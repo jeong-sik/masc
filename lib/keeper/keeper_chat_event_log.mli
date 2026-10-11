@@ -104,6 +104,9 @@ type read_failure =
           text). *)
   | Journal_corrupt of string  (** A complete row failed the strict decode. *)
 
+val decode_rows : path:string -> string -> (journaled_event list, read_failure) result
+(** Strictly decode one already-framed snapshot without rereading the file. *)
+
 val read_journal_path_result : string -> (journaled_event list, read_failure) result
 (** Every complete row of the journal at an already-resolved path, strictly
     decoded, creating nothing on disk — unlike {!open_journal}, which mkdirs

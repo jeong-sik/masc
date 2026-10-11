@@ -90,6 +90,16 @@ val turn_events_page :
   Keeper_chat_event_log.page -> Yojson.Safe.t
 (** [masc.keeper_turn_events.v1], with [turn_ref] instead of [operation_id]. *)
 
+val turn_events_projected_page :
+  turn_ref:Ids.Turn_ref.t ->
+  since_seq:Keeper_chat_event_log.replay_position ->
+  redact_text:(string -> string) ->
+  entries:Keeper_chat_event_log.journaled_event list ->
+  Keeper_chat_event_log.page -> Yojson.Safe.t
+(** Same snapshot and cursors as the raw turn page, with [ag_ui_events]. Replay
+    folds the full snapshot before selecting this page, preserving identities
+    established before the cursor. Connector-only events have null projection. *)
+
 val get_route : string -> get_route option
 val mutation_route : string -> mutation_route option
 

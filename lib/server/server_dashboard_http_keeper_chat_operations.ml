@@ -314,6 +314,22 @@ let turn_events_page ~turn_ref ~since_seq ~redact_text page =
     ~identity:("turn_ref", `String (Ids.Turn_ref.to_string turn_ref)) ~since_seq ~redact_text page
 ;;
 
+module Sequence_map = Map.Make (Int)
+
+let turn_events_projected_page ~turn_ref ~since_seq ~redact_text ~entries page =
+  let projected = Server_keeper_chat_replay.replay ~redact_text ~since_seq entries
+    |> List.fold_left (fun acc (seq, event) -> Sequence_map.add seq event acc) Sequence_map.empty in
+  let events = List.map (fun (entry : Keeper_chat_event_log.journaled_event) ->
+    let event = match Sequence_map.find_opt entry.seq projected with
+      | Some event -> Ag_ui.event_to_json event
+      | None -> `Null in
+    `Assoc ["seq", `Int entry.seq; "ts", `Float entry.ts; "event", event])
+    page.Keeper_chat_event_log.events in
+  match turn_events_page ~turn_ref ~since_seq ~redact_text page with
+  | `Assoc fields -> `Assoc (("ag_ui_events", `List events) :: fields)
+  | body -> body
+;;
+
 (* Everything the events route reads off the query, parsed once. The handler
    passes the whole record to {!events_page_of_rows}, so a cursor cannot be
    read and then dropped on the way to the page. *)
@@ -385,10 +401,16 @@ let handle_get state request reqd = function
         | Ok rows ->
           let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
           let page = Domain_pool_ref.submit_cpu_or_inline (fun () ->
-            Keeper_chat_event_log.page_of_rows ~path ~since_seq ~start ~limit rows
-            |> Result.map (turn_events_page ~turn_ref ~since_seq
-                 ~redact_text:(Keeper_secret_redaction.redact_text redaction))
-            |> Result.map_error page_failure_error) in
+            let ( let* ) = Result.bind in
+            let* page = Keeper_chat_event_log.page_of_rows ~path ~since_seq ~start ~limit rows
+              |> Result.map_error page_failure_error in
+            let* entries = Keeper_chat_event_log.decode_rows ~path rows
+              |> Result.map_error (fun failure -> match failure with
+                | Keeper_chat_event_log.Journal_missing -> unavailable "journal_missing" "Snapshot disappeared"
+                | Journal_unreadable detail -> unavailable "journal_unreadable" detail
+                | Journal_corrupt detail -> unavailable "journal_corrupt" detail) in
+            Ok (turn_events_projected_page ~turn_ref ~since_seq ~entries
+              ~redact_text:(Keeper_secret_redaction.redact_text redaction) page)) in
           (match page with
            | Ok body -> Server_auth.respond_json_value_with_cors request reqd body
            | Error error -> respond_error request reqd error)))

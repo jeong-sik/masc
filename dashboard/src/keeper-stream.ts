@@ -178,6 +178,7 @@ function resetUnfinishedRuntimeAttempt(
     rawText: '',
     runtimeAttempt,
     replyTextProjection: undefined,
+    replyBlockSource: undefined,
     blocks: producerReplyBlocks(entry).filter(block => (
       block.t !== 'p' && block.t !== 'thinking'
     )),
@@ -700,6 +701,7 @@ function admitResponseEvent(
     ...current,
     responseState: decision.state,
     ...(decision.reopens ? {
+      replyBlockSource: undefined,
       streamState: 'opening' as const,
       details: current.details ? { ...current.details, providerMessageId: null, modelUsed: null,
         stopReason: null, usage: null, costUsd: null } : current.details,
@@ -1420,6 +1422,7 @@ export function applyKeeperStreamEvent(
         updateThreadEntry(keeperName, assistantEntryId, entry => ({
           ...entry,
           replyTextProjection: undefined,
+          replyBlockSource: undefined,
           blocks: [
             ...producerReplyBlocks(entry).filter(block => block.t !== 'status'),
             { t: 'status', kind: 'continuation_checkpoint' },

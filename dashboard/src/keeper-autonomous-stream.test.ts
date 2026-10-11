@@ -11,6 +11,25 @@ const page = (sequence: number, event: KeeperChatStreamEvent | null): KeeperTurn
   events: [{ sequence, timestamp: 1, event }], cursor: { sequence, offset: sequence + 1 }, hasMore: false })
 beforeEach(() => { keeperThreads.value = {}; _resetKeeperStreamBuffersForTests(); _resetKeeperAutonomousRecoveryForTests(); vi.mocked(fetchKeeperTurnEvents).mockReset(); vi.mocked(fetchKeeperCurrentTurn).mockReset().mockResolvedValue({ state: 'idle' }) })
 describe('autonomous journal recovery', () => {
+  it('keeps historical model and usage on the latest admitted response owner', () => {
+    mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
+      turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null }])
+    const send = (sequence: number, event: KeeperChatStreamEvent) => applyKeeperAutonomousTurnEvent('k', 'trace#9', sequence, event)
+    send(0, { ...base, type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: {
+      content_generation: 1, stream_scope: 0, model: 'first-model', usage: { input_tokens: 30, output_tokens: 70, cost_usd: 2 } } })
+    send(1, { ...base, type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_STOP', value: { content_generation: 1, stream_scope: 0 } })
+    send(2, { ...base, type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: {
+      content_generation: 2, stream_scope: 1, model: 'second-model', usage: { input_tokens: 3, output_tokens: 7, cost_usd: 0 } } })
+    send(3, { ...base, type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: {
+      content_generation: 1, stream_scope: 99, model: 'stale-model', usage: { input_tokens: 300, output_tokens: 700 } } })
+    send(4, { ...base, type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_DELTA', value: {
+      stream_scope: 99, usage: { input_tokens: 300, output_tokens: 700 } } })
+    send(5, { ...base, type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_DELTA', value: {
+      content_generation: 2, stream_scope: 1, usage: { output_tokens: 8 } } })
+    expect(keeperThreads.value.k?.[0]).toMatchObject({ text: 'canonical answer', delivery: 'history', streamState: null,
+      responseState: { lastSequence: 5 }, details: { modelUsed: 'second-model', costUsd: 0,
+        usage: { inputTokens: 3, outputTokens: 8, totalTokens: 11, costUsd: 0 } } })
+  })
   it('recovers historical model and usage observations without reopening canonical delivery', () => {
     mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
       turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null,

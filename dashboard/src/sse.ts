@@ -515,6 +515,15 @@ function handleEvent(event: SSEEvent): void {
       }
       break
     }
+    case 'keeper_turn_stream_event': {
+      if (event.name && event.turn_ref && event.seq !== undefined) {
+        void import('./keeper-autonomous-stream')
+          .then(mod => mod.recoverKeeperAutonomousTurn(event.name!, event.turn_ref!, event.seq!))
+          .catch(error => { console.debug('[keeper-autonomous-stream] journal recovery failed',
+            error instanceof Error ? error.name : 'read failure') })
+      }
+      break
+    }
     case 'keeper_chat_operation_event': {
       const keeperName = event.name ?? agent
       const operationId = event.operation_id?.trim()

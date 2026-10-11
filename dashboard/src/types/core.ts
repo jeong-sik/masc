@@ -1078,6 +1078,9 @@ export interface KeeperConversationEntry {
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
   responseState?: KeeperResponseState
+  /** Accumulated historical thinking from this exact autonomous journal replay. */
+  autonomousTraceBoundary?: number
+  autonomousThinkingReplay?: readonly { readonly boundary: number | null; readonly index: number | undefined; readonly owner: import('../lib/keeper-response-state').KeeperResponseOwner | null; readonly text: string }[]
   streamContract?: KeeperConversationStreamContract | null
   attachments?: KeeperConversationAttachment[]
   /** Exact ordered multimodal input sent to the Keeper. Kept on optimistic and

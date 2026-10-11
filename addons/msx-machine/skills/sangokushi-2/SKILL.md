@@ -143,6 +143,52 @@ Entering `80`, Return returned to commands with food 80 and gold 104.
 Use the visible menu, officer list and quantity range for the current state;
 these indices and purchase cost describe this single observed transaction.
 
+## Sell rice and reorganize an army
+
+In December 220, province 10 held gold 1, food 1080 and troops 80.
+Merchant `13`, Return → `1`, Return selected `米を売る`. Choosing the
+available officer `1`, Return opened `米をいくら売りますか(1-1080)?`.
+Entering `500`, Return returned to commands with gold 878 and food 580,
+retaining troops 80. This sale's price is not a universal exchange rate.
+
+Military `4`, Return → recruitment `1`, Return listed officer 1 in red;
+selecting that index did not advance. Available officer `2`, Return opened
+`何百人徴兵しますか(1-87)?`. Recruiting 80 and assigning officer 2 final
+total 90 (previously 10), empty Return, `y` completed the allocation.
+The province then held troops 160, gold 78 and food 500. Training `4`,
+Return → `3`, Return selected available officer 3, martial 86, and `y`
+confirmed the order; this sequence does not measure a numerical training gain.
+
+To redistribute existing troops, military `4`, Return → `2`, Return
+opens `再編成`. Choosing available operator `4`, Return opened allocation
+with pool 0. Selecting officer `2`, Return, then total `0`, Return released
+his 90 into the pool. Selecting officer `3`, Return, then total `100`, Return
+combined that pool with his existing 10. Empty Return then `y` confirmed
+reorganization. Province troops remained 160; own officer information
+`8`, Return → `2`, Return → `3`, Return confirmed Niu Jin (`牛金`) at
+troops 100, martial 86 and loyalty 63. Read the current roster and totals;
+these indices belong to this province and month. A strategic officer panel
+does not show training or armament.
+
+## Transport supplies and verify arrival
+
+At the province command, `2`, Return opens `どこに輸送しますか(1-41)?`.
+In December 220, province 16 had gold 205 and food 442, while owned province
+20 had gold 6 and food 20. Destination `20`, Return opened the transporter
+list. Choosing officer `1`, Return asked for gold `(0-205)?`; `100`, Return
+then asked for rice `(0-442)?`; `200`, Return opened `輸送しますか(Y/N)?`.
+Confirming `y` displayed `無事に届けることができました`.
+
+After continuing and returning to commands, province 16 showed gold 105
+and food 242. Information `8`, Return → `1`, Return → `20`, Return showed
+the destination at gold 106 and food 220, still troops 20. Thus both the
+source deduction and destination receipt were verified. A confirmation
+answer or source deduction alone is weaker evidence than the destination
+resources. This proves one successful route, not guaranteed delivery for
+all transports or a completed campaign. Allow screen transitions to finish;
+if a key does not advance the expected prompt, step and inspect before
+repeating an operation or restarting the machine.
+
 ## Buying weapons
 
 At the province command prompt, `13`, Return opens the merchant menu when

@@ -1238,6 +1238,20 @@ let test_autonomous_turn_journal_is_live_and_replayable () =
         (List.exists (fun (entry:L.journaled_event) -> match entry.event with E.Run_finished _ | E.Event_error _ -> true | _ -> false) during);
       Stream.finish stream (Stream.Completed {reply="answer";turn_outcome=Outcome.Visible_reply});
       Stream.finish stream Stream.Cancelled;
+      let sealed = read_ok (L.read_journal_path_result path) in
+      Stream.on_event stream (Agent_core.Types.ContentBlockDelta {index=0;delta=TextDelta "late"});
+      Stream.on_tool_stream_observation stream
+        (Masc.Keeper_hooks_agent_core.Runtime_attempt_started
+           {runtime_id="codex:late"; lane_attempt_index=2; checkpoint_owner=Runtime_execution.Official_client});
+      let execution_id = Ids.Execution_id.of_string "late-execution" in
+      Stream.on_tool_result_ready stream ~tool_call_id:"late-call" ~turn:9 ~planned_index:0 ~execution_id;
+      let delivery_key = match Keeper_chat_delivery_identity.Request_id.of_string "late-approval" with
+        | Ok id -> Keeper_chat_delivery_identity.Approval_lifecycle id
+        | Error detail -> Alcotest.fail detail in
+      Stream.publish_committed_tool_bindings stream
+        [delivery_key, Keeper_chat_delivery_identity.Tool_call {execution_id; ordinal=0}];
+      Alcotest.(check bool) "late callbacks preserve sealed journal" true
+        (sealed = read_ok (L.read_journal_path_result path));
       Alcotest.(check bool) "completed turn is no longer current" true
         (Stream.current ~base_path:base_dir ~keeper_name:"k" = None);
       let entries = read_ok (L.read_journal_path_result path) in

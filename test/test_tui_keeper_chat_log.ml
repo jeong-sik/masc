@@ -694,6 +694,21 @@ let test_journal_final_page_rejects_invalid_event_frontiers () =
       [], Journal.After_seq 2 ]
 ;;
 
+let test_journal_final_page_accepts_valid_resume_and_sequence_gaps () =
+  let event seq = line seq 1. (E.Text_delta {text="authored bytes"; response=Unobserved_scope None}) in
+  let offset = match Journal.page_start_of_wire (Some 100) with
+    | Some offset -> offset | None -> fail "fixture offset" in
+  List.iter (fun (events, next_since_seq) ->
+    let fetch ~since_seq:_ ~since_offset:_ = Ok {
+      Log.source=Log.Operation "op"; events; has_more=false;
+      next_since_seq; next_since_offset=offset } in
+    match Log.read_whole_journal ~since_seq:(Journal.After_seq 1) ~fetch with
+    | Ok actual -> check bool "valid journal events retain exact bytes and order" true (actual = events)
+    | Error error -> fail (Log.events_error_to_string error)
+  ) [ [], Journal.After_seq 1;
+      [event 2; event 7], Journal.After_seq 7 ]
+;;
+
 let test_read_whole_journal_pages_until_the_position_stops_moving () =
   let asked = ref [] in
   let l seq = line seq (float_of_int seq) (E.Text_delta {text=(string_of_int seq); response=Unobserved_scope (None)}) in
@@ -1161,6 +1176,8 @@ let () =
             test_hold_seq_counts_without_an_entry
         ; test_case "the events query spells both cursors" `Quick
             test_events_query_spells_both_cursors
+        ; test_case "final pages accept resumed offsets and sequence gaps" `Quick
+            test_journal_final_page_accepts_valid_resume_and_sequence_gaps
         ; test_case "final pages reject invalid event frontiers" `Quick
             test_journal_final_page_rejects_invalid_event_frontiers
         ; test_case "read_whole_journal pages until the position stops moving" `Quick

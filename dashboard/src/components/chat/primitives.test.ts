@@ -1,3 +1,4 @@
+import { act } from 'preact/test-utils'
 import { setStoredToken, clearStoredToken } from '../../api/core'
 // @vitest-environment jsdom
 
@@ -2610,6 +2611,86 @@ describe('ChatComposer multimodal', () => {
     renderComposer()
     expect(container.querySelector('[title="이미지·파일 첨부"]')).not.toBeNull()
     expect(container.querySelector('[title="음성으로 입력"]')).not.toBeNull()
+  })
+
+  it('waits for a selected file before submitting the shared draft', async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof collectAttachments>>) => void
+    vi.mocked(collectAttachments).mockReturnValue(new Promise(done => { resolve = done }))
+    const onSend = vi.fn()
+    writeKeeperDraft('pending-file', 'text with file')
+    render(html`<${ChatComposer} draftPersistKey="pending-file" placeholder="메시지 입력..." disabled=${false} streaming=${false} onSend=${onSend} />`, container)
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    setInputFiles(input, [new File(['x'], 'selected.txt', { type: 'text/plain' })])
+    input.dispatchEvent(new Event('change'))
+    expect(collectAttachments).toHaveBeenCalledTimes(1)
+    expect(readKeeperDraftSnapshot('pending-file').pendingFiles).toHaveLength(1)
+    await act(async () => {})
+    fireEvent.keyDown(container.querySelector('textarea')!, { key: 'Enter' })
+    expect(onSend).not.toHaveBeenCalled()
+    await act(async () => resolve({ attachments: [{ id: 'selected', type: 'file', name: 'selected.txt', size: 1, mimeType: 'text/plain', data: 'data:text/plain;base64,eA==' }], errors: [] }))
+    fireEvent.keyDown(container.querySelector('textarea')!, { key: 'Enter' })
+    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(onSend.mock.calls[0]?.[0].blocks).toEqual(expect.arrayContaining([expect.objectContaining({ t: 'attach', id: 'selected' })]))
+  })
+
+  it('retains a pending file across a same-Keeper composer remount', async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof collectAttachments>>) => void
+    vi.mocked(collectAttachments).mockReturnValue(new Promise(done => { resolve = done }))
+    const onSend = vi.fn()
+    writeKeeperDraft('remount-file', 'before remount')
+    const mount = () => render(html`<${ChatComposer} draftPersistKey="remount-file" placeholder="메시지 입력..." disabled=${false} streaming=${false} onSend=${onSend} />`, container)
+    mount()
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    setInputFiles(input, [new File(['x'], 'selected.txt', { type: 'text/plain' })])
+    input.dispatchEvent(new Event('change'))
+    render(null, container)
+    mount()
+    fireEvent.keyDown(container.querySelector('textarea')!, { key: 'Enter' })
+    expect(onSend).not.toHaveBeenCalled()
+    writeKeeperDraft('remount-file', 'edited during file read')
+    await act(async () => resolve({ attachments: [{ id: 'selected', type: 'file', name: 'selected.txt', size: 1, mimeType: 'text/plain', data: 'data:text/plain;base64,eA==' }], errors: [] }))
+    fireEvent.keyDown(container.querySelector('textarea')!, { key: 'Enter' })
+    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(onSend.mock.calls[0]?.[0].text).toBe('edited during file read')
+    expect(onSend.mock.calls[0]?.[0].blocks).toEqual(expect.arrayContaining([expect.objectContaining({ t: 'attach', id: 'selected' })]))
+  })
+
+  it('releases file preparation after failure without erasing authored text', async () => {
+    vi.mocked(collectAttachments).mockRejectedValue(new Error('file reader failed'))
+    const onSend = vi.fn()
+    writeKeeperDraft('failed-file', 'retained text')
+    render(html`<${ChatComposer} draftPersistKey="failed-file" placeholder="메시지 입력..." disabled=${false} streaming=${false} onSend=${onSend} />`, container)
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    setInputFiles(input, [new File(['x'], 'selected.txt', { type: 'text/plain' })])
+    await act(async () => { input.dispatchEvent(new Event('change')) })
+    expect(readKeeperDraftSnapshot('failed-file').pendingFiles).toHaveLength(0)
+    expect(readKeeperDraft('failed-file')).toBe('retained text')
+    fireEvent.keyDown(container.querySelector('textarea')!, { key: 'Enter' })
+    expect(onSend).toHaveBeenCalledTimes(1)
+  })
+
+  it('assigns distinct canonical IDs when concurrent file reads finish', async () => {
+    const finishes: Array<(value: Awaited<ReturnType<typeof collectAttachments>>) => void> = []
+    vi.mocked(collectAttachments).mockImplementation(() => new Promise(resolve => finishes.push(resolve)))
+    const onSend = vi.fn()
+    writeKeeperDraft('parallel-files', 'files')
+    render(html`<${ChatComposer} draftPersistKey="parallel-files" placeholder="메시지 입력..." disabled=${false} streaming=${false} onSend=${onSend} />`, container)
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    for (let i = 0; i < 2; i++) {
+      setInputFiles(input, [new File(['x'], 'selected.txt', { type: 'text/plain' })])
+      input.dispatchEvent(new Event('change'))
+    }
+    expect(finishes).toHaveLength(2)
+    const result = { attachments: [{ id: 'same-file', type: 'file' as const, name: 'selected.txt', size: 1, mimeType: 'text/plain', data: 'data:text/plain;base64,eA==' }], errors: [] }
+    await act(async () => { finishes[1]!(result) })
+    fireEvent.keyDown(container.querySelector('textarea')!, { key: 'Enter' })
+    expect(onSend).not.toHaveBeenCalled()
+    await act(async () => { finishes[0]!(result) })
+    const attachments = readKeeperDraftSnapshot('parallel-files').attachments
+    expect(attachments).toHaveLength(2)
+    expect(new Set(attachments.map(attachment => attachment.id)).size).toBe(2)
+    fireEvent.keyDown(container.querySelector('textarea')!, { key: 'Enter' })
+    expect(onSend).toHaveBeenCalledTimes(1)
   })
 
   it('adds attachment chips from file input and removes them', async () => {

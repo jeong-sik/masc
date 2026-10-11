@@ -188,8 +188,8 @@ export function stableAttachmentId(input: StableAttachmentIdentity): string {
 
 function uniqueStableAttachmentId(
   baseId: string,
-  existing: KeeperConversationAttachment[],
-  pending: KeeperConversationAttachment[],
+  existing: readonly KeeperConversationAttachment[],
+  pending: readonly KeeperConversationAttachment[],
 ): string {
   const used = new Set([...existing, ...pending].map(att => att.id))
   if (!used.has(baseId)) return baseId
@@ -197,6 +197,18 @@ function uniqueStableAttachmentId(
   let suffix = 2
   while (used.has(`${baseId}-${suffix}`)) suffix += 1
   return `${baseId}-${suffix}`
+}
+
+/** Allocate identities against the latest owned draft when asynchronous reads settle. */
+export function appendPreparedAttachments(
+  existing: readonly KeeperConversationAttachment[],
+  prepared: readonly KeeperConversationAttachment[],
+): KeeperConversationAttachment[] {
+  const added: KeeperConversationAttachment[] = []
+  for (const attachment of prepared) {
+    added.push({ ...attachment, id: uniqueStableAttachmentId(attachment.id, existing, added) })
+  }
+  return [...existing, ...added]
 }
 
 /** Validate, resize, and encode [files] into attachments, respecting the

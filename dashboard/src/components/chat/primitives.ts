@@ -15,6 +15,7 @@ import {
   MAX_ATTACHMENTS,
   attachmentFromImageReference,
   collectAttachments,
+  appendPreparedAttachments,
   wholeImageUrl,
 } from './attachments'
 import { linkifyHtmlReferences } from './chat-linkify'
@@ -4918,6 +4919,13 @@ function ChatComposerSession({
   const [refDraft, setRefDraft] = useState('')
   const [drag, setDrag] = useState(false)
   const [slashIdx, setSlashIdx] = useState(0)
+  const [localPendingFiles, setLocalPendingFiles] = useState<readonly symbol[]>([])
+  const localPendingFilesRef = useRef<readonly symbol[]>([])
+  const mountedRef = useRef(true)
+  useLayoutEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
   const [localAttachments, setLocalAttachments] = useState<KeeperConversationAttachment[]>([])
   const [localVoiceDraft, setLocalVoiceDraft] = useState<ComposerVoiceDraft | null>(null)
   const isControlled = typeof draftProp === 'string'
@@ -4929,6 +4937,7 @@ function ChatComposerSession({
     : null
   const draft = isControlled ? draftProp : draftSnapshot?.text ?? localDraft
   const attachments = draftSnapshot?.attachments ?? localAttachments
+  const pendingFiles = draftSnapshot?.pendingFiles ?? localPendingFiles
   const voiceDraft = draftSnapshot ? draftSnapshot.voiceDraft : localVoiceDraft
   const setAttachments = (value: readonly KeeperConversationAttachment[] | ((previous: readonly KeeperConversationAttachment[]) => readonly KeeperConversationAttachment[])) => {
     if (draftSnapshot) updateKeeperDraft(draftPersistStoreKey, previous => ({
@@ -5010,7 +5019,7 @@ function ChatComposerSession({
     : '전송'
   const isStreamWarning = streaming && elapsed > 60
   const hasContent = draft.trim() !== '' || attachments.length > 0 || voiceDraft !== null
-  const sendDisabled = disabled || !hasContent || (streaming && !allowSendWhileStreaming)
+  const sendDisabled = disabled || pendingFiles.length > 0 || !hasContent || (streaming && !allowSendWhileStreaming)
   const slashMatch = /^\/([^\s]*)$/.exec(draft)
   const slashQuery = slashMatch?.[1]?.toLowerCase() ?? null
   const slashMatches = useMemo(
@@ -5032,10 +5041,33 @@ function ChatComposerSession({
 
   const ingestFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return
-    const { attachments: added, errors } = await collectAttachments(files, [...attachments])
-    errors.forEach((message) => showToast(message, 'error'))
-    if (added.length > 0) {
-      setAttachments((prev) => [...prev, ...added])
+    const work = Symbol('file input')
+    const persisted = draftSnapshot !== null
+    const updatePending = (add: boolean, added: readonly KeeperConversationAttachment[] = []) => {
+      if (persisted) updateKeeperDraft(draftPersistStoreKey, previous => ({
+        ...previous,
+        pendingFiles: add ? [...previous.pendingFiles, work] : previous.pendingFiles.filter(id => id !== work),
+        attachments: appendPreparedAttachments(previous.attachments, added),
+      }), authRevision)
+      else {
+        localPendingFilesRef.current = add ? [...localPendingFilesRef.current, work] : localPendingFilesRef.current.filter(id => id !== work)
+        if (mountedRef.current) {
+          setLocalPendingFiles(localPendingFilesRef.current)
+          if (added.length > 0) setAttachments(previous => appendPreparedAttachments(previous, added))
+        }
+      }
+    }
+    updatePending(true)
+    const ownsPresentation = () => mountedRef.current
+      && authRevision === currentStoredTokenRevision()
+      && isSubmissionCurrent?.() !== false
+    try {
+      const { attachments: added, errors } = await collectAttachments(files, [...attachments])
+      updatePending(false, added)
+      if (ownsPresentation()) errors.forEach(message => showToast(message, 'error'))
+    } catch (error) {
+      updatePending(false)
+      if (ownsPresentation()) showToast(error instanceof Error ? error.message : '첨부 준비 실패', 'error')
     }
   }
 
@@ -5083,7 +5115,7 @@ function ChatComposerSession({
   }
 
   const handleSend = () => {
-    if (authRevision !== currentStoredTokenRevision() || isSubmissionCurrent?.() === false || !ownsDraft() || sendDisabled) return
+    if (authRevision !== currentStoredTokenRevision() || isSubmissionCurrent?.() === false || !ownsDraft() || localPendingFilesRef.current.length > 0 || sendDisabled) return
     const blocks: ChatBlock[] = []
     const userBlocks: KeeperUserInputBlock[] = []
     for (const att of attachments) {
@@ -5231,6 +5263,7 @@ function ChatComposerSession({
       onPaste=${handlePaste}
     >
       <div class="composer-inner">
+        ${pendingFiles.length > 0 ? html`<div role="status" class="text-xs text-[var(--color-fg-secondary)]">첨부 준비 중</div>` : null}
         ${isPrimary
           ? null
           : html`

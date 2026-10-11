@@ -887,14 +887,21 @@ let test_native_task_read_epoch_retirement () =
     (workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation);
   let cached=["alpha",Masc_tui_native_tasks.empty] in
   state.msg_native_tasks <- cached;
-  state.msg_native_tasks_inflight <- ["alpha"];
-  state.msg_native_tasks_audit_pending <- ["alpha"];
+  state.msg_native_tasks_inflight <- ["alpha",Masc_tui_native_tasks.Audit];
+  state.msg_native_tasks_audit_pending <- [];
   suspend_workspace_readings state;
-  Alcotest.(check (list string)) "retired native slot releases" [] state.msg_native_tasks_inflight;
+  Alcotest.(check bool) "retired native slot releases" true (state.msg_native_tasks_inflight=[]);
   Alcotest.(check bool) "cached task evidence survives" true (state.msg_native_tasks==cached);
   Alcotest.(check (list string)) "manual audit intent survives same workspace suspension"
     ["alpha"] state.msg_native_tasks_audit_pending;
-  state.msg_native_tasks_inflight <- ["alpha"];
+  suspend_workspace_readings state;
+  Alcotest.(check (list string)) "repeated retirement retains restored audit"
+    ["alpha"] state.msg_native_tasks_audit_pending;
+  state.msg_native_tasks_inflight <- ["beta",Masc_tui_native_tasks.Poll];
+  suspend_workspace_readings state;
+  Alcotest.(check (list string)) "poll is never promoted to audit"
+    ["alpha"] state.msg_native_tasks_audit_pending;
+  state.msg_native_tasks_inflight <- ["alpha",Masc_tui_native_tasks.Audit];
   Alcotest.(check bool) "old completion cannot release successor slot" false
     (workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation);
   Alcotest.(check bool) "successor read is admitted" true

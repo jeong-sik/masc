@@ -408,6 +408,24 @@ describe('CopilotDock', () => {
     )
   })
 
+  it('preserves authored whitespace from the composer through the stream request', async () => {
+    const text = '  authored input\n\nend  \n'
+    const fetchMock = dockFetchMock([{ type: 'RUN_FINISHED', runId: 'run', threadId: 'keeper:fixture', timestamp: 0 }])
+    vi.stubGlobal('fetch', fetchMock)
+    const dock = renderDock()
+    dock.open()
+    await waitFor(() => expect(container.querySelector('[data-testid="copilot-dock-textarea"]')).not.toBeNull())
+    const textarea = container.querySelector('[data-testid="copilot-dock-textarea"]') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: text } })
+    ;(container.querySelector('[aria-label="메시지 전송"]') as HTMLButtonElement).click()
+    await waitFor(() => expect(keeperStreamCalls(fetchMock)).toHaveLength(1))
+    const [, init] = keeperStreamCalls(fetchMock)[0] as [string, RequestInit]
+    const body = JSON.parse(String(init.body))
+    expect(body.message).toBe(text)
+    expect(dock.threads.value[body.name]?.find(message => message.role === 'user')?.text).toBe(text)
+    await waitFor(() => expect(dock.streaming.value).toBeNull())
+  })
+
   it('posts copilot channel and surface context to the keeper stream', async () => {
     window.history.replaceState({}, '', '/?agent=dashboard-eager-manta')
     const fetchMock = dockFetchMock([{ type: 'RUN_FINISHED', runId: 'run', threadId: 'keeper:fixture', timestamp: 0 }])

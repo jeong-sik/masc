@@ -11,6 +11,55 @@ const page = (sequence: number, event: KeeperChatStreamEvent | null): KeeperTurn
   events: [{ sequence, timestamp: 1, event }], cursor: { sequence, offset: sequence + 1 }, hasMore: false })
 beforeEach(() => { keeperThreads.value = {}; _resetKeeperStreamBuffersForTests(); _resetKeeperAutonomousRecoveryForTests(); vi.mocked(fetchKeeperTurnEvents).mockReset() })
 describe('autonomous journal recovery', () => {
+  it('retains separate reasoning previews and commits across interleaved Keeper pages', async () => {
+    vi.useFakeTimers()
+    try {
+      const pending = new Map<string, (page: KeeperTurnEventPage) => void>()
+      let bothReading!: () => void
+      const ready = new Promise<void>(resolve => { bothReading = resolve })
+      const think = (name: string, delta: string): KeeperChatStreamEvent => ({ ...base,
+        threadId: `keeper:${name}`, type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+        value: { index: 0, delta, response: { content_generation: 1, stream_scope: 0 } } })
+      vi.mocked(fetchKeeperTurnEvents).mockImplementation((name, _turnRef, cursor) => {
+        if (cursor?.sequence === null) return Promise.resolve({ ...page(0, think(name, `${name} prefix `)), hasMore: true })
+        return new Promise(resolve => {
+          pending.set(name, resolve)
+          if (pending.size === 2) bothReading()
+        })
+      })
+      const first = recoverKeeperAutonomousTurn('first', 'trace#9', 4)
+      const second = recoverKeeperAutonomousTurn('second', 'trace#9', 4)
+      await ready
+      vi.runOnlyPendingTimers()
+      const parent = (name: string) => keeperThreads.value[name]?.find(entry => entry.source === 'autonomous_turn')
+      for (const name of ['first', 'second']) expect(parent(name)?.traceSteps).toMatchObject([
+        { kind: 'think', text: `${name} prefix ` },
+      ])
+      const finish = (name: string): KeeperTurnEventPage => ({ turnRef: 'trace#9', hasMore: false,
+        cursor: { sequence: 4, offset: 100 }, events: [
+          { sequence: 1, timestamp: 1, event: think(name, 'suffix') },
+          { sequence: 2, timestamp: 1, event: { ...base, type: 'TOOL_CALL_START', toolStreamScope: 0,
+            toolCallBlockIndex: 1, toolCallId: 'shared-id', toolCallName: `${name} tool` } },
+          { sequence: 3, timestamp: 1, event: text(`${name} answer`) },
+          { sequence: 4, timestamp: 1, event: { ...base, type: 'RUN_FINISHED' } },
+        ] })
+      pending.get('second')!(finish('second'))
+      await second
+      expect(parent('first')?.traceSteps).toMatchObject([{ kind: 'think', text: 'first prefix ' }])
+      expect(parent('first')?.responseState).toMatchObject({ lastSequence: 0 })
+      pending.get('first')!(finish('first'))
+      await first
+      vi.runOnlyPendingTimers()
+      for (const name of ['first', 'second']) expect(parent(name)).toMatchObject({ text: `${name} answer`,
+        delivery: 'delivered', streamState: null, responseState: { phase: 'terminal', lastSequence: 4 },
+        traceSteps: [{ kind: 'think', text: `${name} prefix suffix` }, { kind: 'tool', name: `${name} tool` }],
+      })
+      expect(fetchKeeperTurnEvents).toHaveBeenCalledTimes(4)
+    } finally {
+      _resetKeeperStreamBuffersForTests()
+      vi.useRealTimers()
+    }
+  })
   it('isolates deferred journal reads and reasoning buffers for Keepers sharing a turn reference', async () => {
     let releaseFirst!: (value: KeeperTurnEventPage) => void
     const journal = (name: string): KeeperTurnEventPage => ({ turnRef: 'trace#9', hasMore: false,

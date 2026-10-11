@@ -11,6 +11,7 @@ import {
   defaultBoardVoter,
   extractApiError,
   get,
+  getWithResponse,
   getStoredToken,
   getStoredTokenMeta,
   post,
@@ -890,4 +891,30 @@ it('skips a removed registration even when its callback is registered again duri
     releaseLater()
     releaseReplacement?.()
   }
+})
+
+it.each([200, 500])('keeps header-aware GET cancellation connected while reading a %s body', async status => {
+ const caller = new AbortController()
+ let writer!: ReadableStreamDefaultController<Uint8Array>
+ let fetchSignal!: AbortSignal
+ const body = new ReadableStream<Uint8Array>({ start(controller) { writer = controller } })
+ vi.stubGlobal('fetch', vi.fn((_path: string, init: RequestInit) => {
+  fetchSignal = init.signal as AbortSignal
+  fetchSignal.addEventListener('abort', () => writer.error(new DOMException('cancelled', 'AbortError')), { once: true })
+  return Promise.resolve(new Response(body, { status, headers: { 'X-Workspace-Source': 'repository' } }))
+ }))
+ const pending = getWithResponse('/api/v1/workspace/tree', { signal: caller.signal })
+ const outcome = pending.then(() => null, error => error)
+ await Promise.resolve(); await Promise.resolve()
+ caller.abort()
+ const aborted = fetchSignal.aborted
+ if (!aborted) writer.error(new DOMException('fixture cleanup', 'AbortError'))
+ expect(await outcome).toBeInstanceOf(DOMException)
+ expect(aborted).toBe(true)
+})
+it('preserves selected response headers with parsed data', async () => {
+ vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('[{"name":"file"}]', { headers: { 'X-Workspace-Source': 'repository' } })))
+ const result = await getWithResponse('/api/v1/workspace/tree')
+ expect(result.data).toEqual([{ name: 'file' }])
+ expect(result.headers.get('X-Workspace-Source')).toBe('repository')
 })

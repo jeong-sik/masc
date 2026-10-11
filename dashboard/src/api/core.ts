@@ -852,7 +852,7 @@ export async function getWithResponse<T>(
   path: string,
   opts: GetOptions = {},
 ): Promise<{ readonly data: T; readonly headers: Headers }> {
-  const res = await fetchWithTimeout(
+  return fetchWithTimeout(
     path,
     {
       headers: authHeaders({ includeActor: opts.includeActorHeader }),
@@ -860,20 +860,22 @@ export async function getWithResponse<T>(
       signal: opts.signal,
     },
     opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS,
+    async (res) => {
+      if (!res.ok) {
+        const warmPayload = await bootstrapWarmPayload(path, res.clone())
+        if (warmPayload !== null) {
+          return { data: warmPayload as T, headers: new Headers() }
+        }
+        throw await apiRequestErrorFromResponse('GET', path, res)
+      }
+      const data = await parseJsonResponse<T>('GET', path, res)
+      if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
+        const payload = bootstrapInitializingPayload(path)
+        if (payload !== null) return { data: payload as T, headers: new Headers() }
+      }
+      return { data, headers: res.headers }
+    },
   )
-  if (!res.ok) {
-    const warmPayload = await bootstrapWarmPayload(path, res.clone())
-    if (warmPayload !== null) {
-      return { data: warmPayload as T, headers: new Headers() }
-    }
-    throw await apiRequestErrorFromResponse('GET', path, res)
-  }
-  const data = await parseJsonResponse<T>('GET', path, res)
-  if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
-    const payload = bootstrapInitializingPayload(path)
-    if (payload !== null) return { data: payload as T, headers: new Headers() }
-  }
-  return { data, headers: res.headers }
 }
 
 export function runRequest<T>(_operation: string, run: () => Promise<T>): Promise<T> {

@@ -26,8 +26,15 @@ def verify(receipt, *, repo, candidate, git_dir, gh, prepare=P.prepare):
     selected = tuple(P.member(str(m["pr"]) + "@" + m["head"]) for m in receipt["members"])
     current = prepare(P, repo=repo, leader=receipt["leader"], selected=selected,
                       git_dir=git_dir, gh=gh)
-    if any(receipt.get(key) != current[key] for key in ("base", "candidate", "tree")):
-        raise P.Rejected(P.Reason.INVALID_SELECTION)
+    # A refusal that only says invalid_selection hides which compared field
+    # moved between prepare time and verify time; name the field and both
+    # values so the dispatch series can be corrected without re-running
+    # blind (task-2235 proof dispatches 38112487273..38114237842).
+    mismatch = [f"{key}: receipt={receipt.get(key)} computed={current[key]}"
+                for key in ("base", "candidate", "tree")
+                if receipt.get(key) != current[key]]
+    if mismatch:
+        raise P.Rejected(f"{P.Reason.INVALID_SELECTION}: " + "; ".join(mismatch))
     for previous, live in zip(receipt["members"], current["members"]):
         ids = previous["approval_ids"]
         if (not isinstance(ids, list) or not ids

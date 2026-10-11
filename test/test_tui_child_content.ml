@@ -117,7 +117,10 @@ let test_cross_page_duplicate_and_receiver_failure () =
 let test_audited_failure_sticky_until_full_success () =
   let first=initial () in
   let failed,_=read Consumer.Audit first [receiver,Error "store_corrupt"] (fun _ -> fail "failed audited inventory must not read records") in
-  check bool "audited corruption displayed" true (Consumer.errors failed<>[]);
+  check int "one audited receiver failure is published once" 1 (List.length (Consumer.errors failed));
+  let distinct,_=read Consumer.Poll failed [receiver,Error "store_unavailable"]
+      (fun _ -> fail "failed inventory must not read records") in
+  check int "distinct scoped failure codes are retained" 2 (List.length (Consumer.errors distinct));
   let hinted,requests=read Consumer.Poll failed [receiver,Ok ("store /&+%",1)] (fun _ -> fail "same hint retried full history") in
   check int "same hint no repeated corrupt full scan" 0 (List.length requests);
   check bool "unchecked inventory cannot clear audited failure" true (Consumer.errors hinted<>[]);

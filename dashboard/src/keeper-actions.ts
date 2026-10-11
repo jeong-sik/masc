@@ -69,6 +69,7 @@ import {
   setStatusDetail,
   settleKeeperToolApproval,
   updateKeeperToolApproval,
+  updateThreadEntry,
   upsertKeeperToolApproval,
 } from './keeper-state'
 import {
@@ -575,9 +576,10 @@ function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation
         requestId: request.operationId,
         reason: 'awaiting durable operation terminal state',
       }),
+      responseState: assistantDraft?.responseState,
       traceSteps: assistantDraft?.traceSteps,
       error: assistantDraft?.error ?? null,
-      details: null,
+      details: assistantDraft?.details ?? null,
     })
   }
   return assistantId
@@ -1082,7 +1084,10 @@ export async function sendKeeperThreadMessage(
       attachments,
       userBlocks,
       surfaceContext: options.surfaceContext,
-      onEvent: event => {
+      onDecodeError: reason => {
+        updateThreadEntry(keeperName, assistantId, entry => ({ ...entry, error: reason }))
+      },
+      onEvent: (event, sequence) => {
         markKeeperStreamSignal(keeperName)
         if (
           event.type === 'CUSTOM'
@@ -1106,7 +1111,7 @@ export async function sendKeeperThreadMessage(
           keeperName,
           assistantId,
           event,
-          { kind: 'operation', operationId },
+          { kind: 'operation', operationId, sequence },
         )
         // First reply-bearing event: the stream itself is the liveness
         // signal now — retire the queued poll.

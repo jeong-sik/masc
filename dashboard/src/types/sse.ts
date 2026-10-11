@@ -247,6 +247,7 @@ export interface SSEEvent {
   audio?: SSEAudioClip
   // keeper_chat_operation_event: the same AG-UI payload used by the accepted
   // stream, correlated to exactly one durable operation.
+  seq?: number
   ag_ui_event?: unknown
 }
 

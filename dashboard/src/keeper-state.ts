@@ -1,3 +1,4 @@
+import { ownerFromUnknown, sameKeeperResponseOwner, type KeeperResponseOwner } from './lib/keeper-response-state'
 import { signal } from '@preact/signals'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import { isInFlightDelivery } from './lib/keeper-delivery'
@@ -1161,16 +1162,19 @@ function writeAssistantThinkingText(
   name: string,
   entryId: string,
   text: string,
-  meta: { agentCoreBlockIndex?: number } = {},
+  meta: { agentCoreBlockIndex?: number; responseOwner?: KeeperResponseOwner } = {},
   mode: 'append' | 'snapshot',
 ): void {
   if (text.length === 0) return
+  const responseOwner = meta.responseOwner === undefined ? undefined : ownerFromUnknown(meta.responseOwner)
+  if (responseOwner === null) return
   const agentCoreBlockIndex = meta.agentCoreBlockIndex
   updateThreadEntry(name, entryId, entry => {
     const existing = entry.traceSteps ?? []
     const last = existing[existing.length - 1]
     const sameThinkingBlock =
       last?.kind === 'think'
+      && sameKeeperResponseOwner(last.responseOwner, responseOwner)
       && (agentCoreBlockIndex === undefined
         ? last.agentCoreBlockIndex === undefined
         : last.agentCoreBlockIndex === agentCoreBlockIndex)
@@ -1193,6 +1197,7 @@ function writeAssistantThinkingText(
               text: nextText,
               ts: last.ts,
               agentCoreBlockIndex: last.agentCoreBlockIndex,
+              responseOwner: last.responseOwner,
             }),
           ]
         : [
@@ -1202,6 +1207,7 @@ function writeAssistantThinkingText(
               text: nextText,
               ts: new Date().toISOString(),
               agentCoreBlockIndex,
+              responseOwner,
             }),
           ]
     return {
@@ -1220,7 +1226,7 @@ export function appendAssistantThinkingDelta(
   name: string,
   entryId: string,
   delta: string,
-  meta: { agentCoreBlockIndex?: number } = {},
+  meta: { agentCoreBlockIndex?: number; responseOwner?: KeeperResponseOwner } = {},
 ): void {
   writeAssistantThinkingText(name, entryId, delta, meta, 'append')
 }
@@ -1229,7 +1235,7 @@ export function setAssistantThinkingSnapshot(
   name: string,
   entryId: string,
   text: string,
-  meta: { agentCoreBlockIndex?: number } = {},
+  meta: { agentCoreBlockIndex?: number; responseOwner?: KeeperResponseOwner } = {},
 ): void {
   writeAssistantThinkingText(name, entryId, text, meta, 'snapshot')
 }

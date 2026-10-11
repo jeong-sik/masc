@@ -407,8 +407,14 @@ export async function hydrateKeeperChatHistory(
     await fetchAndMergeKeeperChatHistory(keeperName, request)
     if (chatHistoryHydrationRequests.get(keeperName) !== request) return
     void import('./keeper-autonomous-stream')
-      .then(mod => mod.discoverKeeperAutonomousTurn(keeperName))
-      .catch(error => console.debug('[keeper-autonomous-stream] current turn discovery unavailable',
+      .then(async mod => {
+        const results = await Promise.allSettled([
+          mod.recoverKeeperAutonomousHistory(keeperName),
+          mod.discoverKeeperAutonomousTurn(keeperName),
+        ])
+        if (results.some(result => result.status === 'rejected')) throw new Error('Autonomous history or current turn recovery incomplete')
+      })
+      .catch(error => console.debug('[keeper-autonomous-stream] history or current turn recovery unavailable',
         error instanceof Error ? error.name : 'read failure'))
     // Tool outputs are stored on a separate durable endpoint. Hydrate even
     // when chat history is empty so a keeper panel can still join recently

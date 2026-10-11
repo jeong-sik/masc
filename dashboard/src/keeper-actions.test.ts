@@ -37,6 +37,12 @@ vi.mock('./api/keeper', () => ({
 }))
 vi.mock('./api/dashboard', () => ({ fetchKeeperToolCalls }))
 vi.mock('./store', () => ({ invalidateDashboardCache, refreshDashboard, shellAuthSummary }))
+vi.mock('./api/keeper-turn-events', () => ({
+  fetchKeeperCurrentTurn: vi.fn().mockResolvedValue({ state: 'idle' }),
+  fetchKeeperTurnEvents: vi.fn(),
+}))
+import { fetchKeeperTurnEvents } from './api/keeper-turn-events'
+import { _resetKeeperAutonomousRecoveryForTests } from './keeper-autonomous-stream'
 
 import {
   _resetActiveKeeperStreamsForTests,
@@ -258,6 +264,24 @@ describe('hydrateKeeperChatHistory', () => {
       status: 'history_without_stream_events',
     })
     expect(thread[1]?.role).toBe('assistant')
+  })
+
+  it('replays a completed autonomous journal after the actual history hydration boundary', async () => {
+    _resetKeeperAutonomousRecoveryForTests()
+    vi.mocked(fetchKeeperTurnEvents).mockReset().mockResolvedValueOnce({ turnRef: 'history#1', hasMore: false,
+      cursor: { sequence: 1, offset: 100 }, events: [
+        { sequence: 0, timestamp: 1, event: { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+          value: { index: 0, delta: 'exposed historical reasoning' } } },
+        { sequence: 1, timestamp: 1, event: { type: 'RUN_FINISHED' } },
+      ] })
+    fetchKeeperChatHistory.mockResolvedValueOnce([{ id: 'autonomous:history#1', role: 'assistant',
+      content: 'canonical answer', ts: 1, autonomous_turn: { turn_id: 'history#1' } }])
+    await hydrateKeeperChatHistory('echo')
+    await vi.waitFor(() => expect(keeperThreads.value.echo?.[0]?.responseState).toMatchObject({ phase: 'terminal', lastSequence: 1 }))
+    expect(fetchKeeperTurnEvents).toHaveBeenCalledWith('echo', 'history#1', { sequence: null, offset: 0 })
+    expect(keeperThreads.value.echo?.[0]).toMatchObject({ text: 'canonical answer', delivery: 'history',
+      traceSteps: [{ kind: 'think', text: 'exposed historical reasoning' }] })
+    _resetKeeperAutonomousRecoveryForTests()
   })
 
   it('keeps backend stream contracts when hydrating server history', async () => {

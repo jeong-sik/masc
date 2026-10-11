@@ -1,5 +1,6 @@
 import { fetchKeeperCurrentTurn, fetchKeeperTurnEvents, type KeeperTurnCursor } from './api/keeper-turn-events'
 import { applyKeeperAutonomousTurnEvent } from './keeper-stream'
+import { keeperThreads } from './keeper-state'
 
 type TurnRecovery = {
   cursor: KeeperTurnCursor
@@ -61,6 +62,16 @@ export function recoverKeeperAutonomousTurn(name: string, turnRef: string, seque
 }
 
 export function _resetKeeperAutonomousRecoveryForTests(): void { recovery.clear() }
+
+/** Persisted autonomous identity discovers completed turns as well as live
+ * ones. Replay only explicit autonomous rows, never matching text or counters. */
+export async function recoverKeeperAutonomousHistory(name: string): Promise<void> {
+  const turns = new Set((keeperThreads.value[name] ?? []).flatMap(entry =>
+    entry.source === 'autonomous_turn' && entry.turnRef ? [entry.turnRef] : []))
+  const results = await Promise.allSettled(Array.from(turns, turnRef =>
+    recoverKeeperAutonomousTurn(name, turnRef, 0, true)))
+  if (results.some(result => result.status === 'rejected')) throw new Error('Autonomous history journal recovery incomplete')
+}
 
 /** A reconnect may have lost completion or the first notice of a new turn.
  * Discover the current producer for each known Keeper and recover its known

@@ -256,6 +256,48 @@ Preserve the pre-expedition, labeled battle-information and post-occupation
 checkpoints. These observations prove the local campaign transitions and
 province capture, not unification or a completed winning campaign.
 
+## Defending, retreating and checking arrivals
+
+In the same campaign, leaving province 19 with no soldiers after the province-21
+capture was followed by a Sun Quan counterattack. The notice showed attacking
+strength 43 and food 58. An empty garrison still opened defender selection,
+deployment and battle commands; it was not an emulator stall.
+
+- Declining a foreign reinforcement request in a later province-18 defense
+  opened the defender list directly. When a requested ruler was not accepted
+  in the province-19 replay, empty Return left the ruler selector and opened
+  `自力で切り抜けますか(Y/N)?`. Confirming `y` opened defender selection.
+  A request or selected ruler alone does not prove reinforcement arrived.
+- Select each defender with its number and Return, checking its `*` before
+  ending the list with empty Return and the visible `y` confirmation. The
+  governor was included without appearing in the additional-defender list.
+  Province 19 selected eight additional officers and deployed nine.
+- At the actual battle command prompt, `6`, then `y` opened a retreat
+  destination prompt for each officer. Enter a displayed province number and
+  Return for every officer; empty Return is not a destination. The set of
+  destinations can differ between battles. Province 19 offered 10, 20, 11
+  and 21; province 18's later defense offered only 16.
+- After all nine province-19 officers selected 21, August province-21
+  information showed 12 officers: its original three plus all nine retreating
+  officers. Read both roster pages with `0`, Return where the list offers it.
+  This confirmed those arrivals after defeat and normal campaign continuation.
+- A later province-18 defense sent five officers toward 16. September
+  province-16 information instead showed nine officers, with Sun Li, Li Dian,
+  Lu Qian and Dian Man present but Zhang Hu absent. The total army was 140.
+  All five destination answers did not establish five arrivals. The missing
+  officer's fate was not verified; do not promise lossless retreat.
+
+Preserve a checkpoint before defense, at the last retreat answer and after
+reading the destination roster. Check ownership as well: defeat and successful
+arrival of surviving officers do not preserve the original province.
+
+When preparing the next expedition, inspect merchant weapons separately from
+battle armament and training. A September province-16 purchase changed Zhang
+Liao's merchant weapons 5 → 100 and gold 200 → 105. A subsequent Dong Heng
+training action displayed `それぞれ訓練度が上がりました`; individual gains were
+not measured. Capturing the screen soon after submission preserved that result
+message; later province commands alone are weaker evidence of training.
+
 ## Battle defection work
 
 In a March 220 province-21 battle, the current Xu Huang command accepted

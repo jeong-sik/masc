@@ -148,11 +148,13 @@ export async function refreshOperatorWorkspaceDigest(opts?: RefreshOptions): Pro
 
 type ActionRefreshOptions = { refresh?: 'await' | 'background' }
 
-async function refreshAfterAction(options: ActionRefreshOptions): Promise<void> {
-  const refreshed = Promise.all([
-    refreshOperatorSnapshot({ force: true }),
-    refreshOperatorWorkspaceDigest({ force: true }),
-  ])
+async function refreshAfterAction(options: ActionRefreshOptions, authRevision: number): Promise<void> {
+  if (currentStoredTokenRevision() !== authRevision) return
+  const reads = [refreshOperatorSnapshot({ force: true })]
+  if (currentStoredTokenRevision() === authRevision) {
+    reads.push(refreshOperatorWorkspaceDigest({ force: true }))
+  }
+  const refreshed = Promise.all(reads)
   if (options.refresh === 'background') {
     // Both stores report their own read errors. A projection is not the action
     // receipt and must not hold its confirmation token or acknowledgement.
@@ -181,7 +183,7 @@ export async function dispatchOperatorAction(
       message: logMessageFromResult(result),
       tool_name: result.tool_name,
     })
-    await refreshAfterAction(options)
+    await refreshAfterAction(options, authRevision)
     return result
   } catch (err) {
     if (currentStoredTokenRevision() !== authRevision) throw err
@@ -223,7 +225,7 @@ export async function confirmOperatorPendingAction(
       message: logMessageFromResult(result),
       tool_name: result.tool_name,
     })
-    await refreshAfterAction(options)
+    await refreshAfterAction(options, authRevision)
     return result
   } catch (err) {
     if (currentStoredTokenRevision() !== authRevision) throw err

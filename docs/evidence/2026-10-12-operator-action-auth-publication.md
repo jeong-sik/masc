@@ -6,6 +6,8 @@ Four real action-boundary fixtures reproduced late dispatch/confirmation success
 
 Dispatch and confirmation capture their original credential revision. A superseded completion returns its original result, or rethrows its original error, without appending shared logs, changing shared errors or initiating post-action refresh. Their pending release remains unconditional and removes only their own identity. This guard does not imply that a server-side action was rolled back or failed.
 
-Focused validation completed: `npx vitest run src/operator-actions.test.ts` passed 29 tests (`/tmp/operator-action-auth-publication-focused-20261012.log`), and `npx tsc --noEmit` exited 0. Existing current-owner success/error/confirmation and overlapping lifetime scenarios remain covered.
+An additional two-case reentrant fixture uses real Preact effects to replace credentials synchronously when the receipt log is published. The earlier candidate then started new-account snapshot/digest reads (`/tmp/operator-log-observer-red-20261012.log`). Post-action refresh now receives the original revision and checks it before starting snapshot and digest reads. This is a new-read admission failure, distinct from an already-running refresh. The earlier three-file source PASS does not certify this later repair.
+
+Focused validation completed: `npx vitest run src/operator-actions.test.ts` passed 31 tests (`/tmp/operator-action-auth-publication-focused-20261012.log`), and `npx tsc --noEmit` exited 0. Existing current-owner success/error/confirmation and overlapping lifetime scenarios remain covered.
 
 This is the late action-receipt publication boundary. Already-started snapshot/digest refreshes, credential partition of pending state, previously visible logs and downstream callers' own UI effects remain separate work. No whole-account isolation, CI, installation, live provider/server, screenshot, TUI runtime or formal approval is claimed. The full chat goal remains active.

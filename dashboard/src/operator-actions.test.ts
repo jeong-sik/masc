@@ -467,3 +467,26 @@ describe('operator action credential publication ownership', () => {
     }
   })
 })
+
+describe('operator receipt observer interleaving', () => {
+  it.each(['dispatch', 'confirm'] as const)('does not refresh a replacement account after %s log observers run', async (action) => {
+    const { mod, signals } = await load()
+    const { setStoredToken, clearStoredToken } = await import('./api/core')
+    const { effect } = await import('@preact/signals')
+    setStoredToken('synthetic-log-owner-a')
+    const dispose = effect(() => {
+      if (signals.operatorActionLog.value.length > 0) setStoredToken('synthetic-log-owner-b')
+    })
+    try {
+      const result = action === 'dispatch'
+        ? await mod.dispatchOperatorAction(makeRequest())
+        : await mod.confirmOperatorPendingAction('vincent', 'owned-confirm-token')
+      expect(result).toEqual(executedResult)
+      expect(apiMocks.fetchOperatorSnapshot).not.toHaveBeenCalled()
+      expect(apiMocks.fetchOperatorDigest).not.toHaveBeenCalled()
+    } finally {
+      dispose()
+      clearStoredToken()
+    }
+  })
+})

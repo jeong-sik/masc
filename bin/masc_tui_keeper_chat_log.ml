@@ -172,7 +172,7 @@ let add ?at t ~seq (delta : Live.delta) =
     (match delta with
      | Live.Runtime_attempt_started _ -> t.attempt <- t.attempt + 1
      | Live.Run_started | Live.Batch_bound _ | Live.Text _ | Live.Thinking _ | Live.Stream_model_started _
-     | Live.Model_content_activity _
+     | Live.Provider_retry_observed _ | Live.Model_content_activity _
      | Live.Stream_details _ | Live.Stream_model_stopped _
      | Live.Native_tool_started _ | Live.Native_tool_ended _ | Live.Native_tool_progress _
      | Live.Tool_started _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
@@ -236,7 +236,8 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
          { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref; terminal_stream_scope })
   | E.Continuation_checkpoint _ -> Some Live.Checkpoint
   | E.Agent_core_stream_connected -> None
-  | E.Provider_retry_observed _ -> None
+  | E.Provider_retry_observed { attempt; retry } ->
+    Some (Live.Provider_retry_observed { attempt; retry })
   | E.Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
     Some (Live.Runtime_attempt_started { runtime_id; attempt_index })
   | E.Agent_core_stream_message_start { content_generation; provider_message_id; model; usage; stream_scope } ->

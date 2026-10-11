@@ -68,6 +68,8 @@ let token_count = function Some value -> string_of_int value | None -> "none"
 let delta_to_string : Live.delta -> string = function
   | Live.Batch_bound {operation_id; execution_id} -> Printf.sprintf "batch(%s,%s)" operation_id execution_id
   | Live.Run_started -> "run_started"
+  | Live.Provider_retry_observed { retry; _ } ->
+      Yojson.Safe.to_string (Masc.Runtime_claude_api_retry.to_json retry)
   | Live.Runtime_attempt_started { runtime_id; attempt_index } ->
       Printf.sprintf "runtime_attempt_started(%s,%s)"
         (Option.value ~default:"none" runtime_id)

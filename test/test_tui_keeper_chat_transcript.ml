@@ -2738,9 +2738,38 @@ let test_tool_start_cannot_inherit_prior_attempt_response () =
     (Transcript.model_activity t = Some (Transcript.Activity_tool_returned "write_file"))
 ;;
 
+let test_provider_retry_progress_owner () =
+  let t = fresh () in
+  let retry : Masc.Runtime_claude_api_retry.t =
+    { observation_id="retry-observation"; attempt=1; max_retries=10;
+      retry_delay_ms=1234; error_status=None } in
+  let event runtime_id lane_attempt_index = Live.Provider_retry_observed
+    { attempt={ routing_run_id="routing-run"; runtime_id; lane_attempt_index }; retry } in
+  feed t [Live.Run_started; event "claude" 0];
+  check bool "unobserved runtime grants no progress authority" true
+    (Transcript.model_activity t = None);
+  feed t [Live.Runtime_attempt_started {runtime_id=Some "claude";attempt_index=Some 0};
+    event "claude" 0];
+  check bool "current provider retry is distinct activity" true
+    (Transcript.model_activity t = Some (Transcript.Activity_provider_retry retry));
+  feed t [event "other" 0; event "claude" 1];
+  check bool "foreign attempts cannot overwrite current retry" true
+    (Transcript.model_activity t = Some (Transcript.Activity_provider_retry retry));
+  feed t [Live.Stream_model_started {generation=Some 1;stream_scope=Some 0;
+    message_id=Some "response";model="claude";usage=None}];
+  check bool "actual model response supersedes retry activity" true
+    (Transcript.model_activity t = Some Transcript.Activity_model_started);
+  feed t [Live.Run_finished];
+  let settled = Transcript.model_activity t in
+  feed t [event "claude" 0];
+  check bool "terminal operation rejects late retry progress" true
+    (Transcript.model_activity t = settled)
+;;
+
 let () =
   run "tui_keeper_chat_transcript"
-    [ ( "response boundaries", [test_case "Skill evidence retains runtime identity" `Quick test_skill_evidence_retains_invocation_runtime_identity;
+    [ ( "provider retry ownership", [test_case "retry progress requires current runtime attempt" `Quick test_provider_retry_progress_owner] )
+    ; ( "response boundaries", [test_case "Skill evidence retains runtime identity" `Quick test_skill_evidence_retains_invocation_runtime_identity;
       test_case "scoped details retire prior model activity" `Quick test_scoped_details_retire_prior_model_activity;
       test_case "scoped details retire prior response usage" `Quick test_scoped_details_retire_prior_response_usage;
       test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "response end retains turn and tool lifecycle" `Quick test_response_stop_preserves_pending_work; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])

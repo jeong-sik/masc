@@ -401,6 +401,7 @@ type model_activity =
   | Activity_content_ended
   | Activity_reasoning
   | Activity_answering
+  | Activity_provider_retry of Masc.Runtime_claude_api_retry.t
   | Activity_tool_returned of string
 
 type response_metadata = {

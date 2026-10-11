@@ -191,6 +191,7 @@ type t =
   | WireCaptureRecordSkipped
   | TurnBoundaryFailures
   | HistoryFragmentFailures
+  | QuietFinals (* counter: autonomous wakes that settled with an explicit blank final and no tool progress *)
   | WorkingStateNotCarried
   | WorkspaceMemoryBriefingBytes (* gauge: briefing summary bytes observed at the keeper turn boundary *)
   | WorkspaceMemoryLedgerClaims  (* gauge: classified ledger claim count observed at the keeper turn boundary *)

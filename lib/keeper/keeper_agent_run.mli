@@ -111,6 +111,23 @@ module For_testing : sig
     -> tool_calls:tool_call_detail list
     -> string list
 
+  val response_policy_for_turn
+    :  turn_kind:Turn_record.turn_kind
+    -> input_speaker:Keeper_input_speaker.t
+    -> world_observation:Keeper_world_observation.world_observation option
+    -> hitl_resolution:Keeper_event_queue.hitl_resolution option
+    -> Keeper_tooling.Response.completion_policy
+
+  val normalize_final_response_text
+    :  response_policy:Keeper_tooling.Response.completion_policy
+    -> keeper_name:string
+    -> runtime_id:string
+    -> run_result:Runtime_agent.run_result
+    -> text:string
+    -> tool_names:string list
+    -> unit
+    -> (string, Agent_core.Error.t) result
+
   (** AGENT_CORE raw-trace sink for keeper turns: a fresh per-turn file under
       [Keeper_types_support.keeper_raw_trace_dir]. The dispatch section passes
       it into [Keeper_turn_driver.run_named] so

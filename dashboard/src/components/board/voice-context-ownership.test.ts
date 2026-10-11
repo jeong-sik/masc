@@ -5,12 +5,12 @@ import { render, fireEvent, cleanup, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ComposerV2 } from './composer-v2'
 import { BoardSurface } from './board-surface'
-import { sendBroadcast } from '../../api'
+import { createPost, sendBroadcast } from '../../api'
 import { operatorSnapshot, dispatchOperatorAction } from '../../operator-store'
 import { boardPosts, boardHearthFilter } from '../../store'
 import { boardComposerMode } from './board-state'
 import type { OperatorSnapshot } from '../../types'
-vi.mock('../../api', () => ({ currentDashboardActor: () => 'test', sendBroadcast: vi.fn(), broadcastReceiptMessage: () => 'receipt', fetchBoardHearths: vi.fn().mockResolvedValue([]), fetchSubBoards: vi.fn().mockResolvedValue([]), fetchBoardFlairs: vi.fn().mockResolvedValue([]) }))
+vi.mock('../../api', () => ({ currentDashboardActor: () => 'test', createPost: vi.fn().mockResolvedValue({ id: 'post' }), sendBroadcast: vi.fn(), broadcastReceiptMessage: () => 'receipt', fetchBoardHearths: vi.fn().mockResolvedValue([]), fetchSubBoards: vi.fn().mockResolvedValue([]), fetchBoardFlairs: vi.fn().mockResolvedValue([]) }))
 vi.mock('../../operator-store', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../operator-store')>()
   return { ...actual, dispatchOperatorAction: vi.fn().mockResolvedValue({ status: 'ok' }) }
@@ -25,6 +25,7 @@ beforeEach(() => {
   boardComposerMode.value = 'mention'
   operatorSnapshot.value = { root: { paused: false, namespace: 'default' }, sessions: [], keepers: [{ name: 'alpha', status: 'running' }, { name: 'beta', status: 'running' }], recent_messages: [], available_actions: [] } as unknown as OperatorSnapshot
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response('[]', { headers: { 'content-type': 'application/json' } })))
+  vi.mocked(createPost).mockClear()
   vi.mocked(sendBroadcast).mockReset(); vi.mocked(dispatchOperatorAction).mockReset().mockResolvedValue({ status: 'ok', confirm_required: false, result: 'sent' })
   getUserMedia.mockReset(); startRecorder.mockReset(); stopTrack.mockReset()
   vi.stubGlobal('MediaRecorder', class { start = startRecorder })
@@ -172,4 +173,23 @@ it('does not acquire a microphone after a mobile mention was synchronously admit
   expect(dispatchOperatorAction).toHaveBeenCalledTimes(1)
   expect(getUserMedia).not.toHaveBeenCalled()
   await act(async () => { resolve({ status: 'ok', confirm_required: false, result: 'sent' }) })
+})
+
+it('cancels mention voice before admitting a post after switching composer mode', async () => {
+  let resolve!: (value: MediaStream) => void
+  getUserMedia.mockReturnValue(new Promise(done => { resolve = done }))
+  const view = render(h(BoardSurface, {}))
+  fireEvent.click(view.getByTestId('bd-composer-mobile-toggle'))
+  fireEvent.click(view.getByLabelText('Start mobile mention voice input'))
+  expect(getUserMedia).toHaveBeenCalledTimes(1)
+  expect(view.queryByTestId('bd-composer-send')).toBeNull()
+  fireEvent.click(view.getByTestId('bd-comp-tab-post'))
+  expect(view.queryByLabelText('Start mobile mention voice input')).toBeNull()
+  fireEvent.input(view.getByTestId('bd-composer-title'), { target: { value: 'post after cancellation' } })
+  fireEvent.input(view.getByTestId('bd-composer-body'), { target: { value: 'post body' } })
+  fireEvent.click(view.getByTestId('bd-composer-send'))
+  expect(createPost).toHaveBeenCalledTimes(1)
+  await act(async () => { resolve(stream) })
+  expect(startRecorder).not.toHaveBeenCalled()
+  expect(stopTrack).toHaveBeenCalledTimes(1)
 })

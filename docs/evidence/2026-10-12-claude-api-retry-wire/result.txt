@@ -1,0 +1,3 @@
+PASS actual CLI retry frames: 10
+PASS session ownership, numeric shape, UUID, duplicate fields and non-retry distinction
+exit_code=0

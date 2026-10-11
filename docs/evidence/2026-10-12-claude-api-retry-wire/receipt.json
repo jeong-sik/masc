@@ -1,0 +1,16 @@
+{
+  "cli_version": "Claude Code 2.1.296",
+  "probe_exit_code": 1,
+  "actual_retry_count": 10,
+  "terminal_subtype": "success",
+  "terminal_is_error": true,
+  "private_capture_sha256": "33f3cae4520b244d34f28dce1cbb4c431ffc666890edb74c9330c685d227f303",
+  "decoder_sha256": "52f29c24cfd8d687f8fff1d193d5a69abfae03d078b65ddac6506ccf78d8a3b9",
+  "actual_capture_decoder_exit_code": 0,
+  "identity_normalization": "session and UUID aliases only; private error and unrelated fields omitted",
+  "limits": [
+    "Direct CLI probe, not MASC adapter execution",
+    "No model reasoning/tool execution or installed UI proof",
+    "Decoder not yet connected to runtime observers or UI"
+  ]
+}

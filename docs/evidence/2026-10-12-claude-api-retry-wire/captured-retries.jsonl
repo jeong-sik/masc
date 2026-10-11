@@ -1,0 +1,10 @@
+{"type": "system", "subtype": "api_retry", "session_id": "synthetic-session", "uuid": "synthetic-retry-1", "attempt": 1, "max_retries": 10, "retry_delay_ms": 615, "error_status": null}
+{"type": "system", "subtype": "api_retry", "session_id": "synthetic-session", "uuid": "synthetic-retry-2", "attempt": 2, "max_retries": 10, "retry_delay_ms": 1144, "error_status": null}
+{"type": "system", "subtype": "api_retry", "session_id": "synthetic-session", "uuid": "synthetic-retry-3", "attempt": 3, "max_retries": 10, "retry_delay_ms": 2267, "error_status": null}
+{"type": "system", "subtype": "api_retry", "session_id": "synthetic-session", "uuid": "synthetic-retry-4", "attempt": 4, "max_retries": 10, "retry_delay_ms": 4843, "error_status": null}
+{"type": "system", "subtype": "api_retry", "session_id": "synthetic-session", "uuid": "synthetic-retry-5", "attempt": 5, "max_retries": 10, "retry_delay_ms": 9990, "error_status": null}
+{"type": "system", "subtype": "api_retry", "session_id": "synthetic-session", "uuid": "synthetic-retry-6", "attempt": 6, "max_retries": 10, "retry_delay_ms": 19349, "error_status": null}
+{"type": "system", "subtype": "api_retry", "session_id": "synthetic-session", "uuid": "synthetic-retry-7", "attempt": 7, "max_retries": 10, "retry_delay_ms": 39749, "error_status": null}
+{"type": "system", "subtype": "api_retry", "session_id": "synthetic-session", "uuid": "synthetic-retry-8", "attempt": 8, "max_retries": 10, "retry_delay_ms": 36585, "error_status": null}
+{"type": "system", "subtype": "api_retry", "session_id": "synthetic-session", "uuid": "synthetic-retry-9", "attempt": 9, "max_retries": 10, "retry_delay_ms": 35647, "error_status": null}
+{"type": "system", "subtype": "api_retry", "session_id": "synthetic-session", "uuid": "synthetic-retry-10", "attempt": 10, "max_retries": 10, "retry_delay_ms": 37805, "error_status": null}

@@ -1,0 +1,39 @@
+import { describe, expect, it, vi } from 'vitest'
+vi.mock('./core', () => ({ fetchControlPlane: vi.fn(), apiRequestErrorFromResponse: vi.fn() }))
+import { fetchControlPlane } from './core'
+import { fetchKeeperTurnEvents, parseKeeperTurnEventPage } from './keeper-turn-events'
+
+const raw = { schema: 'masc.keeper_turn_events.v1', turn_ref: 'trace#9',
+  ag_ui_events: [{ seq: 4, ts: 1, event: { type: 'TEXT_MESSAGE_CONTENT', threadId: 'keeper:k',
+    runId: 'trace#9', messageId: 'trace#9:assistant', delta: 'answer', timestamp: 1 } }],
+  has_more: false, next_since_seq: 4, next_since_offset: 123 }
+const cursor = { sequence: 3, offset: 10 }
+describe('autonomous turn journal boundary', () => {
+  it('retains the exact turn cursor and projected content', () => {
+    const page = parseKeeperTurnEventPage(raw, 'trace#9', cursor)
+    expect(page.cursor).toEqual({ sequence: 4, offset: 123 })
+    expect(page.events[0]?.event).toMatchObject({ delta: 'answer', runId: 'trace#9' })
+    expect(Object.isFrozen(page.events)).toBe(true)
+  })
+  it.each([
+    { turn_ref: 'other#9' },
+    { ag_ui_events: [{ ...raw.ag_ui_events[0], event: { ...raw.ag_ui_events[0]!.event, runId: 'other#9' } }] }, { next_since_seq: 5 }, { next_since_offset: 10 },
+    { ag_ui_events: [{ seq: 3, ts: 1, event: null }] },
+    { ag_ui_events: [raw.ag_ui_events[0], raw.ag_ui_events[0]] },
+    { ag_ui_events: [{ seq: 4, ts: 1, event: { type: 'unknown' } }] },
+  ])('rejects foreign, repeated, and inconsistent pages %j', delta => {
+    expect(() => parseKeeperTurnEventPage({ ...raw, ...delta }, 'trace#9', cursor)).toThrow()
+  })
+  it('advances across connector-only rows without inventing UI content', () => {
+    const page = parseKeeperTurnEventPage({ ...raw, ag_ui_events: [{ seq: 4, ts: 1, event: null }] }, 'trace#9', cursor)
+    expect(page.events[0]?.event).toBeNull()
+    expect(page.cursor.sequence).toBe(4)
+  })
+  it('feeds both cursor halves through the authenticated control-plane request', async () => {
+    vi.mocked(fetchControlPlane).mockResolvedValueOnce(new Response(JSON.stringify(raw)))
+    const controller = new AbortController()
+    await fetchKeeperTurnEvents('k', 'trace#9', cursor, controller.signal)
+    expect(fetchControlPlane).toHaveBeenCalledWith('/api/v1/keepers/k/turns/trace%239/events?since_seq=3&since_offset=10',
+      { method: 'GET', signal: controller.signal })
+  })
+})

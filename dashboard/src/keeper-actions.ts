@@ -729,7 +729,11 @@ function withCurrentTrackedOperationAssistantDraft(
 
 let localIdCounter = 0
 
-const hydratingKeeperChatOperations = new Set<string>()
+interface OperationRecoveryOwner {
+  readonly keeperName: string
+  readonly authRevision: number
+}
+const hydratingKeeperChatOperations = new Map<string, OperationRecoveryOwner>()
 const sendingKeeperThreadMessages = new Set<string>()
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 
@@ -771,9 +775,13 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
   // it rather than minting a duplicate pending entry + a second poll loop.
   // After a full page reload this map is empty, so cold-start resume runs.
   if (liveSendOwnsRequest(request.operationId)) return
-  const key = `${request.keeperName}:${request.operationId}`
-  if (hydratingKeeperChatOperations.has(key)) return
-  hydratingKeeperChatOperations.add(key)
+  const key = JSON.stringify([request.keeperName, request.operationId])
+  const authRevision = currentStoredTokenRevision()
+  if (hydratingKeeperChatOperations.get(key)?.authRevision === authRevision) return
+  const owner: OperationRecoveryOwner = { keeperName: request.keeperName, authRevision }
+  hydratingKeeperChatOperations.set(key, owner)
+  const ownsRecovery = () => hydratingKeeperChatOperations.get(key) === owner
+    && owner.authRevision === currentStoredTokenRevision()
   const assistantId = ensureTrackedOperationThreadEntries(request)
   setRecordValue(keeperSending, request.keeperName, true)
   setRecordValue(keeperActionErrors, request.keeperName, null)
@@ -781,10 +789,12 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
   markKeeperStreamSignal(request.keeperName, { force: true })
   try {
     for (;;) {
+      if (!ownsRecovery()) return
       const operation = await fetchKeeperChatOperation(
         request.keeperName,
         request.operationId,
       )
+      if (!ownsRecovery()) return
       markKeeperStreamSignal(request.keeperName)
       if (operation.state.kind === 'queued' || operation.state.kind === 'running') {
         await sleep(PENDING_KEEPER_CHAT_POLL_MS)
@@ -845,6 +855,7 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
       return
     }
   } catch (err) {
+    if (!ownsRecovery()) return
     const current = (keeperThreads.value[request.keeperName] ?? []).find(entry => entry.id === assistantId)
     if (current?.responseState?.kind === 'known' && current.responseState.phase === 'terminal') {
       // A lookup observation cannot revoke a receipt already restored/applied.
@@ -900,13 +911,16 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
     setRecordValue(keeperActionErrors, request.keeperName, message)
     await hydrateKeeperChatHistory(request.keeperName, { force: true })
   } finally {
-    hydratingKeeperChatOperations.delete(key)
-    const observingAnother = trackedKeeperChatOperationsForKeeper(request.keeperName)
-      .some(candidate => hydratingKeeperChatOperations.has(`${candidate.keeperName}:${candidate.operationId}`))
-    if (!observingAnother && activeStreamEntryId(request.keeperName) === null) {
-      setRecordValue(keeperSending, request.keeperName, false)
-      setRecordValue(keeperStreamStartedAt, request.keeperName, null)
-      clearKeeperStreamSignal(request.keeperName)
+    if (hydratingKeeperChatOperations.get(key) === owner) {
+      hydratingKeeperChatOperations.delete(key)
+      const observingAnother = Array.from(hydratingKeeperChatOperations.values())
+        .some(candidate => candidate.keeperName === request.keeperName
+          && candidate.authRevision === currentStoredTokenRevision())
+      if (!observingAnother && activeStreamEntryId(request.keeperName) === null) {
+        setRecordValue(keeperSending, request.keeperName, false)
+        setRecordValue(keeperStreamStartedAt, request.keeperName, null)
+        clearKeeperStreamSignal(request.keeperName)
+      }
     }
   }
 }

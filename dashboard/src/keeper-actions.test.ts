@@ -55,6 +55,7 @@ import {
   keeperHydrating,
   keeperProbing,
   keeperRecovering,
+  keeperSending,
   keeperStatusDetails,
   keeperStreamLastEventAt,
   keeperThreads,
@@ -1463,6 +1464,70 @@ describe('restored chat operation outcome', () => {
       assistantDraft: { text: 'partial authored answer', rawText: 'partial authored answer', delivery: 'streaming',
         streamState: 'streaming', timestamp: '2026-10-11T00:00:00Z', traceSteps: [{ kind: 'think', text: 'exposed reasoning' }] } })
   }
+
+  it.each(['resolve', 'reject'] as const)('rejects operation lookup from replaced authentication (%s)', async outcome => {
+    storeDraft()
+    setStoredToken('fixture-old')
+    let resolve!: (value: unknown) => void
+    let reject!: (error: Error) => void
+    fetchKeeperChatOperation.mockReturnValueOnce(new Promise((yes, no) => { resolve = yes; reject = no }))
+    const recovery = hydrateTrackedKeeperChatOperations('echo')
+    setStoredToken('fixture-new')
+    keeperActionErrors.value = { echo: 'current scope error' }
+    if (outcome === 'reject') reject(new Error('old lookup failed'))
+    else resolve({ operationId: 'restored-op', state: { kind: 'succeeded', completedAt: 2, outcomeRef: 'result' } })
+    await recovery
+    expect(keeperActionErrors.value.echo).toBe('current scope error')
+    expect(fetchKeeperChatHistory).not.toHaveBeenCalled()
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.delivery).toBe('streaming')
+    clearStoredToken()
+  })
+
+  it('admits current-auth recovery while the previous-auth lookup is pending without losing its owner', async () => {
+    storeDraft()
+    setStoredToken('fixture-old')
+    let oldResolve!: (value: unknown) => void
+    let currentResolve!: (value: unknown) => void
+    fetchKeeperChatOperation.mockReturnValueOnce(new Promise(yes => { oldResolve = yes }))
+      .mockReturnValueOnce(new Promise(yes => { currentResolve = yes }))
+    const old = hydrateTrackedKeeperChatOperations('echo')
+    setStoredToken('fixture-new')
+    const current = hydrateTrackedKeeperChatOperations('echo')
+    expect(fetchKeeperChatOperation).toHaveBeenCalledTimes(2)
+    oldResolve({ operationId: 'restored-op', state: { kind: 'succeeded', completedAt: 2, outcomeRef: 'old' } })
+    await old
+    expect(keeperSending.value.echo).toBe(true)
+    await hydrateTrackedKeeperChatOperations('echo')
+    expect(fetchKeeperChatOperation).toHaveBeenCalledTimes(2)
+    currentResolve({ operationId: 'restored-op', state: { kind: 'cancelled', completedAt: 3 } })
+    await current
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.delivery).toBe('cancelled')
+    expect(keeperSending.value.echo).toBe(false)
+    clearStoredToken()
+  })
+
+  it('does not poll with new credentials on behalf of an old recovery after queued sleep', async () => {
+    vi.useFakeTimers()
+    try {
+      storeDraft()
+      setStoredToken('fixture-old')
+      fetchKeeperChatOperation.mockResolvedValueOnce({ operationId: 'restored-op', state: { kind: 'queued' } })
+        .mockResolvedValueOnce({ operationId: 'restored-op', state: { kind: 'cancelled', completedAt: 3 } })
+      const recovery = hydrateTrackedKeeperChatOperations('echo')
+      await Promise.resolve()
+      setStoredToken('fixture-new')
+      await vi.runAllTimersAsync()
+      await recovery
+      expect(fetchKeeperChatOperation).toHaveBeenCalledTimes(1)
+      expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.delivery).toBe('streaming')
+      await hydrateTrackedKeeperChatOperations('echo')
+      expect(fetchKeeperChatOperation).toHaveBeenCalledTimes(2)
+      expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.delivery).toBe('cancelled')
+    } finally {
+      clearStoredToken()
+      vi.useRealTimers()
+    }
+  })
 
   it.each(['resolve', 'reject'] as const)('retains recovery when credentials change between history admission and caller settlement (%s)', async outcome => {
     storeDraft()

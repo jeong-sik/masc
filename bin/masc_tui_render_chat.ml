@@ -2693,7 +2693,7 @@ let child_content_entries (state : state) ~keeper_name ~role_label_column ~chat_
           let projected = { projected with markdown_source=Message_layout.Markdown_stable {
             keeper_name; request_id=identity; observed_at=record.recorded_at;
             entry_index=record.seq } } in
-          Some (Tagged_child anchor, fold_thinking_entry state ~chat_cols projected)) store.records)
+          Some (Tagged_child anchor, fold_thinking_entry state ~chat_cols projected)) (Consumer.records store))
         (Consumer.stores received) in
       let notices =
         List.map (fun error -> entry Message_layout.Error "CHILD READ" (Consumer.error_text error))

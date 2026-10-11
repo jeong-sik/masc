@@ -9,9 +9,10 @@ type error = Transport of string | Http_refused of int | Invalid_json of string
 (** History rewrite includes same-incarnation rollback or changed prior immutable
     correlations/timestamp. Only human text/model may change on a full Audit. *)
 type read_mode = Poll | Audit
+type history
 type store = private
   { receiver : Read.receiver; store_id : string; cursor : Read.cursor option
-  ; records : Read.record list; error : error option; attempted : Read.cursor option
+  ; history : history; error : error option; attempted : Read.cursor option
   ; cleanup_failures : string list; coverage : Read.coverage }
 (** Ordered snapshots; never Task-folded or merged by provider envelope UUID.
     Old disappeared/incarnation histories retain last-observed redaction only. *)
@@ -19,6 +20,9 @@ type t
 val empty : t
 val failed : t -> error -> t
 val stores : t -> store list
+val records : store -> Read.record list
+(** Ordered immutable observations, memoized per history snapshot. Suffix
+    admission does not traverse or copy the retained prefix. *)
 val errors : t -> error list
 val diagnostics : t -> string list
 val error_text : error -> string

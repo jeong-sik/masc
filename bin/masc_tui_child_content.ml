@@ -6,9 +6,31 @@ type error = Transport of string | Http_refused of int | Invalid_json of string
   | Persistence of Read.receiver * Read.error_code | Receiver_read of Read.receiver * error
   | History_rewritten of Read.receiver * string
 type read_mode = Poll | Audit
+module Keys = Set.Make (struct
+  type t = string * int * Runtime_claude_code.content_channel
+  let compare (left_id,left_ordinal,left_channel) (right_id,right_ordinal,right_channel) =
+    let id = String.compare left_id right_id in
+    if id <> 0 then id else
+    let ordinal = Int.compare left_ordinal right_ordinal in
+    if ordinal <> 0 then ordinal else
+    match left_channel,right_channel with
+    | Runtime_claude_code.Text_content, Runtime_claude_code.Text_content
+    | Runtime_claude_code.Thinking_content, Runtime_claude_code.Thinking_content -> 0
+    | Runtime_claude_code.Text_content, Runtime_claude_code.Thinking_content -> -1
+    | Runtime_claude_code.Thinking_content, Runtime_claude_code.Text_content -> 1
+end)
+let key (row:Read.record) =
+  row.observation.observation_id,row.observation.ordinal,row.observation.channel
+type history =
+  { reversed : Read.record list; keys : Keys.t
+  ; ordered : Read.record list Lazy.Mutexed.t }
+let history_of_records rows =
+  { reversed=List.rev rows
+  ; keys=List.fold_left (fun keys row -> Keys.add (key row) keys) Keys.empty rows
+  ; ordered=Lazy.Mutexed.from_val rows }
 type store =
   { receiver : Read.receiver; store_id : string; cursor : Read.cursor option
-  ; records : Read.record list; error : error option; attempted : Read.cursor option
+  ; history : history; error : error option; attempted : Read.cursor option
   ; cleanup_failures : string list; coverage : Read.coverage }
 type inventory =
   { receivers : (Read.receiver * (Read.cursor,Read.error_code) result) list
@@ -19,6 +41,7 @@ type t =
 let empty = {keeper_name=None;inventory=None;stores=[];error=None;audit_failures=[]}
 let failed previous error = {previous with error=Some error}
 let stores state = state.stores
+let records (store:store) = Lazy.Mutexed.force store.history.ordered
 let errors state =
   Option.to_list state.error
   @ List.map (fun (receiver,code) -> Persistence (receiver,code)) state.audit_failures
@@ -88,20 +111,17 @@ let records_path keeper_name (receiver:Read.receiver) after =
         ["store_id",cursor.store_id;"after_sequence",string_of_int cursor.after_sequence]) in
   Uri.with_query' (Uri.of_string (prefix keeper_name ^ "records")) query |> Uri.to_string
 
-module Keys = Set.Make (struct
-  type t = string * int * Runtime_claude_code.content_channel
-  let compare = compare
-end)
-let key (row:Read.record) =
-  row.observation.observation_id,row.observation.ordinal,row.observation.channel
 let append_records (old:store) (page:Read.records) =
-  let seen=List.fold_left (fun keys row -> Keys.add (key row) keys) Keys.empty old.records in
   let rec unique keys = function
-    | [] -> Ok ()
+    | [] -> Ok keys
     | row::rest -> if Keys.mem (key row) keys then Error (Invalid_response Read.Duplicate_observation)
         else unique (Keys.add (key row) keys) rest in
-  let* ()=unique seen page.records in
-  match page.records with [] -> Ok old.records | _::_ -> Ok (old.records @ page.records)
+  let* keys=unique old.history.keys page.records in
+  match page.records with
+  | [] -> Ok old.history
+  | _::_ ->
+      let reversed=List.rev_append page.records old.history.reversed in
+      Ok {reversed;keys;ordered=Lazy.Mutexed.from_fun (fun () -> List.rev reversed)}
 let same_identity (left:Read.record) (right:Read.record) =
   let a=left.observation and b=right.observation in
   left.seq=right.seq && left.recorded_at=right.recorded_at
@@ -114,13 +134,13 @@ let audit_records (old:store) (page:Read.records) =
   | Some cursor when page.next_cursor.after_sequence<cursor.after_sequence -> refuse ()
   | None | Some _ ->
       let rec prefix unchanged old_rows fresh_rows = match old_rows,fresh_rows with
-        | [],[] -> Ok (if unchanged then old.records else page.records)
-        | [],_::_ -> Ok page.records
+        | [],[] -> Ok (if unchanged then old.history else history_of_records page.records)
+        | [],_::_ -> Ok (history_of_records page.records)
         | _::_,[] -> refuse ()
         | before::old_rest,after::fresh_rest ->
             if not (same_identity before after) then refuse ()
             else prefix (unchanged && before=after) old_rest fresh_rest in
-      prefix true old.records page.records
+      prefix true (records old) page.records
 
 let read ~mode ~keeper_name ~fetch ~previous =
   let* ()=match previous.keeper_name with None -> Ok ()
@@ -164,24 +184,28 @@ let read ~mode ~keeper_name ~fetch ~previous =
           let* ()=if page.next_cursor.store_id<>advertised.store_id then Error (Invalid_response Read.Cursor_mismatch)
             else if page.next_cursor.after_sequence<advertised.after_sequence then Error (Invalid_response Read.Sequence_mismatch)
             else Ok () in
-          let* records=match old,full with
-            | None,_ -> Ok page.records
+          let* history=match old,full with
+            | None,_ -> Ok (history_of_records page.records)
             | Some store,false -> append_records store page
             | Some store,true -> audit_records store page in
-          Ok (page,records) in
+          Ok (page,history) in
         let store=match loaded with
-          | Ok (page,records) ->
+          | Ok (page,history) ->
               audit_failures := List.remove_assoc receiver !audit_failures;
-              let fresh={receiver;store_id=advertised.store_id;cursor=Some page.next_cursor;records;error=None;
+              let fresh={receiver;store_id=advertised.store_id;cursor=Some page.next_cursor;history;error=None;
                 attempted=Some advertised;cleanup_failures=page.cleanup_failures;coverage=page.coverage} in
-              (match old with Some old when old=fresh -> old | None | Some _ -> fresh)
+              (match old with
+               | Some old when old.history==fresh.history && old.cursor=fresh.cursor
+                   && old.error=fresh.error && old.attempted=fresh.attempted
+                   && old.cleanup_failures=fresh.cleanup_failures && old.coverage=fresh.coverage -> old
+               | None | Some _ -> fresh)
           | Error error -> (match old with
               | Some store ->
                   let primary = match store.error with
                     | Some (History_rewritten _ as retained) -> retained
                     | Some _ | None -> error in
                   {store with error=Some primary;attempted=Some advertised}
-              | None -> {receiver;store_id=advertised.store_id;cursor=None;records=[];error=Some error;
+              | None -> {receiver;store_id=advertised.store_id;cursor=None;history=history_of_records [];error=Some error;
                   attempted=Some advertised;cleanup_failures=[];coverage=inventory.coverage}) in
         match old with None -> stores @ [store]
           | Some old when old==store -> stores

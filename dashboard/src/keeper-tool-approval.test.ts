@@ -315,7 +315,7 @@ describe('hydrateKeeperToolApprovals', () => {
     await vi.waitFor(() => expect(resolveFetch).toBeDefined())
     expect(applyKeeperStreamEvent('sangsu', 'approval-reply', {
       type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_SETTLED',
-      value: { tool_call_id: 'stream-finished-wait', outcome: 'approve' },
+      value: { approval_id: '019a0000-0000-7000-8000-000000000001', tool_call_id: 'stream-finished-wait', outcome: 'approve' },
     })).toBeNull()
     resolveFetch(jsonResponse(200, { pending: [{
       keeper: 'sangsu', tool_call_id: 'stream-finished-wait', tool: 'Execute', args: '{}',

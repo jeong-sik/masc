@@ -818,10 +818,12 @@ describe('Keeper operation stream projection', () => {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_APPROVAL_REQUESTED',
       value: {
+        approval_id: '019a0000-0000-7000-8000-000000000001',
         tool_call_id: 'call-1',
         tool_call_name: 'Execute',
         args: '{}',
         question: 'run it?',
+        because: 'policy',
       },
     })).toBeNull()
 
@@ -834,12 +836,32 @@ describe('Keeper operation stream projection', () => {
   // the keeper held the call, and the wait retired itself 180s later as a
   // denial nobody chose. The stream projection must mint a pending approval
   // row the chat surface can draw and answer.
+  it('projects actual approval frames through the strict decoder into approval state', () => {
+    assistantEntry()
+    const opening = KeeperChatStreamEventSchema.parse({
+      type: 'CUSTOM', threadId: 'keeper-consumer:sangsu', runId: 'run-1', timestamp: 1_712_000_000, name: 'KEEPER_TOOL_APPROVAL_REQUESTED',
+      value: { approval_id: '019a0000-0000-7000-8000-000000000001',
+        tool_call_id: 'decoded-call', tool_call_name: 'Execute',
+        args: '{}', question: 'Run?', because: 'policy' },
+    })
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', opening)).toBeNull()
+    expect(keeperToolApprovals.value.sangsu?.['decoded-call']?.settled).toBe(false)
+    const closing = KeeperChatStreamEventSchema.parse({
+      type: 'CUSTOM', threadId: 'keeper-consumer:sangsu', runId: 'run-1', timestamp: 1_712_000_000, name: 'KEEPER_TOOL_APPROVAL_SETTLED',
+      value: { approval_id: '019a0000-0000-7000-8000-000000000001',
+        tool_call_id: 'decoded-call', outcome: 'approve' },
+    })
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', closing)).toBeNull()
+    expect(keeperToolApprovals.value.sangsu?.['decoded-call']?.settled).toBe(true)
+  })
+
   it('mints a pending approval row on KEEPER_TOOL_APPROVAL_REQUESTED', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_APPROVAL_REQUESTED',
       value: {
+        approval_id: '019a0000-0000-7000-8000-000000000001',
         tool_call_id: 'call-approve-1',
         tool_call_name: 'Execute',
         args: '{"argv":["ls","-la"]}',
@@ -864,10 +886,12 @@ describe('Keeper operation stream projection', () => {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_APPROVAL_REQUESTED',
       value: {
+        approval_id: '019a0000-0000-7000-8000-000000000001',
         tool_call_id: 'call-settle-1',
         tool_call_name: 'Execute',
         args: '{}',
         question: 'run it?',
+        because: 'policy',
       },
     })
     expect(keeperToolApprovals.value.sangsu?.['call-settle-1']).toBeDefined()
@@ -875,7 +899,7 @@ describe('Keeper operation stream projection', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_APPROVAL_SETTLED',
-      value: { tool_call_id: 'call-settle-1', outcome: 'Approved' },
+      value: { approval_id: '019a0000-0000-7000-8000-000000000001', tool_call_id: 'call-settle-1', outcome: 'Approved' },
     })).toBeNull()
     expect(keeperToolApprovals.value.sangsu?.['call-settle-1']?.settled).toBe(true)
     expect(keeperToolApprovals.value.sangsu?.['call-settle-1']?.answeredOutcome).toBe('Approved')
@@ -888,7 +912,7 @@ describe('Keeper operation stream projection', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_APPROVAL_SETTLED',
-      value: { tool_call_id: 'call-unknown-1', outcome: 'Denied' },
+      value: { approval_id: '019a0000-0000-7000-8000-000000000001', tool_call_id: 'call-unknown-1', outcome: 'Denied' },
     })).toBeNull()
     expect(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')).toBeDefined()
   })

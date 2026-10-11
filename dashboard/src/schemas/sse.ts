@@ -1,3 +1,4 @@
+import { decodeKeeperToolApprovalId } from '../lib/keeper-tool-approval-id'
 import { decodeKeeperChatDeliveryProvenance } from '../api/schemas/keeper-chat-delivery-provenance'
 // Lightweight schema-at-boundary for SSE events from the MCP server.
 //
@@ -320,15 +321,6 @@ function optionalString(
     : fail(`ag_ui_event.value.${field}`, `Expected non-empty optional ${field}`)
 }
 
-function optionalText(
-  value: Record<string, unknown>,
-  field: string,
-): SafeParseResult<true> {
-  return value[field] === undefined || typeof value[field] === 'string'
-    ? ok(true)
-    : fail(`ag_ui_event.value.${field}`, `Expected optional string ${field}`)
-}
-
 function validateToolStreamOccurrence(
   value: Record<string, unknown>,
   path: string,
@@ -611,13 +603,14 @@ function validateKeeperCustomPayload(
     KEEPER_CHAT_OPERATION_ACCEPTED: ['operation_id', 'state', 'queued_count', 'interactive'],
     KEEPER_CHAT_BATCH_BOUND: ['operation_id', 'execution_id'],
     KEEPER_TOOL_APPROVAL_REQUESTED: [
+      'approval_id',
       'tool_call_id',
       'tool_call_name',
       'args',
       'question',
       'because',
     ],
-    KEEPER_TOOL_APPROVAL_SETTLED: ['tool_call_id', 'outcome'],
+    KEEPER_TOOL_APPROVAL_SETTLED: ['approval_id', 'tool_call_id', 'outcome'],
     KEEPER_STREAM_MESSAGE_START: ['content_generation', 'stream_scope', 'provider_message_id', 'model', 'usage'],
     KEEPER_STREAM_MESSAGE_DELTA: ['content_generation', 'stream_scope', 'stop_reason', 'usage'],
     KEEPER_CONTENT_BLOCK_START: ['index', 'content_type', 'tool_call_id', 'tool_call_name'],
@@ -736,6 +729,7 @@ function validateKeeperCustomPayload(
       return occurrence.success ? requiredString(value, 'executionId') : occurrence
     }
     case 'KEEPER_TOOL_APPROVAL_REQUESTED': {
+      if (decodeKeeperToolApprovalId(value.approval_id) === null) return fail('ag_ui_event.value.approval_id', 'Expected approval UUIDv7')
       const toolCallId = requiredString(value, 'tool_call_id')
       if (!toolCallId.success) return toolCallId
       const toolCallName = requiredString(value, 'tool_call_name')
@@ -743,9 +737,10 @@ function validateKeeperCustomPayload(
       const args = requiredString(value, 'args')
       if (!args.success) return args
       const question = requiredString(value, 'question')
-      return question.success ? optionalText(value, 'because') : question
+      return question.success ? requiredString(value, 'because', true) : question
     }
     case 'KEEPER_TOOL_APPROVAL_SETTLED': {
+      if (decodeKeeperToolApprovalId(value.approval_id) === null) return fail('ag_ui_event.value.approval_id', 'Expected approval UUIDv7')
       const toolCallId = requiredString(value, 'tool_call_id')
       if (!toolCallId.success) return toolCallId
       return requiredString(value, 'outcome')

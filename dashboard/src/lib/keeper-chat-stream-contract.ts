@@ -174,17 +174,18 @@ type KeeperChatCustomEvent =
       type: 'CUSTOM'
       name: 'KEEPER_TOOL_APPROVAL_REQUESTED'
       value: {
+        approval_id: string
         tool_call_id: string
         tool_call_name: string
         args: string
         question: string
-        because?: string
+        because: string
       }
     }
   | {
       type: 'CUSTOM'
       name: 'KEEPER_TOOL_APPROVAL_SETTLED'
-      value: { tool_call_id: string; outcome: string }
+      value: { approval_id: string; tool_call_id: string; outcome: string }
     }
   | {
       type: 'CUSTOM'

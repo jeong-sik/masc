@@ -75,12 +75,33 @@ let test_a_settle_racing_the_timeout_is_the_answer_it_counts () =
           check bool "the late answer applies" true
             (Registry.settle registry ~keeper_name:keeper
                ~tool_call_id:"call-3" Registry.Approve);
-          ignore (Eio.Promise.await_exn waited);
+          check bool "successful receipt matches the wait outcome" true
+            (Eio.Promise.await_exn waited = Registry.Answered Registry.Approve);
           (* The operator's decision reached the call even though the timer
              fired first: the answered count is where this lands, never
              timed_out (the gate's own rule for this race). *)
           check outcome_totals "the race counts as answered"
             { Registry.answered_total = 1; timed_out_total = 0 } (totals registry)))
+
+let test_timeout_claim_rejects_a_later_answer () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock 0.0;
+    let registry = Registry.create () in
+    Eio.Switch.run (fun sw ->
+      let waited = Eio.Fiber.fork_promise ~sw (fun () ->
+        Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ())
+          registry ~clock ~keeper_name:keeper ~tool_call_id:"timeout-claimed"
+          ~tool_name:"Execute" ~args:"{}" ~question:"run?" ~because:"policy"
+          ~timeout_sec:1.0) in
+      Eio_mock.Clock.set_time clock 1.0;
+      check bool "timer publishes timeout" true
+        (Eio.Promise.await_exn waited = Registry.Timed_out);
+      check bool "later answer is not applied" false
+        (Registry.settle registry ~keeper_name:keeper
+          ~tool_call_id:"timeout-claimed" Registry.Approve);
+      check outcome_totals "one terminal outcome is counted"
+        { Registry.answered_total = 0; timed_out_total = 1 } (totals registry)))
 
 let test_a_failed_settle_counts_nothing () =
   with_env (fun ~clock ->
@@ -133,7 +154,9 @@ let () =
   run
     "keeper_tool_approval_registry_outcomes"
     [ ( "outcome totals"
-      , [ test_case "provider call reuse has a new admission identity" `Quick
+      , [ test_case "timeout claim rejects a later answer" `Quick
+            test_timeout_claim_rejects_a_later_answer
+        ; test_case "provider call reuse has a new admission identity" `Quick
             test_reused_provider_call_has_a_new_admission_identity
         ; test_case "failed registration publication removes the wait" `Quick
             test_failed_registration_publication_removes_the_wait

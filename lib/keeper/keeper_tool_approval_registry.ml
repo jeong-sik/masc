@@ -116,34 +116,41 @@ let await ?(on_registered = fun () -> ()) t ~approval_id ~clock ~keeper_name ~to
         t.waiters <-
           List.filter (fun waiter -> waiter.resolve != resolve) t.waiters)
   in
-  (* A decision settled as the wait's timeout passed is the decision: the
-     operator was told it applied, and the call must run under it rather
-     than be reported as timed out. *)
+  (* Timeout and an operator answer claim the same exact waiter under the
+     registry lock. The winning claim publishes one promise outcome, so a
+     successful settlement receipt cannot race a contradictory timeout. *)
   Fun.protect ~finally:remove_self (fun () ->
       on_registered ();
-      match
-        Watched_work.run
-          (fun () -> Eio.Promise.await promise)
-          ~watcher:(fun () ->
-            Eio.Time.sleep clock timeout_sec;
-            Timed_out)
-      with
-      | Timed_out ->
-        (* The timer, not a decision, ended this wait: the one outcome the
-           timeout measurement counts as a timeout. *)
-        t.timed_out_total <- t.timed_out_total + 1;
-        Timed_out
-      | outcome -> outcome)
+      Watched_work.run
+        (fun () -> Eio.Promise.await promise)
+        ~watcher:(fun () ->
+          Eio.Time.sleep clock timeout_sec;
+          let timed_out =
+            Stdlib.Mutex.protect t.mutex (fun () ->
+              let present =
+                List.exists (fun waiter -> waiter.resolve == resolve) t.waiters
+              in
+              if present then begin
+                t.waiters <-
+                  List.filter (fun waiter -> waiter.resolve != resolve) t.waiters;
+                t.timed_out_total <- t.timed_out_total + 1
+              end;
+              present)
+          in
+          if timed_out then Eio.Promise.resolve resolve Timed_out;
+          (* A different claim may have removed the wait but not yet resolved
+             its promise in another domain. Await its outcome rather than
+             manufacture a timeout from absence. *)
+          Eio.Promise.await promise))
 
 let settle t ~keeper_name ~tool_call_id decision =
   let key = { key_keeper_name = keeper_name; key_tool_call_id = tool_call_id } in
-  match Stdlib.Mutex.protect t.mutex (fun () -> take_locked t key) with
+  match Stdlib.Mutex.protect t.mutex (fun () ->
+      let waiter = take_locked t key in
+      if Option.is_some waiter then t.answered_total <- t.answered_total + 1;
+      waiter) with
   | None -> false
   | Some waiter ->
-    (* Counted on the resolved answer, not on [settle]'s return value: the
-       wait this resolves is an answer reaching an operator's call either
-       way. *)
-    t.answered_total <- t.answered_total + 1;
     Eio.Promise.resolve waiter.resolve (Answered decision);
     true
 

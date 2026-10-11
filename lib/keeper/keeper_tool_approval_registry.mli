@@ -89,7 +89,9 @@ val await :
 val settle :
   t -> keeper_name:string -> tool_call_id:string -> decision -> bool
 (** Answer a wait. Returns whether one was actually waiting: [false] means it
-    had already timed out, been answered, or never opened. Callers report that
+    had already timed out, been answered, or never opened. Answer and timeout
+    atomically claim the waiter; a successful answer cannot return a timeout
+    outcome for that wait. Callers report that
     rather than treating it as success, so an operator is not told a call was
     approved when nothing was listening. *)
 

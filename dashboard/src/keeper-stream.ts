@@ -292,27 +292,27 @@ function flushPendingThinkingDeltas(
     pendingThinkingDeltas.delete(key)
     return
   }
+  const ownsTarget = (): boolean => ownsThinkingPublication(pending,
+    (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId), currentStoredTokenRevision())
   const preserveActivity = (): void => {
-    if (!pending.authoritative && before) updateThreadEntry(keeperName, assistantEntryId, entry => ({
-      ...entry, streamState: before.streamState, delivery: before.delivery,
-    }))
+    if (!pending.authoritative && before) updateThreadEntry(keeperName, assistantEntryId, entry =>
+      ownsThinkingPublication(pending, entry, currentStoredTokenRevision())
+        ? { ...entry, streamState: before.streamState, delivery: before.delivery }
+        : entry)
   }
-  if (mode === 'preview') {
-    setAssistantThinkingSnapshot(keeperName, assistantEntryId, fullPendingThinkingText(pending), {
-      agentCoreBlockIndex: pending.agentCoreBlockIndex,
-      responseOwner: pending.responseOwner,
-    })
-    preserveActivity()
-    persistActiveAssistantDraft(keeperName, assistantEntryId)
-    return
-  }
-  pendingThinkingDeltas.delete(key)
+  if (mode === 'commit') pendingThinkingDeltas.delete(key)
   setAssistantThinkingSnapshot(keeperName, assistantEntryId, fullPendingThinkingText(pending), {
     agentCoreBlockIndex: pending.agentCoreBlockIndex,
-      responseOwner: pending.responseOwner,
+    responseOwner: pending.responseOwner,
   })
+  if (!ownsTarget()) {
+    if (pendingThinkingDeltas.get(key) === pending) pendingThinkingDeltas.delete(key)
+    return
+  }
   preserveActivity()
+  if (!ownsTarget()) return
   persistActiveAssistantDraft(keeperName, assistantEntryId)
+
 }
 
 function flushAllPendingThinkingDeltas(): void {

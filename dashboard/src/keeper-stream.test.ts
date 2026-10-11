@@ -1,3 +1,4 @@
+import { effect, untracked } from '@preact/signals'
 import { setStoredToken, clearStoredToken } from './api/core'
 import { captureToolObservations } from './keeper-tool-observations'
 
@@ -1042,6 +1043,32 @@ describe('Keeper operation stream projection', () => {
       _flushPendingKeeperStreamDeltasForTests()
       expect(keeperThreads.value.sangsu).toEqual([before])
     } finally { if (replacement === 'credential') clearStoredToken() }
+  })
+
+  it('does not restore old activity onto a response replaced by a thinking observer', () => {
+    assistantEntry('original-operation')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'observed reasoning', response: { content_generation: 1, stream_scope: 0 } } },
+      { kind: 'operation', operationId: 'original-operation', observationOnly: true })
+    let armed = true
+    const release = effect(() => {
+      const current = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+      if (armed && current?.traceSteps?.some(step => step.kind === 'think')) {
+        armed = false
+        untracked(() => { keeperThreads.value = { sangsu: [{ ...current,
+          deliveryProvenance: operationDeliveryProvenance('replacement-operation', 'terminal_result'),
+          delivery: 'queued', streamState: null, text: 'replacement', rawText: 'replacement', traceSteps: [],
+        }] } })
+      }
+    })
+    try {
+      _flushPendingKeeperStreamDeltasForTests()
+      const after = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+      expect(after.deliveryProvenance).toEqual(operationDeliveryProvenance('replacement-operation', 'terminal_result'))
+      expect(after.delivery).toBe('queued')
+      expect(after.streamState).toBeNull()
+      expect(after.rawText).toBe('replacement')
+    } finally { release() }
   })
 
   it('projects queued acceptance without a receipt or queue revision', () => {

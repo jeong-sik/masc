@@ -81,16 +81,24 @@ let test_the_cap_refuses_rather_than_forgetting () =
         (Queue.length full)
 ;;
 
-(* A keeper that is no longer registered cannot receive what was written to it.
-   Holding those lines would make the count report work that never moves. *)
-let test_lines_for_a_departed_keeper_are_forgotten () =
-  let q, _ = push_exn Queue.empty ~keeper_name:"leaving" "gone" in
-  let q, _ = push_exn q ~keeper_name:"staying" "kept" in
-  let q, _ = push_exn q ~keeper_name:"leaving" "gone too" in
-  let q = Queue.drop_for_keeper q ~keeper_name:"leaving" in
-  check (list string) "only the other keeper's line remains" [ "kept" ]
-    (messages q);
-  check int "and the count follows" 1 (Queue.length q)
+(* Temporary inability to dispatch must not consume the operator's request.
+   Other Keepers may advance while the original identity and payload wait. *)
+let test_unavailable_keeper_input_survives_reconnection () =
+  let q, _ = push_exn Queue.empty ~keeper_name:"leaving" "pending original" in
+  let original = List.hd (Queue.waiting q) in
+  let q, _ = push_exn q ~keeper_name:"staying" "ready other" in
+  let retained = match Queue.take_first_sendable q ~sendable:(fun name -> name = "staying") with
+    | None -> fail "ready other request did not dispatch"
+    | Some (sent, retained) ->
+        check string "other Keeper can advance" "ready other" sent.request.message;
+        retained in
+  check bool "unavailable Keeper alone has no dispatch" true
+    (Option.is_none (Queue.take_first_sendable retained ~sendable:(fun _ -> false)));
+  match Queue.take_first_sendable retained ~sendable:(fun _ -> true) with
+  | None -> fail "reconnected Keeper lost the queued request"
+  | Some (sent, rest) ->
+      check bool "complete original request retained" true (sent == original);
+      check bool "successful dispatch consumes only that request" true (Queue.is_empty rest)
 ;;
 
 (* Lines wait because their own keeper had a turn running, and keepers run
@@ -302,8 +310,8 @@ let () =
             test_a_line_keeps_the_keeper_it_was_written_to
         ; test_case "the cap refuses rather than forgetting" `Quick
             test_the_cap_refuses_rather_than_forgetting
-        ; test_case "lines for a departed keeper are forgotten" `Quick
-            test_lines_for_a_departed_keeper_are_forgotten
+        ; test_case "unavailable Keeper input survives reconnection" `Quick
+            test_unavailable_keeper_input_survives_reconnection
         ; test_case "a busy keeper does not stall the lines behind it" `Quick
             test_a_busy_keeper_does_not_stall_the_lines_behind_it
         ; test_case "take removes the named line and keeps the order" `Quick

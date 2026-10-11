@@ -221,15 +221,24 @@ export async function cancelActiveKeeperThreadMessage(name: string): Promise<boo
   return locallyAborted
 }
 
-export async function interruptKeeperTurn(keeperName: string): Promise<boolean> {
+export type KeeperTurnInterruptionOutcome =
+  | { readonly kind: 'signalled'; readonly authRevision: number }
+  | { readonly kind: 'not_signalled'; readonly authRevision: number }
+  | { readonly kind: 'authentication_superseded'; readonly authRevision: number }
+
+export async function interruptKeeperTurn(keeperName: string): Promise<KeeperTurnInterruptionOutcome> {
   const name = keeperName.trim()
-  if (!name) return false
+  const authRevision = currentStoredTokenRevision()
+  if (!name) return { kind: 'not_signalled', authRevision }
   await cancelActiveKeeperThreadMessage(name)
+  if (authRevision !== currentStoredTokenRevision()) return { kind: 'authentication_superseded', authRevision }
   try {
     const result = await apiInterruptKeeperTurn(name)
+    if (authRevision !== currentStoredTokenRevision()) return { kind: 'authentication_superseded', authRevision }
     setRecordValue(keeperActionErrors, name, null)
-    return result.signalled
+    return { kind: result.signalled ? 'signalled' : 'not_signalled', authRevision }
   } catch (err) {
+    if (authRevision !== currentStoredTokenRevision()) return { kind: 'authentication_superseded', authRevision }
     const message = err instanceof Error ? err.message : String(err)
     console.warn('[keeper] interrupt turn failed', { keeperName: name, message })
     setRecordValue(keeperActionErrors, name, message)

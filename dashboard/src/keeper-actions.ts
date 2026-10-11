@@ -491,27 +491,38 @@ export async function hydrateKeeperToolOutputs(keeperName: string): Promise<void
 }
 
 type ChatRefreshState =
-  | { kind: 'scheduled'; token: object }
-  | { kind: 'running'; token: object; invalidated: boolean }
+  | { kind: 'scheduled'; token: object; authRevision: number }
+  | { kind: 'running'; token: object; authRevision: number; invalidated: boolean }
 const chatRefreshStates = new Map<string, ChatRefreshState>()
 
 function scheduleChatRefresh(keeperName: string): void {
-  const current = chatRefreshStates.get(keeperName)
+  const authRevision = currentStoredTokenRevision()
+  let current = chatRefreshStates.get(keeperName)
+  if (current && current.authRevision !== authRevision) {
+    chatRefreshStates.delete(keeperName)
+    current = undefined
+  }
   if (current?.kind === 'scheduled') return
   if (current?.kind === 'running') {
     chatRefreshStates.set(keeperName, { ...current, invalidated: true })
     return
   }
   const token = {}
-  chatRefreshStates.set(keeperName, { kind: 'scheduled', token })
+  chatRefreshStates.set(keeperName, { kind: 'scheduled', token, authRevision })
   queueMicrotask(() => {
     if (chatRefreshStates.get(keeperName)?.token !== token) return
-    chatRefreshStates.set(keeperName, { kind: 'running', token, invalidated: false })
+    if (authRevision !== currentStoredTokenRevision()) {
+      chatRefreshStates.delete(keeperName)
+      if (!chatHistoryHydrationRequests.has(keeperName)) setRecordValue(keeperHydrating, keeperName, false)
+      return
+    }
+    chatRefreshStates.set(keeperName, { kind: 'running', token, authRevision, invalidated: false })
     void hydrateKeeperChatHistory(keeperName, { force: true }).finally(() => {
       const settled = chatRefreshStates.get(keeperName)
       if (settled?.kind !== 'running' || settled.token !== token) return
       chatRefreshStates.delete(keeperName)
-      if (settled.invalidated) scheduleChatRefresh(keeperName)
+      if (settled.invalidated && authRevision === currentStoredTokenRevision()) scheduleChatRefresh(keeperName)
+      else if (!chatHistoryHydrationRequests.has(keeperName)) setRecordValue(keeperHydrating, keeperName, false)
     })
   })
 }

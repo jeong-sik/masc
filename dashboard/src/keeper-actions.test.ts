@@ -204,6 +204,20 @@ describe('noteKeeperChatAppended', () => {
     expect(keeperChatHistoryErrors.value.echo).toBeNull()
   })
 
+  it('does not run a previous-auth notification after authentication changes before refresh admission', async () => {
+    setStoredToken('fixture-before')
+    fetchKeeperChatHistory.mockResolvedValue([{ id: 'initial', role: 'user', content: 'input', ts: 1 }])
+    await hydrateKeeperChatHistory('echo')
+    noteKeeperChatAppended('echo')
+    setStoredToken('fixture-after')
+    await Promise.resolve()
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
+    noteKeeperChatAppended('echo')
+    await Promise.resolve()
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+    await vi.runAllTimersAsync()
+  })
+
   it('starts broadcast refresh without waiting for a wall-clock quiet period', async () => {
     fetchKeeperChatHistory.mockResolvedValue([{ id: 'initial', role: 'user', content: 'input', ts: 1 }])
     await hydrateKeeperChatHistory('echo')
@@ -481,6 +495,61 @@ describe('hydrateKeeperChatHistory', () => {
       latest.resolve(historyRow('latest'))
       await vi.runAllTimersAsync()
       expect(keeperThreads.value.echo?.map(row => row.id)).toEqual(['latest'])
+      expect(keeperHydrating.value.echo).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([false, true])('settles a cancelled queued replacement without settling a new explicit read (newer=%s)', async newer => {
+    vi.useFakeTimers()
+    try {
+      setStoredToken('fixture-before')
+      fetchKeeperChatHistory.mockResolvedValueOnce(historyRow('initial'))
+      await hydrateKeeperChatHistory('echo')
+      const old = deferredHistory()
+      const latest = deferredHistory()
+      fetchKeeperChatHistory.mockReturnValueOnce(old.promise).mockReturnValueOnce(latest.promise)
+      const pending = hydrateKeeperChatHistory('echo', { force: true })
+      noteKeeperChatAppended('echo')
+      setStoredToken('fixture-after')
+      const replacement = newer ? hydrateKeeperChatHistory('echo', { force: true }) : null
+      await Promise.resolve()
+      old.resolve(historyRow('previous-auth'))
+      await pending
+      expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(newer ? 3 : 2)
+      expect(keeperThreads.value.echo?.map(row => row.id)).toEqual(['initial'])
+      expect(keeperHydrating.value.echo).toBe(newer)
+      if (replacement) {
+        latest.resolve(historyRow('current-auth'))
+        await replacement
+        expect(keeperThreads.value.echo?.map(row => row.id)).toEqual(['current-auth'])
+        expect(keeperHydrating.value.echo).toBe(false)
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([false, true])('keeps running refresh ownership across auth replacement (new notification=%s)', async newer => {
+    vi.useFakeTimers()
+    try {
+      setStoredToken('fixture-before')
+      fetchKeeperChatHistory.mockResolvedValueOnce(historyRow('initial'))
+      await hydrateKeeperChatHistory('echo')
+      const old = deferredHistory()
+      fetchKeeperChatHistory.mockReturnValueOnce(old.promise).mockResolvedValueOnce(historyRow('current-auth'))
+      noteKeeperChatAppended('echo')
+      await Promise.resolve()
+      noteKeeperChatAppended('echo')
+      setStoredToken('fixture-after')
+      if (newer) noteKeeperChatAppended('echo')
+      await Promise.resolve()
+      old.resolve(historyRow('previous-auth'))
+      await vi.runAllTimersAsync()
+      expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(newer ? 3 : 2)
+      expect(keeperThreads.value.echo?.map(row => row.id)).toEqual([newer ? 'current-auth' : 'initial'])
+      expect(keeperChatHistoryErrors.value.echo ?? null).toBeNull()
       expect(keeperHydrating.value.echo).toBe(false)
     } finally {
       vi.useRealTimers()

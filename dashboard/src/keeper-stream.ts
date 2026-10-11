@@ -550,6 +550,12 @@ type KeeperStreamEventSource =
   | { kind: 'operation'; operationId: string; sequence?: number; observationOnly?: true }
   | { kind: 'autonomous'; turnRef: string; sequence: number; observationOnly?: true }
 
+function isResponseMetadataObservation(event: KeeperChatStreamEvent): boolean {
+  return event.type === 'CUSTOM' && (event.name === 'KEEPER_STREAM_MESSAGE_START'
+    || event.name === 'KEEPER_STREAM_MESSAGE_DELTA' || event.name === 'KEEPER_STREAM_MESSAGE_STOP'
+    || event.name === 'KEEPER_MODEL_CONTENT_ACTIVITY')
+}
+
 function isToolObservation(event: KeeperChatStreamEvent): boolean {
   switch (event.type) {
     case 'TOOL_CALL_START':
@@ -608,7 +614,8 @@ export function applyKeeperOperationTurnEvent(
     && matched.delivery !== 'queued'
     && matched.delivery !== 'sending'
     && matched.delivery !== 'streaming'
-  const observationOnly = outsideLiveDelivery && isToolObservation(operation.event)
+  const observationOnly = outsideLiveDelivery
+    && (isToolObservation(operation.event) || isResponseMetadataObservation(operation.event))
   if (outsideLiveDelivery && matched.delivery !== 'interrupted' && !observationOnly) return null
   if (observationOnly && matched.role !== 'assistant') return null
   const entryId = matched?.id ?? `operation-turn-${operationId}`
@@ -648,6 +655,9 @@ export function applyKeeperOperationTurnEvent(
     operation.event,
     { kind: 'operation', operationId, sequence: operation.sequence, ...(observationOnly ? { observationOnly: true as const } : {}) },
   )
+  if (observationOnly && matched) updateThreadEntry(keeperName, entryId, entry => ({ ...entry,
+    delivery: matched.delivery, streamState: matched.streamState, replyBlockSource: matched.replyBlockSource,
+  }))
   if (error && observationOnly) {
     recordStreamProtocolError(keeperName, entryId, error)
   } else if (error) {
@@ -670,10 +680,9 @@ export function applyKeeperAutonomousTurnEvent(keeperName: string, turnRef: stri
   const existing = entries.find(entry => entry.source === 'autonomous_turn' && entry.turnRef === turnRef)
   const entryId = existing?.id ?? `autonomous-${turnRef}`
   const settled = existing !== undefined && existing.delivery !== 'sending' && existing.delivery !== 'streaming'
-  const observationOnly = settled && (isToolObservation(event) || event.type === 'TEXT_MESSAGE_CONTENT' || event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR' || event.type === 'CUSTOM'
-    && (event.name === 'KEEPER_THINKING_DELTA' || event.name === 'KEEPER_STREAM_PROTOCOL_ERROR'
-      || event.name === 'KEEPER_STREAM_MESSAGE_START' || event.name === 'KEEPER_STREAM_MESSAGE_DELTA'
-      || event.name === 'KEEPER_STREAM_MESSAGE_STOP' || event.name === 'KEEPER_MODEL_CONTENT_ACTIVITY'))
+  const observationOnly = settled && (isToolObservation(event) || isResponseMetadataObservation(event)
+    || event.type === 'TEXT_MESSAGE_CONTENT' || event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR' || event.type === 'CUSTOM'
+    && (event.name === 'KEEPER_THINKING_DELTA' || event.name === 'KEEPER_STREAM_PROTOCOL_ERROR'))
   if (settled && !observationOnly) return null
   if (!existing) appendThreadEntry(keeperName, {
     id: entryId, role: 'assistant', source: 'autonomous_turn', label: keeperName,

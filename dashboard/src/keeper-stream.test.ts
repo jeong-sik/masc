@@ -1,4 +1,5 @@
 import { captureToolObservations } from './keeper-tool-observations'
+
 import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -2264,5 +2265,31 @@ describe('applyKeeperStreamEvent tool calls', () => {
     const thread = keeperThreads.value.sangsu ?? []
     expect(thread.filter(entry => entry.toolCallId === 'tc-end-replay')).toHaveLength(1)
     expect(thread.find(entry => entry.id === 'reply-1')?.error).toBeUndefined()
+  })
+})
+
+it('recovers late operation response metadata without reopening canonical history', () => {
+  keeperThreads.value = {}
+  _resetLiveSendRequestOwnersForTests()
+  _resetKeeperStreamBuffersForTests()
+  const operationId = 'historical-response-metadata'
+  appendThreadEntry('sangsu', {
+    id: 'canonical-metadata', role: 'assistant', source: 'direct_assistant', label: 'sangsu',
+    text: 'canonical answer', delivery: 'history', streamState: null,
+    blocks: [{ t: 'p', html: 'canonical answer' }], replyBlockSource: 'canonical_body',
+    deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'), details: null,
+  })
+  applyKeeperOperationTurnEvent('sangsu', { operationId, sequence: 0,
+    event: { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: {
+      content_generation: 1, stream_scope: 0, model: 'observed-model', provider_message_id: 'provider-id',
+      usage: { input_tokens: 3, output_tokens: 6, cost_usd: 0 } } } })
+  applyKeeperOperationTurnEvent('sangsu', { operationId, sequence: 1,
+    event: { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_DELTA', value: {
+      content_generation: 1, stream_scope: 0, usage: { input_tokens: 3, output_tokens: 7 } } } })
+  expect(keeperThreads.value.sangsu?.find(entry => entry.id === 'canonical-metadata')).toMatchObject({
+    text: 'canonical answer', delivery: 'history', streamState: null, replyBlockSource: 'canonical_body',
+    blocks: [{ t: 'p', html: 'canonical answer' }],
+    details: { modelUsed: 'observed-model', providerMessageId: 'provider-id',
+      usage: { inputTokens: 3, outputTokens: 7, costUsd: 0 } },
   })
 })

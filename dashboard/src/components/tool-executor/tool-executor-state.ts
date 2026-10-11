@@ -11,7 +11,7 @@ import { currentStoredTokenRevision, subscribeStoredTokenChanges } from '../../a
 const allToolSchemas = signal<McpToolSchema[]>([])
 export const schemasLoading = signal(false)
 export const schemasError = signal<string | null>(null)
-const schemasLoadedAt = signal<number>(0)
+let schemaCacheReceipt: { readonly authRevision: number; readonly at: number } | null = null
 
 export const searchQuery = signal('')
 export const tierFilter = signal<string>('all')
@@ -50,16 +50,23 @@ let selectionOwner = Object.freeze({})
 interface ExecutionOwner { readonly authRevision: number; readonly selection: object }
 let executionOwner: ExecutionOwner | null = null
 
-interface SchemaReadOwner { readonly authRevision: number }
+type SchemaReadOwner =
+  | { readonly kind: 'preparing'; readonly id: symbol; readonly authRevision: number }
+  | { readonly kind: 'admitted'; readonly id: symbol; readonly authRevision: number }
 let schemaReadOwner: SchemaReadOwner | null = null
 subscribeStoredTokenChanges(() => {
-  schemaReadOwner = null
+  const revision = currentStoredTokenRevision()
+  if (schemaReadOwner?.kind === 'admitted' && schemaReadOwner.authRevision !== revision) schemaReadOwner = null
   executionOwner = null
   batch(() => {
-    allToolSchemas.value = []
-    schemasLoadedAt.value = 0
-    schemasLoading.value = false
-    schemasError.value = null
+    if (schemaCacheReceipt?.authRevision !== revision) {
+      schemaCacheReceipt = null
+      allToolSchemas.value = []
+    }
+    if (schemaReadOwner?.authRevision !== revision) {
+      schemasLoading.value = false
+      schemasError.value = null
+    }
     executing.value = false
     clearSelection()
   })
@@ -68,24 +75,29 @@ subscribeStoredTokenChanges(() => {
 const CACHE_TTL_MS = 5 * 60 * 1000
 
 export async function loadToolSchemas(force = false): Promise<void> {
-  if (!force && allToolSchemas.value.length > 0 && Date.now() - schemasLoadedAt.value < CACHE_TTL_MS) return
-  if (schemaReadOwner) return
-  const owner = Object.freeze({ authRevision: currentStoredTokenRevision() })
-  schemaReadOwner = owner
-  const owns = () => schemaReadOwner === owner && currentStoredTokenRevision() === owner.authRevision
+  const authRevision = currentStoredTokenRevision()
+  if (!force && schemaCacheReceipt?.authRevision === authRevision && allToolSchemas.value.length > 0 && Date.now() - schemaCacheReceipt.at < CACHE_TTL_MS) return
+  if (schemaReadOwner?.authRevision === authRevision) return
+  const id = Symbol('schema-read')
+  schemaReadOwner = Object.freeze({ kind: 'preparing', id, authRevision })
+  const owns = () => schemaReadOwner?.id === id && currentStoredTokenRevision() === schemaReadOwner.authRevision
   try {
     schemasLoading.value = true
     if (!owns()) return
     schemasError.value = null
     if (!owns()) return
-    const raw = await listAllMcpTools()
+    const raw = await listAllMcpTools({ onAdmission: admission => {
+      if (schemaReadOwner?.id !== id) return
+      schemaReadOwner = Object.freeze({ kind: 'admitted', id, authRevision: admission.authRevision })
+      if (owns()) schemasLoading.value = true
+    } })
     if (!owns()) return
     allToolSchemas.value = raw.map(t => ({
       ...t,
       inputSchema: t.inputSchema as unknown as JsonSchema,
     })) as McpToolSchema[]
     if (!owns()) return
-    schemasLoadedAt.value = Date.now()
+    schemaCacheReceipt = Object.freeze({ authRevision: currentStoredTokenRevision(), at: Date.now() })
   } catch (err) {
     if (!owns()) return
     schemasError.value = errorToString(err)
@@ -95,7 +107,7 @@ export async function loadToolSchemas(force = false): Promise<void> {
     try {
       if (owns()) schemasLoading.value = false
     } finally {
-      if (schemaReadOwner === owner) schemaReadOwner = null
+      if (schemaReadOwner?.id === id) schemaReadOwner = null
     }
   }
 }

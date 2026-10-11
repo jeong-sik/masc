@@ -506,8 +506,10 @@ async function listMcpTools(binding: McpRequestBinding, cursor?: string): Promis
    non-progressing server run for that many round trips before saying anything.
    Seen cursors decide it directly: a cursor that repeats means the server has
    not advanced, and that is the error. */
-export async function listAllMcpTools(): Promise<McpToolsListResult['tools']> {
+export async function listAllMcpTools(options: { onAdmission?: (admission: { readonly authRevision: number }) => void } = {}): Promise<McpToolsListResult['tools']> {
   const binding = await ensureBinding()
+  options.onAdmission?.(Object.freeze({ authRevision: binding.authRevision }))
+  assertBinding(binding)
   const all: McpToolsListResult['tools'] = []
   const seenCursors = new Set<string>()
   let cursor: string | undefined

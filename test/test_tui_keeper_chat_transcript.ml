@@ -2673,13 +2673,39 @@ let test_late_tool_receipt_preserves_current_activity () =
        call.execution_id = Some "current-execution") (Transcript.tool_calls t))
 ;;
 
+let test_tool_receipt_retains_response_progress_owner () =
+  List.iter (fun (next_generation, next_scope) ->
+    let t = fresh () in
+    feed t [Live.Run_started;
+      Live.Stream_model_started {generation=Some 1;stream_scope=Some 0;
+        message_id=Some "first";model="model";usage=None};
+      tool_started ~scope:0 ~block_index:1 "old-response-call" "read_file";
+      tool_ended ~scope:0 ~block_index:1 "old-response-call";
+      Live.Stream_model_started {generation=Some next_generation;stream_scope=Some next_scope;
+        message_id=Some "second";model="model";usage=None}];
+    let activity = Transcript.model_activity t in
+    feed t [tool_result ~scope:0 ~block_index:1 "old-response-call" "old-response-execution"];
+    check bool "prior response receipt cannot own current activity" true
+      (activity = Transcript.model_activity t);
+    check bool "prior response receipt still enriches its exact call" true
+      (List.exists (fun (call : Transcript.tool_activity) ->
+        call.execution_id = Some "old-response-execution") (Transcript.tool_calls t));
+    feed t [tool_started ~scope:next_scope ~block_index:2 "current-response-call" "write_file";
+      tool_ended ~scope:next_scope ~block_index:2 "current-response-call";
+      tool_result ~scope:next_scope ~block_index:2 "current-response-call" "current-response-execution"];
+    check bool "current response receipt retains activity authority" true
+      (Transcript.model_activity t = Some (Transcript.Activity_tool_returned "write_file"))
+  ) [2,0;2,1]
+;;
+
 let () =
   run "tui_keeper_chat_transcript"
     [ ( "response boundaries", [test_case "Skill evidence retains runtime identity" `Quick test_skill_evidence_retains_invocation_runtime_identity;
       test_case "scoped details retire prior model activity" `Quick test_scoped_details_retire_prior_model_activity;
       test_case "scoped details retire prior response usage" `Quick test_scoped_details_retire_prior_response_usage;
       test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "response end retains turn and tool lifecycle" `Quick test_response_stop_preserves_pending_work; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
-    ; ( "attempt authority", [test_case "late receipt preserves current activity" `Quick test_late_tool_receipt_preserves_current_activity;
+    ; ( "attempt authority", [test_case "receipt retains response activity owner" `Quick test_tool_receipt_retains_response_progress_owner;
+        test_case "late receipt preserves current activity" `Quick test_late_tool_receipt_preserves_current_activity;
         test_case "current attempt metadata retains activity" `Quick test_current_attempt_metadata_keeps_observed_activity;
         test_case "late runtime naming retains streaming" `Quick test_late_runtime_name_does_not_supersede_observed_output;
         test_case "continuation restarts attempt identity" `Quick test_continuation_restarts_attempt_identity;

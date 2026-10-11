@@ -1090,6 +1090,8 @@ export interface KeeperConversationEntry {
    * pending rows so editing never reconstructs model input from display text. */
   userBlocks?: KeeperUserInputBlock[]
   blocks?: ChatBlock[]
+  /** Exact range created from reply text by this client, never inferred from block tags. */
+  replyTextProjection?: Readonly<{ offset: number; length: number }>
   traceSteps?: ChatTraceStep[]
   details?: KeeperConversationDetails | null
   error?: string | null

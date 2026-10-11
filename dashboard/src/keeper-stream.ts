@@ -11,7 +11,7 @@ import {
   normalizeKeeperConversationDetails,
   normalizeKeeperExternalEffectTarget,
 } from './keeper-message'
-import { parseTextToChatBlocks } from './lib/chat-blocks'
+import { projectFinalReplyBlocks, producerReplyBlocks } from './lib/keeper-reply-block-projection'
 import type { KeeperChatStreamEvent } from './api'
 import type { KeeperConversationEntry, KeeperConversationDetails } from './types'
 import {
@@ -102,7 +102,7 @@ function flushAutonomousSaying(keeperName: string, entryId: string, observationO
         kind: 'progress' as const, text: pending.text,
         ...(pending.timestamp === undefined ? {} : { ts: new Date(pending.timestamp * 1000).toISOString() }),
       }] } : {}),
-      ...(observationOnly ? {} : { text: '', rawText: '', blocks: [] }),
+      ...(observationOnly ? {} : { text: '', rawText: '', blocks: [], replyTextProjection: undefined }),
     }
   })
 }
@@ -208,7 +208,8 @@ function resetUnfinishedRuntimeAttempt(
     ...entry,
     text: '',
     rawText: '',
-    blocks: (entry.blocks ?? []).filter(block => (
+    replyTextProjection: undefined,
+    blocks: producerReplyBlocks(entry).filter(block => (
       block.t !== 'p' && block.t !== 'thinking'
     )),
     traceSteps: (entry.traceSteps ?? []).filter(step => step.kind === 'tool'),
@@ -1411,8 +1412,9 @@ export function applyKeeperStreamEvent(
           : ''
         updateThreadEntry(keeperName, assistantEntryId, entry => ({
           ...entry,
+          replyTextProjection: undefined,
           blocks: [
-            ...(entry.blocks ?? []).filter(block => block.t !== 'status'),
+            ...producerReplyBlocks(entry).filter(block => block.t !== 'status'),
             { t: 'status', kind: 'continuation_checkpoint' },
           ],
           details: {
@@ -1489,15 +1491,14 @@ export function applyKeeperStreamEvent(
               }
             }
             const text = rawText
-            const retainedBlocks = (entry.blocks ?? []).filter(block => block.t !== 'status' && block.t !== 'p')
-            const blocks = [...retainedBlocks, ...parseTextToChatBlocks(text)]
+            const projection = projectFinalReplyBlocks(entry, text)
             return {
               ...entry,
               details: mergedDetails,
               turnRef: mergedDetails.turnRef ?? entry.turnRef,
               rawText,
               text,
-              blocks,
+              ...projection,
             }
           })
         }

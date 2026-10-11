@@ -974,6 +974,7 @@ function normalizeHistoryEntry(
     approvalLifecycle,
     attachments,
     blocks,
+    ...(!serverBlocks && blocks ? { replyTextProjection: Object.freeze({ offset: 0, length: blocks.length }) } : {}),
   }
 }
 
@@ -1156,6 +1157,7 @@ export function promoteAssistantTextToProgress(
       text: '',
       rawText: '',
       blocks: [],
+      replyTextProjection: undefined,
       traceSteps: [...(entry.traceSteps ?? []), progress],
     }
   })
@@ -1434,6 +1436,7 @@ export function finalizeAssistantEntry(
     const next: KeeperConversationEntry = { ...entry, ...patch }
     if (next.role === 'assistant' && !next.blocks?.length && next.text) {
       next.blocks = parseTextToChatBlocks(next.text)
+      next.replyTextProjection = Object.freeze({ offset: 0, length: next.blocks.length })
     }
     return next
   })

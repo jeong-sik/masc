@@ -406,6 +406,10 @@ export async function hydrateKeeperChatHistory(
   try {
     await fetchAndMergeKeeperChatHistory(keeperName, request)
     if (chatHistoryHydrationRequests.get(keeperName) !== request) return
+    void import('./keeper-autonomous-stream')
+      .then(mod => mod.discoverKeeperAutonomousTurn(keeperName))
+      .catch(error => console.debug('[keeper-autonomous-stream] current turn discovery unavailable',
+        error instanceof Error ? error.name : 'read failure'))
     // Tool outputs are stored on a separate durable endpoint. Hydrate even
     // when chat history is empty so a keeper panel can still join recently
     // fetched tool rows from the rail/inspector.

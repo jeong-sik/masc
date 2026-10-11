@@ -12,6 +12,7 @@ type get_route =
       { keeper_name : string
       ; raw_operation_id : string
       }
+  | Current_turn of { keeper_name : string }
   | Chat_events of { keeper_name : string }
   | Turn_events of { keeper_name : string; raw_turn_ref : string }
 
@@ -21,7 +22,7 @@ type get_route =
    gate (server_dashboard_http_keeper_api_types.ml, keeper_get_permission). *)
 let get_permission = function
   | Operation_list _ | Operation_exact _ -> Masc_domain.CanReadState
-  | Chat_events _ | Turn_events _ -> Masc_domain.CanAdmin
+  | Current_turn _ | Chat_events _ | Turn_events _ -> Masc_domain.CanAdmin
 ;;
 
 type mutation =
@@ -57,6 +58,8 @@ let get_route path =
     Some (Operation_exact { keeper_name; raw_operation_id })
   | [ "api"; "v1"; "keepers"; keeper_name; "chat"; "events" ] ->
     Some (Chat_events { keeper_name })
+  | [ "api"; "v1"; "keepers"; keeper_name; "turns"; "current" ] ->
+    Some (Current_turn { keeper_name })
   | [ "api"; "v1"; "keepers"; keeper_name; "turns"; raw_turn_ref; "events" ] ->
     Some (Turn_events { keeper_name; raw_turn_ref })
   | _ -> None
@@ -369,7 +372,32 @@ let events_page_of_rows ~path ~redact_text query rows =
   |> Result.map_error page_failure_error
 ;;
 
+let current_turn_discovery_page current =
+  let value = match current with
+    | None -> `Null
+    | Some (turn_ref, sequence) -> `Assoc ["turn_ref", `String (Ids.Turn_ref.to_string turn_ref); "seq", `Int sequence] in
+  `Assoc ["schema", `String "masc.keeper_current_turn.v1"; "current", value]
+;;
+
 let handle_get state request reqd = function
+  | Current_turn { keeper_name } ->
+    let base_path = base_path state in
+    (match Keeper_autonomous_stream.current ~base_path ~keeper_name with
+     | None -> Server_auth.respond_json_value_with_cors request reqd (current_turn_discovery_page None)
+     | Some turn_ref ->
+       let path = Keeper_chat_event_log.turn_journal_path ~base_dir:base_path ~keeper_name ~turn_ref in
+       let journal = Keeper_chat_event_log.read_journal_rows_path path
+         |> Result.bind (fun rows -> Domain_pool_ref.submit_cpu_or_inline (fun () ->
+           Keeper_chat_event_log.decode_rows ~path rows)) in
+       (match journal with
+        | Ok entries ->
+          (match List.rev entries with
+           | (last : Keeper_chat_event_log.journaled_event) :: _ ->
+             Server_auth.respond_json_value_with_cors request reqd (current_turn_discovery_page (Some (turn_ref, last.seq)))
+           | [] -> respond_error request reqd (unavailable "journal_empty" "Active turn has no durable journal cursor"))
+        | Error Keeper_chat_event_log.Journal_missing -> respond_error request reqd (unavailable "journal_missing" "Active turn journal is unavailable")
+        | Error (Journal_unreadable detail) -> respond_error request reqd (unavailable "journal_unreadable" detail)
+        | Error (Journal_corrupt detail) -> respond_error request reqd (unavailable "journal_corrupt" detail)))
   | Turn_events { keeper_name; raw_turn_ref } ->
     let query =
       let ( let* ) = Result.bind in

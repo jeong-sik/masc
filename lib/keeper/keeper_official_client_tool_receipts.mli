@@ -11,7 +11,9 @@ type t
 
 type delivery =
   | Immediate
-      (** Every block reaches the stream as soon as the producer opens it. *)
+      (** Every block reaches the stream as soon as the producer opens it.
+          Receipt callbacks are serialized in commit order: a reentrant commit
+          queues behind the callback currently being delivered. *)
   | Held_until_released
       (** The producer holds blocks opened before its message starts.
           Receipts committed before {!release} wait for it, so none names a
@@ -37,6 +39,8 @@ val release : t -> unit
     do nothing. Once drained, later receipts are delivered at commit.
     If notification raises, the attempted receipt is not retried (delivery
     is ambiguous); unattempted queued receipts remain held for a later release.
+    For already-immediate delivery, unattempted receipts instead remain pending
+    and are drained before the next commit's receipt, or by explicit release.
     A second completed release does nothing. A turn that ends before its message starts
     never streams its held blocks, and their receipts are never delivered. *)
 

@@ -1,0 +1,9 @@
+observed=a,b,c
+PASS: reentrant release preserves commit order
+recovered=failure-a,failure-b,failure-c,immediate-d
+PASS: unattempted receipts retained, nested release is inert, later commits immediate
+immediate=immediate-a,immediate-b
+PASS: immediate notifications serialized by receipt owner
+immediate_failure_next_commit=failed-a,queued-b,next-c
+immediate_failure_release=failed-a,queued-b,next-c
+PASS: immediate failure preserves FIFO and automatic next-commit or explicit-release recovery

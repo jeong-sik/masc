@@ -9,6 +9,12 @@
 
 (** {1 Event Types} *)
 
+type response_identity = { response_generation : int; response_scope : int }
+
+type text_response =
+  | Unobserved_scope of int option
+  | Observed_response of response_identity
+
 type event_type =
   | Run_started
   | Run_finished
@@ -45,8 +51,8 @@ type event = private {
       (** Text chunk or tool args fragment. *)
   tool_call_id : string option;
   tool_call_name : string option;
-  text_stream_scope : int option;
-      (** Response identity for text chunks, independently of tool occurrence scope. *)
+  text_response : text_response;
+      (** Complete observed response or explicitly unobserved scope; independent of tool occurrence scope. *)
   tool_stream_scope : int option;
   provider_message_id : string option;
   tool_call_block_index : int option;
@@ -69,7 +75,7 @@ val make_event :
   ?delta:string option ->
   ?tool_call_id:string option ->
   ?tool_call_name:string option ->
-  ?text_stream_scope:int option ->
+  ?text_response:text_response ->
   ?tool_stream_scope:int option ->
   ?provider_message_id:string option ->
   ?tool_call_block_index:int option ->

@@ -191,8 +191,10 @@ let keeper_chat_event_to_json event =
     type_tag
       "text_message_start"
       [ "message_id", `String message_id; "role", role_to_json role ]
-  | Text_delta {text; stream_scope} -> type_tag "text_delta"
-      (["delta", `String text] @ json_opt "stream_scope" (Option.map (fun scope -> `Int scope) stream_scope))
+  | Text_delta {text; response} -> type_tag "text_delta"
+      (["delta", `String text] @ (match response with
+       | Unobserved_scope scope -> json_opt "stream_scope" (Option.map (fun scope -> `Int scope) scope)
+       | Observed_response owner -> ["response", response_identity_to_json owner]))
   | Text_message_end -> type_tag "text_message_end" []
   | External_effect_completed { target } ->
     type_tag
@@ -385,14 +387,8 @@ let keeper_chat_event_of_json json =
         (Text_message_start
            { message_id = json |> member "message_id" |> to_string; role })
     | "text_delta" ->
-        let* stream_scope = match json with
-          | `Assoc fields ->
-              (match List.filter (fun (key, _) -> key = "stream_scope") fields with
-               | [] -> Ok None
-               | [_, `Int scope] when scope >= 0 -> Ok (Some scope)
-               | _ -> Error "text_delta.stream_scope must be one nonnegative integer")
-          | _ -> Error "text_delta must be an object" in
-        Ok (Text_delta {text=json |> member "delta" |> to_string; stream_scope})
+        let* response = text_response_of_fields ~owner_field:"response" ~scope_field:"stream_scope" (json |> to_assoc) in
+        Ok (Text_delta {text=json |> member "delta" |> to_string; response})
     | "text_message_end" -> Ok Text_message_end
     | "external_effect_completed" ->
       let* target =

@@ -2262,8 +2262,8 @@ let test_keeper_stream_bridge_text_delta_passthrough_incremental () =
     (stream_text_deltas events);
   check (list (option int)) "bridge stamps its allocated scope on every text chunk"
     [Some 0; Some 0; Some 0; Some 0]
-    (List.filter_map (function Keeper_chat_events.Text_delta {stream_scope; _} ->
-       Some stream_scope | _ -> None) events)
+    (List.filter_map (function Keeper_chat_events.Text_delta {response; _} ->
+       Some (match response with Observed_response owner -> Some owner.response_scope | Unobserved_scope scope -> scope) | _ -> None) events)
 
 let test_keeper_stream_pipeline_reconciles_cumulative_snapshot_once () =
   let open Agent_core.Types in

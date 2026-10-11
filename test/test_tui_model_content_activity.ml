@@ -31,9 +31,9 @@ let test_overlap_uses_event_order () =
   (* Wall clock moves backwards. The last event, not the biggest clock, owns
      the label; stopping it returns to the newest remaining active event. *)
   List.iter (fun (now,delta) -> T.apply ~now t delta)
-    [90.,L.Text {text="A"; stream_scope=None}; 90.,observed (); 80.,L.Thinking {text="R";response=None};
+    [90.,L.Text {text="A"; response=Unobserved_scope (None)}; 90.,observed (); 80.,L.Thinking {text="R";response=None};
      80.,observed ~index:1 ~channel:E.Model_thinking ();
-     70.,L.Text {text="B"; stream_scope=None}; 70.,observed ~index:2 ()];
+     70.,L.Text {text="B"; response=Unobserved_scope (None)}; 70.,observed ~index:2 ()];
   assert_signal t "STREAMING";
   T.apply ~now:60. t (ended ~index:2 ()); assert_signal t "THINKING";
   T.apply ~now:50. t (ended ~index:99 ()); assert_signal t "THINKING";
@@ -63,8 +63,11 @@ let test_scope_retry_and_fallback () =
   T.apply ~now:11. t (ended ~scope:2 ~channel:E.Model_thinking ()); assert_signal t "model content ended";
   (* Legacy flat data lacks occurrence authority: an unrelated old content
      stop cannot certify that this later text has ended. *)
-  T.apply ~now:12. t (L.Text {text="legacy"; stream_scope=None});
-  T.apply ~now:13. t (ended ~scope:2 ~channel:E.Model_thinking ()); assert_signal t "STREAMING";
+  T.apply ~now:12. t (L.Text {text="legacy"; response=Unobserved_scope (None)});
+  T.apply ~now:13. t (ended ~scope:2 ~channel:E.Model_thinking ());
+  check bool "unbound text does not invent owned answering activity" true
+    (T.model_activity t=Some T.Activity_content_ended);
+  check string "unbound body bytes are retained" "legacy" (T.text t);
   T.apply ~now:14. t (L.Stream_model_stopped (Some {response_generation=0; response_scope=2}));
   T.apply ~now:15. t (observed ~scope:2 ()); assert_signal t "model response ended";
   T.apply ~now:16. t L.Run_finished;
@@ -318,10 +321,11 @@ let test_owned_response_stop () =
   T.apply ~now:6. t (stop 2 1);
   check bool "previous generation stop cannot end resumed answer" true
     (T.model_activity t = Some T.Activity_answering);
-  T.apply ~now:7. t (L.Text {text="next";stream_scope=Some 1});
+  T.apply ~now:7. t (L.Text {text="next";response=Unobserved_scope (Some 1)});
   T.apply ~now:8. t (stop 3 0);
   check bool "known old owner cannot end newer unbound text" true
-    (T.model_activity t = Some T.Activity_answering)
+    (T.model_activity t = None);
+  check string "unbound text body remains" "next" (T.text t)
 
 let test_stop_identity_protocol () =
   let owner = {E.response_generation=7;response_scope=2} in
@@ -375,7 +379,7 @@ let test_owned_response_details () =
   check bool "old stop cannot end newly owned details" true (T.model_activity t=None);
   T.apply ~now:7. t (observed ~generation:3 ());
   check bool "content can follow details without start frame" true (T.model_activity t=Some T.Activity_answering);
-  T.apply ~now:8. t (L.Text {text="next";stream_scope=Some 2});
+  T.apply ~now:8. t (L.Text {text="next";response=Unobserved_scope (Some 2)});
   let unbound = T.response_metadata t in
   T.apply ~now:8. t (details (Some 3) 0 99);
   T.apply ~now:8. t (details (Some 3) 1 99);
@@ -434,7 +438,7 @@ let test_owned_thinking_lifecycle () =
   T.apply ~now:2. t (think 1 99 "stale");
   check string "old reasoning cannot append to newer body" "current" (T.thinking t);
   T.apply ~now:3. t (L.Stream_model_stopped (Some {E.response_generation=2;response_scope=0}));
-  T.apply ~now:4. t (L.Text {text="unbound";stream_scope=None});
+  T.apply ~now:4. t (L.Text {text="unbound";response=Unobserved_scope (None)});
   T.apply ~now:5. t (think 2 0 "after-stop");
   check string "mutable answer activity cannot reopen stopped reasoning" "current" (T.thinking t);
   T.apply ~now:6. t (L.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1});
@@ -489,8 +493,81 @@ let test_owned_thinking_protocol () =
      ["response",E.response_identity_to_json {response_generation=7;response_scope=0};
       "response",E.response_identity_to_json {response_generation=8;response_scope=0}]]
 
+let test_owned_text_lifecycle () =
+  let t = create () in
+  let text generation scope text = L.Text {text;response=E.Observed_response
+    {response_generation=generation;response_scope=scope}} in
+  T.apply ~now:1. t (text 2 0 "current");
+  T.apply ~now:2. t (text 1 99 "stale");
+  check string "old generation text cannot append to latest response" "current" (T.text t);
+  T.apply ~now:3. t (text 3 0 "new");
+  check bool "reused text scope belongs to new generation" true ((T.response_metadata t).owner=Some (3,0));
+  T.apply ~now:4. t (L.Stream_model_stopped (Some {E.response_generation=2;response_scope=0}));
+  check bool "old stop cannot end newer owned text" true (T.model_activity t=Some T.Activity_answering);
+  T.apply ~now:5. t (L.Stream_model_stopped (Some {E.response_generation=3;response_scope=0}));
+  let closed_body = T.text t in
+  T.apply ~now:6. t (text 3 0 "after-stop");
+  check string "stopped text cannot reopen body" closed_body (T.text t);
+  T.apply ~now:7. t (L.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1});
+  let retry_body = T.text t in
+  T.apply ~now:8. t (text 3 0 "after-retry");
+  check string "retry cannot reopen stopped text identity" retry_body (T.text t);
+  T.apply ~now:9. t (text 4 0 "fresh");
+  T.apply ~now:10. t (L.Text {text="unknown";response=E.Unobserved_scope (Some 0)});
+  check bool "unknown same scope cannot inherit generation" true ((T.response_metadata t).owner=None);
+  T.apply ~now:11. t (text 5 0 "");
+  check bool "empty owned text retains response boundary" true ((T.response_metadata t).owner=Some (5,0));
+  check bool "empty text does not fabricate model activity" true (T.model_activity t=None);
+  T.apply ~now:12. t (L.Text {text="scope-two";response=E.Unobserved_scope (Some 2)});
+  let unknown_owner = T.response_metadata t in
+  List.iter (fun delta -> T.apply ~now:12. t delta;
+    check bool "intermediate owned event cannot rewind partial response" true
+      (T.response_metadata t=unknown_owner))
+    [text 5 1 "intermediate";
+     L.Stream_model_started {generation=Some 5;stream_scope=Some 1;message_id=None;model="stale";usage=None};
+     observed ~generation:5 ~scope:1 ()];
+  T.apply ~now:12. t L.Run_finished;
+  let terminal_owner = T.response_metadata t in
+  T.apply ~now:12. t (L.Stream_model_started {generation=Some 6;stream_scope=Some 0;message_id=None;model="late";usage=None});
+  check bool "terminal header preserves settled metadata" true (T.response_metadata t=terminal_owner);
+  let terminal_body = T.text t in
+  T.apply ~now:13. t (text 6 0 "late");
+  check string "terminal text preserves settled body" terminal_body (T.text t)
+
+let test_owned_text_protocol () =
+  let translated = B.translate ~redact_text:Fun.id ~base_dir:"/unused" ~stream_scope:0
+    (B.empty_state ~generation:7 ())
+    (Agent_core.Types.ContentBlockDelta {index=0;delta=TextDelta "answer"}) in
+  let event = match List.find_opt (function E.Text_delta _ -> true | _ -> false) translated.chat_events with
+    | Some (E.Text_delta {response=E.Observed_response owner;_} as event) ->
+      check int "text captures run generation" 7 owner.response_generation;
+      check int "text captures server scope" 0 owner.response_scope; event
+    | Some _ | None -> fail "bridge did not emit owned text" in
+  check bool "text durable identity roundtrip" true
+    (J.keeper_chat_event_of_json (J.keeper_chat_event_to_json event)=Ok event);
+  let _, projected = Server_keeper_chat_agui_projection.project ~timestamp:0.
+    ~redact_text:Fun.id Server_keeper_chat_agui_projection.initial event in
+  let wire = Option.fold ~none:"" ~some:(Ag_ui.event_to_sse ~id:1) projected in
+  let expected = L.Text {text="answer";response=E.Observed_response
+    {response_generation=7;response_scope=0}} in
+  check bool "owned text live and journal agree" true
+    (Log.delta_of_journaled event=Some expected
+     && match L.feed (L.create ()) wire with [{delta;_}] -> delta=expected | _ -> false);
+  let owner = E.response_identity_to_json {response_generation=7;response_scope=0} in
+  List.iter (fun fields ->
+    check bool "typed text owner rejects conflicting metadata" true
+      (Result.is_error (E.text_response_of_fields ~owner_field:"response" ~scope_field:"stream_scope" fields));
+    check bool "journal rejects conflicting text metadata" true
+      (Result.is_error (J.keeper_chat_event_of_json (`Assoc
+        (["type",`String "text_delta";"delta",`String "answer"]@fields)))))
+    [["response",owner;"stream_scope",`Int 0];["response",`Null];
+     ["response",owner;"response",owner];["stream_scope",`Int (-1)];
+     ["stream_scope",`Int 9_007_199_254_740_992]]
+
 let () = run "model content activity"
-  ["boundaries", [test_case "owned thinking lifecycle" `Quick test_owned_thinking_lifecycle;
+  ["boundaries", [test_case "owned text lifecycle" `Quick test_owned_text_lifecycle;
+    test_case "owned text protocol" `Quick test_owned_text_protocol;
+    test_case "owned thinking lifecycle" `Quick test_owned_thinking_lifecycle;
     test_case "owned thinking protocol" `Quick test_owned_thinking_protocol;
     test_case "owned response details" `Quick test_owned_response_details;
     test_case "details production identity" `Quick test_details_production_identity;

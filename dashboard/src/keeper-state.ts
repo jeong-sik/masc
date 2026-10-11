@@ -6,6 +6,7 @@ import { isRecord, asString, asNumber, asBoolean, toIsoTimestamp } from './compo
 import { asStrictStringArray, withoutUndefined } from './lib/json-coerce'
 import { keeperStreamContract, normalizeStreamContract } from './keeper-stream-contract'
 import {
+  sameDeliveryKey,
   sameDeliveryProvenance,
   type KeeperChatDeliveryProvenance,
   type KeeperChatDeliveryProvenanceDecode,
@@ -1526,6 +1527,38 @@ function mergeLocalAssistantObservations(
   return historyEntry
 }
 
+function mergeLocalToolObservations(
+  history: KeeperConversationEntry,
+  observed: readonly KeeperConversationEntry[],
+): KeeperConversationEntry {
+  const provenance = history.deliveryProvenance
+  if (history.role !== 'tool' || !provenance) return history
+  const matches = observed.filter(entry => entry.role === 'tool' && entry.deliveryProvenance != null
+    && sameDeliveryProvenance(entry.deliveryProvenance, provenance))
+  const coordinates: { readonly streamScope: number; readonly blockIndex: number }[] = []
+  for (const entry of matches) {
+    const occurrence = entry.toolOccurrence
+    if (!occurrence) continue
+    const values = occurrence.kind === 'identified' ? [occurrence] : occurrence.coordinates
+    for (const value of values) {
+      if (!coordinates.some(existing => existing.streamScope === value.streamScope && existing.blockIndex === value.blockIndex)) {
+        coordinates.push(Object.freeze({ streamScope: value.streamScope, blockIndex: value.blockIndex }))
+      }
+    }
+  }
+  const first = coordinates[0]
+  const conflicting = matches.some(entry => entry.toolOccurrence?.kind === 'conflicting')
+    || (first && coordinates.some(value => value.streamScope !== first.streamScope || value.blockIndex !== first.blockIndex))
+  return {
+    ...history,
+    ...(first ? { toolOccurrence: conflicting
+      ? Object.freeze({ kind: 'conflicting' as const, coordinates: Object.freeze(coordinates) })
+      : Object.freeze({ kind: 'identified' as const, ...first }) } : {}),
+    ...(conflicting || matches.some(entry => entry.toolOccurrenceQuarantined) ? { toolOccurrenceQuarantined: true as const } : {}),
+    ...(matches.some(entry => entry.toolCallEnded === true) ? { toolCallEnded: true } : {}),
+  }
+}
+
 function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   // An empty history payload means the caller did not request history
   // (e.g. hydrateKeeperStatus fast path with tail_messages: 0), not
@@ -1538,7 +1571,34 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   // (see mergeLocalAssistantObservations): identical-text turns no longer steal
   // each other's trace (#21748).
   const consumed = new Set<string>()
-  const historyEntries = entries.map(entry => mergeLocalAssistantObservations(entry, existing, consumed, entries))
+  // Tool-call provenance denotes one execution fact. Duplicate reports of that
+  // exact fact share one published row; reconcile all metadata before choosing
+  // its presentation row so lookup and trace references cannot select aliases.
+  const canonicalEntries = entries.filter((entry, index) => entry.role !== 'tool' || !entry.deliveryProvenance
+    || !entries.slice(0, index).some(previous => previous.role === 'tool' && previous.deliveryProvenance != null
+      && sameDeliveryProvenance(previous.deliveryProvenance, entry.deliveryProvenance!)))
+  const reconciled = canonicalEntries.map(entry => mergeLocalToolObservations(
+    mergeLocalAssistantObservations(entry, existing, consumed, entries), [...existing, ...entries],
+  ))
+  const toolRowReplacement = new Map<string, KeeperConversationEntry>()
+  for (const row of reconciled) {
+    if (row.role !== 'tool' || !row.deliveryProvenance) continue
+    for (const previous of [...existing, ...entries]) {
+      if (previous.role === 'tool' && previous.deliveryProvenance != null
+        && sameDeliveryProvenance(previous.deliveryProvenance, row.deliveryProvenance)) toolRowReplacement.set(previous.id, row)
+    }
+  }
+  const historyEntries = reconciled.map(entry => entry.traceSteps ? {
+    ...entry,
+    traceSteps: entry.traceSteps.map(step => {
+      if (step.kind !== 'tool' || !step.toolOccurrenceId) return step
+      const replacement = toolRowReplacement.get(step.toolOccurrenceId)
+      const parentKey = entry.deliveryProvenance?.delivery_key
+      const toolKey = replacement?.deliveryProvenance?.delivery_key
+      return replacement && parentKey && toolKey && sameDeliveryKey(parentKey, toolKey)
+        ? { ...step, toolOccurrenceId: replacement.id } : step
+    }),
+  } : entry)
   const localEntries = existing.filter(
     entry => {
       const coveredByHistory = historyEntries.some(historyEntry => sameConversationEntry(entry, historyEntry))

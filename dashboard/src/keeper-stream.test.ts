@@ -1,3 +1,4 @@
+import { setStoredToken, clearStoredToken } from './api/core'
 import { captureToolObservations } from './keeper-tool-observations'
 
 import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
@@ -1024,6 +1025,23 @@ describe('Keeper operation stream projection', () => {
     const before = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'authored-row'))
     applyKeeperStreamEvent('sangsu', 'authored-row', { type: 'TEXT_MESSAGE_CONTENT', delta: 'assistant output' })
     expect(keeperThreads.value.sangsu).toEqual([before])
+  })
+
+  it.each(['credential', 'operation', 'target role'] as const)('revokes buffered thinking after %s replacement', replacement => {
+    assistantEntry('original-operation')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'original reasoning', response: { content_generation: 1, stream_scope: 0 } } })
+    try {
+      if (replacement === 'credential') setStoredToken('synthetic-buffer-replacement')
+      else {
+        keeperThreads.value = {}
+        if (replacement === 'operation') assistantEntry('replacement-operation')
+        else appendThreadEntry('sangsu', { id: 'reply-1', role: 'user', source: 'direct_user', label: 'user', text: 'user bytes', rawText: 'user bytes', timestamp: null, delivery: 'delivered', streamState: null, details: null })
+      }
+      const before = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+      _flushPendingKeeperStreamDeltasForTests()
+      expect(keeperThreads.value.sangsu).toEqual([before])
+    } finally { if (replacement === 'credential') clearStoredToken() }
   })
 
   it('projects queued acceptance without a receipt or queue revision', () => {

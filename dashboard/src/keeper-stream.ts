@@ -1,7 +1,9 @@
 import { sameKeeperResponseOwner, type KeeperResponseOwner, initialKeeperResponseState, reduceKeeperResponse, acknowledgeKeeperResponseSequence, type KeeperResponseDecision, type KeeperResponseEvent } from './lib/keeper-response-state'
+import { currentStoredTokenRevision } from './api/core'
 import { keeperStreamContract } from './keeper-stream-contract'
 import {
   sameDeliveryKey,
+  type KeeperChatDeliveryKey,
   toolDeliveryBelongsToProducer,
   operationDeliveryProvenance,
   isOperationDeliveryProvenance,
@@ -53,6 +55,10 @@ export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
 const pendingAgentCoreTextBlockIndexes = new Map<string, number>()
 type ScheduledFlushHandle = ReturnType<typeof setTimeout>
 interface PendingThinkingState {
+  readonly authRevision: number
+  readonly deliveryKey: KeeperChatDeliveryKey | null
+  readonly targetSource: KeeperConversationEntry['source']
+  readonly turnRef: string | null | undefined
   responseOwner?: KeeperResponseOwner
   chunks: string[]
   agentCoreBlockIndex?: number
@@ -262,6 +268,13 @@ function persistActiveAssistantDraft(keeperName: string, assistantEntryId: strin
   updateTrackedKeeperChatAssistantDraft(deliveryKey.operation_id, entry, keeperThreads.value[keeperName] ?? [])
 }
 
+function ownsThinkingPublication(pending: PendingThinkingState, entry: KeeperConversationEntry | undefined, authRevision: number): boolean {
+  return entry !== undefined && entry.role === 'assistant' && pending.authRevision === authRevision
+    && entry.source === pending.targetSource && entry.turnRef === pending.turnRef
+    && (pending.deliveryKey === null || entry.deliveryProvenance != null
+      && sameDeliveryKey(pending.deliveryKey, entry.deliveryProvenance.delivery_key))
+}
+
 function flushPendingThinkingDeltas(
   keeperName: string,
   assistantEntryId: string,
@@ -275,6 +288,10 @@ function flushPendingThinkingDeltas(
     pending.flushHandle = null
   }
   const before = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
+  if (!ownsThinkingPublication(pending, before, currentStoredTokenRevision())) {
+    pendingThinkingDeltas.delete(key)
+    return
+  }
   const preserveActivity = (): void => {
     if (!pending.authoritative && before) updateThreadEntry(keeperName, assistantEntryId, entry => ({
       ...entry, streamState: before.streamState, delivery: before.delivery,
@@ -316,6 +333,13 @@ function enqueueThinkingDelta(
   if (delta.length === 0) return
   const key = streamEntryKey(keeperName, assistantEntryId)
   let pending = pendingThinkingDeltas.get(key)
+  const entry = (keeperThreads.value[keeperName] ?? []).find(candidate => candidate.id === assistantEntryId)
+  if (!entry || entry.role !== 'assistant') return
+  if (pending && !ownsThinkingPublication(pending, entry, currentStoredTokenRevision())) {
+    if (pending.flushHandle !== null) cancelStreamFlush(pending.flushHandle)
+    pendingThinkingDeltas.delete(key)
+    pending = undefined
+  }
   if (pending && (!sameKeeperResponseOwner(pending.responseOwner, meta.responseOwner)
     || !sameAgentCoreBlockIndex(pending.agentCoreBlockIndex, meta.agentCoreBlockIndex)
     || pending.authoritative !== (meta.authoritative ?? true))) {
@@ -323,12 +347,15 @@ function enqueueThinkingDelta(
     pending = undefined
   }
   if (!pending) {
-    const entry = (keeperThreads.value[keeperName] ?? []).find(candidate => candidate.id === assistantEntryId)
-    const last = entry?.traceSteps?.at(-1)
+    const last = entry.traceSteps?.at(-1)
     const prefix = last?.kind === 'think' && sameKeeperResponseOwner(last.responseOwner, meta.responseOwner)
       && sameAgentCoreBlockIndex(last.agentCoreBlockIndex, meta.agentCoreBlockIndex) ? last.text : ''
     const text = `${prefix}${delta}`
     pending = {
+      authRevision: currentStoredTokenRevision(),
+      deliveryKey: entry.deliveryProvenance ? Object.freeze({ ...entry.deliveryProvenance.delivery_key }) : null,
+      targetSource: entry.source,
+      turnRef: entry.turnRef,
       responseOwner: meta.responseOwner,
       chunks: [text],
       agentCoreBlockIndex: meta.agentCoreBlockIndex,

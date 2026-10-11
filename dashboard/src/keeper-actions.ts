@@ -558,7 +558,17 @@ async function reconcileOperationFromServerHistory(
   localUserId: string,
   localAssistantId: string,
 ): Promise<boolean> {
-  const history = await fetchKeeperChatHistory(keeperName)
+  const authRevision = currentStoredTokenRevision()
+  let history: Awaited<ReturnType<typeof fetchKeeperChatHistory>>
+  try {
+    history = await fetchKeeperChatHistory(keeperName)
+  } catch (error) {
+    if (authRevision !== currentStoredTokenRevision()) return false
+    throw error
+  }
+  // A stale read is not evidence that the current scope owns a canonical
+  // replacement. Preserve the tracked operation and its received observations.
+  if (authRevision !== currentStoredTokenRevision()) return false
   const historyEntries = chatHistoryEntriesFromRest(keeperName, history)
   if (!hasCanonicalOperationTurn(historyEntries, operationId)) {
     return false
@@ -1422,6 +1432,7 @@ export async function sendKeeperThreadMessage(
         reason: errorMessage,
       }),
     })
+    const reconciliationAuthRevision = currentStoredTokenRevision()
     try {
       const reconciled = await reconcileOperationFromServerHistory(
         keeperName,
@@ -1439,7 +1450,9 @@ export async function sendKeeperThreadMessage(
         reconcileErr instanceof Error ? reconcileErr.message : reconcileErr,
       )
     }
-    setRecordValue(keeperActionErrors, keeperName, errorMessage)
+    if (reconciliationAuthRevision === currentStoredTokenRevision()) {
+      setRecordValue(keeperActionErrors, keeperName, errorMessage)
+    }
     throw err
   } finally {
     // The queued-liveness poll (Gap B above) must never outlive this send:

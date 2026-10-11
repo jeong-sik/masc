@@ -11,6 +11,45 @@ const page = (sequence: number, event: KeeperChatStreamEvent | null): KeeperTurn
   events: [{ sequence, timestamp: 1, event }], cursor: { sequence, offset: sequence + 1 }, hasMore: false })
 beforeEach(() => { keeperThreads.value = {}; _resetKeeperStreamBuffersForTests(); _resetKeeperAutonomousRecoveryForTests(); vi.mocked(fetchKeeperTurnEvents).mockReset(); vi.mocked(fetchKeeperCurrentTurn).mockReset().mockResolvedValue({ state: 'idle' }) })
 describe('autonomous journal recovery', () => {
+  it.each([false, true])('retains fully unowned Saying and Thinking without inventing response ownership (history=%s)', history => {
+    if (history) mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
+      turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null }])
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('unowned speech'))
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 1, { ...base, type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'unowned reasoning' } })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 2, { ...base, type: 'RUN_FINISHED' })
+    const parent = keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')
+    expect(parent).toMatchObject({ responseState: { current: null, floor: null },
+      traceSteps: [{ kind: 'progress', text: 'unowned speech' }, { kind: 'think', text: 'unowned reasoning' }] })
+    if (history) expect(parent?.text).toBe('canonical answer')
+  })
+  it('recovers an older owned Saying boundary without replacing the latest response owner', () => {
+    mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
+      turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null }])
+    const old = { content_generation: 1, stream_scope: 0 }
+    const latest = { content_generation: 2, stream_scope: 1 }
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, { ...base, type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: latest })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 1, { ...base, type: 'TEXT_MESSAGE_CONTENT', delta: 'earlier speech', textResponse: old })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 2, { ...base, type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'earlier reasoning', response: old } })
+    const parent = keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')
+    expect(parent).toMatchObject({ text: 'canonical answer', delivery: 'history', streamState: null,
+      responseState: { current: latest }, traceSteps: [{ kind: 'progress', text: 'earlier speech' }, { kind: 'think', text: 'earlier reasoning' }] })
+  })
+  it('keeps unowned historical reasoning observable without promoting owned final speech', () => {
+    mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
+      turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null }])
+    const owner = { content_generation: 1, stream_scope: 0 }
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, { ...base, type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: owner })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 1, { ...base, type: 'TEXT_MESSAGE_CONTENT', delta: 'canonical answer', textResponse: owner })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 2, { ...base, type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'unowned observed reasoning' } })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 3, { ...base, type: 'RUN_FINISHED' })
+    const parent = keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')
+    expect(parent?.traceSteps?.filter(step => step.kind === 'progress')).toEqual([])
+    expect(parent?.traceSteps?.filter(step => step.kind === 'think').map(step => step.text)).toContain('unowned observed reasoning')
+    expect(parent).toMatchObject({ text: 'canonical answer', delivery: 'history', streamState: null })
+  })
   it('keeps historical model and usage on the latest admitted response owner', () => {
     mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
       turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null }])

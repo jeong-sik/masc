@@ -257,6 +257,44 @@ Preserve a checkpoint before month rollover and another after capture.
 Check the victory message and the captured city's ruler/command prompt;
 returning to a map alone also happens when a battle is deferred.
 
+## A field victory followed by city capture
+
+The same native-worker replay later sent Puyang's army toward city 20, 초,
+in October 189. Kong Zhou counterattacked on field 53, 정도. This opened a
+field battle instead of the destination city's siege.
+
+- The expedition selected Xiahou Dun and Xiahou Yuan, then requested a joint
+  expedition from Chenliu. Cao Ren's 2,100 infantry arrived on day 2: the
+  friendly total changed 7,281 → 9,381 and a Cao Ren command followed.
+  Sending a joint expedition is not proof of arrival; inspect the battle.
+- By day 7, attacks toward the earlier enemy position left the displayed
+  totals unchanged. On day 8 the enemy appeared farther northeast, and
+  Xiahou Yuan's northwest normal attack changed enemy strength
+  1,796 → 1,693. Directions belong to current positions, not officers.
+- Cao Ren's subsequent movement offered `공격하시겠습니까(Y/N)?`.
+  Confirming `y` was followed by `공주군은 전군 퇴각했습니다` and then
+  `조조군의 승리입니다`. The remaining friendly total was 4,813.
+  An enemy total of zero after retreat does not prove every enemy was killed.
+- After the captured Kong Zhou was released, November commands still
+  placed Xiahou Dun in Puyang. His information showed 2,580 soldiers,
+  training 79 and morale 55. A field victory did not establish city 20
+  ownership; verify the destination's command screen separately.
+- A second expedition from Puyang to city 20 selected Xiahou Dun's 2,580
+  and Cao Hong's 2,000 infantry, gold 500 and food 20,000. Xiahou Yuan's
+  668 remained in Puyang. Declining another city's joint expedition opened
+  city 20's deployment with defender strength 0. Place the officers and
+  answer the food-carrier prompt even when the defending army is empty.
+- The game reported the capture of the retreating Li Gui and then victory.
+  His disposition offered recruitment, release or execution; selecting
+  recruitment with `1`, Enter returned to city commands. The resulting
+  city 20 command named ruler Cao Cao and governor Xiahou Dun. That screen
+  proves occupation; the recruitment choice alone does not prove Li Gui
+  accepted service.
+
+Keep checkpoints at the field victory, the returned origin-city commands
+and the destination-city commands. These observations establish those local
+play transitions, not a completed winning campaign.
+
 ## Hotseat
 
 With two human players (유비 and 조조 in scenario 1) the game asked 조조 first

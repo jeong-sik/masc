@@ -176,6 +176,8 @@ describe('ChatTranscript', () => {
     render(null, container)
     container.remove()
     resetToolCallOutputs()
+    keeperThreads.value = {}
+    _resetKeeperStreamBuffersForTests()
   })
 
   it('renders the completed continuation body instead of its earlier checkpoint', () => {
@@ -191,8 +193,6 @@ describe('ChatTranscript', () => {
     render(html`<${ChatTranscript} keeperName="sangsu" entries=${keeperThreads.value.sangsu} emptyText="empty" variant="messenger" />`, container)
     expect(container.querySelector('[data-chat-control-status="continuation_checkpoint"]')).toBeNull()
     expect(container.querySelector('.chat-bubble')?.textContent).toContain('completed continuation body')
-    keeperThreads.value = {}
-    _resetKeeperStreamBuffersForTests()
   })
 
   it('renders one final image after repeated final-details projection', () => {
@@ -207,8 +207,6 @@ describe('ChatTranscript', () => {
     render(html`<${ChatTranscript} keeperName="sangsu" entries=${keeperThreads.value.sangsu} emptyText="empty" variant="messenger" />`, container)
     expect(container.querySelectorAll('[data-chat-block="image"]')).toHaveLength(1)
     expect(container.querySelector('[data-chat-block="image"] img')?.getAttribute('src')).toBe('https://example.com/result.png')
-    keeperThreads.value = {}
-    _resetKeeperStreamBuffersForTests()
   })
 
   it('renders a loading state instead of the empty card while hydrating with zero entries', () => {

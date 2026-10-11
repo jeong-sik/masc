@@ -546,6 +546,15 @@ describe('Keeper operation stream projection', () => {
       { t: 'p', html: 'final answer' },
     ])
   })
+  it.each(['https://example.com/a.png', 'https://example.com/document'])('keeps final text projection idempotent for %s', (reply) => {
+    assistantEntry()
+    const details = { type: 'CUSTOM' as const, name: 'KEEPER_REPLY_DETAILS' as const,
+      value: { reply, turn_ref: 'turn-1', turn_outcome: 'visible_reply' as const } }
+    applyKeeperStreamEvent('sangsu', 'reply-1', details)
+    const first = keeperThreads.value.sangsu?.[0]?.blocks
+    applyKeeperStreamEvent('sangsu', 'reply-1', details)
+    expect(keeperThreads.value.sangsu?.[0]?.blocks).toEqual(first)
+  })
   it('preserves visible reply whitespace and SKILL-prefixed prose across deltas', () => {
     assistantEntry()
     const chunks = ['    ', '첫 줄', '\n', 'SKILL', '.md 설명', '\n\n\n', '끝  ', '\n\n']

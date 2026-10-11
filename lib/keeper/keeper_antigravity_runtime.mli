@@ -110,6 +110,8 @@ module For_testing : sig
       usage observer installed. *)
 
   val project_stream :
+    ?on_native_action:(official_turn:int ->
+      identity:Runtime_native_tools.action_identity -> tool_name:string -> unit) ->
     ?on_event:(Agent_core.Types.sse_event -> unit) ->
     ?on_native_tool_completion:(block_index:int -> tool_call_id:string option ->
       Runtime_native_tools.completion -> unit) ->

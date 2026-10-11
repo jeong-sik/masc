@@ -627,6 +627,36 @@ let test_unassigned_ends_cannot_close_named_content () =
             (content=[`Text (0,"named"); `Text (0," tail"); `Stop 0]))
 ;;
 
+let test_native_action_uses_first_block_ownership () =
+  let identity step_index = Runtime_native_tools.Provider_step
+      {conversation_id="action-fixture"; step_index} in
+  let observation step_index origin : Runtime_native_tools.observation =
+    {identity=Some (identity step_index); tool_name=Some "view_file"; origin} in
+  let native = observation 4 Runtime_native_tools.Built_in in
+  let retired = observation 5 Runtime_native_tools.Built_in in
+  let wrapper = observation 6 Runtime_native_tools.Mcp_wrapper in
+  let actions = ref [] and block_published = ref false in
+  ignore (Keeper_antigravity_runtime.For_testing.project_stream
+    ~on_event:(function
+      | Agent_core.Types.ContentBlockStart {content_type="native_tool_use"; _} ->
+          block_published := true
+      | _ -> ())
+    ~on_native_action:(fun ~official_turn:_ ~identity ~tool_name:_ ->
+      check bool "native block is published before semantic observation" true !block_published;
+      actions := identity :: !actions)
+    [Runtime_antigravity.Turn_started {conversation_id="action-fixture"; model="fixture"};
+     Native_tool_started native; Native_tool_started native;
+     Native_tool_finished {observation=native; completion=Runtime_native_tools.end_observed};
+     Native_tool_started native;
+     Native_tool_finished {observation=retired; completion=Runtime_native_tools.end_observed};
+     Native_tool_started retired;
+     Native_tool_started {native with identity=None};
+     Native_tool_started wrapper;
+     Turn_finished {text=""}]);
+  check bool "only the first built-in start contributes an action" true
+    (!actions = [identity 4])
+;;
+
 (* #37118: agy prints init before it calls a MASC tool, but the MCP server
    can answer the call while init is still writing the session. The call's
    blocks come after MessageStart, in the order they were answered. *)
@@ -1753,6 +1783,8 @@ let () =
             "Keeper streams two response steps apart"
             `Quick
             test_keeper_streams_two_response_steps_apart
+        ; test_case "native action uses first block ownership" `Quick
+            test_native_action_uses_first_block_ownership
         ; test_case
             "Keeper MCP blocks follow MessageStart"
             `Quick

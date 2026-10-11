@@ -569,3 +569,73 @@ describe('operator action initial observer admission', () => {
     }
   })
 })
+
+describe('operator refresh credential completion ownership', () => {
+  it.each([['snapshot', 'success'], ['snapshot', 'failure'], ['digest', 'success'], ['digest', 'failure']] as const)(
+    'does not publish previous credential %s %s completion', async (kind, outcome) => {
+      const { mod, signals } = await load()
+      const { setStoredToken, clearStoredToken } = await import('./api/core')
+      setStoredToken('synthetic-refresh-owner-a')
+      let resolve!: (value: unknown) => void
+      let reject!: (error: Error) => void
+      const deferred = new Promise((done, fail) => { resolve = done; reject = fail })
+      if (kind === 'snapshot') apiMocks.fetchOperatorSnapshot.mockReturnValue(deferred)
+      else apiMocks.fetchOperatorDigest.mockReturnValue(deferred)
+      const pending = kind === 'snapshot' ? mod.refreshOperatorSnapshot() : mod.refreshOperatorWorkspaceDigest()
+      setStoredToken('synthetic-refresh-owner-b')
+      const loading = kind === 'snapshot' ? signals.operatorLoading : signals.operatorDigestLoading
+      const error = kind === 'snapshot' ? signals.operatorError : signals.operatorDigestError
+      const status = kind === 'snapshot' ? signals.operatorErrorStatus : signals.operatorDigestErrorStatus
+      loading.value = true
+      error.value = 'replacement refresh error'
+      status.value = 409
+      try {
+        if (outcome === 'success') resolve(kind === 'snapshot' ? validSnapshot : { trace_id: 'old-digest' })
+        else reject(new Error('old refresh failed'))
+        await pending
+        expect(loading.value).toBe(true)
+        expect(error.value).toBe('replacement refresh error')
+        expect(status.value).toBe(409)
+        expect(kind === 'snapshot' ? signals.operatorSnapshot.value : signals.operatorWorkspaceDigest.value).toBeNull()
+      } finally {
+        clearStoredToken()
+      }
+    },
+  )
+})
+
+describe('operator refresh replacement and queued ownership', () => {
+  it.each(['snapshot', 'digest'] as const)('keeps the replacement %s read when the old read and followup finish', async (kind) => {
+    const { mod, signals } = await load()
+    const { setStoredToken, clearStoredToken } = await import('./api/core')
+    setStoredToken('synthetic-queued-refresh-a')
+    let finishOld!: (value: unknown) => void
+    let finishCurrent!: (value: unknown) => void
+    const transport = kind === 'snapshot' ? apiMocks.fetchOperatorSnapshot : apiMocks.fetchOperatorDigest
+    transport.mockReturnValueOnce(new Promise(resolve => { finishOld = resolve }))
+      .mockReturnValueOnce(new Promise(resolve => { finishCurrent = resolve }))
+    const refresh = kind === 'snapshot' ? mod.refreshOperatorSnapshot : mod.refreshOperatorWorkspaceDigest
+    const old = refresh()
+    const oldForced = refresh({ force: true })
+    setStoredToken('synthetic-queued-refresh-b')
+    const current = refresh()
+    const loading = kind === 'snapshot' ? signals.operatorLoading : signals.operatorDigestLoading
+    try {
+      expect(transport).toHaveBeenCalledTimes(2)
+      finishOld(kind === 'snapshot' ? validSnapshot : {})
+      await Promise.all([old, oldForced])
+      expect(loading.value).toBe(true)
+      const coalesced = refresh()
+      expect(transport).toHaveBeenCalledTimes(2)
+      finishCurrent(kind === 'snapshot' ? validSnapshot : {})
+      await Promise.all([current, coalesced])
+      expect(loading.value).toBe(false)
+      expect(kind === 'snapshot' ? signals.operatorSnapshot.value : signals.operatorWorkspaceDigest.value).not.toBeNull()
+    } finally {
+      finishOld(kind === 'snapshot' ? validSnapshot : {})
+      finishCurrent(kind === 'snapshot' ? validSnapshot : {})
+      await Promise.all([old, oldForced, current])
+      clearStoredToken()
+    }
+  })
+})

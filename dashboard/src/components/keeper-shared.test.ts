@@ -21,6 +21,15 @@ const {
   moveQueuedKeeperChatOperationToEnd: vi.fn(),
 }))
 
+const panelRefresh = vi.hoisted(() => ({ listeners: new Set<(name: string) => void>() }))
+vi.mock('../sse-store', async importOriginal => ({
+  ...await importOriginal<typeof import('../sse-store')>(),
+  registerKeeperWaitingInventoryRefresh: (listener: (name: string) => void) => {
+    panelRefresh.listeners.add(listener)
+    return () => panelRefresh.listeners.delete(listener)
+  },
+}))
+
 const { invalidateDashboardCache, refreshDashboard } = vi.hoisted(() => ({
   invalidateDashboardCache: vi.fn(),
   refreshDashboard: vi.fn(async () => undefined),
@@ -242,6 +251,7 @@ describe('KeeperConversationPanel', () => {
 
   afterEach(() => {
     render(null, container)
+    clearStoredToken()
     container.remove()
     resetToolCallOutputs()
     vi.unstubAllGlobals()
@@ -812,6 +822,97 @@ describe('KeeperConversationPanel', () => {
       expect(container.textContent).toContain('Keeper 턴 실행 중')
       expect(container.querySelector('[data-keeper-operation-status]')?.textContent).toContain('Running')
     })
+  })
+
+  it.each(['resolve', 'reject'] as const)('retains the newer operation list when an old read settles (%s)', async outcome => {
+    shellAuthSummary.value = { effective_role: 'admin' } as typeof shellAuthSummary.value
+    let finish!: (value: unknown) => void
+    let fail!: (error: Error) => void
+    const row = (operationId: string) => ({ operationId, sequence: '1', createdAt: 1, input: null, state: { kind: 'queued' } })
+    listQueuedKeeperChatOperations.mockReturnValueOnce(new Promise((resolve, reject) => { finish = resolve; fail = reject }))
+      .mockResolvedValueOnce([row('current-operation')])
+    render(html`<${KeeperConversationPanel} keeperName="sangsu" layout="primary" />`, container)
+    fireEvent.click(container.querySelector('[data-open-keeper-operation-control]') as HTMLButtonElement)
+    await waitFor(() => expect(listQueuedKeeperChatOperations).toHaveBeenCalledTimes(1))
+    for (const listener of panelRefresh.listeners) listener('sangsu')
+    await waitFor(() => expect(container.querySelector('[data-operator-chat-operation="current-operation"]')).not.toBeNull())
+    if (outcome === 'resolve') finish([row('old-operation')])
+    else fail(new Error('old list failure'))
+    await Promise.resolve()
+    await Promise.resolve()
+    await waitFor(() => expect(container.querySelector('[data-operator-chat-operation="current-operation"]')).not.toBeNull())
+    expect(container.querySelector('[data-operator-chat-operation="old-operation"]')).toBeNull()
+  })
+
+  it.each(['authentication', 'keeper', 'remount'] as const)('revokes operation list ownership on %s replacement', async replacement => {
+    shellAuthSummary.value = { effective_role: 'admin' } as typeof shellAuthSummary.value
+    let finish!: (value: unknown) => void
+    const row = (operationId: string) => ({ operationId, sequence: '1', createdAt: 1, input: null, state: { kind: 'queued' } })
+    listQueuedKeeperChatOperations.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+      .mockResolvedValueOnce([row('replacement-operation')])
+    const mount = (keeperName: string) => render(html`<${KeeperConversationPanel} keeperName=${keeperName} layout="primary" />`, container)
+    mount('sangsu')
+    fireEvent.click(container.querySelector('[data-open-keeper-operation-control]') as HTMLButtonElement)
+    await waitFor(() => expect(listQueuedKeeperChatOperations).toHaveBeenCalledTimes(1))
+    const signal = listQueuedKeeperChatOperations.mock.calls[0]?.[2]?.signal as AbortSignal
+    if (replacement === 'authentication') setStoredToken('replacement-fixture')
+    else if (replacement === 'keeper') mount('rondo')
+    else {
+      render(null, container)
+      mount('sangsu')
+      fireEvent.click(container.querySelector('[data-open-keeper-operation-control]') as HTMLButtonElement)
+    }
+    await waitFor(() => expect(container.querySelector('[data-operator-chat-operation="replacement-operation"]')).not.toBeNull())
+    expect(signal.aborted).toBe(true)
+    finish([row('superseded-operation')])
+    await Promise.resolve()
+    await Promise.resolve()
+    await waitFor(() => expect(container.querySelector('[data-operator-chat-operation="replacement-operation"]')).not.toBeNull())
+    expect(container.querySelector('[data-operator-chat-operation="superseded-operation"]')).toBeNull()
+  })
+
+  it('does not publish an old Keeper mutation failure after panel replacement', async () => {
+    shellAuthSummary.value = { effective_role: 'admin' } as typeof shellAuthSummary.value
+    const row = (operationId: string) => ({ operationId, sequence: '1', createdAt: 1, input: null, state: { kind: 'queued' } })
+    listQueuedKeeperChatOperations.mockResolvedValueOnce([row('old-operation')]).mockResolvedValue([row('current-operation')])
+    let fail!: (error: Error) => void
+    cancelKeeperChatOperation.mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject }))
+    const mount = (keeperName: string) => render(html`<${KeeperConversationPanel} keeperName=${keeperName} layout="primary" />`, container)
+    mount('sangsu')
+    fireEvent.click(container.querySelector('[data-open-keeper-operation-control]') as HTMLButtonElement)
+    await waitFor(() => expect(container.querySelector('[data-operator-chat-operation="old-operation"]')).not.toBeNull())
+    const button = Array.from(container.querySelector('[data-operator-chat-operation="old-operation"]')!.querySelectorAll('button')).find(button => button.textContent === '취소')!
+    fireEvent.click(button)
+    await waitFor(() => expect(cancelKeeperChatOperation).toHaveBeenCalledTimes(1))
+    mount('rondo')
+    await waitFor(() => expect(container.querySelector('[data-operator-chat-operation="current-operation"]')).not.toBeNull())
+    vi.mocked(showToast).mockClear()
+    fail(new Error('old mutation failure'))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await waitFor(() => expect(container.querySelector('[data-operator-chat-operation="current-operation"]')).not.toBeNull())
+    expect(showToast).not.toHaveBeenCalled()
+    expect(listQueuedKeeperChatOperations).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves freshly reconciled queue rows when publishing a mutation error', async () => {
+    shellAuthSummary.value = { effective_role: 'admin' } as typeof shellAuthSummary.value
+    const row = (operationId: string) => ({ operationId, sequence: '1', createdAt: 1, input: null, state: { kind: 'queued' } })
+    listQueuedKeeperChatOperations.mockResolvedValueOnce([row('before-mutation')]).mockResolvedValueOnce([row('after-mutation')])
+    cancelKeeperChatOperation.mockRejectedValueOnce(new Error('mutation failed'))
+    render(html`<${KeeperConversationPanel} keeperName="sangsu" layout="primary" />`, container)
+    fireEvent.click(container.querySelector('[data-open-keeper-operation-control]') as HTMLButtonElement)
+    await waitFor(() => expect(container.querySelector('[data-operator-chat-operation="before-mutation"]')).not.toBeNull())
+    const button = Array.from(container.querySelector('[data-operator-chat-operation="before-mutation"]')!.querySelectorAll('button')).find(button => button.textContent === '취소')!
+    vi.mocked(showToast).mockClear()
+    fireEvent.click(button)
+    await waitFor(() => expect(showToast).toHaveBeenCalled())
+    expect(container.querySelector('[data-operator-chat-operation="after-mutation"]')).not.toBeNull()
+    expect(container.querySelector('[data-operator-chat-operation="before-mutation"]')).toBeNull()
+    listQueuedKeeperChatOperations.mockRejectedValueOnce(new Error('push read failed'))
+    for (const listener of panelRefresh.listeners) listener('sangsu')
+    await waitFor(() => expect(listQueuedKeeperChatOperations).toHaveBeenCalledTimes(3))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(container.textContent).toContain('mutation failed')
   })
 
   it('renders and mutates queued chat operations by singular operation id', async () => {

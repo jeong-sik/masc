@@ -1,9 +1,10 @@
+import { storedTokenRevision } from '../api/token-revision'
 import { currentStoredTokenRevision } from '../api/core'
 import { keeperStreamContract } from '../keeper-stream-contract'
 import { html } from 'htm/preact'
 import { AgentFailure, failureTypeFromDiagnostic } from './common/agent-failure'
 import { Markdown } from "./common/markdown"
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import { dashboardAuthAccess } from '../lib/dashboard-auth-access'
 import { isInFlightDelivery } from '../lib/keeper-delivery'
@@ -404,46 +405,93 @@ function KeeperQueueControlPanel({
   keeper: DashboardKeeperWaitingKeeper | null
   onClose: () => void
 }) {
-  const [operations, setOperations] = useState<readonly KeeperChatOperation[]>([])
-  const [error, setError] = useState<string | null>(null)
+  const authRevision = storedTokenRevision.value
+  const [snapshot, setSnapshot] = useState<{ keeperName: string; authRevision: number; operations: readonly KeeperChatOperation[]; error: string | null } | null>(null)
+  const currentSnapshot = snapshot?.keeperName === keeperName && snapshot.authRevision === authRevision ? snapshot : null
+  const operations = currentSnapshot?.operations ?? []
+  const error = currentSnapshot?.error ?? null
+  const setError = (error: string | null) => setSnapshot(current =>
+    current?.keeperName === keeperName && current.authRevision === authRevision
+      ? { ...current, error } : { keeperName, authRevision, operations: [], error })
   const [pendingAction, setPendingAction] = useState<string | null>(null)
+  const renderedKeeper = useRef(keeperName)
+  renderedKeeper.current = keeperName
+  const panelScope = useRef<{ keeperName: string; authRevision: number } | null>(null)
+  const readOwner = useRef<AbortController | null>(null)
+  const actionOwner = useRef<object | null>(null)
 
   const load = async (clearError = true) => {
+    const scope = panelScope.current
+    if (!scope || scope.keeperName !== renderedKeeper.current || scope.authRevision !== currentStoredTokenRevision()) return
+    readOwner.current?.abort()
+    const owner = new AbortController()
+    readOwner.current = owner
+    const ownsRead = () => readOwner.current === owner && !owner.signal.aborted
+      && panelScope.current === scope && scope.keeperName === renderedKeeper.current
+      && scope.authRevision === currentStoredTokenRevision()
     try {
       if (clearError) setError(null)
-      setOperations(await listQueuedKeeperChatOperations(keeperName))
+      const rows = await listQueuedKeeperChatOperations(scope.keeperName, undefined, { signal: owner.signal })
+      if (!ownsRead()) return
+      setSnapshot(current => ({ ...scope, operations: rows, error: !clearError
+        && current?.keeperName === scope.keeperName && current.authRevision === scope.authRevision ? current.error : null }))
     } catch (cause) {
-      setOperations([])
-      if (clearError) setError(cause instanceof Error ? cause.message : String(cause))
+      if (!ownsRead()) return
+      setSnapshot(current => ({ ...scope, operations: [], error: clearError
+        ? (cause instanceof Error ? cause.message : String(cause))
+        : current?.keeperName === scope.keeperName && current.authRevision === scope.authRevision ? current.error : null }))
+    } finally {
+      if (readOwner.current === owner) readOwner.current = null
     }
   }
 
   useEffect(() => {
+    const scope = { keeperName, authRevision }
+    panelScope.current = scope
+    actionOwner.current = null
+    setPendingAction(null)
     void load()
-    return registerKeeperWaitingInventoryRefresh(changedKeeper => {
+    const stop = registerKeeperWaitingInventoryRefresh(changedKeeper => {
       if (changedKeeper === keeperName) void load(false)
     })
-  }, [keeperName])
+    return () => {
+      stop()
+      if (panelScope.current === scope) {
+        panelScope.current = null
+        actionOwner.current = null
+        readOwner.current?.abort()
+        readOwner.current = null
+      }
+    }
+  }, [keeperName, authRevision])
 
   const mutateChat = async (
     operationId: string,
     action: () => Promise<unknown>,
   ) => {
-    const authRevision = currentStoredTokenRevision()
+    const scope = panelScope.current
+    if (!scope || scope.keeperName !== renderedKeeper.current || scope.authRevision !== currentStoredTokenRevision()) return
+    const token = {}
+    actionOwner.current = token
+    const ownsAction = () => actionOwner.current === token && panelScope.current === scope
+      && scope.keeperName === renderedKeeper.current && scope.authRevision === currentStoredTokenRevision()
     setPendingAction(operationId)
     try {
       await action()
-      if (authRevision !== currentStoredTokenRevision()) return
+      if (!ownsAction()) return
       await Promise.all([load(), refreshKeeperWaitingInventory(keeperName)])
     } catch (cause) {
-      if (authRevision !== currentStoredTokenRevision()) return
+      if (!ownsAction()) return
       const message = cause instanceof Error ? cause.message : String(cause)
       await Promise.allSettled([load(false), refreshKeeperWaitingInventory(keeperName)])
-      if (authRevision !== currentStoredTokenRevision()) return
+      if (!ownsAction()) return
       setError(message)
       showToast(message, 'error')
     } finally {
-      setPendingAction(null)
+      if (actionOwner.current === token && panelScope.current === scope) {
+        actionOwner.current = null
+        setPendingAction(null)
+      }
     }
   }
 
@@ -477,7 +525,9 @@ function KeeperQueueControlPanel({
                   disabled=${pendingAction === 'interrupt-current-turn'}
                   class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
                   onClick=${() => void mutateChat('interrupt-current-turn', async () => {
+                    const scope = panelScope.current
                     const outcome = await interruptKeeperTurn(keeperName)
+                    if (!scope || panelScope.current !== scope || scope.keeperName !== renderedKeeper.current) return
                     if (outcome.kind === 'authentication_superseded' || outcome.authRevision !== currentStoredTokenRevision()) return
                     showToast(
                       outcome.kind === 'signalled' ? '현재 턴에 중단 신호를 보냈습니다' : '중단 신호가 전송되지 않았습니다',

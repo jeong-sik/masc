@@ -99,14 +99,15 @@ let test_a_wait_nobody_answers_times_out () =
 let test_answering_a_wait_that_already_timed_out_reports_it () =
   with_env (fun ~clock ->
       let registry = Registry.create () in
+      let approval_id = Masc.Keeper_tool_approval_id.fresh () in
       let timed_out =
-        Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
+        Registry.await ~approval_id registry ~clock ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
           ~tool_call_id:"call-4" ~timeout_sec:0.02
       in
       check outcome "the wait ended on its own" Registry.Timed_out timed_out;
       check bool "a late answer says nothing was listening" false
-        (settle_fixture registry ~keeper_name:keeper ~tool_call_id:"call-4"
+        (Registry.settle registry ~keeper_name:keeper ~approval_id
            Registry.Approve))
 
 let test_answering_an_unknown_call_reports_it () =
@@ -156,10 +157,11 @@ let test_a_second_wait_on_the_same_id_displaces_the_first () =
 let test_waits_are_scoped_to_their_keeper () =
   with_env (fun ~clock ->
       let registry = Registry.create () in
+      let approval_id = Masc.Keeper_tool_approval_id.fresh () in
       let result =
         Eio.Fiber.pair
           (fun () ->
-            Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
+            Registry.await ~approval_id registry ~clock ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:"keeper.one"
               ~tool_call_id:"shared-id" ~timeout_sec:0.15)
           (fun () ->
@@ -170,10 +172,10 @@ let test_waits_are_scoped_to_their_keeper () =
               end
             in
             wait_for_registration 100;
-            (* Same call id, different keeper. Tool call ids are unique per
-               provider stream, not across keepers. *)
-            settle_fixture registry ~keeper_name:"keeper.two"
-              ~tool_call_id:"shared-id" Registry.Approve)
+            (* Use the actual admission ID with the wrong Keeper, so this
+               specifically checks Keeper ownership rather than unknown ID. *)
+            Registry.settle registry ~keeper_name:"keeper.two"
+              ~approval_id Registry.Approve)
       in
       check outcome "the other keeper's answer does not release this wait"
         Registry.Timed_out (fst result);

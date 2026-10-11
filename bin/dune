@@ -1641,7 +1641,7 @@
  (name masc_tui_approval_authority)
  (wrapped false)
  (modules masc_tui_approval_authority)
- (libraries masc_tui_approvals_model masc_tui_types))
+ (libraries masc_tui_approvals_model masc_tui_types masc))
 
 (library
  (name masc_tui_terminal_title)

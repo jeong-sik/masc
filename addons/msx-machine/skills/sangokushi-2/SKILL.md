@@ -222,6 +222,35 @@ and confirm the next officer or battle prompt before continuing.
   Return; an empty Return is not an answer. After the last unit the map comes
   back with the next province's command prompt.
 
+## Locating an enemy before attacking through fire
+
+A city's map symbol is not proof that an enemy occupies the selected hex.
+In the October 220 province-19 assault, an early northwest normal attack did
+not reduce the enemy total. A subsequent information selection showed no enemy
+panel. Later, moving the information cursor and pressing `0` identified Guo
+Huai: soldiers 43, training 85, armament 2 and martial ability 54. Confirm the
+name and labeled panel before choosing an attack direction.
+
+The same battle displayed `火を掛けられました` and spreading fire. Some attempted
+movements did not change position even with displayed mobility 6; the exact
+reason for each refusal was not isolated. On October 25 the fire was absent
+from the observed screen. After moving south on a later turn, the totals were
+own 98 and enemy 42 on October 27. This is a route observation, not a general
+fire duration or a guarantee that waiting makes every hex passable.
+
+At that position, separate `2` (attack), `1` (normal), `2` (south) inputs were
+followed by October 28 totals own 98 / enemy 41. `2`, `4` (assault), `2` (south)
+then led to October 29 totals own 91 / enemy 39, with changed positions. Inspect
+positions again after an assault. These calls included animation and opposing
+phases; the total changes do not isolate player damage, and assault was not a
+loss-free improvement over normal attack.
+
+After the October 30 turn, the game returned to province commands. Province-19
+information still said `交戦中`: attacking Xu Shu troops 82, gold 90, food 901;
+defending Sun Quan troops 38, gold 30, food 130. Returning to the strategic map
+therefore did not prove victory, defeat or occupation. Check the war table and
+observe the next month's actual battle resumption separately.
+
 ## Waiting for mobility and verifying occupation
 
 A July 220 province-19 → 21 replay on native worker source
@@ -286,6 +315,24 @@ deployment and battle commands; it was not an emulator stall.
   Lu Qian and Dian Man present but Zhang Hu absent. The total army was 140.
   All five destination answers did not establish five arrivals. The missing
   officer's fate was not verified; do not promise lossless retreat.
+
+An October province-21 counterattack also exposed a difference between
+strategic and battle totals. The province had soldiers 9 and 11 officers.
+After selecting a foreign ruler and Zhu Huan as reinforcement messenger, nine
+additional defenders plus the governor deployed; every deployment entry showed
+soldiers 0. The battle command screen showed own 0 / ten officers and enemy 93,
+although the earlier attack notice had shown 100. Record both views without
+inventing a rounding formula or treating strategic strength as battle strength.
+Neither messenger selection nor a requested duel proved arrival or acceptance.
+
+All ten defenders answered the only listed retreat destination, province 20.
+The defeat message appeared, and November province-20 information showed ruler
+Xu Shu, governor Xu Huang and ten officers. Both roster pages confirmed all ten
+arrivals; Zhu Huan was outside this retreat group and his location was not
+verified. The destination had soldiers 0, gold 290 and food 0. Buying rice 40
+left gold 206 / food 40; recruiting 20 and assigning total 20 to Xu Huang left
+soldiers 20 / gold 6 / food 20. Check food before recruiting, confirm allocation
+and inspect final resources; arriving officers alone do not restore a garrison.
 
 Preserve a checkpoint before defense, at the last retreat answer and after
 reading the destination roster. Check ownership as well: defeat and successful

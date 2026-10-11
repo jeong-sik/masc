@@ -204,7 +204,17 @@ describe('noteKeeperChatAppended', () => {
     expect(keeperChatHistoryErrors.value.echo).toBeNull()
   })
 
-  it('debounces a burst of appends into one forced refetch', async () => {
+  it('starts broadcast refresh without waiting for a wall-clock quiet period', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([{ id: 'initial', role: 'user', content: 'input', ts: 1 }])
+    await hydrateKeeperChatHistory('echo')
+    noteKeeperChatAppended('echo')
+    noteKeeperChatAppended('echo')
+    await Promise.resolve()
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+    await vi.runAllTimersAsync()
+  })
+
+  it('coalesces one event batch of appends into one forced refetch', async () => {
     fetchKeeperChatHistory.mockResolvedValue([
       { id: 'msg-debounce-user', role: 'user', content: 'hi', ts: 1_780_000_000 },
     ])
@@ -426,13 +436,40 @@ describe('hydrateKeeperChatHistory', () => {
     return { promise, resolve, reject }
   }
 
+  it.each(['resolve', 'reject'] as const)('coalesces broadcasts during one history read into one follow-up (%s)', async outcome => {
+    vi.useFakeTimers()
+    try {
+      fetchKeeperChatHistory.mockResolvedValueOnce(historyRow('initial'))
+      await hydrateKeeperChatHistory('echo')
+      const reading = deferredHistory()
+      fetchKeeperChatHistory.mockReturnValueOnce(reading.promise).mockResolvedValueOnce(historyRow('latest'))
+      noteKeeperChatAppended('echo')
+      await Promise.resolve()
+      expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+      noteKeeperChatAppended('echo')
+      await Promise.resolve()
+      noteKeeperChatAppended('echo')
+      await Promise.resolve()
+      expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+      if (outcome === 'resolve') reading.resolve(historyRow('superseded'))
+      else reading.reject(new Error('superseded read failed'))
+      await vi.runAllTimersAsync()
+      expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(3)
+      expect(keeperThreads.value.echo?.map(row => row.id)).toEqual(['latest'])
+      expect(keeperHydrating.value.echo).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it.each(['resolve', 'reject'] as const)('invalidates an older history fetch on a newer broadcast (%s)', async outcome => {
     vi.useFakeTimers()
     try {
       fetchKeeperChatHistory.mockResolvedValueOnce(historyRow('initial'))
       await hydrateKeeperChatHistory('echo')
       const older = deferredHistory()
-      fetchKeeperChatHistory.mockReturnValueOnce(older.promise).mockResolvedValueOnce(historyRow('latest'))
+      const latest = deferredHistory()
+      fetchKeeperChatHistory.mockReturnValueOnce(older.promise).mockReturnValueOnce(latest.promise)
       const pending = hydrateKeeperChatHistory('echo', { force: true })
       noteKeeperChatAppended('echo')
       if (outcome === 'resolve') older.resolve(historyRow('stale'))
@@ -441,6 +478,7 @@ describe('hydrateKeeperChatHistory', () => {
       expect(keeperThreads.value.echo?.map(row => row.id)).toEqual(['initial'])
       expect(keeperChatHistoryErrors.value.echo).toBeNull()
       expect(keeperHydrating.value.echo).toBe(true)
+      latest.resolve(historyRow('latest'))
       await vi.runAllTimersAsync()
       expect(keeperThreads.value.echo?.map(row => row.id)).toEqual(['latest'])
       expect(keeperHydrating.value.echo).toBe(false)

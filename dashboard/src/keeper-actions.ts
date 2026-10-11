@@ -373,6 +373,7 @@ const chatHistoryHydrationRequests = new Map<string, object>()
 export function _resetChatHydrationForTests(): void {
   hydratedChatKeepers.clear()
   chatHistoryHydrationRequests.clear()
+  chatRefreshStates.clear()
   keeperChatHistoryErrors.value = {}
   keeperChatHistoryHydration.value = {}
 }
@@ -483,11 +484,31 @@ export async function hydrateKeeperToolOutputs(keeperName: string): Promise<void
   }
 }
 
-// Trailing per-keeper debounce for keeper_chat_appended pushes so a
-// burst of turns (queue drain, multi-connector traffic) coalesces into
-// one history refetch instead of one round-trip per message.
-const chatRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
-const CHAT_APPENDED_REFRESH_DELAY_MS = 400
+type ChatRefreshState =
+  | { kind: 'scheduled'; token: object }
+  | { kind: 'running'; token: object; invalidated: boolean }
+const chatRefreshStates = new Map<string, ChatRefreshState>()
+
+function scheduleChatRefresh(keeperName: string): void {
+  const current = chatRefreshStates.get(keeperName)
+  if (current?.kind === 'scheduled') return
+  if (current?.kind === 'running') {
+    chatRefreshStates.set(keeperName, { ...current, invalidated: true })
+    return
+  }
+  const token = {}
+  chatRefreshStates.set(keeperName, { kind: 'scheduled', token })
+  queueMicrotask(() => {
+    if (chatRefreshStates.get(keeperName)?.token !== token) return
+    chatRefreshStates.set(keeperName, { kind: 'running', token, invalidated: false })
+    void hydrateKeeperChatHistory(keeperName, { force: true }).finally(() => {
+      const settled = chatRefreshStates.get(keeperName)
+      if (settled?.kind !== 'running' || settled.token !== token) return
+      chatRefreshStates.delete(keeperName)
+      if (settled.invalidated) scheduleChatRefresh(keeperName)
+    })
+  })
+}
 const PENDING_KEEPER_CHAT_POLL_MS = 2_000
 const QUEUED_KEEPER_REQUEST_LOST_MESSAGE =
   '서버 재시작으로 대기 중이던 요청을 찾을 수 없습니다. 메시지를 다시 보내주세요.'
@@ -902,16 +923,9 @@ export function noteKeeperChatAppended(name: string, _audio?: unknown, _blocks?:
     return
   }
   // The notification supersedes any snapshot acquired before it. Invalidate
-  // immediately, before the debounced replacement fetch starts.
+  // immediately, before the scheduled replacement fetch starts.
   chatHistoryHydrationRequests.delete(keeperName)
-  const pending = chatRefreshTimers.get(keeperName)
-  if (pending) clearTimeout(pending)
-  chatRefreshTimers.set(keeperName, setTimeout(() => {
-    chatRefreshTimers.delete(keeperName)
-    void (async () => {
-      await hydrateKeeperChatHistory(keeperName, { force: true })
-    })()
-  }, CHAT_APPENDED_REFRESH_DELAY_MS))
+  scheduleChatRefresh(keeperName)
 }
 
 /** Re-hydrate the chat transcript for the keeper whose conversation panel

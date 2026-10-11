@@ -192,6 +192,8 @@ type t =
   | TurnBoundaryFailures
   | HistoryFragmentFailures
   | WorkingStateNotCarried
+  | WorkspaceMemoryBriefingBytes (* gauge: briefing summary bytes observed at the keeper turn boundary *)
+  | WorkspaceMemoryLedgerClaims  (* gauge: classified ledger claim count observed at the keeper turn boundary *)
 
 val to_string : t -> string
 

@@ -5211,6 +5211,11 @@
  (libraries alcotest yojson masc unix))
 
 (test
+ (name test_keeper_workspace_memory_observation_metrics)
+ (modules test_keeper_workspace_memory_observation_metrics)
+ (libraries alcotest masc masc.keeper_metrics))
+
+(test
  (name test_workspace_memory_request)
  (modules test_workspace_memory_request)
  (libraries alcotest digestif yojson masc))

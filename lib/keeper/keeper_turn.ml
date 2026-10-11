@@ -714,6 +714,8 @@ let run_keeper_invocation_turn_admitted_inner
              | Workspace_memory_ledger.Unavailable detail ->
                Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
              | Missing | Available _ -> ());
+            Keeper_workspace_memory_observation_metrics.record
+              ~keeper_name:meta.name workspace_memory;
             let build_turn_prompt ~base_system_prompt:_ ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)

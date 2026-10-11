@@ -864,6 +864,8 @@ let run_keeper_cycle
                 | Workspace_memory_ledger.Unavailable detail ->
                   Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
                 | Missing | Available _ -> ());
+               Keeper_workspace_memory_observation_metrics.record
+                 ~keeper_name:meta.name workspace_memory;
                (* Repository freshness projection (context only, never a
                   gate): where each playground checkout stands against its
                   upstream default branch. A failed scan is logged and the

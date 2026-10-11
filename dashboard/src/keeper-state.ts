@@ -1159,6 +1159,7 @@ export function promoteAssistantTextToProgress(
       rawText: '',
       blocks: [],
       replyTextProjection: undefined,
+      replyBlockSource: undefined,
       traceSteps: [...(entry.traceSteps ?? []), progress],
     }
   })

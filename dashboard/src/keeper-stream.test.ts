@@ -570,6 +570,17 @@ describe('Keeper operation stream projection', () => {
     expect(keeperThreads.value.sangsu?.[0]?.text).toBe(reply)
     expect(keeperThreads.value.sangsu?.[0]?.blocks).toEqual([block])
   })
+  it('releases canonical body authority when a checkpoint continues into a new attempt', () => {
+    mergeServerHistoryEntries('sangsu', chatHistoryEntriesFromRest('sangsu', [{ id: 'reply-1', role: 'assistant',
+      content: '', ts: 1, blocks: [{ t: 'status', kind: 'continuation_checkpoint' }] }]))
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_CONTINUATION_CHECKPOINT',
+      value: { message: 'checkpoint', request_id: 'request-1' } })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_STARTED' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: null })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_REPLY_DETAILS',
+      value: { reply: 'new answer', turn_ref: 'turn-1', turn_outcome: 'visible_reply' } })
+    expect(keeperThreads.value.sangsu?.[0]).toMatchObject({ text: 'new answer', blocks: [{ t: 'p', html: 'new answer' }] })
+  })
   it('preserves visible reply whitespace and SKILL-prefixed prose across deltas', () => {
     assistantEntry()
     const chunks = ['    ', '첫 줄', '\n', 'SKILL', '.md 설명', '\n\n\n', '끝  ', '\n\n']

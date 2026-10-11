@@ -731,7 +731,7 @@ let adapter_loop_with_transport
     | Agent_core_stream_connected
     | Agent_core_stream_message_start _
     | Agent_core_stream_message_delta _
-    | Agent_core_stream_message_stop
+    | Agent_core_stream_message_stop _
     | Agent_core_stream_ping
     | Agent_core_content_block_start _
     | Model_content_activity _

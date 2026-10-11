@@ -175,8 +175,9 @@ let project ~timestamp ~redact_text state event =
            @ json_opt "usage" (Option.map delta_usage_to_json usage))
       in
       state, Some (custom ~timestamp state Stream_message_delta value)
-  | Agent_core_stream_message_stop ->
-      state, Some (custom ~timestamp state Stream_message_stop `Null)
+  | Agent_core_stream_message_stop owner ->
+      state, Some (custom ~timestamp state Stream_message_stop
+        (match owner with None -> `Null | Some owner -> response_identity_to_json owner))
   | Agent_core_stream_ping ->
       state, Some (custom ~timestamp state Stream_ping `Null)
   | Agent_core_content_block_start

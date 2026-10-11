@@ -235,7 +235,8 @@ let keeper_chat_event_to_json event =
             (fun reason -> `String (Agent_core.Types.stop_reason_to_string reason))
             stop_reason)
        @ json_opt "usage" (Option.map delta_usage_to_json usage))
-  | Agent_core_stream_message_stop -> type_tag "agent_core_stream_message_stop" []
+  | Agent_core_stream_message_stop owner -> type_tag "agent_core_stream_message_stop"
+      (json_opt "response" (Option.map response_identity_to_json owner))
   | Agent_core_stream_ping -> type_tag "agent_core_stream_ping" []
   | Agent_core_content_block_start { index; content_type; tool_call_id; tool_call_name }
     ->
@@ -462,7 +463,15 @@ let keeper_chat_event_of_json json =
                Option.map Agent_core.Types.stop_reason_of_string stop_reason_raw
            ; usage
            })
-    | "agent_core_stream_message_stop" -> Ok Agent_core_stream_message_stop
+    | "agent_core_stream_message_stop" ->
+      let* owner = match json with
+        | `Assoc fields ->
+          (match List.filter (fun (key, _) -> key = "response") fields with
+           | [] -> Ok None
+           | [(_, value)] -> Result.map (fun owner -> Some owner) (response_identity_of_json value)
+           | _ -> Error "message stop has duplicate response identity")
+        | _ -> Error "message stop must be an object" in
+      Ok (Agent_core_stream_message_stop owner)
     | "agent_core_stream_ping" -> Ok Agent_core_stream_ping
     | "agent_core_content_block_start" ->
       Ok

@@ -809,7 +809,7 @@ let known_custom_names =
 
 let null_custom_names =
   [ "KEEPER_CONNECTED"
-  ; "KEEPER_STREAM_MESSAGE_STOP"; "KEEPER_STREAM_PING"
+  ; "KEEPER_STREAM_PING"
   ]
 
 let validate_custom_value ~name value =
@@ -819,6 +819,12 @@ let validate_custom_value ~name value =
     Masc.Keeper_chat_events.model_content_activity_of_json value
     |> Result.map (fun _ -> ())
     |> Result.map_error (fun detail -> Malformed_event detail)
+  else if String.equal name "KEEPER_STREAM_MESSAGE_STOP" then
+    (match value with
+     | `Null -> Ok ()
+     | json -> Masc.Keeper_chat_events.response_identity_of_json json
+       |> Result.map (fun _ -> ())
+       |> Result.map_error (fun detail -> Malformed_event detail))
   else if String.equal name "KEEPER_RUNTIME_ATTEMPT_STARTED" then
     match value with
     | `Null -> Ok ()

@@ -941,7 +941,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
   | MessageStop ->
       (match bridge_state.stream_phase with
        | Message_stopped ->
-         { bridge_state; chat_events = [ Agent_core_stream_message_stop ] }
+         { bridge_state; chat_events = [ Agent_core_stream_message_stop (Some { response_generation = bridge_state.content_generation; response_scope = stream_scope }) ] }
        | Accepting_content | Stop_reason_seen _ ->
          let closed = close_open_content_blocks ~redact_text ~base_dir bridge_state in
          { bridge_state =
@@ -953,7 +953,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
              ; last_completed_stream_scope = bridge_state.current_stream_scope
              ; message_open = false
              }
-         ; chat_events = closed.chat_events @ [ Agent_core_stream_message_stop ]
+         ; chat_events = closed.chat_events @ [ Agent_core_stream_message_stop (Some { response_generation = bridge_state.content_generation; response_scope = stream_scope }) ]
          })
   | Ping ->
       { bridge_state; chat_events = [ Agent_core_stream_ping ] }

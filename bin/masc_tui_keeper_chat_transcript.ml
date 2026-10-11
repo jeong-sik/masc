@@ -1615,9 +1615,16 @@ let apply_delta ~now t (delta : Live.delta) =
       end
       end
   | Live.Model_content_activity activity -> apply_model_content ~now t activity
-  | Live.Stream_model_stopped ->
-      retire_model_content t;
-      t.model_signal <- Some Model_response_ended
+  | Live.Stream_model_stopped owner ->
+      let owns_current_response = match owner, t.response_scope with
+        | Some owner, Some {rs_generation = Some generation; rs_scope} ->
+            owner.response_generation = generation && owner.response_scope = rs_scope
+        | None, _ -> t.admitted_response_owner = None
+        | Some _, None | Some _, Some {rs_generation = None; _} -> false in
+      if owns_current_response then begin
+        retire_model_content t;
+        t.model_signal <- Some Model_response_ended
+      end
   | Live.Stream_details { usage; stop_reason; stream_scope } ->
       (* A retained detail can be the first surviving event of a response.
          Its scope retires prior counters before sparse fields are merged. *)

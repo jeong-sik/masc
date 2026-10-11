@@ -473,8 +473,8 @@ function parseMcpListResponse(raw: string): McpListResponse {
   return parseMcpJsonText(payload) as McpListResponse
 }
 
-async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
-  const binding = await ensureBinding()
+async function listMcpTools(binding: McpRequestBinding, cursor?: string): Promise<McpToolsListResult> {
+  assertBinding(binding)
   const text = await mcpPost({
     jsonrpc: '2.0',
     method: 'tools/list',
@@ -507,12 +507,14 @@ async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
    Seen cursors decide it directly: a cursor that repeats means the server has
    not advanced, and that is the error. */
 export async function listAllMcpTools(): Promise<McpToolsListResult['tools']> {
+  const binding = await ensureBinding()
   const all: McpToolsListResult['tools'] = []
   const seenCursors = new Set<string>()
   let cursor: string | undefined
   let pages = 0
   do {
-    const page = await listMcpTools(cursor)
+    const page = await listMcpTools(binding, cursor)
+    assertBinding(binding)
     all.push(...page.tools)
     cursor = page.nextCursor
     pages++
@@ -525,6 +527,7 @@ export async function listAllMcpTools(): Promise<McpToolsListResult['tools']> {
       seenCursors.add(cursor)
     }
   } while (cursor)
+  assertBinding(binding)
   return all
 }
 

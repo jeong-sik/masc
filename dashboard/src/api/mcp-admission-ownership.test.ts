@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { callMcpTool, resetMcpClientState } from './mcp'
+import { callMcpTool, listAllMcpTools, resetMcpClientState } from './mcp'
 import { clearStoredToken, getStoredToken, setStoredToken, subscribeStoredTokenChanges } from './core'
 import { devTokenBootstrapStatus, ensureDevToken, resetDevTokenBootstrap } from './dev-token'
 vi.mock('../components/common/toast', () => ({ showActionToast: vi.fn() }))
@@ -271,5 +271,28 @@ it('aborts a request waiting for headers when its credential owner changes', asy
   } finally {
     if (!signal.aborted) finish(toolResponse())
     await pending
+  }
+})
+
+it.each([true, false])('rejects credential replacement after page decode (has next page: %s)', async (hasNextPage) => {
+  setStoredToken('synthetic-page-owner-a')
+  const first = JSON.stringify({ result: { tools: [{ name: 'owner-a-tool', inputSchema: {} }], ...(hasNextPage ? { nextCursor: 'owner-a-cursor' } : {}) } })
+  const second = JSON.stringify({ result: { tools: [{ name: 'owner-b-tool', inputSchema: {} }] } })
+  fetchMock.mockResolvedValueOnce(new Response(first)).mockResolvedValueOnce(new Response(second))
+  const parse = JSON.parse
+  // Schedule an external credential change after the first actual page decode,
+  // before the aggregate continues to its next page admission.
+  const decode = vi.spyOn(JSON, 'parse').mockImplementation((text, reviver) => {
+    const result = parse(text, reviver)
+    if (text === first) queueMicrotask(() => setStoredToken('synthetic-page-owner-b'))
+    return result
+  })
+  try {
+    const outcome = await Promise.allSettled([listAllMcpTools()])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(outcome[0].status).toBe('rejected')
+    if (outcome[0].status === 'rejected') expect(outcome[0].reason.message).toBe('MCP authentication changed during request')
+  } finally {
+    decode.mockRestore()
   }
 })

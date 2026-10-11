@@ -4,7 +4,7 @@ module Read = Masc.Keeper_child_content_read
 
 type error = Transport of string | Http_refused of int | Invalid_json of string
   | Invalid_response of Read.decode_error | Service of Read.failure
-  | Persistence of Read.receiver * Read.error_code | Receiver_read of Read.receiver * error
+  | Persistence of Read.receiver * Read.error_code | Receiver_read of Read.receiver * string * error
   | History_rewritten of Read.receiver * string
 (** History rewrite includes same-incarnation rollback or changed prior immutable
     correlations/timestamp. Only human text/model may change on a full Audit. *)
@@ -24,6 +24,8 @@ val records : store -> Read.record list
 (** Ordered immutable observations, memoized per history snapshot. Suffix
     admission does not traverse or copy the retained prefix. *)
 val errors : t -> error list
+(** Record-read failures carry the advertised store incarnation, including when
+    no page has been admitted. Inventory failures have no store identity. *)
 val diagnostics : t -> string list
 val error_text : error -> string
 val read : mode:read_mode -> keeper_name:string ->

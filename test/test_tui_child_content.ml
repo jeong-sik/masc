@@ -206,7 +206,30 @@ let test_bad_pages_and_guarded_fetch_keep_cache () =
     ~fetch:(fun _ -> fail "foreign Keeper request must refuse before fetch") with
    | Error (Consumer.Invalid_response Read.Scope_mismatch) -> () | _ -> fail "foreign Keeper cache reused")
 
+let test_failed_store_incarnations_remain_distinct () =
+  let first=initial () in
+  let old_failed,_=read Consumer.Poll first [receiver,Ok ("store /&+%",2)]
+    (fun _ -> Error "read unavailable") in
+  let both_failed,_=read Consumer.Poll old_failed [receiver,Ok ("replacement",1)]
+    (fun _ -> Error "read unavailable") in
+  let incarnations=List.map (function
+    | Consumer.Receiver_read (owner,store_id,Consumer.Transport _) ->
+        check bool "failure retains exact receiver" true (owner=receiver);store_id
+    | _ -> fail "expected scoped record-read failure") (Consumer.errors both_failed) in
+  check (list string) "old and replacement failures have distinct incarnations"
+    ["store /&+%";"replacement"] incarnations;
+  check int "failed replacement cannot erase old received content" 1 (records_count both_failed);
+  let recovered,_=read Consumer.Audit both_failed [receiver,Ok ("replacement",1)]
+    (fun _ -> Ok (200,json (page "replacement" 1 [row 1 (observation "replacement-content")]))) in
+  (match Consumer.errors recovered with
+   | [Consumer.Receiver_read (owner,store_id,Consumer.Transport _)] ->
+       check bool "old failure owner retained" true (owner=receiver);
+       check string "only recovered incarnation clears" "store /&+%" store_id
+   | _ -> fail "replacement recovery cleared unrelated incarnation evidence");
+  check int "both received histories preserved" 2 (records_count recovered)
+
 let ()=run "Child immutable snapshot reader" ["read",[
+  test_case "failed store incarnations remain distinct" `Quick test_failed_store_incarnations_remain_distinct;
   test_case "snapshots, opaque suffix and idle identity" `Quick test_snapshots_suffix_identity_and_idle;
   test_case "newer audited receipt and same trigger do not repeat scans" `Quick test_newer_receipt_does_not_repeat_full_reads;
   test_case "cross-page composite and independent actual clients" `Quick test_cross_page_duplicate_and_receiver_failure;

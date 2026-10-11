@@ -76,7 +76,8 @@ type delta =
       (** New resolved-runtime attempt: discard unfinished text/thinking from
           the prior attempt while retaining tool evidence. *)
   | Stream_model_started of
-      { message_id : string option
+      { generation : int option
+      ; message_id : string option
       ; stream_scope : int option
       ; model : string
       ; usage : stream_usage option

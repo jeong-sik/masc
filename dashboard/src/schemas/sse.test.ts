@@ -878,6 +878,24 @@ describe('SSEMessageSchema', () => {
     }
   })
 
+  it('preserves supplied response generation and rejects malformed generation', () => {
+    const event = (content_generation: unknown) => ({
+      type: 'keeper_chat_operation_event', name: 'fixture', operation_id: 'operation',
+      ag_ui_event: {
+        type: 'CUSTOM', threadId: 'fixture', runId: 'run',
+        name: 'KEEPER_STREAM_MESSAGE_START',
+        value: { content_generation, stream_scope: 4, provider_message_id: 'message', model: 'model' },
+        timestamp: 1_712_000_000,
+      },
+    })
+    const parsed = SSEMessageSchema.safeParse(event(7))
+    expect(parsed.success).toBe(true)
+    if (parsed.success) expect(parsed.data).toMatchObject({ ag_ui_event: { value: { content_generation: 7 } } })
+    for (const generation of [null, -1, 0.5, '7', Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(SSEMessageSchema.safeParse(event(generation)).success).toBe(false)
+    }
+  })
+
   it.each(['KEEPER_STREAM_MESSAGE_START', 'KEEPER_STREAM_MESSAGE_DELTA'])(
     'retains a response identity on %s frames and rejects invalid identities', name => {
       const event = (stream_scope: unknown) => ({

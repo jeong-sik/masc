@@ -96,7 +96,8 @@ type keeper_chat_event =
       ; attempt_index : int option
       }
   | Agent_core_stream_message_start of
-      { stream_scope : int
+      { content_generation : int option
+      ; stream_scope : int
       ; provider_message_id : string
       ; model : string
       ; usage : Agent_core.Types.api_usage option

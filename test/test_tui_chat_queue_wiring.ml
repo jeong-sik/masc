@@ -2282,7 +2282,7 @@ let test_skill_evidence_stands_for_a_read_the_trail_missed () =
   in
   let log =
     settled_log ~request_id:"op-1"
-      [ Live.Run_started; Live.Stream_model_started {usage = None; message_id = None;  stream_scope = Some 1; model = "observed" }
+      [ Live.Run_started; Live.Stream_model_started { generation=None;usage = None; message_id = None;  stream_scope = Some 1; model = "observed" }
       ; Live.Text {text="done"; stream_scope=None}
       ; Live.Stream_details { stream_scope = Some 1; usage = None; stop_reason = Some EndTurn }
       ; visible_reply "done"; Live.Run_finished ]

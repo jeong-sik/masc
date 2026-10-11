@@ -4,14 +4,15 @@ module Read = Masc.Keeper_child_content_read
 
 type error = Transport of string | Http_refused of int | Invalid_json of string
   | Invalid_response of Read.decode_error | Service of Read.failure
-  | Persistence of Read.receiver * Read.error_code | Receiver_read of Read.receiver * error
+  | Persistence of Read.receiver * Read.error_code | Receiver_read of Read.receiver * string * error
   | History_rewritten of Read.receiver * string
 (** History rewrite includes same-incarnation rollback or changed prior immutable
     correlations/timestamp. Only human text/model may change on a full Audit. *)
 type read_mode = Poll | Audit
+type history
 type store = private
   { receiver : Read.receiver; store_id : string; cursor : Read.cursor option
-  ; records : Read.record list; error : error option; attempted : Read.cursor option
+  ; history : history; error : error option; attempted : Read.cursor option
   ; cleanup_failures : string list; coverage : Read.coverage }
 (** Ordered snapshots; never Task-folded or merged by provider envelope UUID.
     Old disappeared/incarnation histories retain last-observed redaction only. *)
@@ -19,8 +20,16 @@ type t
 val empty : t
 val failed : t -> error -> t
 val stores : t -> store list
+val records : store -> Read.record list
+(** Ordered immutable observations, memoized per history snapshot. Suffix
+    admission does not traverse or copy the retained prefix. *)
 val errors : t -> error list
+(** Record-read failures carry the advertised store incarnation, including when
+    no page has been admitted. Inventory failures have no store identity. *)
 val diagnostics : t -> string list
+(** Cleanup evidence from an exact-scope/incarnation validated page survives a
+    subsequent frontier or history rejection. Foreign or malformed pages cannot
+    supply diagnostics. A successfully admitted page refreshes that evidence. *)
 val error_text : error -> string
 val read : mode:read_mode -> keeper_name:string ->
   fetch:(string -> (int * string,string) result) -> previous:t -> (t,error) result

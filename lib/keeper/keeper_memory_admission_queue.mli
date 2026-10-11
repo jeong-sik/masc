@@ -25,7 +25,11 @@ val append :
   keepers_dir:string -> keeper_id:string -> request_id:string ->
   Keeper_memory_os_types.fact -> (candidate, string) result
 (** Atomic pending append. Retrying an identity still pending returns the same
-    candidate only if the entire fact matches. It never writes current Memory. *)
+    candidate only if the entire fact matches. It never writes current Memory.
+    An append whose serialized queue would exceed the pending byte cap
+    (MASC_KEEPER_MEMORY_OS_PENDING_MAX_BYTES, default 16 MiB) is refused
+    before any write: the durable pending input is unchanged, and a drain
+    that acknowledges committed candidates makes room for a later retry. *)
 
 val read_pending :
   keepers_dir:string -> keeper_id:string -> (batch option, string) result

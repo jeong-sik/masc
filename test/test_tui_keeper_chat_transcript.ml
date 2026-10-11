@@ -1543,7 +1543,7 @@ let test_scoped_reasoning_retires_previous_response_metadata () =
   let usage : Live.stream_usage = {input_tokens=Some 7; output_tokens=Some 9;
     cache_read_input_tokens=None; cache_creation_input_tokens=None} in
   feed t [Live.Run_started;
-    Live.Stream_model_started { generation=None;stream_scope=Some 1;message_id=None;model="first";usage=Some usage};
+    Live.Stream_model_started { generation=Some 0;stream_scope=Some 1;message_id=None;model="first";usage=Some usage};
     Live.Stream_details {stream_scope=Some 1;usage=None;stop_reason=Some Agent_core.Types.StopToolUse};
     activity 1];
   check (option string) "same scoped activity retains supplied model" (Some "first")
@@ -1557,16 +1557,97 @@ let test_scoped_reasoning_retires_previous_response_metadata () =
   check bool "missing new start does not inherit old stop reason" true (metadata.stop_reason=None);
   check string "metadata retirement preserves authored reasoning" "new supplied reasoning"
     (Transcript.thinking t);
-  feed t [Live.Stream_model_started { generation=None;stream_scope=Some 2;message_id=None;model="second";usage=None}];
+  feed t [Live.Stream_model_started { generation=Some 0;stream_scope=Some 2;message_id=None;model="second";usage=None}];
   feed t [activity 1];
   check (option string) "older activity cannot erase newly supplied model" (Some "second")
     (Transcript.response_metadata t).model;
-  feed t [Live.Stream_model_started { generation=None;stream_scope=Some 4;message_id=None;model="fresh";usage=Some usage};
+  feed t [Live.Stream_model_started { generation=Some 0;stream_scope=Some 4;message_id=None;model="fresh";usage=Some usage};
     activity 3];
   check (option string) "intermediate delayed content cannot erase newer model" (Some "fresh")
     (Transcript.response_metadata t).model;
   check bool "intermediate delayed content cannot erase newer usage" true
     ((Transcript.response_metadata t).usage=Some usage)
+
+let test_response_generation_owns_content_activity () =
+  let t = fresh () in
+  let start generation scope model = Live.Stream_model_started {
+    generation=Some generation;stream_scope=Some scope;message_id=None;model;usage=None} in
+  let activity generation scope channel state = Live.Model_content_activity {
+    Masc.Keeper_chat_events.content_generation=generation;content_scope=scope;
+    content_index=1;content_provider_message_id=None;channel;state} in
+  let observe generation scope channel = activity generation scope channel Masc.Keeper_chat_events.Content_observed in
+  feed t [Live.Run_started;start 0 1 "first";observe 0 1 Masc.Keeper_chat_events.Model_thinking;
+    start 0 3 "third";observe 0 2 Masc.Keeper_chat_events.Model_thinking;
+    activity 0 2 Masc.Keeper_chat_events.Model_thinking Masc.Keeper_chat_events.Content_ended];
+  check bool "intermediate delayed activity cannot own a newer response" true
+    (Transcript.model_activity t=Some Transcript.Activity_model_started);
+  check bool "header owns its explicit generation and scope" true
+    ((Transcript.response_metadata t).owner=Some (0,3));
+  feed t [observe 0 3 Masc.Keeper_chat_events.Model_thinking;start 1 1 "new generation";
+    observe 0 4 Masc.Keeper_chat_events.Model_text];
+  check bool "old generation with higher numeric scope is rejected" true
+    (Transcript.model_activity t=Some Transcript.Activity_model_started);
+  feed t [observe 1 1 Masc.Keeper_chat_events.Model_text];
+  check bool "new generation can reuse a smaller scope" true
+    (Transcript.model_activity t=Some Transcript.Activity_answering);
+  feed t [activity 1 1 Masc.Keeper_chat_events.Model_text Masc.Keeper_chat_events.Content_ended];
+  check bool "reused scope's legitimate end remains admitted" true
+    (Transcript.model_activity t=Some Transcript.Activity_content_ended);
+  feed t [observe 1 2 Masc.Keeper_chat_events.Model_thinking];
+  check (option string) "missing newer start retires old metadata across the scoped owner" None
+    (Transcript.response_metadata t).model;
+  feed t [start 1 2 "late supplied";start 0 99 "stale supplied"];
+  check bool "late matching header preserves supplied activity" true
+    (Transcript.model_activity t=Some Transcript.Activity_reasoning);
+  check (option string) "old generation header cannot replace a newer supplied model" (Some "late supplied")
+    (Transcript.response_metadata t).model
+
+let test_unknown_header_cannot_weaken_known_content_owner () =
+  let t=fresh () in
+  let start generation scope model = Live.Stream_model_started {
+    generation;stream_scope=scope;message_id=None;model;usage=None} in
+  let content generation scope = Live.Model_content_activity {
+    Masc.Keeper_chat_events.content_generation=generation;content_scope=scope;
+    content_index=0;content_provider_message_id=None;channel=Model_text;state=Content_observed} in
+  feed t [Live.Run_started;start (Some 2) (Some 3) "owned";content 2 3;
+    start None (Some 3) "unknown";start None None "fully unknown";
+    start (Some 1) (Some 99) "stale"];
+  check bool "unknown header retains known admission owner" true
+    ((Transcript.response_metadata t).owner=Some (2,3));
+  check (option string) "unknown or stale header cannot replace owned model" (Some "owned")
+    (Transcript.response_metadata t).model;
+  let partial=fresh () in
+  feed partial [Live.Run_started;start None (Some 5) "unbound";content 1 1];
+  check bool "explicit content provides its own owner" true
+    ((Transcript.response_metadata partial).owner=Some (1,1));
+  check (option string) "unbound model cannot be attributed to explicit content" None
+    (Transcript.response_metadata partial).model
+
+let test_partial_response_facts_cannot_erase_admission_owner () =
+  let start generation scope model usage = Live.Stream_model_started {
+    generation;stream_scope=Some scope;message_id=None;model;usage} in
+  let content generation scope = Live.Model_content_activity {
+    Masc.Keeper_chat_events.content_generation=generation;content_scope=scope;
+    content_index=0;content_provider_message_id=None;channel=Model_thinking;state=Content_observed} in
+  List.iter (fun partial ->
+    let t=fresh () in
+    feed t [Live.Run_started;start (Some 2) 3 "owned" None;content 2 3;partial];
+    let signal=Transcript.model_activity t and metadata=Transcript.response_metadata t in
+    feed t [start (Some 1) 99 "stale" None;content 1 99];
+    check bool "partial facts cannot reopen older generation admission" true
+      (Transcript.model_activity t=signal && Transcript.response_metadata t=metadata);
+    feed t [start (Some 2) 4 "current" None];
+    check bool "later explicit current owner remains admissible" true
+      ((Transcript.response_metadata t).owner=Some (2,4)))
+    [Live.Text {text="partial scoped bytes";stream_scope=Some 4};
+     Live.Stream_details {stream_scope=Some 4;usage=None;stop_reason=None}];
+  let t=fresh () in
+  let old_usage : Live.stream_usage = {input_tokens=Some 7;output_tokens=None;
+    cache_read_input_tokens=None;cache_creation_input_tokens=None} in
+  feed t [Live.Run_started;start None 1 "unbound" (Some old_usage);
+    start (Some 1) 1 "explicit" None];
+  check bool "explicit header cannot inherit unbound counters" true
+    ((Transcript.response_metadata t).usage=None)
 
 let test_current_attempt_metadata_keeps_observed_activity () =
   let t = fresh () in
@@ -2551,6 +2632,12 @@ let () =
             test_the_whole_reasoning_trail_is_kept
         ; test_case "runtime attempt restarts the per-attempt totals" `Quick
             test_runtime_attempt_restarts_the_per_attempt_totals
+        ; test_case "partial response facts cannot erase admission owner" `Quick
+            test_partial_response_facts_cannot_erase_admission_owner
+        ; test_case "unknown header cannot weaken known content owner" `Quick
+            test_unknown_header_cannot_weaken_known_content_owner
+        ; test_case "response generation owns content activity" `Quick
+            test_response_generation_owns_content_activity
         ; test_case "scoped reasoning retires previous response metadata" `Quick
             test_scoped_reasoning_retires_previous_response_metadata
         ; test_case "runtime attempt keeps the earlier attempt superseded" `Quick

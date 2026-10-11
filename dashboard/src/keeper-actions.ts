@@ -1,5 +1,6 @@
+import { initialKeeperResponseState, reduceKeeperResponse } from './lib/keeper-response-state'
 import { keeperStreamContract } from './keeper-stream-contract'
-import { keeperResponseIsFailed } from './lib/keeper-response-state'
+import { keeperResponseIsFailed, keeperResponseIsTerminal } from './lib/keeper-response-state'
 import {
   newKeeperChatOperationId,
   operationDeliveryProvenance,
@@ -505,7 +506,7 @@ function hasCanonicalOperationTurn(
   return hasUser && hasAssistant
 }
 
-async function reconcileStreamFailureFromServerHistory(
+async function reconcileOperationFromServerHistory(
   keeperName: string,
   operationId: string,
   localUserId: string,
@@ -677,7 +678,6 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
         await sleep(PENDING_KEEPER_CHAT_POLL_MS)
         continue
       }
-      await hydrateKeeperChatHistory(request.keeperName, { force: true })
       const isCancelled = operation.state.kind === 'cancelled'
       const failure = operation.state.kind === 'failed' ? operation.state : null
       const interrupted =
@@ -701,46 +701,49 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
         }),
       })
       const assistantStillLocal = (keeperThreads.value[request.keeperName] ?? [])
-        .some(entry => entry.id === assistantId)
-      const localAssistant = (keeperThreads.value[request.keeperName] ?? [])
         .find(entry => entry.id === assistantId)
-      if (assistantStillLocal && !isCancelled && !failure && keeperResponseIsFailed(localAssistant?.responseState)) {
-        // The server finished the operation, but this copy lost a frame and
-        // the stored transcript could not replace it. Keep the recorded
-        // failure and the partial text instead of showing a delivered reply.
-        const incomplete = localAssistant?.error ?? INCOMPLETE_KEEPER_REPLY_MESSAGE
+      if (assistantStillLocal) {
+        // The server finished the operation, but a response whose stream
+        // dropped a frame is incomplete and the stored transcript could not
+        // replace it: keep the recorded failure instead of a delivered reply.
+        const incomplete = !isCancelled && !failure && keeperResponseIsFailed(assistantStillLocal.responseState)
+        const incompleteReason = assistantStillLocal.error ?? INCOMPLETE_KEEPER_REPLY_MESSAGE
         finalizeAssistantEntry(request.keeperName, assistantId, {
-          delivery: 'error',
+          responseState: reduceKeeperResponse(assistantStillLocal.responseState ?? initialKeeperResponseState, { kind: 'terminal' }).state,
+          delivery: incomplete ? 'error' : assistantDelivery,
           streamState: null,
-          error: incomplete,
-          streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
-            requestId: request.operationId,
-            reason: incomplete,
-          }),
-        })
-        setRecordValue(keeperActionErrors, request.keeperName, incomplete)
-      } else if (assistantStillLocal) {
-        const terminalText = isCancelled ? 'Cancelled' : errorMessage ?? ''
-        finalizeAssistantEntry(request.keeperName, assistantId, {
-          text: terminalText,
-          rawText: terminalText,
-          delivery: assistantDelivery,
-          streamState: null,
-          timestamp: new Date().toISOString(),
-          error: errorMessage,
+          error: incomplete ? incompleteReason : errorMessage,
           streamContract: keeperStreamContract('client_operation_lookup', 'client_operation_terminal', {
             requestId: request.operationId,
-            reason: errorMessage,
+            reason: incomplete ? incompleteReason : errorMessage,
           }),
         })
+        if (incomplete) setRecordValue(keeperActionErrors, request.keeperName, incompleteReason)
       }
       if (errorMessage) setRecordValue(keeperActionErrors, request.keeperName, errorMessage)
-      removeTrackedKeeperChatOperation(request.operationId)
+      persistTrackedOperationAssistantDraft(request.keeperName, request.operationId, assistantId)
+      try {
+        const canonical = await reconcileOperationFromServerHistory(
+          request.keeperName, request.operationId, operationUserEntryId(request.operationId), assistantId,
+        )
+        if (canonical) removeTrackedKeeperChatOperation(request.operationId)
+      } catch (historyError) {
+        // A missing observation cannot revoke the authoritative terminal receipt.
+        const detail = historyError instanceof Error ? historyError.message : 'Chat history unavailable'
+        setRecordValue(keeperChatHistoryErrors, request.keeperName, `이전 대화 불러오기 실패: ${detail}`)
+      }
       return
     }
   } catch (err) {
+    const current = (keeperThreads.value[request.keeperName] ?? []).find(entry => entry.id === assistantId)
+    if (keeperResponseIsTerminal(current?.responseState)) {
+      // A lookup observation cannot revoke a receipt already restored/applied.
+      const detail = err instanceof Error ? err.message : 'Operation lookup unavailable'
+      setRecordValue(keeperActionErrors, request.keeperName, detail)
+      persistTrackedOperationAssistantDraft(request.keeperName, request.operationId, assistantId)
+      return
+    }
     if (isUnknownKeeperChatOperationError(err)) {
-      removeTrackedKeeperChatOperation(request.operationId)
       finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
         delivery: 'error',
         error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
@@ -750,17 +753,15 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
         }),
       })
       finalizeAssistantEntry(request.keeperName, assistantId, {
-        text: '',
-        rawText: '',
         delivery: 'error',
         streamState: null,
-        timestamp: new Date().toISOString(),
         error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
         streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
           requestId: request.operationId,
           reason: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
         }),
       })
+      persistTrackedOperationAssistantDraft(request.keeperName, request.operationId, assistantId)
       setRecordValue(keeperActionErrors, request.keeperName, QUEUED_KEEPER_REQUEST_LOST_MESSAGE)
       await hydrateKeeperChatHistory(request.keeperName, { force: true })
       return
@@ -777,17 +778,15 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
       }),
     })
     finalizeAssistantEntry(request.keeperName, assistantId, {
-      text: '',
-      rawText: '',
       delivery: 'error',
       streamState: null,
-      timestamp: new Date().toISOString(),
       error: message,
       streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
         requestId: request.operationId,
         reason: message,
       }),
     })
+    persistTrackedOperationAssistantDraft(request.keeperName, request.operationId, assistantId)
     setRecordValue(keeperActionErrors, request.keeperName, message)
     await hydrateKeeperChatHistory(request.keeperName, { force: true })
   } finally {
@@ -1349,7 +1348,7 @@ export async function sendKeeperThreadMessage(
       }),
     })
     try {
-      const reconciled = await reconcileStreamFailureFromServerHistory(
+      const reconciled = await reconcileOperationFromServerHistory(
         keeperName,
         operationId,
         localId,

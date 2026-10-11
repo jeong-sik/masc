@@ -5895,6 +5895,30 @@ let test_interrupted_native_progress_survives_results_projection () =
            quarantined_occurrence=Some occurrence;detail="invalid correlated native event"})])
 ;;
 
+(* A preview landing moves the height of rows with links and changes nothing in
+   an entry, so the entries are kept and only the list is new. *)
+let test_a_landed_preview_keeps_the_entries () =
+  let module Preview = Masc_tui_link_preview in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let url = "https://github.com/jeong-sik/masc/pull/37633" in
+  let plain = { (entry_at 41.0) with me_text = "no link here" } in
+  let linked = { (entry_at 42.0) with me_text = url } in
+  let messages = [ plain; linked ] in
+  let entries () =
+    Masc_tui_render_chat.keeper_message_layout_entries ~messages state
+      ~keeper_name:"alpha" ~chat_cols:120
+  in
+  let before = entries () in
+  check bool "unchanged metadata reuses the list" true (before == entries ());
+  let preview = Preview.get_preview url in
+  Preview.cache_store { preview with title = Some "A landed preview" };
+  let after = entries () in
+  check bool "the list is new, so row counts are asked again" false (before == after);
+  check int "same number of entries" (List.length before) (List.length after);
+  List.iter2
+    (fun b a -> check bool "each entry is the one built before" true (b == a))
+    before after
+
 let () =
   run
     "tui_chat_queue_wiring"
@@ -5928,7 +5952,7 @@ let () =
         ; test_case "Fusion workspace withdrawal" `Quick test_fusion_workspace_withdrawal
         ; test_case "priority completions survive controls" `Quick test_priority_completion_survives_controls
         ; test_case "status details and fold counts reach the frame" `Quick test_status_details_and_fold_counts_reach_the_frame ] )
-    ; ( "link card layout", [] )
+    ; ( "link card layout", [ test_case "a landed preview keeps the entries" `Quick test_a_landed_preview_keeps_the_entries ] )
     ; ( "wiring"
       , [ test_case "queue summary follows admission and execution" `Quick test_queue_summary_follows_admission_and_execution
         ; test_case "checkpoint watcher allows new input" `Quick test_checkpoint_watcher_allows_new_input

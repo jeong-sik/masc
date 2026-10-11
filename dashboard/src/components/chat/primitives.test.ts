@@ -180,7 +180,9 @@ describe('ChatTranscript', () => {
       render(html`<${ChatTranscript} entries=${[{ ...entry, autonomousJournalRecovery: null }]} emptyText="empty" />`, host)
       expect(host.querySelector('[role="status"]')).toBeNull()
       expect(host.textContent).toContain('canonical answer')
-      render(html`<${ChatTranscript} entries=${[entry, { ...entry, id: 'other-turn', turnRef: 'trace#10', autonomousJournalRecovery: null }]} emptyText="empty" />`, host)
+      render(html`<${ChatTranscript} entries=${[entry,
+        { ...entry, id: 'other-turn', turnRef: 'trace#10', autonomousJournalRecovery: null },
+        { ...entry, id: 'third-turn', turnRef: 'trace#11', autonomousJournalRecovery: null }]} emptyText="empty" />`, host)
       expect(host.querySelector('.chat-auto-run [role="status"]')?.textContent).toContain('활동 기록 누락 가능')
       expect(host.textContent).not.toContain('private transport diagnostic')
     } finally { render(null, host) }

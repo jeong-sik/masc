@@ -330,6 +330,52 @@ describe('streamKeeperMessage', () => {
     clearStoredToken()
   })
 
+  it('aborts a pending stream acquisition when its admitted authentication is replaced', async () => {
+    setStoredToken('fixture-old')
+    let rejectFetch!: (error: unknown) => void
+    let acquiredSignal: AbortSignal | null | undefined
+    vi.stubGlobal('fetch', vi.fn((_url, init: RequestInit) => {
+      acquiredSignal = init.signal
+      return new Promise<Response>((_resolve, reject) => { rejectFetch = reject })
+    }))
+    const caller = new AbortController()
+    const onEvent = vi.fn()
+    const stream = streamKeeperMessage('echo', 'input', { operationId: 'operation', signal: caller.signal, onEvent }).catch(error => error)
+    setStoredToken('fixture-new')
+    try {
+      expect(acquiredSignal?.aborted).toBe(true)
+      expect(caller.signal.aborted).toBe(false)
+    } finally {
+      rejectFetch(new DOMException('fixture cleanup', 'AbortError'))
+    }
+    expect(await stream).toBeInstanceOf(KeeperStreamAuthenticationSupersededError)
+    expect(onEvent).not.toHaveBeenCalled()
+    clearStoredToken()
+  })
+
+  it('propagates caller cancellation during pending acquisition without replacing it with authentication failure', async () => {
+    setStoredToken('fixture-current')
+    const caller = new AbortController()
+    const onEvent = vi.fn()
+    let acquiredSignal: AbortSignal | null | undefined
+    vi.stubGlobal('fetch', vi.fn((_url, init: RequestInit) => {
+      acquiredSignal = init.signal
+      return new Promise<Response>((_resolve, reject) => {
+        const cancel = () => reject(new DOMException('caller cancelled', 'AbortError'))
+        if (acquiredSignal?.aborted) cancel()
+        else acquiredSignal?.addEventListener('abort', cancel, { once: true })
+      })
+    }))
+    const stream = streamKeeperMessage('echo', 'input', {
+      operationId: 'operation', signal: caller.signal, onEvent,
+    }).catch(error => error)
+    caller.abort()
+    expect(acquiredSignal?.aborted).toBe(true)
+    expect(await stream).toMatchObject({ name: 'AbortError' })
+    expect(onEvent).not.toHaveBeenCalled()
+    clearStoredToken()
+  })
+
   it('does not deliver a streaming response acquired under replaced credentials', async () => {
     setStoredToken('fixture-old')
     let complete!: (response: Response) => void

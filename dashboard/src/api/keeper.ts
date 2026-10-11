@@ -560,15 +560,24 @@ export async function streamKeeperMessage(
     const headers = { ...jsonHeaders(), Accept: 'text/event-stream' }
     const admission: KeeperStreamAdmission = Object.freeze({ keeperName: name, operationId: exactOperationId,
       authRevision: currentStoredTokenRevision() })
-    onAdmission?.(admission)
-    assertCurrentKeeperStreamAdmission(admission)
+    const acquisitionController = new AbortController()
+    const requestSignal = signal
+      ? AbortSignal.any([signal, acquisitionController.signal])
+      : acquisitionController.signal
+    const releaseAcquisitionAuthListener = subscribeStoredTokenChanges(() => {
+      acquisitionController.abort()
+    })
     try {
-      const response = await fetch(streamPath, { method: 'POST', headers, body: requestBody, signal })
+      onAdmission?.(admission)
+      assertCurrentKeeperStreamAdmission(admission)
+      const response = await fetch(streamPath, { method: 'POST', headers, body: requestBody, signal: requestSignal })
       assertResponseAdmission(response, admission)
       return { response, admission }
     } catch (error) {
       assertCurrentKeeperStreamAdmission(admission)
       throw error
+    } finally {
+      releaseAcquisitionAuthListener()
     }
   }
 

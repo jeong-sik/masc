@@ -1,4 +1,4 @@
-import { sameKeeperResponseOwner, type KeeperResponseOwner, initialKeeperResponseState, reduceKeeperResponse, acknowledgeKeeperResponseSequence, type KeeperResponseDecision, type KeeperResponseEvent } from './lib/keeper-response-state'
+import { sameResponseObservation, sameKeeperResponseOwner, type KeeperResponseOwner, initialKeeperResponseState, reduceKeeperResponse, acknowledgeKeeperResponseSequence, type KeeperResponseDecision, type KeeperResponseEvent } from './lib/keeper-response-state'
 import { currentStoredTokenRevision } from './api/core'
 import { keeperStreamContract } from './keeper-stream-contract'
 import {
@@ -295,10 +295,15 @@ function flushPendingThinkingDeltas(
   const ownsTarget = (): boolean => ownsThinkingPublication(pending,
     (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId), currentStoredTokenRevision())
   const preserveActivity = (): void => {
-    if (!pending.authoritative && before) updateThreadEntry(keeperName, assistantEntryId, entry =>
-      ownsThinkingPublication(pending, entry, currentStoredTokenRevision())
+    if (!pending.authoritative && before) updateThreadEntry(keeperName, assistantEntryId, entry => {
+      const previous = before.responseState
+      const current = entry.responseState
+      const sameFrontier = previous === current || previous?.kind === 'known' && current?.kind === 'known'
+        && sameResponseObservation(previous, current)
+      return ownsThinkingPublication(pending, entry, currentStoredTokenRevision()) && sameFrontier
         ? { ...entry, streamState: before.streamState, delivery: before.delivery }
-        : entry)
+        : entry
+    })
   }
   if (mode === 'commit') pendingThinkingDeltas.delete(key)
   setAssistantThinkingSnapshot(keeperName, assistantEntryId, fullPendingThinkingText(pending), {

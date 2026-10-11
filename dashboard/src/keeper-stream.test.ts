@@ -1084,6 +1084,32 @@ describe('Keeper operation stream projection', () => {
     expect(entry.delivery).toBe('streaming')
   })
 
+  it('does not restore old activity after an observer advances the same producer response owner', () => {
+    assistantEntry('owned-operation')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'observed reasoning', response: { content_generation: 1, stream_scope: 0 } } },
+      { kind: 'operation', operationId: 'owned-operation', observationOnly: true })
+    let armed = true
+    const release = effect(() => {
+      const current = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+      if (armed && current?.traceSteps?.some(step => step.kind === 'think')) {
+        armed = false
+        untracked(() => applyKeeperStreamEvent('sangsu', 'reply-1', {
+          type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START',
+          value: { content_generation: 2, stream_scope: 1 },
+        }))
+      }
+    })
+    try {
+      _flushPendingKeeperStreamDeltasForTests()
+      const entry = requiredFixture(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1'))
+      expect(entry.responseState).toMatchObject({ current: { content_generation: 2, stream_scope: 1 } })
+      expect(entry.traceSteps).toMatchObject([{ kind: 'think', text: 'observed reasoning', responseOwner: { content_generation: 1, stream_scope: 0 } }])
+      expect(entry.delivery).toBe('streaming')
+      expect(entry.streamState).toBe('opening')
+    } finally { release() }
+  })
+
   it('projects queued acceptance without a receipt or queue revision', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

@@ -2612,6 +2612,11 @@ let test_terminal_reasoning_cannot_replace_response_state () =
     let activity = Transcript.model_activity t in
     let reply = Transcript.reply t in
     let thinking = Transcript.thinking t in
+    check (option string) "initial observed model exists" (Some "observed-model") metadata.model;
+    check (option (pair int int)) "initial metadata owner exists" (Some (1, 0)) metadata.owner;
+    check (option string) "initial committed reply exists" (Some "committed answer")
+      (Option.map (fun (reply : Transcript.reply) -> reply.reply_text) reply);
+    check string "initial reasoning exists" "observed reasoning" thinking;
     feed t [Live.Thinking { text="late newer reasoning";
       response=Some { Masc.Keeper_chat_events.response_generation=2; response_scope=1 } };
       Live.Thinking { text="late unowned reasoning"; response=None }];

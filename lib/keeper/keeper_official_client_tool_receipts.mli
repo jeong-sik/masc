@@ -32,8 +32,12 @@ val finish : t -> call_id:string -> unit
 
 val release : t -> unit
 (** The held blocks reached the stream. Delivers the receipts that waited
-    for them, in commit order; later receipts are delivered at commit. A
-    second call does nothing. A turn that ends before its message starts
+    for them, in commit order. Receipts committed while release is notifying
+    an observer queue behind already committed receipts; nested release calls
+    do nothing. Once drained, later receipts are delivered at commit.
+    If notification raises, the attempted receipt is not retried (delivery
+    is ambiguous); unattempted queued receipts remain held for a later release.
+    A second completed release does nothing. A turn that ends before its message starts
     never streams its held blocks, and their receipts are never delivered. *)
 
 val hooks : t -> Agent_core.Hooks.hooks -> Agent_core.Hooks.hooks

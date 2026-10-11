@@ -36,19 +36,23 @@ describe('autonomous journal recovery', () => {
     expect(parent).toMatchObject({ text: 'canonical answer', delivery: 'history', streamState: null,
       responseState: { current: latest }, traceSteps: [{ kind: 'progress', text: 'earlier speech' }, { kind: 'think', text: 'earlier reasoning' }] })
   })
-  it('keeps unowned historical reasoning observable without promoting owned final speech', () => {
-    mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
+  it.each([false, true])('keeps unowned reasoning observable without promoting owned final speech (history=%s)', history => {
+    if (history) mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
       turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null }])
     const owner = { content_generation: 1, stream_scope: 0 }
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, { ...base, type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: owner })
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 1, { ...base, type: 'TEXT_MESSAGE_CONTENT', delta: 'canonical answer', textResponse: owner })
+    const before = keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 2, { ...base, type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
       value: { index: 0, delta: 'unowned observed reasoning' } })
+    const observed = keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')
+    expect(observed).toMatchObject({ text: before?.text, delivery: before?.delivery, streamState: before?.streamState,
+      responseState: { current: owner } })
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 3, { ...base, type: 'RUN_FINISHED' })
     const parent = keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')
     expect(parent?.traceSteps?.filter(step => step.kind === 'progress')).toEqual([])
     expect(parent?.traceSteps?.filter(step => step.kind === 'think').map(step => step.text)).toContain('unowned observed reasoning')
-    expect(parent).toMatchObject({ text: 'canonical answer', delivery: 'history', streamState: null })
+    expect(parent).toMatchObject({ text: 'canonical answer', delivery: history ? 'history' : 'delivered', streamState: null })
   })
   it('keeps historical model and usage on the latest admitted response owner', () => {
     mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',

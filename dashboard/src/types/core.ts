@@ -1081,6 +1081,7 @@ export interface KeeperConversationEntry {
   streamState?: KeeperConversationStreamState
   responseState?: KeeperResponseState
   /** Accumulated historical thinking from this exact autonomous journal replay. */
+  autonomousSayingReplay?: Readonly<{ text: string; timestamp: number | undefined }>
   autonomousTraceBoundary?: number
   autonomousThinkingReplay?: readonly { readonly boundary: number | null; readonly index: number | undefined; readonly owner: import('../lib/keeper-response-state').KeeperResponseOwner | null; readonly text: string }[]
   streamContract?: KeeperConversationStreamContract | null

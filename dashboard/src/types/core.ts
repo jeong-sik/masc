@@ -1064,6 +1064,13 @@ export interface KeeperConversationEntry {
   toolCallId?: string | null
   // Live lifecycle state for selecting the current provider occurrence.
   toolCallEnded?: boolean
+  /** Server occurrence coordinates; row IDs and provider IDs are not ownership. */
+  toolOccurrence?:
+    | { readonly kind: 'identified'; readonly streamScope: number; readonly blockIndex: number }
+    | { readonly kind: 'conflicting'; readonly coordinates: readonly { readonly streamScope: number; readonly blockIndex: number }[] }
+  /** Explicit parent for an observation that carried no delivery identity. */
+  toolParentEntryId?: string
+  toolOccurrenceQuarantined?: true
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
   responseState?: KeeperResponseState

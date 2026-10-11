@@ -56,3 +56,18 @@ including for search and scroll measurements.
 
 These are source contracts. Parser-only checks and independent source review do
 not prove type checking, execution, installation, or visible terminal behavior.
+
+
+## Native Task read retirement
+
+Native Task observation reads use the same caller-owned read lifetime. Running
+slots retain their typed Poll/Audit mode. Retirement restores a running Audit to
+pending intent before releasing the slot; a Poll never becomes an Audit. An
+explicit Audit while server identity is unconfirmed records intent without
+starting HTTP. Workspace withdrawal still clears the intent and cached scope.
+
+Read eligibility depends on authenticated server read authority, independently
+of local attachment identity and whether a roster entry can accept a new
+message. Every HTTP boundary checks the original read epoch before and after
+request execution. Retired observation replies are rejected before cache or
+inflight mutation; they cannot release a successor slot.

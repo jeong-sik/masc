@@ -1503,11 +1503,12 @@ function mergeLocalAssistantObservations(
   const toolAuthorityUnavailable = [...exactLocalEntries, ...exactCanonicalEntries, historyEntry]
     .some(entry => entry.toolObservationAuthority === 'unavailable')
   const producerTraceBoundary = exactLocalEntries.find(entry => entry.producerTraceBoundary !== undefined)?.producerTraceBoundary
-  const producerSayingReplay = exactLocalEntries.find(entry => entry.producerSayingReplay)?.producerSayingReplay
+  const producerSayingReplay = responseState?.kind === 'known' && responseState.phase !== 'terminal'
+    ? exactLocalEntries.find(entry => entry.producerSayingReplay)?.producerSayingReplay : undefined
   const mergedHistory = { ...historyEntry,
     ...(exactLocalEntries.find(entry => entry.autonomousJournalRecovery)?.autonomousJournalRecovery
       ? { autonomousJournalRecovery: exactLocalEntries.find(entry => entry.autonomousJournalRecovery)!.autonomousJournalRecovery } : {}),
-    ...(producerSayingReplay ? { producerSayingReplay } : {}),
+    producerSayingReplay,
     ...(producerTraceBoundary !== undefined ? { producerTraceBoundary } : {}),
     ...(exactLocalEntries.find(entry => entry.autonomousThinkingReplay)?.autonomousThinkingReplay
       ? { autonomousThinkingReplay: exactLocalEntries.find(entry => entry.autonomousThinkingReplay)!.autonomousThinkingReplay } : {}),

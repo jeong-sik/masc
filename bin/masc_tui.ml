@@ -22065,6 +22065,33 @@ and is loaded on demand through keeper_skill.
         | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
         | None -> false
       in
+      (* What [r] refreshes on every surface, the Git-changes overlay
+         included. The overlay's arm and the surface arm below both start
+         here; only the reload that follows differs. *)
+      let refresh_shared_sources () =
+        state.pending_approval_action <- None;
+        Masc_tui_theme_choice.invalidate_cache ();
+        load_local_workspace_if_safe state base_path;
+        let host = server_peer_host in
+        let port = state.port in
+        (* Each source owns its read even while the whole-surface refresh
+           is busy. Cadence reads share these requests rather than
+           superseding them before their responses can arrive. *)
+        (match state.connection_status with
+         | Booting -> ()
+         | Disconnected | Connecting | Reconnecting | Degraded | Connected ->
+           launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh
+             state ~mailbox:async_messages;
+           launch_gate_snapshot_load ~intent:Snapshot_read.Refresh
+             state ~mailbox:async_messages;
+           launch_schedules_load ~intent:Snapshot_read.Refresh
+             state ~mailbox:async_messages);
+        start_http_refresh state ~host ~port ~intent:Revalidate
+          ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight
+          ~scoped_refresh_followup
+          ~mailbox:async_messages
+      in
       (match key, browser_lane_on_screen state with
        | Some _, Some view ->
            state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
@@ -24020,6 +24047,29 @@ and is loaded on demand through keeper_skill.
                                   (Printf.sprintf "gh pr view %d -R %s stopped by signal %d"
                                      number slug signal)))))
 
+            | ("pageup" | "pagedown") as page_key ->
+              (* A surface page at a time, as the shared page arm moved the
+                 overlay before its keys were gathered here. *)
+              let page = surface_page_rows state in
+              let direction = if String.equal page_key "pagedown" then 1 else -1 in
+              (match state.repository_changes_diff_path with
+               | Some _ ->
+                   state.repository_changes_diff_scroll <-
+                     (if direction > 0 then
+                        Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:page
+                      else max 0 (state.repository_changes_diff_scroll + (direction * page)))
+               | None ->
+                   let cursor, scroll =
+                     move_row_cursor state ~delta:(direction * page)
+                       ~cursor:state.repository_changes_cursor
+                       ~scroll:state.repository_changes_scroll
+                   in
+                   state.repository_changes_cursor <- cursor;
+                   state.repository_changes_scroll <- scroll)
+            | "r" | "R" ->
+              refresh_shared_sources ();
+              refresh_repository_changes state ~mailbox:async_messages;
+              add_event state "system" "Manual refresh"
             | _ -> ())
        (* The palette is the same kind of modal, but typed: printable keys
           build the query, arrows move the cursor, Enter runs the highlighted
@@ -26461,21 +26511,6 @@ and is loaded on demand through keeper_skill.
                   Masc_tui_scroll.cursor_move
                     ~count:(List.length state.config_models_rows)
                     ~delta:(direction * page) state.config_models_cursor
-            | _ when state.repository_changes_open ->
-                (match state.repository_changes_diff_path with
-                 | Some _ ->
-                     state.repository_changes_diff_scroll <-
-                       (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:page
-                   else max 0 (state.repository_changes_diff_scroll + (direction * page)))
-                 | None ->
-                     let cursor, scroll =
-                       move_row_cursor state ~delta:(direction * page)
-                         ~cursor:state.repository_changes_cursor
-                         ~scroll:state.repository_changes_scroll
-                     in
-                     state.repository_changes_cursor <- cursor;
-                     state.repository_changes_scroll <- scroll)
             | Planning when Option.is_some (goal_detail_on_screen state) ->
                 let count, height = Masc_tui_render.planning_detail_viewport state in
                 state.planning_scroll <-
@@ -26787,32 +26822,10 @@ and is loaded on demand through keeper_skill.
              (fun action -> handle_goal_action_key state ~mailbox:async_messages ~action)
              (planning_action_of_key key)
        | Some "r" | Some "R" ->
-           state.pending_approval_action <- None;
-           Masc_tui_theme_choice.invalidate_cache ();
-           load_local_workspace_if_safe state base_path;
+           refresh_shared_sources ();
            let host = server_peer_host in
            let port = state.port in
-           (* Each source owns its read even while the whole-surface refresh
-              is busy. Cadence reads share these requests rather than
-              superseding them before their responses can arrive. *)
-           (match state.connection_status with
-            | Booting -> ()
-            | Disconnected | Connecting | Reconnecting | Degraded | Connected ->
-              launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh
-                state ~mailbox:async_messages;
-              launch_gate_snapshot_load ~intent:Snapshot_read.Refresh
-                state ~mailbox:async_messages;
-              launch_schedules_load ~intent:Snapshot_read.Refresh
-                state ~mailbox:async_messages);
-           start_http_refresh state ~host ~port ~intent:Revalidate
-             ~refresh_inflight:http_refresh_inflight
-             ~scoped_refresh_inflight:http_scoped_refresh_inflight
-             ~scoped_refresh_followup
-             ~mailbox:async_messages;
            (* Also reload logs / Board detail if viewing them. *)
-           if state.repository_changes_open then
-             refresh_repository_changes state ~mailbox:async_messages
-           else
            (match state.view with
             | Code ->
                 if state.code_history_open then
@@ -27229,8 +27242,6 @@ and is loaded on demand through keeper_skill.
                 state.harness_detail <- None;
                 state.harness_detail_scroll <- 0
             | Resources -> state.resource_focus <- Left_pane
-            | Repositories when state.repository_changes_open ->
-                close_repository_changes state
             | Changes ->
                 state.changes_diff_row <- None;
                 state.changes_diff_scroll <- 0;
@@ -28145,18 +28156,6 @@ and is loaded on demand through keeper_skill.
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
                         state.changes_tree_diff_path <- None))
-            | Repositories when state.repository_changes_open -> (
-                match state.repository_changes, state.repository_changes_scope with
-                | Some snapshot, Some scope ->
-                    (match
-                       List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                         state.repository_changes_cursor
-                     with
-                     | None -> ()
-                     | Some change ->
-                         open_repository_change_in_code state
-                           ~mailbox:async_messages ~scope change)
-                | _ -> ())
             | Memory -> (
                 match state.memory_facts_keeper with
                 | Some _ ->

@@ -530,6 +530,20 @@ describe('Keeper operation stream projection', () => {
     expect(completed?.blocks?.some(block => block.t === 'status')).toBe(false)
     if (withContent) expect(completed?.blocks).toEqual([
       { t: 'thinking', content: 'exposed reasoning', redacted: false }, { t: 'attach', name: 'result.txt' },
+      { t: 'p', html: 'completed answer' },
+    ])
+  })
+  it('rebuilds final prose while retaining exposed reasoning and attachments', () => {
+    assistantEntry()
+    keeperThreads.value = { sangsu: keeperThreads.value.sangsu!.map(entry => ({ ...entry,
+      blocks: [{ t: 'p' as const, html: 'old partial answer' },
+        { t: 'thinking' as const, content: 'reasoning', redacted: false }, { t: 'attach' as const, name: 'result.txt' }],
+    })) }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_REPLY_DETAILS',
+      value: { reply: 'final answer', turn_ref: 'turn-1', turn_outcome: 'visible_reply' } })
+    expect(keeperThreads.value.sangsu?.[0]?.blocks).toEqual([
+      { t: 'thinking', content: 'reasoning', redacted: false }, { t: 'attach', name: 'result.txt' },
+      { t: 'p', html: 'final answer' },
     ])
   })
   it('preserves visible reply whitespace and SKILL-prefixed prose across deltas', () => {

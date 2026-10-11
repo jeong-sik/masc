@@ -583,12 +583,21 @@ type mcp_blocks =
           are not streamed. *)
   | Streaming
 
+type stream_terminal =
+  | Stream_live
+  | Stream_closing of Agent_core.Types.stop_reason option
+  | Stream_closed
+
 let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~raw_trace_run ~turn_count
     ~on_native_action ~on_usage_report ~on_turn_started ~on_message_started ~position ~receipts on_event =
   let emit event = Option.iter (fun callback -> callback event) on_event in
   let next_tool_index = ref 1 in
   let tool_indexes = Hashtbl.create 8 in
   let native_tool_indexes = Hashtbl.create 8 in
+  let stream_terminal = ref Stream_live in
+  (* These local tokens own outstanding publication batches, not provider
+     identities. No terminal may overtake a batch's yielding callbacks. *)
+  let publications = ref [] in
   let emit event =
     try emit event with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -596,6 +605,30 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
       Log.Runtime_agent.warn
         "Muse Code Keeper stream callback raised (error=%s)"
         (Printexc.to_string exn)
+  in
+  let publish_terminal stop_reason =
+    stream_terminal := Stream_closed;
+    let open_indexes table = Hashtbl.fold (fun _ index acc -> index :: acc) table [] in
+    let indexes = List.sort_uniq Int.compare
+        (open_indexes tool_indexes @ open_indexes native_tool_indexes) in
+    Hashtbl.clear tool_indexes;
+    Hashtbl.clear native_tool_indexes;
+    List.iter (fun index -> emit (Agent_core.Types.ContentBlockStop {index})) indexes;
+    Option.iter (fun reason -> emit (Agent_core.Types.MessageDelta
+      {stop_reason=Some reason; usage=None})) stop_reason;
+    emit Agent_core.Types.MessageStop
+  in
+  let flush_terminal () =
+    match !stream_terminal, !publications with
+    | Stream_closing reason, [] -> publish_terminal reason
+    | (Stream_live | Stream_closed), _ | Stream_closing _, _ :: _ -> ()
+  in
+  let with_publication publish =
+    let owner = ref () in
+    publications := owner :: !publications;
+    Fun.protect ~finally:(fun () ->
+      publications := List.filter (fun pending -> pending != owner) !publications;
+      Eio.Cancel.protect flush_terminal) publish
   in
   let mcp_blocks = ref (Held []) in
   let emit_mcp_block event =
@@ -606,7 +639,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
   (* Emitting can yield to the bridge's fiber, which then holds more blocks;
      they go out in the next pass, and streaming starts only when a pass
      finds nothing held. *)
-  let rec release_mcp_blocks () =
+  let rec drain_mcp_blocks () =
     match !mcp_blocks with
     | Streaming | Held [] ->
       mcp_blocks := Streaming;
@@ -614,8 +647,9 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
     | Held held ->
       mcp_blocks := Held [];
       List.iter emit (List.rev held);
-      release_mcp_blocks ()
+      drain_mcp_blocks ()
   in
+  let release_mcp_blocks () = with_publication drain_mcp_blocks in
   (* Each text delta names its agent-message item, so a second message in
      the turn starts its own paragraph. *)
   let text_stream = Keeper_official_client_text_stream.create ~equal:String.equal () in
@@ -625,23 +659,17 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
       (Agent_core.Types.ContentBlockDelta
          { index = 0; delta = Agent_core.Types.TextDelta text })
   in
-  let stream_finished = ref false in
   let finish_stream ~stop_reason () =
-    if not !stream_finished then (
-      stream_finished := true;
-      let open_indexes table = Hashtbl.fold (fun _ index acc -> index :: acc) table [] in
-      let indexes = List.sort_uniq Int.compare
-          (open_indexes tool_indexes @ open_indexes native_tool_indexes) in
-      Hashtbl.clear tool_indexes;
-      Hashtbl.clear native_tool_indexes;
-      List.iter (fun index -> emit (Agent_core.Types.ContentBlockStop {index})) indexes;
-      Option.iter (fun reason -> emit (Agent_core.Types.MessageDelta
-        {stop_reason=Some reason; usage=None})) stop_reason;
-      emit Agent_core.Types.MessageStop)
+    match !stream_terminal with
+    | Stream_closing _ | Stream_closed -> ()
+    | Stream_live ->
+      stream_terminal := Stream_closing stop_reason;
+      flush_terminal ()
   in
   { on_serve_event =
       (function
         | Serve.Turn_started { session_id; turn_id; model } ->
+          with_publication (fun () ->
           reported_model := model;
           on_turn_started { session_id; turn_id; model };
           emit
@@ -651,7 +679,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
                ; usage = None
                });
           release_mcp_blocks ();
-          on_message_started ()
+          on_message_started ())
         | Serve.Text_delta { item_id; text } ->
           emit_text
             (Keeper_official_client_text_stream.forward
@@ -663,6 +691,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
             (Keeper_official_client_text_stream.complete_message text_stream
                ~message:item_id ~text)
         | Serve.Native_tool_started observation ->
+          with_publication (fun () ->
           (* MSP's [toolCall] item names no MCP server, so a call the host
              makes to MASC's own bridge arrives here too, as a built-in tool,
              beside the MCP block the bridge opened for it. Telling the two
@@ -684,7 +713,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
             emit (Agent_core.Types.ContentBlockStart
               {index; content_type=Runtime_native_tools.stream_content_type;
                tool_id=Runtime_native_tools.call_id observation;
-               tool_name=observation.tool_name})) observation.identity
+               tool_name=observation.tool_name})) observation.identity)
         | Serve.Native_tool_finished observation ->
           Host.record_raw_native_tool ~keeper_name ~raw_trace_run ~phase:`Finished observation;
           Option.iter
@@ -759,7 +788,9 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
           finish_stream ~stop_reason:(Some Agent_core.Types.EndTurn) ())
   ; on_tool_started =
       (fun ~call_id ~tool_name ~arguments ->
-        if !stream_finished then Turn_closed else (
+        match !stream_terminal with
+        | Stream_closing _ | Stream_closed -> Turn_closed
+        | Stream_live ->
         Keeper_official_client_text_stream.tool_row text_stream;
         let index = !next_tool_index in
         incr next_tool_index;
@@ -768,6 +799,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
              Keeper_official_client_tool_receipts.start receipts ~call_id ~block_index:index)
           receipts;
         Hashtbl.replace tool_indexes call_id index;
+        with_publication (fun () ->
         emit_mcp_block
           (Agent_core.Types.ContentBlockStart
              { index; content_type = "tool_use"; tool_id = Some call_id; tool_name = Some tool_name });
@@ -775,8 +807,8 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
           (Agent_core.Types.ContentBlockDelta
              { index
              ; delta = Agent_core.Types.InputJsonSnapshot (Yojson.Safe.to_string arguments)
-             });
-        Admitted))
+             }));
+        Admitted)
   ; on_tool_finished =
       (fun ~call_id ->
         Option.iter

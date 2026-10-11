@@ -154,6 +154,9 @@ module For_testing : sig
       records [event]; they are fed before [event] is recorded. [receipts]
       [on_tool_admission] observes the projection's actual synchronous decision;
       a new call after terminal is rejected without a block or receipt binding.
+      Terminal publication waits for admitted MCP start/arguments and held
+      block batches already being published, while closing new admission
+      immediately. Reentrant [during] callbacks exercise this boundary.
       [receipts] opens and closes with the MASC tool blocks and is released when the
       held blocks reach the stream. *)
 

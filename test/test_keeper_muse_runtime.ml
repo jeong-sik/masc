@@ -141,6 +141,59 @@ let mcp_started call_id =
     { call_id; tool_name = "masc_probe"; arguments = `Assoc [ "marker", `String "x" ] }
 ;;
 
+let test_terminal_waits_for_yielding_publication () =
+  let terminal = Adapter.Serve_event (Serve.Turn_terminal_received Msp.Terminal_cancelled) in
+  let check_terminal events =
+    let rec scan open_blocks stopped = function
+      | [] -> check bool "terminal delivered" true stopped
+      | Agent_core.Types.MessageStop :: rest ->
+          check (list int) "no unfinished block at terminal" [] open_blocks;
+          check bool "one terminal" false stopped;
+          scan open_blocks true rest
+      | ContentBlockStart {index;_} :: rest ->
+          check bool "no start after terminal" false stopped;
+          scan (index :: open_blocks) stopped rest
+      | ContentBlockDelta {delta=InputJsonSnapshot _;index} :: rest ->
+          check bool "arguments precede terminal" false stopped;
+          check bool "arguments target open block" true (List.mem index open_blocks);
+          scan open_blocks stopped rest
+      | ContentBlockStop {index} :: rest ->
+          check bool "stop targets open block" true (List.mem index open_blocks);
+          scan (List.filter ((<>) index) open_blocks) stopped rest
+      | _ :: rest -> scan open_blocks stopped rest in
+    scan [] false events
+  in
+  let decisions = ref [] in
+  let events = Adapter.project_stream_inputs
+    ~on_tool_admission:(fun ~call_id decision -> decisions := (call_id,decision) :: !decisions)
+    ~during:(function
+      | Agent_core.Types.ContentBlockStart {tool_id=Some "first";_} ->
+          [terminal;mcp_started "after-closing"]
+      | _ -> [])
+    [Adapter.Serve_event turn_started;mcp_started "first"] in
+  check_terminal events;
+  check bool "already admitted call retains ownership" true
+    (List.assoc "first" !decisions = Adapter.Admitted);
+  check bool "new admission closes during pending terminal" true
+    (List.assoc "after-closing" !decisions = Adapter.Turn_closed);
+  let held = Adapter.project_stream_inputs
+    ~during:(function
+      | Agent_core.Types.ContentBlockStart {tool_id=Some "held-first";_} ->
+          [mcp_started "held-second";terminal]
+      | _ -> [])
+    [mcp_started "held-first";Adapter.Serve_event turn_started] in
+  check_terminal held;
+  check int "both held batches publish before closure" 2
+    (List.length (List.filter (function Agent_core.Types.ContentBlockStart _ -> true | _ -> false) held));
+  check_terminal (Adapter.project_stream_inputs
+    ~during:(function Agent_core.Types.MessageStart _ -> [terminal] | _ -> [])
+    [Adapter.Serve_event turn_started]);
+  check_terminal (Adapter.project_stream_inputs
+    ~during:(function Agent_core.Types.ContentBlockStart _ -> [terminal] | _ -> [])
+    [Adapter.Serve_event turn_started;
+     Adapter.Serve_event (Serve.Native_tool_started (native_observation "native"))])
+;;
+
 let test_mcp_admission_stops_at_terminal () =
   List.iter (fun terminal ->
     let decisions = ref [] in
@@ -2625,6 +2678,7 @@ let () =
       , [ test_case "identity-less native tool leaves no open block" `Quick test_native_tool_without_identity_does_not_open_a_block
         ; test_case "failed terminal closes tools without success" `Quick test_failed_terminal_closes_open_tools_without_success
         ; test_case "MCP admission stops at terminal" `Quick test_mcp_admission_stops_at_terminal
+        ; test_case "terminal waits for yielding publication" `Quick test_terminal_waits_for_yielding_publication
         ; test_case "projection order" `Quick test_stream_order
         ; test_case "unstreamed reply is forwarded at the end" `Quick
             test_unstreamed_reply_is_forwarded_at_the_end

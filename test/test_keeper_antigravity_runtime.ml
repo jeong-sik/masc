@@ -149,6 +149,7 @@ printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_inde
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"DONE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
+printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":3,"state":"ACTIVE","step_type":"agent_response","text_delta":"MASC_ANTIGRAVITY_KEEPER_OK"}}\n' "$conversation"
 printf '%%s\n' "$turns" > "$turn_counter"
 printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"MASC_ANTIGRAVITY_KEEPER_OK","error":null,"num_turns":%%d,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":40,"total_tokens":16}}}\n' "$conversation" "$turns"
 |}
@@ -535,6 +536,17 @@ let test_keeper_projects_mcp_tool_and_settles () =
                             "unknown-origin tool count"
                             0
                             (List.length starts - native_count - mcp_count);
+                          let text_indexes = List.filter_map (function
+                            | Agent_core.Types.ContentBlockDelta
+                                {index; delta=Agent_core.Types.TextDelta _} -> Some index
+                            | _ -> None) rest |> List.sort_uniq Int.compare in
+                          check bool "streamed final answer has a text block" true
+                            (not (List.is_empty text_indexes));
+                          List.iter (fun index ->
+                            check int "terminal closes each streamed text block once" 1
+                              (List.length (List.filter (function
+                                | Agent_core.Types.ContentBlockStop {index=closed} -> Int.equal index closed
+                                | _ -> false) rest))) text_indexes;
                           let arguments =
                             List.find_map
                               (function

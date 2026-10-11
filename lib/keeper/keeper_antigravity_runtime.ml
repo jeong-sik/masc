@@ -427,9 +427,11 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
             (* MessageStop is a transport boundary, not evidence that an
                unfinished tool succeeded. Close its block without inventing a
                native completion outcome. *)
-            List.iter (fun (_, index) -> stop_content index)
-              (List.sort (fun (_, left) (_, right) -> Int.compare left right)
-                 unfinished_native);
+            let text_blocks = Hashtbl.fold
+                (fun _ index acc -> index :: acc) text_indexes [] in
+            List.iter stop_content
+              (List.sort_uniq Int.compare
+                 (text_blocks @ List.map snd unfinished_native));
             emit
               (Agent_core.Types.MessageDelta
                  { stop_reason = Some Agent_core.Types.EndTurn; usage = None });

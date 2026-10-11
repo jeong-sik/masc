@@ -69,6 +69,7 @@ import {
   probeKeeperRuntime,
   recoverKeeperRuntime,
   refreshActiveKeeperChatHistory,
+  refreshKnownKeeperChatHistories,
   selectKeeper,
   sendKeeperThreadMessage,
 } from './keeper-actions'
@@ -504,6 +505,29 @@ describe('refreshActiveKeeperChatHistory', () => {
     // Force bypasses the once-per-page guard so the missed replay-buffer gap
     // is re-fetched even though 'echo' is already hydrated.
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+  })
+
+  it('recovers a missed completed turn for an inactive previously visited Keeper', async () => {
+    await hydrateKeeperChatHistory('inactive')
+    await hydrateKeeperChatHistory('active')
+    activeKeeperName.value = 'active'
+    fetchKeeperChatHistory.mockReset().mockImplementation(name => Promise.resolve(name === 'inactive'
+      ? [{ id: 'missed-turn', role: 'assistant', content: 'missed answer', ts: 1 }] : []))
+    await refreshKnownKeeperChatHistories()
+    expect(fetchKeeperChatHistory).toHaveBeenCalledWith('active')
+    expect(fetchKeeperChatHistory).toHaveBeenCalledWith('inactive')
+    expect(keeperThreads.value.inactive?.[0]?.text).toBe('missed answer')
+  })
+  it('refreshes an inactive pending history request and rejects its stale completion', async () => {
+    let finishOld!: (rows: []) => void
+    fetchKeeperChatHistory.mockReset().mockReturnValueOnce(new Promise(resolve => { finishOld = resolve }))
+      .mockResolvedValueOnce([{ id: 'fresh-history', role: 'assistant', content: 'fresh answer', ts: 1 }])
+    const old = hydrateKeeperChatHistory('inactive')
+    await refreshKnownKeeperChatHistories()
+    finishOld([])
+    await old
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+    expect(keeperThreads.value.inactive?.[0]?.text).toBe('fresh answer')
   })
 
   it('respects the hydration guard without force (route/periodic no-op)', async () => {

@@ -930,6 +930,21 @@ describe('Keeper operation stream projection', () => {
     expect(after.streamState).toBe(before.streamState)
   })
 
+  it('preserves admitted reasoning while its buffered preview has not flushed', () => {
+    assistantEntry('reasoning-operation')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'exposed reasoning', response: { content_generation: 1, stream_scope: 0 } } })
+    const before = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+    expect(before.responseState).toMatchObject({ current: { content_generation: 1, stream_scope: 0 } })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+      value: { operation_id: 'reasoning-operation', state: 'Queued', queued_count: 1 } })
+    const after = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+    expect(after.delivery).toBe(before.delivery)
+    expect(after.streamState).toBe(before.streamState)
+    _flushPendingKeeperStreamDeltasForTests()
+    expect(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')?.traceSteps).toMatchObject([{ kind: 'think', text: 'exposed reasoning' }])
+  })
+
   it('projects queued acceptance without a receipt or queue revision', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

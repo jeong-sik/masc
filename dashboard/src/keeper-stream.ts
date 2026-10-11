@@ -1233,7 +1233,10 @@ export function applyKeeperStreamEvent(
         if (current?.deliveryProvenance && !sameDeliveryKey(current.deliveryProvenance.delivery_key, provenance.delivery_key)) return null
         const queued = event.value.state === 'Queued'
         updateThreadEntry(keeperName, assistantEntryId, entry => {
-          const awaiting = entry.delivery === 'queued' || entry.delivery === 'sending'
+          const response = entry.responseState
+          const observedResponse = response?.kind === 'known' && (response.floor !== null
+            || response.current !== null || response.partialScope !== null || response.phase !== 'running')
+          const awaiting = !observedResponse && (entry.delivery === 'queued' || entry.delivery === 'sending')
           return {
             ...entry,
             deliveryProvenance: provenance,

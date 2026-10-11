@@ -55,6 +55,8 @@ import {
   parseKeeperRuntimeTrace as parseKeeperRuntimeTraceFromRuntimeTrace,
 } from './keeper-runtime-trace'
 import { resetDevTokenBootstrap } from './dev-token'
+import { ApiRequestError } from './core'
+import { KeeperChatOperationMissingError } from './keeper-operation-error'
 import { DEFAULT_GET_TIMEOUT_MS } from '../config/constants'
 
 afterEach(() => {
@@ -556,6 +558,28 @@ describe('streamKeeperMessage', () => {
 })
 
 describe('fetchKeeperChatOperation', () => {
+  it('classifies only the explicit missing-operation receipt for the requested identity', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      schema: 'masc.keeper_chat_operation.error.v1', error: 'unknown_operation', message: 'request unavailable',
+    }), { status: 404 })))
+    const error = await fetchKeeperChatOperation('keeper / one', 'operation / two').catch(error => error)
+    expect(error).toBeInstanceOf(KeeperChatOperationMissingError)
+    expect(error).toMatchObject({ keeperName: 'keeper / one', operationId: 'operation / two' })
+    expect(error.cause).toBeInstanceOf(ApiRequestError)
+  })
+
+  it.each([
+    [404, { error: 'unknown_operation' }],
+    [404, { schema: 'different.error', error: 'unknown_operation' }],
+    [404, { schema: 'masc.keeper_chat_operation.error.v1', error: 'route_unavailable' }],
+    [503, { schema: 'masc.keeper_chat_operation.error.v1', error: 'unknown_operation' }],
+  ])('retains unclassified status %s as an HTTP observation', async (status, body) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status })))
+    const error = await fetchKeeperChatOperation('echo', 'operation').catch(error => error)
+    expect(error).toBeInstanceOf(ApiRequestError)
+    expect(error).not.toBeInstanceOf(KeeperChatOperationMissingError)
+  })
+
   it('parses restart interruption as a terminal failed operation', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

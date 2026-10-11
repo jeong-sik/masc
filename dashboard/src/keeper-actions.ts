@@ -27,7 +27,7 @@ import {
   markToolCallOutputsHydrationFailed,
   recordToolCallOutputs,
 } from './tool-call-output-store'
-import { asString, isRecord } from './components/common/normalize'
+import { KeeperChatOperationMissingError } from './api/keeper-operation-error'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
 import type {
@@ -527,8 +527,8 @@ function scheduleChatRefresh(keeperName: string): void {
   })
 }
 const PENDING_KEEPER_CHAT_POLL_MS = 2_000
-const QUEUED_KEEPER_REQUEST_LOST_MESSAGE =
-  '서버 재시작으로 대기 중이던 요청을 찾을 수 없습니다. 메시지를 다시 보내주세요.'
+const KEEPER_OPERATION_MISSING_MESSAGE =
+  '서버에서 요청을 찾을 수 없습니다. 저장된 대화를 확인하고 필요하면 메시지를 다시 보내주세요.'
 const PENDING_KEEPER_CHAT_RESUME_FAILED_MESSAGE =
   '응답을 확인할 수 없어 메시지 복구를 중단했습니다. 다시 보내주세요.'
 function sleep(ms: number): Promise<void> {
@@ -585,16 +585,6 @@ function operationUserEntryId(operationId: string): string {
 
 function operationAssistantEntryId(operationId: string): string {
   return `pending-assistant-${operationId}`
-}
-
-function isUnknownKeeperChatOperationError(err: unknown): boolean {
-  const record = isRecord(err) ? err : null
-  const method = asString(record?.method, '').trim().toUpperCase()
-  const status = typeof record?.status === 'number' ? record.status : null
-  const path = asString(record?.path, '').trim()
-  const message = err instanceof Error ? err.message : ''
-  if (method === 'GET' && status === 404 && path.includes('/chat/operations/')) return true
-  return message.includes('/chat/operations/') && message.includes('unknown_operation')
 }
 
 function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation): string {
@@ -864,26 +854,27 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
       persistTrackedOperationAssistantDraft(request.keeperName, request.operationId, assistantId)
       return
     }
-    if (isUnknownKeeperChatOperationError(err)) {
+    if (err instanceof KeeperChatOperationMissingError
+      && err.keeperName === request.keeperName && err.operationId === request.operationId) {
       finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
         delivery: 'error',
-        error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
+        error: KEEPER_OPERATION_MISSING_MESSAGE,
         streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
           requestId: request.operationId,
-          reason: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
+          reason: KEEPER_OPERATION_MISSING_MESSAGE,
         }),
       })
       finalizeAssistantEntry(request.keeperName, assistantId, {
         delivery: 'error',
         streamState: null,
-        error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
+        error: KEEPER_OPERATION_MISSING_MESSAGE,
         streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
           requestId: request.operationId,
-          reason: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
+          reason: KEEPER_OPERATION_MISSING_MESSAGE,
         }),
       })
       persistTrackedOperationAssistantDraft(request.keeperName, request.operationId, assistantId)
-      setRecordValue(keeperActionErrors, request.keeperName, QUEUED_KEEPER_REQUEST_LOST_MESSAGE)
+      setRecordValue(keeperActionErrors, request.keeperName, KEEPER_OPERATION_MISSING_MESSAGE)
       await hydrateKeeperChatHistory(request.keeperName, { force: true })
       return
     }

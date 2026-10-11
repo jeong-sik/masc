@@ -2,6 +2,7 @@ import { KeeperChatStreamEventSchema } from '../schemas/sse'
 // MASC Dashboard — Keeper operation messaging and SSE streaming
 
 import { asString, isRecord } from '../components/common/normalize'
+import { KeeperChatOperationMissingError } from './keeper-operation-error'
 import type { KeeperConversationAttachment, KeeperUserInputBlock } from '../types'
 import {
   apiRequestErrorFromResponse,
@@ -733,7 +734,16 @@ export async function fetchKeeperChatOperation(
     { headers: jsonHeaders(), signal: opts.signal },
     DEFAULT_GET_TIMEOUT_MS,
   )
-  if (!response.ok) throw await apiRequestErrorFromResponse('GET', path, response)
+  if (!response.ok) {
+    const error = await apiRequestErrorFromResponse('GET', path, response)
+    const body = error.responseData
+    if (error.status === 404 && isRecord(body)
+      && body.schema === 'masc.keeper_chat_operation.error.v1'
+      && body.error === 'unknown_operation') {
+      throw new KeeperChatOperationMissingError(keeperName, operationId, error)
+    }
+    throw error
+  }
   const operation = parseKeeperChatOperation(await response.json())
   if (operation.operationId !== operationId) {
     throw new Error('Keeper chat operation response identity mismatch')

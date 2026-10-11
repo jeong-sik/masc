@@ -49,7 +49,12 @@ def main():
         print(json.dumps(verified, sort_keys=True))
         return 0
     except (P.Rejected, argparse.ArgumentTypeError) as error:
-        print(json.dumps({"status": "refused", "reason": str(error)}))
+        refused = json.dumps({"status": "refused", "reason": str(error)})
+        # The caller redirects stdout to a file, so also echo the refusal to
+        # stderr: a hidden refusal costs more debugging time than the extra
+        # line is worth.
+        print(refused, file=sys.stderr)
+        print(refused)
         return 2
     except (OSError, ValueError, KeyError, TypeError, AttributeError, P.SourceUnavailable):
         print(json.dumps({"status": "unavailable", "reason": "evidence_read_failed"}))

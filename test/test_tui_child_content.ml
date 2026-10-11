@@ -54,7 +54,7 @@ let read mode previous entries serve =
   | Ok state -> state,List.rev !reads | Error error -> fail (Consumer.error_text error)
 let one state=match Consumer.stores state with [store] -> store | _ -> fail "one store required"
 let after uri=Uri.get_query_param uri "after_sequence"
-let records_count state=List.fold_left (fun count (store:Consumer.store) -> count+List.length store.records) 0 (Consumer.stores state)
+let records_count state=List.fold_left (fun count (store:Consumer.store) -> count+List.length (Consumer.records store)) 0 (Consumer.stores state)
 let initial () =
   fst (read Consumer.Poll Consumer.empty [receiver,Ok ("store /&+%",1)]
     (fun uri -> check (option string) "new store begins without cursor" None (after uri);
@@ -72,7 +72,7 @@ let test_snapshots_suffix_identity_and_idle () =
     Ok (200,json (page store 3 [row 2 (observation ~ordinal:2 ~channel:"thinking" ~body:"" "first");
       row 3 (observation ~known:true "later")])) ) in
   check int "one changed store suffix request" 1 (List.length requests);
-  let rows=(one second).records in
+  let rows=Consumer.records (one second) in
   check int "all complete snapshots retained without Task fold" 3 (List.length rows);
   check (list string) "same provider UUID is a correlation, not dedup key"
     ["same-provider-envelope";"same-provider-envelope";"same-provider-envelope"]
@@ -84,7 +84,7 @@ let test_snapshots_suffix_identity_and_idle () =
   let idle,requests=read Consumer.Poll second [receiver,Ok (store,3)] (fun _ -> fail "unchanged Poll performed full read") in
   check int "unchanged Poll only hints" 0 (List.length requests);
   check bool "idle keeps actual immutable state identity" true (idle==second);
-  check bool "idle keeps exact rows list" true ((one idle).records==(one second).records);
+  check bool "idle keeps exact rows list" true (Consumer.records (one idle)==Consumer.records (one second));
   check bool "coverage is explicitly unavailable" true ((one idle).coverage=Read.Unavailable)
 
 let test_newer_receipt_does_not_repeat_full_reads () =
@@ -140,8 +140,8 @@ let test_audit_redaction_disappearance_and_replacement () =
   let fresh,_=read Consumer.Audit first [receiver,Ok ("store /&+%",1)] (fun uri ->
     check (option string) "full Audit refreshes cached human leaves" None (after uri);
     Ok (200,json (page "store /&+%" 1 [row 1 (observation ~body:"[redacted]" ~model:"[redacted-model]" "first")]))) in
-  check string "current full response replaces cached text" "[redacted]" (List.hd (one fresh).records).observation.text;
-  check string "current full response replaces cached model only" "[redacted-model]" (List.hd (one fresh).records).observation.model;
+  check string "current full response replaces cached text" "[redacted]" (List.hd (Consumer.records (one fresh))).observation.text;
+  check string "current full response replaces cached model only" "[redacted-model]" (List.hd (Consumer.records (one fresh))).observation.model;
   let absent,_=read Consumer.Poll fresh [] (fun _ -> fail "absent inventory must not invent store") in
   check int "disappeared history retained" 1 (records_count absent);
   check bool "last-observed absent body not claimed currently redacted" true (Consumer.diagnostics absent<>Consumer.diagnostics fresh);
@@ -162,7 +162,7 @@ let test_audit_refuses_rollback_and_identity_rewrite () =
   let rewritten,_=read Consumer.Audit initial [receiver,Ok ("stable",4)] (fun _ ->
     Ok (200,json (page "stable" 4 (row 1 (observation ~provider:"rewritten-provider-envelope" "1")::List.tl rows)))) in
   check int "rewritten prior identity retains original history" 4 (records_count rewritten);
-  check string "original provider correlation unchanged" "same-provider-envelope" (List.hd (one rewritten).records).observation.envelope_uuid;
+  check string "original provider correlation unchanged" "same-provider-envelope" (List.hd (Consumer.records (one rewritten))).observation.envelope_uuid;
   (match (one rewritten).error with Some (Consumer.History_rewritten _) -> () | _ -> fail "identity rewrite not refused")
 
 let test_changed_hint_cannot_clear_known_rewrite_with_suffix () =

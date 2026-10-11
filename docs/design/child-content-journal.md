@@ -123,8 +123,47 @@ Every read response explicitly reports persistence-failure history `unavailable`
 provider completeness `unknown` and liveness `unknown`. Collector-local health is
 not represented as an empty surviving process history. Cleanup operations and
 closed failure codes expose no raw filesystem paths or exception details.
-These codecs/discovery primitives are not yet an authenticated HTTP endpoint or
-TUI consumer. The subsequent transport must use captured authenticated workspace
-scope, strict URI queries and both H1/H2 auth gates; the UI must poll unchecked
-hints and fully read changed stores or an explicit audit rather than repeatedly
-auditing unchanged full history.
+The codecs and discovery primitives do not authenticate HTTP requests or own
+TUI state. The pure TUI consumer below uses them through a caller-supplied fetch.
+HTTP transport must capture authenticated workspace scope, enforce strict URI
+queries and both H1/H2 auth gates. The actual TUI launcher owns that authenticated
+fetch, read epoch and mailbox admission. The UI polls unchecked hints and fully
+reads changed stores or an explicit audit instead of repeatedly auditing unchanged
+full history.
+
+## Immutable TUI snapshot reader
+
+`Masc_tui_child_content` consumes the public records/receivers/hints API through a
+caller-supplied guarded fetch boundary. Its immutable cache keeps every complete
+snapshot, including refusals, keyed by Keeper, full ticket3 receiver and store
+incarnation. Provider envelope UUID is a correlation, not a deduplication key;
+there is no Task fold, Root speech/lifecycle mutation or inferred input consumption.
+Workspace ownership, read-epoch checks and mailbox admission belong to the actual
+launcher; this pure consumer cannot authenticate a workspace from DTO or Keeper
+name. The caller must retire the cache with its workspace lifetime.
+
+Poll reads unchecked hints and requests exact suffixes only for changed stores.
+It preserves prior bodies/cursor on failure, retains disappeared/older
+incarnations, keeps audited errors through an unchecked Poll and avoids repeated
+failed full reads at the same attempted hint. A healthy receiver may still advance.
+Composite observation identity is checked against retained earlier pages as well
+as within a decoded page. An unchanged Poll retains physical state/records
+identity rather than rebuilding the retained history.
+
+Explicit Audit always requests full current-incarnation records. It may replace
+only the cached human text/model leaves as supplied by that full response;
+previous sequence/timestamp/origin/observation/provider/parent/message/evidence
+facts must match exactly, and the same incarnation cannot regress its tail.
+A valid-looking rollback or identity rewrite is a typed cache refusal that retains
+known history. This is consistency with prior observed public facts, not a
+cryptographic certification of disk provenance. Full successful reads clear
+current audited failure; hints alone cannot clear it.
+
+Audit refreshes current store leaves only as supplied by that response's captured
+redactor. Older/disappeared incarnation leaves remain last observed, with current
+redaction unknown. An empty caught-up suffix cannot re-redact cached human leaves,
+and no policy-version/global/latest-redaction guarantee is inferred. Persistence
+failure history remains unavailable and provider completeness/liveness unknown.
+This unit adds the standalone public-API consumer and authored transport fixtures;
+actual launcher/async read-epoch wiring, distinct safe terminal projection and
+visible PTY/screenshot acceptance remain separate subsequent work.

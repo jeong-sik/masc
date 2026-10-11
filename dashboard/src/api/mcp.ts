@@ -186,11 +186,23 @@ async function mcpPost(
 ): Promise<string> {
   assertBinding(binding)
   const request = currentRequest(body)
-  const res = await fetchWithTimeout('/mcp', {
-    method: 'POST',
-    headers: mcpHeadersForActor(binding, request.method, request.name, actorName),
-    body: JSON.stringify(request.body),
-  }, timeoutMs)
+  const acquisitionController = new AbortController()
+  const releaseAcquisition = subscribeStoredTokenChanges(() => acquisitionController.abort())
+  let res: Response
+  try {
+    assertBinding(binding)
+    res = await fetchWithTimeout('/mcp', {
+      method: 'POST',
+      headers: mcpHeadersForActor(binding, request.method, request.name, actorName),
+      body: JSON.stringify(request.body),
+      signal: acquisitionController.signal,
+    }, timeoutMs)
+  } catch (error) {
+    assertBinding(binding)
+    throw error
+  } finally {
+    releaseAcquisition()
+  }
   try {
     assertBinding(binding)
   } catch (error) {

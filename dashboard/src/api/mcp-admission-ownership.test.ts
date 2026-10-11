@@ -252,3 +252,24 @@ it('disposes a forbidden response without reading its body', async () => {
     if (cancel.mock.calls.length === 0) await body.cancel()
   }
 })
+
+it('aborts a request waiting for headers when its credential owner changes', async () => {
+  setStoredToken('synthetic-waiting-owner-a')
+  let signal!: AbortSignal
+  let finish!: (response: Response) => void
+  fetchMock.mockImplementation((_path: string, init: RequestInit) => new Promise<Response>((resolve, reject) => {
+    finish = resolve
+    signal = init.signal!
+    signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+  }))
+  const pending = callMcpTool('masc_broadcast', { message: 'waiting old request' }).catch(error => error)
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+  setStoredToken('synthetic-waiting-owner-b')
+  try {
+    expect(signal.aborted).toBe(true)
+    expect((await pending).message).toBe('MCP authentication changed during request')
+  } finally {
+    if (!signal.aborted) finish(toolResponse())
+    await pending
+  }
+})

@@ -21,6 +21,7 @@ import {
   _resetKeeperStreamBuffersForTests,
   abortKeeperThreadMessage,
   applyKeeperOperationTurnEvent,
+  applyKeeperAutonomousTurnEvent,
   applyKeeperStreamEvent,
 } from './keeper-stream'
 import { parseSSEMessage, KeeperChatStreamEventSchema } from './schemas/sse'
@@ -943,6 +944,36 @@ describe('Keeper operation stream projection', () => {
     expect(after.streamState).toBe(before.streamState)
     _flushPendingKeeperStreamDeltasForTests()
     expect(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')?.traceSteps).toMatchObject([{ kind: 'think', text: 'exposed reasoning' }])
+  })
+
+  it('does not bind an unowned response to an acceptance outside its operation source', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+      value: { operation_id: 'foreign-operation', state: 'Queued', queued_count: 1 } },
+      { kind: 'operation', operationId: 'source-operation', sequence: 1 })
+    const entry = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+    expect(entry.deliveryProvenance).toBeUndefined()
+    expect(entry.delivery).toBe('sending')
+  })
+
+  it('does not turn an autonomous journal response into an accepted user operation', () => {
+    applyKeeperAutonomousTurnEvent('sangsu', 'autonomous-turn', 1,
+      { type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: 'foreign-operation', state: 'Queued', queued_count: 1 } })
+    const entry = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.turnRef === 'autonomous-turn'))
+    expect(entry.deliveryProvenance).toBeNull()
+    expect(entry.delivery).toBe('sending')
+    expect(entry.source).toBe('autonomous_turn')
+  })
+
+  it('binds an unowned response when acceptance matches its operation source', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+      value: { operation_id: 'source-operation', state: 'Queued', queued_count: 1 } },
+      { kind: 'operation', operationId: 'source-operation', sequence: 1 })
+    const entry = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+    expect(entry.deliveryProvenance).toEqual(operationDeliveryProvenance('source-operation', 'terminal_result'))
+    expect(entry.delivery).toBe('queued')
   })
 
   it('projects queued acceptance without a receipt or queue revision', () => {

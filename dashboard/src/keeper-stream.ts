@@ -1230,6 +1230,10 @@ export function applyKeeperStreamEvent(
         const operationId = event.value.operation_id.trim()
         if (!operationId) return 'Keeper operation acceptance is missing operation_id.'
         const provenance = operationDeliveryProvenance(operationId, 'terminal_result')
+        if (source.kind === 'autonomous') return null
+        if (source.kind === 'operation' && !sameDeliveryKey(
+          operationDeliveryProvenance(source.operationId, 'terminal_result').delivery_key, provenance.delivery_key,
+        )) return null
         if (current?.deliveryProvenance && !sameDeliveryKey(current.deliveryProvenance.delivery_key, provenance.delivery_key)) return null
         const queued = event.value.state === 'Queued'
         updateThreadEntry(keeperName, assistantEntryId, entry => {

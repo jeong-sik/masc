@@ -63,6 +63,14 @@ operational issue automation and remains independent of CI. Disabled GitHub
 workflow states remain disabled until these definitions are integrated;
 reenabling an old automatic definition would violate this policy.
 
+While a dispatch runs, its selection job pins each selected member head with a
+pending `leader-selected-ci` commit status, and the final evidence job settles
+that status to success or failure with `if: always()` — including recheck,
+cancelled and crashed attempts, so a finished run never leaves a pending pin
+behind. `merge-guard.sh` reads the same status through `ci-checks.sh` and
+refuses to merge a member whose head is pinned pending or settled failed; a
+missing status means no leader-selected run is pinning the head.
+
 The result describes the combined candidate and the selected coverage. It is
 not an individual member's check and does not authorize merge. Ordinary
 review guards require current independent source approval; Release admission

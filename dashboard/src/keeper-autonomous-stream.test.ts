@@ -221,6 +221,59 @@ describe('autonomous journal recovery', () => {
     expect(parent).toMatchObject({ text: 'canonical answer', delivery: 'history', streamState: null,
       traceSteps: [{ kind: 'progress', text: 'checking files' }, { kind: 'tool', name: 'Read' }] })
   })
+  it('records saying, thinking and tool transitions in journal order after history', () => {
+    mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
+      turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null }])
+    const think = (sequence: number, delta: string) => applyKeeperAutonomousTurnEvent('k', 'trace#9', sequence,
+      { ...base, type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta,
+        response: { content_generation: 1, stream_scope: 0 } } })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('say first'))
+    think(1, 'think first')
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 2, text('say second'))
+    think(3, 'think second')
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 4, { ...base, type: 'TOOL_CALL_START', toolStreamScope: 0,
+      toolCallBlockIndex: 1, toolCallName: 'Read' })
+    expect(keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')).toMatchObject({
+      text: 'canonical answer', delivery: 'history', streamState: null, traceSteps: [
+        { kind: 'progress', text: 'say first' }, { kind: 'think', text: 'think first' },
+        { kind: 'progress', text: 'say second' }, { kind: 'think', text: 'think second' }, { kind: 'tool' },
+      ],
+    })
+  })
+  it('separates owned speech and retains a live prefix across canonical history', () => {
+    const say = (sequence: number, generation: number, delta: string) => applyKeeperAutonomousTurnEvent('k', 'trace#9', sequence,
+      { ...base, type: 'TEXT_MESSAGE_CONTENT', delta, textResponse: { content_generation: generation, stream_scope: 0 } })
+    say(0, 1, 'live prefix ')
+    mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
+      turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null }])
+    say(1, 1, 'suffix')
+    say(2, 2, 'next response')
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 3, { ...base, type: 'TOOL_CALL_START', toolStreamScope: 0,
+      toolCallBlockIndex: 1, toolCallName: 'Read' })
+    expect(keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')).toMatchObject({
+      text: 'canonical answer', traceSteps: [ { kind: 'progress', text: 'live prefix suffix' },
+        { kind: 'progress', text: 'next response' }, { kind: 'tool' } ],
+    })
+  })
+  it('does not promote final historical speech when a late tool observation arrives', () => {
+    mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
+      turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null }])
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('canonical answer'))
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 1, { ...base, type: 'RUN_FINISHED' })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 2, { ...base, type: 'TOOL_CALL_START', toolStreamScope: 0,
+      toolCallBlockIndex: 1, toolCallName: 'Read' })
+    expect(keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')).toMatchObject({
+      text: 'canonical answer', traceSteps: [{ kind: 'tool' }], responseState: { phase: 'terminal' },
+    })
+  })
+  it.each(['', undefined])('does not promote live speech on empty or absent reasoning %s', (delta) => {
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('answer'))
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 1, { ...base, type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, ...(delta === undefined ? {} : { delta }) } })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 2, { ...base, type: 'RUN_FINISHED' })
+    expect(keeperThreads.value.k?.[0]).toMatchObject({ text: 'answer', delivery: 'delivered', streamState: null })
+    expect(keeperThreads.value.k?.[0]?.traceSteps ?? []).toEqual([])
+  })
   it('deduplicates replay at the turn-owned reducer boundary', () => {
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('a'))
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('a'))

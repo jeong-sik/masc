@@ -93,6 +93,36 @@ function convergeAcknowledgedTool(keeperName: string, parent: KeeperConversation
   }
 }
 
+function flushAutonomousSaying(keeperName: string, entryId: string, observationOnly: boolean): void {
+  updateThreadEntry(keeperName, entryId, entry => {
+    const pending = entry.autonomousSayingReplay
+    if (!pending) return entry
+    return { ...entry, autonomousSayingReplay: undefined,
+      ...(pending.text ? { traceSteps: [...(entry.traceSteps ?? []), {
+        kind: 'progress' as const, text: pending.text,
+        ...(pending.timestamp === undefined ? {} : { ts: new Date(pending.timestamp * 1000).toISOString() }),
+      }] } : {}),
+      ...(observationOnly ? {} : { text: '', rawText: '', blocks: [] }),
+    }
+  })
+}
+
+function recordAutonomousSaying(keeperName: string, entryId: string,
+  event: Extract<KeeperChatStreamEvent, { type: 'TEXT_MESSAGE_CONTENT' }>, sequence: number, observationOnly: boolean): void {
+  if (typeof event.delta !== 'string' || event.delta.length === 0) return
+  const owner = event.textResponse ? Object.freeze({ ...event.textResponse }) : null
+  const scope = event.textStreamScope ?? null
+  const before = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === entryId)
+  const pending = before?.autonomousSayingReplay
+  if (pending && (!sameKeeperResponseOwner(pending.owner ?? undefined, owner ?? undefined) || pending.scope !== scope)) {
+    flushAutonomousSaying(keeperName, entryId, observationOnly)
+  }
+  updateThreadEntry(keeperName, entryId, entry => ({ ...entry, autonomousTraceBoundary: sequence,
+    autonomousSayingReplay: Object.freeze({ text: (entry.autonomousSayingReplay?.text ?? '') + event.delta,
+      timestamp: entry.autonomousSayingReplay?.timestamp ?? event.timestamp, owner, scope }),
+  }))
+}
+
 function occurrenceContains(
   occurrence: KeeperConversationEntry['toolOccurrence'], scope: number, index: number,
 ): boolean {
@@ -772,10 +802,7 @@ export function applyKeeperStreamEvent(
     }
     case 'TEXT_MESSAGE_CONTENT': {
       if (source.kind === 'autonomous' && source.observationOnly) {
-        if (typeof event.delta === 'string') updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry,
-          autonomousSayingReplay: Object.freeze({ text: (entry.autonomousSayingReplay?.text ?? '') + event.delta,
-            timestamp: entry.autonomousSayingReplay?.timestamp ?? event.timestamp }),
-        }))
+        recordAutonomousSaying(keeperName, assistantEntryId, event, source.sequence, true)
         return null
       }
 
@@ -797,10 +824,7 @@ export function applyKeeperStreamEvent(
         // Adopt the id when START was coalesced away by the guards above.
         streamState.activeMessageId = messageId
       }
-      if (source.kind === 'autonomous' && typeof event.delta === 'string') updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry,
-        autonomousSayingReplay: Object.freeze({ text: (entry.autonomousSayingReplay?.text ?? '') + event.delta,
-          timestamp: entry.autonomousSayingReplay?.timestamp ?? event.timestamp }),
-      }))
+      if (source.kind === 'autonomous') recordAutonomousSaying(keeperName, assistantEntryId, event, source.sequence, false)
       applyTextDelta(event.delta, response.authoritative)
       return null
     }
@@ -859,14 +883,10 @@ export function applyKeeperStreamEvent(
         }
         return null
       }
-      if (source.kind === 'autonomous') updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry,
-        autonomousTraceBoundary: source.sequence,
-        ...(source.observationOnly && entry.autonomousSayingReplay?.text ? { traceSteps: [...(entry.traceSteps ?? []), {
-          kind: 'progress' as const, text: entry.autonomousSayingReplay.text,
-          ...(entry.autonomousSayingReplay.timestamp === undefined ? {} : { ts: new Date(entry.autonomousSayingReplay.timestamp * 1000).toISOString() }),
-        }] } : {}),
-        autonomousSayingReplay: undefined,
-      }))
+      if (source.kind === 'autonomous') {
+        flushAutonomousSaying(keeperName, assistantEntryId, source.observationOnly === true)
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry, autonomousTraceBoundary: source.sequence }))
+      }
       if (!(source.kind !== 'direct' && source.observationOnly)) {
         promoteAssistantTextToProgress(keeperName, assistantEntryId, {
           agentCoreBlockIndex: takeAgentCoreTextBlockIndex(keeperName, assistantEntryId),
@@ -1315,6 +1335,8 @@ export function applyKeeperStreamEvent(
           kind: 'observe', owner: value.response ?? null, scope: null, source: 'body',
         })
         if (response && !response.accepted) return null
+        if (typeof value.delta !== 'string' || value.delta.length === 0) return null
+        flushAutonomousSaying(keeperName, assistantEntryId, source.observationOnly === true)
         const owner = value.response ? Object.freeze({ ...value.response }) : null
         const before = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
         if (!before) return null

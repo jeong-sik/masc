@@ -1907,7 +1907,7 @@
  (name masc_tui_render_chat)
  (wrapped false)
  (modules masc_tui_render_chat)
- (libraries masc.runtime masc_tui_native_tasks masc_tui_chat_search masc_tui_message_input
+ (libraries yojson masc.runtime masc_tui_child_content masc_tui_native_tasks masc_tui_chat_search masc_tui_message_input
   eio
   masc_core
   masc_tui_async_read

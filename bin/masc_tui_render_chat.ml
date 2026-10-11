@@ -2568,6 +2568,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
 
 (* Whose a merged row is: a committed message's, or a block's log's. *)
 type tagged_row =
+  | Tagged_child of child_content_anchor
   | Tagged_row of Masc_tui_types.msg_entry
   | Tagged_block of Masc_tui_types.turn_log * Keeper_chat_transcript.drawn_origin option * bool
 
@@ -2741,6 +2742,100 @@ let native_task_entries (state : state) ~keeper_name ~role_label_column =
         @ List.map (entry Message_layout.Status "NATIVE HEALTH") diagnostics in
       native_entries_memo := Some (native,state.msg_tool_visibility,role_label_column,entries);
       entries
+
+(* Complete Child snapshots have their own durable identity and no Root turn
+   ownership. Keep cross-store order as observed; provider clocks are not a
+   shared timeline. The same entries feed drawing, search and scroll pins. *)
+let child_entries_memo = ref None
+
+let child_content_entries (state : state) ~keeper_name ~role_label_column ~chat_cols =
+  let module Consumer = Masc_tui_child_content in
+  let entry ?(diagnostics=[]) style label body : Message_layout.entry =
+    let label = Keeper_chat.terminal_safe_text label in
+    { delivery_state=None; style; heading_boundary=Message_layout.Start_heading;
+      timestamp=""; timeline_bucket=None; speaker=label;
+      role_label=Message_layout.align_role_label ~column:role_label_column ~style label;
+      role_label_mark_cells=Message_layout.role_label_mark_cells ~column:role_label_column ~style ();
+      diagnostics=List.map Keeper_chat.terminal_safe_text diagnostics;
+      request_label=""; body=Keeper_chat.terminal_safe_text ~preserve_newlines:true body;
+      journal=[]; markdown_source=Message_layout.Markdown_streaming;
+      body_presentation=Message_layout.Source_body;
+      turn_rail=Message_layout.Rail_none; action=Message_layout.Action_none } in
+  match List.assoc_opt keeper_name state.msg_child_content with
+  | None -> [], []
+  | Some received ->
+      let palette_generation = Masc_tui_terminal_palette.snapshot_generation
+        (Masc_tui_terminal_palette.snapshot ()) in
+      let key = state.msg_tool_visibility, state.msg_reasoning_visibility,
+        role_label_column, chat_cols, state.msg_origin_display, palette_generation in
+      match !child_entries_memo with
+      | Some (previous, previous_key, result) when previous == received && previous_key = key -> result
+      | Some _ | None ->
+      let rows = List.concat_map (fun (store : Consumer.store) ->
+        List.filter_map (fun (record : Consumer.Read.record) ->
+          let child = record.observation in
+          let visible, style, label = match child.channel with
+            | Runtime_claude_code.Text_content -> true, Message_layout.Inbound, "CHILD"
+            | Thinking_content -> state.msg_reasoning_visibility <> Reasoning_hidden,
+                Message_layout.Thinking, "CHILD THINKING" in
+          if not visible then None else
+          let anchor = { child_receiver=store.receiver; child_store_id=store.store_id;
+            child_observation_id=child.observation_id; child_ordinal=child.ordinal;
+            child_channel=child.channel } in
+          let diagnostics = match state.msg_tool_visibility with
+            | Tools_compact | Tools_results -> []
+            | Tools_full ->
+                ["store " ^ store.store_id;
+                 "receiver " ^ store.receiver.receiver_generation;
+                 "session " ^ store.receiver.session_id;
+                 "input " ^ store.receiver.client_uuid;
+                 "observation " ^ child.observation_id;
+                 "parent tool " ^ child.parent_tool_use_id;
+                 "provider envelope " ^ child.envelope_uuid;
+                 "ordinal " ^ string_of_int child.ordinal] in
+          let identity = Yojson.Safe.to_string (`List (List.map (fun value -> `String value)
+            [store.receiver.receiver_generation; store.receiver.session_id;
+             store.receiver.client_uuid; store.store_id; child.observation_id])) in
+          let projected = entry ~diagnostics style label child.text in
+          let projected = { projected with markdown_source=Message_layout.Markdown_stable {
+            keeper_name; request_id=identity; observed_at=record.recorded_at;
+            entry_index=record.seq } } in
+          Some (Tagged_child anchor, fold_thinking_entry state ~chat_cols projected)) store.records)
+        (Consumer.stores received) in
+      let notices =
+        List.map (fun error -> entry Message_layout.Error "CHILD READ" (Consumer.error_text error))
+          (Consumer.errors received)
+        @ List.map (entry Message_layout.Status "CHILD HEALTH") (Consumer.diagnostics received) in
+      let result = rows, notices in
+      child_entries_memo := Some (received, key, result);
+      result
+
+let child_join_memo = ref None
+
+let join_child_entries tags entries child_rows =
+  match child_rows with
+  | [] -> tags, entries
+  | _ ->
+      match !child_join_memo with
+      | Some (old_tags, old_entries, old_children, result)
+        when old_tags == tags && old_entries == entries && old_children == child_rows -> result
+      | Some _ | None ->
+          let result = tags @ child_rows, entries @ List.map snd child_rows in
+          child_join_memo := Some (tags, entries, child_rows, result);
+          result
+
+let child_notice_join_memo = ref None
+
+let join_child_notices notices native =
+  match notices with
+  | [] -> native
+  | _ ->
+      match !child_notice_join_memo with
+      | Some (old_notices, old_native, joined) when old_notices == notices && old_native == native -> joined
+      | Some _ | None ->
+          let joined = notices @ native in
+          child_notice_join_memo := Some (notices, native, joined);
+          joined
 
 let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
   (* The same pure derivation the committed rows used, asked again for the
@@ -3184,6 +3279,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
       let request_id, execution_id = match tag with
         | Tagged_row message -> message.me_request_id,
             request_owner request_owners message.me_request_id
+        | Tagged_child _ -> "", ""
         | Tagged_block (log, _, _) -> Masc_tui_types.turn_log_request_id log,
             Masc_tui_types.turn_log_execution_id log in
       let identities = request_diagnostics ~tools:state.msg_tool_visibility
@@ -3274,6 +3370,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
            | Some request_id -> request_id
            | None -> message.me_request_id in
           if request_id = "" then None else Some request_id
+      | Tagged_child _ -> None
       | Tagged_block (_, Some (Keeper_chat_transcript.Admission_of_request _), _) -> None
       | Tagged_block (log, _, _) -> Some (Masc_tui_types.turn_log_execution_id log)
     in
@@ -3309,7 +3406,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
             let siding =
               match tag with
               | Tagged_row message -> siding_of_message message
-              | Tagged_block _ -> None
+              | Tagged_child _ | Tagged_block _ -> None
             in
             ( tag
             , { entry with
@@ -3377,7 +3474,11 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
         | Some excerpt -> anchor, excerpt.held_entry
         | None -> anchor, entry) polled in
   let pending = chat_tail_entries state ~keeper_name ~role_label_column in
-  let native = native_task_entries state ~keeper_name ~role_label_column in
+  let child_rows, child_notices = child_content_entries state ~keeper_name ~role_label_column ~chat_cols in
+  let tagged_layout_entries, layout_entries =
+    join_child_entries tagged_layout_entries layout_entries child_rows in
+  let native = join_child_notices child_notices
+    (native_task_entries state ~keeper_name ~role_label_column) in
   let transient_anchors = List.map (fun (anchor, _) -> Some anchor) polled
     @ List.map (fun _ -> None) native
     @ List.map (fun (entry : Message_layout.entry) ->
@@ -3408,6 +3509,7 @@ let search_reply_source (message : msg_entry) =
   | (Message_keeper | Message_autonomous), (Turn_input | Turn_progress | Turn_tool) -> None
 
 let search_anchor_of_tag = function
+  | Tagged_child anchor -> Some (Search_child anchor)
   | Tagged_row message -> Some (Search_history {
       row_anchor = msg_anchor message; reply_source = search_reply_source message })
   | Tagged_block (_, Some (Keeper_chat_transcript.Admission_of_request request_id), _) ->
@@ -3418,6 +3520,7 @@ let search_anchor_of_tag = function
   | Tagged_block (_, None, _) -> None
 
 type search_index_key =
+  | Child_identity of child_content_anchor
   | History_identity of msg_identity
   | History_user_slot of string * chat_turn_phase * int
   | History_reply of Masc_tui_keeper_chat_log.journal_source
@@ -3435,6 +3538,7 @@ let projection_index_of_anchor projection =
         let index = Hashtbl.create 64 in
         let add key at = if not (Hashtbl.mem index key) then Hashtbl.add index key at in
         List.iteri (fun at (tag, _) -> match tag with
+          | Tagged_child anchor -> add (Child_identity anchor) at
           | Tagged_row row ->
               add (History_identity row.me_identity) at;
               (match row.me_role with
@@ -3454,6 +3558,7 @@ let projection_index_of_anchor projection =
         index in
   fun anchor ->
     let keys = match anchor with
+      | Search_child anchor -> [Child_identity anchor]
       | Search_admission request_id -> [Admission_request request_id]
       | Search_history {row_anchor; reply_source} ->
           History_identity row_anchor.ma_identity
@@ -3506,7 +3611,7 @@ let scroll_anchor_index projection =
              | Message_user _, (Turn_input | Turn_progress | Turn_tool | Turn_output)
              | (Message_keeper | Message_autonomous | Message_status | Message_local
                 | Message_error | Message_tool | Message_skill _ | Message_thinking | Message_memory), _ -> ())
-        | Tagged_block _ -> ()) projection.tagged_entries;
+        | Tagged_child _ | Tagged_block _ -> ()) projection.tagged_entries;
       let indexed_entries = Array.of_list projection.layout_entries in
       let anchors = {indexed_entries; indexed_anchors; transient_indices} in
       scroll_anchor_index_memo := Some (projection.layout_entries, anchors);
@@ -3925,7 +4030,7 @@ let plan_keeper_message_search ?(preview_lookup=Masc_tui_link_preview.get_previe
                   | Some _ | None -> None in
                 let requests = entry.Message_layout.request_label :: (match tag with
                   | Tagged_row message -> [message.me_request_id]
-                  | Tagged_block _ -> []) in
+                  | Tagged_child _ | Tagged_block _ -> []) in
                 let source_requests = List.sort_uniq String.compare
                     (List.filter (fun request -> request <> "") requests) in
                 Anchored_source {source_index=index;source_anchor=anchor;source_before=before;

@@ -139,7 +139,7 @@ val prepare_agent_setup
        (** Frozen current+held exact selection captured beside the prompt.
            Setup must not reread mutable Workspace task state. *)
   -> trajectory_acc:Trajectory.accumulator option
-  -> ?dynamic_context_for_tools:(Keeper_request_tool_access.t -> string)
+  -> ?dynamic_context_for_tools:(Keeper_request_tool_access.t -> Keeper_context_layers.rendered)
   -> ?repetition_execution:Keeper_repetition_scope.Execution.t
   -> ?runtime_manifest_context:Keeper_runtime_manifest.turn_context
   -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)

@@ -793,7 +793,8 @@ let run_keeper_invocation_turn_admitted_inner
                  built, shared with autonomous turns. Channel-specific input
                  stays in [dynamic_context] and the persisted user message. *)
               { dynamic_context = render_dynamic_context None;
-                dynamic_context_for_tools = Some (fun access -> render_dynamic_context (Some access)) }
+                dynamic_context_for_tools = Some (fun access ->
+                  Keeper_context_layers.unattributed Direct_turn (render_dynamic_context (Some access))) }
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();

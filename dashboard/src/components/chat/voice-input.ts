@@ -11,11 +11,11 @@
  * This module owns the MediaRecorder lifecycle so the composer component stays
  * a thin shell: a mic button bound to {@link useVoiceInput} plus a status hint.
  */
-import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
-import { authHeaders, fetchWithTimeout } from '../../api/core'
+import { useCallback, useLayoutEffect, useRef, useState } from 'preact/hooks'
+import { authHeaders, fetchControlPlane, currentStoredTokenRevision, subscribeStoredTokenChanges } from '../../api/core'
 import { recordingToWav } from './voice-wav'
 
-export type VoiceInputState = 'idle' | 'recording' | 'transcribing'
+export type VoiceInputState = 'idle' | 'acquiring' | 'recording' | 'transcribing'
 
 export interface TranscribeResult {
   /** The transcribed utterance. Empty string on a no-speech capture. */
@@ -24,33 +24,40 @@ export interface TranscribeResult {
   readonly languageCode: string | null
 }
 
-const TRANSCRIBE_TIMEOUT_MS = 60_000
-
-/** Upload a recorded clip and return the transcribed text. */
-export async function transcribeAudio(blob: Blob): Promise<TranscribeResult> {
-  const res = await fetchWithTimeout(
-    '/api/v1/voice/transcribe',
-    {
+/** Upload audio under the caller's lifetime and the admitted credential epoch. */
+export async function transcribeAudio(blob: Blob, options: { signal?: AbortSignal } = {}): Promise<TranscribeResult> {
+  const controller = new AbortController()
+  const signal = options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal
+  const releaseAuth = subscribeStoredTokenChanges(() => controller.abort())
+  try {
+    signal.throwIfAborted()
+    const res = await fetchControlPlane('/api/v1/voice/transcribe', {
       method: 'POST',
       headers: { ...authHeaders(), 'content-type': blob.type || 'audio/webm' },
       body: blob,
-    },
-    TRANSCRIBE_TIMEOUT_MS,
-  )
-  if (!res.ok) {
-    let detail = `${res.status} ${res.statusText}`
-    try {
-      const err = (await res.json()) as { error?: string }
-      if (typeof err?.error === 'string' && err.error !== '') detail = err.error
-    } catch {
-      // Body was not JSON; keep the status-line detail.
+      signal,
+    })
+    signal.throwIfAborted()
+    if (!res.ok) {
+      let detail = `${res.status} ${res.statusText}`
+      try {
+        const err = (await res.json()) as { error?: string }
+        if (typeof err?.error === 'string' && err.error !== '') detail = err.error
+      } catch (error) {
+        signal.throwIfAborted()
+      }
+      signal.throwIfAborted()
+      throw new Error(detail)
     }
-    throw new Error(detail)
+    const json = (await res.json()) as { text?: unknown; language_code?: unknown }
+    signal.throwIfAborted()
+    return {
+      text: typeof json.text === 'string' ? json.text : '',
+      languageCode: typeof json.language_code === 'string' ? json.language_code : null,
+    }
+  } finally {
+    releaseAuth()
   }
-  const json = (await res.json()) as { text?: unknown; language_code?: unknown }
-  const text = typeof json.text === 'string' ? json.text : ''
-  const languageCode = typeof json.language_code === 'string' ? json.language_code : null
-  return { text, languageCode }
 }
 
 /** True where MediaRecorder + getUserMedia are usable (excludes old Safari). */
@@ -63,6 +70,8 @@ export function voiceInputSupported(): boolean {
 }
 
 export interface UseVoiceInputOptions {
+  /** Host context ownership captured when recording is admitted. */
+  readonly isCurrent?: () => boolean
   /** Called with the transcribed text once Scribe returns. */
   readonly onTranscribed: (text: string) => void
   /** Called with a human-readable error string on capture/upload failure. */
@@ -83,111 +92,132 @@ export interface UseVoiceInput {
  * at a time and tears down its MediaStream on every exit path (stop, error,
  * unmount) so the mic indicator never lingers.
  */
-export function useVoiceInput({ onTranscribed, onError }: UseVoiceInputOptions): UseVoiceInput {
-  const [state, setState] = useState<VoiceInputState>('idle')
-  const recorderRef = useRef<MediaRecorder | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const chunksRef = useRef<Blob[]>([])
-  // Keep the latest callbacks without re-arming the recorder on every render.
-  const onTranscribedRef = useRef(onTranscribed)
-  const onErrorRef = useRef(onError)
-  onTranscribedRef.current = onTranscribed
-  onErrorRef.current = onError
+interface VoiceSession {
+  readonly controller: AbortController
+  readonly authRevision: number
+  readonly options: UseVoiceInputOptions
+  releaseAuth: () => void
+  stream: MediaStream | null
+  recorder: MediaRecorder | null
+  chunks: Blob[]
+}
 
+export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInput {
+  const [state, setState] = useState<VoiceInputState>('idle')
+  const mounted = useRef(false)
+  const active = useRef<VoiceSession | null>(null)
   const supported = voiceInputSupported()
 
-  const stopStream = useCallback(() => {
-    streamRef.current?.getTracks().forEach((t) => t.stop())
-    streamRef.current = null
+  const release = useCallback((session: VoiceSession, cancel: boolean) => {
+    const wasActive = active.current === session
+    if (wasActive) active.current = null
+    session.releaseAuth()
+    if (cancel) session.controller.abort()
+    const recorder = session.recorder
+    session.recorder = null
+    try {
+      if (recorder) {
+        recorder.ondataavailable = null
+        recorder.onstop = null
+        recorder.onerror = null
+        if (recorder.state === 'recording' || recorder.state === 'paused') recorder.stop()
+      }
+    } finally {
+      session.stream?.getTracks().forEach(track => track.stop())
+      session.stream = null
+      session.chunks = []
+      if (mounted.current && wasActive) setState('idle')
+    }
   }, [])
 
-  const fail = useCallback(
-    (message: string) => {
-      stopStream()
-      recorderRef.current = null
-      chunksRef.current = []
-      setState('idle')
-      onErrorRef.current?.(message)
-    },
-    [stopStream],
-  )
+  const owns = (session: VoiceSession) => mounted.current && active.current === session
+    && !session.controller.signal.aborted
+    && session.authRevision === currentStoredTokenRevision()
+    && session.options.isCurrent?.() !== false
+
+  useLayoutEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      if (active.current) release(active.current, true)
+    }
+  }, [release])
+  useLayoutEffect(() => {
+    if (active.current && !owns(active.current)) release(active.current, true)
+  })
 
   const stop = useCallback(() => {
-    const recorder = recorderRef.current
-    if (!recorder || recorder.state === 'inactive') return
-    // The actual transcribe happens in the onstop handler below.
-    recorder.stop()
-  }, [])
+    const session = active.current
+    if (!session || !owns(session)) {
+      if (session) release(session, true)
+      return
+    }
+    if (session.recorder?.state === 'recording') session.recorder.stop()
+  }, [release])
 
-  const start = useCallback(async () => {
+  const start = async () => {
+    if (!mounted.current || active.current || options.isCurrent?.() === false) return
     if (!supported) {
-      onErrorRef.current?.('이 브라우저에서는 음성 입력을 지원하지 않습니다.')
+      options.onError?.('이 브라우저에서는 음성 입력을 지원하지 않습니다.')
       return
     }
-    if (state !== 'idle') return
-    chunksRef.current = []
-    let stream: MediaStream
+    const session: VoiceSession = {
+      controller: new AbortController(), authRevision: currentStoredTokenRevision(), options,
+      releaseAuth: () => {}, stream: null, recorder: null, chunks: [],
+    }
+    active.current = session
+    session.releaseAuth = subscribeStoredTokenChanges(() => release(session, true))
+    setState('acquiring')
+    const fail = (message: string) => {
+      const present = owns(session)
+      release(session, true)
+      if (present) session.options.onError?.(message)
+    }
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    } catch (err) {
-      const e = err as DOMException
-      const message =
-        e?.name === 'NotAllowedError'
-          ? '마이크 권한이 거부되었습니다. 브라우저 설정에서 허용하세요.'
-          : `마이크를 열 수 없습니다: ${e?.message ?? '알 수 없는 오류'}`
-      fail(message)
-      return
-    }
-    streamRef.current = stream
-    const recorder = new MediaRecorder(stream)
-    recorderRef.current = recorder
-    recorder.ondataavailable = (event: BlobEvent) => {
-      if (event.data.size > 0) chunksRef.current.push(event.data)
-    }
-    recorder.onstop = () => {
-      const mimeType = recorder.mimeType || 'audio/webm'
-      const blob = new Blob(chunksRef.current, { type: mimeType })
-      chunksRef.current = []
-      stopStream()
-      recorderRef.current = null
-      if (blob.size === 0) {
-        setState('idle')
-        onErrorRef.current?.('녹음된 오디오 없음')
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (!owns(session)) {
+        stream.getTracks().forEach(track => track.stop())
+        release(session, true)
         return
       }
-      setState('transcribing')
-      void (async () => {
-        let wav: Blob
-        try {
-          wav = await recordingToWav(blob)
-        } catch (err: unknown) {
-          const e = err as Error
-          fail(`녹음을 WAV 로 바꾸지 못했습니다: ${e?.message ?? '알 수 없는 오류'}`)
-          return
-        }
-        try {
-          const result = await transcribeAudio(wav)
-          setState('idle')
-          if (result.text === '') {
-            onErrorRef.current?.('음성을 인식하지 못했습니다. 다시 말해주세요.')
-            return
+      session.stream = stream
+      const recorder = new MediaRecorder(stream)
+      session.recorder = recorder
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (owns(session) && event.data.size > 0) session.chunks.push(event.data)
+      }
+      recorder.onstop = () => {
+        if (!owns(session)) { release(session, true); return }
+        const blob = new Blob(session.chunks, { type: recorder.mimeType || 'audio/webm' })
+        session.chunks = []
+        session.stream?.getTracks().forEach(track => track.stop())
+        session.stream = null
+        if (blob.size === 0) { fail('녹음된 오디오 없음'); return }
+        setState('transcribing')
+        void (async () => {
+          try {
+            const wav = await recordingToWav(blob)
+            if (!owns(session)) { release(session, true); return }
+            const result = await transcribeAudio(wav, { signal: session.controller.signal })
+            if (!owns(session)) { release(session, true); return }
+            release(session, false)
+            if (result.text === '') session.options.onError?.('음성을 인식하지 못했습니다. 다시 말해주세요.')
+            else session.options.onTranscribed(result.text)
+          } catch (error) {
+            fail(`전사 실패: ${error instanceof Error ? error.message : '알 수 없는 오류'}`)
           }
-          onTranscribedRef.current(result.text)
-        } catch (err: unknown) {
-          const e = err as Error
-          fail(`전사 실패: ${e?.message ?? '알 수 없는 오류'}`)
-        }
-      })()
+        })()
+      }
+      recorder.onerror = () => fail('녹음 중 오류가 발생했습니다.')
+      recorder.start()
+      setState('recording')
+    } catch (error) {
+      const e = error as DOMException
+      fail(e?.name === 'NotAllowedError'
+        ? '마이크 권한이 거부되었습니다. 브라우저 설정에서 허용하세요.'
+        : `마이크를 열 수 없습니다: ${e?.message ?? '알 수 없는 오류'}`)
     }
-    recorder.onerror = () => {
-      fail('녹음 중 오류가 발생했습니다.')
-    }
-    recorder.start()
-    setState('recording')
-  }, [supported, state, fail, stopStream])
-
-  // Release the mic if the composer unmounts mid-recording.
-  useEffect(() => stopStream, [stopStream])
+  }
 
   return { state, supported, start, stop }
 }

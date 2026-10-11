@@ -247,7 +247,9 @@ export function ComposerV2({
       : 'ready'
   const deliveryReason = busy
     ? 'transport busy'
-    : voice.state === 'recording'
+    : voice.state === 'acquiring'
+      ? 'requesting microphone'
+      : voice.state === 'recording'
       ? 'recording voice'
       : voice.state === 'transcribing'
         ? 'transcribing voice'
@@ -507,7 +509,7 @@ export function ComposerV2({
           ? html`
               <div class="rec-bar" data-testid="composer-v2-recorder">
                 <span class="rec-dot" aria-hidden="true"></span>
-                <span class="rec-lbl">${voice.state === 'recording' ? '녹음 중' : '전사 중'}</span>
+                <span class="rec-lbl">${voice.state === 'recording' ? '녹음 중' : voice.state === 'acquiring' ? '마이크 연결 중' : '전사 중'}</span>
                 <div class="rec-wave" aria-hidden="true">
                   ${[0.4, 0.8, 0.5, 0.9, 0.45, 0.75, 0.52, 0.84, 0.48, 0.7].map((height, index) => html`<span class="rbar" key=${index} style=${{ height: `${Math.round(3 + height * 20)}px` }} />`)}
                 </div>

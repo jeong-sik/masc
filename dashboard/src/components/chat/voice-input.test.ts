@@ -3,20 +3,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // Mock the core fetch layer so the tests exercise transcribeAudio's contract
 // (path, method, raw audio body, bearer, content-type) without network I/O.
 vi.mock('../../api/core', () => ({
-  fetchWithTimeout: vi.fn(),
+  fetchControlPlane: vi.fn(),
   authHeaders: () => ({ Authorization: 'Bearer test' }),
+  subscribeStoredTokenChanges: () => () => {},
 }))
 
-import { fetchWithTimeout } from '../../api/core'
+import { fetchControlPlane } from '../../api/core'
 import { transcribeAudio, voiceInputSupported } from './voice-input'
 
-const mockedFetch = vi.mocked(fetchWithTimeout)
+const mockedFetch = vi.mocked(fetchControlPlane)
 
 /** The last fetch call, typed as the [path, init, timeoutMs] tuple transcribeAudio passes. */
-function lastCall(): [string, RequestInit, number] {
+function lastCall(): [string, RequestInit] {
   const call = mockedFetch.mock.calls.at(-1)
-  if (!call) throw new Error('fetchWithTimeout was not called')
-  return [call[0], call[1], call[2]]
+  if (!call) throw new Error('fetchControlPlane was not called')
+  return [call[0], call[1]]
 }
 
 /** Cast the request headers to a plain record so strict indexing type-checks. */
@@ -72,13 +73,6 @@ describe('transcribeAudio', () => {
     await transcribeAudio(new Blob(['x']))
     const [, init] = lastCall()
     expect(headersOf(init)['content-type']).toBe('audio/webm')
-  })
-
-  it('uses a 60s timeout', async () => {
-    mockedFetch.mockResolvedValue(okResponse({ text: 'hi' }))
-    await transcribeAudio(new Blob(['x']))
-    const [, , timeoutMs] = lastCall()
-    expect(timeoutMs).toBe(60_000)
   })
 
   it('throws the server error message on HTTP failure', async () => {

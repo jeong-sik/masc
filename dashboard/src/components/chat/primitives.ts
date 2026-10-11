@@ -4969,6 +4969,7 @@ function ChatComposerSession({
   // RFC-0236 P1: speak to compose. Voice transcription is saved as a visual draft
   // card (VoiceDraft) matching the mockup and board composers.
   const voice = useVoiceInput({
+    isCurrent: () => authRevision === currentStoredTokenRevision() && isSubmissionCurrent?.() !== false,
     onTranscribed: (text) => {
       if (text) {
         setVoiceDraft({
@@ -5404,11 +5405,11 @@ function ChatComposerSession({
                chat.css (mirrors styles/v2.css:932-936). Removing the prior
                inline Tailwind (control-textarea + border + rounded + px/py +
                bg + focus ring) drops the nested box the prototype lacks. -->
-          ${voice.state === 'recording' || voice.state === 'transcribing'
+          ${voice.state === 'acquiring' || voice.state === 'recording' || voice.state === 'transcribing'
             ? html`
                 <div class=${`rec-bar ${voice.state === 'transcribing' ? 'transcribing' : ''}`}>
                   <span class="rec-dot"></span>
-                  <span class="rec-lbl">${voice.state === 'recording' ? '녹음 중' : '전사 중'}</span>
+                  <span class="rec-lbl">${voice.state === 'recording' ? '녹음 중' : voice.state === 'acquiring' ? '마이크 연결 중' : '전사 중'}</span>
                   <span class="rec-clock mono">${formatVoiceClock(voiceElapsed)}</span>
                   <div class="rec-wave" aria-hidden="true">
                     ${VOICE_WAVE_BARS.map((height, index) => html`
@@ -5422,7 +5423,7 @@ function ChatComposerSession({
                   <button
                     type="button"
                     class="rec-btn stop"
-                    title=${voice.state === 'recording' ? '녹음 종료 — 받아쓰기' : '음성 전사 중'}
+                    title=${voice.state === 'recording' ? '녹음 종료 — 받아쓰기' : voice.state === 'acquiring' ? '마이크 연결 중' : '음성 전사 중'}
                     disabled=${voice.state !== 'recording'}
                     onClick=${voice.stop}
                   >

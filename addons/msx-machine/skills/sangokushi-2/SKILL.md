@@ -441,10 +441,18 @@ checking its displayed name; list positions depend on the current enemy force.
 
 The next prompt asked `いかほど金を使いますか(0-78)?`. Separate `7`, `8` presses
 entered 78; Return then opened `よろしいですか(Y/N)?`, and `y` confirmed the
-attempt. That maximum was the force's current gold, not a general input limit.
-Read the amount prompt rather than reusing the observed maximum in another battle.
+attempt. The force had 78 gold in that observation. In an April 221
+province-21 battle, the force had 190 gold but the prompt allowed only
+`(0-100)`. Read the live amount range; do not assume its maximum equals
+available funds or reuse another battle's amount.
 
-After confirmation, the next own command was Yue Jin. Own gold fell from 78 to
+In that April branch, choosing the explicitly listed Deng Ai (鄧艾),
+entering 100 and confirming `y` showed `愚かなことを`, advanced the day,
+and reduced own gold 190 → 90. Own troops 93 and enemy troops 183 stayed
+unchanged. No allegiance transfer was observed; spending gold does not
+establish successful persuasion.
+
+In the March observation, after confirmation, the next own command was Yue Jin. Own gold fell from 78 to
 0, while displayed troops and officers remained enemy 128 / two and own 103 /
 four. This establishes target selection, payment and command progression;
 it does **not** establish a successful defection or faction transfer. Verify an

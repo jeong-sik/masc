@@ -864,6 +864,7 @@ describe('sendKeeperThreadMessage operation stream', () => {
     expect(keeperActionErrors.value.echo).toBe('current scope error')
     expect(fetchKeeperChatHistory).not.toHaveBeenCalled()
     expect(cancelKeeperChatOperation).not.toHaveBeenCalled()
+    expect(keeperThreads.value.echo?.find(entry => entry.role === 'user')).toMatchObject({ text: 'input', delivery: 'interrupted' })
     clearStoredToken()
   })
 
@@ -881,6 +882,7 @@ describe('sendKeeperThreadMessage operation stream', () => {
     keeperActionErrors.value = { echo: 'current scope error' }
     finish({ terminal: false })
     await send
+    expect(keeperThreads.value.echo?.find(entry => entry.role === 'user')?.delivery).toBe('delivered')
     expect(trackedKeeperChatOperationsForKeeper('echo')).toHaveLength(1)
     expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft).toMatchObject({
       rawText: 'admitted partial', delivery: 'interrupted', streamState: null,
@@ -1124,6 +1126,24 @@ describe('sendKeeperThreadMessage operation stream', () => {
 
     streams[1]?.resolve({ terminal: false })
     await second
+  })
+
+  it('keeps authored input sending until the operation acceptance receipt', async () => {
+    let options!: { operationId: string; onEvent: (event: KeeperChatStreamEvent) => void }
+    let finish!: (value: { terminal: boolean }) => void
+    streamKeeperMessage.mockImplementationOnce((_name, _message, admitted) => {
+      options = admitted
+      return new Promise(resolve => { finish = resolve })
+    })
+    const send = sendKeeperThreadMessage('echo', 'original input')
+    const user = () => keeperThreads.value.echo?.find(entry => entry.role === 'user')
+    expect(user()?.text).toBe('original input')
+    expect(user()?.delivery).toBe('sending')
+    options.onEvent({ type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+      value: { operation_id: options.operationId, state: 'Running', queued_count: 0 } })
+    expect(user()?.delivery).toBe('delivered')
+    finish({ terminal: false })
+    await send
   })
 
   it('cancels the FIFO-head operation by exact operation id', async () => {

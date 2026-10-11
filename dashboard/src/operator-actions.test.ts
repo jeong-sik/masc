@@ -639,3 +639,48 @@ describe('operator refresh replacement and queued ownership', () => {
     }
   })
 })
+
+describe('operator refresh observer failure cleanup', () => {
+  it.each(['snapshot', 'digest'] as const)('releases %s operations and queued work after a cleanup observer throws', async (kind) => {
+    const { mod, signals } = await load()
+    const { effect } = await import('@preact/signals')
+    const loading = kind === 'snapshot' ? signals.operatorLoading : signals.operatorDigestLoading
+    const refresh = kind === 'snapshot' ? mod.refreshOperatorSnapshot : mod.refreshOperatorWorkspaceDigest
+    const transport = kind === 'snapshot' ? apiMocks.fetchOperatorSnapshot : apiMocks.fetchOperatorDigest
+    let finishFirst!: (value: unknown) => void
+    let finishSecond!: (value: unknown) => void
+    transport.mockReturnValueOnce(new Promise(resolve => { finishFirst = resolve }))
+      .mockReturnValueOnce(new Promise(resolve => { finishSecond = resolve }))
+    let started = false
+    let thrown = false
+    const observerFailure = new Error('cleanup observer failed')
+    const dispose = effect(() => {
+      if (loading.value) started = true
+      else if (started && !thrown) { thrown = true; throw observerFailure }
+    })
+    const first = refresh()
+    const queued = refresh({ force: true })
+    try {
+      finishFirst(kind === 'snapshot' ? validSnapshot : {})
+      const old = await Promise.allSettled([first, queued])
+      expect(old.every(result => result.status === 'rejected')).toBe(true)
+      dispose()
+      const second = refresh({ force: true })
+      const nextQueued = refresh({ force: true })
+      const secondOutcome = second.catch(error => error)
+      const nextOutcome = nextQueued.catch(error => error)
+      try {
+        expect(transport).toHaveBeenCalledTimes(2)
+      } finally {
+        if (typeof finishSecond === 'function') finishSecond(kind === 'snapshot' ? validSnapshot : {})
+        await Promise.all([secondOutcome, nextOutcome])
+      }
+      expect(transport).toHaveBeenCalledTimes(3)
+      expect(loading.value).toBe(false)
+    } finally {
+      dispose()
+      finishFirst(kind === 'snapshot' ? validSnapshot : {})
+      await Promise.allSettled([first, queued])
+    }
+  })
+})

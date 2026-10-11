@@ -106,8 +106,6 @@ export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<vo
         await refreshOperatorSnapshot({ force: true })
       }).finally(() => {
         if (snapshotFollowup === pending.operation) snapshotFollowup = null
-      }).finally(() => {
-        if (digestFollowup === pending.operation) digestFollowup = null
       }).then(pending.resolve, pending.reject)
     }
     return snapshotFollowup.promise
@@ -140,8 +138,11 @@ export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<vo
       if (!owns()) return
       operatorErrorStatus.value = summary.status
     } finally {
-      if (owns()) operatorLoading.value = false
-      if (snapshotRefreshInflight === operation) snapshotRefreshInflight = null
+      try {
+        if (owns()) operatorLoading.value = false
+      } finally {
+        if (snapshotRefreshInflight === operation) snapshotRefreshInflight = null
+      }
     }
   })().then(pending.resolve, pending.reject)
   return operation.promise
@@ -159,6 +160,8 @@ export async function refreshOperatorWorkspaceDigest(opts?: RefreshOptions): Pro
         if (digestFollowup !== pending.operation || currentStoredTokenRevision() !== authRevision) return
         digestFollowup = null
         await refreshOperatorWorkspaceDigest({ force: true })
+      }).finally(() => {
+        if (digestFollowup === pending.operation) digestFollowup = null
       }).then(pending.resolve, pending.reject)
     }
     return digestFollowup.promise
@@ -189,8 +192,11 @@ export async function refreshOperatorWorkspaceDigest(opts?: RefreshOptions): Pro
       if (!owns()) return
       operatorDigestErrorStatus.value = summary.status
     } finally {
-      if (owns()) operatorDigestLoading.value = false
-      if (workspaceDigestRefreshInflight === operation) workspaceDigestRefreshInflight = null
+      try {
+        if (owns()) operatorDigestLoading.value = false
+      } finally {
+        if (workspaceDigestRefreshInflight === operation) workspaceDigestRefreshInflight = null
+      }
     }
   })().then(pending.resolve, pending.reject)
   return operation.promise

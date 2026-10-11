@@ -161,7 +161,10 @@ val create_openai_stream_state
     prelude is emitted: a late start would conflict with the existing content
     or reset consumer metadata. Later metadata does not create another response;
     each HTTP request owns its own normalization state. Tool-bearing chunks
-    commit the prelude and content together, or roll back both on failure. *)
+    commit the prelude and content together, or roll back both on failure.
+    A successful finish closes content admission for this request. Later content
+    and conflicting finishes fail without mutation; usage-only trailers and
+    identical finish replays preserve usage without closing blocks again. *)
 val openai_chunk_to_events
   :  openai_stream_state
   -> openai_chunk
@@ -169,7 +172,9 @@ val openai_chunk_to_events
 
 (** Convert every closed parser outcome into stream events. Malformed payloads
     become exactly one [SSEParseFailed], provider errors become exactly one
-    [SSEError], and the terminal sentinel becomes [MessageStop]. *)
+    [SSEError]. The first terminal sentinel closes any unfinished content before
+    [MessageStop], without inventing a stop reason; repeated sentinels are no-ops.
+    Chunks after that sentinel fail without mutation. *)
 val openai_sse_parse_result_to_events
   :  openai_stream_state
   -> openai_sse_parse_result

@@ -876,6 +876,11 @@ type openai_prelude =
   | Reported_prelude_published
   | Output_without_prelude
 
+type openai_content_phase =
+  | Openai_content_live
+  | Openai_content_finished of Stop_reason_wire.wire_finish
+  | Openai_message_stopped
+
 type openai_stream_state =
   { mutable thinking_block_started : bool
   ; mutable thinking_block_index : int
@@ -899,6 +904,7 @@ type openai_stream_state =
   ; mutable thinking_state : thinking_state
   ; mutable gemini_message_model : Model_id.t option
   ; mutable openai_prelude : openai_prelude
+  ; mutable openai_content_phase : openai_content_phase
   ; inline_reasoning : Inline_reasoning_split.state option
     (** Present only for a model whose content channel can also carry
         reasoning wrapped in tags (template-parser dialect or declared
@@ -928,6 +934,7 @@ let create_openai_stream_state
   ; thinking_state = Not_thinking
   ; gemini_message_model = None
   ; openai_prelude = Awaiting_reported_metadata
+  ; openai_content_phase = Openai_content_live
   ; inline_reasoning =
       (if inline_reasoning then Some (Inline_reasoning_split.create ()) else None)
   ; provider
@@ -1476,24 +1483,51 @@ let project_openai_chunk ?tx (state : openai_stream_state) (chunk : openai_chunk
     exactly one parse failure and rolls back every scalar/table mutation. The
     structurally exact no-tool fast path avoids transaction allocation for the
     common text/reasoning token stream. *)
-let openai_chunk_to_events (state : openai_stream_state) (chunk : openai_chunk)
-  : sse_event list * Telemetry_event.t option
+let project_live_openai_chunk (state : openai_stream_state) (chunk : openai_chunk)
+  : (sse_event list * Telemetry_event.t option, sse_event) result
   =
   match chunk.delta_tool_calls with
-  | [] ->
-    (match project_openai_chunk state chunk with
-     | Ok result -> result
-     | Error error -> [ error ], None)
+  | [] -> project_openai_chunk state chunk
   | _ :: _ ->
     let tx = begin_openai_projection state in
     (match project_openai_chunk ~tx state chunk with
-     | Ok result -> result
+     | Ok result -> Ok result
      | Error error ->
        rollback_openai_projection tx;
-       [ error ], None
+       Error error
      | exception exn ->
        rollback_openai_projection tx;
        raise exn)
+;;
+
+let openai_chunk_to_events state chunk =
+  let reject reason = [ SSEParseFailed { reason; raw = "" } ], None in
+  let usage_only () =
+    match chunk.chunk_usage with
+    | None -> [], None
+    | Some usage -> [ MessageDelta { stop_reason = None; usage = Some usage } ], None
+  in
+  match state.openai_content_phase with
+  | Openai_message_stopped -> reject "openai_chunk_after_message_stop"
+  | Openai_content_finished finished ->
+    if chunk_has_non_empty_delta chunk then reject "openai_content_after_finish"
+    else
+      (match chunk.finish_reason with
+       | None -> usage_only ()
+       | Some reason ->
+         if Stop_reason_wire.wire_finish_of_string reason = finished then usage_only ()
+         else reject "openai_conflicting_finish")
+  | Openai_content_live ->
+    (* The phase commits only after successful projection, outside the tool
+       transaction. Failed routes must leave content admission live. *)
+    (match project_live_openai_chunk state chunk with
+     | Error error -> [ error ], None
+     | Ok result ->
+       Option.iter
+         (fun reason -> state.openai_content_phase <-
+             Openai_content_finished (Stop_reason_wire.wire_finish_of_string reason))
+         chunk.finish_reason;
+       result)
 ;;
 
 let openai_sse_parse_result_to_events state = function
@@ -1501,10 +1535,23 @@ let openai_sse_parse_result_to_events state = function
   | Openai_done ->
     (* The terminal sentinel is observable even without a preceding chunk.
        It closes the prelude window; later data must not invent a new start. *)
+    let events = match state.openai_content_phase with
+      | Openai_message_stopped -> []
+      | Openai_content_finished _ -> [ MessageStop ]
+      | Openai_content_live ->
+        let buffered = ref [] in
+        Option.iter
+          (fun split -> emit_inline_segments state
+              (fun event -> buffered := event :: !buffered)
+              (Inline_reasoning_split.flush_segments split))
+          state.inline_reasoning;
+        List.rev !buffered @ openai_open_block_stops state @ [ MessageStop ]
+    in
+    state.openai_content_phase <- Openai_message_stopped;
     (match state.openai_prelude with
      | Awaiting_reported_metadata -> state.openai_prelude <- Output_without_prelude
      | Reported_prelude_published | Output_without_prelude -> ());
-    [ MessageStop ], None
+    events, None
   | Openai_empty -> [], None
   | Openai_provider_error { message; error_type; provider_status; report; raw } ->
     [ SSEError { message; error_type; provider_status; report; raw } ], None

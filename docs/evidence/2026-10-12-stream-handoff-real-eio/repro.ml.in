@@ -1,0 +1,72 @@
+#use "topfind";;
+#require "eio_main";;
+#mod_use "@SOURCE@";;
+module H = Server_keeper_stream_handoff;;
+let check label expected actual =
+  if expected <> actual then failwith label;
+  Printf.printf "PASS %s\n%!" label;;
+Eio_main.run (fun _ ->
+  let h = H.create () in
+  let seen = ref [] in
+  let entered, enter = Eio.Promise.create () in
+  let release, resume = Eio.Promise.create () in
+  let send value =
+    seen := !seen @ [value];
+    if value = 1 then (Eio.Promise.resolve enter (); Eio.Promise.await release);
+    H.Continue in
+  H.publish h ~send 1;
+  H.publish h ~send 2;
+  Eio.Fiber.both
+    (fun () -> H.accept h ~send)
+    (fun () -> Eio.Promise.await entered; H.publish h ~send 3;
+      H.accept h ~send; Eio.Promise.resolve resume ());
+  check "buffered and concurrent live FIFO" [1;2;3] !seen;
+  let h = H.create () in
+  let seen = ref [] in
+  H.accept h ~send:(fun _ -> failwith "empty acceptance sent");
+  let entered, enter = Eio.Promise.create () in
+  let release, resume = Eio.Promise.create () in
+  let send value =
+    seen := !seen @ [value];
+    if value = 1 then (Eio.Promise.resolve enter (); Eio.Promise.await release);
+    H.Continue in
+  Eio.Fiber.both
+    (fun () -> H.publish h ~send 1)
+    (fun () -> Eio.Promise.await entered; H.publish h ~send 2;
+      H.close h; H.publish h ~send 3; Eio.Promise.resolve resume ());
+  H.accept h ~send;
+  check "close retires pending events while claimed send finishes" [1] !seen;
+  let h = H.create () in
+  let seen = ref [] in
+  H.accept h ~send:(fun _ -> failwith "empty acceptance sent");
+  let cancelled =
+    try Eio.Cancel.sub (fun cc ->
+      H.publish h ~send:(fun value ->
+        seen := !seen @ [value];
+        H.publish h ~send:(fun _ -> failwith "second sender") 2;
+        Eio.Cancel.cancel cc Exit;
+        Eio.Fiber.yield ();
+        H.Continue) 1);
+      false
+    with Eio.Cancel.Cancelled _ -> true in
+  check "real cancellation propagates" true cancelled;
+  H.publish h ~send:(fun value -> seen := !seen @ [value]; H.Continue) 3;
+  H.accept h ~send:(fun _ -> failwith "closed acceptance sent");
+  check "cancelled sender closes subscription without late sends" [1] !seen;
+  let h = H.create () in
+  let seen = ref [] in
+  H.accept h ~send:(fun _ -> failwith "empty acceptance sent");
+  let send value =
+    seen := !seen @ [value];
+    if value = 1 then begin
+      let publisher = Domain.spawn (fun () ->
+        let forbidden _ = failwith "concurrent publisher acquired sender" in
+        H.publish h ~send:forbidden 2;
+        H.publish h ~send:forbidden 3;
+        H.accept h ~send:forbidden) in
+      Domain.join publisher
+    end;
+    H.Continue in
+  H.publish h ~send 1;
+  check "cross-domain producers retain sole sender and FIFO" [1;2;3] !seen
+);;

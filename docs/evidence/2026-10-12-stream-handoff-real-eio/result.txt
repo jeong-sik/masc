@@ -1,0 +1,5 @@
+PASS buffered and concurrent live FIFO
+PASS close retires pending events while claimed send finishes
+PASS real cancellation propagates
+PASS cancelled sender closes subscription without late sends
+PASS cross-domain producers retain sole sender and FIFO

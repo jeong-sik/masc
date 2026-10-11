@@ -153,13 +153,6 @@ let take_newest_for_keeper queue ~keeper_name =
   Option.bind newest (fun item -> take queue ~request_id:item.request.request_id)
 ;;
 
-let drop_for_keeper queue ~keeper_name =
-  let items = List.filter
-    (fun item -> not (String.equal (item_keeper item) keeper_name))
-    queue.items in
-  { queue with items }
-;;
-
 let holds queue ~request_id =
   List.exists
     (fun item -> String.equal item.request.Chat.request_id request_id)

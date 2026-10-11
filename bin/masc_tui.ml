@@ -8398,31 +8398,11 @@ let drain_queued_message state ~base_path ~mailbox =
             queue_run_next_on_admission state request;
           launch_keeper_request ~promoted:item state ~mailbox request;
           next ())
-        else (
-          (* The keeper this was written to is no longer registered. Sending it
-             would fail; holding it would leave a count reporting work that
-             never moves. Say what is being let go, and let it go. *)
-          let dropped =
-            Chat_queue.waiting state.msg_queued
-            |> List.filter (fun item ->
-                   String.equal item.Chat_queue.request.Keeper_chat.keeper_name
-                     keeper_name)
-          in
-          let before = Chat_queue.length state.msg_queued in
-          state.msg_queued <-
-            Chat_queue.drop_for_keeper state.msg_queued ~keeper_name;
-          (* Their rows go with them: a line left in the conversation for a
-             keeper that will never receive it reads as sent. *)
-          List.iter
-            (fun item -> forget_queued_history state item.Chat_queue.request)
-            dropped;
-          add_event state "error"
-            (Printf.sprintf
-               "Keeper %s is no longer registered; %d queued message(s) for it \
-                were not sent"
-               (Keeper_chat.terminal_safe_text keeper_name)
-               (before - Chat_queue.length state.msg_queued));
-          next ())
+        else
+          (* Availability is an observation, not operator cancellation. The
+             queue still owns the original request until dispatch or explicit
+             edit/cancel; no receipt exists that would authorize its removal. *)
+          ()
   in
   if state.workspace_identity = Workspace_identity_match
      && Option.is_none state.keepers_error then begin

@@ -424,19 +424,20 @@ let prepare_request_dynamic_context
   let dynamic_context =
     match dynamic_context_for_tools with
     | Some project when not post_tool_round -> project access
-    | Some _ | None -> dynamic_context
+    | Some _ | None -> Keeper_context_layers.unattributed Unprojected_input dynamic_context
   in
   let dynamic_context =
     match post_tool_round, Keeper_request_tool_access.route access
         ~name:"keeper_workspace_memory_read", host_recall with
-    | false, Unavailable, Some recall -> dynamic_context ^ recall ~context:dynamic_context
+    | false, Unavailable, Some recall -> Keeper_context_layers.append_unattributed dynamic_context Host_workspace_recall
+        (recall ~context:(Keeper_context_layers.text dynamic_context))
     | true, _, _ | false, (Direct | Discoverable), _ | false, Unavailable, None -> dynamic_context
   in
   let emit_metrics () =
     match turn_kind with
     | Turn_record.Autonomous when not post_tool_round ->
       Keeper_unified_prompt.emit_prompt_metrics ~meta ~system_prompt
-        { world_state = dynamic_context; user_message }
+        { world_state = Keeper_context_layers.text dynamic_context; world_partition = dynamic_context; user_message }
     | Autonomous | Direct -> ()
   in
   dynamic_context, emit_metrics
@@ -1028,6 +1029,8 @@ let assemble_hooks
                     ~post_tool_round ~dynamic_context ~dynamic_context_for_tools
                     ~deferred_names:ctx.deferred_tool_names
                     ~loader_alive:attempt_surface.loader_alive ~host_recall offered_tools in
+                let dynamic_context_partition = dynamic_context in
+                let dynamic_context = Keeper_context_layers.text dynamic_context in
                 (if String.trim dynamic_context <> ""
                  then record_block Prompt_block_id.Dynamic_context dynamic_context);
                 (* The Librarian publishes this small index in its own lane.
@@ -1121,6 +1124,7 @@ let assemble_hooks
                 in
                 let extra_system_context_assembly =
                   Keeper_run_prompt.assemble_extra_system_context
+                    ~dynamic_context_partition:(Some dynamic_context_partition)
                     ~existing_extra_system_context:
                       current_params.extra_system_context
                     ~blocks:turn_blocks

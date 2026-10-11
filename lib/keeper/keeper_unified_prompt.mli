@@ -17,6 +17,7 @@
     which exhausted the request window and re-fed the model its own observations. *)
 type turn_prompt_parts = {
   world_state : string;
+  world_partition : Keeper_context_layers.rendered;
       (** The "## Current World State" observation frame, rebuilt fresh
           every turn. Inject as per-turn [dynamic_context]; never append
           to the persisted message history. *)

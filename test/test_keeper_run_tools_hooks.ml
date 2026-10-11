@@ -74,12 +74,14 @@ let test_request_projection_distinguishes_loadable_and_suppressed_reader () =
       fst (Masc.Keeper_run_tools_hooks.prepare_request_dynamic_context
         ~meta ~turn_kind ~system_prompt:"system" ~user_message:"current purpose"
         ~post_tool_round ~dynamic_context:"provisional"
-        ~dynamic_context_for_tools:(Some project)
+        ~dynamic_context_for_tools:(Some (fun access ->
+          Masc.Keeper_context_layers.unattributed Unprojected_input (project access)))
         ~host_recall:(fun ~context ->
           incr recalls;
           check string "host sees the projected request context" "unavailable" context;
           " + source-scoped host evidence")
-        ~deferred_names:["keeper_workspace_memory_read"] ~loader_alive tools) in
+        ~deferred_names:["keeper_workspace_memory_read"] ~loader_alive tools)
+      |> Masc.Keeper_context_layers.text in
     check string "reader remains directly callable" "direct" (prepare ~loader_alive:false [reader]);
     check string "live loader can obtain allowed deferred reader" "discoverable"
       (prepare ~loader_alive:true [loader]);
@@ -91,6 +93,43 @@ let test_request_projection_distinguishes_loadable_and_suppressed_reader () =
     check string "tool result rounds retain their existing context" "provisional"
       (prepare ~post_tool_round:true ~loader_alive:false []);
     check int "post-tool round does not rerun host retrieval" 2 !recalls) [Turn_record.Direct; Autonomous]
+;;
+
+let test_actual_projection_partition_and_stale_proof () =
+  let module L = Masc.Keeper_context_layers in
+  let module A = Masc.Keeper_context_assembly in
+  let open Yojson.Safe.Util in
+  let meta = make_meta "partition-projection" in
+  let calls = ref 0 in
+  let project access =
+    incr calls;
+    let actual = match Masc.Keeper_request_tool_access.offered access with
+      | [] -> "한글 actual" | _ -> "offered" in
+    L.assemble ~content_of:(function L.Active_goals -> Some actual | _ -> None) in
+  let rendered, _ = Masc.Keeper_run_tools_hooks.prepare_request_dynamic_context
+      ~meta ~turn_kind:Turn_record.Autonomous ~system_prompt:"system" ~user_message:"goal"
+      ~post_tool_round:false ~dynamic_context:"stale preview"
+      ~dynamic_context_for_tools:(Some project)
+      ~host_recall:(fun ~context ->
+        check string "host consumes the actual projection" "한글 actual" context;
+        "\nHOST") [] in
+  check int "actual renderer runs once" 1 !calls;
+  check string "suffix preserves the exact output" "한글 actual\nHOST" (L.text rendered);
+  let issue document text =
+    A.assemble ~dynamic_context_partition:(Some document)
+      ~existing_extra_system_context:(Some "")
+      ~blocks:[Prompt_block_id.Dynamic_context, text]
+    |> fun assembly -> A.receipt_to_json (Option.get assembly.receipt)
+    |> member "spans" |> to_list |> List.rev |> List.hd |> member "subpartition" in
+  let verified = issue rendered (L.text rendered) in
+  check string "actual rendered value is issuer-bound" "verified"
+    (member "status" verified |> to_string);
+  let spans = verified |> member "partition" |> member "spans" |> to_list in
+  check int "host suffix has its own source span" 2 (List.length spans);
+  check string "suffix is explicitly unattributed" "host_workspace_recall"
+    (List.nth spans 1 |> member "source" |> member "reason" |> to_string);
+  check string "stale callback proof cannot certify new text" "unavailable"
+    (issue rendered "other request" |> member "status" |> to_string)
 ;;
 
 let test_prompt_metrics_follow_request_tool_projection () =
@@ -114,10 +153,12 @@ let test_prompt_metrics_follow_request_tool_projection () =
       ~labels:["keeper",meta.name] () in
   let prepare ?(turn_kind = Turn_record.Autonomous) ?(post_tool_round = false)
       ?(projection = project) tools =
-    Masc.Keeper_run_tools_hooks.prepare_request_dynamic_context
+    let rendered, emit = Masc.Keeper_run_tools_hooks.prepare_request_dynamic_context
       ~meta ~turn_kind ~system_prompt ~user_message ~post_tool_round
       ~dynamic_context:"unprojected placeholder"
-      ~dynamic_context_for_tools:(Some projection) tools in
+      ~dynamic_context_for_tools:(Some (fun access ->
+        Masc.Keeper_context_layers.unattributed Unprojected_input (projection access))) tools in
+    Masc.Keeper_context_layers.text rendered, emit in
   let check_metric text =
     check (option (float 0.)) "world bytes describe returned request body"
       (Some (Float.of_int (String.length text))) (world_bytes ());
@@ -160,8 +201,10 @@ let test_prompt_metrics_follow_request_tool_projection () =
   check_metric unavailable;
   let extended, emit = Masc.Keeper_run_tools_hooks.prepare_request_dynamic_context
     ~meta ~turn_kind:Turn_record.Autonomous ~system_prompt ~user_message ~post_tool_round:false
-    ~dynamic_context:"provisional" ~dynamic_context_for_tools:(Some project)
+    ~dynamic_context:"provisional" ~dynamic_context_for_tools:(Some (fun access ->
+          Masc.Keeper_context_layers.unattributed Unprojected_input (project access)))
     ~host_recall:(fun ~context:_ -> "\nHOST_SELECTED_EVIDENCE") [] in
+  let extended = Masc.Keeper_context_layers.text extended in
   emit ();
   check_metric extended;
   check bool "host evidence is included in the measured request" true
@@ -2186,6 +2229,8 @@ let () =
             "prompt metrics measure offered-tool projection at request assembly"
             `Quick
             test_prompt_metrics_follow_request_tool_projection
+        ; test_case "actual partition and stale proof" `Quick
+            test_actual_projection_partition_and_stale_proof
         ; test_case "request projection distinguishes deferred and suppressed memory readers" `Quick
             test_request_projection_distinguishes_loadable_and_suppressed_reader
         ; test_case

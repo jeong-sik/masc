@@ -569,7 +569,7 @@ let test_extra_system_context_preserves_typed_blocks () =
     ]
   in
   let assembly =
-    Keeper_run_prompt.assemble_extra_system_context
+    Keeper_run_prompt.assemble_extra_system_context ~dynamic_context_partition:None
       ~existing_extra_system_context:(Some "existing")
       ~blocks
   in
@@ -582,7 +582,7 @@ let test_extra_system_context_preserves_typed_blocks () =
   let repeated = "기억 \"동일\"\n반복" in
   List.iter (fun prefix ->
     List.iter (fun blocks ->
-      let issued = Keeper_run_prompt.assemble_extra_system_context
+      let issued = Keeper_run_prompt.assemble_extra_system_context ~dynamic_context_partition:None
         ~existing_extra_system_context:prefix ~blocks in
       let expected = List.fold_left (fun before (_,text) -> match before with
         | None -> Some text | Some before -> Some (before ^ "\n\n" ^ text)) prefix blocks in

@@ -128,8 +128,21 @@ describe('Keeper operation stream projection', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: { runtime_id: 'claude', attempt_index: 0 },
     })
-    expect(entry().runtimeAttempt?.index).toBe(1)
-    expect(entry().streamState).toBe('retrying')
+    for (const value of [null, { runtime_id: 'claude' }, { attempt_index: 2 }]) {
+      applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value })
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: { runtime_id: 'claude', attempt_index: 0 },
+      })
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_PROVIDER_RETRY', value: {
+          attempt: { routing_run_id: 'old-routing-run', runtime_id: 'claude', lane_attempt_index: 0 },
+          retry: { observation_id: 'old-retry-id', attempt: 1, max_retries: 10, retry_delay_ms: 1, error_status: null },
+        },
+      })
+      expect(entry().runtimeAttempt?.index).toBe(1)
+      expect(entry().streamState).toBe('retrying')
+    }
+
   })
 
   it('deduplicates sequenced reasoning across transport replay and restores its prefix', () => {

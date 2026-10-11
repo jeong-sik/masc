@@ -628,9 +628,9 @@ let test_missing_skill_boundary_reconciles_the_identified_terminal_round () =
   List.iter (fun terminal_text ->
     let deltas =
       [ Live.Run_started
-      ; Live.Stream_model_started {model="model"; stream_scope=Some 0; message_id=None; usage=None}
+      ; Live.Stream_model_started { generation=None;model="model"; stream_scope=Some 0; message_id=None; usage=None}
       ; Live.Text {text="Let me check."; stream_scope=Some 0}
-      ; Live.Stream_model_started {model="model"; stream_scope=Some 1; message_id=None; usage=None}
+      ; Live.Stream_model_started { generation=None;model="model"; stream_scope=Some 1; message_id=None; usage=None}
       ] @ (if terminal_text then [Live.Text {text="Done."; stream_scope=Some 1}] else []) @
       [ Live.Reply_details {reply="Done.";turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
           turn_ref="trace-1#3";terminal_stream_scope=Some 1} ] in
@@ -656,7 +656,7 @@ let test_terminal_scope_survives_a_missing_start () =
     check bool "each scoped stretch keeps its own identity" true
       (List.sort_uniq Int.compare before = before);
     if repeated_start then
-      feed t [Live.Stream_model_started {model="model"; stream_scope=Some 1; message_id=None; usage=None}];
+      feed t [Live.Stream_model_started { generation=None;model="model"; stream_scope=Some 1; message_id=None; usage=None}];
     feed t [Live.Text {text="ne"; stream_scope=Some 1};
       Live.Reply_details {reply="Done.";
         turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
@@ -674,10 +674,10 @@ let test_final_response_boundary_survives_a_missing_skill_call () =
     List.iter (fun final_text ->
       List.iter (fun progress ->
         let t = fresh () in
-        feed t [Live.Run_started; Live.Stream_model_started {usage = None; message_id = None; stream_scope=Some 1; model="observed"};
+        feed t [Live.Run_started; Live.Stream_model_started { generation=None;usage = None; message_id = None; stream_scope=Some 1; model="observed"};
           Live.Text {text=progress; stream_scope=None};
           Live.Stream_details {stream_scope=Some 1; usage=None; stop_reason=Some Agent_core.Types.StopToolUse};
-          Live.Stream_model_started {usage = None; message_id = None; stream_scope=Some 2; model="observed"}];
+          Live.Stream_model_started { generation=None;usage = None; message_id = None; stream_scope=Some 2; model="observed"}];
         Option.iter (fun text -> feed t [Live.Text {text=text; stream_scope=None}]) final_text;
         feed t [Live.Stream_details {stream_scope=Some 2; usage=None; stop_reason=Some stop_reason}];
         Transcript.note_skill_activity t (missing_skill_activity ());
@@ -694,7 +694,7 @@ let test_stop_from_an_unobserved_response_preserves_progress () =
   List.iter (fun stopped_scope ->
     let t = fresh () in
     feed t [Live.Run_started;
-      Live.Stream_model_started {usage = None; message_id = None; stream_scope=Some 1; model="observed"};
+      Live.Stream_model_started { generation=None;usage = None; message_id = None; stream_scope=Some 1; model="observed"};
       Live.Text {text="Let me check."; stream_scope=None};
       (* The tool call and the next MessageStart were not retained. *)
       Live.Stream_details {stream_scope=stopped_scope; usage=None; stop_reason=Some Agent_core.Types.EndTurn}];
@@ -708,7 +708,7 @@ let test_stop_from_an_unobserved_response_preserves_progress () =
 let test_repeated_response_start_is_not_a_boundary () =
   List.iter (fun tail ->
     let t = fresh () in
-    let start = Live.Stream_model_started {usage = None; message_id = None; stream_scope=Some 4; model="observed"} in
+    let start = Live.Stream_model_started { generation=None;usage = None; message_id = None; stream_scope=Some 4; model="observed"} in
     feed t [Live.Run_started; start; Live.Text {text="Done"; stream_scope=None}; start];
     Option.iter (fun text -> feed t [Live.Text {text=text; stream_scope=None}]) tail;
     feed t [Live.Stream_details {stream_scope=Some 4; usage=None; stop_reason=Some Agent_core.Types.EndTurn}];
@@ -721,7 +721,7 @@ let test_repeated_response_start_is_not_a_boundary () =
 let test_scoped_text_retires_prior_response_metadata () =
   let t = fresh () in
   feed t [Live.Run_started;
-    Live.Stream_model_started {usage = None; message_id = None; stream_scope=Some 1; model="first"};
+    Live.Stream_model_started { generation=None;usage = None; message_id = None; stream_scope=Some 1; model="first"};
     Live.Stream_details {stream_scope=Some 1;
       usage=Some {input_tokens=Some 100; output_tokens=Some 20;
         cache_read_input_tokens=None; cache_creation_input_tokens=None};
@@ -731,7 +731,7 @@ let test_scoped_text_retires_prior_response_metadata () =
     (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
   feed t [Live.Stream_details {stream_scope=Some 2; usage=None;
     stop_reason=Some Agent_core.Types.MaxTokens};
-    Live.Stream_model_started {usage = None; message_id = None; stream_scope=Some 2; model="second"}];
+    Live.Stream_model_started { generation=None;usage = None; message_id = None; stream_scope=Some 2; model="second"}];
   check (option string) "the delayed equal start preserves current stop metadata"
     (Some "stopped: max_tokens")
     (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
@@ -1252,7 +1252,7 @@ let test_runtime_failover_visibility_and_error_attribution () =
 let test_empty_scoped_text_still_retires_prior_response_metadata () =
   let t = fresh () in
   feed t [Live.Run_started;
-    Live.Stream_model_started {usage = None; message_id = None; stream_scope=Some 1; model="first"};
+    Live.Stream_model_started { generation=None;usage = None; message_id = None; stream_scope=Some 1; model="first"};
     Live.Stream_details {stream_scope=Some 1;
       usage=Some {input_tokens=Some 100; output_tokens=Some 20;
         cache_read_input_tokens=None; cache_creation_input_tokens=None};
@@ -1274,7 +1274,7 @@ let test_empty_scoped_text_still_retires_prior_response_metadata () =
 let test_response_stop_preserves_pending_work () =
   List.iter (fun content ->
     let t = fresh () in
-    feed t [Live.Run_started; Live.Stream_model_started {stream_scope=None; message_id=Some "response";model="observed";usage=None}; content];
+    feed t [Live.Run_started; Live.Stream_model_started { generation=None;stream_scope=None; message_id=Some "response";model="observed";usage=None}; content];
     let before = Transcript.drawn t in
     let active = Transcript.model_activity t in
     let decoder = Live.create () in
@@ -1309,7 +1309,7 @@ let test_response_stop_preserves_pending_work () =
     feed t [Live.Stream_model_stopped];
     check bool "response stop preserves existing pending execution" true
       (pending = Transcript.tool_calls t);
-    feed t [tool_result "pending" "executed"; Live.Stream_model_started {stream_scope=None; message_id=Some "response";model="observed";usage=None}; Live.Thinking "next"];
+    feed t [tool_result "pending" "executed"; Live.Stream_model_started { generation=None;stream_scope=None; message_id=Some "response";model="observed";usage=None}; Live.Thinking "next"];
     check bool "a later response can resume reasoning with a reused id" true
       (Transcript.model_activity t = Some Transcript.Activity_reasoning);
     feed t [Live.Stream_model_stopped; Live.Runtime_attempt_started
@@ -1397,7 +1397,7 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
         ; cache_read_input_tokens = Some 4096
         ; cache_creation_input_tokens = None
         }
-    ; Live.Stream_model_started { stream_scope = None; message_id = None; model = "glm-5-turbo"; usage = None }
+    ; Live.Stream_model_started { generation=None; stream_scope = None; message_id = None; model = "glm-5-turbo"; usage = None }
     ];
   check (option string) "a second round starts from neither" None
     (usage (Some t));
@@ -1503,7 +1503,7 @@ let test_new_attempt_does_not_inherit_previous_runtime () =
       "configured: assigned-runtime"
       (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
          ~configured_runtime:"assigned-runtime" (Some t));
-    feed t [ Live.Stream_model_started { stream_scope = None; message_id = None; model = "new-model"; usage = None } ];
+    feed t [ Live.Stream_model_started { generation=None; stream_scope = None; message_id = None; model = "new-model"; usage = None } ];
     (* A model name is not a runtime id: the header says which it has. *)
     check (option string) "the model event does not name a runtime" None
       (Transcript.current_runtime_id t);
@@ -1543,7 +1543,7 @@ let test_scoped_reasoning_retires_previous_response_metadata () =
   let usage : Live.stream_usage = {input_tokens=Some 7; output_tokens=Some 9;
     cache_read_input_tokens=None; cache_creation_input_tokens=None} in
   feed t [Live.Run_started;
-    Live.Stream_model_started {stream_scope=Some 1;message_id=None;model="first";usage=Some usage};
+    Live.Stream_model_started { generation=None;stream_scope=Some 1;message_id=None;model="first";usage=Some usage};
     Live.Stream_details {stream_scope=Some 1;usage=None;stop_reason=Some Agent_core.Types.StopToolUse};
     activity 1];
   check (option string) "same scoped activity retains supplied model" (Some "first")
@@ -1557,11 +1557,11 @@ let test_scoped_reasoning_retires_previous_response_metadata () =
   check bool "missing new start does not inherit old stop reason" true (metadata.stop_reason=None);
   check string "metadata retirement preserves authored reasoning" "new supplied reasoning"
     (Transcript.thinking t);
-  feed t [Live.Stream_model_started {stream_scope=Some 2;message_id=None;model="second";usage=None}];
+  feed t [Live.Stream_model_started { generation=None;stream_scope=Some 2;message_id=None;model="second";usage=None}];
   feed t [activity 1];
   check (option string) "older activity cannot erase newly supplied model" (Some "second")
     (Transcript.response_metadata t).model;
-  feed t [Live.Stream_model_started {stream_scope=Some 4;message_id=None;model="fresh";usage=Some usage};
+  feed t [Live.Stream_model_started { generation=None;stream_scope=Some 4;message_id=None;model="fresh";usage=Some usage};
     activity 3];
   check (option string) "intermediate delayed content cannot erase newer model" (Some "fresh")
     (Transcript.response_metadata t).model;
@@ -1572,7 +1572,7 @@ let test_current_attempt_metadata_keeps_observed_activity () =
   let t = fresh () in
   feed t [Live.Run_started;
     Live.Runtime_attempt_started {runtime_id=Some "runtime-a";attempt_index=Some 2};
-    Live.Stream_model_started {stream_scope=None; message_id=Some "message";model="model-a";usage=None};
+    Live.Stream_model_started { generation=None;stream_scope=None; message_id=Some "message";model="model-a";usage=None};
     Live.Text {text="current text"; stream_scope=None}; Live.Thinking "current reasoning";
     Live.Model_content_activity {Masc.Keeper_chat_events.content_generation=0;
       content_scope=0;content_index=1;content_provider_message_id=Some "message";
@@ -1602,7 +1602,7 @@ let test_current_attempt_metadata_keeps_observed_activity () =
 let test_late_runtime_name_does_not_supersede_observed_output () =
   let t = fresh () in
   feed t [Live.Run_started;
-    Live.Stream_model_started {stream_scope=None; message_id=Some "message";model="observed-model";usage=None};
+    Live.Stream_model_started { generation=None;stream_scope=None; message_id=Some "message";model="observed-model";usage=None};
     Live.Text {text="already streaming"; stream_scope=None};
     Live.Runtime_attempt_started {runtime_id=Some "late-runtime";attempt_index=Some 0}];
   check string "late runtime metadata retains output" "already streaming" (Transcript.text t);
@@ -2257,7 +2257,7 @@ let test_response_boundaries_preserve_origins () =
       Live.Native_tool_started {occurrence=occurrence "native";tool_name=Some "Read"};
       Live.Native_tool_ended {occurrence=occurrence "native"; completion=Runtime_native_tools.end_observed}];
     "provider response", [Live.Text {text="COMMENTARY"; stream_scope=None};
-      Live.Stream_model_started {stream_scope=None; message_id=Some "new";model="glm";usage=None}];
+      Live.Stream_model_started { generation=None;stream_scope=None; message_id=Some "new";model="glm";usage=None}];
     "retry", [Live.Text {text="COMMENTARY"; stream_scope=None};
       Live.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1}];
     "continuation", [Live.Text {text="COMMENTARY"; stream_scope=None};
@@ -2340,16 +2340,16 @@ let test_usage_resets_only_at_response_boundaries () =
   let usage input output = {Live.input_tokens=input;output_tokens=output;
     cache_read_input_tokens=None;cache_creation_input_tokens=None} in
   let tokens () = Transcript.stream_tokens_text ~keeper_name:"keeper.one" (Some t) in
-  let seed () = feed t [Live.Stream_model_started {stream_scope = None; message_id=Some "message";
+  let seed () = feed t [Live.Stream_model_started { generation=None;stream_scope = None; message_id=Some "message";
     model="glm";usage=Some (usage (Some 99) (Some 0))};
     Live.Stream_details {stream_scope=None; usage=Some (usage None (Some 7));stop_reason=Some Agent_core.Types.StopToolUse}] in
   feed t [Live.Run_started]; seed ();
   check (option string) "sparse report retains earlier fields"
     (Some "tokens: in 99 · out 7") (tokens ());
-  feed t [Live.Stream_model_started {stream_scope = None; message_id=Some "next";model="glm";usage=None}];
+  feed t [Live.Stream_model_started { generation=None;stream_scope = None; message_id=Some "next";model="glm";usage=None}];
   check (option string) "new message clears old counters" None (tokens ());
   seed ();
-  feed t [Live.Stream_model_started {stream_scope = None; message_id=Some "message";model="glm";
+  feed t [Live.Stream_model_started { generation=None;stream_scope = None; message_id=Some "message";model="glm";
     usage=Some (usage (Some 200) (Some 0))}];
   check (option string) "a published response boundary may reuse its provider id"
     (Some "tokens: in 200 · out 0") (tokens ());
@@ -2376,7 +2376,7 @@ let test_usage_resets_only_at_response_boundaries () =
     cache_creation_input_tokens=None};stop_reason=None}];
   check (option string) "a later sparse output retains both cache fields"
     (Some "tokens: in 0 · out 8 · cache read 12 · cache write 3") (tokens ());
-  feed t [Live.Stream_model_started {stream_scope = None; message_id=None;model="unknown-id";usage=None}];
+  feed t [Live.Stream_model_started { generation=None;stream_scope = None; message_id=None;model="unknown-id";usage=None}];
   check (option string) "unidentified start cannot inherit another response's usage"
     None (tokens ())
 ;;
@@ -2384,7 +2384,7 @@ let test_usage_resets_only_at_response_boundaries () =
 let test_empty_new_response_does_not_replace_prior_message () =
   let t = fresh () in
   feed t [Live.Run_started;Live.Text {text="EARLIER"; stream_scope=None};
-    Live.Stream_model_started {stream_scope = None; message_id=Some "next";model="observed";usage=None};
+    Live.Stream_model_started { generation=None;stream_scope = None; message_id=Some "next";model="observed";usage=None};
     reply_details ~reply:"FINAL" ();Live.Run_finished];
   let items = Transcript.drawn t in
   check (list string) "a response without streamed text leaves earlier output in place"
@@ -2463,7 +2463,7 @@ let test_scoped_details_retire_prior_model_activity () =
   List.iter (fun activity ->
     let t = fresh () in
     feed t [Live.Run_started;
-      Live.Stream_model_started {stream_scope=Some 1;message_id=Some "first";
+      Live.Stream_model_started { generation=None;stream_scope=Some 1;message_id=Some "first";
         model="first-model";usage=None};
       Live.Text {text="earlier response";stream_scope=Some 1};activity];
     let body = Transcript.drawn t in
@@ -2499,7 +2499,7 @@ let test_scoped_details_retire_prior_response_usage () =
     { input_tokens=None; output_tokens=Some 8;
       cache_read_input_tokens=None; cache_creation_input_tokens=None } in
   feed t [Live.Run_started;
-    Live.Stream_model_started {stream_scope=Some 1;message_id=Some "first";
+    Live.Stream_model_started { generation=None;stream_scope=Some 1;message_id=Some "first";
       model="first-model";usage=Some initial};
     Live.Text {text="earlier response";stream_scope=Some 1};
     Live.Stream_details {stream_scope=Some 1;usage=None;
@@ -2508,7 +2508,7 @@ let test_scoped_details_retire_prior_response_usage () =
   check (option string) "detail-only next response has no prior input/cache/stop"
     (Some "tokens: out 8")
     (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
-  feed t [Live.Stream_model_started {stream_scope=Some 2;message_id=Some "second";
+  feed t [Live.Stream_model_started { generation=None;stream_scope=Some 2;message_id=Some "second";
     model="second-model";usage=Some {initial with output_tokens=Some 0}}];
   check (option string) "late start fills this response without rewinding output"
     (Some "tokens: in 99 · out 8 · cache read 12 · cache write 3")

@@ -238,9 +238,9 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
   | E.Agent_core_stream_connected -> None
   | E.Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
     Some (Live.Runtime_attempt_started { runtime_id; attempt_index })
-  | E.Agent_core_stream_message_start { provider_message_id; model; usage; stream_scope } ->
+  | E.Agent_core_stream_message_start { content_generation; provider_message_id; model; usage; stream_scope } ->
     Some (Live.Stream_model_started
-      { message_id = (if String.trim provider_message_id = "" then None else Some provider_message_id); model; stream_scope = Some stream_scope
+      { generation=content_generation; message_id = (if String.trim provider_message_id = "" then None else Some provider_message_id); model; stream_scope = Some stream_scope
       ; usage = Option.bind usage (fun usage ->
           Live.stream_usage_of_usage_json (E.api_usage_to_json usage)) })
   | E.Agent_core_stream_message_delta { stream_scope; stop_reason; usage } ->

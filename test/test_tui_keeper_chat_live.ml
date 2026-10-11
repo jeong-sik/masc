@@ -746,13 +746,24 @@ let test_stream_model_started_is_typed () =
     sse
       (custom "KEEPER_STREAM_MESSAGE_START"
          (`Assoc
-            [ "stream_scope", `Int 4; "provider_message_id", `String "pm-1"
+            [ "content_generation", `Int 7; "stream_scope", `Int 4; "provider_message_id", `String "pm-1"
             ; "model", `String "claude-3-7-sonnet"
             ]))
   in
   check (list delta) "stream message start yields stream_model_started"
-    [ Live.Stream_model_started { stream_scope = Some 4; message_id = Some "pm-1"; model = "claude-3-7-sonnet"; usage = None } ]
+    [ Live.Stream_model_started { generation=Some 7; stream_scope = Some 4; message_id = Some "pm-1"; model = "claude-3-7-sonnet"; usage = None } ]
     (feed_whole body)
+
+let test_stream_generation_refuses_malformed_values () =
+  List.iter (fun generation_fields ->
+    let body=sse (custom "KEEPER_STREAM_MESSAGE_START" (`Assoc
+      (generation_fields @ ["stream_scope",`Int 4;"model",`String "supplied"]))) in
+    match feed_whole body with
+    | [Live.Undecodable _] -> ()
+    | _ -> fail "malformed generation granted a model-start event")
+    [["content_generation",`Int (-1)];["content_generation",`Null];
+     ["content_generation",`String "7"];
+     ["content_generation",`Int 7;"content_generation",`Int 8]]
 
 let test_stream_model_stop_reaches_the_view () =
   let body = sse (custom "KEEPER_STREAM_MESSAGE_STOP" `Null) in
@@ -852,6 +863,8 @@ let () =
             test_runtime_attempt_rejects_invalid_payload
         ; test_case "stream message start model is typed" `Quick
             test_stream_model_started_is_typed
+        ; test_case "malformed response generation is refused" `Quick
+            test_stream_generation_refuses_malformed_values
         ; test_case "provider stop reaches the view" `Quick test_stream_model_stop_reaches_the_view
         ; test_case "a turn in flight reports the tokens it has spent" `Quick
             test_stream_usage_is_typed

@@ -6,8 +6,8 @@
     - a [pre_tool_use] hook, which decides {i whether} to ask — from
       {!Keeper_tool_approval_policy}
     - a [tool_approval] callback, which {i does} the asking — handing the
-      question to [publish] and parking on {!Keeper_tool_approval_registry}
-      until an answer or the timeout
+      question to [publish] after {!Keeper_tool_approval_registry} registers
+      the wait, then parking until an answer or the timeout
 
     [publish] takes an event rather than a stream so the caller decides where
     it goes: the chat handler already owns one path for the events it sends a

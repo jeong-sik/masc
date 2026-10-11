@@ -82,7 +82,7 @@ let take_locked t key =
       t.waiters;
   !taken
 
-let await t ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question ~because
+let await ?(on_registered = fun () -> ()) t ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question ~because
     ~timeout_sec =
   let key = { key_keeper_name = keeper_name; key_tool_call_id = tool_call_id } in
   let entry =
@@ -118,6 +118,7 @@ let await t ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question ~becaus
      operator was told it applied, and the call must run under it rather
      than be reported as timed out. *)
   Fun.protect ~finally:remove_self (fun () ->
+      on_registered ();
       match
         Watched_work.run
           (fun () -> Eio.Promise.await promise)

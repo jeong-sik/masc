@@ -91,11 +91,24 @@ let test_a_failed_settle_counts_nothing () =
       check outcome_totals "an answer to nobody counts nothing"
         { Registry.answered_total = 0; timed_out_total = 0 } (totals registry))
 
+let test_failed_registration_publication_removes_the_wait () =
+  with_env (fun ~clock ->
+      let registry = Registry.create () in
+      check_raises "publication failure propagates" Exit (fun () ->
+        ignore (Registry.await ~on_registered:(fun () -> raise Exit) registry
+          ~clock ~tool_name:"Execute" ~args:"{}" ~question:"run?"
+          ~because:"policy" ~keeper_name:keeper ~tool_call_id:"publish-failed"
+          ~timeout_sec:5.0));
+      check int "failed publication leaves no held wait" 0
+        (List.length (Registry.pending registry)))
+
 let () =
   run
     "keeper_tool_approval_registry_outcomes"
     [ ( "outcome totals"
-      , [ test_case "a fresh registry counts nothing" `Quick
+      , [ test_case "failed registration publication removes the wait" `Quick
+            test_failed_registration_publication_removes_the_wait
+        ; test_case "a fresh registry counts nothing" `Quick
             test_new_registry_counts_nothing
         ; test_case "an answer is counted once" `Quick
             test_an_answer_counted_once

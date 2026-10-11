@@ -222,6 +222,26 @@ let test_a_synthetic_composition_asks_with_its_node_name () =
               Alcotest.fail
                 ("composition should ask, got: " ^ decision_to_string other))
 
+let test_request_publication_can_answer_the_registered_wait () =
+  Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let registry = Registry.create () in
+      let answered = ref false in
+      let publish = function
+        | Events.Tool_approval_requested { tool_call_id; _ } ->
+            answered := Registry.settle registry ~keeper_name:keeper
+              ~tool_call_id Registry.Approve
+        | _ -> ()
+      in
+      let gate = Gate.create ~redact_text:Fun.id ~registry
+        ~late_approvals:(Masc.Keeper_late_approval.create ()) ~publish
+        ~clock ~base_path:workspace ~keeper_name:keeper ~timeout_sec:0.01 in
+      let result = gate.Gate.tool_approval
+        (request ~tool_name:"Edit" ~input:(`Assoc [])) in
+      check bool "published wait can be answered immediately" true !answered;
+      check approval "the immediate answer reaches the tool" Agent_core.Hooks.Approved result;
+      check int "answered wait is removed" 0 (List.length (Registry.pending registry)))
+
 let () =
   run "keeper_tool_approval_gate"
     [ ( "deciding whether to ask"
@@ -236,7 +256,9 @@ let () =
             test_other_stages_pass_through
         ] )
     ; ( "asking"
-      , [ test_case "an approval lets the call through" `Quick
+      , [ test_case "request publication can answer the registered wait" `Quick
+            test_request_publication_can_answer_the_registered_wait
+        ; test_case "an approval lets the call through" `Quick
             test_an_approval_lets_the_call_through
         ; test_case "a denial stops the call" `Quick test_a_denial_stops_the_call
         ; test_case "nobody answering does not admit the call" `Quick

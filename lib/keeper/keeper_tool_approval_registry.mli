@@ -48,6 +48,7 @@ type outcome =
           approve a call the operator never saw. *)
 
 val await :
+  ?on_registered:(unit -> unit) ->
   t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   keeper_name:string ->
@@ -59,6 +60,10 @@ val await :
   timeout_sec:float ->
   outcome
 (** Register a wait and block until it settles.
+
+    [on_registered] runs after registration outside the lock, before waiting.
+    Publish operator requests here so an immediate answer can find the wait.
+    The wait is removed if this callback raises or is cancelled.
 
     [timeout_sec] is required. A wait with no bound would park the keeper's
     turn for the life of the process if nobody is watching, and how long an

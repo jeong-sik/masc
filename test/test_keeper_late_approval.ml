@@ -182,8 +182,7 @@ let test_the_identical_retried_call_is_settled_once () =
         Agent_core.Hooks.Approved retry;
       check (list string)
         "the stream shows the question was raised and settled from memory"
-        [ "requested(call-2,Run it?,policy: needs an operator's eye)"
-        ; "settled(call-2,remembered_approve)" ]
+        [ "settled(call-2,remembered_approve)" ]
         (event_labels events);
       let again =
         gate.Gate.tool_approval
@@ -210,8 +209,7 @@ let test_a_remembered_denial_refuses_the_identical_retry () =
       check approval "a remembered refusal spares asking the same no twice"
         Agent_core.Hooks.Denied retry;
       check (list string) "the refusal is on the stream as remembered"
-        [ "requested(call-2,Run it?,policy: needs an operator's eye)"
-        ; "settled(call-2,remembered_deny)" ]
+        [ "settled(call-2,remembered_deny)" ]
         (event_labels events))
 
 let test_a_call_with_different_arguments_is_asked_about () =

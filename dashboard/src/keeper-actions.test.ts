@@ -487,6 +487,22 @@ describe('hydrateKeeperChatHistory', () => {
     }
   })
 
+  it.each(['resolve', 'reject'] as const)('rejects history acquired under a replaced authentication revision (%s)', async outcome => {
+    setStoredToken('fixture-before')
+    const old = deferredHistory()
+    fetchKeeperChatHistory.mockReturnValueOnce(old.promise).mockResolvedValueOnce(historyRow('current-auth'))
+    const pending = hydrateKeeperChatHistory('echo')
+    setStoredToken('fixture-after')
+    if (outcome === 'resolve') old.resolve(historyRow('previous-auth'))
+    else old.reject(new Error('previous-auth failure'))
+    await pending
+    expect(keeperThreads.value.echo ?? []).toEqual([])
+    expect(keeperChatHistoryHydration.value.echo).not.toBe('hydrated')
+    expect(keeperChatHistoryErrors.value.echo ?? null).toBeNull()
+    await hydrateKeeperChatHistory('echo')
+    expect(keeperThreads.value.echo?.map(row => row.id)).toEqual(['current-auth'])
+  })
+
   it('keeps the latest failure when an older history succeeds', async () => {
     const older = deferredHistory()
     const latest = deferredHistory()

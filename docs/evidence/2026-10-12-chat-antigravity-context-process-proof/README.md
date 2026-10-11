@@ -2,7 +2,7 @@
 
 At source head `cd9fa7e21fcb4367605addadbd43c2004ad07621`, the existing
 context transport process suite ran four tests in 3.404 seconds and exited 0.
-Receipt contains exact script/test hashes; tests.log preserves the bounded output.
+Receipt contains exact script/test hashes; test-output.txt preserves the bounded output.
 
 Actual checks: PTY status callback projection and privacy, owned process-group
 cleanup on success/timeout, private version-probe working directory, and duplicate

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { clearStoredToken, setStoredToken } from './api/core'
+import { clearStoredToken, setStoredToken, subscribeStoredTokenChanges } from './api/core'
 import { refreshOperatorSnapshot, refreshOperatorWorkspaceDigest } from './operator-actions'
 vi.mock('./sse-store', () => ({ registerOperatorRefresh: vi.fn() }))
 const fetchMock = vi.fn()
@@ -88,5 +88,39 @@ it.each([200, 500])('preserves a typed GET timeout while reading the %s response
     await pending
     read.mockRestore()
     vi.useRealTimers()
+  }
+})
+
+it.each([['snapshot', false], ['snapshot', true], ['digest', false], ['digest', true]] as const)('admits new %s owner during notification (subsequent replacement: %s)', async (kind, nextChange) => {
+  setStoredToken('synthetic-notification-owner-a')
+  const requests: Array<{ signal: AbortSignal; headers: Headers; finish: (response: Response) => void }> = []
+  fetchMock.mockImplementation((_path: string, init: RequestInit) => new Promise<Response>((resolve, reject) => {
+    const signal = init.signal!
+    requests.push({ signal, headers: new Headers(init.headers), finish: resolve })
+    signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+  }))
+  const refresh = kind === 'snapshot' ? refreshOperatorSnapshot : refreshOperatorWorkspaceDigest
+  const old = refresh({ force: true })
+  let current: Promise<void> | undefined
+  const release = subscribeStoredTokenChanges(() => {
+    release()
+    current = refresh({ force: true })
+  })
+  try {
+    setStoredToken('synthetic-notification-owner-b')
+    expect(requests).toHaveLength(2)
+    const [previous, replacement] = requests
+    if (!previous || !replacement) throw new Error('Expected both admitted HTTP requests')
+    expect(previous.signal.aborted).toBe(true)
+    expect(replacement.headers.get('Authorization')).toBe('Bearer synthetic-notification-owner-b')
+    expect(replacement.signal.aborted).toBe(false)
+    if (nextChange) {
+      setStoredToken('synthetic-notification-owner-c')
+      expect(replacement.signal.aborted).toBe(true)
+    }
+  } finally {
+    release()
+    for (const request of requests) if (!request.signal.aborted) request.finish(new Response('{}'))
+    await Promise.all([old, current])
   }
 })

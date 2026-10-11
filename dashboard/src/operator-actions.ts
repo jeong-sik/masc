@@ -115,7 +115,9 @@ export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<vo
   const pending = createRefreshOperation(authRevision)
   const operation = pending.operation
   const controller = new AbortController()
-  const releaseAuth = subscribeStoredTokenChanges(() => controller.abort())
+  const releaseAuth = subscribeStoredTokenChanges(() => {
+    if (currentStoredTokenRevision() !== authRevision) controller.abort()
+  })
   snapshotRefreshInflight = operation
   const owns = () => snapshotRefreshInflight === operation && currentStoredTokenRevision() === authRevision
   void (async () => {
@@ -174,7 +176,9 @@ export async function refreshOperatorWorkspaceDigest(opts?: RefreshOptions): Pro
   const pending = createRefreshOperation(authRevision)
   const operation = pending.operation
   const controller = new AbortController()
-  const releaseAuth = subscribeStoredTokenChanges(() => controller.abort())
+  const releaseAuth = subscribeStoredTokenChanges(() => {
+    if (currentStoredTokenRevision() !== authRevision) controller.abort()
+  })
   workspaceDigestRefreshInflight = operation
   const owns = () => workspaceDigestRefreshInflight === operation && currentStoredTokenRevision() === authRevision
   void (async () => {

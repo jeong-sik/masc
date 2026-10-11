@@ -839,6 +839,42 @@ let test_effect_observations_resume_without_repeating_effects () =
   Alcotest.(check bool) "old save cannot replace newer panel read" false
     (retain_operation_observation state (Lane_subscriptions_observation 9))
 
+let test_child_read_epoch_retains_running_audit () =
+  let open Masc_tui_types in
+  let state=create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let authority=state.workspace_authority in
+  let original_reading=Some state.workspace_read_authority in
+  let cached=["alpha",Masc_tui_child_content.empty] in
+  state.msg_child_content <- cached;
+  state.msg_child_content_inflight <-
+    ["alpha",Masc_tui_child_content.Audit;"beta",Masc_tui_child_content.Poll];
+  state.msg_child_content_audit_pending <- ["alpha";"gamma"];
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "all retired Child slots released" true
+    (state.msg_child_content_inflight=[]);
+  Alcotest.(check bool) "Child snapshots retain physical cache identity" true
+    (state.msg_child_content==cached);
+  Alcotest.(check (list string)) "running audit coalesces with queued audit; poll is not promoted"
+    ["alpha";"gamma"] state.msg_child_content_audit_pending;
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "temporary identity failure";
+  suspend_workspace_readings state;
+  Alcotest.(check (list string)) "repeated suspension retains exact audit intent"
+    ["alpha";"gamma"] state.msg_child_content_audit_pending;
+  state.workspace_identity <- Workspace_identity_match;
+  state.msg_child_content_inflight <- ["alpha",Masc_tui_child_content.Audit];
+  Alcotest.(check bool) "retired Child completion cannot own the successor slot" false
+    (workspace_reply_admitted state ~authority ~reading:original_reading ~kind:Workspace_observation);
+  Alcotest.(check bool) "successor observation is admitted" true
+    (workspace_reply_admitted state ~authority ~reading:(Some state.workspace_read_authority)
+      ~kind:Workspace_observation);
+  state.msg_child_content_audit_pending <- [];
+  suspend_workspace_readings state;
+  Alcotest.(check (list string)) "a started audit without queued intent is restored"
+    ["alpha"] state.msg_child_content_audit_pending
+
 let test_native_task_read_epoch_retirement () =
   let open Masc_tui_types in
   let state=create_state ~workspace:"a" ~local_base_path:"/workspace/a"
@@ -868,7 +904,9 @@ let test_native_task_read_epoch_retirement () =
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "native observations retire without losing queued audit" `Quick
+      , [ Alcotest.test_case "Child retirement preserves a running full audit" `Quick
+            test_child_read_epoch_retains_running_audit
+        ; Alcotest.test_case "native observations retire without losing queued audit" `Quick
             test_native_task_read_epoch_retirement
         ; Alcotest.test_case "unsent resource and log intents survive reconfirmation" `Quick
             test_unsent_resource_and_log_intents_survive_reconfirmation

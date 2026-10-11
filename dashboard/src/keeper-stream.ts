@@ -655,9 +655,6 @@ export function applyKeeperOperationTurnEvent(
     operation.event,
     { kind: 'operation', operationId, sequence: operation.sequence, ...(observationOnly ? { observationOnly: true as const } : {}) },
   )
-  if (observationOnly && matched) updateThreadEntry(keeperName, entryId, entry => ({ ...entry,
-    delivery: matched.delivery, streamState: matched.streamState, replyBlockSource: matched.replyBlockSource,
-  }))
   if (error && observationOnly) {
     recordStreamProtocolError(keeperName, entryId, error)
   } else if (error) {
@@ -692,9 +689,6 @@ export function applyKeeperAutonomousTurnEvent(keeperName: string, turnRef: stri
   })
   const error = applyKeeperStreamEvent(keeperName, entryId, event,
     { kind: 'autonomous', turnRef, sequence, ...(observationOnly ? { observationOnly: true as const } : {}) })
-  if (observationOnly && existing) updateThreadEntry(keeperName, entryId, entry => ({ ...entry,
-    delivery: existing.delivery, streamState: existing.streamState, replyBlockSource: existing.replyBlockSource,
-  }))
   if (error && observationOnly) recordStreamProtocolError(keeperName, entryId, error)
   else if (error) finalizeAssistantEntry(keeperName, entryId, {
     delivery: 'error', streamState: null, error, timestamp: new Date().toISOString(),
@@ -1599,6 +1593,11 @@ export function applyKeeperStreamEvent(
           const state = acknowledgeKeeperResponseSequence(entry.responseState ?? initialKeeperResponseState, source.sequence)
           return state ? { ...entry, responseState: state } : entry
         })
+      }
+      if (!failed && source.kind !== 'direct' && source.observationOnly) {
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry,
+          delivery: existing.delivery, streamState: existing.streamState, replyBlockSource: existing.replyBlockSource,
+        }))
       }
     } finally {
       applyingStreamFrames.delete(frameKey)

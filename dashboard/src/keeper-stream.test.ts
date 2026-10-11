@@ -2273,6 +2273,8 @@ it('recovers late operation response metadata without reopening canonical histor
   _resetLiveSendRequestOwnersForTests()
   _resetKeeperStreamBuffersForTests()
   const operationId = 'historical-response-metadata'
+  _clearTrackedKeeperChatOperationsForTests()
+  upsertTrackedKeeperChatOperation({ operationId, keeperName: 'sangsu', message: 'request', submittedAt: 1 })
   appendThreadEntry('sangsu', {
     id: 'canonical-metadata', role: 'assistant', source: 'direct_assistant', label: 'sangsu',
     text: 'canonical answer', delivery: 'history', streamState: null,
@@ -2283,6 +2285,9 @@ it('recovers late operation response metadata without reopening canonical histor
     event: { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: {
       content_generation: 1, stream_scope: 0, model: 'observed-model', provider_message_id: 'provider-id',
       usage: { input_tokens: 3, output_tokens: 6, cost_usd: 0 } } } })
+  expect(trackedKeeperChatOperationsForKeeper('sangsu')[0]?.assistantDraft).toMatchObject({
+    text: 'canonical answer', delivery: 'history', streamState: null,
+  })
   applyKeeperOperationTurnEvent('sangsu', { operationId, sequence: 1,
     event: { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_DELTA', value: {
       content_generation: 1, stream_scope: 0, usage: { input_tokens: 3, output_tokens: 7 } } } })
@@ -2291,5 +2296,8 @@ it('recovers late operation response metadata without reopening canonical histor
     blocks: [{ t: 'p', html: 'canonical answer' }],
     details: { modelUsed: 'observed-model', providerMessageId: 'provider-id',
       usage: { inputTokens: 3, outputTokens: 7, costUsd: 0 } },
+  })
+  expect(trackedKeeperChatOperationsForKeeper('sangsu')[0]?.assistantDraft).toMatchObject({
+    text: 'canonical answer', delivery: 'history', streamState: null,
   })
 })

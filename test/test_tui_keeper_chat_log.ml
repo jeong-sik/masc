@@ -418,7 +418,7 @@ let golden : E.keeper_chat_event list =
       ; execution_id = (match Keeper_chat_operation.Operation_id.of_string "batch-owner" with Ok id -> id | Error detail -> fail detail) }
   ; E.Agent_core_stream_connected
   ; E.Agent_core_stream_message_start
-      { stream_scope = 0; provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = None }
+      { content_generation=None; stream_scope = 0; provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = None }
   ; E.Agent_core_content_block_start
       { index = 0; content_type = "thinking"; tool_call_id = None; tool_call_name = None }
   ; E.Text_message_start { message_id = "msg-1"; role = E.Assistant }
@@ -1073,7 +1073,7 @@ let test_missing_start_text_scope_survives_journal_and_wire () =
       @ (if earlier then [E.Text_delta {text="Earlier progress."; stream_scope=Some 1}] else [])
       @ [E.Text_delta {text="Do"; stream_scope=Some 2};
          (* The original start was lost; this surviving equal start follows text. *)
-         E.Agent_core_stream_message_start {stream_scope=2; provider_message_id="response-2";
+         E.Agent_core_stream_message_start { content_generation=None;stream_scope=2; provider_message_id="response-2";
            model="observed"; usage=None};
          E.Text_delta {text="ne"; stream_scope=Some 2};
          E.Agent_core_stream_message_delta {stream_scope=stopped_scope;

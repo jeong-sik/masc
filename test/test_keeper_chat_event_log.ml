@@ -79,9 +79,9 @@ let all_events : E.keeper_chat_event list =
   ; E.Agent_core_runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
   ; E.Agent_core_runtime_attempt_started { runtime_id = None; attempt_index = None }
   ; E.Agent_core_stream_message_start
-      { stream_scope = 0; provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = Some usage_full }
+      { content_generation=None; stream_scope = 0; provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = Some usage_full }
   ; E.Agent_core_stream_message_start
-      { stream_scope = 0; provider_message_id = "pm-2"; model = "m"; usage = None }
+      { content_generation=None; stream_scope = 0; provider_message_id = "pm-2"; model = "m"; usage = None }
   ; E.Agent_core_stream_message_delta
       { stream_scope = 0; stop_reason = Some Agent_core.Types.EndTurn
       ; usage = Some delta_usage_partial
@@ -347,7 +347,7 @@ let test_journal_skips_non_finite_floats () =
          ~seq:1
          ~ts:1_762_300_000.0
          (E.Agent_core_stream_message_start
-            { stream_scope = 0; provider_message_id = "pm-1"
+            { content_generation=None; stream_scope = 0; provider_message_id = "pm-1"
             ; model = "m"
             ; usage = Some { usage_full with Agent_core.Types.cost_usd = Some Float.nan }
             });
@@ -884,7 +884,7 @@ let golden_events : E.keeper_chat_event list =
   [ E.Run_started { run_id = "run-golden"; thread_id = "keeper:golden" }
   ; E.Agent_core_stream_connected
   ; E.Agent_core_stream_message_start
-      { stream_scope = 0; provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = Some usage_full }
+      { content_generation=Some 7; stream_scope = 0; provider_message_id = "pm-1"; model = "kimi-for-coding"; usage = Some usage_full }
   ; E.Agent_core_stream_ping
   ; E.Text_message_start { message_id = "msg-1"; role = E.Assistant }
   ; E.Agent_core_content_block_start

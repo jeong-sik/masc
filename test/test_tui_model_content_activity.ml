@@ -12,7 +12,7 @@ let activity ?(generation=0) ?(scope=0) ?(index=0) ?(channel=E.Model_text) state
   {E.content_generation=generation; content_scope=scope; content_index=index; content_provider_message_id=Some "reusable"; channel; state}
 let observed ?generation ?scope ?index ?channel () = L.Model_content_activity (activity ?generation ?scope ?index ?channel E.Content_observed)
 let ended ?generation ?scope ?index ?channel () = L.Model_content_activity (activity ?generation ?scope ?index ?channel E.Content_ended)
-let start = L.Stream_model_started {stream_scope=None; message_id=Some "reusable"; model="fixture"; usage=None}
+let start = L.Stream_model_started {generation=None;stream_scope=None; message_id=Some "reusable"; model="fixture"; usage=None}
 let rows t = String.concat "\n" (List.map snd (T.status_rows ~now:1000. t))
 let contains t needle = Astring.String.is_infix ~affix:needle (rows t)
 let assert_signal t signal =

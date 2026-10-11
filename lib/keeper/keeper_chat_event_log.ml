@@ -219,10 +219,11 @@ let keeper_chat_event_to_json event =
       (json_opt "runtime_id" (Option.map (fun value -> `String value) runtime_id)
        @ json_opt "attempt_index"
            (Option.map (fun value -> `Int value) attempt_index))
-  | Agent_core_stream_message_start { stream_scope; provider_message_id; model; usage } ->
+  | Agent_core_stream_message_start { content_generation; stream_scope; provider_message_id; model; usage } ->
     type_tag
       "agent_core_stream_message_start"
       ([ "stream_scope", `Int stream_scope; "provider_message_id", `String provider_message_id; "model", `String model ]
+       @ json_opt "content_generation" (Option.map (fun value -> `Int value) content_generation)
        @ json_opt "usage" (Option.map api_usage_to_json usage))
   | Agent_core_stream_message_delta { stream_scope; stop_reason; usage } ->
     type_tag
@@ -434,10 +435,19 @@ let keeper_chat_event_of_json json =
       let attempt_index = json |> member "attempt_index" |> to_int_option in
       Ok (Agent_core_runtime_attempt_started { runtime_id; attempt_index })
     | "agent_core_stream_message_start" ->
+      let* content_generation = match List.filter (fun (key,_) -> key="content_generation")
+          (json |> to_assoc) with
+        | [] -> Ok None
+        | [_, value] ->
+            let* generation = Runtime_json_integer.of_json value in
+            if generation < 0 then Error "content generation must be nonnegative"
+            else Ok (Some generation)
+        | _ -> Error "duplicate content generation" in
       let* usage = opt_member json "usage" api_usage_of_json in
       Ok
         (Agent_core_stream_message_start
-           { stream_scope = json |> member "stream_scope" |> to_int
+           { content_generation
+           ; stream_scope = json |> member "stream_scope" |> to_int
            ; provider_message_id = json |> member "provider_message_id" |> to_string
            ; model = json |> member "model" |> to_string
            ; usage

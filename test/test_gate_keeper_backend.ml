@@ -2461,7 +2461,7 @@ let test_keeper_stream_bridge_surfaces_agent_core_message_metadata () =
   in
   match events with
   | [ Keeper_chat_events.Agent_core_stream_message_start
-        { stream_scope = 0; provider_message_id; model; usage = Some start_usage };
+        { content_generation=Some 0; stream_scope = 0; provider_message_id; model; usage = Some start_usage };
       Keeper_chat_events.Agent_core_stream_message_delta
         { stream_scope = 0; stop_reason = Some stop_reason; usage = Some delta_usage };
       Keeper_chat_events.Agent_core_stream_message_stop;

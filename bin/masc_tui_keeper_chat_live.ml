@@ -31,7 +31,8 @@ type delta =
       ; attempt_index : int option
       }
   | Stream_model_started of
-      { message_id : string option
+      { generation : int option
+      ; message_id : string option
       ; stream_scope : int option
       ; model : string
       ; usage : stream_usage option
@@ -287,18 +288,26 @@ let custom_deltas_unvalidated fields =
   | Some "KEEPER_STREAM_MESSAGE_START" ->
     (match object_field fields "value" with
      | Some value ->
-       (match string_field value "model" with
-        | Some model ->
+       let generation = match List.filter (fun (key,_) -> key="content_generation") value with
+         | [] -> Ok None
+         | [_, json] ->
+             Result.bind (Runtime_json_integer.of_json json) (fun generation ->
+               if generation < 0 then Error "content generation must be nonnegative"
+               else Ok (Some generation))
+         | _ -> Error "duplicate content generation" in
+       (match generation, string_field value "model" with
+        | Ok generation, Some model ->
           (* A start establishes response and usage even when the provider
              has no model label. Presentation handles that absent label. *)
           [ Stream_model_started
-              { message_id = Option.bind (string_field value "provider_message_id")
+              { generation; message_id = Option.bind (string_field value "provider_message_id")
                   (fun id -> if String.trim id = "" then None else Some id)
               ; stream_scope = nonnegative_int_field value "stream_scope"
               ; model = String.trim model
               ; usage = Option.bind (List.assoc_opt "usage" value) stream_usage_of_usage_json
               } ]
-        | _ -> [])
+        | Error detail, _ -> [Undecodable detail]
+        | Ok _, None -> [])
      | None -> [])
   | Some "KEEPER_MODEL_CONTENT_ACTIVITY" ->
     (match List.assoc_opt "value" fields with

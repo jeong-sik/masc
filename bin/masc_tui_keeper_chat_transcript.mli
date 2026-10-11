@@ -403,12 +403,16 @@ type model_activity =
   | Activity_tool_returned of string
 
 type response_metadata = {
+  owner : (int * int) option;
   model : string option;
   usage : Masc_tui_keeper_chat_live.stream_usage option;
   stop_reason : Agent_core.Types.stop_reason option;
 }
 val response_metadata : t -> response_metadata
-(** Current supplied provider metadata. A newer scoped content observation
+(** [owner] is explicit generation/scope ownership of these supplied metadata
+    facts, independent of the strongest admitted response identity. Partial
+    text/details can make metadata ownership unknown without reopening older
+    generation admission. A newer scoped content observation
     retires metadata owned by an older known response, without
     fabricating missing metadata or changing authored body bytes. *)
 

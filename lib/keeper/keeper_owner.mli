@@ -81,9 +81,18 @@ type run_next_result =
   | Run_next_applied of { signalled : bool; interrupt_error : string option }
 
 type interactive_outcome = Applied | Stale_control | Paused | Replayed
+(** Admission and chat-control decision, not model input delivery.
+    [Applied] means a new operation was admitted with the current control token
+    while turn admission was open. It does not mean the operation started,
+    the previous turn stopped, or a provider read the input. [Replayed] does
+    not repeat the interruption request. *)
 type interactive_receipt =
   { outcome : interactive_outcome; chat_control_token : string
   ; signalled : bool; resumed : bool; interrupt_error : string option }
+(** [signalled] records an interruption request against the exact target;
+    it is not acknowledgement of that target's termination. [resumed] records
+    release of a chat-control pause, not delivery to a model. [interrupt_error]
+    concerns interruption only: an admitted operation remains admitted. *)
 type interactive_intent = { control_token : string; target : interrupt_target option }
 
 type turn_lane =

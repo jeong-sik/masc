@@ -34,8 +34,13 @@ type acceptance_state =
 type interactive_target = Observed_turn_token of string | Direct_operation_id of string
 type admission_intent = Queue_only | Interactive of {control_token : string; target : interactive_target option}
 type interactive_outcome = Applied | Stale_control | Paused | Replayed
+(** Wire projection of the Owner's admission/control decision. [Applied]
+    never certifies that a provider read or incorporated the message. Operation
+    start, model content and operation settlement have separate events. *)
 type interactive_receipt = {outcome : interactive_outcome; chat_control_token : string;
   signalled : bool; resumed : bool; interrupt_error : string option}
+(** [signalled] is a request to interrupt the observed target, not evidence
+    that it has stopped. A failed interruption does not undo message admission. *)
 
 type acceptance = {
   interactive : interactive_receipt option;

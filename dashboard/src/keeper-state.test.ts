@@ -337,6 +337,50 @@ describe('thread history merge & persistence', () => {
     expect(requiredFixture(keeperThreads.value.echo).every(row => row.role !== 'tool')).toBe(true)
   })
 
+  it.each([false, true])('selects pending speech from the reconciled running frontier (pending=%s)', pending => {
+    const provenance = operationDeliveryProvenance('running-pending-frontier', 'terminal_result')
+    appendThreadEntry('echo', entry({ id: 'old', role: 'assistant', deliveryProvenance: provenance,
+      responseState: { ...initialKeeperResponseState, lastSequence: 2 }, producerTraceBoundary: 2,
+      producerSayingReplay: { text: 'old speech', timestamp: 1, owner: null, scope: null } }))
+    appendThreadEntry('echo', entry({ id: 'latest', role: 'assistant', deliveryProvenance: provenance,
+      responseState: { ...initialKeeperResponseState, lastSequence: 4 }, producerTraceBoundary: 4,
+      ...(pending ? { producerSayingReplay: { text: 'latest speech', timestamp: 2, owner: null, scope: null } } : {}) }))
+    mergeServerHistoryEntries('echo', [entry({ id: 'canonical', role: 'assistant', text: 'answer',
+      delivery: 'history', streamState: null, deliveryProvenance: provenance })])
+    const canonical = keeperThreads.value.echo?.find(row => row.id === 'canonical')
+    expect(canonical?.responseState).toMatchObject({ lastSequence: 4 })
+    expect(canonical?.producerTraceBoundary).toBe(4)
+    expect(canonical?.producerSayingReplay?.text).toBe(pending ? 'latest speech' : undefined)
+  })
+
+  it.each([false, true])('quarantines conflicting speech at equal response frontiers (reverse=%s)', reverse => {
+    const provenance = operationDeliveryProvenance('conflicting-pending-frontier', 'terminal_result')
+    const sharedState = { ...initialKeeperResponseState, lastSequence: 2 }
+    for (const text of reverse ? ['second', 'first'] : ['first', 'second']) appendThreadEntry('echo', entry({
+      id: text, role: 'assistant', deliveryProvenance: provenance, responseState: sharedState, producerTraceBoundary: 2,
+      producerSayingReplay: { text, timestamp: 1, owner: null, scope: null },
+    }))
+    mergeServerHistoryEntries('echo', [entry({ id: 'canonical', role: 'assistant', text: 'answer',
+      delivery: 'history', deliveryProvenance: provenance })])
+    const canonical = keeperThreads.value.echo?.find(row => row.id === 'canonical')
+    expect(canonical?.responseState).toEqual({ kind: 'unavailable' })
+    expect(canonical?.producerSayingReplay).toBeUndefined()
+  })
+
+  it.each([false, true])('ignores neutral unsequenced peers when retaining observed speech (reverse=%s)', reverse => {
+    const provenance = operationDeliveryProvenance('neutral-pending-peer', 'terminal_result')
+    const owner = { content_generation: 1, stream_scope: 0 }
+    const neutral = entry({ id: 'neutral', role: 'assistant', deliveryProvenance: provenance, responseState: initialKeeperResponseState })
+    const observed = entry({ id: 'observed', role: 'assistant', deliveryProvenance: provenance,
+      responseState: { ...initialKeeperResponseState, floor: owner, current: owner },
+      producerSayingReplay: { text: 'observed speech', timestamp: 1, owner, scope: null } })
+    for (const row of reverse ? [observed, neutral] : [neutral, observed]) appendThreadEntry('echo', row)
+    mergeServerHistoryEntries('echo', [entry({ id: 'canonical', role: 'assistant', text: 'answer', delivery: 'history', deliveryProvenance: provenance })])
+    const canonical = keeperThreads.value.echo?.find(row => row.id === 'canonical')
+    expect(canonical?.responseState).toMatchObject({ kind: 'known', current: owner })
+    expect(canonical?.producerSayingReplay?.text).toBe('observed speech')
+  })
+
   it.each(['terminal', 'unavailable'] as const)('does not revive older pending speech when history selects %s ownership', phase => {
     const operationId = 'pending-terminal-history'
     const provenance = operationDeliveryProvenance(operationId, 'terminal_result')

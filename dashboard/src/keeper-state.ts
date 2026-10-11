@@ -1,5 +1,5 @@
 import { reconcileTranscriptBindings } from './keeper-tool-observations'
-import { reconcileKeeperResponseStates, keeperResponseIsRunning, ownerFromUnknown, sameKeeperResponseOwner, type KeeperResponseOwner } from './lib/keeper-response-state'
+import { reconcileKeeperResponseStates, sameResponseObservation, unavailableKeeperResponseState, keeperResponseIsRunning, ownerFromUnknown, sameKeeperResponseOwner, type KeeperResponseOwner } from './lib/keeper-response-state'
 import { signal } from '@preact/signals'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import { isInFlightDelivery } from './lib/keeper-delivery'
@@ -1496,20 +1496,37 @@ function mergeLocalAssistantObservations(
   const exactCanonicalEntries = historyProvenance ? canonicalEntries.filter(entry =>
     entry.deliveryProvenance != null && sameDeliveryProvenance(entry.deliveryProvenance, historyProvenance),
   ) : []
-  const responseState = historyProvenance || historyEntry.source === 'autonomous_turn' ? reconcileKeeperResponseStates(
+  let responseState = historyProvenance || historyEntry.source === 'autonomous_turn' ? reconcileKeeperResponseStates(
     [...exactLocalEntries, ...exactCanonicalEntries].map(entry => entry.responseState),
   ) : historyEntry.responseState
   const toolTranscriptBindings = reconcileTranscriptBindings([...exactLocalEntries, ...exactCanonicalEntries, historyEntry].map(entry => entry.toolTranscriptBindings))
   const toolAuthorityUnavailable = [...exactLocalEntries, ...exactCanonicalEntries, historyEntry]
     .some(entry => entry.toolObservationAuthority === 'unavailable')
-  const producerTraceBoundary = exactLocalEntries.find(entry => entry.producerTraceBoundary !== undefined)?.producerTraceBoundary
+  const authoritativeState = responseState?.kind === 'known' ? responseState : undefined
+  const producerPeers = authoritativeState === undefined ? [] : [...exactLocalEntries, ...exactCanonicalEntries]
+    .filter(entry => entry.responseState?.kind === 'known'
+      && entry.responseState.lastSequence === authoritativeState.lastSequence
+      && sameResponseObservation(entry.responseState, authoritativeState))
+  const selectedProducer = producerPeers[0]
+  const pendingConflict = responseState?.kind === 'known' && responseState.phase !== 'terminal'
+    && producerPeers.some(peer => {
+      const left = selectedProducer?.producerSayingReplay, right = peer.producerSayingReplay
+      return selectedProducer?.producerTraceBoundary !== peer.producerTraceBoundary
+        || (left === undefined) !== (right === undefined)
+        || left !== undefined && right !== undefined && (left.text !== right.text || left.timestamp !== right.timestamp
+          || left.scope !== right.scope || !sameKeeperResponseOwner(left.owner ?? undefined, right.owner ?? undefined))
+    })
+  if (pendingConflict) responseState = unavailableKeeperResponseState
+  const producerSnapshot = pendingConflict ? undefined : selectedProducer
+  const producerTraceBoundary = producerSnapshot?.producerTraceBoundary
   const producerSayingReplay = responseState?.kind === 'known' && responseState.phase !== 'terminal'
-    ? exactLocalEntries.find(entry => entry.producerSayingReplay)?.producerSayingReplay : undefined
+    ? producerSnapshot?.producerSayingReplay : undefined
   const mergedHistory = { ...historyEntry,
     ...(exactLocalEntries.find(entry => entry.autonomousJournalRecovery)?.autonomousJournalRecovery
       ? { autonomousJournalRecovery: exactLocalEntries.find(entry => entry.autonomousJournalRecovery)!.autonomousJournalRecovery } : {}),
     producerSayingReplay,
-    ...(producerTraceBoundary !== undefined ? { producerTraceBoundary } : {}),
+    ...(pendingConflict ? { error: 'Conflicting pending speech at the observed response frontier' } : {}),
+    producerTraceBoundary,
     ...(exactLocalEntries.find(entry => entry.autonomousThinkingReplay)?.autonomousThinkingReplay
       ? { autonomousThinkingReplay: exactLocalEntries.find(entry => entry.autonomousThinkingReplay)!.autonomousThinkingReplay } : {}),
     ...(responseState ? { responseState } : {}),

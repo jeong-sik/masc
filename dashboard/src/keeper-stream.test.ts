@@ -420,6 +420,31 @@ describe('Keeper operation stream projection', () => {
     expect(after?.details?.costUsd).toBe(0.01)
   })
 
+  it('persists full unsequenced reasoning at the scheduled flush and resumes it after reload', () => {
+    vi.useFakeTimers()
+    try {
+      const operationId = 'reasoning-reload'
+      upsertTrackedKeeperChatOperation({ operationId, keeperName: 'sangsu', message: 'inspect', submittedAt: 1 })
+      assistantEntry(operationId)
+      const owner = { content_generation: 8, stream_scope: 0 }
+      const prefix = 'Reasoning paragraph with preserved whitespace.\n'.repeat(1000)
+      applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+        value: { index: 0, delta: prefix, response: owner } })
+      vi.advanceTimersByTime(KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS)
+      const draft = trackedKeeperChatOperationsForKeeper('sangsu')[0].assistantDraft!
+      expect(draft.traceSteps?.[0]).toMatchObject({ text: prefix, responseOwner: owner })
+      _resetKeeperStreamBuffersForTests()
+      keeperThreads.value = { sangsu: [{ ...keeperThreads.value.sangsu[0], traceSteps: draft.traceSteps, responseState: draft.responseState }] }
+      applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+        value: { index: 0, delta: 'continuation', response: owner } })
+      _flushPendingKeeperStreamDeltasForTests()
+      expect(keeperThreads.value.sangsu[0].traceSteps?.[0]).toMatchObject({ text: `${prefix}continuation` })
+    } finally {
+      _resetKeeperStreamBuffersForTests()
+      vi.useRealTimers()
+    }
+  })
+
   it.each(['observed', 'ended'] as const)('keeps content %s metadata outside model progress and body state', state => {
     assistantEntry()
     for (const hasBody of [false, true]) {

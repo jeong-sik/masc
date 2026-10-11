@@ -48,7 +48,6 @@ import { isRecord, asNumber, asString } from './components/common/normalize'
 import {
   nonBlankToolCallId,
 } from './tool-call-output-store'
-import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
 import { updateTrackedKeeperChatAssistantDraft } from './keeper-chat-operations-local'
 
 export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
@@ -64,7 +63,6 @@ interface ThinkingPublicationOwner {
 interface PendingThinkingState {
   responseOwner?: KeeperResponseOwner
   chunks: string[]
-  preview: string
   agentCoreBlockIndex?: number
   flushHandle: ScheduledFlushHandle | null
   authoritative: boolean
@@ -214,13 +212,6 @@ function sameAgentCoreBlockIndex(left: number | undefined, right: number | undef
   return left === undefined ? right === undefined : left === right
 }
 
-function nextThinkingPreview(current: string, delta: string): string {
-  const next = `${current}${delta}`
-  if (next.length <= STREAMING_THINKING_PREVIEW_CHARS) return next
-  const marker = '...\n'
-  return `${marker}${next.slice(-(STREAMING_THINKING_PREVIEW_CHARS - marker.length))}`
-}
-
 function fullPendingThinkingText(pending: PendingThinkingState): string {
   return pending.chunks.join('')
 }
@@ -269,7 +260,7 @@ function flushPendingThinkingDeltas(
     }))
   }
   if (mode === 'preview') {
-    setAssistantThinkingSnapshot(keeperName, assistantEntryId, pending.preview, {
+    setAssistantThinkingSnapshot(keeperName, assistantEntryId, fullPendingThinkingText(pending), {
       agentCoreBlockIndex: pending.agentCoreBlockIndex,
       responseOwner: pending.responseOwner,
     })
@@ -319,7 +310,6 @@ function enqueueThinkingDelta(
     pending = {
       responseOwner: meta.responseOwner,
       chunks: [text],
-      preview: text,
       agentCoreBlockIndex: meta.agentCoreBlockIndex,
       flushHandle: null,
       authoritative: meta.authoritative ?? true,
@@ -327,7 +317,6 @@ function enqueueThinkingDelta(
     pendingThinkingDeltas.set(key, pending)
   } else {
     pending.chunks.push(delta)
-    pending.preview = nextThinkingPreview(pending.preview, delta)
   }
   if (pending.flushHandle !== null) return
   pending.flushHandle = scheduleThinkingFlush(() => {

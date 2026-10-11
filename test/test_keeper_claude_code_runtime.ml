@@ -1605,6 +1605,38 @@ let test_keeper_preserves_claude_thinking_before_tools () =
             check string "thinking does not enter final response" "Answer" (keeper_response_text turn)))
 ;;
 
+let test_result_closes_unfinished_partial_reasoning () =
+  let frame event = Yojson.Safe.to_string (`Assoc ["type", `String "stream_event";
+    "session_id", `String "__SESSION__"; "parent_tool_use_id", `Null; "event", event]) in
+  let start = frame (`Assoc ["type", `String "message_start";
+    "message", `Assoc ["id", `String "unfinished"; "model", `String "claude-fixture"]]) in
+  let block = frame (`Assoc ["type", `String "content_block_start";
+    "index", `Int 0; "content_block", `Assoc ["type", `String "thinking";
+      "thinking", `String ""]]) in
+  let piece = frame (`Assoc ["type", `String "content_block_delta";
+    "index", `Int 0; "delta", `Assoc ["type", `String "thinking_delta";
+      "thinking", `String "exposed fixture reasoning"]]) in
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let events = ref [] in
+    with_fixture [Emit (response_text ~turn_id:"anchor" ~message_id:"anchor" "Answer");
+      Emit start; Emit block; Emit piece; Emit (result_text ~turn_id:"terminal" "Answer")]
+      (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~goal:"TERMINAL_CONTENT"
+          ~on_event:(fun event -> events := event :: !events) () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok _ ->
+            let indexes = List.filter_map (function
+              | Agent_core.Types.ContentBlockDelta {index; delta=ThinkingDelta _} -> Some index
+              | _ -> None) !events |> List.sort_uniq Int.compare in
+            check bool "partial reasoning reaches its own content block" true
+              (not (List.is_empty indexes));
+            List.iter (fun index ->
+              check int "result closes each observed reasoning block once" 1
+                (List.length (List.filter (function
+                  | Agent_core.Types.ContentBlockStop {index=closed} -> Int.equal index closed
+                  | _ -> false) !events))) indexes))
+;;
+
 let test_partial_content_boundaries_keep_message_and_channel_identity () =
   let frame event = Yojson.Safe.to_string (`Assoc ["type", `String "stream_event";
     "session_id", `String "__SESSION__"; "parent_tool_use_id", `Null; "event", event]) in
@@ -5858,7 +5890,8 @@ let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_claude_code_runtime"
-    [ ( "native action", [ test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity
+    [ ( "native action", [ test_case "result closes unfinished partial reasoning" `Quick test_result_closes_unfinished_partial_reasoning
+        ; test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity
         ; test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
     ; ( "usage scope"
       , [ test_case "result-only usage keeps client-turn scope" `Quick

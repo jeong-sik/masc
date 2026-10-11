@@ -337,6 +337,8 @@ let claude_stream_callback ?on_child_content_observation ?on_native_task_observa
             emit_text ~index remainder;
             stop_content index)
             (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
+          let indexes = Hashtbl.fold (fun _ index acc -> index :: acc) content_indexes [] in
+          List.iter stop_content (List.sort_uniq Int.compare indexes);
           emit
             (Agent_core.Types.MessageDelta
                { stop_reason = Some Agent_core.Types.EndTurn; usage = None });

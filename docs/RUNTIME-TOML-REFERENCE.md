@@ -212,10 +212,12 @@ name a lane instead of a single runtime.
 
 `slots = []` means `cli_slots` only; both empty is refused at load.
 
-**Deadline rule**: plan admission refuses an exact-output target that carries
-neither `connect-timeout-s` nor `exact-body-timeout-s`
-(`Missing_deadline`, #36979, #38573). One of the two on the provider is
-enough; a keeper turn is not affected — it keeps its own first-event budget.
+**Deadline rule**: a `slots` entry naming an HTTP runtime whose provider
+declares no `exact-body-timeout-s` is refused at save time (rule 3, #38779).
+An older admission layer additionally refuses a target carrying neither
+deadline at all (`Missing_deadline`, #36979, #38573). `connect-timeout-s`
+alone does not qualify a provider for exact-output slots; a keeper turn is
+not affected — it keeps its own first-event budget.
 
 ## 8. Worked example — catalogued Anthropic provider
 
@@ -252,9 +254,9 @@ Notes on what is deliberately absent:
 - No `kind` — the catalog row owns the dialect; writing one is a load error.
 - No `request-path` — the catalog row's `/v1/messages` is used.
 - No `max-context` — the catalog's `claude-*` row answers (1M).
-- No `exact-body-timeout-s` — this provider is not an exact-output slot; add
-  it (or rely on `connect-timeout-s`, which already satisfies admission) when
-  it becomes one.
+- No `exact-body-timeout-s` — this provider serves no exact-output slot; a
+  `slots` entry naming it is refused at save until the key is added
+  (rule 3, #38779).
 
 An uncatalogued Anthropic-dialect endpoint instead states `kind =
 "anthropic"` and `request-path = "/v1/messages"` itself.
@@ -278,4 +280,6 @@ An uncatalogued Anthropic-dialect endpoint instead states `kind =
 
 Runtime (not load-time): an exact-output slot whose provider has neither
 `connect-timeout-s` nor `exact-body-timeout-s` is refused at plan admission
-with `Missing_deadline` (#36979, #38573).
+with `Missing_deadline` (#36979, #38573), and a `slots` entry whose provider
+lacks `exact-body-timeout-s` specifically is refused already at save time
+(rule 3, #38779).

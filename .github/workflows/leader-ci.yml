@@ -27,7 +27,13 @@ on:
 
 permissions:
   contents: read
+  # test.yml (called for the tests scope) declares issues: write at the top
+  # level for its scheduled-failure filing path. A calling workflow must grant
+  # every permission the callee declares, or the run fails before any job
+  # starts (startup_failure with zero jobs). leader-ci never reaches that
+  # issue-filing step itself; this grant exists only to satisfy the callee.
   pull-requests: read
+  issues: write
   statuses: write
 
 concurrency:

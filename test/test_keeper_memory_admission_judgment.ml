@@ -137,6 +137,41 @@ let test_structured_output_schema_accepts_the_envelope () = with_batch (fun batc
     (envelope (add "extra" `Null (List.hd rows) :: List.tl rows))
   |> refused "extra judgment field at the runtime admission boundary")
 
+module Current = Masc.Keeper_memory_os_current
+
+let archived (original : Types.fact) ~removed_at ~revision ~reason
+    : Current.archived_fact =
+  { original
+  ; removal =
+      { removed_in_revision = revision
+      ; removed_at
+      ; removed_by = { kind = Current.Librarian; trace_id = "retire-trace" }
+      ; removed_origin = Types.Authored
+      ; drop_reason = Some reason
+      }
+  }
+
+let test_retirement_evidence_keeps_latest_per_identity () = with_batch (fun batch ->
+  let alpha_claim = "Alpha failed on Monday." in
+  let beta_claim = "Beta needs separate deployment credentials." in
+  let archive =
+    [ archived (fact alpha_claim) ~removed_at:100. ~revision:1 ~reason:"superseded by rewrite"
+    ; archived (fact beta_claim) ~removed_at:200. ~revision:2 ~reason:"unrelated branch"
+    ; archived (fact alpha_claim) ~removed_at:300. ~revision:3 ~reason:"operator cleanup" ] in
+  let render () =
+    Judgment.retirement_prompt_suffix ~batch (Judgment.Available archive) in
+  check bool "matched evidence renders" true (render () <> "");
+  let suffix = render () in
+  check bool "latest removal per identity wins, other identities intact" true
+    (Astring.String.is_infix ~affix:"operator cleanup" suffix
+     && Astring.String.is_infix ~affix:"unrelated branch" suffix
+     && not (Astring.String.is_infix ~affix:"superseded by rewrite" suffix));
+  Masc_test_deps.with_process_env
+    Env_config.KeeperMemoryOs.admission_retirement_match_cap_env_key (Some "2")
+    (fun () ->
+      check bool "raised cap admits the earlier removal too" true
+        (Astring.String.is_infix ~affix:"superseded by rewrite" (render ()))))
+
 let () = run "explicit memory admission judgment"
   ["admission boundary",[
     test_case "complete judgments preserve Memory and final references" `Quick
@@ -144,4 +179,5 @@ let () = run "explicit memory admission judgment"
     test_case "candidate coverage and strict fields" `Quick test_candidate_coverage_and_strict_fields;
     test_case "claim requirements and final destinations" `Quick test_claim_requirements_and_final_selection;
     test_case "partial settlement keeps deferred independent work out of change support" `Quick test_partial_settlement_and_change_support;
-    test_case "structured output accepts the wrapped Memory answer" `Quick test_structured_output_schema_accepts_the_envelope]]
+    test_case "structured output accepts the wrapped Memory answer" `Quick test_structured_output_schema_accepts_the_envelope;
+    test_case "retirement evidence keeps the latest removal per identity" `Quick test_retirement_evidence_keeps_latest_per_identity]]

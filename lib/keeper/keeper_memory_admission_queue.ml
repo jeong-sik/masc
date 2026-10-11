@@ -11,6 +11,12 @@ let suffix = ".memory-admission.json"
 let path ~keepers_dir ~keeper_id = Filename.concat keepers_dir (keeper_id ^ suffix)
 let candidates batch = batch.rows
 
+(* Contiguous sub-range of one pending read, keeping the queue generation for
+   candidate receipts. The judgment budgeter builds parts with this; a part
+   above the provider budget must still be a well-formed batch so a later
+   capacity refusal can defer it whole. *)
+let with_candidates batch rows = {batch with rows}
+
 let split batch =
   match batch.rows with
   | [] | [_] -> None

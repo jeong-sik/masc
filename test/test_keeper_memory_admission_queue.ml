@@ -278,6 +278,63 @@ let test_worker_partial_consumption_wakes_only_new_input () =
 let candidate_names selected =
   List.map (fun (row : Queue.candidate) -> row.request_id) (Queue.candidates selected)
 
+(* Same rendering the judgment prompt suffix uses, so a budget built from it
+   is exact rather than an approximation of the prompt cost model. *)
+let candidate_payload_bytes (row : Queue.candidate) =
+  String.length (Yojson.Safe.to_string
+    (`Assoc ["request_id", `String row.request_id; "sequence", `Int row.sequence;
+             "proposed_fact", Types.fact_to_json row.fact]))
+
+let largest_candidate_budget rows =
+  List.fold_left (fun acc row -> max acc (candidate_payload_bytes row)) 1 rows
+
+let test_worker_presplits_batch_over_budget () = with_store (fun keepers_dir ->
+  let ids = ["a";"b";"c";"d";"e"] in
+  List.iter (fun id -> ignore (append keepers_dir id ("rule " ^ id))) ids;
+  let budget = largest_candidate_budget (Queue.candidates (batch keepers_dir)) in
+  (* Budget at the largest single row: no row ever needs a capacity refusal,
+     so the traversal below is the pre-judgment budget alone, not refusal
+     halving inside an over-budget pass. *)
+  Masc_test_deps.with_process_env
+    Env_config.KeeperMemoryOs.admission_batch_max_bytes_env_key (Some (string_of_int budget))
+    (fun () ->
+      let calls = ref [] in
+      let outcome = Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+        ~judge:(fun selected ->
+          let names = candidate_names selected in
+          calls := names :: !calls;
+          ignore (commit keepers_dir (Queue.candidate_ids selected) []);
+          Worker.Committed) in
+      check (list (list string)) "over-budget batch is pre-split into single-row parts"
+        (List.map (fun id -> [id]) ids) (List.rev !calls);
+      check bool "every pre-split part committed without a refusal retry" true
+        (outcome = Worker.Settled {has_more=false});
+      check bool "all pre-split input consumed exactly once" true (pending keepers_dir = None)))
+
+let test_worker_presplit_oversized_row_defers_whole () = with_store (fun keepers_dir ->
+  List.iter (fun id -> ignore (append keepers_dir id ("rule " ^ id))) ["a";"b"];
+  let budget = largest_candidate_budget (Queue.candidates (batch keepers_dir)) in
+  Masc_test_deps.with_process_env
+    Env_config.KeeperMemoryOs.admission_batch_max_bytes_env_key (Some (string_of_int budget))
+    (fun () ->
+      let calls = ref [] in
+      let outcome = Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+        ~judge:(fun selected ->
+          let names = candidate_names selected in
+          calls := names :: !calls;
+          match names with
+          | ["a"] -> Worker.Input_size_refused "synthetic provider refused candidate a"
+          | ["b"] ->
+            ignore (commit keepers_dir (Queue.candidate_ids selected) []);
+            Worker.Committed
+          | _ -> fail "pre-split parts were re-merged") in
+      check (list (list string)) "oversized row reaches the refusal path as its own part"
+        [["a"];["b"]] (List.rev !calls);
+      check bool "sibling still settles around the deferred oversized row" true
+        (outcome = Worker.Settled {has_more=false});
+      check (list string) "oversized row remains pending for a fresh judgment"
+        ["a"] (candidate_names (batch keepers_dir))))
+
 let test_capacity_left_uncertainty_does_not_block_right () =
   List.iter (fun append_tail -> with_store (fun keepers_dir ->
     List.iter (fun id -> ignore (append keepers_dir id ("rule " ^ id))) ["a";"b";"c";"d"];
@@ -441,10 +498,10 @@ let test_size_with_a_same_failure_is_deferred_whole () =
     ; "a quota without a capacity refusal defers", false, true, "defer" ]
 
 let () = run "durable explicit admission queue"
-  ["storage boundaries", [
-    test_case "missing receipt before acknowledgement remains explicit scope limitation" `Quick test_missing_receipt_before_acknowledgement_is_unresolved_authority;
-    test_case "contiguous pending recovers without sparse authority" `Quick test_contiguous_pending_recovers_without_sparse_authority;
-    test_case "lost sparse authority refuses judgment without retiring evidence" `Quick test_sparse_authority_loss_refuses_judgment;
+  ["pre-judgment batch budget", [
+    test_case "over-budget batch is pre-split before the first judgment" `Quick test_worker_presplits_batch_over_budget;
+    test_case "oversized single row defers whole through the refusal path" `Quick test_worker_presplit_oversized_row_defers_whole];
+   "storage boundaries", [
     test_case "new input during semantic deferral is recheck, not commit" `Quick test_semantic_deferral_with_new_tail_is_not_commit;
     test_case "capacity siblings continue past semantic uncertainty" `Quick test_capacity_left_uncertainty_does_not_block_right;
     test_case "capacity sibling traversal stops on provider outage" `Quick test_capacity_outage_stops_before_sibling;

@@ -1,272 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import {
-  _resetChatStoreForTests,
-  enqueueInput,
-  dequeueInput,
-  markInputSent,
-  requeueInputFront,
-  clearInputQueue,
-  hasQueuedInputClientAction,
-  getQueuedMessages,
-  getQueueLength,
-  getQueueTotal,
-  updateQueuedMessage,
-  readKeeperDraft,
-  writeKeeperDraft,
-  clearKeeperDraft,
-  _draftCountForTests,
-} from './keeper-chat-store'
-
-describe('keeper-chat-store input queue', () => {
-  beforeEach(() => {
-    _resetChatStoreForTests()
-  })
-
-  afterEach(() => {
-    _resetChatStoreForTests()
-  })
-
-  it('enqueues a message while streaming', () => {
-    enqueueInput('keeper-q', 'hello queue')
-    expect(getQueueLength('keeper-q')).toBe(1)
-  })
-
-  it('dedupes queued messages by client action id, not content', () => {
-    const first = enqueueInput('keeper-q', 'same text', undefined, 'click-1')
-    const duplicate = enqueueInput('keeper-q', 'same text', undefined, 'click-1')
-    const repeatedContent = enqueueInput('keeper-q', 'same text', undefined, 'click-2')
-
-    expect(duplicate).toBe(first)
-    expect(repeatedContent).not.toBe(first)
-    expect(getQueueLength('keeper-q')).toBe(2)
-    expect(hasQueuedInputClientAction('keeper-q', 'click-1')).toBe(true)
-    expect(hasQueuedInputClientAction('keeper-q', 'missing')).toBe(false)
-  })
-
-  it('dequeues messages in FIFO order', () => {
-    enqueueInput('keeper-q', 'first')
-    enqueueInput('keeper-q', 'second')
-    const msg1 = dequeueInput('keeper-q')
-    expect(msg1!.content).toBe('first')
-    markInputSent('keeper-q')
-    const msg2 = dequeueInput('keeper-q')
-    expect(msg2!.content).toBe('second')
-    markInputSent('keeper-q')
-    expect(dequeueInput('keeper-q')).toBeNull()
-  })
-
-  it('assigns stable enqueue sequence across dequeue and requeue', () => {
-    const first = enqueueInput('keeper-q', 'first')
-    const second = enqueueInput('keeper-q', 'second')
-
-    expect(first.sequence).toBe(1)
-    expect(second.sequence).toBe(2)
-
-    const msg = dequeueInput('keeper-q')
-    expect(msg!.sequence).toBe(1)
-
-    requeueInputFront('keeper-q', msg!)
-
-    const replay = dequeueInput('keeper-q')
-    expect(replay!.sequence).toBe(1)
-    markInputSent('keeper-q')
-
-    const next = dequeueInput('keeper-q')
-    expect(next!.sequence).toBe(2)
-  })
-
-  it('prevents dequeue while sending', () => {
-    enqueueInput('keeper-q', 'only')
-    dequeueInput('keeper-q')
-    expect(dequeueInput('keeper-q')).toBeNull()
-  })
-
-  it('allows dequeue after markInputSent', () => {
-    enqueueInput('keeper-q', 'a')
-    enqueueInput('keeper-q', 'b')
-    dequeueInput('keeper-q')
-    markInputSent('keeper-q')
-    const next = dequeueInput('keeper-q')
-    expect(next!.content).toBe('b')
-  })
-
-  it('requeues a deferred sending item at the front', () => {
-    enqueueInput('keeper-q', 'first')
-    enqueueInput('keeper-q', 'second')
-    const msg = dequeueInput('keeper-q')
-    expect(msg!.content).toBe('first')
-
-    requeueInputFront('keeper-q', msg!)
-
-    const replay = dequeueInput('keeper-q')
-    expect(replay!.content).toBe('first')
-    markInputSent('keeper-q')
-    const next = dequeueInput('keeper-q')
-    expect(next!.content).toBe('second')
-  })
-
-  it('clearInputQueue removes all items', () => {
-    enqueueInput('keeper-q', 'x')
-    enqueueInput('keeper-q', 'y')
-    clearInputQueue('keeper-q')
-    expect(getQueueLength('keeper-q')).toBe(0)
-  })
-
-  it('is isolated per keeper', () => {
-    enqueueInput('keeper-a', 'a-msg')
-    enqueueInput('keeper-b', 'b-msg')
-    expect(getQueueLength('keeper-a')).toBe(1)
-    expect(getQueueLength('keeper-b')).toBe(1)
-  })
-
-  it('getQueueTotal includes sending item', () => {
-    enqueueInput('keeper-q', 'sending')
-    enqueueInput('keeper-q', 'waiting')
-    dequeueInput('keeper-q')
-    expect(getQueueTotal('keeper-q')).toBe(2)
-    expect(getQueueLength('keeper-q')).toBe(1)
-  })
-
-  it('_resetChatStoreForTests clears queues', () => {
-    enqueueInput('keeper-q', 'test')
-    _resetChatStoreForTests()
-    expect(getQueueLength('keeper-q')).toBe(0)
-  })
-
-  it('carries attachments selected at enqueue time through dequeue', () => {
-    enqueueInput('keeper-q', 'with file', [{
-      id: 'att-1',
-      type: 'image',
-      name: 'screenshot.png',
-      size: 1024,
-      mimeType: 'image/png',
-      data: 'data:image/png;base64,abc123',
-    }])
-    const msg = dequeueInput('keeper-q')
-    expect(msg!.attachments).toHaveLength(1)
-    expect(msg!.attachments![0]!.name).toBe('screenshot.png')
-  })
-
-  it('carries display blocks and semantic user blocks through dequeue', () => {
-    enqueueInput(
-      'keeper-q',
-      '[Voice memo 00:03 (12 KB)]\nhello',
-      undefined,
-      'click-voice',
-      [{ t: 'voice', secs: 3, size: '12 KB', wave: [0.2, 0.8], transcript: 'hello' }],
-      [{ type: 'text', text: '[Voice memo 00:03 (12 KB)]\nhello' }],
-    )
-
-    const msg = dequeueInput('keeper-q')
-
-    expect(msg!.blocks).toEqual([
-      { t: 'voice', secs: 3, size: '12 KB', wave: [0.2, 0.8], transcript: 'hello' },
-    ])
-    expect(msg!.userBlocks).toEqual([
-      { type: 'text', text: '[Voice memo 00:03 (12 KB)]\nhello' },
-    ])
-  })
-
-  it('omits the attachments key for plain messages', () => {
-    enqueueInput('keeper-q', 'plain')
-    const msg = dequeueInput('keeper-q')
-    expect(msg!.attachments).toBeUndefined()
-  })
-
-  it('clears the client action id when a queued message is edited', () => {
-    const msg = enqueueInput('keeper-q', 'original', undefined, 'click-1')
-
-    updateQueuedMessage('keeper-q', msg.id, { content: 'edited' })
-
-    expect(hasQueuedInputClientAction('keeper-q', 'click-1')).toBe(false)
-    enqueueInput('keeper-q', 'original', undefined, 'click-1')
-    expect(getQueueLength('keeper-q')).toBe(2)
-  })
-
-  it('clears stale display blocks and edits the exact semantic text block', () => {
-    const msg = enqueueInput(
-      'keeper-q',
-      '[Voice memo 00:03 (12 KB)]\nhello',
-      undefined,
-      'click-voice',
-      [{ t: 'voice', secs: 3, size: '12 KB', wave: [0.2, 0.8], transcript: 'hello' }],
-      [{ type: 'text', text: '[Voice memo 00:03 (12 KB)]\nhello' }],
-    )
-
-    updateQueuedMessage('keeper-q', msg.id, { content: 'edited text' })
-
-    const edited = dequeueInput('keeper-q')
-    expect(edited!.content).toBe('edited text')
-    expect(edited!.blocks).toBeUndefined()
-    expect(edited!.userBlocks).toEqual([{ type: 'text', text: 'edited text' }])
-  })
-
-  it('does not synthesize a text block when an attachment-only message is unchanged', () => {
-    const attachment = {
-      id: 'att-image',
-      type: 'image' as const,
-      name: 'photo.png',
-      size: 1024,
-      mimeType: 'image/png',
-      data: 'data:image/png;base64,abc123',
-    }
-    const msg = enqueueInput(
-      'keeper-q',
-      '[첨부: photo.png]',
-      [attachment],
-      'click-image',
-      undefined,
-      [{
-        type: 'image',
-        attachmentId: attachment.id,
-        name: attachment.name,
-        mimeType: attachment.mimeType,
-        size: attachment.size,
-      }],
-    )
-
-    updateQueuedMessage('keeper-q', msg.id, {
-      content: '[첨부: photo.png]',
-      attachments: [attachment],
-    })
-
-    const edited = dequeueInput('keeper-q')
-    expect(edited!.userBlocks).toEqual([{
-      type: 'image',
-      attachmentId: 'att-image',
-      name: 'photo.png',
-      mimeType: 'image/png',
-      size: 1024,
-    }])
-  })
-
-  it('rejects ambiguous semantic text edits without partially mutating the item', () => {
-    const msg = enqueueInput(
-      'keeper-q',
-      'original',
-      undefined,
-      'click-multi-text',
-      undefined,
-      [
-        { type: 'text', text: 'first' },
-        { type: 'text', text: 'second' },
-      ],
-    )
-
-    expect(() => updateQueuedMessage('keeper-q', msg.id, {
-      content: 'edited',
-      editOnOpen: false,
-    })).toThrow('여러 구조화 text block')
-
-    expect(getQueuedMessages('keeper-q')).toEqual([msg])
-    expect(msg.content).toBe('original')
-    expect(msg.clientActionId).toBe('click-multi-text')
-    expect(msg.userBlocks).toEqual([
-      { type: 'text', text: 'first' },
-      { type: 'text', text: 'second' },
-    ])
-  })
-})
+import { readKeeperDraft, writeKeeperDraft, clearKeeperDraft, _draftCountForTests, _resetChatStoreForTests } from './keeper-chat-store'
+import { setStoredToken, clearStoredToken, currentStoredTokenRevision } from './api/core'
 
 describe('keeper-chat-store draft persistence', () => {
   beforeEach(() => { _resetChatStoreForTests() })
@@ -309,5 +43,23 @@ describe('keeper-chat-store draft persistence', () => {
   it('ignores a blank-key write', () => {
     writeKeeperDraft('   ', 'nope')
     expect(readKeeperDraft('')).toBe('')
+  })
+})
+
+describe('draft authentication ownership', () => {
+  afterEach(() => { clearStoredToken(); _resetChatStoreForTests() })
+
+  it('retains old authored input without exposing it to the new epoch or letting late cleanup clear new input', () => {
+    setStoredToken('fixture-old')
+    const oldOwner = currentStoredTokenRevision()
+    writeKeeperDraft('echo', 'old authored draft', oldOwner)
+    setStoredToken('fixture-new')
+    expect(readKeeperDraft('echo')).toBe('')
+    writeKeeperDraft('echo', 'new authored draft')
+    writeKeeperDraft('echo', 'late old authored draft', oldOwner)
+    expect(readKeeperDraft('echo')).toBe('new authored draft')
+    expect(readKeeperDraft('echo', oldOwner)).toBe('late old authored draft')
+    clearKeeperDraft('echo', oldOwner)
+    expect(readKeeperDraft('echo')).toBe('new authored draft')
   })
 })

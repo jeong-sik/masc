@@ -1,3 +1,4 @@
+import { setStoredToken, clearStoredToken } from '../../api/core'
 // @vitest-environment jsdom
 
 import { html } from 'htm/preact'
@@ -1970,6 +1971,7 @@ describe('ChatComposer draft persistence (uncontrolled, per-keeper)', () => {
     render(null, container)
     container.remove()
     _resetChatStoreForTests()
+    clearStoredToken()
   })
 
   function mountComposer(draftPersistKey: string, onSend: () => void = () => {}) {
@@ -1985,6 +1987,32 @@ describe('ChatComposer draft persistence (uncontrolled, per-keeper)', () => {
     )
     return container.querySelector('textarea') as HTMLTextAreaElement
   }
+
+  it('does not submit the previous owner draft before the auth rerender commits', () => {
+    setStoredToken('fixture-old')
+    const onSend = vi.fn()
+    const textarea = mountComposer('rondo', onSend)
+    fireEvent.input(textarea, { target: { value: 'old authored draft' } })
+    setStoredToken('fixture-new')
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(onSend).not.toHaveBeenCalled()
+    clearStoredToken()
+  })
+
+  it('separates an open composer draft on authentication replacement', async () => {
+    setStoredToken('fixture-old')
+    let textarea = mountComposer('rondo')
+    fireEvent.input(textarea, { target: { value: 'old authored draft' } })
+    setStoredToken('fixture-new')
+    await waitFor(() => expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(''))
+    textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: 'new authored draft' } })
+    expect(readKeeperDraft('rondo')).toBe('new authored draft')
+    render(null, container)
+    textarea = mountComposer('rondo')
+    expect(textarea.value).toBe('new authored draft')
+    clearStoredToken()
+  })
 
   it('restores a keeper draft across remount and never leaks across keepers', () => {
     // Type for keeper 'rondo', then switch away (unmount — the key=keeperName

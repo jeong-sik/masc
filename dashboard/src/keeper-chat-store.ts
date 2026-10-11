@@ -1,272 +1,37 @@
-// Keeper chat input queue — messages typed while a keeper is still
-// streaming, drained sequentially by the conversation panel.
-//
-// This module used to also hold a per-keeper ChatMessage buffer with
-// localStorage persistence for the secondary KeeperChatPanel surface.
-// That surface was unified into KeeperConversationPanel, whose state
-// lives in the keeperThreads signal (keeper-state.ts) and is rehydrated
-// from the server SSOT (.masc/keeper_chat/<name>.jsonl via
-// GET /chat/history), so the duplicate client-side store was deleted.
+// Unsent composer drafts, owned by credential epoch and Keeper.
+import { currentStoredTokenRevision } from './api/core'
 
-import type { ChatBlock, KeeperConversationAttachment, KeeperUserInputBlock } from './types'
+const drafts = new Map<number, Map<string, string>>()
 
-export interface QueuedMessage {
-  id: string
-  content: string
-  timestamp: number
-  sequence: number
-  sent: boolean
-  attachments?: KeeperConversationAttachment[]
-  blocks?: ChatBlock[]
-  userBlocks?: KeeperUserInputBlock[]
-  clientActionId?: string
-  editOnOpen?: boolean
+export function readKeeperDraft(keeperName: string, authRevision = currentStoredTokenRevision()): string {
+  return drafts.get(authRevision)?.get(keeperName.trim()) ?? ''
 }
 
-export interface InputQueue {
-  items: QueuedMessage[]
-  sending: boolean
-}
-
-const _queues = new Map<string, InputQueue>()
-let _nextQueueSequence = 0
-
-function _ensureQueue(keeperName: string): InputQueue {
-  let q = _queues.get(keeperName)
-  if (!q) {
-    q = { items: [], sending: false }
-    _queues.set(keeperName, q)
-  }
-  return q
-}
-
-// ── Per-keeper composer draft persistence ──────────────────────────────
-//
-// Holds the unsent composer text per keeper. ChatComposer is keyed by
-// keeper name (key=${keeperName}) and therefore remounts on a keeper
-// switch; reading from this map on mount preserves a half-typed message,
-// and — unlike the old single shared `draft` state on the panel — one
-// keeper's text never leaks into another's composer (which previously
-// risked sending to the wrong recipient). Plain Map, not a signal, so the
-// per-keystroke write does not re-render the conversation panel.
-const _drafts = new Map<string, string>()
-
-/** Read the persisted unsent draft for a keeper ('' when none). */
-export function readKeeperDraft(keeperName: string): string {
-  return _drafts.get(keeperName.trim()) ?? ''
-}
-
-/** Persist the unsent draft for a keeper. An empty value deletes the entry
- *  so the map does not accumulate blank drafts after a send. */
-export function writeKeeperDraft(keeperName: string, value: string): void {
+export function writeKeeperDraft(keeperName: string, value: string, authRevision = currentStoredTokenRevision()): void {
   const key = keeperName.trim()
   if (!key) return
-  if (value === '') _drafts.delete(key)
-  else _drafts.set(key, value)
+  if (value === '') {
+    clearKeeperDraft(key, authRevision)
+    return
+  }
+  let owned = drafts.get(authRevision)
+  if (!owned) {
+    owned = new Map()
+    drafts.set(authRevision, owned)
+  }
+  owned.set(key, value)
 }
 
-/** Drop a keeper's persisted draft. */
-export function clearKeeperDraft(keeperName: string): void {
-  _drafts.delete(keeperName.trim())
+export function clearKeeperDraft(keeperName: string, authRevision = currentStoredTokenRevision()): void {
+  const owned = drafts.get(authRevision)
+  owned?.delete(keeperName.trim())
+  if (owned?.size === 0) drafts.delete(authRevision)
 }
 
-/** Test-only: number of persisted drafts. Lets a test observe that an empty
- *  write deletes the entry rather than storing a blank string (which
- *  readKeeperDraft cannot distinguish, since both read back as ''). */
 export function _draftCountForTests(): number {
-  return _drafts.size
-}
-
-/** Enqueue a message typed while the keeper is streaming. Attachments
- *  selected at enqueue time ride along so draining does not drop them. */
-export function enqueueInput(
-  keeperName: string,
-  content: string,
-  attachments?: KeeperConversationAttachment[],
-  clientActionId?: string,
-  blocks?: ChatBlock[],
-  userBlocks?: KeeperUserInputBlock[],
-  editOnOpen = false,
-): QueuedMessage {
-  const q = _ensureQueue(keeperName)
-  const actionId = clientActionId?.trim()
-  if (actionId) {
-    const existing = q.items.find(item => item.clientActionId === actionId)
-    if (existing) return existing
-  }
-  const msg: QueuedMessage = {
-    id: `${keeperName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, // real-randomness-needed: local queue id, never a measurement
-    content,
-    timestamp: Date.now(),
-    sequence: ++_nextQueueSequence,
-    sent: false,
-    ...(attachments && attachments.length > 0 ? { attachments } : {}),
-    ...(blocks && blocks.length > 0 ? { blocks } : {}),
-    ...(userBlocks && userBlocks.length > 0 ? { userBlocks } : {}),
-    ...(actionId ? { clientActionId: actionId } : {}),
-    ...(editOnOpen ? { editOnOpen: true } : {}),
-  }
-  q.items.push(msg)
-  return msg
-}
-
-export function hasQueuedInputClientAction(
-  keeperName: string,
-  clientActionId: string | undefined,
-): boolean {
-  const actionId = clientActionId?.trim()
-  if (!actionId) return false
-  const q = _queues.get(keeperName)
-  return q ? q.items.some(item => item.clientActionId === actionId) : false
-}
-
-/** Return all queued items for a keeper (newest last). */
-export function getQueuedMessages(keeperName: string): QueuedMessage[] {
-  const q = _queues.get(keeperName)
-  return q ? q.items.slice() : []
-}
-
-function editedUserBlocks(
-  blocks: KeeperUserInputBlock[] | undefined,
-  previousContent: string,
-  content: string,
-  attachments: KeeperConversationAttachment[] | undefined,
-): KeeperUserInputBlock[] | undefined {
-  if (!blocks) return undefined
-  const attachmentIds = new Set((attachments ?? []).map(attachment => attachment.id))
-  // A reference block names no attachment id (its carrier is url/file_id), so
-  // it survives the edit filter exactly when a still-attached chip carries the
-  // same reference value.
-  const referenceValues = new Set(
-    (attachments ?? []).flatMap((attachment) =>
-      attachment.kind === 'url'
-        ? [attachment.url]
-        : attachment.kind === 'file_id'
-          ? [attachment.fileId]
-          : [],
-    ),
-  )
-  const retained = blocks.filter(block => {
-    if (block.type === 'text') return true
-    if ('url' in block) return referenceValues.has(block.url)
-    if ('fileId' in block) return referenceValues.has(block.fileId)
-    return attachmentIds.has(block.attachmentId)
-  })
-  const nextText = content
-  if (previousContent === nextText) {
-    return retained.length > 0 ? retained : undefined
-  }
-  const textBlockCount = retained.filter(block => block.type === 'text').length
-  if (textBlockCount > 1) {
-    throw new Error('여러 구조화 text block이 있는 메시지는 추측해서 수정하지 않습니다.')
-  }
-  let replacedText = false
-  const edited: KeeperUserInputBlock[] = []
-  for (const block of retained) {
-    if (block.type !== 'text') {
-      edited.push(block)
-    } else if (!replacedText) {
-      replacedText = true
-      if (nextText.trim()) edited.push({ type: 'text', text: nextText })
-    }
-  }
-  if (!replacedText && nextText.trim()) edited.push({ type: 'text', text: nextText })
-  return edited.length > 0 ? edited : undefined
-}
-
-/** Update the editable fields or editor presentation of a queued message. */
-export function updateQueuedMessage(
-  keeperName: string,
-  id: string,
-  updates: Partial<
-    Pick<QueuedMessage, 'content' | 'attachments' | 'blocks' | 'userBlocks' | 'editOnOpen'>
-  >,
-): QueuedMessage | null {
-  const q = _queues.get(keeperName)
-  if (!q) return null
-  const item = q.items.find(i => i.id === id)
-  if (!item) return null
-  const previousContent = item.content
-  const previousUserBlocks = item.userBlocks
-  const contentChanged =
-    typeof updates.content === 'string' && updates.content !== item.content
-  const attachmentsChanged = 'attachments' in updates
-  const changed = contentChanged || attachmentsChanged
-  const nextContent = typeof updates.content === 'string' ? updates.content : item.content
-  const nextAttachments = 'attachments' in updates ? updates.attachments : item.attachments
-  const nextUserBlocks = changed
-    ? ('userBlocks' in updates
-        ? updates.userBlocks
-        : editedUserBlocks(
-            previousUserBlocks,
-            previousContent,
-            nextContent,
-            nextAttachments,
-          ))
-    : previousUserBlocks
-  if ('editOnOpen' in updates) {
-    if (updates.editOnOpen) item.editOnOpen = true
-    else delete item.editOnOpen
-  }
-  item.content = nextContent
-  if (nextAttachments && nextAttachments.length > 0) item.attachments = nextAttachments
-  else delete item.attachments
-  if (changed) delete item.clientActionId
-  if (changed) {
-    if ('blocks' in updates && updates.blocks && updates.blocks.length > 0) {
-      item.blocks = updates.blocks
-    } else {
-      delete item.blocks
-    }
-    if (nextUserBlocks && nextUserBlocks.length > 0) item.userBlocks = nextUserBlocks
-    else delete item.userBlocks
-  }
-  return item
-}
-
-/** Pop the front queued message. Returns null if empty or already sending. */
-export function dequeueInput(keeperName: string): QueuedMessage | null {
-  const q = _queues.get(keeperName)
-  if (!q || q.sending || q.items.length === 0) return null
-  q.sending = true
-  const msg = q.items.shift()!
-  return msg
-}
-
-/** Put an unsent/deferred message back at the front of the queue. */
-export function requeueInputFront(keeperName: string, msg: QueuedMessage): void {
-  const q = _ensureQueue(keeperName)
-  q.sending = false
-  if (q.items.some(item => item.id === msg.id)) return
-  q.items.unshift({ ...msg, sent: false })
-}
-
-/** Mark the current sending item as done and clear the sending flag. */
-export function markInputSent(keeperName: string): void {
-  const q = _queues.get(keeperName)
-  if (q) q.sending = false
-}
-
-/** Clear all queued items for a keeper. */
-export function clearInputQueue(keeperName: string): void {
-  _queues.delete(keeperName)
-}
-
-/** Number of items waiting (excluding the one currently being sent). */
-export function getQueueLength(keeperName: string): number {
-  const q = _queues.get(keeperName)
-  return q ? q.items.length : 0
-}
-
-/** Total count including the item currently being sent. */
-export function getQueueTotal(keeperName: string): number {
-  const q = _queues.get(keeperName)
-  if (!q) return 0
-  return q.items.length + (q.sending ? 1 : 0)
+  return [...drafts.values()].reduce((count, owned) => count + owned.size, 0)
 }
 
 export function _resetChatStoreForTests(): void {
-  _queues.clear()
-  _drafts.clear()
-  _nextQueueSequence = 0
+  drafts.clear()
 }

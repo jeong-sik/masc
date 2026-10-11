@@ -1,3 +1,5 @@
+import { currentStoredTokenRevision } from '../../api/core'
+import { storedTokenRevision } from '../../api/token-revision'
 import { KeeperToolOutputScope, ToolOutputLookupNotice, useToolOutputLookup } from './tool-output-lookup'
 import { ChatEditEvidence } from './edit-evidence'
 import { ChatFailureCard } from './failure-message'
@@ -4843,7 +4845,13 @@ export interface ComposerVoiceDraft {
   transcript: string
 }
 
-export function ChatComposer({
+export function ChatComposer(props: Omit<Parameters<typeof ChatComposerSession>[0], 'authRevision'>) {
+  const authRevision = storedTokenRevision.value
+  return html`<${ChatComposerSession} key=${authRevision} ...${props} authRevision=${authRevision} />`
+}
+
+function ChatComposerSession({
+  authRevision,
   draft: draftProp,
   placeholder,
   disabled,
@@ -4860,6 +4868,7 @@ export function ChatComposer({
   keeperLabel,
   footerMode = 'always',
 }: {
+  authRevision: number
   draft?: string
   placeholder: string
   disabled: boolean
@@ -4919,13 +4928,13 @@ export function ChatComposer({
       ? { key: null, value: '' }
       : {
           key: draftPersistStoreKey,
-          value: draftPersistStoreKey ? readKeeperDraft(draftPersistStoreKey) : '',
+          value: draftPersistStoreKey ? readKeeperDraft(draftPersistStoreKey, authRevision) : '',
         },
   )
   const internalDraft =
     !isControlled && draftPersistStoreKey !== internalDraftState.key
       ? draftPersistStoreKey
-        ? readKeeperDraft(draftPersistStoreKey)
+        ? readKeeperDraft(draftPersistStoreKey, authRevision)
         : ''
       : internalDraftState.value
   const draft = isControlled ? draftProp : internalDraft
@@ -4934,7 +4943,7 @@ export function ChatComposer({
       onDraftChange?.(value)
     } else {
       setInternalDraftState({ key: draftPersistStoreKey, value })
-      if (draftPersistStoreKey) writeKeeperDraft(draftPersistStoreKey, value)
+      if (draftPersistStoreKey) writeKeeperDraft(draftPersistStoreKey, value, authRevision)
     }
   }
   // External-store sync: a normal keeper switch remounts (key=${keeperName}) and
@@ -4951,7 +4960,7 @@ export function ChatComposer({
     if (draftPersistStoreKey !== internalDraftState.key) {
       setInternalDraftState({
         key: draftPersistStoreKey,
-        value: draftPersistStoreKey ? readKeeperDraft(draftPersistStoreKey) : '',
+        value: draftPersistStoreKey ? readKeeperDraft(draftPersistStoreKey, authRevision) : '',
       })
     }
   }, [draftPersistStoreKey, internalDraftState.key, isControlled])
@@ -5084,7 +5093,7 @@ export function ChatComposer({
   }
 
   const handleSend = () => {
-    if (sendDisabled) return
+    if (authRevision !== currentStoredTokenRevision() || sendDisabled) return
     const blocks: ChatBlock[] = []
     const userBlocks: KeeperUserInputBlock[] = []
     for (const att of attachments) {
@@ -5155,7 +5164,7 @@ export function ChatComposer({
   }
 
   const runSlashCommand = (command?: ChatComposerCommand) => {
-    if (!command || command.disabled) return
+    if (authRevision !== currentStoredTokenRevision() || !command || command.disabled) return
     setDraft('')
     setSlashIdx(0)
     if (textareaRef.current) textareaRef.current.style.height = 'auto'

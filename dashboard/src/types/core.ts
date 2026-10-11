@@ -974,6 +974,7 @@ export type KeeperConversationStreamState =
   | 'cancelling'
   | 'opening'
   | 'thinking'
+  | 'retrying'
   | 'streaming'
   | 'finalizing'
   | null
@@ -1064,6 +1065,7 @@ export interface KeeperConversationEntry {
   toolCallEnded?: boolean
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
+  runtimeAttempt?: Readonly<{ runtimeId: string; index: number }>
   streamContract?: KeeperConversationStreamContract | null
   attachments?: KeeperConversationAttachment[]
   /** Exact ordered multimodal input sent to the Keeper. Kept on optimistic and

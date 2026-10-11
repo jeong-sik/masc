@@ -361,6 +361,7 @@ type stream_event =
       }
   | Native_task_observed of native_task_observation
   | Usage_windows_reported of Runtime_provider_usage_window.report
+  | Provider_retry_observed of Runtime_claude_api_retry.t
   | Conversation_compacted
   | Usage_reported of
       { session_id : string
@@ -2384,6 +2385,10 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     let* subtype = optional_string "system message" "subtype" fields in
     (match subtype with
      | Some "compact_boundary" -> emit_stream_event on_stream_event Conversation_compacted
+     | Some "api_retry" ->
+         (match Runtime_claude_api_retry.decode ~expected_session_id (`Assoc fields) with
+          | Ok (Some retry) -> emit_stream_event on_stream_event (Provider_retry_observed retry)
+          | Ok None | Error _ -> ())
      | Some value when Option.is_some (task_kind value) ->
          Option.iter (fun observation ->
            emit_stream_event on_stream_event (Native_task_observed observation))

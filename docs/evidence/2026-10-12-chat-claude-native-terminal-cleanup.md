@@ -41,7 +41,13 @@ completion observer. They inspect stream lifecycle and callback state rather
 than TUI text, layout or row order. They are **not executed**.
 
 Type checking, build, CI, live Claude behavior, installation and actual TUI
-or dashboard screens remain unverified. If the stop callback itself explicitly
+or dashboard screens remain unverified. The outer runtime emit_stream_event
+boundary logs ordinary observer exceptions and continues; operator interrupts
+and Eio cancellation propagate. Cleanup here does not change that policy. The
+first fixture revision incorrectly expected a returned Error for an ordinary
+observer exception; independent review found P2 and the expectation was corrected
+to successful response continuation with exactly one native block stop.
+If the stop callback itself explicitly
 raises, Fun.protect can replace the original exception with Finally_raised;
 Cancel.protect prevents inherited cancellation, not an explicitly raised
 exception. Claim-time Skill delivery capture remains a separate unresolved

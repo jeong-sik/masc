@@ -1740,7 +1740,11 @@ let test_native_completion_observer_failure_closes_block () =
           ~on_event:(fun event -> events := event :: !events)
           ~on_native_tool_completion:(fun ~block_index:_ ~tool_call_id:_ _ ->
             incr callbacks; raise Native_completion_observer_failed) () in
-        (match outcome with Error _ -> () | Ok _ -> fail "observer failure was swallowed");
+        (* Ordinary stream observer failures are logged by the runtime;
+           operator interrupts and Eio cancellation retain propagation. *)
+        (match outcome with
+         | Ok _ -> ()
+         | Error error -> fail (Agent_core.Error.to_string error));
         check int "observer invoked once" 1 !callbacks;
         let indexes = List.filter_map (function
           | Agent_core.Types.ContentBlockStart {index;content_type="native_tool_use";_} -> Some index

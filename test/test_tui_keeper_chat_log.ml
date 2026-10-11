@@ -709,6 +709,29 @@ let test_journal_final_page_accepts_valid_resume_and_sequence_gaps () =
       [event 2; event 7], Journal.After_seq 7 ]
 ;;
 
+let test_journal_empty_page_rejects_unserved_byte_advances () =
+  let offset value = match Journal.page_start_of_wire (Some value) with
+    | Some offset -> offset | None -> fail "fixture offset" in
+  let page ~events ~has_more ~next_since_seq ~next_since_offset = Ok {
+    Log.source=Log.Operation "op"; events; has_more;
+    next_since_seq; next_since_offset=offset next_since_offset } in
+  let whole_turn ~since_seq:_ ~since_offset:_ =
+    page ~events:[] ~has_more:false ~next_since_seq:Journal.Whole_turn ~next_since_offset:100 in
+  let calls = ref 0 in
+  let resumed ~since_seq:_ ~since_offset:_ =
+    incr calls;
+    if !calls = 1 then
+      page ~events:[line 2 1. (E.Text_delta {text="authored bytes"; response=Unobserved_scope None})]
+        ~has_more:true ~next_since_seq:(Journal.After_seq 2) ~next_since_offset:100
+    else page ~events:[] ~has_more:false ~next_since_seq:(Journal.After_seq 2) ~next_since_offset:200 in
+  List.iter (fun fetch ->
+    match Log.read_whole_journal ~since_seq:Journal.Whole_turn ~fetch with
+    | Error (Log.Events_undecodable _) -> ()
+    | Ok _ -> fail "empty page skipped unserved byte range"
+    | Error error -> fail (Log.events_error_to_string error)
+  ) [whole_turn; resumed]
+;;
+
 let test_read_whole_journal_pages_until_the_position_stops_moving () =
   let asked = ref [] in
   let l seq = line seq (float_of_int seq) (E.Text_delta {text=(string_of_int seq); response=Unobserved_scope (None)}) in
@@ -1182,6 +1205,8 @@ let () =
             test_journal_final_page_rejects_invalid_event_frontiers
         ; test_case "read_whole_journal pages until the position stops moving" `Quick
             test_read_whole_journal_pages_until_the_position_stops_moving
+        ; test_case "empty pages cannot skip unserved byte ranges" `Quick
+            test_journal_empty_page_rejects_unserved_byte_advances
         ] )
     ; ( "golden"
       , [ test_case "missing start retains scoped text through journal and live wire" `Quick

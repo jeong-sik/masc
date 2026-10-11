@@ -219,7 +219,10 @@ val read_whole_journal :
     while both cursors advance past the ones asked from. The first error ends
     the read. Event sequences must strictly advance from the requested
     position and the returned sequence cursor must equal the last served
-    event (or the requested position on an empty page). A page that claims more without advancing is
+    event (or the requested position on an empty page). An empty page may
+    advance only its byte offset when scanning from the first row after a
+    held sequence; all other empty pages must retain the requested offset.
+    A page that claims more without advancing is
     {!Events_undecodable}, naming the positions, never a shorter [Ok]. *)
 
 val read_with_operation_state :

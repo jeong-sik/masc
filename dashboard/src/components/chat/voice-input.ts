@@ -15,7 +15,8 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { authHeaders, fetchControlPlane, currentStoredTokenRevision, subscribeStoredTokenChanges } from '../../api/core'
 import { recordingToWav } from './voice-wav'
 
-export type VoiceInputState = 'idle' | 'acquiring' | 'recording' | 'transcribing'
+import type { VoicePreparationPhase } from '../../keeper-chat-store'
+export type VoiceInputState = 'idle' | VoicePreparationPhase
 
 export interface TranscribeResult {
   /** The transcribed utterance. Empty string on a no-speech capture. */
@@ -72,8 +73,12 @@ export function voiceInputSupported(): boolean {
 export interface UseVoiceInputOptions {
   /** Host context ownership captured when recording is admitted. */
   readonly isCurrent?: () => boolean
-  /** Called with the transcribed text once Scribe returns. */
-  readonly onTranscribed: (text: string) => void
+  /** Admit one voice operation before requesting a microphone. */
+  readonly onAdmitted?: (id: symbol) => boolean
+  readonly onPhaseChanged?: (id: symbol, phase: VoicePreparationPhase) => void
+  readonly onSettled?: (id: symbol) => void
+  /** Adopt the completed text under the original operation identity. */
+  readonly onTranscribed: (text: string, id: symbol) => void
   /** Called with a human-readable error string on capture/upload failure. */
   readonly onError?: (message: string) => void
 }
@@ -93,6 +98,8 @@ export interface UseVoiceInput {
  * unmount) so the mic indicator never lingers.
  */
 interface VoiceSession {
+  readonly id: symbol
+  settled: boolean
   readonly controller: AbortController
   readonly authRevision: number
   readonly options: UseVoiceInputOptions
@@ -127,6 +134,10 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInput {
       session.stream = null
       session.chunks = []
       if (mounted.current && wasActive) setState('idle')
+      if (!session.settled) {
+        session.settled = true
+        session.options.onSettled?.(session.id)
+      }
     }
   }, [])
 
@@ -162,10 +173,11 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInput {
       return
     }
     const session: VoiceSession = {
-      controller: new AbortController(), authRevision: currentStoredTokenRevision(), options,
+      id: Symbol('voice input'), settled: false, controller: new AbortController(), authRevision: currentStoredTokenRevision(), options,
       releaseAuth: () => {}, stream: null, recorder: null, chunks: [],
     }
     active.current = session
+    if (session.options.onAdmitted?.(session.id) === false) { release(session, true); return }
     session.releaseAuth = subscribeStoredTokenChanges(() => release(session, true))
     setState('acquiring')
     const fail = (message: string) => {
@@ -194,15 +206,17 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInput {
         session.stream = null
         if (blob.size === 0) { fail('녹음된 오디오 없음'); return }
         setState('transcribing')
+        session.options.onPhaseChanged?.(session.id, 'transcribing')
         void (async () => {
           try {
             const wav = await recordingToWav(blob)
             if (!owns(session)) { release(session, true); return }
             const result = await transcribeAudio(wav, { signal: session.controller.signal })
             if (!owns(session)) { release(session, true); return }
-            release(session, false)
-            if (result.text === '') session.options.onError?.('음성을 인식하지 못했습니다. 다시 말해주세요.')
-            else session.options.onTranscribed(result.text)
+            try {
+              if (result.text === '') session.options.onError?.('음성을 인식하지 못했습니다. 다시 말해주세요.')
+              else session.options.onTranscribed(result.text, session.id)
+            } finally { release(session, false) }
           } catch (error) {
             fail(`전사 실패: ${error instanceof Error ? error.message : '알 수 없는 오류'}`)
           }
@@ -211,6 +225,7 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInput {
       recorder.onerror = () => fail('녹음 중 오류가 발생했습니다.')
       recorder.start()
       setState('recording')
+      session.options.onPhaseChanged?.(session.id, 'recording')
     } catch (error) {
       const e = error as DOMException
       fail(e?.name === 'NotAllowedError'

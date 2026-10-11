@@ -35,7 +35,7 @@ import { isSubmitEnter } from '../../lib/keyboard'
 import { isFailedDelivery } from '../../lib/keeper-delivery'
 import { parseTextToChatBlocks } from '../../lib/chat-blocks'
 import { createPortal, memo } from 'preact/compat'
-import { readKeeperDraftSnapshot, writeKeeperDraft, clearKeeperDraft, updateKeeperDraft } from '../../keeper-chat-store'
+import { readKeeperDraftSnapshot, writeKeeperDraft, clearKeeperDraft, updateKeeperDraft, type KeeperDraftSnapshot } from '../../keeper-chat-store'
 import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, ChatIssueBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatSuggestionsBlock, ChatTableBlock, ChatTraceStep, ChatTraceToolStep, ChatVoiceBlock, KeeperUserInputBlock } from '../../types'
 import type { KeeperApprovalLifecycle, KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
@@ -4919,6 +4919,8 @@ function ChatComposerSession({
   const [refDraft, setRefDraft] = useState('')
   const [drag, setDrag] = useState(false)
   const [slashIdx, setSlashIdx] = useState(0)
+  const [localPendingVoice, setLocalPendingVoice] = useState<KeeperDraftSnapshot['pendingVoice']>(null)
+  const localPendingVoiceRef = useRef<symbol | null>(null)
   const [localPendingFiles, setLocalPendingFiles] = useState<readonly symbol[]>([])
   const localPendingFilesRef = useRef<readonly symbol[]>([])
   const mountedRef = useRef(true)
@@ -4937,6 +4939,7 @@ function ChatComposerSession({
     : null
   const draft = isControlled ? draftProp : draftSnapshot?.text ?? localDraft
   const attachments = draftSnapshot?.attachments ?? localAttachments
+  const pendingVoice = draftSnapshot ? draftSnapshot.pendingVoice : localPendingVoice
   const pendingFiles = draftSnapshot?.pendingFiles ?? localPendingFiles
   const voiceDraft = draftSnapshot ? draftSnapshot.voiceDraft : localVoiceDraft
   const setAttachments = (value: readonly KeeperConversationAttachment[] | ((previous: readonly KeeperConversationAttachment[]) => readonly KeeperConversationAttachment[])) => {
@@ -4968,14 +4971,37 @@ function ChatComposerSession({
 
   // RFC-0236 P1: speak to compose. Voice transcription is saved as a visual draft
   // card (VoiceDraft) matching the mockup and board composers.
+  const ownsVoice = (id: symbol) => draftSnapshot
+    ? readKeeperDraftSnapshot(draftPersistStoreKey, authRevision).pendingVoice?.id === id
+    : localPendingVoiceRef.current === id
   const voice = useVoiceInput({
     isCurrent: () => authRevision === currentStoredTokenRevision() && isSubmissionCurrent?.() !== false,
-    onTranscribed: (text) => {
-      if (text) {
-        setVoiceDraft({
-          transcript: text,
-        })
+    onAdmitted: (id) => {
+      if (draftSnapshot) {
+        if (readKeeperDraftSnapshot(draftPersistStoreKey, authRevision).pendingVoice) return false
+        updateKeeperDraft(draftPersistStoreKey, previous => ({ ...previous, pendingVoice: { id, phase: 'acquiring' } }), authRevision)
+      } else {
+        if (localPendingVoiceRef.current) return false
+        localPendingVoiceRef.current = id
+        setLocalPendingVoice({ id, phase: 'acquiring' })
       }
+      return true
+    },
+    onPhaseChanged: (id, phase) => {
+      if (!ownsVoice(id)) return
+      if (draftSnapshot) updateKeeperDraft(draftPersistStoreKey, previous => ({ ...previous, pendingVoice: { id, phase } }), authRevision)
+      else if (mountedRef.current) setLocalPendingVoice({ id, phase })
+    },
+    onSettled: (id) => {
+      if (!ownsVoice(id)) return
+      if (draftSnapshot) updateKeeperDraft(draftPersistStoreKey, previous => ({ ...previous, pendingVoice: null }), authRevision)
+      else {
+        localPendingVoiceRef.current = null
+        if (mountedRef.current) setLocalPendingVoice(null)
+      }
+    },
+    onTranscribed: (text, id) => {
+      if (text && ownsVoice(id)) setVoiceDraft({ transcript: text })
     },
     onError: (message) => showToast(message, 'error'),
   })
@@ -5020,7 +5046,7 @@ function ChatComposerSession({
     : '전송'
   const isStreamWarning = streaming && elapsed > 60
   const hasContent = draft.trim() !== '' || attachments.length > 0 || voiceDraft !== null
-  const sendDisabled = disabled || pendingFiles.length > 0 || !hasContent || (streaming && !allowSendWhileStreaming)
+  const sendDisabled = disabled || pendingVoice !== null || pendingFiles.length > 0 || !hasContent || (streaming && !allowSendWhileStreaming)
   const slashMatch = /^\/([^\s]*)$/.exec(draft)
   const slashQuery = slashMatch?.[1]?.toLowerCase() ?? null
   const slashMatches = useMemo(
@@ -5116,7 +5142,7 @@ function ChatComposerSession({
   }
 
   const handleSend = () => {
-    if (authRevision !== currentStoredTokenRevision() || isSubmissionCurrent?.() === false || !ownsDraft() || localPendingFilesRef.current.length > 0 || sendDisabled) return
+    if (authRevision !== currentStoredTokenRevision() || isSubmissionCurrent?.() === false || !ownsDraft() || localPendingVoiceRef.current !== null || localPendingFilesRef.current.length > 0 || sendDisabled) return
     const blocks: ChatBlock[] = []
     const userBlocks: KeeperUserInputBlock[] = []
     for (const att of attachments) {
@@ -5264,6 +5290,7 @@ function ChatComposerSession({
       onPaste=${handlePaste}
     >
       <div class="composer-inner">
+        ${pendingVoice && voice.state === 'idle' ? html`<div role="status" class="text-xs text-[var(--color-fg-secondary)]">${pendingVoice.phase === 'acquiring' ? '마이크 연결 중' : pendingVoice.phase === 'recording' ? '녹음 중' : '전사 중'}</div>` : null}
         ${pendingFiles.length > 0 ? html`<div role="status" class="text-xs text-[var(--color-fg-secondary)]">첨부 준비 중</div>` : null}
         ${isPrimary
           ? null

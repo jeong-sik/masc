@@ -56,8 +56,13 @@ vi.mock('../../api/board', () => ({
 export let mockTranscribeCallback: ((text: string) => void) | null = null
 vi.mock('./voice-input', () => ({
   voiceInputSupported: () => true,
-  useVoiceInput: ({ onTranscribed }: any) => {
-    mockTranscribeCallback = onTranscribed
+  useVoiceInput: (options: any) => {
+    mockTranscribeCallback = (text) => {
+      const id = Symbol('test voice')
+      if (options.onAdmitted?.(id) === false) return
+      options.onTranscribed(text, id)
+      options.onSettled?.(id)
+    }
     return {
       state: 'idle',
       supported: true,

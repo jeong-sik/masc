@@ -3,14 +3,16 @@ import { signal, type Signal } from '@preact/signals'
 import { currentStoredTokenRevision } from './api/core'
 import type { KeeperConversationAttachment } from './types'
 
+export type VoicePreparationPhase = 'acquiring' | 'recording' | 'transcribing'
 export interface KeeperDraftSnapshot {
+  readonly pendingVoice: { readonly id: symbol; readonly phase: VoicePreparationPhase } | null
   readonly revision: number
   readonly pendingFiles: readonly symbol[]
   readonly text: string
   readonly attachments: readonly KeeperConversationAttachment[]
   readonly voiceDraft: { readonly transcript: string } | null
 }
-const emptyDraft: KeeperDraftSnapshot = Object.freeze({ revision: 0, pendingFiles: Object.freeze([]), text: '', attachments: Object.freeze([]), voiceDraft: null })
+const emptyDraft: KeeperDraftSnapshot = Object.freeze({ revision: 0, pendingVoice: null, pendingFiles: Object.freeze([]), text: '', attachments: Object.freeze([]), voiceDraft: null })
 const drafts = new Map<number, Map<string, Signal<KeeperDraftSnapshot>>>()
 
 function ownedDraft(keeperName: string, authRevision: number): Signal<KeeperDraftSnapshot> {
@@ -48,6 +50,7 @@ export function updateKeeperDraft(
   const next = update(previous)
   draft.value = Object.freeze({
     revision: previous.revision + 1,
+    pendingVoice: next.pendingVoice ? Object.freeze({ ...next.pendingVoice }) : null,
     pendingFiles: Object.freeze([...next.pendingFiles]),
     text: next.text,
     attachments: Object.freeze(next.attachments.map(attachment => Object.freeze({ ...attachment }))),
@@ -61,7 +64,7 @@ export function writeKeeperDraft(keeperName: string, text: string, authRevision 
 
 export function clearKeeperDraft(keeperName: string, authRevision = currentStoredTokenRevision(), expectedRevision?: number, content: 'text' | 'all' = 'all'): boolean {
   const draft = drafts.get(authRevision)?.get(keeperName.trim())
-  if (!draft || (content === 'all' && draft.peek().pendingFiles.length > 0) || (expectedRevision !== undefined && draft.peek().revision !== expectedRevision)) return false
+  if (!draft || (content === 'all' && (draft.peek().pendingFiles.length > 0 || draft.peek().pendingVoice !== null)) || (expectedRevision !== undefined && draft.peek().revision !== expectedRevision)) return false
   const current = draft.peek()
   draft.value = Object.freeze({ ...(content === 'text' ? current : emptyDraft), text: '', revision: current.revision + 1 })
   return true

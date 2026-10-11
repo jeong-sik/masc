@@ -360,7 +360,7 @@ describe('refreshOperatorWorkspaceDigest', () => {
 
     await mod.refreshOperatorWorkspaceDigest()
 
-    expect(apiMocks.fetchOperatorDigest).toHaveBeenCalledExactlyOnceWith({ targetType: 'namespace' })
+    expect(apiMocks.fetchOperatorDigest).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ targetType: 'namespace', signal: expect.any(AbortSignal) }))
     expect(signals.operatorWorkspaceDigest.value).not.toBeNull()
     expect(signals.operatorDigestLoading.value).toBe(false)
   })

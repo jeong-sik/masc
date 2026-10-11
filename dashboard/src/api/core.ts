@@ -1005,15 +1005,15 @@ export async function confirmOperatorAction(
   return parseOperatorActionResult(raw)
 }
 
-export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
-  return get('/api/v1/operator', { includeActorHeader: false })
+export function fetchOperatorSnapshot(opts: AbortableRequestOptions = {}): Promise<OperatorSnapshot> {
+  return get('/api/v1/operator', { ...opts, includeActorHeader: false })
 }
 
 export function fetchOperatorDigest(options: {
   targetType?: 'namespace' | 'workspace'
   targetId?: string
   includeWorkers?: boolean
-} = {}): Promise<OperatorDigest> {
+} & AbortableRequestOptions = {}): Promise<OperatorDigest> {
   const params = new URLSearchParams()
   if (options.targetType) params.set('target_type', options.targetType)
   if (options.targetId) params.set('target_id', options.targetId)
@@ -1021,5 +1021,6 @@ export function fetchOperatorDigest(options: {
   const query = params.toString()
   return get(`/api/v1/operator/digest${query ? `?${query}` : ''}`, {
     includeActorHeader: false,
+    signal: options.signal,
   })
 }

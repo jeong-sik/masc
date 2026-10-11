@@ -1,6 +1,7 @@
 import {
   confirmOperatorAction,
   currentStoredTokenRevision,
+  subscribeStoredTokenChanges,
   extractApiError,
   fetchOperatorDigest,
   fetchOperatorSnapshot,
@@ -113,6 +114,8 @@ export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<vo
   if (isFresh(lastSnapshotRefresh, authRevision, opts)) return
   const pending = createRefreshOperation(authRevision)
   const operation = pending.operation
+  const controller = new AbortController()
+  const releaseAuth = subscribeStoredTokenChanges(() => controller.abort())
   snapshotRefreshInflight = operation
   const owns = () => snapshotRefreshInflight === operation && currentStoredTokenRevision() === authRevision
   void (async () => {
@@ -123,7 +126,7 @@ export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<vo
       if (!owns()) return
       operatorErrorStatus.value = null
       if (!owns()) return
-      const raw = await fetchOperatorSnapshot()
+      const raw = await fetchOperatorSnapshot({ signal: controller.signal })
       if (!owns()) return
       operatorSnapshot.value = normalizeOperatorSnapshot(raw)
       if (!owns()) return
@@ -142,6 +145,7 @@ export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<vo
         if (owns()) operatorLoading.value = false
       } finally {
         if (snapshotRefreshInflight === operation) snapshotRefreshInflight = null
+        releaseAuth()
       }
     }
   })().then(pending.resolve, pending.reject)
@@ -169,6 +173,8 @@ export async function refreshOperatorWorkspaceDigest(opts?: RefreshOptions): Pro
   if (isFresh(lastWorkspaceDigestRefresh, authRevision, opts)) return
   const pending = createRefreshOperation(authRevision)
   const operation = pending.operation
+  const controller = new AbortController()
+  const releaseAuth = subscribeStoredTokenChanges(() => controller.abort())
   workspaceDigestRefreshInflight = operation
   const owns = () => workspaceDigestRefreshInflight === operation && currentStoredTokenRevision() === authRevision
   void (async () => {
@@ -179,7 +185,7 @@ export async function refreshOperatorWorkspaceDigest(opts?: RefreshOptions): Pro
       if (!owns()) return
       operatorDigestErrorStatus.value = null
       if (!owns()) return
-      const raw = await fetchOperatorDigest({ targetType: 'namespace' })
+      const raw = await fetchOperatorDigest({ targetType: 'namespace', signal: controller.signal })
       if (!owns()) return
       operatorWorkspaceDigest.value = normalizeOperatorDigest(raw)
       if (!owns()) return
@@ -196,6 +202,7 @@ export async function refreshOperatorWorkspaceDigest(opts?: RefreshOptions): Pro
         if (owns()) operatorDigestLoading.value = false
       } finally {
         if (workspaceDigestRefreshInflight === operation) workspaceDigestRefreshInflight = null
+        releaseAuth()
       }
     }
   })().then(pending.resolve, pending.reject)

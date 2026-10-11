@@ -216,3 +216,39 @@ it('disposes an acquired response whose credential changed before headers arrive
     if (cancel.mock.calls.length === 0) await body.cancel()
   }
 })
+
+it('cancels a stalled successful response when its credential owner changes', async () => {
+  setStoredToken('synthetic-success-owner-a')
+  let controller!: ReadableStreamDefaultController<Uint8Array<ArrayBuffer>>
+  const cancel = vi.fn()
+  const body = new ReadableStream<Uint8Array<ArrayBuffer>>({ start(value) { controller = value }, cancel })
+  const response = new Response(body)
+  let reading = false
+  const originalText = response.text.bind(response)
+  vi.spyOn(response, 'text').mockImplementation(() => { reading = true; return originalText() })
+  vi.spyOn(response, 'body', 'get').mockImplementation(() => { reading = true; return body })
+  fetchMock.mockResolvedValue(response)
+  const pending = callMcpTool('masc_broadcast', { message: 'stalled success body' }).catch(error => error)
+  await vi.waitFor(() => expect(reading).toBe(true))
+  setStoredToken('synthetic-success-owner-b')
+  try {
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledTimes(1))
+    expect((await pending).message).toBe('MCP authentication changed during request')
+  } finally {
+    if (cancel.mock.calls.length === 0) controller.close()
+    await pending
+  }
+})
+
+it('disposes a forbidden response without reading its body', async () => {
+  setStoredToken('synthetic-forbidden-owner')
+  const cancel = vi.fn()
+  const body = new ReadableStream<Uint8Array<ArrayBuffer>>({ cancel })
+  fetchMock.mockResolvedValue(new Response(body, { status: 403 }))
+  await expect(callMcpTool('masc_broadcast', { message: 'forbidden input' })).rejects.toThrow()
+  try {
+    expect(cancel).toHaveBeenCalledTimes(1)
+  } finally {
+    if (cancel.mock.calls.length === 0) await body.cancel()
+  }
+})

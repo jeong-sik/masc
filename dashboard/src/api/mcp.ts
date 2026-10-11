@@ -199,6 +199,7 @@ async function mcpPost(
   }
   if (!res.ok) {
     if (res.status === 403) {
+      void res.body?.cancel().catch(() => undefined)
       blockedAuthRevision = binding.authRevision
       throw new Error(MCP_BLOCKED_MESSAGE)
     }
@@ -216,9 +217,22 @@ async function mcpPost(
       releaseAuth()
     }
   }
-  const text = await res.text()
-  assertBinding(binding)
-  return text
+  const bodyController = new AbortController()
+  const releaseAuth = subscribeStoredTokenChanges(() => bodyController.abort())
+  try {
+    assertBinding(binding)
+    const readableResponse = res.body
+      ? new Response(res.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), { signal: bodyController.signal }))
+      : res
+    const text = await readableResponse.text()
+    assertBinding(binding)
+    return text
+  } catch (error) {
+    assertBinding(binding)
+    throw error
+  } finally {
+    releaseAuth()
+  }
 }
 
 async function ensureBinding(admittedRevision = currentStoredTokenRevision()): Promise<McpRequestBinding> {

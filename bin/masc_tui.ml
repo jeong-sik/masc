@@ -6727,8 +6727,49 @@ let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~ma
           result))
   end
 
+let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~mailbox ~keeper_name =
+  (* Reading retained server observations does not submit a message or use
+     local attachment paths. Remote/missing roster rows are not a refusal. *)
+  let eligible = server_authority_ready state in
+  (* An explicit Audit is retained intent even while reading is unconfirmed;
+     it does not authorize an HTTP request. Workspace withdrawal clears it. *)
+  if mode=Masc_tui_child_content.Audit
+     && not (List.mem keeper_name state.msg_child_content_audit_pending) then
+    state.msg_child_content_audit_pending <- keeper_name :: state.msg_child_content_audit_pending;
+  if eligible && not (List.mem_assoc keeper_name state.msg_child_content_inflight) then begin
+    let mode = if List.mem keeper_name state.msg_child_content_audit_pending
+      then Masc_tui_child_content.Audit else mode in
+    state.msg_child_content_audit_pending <-
+      List.filter ((<>) keeper_name) state.msg_child_content_audit_pending;
+    let enqueue_async = workspace_enqueue state in
+    let authority = state.workspace_authority in
+    let identity = state.server_identity in
+    let reading = state.workspace_read_authority in
+    let host = server_peer_host and port = state.port in
+    let previous = Option.value ~default:Masc_tui_child_content.empty
+        (List.assoc_opt keeper_name state.msg_child_content) in
+    state.msg_child_content_inflight <- (keeper_name,mode) :: state.msg_child_content_inflight;
+    Masc_tui_async_read.launch_with
+      ~boundary_error:(fun detail -> Masc_tui_child_content.Transport detail)
+      ~deliver:(fun result -> enqueue_async mailbox (Keeper_child_content_loaded (keeper_name,result)))
+      (fun () -> Masc_tui_child_content.read ~mode ~keeper_name ~previous
+        ~fetch:(fun path ->
+          let ( let* ) = Result.bind in
+          let check () =
+            if reading != state.workspace_read_authority then
+              Error "Child observation read was retired"
+            else check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          let* () = check () in
+          let result = Masc_tui_http.http_get ~host ~port ~path in
+          let* () = check () in
+          result))
+  end
+
 let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) state ~mailbox
     ~keeper_name =
+  launch_keeper_child_content_load
+    ~mode:(if force then Masc_tui_child_content.Audit else Masc_tui_child_content.Poll)
+    state ~mailbox ~keeper_name;
   if server_authority_ready state then begin
   launch_keeper_native_tasks_load
     ~mode:(if force then Masc_tui_native_tasks.Audit else Masc_tui_native_tasks.Poll)
@@ -11654,6 +11695,9 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.msg_native_tasks <- [];
   state.msg_native_tasks_inflight <- [];
   state.msg_native_tasks_audit_pending <- [];
+  state.msg_child_content <- [];
+  state.msg_child_content_inflight <- [];
+  state.msg_child_content_audit_pending <- [];
   state.msg_journal_wanted <- [];
   state.msg_journal_unavailable <- [];
   state.msg_journal_reads_refused <- false;
@@ -12412,7 +12456,9 @@ let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs
   (* Independent task observations continue while reading older chat rows.
      Root-turn settlement and history scroll do not own their lifecycle. *)
   (if needs.Masc_tui_types.needs_keeper_chat then
-     Option.iter (fun keeper_name -> launch_keeper_native_tasks_load state ~mailbox ~keeper_name)
+     Option.iter (fun keeper_name ->
+         launch_keeper_native_tasks_load state ~mailbox ~keeper_name;
+         launch_keeper_child_content_load state ~mailbox ~keeper_name)
        state.msg_target_keeper_name);
   (* The chat pane's history comes down its own generation-guarded path, not
      in the surface bundle, so the tick asks for it here. Without this the
@@ -17895,6 +17941,16 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       state.msg_native_tasks <- (keeper_name,tasks) :: List.remove_assoc keeper_name state.msg_native_tasks;
       if List.mem keeper_name state.msg_native_tasks_audit_pending then
         launch_keeper_native_tasks_load ~mode:Masc_tui_native_tasks.Audit state ~mailbox ~keeper_name
+  | Keeper_child_content_loaded (keeper_name,result) ->
+      state.msg_child_content_inflight <- List.remove_assoc keeper_name state.msg_child_content_inflight;
+      let previous = Option.value ~default:Masc_tui_child_content.empty
+          (List.assoc_opt keeper_name state.msg_child_content) in
+      let snapshots = match result with
+        | Ok snapshots -> snapshots
+        | Error error -> Masc_tui_child_content.failed previous error in
+      state.msg_child_content <- (keeper_name,snapshots) :: List.remove_assoc keeper_name state.msg_child_content;
+      if List.mem keeper_name state.msg_child_content_audit_pending then
+        launch_keeper_child_content_load ~mode:Masc_tui_child_content.Audit state ~mailbox ~keeper_name
   | Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state; terminal_replay } -> (
       let journal_id = Keeper_chat_log.source_key source in
       (* Not generation-guarded: a journal is the turn's record whichever

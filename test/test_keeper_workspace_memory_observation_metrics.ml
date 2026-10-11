@@ -19,63 +19,53 @@ let available ~claim_count briefing =
     ; briefing
     }
 
-let briefing_value keeper status =
-  Store.get_metric_value briefing_name ~labels:[("keeper", keeper); ("status", status)] ()
-let claims_value keeper =
-  Store.get_metric_value claims_name ~labels:[("keeper", keeper)] ()
+(* Both gauges are workspace values, so each is one unlabeled series. *)
+let briefing_bytes () = Store.get_metric_value briefing_name ()
+let claims () = Store.get_metric_value claims_name ()
+let bytes_of text = Some (Float.of_int (String.length text))
 
 let test_current_records_bytes_and_claims () =
-  let keeper = "obs-current" in
   let text = "the world as the curator synthesized it" in
-  Observe_metrics.record ~keeper_name:keeper
-    (available ~claim_count:3 (Ok (Briefing.Current (summary text))));
-  check (option (float 0.0)) "current briefing bytes recorded"
-    (Some (Float.of_int (String.length text)))
-    (briefing_value keeper "current");
-  check (option (float 0.0)) "claim count recorded alongside"
-    (Some 3.0) (claims_value keeper)
+  Observe_metrics.record (available ~claim_count:3 (Ok (Briefing.Current (summary text))));
+  check (option (float 0.0)) "current briefing bytes recorded" (bytes_of text) (briefing_bytes ());
+  check (option (float 0.0)) "claim count recorded alongside" (Some 3.0) (claims ())
 
-let test_stale_records_under_stale_status () =
-  let keeper = "obs-stale" in
-  let text = "older synthesis, sources changed" in
-  Observe_metrics.record ~keeper_name:keeper
-    (available ~claim_count:0 (Ok (Briefing.Stale (summary text))));
-  check (option (float 0.0)) "stale briefing bytes recorded under stale label"
-    (Some (Float.of_int (String.length text)))
-    (briefing_value keeper "stale");
-  check (option (float 0.0)) "no current-status cell for a stale briefing"
-    None (briefing_value keeper "current")
+let test_status_change_keeps_one_series () =
+  let current = "synthesis read while sources matched" in
+  let stale = "the same body after its sources changed, a little longer" in
+  Observe_metrics.record (available ~claim_count:4 (Ok (Briefing.Current (summary current))));
+  Observe_metrics.record (available ~claim_count:4 (Ok (Briefing.Stale (summary stale))));
+  check (option (float 0.0)) "a stale body replaces the value of the one series"
+    (bytes_of stale) (briefing_bytes ());
+  check (option (float 0.0)) "no series is kept per briefing status"
+    None (Store.get_metric_value briefing_name ~labels:[("status", "current")] ())
 
-let test_pending_and_unavailable_record_zero () =
-  let keeper_pending = "obs-pending" in
-  Observe_metrics.record ~keeper_name:keeper_pending
-    (available ~claim_count:0 (Ok Briefing.Missing));
-  check (option (float 0.0)) "missing publication records zero pending bytes"
-    (Some 0.0) (briefing_value keeper_pending "pending");
-  let keeper_unavailable = "obs-unavailable" in
-  Observe_metrics.record ~keeper_name:keeper_unavailable
-    (available ~claim_count:0 (Error "briefing.json: malformed"));
-  check (option (float 0.0)) "unreadable briefing records zero unavailable bytes"
-    (Some 0.0) (briefing_value keeper_unavailable "unavailable")
+let test_unmeasured_briefing_keeps_last_size () =
+  let text = "last body that was measured" in
+  Observe_metrics.record (available ~claim_count:2 (Ok (Briefing.Current (summary text))));
+  Observe_metrics.record (available ~claim_count:7 (Ok Briefing.Missing));
+  check (option (float 0.0)) "a missing publication records no size" (bytes_of text) (briefing_bytes ());
+  check (option (float 0.0)) "the claim count still follows the ledger" (Some 7.0) (claims ());
+  Observe_metrics.record (available ~claim_count:7 (Error "briefing.json: malformed"));
+  check (option (float 0.0)) "an unreadable briefing records no size" (bytes_of text) (briefing_bytes ())
 
 let test_missing_ledger_records_nothing () =
-  let keeper = "obs-missing" in
-  Observe_metrics.record ~keeper_name:keeper Ledger.Missing;
-  Observe_metrics.record ~keeper_name:keeper (Ledger.Unavailable "ledger.json: denied");
-  check (option (float 0.0)) "missing ledger leaves no briefing cell"
-    None (briefing_value keeper "current");
-  check (option (float 0.0)) "missing ledger leaves no claim cell"
-    None (claims_value keeper)
+  let text = "body before the ledger went away" in
+  Observe_metrics.record (available ~claim_count:5 (Ok (Briefing.Current (summary text))));
+  Observe_metrics.record Ledger.Missing;
+  Observe_metrics.record (Ledger.Unavailable "ledger.json: denied");
+  check (option (float 0.0)) "missing ledger leaves the briefing size" (bytes_of text) (briefing_bytes ());
+  check (option (float 0.0)) "missing ledger leaves the claim count" (Some 5.0) (claims ())
 
 let () =
   run "keeper_workspace_memory_observation_metrics"
     [ ( "record"
       , [ test_case "current briefing bytes and claim count" `Quick
             test_current_records_bytes_and_claims
-        ; test_case "stale briefing recorded under stale status" `Quick
-            test_stale_records_under_stale_status
-        ; test_case "pending and unreadable briefing record zero" `Quick
-            test_pending_and_unavailable_record_zero
+        ; test_case "a status change keeps one series" `Quick
+            test_status_change_keeps_one_series
+        ; test_case "an unmeasured briefing keeps the last size" `Quick
+            test_unmeasured_briefing_keeps_last_size
         ; test_case "missing ledger records nothing" `Quick
             test_missing_ledger_records_nothing
         ] )

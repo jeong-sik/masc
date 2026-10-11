@@ -706,6 +706,7 @@ export function applyKeeperOperationTurnEvent(
 /** Autonomous ownership is the durable turn reference, never a user request. */
 export function applyKeeperAutonomousTurnEvent(keeperName: string, turnRef: string, sequence: number,
   event: KeeperChatStreamEvent): string | null {
+  const authRevision = currentStoredTokenRevision()
   const entries = keeperThreads.value[keeperName] ?? []
   const existing = entries.find(entry => entry.source === 'autonomous_turn' && entry.turnRef === turnRef)
   const entryId = existing?.id ?? `autonomous-${turnRef}`
@@ -720,6 +721,7 @@ export function applyKeeperAutonomousTurnEvent(keeperName: string, turnRef: stri
     delivery: 'sending', streamState: 'opening', details: null,
     streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'keeper_turn_stream_event' }),
   })
+  if (authRevision !== currentStoredTokenRevision()) return null
   const error = applyKeeperStreamEvent(keeperName, entryId, event,
     { kind: 'autonomous', turnRef, sequence, ...(observationOnly ? { observationOnly: true as const } : {}) })
   if (error && observationOnly) recordStreamProtocolError(keeperName, entryId, error)

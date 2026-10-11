@@ -1,0 +1,13 @@
+# Autonomous journal recovery owns its authentication namespace
+
+Base: `f71ad70fd2fd6248a884da806378c08189424d6d`.
+
+Independent review of the parent unseen-terminal unit identified P2: a journal request dispatched under auth A could complete after auth B and mint a B-owned terminal. Current-token stamping at the consumer does not establish the old producer's authority. Original SOURCE HOLD is preserved at `/tmp/masc-web-unseen-approval-terminal-independent-review-20261012/review.json`.
+
+Recovery now captures an immutable namespace owner consisting of the central stored-token revision and its private Keeper/turn recovery map. A changed revision replaces the map instead of reusing old in-flight reads or cursor positions. Page publication, each event, cursor update, recovery status and follow-up scheduling check the captured namespace and exact recovery state. Producer discovery and reconnect/history aggregate results also revalidate before dispatch/publication. The autonomous event consumer captures auth before creating its parent and rechecks after that observable publication; an observer changing auth cannot continue the old event under the new account.
+
+Actual RED: A-to-B and A-to-B-to-A delayed terminal pages plus delayed producer discovery all failed before repair, `/tmp/chat-autonomous-auth-owner-red.log` (three selected failures). A separate real signal-observer case, temporarily removing the new parent-publication guard, reproduced old approval publication after an observer switched auth, `/tmp/chat-autonomous-auth-reentrant-red.log` (one selected failure). Corrected source was restored before final checks.
+
+Final execution: six suites, 256 tests passed; `pnpm exec vitest run src/keeper-autonomous-stream.test.ts src/keeper-stream.test.ts src/keeper-tool-approval.test.ts src/keeper-delivery-provenance.test.ts src/lib/keeper-delivery.test.ts src/components/keeper-workspace/keeper-workspace-chat.test.ts --config vitest.config.ts --no-file-parallelism --maxWorkers=1`; `/tmp/chat-autonomous-auth-owner-green.log`. `pnpm exec tsc --noEmit` succeeded with empty diagnostics; `/tmp/chat-autonomous-auth-owner-types.log`. `git diff --check` passed. This spans recovery/Thinking/tools/saying/provenance and approval state feature suites, not all provider/runtime behavior.
+
+The corrected cumulative scope awaits independent source review. No formal GitHub approval, CI, merge, deployment, installed runtime continuity or screenshots were verified. Terminal metadata frontier/resource retirement and the broader interleaving/broadcast/provider/runtime/UI goal remain active.

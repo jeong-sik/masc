@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { effect } from '@preact/signals'
+import { clearStoredToken, setStoredToken } from './api/core'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('./api/keeper-turn-events', () => ({ fetchKeeperTurnEvents: vi.fn(), fetchKeeperCurrentTurn: vi.fn().mockResolvedValue({ state: 'idle' }) }))
 import { fetchKeeperCurrentTurn, fetchKeeperTurnEvents, type KeeperTurnEventPage } from './api/keeper-turn-events'
-import { mergeServerHistoryEntries, keeperThreads } from './keeper-state'
+import { mergeServerHistoryEntries, keeperThreads, keeperToolApprovals } from './keeper-state'
 import { _resetKeeperStreamBuffersForTests, applyKeeperAutonomousTurnEvent, applyKeeperStreamEvent } from './keeper-stream'
 import { _resetKeeperAutonomousRecoveryForTests, discoverKeeperAutonomousTurn, recoverKnownKeeperAutonomousTurns, recoverKeeperAutonomousTurn, recoverKeeperAutonomousHistory } from './keeper-autonomous-stream'
 import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
@@ -9,8 +11,65 @@ const base = { threadId: 'keeper:k', runId: 'trace#9', timestamp: 1 }
 const text = (delta: string): KeeperChatStreamEvent => ({ ...base, type: 'TEXT_MESSAGE_CONTENT', messageId: 'trace#9:assistant', textStreamScope: 0, delta })
 const page = (sequence: number, event: KeeperChatStreamEvent | null): KeeperTurnEventPage => ({ turnRef: 'trace#9',
   events: [{ sequence, timestamp: 1, event }], cursor: { sequence, offset: sequence + 1 }, hasMore: false })
-beforeEach(() => { keeperThreads.value = {}; _resetKeeperStreamBuffersForTests(); _resetKeeperAutonomousRecoveryForTests(); vi.mocked(fetchKeeperTurnEvents).mockReset(); vi.mocked(fetchKeeperCurrentTurn).mockReset().mockResolvedValue({ state: 'idle' }) })
+beforeEach(() => { clearStoredToken(); keeperToolApprovals.value = {}; keeperThreads.value = {}; _resetKeeperStreamBuffersForTests(); _resetKeeperAutonomousRecoveryForTests(); vi.mocked(fetchKeeperTurnEvents).mockReset(); vi.mocked(fetchKeeperCurrentTurn).mockReset().mockResolvedValue({ state: 'idle' }) })
+afterEach(() => { clearStoredToken(); keeperToolApprovals.value = {} })
 describe('autonomous journal recovery', () => {
+  it.each([false, true])('discards an old-auth journal terminal and cursor (return to old account=%s)', async returnToOld => {
+    setStoredToken('synthetic-journal-account-a')
+    let release!: (value: KeeperTurnEventPage) => void
+    vi.mocked(fetchKeeperTurnEvents).mockReturnValueOnce(new Promise(done => { release = done }))
+    const pending = recoverKeeperAutonomousTurn('k', 'trace#9', 0)
+    setStoredToken('synthetic-journal-account-b')
+    if (returnToOld) setStoredToken('synthetic-journal-account-a')
+    const approvalId = '019a0000-0000-7000-8000-000000000001'
+    release(page(0, { ...base, type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_SETTLED',
+      value: { approval_id: approvalId, tool_call_id: 'old-account-call', outcome: 'approve' } }))
+    await pending
+    expect(keeperToolApprovals.value.k?.[approvalId]).toBeUndefined()
+    expect(keeperThreads.value.k).toBeUndefined()
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(0, text('current account answer')))
+    await recoverKeeperAutonomousTurn('k', 'trace#9', 0)
+    expect(fetchKeeperTurnEvents).toHaveBeenLastCalledWith('k', 'trace#9', { sequence: null, offset: 0 })
+    expect(keeperThreads.value.k?.[0]?.text).toBe('current account answer')
+  })
+
+  it('stops an old-auth page when an entry observer changes authentication', async () => {
+    setStoredToken('synthetic-reentrant-journal-a')
+    const approvalId = '019a0000-0000-7000-8000-000000000001'
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce({ ...page(1, text('old remaining speech')),
+      events: [
+        { sequence: 0, timestamp: 1, event: { ...base, type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_SETTLED',
+          value: { approval_id: approvalId, tool_call_id: 'old-call', outcome: 'approve' } } },
+        { sequence: 1, timestamp: 1, event: text('old remaining speech') },
+      ] })
+    let switched = false
+    const dispose = effect(() => {
+      if (keeperThreads.value.k?.length && !switched) {
+        switched = true
+        setStoredToken('synthetic-reentrant-journal-b')
+      }
+    })
+    try {
+      await recoverKeeperAutonomousTurn('k', 'trace#9', 1)
+      expect(switched).toBe(true)
+      expect(keeperThreads.value.k?.[0]?.text).toBe('')
+      expect(keeperToolApprovals.value.k?.[approvalId]).toBeUndefined()
+      expect(fetchKeeperTurnEvents).toHaveBeenCalledTimes(1)
+    } finally { dispose() }
+  })
+
+  it('discards old-auth producer discovery before it dispatches a journal read', async () => {
+    setStoredToken('synthetic-discovery-account-a')
+    let release!: (value: Awaited<ReturnType<typeof fetchKeeperCurrentTurn>>) => void
+    vi.mocked(fetchKeeperCurrentTurn).mockReturnValueOnce(new Promise(done => { release = done }))
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(0, text('old account discovery')))
+    const pending = discoverKeeperAutonomousTurn('k')
+    setStoredToken('synthetic-discovery-account-b')
+    release({ state: 'observed', turnRef: 'trace#9', sequence: 0 })
+    await pending
+    expect(fetchKeeperTurnEvents).not.toHaveBeenCalled()
+  })
+
   it.each([false, true])('retains fully unowned Saying and Thinking without inventing response ownership (history=%s)', history => {
     if (history) mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
       turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null }])

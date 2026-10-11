@@ -251,6 +251,39 @@ let test_completed_agent_cannot_restart () =
       | Ok _ -> fail "completed agent message restarted")
 ;;
 
+let test_completed_agent_cannot_change_kind () =
+  let rewrite_item_id frame =
+    let replace name value fields =
+      List.map (fun (key, old) -> key, if String.equal key name then value else old) fields in
+    match Yojson.Safe.from_string frame with
+    | `Assoc frame ->
+        let params = match List.assoc "params" frame with
+          | `Assoc params -> params
+          | _ -> fail "fixture params missing" in
+        let item = match List.assoc "item" params with
+          | `Assoc item -> item
+          | _ -> fail "fixture item missing" in
+        Yojson.Safe.to_string (`Assoc (replace "params"
+          (`Assoc (replace "item" (`Assoc (replace "itemId" (`String "m-1") item)) params)) frame))
+    | _ -> fail "fixture frame missing" in
+  List.iter (fun (stage, frame) ->
+    let native_events = ref 0 in
+    run_scripted
+      ~on_stream_event:(function
+        | Serve.Native_tool_started _ | Serve.Native_tool_finished _ -> incr native_events
+        | _ -> ())
+      (handshake_and_session ~granted:[] @
+        [Write agent_completed; Write (rewrite_item_id frame); Write turn_completed])
+      (fun result _ ->
+        check int "changed completed identity publishes no native effect" 0 !native_events;
+        match result with
+        | Error (Serve.Protocol_error {stage=actual; _}) ->
+            check string "identity checked before kind dispatch" stage actual
+        | Error error -> fail (Serve.error_to_string error)
+        | Ok _ -> fail "completed agent changed kind"))
+    ["item/started", tool_started; "item/completed", tool_completed]
+;;
+
 let test_turn_with_tool_and_approval () =
   let deltas = Buffer.create 16 in
   let decisions = ref [] in
@@ -1143,6 +1176,7 @@ let () =
       , [ test_case "completed message presence" `Quick test_completed_message_presence
         ; test_case "completed agent replay preserves final reply" `Quick
             test_completed_agent_replay_preserves_final_reply
+        ; test_case "completed agent cannot change kind" `Quick test_completed_agent_cannot_change_kind
         ; test_case "completed agent cannot restart" `Quick test_completed_agent_cannot_restart
         ; test_case "turn with tool and approval" `Quick test_turn_with_tool_and_approval
         ; test_case "auth required" `Quick test_auth_required

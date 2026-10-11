@@ -2,6 +2,53 @@
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-10-11
+
+### Added
+
+- The TUI home now shows when MASC starts the Keeper Firefox, on the BiDi
+  host rows, instead of a bare browser line (#42250, with #42235's start
+  record and #42227's refusal-reason note underneath it). When the host
+  selector cannot tell whether the clock passed, the row says that rather
+  than inventing a start time (#42227). Guide: none (target doc:
+  docs/design/browser-bidi-live-host.md).
+
+- HITL late-approvals can leave a durable evidence path: the acceptance
+  letters are stored in the Keeper journal and `Post the late approval
+  restore` exports a fenced `masc-review-receipt` block with the journal
+  coordinates, so a deflected approval is still auditable after the fact
+  (#42266).
+
+### Changed
+
+- `runtime`'s HTTP bindings for the configuration and registry surface
+  moved to a new private `Runtime_config_projection` module; the public
+  interface is unchanged (#42308).
+
+- `render_chat` now gets its exact durable-call association and verdicts
+  from a new internal owner module and builds its rows from typed
+  receipt/transcript state instead of re-parsing the Results prefix
+  strings; the public renderer interface is unchanged (#42320).
+
+- `test.yml` runs the full behavioural suite on a nightly schedule again
+  (17:43 UTC), files each red night as a `nightly-test-lane` issue with a
+  `masc-triage` declaration, so regressions outside the pull-request
+  gate surface on main within a day (#42290, #42319).
+
+- `leader-ci` (approved-selection recheck) surfaces refusal reasons in
+  the job log and its `gh api` failures are visible in the run log
+  (#42294, #42313, #42317, #42318).
+
+### Fixed
+
+- The dashboard typechecks again: the machine publication wire gained an
+  `unavailable` literal and the panel now names it ("Worker observation
+  unavailable") instead of failing `tsc --noEmit` (#42263).
+
+- The road map header no longer claims a package version that main does
+  not have; the current-package line follows the version bump, and the
+  changelog/release lines follow the published release (#42316).
+
 ## [0.50.0] - 2026-10-09
 
 ### Upgrade notes

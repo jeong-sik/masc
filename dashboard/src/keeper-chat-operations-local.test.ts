@@ -120,4 +120,23 @@ describe('keeper chat operation tracking', () => {
     })
   })
 
+  it.each(['delivered', 'no_reply', 'cancelled', 'error', 'request_failure', 'interrupted', 'timeout'] as const)(
+    'preserves stored %s delivery instead of reopening the request queue', delivery => {
+      upsertTrackedKeeperChatOperation({ operationId: 'terminal-draft', keeperName: 'echo', message: 'input', submittedAt: 1,
+        assistantDraft: { text: 'authored bytes', rawText: 'authored bytes', delivery, streamState: null,
+          responseState: { ...initialKeeperResponseState, phase: 'terminal' } } })
+      expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft).toMatchObject({
+        delivery, streamState: null, rawText: 'authored bytes', responseState: { phase: 'terminal' },
+      })
+    },
+  )
+
+  it('quarantines unknown delivery without turning it into queued or losing authored bytes', () => {
+    upsertTrackedKeeperChatOperation({ operationId: 'bad-delivery', keeperName: 'echo', message: 'input', submittedAt: 1,
+      assistantDraft: { text: 'preserve', rawText: 'preserve', delivery: 'unrecognized' as never, streamState: null } })
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]).toMatchObject({ message: 'input', assistantDraft: {
+      rawText: 'preserve', delivery: 'error', responseState: { kind: 'unavailable' },
+    } })
+  })
+
 })

@@ -96,7 +96,7 @@
       "baseline_lines": 3924,
       "kind": "production",
       "status": "partially improved; exact call evidence separated; remaining rendering, string decoration, search and cache semantics pending",
-      "current_lines": 5007,
+      "current_lines": 5009,
       "prs": [
         42320
       ],

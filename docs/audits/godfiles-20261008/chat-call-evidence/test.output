@@ -1,9 +1,9 @@
 Testing `keeper_call_evidence'.
-This run has ID `OXYBI27Z'.
+This run has ID `VO78KS2H'.
 
   [OK]          receipt decisions          0   identity and coverage boundaries.
   [OK]          receipt decisions          1   refresh retains admitted evide...
   [OK]          receipt decisions          2   durable and transcript evidenc...
 
 Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261011/_build/_tests/keeper_call_evidence'.
-Test Successful in 0.002s. 3 tests run.
+Test Successful in 0.001s. 3 tests run.

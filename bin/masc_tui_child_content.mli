@@ -27,6 +27,9 @@ val errors : t -> error list
 (** Record-read failures carry the advertised store incarnation, including when
     no page has been admitted. Inventory failures have no store identity. *)
 val diagnostics : t -> string list
+(** Cleanup evidence from an exact-scope/incarnation validated page survives a
+    subsequent frontier or history rejection. Foreign or malformed pages cannot
+    supply diagnostics. A successfully admitted page refreshes that evidence. *)
 val error_text : error -> string
 val read : mode:read_mode -> keeper_name:string ->
   fetch:(string -> (int * string,string) result) -> previous:t -> (t,error) result

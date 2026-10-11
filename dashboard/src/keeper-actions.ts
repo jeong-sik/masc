@@ -28,6 +28,8 @@ import {
   recordToolCallOutputs,
 } from './tool-call-output-store'
 import { KeeperChatOperationMissingError } from './api/keeper-operation-error'
+import { assertCurrentKeeperStreamAdmission, KeeperStreamAuthenticationSupersededError,
+  type KeeperStreamAdmission } from './api/keeper-stream-admission'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
 import type {
@@ -1171,6 +1173,8 @@ export async function sendKeeperThreadMessage(
   setActiveStream(keeperName, operationId, assistantId, controller)
   let operationAccepted = false
   let toolCallEnded = false
+  let streamAdmission: KeeperStreamAdmission = Object.freeze({ keeperName, operationId,
+    authRevision: currentStoredTokenRevision() })
   // #20849/#25898 Gap B: after ACCEPTED, the live-send SSE feed is silent
   // while the operation sits queued behind a running turn. [lastEventAt]
   // would otherwise cross STREAM_STALL_THRESHOLD_S and the composer would
@@ -1186,11 +1190,13 @@ export async function sendKeeperThreadMessage(
   void (async () => {
     while (!queuedSignalPollStopped && !controller.signal.aborted) {
       await sleep(PENDING_KEEPER_CHAT_POLL_MS)
-      if (queuedSignalPollStopped || controller.signal.aborted) return
+      if (queuedSignalPollStopped || controller.signal.aborted
+        || streamAdmission.authRevision !== currentStoredTokenRevision()) return
       try {
         const operation = await fetchKeeperChatOperation(keeperName, operationId, {
           signal: controller.signal,
         })
+        if (streamAdmission.authRevision !== currentStoredTokenRevision()) return
         if (operation.state.kind === 'queued' || operation.state.kind === 'running') {
           markKeeperStreamSignal(keeperName)
         } else {
@@ -1211,10 +1217,16 @@ export async function sendKeeperThreadMessage(
       attachments,
       userBlocks,
       surfaceContext: options.surfaceContext,
+      onAdmission: admission => {
+        assertCurrentKeeperStreamAdmission(admission)
+        streamAdmission = admission
+      },
       onDecodeError: reason => {
+        assertCurrentKeeperStreamAdmission(streamAdmission)
         updateThreadEntry(keeperName, assistantId, entry => ({ ...entry, error: reason }))
       },
       onEvent: (event, sequence) => {
+        assertCurrentKeeperStreamAdmission(streamAdmission)
         markKeeperStreamSignal(keeperName)
         if (
           event.type === 'CUSTOM'
@@ -1267,6 +1279,7 @@ export async function sendKeeperThreadMessage(
       },
     })
 
+    assertCurrentKeeperStreamAdmission(streamAdmission)
     flushPendingKeeperStreamDeltas(keeperName, assistantId)
     const finalEntry =
       (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantId) ?? null
@@ -1357,6 +1370,17 @@ export async function sendKeeperThreadMessage(
     }
   } catch (err) {
     flushPendingKeeperStreamDeltas(keeperName, assistantId)
+    if (err instanceof KeeperStreamAuthenticationSupersededError
+      || streamAdmission.authRevision !== currentStoredTokenRevision()) {
+      updateThreadEntry(keeperName, assistantId, entry => ({ ...entry,
+        delivery: entry.responseState?.kind === 'known' && entry.responseState.phase === 'terminal'
+          ? entry.delivery : 'interrupted',
+        streamState: null,
+      }))
+      persistTrackedOperationAssistantDraft(keeperName, operationAccepted ? operationId : null, assistantId)
+      throw err instanceof KeeperStreamAuthenticationSupersededError
+        ? err : new KeeperStreamAuthenticationSupersededError(streamAdmission)
+    }
     if (isAbortError(err)) {
       const durablePendingRequest = operationAccepted
         ? trackedKeeperChatOperationsForKeeper(keeperName)

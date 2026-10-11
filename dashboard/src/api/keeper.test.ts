@@ -55,8 +55,9 @@ import {
   parseKeeperRuntimeTrace as parseKeeperRuntimeTraceFromRuntimeTrace,
 } from './keeper-runtime-trace'
 import { resetDevTokenBootstrap } from './dev-token'
-import { ApiRequestError } from './core'
+import { ApiRequestError, clearStoredToken, setStoredToken } from './core'
 import { KeeperChatOperationMissingError } from './keeper-operation-error'
+import { KeeperStreamAuthenticationSupersededError } from './keeper-stream-admission'
 import { DEFAULT_GET_TIMEOUT_MS } from '../config/constants'
 
 afterEach(() => {
@@ -278,6 +279,69 @@ describe('Keeper Event Queue API', () => {
 })
 
 describe('streamKeeperMessage', () => {
+  it('stops the current frame batch when an event callback replaces credentials', async () => {
+    setStoredToken('fixture-old')
+    const events = [
+      { type: 'RUN_STARTED', runId: 'run', threadId: 'keeper:echo', timestamp: 0 },
+      { type: 'TEXT_MESSAGE_CONTENT', messageId: 'message', delta: 'stale response', timestamp: 1 },
+      { type: 'RUN_FINISHED', runId: 'run', threadId: 'keeper:echo', timestamp: 2 },
+    ].map(event => `data: ${JSON.stringify(event)}\n\n`).join('')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(events, { status: 200 })))
+    const observed: string[] = []
+    const result = await streamKeeperMessage('echo', 'input', { operationId: 'operation', onEvent: event => {
+      observed.push(event.type)
+      setStoredToken('fixture-new')
+    } }).catch(error => error)
+    expect(result).toBeInstanceOf(KeeperStreamAuthenticationSupersededError)
+    expect(observed).toEqual(['RUN_STARTED'])
+    clearStoredToken()
+  })
+
+  it.each(['headers', 'handoff'] as const)('cancels the stale response body when authentication changes at %s', async phase => {
+    setStoredToken('fixture-old')
+    let complete!: (response: Response) => void
+    const cancel = vi.fn()
+    const body = new ReadableStream<Uint8Array>({ cancel })
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(resolve => { complete = resolve })))
+    const stream = streamKeeperMessage('echo', 'input', { operationId: 'operation', onEvent: vi.fn() }).catch(error => error)
+    if (phase === 'headers') setStoredToken('fixture-new')
+    complete(new Response(body, { status: 200 }))
+    if (phase === 'handoff') queueMicrotask(() => setStoredToken('fixture-new'))
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledTimes(1))
+    expect(await stream).toBeInstanceOf(KeeperStreamAuthenticationSupersededError)
+    expect(body.locked).toBe(false)
+    clearStoredToken()
+  })
+
+  it('withdraws a quiet acquired reader immediately when authentication changes', async () => {
+    setStoredToken('fixture-old')
+    const cancel = vi.fn()
+    const body = new ReadableStream<Uint8Array>({ cancel })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: 200 })))
+    const onEvent = vi.fn()
+    const stream = streamKeeperMessage('echo', 'input', { operationId: 'operation', onEvent }).catch(error => error)
+    await vi.waitFor(() => expect(body.locked).toBe(true))
+    setStoredToken('fixture-new')
+    expect(await stream).toBeInstanceOf(KeeperStreamAuthenticationSupersededError)
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(body.locked).toBe(false)
+    expect(onEvent).not.toHaveBeenCalled()
+    clearStoredToken()
+  })
+
+  it('does not deliver a streaming response acquired under replaced credentials', async () => {
+    setStoredToken('fixture-old')
+    let complete!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(resolve => { complete = resolve })))
+    const onEvent = vi.fn()
+    const stream = streamKeeperMessage('echo', 'input', { operationId: 'operation', onEvent }).catch(error => error)
+    setStoredToken('fixture-new')
+    complete(new Response('data: {"type":"RUN_FINISHED","runId":"run","threadId":"keeper:echo","timestamp":0}\n\n', { status: 200 }))
+    await stream
+    expect(onEvent).not.toHaveBeenCalled()
+    clearStoredToken()
+  })
+
   const devTokenResponse = () => new Response(
     JSON.stringify({ token: 'test-dev-token', actor: 'dashboard', role: 'admin' }),
     { status: 200, headers: { 'Content-Type': 'application/json' } },

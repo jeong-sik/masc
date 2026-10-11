@@ -615,7 +615,8 @@ export function applyKeeperOperationTurnEvent(
     && matched.delivery !== 'sending'
     && matched.delivery !== 'streaming'
   const observationOnly = outsideLiveDelivery
-    && (isToolObservation(operation.event) || isResponseMetadataObservation(operation.event))
+    && (isToolObservation(operation.event) || isResponseMetadataObservation(operation.event)
+      || operation.event.type === 'CUSTOM' && operation.event.name === 'KEEPER_THINKING_DELTA')
   if (outsideLiveDelivery && matched.delivery !== 'interrupted' && !observationOnly) return null
   if (observationOnly && matched.role !== 'assistant') return null
   const entryId = matched?.id ?? `operation-turn-${operationId}`
@@ -1382,7 +1383,7 @@ export function applyKeeperStreamEvent(
           ? value.delta
           : undefined
         const agentCoreBlockIndex = value ? asNumber(value.index) : undefined
-        if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { agentCoreBlockIndex, responseOwner: event.value.response && response.state.kind === 'known' ? response.state.current ?? undefined : undefined, authoritative: response.authoritative })
+        if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { agentCoreBlockIndex, responseOwner: event.value.response && response.state.kind === 'known' ? response.state.current ?? undefined : undefined, authoritative: response.authoritative && !(source.kind === 'operation' && source.observationOnly) })
         return null
       }
       if (event.name === 'KEEPER_STREAM_PROTOCOL_ERROR') {

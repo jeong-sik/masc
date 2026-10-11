@@ -496,6 +496,7 @@ export interface KeeperOperationTurnEvent {
 type KeeperStreamEventSource =
   | { kind: 'direct' }
   | { kind: 'operation'; operationId: string; sequence?: number; observationOnly?: true }
+  | { kind: 'autonomous'; turnRef: string; sequence: number; observationOnly?: true }
 
 function isToolObservation(event: KeeperChatStreamEvent): boolean {
   switch (event.type) {
@@ -610,6 +611,31 @@ export function applyKeeperOperationTurnEvent(
   return error
 }
 
+/** Autonomous ownership is the durable turn reference, never a user request. */
+export function applyKeeperAutonomousTurnEvent(keeperName: string, turnRef: string, sequence: number,
+  event: KeeperChatStreamEvent): string | null {
+  const entries = keeperThreads.value[keeperName] ?? []
+  const existing = entries.find(entry => entry.source === 'autonomous_turn' && entry.turnRef === turnRef)
+  const entryId = existing?.id ?? `autonomous-${turnRef}`
+  const settled = existing !== undefined && existing.delivery !== 'sending' && existing.delivery !== 'streaming'
+  const observationOnly = settled && (isToolObservation(event) || event.type === 'CUSTOM'
+    && (event.name === 'KEEPER_THINKING_DELTA' || event.name === 'KEEPER_STREAM_PROTOCOL_ERROR'))
+  if (settled && !observationOnly) return null
+  if (!existing) appendThreadEntry(keeperName, {
+    id: entryId, role: 'assistant', source: 'autonomous_turn', label: keeperName,
+    turnRef, text: '', rawText: null, deliveryProvenance: null, timestamp: event.timestamp === undefined ? null : new Date(event.timestamp * 1000).toISOString(),
+    delivery: 'sending', streamState: 'opening', details: null,
+    streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'keeper_turn_stream_event' }),
+  })
+  const error = applyKeeperStreamEvent(keeperName, entryId, event,
+    { kind: 'autonomous', turnRef, sequence, ...(observationOnly ? { observationOnly: true as const } : {}) })
+  if (error && observationOnly) recordStreamProtocolError(keeperName, entryId, error)
+  else if (error) finalizeAssistantEntry(keeperName, entryId, {
+    delivery: 'error', streamState: null, error, timestamp: new Date().toISOString(),
+  })
+  return error
+}
+
 function admitResponseEvent(
   keeperName: string,
   assistantEntryId: string,
@@ -647,7 +673,7 @@ export function applyKeeperStreamEvent(
   const existing = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
   if (!existing) return null
   const beforeSequence = existing.responseState ?? initialKeeperResponseState
-  const sequenced = acknowledgeKeeperResponseSequence(beforeSequence, source.kind === 'operation' ? source.sequence : undefined)
+  const sequenced = acknowledgeKeeperResponseSequence(beforeSequence, source.kind !== 'direct' ? source.sequence : undefined)
   if (!sequenced) return null
   const frameKey = streamEntryKey(keeperName, assistantEntryId)
   if (applyingStreamFrames.has(frameKey)) return 'Reentrant Keeper stream frame'
@@ -801,7 +827,8 @@ export function applyKeeperStreamEvent(
         }
         return null
       }
-      if (!(source.kind === 'operation' && source.observationOnly)) {
+      if (source.kind === 'autonomous') updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry, autonomousTraceBoundary: source.sequence }))
+      if (!(source.kind !== 'direct' && source.observationOnly)) {
         promoteAssistantTextToProgress(keeperName, assistantEntryId, {
           agentCoreBlockIndex: takeAgentCoreTextBlockIndex(keeperName, assistantEntryId),
         })
@@ -813,7 +840,7 @@ export function applyKeeperStreamEvent(
         toolOccurrenceId,
         name: toolName,
         agentCoreBlockIndex,
-      }, source.kind === 'operation' && source.observationOnly ? 'observation' : 'active')
+      }, source.kind !== 'direct' && source.observationOnly ? 'observation' : 'active')
       // Insert above the live assistant bubble so the final reply text
       // stays the last entry in the transcript.
       insertThreadEntryBefore(keeperName, assistantEntryId, {
@@ -1229,6 +1256,30 @@ export function applyKeeperStreamEvent(
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         return null
       }
+      if (event.name === 'KEEPER_THINKING_DELTA' && source.kind === 'autonomous') {
+        const value = event.value
+        const response = source.observationOnly ? null : admitResponseEvent(keeperName, assistantEntryId, {
+          kind: 'observe', owner: value.response ?? null, scope: null, source: 'body',
+        })
+        if (response && !response.accepted) return null
+        const owner = value.response ? Object.freeze({ ...value.response }) : null
+        const before = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
+        if (!before) return null
+        const slots = before.autonomousThinkingReplay ?? []
+        const boundary = before.autonomousTraceBoundary ?? null
+        const same = (slot: typeof slots[number]) => slot.index === value.index && slot.boundary === boundary
+          && sameKeeperResponseOwner(slot.owner ?? undefined, owner ?? undefined)
+        const previous = slots.find(same)
+        const observed = Object.freeze({ boundary, index: value.index, owner, text: (previous?.text ?? '') + value.delta })
+        setAssistantThinkingSnapshot(keeperName, assistantEntryId, observed.text,
+          { agentCoreBlockIndex: value.index, responseOwner: owner ?? undefined })
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry,
+          ...(source.observationOnly || response && !response.authoritative
+            ? { delivery: before.delivery, streamState: before.streamState } : {}),
+          autonomousThinkingReplay: Object.freeze([...slots.filter(slot => !same(slot)), observed]),
+        }))
+        return null
+      }
       if (event.name === 'KEEPER_THINKING_DELTA') {
         const response = admitResponseEvent(keeperName, assistantEntryId, {
           kind: 'observe', source: 'body', scope: null, owner: event.value.response ?? null,
@@ -1389,6 +1440,13 @@ export function applyKeeperStreamEvent(
       })
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
       clearTextMessageStreamState(keeperName, assistantEntryId)
+      if (source.kind === 'autonomous') {
+        updateThreadEntry(keeperName, assistantEntryId, entry => entry.source === 'autonomous_turn' && entry.turnRef === source.turnRef
+          ? { ...entry, delivery: entry.delivery === 'no_reply' ? 'no_reply' : 'delivered', streamState: null, error: null,
+            streamContract: keeperStreamContract('sse_event', 'backend_terminal_event', { eventName: 'RUN_FINISHED' }) }
+          : entry)
+        return null
+      }
       if (source.kind !== 'operation') return null
       updateThreadEntry(keeperName, assistantEntryId, entry => {
         if (!isOperationDeliveryProvenance(
@@ -1431,7 +1489,7 @@ export function applyKeeperStreamEvent(
     throw error
   } finally {
     try {
-      if (!failed && source.kind === 'operation' && source.sequence !== undefined) {
+      if (!failed && source.kind !== 'direct' && source.sequence !== undefined) {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         updateThreadEntry(keeperName, assistantEntryId, entry => {
           const state = acknowledgeKeeperResponseSequence(entry.responseState ?? initialKeeperResponseState, source.sequence)

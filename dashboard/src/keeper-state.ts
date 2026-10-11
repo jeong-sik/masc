@@ -1485,17 +1485,23 @@ function mergeLocalAssistantObservations(
   const exactLocalEntries = historyProvenance ? localEntries.filter(entry =>
     entry.role === 'assistant' && entry.deliveryProvenance != null
       && sameDeliveryProvenance(entry.deliveryProvenance, historyProvenance),
+  ) : historyEntry.source === 'autonomous_turn' && historyEntry.turnRef ? localEntries.filter(entry =>
+    entry.source === 'autonomous_turn' && entry.turnRef === historyEntry.turnRef,
   ) : []
   const exactCanonicalEntries = historyProvenance ? canonicalEntries.filter(entry =>
     entry.deliveryProvenance != null && sameDeliveryProvenance(entry.deliveryProvenance, historyProvenance),
   ) : []
-  const responseState = historyProvenance ? reconcileKeeperResponseStates(
+  const responseState = historyProvenance || historyEntry.source === 'autonomous_turn' ? reconcileKeeperResponseStates(
     [...exactLocalEntries, ...exactCanonicalEntries].map(entry => entry.responseState),
   ) : historyEntry.responseState
   const toolTranscriptBindings = reconcileTranscriptBindings([...exactLocalEntries, ...exactCanonicalEntries, historyEntry].map(entry => entry.toolTranscriptBindings))
   const toolAuthorityUnavailable = [...exactLocalEntries, ...exactCanonicalEntries, historyEntry]
     .some(entry => entry.toolObservationAuthority === 'unavailable')
+  const autonomousTraceBoundary = exactLocalEntries.find(entry => entry.autonomousTraceBoundary !== undefined)?.autonomousTraceBoundary
   const mergedHistory = { ...historyEntry,
+    ...(autonomousTraceBoundary !== undefined ? { autonomousTraceBoundary } : {}),
+    ...(exactLocalEntries.find(entry => entry.autonomousThinkingReplay)?.autonomousThinkingReplay
+      ? { autonomousThinkingReplay: exactLocalEntries.find(entry => entry.autonomousThinkingReplay)!.autonomousThinkingReplay } : {}),
     ...(responseState ? { responseState } : {}),
     ...(toolAuthorityUnavailable || toolTranscriptBindings === null ? { toolObservationAuthority: 'unavailable' as const } : {}),
     ...(toolTranscriptBindings ? { toolTranscriptBindings } : {}),
@@ -1509,7 +1515,8 @@ function mergeLocalAssistantObservations(
     consumed.add(localTraceSourceByProvenance.id)
     return {
       ...mergedHistory,
-      traceSteps: historyEntry.traceSteps?.length ? historyEntry.traceSteps : localTraceSourceByProvenance.traceSteps,
+      traceSteps: historyEntry.source === 'autonomous_turn' ? localTraceSourceByProvenance.traceSteps
+        : historyEntry.traceSteps?.length ? historyEntry.traceSteps : localTraceSourceByProvenance.traceSteps,
     }
   }
   if (historyProvenance) return mergedHistory
@@ -1526,13 +1533,13 @@ function mergeLocalAssistantObservations(
     : undefined
   if (localTraceSourceByTurnRef?.traceSteps?.length) {
     consumed.add(localTraceSourceByTurnRef.id)
-    if ((historyEntry.traceSteps?.length ?? 0) > 0) return historyEntry
+    if ((historyEntry.traceSteps?.length ?? 0) > 0) return mergedHistory
     return {
-      ...historyEntry,
+      ...mergedHistory,
       traceSteps: localTraceSourceByTurnRef.traceSteps,
     }
   }
-  return historyEntry
+  return mergedHistory
 }
 
 function matchesCanonicalTool(observed: KeeperConversationEntry, canonical: KeeperConversationEntry): boolean {

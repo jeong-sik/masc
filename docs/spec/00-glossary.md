@@ -307,7 +307,10 @@ status: reference
   ([`masc_tui_keys.ml`](../../bin/masc_tui_keys.ml)의 판 이름 표), 상세에서 `y`(agree)·`x`(overrule)로 그 판정에 답한다
   (`render_harness_detail`). (2) Eval Harness: Keeper 에이전트의 시나리오 기반 행동
   평가(`lib/eval_harness.mli`). scenario·grader·metric 타입과 runner·summary 를
-  정의하고 eval CLI 와 dashboard 가 소비한다. (3) Lab Safety Harness: Dashboard Lab
+  정의하고 eval CLI 와 dashboard 가 소비한다. Grader는 둘로 나뉜다 —
+  `Deterministic`은 필드(result·tool_name·error)에 대한 Exact/Contains/Regex/NotContains
+  매칭으로 지연 0이고, `ModelBased`는 LLM에 rubric과 결과를 제출해 0.0~1.0 점수를
+  산출하며 비용이 든다. (3) Lab Safety Harness: Dashboard Lab
   표면의 안전 판독(`#lab?section=harness`,
   `lib/dashboard/dashboard_harness_health.ml`) — 평가자 보정 통계와 최근 runtime 안전
   신호를 한 화면에 모은다. (4) Harness First: "측정 없이 AI 에이전트 코드를 진행하지

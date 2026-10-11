@@ -861,6 +861,33 @@ describe('sendKeeperThreadMessage operation stream', () => {
     }
   }
 
+  it.each([
+    { kind: 'empty', events: [] },
+    { kind: 'thinking-only', events: [{ type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta: 'exposed reasoning' } }] },
+    { kind: 'tool-only', events: [
+      { type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallId: 'empty-tool', toolCallName: 'Read' },
+      { type: 'TOOL_CALL_END', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallId: 'empty-tool' },
+    ] },
+    { kind: 'whitespace', events: [{ type: 'TEXT_MESSAGE_CONTENT', delta: '  \n' }] },
+  ])('retains actual authored content and terminal evidence for $kind completion', async ({ kind, events }) => {
+    streamKeeperMessage.mockImplementation(async (_name, _message, opts) => {
+      opts.onEvent({ type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED', value: {
+        operation_id: opts.operationId, state: 'Running', queued_count: 0,
+      } })
+      for (const event of events) opts.onEvent(event)
+      opts.onEvent({ type: 'RUN_FINISHED' })
+      return { terminal: true }
+    })
+    await sendKeeperThreadMessage('echo', 'original question')
+    const entry = keeperThreads.value.echo?.find(row => row.role === 'assistant')
+    const authored = kind === 'whitespace' ? '  \n' : ''
+    expect(entry).toMatchObject({ text: authored, rawText: authored, delivery: 'delivered', error: null,
+      responseState: { kind: 'known', phase: 'terminal' },
+      streamContract: { source: 'sse_event', status: 'backend_terminal_event', eventName: 'RUN_FINISHED' } })
+    expect(keeperActionErrors.value.echo ?? null).toBeNull()
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toEqual([])
+  })
+
   it('preserves authored request blocks and the completed reply', async () => {
     const text = '    첫 줄\nSKILL.md 설명\n\n\n끝  \n\n'
     streamKeeperMessage.mockImplementation(completeStream(text))

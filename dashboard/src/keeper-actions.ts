@@ -96,9 +96,6 @@ import {
 
 type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 
-const TOOL_ONLY_EMPTY_REPLY_TEXT = 'Tool-only turn ended without a final reply.'
-const EMPTY_VISIBLE_REPLY_TEXT =
-  'Keeper가 thinking만 반환하고 표시할 답변을 만들지 못했습니다. 다시 보내주세요.'
 type KeeperThreadCancelOutcome = 'cancelling' | 'cancelled'
 
 const pendingKeeperThreadCancels = new Map<
@@ -1306,7 +1303,6 @@ export async function sendKeeperThreadMessage(
     const finalEntry =
       (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantId) ?? null
     const finalText = finalEntry?.text ?? ''
-    const hasFinalText = finalText.trim().length > 0
 
     if (!outcome.terminal) {
       if (operationAccepted) {
@@ -1342,43 +1338,9 @@ export async function sendKeeperThreadMessage(
       return
     }
 
-    const finalDelivery = 'delivered' as KeeperConversationDelivery
-    const hasContinuationStatus = (
-      finalEntry?.details?.turnOutcome === 'continuation_checkpoint'
-      && finalEntry.blocks?.some(block => (
-        block.t === 'status' && block.kind === 'continuation_checkpoint'
-      )) === true
-    )
-    if (
-      !hasFinalText
-      && !toolCallEnded
-      && !hasContinuationStatus
-    ) {
-      finalizeAssistantEntry(keeperName, assistantId, {
-        text: EMPTY_VISIBLE_REPLY_TEXT,
-        rawText: finalEntry?.rawText || EMPTY_VISIBLE_REPLY_TEXT,
-        delivery: 'error',
-        streamState: null,
-        timestamp: new Date().toISOString(),
-        error: EMPTY_VISIBLE_REPLY_TEXT,
-        streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
-          reason: EMPTY_VISIBLE_REPLY_TEXT,
-        }),
-      })
-      setRecordValue(keeperActionErrors, keeperName, EMPTY_VISIBLE_REPLY_TEXT)
-      if (operationAccepted) {
-        removeTrackedKeeperChatOperation(operationId)
-      }
-      return
-    }
-    let emptyTerminalText = ''
-    if (toolCallEnded && !hasContinuationStatus) {
-      emptyTerminalText = TOOL_ONLY_EMPTY_REPLY_TEXT
-    }
-
     finalizeAssistantEntry(keeperName, assistantId, {
-      text: hasFinalText ? finalText : emptyTerminalText,
-      delivery: finalDelivery,
+      text: finalText,
+      delivery: finalEntry?.delivery === 'no_reply' ? 'no_reply' : 'delivered',
       streamState: null,
       timestamp: new Date().toISOString(),
       error: null,

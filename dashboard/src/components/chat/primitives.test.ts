@@ -203,6 +203,19 @@ describe('ChatTranscript', () => {
     _resetKeeperStreamBuffersForTests()
   })
 
+  it('shows empty terminal content as status without authored prose or copy action', () => {
+    const original = entry({ id: 'empty-terminal', role: 'assistant', source: 'direct_assistant',
+      text: '', rawText: '', delivery: 'delivered', streamState: null,
+      responseState: { kind: 'known', lastSequence: null, floor: null, current: null, partialScope: null,
+        closed: null, phase: 'terminal', closedGeneration: null } })
+    render(html`<${ChatTranscript} entries=${[original]} emptyText="empty" />`, container)
+    expect(container.querySelector('[data-chat-content-absence][role="status"]')).not.toBeNull()
+    expect(container.querySelector('.markdown-body')).toBeNull()
+    expect(container.querySelector('[data-testid="chat-message-copy"]')).toBeNull()
+    expect(original.text).toBe('')
+    expect(original.rawText).toBe('')
+  })
+
   it('renders the completed continuation body instead of its earlier checkpoint', () => {
     _resetKeeperStreamBuffersForTests()
     keeperThreads.value = {}

@@ -2782,7 +2782,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const rawExpanded = showMetadata && rawExpandedRaw
   const [bubbleRef, bubbleInView] = useInViewOnce<HTMLElement>('300px')
   const liveLabel = liveMessageLabel(entry)
-  const messageText = liveLabel ? '' : entry.text || '(empty reply)'
+  const messageText = liveLabel ? '' : entry.text
   const messageLength = messageText.length
   // keeper-state.ts maps the server-owned request_failure role to its own
   // closed delivery variant; only that durable row renders the typed
@@ -3089,6 +3089,12 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                 `
               : traceOwnsIntermediateText
               ? null
+              : entry.role === 'assistant' && !hasRealText
+              ? html`<p role="status" data-chat-content-absence class="m-0 text-sm text-[var(--color-fg-secondary)]">
+                  ${entry.responseState?.kind === 'known' && entry.responseState.phase === 'terminal'
+                    ? '턴 종료 · 표시할 응답 본문 없음'
+                    : '표시할 응답 본문 없음'}
+                </p>`
               : html`
                   <div
                     class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}

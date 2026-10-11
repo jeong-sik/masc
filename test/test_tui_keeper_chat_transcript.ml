@@ -1534,6 +1534,40 @@ let test_new_attempt_does_not_inherit_previous_runtime () =
          ~configured_runtime:"assigned-runtime" (Some t)))
     [ Some 1; None ]
 
+let test_scoped_reasoning_retires_previous_response_metadata () =
+  let t = fresh () in
+  let activity scope = Live.Model_content_activity {
+    Masc.Keeper_chat_events.content_generation=0; content_scope=scope;
+    content_index=1; content_provider_message_id=None;
+    channel=Model_thinking; state=Content_observed } in
+  let usage : Live.stream_usage = {input_tokens=Some 7; output_tokens=Some 9;
+    cache_read_input_tokens=None; cache_creation_input_tokens=None} in
+  feed t [Live.Run_started;
+    Live.Stream_model_started {stream_scope=Some 1;message_id=None;model="first";usage=Some usage};
+    Live.Stream_details {stream_scope=Some 1;usage=None;stop_reason=Some Agent_core.Types.StopToolUse};
+    activity 1];
+  check (option string) "same scoped activity retains supplied model" (Some "first")
+    (Transcript.response_metadata t).model;
+  check bool "same scoped activity retains supplied usage" true
+    ((Transcript.response_metadata t).usage=Some usage);
+  feed t [Live.Thinking "new supplied reasoning";activity 2];
+  let metadata=Transcript.response_metadata t in
+  check (option string) "missing new start does not inherit old model" None metadata.model;
+  check bool "missing new start does not inherit old usage" true (metadata.usage=None);
+  check bool "missing new start does not inherit old stop reason" true (metadata.stop_reason=None);
+  check string "metadata retirement preserves authored reasoning" "new supplied reasoning"
+    (Transcript.thinking t);
+  feed t [Live.Stream_model_started {stream_scope=Some 2;message_id=None;model="second";usage=None}];
+  feed t [activity 1];
+  check (option string) "older activity cannot erase newly supplied model" (Some "second")
+    (Transcript.response_metadata t).model;
+  feed t [Live.Stream_model_started {stream_scope=Some 4;message_id=None;model="fresh";usage=Some usage};
+    activity 3];
+  check (option string) "intermediate delayed content cannot erase newer model" (Some "fresh")
+    (Transcript.response_metadata t).model;
+  check bool "intermediate delayed content cannot erase newer usage" true
+    ((Transcript.response_metadata t).usage=Some usage)
+
 let test_current_attempt_metadata_keeps_observed_activity () =
   let t = fresh () in
   feed t [Live.Run_started;
@@ -2517,6 +2551,8 @@ let () =
             test_the_whole_reasoning_trail_is_kept
         ; test_case "runtime attempt restarts the per-attempt totals" `Quick
             test_runtime_attempt_restarts_the_per_attempt_totals
+        ; test_case "scoped reasoning retires previous response metadata" `Quick
+            test_scoped_reasoning_retires_previous_response_metadata
         ; test_case "runtime attempt keeps the earlier attempt superseded" `Quick
             test_runtime_attempt_keeps_the_earlier_attempt_superseded
         ; test_case "reply details is recorded, not drawn" `Quick

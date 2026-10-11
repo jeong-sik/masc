@@ -274,6 +274,16 @@ describe('autonomous journal recovery', () => {
     expect(keeperThreads.value.k?.[0]).toMatchObject({ text: 'answer', delivery: 'delivered', streamState: null })
     expect(keeperThreads.value.k?.[0]?.traceSteps ?? []).toEqual([])
   })
+  it('does not turn post-terminal text into intermediate speech on a late tool event', () => {
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('answer'))
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 1, { ...base, type: 'RUN_FINISHED' })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 2, text('late duplicate'))
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 3, { ...base, type: 'TOOL_CALL_START', toolStreamScope: 0,
+      toolCallBlockIndex: 1, toolCallName: 'Read' })
+    expect(keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')).toMatchObject({ text: 'answer', delivery: 'delivered',
+      responseState: { phase: 'terminal', lastSequence: 3 } })
+    expect(keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')?.traceSteps?.filter(step => step.kind === 'progress') ?? []).toEqual([])
+  })
   it('deduplicates replay at the turn-owned reducer boundary', () => {
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('a'))
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('a'))

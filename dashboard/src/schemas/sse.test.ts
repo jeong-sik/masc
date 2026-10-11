@@ -1423,3 +1423,24 @@ describe('Keeper response stop ownership protocol', () => {
     expect(SSEMessageSchema.safeParse(event(value)).success).toBe(false)
   })
 })
+
+
+describe('Keeper response details generation protocol', () => {
+  const event = (value: unknown) => ({
+    type: 'keeper_chat_operation_event', name: 'fixture', operation_id: 'kmsg-fixture',
+    ag_ui_event: { type: 'CUSTOM', threadId: 'keeper-consumer:fixture', runId: 'run-1',
+      name: 'KEEPER_STREAM_MESSAGE_DELTA', value, timestamp: 1712000000 },
+  })
+  it('accepts owned identity even without counters', () => {
+    expect(SSEMessageSchema.safeParse(event({ content_generation: 7, stream_scope: 0 })).success).toBe(true)
+  })
+  it.each([
+    { content_generation: null, stream_scope: 0 },
+    { content_generation: -1, stream_scope: 0 },
+    { content_generation: 7 },
+    { content_generation: 7, stream_scope: -1 },
+    { content_generation: 7, stream_scope: Number.MAX_SAFE_INTEGER + 1 },
+  ])('rejects malformed details identity %j', value => {
+    expect(SSEMessageSchema.safeParse(event(value)).success).toBe(false)
+  })
+})

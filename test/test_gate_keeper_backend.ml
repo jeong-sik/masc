@@ -2463,7 +2463,7 @@ let test_keeper_stream_bridge_surfaces_agent_core_message_metadata () =
   | [ Keeper_chat_events.Agent_core_stream_message_start
         { content_generation=Some 0; stream_scope = 0; provider_message_id; model; usage = Some start_usage };
       Keeper_chat_events.Agent_core_stream_message_delta
-        { stream_scope = 0; stop_reason = Some stop_reason; usage = Some delta_usage };
+        {content_generation=Some 0; stream_scope = 0; stop_reason = Some stop_reason; usage = Some delta_usage };
       Keeper_chat_events.Agent_core_stream_message_stop (Some {response_generation=0; response_scope=0});
       Keeper_chat_events.Agent_core_stream_ping ] ->
       check string "provider message id" "msg-agent_core-1" provider_message_id;

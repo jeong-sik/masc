@@ -1625,10 +1625,37 @@ let apply_delta ~now t (delta : Live.delta) =
         retire_model_content t;
         t.model_signal <- Some Model_response_ended
       end
-  | Live.Stream_details { usage; stop_reason; stream_scope } ->
+  | Live.Stream_details { generation; usage; stop_reason; stream_scope } ->
+      let admissible = match t.phase with
+        | Stream_ended | Stream_failed _ -> false
+        | Waiting | Working -> match generation, stream_scope with
+        | Some generation, Some scope ->
+          let incoming = generation, scope in
+          (match t.admitted_response_owner with
+           | Some current when compare incoming current < 0 -> false
+           | Some (current_generation, _) when generation = current_generation
+               && Option.fold ~none:false ~some:(fun response ->
+                    response.rs_generation=None && response.rs_scope > scope) t.response_scope -> false
+           | Some _ | None ->
+             if t.response_scope <> Some {rs_generation=Some generation;rs_scope=scope} then begin
+               begin_response t;
+               retire_model_content t;
+               t.observed_model <- None;
+               t.observed_usage <- None;
+               t.observed_stop_reason <- None;
+               t.model_signal <- None;
+               t.stop_scope <- None
+             end;
+             t.admitted_response_owner <- Some incoming;
+             t.response_scope <- Some {rs_generation=Some generation;rs_scope=scope};
+             t.current_stream_scope <- Some scope;
+             true)
+        | None, _ -> t.admitted_response_owner = None
+        | Some _, None -> false in
+      if admissible then begin
       (* A retained detail can be the first surviving event of a response.
          Its scope retires prior counters before sparse fields are merged. *)
-      Option.iter (enter_text_response_scope t) stream_scope;
+      if generation = None then Option.iter (enter_text_response_scope t) stream_scope;
       (* What the provider reported, not that anything was written, so the
          model-side signal is left as whatever last moved the answer. A field
          the delta did not carry leaves the last report standing: the wire
@@ -1650,6 +1677,7 @@ let apply_delta ~now t (delta : Live.delta) =
            t.observed_stop_reason <- Some stop_reason;
            t.stop_scope <- stream_scope
        | None -> ())
+      end
   | Live.Text {text=""; stream_scope} ->
       (* An empty chunk writes nothing, so it does not move the answer. Its
          scope is still a response boundary: when the next response's start

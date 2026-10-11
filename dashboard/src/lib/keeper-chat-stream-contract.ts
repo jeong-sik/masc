@@ -213,7 +213,7 @@ type KeeperChatCustomEvent =
   | {
       type: 'CUSTOM'
       name: 'KEEPER_STREAM_MESSAGE_DELTA'
-      value: { stream_scope: number; stop_reason?: string; usage?: KeeperStreamDeltaUsage }
+      value: { content_generation?: number; stream_scope: number; stop_reason?: string; usage?: KeeperStreamDeltaUsage }
     }
   | { type: 'CUSTOM'; name: 'KEEPER_STREAM_MESSAGE_STOP'; value: null | { content_generation: number; stream_scope: number } }
   | { type: 'CUSTOM'; name: 'KEEPER_STREAM_PING'; value: null }

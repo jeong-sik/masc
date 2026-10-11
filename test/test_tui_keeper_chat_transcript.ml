@@ -676,10 +676,10 @@ let test_final_response_boundary_survives_a_missing_skill_call () =
         let t = fresh () in
         feed t [Live.Run_started; Live.Stream_model_started { generation=None;usage = None; message_id = None; stream_scope=Some 1; model="observed"};
           Live.Text {text=progress; stream_scope=None};
-          Live.Stream_details {stream_scope=Some 1; usage=None; stop_reason=Some Agent_core.Types.StopToolUse};
+          Live.Stream_details {generation=None;stream_scope=Some 1; usage=None; stop_reason=Some Agent_core.Types.StopToolUse};
           Live.Stream_model_started { generation=None;usage = None; message_id = None; stream_scope=Some 2; model="observed"}];
         Option.iter (fun text -> feed t [Live.Text {text=text; stream_scope=None}]) final_text;
-        feed t [Live.Stream_details {stream_scope=Some 2; usage=None; stop_reason=Some stop_reason}];
+        feed t [Live.Stream_details {generation=None;stream_scope=Some 2; usage=None; stop_reason=Some stop_reason}];
         Transcript.note_skill_activity t (missing_skill_activity ());
         feed t [reply_details ~reply:"Done." ()];
         check (list string) "only text observed after the terminal boundary is replaced"
@@ -697,7 +697,7 @@ let test_stop_from_an_unobserved_response_preserves_progress () =
       Live.Stream_model_started { generation=None;usage = None; message_id = None; stream_scope=Some 1; model="observed"};
       Live.Text {text="Let me check."; stream_scope=None};
       (* The tool call and the next MessageStart were not retained. *)
-      Live.Stream_details {stream_scope=stopped_scope; usage=None; stop_reason=Some Agent_core.Types.EndTurn}];
+      Live.Stream_details {generation=None;stream_scope=stopped_scope; usage=None; stop_reason=Some Agent_core.Types.EndTurn}];
     Transcript.note_skill_activity t (missing_skill_activity ());
     feed t [reply_details ~reply:"Done." ()];
     check (list string) "another or unidentified response ending cannot consume earlier progress"
@@ -711,7 +711,7 @@ let test_repeated_response_start_is_not_a_boundary () =
     let start = Live.Stream_model_started { generation=None;usage = None; message_id = None; stream_scope=Some 4; model="observed"} in
     feed t [Live.Run_started; start; Live.Text {text="Done"; stream_scope=None}; start];
     Option.iter (fun text -> feed t [Live.Text {text=text; stream_scope=None}]) tail;
-    feed t [Live.Stream_details {stream_scope=Some 4; usage=None; stop_reason=Some Agent_core.Types.EndTurn}];
+    feed t [Live.Stream_details {generation=None;stream_scope=Some 4; usage=None; stop_reason=Some Agent_core.Types.EndTurn}];
     Transcript.note_skill_activity t (missing_skill_activity ());
     feed t [reply_details ~reply:"Done." ()];
     check (list string) "an identical start cannot leave a prefix or a second final answer"
@@ -722,14 +722,14 @@ let test_scoped_text_retires_prior_response_metadata () =
   let t = fresh () in
   feed t [Live.Run_started;
     Live.Stream_model_started { generation=None;usage = None; message_id = None; stream_scope=Some 1; model="first"};
-    Live.Stream_details {stream_scope=Some 1;
+    Live.Stream_details {generation=None;stream_scope=Some 1;
       usage=Some {input_tokens=Some 100; output_tokens=Some 20;
         cache_read_input_tokens=None; cache_creation_input_tokens=None};
       stop_reason=Some Agent_core.Types.EndTurn};
     Live.Text {text="next response"; stream_scope=Some 2}];
   check (option string) "a distinct text scope retires prior counters and stop" None
     (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
-  feed t [Live.Stream_details {stream_scope=Some 2; usage=None;
+  feed t [Live.Stream_details {generation=None;stream_scope=Some 2; usage=None;
     stop_reason=Some Agent_core.Types.MaxTokens};
     Live.Stream_model_started { generation=None;usage = None; message_id = None; stream_scope=Some 2; model="second"}];
   check (option string) "the delayed equal start preserves current stop metadata"
@@ -1253,7 +1253,7 @@ let test_empty_scoped_text_still_retires_prior_response_metadata () =
   let t = fresh () in
   feed t [Live.Run_started;
     Live.Stream_model_started { generation=None;usage = None; message_id = None; stream_scope=Some 1; model="first"};
-    Live.Stream_details {stream_scope=Some 1;
+    Live.Stream_details {generation=None;stream_scope=Some 1;
       usage=Some {input_tokens=Some 100; output_tokens=Some 20;
         cache_read_input_tokens=None; cache_creation_input_tokens=None};
       stop_reason=Some Agent_core.Types.EndTurn}];
@@ -1264,7 +1264,7 @@ let test_empty_scoped_text_still_retires_prior_response_metadata () =
   check bool "the empty chunk writes nothing" true (before = Transcript.drawn t);
   check bool "the empty chunk does not invent an answer in progress" false
     (Transcript.model_activity t = Some Transcript.Activity_answering);
-  feed t [Live.Stream_details {stream_scope=None; usage=None;
+  feed t [Live.Stream_details {generation=None;stream_scope=None; usage=None;
     stop_reason=Some Agent_core.Types.MaxTokens}];
   check (option string) "a later unscoped stop belongs to the new response alone"
     (Some "stopped: max_tokens")
@@ -1326,7 +1326,7 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
   let usage ?(keeper_name = "keeper.one") transcript =
     Transcript.stream_details_text ~keeper_name transcript
   in
-  let counters ?stop_reason usage = Live.Stream_details { stream_scope = None; usage = Some usage; stop_reason } in
+  let counters ?stop_reason usage = Live.Stream_details {generation=None; stream_scope = None; usage = Some usage; stop_reason } in
   check (option string) "nothing is claimed without a transcript" None (usage None);
   let t = fresh () in
   check (option string) "a turn that reported no counters says nothing" None
@@ -1364,7 +1364,7 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
      cannot say this: a reply cut off at max_tokens is still a visible reply,
      so without this clause the screen shows a finished answer and no sign
      that the provider ran out of room. *)
-  feed t [ Live.Stream_details { stream_scope = None; usage = None; stop_reason = Some Agent_core.Types.MaxTokens } ];
+  feed t [ Live.Stream_details {generation=None; stream_scope = None; usage = None; stop_reason = Some Agent_core.Types.MaxTokens } ];
   check (option string) "why the provider stopped joins the same clause"
     (Some
        "tokens: in 1200 \xc2\xb7 out 900 \xc2\xb7 cache read 4096 \xc2\xb7 stopped: max_tokens")
@@ -1454,7 +1454,7 @@ let test_a_narrow_row_keeps_the_counters_it_was_drawing () =
     ; Live.Runtime_attempt_started
         { runtime_id = Some "observed-glm"; attempt_index = Some 0 }
     ; (let counters ?stop_reason usage =
-         Live.Stream_details { stream_scope = None; usage = Some usage; stop_reason }
+         Live.Stream_details {generation=None; stream_scope = None; usage = Some usage; stop_reason }
        in
        counters ~stop_reason:Agent_core.Types.MaxTokens
          { input_tokens = Some 1200
@@ -1544,7 +1544,7 @@ let test_scoped_reasoning_retires_previous_response_metadata () =
     cache_read_input_tokens=None; cache_creation_input_tokens=None} in
   feed t [Live.Run_started;
     Live.Stream_model_started { generation=Some 0;stream_scope=Some 1;message_id=None;model="first";usage=Some usage};
-    Live.Stream_details {stream_scope=Some 1;usage=None;stop_reason=Some Agent_core.Types.StopToolUse};
+    Live.Stream_details {generation=None;stream_scope=Some 1;usage=None;stop_reason=Some Agent_core.Types.StopToolUse};
     activity 1];
   check (option string) "same scoped activity retains supplied model" (Some "first")
     (Transcript.response_metadata t).model;
@@ -1640,7 +1640,7 @@ let test_partial_response_facts_cannot_erase_admission_owner () =
     check bool "later explicit current owner remains admissible" true
       ((Transcript.response_metadata t).owner=Some (2,4)))
     [Live.Text {text="partial scoped bytes";stream_scope=Some 4};
-     Live.Stream_details {stream_scope=Some 4;usage=None;stop_reason=None}];
+     Live.Stream_details {generation=None;stream_scope=Some 4;usage=None;stop_reason=None}];
   let t=fresh () in
   let old_usage : Live.stream_usage = {input_tokens=Some 7;output_tokens=None;
     cache_read_input_tokens=None;cache_creation_input_tokens=None} in
@@ -2423,7 +2423,7 @@ let test_usage_resets_only_at_response_boundaries () =
   let tokens () = Transcript.stream_tokens_text ~keeper_name:"keeper.one" (Some t) in
   let seed () = feed t [Live.Stream_model_started { generation=None;stream_scope = None; message_id=Some "message";
     model="glm";usage=Some (usage (Some 99) (Some 0))};
-    Live.Stream_details {stream_scope=None; usage=Some (usage None (Some 7));stop_reason=Some Agent_core.Types.StopToolUse}] in
+    Live.Stream_details {generation=None;stream_scope=None; usage=Some (usage None (Some 7));stop_reason=Some Agent_core.Types.StopToolUse}] in
   feed t [Live.Run_started]; seed ();
   check (option string) "sparse report retains earlier fields"
     (Some "tokens: in 99 · out 7") (tokens ());
@@ -2447,12 +2447,12 @@ let test_usage_resets_only_at_response_boundaries () =
   seed ();
   check (option string) "same provider id may start again in a new segment"
     (Some "tokens: in 99 · out 7") (tokens ());
-  feed t [Live.Stream_details {stream_scope=None; usage=Some {Live.input_tokens=Some 0;
+  feed t [Live.Stream_details {generation=None;stream_scope=None; usage=Some {Live.input_tokens=Some 0;
     output_tokens=None;cache_read_input_tokens=Some 12;
     cache_creation_input_tokens=Some 3};stop_reason=None}];
   check (option string) "zero updates one field while absent output is retained"
     (Some "tokens: in 0 · out 7 · cache read 12 · cache write 3") (tokens ());
-  feed t [Live.Stream_details {stream_scope=None; usage=Some {Live.input_tokens=None;
+  feed t [Live.Stream_details {generation=None;stream_scope=None; usage=Some {Live.input_tokens=None;
     output_tokens=Some 8;cache_read_input_tokens=None;
     cache_creation_input_tokens=None};stop_reason=None}];
   check (option string) "a later sparse output retains both cache fields"
@@ -2552,12 +2552,12 @@ let test_scoped_details_retire_prior_model_activity () =
     check bool "prior response has observed quiet activity" true
       (contains ~needle:"nothing back for" observed);
     feed ~now:(origin +. 20.) t
-      [Live.Stream_details {stream_scope=Some 1;usage=None;
+      [Live.Stream_details {generation=None;stream_scope=Some 1;usage=None;
         stop_reason=Some Agent_core.Types.StopToolUse}];
     check string "same-scope details preserve model activity and its observation age"
       observed (progress_text ~now:(origin +. 40.) t);
     feed ~now:(origin +. 30.) t
-      [Live.Stream_details {stream_scope=Some 2;usage=None;
+      [Live.Stream_details {generation=None;stream_scope=Some 2;usage=None;
         stop_reason=Some Agent_core.Types.StopToolUse}];
     let incoming = progress_text ~now:(origin +. 40.) t in
     check bool "details-only response cannot inherit prior streaming or thinking" false
@@ -2583,9 +2583,9 @@ let test_scoped_details_retire_prior_response_usage () =
     Live.Stream_model_started { generation=None;stream_scope=Some 1;message_id=Some "first";
       model="first-model";usage=Some initial};
     Live.Text {text="earlier response";stream_scope=Some 1};
-    Live.Stream_details {stream_scope=Some 1;usage=None;
+    Live.Stream_details {generation=None;stream_scope=Some 1;usage=None;
       stop_reason=Some Agent_core.Types.StopToolUse};
-    Live.Stream_details {stream_scope=Some 2;usage=Some incoming;stop_reason=None}];
+    Live.Stream_details {generation=None;stream_scope=Some 2;usage=Some incoming;stop_reason=None}];
   check (option string) "detail-only next response has no prior input/cache/stop"
     (Some "tokens: out 8")
     (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));

@@ -1,5 +1,5 @@
 import { reconcileTranscriptBindings } from './keeper-tool-observations'
-import { reconcileKeeperResponseStates, keeperResponseIsRunning, ownerFromUnknown, sameKeeperResponseOwner, type KeeperResponseOwner } from './lib/keeper-response-state'
+import { reconcileKeeperResponseStates, sameResponseObservation, unavailableKeeperResponseState, keeperResponseIsRunning, ownerFromUnknown, sameKeeperResponseOwner, type KeeperResponseOwner } from './lib/keeper-response-state'
 import { signal } from '@preact/signals'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import { isInFlightDelivery } from './lib/keeper-delivery'
@@ -1496,7 +1496,7 @@ function mergeLocalAssistantObservations(
   const exactCanonicalEntries = historyProvenance ? canonicalEntries.filter(entry =>
     entry.deliveryProvenance != null && sameDeliveryProvenance(entry.deliveryProvenance, historyProvenance),
   ) : []
-  const responseState = historyProvenance || historyEntry.source === 'autonomous_turn' ? reconcileKeeperResponseStates(
+  let responseState = historyProvenance || historyEntry.source === 'autonomous_turn' ? reconcileKeeperResponseStates(
     [...exactLocalEntries, ...exactCanonicalEntries].map(entry => entry.responseState),
   ) : historyEntry.responseState
   const toolTranscriptBindings = reconcileTranscriptBindings([...exactLocalEntries, ...exactCanonicalEntries, historyEntry].map(entry => entry.toolTranscriptBindings))
@@ -1505,25 +1505,38 @@ function mergeLocalAssistantObservations(
   // Pending speech is only coherent with the boundary recorded by the same
   // local snapshot that owns the reconciled response frontier: an older
   // duplicate row must not pair its buffered tail with a newer frontier, and
-  // no pending speech crosses a terminal frontier.
-  const frontierSequence = responseState?.kind === 'known' ? responseState.lastSequence : null
-  const frontierLocalEntry = frontierSequence !== null
-    ? exactLocalEntries.find(entry => entry.responseState?.kind === 'known' && entry.responseState.lastSequence === frontierSequence)
-    : undefined
-  const legacyPendingSource = frontierSequence === null
-    && (responseState === undefined || responseState.kind === 'known' && responseState.phase !== 'terminal')
+  // no pending speech crosses a terminal frontier. Peers that claim the same
+  // frontier but disagree about the buffered tail make the frontier itself
+  // unavailable instead of silently picking one tail.
+  const authoritativeState = responseState?.kind === 'known' ? responseState : undefined
+  const producerPeers = authoritativeState === undefined ? [] : [...exactLocalEntries, ...exactCanonicalEntries]
+    .filter(entry => entry.responseState?.kind === 'known'
+      && entry.responseState.lastSequence === authoritativeState.lastSequence
+      && sameResponseObservation(entry.responseState, authoritativeState))
+  const selectedProducer = producerPeers[0]
+  const pendingConflict = responseState?.kind === 'known' && responseState.phase !== 'terminal'
+    && producerPeers.some(peer => {
+      const left = selectedProducer?.producerSayingReplay, right = peer.producerSayingReplay
+      return selectedProducer?.producerTraceBoundary !== peer.producerTraceBoundary
+        || (left === undefined) !== (right === undefined)
+        || left !== undefined && right !== undefined && (left.text !== right.text || left.timestamp !== right.timestamp
+          || left.scope !== right.scope || !sameKeeperResponseOwner(left.owner ?? undefined, right.owner ?? undefined))
+    })
+  if (pendingConflict) responseState = unavailableKeeperResponseState
+  const legacyPendingSource = authoritativeState === undefined && responseState === undefined
     ? exactLocalEntries.find(entry => entry.producerSayingReplay)
     : undefined
-  const pendingSource = frontierLocalEntry ?? legacyPendingSource
+  const producerSnapshot = pendingConflict ? undefined : (selectedProducer ?? legacyPendingSource)
   const producerSayingReplay = responseState?.kind === 'known' && responseState.phase === 'terminal'
     ? undefined
-    : pendingSource?.producerSayingReplay
-  const producerTraceBoundary = (frontierLocalEntry
+    : producerSnapshot?.producerSayingReplay
+  const producerTraceBoundary = (producerSnapshot
     ?? exactLocalEntries.find(entry => entry.producerTraceBoundary !== undefined))?.producerTraceBoundary
   const mergedHistory = { ...historyEntry,
     ...(exactLocalEntries.find(entry => entry.autonomousJournalRecovery)?.autonomousJournalRecovery
       ? { autonomousJournalRecovery: exactLocalEntries.find(entry => entry.autonomousJournalRecovery)!.autonomousJournalRecovery } : {}),
     ...(producerSayingReplay ? { producerSayingReplay } : {}),
+    ...(pendingConflict ? { error: 'Conflicting pending speech at the observed response frontier' } : {}),
     ...(producerTraceBoundary !== undefined ? { producerTraceBoundary } : {}),
     ...(exactLocalEntries.find(entry => entry.autonomousThinkingReplay)?.autonomousThinkingReplay
       ? { autonomousThinkingReplay: exactLocalEntries.find(entry => entry.autonomousThinkingReplay)!.autonomousThinkingReplay } : {}),

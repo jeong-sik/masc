@@ -142,7 +142,7 @@ export function keeperResponseIsRunning(state: KeeperResponseState = initialKeep
   return state.kind === 'known' && state.phase === 'running'
 }
 
-function sameResponseObservation(left: ObservedKeeperResponseState, right: ObservedKeeperResponseState): boolean {
+export function sameResponseObservation(left: ObservedKeeperResponseState, right: ObservedKeeperResponseState): boolean {
   return sameKeeperResponseOwner(left.floor ?? undefined, right.floor ?? undefined)
     && sameKeeperResponseOwner(left.current ?? undefined, right.current ?? undefined)
     && sameKeeperResponseOwner(left.closed ?? undefined, right.closed ?? undefined)

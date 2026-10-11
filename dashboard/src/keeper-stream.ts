@@ -206,6 +206,7 @@ function clearTextMessageStreamState(keeperName: string, assistantEntryId: strin
 function resetUnfinishedRuntimeAttempt(
   keeperName: string,
   assistantEntryId: string,
+  runtimeAttempt: KeeperConversationEntry['runtimeAttempt'],
 ): void {
   const key = streamEntryKey(keeperName, assistantEntryId)
   const pending = pendingThinkingDeltas.get(key)
@@ -217,6 +218,7 @@ function resetUnfinishedRuntimeAttempt(
     ...entry,
     text: '',
     rawText: '',
+    runtimeAttempt,
     replyTextProjection: undefined,
     replyBlockSource: undefined,
     blocks: producerReplyBlocks(entry).filter(block => (
@@ -1297,8 +1299,33 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_RUNTIME_ATTEMPT_STARTED') {
+        const current = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
+        const value = event.value
+        const observed = value?.runtime_id !== undefined && value.attempt_index !== undefined
+          ? Object.freeze({ runtimeId: value.runtime_id, index: value.attempt_index }) : undefined
+        if (observed && current?.runtimeAttempt) {
+          if (observed.index < current.runtimeAttempt.index) return null
+          if (observed.index === current.runtimeAttempt.index) {
+            if (observed.runtimeId !== current.runtimeAttempt.runtimeId) return 'Conflicting runtime attempt identity'
+            return null
+          }
+        }
         if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'attempt' }).accepted) return null
-        resetUnfinishedRuntimeAttempt(keeperName, assistantEntryId)
+        resetUnfinishedRuntimeAttempt(keeperName, assistantEntryId, observed)
+        return null
+      }
+      if (event.name === 'KEEPER_PROVIDER_RETRY') {
+        updateThreadEntry(keeperName, assistantEntryId, entry => {
+          const state = entry.responseState ?? initialKeeperResponseState
+          if (state.kind !== 'known' || state.phase !== 'running') return entry
+          if (entry.delivery !== 'sending' && entry.delivery !== 'streaming') return entry
+          if (!entry.runtimeAttempt
+              || entry.runtimeAttempt.runtimeId !== event.value.attempt.runtime_id
+              || entry.runtimeAttempt.index !== event.value.attempt.lane_attempt_index) return entry
+          return { ...entry, streamState: 'retrying', delivery: 'streaming',
+            streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_PROVIDER_RETRY' }) }
+        })
+        persistActiveAssistantDraft(keeperName, assistantEntryId)
         return null
       }
       if (event.name === 'KEEPER_TOOL_APPROVAL_REQUESTED') {

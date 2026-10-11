@@ -413,6 +413,7 @@ function deliveryLabel(entry: KeeperConversationEntry): string {
     case 'sending':
       return 'sending'
     case 'streaming':
+      if (entry.streamState === 'retrying') return 'provider retry'
       if (entry.streamState === 'thinking') return 'thinking'
       return entry.streamState === 'finalizing' ? 'finalizing' : 'live'
     case 'timeout':
@@ -439,6 +440,7 @@ function liveMessageLabel(entry: KeeperConversationEntry): string | null {
   if (entry.streamState === 'cancelling') return '응답 연결 중단 · 서버 취소 확인 중'
   if (entry.delivery === 'cancelled') return '요청이 취소되었습니다.'
   if (entry.delivery === 'streaming') {
+    if (entry.streamState === 'retrying') return '모델 제공자 요청 재시도 중...'
     if (entry.streamState === 'thinking') return '생각 중...'
     return entry.streamState === 'finalizing' ? '응답 마무리 중...' : '응답 작성 중...'
   }

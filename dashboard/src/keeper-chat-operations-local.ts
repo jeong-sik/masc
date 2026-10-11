@@ -42,6 +42,7 @@ const STORAGE_KEY = 'masc_keeper_chat_operations_v1'
 const KEEPER_STREAM_STATES = [
   'opening',
   'thinking',
+  'retrying',
   'streaming',
   'finalizing',
 ] as const satisfies ReadonlyArray<Exclude<KeeperConversationStreamState, null>>

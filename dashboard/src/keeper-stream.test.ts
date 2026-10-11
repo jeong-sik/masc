@@ -76,6 +76,62 @@ describe('Keeper operation stream projection', () => {
     keeperToolApprovals.value = {}
   })
 
+  it('accepts retry activity only for the observed running runtime attempt', () => {
+    assistantEntry('op-retry')
+    const retry = (runtime_id = 'claude', lane_attempt_index = 0): KeeperChatStreamEvent => ({
+      type: 'CUSTOM', name: 'KEEPER_PROVIDER_RETRY', value: {
+        attempt: { routing_run_id: 'routing-run', runtime_id, lane_attempt_index },
+        retry: { observation_id: 'retry-id', attempt: 1, max_retries: 10, retry_delay_ms: 1234, error_status: null },
+      },
+    })
+    const entry = () => requiredFixture(keeperThreads.value.sangsu?.find(row => row.id === 'reply-1'))
+    applyKeeperStreamEvent('sangsu', 'reply-1', retry())
+    expect(entry().streamState).toBe('opening')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: { runtime_id: 'claude', attempt_index: 0 },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', retry())
+    expect(entry().streamState).toBe('retrying')
+    expect(entry().text).toBe('')
+    expect(entry().details).toBeNull()
+    applyKeeperStreamEvent('sangsu', 'reply-1', retry('foreign'))
+    applyKeeperStreamEvent('sangsu', 'reply-1', retry('claude', 1))
+    expect(entry().streamState).toBe('retrying')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START', messageId: 'm-recovered' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm-recovered', delta: 'answer' })
+    expect(entry().streamState).toBe('streaming')
+    const recoveredOwner = entry().responseState
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: { runtime_id: 'claude', attempt_index: 0 },
+    })
+    expect(entry().text).toBe('answer')
+    expect(entry().responseState).toBe(recoveredOwner)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' })
+    const settled = entry().streamState
+    applyKeeperStreamEvent('sangsu', 'reply-1', retry())
+    expect(entry().streamState).toBe(settled)
+    expect(entry().text).toBe('answer')
+  })
+
+  it('does not let an old attempt erase a current retry', () => {
+    assistantEntry()
+    const entry = () => requiredFixture(keeperThreads.value.sangsu?.find(row => row.id === 'reply-1'))
+    for (const attempt_index of [0, 1]) applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: { runtime_id: 'claude', attempt_index },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_PROVIDER_RETRY', value: {
+        attempt: { routing_run_id: 'routing-run', runtime_id: 'claude', lane_attempt_index: 1 },
+        retry: { observation_id: 'retry-id', attempt: 1, max_retries: 10, retry_delay_ms: 1234, error_status: null },
+      },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: { runtime_id: 'claude', attempt_index: 0 },
+    })
+    expect(entry().runtimeAttempt?.index).toBe(1)
+    expect(entry().streamState).toBe('retrying')
+  })
+
   it('deduplicates sequenced reasoning across transport replay and restores its prefix', () => {
     assistantEntry()
     const owner = { content_generation: 4, stream_scope: 2 }

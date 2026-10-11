@@ -987,6 +987,7 @@ export type KeeperConversationStreamState =
   | 'cancelling'
   | 'opening'
   | 'thinking'
+  | 'retrying'
   | 'streaming'
   | 'finalizing'
   | null
@@ -1090,6 +1091,7 @@ export interface KeeperConversationEntry {
   toolTranscriptBindings?: readonly { readonly deliveryKey: KeeperChatDeliveryKey; readonly executionId: string; readonly ordinal: number }[]
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
+  runtimeAttempt?: Readonly<{ runtimeId: string; index: number }>
   responseState?: KeeperResponseState
   /** Published history facts retained separately from locally observed trace.
       No cross-source occurrence order is inferred from anonymous placeholders. */

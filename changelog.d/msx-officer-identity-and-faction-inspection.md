@@ -1,0 +1,1 @@
+Correct the Sangokushi II prepared second officer name to Deng Ai (鄧艾), as labeled in the original personal information screens. Add the April deployed-unit inspection showing Sun Quan army membership, without attributing an unverified cause to the change.

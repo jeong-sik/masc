@@ -213,12 +213,12 @@ prompt without opening the merchant menu; no purchase was established there.
 ## Check battle armament and loyalty before another expedition
 
 A February 221 province-20 → 21 inspection branch deployed Xu Huang and
-Zang Ba, 100 troops each. Xu Huang's labeled battle information showed
+Deng Ai (鄧艾), 100 troops each. Xu Huang's labeled battle information showed
 training 33 and armament 0. Preserve that checkpoint before returning to
 preparation; a large troop total alone does not establish that it is equipped.
 
 After restoring the pre-sortie checkpoint, merchant weapon purchases of
-100 for Xu Huang and 99 for Zang Ba produced displayed weapon values 100
+100 for Xu Huang and 99 for Deng Ai (鄧艾) produced displayed weapon values 100
 for each. A subsequent March sortie's labeled battle information confirmed
 Xu Huang at troops 100, armament 100, training 144 and loyalty 96. This
 verifies armament after that purchase. Training orders also occurred during
@@ -231,16 +231,24 @@ The enemy officer's identity and the cause were not obtained. Preserve the
 branch; do not describe this as ordinary movement casualties, an emulator
 fault or a proven loyalty mechanism from these totals alone.
 
-Restoring the pre-sortie checkpoint and opening Zang Ba's own information
+Restoring the pre-sortie checkpoint and opening Deng Ai (鄧艾)'s own information
 showed troops 100 and loyalty 68. Rewards `11`, Return → gold `1`, Return
-opened the recipient list. Selecting Zang Ba at the displayed index `5`,
+opened the recipient list. Selecting Deng Ai (鄧艾) at the displayed index `5`,
 Return, then `100`, Return deducted gold 618 → 518. His information then
 confirmed loyalty 85, retaining troops 100. No confirmation question was
 observed in this reward sequence. A later war selection list showed Xu Huang
-in red and Zang Ba available. Recheck the live departure list after rewards;
+in red and Deng Ai (鄧艾) available. Recheck the live departure list after rewards;
 these observations do not promise that every prepared officer can depart in
 the same month, that a reward prevents defection, or that loyalty gains are
 fixed. The comparison branches did not establish a battle or campaign win.
+
+In April, both officers were available and selected at 100 troops each.
+After allocating gold 200 and rice 200, confirming dispatch and placing both
+units, the first command summary showed own troops 100 and enemy troops
+193. Inspecting Deng Ai's placement hex explicitly showed 孫権軍, troops
+100, training 136, armament 100 and loyalty 90. This verifies his enemy
+side membership after deployment; it does not isolate the cause of the
+change or prove that the earlier loyalty-85 reward prevents it.
 
 ## Going to war
 

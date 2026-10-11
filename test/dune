@@ -5881,3 +5881,8 @@
 (include stanzas/test_keeper_event_genealogy_capture.inc)
 
 (include stanzas/test_keeper_event_genealogy_replay.inc)
+
+(test
+ (name test_tui_keeper_call_evidence)
+ (modules test_tui_keeper_call_evidence)
+ (libraries alcotest masc masc.tool_types masc_tui_keeper_call_evidence masc_tui_keeper_chat_transcript yojson))

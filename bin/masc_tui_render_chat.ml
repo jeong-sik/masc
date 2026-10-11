@@ -33,6 +33,9 @@ module Markdown_cache = Masc_tui_markdown_render_cache
 module Message_layout = Masc_tui_message_layout
 module Observation_layout = Masc_tui_observation_layout
 module Tool_detail = Masc_tui_tool_detail
+module Call_evidence = Masc_tui_keeper_call_evidence
+open Call_evidence
+
 
 let chat_history_first_row = ref 0
 
@@ -1048,83 +1051,11 @@ let keeper_message_clock at = clock_of_local_time (Unix.localtime at)
 let keeper_message_timeline_bucket at = bucket_of_local_time (Unix.localtime at)
 ;;
 
-type keeper_call_association =
-  | Call_log_not_loaded
-  | Call_log_loading
-  | Call_log_unavailable of string
-  | Call_execution_unrecorded
-  | Call_execution_missing
-  | Call_execution_coverage_gap of string
-  | Call_execution_ambiguous of int
-  | Call_execution_exact of Tui_decode.keeper_call
-
 let keeper_call_association state ~keeper_name
     (activity : Keeper_chat_transcript.tool_activity) =
-  match activity.execution_id with
-  | None -> Call_execution_unrecorded
-  | Some execution_id -> (
-      if
-        not
-          (Option.equal String.equal state.keeper_calls_keeper
-             (Some keeper_name))
-      then Call_log_not_loaded
-      (* Refresh keeps the last snapshot for this Keeper. Replacing it with
-         a loading row drops every expanded output, changing the transcript's
-         height twice per poll and moving the reader's viewport. Only the
-         first read has no durable detail to draw yet. *)
-      else if state.keeper_calls_loading && Option.is_none state.keeper_calls
-      then Call_log_loading
-      else
-      match state.keeper_calls_error, state.keeper_calls with
-      | Some detail, None -> Call_log_unavailable detail
-      | None, None -> Call_log_not_loaded
-      | _, Some snapshot
-        when not (String.equal snapshot.Tui_decode.kcs_keeper keeper_name) ->
-          Call_log_not_loaded
-      | _, Some snapshot ->
-          let matches =
-            List.filter
-              (fun (call : Tui_decode.keeper_call) ->
-                Option.equal String.equal call.kc_execution_id
-                  (Some execution_id))
-              snapshot.kcs_entries
-          in
-          match matches with
-          | [] ->
-              (match state.keeper_calls_error with
-               | Some detail -> Call_log_unavailable detail
-               | None when snapshot.Tui_decode.kcs_mismatched > 0 ->
-                   (* Filtered foreign rows never join. One of them may carry
-                      the queried execution id, so a nonzero mismatch count
-                      means this absence is unproven even when health says ok. *)
-                   Call_execution_coverage_gap
-                     (Printf.sprintf "%d row(s) named another keeper and were not drawn"
-                        snapshot.Tui_decode.kcs_mismatched)
-               | None -> (
-                   (* No match is only proof of absence against a log known
-                      complete: [ok], or [empty]/[missing] with nothing in it.
-                      Any other verdict -- a coverage gap, a stale read, a word
-                      this build does not know -- means the row may exist past
-                      what the snapshot covers, so the association says the log
-                      is incomplete instead of the row missing. *)
-                   match snapshot.Tui_decode.kcs_health with
-                   | Tui_decode.Call_log_ok -> Call_execution_missing
-                   | (Tui_decode.Call_log_empty | Tui_decode.Call_log_missing)
-                     when snapshot.Tui_decode.kcs_entries = [] ->
-                       Call_execution_missing
-                   | (Tui_decode.Call_log_empty | Tui_decode.Call_log_missing
-                     | Tui_decode.Call_log_stale
-                     | Tui_decode.Call_log_coverage_gap
-                     | Tui_decode.Call_log_unknown _) as health ->
-                       let reason =
-                         match snapshot.Tui_decode.kcs_stale_reason with
-                         | Some reason -> reason
-                         | None ->
-                             Tui_decode.keeper_call_log_health_to_string health
-                       in
-                       Call_execution_coverage_gap reason))
-          | [ call ] -> Call_execution_exact call
-          | rows -> Call_execution_ambiguous (List.length rows))
+  Call_evidence.resolve ~keeper_name ~execution_id:activity.execution_id
+    ~loaded_keeper:state.keeper_calls_keeper ~loading:state.keeper_calls_loading
+    ~error:state.keeper_calls_error ~snapshot:state.keeper_calls
 
 
 (* The tool tree's colours, out of the reader's own theme. Built per draw
@@ -1172,27 +1103,6 @@ let tool_outcome_tone : Keeper_chat_transcript.tool_outcome -> string = function
   | Keeper_chat_transcript.Outcome_unrecorded -> Theme.warn ()
 
 
-let tool_outcome_label : Keeper_chat_transcript.tool_outcome -> string = function
-  | Keeper_chat_transcript.Started -> "PREPARING · ARGUMENTS STREAMING"
-  | Keeper_chat_transcript.Awaiting_result -> "WAITING FOR RESULT"
-  | Keeper_chat_transcript.Returned -> "RETURNED"
-  | Keeper_chat_transcript.Native_running -> "NATIVE STEP RUNNING"
-  | Keeper_chat_transcript.Native_ended -> "NATIVE STEP ENDED · PROVIDER OBSERVATION"
-  | Keeper_chat_transcript.Native_failed -> "NATIVE STEP FAILED · PROVIDER OBSERVATION"
-  | Keeper_chat_transcript.Failed -> "FAILED"
-  | Keeper_chat_transcript.Never_returned -> "RESULT NOT SEEN HERE"
-  | Keeper_chat_transcript.Outcome_unrecorded -> "OUTCOME UNRECORDED"
-
-
-let durable_call_failed = function
-  | Call_execution_exact call ->
-      call.kc_outcome = Tool_result.Recorded_failed
-      || call.kc_disposition = Some Tui_decode.Keeper_call_failed
-  | Call_log_not_loaded | Call_log_loading | Call_log_unavailable _
-  | Call_execution_unrecorded | Call_execution_missing
-  | Call_execution_coverage_gap _ | Call_execution_ambiguous _ -> false
-
-
 let tool_outcome_label_with_call outcome association =
   if durable_call_failed association then "FAILED · CALL LOG"
   else match outcome, association with
@@ -1205,17 +1115,6 @@ let tool_outcome_label_with_call outcome association =
 let tool_outcome_tone_with_call outcome association =
   if durable_call_failed association then Theme.bad ()
   else tool_outcome_tone outcome
-
-
-let keeper_call_schedule_label (schedule : Tui_decode.keeper_call_schedule) =
-  let execution =
-    match schedule.kcs_execution_mode with
-    | Tui_decode.Keeper_call_serial -> "serial"
-    | Tui_decode.Keeper_call_concurrent -> "concurrent"
-  in
-  Printf.sprintf "%s · batch %d · width %d · plan step %d" execution
-    (schedule.kcs_batch_index + 1) schedule.kcs_batch_size
-    (schedule.kcs_planned_index + 1)
 
 
 (* What the full calls draw for a recorded result: an Execute result read into
@@ -1442,35 +1341,9 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
         (* Exact durable failure wins over a transcript that has not been
            enriched yet. Receipt otherwise makes no success claim. *)
         let durable_failure = durable_call_failed association in
-        let marker, status =
-          if durable_failure then
-            Keeper_chat_transcript.marker_of_outcome Keeper_chat_transcript.Failed,
-            "failed"
-          else
-            match activity.outcome, association with
-            | ( Keeper_chat_transcript.Never_returned
-              | Keeper_chat_transcript.Started
-              | Keeper_chat_transcript.Awaiting_result )
-              , Call_execution_exact call
-              when Option.is_some call.kc_output ->
-                (* A recorded output is already evidence, even when the
-                   transcript has not folded its completion event yet. *)
-                Keeper_chat_transcript.received_marker, "in call log"
-            | Keeper_chat_transcript.Returned, _ ->
-                Keeper_chat_transcript.received_marker, "received"
-            | outcome, _ ->
-                Keeper_chat_transcript.marker_of_outcome outcome,
-                (match outcome with
-                 | Keeper_chat_transcript.Started -> "starting"
-                 | Keeper_chat_transcript.Awaiting_result -> "waiting"
-                 | Keeper_chat_transcript.Failed -> "failed"
-                 | Keeper_chat_transcript.Never_returned -> "not seen"
-                 | Keeper_chat_transcript.Outcome_unrecorded -> "unknown"
-                 | Keeper_chat_transcript.Native_running -> "native running"
-                 | Keeper_chat_transcript.Native_ended -> "native ended"
-                 | Keeper_chat_transcript.Native_failed -> "native failed"
-                 | Keeper_chat_transcript.Returned -> "received")
-        in
+        let result_state = Call_evidence.result_state activity.outcome association in
+        let marker = Call_evidence.result_marker result_state in
+        let status = Call_evidence.result_label result_state in
         let fixed_cells = Message_layout.display_width (marker ^ "  · " ^ status) in
         let detail_on_next_line = max_cells < 80 in
         let name_cells =
@@ -1523,7 +1396,25 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
         (* Only generated status text is dressed. Payload stays terminal-safe
            plain text, including words or glyphs that resemble a failure. *)
         let prefix = clip_tool_result ~max_cells prefix in
-        let styled_prefix = dress_tool_summary prefix in
+        let tone =
+          match result_state with
+          | Durable_failed -> Ansi.reset ^ Ansi.bold ^ Theme.bad ()
+          | Durable_output -> Theme.ok ()
+          | Transcript_outcome outcome -> tool_outcome_tone outcome
+        in
+        let styled_prefix =
+          Printf.sprintf "%s%s%s %s%s%s · %s%s%s"
+            tone marker tool_reopen (Theme.tool_origin ()) name tool_reopen
+            tone status tool_reopen
+        in
+        let styled_prefix =
+          if Message_layout.display_width styled_prefix <= max_cells then styled_prefix
+          else
+            match Message_layout.split_styled_cells
+              ~max_cells:(max 1 (max_cells - 1)) styled_prefix with
+            | [] -> "…"
+            | first :: _ -> first ^ "…" ^ tool_reopen
+        in
         match detail with
         | None -> [styled_prefix]
         | Some detail when detail_on_next_line ->

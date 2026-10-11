@@ -965,6 +965,12 @@
  (libraries masc_tui_keeper_chat_projection masc_tui_message_layout yojson))
 
 (library
+ (name masc_tui_keeper_call_evidence)
+ (wrapped false)
+ (modules masc_tui_keeper_call_evidence)
+ (libraries masc masc.tool_types masc_tui_keeper_chat_transcript))
+
+(library
  (name masc_tui_execute_result)
  (wrapped false)
  (modules masc_tui_execute_result)
@@ -1900,7 +1906,7 @@
  (name masc_tui_render_chat)
  (wrapped false)
  (modules masc_tui_render_chat)
- (libraries masc.runtime masc_tui_native_tasks masc_tui_chat_search masc_tui_message_input
+ (libraries masc.runtime masc_tui_keeper_call_evidence masc_tui_native_tasks masc_tui_chat_search masc_tui_message_input
   eio
   masc_core
   masc_tui_async_read

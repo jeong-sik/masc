@@ -589,6 +589,10 @@ let read_whole_journal ~fetch ~since_seq =
     | Ok { events; has_more; next_since_seq; next_since_offset; _ } ->
       let advancing = position_advanced ~from:since_seq next_since_seq
         && Journal.page_start_offset next_since_offset > Journal.page_start_offset since_offset in
+      let held_sequence_scan = match since_seq, since_offset with
+        | Journal.After_seq _, Journal.From_first_row -> true
+        | Journal.After_seq _, Journal.From_offset offset -> offset = 0
+        | Journal.Whole_turn, (Journal.From_first_row | Journal.From_offset _) -> false in
       let rec event_frontier position = function
         | [] -> Some position
         | (event : Journal.journaled_event) :: rest ->
@@ -608,6 +612,8 @@ let read_whole_journal ~fetch ~since_seq =
       else if event_frontier since_seq events <> Some next_since_seq
         || (has_more && events = [])
         || Journal.page_start_offset next_since_offset < Journal.page_start_offset since_offset
+        || (events = [] && not held_sequence_scan
+            && Journal.page_start_offset next_since_offset > Journal.page_start_offset since_offset)
         || (events <> [] && not advancing)
       then Error (Events_undecodable "journal page events and continuation cursor disagree")
       else

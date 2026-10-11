@@ -1083,6 +1083,8 @@ export interface KeeperConversationEntry {
   /** Accumulated historical thinking from this exact autonomous journal replay. */
   autonomousSayingReplay?: Readonly<{ text: string; timestamp: number | undefined; owner: KeeperResponseOwner | null; scope: number | null }>
   autonomousTraceBoundary?: number
+  /** Transport recovery failure is distinct from provider response failure. */
+  autonomousJournalRecovery?: Readonly<{ kind: 'unavailable'; detail: string }> | null
   autonomousThinkingReplay?: readonly { readonly boundary: number | null; readonly index: number | undefined; readonly owner: import('../lib/keeper-response-state').KeeperResponseOwner | null; readonly text: string }[]
   streamContract?: KeeperConversationStreamContract | null
   attachments?: KeeperConversationAttachment[]

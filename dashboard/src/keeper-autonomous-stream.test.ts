@@ -11,6 +11,22 @@ const page = (sequence: number, event: KeeperChatStreamEvent | null): KeeperTurn
   events: [{ sequence, timestamp: 1, event }], cursor: { sequence, offset: sequence + 1 }, hasMore: false })
 beforeEach(() => { keeperThreads.value = {}; _resetKeeperStreamBuffersForTests(); _resetKeeperAutonomousRecoveryForTests(); vi.mocked(fetchKeeperTurnEvents).mockReset(); vi.mocked(fetchKeeperCurrentTurn).mockReset().mockResolvedValue({ state: 'idle' }) })
 describe('autonomous journal recovery', () => {
+  it('retains recovery failure through history convergence and clears it after a successful read', async () => {
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(0, text('answer')))
+    await recoverKeeperAutonomousTurn('k', 'trace#9', 0)
+    const history = [{ id: 'autonomous-trace#9', source: 'autonomous_turn' as const, role: 'assistant' as const,
+      label: 'k', turnRef: 'trace#9', text: 'canonical answer', delivery: 'history' as const, streamState: null, details: null }]
+    mergeServerHistoryEntries('k', history)
+    vi.mocked(fetchKeeperTurnEvents).mockRejectedValueOnce(new Error('journal unavailable'))
+    await expect(recoverKeeperAutonomousHistory('k')).rejects.toThrow()
+    mergeServerHistoryEntries('k', history)
+    expect(keeperThreads.value.k?.[0]).toMatchObject({ text: 'canonical answer', delivery: 'history',
+      autonomousJournalRecovery: { kind: 'unavailable', detail: 'journal unavailable' } })
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(1, { ...base, type: 'RUN_FINISHED' }))
+    await recoverKeeperAutonomousHistory('k')
+    expect(keeperThreads.value.k?.[0]).toMatchObject({ text: 'canonical answer', delivery: 'history',
+      autonomousJournalRecovery: null, responseState: { phase: 'terminal', lastSequence: 1 } })
+  })
   it('discovers a completed autonomous journal from typed history without borrowing direct turns', async () => {
     mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
       turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null,

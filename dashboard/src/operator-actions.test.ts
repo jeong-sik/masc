@@ -525,3 +525,47 @@ describe('operator error observer interleaving', () => {
     }
   })
 })
+
+describe('operator action initial observer admission', () => {
+  it.each([
+    ['dispatch', 'busy'], ['dispatch', 'error'], ['dispatch', 'status'],
+    ['confirm', 'busy'], ['confirm', 'error'], ['confirm', 'status'],
+  ] as const)('does not admit %s under credentials changed by its %s observer', async (action, field) => {
+    const { mod, signals } = await load()
+    const { setStoredToken, clearStoredToken } = await import('./api/core')
+    const { effect } = await import('@preact/signals')
+    setStoredToken('synthetic-initial-owner-a')
+    signals.operatorError.value = 'initial error'
+    signals.operatorErrorStatus.value = 503
+    const dispose = effect(() => {
+      const pending = signals.operatorActionBusy.value
+      const changed = field === 'busy' ? pending
+        : field === 'error' ? signals.operatorError.value === null
+        : signals.operatorErrorStatus.value === null
+      if (pending && changed) {
+        setStoredToken('synthetic-initial-owner-b')
+        signals.operatorError.value = 'replacement initial error'
+        signals.operatorErrorStatus.value = 409
+      }
+    })
+    try {
+      const pending = action === 'dispatch'
+        ? mod.dispatchOperatorAction(makeRequest())
+        : mod.confirmOperatorPendingAction('vincent', 'previous-owner-confirm')
+      const outcome = await Promise.allSettled([pending])
+      expect(apiMocks.runOperatorAction).not.toHaveBeenCalled()
+      expect(apiMocks.confirmOperatorAction).not.toHaveBeenCalled()
+      expect(outcome[0].status).toBe('rejected')
+      if (outcome[0].status === 'rejected') {
+        expect(outcome[0].reason).toBeInstanceOf(mod.OperatorActionAuthenticationSupersededError)
+      }
+      expect(signals.operatorError.value).toBe('replacement initial error')
+      expect(signals.operatorErrorStatus.value).toBe(409)
+      expect(signals.operatorActionBusy.value).toBe(false)
+      expect(signals.operatorActionLog.value).toEqual([])
+    } finally {
+      dispose()
+      clearStoredToken()
+    }
+  })
+})

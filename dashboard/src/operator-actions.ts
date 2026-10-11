@@ -146,6 +146,19 @@ export async function refreshOperatorWorkspaceDigest(opts?: RefreshOptions): Pro
   return workspaceDigestRefreshInflight
 }
 
+export class OperatorActionAuthenticationSupersededError extends Error {
+  constructor() {
+    super('Operator action authentication changed before admission')
+    this.name = 'OperatorActionAuthenticationSupersededError'
+  }
+}
+
+function assertActionAdmission(authRevision: number): void {
+  if (currentStoredTokenRevision() !== authRevision) {
+    throw new OperatorActionAuthenticationSupersededError()
+  }
+}
+
 type ActionRefreshOptions = { refresh?: 'await' | 'background' }
 
 async function refreshAfterAction(options: ActionRefreshOptions, authRevision: number): Promise<void> {
@@ -170,9 +183,12 @@ export async function dispatchOperatorAction(
 ): Promise<OperatorActionResult> {
   const authRevision = currentStoredTokenRevision()
   const releaseAction = acquireOperatorAction()
-  operatorError.value = null
-  operatorErrorStatus.value = null
   try {
+    assertActionAdmission(authRevision)
+    operatorError.value = null
+    assertActionAdmission(authRevision)
+    operatorErrorStatus.value = null
+    assertActionAdmission(authRevision)
     const result = await runOperatorAction(request)
     if (currentStoredTokenRevision() !== authRevision) return result
     appendLog({
@@ -214,9 +230,12 @@ export async function confirmOperatorPendingAction(
 ): Promise<OperatorActionResult> {
   const authRevision = currentStoredTokenRevision()
   const releaseAction = acquireOperatorAction()
-  operatorError.value = null
-  operatorErrorStatus.value = null
   try {
+    assertActionAdmission(authRevision)
+    operatorError.value = null
+    assertActionAdmission(authRevision)
+    operatorErrorStatus.value = null
+    assertActionAdmission(authRevision)
     const result = await confirmOperatorAction(actor, confirmToken, decision)
     if (currentStoredTokenRevision() !== authRevision) return result
     appendLog({

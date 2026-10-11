@@ -190,7 +190,9 @@ export async function dispatchOperatorAction(
     const summary = extractApiError(err, 'operator 액션 실패')
     const message = summary.message
     operatorError.value = message
+    if (currentStoredTokenRevision() !== authRevision) throw err
     operatorErrorStatus.value = summary.status
+    if (currentStoredTokenRevision() !== authRevision) throw err
     appendLog({
       actor: request.actor,
       action_type: request.action_type,
@@ -232,7 +234,9 @@ export async function confirmOperatorPendingAction(
     const summary = extractApiError(err, 'operator 확인 실패')
     const message = summary.message
     operatorError.value = message
+    if (currentStoredTokenRevision() !== authRevision) throw err
     operatorErrorStatus.value = summary.status
+    if (currentStoredTokenRevision() !== authRevision) throw err
     appendLog({
       actor,
       action_type: decision,

@@ -490,3 +490,38 @@ describe('operator receipt observer interleaving', () => {
     }
   })
 })
+
+describe('operator error observer interleaving', () => {
+  it.each([['dispatch', 'error'], ['dispatch', 'status'], ['confirm', 'error'], ['confirm', 'status']] as const)('preserves replacement account state after %s %s observers run', async (action, field) => {
+    const { mod, signals } = await load()
+    const { setStoredToken, clearStoredToken } = await import('./api/core')
+    const { effect } = await import('@preact/signals')
+    setStoredToken('synthetic-error-publication-a')
+    const { ApiRequestError } = await import('./api/core')
+    const oldFailure = field === 'status'
+      ? new ApiRequestError({ method: 'POST', path: '/api/v1/operator/action', status: 503 })
+      : new Error('old admitted failure')
+    if (action === 'dispatch') apiMocks.runOperatorAction.mockRejectedValue(oldFailure)
+    else apiMocks.confirmOperatorAction.mockRejectedValue(oldFailure)
+    const dispose = effect(() => {
+      if (field === 'error' ? signals.operatorError.value === oldFailure.message : signals.operatorErrorStatus.value === 503) {
+        setStoredToken('synthetic-error-publication-b')
+        signals.operatorError.value = 'replacement account error'
+        signals.operatorErrorStatus.value = 409
+        signals.operatorActionLog.value = []
+      }
+    })
+    try {
+      const pending = action === 'dispatch'
+        ? mod.dispatchOperatorAction(makeRequest())
+        : mod.confirmOperatorPendingAction('vincent', 'old-confirm-token')
+      await expect(pending).rejects.toBe(oldFailure)
+      expect(signals.operatorError.value).toBe('replacement account error')
+      expect(signals.operatorErrorStatus.value).toBe(409)
+      expect(signals.operatorActionLog.value).toEqual([])
+    } finally {
+      dispose()
+      clearStoredToken()
+    }
+  })
+})

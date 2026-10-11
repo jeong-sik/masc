@@ -138,3 +138,33 @@ export function sameKeeperResponseOwner(left: KeeperResponseOwner | undefined, r
 export function keeperResponseIsRunning(state: KeeperResponseState = initialKeeperResponseState): boolean {
   return state.kind === 'known' && state.phase === 'running'
 }
+
+function sameResponseObservation(left: ObservedKeeperResponseState, right: ObservedKeeperResponseState): boolean {
+  return sameKeeperResponseOwner(left.floor ?? undefined, right.floor ?? undefined)
+    && sameKeeperResponseOwner(left.current ?? undefined, right.current ?? undefined)
+    && sameKeeperResponseOwner(left.closed ?? undefined, right.closed ?? undefined)
+    && left.partialScope === right.partialScope && left.phase === right.phase
+    && left.closedGeneration === right.closedGeneration
+}
+
+/** Resolve observations only after the caller proves the same producer identity. */
+export function reconcileKeeperResponseStates(states: readonly (KeeperResponseState | undefined)[]): KeeperResponseState | undefined {
+  const known: ObservedKeeperResponseState[] = []
+  let latestSequence: number | null = null
+  for (const state of states) {
+    if (!state) continue
+    if (state.kind === 'unavailable') return unavailableKeeperResponseState
+    known.push(state)
+    if (state.lastSequence !== null && (latestSequence === null || state.lastSequence > latestSequence)) latestSequence = state.lastSequence
+  }
+  // Resolve the frontier first; older conflicting snapshots cannot override a
+  // newer journal observation merely because they appear earlier in the array.
+  let selected = known.find(state => state.lastSequence === latestSequence)
+  for (const state of known) {
+    if (state.lastSequence !== latestSequence && state.lastSequence !== null) continue
+    if (state.lastSequence === null && sameResponseObservation(state, initialKeeperResponseState)) continue
+    if (!selected || (selected.lastSequence === null && sameResponseObservation(selected, initialKeeperResponseState))) { selected = state; continue }
+    if (!sameResponseObservation(state, selected)) return unavailableKeeperResponseState
+  }
+  return selected
+}

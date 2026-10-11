@@ -671,7 +671,9 @@ export function applyKeeperAutonomousTurnEvent(keeperName: string, turnRef: stri
   const entryId = existing?.id ?? `autonomous-${turnRef}`
   const settled = existing !== undefined && existing.delivery !== 'sending' && existing.delivery !== 'streaming'
   const observationOnly = settled && (isToolObservation(event) || event.type === 'TEXT_MESSAGE_CONTENT' || event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR' || event.type === 'CUSTOM'
-    && (event.name === 'KEEPER_THINKING_DELTA' || event.name === 'KEEPER_STREAM_PROTOCOL_ERROR'))
+    && (event.name === 'KEEPER_THINKING_DELTA' || event.name === 'KEEPER_STREAM_PROTOCOL_ERROR'
+      || event.name === 'KEEPER_STREAM_MESSAGE_START' || event.name === 'KEEPER_STREAM_MESSAGE_DELTA'
+      || event.name === 'KEEPER_STREAM_MESSAGE_STOP' || event.name === 'KEEPER_MODEL_CONTENT_ACTIVITY'))
   if (settled && !observationOnly) return null
   if (!existing) appendThreadEntry(keeperName, {
     id: entryId, role: 'assistant', source: 'autonomous_turn', label: keeperName,
@@ -681,6 +683,9 @@ export function applyKeeperAutonomousTurnEvent(keeperName: string, turnRef: stri
   })
   const error = applyKeeperStreamEvent(keeperName, entryId, event,
     { kind: 'autonomous', turnRef, sequence, ...(observationOnly ? { observationOnly: true as const } : {}) })
+  if (observationOnly && existing) updateThreadEntry(keeperName, entryId, entry => ({ ...entry,
+    delivery: existing.delivery, streamState: existing.streamState, replyBlockSource: existing.replyBlockSource,
+  }))
   if (error && observationOnly) recordStreamProtocolError(keeperName, entryId, error)
   else if (error) finalizeAssistantEntry(keeperName, entryId, {
     delivery: 'error', streamState: null, error, timestamp: new Date().toISOString(),

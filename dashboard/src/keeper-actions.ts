@@ -1,7 +1,9 @@
+import { toolObservationContinues } from './keeper-tool-observations'
 import { initialKeeperResponseState, reduceKeeperResponse } from './lib/keeper-response-state'
 import { keeperStreamContract } from './keeper-stream-contract'
 import {
   newKeeperChatOperationId,
+  sameDeliveryKey,
   operationDeliveryProvenance,
   sameDeliveryProvenance,
 } from './keeper-delivery-provenance'
@@ -578,10 +580,57 @@ function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation
         reason: 'awaiting durable operation terminal state',
       }),
       responseState: assistantDraft?.responseState,
+      ...(assistantDraft?.toolObservations?.kind === 'unavailable' ? { toolObservationAuthority: 'unavailable' as const } : {}),
       traceSteps: assistantDraft?.traceSteps,
       error: assistantDraft?.error ?? null,
       details: assistantDraft?.details ?? null,
     })
+  }
+  const tools = assistantDraft?.toolObservations
+  if (tools?.kind === 'known') {
+    const parentKey = operationDeliveryProvenance(request.operationId, 'terminal_result').delivery_key
+    for (const tool of tools.entries) {
+      if (!tool.deliveryProvenance || !sameDeliveryKey(parentKey, tool.deliveryProvenance.delivery_key)) continue
+      const slot = tool.deliveryProvenance.transcript_slot
+      const peers = (keeperThreads.value[request.keeperName] ?? []).filter(entry => {
+        if (entry.id === tool.id) return true
+        const other = entry.deliveryProvenance
+        const otherSlot = other?.transcript_slot
+        return entry.role === 'tool' && other && sameDeliveryKey(other.delivery_key, tool.deliveryProvenance!.delivery_key)
+          && (slot.kind === 'tool_delivery' || slot.kind === 'tool_call')
+          && (otherSlot?.kind === 'tool_delivery' || otherSlot?.kind === 'tool_call') && slot.ordinal === otherSlot.ordinal
+      })
+      if (peers.length > 1) {
+        updateThreadEntry(request.keeperName, assistantId, entry => ({ ...entry, toolObservationAuthority: 'unavailable' }))
+        continue
+      }
+      const existingTool = peers[0]
+      if (existingTool) {
+        const quarantined = existingTool.toolOccurrenceQuarantined || tool.toolOccurrenceQuarantined
+        const durable = { ...tool, toolCallEnded: tool.toolCallEnded || existingTool.toolCallEnded, ...(quarantined ? { toolOccurrenceQuarantined: true as const } : {}) }
+        const exactBound = slot.kind === 'tool_call' && existingTool.deliveryProvenance
+          && sameDeliveryProvenance(existingTool.deliveryProvenance, tool.deliveryProvenance)
+          && existingTool.executionId === tool.executionId
+        const live = { ...existingTool,
+          ...(existingTool.toolOccurrence === undefined && exactBound ? { toolOccurrence: tool.toolOccurrence } : {}),
+          toolCallId: existingTool.toolCallId ?? tool.toolCallId, toolCallEnded: tool.toolCallEnded || existingTool.toolCallEnded, ...(quarantined ? { toolOccurrenceQuarantined: true as const } : {}) }
+        if (existingTool.role !== 'tool' || !toolObservationContinues(live, durable) && !toolObservationContinues(durable, live)) {
+          updateThreadEntry(request.keeperName, assistantId, entry => ({ ...entry, toolObservationAuthority: 'unavailable' }))
+        } else {
+          const retained = existingTool.toolOccurrence === undefined && exactBound ? live
+            : toolObservationContinues(live, durable) ? { ...durable, toolCallId: durable.toolCallId ?? live.toolCallId } : live
+          updateThreadEntry(request.keeperName, existingTool.id, entry => ({ ...entry, ...retained, id: existingTool.id,
+            toolCallEnded: tool.toolCallEnded || existingTool.toolCallEnded,
+          }))
+          updateThreadEntry(request.keeperName, assistantId, entry => ({ ...entry,
+            traceSteps: entry.traceSteps?.map(step => step.kind === 'tool' && step.toolOccurrenceId === tool.id
+              ? { ...step, toolOccurrenceId: existingTool.id } : step),
+          }))
+        }
+        continue
+      }
+      appendThreadEntry(request.keeperName, { ...tool, role: 'tool', source: 'tool_result', streamState: null })
+    }
   }
   return assistantId
 }
@@ -595,7 +644,7 @@ function persistTrackedOperationAssistantDraft(
   const entry = (keeperThreads.value[keeperName] ?? [])
     .find(candidate => candidate.id === assistantEntryId) ?? null
   if (!entry) return
-  updateTrackedKeeperChatAssistantDraft(requestId, entry)
+  updateTrackedKeeperChatAssistantDraft(requestId, entry, keeperThreads.value[keeperName] ?? [])
 }
 
 function withCurrentTrackedOperationAssistantDraft(
@@ -605,7 +654,7 @@ function withCurrentTrackedOperationAssistantDraft(
   const entry = (keeperThreads.value[request.keeperName] ?? [])
     .find(candidate => candidate.id === assistantEntryId) ?? null
   if (!entry) return request
-  const assistantDraft = trackedKeeperChatAssistantDraftFromEntry(entry)
+  const assistantDraft = trackedKeeperChatAssistantDraftFromEntry(entry, keeperThreads.value[request.keeperName] ?? [])
   return assistantDraft ? { ...request, assistantDraft } : request
 }
 

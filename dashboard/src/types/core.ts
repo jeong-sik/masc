@@ -1071,6 +1071,7 @@ export interface KeeperConversationEntry {
   /** Explicit parent for an observation that carried no delivery identity. */
   toolParentEntryId?: string
   toolOccurrenceQuarantined?: true
+  toolObservationAuthority?: 'unavailable'
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
   responseState?: KeeperResponseState

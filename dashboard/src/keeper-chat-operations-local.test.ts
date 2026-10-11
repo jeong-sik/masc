@@ -1,3 +1,5 @@
+import { operationDeliveryProvenance, toolDeliveryProvenance, toolCallDeliveryProvenance } from './keeper-delivery-provenance'
+import type { TrackedKeeperChatAssistantDraft } from './keeper-chat-operations-local'
 import { initialKeeperResponseState } from './lib/keeper-response-state'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -130,6 +132,38 @@ describe('keeper chat operation tracking', () => {
       })
     },
   )
+
+  it('persists normal planned-to-bound tool transition without erasing quarantine authority', () => {
+    const request = { operationId: 'binding-tools', keeperName: 'echo', message: 'input', submittedAt: 1 }
+    const parent = operationDeliveryProvenance(request.operationId, 'terminal_result')
+    const tool = { id: 'tool', label: 'Read', text: '', toolCallId: 'provider-a', delivery: 'streaming' as const,
+      toolOccurrence: { kind: 'identified' as const, streamScope: 1, blockIndex: 0 },
+      deliveryProvenance: toolDeliveryProvenance(parent, 0) }
+    const draft: TrackedKeeperChatAssistantDraft = { text: 'body', rawText: 'body', delivery: 'streaming', streamState: null,
+      toolObservations: { kind: 'known', entries: [tool] } }
+    upsertTrackedKeeperChatOperation({ ...request, assistantDraft: draft })
+    upsertTrackedKeeperChatOperation({ ...request, assistantDraft: { ...draft, toolObservations: { kind: 'known', entries: [
+      { ...tool, executionId: 'execution', deliveryProvenance: toolCallDeliveryProvenance(parent, 'execution', 0) },
+    ] } } })
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft?.toolObservations).toMatchObject({ kind: 'known', entries: [{ executionId: 'execution' }] })
+    upsertTrackedKeeperChatOperation({ ...request, assistantDraft: { ...draft, toolObservations: { kind: 'known', entries: [
+      { ...tool, toolCallId: undefined, executionId: 'execution', deliveryProvenance: toolCallDeliveryProvenance(parent, 'execution', 0) },
+    ] } } })
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft?.toolObservations).toMatchObject({ kind: 'known', entries: [{ toolCallId: 'provider-a' }] })
+    upsertTrackedKeeperChatOperation({ ...request, assistantDraft: { ...draft, toolObservations: { kind: 'known', entries: [] } } })
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft?.toolObservations).toEqual({ kind: 'unavailable' })
+  })
+
+  it('retains unavailable tool authority through receipt-only and assistant-only writes', () => {
+    const request = { operationId: 'unavailable-tools', keeperName: 'echo', message: 'input', submittedAt: 1 }
+    const draft = { text: 'authored', rawText: 'authored', delivery: 'streaming' as const, streamState: null,
+      toolObservations: { kind: 'unavailable' as const } }
+    upsertTrackedKeeperChatOperation({ ...request, assistantDraft: draft })
+    upsertTrackedKeeperChatOperation(request)
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft?.toolObservations).toEqual({ kind: 'unavailable' })
+    upsertTrackedKeeperChatOperation({ ...request, assistantDraft: { ...draft, toolObservations: { kind: 'known', entries: [] } } })
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft).toMatchObject({ rawText: 'authored', toolObservations: { kind: 'unavailable' } })
+  })
 
   it('quarantines unknown delivery without turning it into queued or losing authored bytes', () => {
     upsertTrackedKeeperChatOperation({ operationId: 'bad-delivery', keeperName: 'echo', message: 'input', submittedAt: 1,

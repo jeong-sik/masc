@@ -1,3 +1,5 @@
+import { operationDeliveryProvenance, sameDeliveryKey } from './keeper-delivery-provenance'
+import { captureToolObservations, toolObservationContinues, toolObservationsFromUnknown, type StoredToolObservations } from './keeper-tool-observations'
 import { normalizeKeeperConversationDetails } from './keeper-message'
 import { ownerFromUnknown, keeperResponseStateFromUnknown, unavailableKeeperResponseState, type KeeperResponseState } from './lib/keeper-response-state'
 import type {
@@ -12,6 +14,7 @@ import { keeperConversationDeliveryFromUnknown } from './lib/keeper-delivery'
 
 export interface TrackedKeeperChatAssistantDraft {
   responseState?: KeeperResponseState
+  toolObservations?: StoredToolObservations
   details?: KeeperConversationDetails | null
   text: string
   rawText: string
@@ -165,7 +168,7 @@ function normalizeTraceSteps(raw: unknown): ChatTraceStep[] | undefined {
   return steps.length > 0 ? (steps as ChatTraceStep[]) : undefined
 }
 
-function normalizeAssistantDraft(raw: unknown): TrackedKeeperChatAssistantDraft | null {
+function normalizeAssistantDraft(raw: unknown, operationId?: string): TrackedKeeperChatAssistantDraft | null {
   if (!isRecord(raw)) return null
   const text = stringValue(raw.text)
   if (text === undefined) return null
@@ -177,6 +180,11 @@ function normalizeAssistantDraft(raw: unknown): TrackedKeeperChatAssistantDraft 
       : parseMember(KEEPER_STREAM_STATES, raw.streamState) ?? null
   const timestamp = nullableStringValue(raw.timestamp)
   const traceSteps = normalizeTraceSteps(raw.traceSteps)
+  const decodedTools = raw.toolObservations === undefined ? undefined : toolObservationsFromUnknown(raw.toolObservations)
+  const toolObservations = decodedTools?.kind === 'known' && operationId !== undefined
+    && decodedTools.entries.some(tool => !tool.deliveryProvenance || !sameDeliveryKey(
+      operationDeliveryProvenance(operationId, 'terminal_result').delivery_key, tool.deliveryProvenance.delivery_key))
+      ? { kind: 'unavailable' as const } : decodedTools
   const error = nullableStringValue(raw.error)
   const responseState = raw.responseState === undefined ? undefined : keeperResponseStateFromUnknown(raw.responseState)
 
@@ -189,6 +197,7 @@ function normalizeAssistantDraft(raw: unknown): TrackedKeeperChatAssistantDraft 
     streamState,
     ...(timestamp !== undefined ? { timestamp } : {}),
     ...(traceSteps ? { traceSteps } : {}),
+    ...(toolObservations ? { toolObservations } : {}),
     ...(error !== undefined ? { error } : {}),
     ...(delivery === null ? {
       responseState: unavailableKeeperResponseState, delivery: 'error' as const, streamState: null,
@@ -203,11 +212,13 @@ function normalizeAssistantDraft(raw: unknown): TrackedKeeperChatAssistantDraft 
 
 export function trackedKeeperChatAssistantDraftFromEntry(
   entry: KeeperConversationEntry,
+  toolEntries?: readonly KeeperConversationEntry[],
 ): TrackedKeeperChatAssistantDraft | null {
   if (entry.role !== 'assistant') return null
   const traceSteps = normalizeTraceSteps(entry.traceSteps)
   return {
     ...(entry.responseState ? { responseState: entry.responseState } : {}),
+    ...(toolEntries ? { toolObservations: captureToolObservations(entry, toolEntries) } : {}),
     details: entry.details ? { ...entry.details, rawPayload: undefined } : null,
     text: entry.text,
     rawText: entry.rawText ?? entry.text,
@@ -239,7 +250,7 @@ function normalizeTrackedOperation(raw: unknown): TrackedKeeperChatOperation | n
     ? raw.attachments.map(normalizeAttachment).filter((att): att is KeeperConversationAttachment => att !== null)
     : []
   const assistantDraft = raw.assistantDraft === undefined ? null
-    : normalizeAssistantDraft(raw.assistantDraft) ?? unavailableAssistantDraft()
+    : normalizeAssistantDraft(raw.assistantDraft, operationId) ?? unavailableAssistantDraft()
 
   return {
     operationId,
@@ -292,6 +303,24 @@ function preserveNewerDraft(
   stored: TrackedKeeperChatAssistantDraft | undefined,
   incoming: TrackedKeeperChatAssistantDraft | undefined,
 ): TrackedKeeperChatAssistantDraft | undefined {
+  if (!incoming) return stored
+  if (stored?.toolObservations?.kind === 'unavailable' && incoming) {
+    incoming = { ...incoming, toolObservations: stored.toolObservations }
+  } else if (stored?.toolObservations && incoming && incoming.toolObservations === undefined) {
+    incoming = { ...incoming, toolObservations: stored.toolObservations }
+  }
+  if (stored?.toolObservations?.kind === 'known' && incoming.toolObservations?.kind === 'known') {
+    const previousTools = stored.toolObservations.entries
+    const nextTools = incoming.toolObservations.entries.map(next => {
+      const previous = previousTools.find(previous => toolObservationContinues(previous, next))
+      return previous?.toolCallId && !next.toolCallId ? { ...next, toolCallId: previous.toolCallId } : next
+    })
+    incoming = { ...incoming, toolObservations: { kind: 'known', entries: nextTools } }
+    if (stored.toolObservations.entries.some(previous => !nextTools.some(next =>
+      toolObservationContinues(previous, next)))) {
+      incoming = { ...incoming, toolObservations: { kind: 'unavailable' } }
+    }
+  }
   const previousState = stored?.responseState
   if (previousState?.kind !== 'known' || previousState.lastSequence === null) return incoming
   const nextState = incoming?.responseState
@@ -308,7 +337,7 @@ export function upsertTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
   const message = request.message
   if (!operationId || !keeperName || !message.trim()) return
   const assistantDraft = request.assistantDraft === undefined ? null
-    : normalizeAssistantDraft(request.assistantDraft) ?? unavailableAssistantDraft()
+    : normalizeAssistantDraft(request.assistantDraft, operationId) ?? unavailableAssistantDraft()
   const normalized: TrackedKeeperChatOperation = {
     operationId,
     keeperName,
@@ -329,9 +358,10 @@ export function upsertTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
 export function updateTrackedKeeperChatAssistantDraft(
   requestId: string,
   entry: KeeperConversationEntry,
+  toolEntries?: readonly KeeperConversationEntry[],
 ): void {
   const id = requestId.trim()
-  const assistantDraft = trackedKeeperChatAssistantDraftFromEntry(entry)
+  const assistantDraft = trackedKeeperChatAssistantDraftFromEntry(entry, toolEntries)
   if (!id || !assistantDraft) return
   const requests = readAll()
   let found = false

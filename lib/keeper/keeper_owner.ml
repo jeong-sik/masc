@@ -2145,8 +2145,6 @@ let checkpoint_direct_native_call t ~operation_id ~execution_digest ~call_id ~ob
   request t (Update_direct_native_call {operation_id; execution_digest; change=Keeper_native_call.Checkpoint {call_id; observed; checkpoint}})
 let terminal_direct_native_call t ~operation_id ~execution_digest ~call_id ~disposition =
   request t (Update_direct_native_call {operation_id; execution_digest; change=Keeper_native_call.Terminal {call_id; disposition}})
-let acknowledge_direct_native_call t ~operation_id ~execution_digest ~call_id =
-  request t (Update_direct_native_call {operation_id; execution_digest; change=Keeper_native_call.Acknowledge call_id})
 let resume_direct_checkpoint t ~operation_id ~observed =
   request t (Resume_direct_checkpoint {operation_id; observed})
 

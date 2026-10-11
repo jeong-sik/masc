@@ -2048,7 +2048,7 @@ let run_named
        | Keeper_direct_native_continuation.No_pending -> Ok None
        | Resume resumed -> Ok (Some (Keeper_direct_native_continuation.runtime_id resumed))
        | Terminal_pending _ -> Error (Agent_core.Error.Internal
-           "native terminal disposition awaits Owner acknowledgement")) in
+           "native terminal disposition awaits Owner settlement")) in
   let* lane_candidate_ids =
     match native_runtime with
     | Some saved_runtime ->

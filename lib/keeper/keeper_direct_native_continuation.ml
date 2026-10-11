@@ -379,15 +379,3 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
                                   checkpoint_sink=Some checkpoint_sink};
       checkpoint=agent_core_checkpoint; input}
 
-let acknowledge ~binding =
-  let* observed = state binding in
-  match observed with
-  | Native.No_native_call -> Ok ()
-  | Native.Terminal_unacknowledged (call, {Agent.recovery=Retire; _}) ->
-    Owner.acknowledge_direct_native_call ~base_path:binding.base_path
-      ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
-      ~execution_digest:binding.execution_digest ~call_id:call.call_id |> owner
-  | Native.Active _
-  | Native.Terminal_unacknowledged
-      (_, {Agent.recovery=Operator_repair_required Effect_outcome_unknown; _}) ->
-    Error "native call is not safely retired"

@@ -20,7 +20,6 @@ type change =
   | Bind of {observed:state; call:t}
   | Checkpoint of {call_id:string; observed:Ref.t; checkpoint:Ref.t}
   | Terminal of {call_id:string; disposition:Agent.execution_terminal_disposition}
-  | Acknowledge of string
 
 let valid_component value = match Uuidm.of_string value with
   | Some uuid -> String.equal (Uuidm.to_string uuid) value
@@ -77,10 +76,8 @@ let transition state change = match state, change with
     Ok (Terminal_unacknowledged (call, disposition))
   | Terminal_unacknowledged (call, current), Terminal {call_id; disposition}
     when call.call_id = call_id && current = disposition -> Ok state
-  | Terminal_unacknowledged (call, disposition), Acknowledge call_id
-    when retirement_allowed disposition && call.call_id = call_id -> Ok No_native_call
   | (No_native_call | Active _ | Terminal_unacknowledged _),
-    (Bind _ | Checkpoint _ | Terminal _ | Acknowledge _) -> Error "native call transition or identity is not admitted"
+    (Bind _ | Checkpoint _ | Terminal _) -> Error "native call transition or identity is not admitted"
 
 let checkpoint_references = function
   | No_native_call -> []

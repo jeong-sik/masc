@@ -100,6 +100,14 @@ type review_result =
   ; retryable_runtimes : string list
         (** Actual candidates that reported a typed retryable error, in attempt
             order. The final diagnostic runtime does not own their retry time. *)
+  ; model_absent_runtimes : string list
+        (** Actual candidates whose typed refusal was model-absence
+            ({!Keeper_runtime_failure_route.core_error_is_model_absent}: a
+            typed [NotFound]), in attempt order. A retired or unknown model is
+            a permanent failure for the unchanged request: these candidates
+            are kept out of [retryable_runtimes] and named here so the
+            deferral records per-candidate outcomes, not only the last
+            candidate's error (2026-10-07 audit F-02). *)
   ; evaluator_error_retryable : bool option
         (** [Some true] when a verdict-less exhausted lane observed at least
             one typed retryable {!Agent_core.Error.t}; a later non-retryable

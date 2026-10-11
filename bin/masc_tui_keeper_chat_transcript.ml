@@ -1376,6 +1376,15 @@ let enter_text_response_scope t scope =
     t.stop_scope <- None
   end
 
+type response_metadata = {
+  model : string option;
+  usage : Live.stream_usage option;
+  stop_reason : Agent_core.Types.stop_reason option;
+}
+
+let response_metadata t =
+  { model=t.observed_model; usage=t.observed_usage; stop_reason=t.observed_stop_reason }
+
 let retire_model_content t =
   t.active_model_content <- [];
   t.content_scope_closed <- true
@@ -1393,6 +1402,18 @@ let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content
     else match activity.state with
     | Content_observed ->
       if scope_order > 0 then begin
+        (* A surviving scoped reasoning/content event can prove that prior
+           response metadata no longer applies even if MessageStart and text
+           deltas were lost. It does not invent the missing model or usage. *)
+        let response_changed = match t.response_scope with
+          | Some scope -> activity.content_scope > scope
+          | None -> false in
+        if response_changed then begin
+          t.observed_model <- None;
+          t.observed_usage <- None;
+          t.observed_stop_reason <- None;
+          t.stop_scope <- None
+        end;
         t.content_scope <- Some (activity.content_generation, activity.content_scope);
         t.content_scope_closed <- false;
         t.active_model_content <- []

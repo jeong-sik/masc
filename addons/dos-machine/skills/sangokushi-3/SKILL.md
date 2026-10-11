@@ -247,6 +247,16 @@ Observed at 193년 7월 6 평원 (유비 defending against 원소) and at 235년
   and 7, and a later direction prompt retained the higher value. Use the
   displayed value instead of assuming that every turn resets it to 4.
   This observation does not establish a universal cost for crossing walls.
+- Movement into enemy contact can open `공격하시겠습니까(Y/N)?`.
+  At January 190 Puyang, Li Dian answered `n` after approaching Guo Si;
+  the next officer command opened with both army totals unchanged. This
+  allows approaching support without accepting the immediate attack.
+- For a verified enemy hex, attack `2` → joint `2` → direction executes
+  an 일제 attack when the menu allows it. From the same January 190
+  day-6 noon checkpoint, Xiahou Yuan's north `8` joint attack inflicted
+  429 enemy losses at 521 friendly losses; normal `1` north `8` inflicted
+  149 at 303. These are one paired observation, not a universal damage
+  formula or proof of which support officers participate.
 - `8` (위임) asks `전군위임합니다 해제할 수 없습니다만 좋겠습니까(Y/N)?`; `y`
   hands every officer to the computer until the battle ends. Each
   `<장수>의 전술` line still waits for a key (`space`). One delegated siege ran

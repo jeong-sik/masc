@@ -194,6 +194,48 @@ Observed at 193년 7월 6 평원 (유비 defending against 원소) and at 235년
   `<장수>의 전술` line still waits for a key (`space`). One delegated siege ran
   from day 1 to day 10 and returned to the attacker city's command prompt.
 
+## A manual siege, an ongoing battle and reinforcements
+
+A native-worker replay on source
+`daece6c0facc64524ad49a1c1bc2f60c173a25d4` completed the March–April 189
+Chenliu → Puyang siege with human inputs. These are observations from that
+campaign, not universal gate costs or reusable coordinates.
+
+- Xiahou Dun approached the southwest gate with infantry. At his command
+  menu, `2` → `1` → `8` attacked the gate to the north. Subsequent gate
+  displays reached 31, 14 and 0. After zero, movement `1` → `8` crossed
+  the gate, then `9` moved into the city. A displayed zero alone is weaker
+  evidence than the observed unit crossing; inspect both.
+- Later movement into contact asked `공격하시겠습니까(Y/N)?`. `y`
+  executed the attack: defenders changed 7,500 → 7,175 and attackers
+  12,300 → 12,010. Read the current target and confirmation. Enemy movement
+  changed the valid attack direction later; do not repeat a fixed direction
+  across turns without checking the map.
+- The March battle ended with `승부는 다음달로 넘어갔습니다`. This is
+  an ongoing battle, not victory. Finish the remaining city commands and
+  resolve actual month-end events to reach the next month's commands.
+- In April, Chenliu military `1`, Enter → war `4`, Enter → destination
+  `9`, Enter offered `응원부대를 보내겠습니까(Y/N)?`. `y` opened the
+  officer list. Select an available officer and unit type with Enter at
+  each prompt; an empty Enter ends the selected officer list. The gold,
+  food and final expedition confirmation follow their visible prompts.
+  Sending Cao Hong's 2,000 infantry, gold 300 and food 12,000 decreased
+  Chenliu soldiers 11,200 → 9,200 and food 25,000 → 13,000.
+- Ending Chenliu's April commands resumed the battle. The reinforcement
+  needed placement on a permitted hex before `0` would accept it. Its cursor
+  initially stood outside that area, so pressing `0` there did not place it.
+  The next command screen then included the reinforcement's soldiers.
+- The April battle displayed enemy strength 0, an enemy-annihilation notice
+  and then `조조군의 승리입니다`. The captured ruler's disposition was
+  another interactive prompt; releasing him required choice `1`, Enter
+  and the visible `y` confirmation. After Chenliu's May commands ended,
+  Puyang's own command screen named ruler Cao Cao and governor Xiahou Dun.
+  This proves that battle and city capture, not unification or the ending.
+
+Preserve a checkpoint before month rollover and another after capture.
+Check the victory message and the captured city's ruler/command prompt;
+returning to a map alone also happens when a battle is deferred.
+
 ## Hotseat
 
 With two human players (유비 and 조조 in scenario 1) the game asked 조조 first

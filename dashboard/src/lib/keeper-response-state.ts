@@ -68,13 +68,13 @@ export function reduceKeeperResponse(state: KeeperResponseState, event: KeeperRe
     if (!event.owner) {
       return state.floor ? refuse() : { state, accepted: true, advanced: false, authoritative: true }
     }
-    // No established current owner (header-only observation so far): the
-    // ownership gate upstream already rejected stale stops, so accept.
-    if (!state.current) return { state, accepted: true, advanced: false, authoritative: true }
-    if (compareOwner(event.owner, state.current) !== 0
+    if (!state.current || compareOwner(event.owner, state.current) !== 0
       || (state.closed && compareOwner(event.owner, state.closed) <= 0)) return refuse()
     return { state: Object.freeze({ ...state, closed: state.current }), accepted: true, advanced: false, authoritative: true }
   }
+  // The lifecycle handlers above return for every non-observe kind; only an
+  // observation reaches here. The guard teaches the compiler what the early
+  // returns already guarantee about the union member.
   if (event.kind !== 'observe') return refuse()
   if (!event.owner) {
     if (state.floor && event.source !== 'body') return refuse()
@@ -87,15 +87,22 @@ export function reduceKeeperResponse(state: KeeperResponseState, event: KeeperRe
   }
   const incoming = Object.freeze({ content_generation: event.owner.content_generation, stream_scope: event.owner.stream_scope })
   if (state.closedGeneration !== null && incoming.content_generation <= state.closedGeneration) return refuse()
-  if (state.floor && compareOwner(incoming, state.floor) < 0) return refuse()
+  const sameCurrent = state.current !== null && compareOwner(incoming, state.current) === 0
+  if (sameCurrent) {
+    // A continuation or replay of the in-flight response stays admissible,
+    // but never past its closure (details may still annotate the closed one).
+    if (state.closed && compareOwner(incoming, state.closed) <= 0 && event.source !== 'details') return refuse()
+    return { state, accepted: true, advanced: false, authoritative: true }
+  }
+  // An attempt retires the admitted owner to the floor without clearing it,
+  // so an equal identity past the advance is stale, not a re-admission.
+  if (state.floor && compareOwner(incoming, state.floor) <= 0) return refuse()
   if (state.floor && incoming.content_generation === state.floor.content_generation
     && state.partialScope !== null && incoming.stream_scope < state.partialScope) return refuse()
-  const sameCurrent = state.current !== null && compareOwner(incoming, state.current) === 0
-  if (state.closed && compareOwner(incoming, state.closed) <= 0
-    && !(event.source === 'details' && sameCurrent)) return refuse()
+  if (state.closed && compareOwner(incoming, state.closed) <= 0) return refuse()
   return {
-    state: sameCurrent ? state : Object.freeze({ ...state, floor: incoming, current: incoming, partialScope: null }),
-    accepted: true, advanced: !sameCurrent, authoritative: true,
+    state: Object.freeze({ ...state, floor: incoming, current: incoming, partialScope: null }),
+    accepted: true, advanced: true, authoritative: true,
   }
 }
 

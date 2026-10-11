@@ -261,13 +261,6 @@ function compareStreamResponseOwners(left: StreamResponseOwner, right: StreamRes
   return left.streamScope - right.streamScope
 }
 
-function admittedStreamResponseOwner(
-  keeperName: string,
-  assistantEntryId: string,
-): StreamResponseOwner | null {
-  return admittedStreamResponseOwners.get(streamEntryKey(keeperName, assistantEntryId)) ?? null
-}
-
 function admitStreamResponseOwner(
   keeperName: string,
   assistantEntryId: string,
@@ -414,30 +407,6 @@ function flushAllPendingThinkingDeltas(): void {
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
     }
   }
-}
-
-// Stale thinking bytes must not revive a response the TUI already closed:
-// after a stop, flushing would move the entry back to 'thinking' and append
-// old reasoning to the current answer. Same-response thinking is admitted
-// only while the entry still shows that response as live.
-function assistantStreamResponseIsLive(keeperName: string, assistantEntryId: string): boolean {
-  const entry = (keeperThreads.value[keeperName] ?? [])
-    .find(candidate => candidate.id === assistantEntryId) ?? null
-  if (!entry) return true
-  return entry.streamState === 'opening' || entry.streamState === 'thinking' || entry.streamState === 'streaming'
-}
-
-function isStaleThinkingResponse(
-  keeperName: string,
-  assistantEntryId: string,
-  owner: StreamResponseOwner,
-): boolean {
-  const admitted = admittedStreamResponseOwner(keeperName, assistantEntryId)
-  if (!admitted) return false
-  const order = compareStreamResponseOwners(owner, admitted)
-  if (order < 0) return true
-  if (order > 0) return false
-  return !assistantStreamResponseIsLive(keeperName, assistantEntryId)
 }
 
 function enqueueThinkingDelta(
@@ -805,10 +774,16 @@ function admitResponseEvent(
   if (decision.advanced) {
     flushPendingThinkingDeltas(keeperName, assistantEntryId)
     clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
+    clearTextMessageStreamState(keeperName, assistantEntryId)
   }
   if (decision.state !== before) updateThreadEntry(keeperName, assistantEntryId, current => ({
     ...current,
     responseState: decision.state,
+    ...(decision.advanced && decision.authoritative ? {
+      streamState: 'opening' as const,
+      details: current.details ? { ...current.details, providerMessageId: null, modelUsed: null,
+        stopReason: null, usage: null, costUsd: null } : current.details,
+    } : {}),
   }))
   persistActiveAssistantDraft(keeperName, assistantEntryId)
   return decision
@@ -904,13 +879,13 @@ export function applyKeeperStreamEvent(
       return null
     }
     case 'TEXT_MESSAGE_CONTENT': {
-      const streamState = textMessageStreamState(keeperName, assistantEntryId)
       const response = admitResponseEvent(keeperName, assistantEntryId, {
-        kind: 'observe', owner: null, scope: event.textStreamScope ?? null, source: 'body',
+        kind: 'observe', owner: event.textResponse ?? null, scope: event.textStreamScope ?? null, source: 'body',
       })
       if (!response.accepted) return null
       const messageId = textStreamMessageId(event.messageId)
-      if (messageId !== null) {
+      if (!event.textResponse && messageId !== null) {
+        const streamState = textMessageStreamState(keeperName, assistantEntryId)
         if (streamState.endedMessageIds.has(messageId)) {
           // Content re-delivered after the message ended: already rendered.
           return null
@@ -921,14 +896,6 @@ export function applyKeeperStreamEvent(
         }
         // Adopt the id when START was coalesced away by the guards above.
         streamState.activeMessageId = messageId
-      }
-      if (event.textResponse) {
-        // A delayed delta from a superseded response shares the operation and
-        // message ids and passes every guard above: ownership is what keeps
-        // its bytes out of the fresh response.
-        if (!admitKeeperTextOwner(streamState.ownership, event.textResponse)) return null
-      } else if (typeof event.textStreamScope === 'number') {
-        observeKeeperTextScope(streamState.ownership, event.textStreamScope)
       }
       applyTextDelta(event.delta, response.authoritative)
       return null
@@ -1304,7 +1271,9 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_START') {
         const response = admitResponseEvent(keeperName, assistantEntryId, {
-          kind: 'observe', source: 'header', scope: event.value.stream_scope, owner: null,
+          kind: 'observe', source: 'header', scope: event.value.stream_scope,
+          owner: event.value.content_generation === undefined ? null
+            : { content_generation: event.value.content_generation, stream_scope: event.value.stream_scope },
         })
         if (!response.accepted) return null
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
@@ -1327,11 +1296,8 @@ export function applyKeeperStreamEvent(
         }
         if (usage?.costUsd !== undefined && current?.costUsd == null) patch.costUsd = usage.costUsd
         if (Object.keys(patch).length > 0) mergeAssistantStreamDetails(keeperName, assistantEntryId, patch)
-        setAssistantStreamState(
-          keeperName,
-          assistantEntryId,
-          'streaming',
-          'streaming',
+        if (response.advanced) setAssistantStreamState(
+          keeperName, assistantEntryId, 'opening', 'streaming',
           keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_MESSAGE_START' }),
         )
         persistActiveAssistantDraft(keeperName, assistantEntryId)
@@ -1339,7 +1305,9 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_DELTA') {
         if (!admitResponseEvent(keeperName, assistantEntryId, {
-          kind: 'observe', source: 'details', scope: event.value.stream_scope, owner: null,
+          kind: 'observe', source: 'details', scope: event.value.stream_scope,
+          owner: event.value.content_generation === undefined ? null
+            : { content_generation: event.value.content_generation, stream_scope: event.value.stream_scope },
         }).accepted) return null
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
@@ -1354,10 +1322,6 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_STOP') {
-        const value = isRecord(event.value) ? event.value : null
-        const owner = streamResponseOwnerFromFields(value)
-        const admitted = admittedStreamResponseOwner(keeperName, assistantEntryId)
-        if (owner && admitted && compareStreamResponseOwners(owner, admitted) !== 0) return null
         if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'stop', owner: event.value }).accepted) return null
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         markFinalizingIfLive('KEEPER_STREAM_MESSAGE_STOP')
@@ -1380,7 +1344,7 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_THINKING_DELTA') {
         const response = admitResponseEvent(keeperName, assistantEntryId, {
-          kind: 'observe', source: 'body', scope: null, owner: null,
+          kind: 'observe', source: 'body', scope: null, owner: event.value.response ?? null,
         })
         if (!response.accepted) return null
         const value = isRecord(event.value) ? event.value : null
@@ -1388,10 +1352,7 @@ export function applyKeeperStreamEvent(
           ? value.delta
           : undefined
         const agentCoreBlockIndex = value ? asNumber(value.index) : undefined
-        const owner = streamResponseOwnerFromFields(value?.response)
-        if (owner && isStaleThinkingResponse(keeperName, assistantEntryId, owner)) return null
-        if (owner) admitStreamResponseOwner(keeperName, assistantEntryId, owner)
-        if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { agentCoreBlockIndex, responseOwner: undefined, authoritative: response.authoritative })
+        if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { agentCoreBlockIndex, responseOwner: event.value.response && response.state.kind === 'known' ? response.state.current ?? undefined : undefined, authoritative: response.authoritative })
         else {
           setAssistantStreamState(
             keeperName,

@@ -1,0 +1,18 @@
+{
+  "base": "2a295097ad08f311bd0dd411b5223a63a5b32066",
+  "built_source_head": "7ba85180130a3a34af7c0a5223b0190a1ecf51d9",
+  "build_command": "opam exec -- dune build test/test_tui_keeper_call_evidence.exe bin/.masc_tui_render_chat.objs/byte/masc_tui_render_chat.cmo",
+  "build_exit": 0,
+  "test_command": "_build/default/test/test_tui_keeper_call_evidence.exe --color=never",
+  "test_exit": 0,
+  "run": "OXYBI27Z",
+  "passed": 3,
+  "initial_build_failure": "Unqualified Tui_decode in new owner; resolved with explicit Masc.Tui_decode",
+  "comparison": {
+    "resolver_after_explicit_input_substitution": "identical",
+    "durable_failure_and_labels_and_schedule": "identical",
+    "renderer_public_mli": "byte-identical"
+  },
+  "styling_evidence": "source only; no rendered-screen test or observed UI",
+  "scope": "Protocol decoder and receipt association/result state decisions; no providers or live runtime."
+}

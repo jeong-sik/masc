@@ -1308,7 +1308,13 @@ let apply_tool_result ~now t ~(occurrence : Live.tool_occurrence) ~execution_id 
             })
         with
         | Call_updated ->
-          t.model_signal <- Some (Tool_returned_at (returned.tool_name, now))
+          (* A receipt can enrich a superseded attempt after failover, or
+             arrive after operation settlement. It owns that historical call,
+             not the current model's progress observation. *)
+          (match t.phase with
+           | Waiting | Working when returned.attempt = t.attempt ->
+               t.model_signal <- Some (Tool_returned_at (returned.tool_name, now))
+           | Waiting | Working | Stream_ended | Stream_failed _ -> ())
         | Call_missing ->
           note_unreadable t
             "KEEPER_TOOL_RESULT_READY occurrence disappeared during update"

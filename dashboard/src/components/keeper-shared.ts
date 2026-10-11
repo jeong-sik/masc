@@ -11,10 +11,7 @@ import { isInFlightDelivery } from '../lib/keeper-delivery'
 import { relativeTime, NO_TIME_INFO } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
 import type {
-  ChatBlock,
-  ChatAttachBlock,
   Keeper,
-  KeeperConversationAttachment,
   KeeperConversationEntry,
   KeeperDiagnostic,
 } from '../types'
@@ -50,7 +47,7 @@ import {
   advanceKeeperLastSeen,
   newestConversationEntryUnix,
 } from '../keeper-last-seen'
-import { stableAttachmentId } from './chat/attachments'
+import { composerMessageOptions } from './chat/composer-message'
 import { ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, type ChatComposerCommand, type ChatComposerSendPayload } from './chat/primitives'
 import { showToast } from './common/toast'
 import { TextInput } from './common/input'
@@ -223,49 +220,6 @@ export function filterConversationEntries(
     if ((entry.rawText ?? '').toLowerCase().includes(q)) return true
     return entry.role === 'tool' && entry.label.toLowerCase().includes(q)
   })
-}
-
-function blocksToAttachments(blocks: ChatBlock[]): KeeperConversationAttachment[] {
-  const generatedCounts = new Map<string, number>()
-  return blocks
-    .filter((b): b is ChatAttachBlock => b.t === 'attach')
-    .map((b) => {
-      const baseId = stableAttachmentId({
-        name: b.name,
-        type: b.kind === 'image' || b.src?.startsWith('data:image/') ? 'image' : 'file',
-        kind: b.kind,
-        mimeType: b.mimeType,
-        size: b.sizeBytes,
-        dims: b.dims,
-        data: b.data ?? b.svg ?? b.ph,
-        src: b.src,
-      })
-      const count = generatedCounts.get(baseId) ?? 0
-      generatedCounts.set(baseId, count + 1)
-      // A reference chip rebuilds as its carrier form (#33728); only the
-      // byte-backed chips go through the data-URL reconstruction.
-      if (b.ref) {
-        const attachment: KeeperConversationAttachment =
-          b.ref.kind === 'url'
-            ? { kind: 'url', id: b.id ?? baseId, name: b.name, url: b.ref.url, mimeType: b.mimeType }
-            : { kind: 'file_id', id: b.id ?? baseId, name: b.name, fileId: b.ref.fileId, mimeType: b.mimeType }
-        return attachment
-      }
-      return {
-        id: b.id ?? (count === 0 ? baseId : `${baseId}-${count + 1}`),
-        type: b.kind === 'image' || b.src?.startsWith('data:image/') ? 'image' : 'file',
-        name: b.name,
-        size: b.sizeBytes ?? 0,
-        mimeType: b.mimeType ?? 'application/octet-stream',
-        data: b.data ?? b.src ?? '',
-        dims: b.dims,
-      } satisfies KeeperConversationAttachment
-    })
-}
-
-function blocksToDisplayBlocks(blocks: ChatBlock[]): ChatBlock[] | undefined {
-  const displayBlocks = blocks.filter((block) => block.t !== 'attach')
-  return displayBlocks.length > 0 ? displayBlocks : undefined
 }
 
 // ── Diagnostic chip ──────────────────────────────────────
@@ -825,15 +779,10 @@ export function KeeperConversationPanel({
       return
     }
     if (!keeperName || (!prompt && blocks.length === 0)) return
-    const attachments = blocksToAttachments(blocks)
-    const displayBlocks = blocksToDisplayBlocks(blocks)
     if (isKeeperThreadMessageSendInFlight(keeperName, clientActionId)) return
     try {
       await sendKeeperThreadMessage(keeperName, prompt, {
-        attachments,
-        blocks: displayBlocks,
-        clientActionId,
-        userBlocks,
+        ...composerMessageOptions({ blocks, userBlocks, clientActionId, text }),
       })
     } catch (err) {
       if (isAbortError(err)) return

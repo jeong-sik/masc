@@ -1,3 +1,4 @@
+import { readKeeperDraft, _resetChatStoreForTests } from '../keeper-chat-store'
 import { chatShowInternal, chatShowAutonomous, chatExpandAutonomousRuns } from '../lib/chat-view-prefs'
 import { keeperThreads, _resetActiveKeeperStreamsForTests, _resetLiveSendRequestOwnersForTests } from '../keeper-state'
 import { _resetKeeperThreadMessageSendGuardsForTests } from '../keeper-actions'
@@ -44,6 +45,7 @@ describe('CopilotDock', () => {
     _resetLiveSendRequestOwnersForTests()
     _resetKeeperThreadMessageSendGuardsForTests()
     dock.threads.value = {}
+    _resetChatStoreForTests()
     clearStoredToken()
     resetDevTokenBootstrap()
   })
@@ -439,6 +441,101 @@ describe('CopilotDock', () => {
     expect(dock.threads.value['masc-improver']).toBe(rows)
   })
 
+  it('separates an open Dock draft on authentication replacement', async () => {
+    setStoredToken('fixture-old')
+    const dock = renderDock()
+    dock.open()
+    await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: 'old Dock draft' } })
+    setStoredToken('fixture-new')
+    await waitFor(() => expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(''))
+  })
+
+  it('rejects old Dock Enter before the auth rerender commits', async () => {
+    setStoredToken('fixture-old')
+    const actual = useCopilotDock()
+    const dock = { ...actual, send: vi.fn() }
+    render(h(DockHarness, { dock }), container)
+    dock.open()
+    await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
+    const textarea = container.querySelector('textarea')!
+    fireEvent.input(textarea, { target: { value: 'old Dock draft' } })
+    setStoredToken('fixture-new')
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(dock.send).not.toHaveBeenCalled()
+  })
+
+  it('preserves each Keeper draft when switching the Dock recipient', async () => {
+    keepers.value = [ { name: 'first', status: 'running' }, { name: 'second', status: 'running' } ] as typeof keepers.value
+    setStoredToken('fixture-current')
+    const dock = renderDock()
+    dock.setKeeper('first')
+    dock.open()
+    await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: 'first draft' } })
+    dock.setKeeper('second')
+    await waitFor(() => expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(''))
+    fireEvent.input(container.querySelector('textarea')!, { target: { value: 'second draft' } })
+    dock.setKeeper('first')
+    await waitFor(() => expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('first draft'))
+  })
+
+  it('rejects the previous recipient callback before the Dock rerender commits', async () => {
+    keepers.value = [ { name: 'first', status: 'running' }, { name: 'second', status: 'running' } ] as typeof keepers.value
+    setStoredToken('fixture-current')
+    const actual = useCopilotDock()
+    const dock = { ...actual, send: vi.fn() }
+    dock.setKeeper('first')
+    render(h(DockHarness, { dock }), container)
+    dock.open()
+    await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
+    const textarea = container.querySelector('textarea')!
+    fireEvent.input(textarea, { target: { value: 'first draft' } })
+    dock.setKeeper('second')
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(dock.send).not.toHaveBeenCalled()
+    expect(readKeeperDraft('first')).toBe('first draft')
+  })
+
+  it('does not send with the previous screen context before route rerender', async () => {
+    setStoredToken('fixture-current')
+    const actual = useCopilotDock()
+    const dock = { ...actual, send: vi.fn() }
+    render(h(DockHarness, { dock }), container)
+    dock.open()
+    await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
+    const textarea = container.querySelector('textarea')!
+    fireEvent.input(textarea, { target: { value: 'describe this screen' } })
+    route.value = { tab: 'connectors', params: {}, postId: null }
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(dock.send).not.toHaveBeenCalled()
+    expect(readKeeperDraft('masc-improver')).toBe('describe this screen')
+  })
+
+  it('sends reference-only composer input through the actual Copilot stream protocol', async () => {
+    setStoredToken('fixture-current')
+    const fetchMock = dockFetchMock([{ type: 'RUN_FINISHED', runId: 'run', threadId: 'keeper:fixture', timestamp: 0 }])
+    vi.stubGlobal('fetch', fetchMock)
+    const dock = renderDock()
+    dock.open()
+    await waitFor(() => expect(container.querySelector('[aria-label="이미지 참조 첨부"]')).not.toBeNull())
+    fireEvent.click(container.querySelector('[aria-label="이미지 참조 첨부"]')!)
+    await waitFor(() => expect(container.querySelector('[aria-label="이미지 참조 입력"]')).not.toBeNull())
+    fireEvent.input(container.querySelector('[aria-label="이미지 참조 입력"]')!, { target: { value: 'https://example.com/fixture.png' } })
+    fireEvent.click(container.querySelector('[aria-label="참조 추가"]')!)
+    await waitFor(() => expect((container.querySelector('button.send') as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(container.querySelector('button.send')!)
+    await waitFor(() => expect(keeperStreamCalls(fetchMock)).toHaveLength(1))
+    const [, init] = keeperStreamCalls(fetchMock)[0] as [string, RequestInit]
+    const body = JSON.parse(String(init.body))
+    expect(body.channel).toBe('copilot')
+    expect(body.user_blocks).toEqual([{ type: 'image', url: 'https://example.com/fixture.png' }])
+    expect(dock.threads.value[body.name]?.find(entry => entry.role === 'user')?.attachments).toEqual([
+      expect.objectContaining({ kind: 'url', url: 'https://example.com/fixture.png' }),
+    ])
+    await waitFor(() => expect(Object.values(dock.sending.value).some(Boolean)).toBe(false))
+  })
+
   it('sends a message and shows a streaming reply', async () => {
     const fetchMock = dockFetchMock([
       { type: 'TEXT_MESSAGE_START', role: 'assistant', messageId: 'm1', threadId: 'keeper:fixture', timestamp: 0 },
@@ -450,13 +547,12 @@ describe('CopilotDock', () => {
 
     const dock = renderDock()
     dock.open()
-    await waitFor(() => expect(container.querySelector('[data-testid="copilot-dock-textarea"]')).not.toBeNull())
+    await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
 
-    const textarea = container.querySelector('[data-testid="copilot-dock-textarea"]') as HTMLTextAreaElement
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
     fireEvent.input(textarea, { target: { value: '요약해줘' } })
 
-    const sendBtn = container.querySelector('[aria-label="메시지 전송"]') as HTMLButtonElement
-    expect(sendBtn?.classList.contains('dock-send')).toBe(true)
+    const sendBtn = container.querySelector('button.send') as HTMLButtonElement
     sendBtn.click()
 
     await waitFor(() => expect(container.querySelectorAll('[data-chat-role="user"]').length).toBe(1))
@@ -474,10 +570,10 @@ describe('CopilotDock', () => {
     vi.stubGlobal('fetch', fetchMock)
     const dock = renderDock()
     dock.open()
-    await waitFor(() => expect(container.querySelector('[data-testid="copilot-dock-textarea"]')).not.toBeNull())
-    const textarea = container.querySelector('[data-testid="copilot-dock-textarea"]') as HTMLTextAreaElement
+    await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
     fireEvent.input(textarea, { target: { value: text } })
-    ;(container.querySelector('[aria-label="메시지 전송"]') as HTMLButtonElement).click()
+    ;(container.querySelector('button.send') as HTMLButtonElement).click()
     await waitFor(() => expect(keeperStreamCalls(fetchMock)).toHaveLength(1))
     const [, init] = keeperStreamCalls(fetchMock)[0] as [string, RequestInit]
     const body = JSON.parse(String(init.body))
@@ -493,12 +589,12 @@ describe('CopilotDock', () => {
 
     const dock = renderDock()
     dock.open()
-    await waitFor(() => expect(container.querySelector('[data-testid="copilot-dock-textarea"]')).not.toBeNull())
+    await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
 
-    const textarea = container.querySelector('[data-testid="copilot-dock-textarea"]') as HTMLTextAreaElement
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
     fireEvent.input(textarea, { target: { value: '요약해줘' } })
 
-    const sendBtn = container.querySelector('[aria-label="메시지 전송"]') as HTMLButtonElement
+    const sendBtn = container.querySelector('button.send') as HTMLButtonElement
     sendBtn.click()
 
     await waitFor(() => expect(keeperStreamCalls(fetchMock)).toHaveLength(1))

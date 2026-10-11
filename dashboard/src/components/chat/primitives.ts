@@ -4859,6 +4859,7 @@ function ChatComposerSession({
   streamStartedAt,
   lastEventAt,
   allowSendWhileStreaming = false,
+  isSubmissionCurrent,
   commands = [],
   onDraftChange,
   onSend,
@@ -4879,6 +4880,8 @@ function ChatComposerSession({
   /** When true, a new durable operation may be submitted while another
    *  operation is streaming. */
   allowSendWhileStreaming?: boolean
+  /** Live host ownership check before send/command effects and draft cleanup. */
+  isSubmissionCurrent?: () => boolean
   commands?: ChatComposerCommand[]
   /** Optional controlled draft handler. When omitted the composer keeps its
    *  own draft state, which prevents the host from re-rendering on every
@@ -5093,7 +5096,7 @@ function ChatComposerSession({
   }
 
   const handleSend = () => {
-    if (authRevision !== currentStoredTokenRevision() || sendDisabled) return
+    if (authRevision !== currentStoredTokenRevision() || isSubmissionCurrent?.() === false || sendDisabled) return
     const blocks: ChatBlock[] = []
     const userBlocks: KeeperUserInputBlock[] = []
     for (const att of attachments) {
@@ -5164,7 +5167,7 @@ function ChatComposerSession({
   }
 
   const runSlashCommand = (command?: ChatComposerCommand) => {
-    if (authRevision !== currentStoredTokenRevision() || !command || command.disabled) return
+    if (authRevision !== currentStoredTokenRevision() || isSubmissionCurrent?.() === false || !command || command.disabled) return
     setDraft('')
     setSlashIdx(0)
     if (textareaRef.current) textareaRef.current.style.height = 'auto'

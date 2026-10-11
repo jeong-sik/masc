@@ -1,17 +1,18 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { ChevronDown, MessageCircle, PanelRightClose, PanelRightOpen, Send, Sparkles, X } from 'lucide-preact'
+import { ChevronDown, MessageCircle, PanelRightClose, PanelRightOpen, Sparkles, X } from 'lucide-preact'
 import { persistentSignal } from '../lib/persistent-signal'
 import { globalShortcutManager } from '../lib/global-shortcut-manager'
 import { route } from '../router'
 import { keepers } from '../store'
 import { DASHBOARD_NAV_ITEMS } from '../config/navigation'
-import { isSubmitEnter } from '../lib/keyboard'
-import { currentDashboardActor } from '../api/core'
+import { currentDashboardActor, currentStoredTokenRevision } from '../api/core'
+import { storedTokenRevision } from '../api/token-revision'
 import { sendKeeperThreadMessage } from '../keeper-actions'
 import { keeperSending, keeperThreads, isDefaultVisibleConversationEntry, isAutonomousTurnEntry } from '../keeper-state'
 import { chatShowInternal, chatShowAutonomous, chatShowMetadata, chatExpandAutonomousRuns } from '../lib/chat-view-prefs'
-import { ChatTranscript } from './chat/primitives'
+import { ChatTranscript, ChatComposer, type ChatComposerSendPayload } from './chat/primitives'
+import { composerMessageOptions } from './chat/composer-message'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
 import { useIsMobile } from '../hooks/use-is-mobile'
@@ -220,10 +221,10 @@ export function useCopilotDock() {
     setMode: (mode: 'dock' | 'float') => { dockOpen.value = { ...dockOpen.value, mode } },
     setKeeper: (keeperId: string) => { dockOpen.value = { ...dockOpen.value, keeperId } },
     patch: (patch: Partial<DockState>) => { dockOpen.value = { ...dockOpen.value, ...patch } },
-    send: (text: string, keeper: DockKeeper, ctx: SurfaceContext) => {
-      if (!text.trim()) return
+    send: (text: string, keeper: DockKeeper, ctx: SurfaceContext, options: Partial<ReturnType<typeof composerMessageOptions>> = {}) => {
+      if (!text.trim() && !options.userBlocks?.length && !options.attachments?.length) return
       void sendKeeperThreadMessage(keeper.id, text, {
-        channel: 'copilot', resolveChannelWorkspaceId: currentDashboardActor, surfaceContext: ctx,
+        ...options, channel: 'copilot', resolveChannelWorkspaceId: currentDashboardActor, surfaceContext: ctx,
       }).catch(() => { /* The shared action records delivery and error on its canonical entry. */ })
     },
   }
@@ -292,6 +293,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
     phase: 'Running',
     status: 'run',
   }
+  const contextRoute = route.value
   const ctx = useMemo(() => getSurfaceContext(keeper.id), [route.value, keepers.value, keeper.id])
   const starterPrompts = useMemo(() => starterPromptsForContext(ctx), [ctx.route])
   const rawThread = dock.threads.value[keeper.id] ?? []
@@ -302,10 +304,9 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
       && (showAutonomous || !isAutonomousTurnEntry(entry))),
   [rawThread, showInternal, showAutonomous])
   const sending = dock.sending.value[keeper.id] === true
-  const [val, setVal] = useState('')
-  const [focus, setFocus] = useState(false)
+  const authRevision = storedTokenRevision.value
+  const selectedKeeperId = dock.state.value.keeperId
   const [pickOpen, setPickOpen] = useState(false)
-  const taRef = useRef<HTMLTextAreaElement | null>(null)
   const threadRef = useRef<HTMLDivElement | null>(null)
   const rootRef = useRef<HTMLElement | null>(null)
   const isMobile = useIsMobile()
@@ -315,26 +316,16 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
     if (el) el.scrollTop = el.scrollHeight
   }, [msgs, keeper.id])
 
-  const doSend = (text?: string) => {
-    const v = text !== undefined ? text : val
-    if (!v.trim()) return
-    dock.send(v, keeper, ctx)
-    setVal('')
-    if (taRef.current) taRef.current.style.height = 'auto'
+  const ownsInput = () => authRevision === currentStoredTokenRevision()
+    && selectedKeeperId === dock.state.value.keeperId
+    && contextRoute === route.value
+  const doSend = (text: string) => {
+    if (!ownsInput()) return
+    dock.send(text, keeper, ctx)
   }
-
-  const onKey = (e: KeyboardEvent) => {
-    if (isSubmitEnter(e) && !e.shiftKey) {
-      e.preventDefault()
-      doSend()
-    }
-  }
-
-  const grow = (e: Event) => {
-    const target = e.target as HTMLTextAreaElement
-    setVal(target.value)
-    target.style.height = 'auto'
-    target.style.height = `${Math.min(target.scrollHeight, 120)}px`
+  const submit = (payload: ChatComposerSendPayload) => {
+    if (!ownsInput()) return
+    dock.send(payload.text, keeper, ctx, composerMessageOptions(payload))
   }
 
   const drag = (e: MouseEvent) => {
@@ -488,29 +479,18 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
       </div>
 
       <div class="dock-composer">
-        <div class=${`dock-comp-box ${focus ? 'focus' : ''}`}>
-          <textarea
-            ref=${taRef}
-            rows=${1}
-            value=${val}
-            placeholder=${`${keeper.kr}에게… (이 화면 기준)`}
-            onInput=${grow}
-            onKeyDown=${onKey}
-            onFocus=${() => setFocus(true)}
-            onBlur=${() => setFocus(false)}
-            onMouseDown=${(e: MouseEvent) => e.stopPropagation()}
-            data-testid="copilot-dock-textarea"
-          />
-          <button
-            type="button"
-            class="dock-send"
-            aria-label="메시지 전송"
-            disabled=${!val.trim()}
-            onClick=${() => doSend()}
-          >
-            <${Send} size=${14} aria-hidden="true" />
-          </button>
-        </div>
+        <${ChatComposer}
+          key=${keeper.id}
+          draftPersistKey=${keeper.id}
+          keeperLabel=${keeper.kr}
+          placeholder=${`${keeper.kr}에게… (이 화면 기준)`}
+          disabled=${false}
+          streaming=${sending}
+          allowSendWhileStreaming=${true}
+          isSubmissionCurrent=${ownsInput}
+          onSend=${submit}
+          footerMode="activity"
+        />
         <div class="dock-foot">
           <span>발신 <b>@operator</b></span>
           <span style=${{ marginLeft: 'auto' }}><kbd>↵</kbd> 전송 · <kbd>Esc</kbd> 닫기</span>

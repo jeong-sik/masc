@@ -152,18 +152,6 @@
 
 /* ── composer ── */
 .dock-composer { flex: none; padding: var(--sp-3) var(--sp-4) var(--sp-4); border-top: 1px solid var(--border-main); background: var(--bg-panel); }
-.dock-comp-box {
-  display: flex; align-items: flex-end; gap: var(--sp-2);
-  background: var(--bg-card); border: 1px solid var(--border-main);
-  border-radius: var(--radius-md); padding: 6px 6px 6px var(--sp-4); transition: 0.15s;
-}
-.dock-comp-box.focus { border-color: var(--volt-dim); box-shadow: 0 0 0 3px var(--volt-wash); }
-.dock-comp-box textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: var(--text-bright); font-family: var(--font-ui); font-size: 12.5px; line-height: 1.5; padding: 8px 0; max-height: 120px; min-height: 20px; }
-.dock-comp-box textarea::placeholder { color: var(--text-dim); }
-.dock-send { width: 30px; height: 30px; flex: none; border-radius: var(--radius-sm); border: 1px solid var(--volt); background: var(--volt); color: var(--volt-ink); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: var(--fs-14); transition: 0.14s; }
-.dock-send svg { flex: none; }
-.dock-send:hover:not(:disabled) { background: var(--volt-strong); box-shadow: 0 0 14px var(--volt-glow); }
-.dock-send:disabled { opacity: 0.4; cursor: default; }
 .dock-foot { display: flex; align-items: center; gap: var(--sp-3); margin-top: 8px; font-size: var(--fs-10); color: var(--text-dim); }
 .dock-foot b { color: var(--volt-strong); font-family: var(--font-mono); font-weight: 600; }
 .dock-foot kbd { font-family: var(--font-mono); font-size: var(--fs-9); background: var(--bg-card); border: 1px solid var(--border-main); border-bottom-width: 2px; border-radius: var(--radius-xs); padding: 1px 4px; color: var(--text-mid); }

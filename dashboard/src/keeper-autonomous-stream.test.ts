@@ -11,6 +11,35 @@ const page = (sequence: number, event: KeeperChatStreamEvent | null): KeeperTurn
   events: [{ sequence, timestamp: 1, event }], cursor: { sequence, offset: sequence + 1 }, hasMore: false })
 beforeEach(() => { keeperThreads.value = {}; _resetKeeperStreamBuffersForTests(); _resetKeeperAutonomousRecoveryForTests(); vi.mocked(fetchKeeperTurnEvents).mockReset() })
 describe('autonomous journal recovery', () => {
+  it('isolates deferred journal reads and reasoning buffers for Keepers sharing a turn reference', async () => {
+    let releaseFirst!: (value: KeeperTurnEventPage) => void
+    const journal = (name: string): KeeperTurnEventPage => ({ turnRef: 'trace#9', hasMore: false,
+      cursor: { sequence: 3, offset: 100 }, events: [
+        { sequence: 0, timestamp: 1, event: { ...base, threadId: `keeper:${name}`, type: 'CUSTOM',
+          name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta: `${name} reasoning`,
+            response: { content_generation: 1, stream_scope: 0 } } } },
+        { sequence: 1, timestamp: 1, event: { ...base, threadId: `keeper:${name}`, type: 'TOOL_CALL_START',
+          toolStreamScope: 0, toolCallBlockIndex: 1, toolCallId: 'same-provider-id', toolCallName: `${name} tool` } },
+        { sequence: 2, timestamp: 1, event: { ...text(`${name} answer`), threadId: `keeper:${name}` } },
+        { sequence: 3, timestamp: 1, event: { ...base, threadId: `keeper:${name}`, type: 'RUN_FINISHED' } },
+      ] })
+    vi.mocked(fetchKeeperTurnEvents).mockImplementation(name => name === 'first'
+      ? new Promise(resolve => { releaseFirst = resolve }) : Promise.resolve(journal(name)))
+    const first = recoverKeeperAutonomousTurn('first', 'trace#9', 3)
+    await recoverKeeperAutonomousTurn('second', 'trace#9', 3)
+    expect(keeperThreads.value.first).toBeUndefined()
+    releaseFirst(journal('first'))
+    await first
+    for (const name of ['first', 'second']) {
+      const parent = keeperThreads.value[name]?.find(entry => entry.source === 'autonomous_turn')
+      expect(parent).toMatchObject({ text: `${name} answer`, delivery: 'delivered', streamState: null,
+        responseState: { phase: 'terminal', lastSequence: 3 }, traceSteps: [
+          { kind: 'think', text: `${name} reasoning` }, { kind: 'tool', name: `${name} tool` },
+        ] })
+      await recoverKeeperAutonomousTurn(name, 'trace#9', 3)
+    }
+    expect(fetchKeeperTurnEvents).toHaveBeenCalledTimes(2)
+  })
   it('renders saying and terminal state without a user message or operation receipt', async () => {
     vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(0, text('answer'))).mockResolvedValueOnce(page(1, { ...base, type: 'RUN_FINISHED' }))
     await recoverKeeperAutonomousTurn('k', 'trace#9', 0)

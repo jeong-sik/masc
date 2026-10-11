@@ -287,7 +287,6 @@ val run_named :
   ?required_native_posture:Runtime_native_tools.posture ->
   ?initial_messages:Agent_core.Types.message list ->
   ?model_input_projection:Agent_core.Agent.model_input_projection ->
-  ?recovery_view:Keeper_recovery_transmission.t ->
   ?temperature:float ->
   ?accept:(Agent_core.Types.api_response -> bool) ->
   ?hooks:Agent_core.Hooks.hooks ->
@@ -433,13 +432,12 @@ type attempt_inference_policy =
 module For_testing : sig
   val official_client_turn_start :
     session_id:string option ->
-    recovery_view:'view option ->
     read_boundary:(unit -> Keeper_carried_front.turn_start) ->
     Keeper_carried_front.turn_start
   (** Where an official client's carried range begins when nothing later
       names a front: the boundary read from the session trace, and
       [Turn_boundary_unknown] (the newest atom alone) for a turn with no
-      session trace or with a recovery view, never the whole history. *)
+      session trace, never the whole history. *)
 
   val provider_attempt_dispatch :
     request_serialized:bool ->

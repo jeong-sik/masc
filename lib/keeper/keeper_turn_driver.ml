@@ -584,7 +584,6 @@ let lane_should_retry
   else if Keeper_turn_driver_try_runtime.attempt_rejected_should_try_next error
   then
     true
-  else if Keeper_recovery_transmission.should_try_next error then true
   else if Keeper_turn_driver_try_runtime.candidate_access_should_try_next error
   then
     true
@@ -1715,18 +1714,13 @@ let provider_attempt_dispatch ~request_serialized result =
    ([Keeper_carried_front.Turn_boundary_unknown]) rather than everything: a
    short range costs one turn of context, the whole history costs the turn.
    [Turn_boundary { end_atom = 0 }] means a history with no completed turn,
-   which is not what these turns know. A recovery view names no boundary
-   either; the official-client lanes refuse that view before dispatch, and
-   the value says the same thing if one ever reaches them. *)
-let official_client_turn_start ~session_id ~recovery_view ~read_boundary =
-  match session_id, recovery_view with
-  | Some _, None -> read_boundary ()
-  | None, (None | Some _) ->
+   which is not what these turns know. *)
+let official_client_turn_start ~session_id ~read_boundary =
+  match session_id with
+  | Some _ -> read_boundary ()
+  | None ->
     Keeper_carried_front.Turn_boundary_unknown
       { reason = "no session trace names the last completed turn" }
-  | Some _, Some _ ->
-    Keeper_carried_front.Turn_boundary_unknown
-      { reason = "a recovery view names no turn boundary" }
 ;;
 
 (* Native recovery evidence can close the retry boundary, but cannot erase an
@@ -1770,7 +1764,6 @@ let run_named
     ?required_native_posture
     ?(initial_messages = [])
     ?model_input_projection
-    ?recovery_view
     ?temperature
     ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
     ?hooks
@@ -1864,23 +1857,22 @@ let run_named
          with no absorbed point starts (RFC keeper-context-window-in-tokens
          §13.4) and, under the small input policy, the boundary before which
          completed turns' tool bodies demote. Read once per turn for every
-         input policy and lane. A turn resuming an operation composes from
-         its recovery view and names no boundary here, as before. *)
+         input policy and lane. *)
       let turn_boundary = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
-        match session_id, recovery_view with
-        | Some trace_id, None ->
+        match session_id with
+        | Some trace_id ->
           Domain_pool_ref.submit_io_or_inline (fun () ->
             Keeper_turn_driver_try_provider.turn_start
               ~config:(Workspace.default_config base_path) ~keeper_name ~trace_id
               ~messages:initial_messages)
-        | None, _ | Some _, Some _ -> Keeper_carried_front.Turn_boundary { end_atom = 0 }) in
+        | None -> Keeper_carried_front.Turn_boundary { end_atom = 0 }) in
       let official_client_turn_boundary = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
-        official_client_turn_start ~session_id ~recovery_view
+        official_client_turn_start ~session_id
           ~read_boundary:(fun () -> Eio.Lazy.force turn_boundary)) in
       let continuity = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
-        match session_id, recovery_view with
-        | None, _ | _, Some _ -> None
-        | Some trace_id, None ->
+        match session_id with
+        | None -> None
+        | Some trace_id ->
           Domain_pool_ref.submit_io_or_inline (fun () ->
             let continuity, notes =
               Keeper_turn_driver_try_provider.read_keeper_continuity
@@ -2352,11 +2344,7 @@ let run_named
         | Some checkpoint when attempt_runtime_id <> checkpoint.Keeper_semantic_execution.runtime_id
             || Runtime_execution.checkpoint_owner runtime.Runtime_instance.execution <> Runtime_execution.Official_client ->
           Error (Agent_core.Error.Internal "Gate continuation must resume its original official-client runtime")
-        | Some _ | None -> match recovery_view, runtime.Runtime_instance.execution with
-        | Some _, Runtime_execution.Agent_core _ ->
-          Keeper_recovery_transmission.require_reader agent_core_tools
-          |> Result.map_error Keeper_recovery_transmission.to_core_error
-        | _ -> Ok () in
+        | Some _ | None -> Ok () in
       let has_tools, surface_enabled = match runtime.Runtime_instance.execution with
         | Runtime_execution.Agent_core _ -> agent_core_tools <> [], true
         | Runtime_execution.Codex_app_server _
@@ -2399,12 +2387,12 @@ let run_named
           ; attempt_agent_core_checkpoint = agent_core_checkpoint
           ; attempt_replay_prefix_projection = replay_prefix_projection
           } =
-        match native_runtime, recovery_view with
-        | Some _, _ | None, Some _ ->
+        match native_runtime with
+        | Some _ ->
           {attempt_goal_blocks=goal_blocks;attempt_initial_messages=initial_messages;
            attempt_agent_core_checkpoint=agent_core_checkpoint;
            attempt_replay_prefix_projection=Keeper_replay_prefix.unchanged}
-        | None, None -> project_input_for_attempt
+        | None -> project_input_for_attempt
           ~project_media:(Keeper_media_reading.project media_projector)
           ~project_images
           ~keeper_name
@@ -2536,15 +2524,6 @@ let run_named
            "input policy runtime=%s selected=%s context_owner=official_client applied=false"
            attempt_runtime_id (Keeper_input_policy.to_string input_policy));
       match runtime.Runtime_instance.execution with
-      | (Runtime_execution.Codex_app_server _
-        | Runtime_execution.Claude_code _
-        | Runtime_execution.Antigravity_cli _
-        | Runtime_execution.Muse_serve _) when Option.is_some recovery_view ->
-        (Error (Keeper_recovery_transmission.to_core_error
-          (Keeper_recovery_transmission.Client_projection_not_integrated
-            {runtime_id=attempt_runtime_id})), None,
-         Keeper_provider_attempt_effect.No_effect_observed,
-         Keeper_attempt_dispatch.Rejected_before_dispatch)
       | Runtime_execution.Codex_app_server config ->
         let ( reset_model_input_observation
             , on_model_input_window_observation
@@ -3098,7 +3077,7 @@ let run_named
               provider_config
         in
         (match Keeper_required_tools.check_provider
-            (match recovery_view with Some _ -> Keeper_required_tools.Required | None -> tool_requirement)
+            tool_requirement
             ~runtime_id:attempt_runtime_id provider_config with
          | Error failure ->
            Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
@@ -3180,7 +3159,6 @@ let run_named
               tools = agent_core_tools
             ; initial_messages
             ; model_input_projection
-            ; recovery_view
             ; (* Keeper policy knobs, injected from the resolved layer like
                  [provider_call_deadline_sec] below rather than threaded through
                  run_named as optionals: every entry point that reaches this

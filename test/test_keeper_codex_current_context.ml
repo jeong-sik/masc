@@ -955,12 +955,12 @@ let test_an_unknown_turn_start_carries_the_newest_atom () =
 let turn_start_to_string = Keeper_carried_front.turn_start_to_string
 
 let test_a_turn_without_a_session_trace_opens_on_the_newest_atom () =
-  (* A turn with no session trace, or with a recovery view, cannot read where
-     the last completed turn ended. [Turn_boundary { end_atom = 0 }] would
-     claim a history with no completed turn and send all of it. *)
+  (* A turn with no session trace cannot read where the last completed turn
+     ended. [Turn_boundary { end_atom = 0 }] would claim a history with no
+     completed turn and send all of it. *)
   let read = Keeper_carried_front.Turn_boundary { end_atom = 60 } in
-  let start ~session_id ~recovery_view =
-    Keeper_turn_driver.For_testing.official_client_turn_start ~session_id ~recovery_view
+  let start ~session_id =
+    Keeper_turn_driver.For_testing.official_client_turn_start ~session_id
       ~read_boundary:(fun () -> read)
   in
   let unknown = function
@@ -968,15 +968,11 @@ let test_a_turn_without_a_session_trace_opens_on_the_newest_atom () =
     | Keeper_carried_front.Turn_boundary _ -> false
   in
   check string "a session trace reads the boundary" (turn_start_to_string read)
-    (turn_start_to_string (start ~session_id:(Some "trace-1") ~recovery_view:None));
+    (turn_start_to_string (start ~session_id:(Some "trace-1")));
   check bool "no session trace: unknown" true
-    (unknown (start ~session_id:None ~recovery_view:None));
-  check bool "a recovery view: unknown" true
-    (unknown (start ~session_id:(Some "trace-1") ~recovery_view:(Some ())));
-  check bool "no session trace with a recovery view: unknown" true
-    (unknown (start ~session_id:None ~recovery_view:(Some ())));
+    (unknown (start ~session_id:None));
   check (list int) "and a Codex Start without a trace carries the newest atom" [ 63 ]
-    (carried (start ~session_id:None ~recovery_view:None))
+    (carried (start ~session_id:None))
 let test_resume_sends_no_history () =
   (* The thread already holds the conversation. Neither the instructions nor
      the turn input carry any of it. *)

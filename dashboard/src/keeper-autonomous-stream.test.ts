@@ -284,6 +284,16 @@ describe('autonomous journal recovery', () => {
       responseState: { phase: 'terminal', lastSequence: 3 } })
     expect(keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')?.traceSteps?.filter(step => step.kind === 'progress') ?? []).toEqual([])
   })
+  it.each(['RUN_FINISHED', 'RUN_ERROR'] as const)('keeps late reasoning outside a %s terminal boundary', (type) => {
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('answer'))
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 1,
+      type === 'RUN_ERROR' ? { ...base, type, message: 'failed' } : { ...base, type })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 2, { ...base, type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'late reasoning' } })
+    const parent = keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')
+    expect(parent?.responseState).toMatchObject({ phase: 'terminal', lastSequence: 2 })
+    expect(parent?.traceSteps?.filter(step => step.kind === 'think') ?? []).toEqual([])
+  })
   it('deduplicates replay at the turn-owned reducer boundary', () => {
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('a'))
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('a'))

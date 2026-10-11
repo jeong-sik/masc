@@ -316,6 +316,23 @@ let test_capacity_outage_stops_before_sibling () = with_store (fun keepers_dir -
   check bool "outage cause remains explicit" true (outcome=Worker.Pending "provider unavailable");
   check string "outage preserves all pending bytes" before (Fs_compat.load_file path))
 
+let test_worker_deferred_after_commit_reports_commit () = with_store (fun keepers_dir ->
+  List.iter (fun id -> ignore (append keepers_dir id ("rule " ^ id))) ["a";"b"];
+  let calls = ref [] in
+  let outcome = Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+    ~judge:(fun selected ->
+      let names = candidate_names selected in calls := names :: !calls;
+      match names with
+      | ["a";"b"] -> Worker.Input_size_refused "full request too large"
+      | ["a"] -> ignore (commit keepers_dir (Queue.candidate_ids selected) []); Worker.Committed
+      | ["b"] -> Worker.Deferred "provider unavailable"
+      | _ -> fail "unexpected or repeated capacity slice") in
+  check (list (list string)) "deferred sibling still stops the pass after a commit"
+    [["a";"b"];["a"];["b"]] (List.rev !calls);
+  check bool "earlier commit is reported settled, not pending" true
+    (outcome=Worker.Settled {has_more=false});
+  check (list string) "deferred sibling remains durable" ["b"] (candidate_names (batch keepers_dir)))
+
 let test_nested_capacity_retains_indivisible_input () = with_store (fun keepers_dir ->
   List.iter (fun id -> ignore (append keepers_dir id ("rule " ^ id))) ["a";"b";"c";"d"];
   let calls = ref [] in
@@ -448,6 +465,7 @@ let () = run "durable explicit admission queue"
     test_case "new input during semantic deferral is recheck, not commit" `Quick test_semantic_deferral_with_new_tail_is_not_commit;
     test_case "capacity siblings continue past semantic uncertainty" `Quick test_capacity_left_uncertainty_does_not_block_right;
     test_case "capacity sibling traversal stops on provider outage" `Quick test_capacity_outage_stops_before_sibling;
+    test_case "deferred sibling after a commit still reports the commit" `Quick test_worker_deferred_after_commit_reports_commit;
     test_case "size with a same failure is deferred whole" `Quick test_size_with_a_same_failure_is_deferred_whole;
     test_case "nested capacity split retains indivisible input" `Quick test_nested_capacity_retains_indivisible_input;
     test_case "all deferred capacity siblings do not spin" `Quick test_capacity_all_siblings_deferred_do_not_spin;

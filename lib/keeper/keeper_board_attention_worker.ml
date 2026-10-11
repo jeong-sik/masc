@@ -1923,9 +1923,8 @@ let release_process_recovery ~base_path ~keeper_name =
 ;;
 
 let protect_process_recovery_release release =
-  match Eio.Fiber.is_cancelled () with
-  | true | false -> Eio.Cancel.protect release
-  | exception Effect.Unhandled _ -> release ()
+  try ignore (Eio.Fiber.is_cancelled ()); Eio.Cancel.protect release
+  with Effect.Unhandled _ -> release ()
 ;;
 
 let with_process_recovery_claim ~base_path ~keeper_name run =

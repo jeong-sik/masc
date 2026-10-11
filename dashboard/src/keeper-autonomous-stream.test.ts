@@ -11,6 +11,30 @@ const page = (sequence: number, event: KeeperChatStreamEvent | null): KeeperTurn
   events: [{ sequence, timestamp: 1, event }], cursor: { sequence, offset: sequence + 1 }, hasMore: false })
 beforeEach(() => { keeperThreads.value = {}; _resetKeeperStreamBuffersForTests(); _resetKeeperAutonomousRecoveryForTests(); vi.mocked(fetchKeeperTurnEvents).mockReset(); vi.mocked(fetchKeeperCurrentTurn).mockReset().mockResolvedValue({ state: 'idle' }) })
 describe('autonomous journal recovery', () => {
+  it('recovers historical model and usage observations without reopening canonical delivery', () => {
+    mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
+      turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null,
+      blocks: [{ t: 'p', html: 'canonical answer' }], replyBlockSource: 'canonical_body' }])
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, { ...base, type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START',
+      value: { content_generation: 1, stream_scope: 0, provider_message_id: 'provider-message', model: 'observed-model' } })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 1, { ...base, type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_DELTA',
+      value: { content_generation: 1, stream_scope: 0, stop_reason: 'end_turn', usage: { input_tokens: 3, output_tokens: 7 } } })
+    expect(keeperThreads.value.k?.[0]).toMatchObject({ text: 'canonical answer', delivery: 'history', streamState: null,
+      replyBlockSource: 'canonical_body', blocks: [{ t: 'p', html: 'canonical answer' }],
+      details: { modelUsed: 'observed-model', providerMessageId: 'provider-message', stopReason: 'end_turn',
+        usage: { inputTokens: 3, outputTokens: 7 } } })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 2, { ...base, type: 'CUSTOM', name: 'KEEPER_MODEL_CONTENT_ACTIVITY',
+      value: { generation: 1, stream_scope: 0, block_index: 0, channel: 'thinking', state: 'observed' } })
+    expect(keeperThreads.value.k?.[0]).toMatchObject({ delivery: 'history', streamState: null,
+      responseState: { lastSequence: 2 } })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 3, { ...base, type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_STOP',
+      value: { content_generation: 1, stream_scope: 0 } })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 4, { ...base, type: 'RUN_FINISHED' })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 5, { ...base, type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START',
+      value: { content_generation: 2, stream_scope: 1, model: 'late-model' } })
+    expect(keeperThreads.value.k?.[0]).toMatchObject({ text: 'canonical answer', delivery: 'history', streamState: null,
+      details: { modelUsed: 'observed-model' }, responseState: { phase: 'terminal', lastSequence: 5 } })
+  })
   it('retains recovery failure through history convergence and clears it after a successful read', async () => {
     vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(0, text('answer')))
     await recoverKeeperAutonomousTurn('k', 'trace#9', 0)

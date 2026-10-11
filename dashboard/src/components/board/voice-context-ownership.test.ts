@@ -5,11 +5,16 @@ import { render, fireEvent, cleanup, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ComposerV2 } from './composer-v2'
 import { BoardSurface } from './board-surface'
-import { operatorSnapshot } from '../../operator-store'
+import { sendBroadcast } from '../../api'
+import { operatorSnapshot, dispatchOperatorAction } from '../../operator-store'
 import { boardPosts, boardHearthFilter } from '../../store'
 import { boardComposerMode } from './board-state'
 import type { OperatorSnapshot } from '../../types'
 vi.mock('../../api', () => ({ currentDashboardActor: () => 'test', sendBroadcast: vi.fn(), broadcastReceiptMessage: () => 'receipt', fetchBoardHearths: vi.fn().mockResolvedValue([]), fetchSubBoards: vi.fn().mockResolvedValue([]), fetchBoardFlairs: vi.fn().mockResolvedValue([]) }))
+vi.mock('../../operator-store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../operator-store')>()
+  return { ...actual, dispatchOperatorAction: vi.fn().mockResolvedValue({ status: 'ok' }) }
+})
 const getUserMedia = vi.fn()
 const startRecorder = vi.fn()
 const stopTrack = vi.fn()
@@ -20,6 +25,7 @@ beforeEach(() => {
   boardComposerMode.value = 'mention'
   operatorSnapshot.value = { root: { paused: false, namespace: 'default' }, sessions: [], keepers: [{ name: 'alpha', status: 'running' }, { name: 'beta', status: 'running' }], recent_messages: [], available_actions: [] } as unknown as OperatorSnapshot
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response('[]', { headers: { 'content-type': 'application/json' } })))
+  vi.mocked(sendBroadcast).mockReset(); vi.mocked(dispatchOperatorAction).mockReset().mockResolvedValue({ status: 'ok', confirm_required: false, result: 'sent' })
   getUserMedia.mockReset(); startRecorder.mockReset(); stopTrack.mockReset()
   vi.stubGlobal('MediaRecorder', class { start = startRecorder })
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } })
@@ -110,4 +116,60 @@ it('cancels mobile voice when a typed mention changes its delivery recipient', a
   await act(async () => { resolve(stream) })
   expect(startRecorder).not.toHaveBeenCalled()
   expect(stopTrack).toHaveBeenCalledTimes(1)
+})
+
+it('holds broadcast sending immediately after native microphone admission', async () => {
+  let resolve!: (value: MediaStream) => void
+  getUserMedia.mockReturnValue(new Promise(done => { resolve = done }))
+  const view = render(h(ComposerV2, { workspaceId: 'ops' }))
+  fireEvent.input(view.getByLabelText('Composer v2 message'), { target: { value: 'voice draft' } })
+  view.getByRole('button', { name: 'Start voice input' }).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  view.getByRole('button', { name: 'Send' }).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  expect(getUserMedia).toHaveBeenCalledTimes(1)
+  expect(sendBroadcast).not.toHaveBeenCalled()
+  view.unmount()
+  await act(async () => { resolve(stream) })
+  expect(stopTrack).toHaveBeenCalledTimes(1)
+})
+
+it('holds mobile mention sending immediately after native microphone admission', async () => {
+  let resolve!: (value: MediaStream) => void
+  getUserMedia.mockReturnValue(new Promise(done => { resolve = done }))
+  const view = render(h(BoardSurface, {}))
+  fireEvent.click(view.getByTestId('bd-composer-mobile-toggle'))
+  fireEvent.input(view.getByTestId('bd-composer-mobile-body'), { target: { value: 'voice draft @alpha' } })
+  view.getByLabelText('Start mobile mention voice input').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  view.getByTestId('bd-composer-mobile-send').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  expect(getUserMedia).toHaveBeenCalledTimes(1)
+  expect(dispatchOperatorAction).not.toHaveBeenCalled()
+  view.unmount()
+  await act(async () => { resolve(stream) })
+  expect(stopTrack).toHaveBeenCalledTimes(1)
+})
+
+it('does not acquire a microphone after a broadcast was synchronously admitted', async () => {
+  let resolve!: (value: Awaited<ReturnType<typeof sendBroadcast>>) => void
+  vi.mocked(sendBroadcast).mockReturnValue(new Promise(done => { resolve = done }))
+  getUserMedia.mockReturnValue(new Promise(() => {}))
+  const view = render(h(ComposerV2, { workspaceId: 'ops' }))
+  fireEvent.input(view.getByLabelText('Composer v2 message'), { target: { value: 'sent draft' } })
+  view.getByRole('button', { name: 'Send' }).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  view.getByRole('button', { name: 'Start voice input' }).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  expect(sendBroadcast).toHaveBeenCalledTimes(1)
+  expect(getUserMedia).not.toHaveBeenCalled()
+  await act(async () => { resolve({ ok: true, requestId: 'voice-boundary', deliveryKind: 'passive', reason: null, workspacePersisted: true }) })
+})
+
+it('does not acquire a microphone after a mobile mention was synchronously admitted', async () => {
+  let resolve!: (value: Awaited<ReturnType<typeof dispatchOperatorAction>>) => void
+  vi.mocked(dispatchOperatorAction).mockReturnValue(new Promise(done => { resolve = done }))
+  getUserMedia.mockReturnValue(new Promise(() => {}))
+  const view = render(h(BoardSurface, {}))
+  fireEvent.click(view.getByTestId('bd-composer-mobile-toggle'))
+  fireEvent.input(view.getByTestId('bd-composer-mobile-body'), { target: { value: 'sent draft @alpha' } })
+  view.getByTestId('bd-composer-mobile-send').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  view.getByLabelText('Start mobile mention voice input').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  expect(dispatchOperatorAction).toHaveBeenCalledTimes(1)
+  expect(getUserMedia).not.toHaveBeenCalled()
+  await act(async () => { resolve({ status: 'ok', confirm_required: false, result: 'sent' }) })
 })

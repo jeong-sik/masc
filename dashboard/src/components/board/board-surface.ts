@@ -853,6 +853,7 @@ function BdComposer() {
   const mobileVoiceContext = useRef({ localHearth, mobileMentionTarget, mobileOpen })
   mobileVoiceContext.current = { localHearth, mobileMentionTarget, mobileOpen }
   const mobileVoice = useVoiceInput({
+    onAdmitted: () => !submitting.value && !operatorActionBusy.value,
     isCurrent: () => mobileOpen
       && boardComposerMode.value === mode
       && boardHearthFilter.value === admittedHearthFilter

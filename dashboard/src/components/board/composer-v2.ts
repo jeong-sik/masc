@@ -232,6 +232,7 @@ export function ComposerV2({
   const voiceContext = useRef({ workspace, mode, deliveryKeeper })
   voiceContext.current = { workspace, mode, deliveryKeeper }
   const voice = useVoiceInput({
+    onAdmitted: () => !submitting.value && !operatorActionBusy.value,
     isCurrent: () => voiceContext.current.workspace === workspace
       && voiceContext.current.mode === mode
       && (mode !== 'dm' || voiceContext.current.deliveryKeeper === deliveryKeeper),

@@ -11,7 +11,8 @@
  * This module owns the MediaRecorder lifecycle so the composer component stays
  * a thin shell: a mic button bound to {@link useVoiceInput} plus a status hint.
  */
-import { useCallback, useLayoutEffect, useRef, useState } from 'preact/hooks'
+import { useSignal } from '@preact/signals'
+import { useCallback, useLayoutEffect, useRef } from 'preact/hooks'
 import { authHeaders, fetchControlPlane, currentStoredTokenRevision, subscribeStoredTokenChanges } from '../../api/core'
 import { recordingToWav } from './voice-wav'
 
@@ -110,7 +111,7 @@ interface VoiceSession {
 }
 
 export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInput {
-  const [state, setState] = useState<VoiceInputState>('idle')
+  const state = useSignal<VoiceInputState>('idle')
   const mounted = useRef(false)
   const active = useRef<VoiceSession | null>(null)
   const supported = voiceInputSupported()
@@ -133,7 +134,7 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInput {
       session.stream?.getTracks().forEach(track => track.stop())
       session.stream = null
       session.chunks = []
-      if (mounted.current && wasActive) setState('idle')
+      if (mounted.current && wasActive) state.value = 'idle'
       if (!session.settled) {
         session.settled = true
         session.options.onSettled?.(session.id)
@@ -179,7 +180,7 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInput {
     active.current = session
     if (session.options.onAdmitted?.(session.id) === false) { release(session, true); return }
     session.releaseAuth = subscribeStoredTokenChanges(() => release(session, true))
-    setState('acquiring')
+    state.value = 'acquiring'
     const fail = (message: string) => {
       const present = owns(session)
       release(session, true)
@@ -205,7 +206,7 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInput {
         session.stream?.getTracks().forEach(track => track.stop())
         session.stream = null
         if (blob.size === 0) { fail('녹음된 오디오 없음'); return }
-        setState('transcribing')
+        state.value = 'transcribing'
         session.options.onPhaseChanged?.(session.id, 'transcribing')
         void (async () => {
           try {
@@ -224,7 +225,7 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInput {
       }
       recorder.onerror = () => fail('녹음 중 오류가 발생했습니다.')
       recorder.start()
-      setState('recording')
+      state.value = 'recording'
       session.options.onPhaseChanged?.(session.id, 'recording')
     } catch (error) {
       const e = error as DOMException
@@ -234,5 +235,5 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInput {
     }
   }
 
-  return { state, supported, start, stop }
+  return { get state() { return state.value }, supported, start, stop }
 }

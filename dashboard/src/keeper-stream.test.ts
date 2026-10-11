@@ -365,6 +365,59 @@ describe('Keeper operation stream projection', () => {
     ])
   })
 
+  it.each([false, true])('keeps trace lanes separate through late tool convergence (wrapper=%s)', wrapper => {
+    const operationId = 'trace-tool-convergence'
+    _clearTrackedKeeperChatOperationsForTests()
+    upsertTrackedKeeperChatOperation({ operationId, keeperName: 'sangsu', message: 'input', submittedAt: 1 })
+    assistantEntry(operationId)
+    const source = { kind: 'operation' as const, operationId }
+    let sequence = 0
+    const send = (event: KeeperChatStreamEvent) => wrapper
+      ? applyKeeperOperationTurnEvent('sangsu', { operationId, sequence: sequence++, event })
+      : applyKeeperStreamEvent('sangsu', 'reply-1', event, source)
+    const owner = { content_generation: 1, stream_scope: 0 }
+    send({ type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: owner })
+    send({ type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'provided reasoning', response: owner } })
+    _flushPendingKeeperStreamDeltasForTests()
+    const published = [{ kind: 'think' as const, text: '', contentWithheld: true }]
+    mergeServerHistoryEntries('sangsu', chatHistoryEntriesFromRest('sangsu', [{ id: 'reply-1', role: 'assistant',
+      source: 'direct_assistant', content: 'canonical answer', ts: 1,
+      delivery_provenance_status: 'valid', delivery_provenance: operationDeliveryProvenance(operationId, 'terminal_result'),
+      blocks: [{ t: 'trace', trace: published }] }]))
+    appendThreadEntry('sangsu', { id: 'other-reply', role: 'assistant', source: 'direct_assistant', label: 'sangsu',
+      text: 'other input answer', rawText: 'other input answer', delivery: 'streaming', streamState: 'thinking',
+      deliveryProvenance: operationDeliveryProvenance('other-operation', 'terminal_result'),
+      traceSteps: [{ kind: 'think', text: 'other reasoning' }] })
+    send({ type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read' })
+    send({ type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(), executionId: 'execution' } })
+    const observedTool = requiredFixture(requiredFixture(keeperThreads.value.sangsu).find(row => row.role === 'tool'))
+    const canonicalReply = requiredFixture(chatHistoryEntriesFromRest('sangsu', [{ id: 'reply-1', role: 'assistant',
+      source: 'direct_assistant', content: 'canonical answer', ts: 1,
+      delivery_provenance_status: 'valid', delivery_provenance: operationDeliveryProvenance(operationId, 'terminal_result'),
+      blocks: [{ t: 'trace', trace: published }] }])[0])
+    mergeServerHistoryEntries('sangsu', [canonicalReply, { ...observedTool, id: 'canonical-tool', delivery: 'history',
+      toolOccurrence: undefined, toolOwnerKey: undefined,
+      deliveryProvenance: toolCallDeliveryProvenance(operationDeliveryProvenance(operationId, 'terminal_result'), 'execution', 0) }])
+    send({ type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED',
+      value: { deliveryKey: { kind: 'operation', operation_id: operationId }, executionId: 'execution', ordinal: 0 } })
+    const rows = requiredFixture(keeperThreads.value.sangsu)
+    const reply = requiredFixture(rows.find(row => row.id === 'reply-1'))
+    expect(reply.publishedTraceSteps).toEqual(published)
+    expect(reply.traceSteps?.filter(step => step.kind === 'think')).toMatchObject([{ text: 'provided reasoning' }])
+    expect(reply.traceSteps?.filter(step => step.kind === 'tool')).toMatchObject([{ toolOccurrenceId: 'canonical-tool' }])
+    expect(rows.filter(row => row.role === 'tool')).toHaveLength(1)
+    expect(rows.find(row => row.id === 'other-reply')).toMatchObject({ text: 'other input answer',
+      traceSteps: [{ kind: 'think', text: 'other reasoning' }] })
+    expect(rows.find(row => row.id === 'other-reply')?.publishedTraceSteps).toBeUndefined()
+    const draft = requiredFixture(trackedKeeperChatOperationsForKeeper('sangsu')[0]?.assistantDraft)
+    expect(draft.publishedTraceSteps).toEqual(published)
+    expect(draft.traceSteps?.filter(step => step.kind === 'think')).toMatchObject([{ text: 'provided reasoning' }])
+    expect(draft.traceSteps?.filter(step => step.kind === 'tool')).toMatchObject([{ toolOccurrenceId: 'canonical-tool' }])
+    _clearTrackedKeeperChatOperationsForTests()
+  })
+
   it('retains authoritative quarantine across parent replacement and transient buffer reset', () => {
     const operationId = 'stable-quarantine-parent'
     assistantEntry(operationId)

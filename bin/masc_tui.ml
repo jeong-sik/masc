@@ -3210,7 +3210,7 @@ let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
                  generation )))
 
 let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
-    ~approval_id ~tool_call_id ~allow =
+    ~(approval : Keeper_chat_transcript.awaiting_approval) ~allow =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if state.workspace_identity <> Workspace_identity_match then
@@ -3218,6 +3218,11 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
   else match state.server_identity with
   | None -> report_action state "error" "Cannot decide: workspace identity is unverified"
   | Some expected_workspace ->
+  match Approval.Flow.begin_action state.approval_flow with
+  | Error `Already_inflight ->
+      report_action state "system" "Approval action already in progress"
+  | Ok (flow, generation) ->
+  state.approval_flow <- flow;
   supersede_home_decision_receipt state;
   let host = server_peer_host in
   let port = state.port in
@@ -3229,13 +3234,13 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
         let* () = if authority <> state.workspace_authority then Error "Workspace authority withdrawn" else Ok () in
             let* () = probe_expected_workspace ~host ~port expected_workspace in
         Masc_tui_http.post_keeper_tool_approval ~expected_workspace ~host ~port ~keeper_name
-          ~approval_id ~allow
+          ~approval_id:approval.approval_id ~allow
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
     enqueue_async mailbox
-      (Keeper_chat_approval_answered (request, tool_call_id, allow, result))
+      (Keeper_chat_approval_answered (request, approval, allow, result, generation))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -3243,7 +3248,7 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
   | None ->
       enqueue_async mailbox
         (Keeper_chat_approval_answered
-           (request, tool_call_id, allow, Error "Eio switch is unavailable"))
+           (request, approval, allow, Error "Eio switch is unavailable", generation))
 
 (* Automatic polling shares a pending reading for the same Keeper. Explicit
    refresh and selection changes supersede it, retaining the generation guard. *)
@@ -10548,7 +10553,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            (match Keeper_chat_transcript.awaiting_approval entry.log.tl_transcript with
             | Some awaiting ->
               launch_keeper_approval state ~mailbox entry.sent_request
-                ~approval_id:awaiting.approval_id ~tool_call_id:awaiting.call_id ~allow
+                ~approval:awaiting ~allow
             | None -> notice ~kind:Notice_reply "No tool approval is waiting for this Keeper")
          | None -> notice ~kind:Notice_reply "No tool approval is waiting for this Keeper")
   | Masc_tui_command.Interrupt_turn -> (
@@ -17136,26 +17141,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            entry.phase <- Turn_reconciling
        | Some _ | None -> ());
       append_chat_history state request Message_status detail
-  | Keeper_chat_approval_answered (request, tool_call_id, allow, result) ->
-      (* The operator answered a question that named a tool; echoing the call
-         id back tells them nothing they can act on and nothing they can
-         match to what they read. The live transcript still holds the call, so
-         the answer is said in the same words the question used. *)
-      let call_label =
-        let by_id =
-          match state.msg_live with
-          | None -> None
-          | Some live ->
-            Keeper_chat_transcript.tool_calls live.tl_transcript
-            |> List.find_opt (fun (activity : Keeper_chat_transcript.tool_activity) ->
-                 Option.equal String.equal activity.call_id (Some tool_call_id))
-            |> Option.map (fun (activity : Keeper_chat_transcript.tool_activity) ->
-                 activity.tool_name)
-        in
-        match by_id with
-        | Some name when String.trim name <> "" -> Keeper_chat.terminal_safe_text name
-        | Some _ | None -> Keeper_chat.compact_request_id tool_call_id
+  | Keeper_chat_approval_answered (request, approval, allow, result, generation) ->
+      let flow, owns_action =
+        Approval.Flow.finish_action state.approval_flow generation
       in
+      if owns_action then begin
+      state.approval_flow <- flow;
+      (* The immutable admission captured at dispatch owns the receipt label.
+         The current live transcript may already describe another turn. *)
+      let call_label = Keeper_chat.terminal_safe_text approval.tool_name in
       let text =
         match result with
         | Ok { Masc_tui_http.settled = true; _ } ->
@@ -17186,6 +17180,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              Message_status
          | _ -> Message_error)
         text
+      end
   | Keeper_tool_approvals_loaded (request, expected_workspace, result) ->
       (match Snapshot_read.settle state.keeper_tool_approvals_read request with
        | None -> ()

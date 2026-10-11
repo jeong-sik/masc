@@ -381,9 +381,10 @@ type async_msg =
           and whether the server took it. *)
   | Keeper_chat_approval_answered of
       Masc_tui_keeper_chat_projection.request
-      * string
+      * Masc_tui_keeper_chat_transcript.awaiting_approval
       * bool
       * (Masc_tui_http.tool_approval_answer, string) result
+      * Masc_tui_operator_projection.Flow.generation
   | Keeper_tool_approvals_loaded of
       Snapshot_read.request * Masc.Tui_decode.server_identity * (Masc.Tui_decode.keeper_tool_approval list, string) result
   | Sent_image_ready of {

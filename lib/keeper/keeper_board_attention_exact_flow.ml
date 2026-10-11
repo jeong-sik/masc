@@ -756,7 +756,9 @@ let execute_current
     ~input:(Exact_lane_run_registry.Exact_input prepared.request);
   let bound = ref None in
   let cli_selected_slot = ref None in
-  let complete outcome output =
+  (* Set only by an HTTP flow success; JEV and CLI transports report none. *)
+  let observed_usage = ref None in
+  let complete ?usage outcome output =
     (* A CLI answer after the HTTP slots failed leaves [bound] on the last
        failed HTTP slot; the slot that answered is the CLI one. *)
     let selected_slot =
@@ -772,7 +774,9 @@ let execute_current
         ~outcome
         ~elapsed_s:(Time_compat.now () -. started_at)
         ~selected_slot
+        ?usage
         ~output
+        ()
     with
     | Ok () -> ()
     | Error error ->
@@ -877,7 +881,11 @@ let execute_current
              in
              Runtime_exact_lane_backpressure.observe ~resolved flow;
              (match flow with
-              | Ok success -> Ok success.accepted
+              | Ok success ->
+                observed_usage :=
+                  (Exact_output.flow_success_output success.transport_success).usage
+                  |> Option.map Exact_lane_run_registry.usage_of_api_usage;
+                Ok success.accepted
               | Error (Exact_output.Flow_execution_terminal { cause; prior_rejections }) ->
                 let terminal = terminal_of_flow_error ~callback_error_to_string cause in
                 (* A slot whose answer the domain decoder rejected was not
@@ -928,6 +936,7 @@ let execute_current
   (match result with
    | Ok judgment ->
      complete
+       ?usage:!observed_usage
        Exact_lane_run_registry.Succeeded
        (Keeper_board_attention_candidate.judgment_to_yojson judgment)
    | Error error ->

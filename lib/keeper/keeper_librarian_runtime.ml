@@ -1090,6 +1090,7 @@ let execute_answer
       ~base_path
       ~keeper_id
       ~messages
+      ?usage_observer
       ()
   =
   let open Result.Syntax in
@@ -1152,6 +1153,10 @@ let execute_answer
       |> Exact_output.flow_success_candidate
       |> fun candidate -> candidate.visit.identity.candidate_id
     in
+    (match usage_observer with
+     | Some observe ->
+       observe (Exact_output.flow_success_output success.transport_success).usage
+     | None -> ());
     Ok (success.accepted, Api_slot selected_slot)
   | Error (Exact_output.Flow_execution_terminal { cause; prior_rejections }) ->
     (* A semantic rejection does not enter the walk's advances. Preserve it
@@ -1547,8 +1552,12 @@ let run_best_effort
         let preflight_domain_rejection = ref None in
         let context_write = ref Not_attempted in
         let continuity_write = ref (`Assoc ["status", `String "not_attempted"]) in
-        let complete ?selected_slot outcome output =
+        (* Only an API attempt's own success reports usage; a CLI tail never
+           fires the observer, so a CLI-answered run completes with [None]. *)
+        let observed_usage = ref None in
+        let complete ?selected_slot ?usage outcome output =
           let selected_slot = if !full_llm_skipped then None else selected_slot in
+          let usage = if !full_llm_skipped then None else usage in
           let output = match !observed_preflight, output with
             | Some observation, `Assoc fields ->
               `Assoc (("jev_preflight", Typesafeai_librarian_preflight.to_yojson observation)
@@ -1594,7 +1603,9 @@ let run_best_effort
               ~outcome
               ~elapsed_s
               ~selected_slot
+              ?usage
               ~output
+              ()
           in
           match completion with
           | Ok () -> ()
@@ -1658,6 +1669,7 @@ let run_best_effort
                ~output:
                  (Keeper_librarian_absorb_gate.observation_to_yojson
                     (Keeper_librarian_absorb_gate.Incomplete [ evaluation ]))
+               ()
            with
            | Ok () -> ()
            | Error error ->
@@ -1684,6 +1696,7 @@ let run_best_effort
                ~elapsed_s:(absorb_evaluation_elapsed_s started_at_ns)
                ~selected_slot:None
                ~output
+               ()
            with
            | Ok () -> ()
            | Error error ->
@@ -1728,7 +1741,11 @@ let run_best_effort
                    ~requirement
                    ~validate
                    ?cli_runner ~clock ~net ~base_path ~keeper_id
-                   ~messages:[ message Agent_core.Types.User prompt ] ()
+                   ~messages:[ message Agent_core.Types.User prompt ]
+                   ~usage_observer:(fun usage ->
+                      observed_usage :=
+                        Option.map Exact_lane_run_registry.usage_of_api_usage usage)
+                   ()
                  |> Result.map (fun (accepted, source) -> (accepted, Some source)) in
                if Typesafeai_librarian_preflight.keeps_current observation then (
                  let output = `Assoc
@@ -2010,13 +2027,13 @@ let run_best_effort
            in
            match result with
            | Ok (`Admission_deferred (exact_output, selected_slot)) ->
-             complete ~selected_slot Exact_lane_run_registry.Succeeded
+             complete ~selected_slot ?usage:!observed_usage Exact_lane_run_registry.Succeeded
                (`Assoc ["memory_write", `String "pending_explicit_admission";
                         "exact_output", exact_output]);
              on_admission_deferred ();
              Eio.Fiber.check ()
            | Ok (`Context_organized (exact_output, selected_slot)) ->
-             complete ~selected_slot Exact_lane_run_registry.Succeeded
+             complete ~selected_slot ?usage:!observed_usage Exact_lane_run_registry.Succeeded
                (`Assoc [ "memory_write", `String "skipped_context_only"
                        ; "exact_output", exact_output ]);
              Eio.Fiber.check ()
@@ -2024,7 +2041,7 @@ let run_best_effort
              (* The answer was accepted and the store refused it. The snapshot
                 is this pass's whole product, so the run failed, as a Memory
                 snapshot that cannot be written fails its run. *)
-             complete ~selected_slot
+             complete ~selected_slot ?usage:!observed_usage
                (Exact_lane_run_registry.Failed
                   { code = continuity_not_committed_code; detail = reason })
                (`Assoc [ "memory_write", `String "skipped_context_only"
@@ -2034,6 +2051,7 @@ let run_best_effort
              let snapshot = disposition.snapshot in
              complete
                ~selected_slot
+               ?usage:!observed_usage
                Exact_lane_run_registry.Succeeded
                (completed_output ~inp ~exact_output ~absorb_gate disposition);
              (match disposition.commit with

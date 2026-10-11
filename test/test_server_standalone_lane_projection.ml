@@ -43,7 +43,7 @@ let lane_by_id json lane_id =
 let test_runs_without_a_slot_are_split_by_why () =
   let completed ~run_id ~lane ~outcome ~selected_slot =
     exact_run ~run_id ~lane ~started_at:50.
-      ~status:(Exact.Completed { outcome; elapsed_s = 1.; output = `Null; selected_slot })
+      ~status:(Exact.Completed { outcome; elapsed_s = 1.; output = `Null; selected_slot; usage = None })
   in
   let restarted = Exact.Failed { code = Exact.server_restarted_code; detail = "orphan" } in
   let provider = Exact.Failed { code = "provider"; detail = "offline" } in
@@ -67,6 +67,7 @@ let test_runs_without_a_slot_are_split_by_why () =
              ; elapsed_s = 1.
              ; output = `Null
              ; selected_slot = None
+             ; usage = None
              ; failure = { detail = "disk"; state = Exact.Not_persisted }
              })
     ; exact_run ~run_id:"board-running" ~lane:Exact.Board_attention ~started_at:60.
@@ -135,6 +136,7 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
              ; elapsed_s = 4.
              ; output = `Assoc []
              ; selected_slot = Some "hitl-primary"
+             ; usage = None
              })
     ; exact_run
         ~run_id:"librarian-failed"
@@ -146,6 +148,7 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
              ; elapsed_s = 8.
              ; output = `Null
              ; selected_slot = Some "librarian-secondary"
+             ; usage = None
              })
     ]
   in
@@ -324,6 +327,7 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
              ; elapsed_s = 8.
              ; output = `Null
              ; selected_slot = None
+             ; usage = None
              })
     ; exact_run
         ~run_id:"librarian-restart-orphan"
@@ -336,6 +340,7 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
              ; elapsed_s = 100000.
              ; output = `Null
              ; selected_slot = None
+             ; usage = None
              })
     ]
   in
@@ -463,6 +468,7 @@ let test_latest_terminal_uses_completion_time () =
              ; elapsed_s = 1.
              ; output = `Null
              ; selected_slot = Some "secondary"
+             ; usage = None
              })
     ; exact_run
         ~run_id:"started-first-finished-last"
@@ -474,6 +480,7 @@ let test_latest_terminal_uses_completion_time () =
              ; elapsed_s = 20.
              ; output = `Null
              ; selected_slot = Some "primary"
+             ; usage = None
              })
     ]
   in
@@ -882,7 +889,7 @@ let test_detail_preserves_outcome_when_original_payloads_are_unavailable () =
         (availability "output" running = `Null);
       (match
          Exact.mark_completed registry ~run_id ~outcome:Exact.Succeeded
-           ~elapsed_s:1. ~selected_slot:None ~output:`Null
+           ~elapsed_s:1. ~selected_slot:None ~output:`Null ()
        with
        | Ok () -> ()
        | Error error -> fail (Exact.completion_error_to_string error));

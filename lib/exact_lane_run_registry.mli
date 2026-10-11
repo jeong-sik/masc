@@ -42,6 +42,22 @@ type persistence_failure =
   ; state : persistence_state
   }
 
+(** Token usage of one run's answering provider attempt, as the provider's
+    own response parser reported it. [input_tokens] is the inclusive prompt
+    total (it already counts the cache components); [cost_usd] is a
+    provider-reported charge, [None] when the wire carried none. [None] on
+    the status field means the run's transport reported no usage at all
+    (CLI slot, vendor-system-one judging, or a body without a usage report). *)
+type usage =
+  { input_tokens : int
+  ; output_tokens : int
+  ; cache_creation_input_tokens : int
+  ; cache_read_input_tokens : int
+  ; cost_usd : float option
+  }
+
+val usage_of_api_usage : Agent_core.Types.api_usage -> usage
+
 type run_status =
   | Running
   | Completed of
@@ -49,12 +65,14 @@ type run_status =
       ; elapsed_s : float
       ; output : Yojson.Safe.t
       ; selected_slot : string option
+      ; usage : usage option
       }
   | Completion_persistence_failed of
       { intended_outcome : outcome
       ; elapsed_s : float
       ; output : Yojson.Safe.t
       ; selected_slot : string option
+      ; usage : usage option
       ; failure : persistence_failure
       }
 
@@ -144,7 +162,9 @@ val mark_completed
   -> outcome:outcome
   -> elapsed_s:float
   -> selected_slot:string option
+  -> ?usage:usage
   -> output:Yojson.Safe.t
+  -> unit
   -> (unit, completion_error) result
 (** Record an observation-plane completion without taking ownership of the
     caller's primary lifecycle. Persistence failures are returned rather than
@@ -155,7 +175,12 @@ val mark_completed
     attribution. It names the last bound HTTP attempt, or the successful CLI
     slot after HTTP exhaustion. Vendor System One runs before either and leaves
     it [None]; its provenance remains in [output]. Blank slot identities are
-    rejected. *)
+    rejected.
+
+    [usage] is the answering attempt's provider-reported token counts; omit it
+    when the run's transport produced none (CLI slot, vendor judging, missing
+    wire report). Completions written before this field existed replay with
+    [usage = None]. *)
 
 val list_runs : t -> run list
 

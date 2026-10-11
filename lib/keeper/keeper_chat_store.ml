@@ -992,6 +992,9 @@ let tool_transcript_slot ~ordinal (call : tool_call) =
     Keeper_chat_delivery_identity.Tool_call { execution_id; ordinal }
   | None -> Keeper_chat_delivery_identity.Tool_delivery { ordinal }
 
+let tool_transcript_bindings calls =
+  List.mapi (fun ordinal call -> call, tool_transcript_slot ~ordinal call) calls
+
 (* RFC-0232 §3.3: the append IS the parse boundary.  Mentions are
    derived from the content that is actually persisted (post-redaction),
    so an offline re-parse of the stored line reproduces the field;
@@ -1381,9 +1384,8 @@ let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
 
 let tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
       tool_calls =
-  List.mapi
-    (fun ordinal tc ->
-       let transcript_slot = tool_transcript_slot ~ordinal tc in
+  List.map
+    (fun (tc, transcript_slot) ->
        let row_id = mint_message_id ~ts in
        { transcript_slot
        ; row_id
@@ -1403,7 +1405,7 @@ let tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
                { Keeper_chat_delivery_identity.delivery_key; transcript_slot }
              ()
        })
-    tool_calls
+    (tool_transcript_bindings tool_calls)
 ;;
 
 let append_tool_calls_once

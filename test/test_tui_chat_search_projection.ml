@@ -293,7 +293,7 @@ let test_repeat_survives_reasoning_visibility_and_backfill () = at_sizes (fun or
   let history = find ~older:progress state "MATCH_" in
   (match history.matched_anchor with
    | T.Search_history _ -> ()
-   | T.Search_journal _ | T.Search_admission _ -> fail "search repeated a newer journal item");
+   | T.Search_child _ | T.Search_journal _ | T.Search_admission _ -> fail "search repeated a newer journal item");
   check bool "no older match ends the walk" true
     (Option.is_none ((Render.keeper_message_find_scroll state ~keeper_name:"alpha"
        ~needle:"MATCH_" ~older_than:(Some history)).match_result));

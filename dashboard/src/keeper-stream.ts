@@ -1485,7 +1485,9 @@ export function applyKeeperStreamEvent(
               costUsd: details.costUsd ?? entry.details?.costUsd ?? null,
               usage: details.usage ?? entry.details?.usage ?? null,
             }
-            const rawText = mergedDetails.replyText ?? entry.rawText ?? entry.text
+            const rawText = entry.replyBlockSource === 'canonical_body'
+              ? entry.rawText ?? entry.text
+              : mergedDetails.replyText ?? entry.rawText ?? entry.text
             if (keeperTurnOutcomeSuppressesReply(mergedDetails.turnOutcome)) {
               return {
                 ...entry,

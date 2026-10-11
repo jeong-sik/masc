@@ -309,6 +309,8 @@ let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
 (* Always installed so usage-window reports and the thread's usage counts are
    recorded. A turn nobody streams, traces or observes gets only those; its
    other events are ignored as before. *)
+type native_stream_block = Native_block_open of int | Native_block_closed
+
 let codex_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
     ~on_usage_report ~position on_event =
   (* The thread's running count, reported under the app-server turn id (the
@@ -464,45 +466,41 @@ let codex_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?r
             ~raw_trace_run
             ~phase:`Started
             observation;
-          let index =
-            match Option.bind observation.identity (Hashtbl.find_opt native_tool_indexes) with
-            | Some index -> index
+          Option.iter (fun identity ->
+            match Hashtbl.find_opt native_tool_indexes identity with
+            | Some (Native_block_open _ | Native_block_closed) -> ()
             | None ->
                 let index = !next_tool_index in
                 incr next_tool_index;
-                Option.iter
-                  (fun identity -> Hashtbl.add native_tool_indexes identity index)
-                  observation.identity;
-                index
-          in
-          emit
-            (Agent_core.Types.ContentBlockStart
-               { index
-               ; content_type = Runtime_native_tools.stream_content_type
-               ; tool_id = Runtime_native_tools.call_id observation
-               ; tool_name = observation.tool_name
-               })
+                Hashtbl.add native_tool_indexes identity (Native_block_open index);
+                emit (Agent_core.Types.ContentBlockStart
+                  {index; content_type=Runtime_native_tools.stream_content_type;
+                   tool_id=Runtime_native_tools.call_id observation;
+                   tool_name=observation.tool_name})) observation.identity
         | Runtime_codex_app_server.Native_tool_progress {item_id; progress} ->
-          Option.iter (fun index ->
-            Option.iter (fun observe -> observe ~block_index:index ~tool_call_id:(Some item_id) progress)
-              on_native_tool_progress)
-            (Hashtbl.find_opt native_tool_indexes (Runtime_native_tools.Call_id item_id))
+          (match Hashtbl.find_opt native_tool_indexes (Runtime_native_tools.Call_id item_id) with
+           | Some (Native_block_open index) ->
+               Option.iter (fun observe ->
+                 observe ~block_index:index ~tool_call_id:(Some item_id) progress)
+                 on_native_tool_progress
+           | Some Native_block_closed | None -> ())
         | Runtime_codex_app_server.Native_tool_finished {observation; completion} ->
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run
             ~phase:`Finished
             observation;
-          Option.iter
-            (fun identity ->
-               Option.iter
-                 (fun index ->
-                    Option.iter (fun finish -> finish ~block_index:index
-                      ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
-                      on_native_tool_completion;
-                    Hashtbl.remove native_tool_indexes identity;
-                    emit (Agent_core.Types.ContentBlockStop { index }))
-                 (Hashtbl.find_opt native_tool_indexes identity))
+          Option.iter (fun identity ->
+            match Hashtbl.find_opt native_tool_indexes identity with
+            | Some (Native_block_open index) ->
+                Hashtbl.replace native_tool_indexes identity Native_block_closed;
+                Fun.protect
+                  ~finally:(fun () -> Eio.Cancel.protect (fun () -> stop_content index))
+                  (fun () -> Option.iter (fun finish -> finish ~block_index:index
+                    ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                    on_native_tool_completion)
+            | Some Native_block_closed -> ()
+            | None -> Hashtbl.add native_tool_indexes identity Native_block_closed)
             observation.identity
         | Runtime_codex_app_server.Elicitation_cancelled
             { server_name; mode = _; reason = Runtime_codex_app_server.Host_input_unavailable } ->
@@ -523,10 +521,18 @@ let codex_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?r
             emit_text ~index remainder;
             stop_content index)
             (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
+          let unfinished_native = Hashtbl.fold (fun identity state acc ->
+            match state with
+            | Native_block_open index -> (identity, index) :: acc
+            | Native_block_closed -> acc) native_tool_indexes [] in
+          List.iter (fun (identity, _) ->
+            Hashtbl.replace native_tool_indexes identity Native_block_closed)
+            unfinished_native;
           let open_indexes table = Hashtbl.fold (fun _ index acc -> index :: acc) table [] in
           List.iter stop_content
             (List.sort_uniq Int.compare
-               (open_indexes text_indexes @ open_indexes thinking_indexes));
+               (open_indexes text_indexes @ open_indexes thinking_indexes
+                @ List.map snd unfinished_native));
           emit
             (Agent_core.Types.MessageDelta
                { stop_reason = Some Agent_core.Types.EndTurn; usage = None });

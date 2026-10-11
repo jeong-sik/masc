@@ -9,7 +9,7 @@ let text = Yojson.Safe.Util.to_string
 let items = Yojson.Safe.Util.to_list
 let require = function Ok value -> value | Error detail -> fail detail
 
-let fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item ~unfinished_reasoning =
+let fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item ~unfinished_reasoning ~native_replay =
   let capture = Filename.concat root "requests.jsonl" in
   write capture "";
   let command = Filename.concat root "codex-fixture" in
@@ -26,6 +26,7 @@ hold_first_resume = %s
 compact_resume = %s
 compact_item = %s
 unfinished_reasoning = %s
+native_replay = %s
 turn_id = 'fresh-turn'
 def emit(value):
     print(json.dumps(value), flush=True)
@@ -71,6 +72,17 @@ for line in sys.stdin:
             for last in ((request_usage,) if compact_item else (estimate, request_usage)):
                 emit({'method':'thread/tokenUsage/updated','params':{'threadId':'context-thread','turnId':turn_id,
                      'tokenUsage':{'last':last,'total':request_usage,'modelContextWindow':400000}}})
+        if native_replay:
+            native = {'type':'commandExecution','id':'native-1','status':'inProgress','command':'fixture'}
+            for _ in range(2):
+                emit({'method':'item/started','params':{'threadId':'context-thread','turnId':turn_id,'item':native}})
+            native = dict(native, status='completed', exitCode=0)
+            for _ in range(2):
+                emit({'method':'item/completed','params':{'threadId':'context-thread','turnId':turn_id,'item':native}})
+            emit({'method':'item/started','params':{'threadId':'context-thread','turnId':turn_id,
+                 'item':dict(native, status='inProgress')}})
+            emit({'method':'item/started','params':{'threadId':'context-thread','turnId':turn_id,
+                 'item':dict(native, id='native-2', status='inProgress')}})
         if unfinished_reasoning:
             emit({'method':'item/reasoning/summaryTextDelta','params':{'threadId':'context-thread','turnId':turn_id,
                  'itemId':'reasoning-1','summaryIndex':0,'delta':'exposed fixture reasoning'}})
@@ -82,11 +94,12 @@ for line in sys.stdin:
     (if hold_first_resume then "True" else "False")
     (if compact_resume then "True" else "False")
     (if compact_item then "True" else "False")
-    (if unfinished_reasoning then "True" else "False"));
+    (if unfinished_reasoning then "True" else "False")
+    (if native_replay then "True" else "False"));
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?(unfinished_reasoning = false) ?catalog_context_window test =
+let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?(unfinished_reasoning = false) ?(native_replay = false) ?catalog_context_window test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   let previous_pool = Domain_pool_ref.get () in
   Eio.Switch.on_release sw (fun () ->
@@ -109,7 +122,7 @@ let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_res
     ~base_path:root ~sandbox_profile:None "context-fixture";
   let saved = Runtime.For_testing.snapshot () in
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
-  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item ~unfinished_reasoning in
+  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item ~unfinished_reasoning ~native_replay in
   let config_path = Filename.concat root "runtime.toml" in
   let write_catalog max_context =
     write config_path (Printf.sprintf {|
@@ -172,6 +185,26 @@ let read_requests path = In_channel.with_open_bin path In_channel.input_lines
 let successful attempt = match attempt.Keeper_codex_runtime.result with
   | Ok _ -> ()
   | Error error -> fail (Agent_core.Error.to_string error)
+
+let test_native_replay_keeps_one_block_per_identity () =
+  with_fixture ~native_replay:true (fun ~run ~capture:_ ~reports:_ ->
+    let events = ref [] in
+    successful (run ~instructions:"Keeper instructions" ~world:"Context"
+      ~on_event:(fun event -> events := event :: !events) ());
+    let starts = List.filter_map (function
+      | Agent_core.Types.ContentBlockStart {index; content_type="native_tool_use"; tool_id; _} ->
+          Some (index, tool_id)
+      | _ -> None) !events in
+    check int "replayed and unfinished native identities open once each" 2 (List.length starts);
+    List.iter (fun call_id ->
+      check int "one native start per exact call identity" 1
+        (List.length (List.filter (fun (_, id) -> id = Some call_id) starts)))
+      ["native-1"; "native-2"];
+    List.iter (fun (index, _) ->
+      check int "each native block closes once" 1
+        (List.length (List.filter (function
+          | Agent_core.Types.ContentBlockStop {index=closed} -> Int.equal index closed
+          | _ -> false) !events))) starts)
 
 let test_turn_terminal_closes_observed_reasoning () =
   with_fixture ~unfinished_reasoning:true (fun ~run ~capture:_ ~reports:_ ->
@@ -1004,6 +1037,7 @@ let test_resume_sends_no_history () =
       (String_util.contains_substring sent "xxxx")) wire
 
 let () = run "Keeper current Codex context" ["native requests",[
+  test_case "native replay keeps one block per identity" `Quick test_native_replay_keeps_one_block_per_identity;
   test_case "turn terminal closes observed reasoning" `Quick test_turn_terminal_closes_observed_reasoning;
   test_case "selected context window survives catalog reload on start and resume" `Quick test_captured_context_window_survives_catalog_reload;
   test_case "compaction item invalidates recall without usage estimate" `Quick test_compaction_item_invalidates_recall_without_usage_estimate;

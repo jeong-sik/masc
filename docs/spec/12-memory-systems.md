@@ -24,6 +24,30 @@ changes the config root.
 A missing snapshot means fresh empty state. Memory OS does not import, migrate,
 or fall back to alternate store layouts.
 
+## Context delivery evidence
+
+World observations are rendered as typed layers by `Keeper_context_layers`.
+The renderer keeps an immutable text value with ordered raw UTF-8 spans and
+SHA-256 digests. The world-frame prefix, direct-turn context, unprojected input,
+and appended host workspace recall are explicitly unattributed; a heading or
+similar sentence does not assign them to a world layer. Each layer is rendered
+once for that value. Projection for the actual offered tools produces a new
+value instead of reusing the preliminary observation's partition.
+
+The `masc.logical-context-partition.v2` assembly receipt can attach a
+`masc.dynamic-context-partition.v1` subpartition to the Dynamic_context block
+only when its exact text matches the renderer-issued value. Missing or stale
+subpartitions are unavailable, not measured zero-byte layers. Raw UTF-8 offsets
+are relative to their source text, distinct from encoded message and IPC JSON
+offsets.
+
+These receipts alone describe source assembly. Codex's completed input-slot
+binding joins the selected source spans to the actual submitted slot. A
+Dynamic_context span inside an omitted-held carrier describes locally omitted
+input, not bytes delivered on that request. Tool history, server acceptance,
+remote retention and remote ejection are outside this proof. The partition
+does not change layer relevance or independently omit individual world layers.
+
 ## Write Contract
 
 A memory claim must come from an explicit memory operation or the librarian

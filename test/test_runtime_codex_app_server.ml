@@ -1639,6 +1639,27 @@ let export_assembly_submission_measurement ~fixture_kind ~scenario ~binding ~sub
   let verify_text label text record =
     check int (label ^ " byte length") (member "bytes" record |> to_int) (String.length text);
     check string (label ^ " SHA") (member "sha256" record |> to_string) (hash text) in
+  let verify_raw_span label text span =
+    verify_text label text span;
+    let nested = member "subpartition" span in
+    match member "status" nested |> to_string with
+    | "verified" ->
+      let partition = member "partition" nested in
+      check string "nested renderer schema" "masc.dynamic-context-partition.v1"
+        (member "schema" partition |> to_string);
+      verify_text "actual dynamic raw block" text partition;
+      let cursor = ref 0 in
+      partition |> member "spans" |> to_list |> List.iter (fun layer ->
+        let offset = member "offset" layer |> to_int in
+        let bytes = member "bytes" layer |> to_int in
+        check int "nested raw spans are contiguous" !cursor offset;
+        verify_text "actual nested layer slice"
+          (slice "nested layer" text offset bytes) layer;
+        cursor := offset + bytes);
+      check int "nested spans close the actual codec text" (String.length text) !cursor
+    | "unavailable" | "not_applicable" -> ()
+    | _ -> fail "missing or unknown nested partition status"
+  in
   let slot = member "matched_slot" binding in
   let offset = member "json_offset" slot |> to_int in
   let bytes = member "json_bytes" slot |> to_int in
@@ -1693,7 +1714,7 @@ let export_assembly_submission_measurement ~fixture_kind ~scenario ~binding ~sub
       check (list int) "whole carrier includes every issuer span" (List.mapi (fun i _ -> i) spans) indices;
       verify_text "whole issuer carrier" rendered assembly;
       List.iter (fun span ->
-        verify_text "actual whole-carrier span"
+        verify_raw_span "actual whole-carrier span"
           (slice "whole-carrier source span" rendered (member "offset" span |> to_int)
              (member "bytes" span |> to_int)) span) spans
     | "ordered_blocks_joined_by_two_newlines" ->
@@ -1707,7 +1728,7 @@ let export_assembly_submission_measurement ~fixture_kind ~scenario ~binding ~sub
         check string "subset selects source blocks, not old separators" "block"
           (span |> member "source" |> member "kind" |> to_string);
         let bytes = member "bytes" span |> to_int in
-        verify_text "actual selected raw block" (slice "selected raw block" rendered !cursor bytes) span;
+        verify_raw_span "actual selected raw block" (slice "selected raw block" rendered !cursor bytes) span;
         cursor := !cursor + bytes) indices;
       check int "selected blocks and new separators close actual text" (String.length rendered) !cursor
     | _ -> fail "unknown carrier rendering proof");
@@ -1735,9 +1756,19 @@ let test_issuer_assembly_links_to_completed_slots () =
   let module Client = Runtime_codex_app_server in
   let open Yojson.Safe.Util in
   let repeated="한글 \"same\"\n\\tail" in
-  let blocks=[Prompt_block_id.Dynamic_context,repeated;
+  let module Layers = Masc.Keeper_context_layers in
+  let dynamic_partition =
+    Layers.assemble ~content_of:(function
+      | Layers.Active_goals | Layers.Current_task -> Some repeated
+      | _ -> None)
+    |> Layers.prepend_unattributed World_frame "frame\n"
+  in
+  let dynamic_partition = Layers.append_unattributed dynamic_partition
+      Host_workspace_recall "\nHOST_SUFFIX" in
+  let dynamic_text = Layers.text dynamic_partition in
+  let blocks=[Prompt_block_id.Dynamic_context,dynamic_text;
     Prompt_block_id.Memory_os_recall,repeated;Prompt_block_id.Temporal_summary,repeated] in
-  let assembly=Assembly.assemble ~existing_extra_system_context:None ~blocks in
+  let assembly=Assembly.assemble ~dynamic_context_partition:(Some dynamic_partition) ~existing_extra_system_context:None ~blocks in
   let carrier assembly : Agent_core.Types.message =
     {role=System;content=[Text (Option.get assembly.Assembly.extra_system_context)];name=None;
      tool_call_id=None;metadata=Agent_core.Types.Extra_system_context_provenance.metadata} in
@@ -1748,11 +1779,11 @@ let test_issuer_assembly_links_to_completed_slots () =
   let subset=Host.resume_prompt ~goal:"GOAL" ~held:partial_held ~composed_context:assembly [message] in
   let allheld=Host.resume_prompt ~goal:"GOAL" ~held ~composed_context:assembly [message] in
   check string "held carrier contributes no bytes" "GOAL" allheld.prompt;
-  let changed=Assembly.assemble ~existing_extra_system_context:None
-    ~blocks:[Prompt_block_id.Dynamic_context,repeated;Prompt_block_id.Memory_os_recall,repeated;
+  let changed=Assembly.assemble ~dynamic_context_partition:(Some dynamic_partition) ~existing_extra_system_context:None
+    ~blocks:[Prompt_block_id.Dynamic_context,dynamic_text;Prompt_block_id.Memory_os_recall,repeated;
       Prompt_block_id.Temporal_summary,repeated ^ " changed"] in
   let changed_delivery=Host.resume_prompt ~goal:"GOAL" ~held ~composed_context:changed [carrier changed] in
-  let prefixed=Assembly.assemble ~existing_extra_system_context:(Some "prefix\n") ~blocks in
+  let prefixed=Assembly.assemble ~dynamic_context_partition:(Some dynamic_partition) ~existing_extra_system_context:(Some "prefix\n") ~blocks in
   let whole=Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:prefixed [carrier prefixed] in
   let stale=Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:assembly [carrier prefixed] in
   let missing = Host.resume_prompt ~goal:"GOAL" ~held:[] [message] in
@@ -1796,6 +1827,32 @@ let test_issuer_assembly_links_to_completed_slots () =
       (member "unavailable" attribution |> to_list |> List.map (fun row ->
         (member "reason" row |> to_string), (member "disposition" row |> to_string)));
     let found=proof |> member "occurrences" |> to_list in
+    let nested_partitions source =
+      let spans = source |> member "assembly" |> member "spans" |> to_list in
+      source |> member "source_span_indices" |> to_list
+      |> List.filter_map (fun index ->
+        let nested = List.nth spans (to_int index) |> member "subpartition" in
+        match member "status" nested |> to_string with
+        | "verified" -> Some (member "partition" nested)
+        | "not_applicable" | "unavailable" -> None
+        | _ -> fail "unknown nested source status") in
+    let transmitted = List.concat_map (fun row -> nested_partitions (member "source" row)) found in
+    let held_partitions = proof |> member "omitted_held" |> to_list
+      |> List.concat_map nested_partitions in
+    (match label with
+     | "all held" | "changed block" ->
+       check int "held dynamic partition is not transmitted" 0 (List.length transmitted);
+       check int "held dynamic partition remains local omission evidence" 1 (List.length held_partitions)
+     | "start" | "held middle" | "prefix fallback" ->
+       check int "actual slot includes one dynamic partition" 1 (List.length transmitted);
+       let layers = List.hd transmitted |> member "spans" |> to_list in
+       check (list string) "equal text has two distinct layer sources"
+         ["active_goals"; "current_task"]
+         (List.filter_map (fun span -> match span |> member "source" |> member "layer" with
+           | `String layer -> Some layer | _ -> None) layers)
+     | "stale issuer" ->
+       check int "stale issuer cannot deliver a nested attribution" 0 (List.length transmitted)
+     | _ -> ());
     check int (label ^ " attributed occurrences") occurrences (List.length found);
     check int (label ^ " explicit held omissions") omitted (proof |> member "omitted_held" |> to_list |> List.length);
     (match found with
@@ -5982,7 +6039,7 @@ let test_keeper_preserves_typed_history_on_codex_wire () =
 let test_keeper_assembly_binding_is_durable_in_same_attempt () =
   let base_path=temp_workspace "keeper-assembly-binding-" in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) @@ fun () ->
-  let assembly=Masc.Keeper_context_assembly.assemble ~existing_extra_system_context:None
+  let assembly=Masc.Keeper_context_assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None
     ~blocks:[Prompt_block_id.Dynamic_context,"한글 \"same\"\n";
       Prompt_block_id.Memory_os_recall,"한글 \"same\"\n"] in
   let hooks : Agent_core.Hooks.hooks = {Agent_core.Hooks.empty with
@@ -6035,7 +6092,7 @@ let test_keeper_context_lifecycle_three_settled_turns () =
       { role = System; content = [Text text]; name = None; tool_call_id = None;
         metadata = Agent_core.Types.Extra_system_context_provenance.metadata } in
     Keeper_official_client_context_codec.encode message in
-  let assembly changed = Assembly.assemble ~existing_extra_system_context:None
+  let assembly changed = Assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None
     ~blocks:[Prompt_block_id.Dynamic_context,same;
       Prompt_block_id.Memory_os_recall,(if changed then same ^ " revised" else same)] in
   let initial = assembly false and changed = assembly true in
@@ -7923,7 +7980,8 @@ let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
   let projection_calls = ref 0 in
   let projected = "PROJECTED_DYNAMIC_CONTEXT" in
   let dynamic_context_for_tools =
-    if project then Some (fun _tools -> incr projection_calls; projected)
+    if project then Some (fun _tools -> incr projection_calls;
+      Masc.Keeper_context_layers.unattributed Unprojected_input projected)
     else None
   in
   let expected_dynamic_context =
@@ -7996,7 +8054,14 @@ let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
          | Ok capture -> capture
          | Error error -> fail (Keeper_prompt_capture.read_error_to_string error) in
        check (option string) "production capture and actual carrier agree" (Some wire_text) capture.assembled;
-       let issued = Keeper_run_prompt.assemble_extra_system_context ~existing_extra_system_context:None
+       (* Both the fixture callback and the no-callback hook path issue an
+          unattributed renderer value. Derive it from the original fixture
+          input, not from the captured receipt being checked. *)
+       let expected_dynamic_partition = Masc.Keeper_context_layers.unattributed
+           Unprojected_input expected_dynamic_context in
+       let issued = Keeper_run_prompt.assemble_extra_system_context
+         ~dynamic_context_partition:(Some expected_dynamic_partition)
+         ~existing_extra_system_context:None
          ~blocks:(List.map (fun (block : Keeper_prompt_capture.block) -> block.id,block.text) capture.blocks) in
        check (option string) "issuer reproduces the production hook assembly" (Some wire_text)
          issued.extra_system_context;

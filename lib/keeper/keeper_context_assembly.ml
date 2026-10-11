@@ -1,10 +1,12 @@
 type unattributed = Existing_prefix | Separator
 type kind = Block of Prompt_block_id.t | Unattributed of unattributed
+type subpartition = Not_applicable | Unavailable | Issued of Yojson.Safe.t
 type span =
   { kind : kind
   ; offset : int
   ; bytes : int
   ; sha256 : string
+  ; subpartition : subpartition
   }
 type receipt =
   { bytes : int
@@ -19,16 +21,23 @@ type t =
 
 let sha256 text = Digestif.SHA256.(digest_string text |> to_hex)
 
-let assemble ~existing_extra_system_context ~blocks =
+let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
   let buffer = Buffer.create 128 in
   let spans = ref [] in
   let present = ref false in
   let append kind text =
+    let subpartition = match kind, dynamic_context_partition with
+      | Block Prompt_block_id.Dynamic_context, Some rendered
+        when String.equal text (Keeper_context_layers.text rendered) ->
+        Issued (Keeper_context_layers.receipt_to_json rendered)
+      | Block Prompt_block_id.Dynamic_context, _ -> Unavailable
+      | (Block _ | Unattributed _), _ -> Not_applicable in
     spans :=
       { kind
       ; offset = Buffer.length buffer
       ; bytes = String.length text
       ; sha256 = sha256 text
+      ; subpartition
       } :: !spans;
     Buffer.add_string buffer text
   in
@@ -91,10 +100,14 @@ let receipt_to_json (receipt : receipt) =
       ; "offset", `Int span.offset
       ; "bytes", `Int span.bytes
       ; "sha256", `String span.sha256
+      ; "subpartition", (match span.subpartition with
+          | Not_applicable -> `Assoc ["status", `String "not_applicable"]
+          | Unavailable -> `Assoc ["status", `String "unavailable"]
+          | Issued receipt -> `Assoc ["status", `String "verified"; "partition", receipt])
       ]
   in
   `Assoc
-    [ "schema", `String "masc.logical-context-partition.v1"
+    [ "schema", `String "masc.logical-context-partition.v2"
     ; "scope", `String "assembled_raw_utf8_before_message_or_ipc_encoding"
     ; "bytes", `Int receipt.bytes
     ; "sha256", `String receipt.sha256

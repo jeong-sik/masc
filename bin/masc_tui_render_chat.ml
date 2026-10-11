@@ -2767,7 +2767,8 @@ let child_content_entries (state : state) ~keeper_name ~role_label_column ~chat_
       let palette_generation = Masc_tui_terminal_palette.snapshot_generation
         (Masc_tui_terminal_palette.snapshot ()) in
       let key = state.msg_tool_visibility, state.msg_reasoning_visibility,
-        role_label_column, chat_cols, state.msg_origin_display, palette_generation in
+        role_label_column, chat_cols, state.msg_origin_display, palette_generation,
+        state.link_previews_mode, Masc_tui_link_preview.cache_generation () in
       match !child_entries_memo with
       | Some (previous, previous_key, result) when previous == received && previous_key = key -> result
       | Some _ | None ->
@@ -3784,20 +3785,25 @@ let source_point_on_row ~source_body entry_index body_row =
   Option.bind (source_body entry_index) (fun body -> Hashtbl.find_opt body.row_sources body_row)
 
 (* The point's entry still stands, but a view stance (Ctrl-D, Ctrl-N, Ctrl-R)
-   replaced the body text the point indexed with another presentation. No byte
-   of the old text names a byte of the new one, so the reader stays on the
-   entry itself, at its first body row. *)
-let presentation_changed_row projection entry_index (point : chat_scroll_point) =
-  match point.source_position with
-  | None | Some (Polled_body_byte _) -> None
-  | Some (Durable_position position) ->
-      let entries = (scroll_anchor_index projection).indexed_entries in
-      if entry_index < 0 || entry_index >= Array.length entries then None else
-      match Search.presentation_of_position position with
-      | None -> None
-      | Some presentation ->
-          if presentation = entries.(entry_index).Message_layout.body_presentation then None
-          else Some 0
+   replaced the body text the point indexed with another presentation. A Child
+   Audit may also redact bytes while retaining the same durable observation.
+   When no exact source byte survives, keep that existing entry at its first
+   body row; a removed observation cannot acquire this fallback. *)
+let surviving_entry_row projection entry_index (point : chat_scroll_point) =
+  let entries = (scroll_anchor_index projection).indexed_entries in
+  if entry_index < 0 || entry_index >= Array.length entries then None else
+  match point.scroll_anchor with
+  | Scroll_durable (Search_child _) -> Some 0
+  | Scroll_durable (Search_admission _ | Search_history _ | Search_journal _)
+  | Scroll_pending _ | Scroll_polled _ ->
+      match point.source_position with
+      | None | Some (Polled_body_byte _) -> None
+      | Some (Durable_position position) ->
+          match Search.presentation_of_position position with
+          | None -> None
+          | Some presentation ->
+              if presentation = entries.(entry_index).Message_layout.body_presentation then None
+              else Some 0
 
 let requested_scroll_from_pin state ~keeper_name projection ~markdown ~source_body ~inner_width =
   if state.msg_scroll = max_int then max_int
@@ -3815,14 +3821,14 @@ let requested_scroll_from_pin state ~keeper_name projection ~markdown ~source_bo
                   ~origin:state.msg_origin_display ~inner_width ~entry_index
                   ~body_row projection.layout_entries))) in
       (* An exact byte anywhere in the pin wins. Only when none survives does
-         an entry redrawn in another presentation hold the reader. Every saved
-         byte may have been removed; a stale numeric distance must not become
+         a surviving Child observation or changed presentation hold the reader.
+         Every saved byte may have been removed; a stale numeric distance must not become
          a successful pin to newly arriving content. *)
       (match List.find_map (scroll_at ~row_of:(body_row_of_point ~source_body)) pin.pin_points with
        | Some scroll -> scroll
        | None ->
            Option.value ~default:0
-             (List.find_map (scroll_at ~row_of:(presentation_changed_row projection)) pin.pin_points))
+             (List.find_map (scroll_at ~row_of:(surviving_entry_row projection)) pin.pin_points))
   | Some _ | None -> state.msg_scroll
 
 let scroll_position_for_window state ~keeper_name projection ~markdown ~source_body ~inner_width

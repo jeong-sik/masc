@@ -3,9 +3,12 @@ import { KeeperChatStreamEventSchema } from '../schemas/sse'
 
 import { asString, isRecord } from '../components/common/normalize'
 import { KeeperChatOperationMissingError } from './keeper-operation-error'
+import { assertCurrentKeeperStreamAdmission, type KeeperStreamAdmission } from './keeper-stream-admission'
 import type { KeeperConversationAttachment, KeeperUserInputBlock } from '../types'
 import {
   apiRequestErrorFromResponse,
+  currentStoredTokenRevision,
+  subscribeStoredTokenChanges,
   jsonHeaders,
   post,
   fetchControlPlane,
@@ -442,6 +445,7 @@ export interface StreamKeeperMessageOptions {
   operationId: string
   signal?: AbortSignal
   onEvent: (event: KeeperChatStreamEvent, sequence?: number) => void
+  onAdmission?: (admission: KeeperStreamAdmission) => void
   onDecodeError?: (reason: string) => void
   attachments?: KeeperConversationAttachment[]
   userBlocks?: KeeperUserInputBlock[]
@@ -490,6 +494,7 @@ export async function streamKeeperMessage(
     operationId,
     signal,
     onEvent,
+    onAdmission,
     onDecodeError,
     attachments,
     userBlocks,
@@ -544,29 +549,47 @@ export async function streamKeeperMessage(
   }
   const requestBody = JSON.stringify(body)
   const streamPath = '/api/v1/keepers/chat/stream'
-  const postStream = () => fetch(streamPath, {
-    method: 'POST',
-    headers: {
-      ...jsonHeaders(),
-      Accept: 'text/event-stream',
-    },
-    body: requestBody,
-    signal,
-  })
+  const assertResponseAdmission = (response: Response, admission: KeeperStreamAdmission) => {
+    try {
+      assertCurrentKeeperStreamAdmission(admission)
+    } catch (error) {
+      void response.body?.cancel().catch(() => undefined)
+      throw error
+    }
+  }
+  const postStream = async () => {
+    const headers = { ...jsonHeaders(), Accept: 'text/event-stream' }
+    const admission: KeeperStreamAdmission = Object.freeze({ keeperName: name, operationId: exactOperationId,
+      authRevision: currentStoredTokenRevision() })
+    onAdmission?.(admission)
+    assertCurrentKeeperStreamAdmission(admission)
+    try {
+      const response = await fetch(streamPath, { method: 'POST', headers, body: requestBody, signal })
+      assertResponseAdmission(response, admission)
+      return { response, admission }
+    } catch (error) {
+      assertCurrentKeeperStreamAdmission(admission)
+      throw error
+    }
+  }
 
-  let res = await postStream()
+  let { response: res, admission } = await postStream()
+  assertResponseAdmission(res, admission)
 
   if (!res.ok) {
     let requestError = await apiRequestErrorFromResponse('POST', streamPath, res)
+    assertResponseAdmission(res, admission)
     if (
       res.status === 401
       && await refreshDevTokenAfterAuthError(requestError.authErrorCode)
     ) {
-      res = await postStream()
+      ;({ response: res, admission } = await postStream())
+      assertResponseAdmission(res, admission)
       if (!res.ok) {
         requestError = await apiRequestErrorFromResponse('POST', streamPath, res)
       }
     }
+    assertResponseAdmission(res, admission)
     if (!res.ok) {
       throw requestError
     }
@@ -576,28 +599,39 @@ export async function streamKeeperMessage(
     throw new Error('스트리밍 응답 본문 사용 불가')
   }
 
+  assertResponseAdmission(res, admission)
   const reader = res.body.getReader()
+  const releaseAuthListener = subscribeStoredTokenChanges(() => {
+    void reader.cancel().catch(() => undefined)
+  })
   const decoder = new TextDecoder()
   let buffer = ''
 
   try {
     for (;;) {
+      assertCurrentKeeperStreamAdmission(admission)
       const { done, value } = await reader.read()
+      assertCurrentKeeperStreamAdmission(admission)
       buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done })
       const { frames, rest } = parseSseFrames(buffer)
       buffer = rest
       for (const frame of frames) {
+        assertCurrentKeeperStreamAdmission(admission)
         const parsed = parseSseEvent(frame, onDecodeError)
+        assertCurrentKeeperStreamAdmission(admission)
         if (!parsed) continue
         const { event, sequence } = parsed
+        assertCurrentKeeperStreamAdmission(admission)
         if (sequence === undefined) onEvent(event)
         else onEvent(event, sequence)
+        assertCurrentKeeperStreamAdmission(admission)
         if (isTerminalKeeperStreamEvent(event)) {
           try {
             await reader.cancel()
           } catch {
             // Ignore stream cancellation errors after terminal events.
           }
+          assertCurrentKeeperStreamAdmission(admission)
           return { terminal: true }
         }
       }
@@ -605,17 +639,25 @@ export async function streamKeeperMessage(
     }
     const tail = buffer.trim()
     if (tail) {
+      assertCurrentKeeperStreamAdmission(admission)
       const parsed = parseSseEvent(tail, onDecodeError)
+      assertCurrentKeeperStreamAdmission(admission)
       if (parsed) {
         const { event, sequence } = parsed
+        assertCurrentKeeperStreamAdmission(admission)
         if (sequence === undefined) onEvent(event)
         else onEvent(event, sequence)
+        assertCurrentKeeperStreamAdmission(admission)
         if (isTerminalKeeperStreamEvent(event)) return { terminal: true }
       }
     }
     // Connection closed without RUN_FINISHED / RUN_ERROR: mid-stream cut.
     return { terminal: false }
+  } catch (error) {
+    assertCurrentKeeperStreamAdmission(admission)
+    throw error
   } finally {
+    releaseAuthListener()
     reader.releaseLock()
   }
 }

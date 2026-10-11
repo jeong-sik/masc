@@ -86,7 +86,7 @@ import {
   upsertTrackedKeeperChatOperation,
 } from './keeper-chat-operations-local'
 import { KEEPER_HISTORY_TAIL_MESSAGES } from './config/constants'
-import { ApiRequestError, clearStoredToken, setStoredToken } from './api/core'
+import { ApiRequestError, clearStoredToken, currentStoredTokenRevision, setStoredToken } from './api/core'
 import { KeeperChatOperationMissingError } from './api/keeper-operation-error'
 import {
   lookupToolCallOutput,
@@ -789,6 +789,100 @@ describe('sendKeeperThreadMessage operation stream', () => {
     }))
     expect(keeperThreads.value.echo?.filter(entry => entry.role === 'user').at(-1)?.text).toBe(text)
     expect(keeperThreads.value.echo?.filter(entry => entry.role === 'assistant').at(-1)?.text).toBe(text)
+  })
+
+  it('does not apply old stream events or reconcile under replacement credentials', async () => {
+    setStoredToken('fixture-old')
+    let emit!: (event: KeeperChatStreamEvent) => void
+    let finish!: (outcome: { terminal: boolean }) => void
+    streamKeeperMessage.mockImplementationOnce((_name, _message, options) => {
+      emit = options.onEvent
+      return new Promise(resolve => { finish = resolve })
+    })
+    const send = sendKeeperThreadMessage('echo', 'input').catch(error => error)
+    setStoredToken('fixture-new')
+    keeperActionErrors.value = { echo: 'current scope error' }
+    const oldEvents: KeeperChatStreamEvent[] = [
+      { type: 'TEXT_MESSAGE_CONTENT', messageId: 'old-message', delta: 'old response' },
+      { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta: 'old reasoning' } },
+      { type: 'TOOL_CALL_START', toolCallId: 'old-tool', toolCallName: 'Read',
+        toolStreamScope: 0, toolCallBlockIndex: 0 },
+    ]
+    for (const event of oldEvents) {
+      try { emit(event) } catch {}
+    }
+    finish({ terminal: true })
+    await send
+    expect(keeperThreads.value.echo?.some(entry => entry.text.includes('old response'))).toBe(false)
+    expect(keeperThreads.value.echo?.some(entry => entry.role === 'tool')).toBe(false)
+    expect(keeperThreads.value.echo?.some(entry => entry.traceSteps?.some(step => step.kind === 'think'))).toBe(false)
+    expect(keeperActionErrors.value.echo).toBe('current scope error')
+    expect(fetchKeeperChatHistory).not.toHaveBeenCalled()
+    expect(cancelKeeperChatOperation).not.toHaveBeenCalled()
+    clearStoredToken()
+  })
+
+  it('keeps accepted partial observations available for recovery after authentication withdrawal', async () => {
+    setStoredToken('fixture-old')
+    let finish!: (outcome: { terminal: boolean }) => void
+    streamKeeperMessage.mockImplementationOnce((_name, _message, options) => {
+      options.onEvent({ type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: options.operationId, state: 'Running', queued_count: 0 } })
+      options.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'admitted partial' })
+      return new Promise(resolve => { finish = resolve })
+    })
+    const send = sendKeeperThreadMessage('echo', 'input').catch(error => error)
+    setStoredToken('fixture-new')
+    keeperActionErrors.value = { echo: 'current scope error' }
+    finish({ terminal: false })
+    await send
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toHaveLength(1)
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft).toMatchObject({
+      rawText: 'admitted partial', delivery: 'interrupted', streamState: null,
+    })
+    expect(keeperActionErrors.value.echo).toBe('current scope error')
+    expect(fetchKeeperChatHistory).not.toHaveBeenCalled()
+    expect(cancelKeeperChatOperation).not.toHaveBeenCalled()
+    clearStoredToken()
+  })
+
+  it('accepts the HTTP admission established after initial credential bootstrap', async () => {
+    streamKeeperMessage.mockImplementationOnce(async (_name, _message, options) => {
+      setStoredToken('fixture-dev', { source: 'dev', actor: 'dashboard', role: 'admin' })
+      options.onAdmission({ keeperName: 'echo', operationId: options.operationId,
+        authRevision: currentStoredTokenRevision() })
+      options.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'admitted response' })
+      options.onEvent({ type: 'RUN_FINISHED' })
+      return { terminal: true }
+    })
+    await sendKeeperThreadMessage('echo', 'input')
+    expect(keeperThreads.value.echo?.find(entry => entry.role === 'assistant')?.rawText).toBe('admitted response')
+    clearStoredToken()
+  })
+
+  it('does not release a newer send when an older authentication scope settles', async () => {
+    setStoredToken('fixture-old')
+    let finishOld!: (outcome: { terminal: boolean }) => void
+    let finishCurrent!: (outcome: { terminal: boolean }) => void
+    let currentEvent!: (event: KeeperChatStreamEvent) => void
+    streamKeeperMessage.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+      .mockImplementationOnce((_name, _message, options) => {
+        currentEvent = options.onEvent
+        options.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'current answer' })
+        return new Promise(resolve => { finishCurrent = resolve })
+      })
+    const old = sendKeeperThreadMessage('echo', 'old input').catch(error => error)
+    setStoredToken('fixture-new')
+    const current = sendKeeperThreadMessage('echo', 'new input')
+    finishOld({ terminal: false })
+    await old
+    expect(keeperSending.value.echo).toBe(true)
+    currentEvent({ type: 'RUN_FINISHED' })
+    finishCurrent({ terminal: true })
+    await current
+    expect(keeperThreads.value.echo?.some(entry => entry.rawText === 'current answer' && entry.delivery === 'delivered')).toBe(true)
+    expect(keeperSending.value.echo).toBe(false)
+    clearStoredToken()
   })
 
   it.each(['resolve', 'reject'] as const)('preserves current action error when failed-send history becomes stale (%s)', async outcome => {

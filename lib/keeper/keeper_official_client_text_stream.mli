@@ -51,7 +51,8 @@ val tool_row : 'message t -> unit
 val complete_message : 'message t -> message:'message -> text:string -> string option
 (** Forward missing text from a completed message with a wire identity. A later
     message with no deltas starts its own paragraph; completing the same message
-    forwards only its missing suffix, so repeated completion cannot duplicate it. *)
+    forwards only its missing suffix. Once completed, that wire identity cannot
+    emit another completion delta, including after a later message starts. *)
 
 val remainder : 'message t -> final_text:string -> string option
 (** The part of the turn's recorded text the stream has not shown, to forward

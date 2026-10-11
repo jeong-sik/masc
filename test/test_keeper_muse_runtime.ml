@@ -120,6 +120,21 @@ let test_completed_message_suffix_is_forwarded_once () =
   check string "completion and turn finalization never repeat a suffix" "partial rest" text
 ;;
 
+let test_completed_message_replay_after_next_message () =
+  let events = Adapter.project_stream [turn_started;
+    Serve.Text_delta {item_id="first"; text="partial"};
+    Serve.Text_completed {item_id="first"; text="partial rest"};
+    Serve.Text_delta {item_id="second"; text="answer"};
+    Serve.Text_completed {item_id="first"; text="partial rest"};
+    Serve.Text_completed {item_id="second"; text="answer"};
+    Serve.Turn_finished {text="answer"}] in
+  let text = List.filter_map (function
+    | Agent_core.Types.ContentBlockDelta {delta=TextDelta text; _} -> Some text
+    | _ -> None) events |> String.concat "" in
+  check string "completed identity cannot replay into the next message"
+    "partial rest\n\nanswer" text
+;;
+
 let mcp_started call_id =
   Adapter.Mcp_tool_started
     { call_id; tool_name = "masc_probe"; arguments = `Assoc [ "marker", `String "x" ] }
@@ -2588,6 +2603,7 @@ let () =
             test_failed_muse_turn_reads_typed_usage_without_replay
         ; test_case "prepared hook tool surface controls session binding" `Quick test_hook_tool_surface_controls_session_binding
         ; test_case "completed message suffix is forwarded once" `Quick test_completed_message_suffix_is_forwarded_once
+        ; test_case "completed message replay after next message is ignored" `Quick test_completed_message_replay_after_next_message
         ; test_case "later unstreamed message reaches live consumers" `Quick test_later_unstreamed_message_reaches_live_consumers
         ; test_case "text-only host needs no session MCP" `Quick test_text_only_session_does_not_require_session_mcp
         ] )

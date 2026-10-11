@@ -267,6 +267,8 @@ type async_msg =
       int * string * Masc_tui_context_inspector.reading
   | Keeper_chat_older_loaded of
       int * string * float * (Masc_tui_keeper_chat_history.page, string) result
+  | Local_workspace_read of string * Masc_tui_loader.local_reading
+      (** The .masc directory as read off the UI thread for this base path. *)
   | Lanes_loaded of
       unit ref * ( Masc.Tui_decode.keeper_lanes_snapshot
         * Masc.Tui_decode.keeper_secret_projection list,
@@ -683,6 +685,7 @@ let rec workspace_message_is_read = function
   | Keeper_chat_journal_loaded _
   | Context_inspector_loaded _
   | Keeper_chat_older_loaded _
+  | Local_workspace_read _
   | Lanes_loaded _
   | Lane_inventory_loaded _
   | Clients_loaded _

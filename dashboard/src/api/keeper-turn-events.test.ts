@@ -24,6 +24,19 @@ describe('autonomous turn journal boundary', () => {
   ])('rejects foreign, repeated, and inconsistent pages %j', delta => {
     expect(() => parseKeeperTurnEventPage({ ...raw, ...delta }, 'trace#9', cursor)).toThrow()
   })
+  it('accepts a scanned empty resume page without fabricating events or a newer sequence', () => {
+    const page = parseKeeperTurnEventPage({ ...raw, ag_ui_events: [], has_more: false,
+      next_since_seq: 3, next_since_offset: 123 }, 'trace#9', { sequence: 3, offset: 0 })
+    expect(page.events).toEqual([])
+    expect(page.cursor).toEqual({ sequence: 3, offset: 123 })
+  })
+  it.each([
+    { has_more: true, next_since_seq: 3, next_since_offset: 123 },
+    { has_more: false, next_since_seq: 4, next_since_offset: 123 },
+    { has_more: false, next_since_seq: 3, next_since_offset: 9 },
+  ])('rejects an empty page with false progress or backward bytes %j', delta => {
+    expect(() => parseKeeperTurnEventPage({ ...raw, ag_ui_events: [], ...delta }, 'trace#9', cursor)).toThrow()
+  })
   it('advances across connector-only rows without inventing UI content', () => {
     const page = parseKeeperTurnEventPage({ ...raw, ag_ui_events: [{ seq: 4, ts: 1, event: null }] }, 'trace#9', cursor)
     expect(page.events[0]?.event).toBeNull()

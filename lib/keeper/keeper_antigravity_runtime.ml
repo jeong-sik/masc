@@ -378,10 +378,13 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
                      (* Retire ownership before a completion observer can yield
                         or reenter this projection. *)
                      Hashtbl.replace native_tool_indexes identity Native_closed;
-                     Option.iter (fun finish -> finish ~block_index:index
-                       ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
-                       on_native_tool_completion;
-                     stop_content index
+                     Fun.protect
+                       ~finally:(fun () ->
+                         Eio.Cancel.protect (fun () -> stop_content index))
+                       (fun () ->
+                         Option.iter (fun finish -> finish ~block_index:index
+                           ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                           on_native_tool_completion)
                  | Some Native_closed -> ()
                  | None ->
                      (* A finish may arrive without its start. It still fences

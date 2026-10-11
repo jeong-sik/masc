@@ -1,4 +1,4 @@
-import { keeperResponseIsRunning, ownerFromUnknown, sameKeeperResponseOwner, type KeeperResponseOwner } from './lib/keeper-response-state'
+import { reconcileKeeperResponseStates, keeperResponseIsRunning, ownerFromUnknown, sameKeeperResponseOwner, type KeeperResponseOwner } from './lib/keeper-response-state'
 import { signal } from '@preact/signals'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import { isInFlightDelivery } from './lib/keeper-delivery'
@@ -1464,7 +1464,7 @@ function entryTimeMs(entry: KeeperConversationEntry): number {
   return Number.isFinite(ms) ? ms : TIMESTAMP_SORT_FALLBACK
 }
 
-function mergeLocalAssistantTraceSteps(
+function mergeLocalAssistantObservations(
   historyEntry: KeeperConversationEntry,
   localEntries: KeeperConversationEntry[],
   // Tracks local trace sources already claimed by an earlier history row.
@@ -1476,28 +1476,34 @@ function mergeLocalAssistantTraceSteps(
   // letting duplicate assistant text reuse the first local trace source
   // (#21748).
   consumed: Set<string>,
+  canonicalEntries: readonly KeeperConversationEntry[],
 ): KeeperConversationEntry {
   if (historyEntry.role !== 'assistant' && historyEntry.delivery !== 'request_failure') return historyEntry
   const historyProvenance = historyEntry.deliveryProvenance
-  const localTraceSourceByProvenance = historyProvenance
-    ? localEntries.find(
-        entry =>
-          entry.role === 'assistant'
-          && (entry.traceSteps?.length ?? 0) > 0
-          && !consumed.has(entry.id)
-          && entry.deliveryProvenance != null
-          && sameDeliveryProvenance(entry.deliveryProvenance, historyProvenance),
-      )
-    : undefined
-  if (localTraceSourceByProvenance?.traceSteps?.length) {
+  const exactLocalEntries = historyProvenance ? localEntries.filter(entry =>
+    entry.role === 'assistant' && entry.deliveryProvenance != null
+      && sameDeliveryProvenance(entry.deliveryProvenance, historyProvenance),
+  ) : []
+  const exactCanonicalEntries = historyProvenance ? canonicalEntries.filter(entry =>
+    entry.deliveryProvenance != null && sameDeliveryProvenance(entry.deliveryProvenance, historyProvenance),
+  ) : []
+  const responseState = historyProvenance ? reconcileKeeperResponseStates(
+    [...exactLocalEntries, ...exactCanonicalEntries].map(entry => entry.responseState),
+  ) : historyEntry.responseState
+  const mergedHistory = responseState ? { ...historyEntry, responseState } : historyEntry
+  // Trace occurrences retain their existing one-to-one correlation. Ownership
+  // belongs to the producer identity and is shared across every exact match.
+  const localTraceSourceByProvenance = exactLocalEntries.find(entry =>
+    (entry.traceSteps?.length ?? 0) > 0 && !consumed.has(entry.id),
+  )
+  if (localTraceSourceByProvenance) {
     consumed.add(localTraceSourceByProvenance.id)
-    if ((historyEntry.traceSteps?.length ?? 0) > 0) return historyEntry
     return {
-      ...historyEntry,
-      traceSteps: localTraceSourceByProvenance.traceSteps,
+      ...mergedHistory,
+      traceSteps: historyEntry.traceSteps?.length ? historyEntry.traceSteps : localTraceSourceByProvenance.traceSteps,
     }
   }
-  if (historyProvenance) return historyEntry
+  if (historyProvenance) return mergedHistory
   const historyTurnRef = historyEntry.turnRef?.trim()
   const localTraceSourceByTurnRef = historyTurnRef
     ? localEntries.find(
@@ -1529,10 +1535,10 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   if (entries.length === 0) return
   const existing = keeperThreads.value[name] ?? []
   // Shared across the map so each local trace source is claimed at most once
-  // (see mergeLocalAssistantTraceSteps): identical-text turns no longer steal
+  // (see mergeLocalAssistantObservations): identical-text turns no longer steal
   // each other's trace (#21748).
   const consumed = new Set<string>()
-  const historyEntries = entries.map(entry => mergeLocalAssistantTraceSteps(entry, existing, consumed))
+  const historyEntries = entries.map(entry => mergeLocalAssistantObservations(entry, existing, consumed, entries))
   const localEntries = existing.filter(
     entry => {
       const coveredByHistory = historyEntries.some(historyEntry => sameConversationEntry(entry, historyEntry))

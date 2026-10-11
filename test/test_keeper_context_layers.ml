@@ -67,10 +67,10 @@ let test_assemble_concatenates_present_in_order () =
     | _ -> None
   in
   check string "present layers concatenated in ordered order" "ATB"
-    (L.assemble ~content_of)
+    (L.text (L.assemble ~content_of))
 
 let test_assemble_empty_when_all_absent () =
-  check string "no layers -> empty body" "" (L.assemble ~content_of:(fun _ -> None))
+  check string "no layers -> empty body" "" (L.text (L.assemble ~content_of:(fun _ -> None)))
 
 let test_assemble_all_present_follows_ordered () =
   (* Each layer renders its own order index; the result must read 0..n-1.
@@ -82,7 +82,39 @@ let test_assemble_all_present_follows_ordered () =
     List.init (List.length all_layers) string_of_int |> String.concat ""
   in
   check string "every layer present -> indices in order" expected
-    (L.assemble ~content_of)
+    (L.text (L.assemble ~content_of))
+
+let test_issued_partition_preserves_occurrences () =
+  let open Yojson.Safe.Util in
+  let calls = ref [] in
+  let repeated = "한글 \"same\"\n\\tail" in
+  let rendered = L.assemble ~content_of:(fun layer ->
+      calls := layer :: !calls;
+      match layer with
+      | L.Active_goals | L.Current_task -> Some repeated
+      | L.Approval_authority -> Some ""
+      | _ -> None)
+    |> L.prepend_unattributed World_frame "" in
+  let rendered = L.append_unattributed rendered Host_workspace_recall "HOST" in
+  check bool "each producer is evaluated once in order" true (List.rev !calls = L.ordered);
+  check string "source text is unchanged" (repeated ^ repeated ^ "HOST") (L.text rendered);
+  let receipt = L.receipt_to_json rendered in
+  let spans = member "spans" receipt |> to_list in
+  check int "empty present layers and prefix retain their occurrences" 5 (List.length spans);
+  check (list string) "repeated bytes retain distinct typed layer identities"
+    ["active_goals"; "current_task"; "approval_authority"]
+    (List.filter_map (fun span -> match member "layer" (member "source" span) with
+      | `String name -> Some name | _ -> None) spans);
+  let cursor = ref 0 in
+  List.iter (fun span ->
+    let offset = member "offset" span |> to_int in
+    let bytes = member "bytes" span |> to_int in
+    check int "contiguous actual source offset" !cursor offset;
+    let actual = String.sub (L.text rendered) offset bytes in
+    check string "actual slice hash" (member "sha256" span |> to_string)
+      Digestif.SHA256.(digest_string actual |> to_hex);
+    cursor := offset + bytes) spans;
+  check int "all bytes accounted for" (String.length (L.text rendered)) !cursor
 
 let () =
   run "keeper_context_layers"
@@ -98,6 +130,8 @@ let () =
         ] );
       ( "assemble",
         [
+          test_case "issued partition preserves repeated and empty occurrences" `Quick
+            test_issued_partition_preserves_occurrences;
           test_case "concatenates present layers in order" `Quick
             test_assemble_concatenates_present_in_order;
           test_case "empty when all absent" `Quick

@@ -7,7 +7,7 @@
     a callback cannot substitute a second render (#38354). *)
 type turn_prompt =
   { dynamic_context : string
-  ; dynamic_context_for_tools : (Keeper_request_tool_access.t -> string) option
+  ; dynamic_context_for_tools : (Keeper_request_tool_access.t -> Keeper_context_layers.rendered) option
       (** Optional transmission view, evaluated after the current attempt's
           offered tools and obtainable deferred tools are known.
           [dynamic_context] is the provisional view before that projection;

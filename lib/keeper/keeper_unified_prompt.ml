@@ -21,6 +21,7 @@ open Keeper_unified_prompt_event_fields
 
 type turn_prompt_parts = {
   world_state : string;
+  world_partition : Keeper_context_layers.rendered;
   user_message : string;
 }
 
@@ -1818,11 +1819,11 @@ let build_prompt_internal
      then reports "I checked the board" is misreading its own frame rather than
      inventing a tool call. Stating where the frame came from is what makes
      that distinction available to the model. *)
-  let world_state =
-    render_fragment Prompt_names.keeper_world_frame_frame []
-    ^ "\n\n"
-    ^ Keeper_context_layers.assemble ~content_of
-  in
+  let world_partition =
+    Keeper_context_layers.assemble ~content_of
+    |> Keeper_context_layers.prepend_unattributed World_frame
+         (render_fragment Prompt_names.keeper_world_frame_frame [] ^ "\n\n") in
+  let world_state = Keeper_context_layers.text world_partition in
   (* An answered Ask is new conversation input, not just a world observation.
      Dynamic context is transient across tool rounds and is not checkpointed.
      Keep the attributed, quoted answer in the ordinary durable user turn;
@@ -1832,13 +1833,13 @@ let build_prompt_internal
     String.concat "\n\n"
       (Env_config_keeper.KeeperAutonomous.wake_prompt () :: answered_asks)
   in
-  { world_state; user_message }
+  { world_state; world_partition; user_message }
 ;;
 
 let emit_prompt_metrics
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(system_prompt : string)
-      { world_state; user_message }
+      { world_state; user_message; _ }
   =
   (* Tool names and availability come exclusively from the typed schemas sent
      with this turn. Prompt markdown describes behaviour rather than attempting

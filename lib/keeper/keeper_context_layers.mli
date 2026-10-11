@@ -47,7 +47,15 @@ val order_index : layer_id -> int
 (** Position of a layer in {!ordered} (0-based). Exhaustive over {!layer_id}, so
     a new variant forces an arm here as well as in any [content_of]. *)
 
-val assemble : content_of:(layer_id -> string option) -> string
+type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
+type rendered
+val text : rendered -> string
+val unattributed : unattributed -> string -> rendered
+val append_unattributed : rendered -> unattributed -> string -> rendered
+val prepend_unattributed : unattributed -> string -> rendered -> rendered
+val receipt_to_json : rendered -> Yojson.Safe.t
+(** Renderer-issued raw UTF8 spans, not a prepared or delivered IPC claim. *)
+val assemble : content_of:(layer_id -> string option) -> rendered
 (** [assemble ~content_of] renders each layer in {!ordered} via [content_of]
     and concatenates the [Some] results in order; a [None] layer contributes
     nothing. The concatenation is byte-exact — each [content_of] result is

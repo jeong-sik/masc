@@ -909,7 +909,7 @@ let run_keeper_cycle
                let prompt_parts =
                  Eio_guard.with_named_switch "turn:prompt" (fun () -> render_prompt [] observation)
                in
-               let { Keeper_unified_prompt.world_state; user_message } = prompt_parts in
+               let { Keeper_unified_prompt.world_state; user_message; _ } = prompt_parts in
                let dynamic_context_for_tools = Some (fun access ->
                  let tools = Keeper_request_tool_access.offered access in
                  Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -920,7 +920,7 @@ let run_keeper_cycle
                          ~policy:meta.input_policy ~tools turns in
                        {observation with own_recent_actions=Ok own_recent_actions}
                      | Wide, _ | Small, Error _ -> observation in
-                   (render_prompt ~workspace_memory_access:access tools observation).world_state)) in
+                   (render_prompt ~workspace_memory_access:access tools observation).world_partition)) in
                Eio.Fiber.yield ();
                let base_dir = session_base_dir config in
                (* Ensure session dir tree for trace artifacts. *)

@@ -2789,14 +2789,14 @@ let carrier_message text : Agent_core.Types.message =
 ;;
 
 let carried_composed ~dynamic_text ~operator_text =
-  let assembly = Keeper_context_assembly.assemble ~existing_extra_system_context:None
+  let assembly = Keeper_context_assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None
     ~blocks:[Prompt_block_id.Dynamic_context,dynamic_text;Prompt_block_id.Operator_note,operator_text] in
   carrier_message (Option.get assembly.extra_system_context),assembly
 ;;
 
 let test_issued_prefix_delivery_preserves_held_semantics () =
   let blocks = [Prompt_block_id.Memory_os_recall,"stable recall"] in
-  let issued prefix = Keeper_run_prompt.assemble_extra_system_context
+  let issued prefix = Keeper_run_prompt.assemble_extra_system_context ~dynamic_context_partition:None
     ~existing_extra_system_context:prefix ~blocks in
   let message assembly = carrier_message (Option.get assembly.Keeper_context_assembly.extra_system_context) in
   let rendered assembly = "SYSTEM:\n" ^ Host.encode_history_message (message assembly) ^ "\n\nGOAL" in
@@ -2817,13 +2817,13 @@ let test_issued_prefix_delivery_preserves_held_semantics () =
     [Some "prefix";Some ""];
   let first = issued None in
   let initial = Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
-  let changed = Keeper_run_prompt.assemble_extra_system_context ~existing_extra_system_context:None
+  let changed = Keeper_run_prompt.assemble_extra_system_context ~dynamic_context_partition:None ~existing_extra_system_context:None
     ~blocks:[Prompt_block_id.Memory_os_recall,"updated recall"] in
   check string "blocks-only change retains typed resend"
     (rendered changed)
     (Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
        ~composed_context:changed [message changed]).prompt;
-  let duplicate = Keeper_run_prompt.assemble_extra_system_context ~existing_extra_system_context:None
+  let duplicate = Keeper_run_prompt.assemble_extra_system_context ~dynamic_context_partition:None ~existing_extra_system_context:None
     ~blocks:[Prompt_block_id.Memory_os_recall,"first";Prompt_block_id.Memory_os_recall,"second"] in
   let held = Host.start_held_context ~composed_context:duplicate [message duplicate] in
   check int "duplicate block identities retain a single whole carrier" 1 (List.length held);

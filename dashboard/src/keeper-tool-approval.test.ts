@@ -310,6 +310,15 @@ describe('hydrateKeeperToolApprovals', () => {
     expect(keeperToolApprovals.value.sangsu?.['stream-finished-wait']?.settled).toBe(true)
   })
 
+  it('does not publish an infinite millisecond timestamp from finite server seconds', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { pending: [{
+      keeper: 'sangsu', tool_call_id: 'overflow-clock', tool: 'Execute', args: '{}',
+      question: 'approval', because: 'effect', asked_at: Number.MAX_VALUE, timeout_sec: 180,
+    }] })))
+    await hydrateKeeperToolApprovals()
+    expect(keeperToolApprovals.value.sangsu?.['overflow-clock']).toBeUndefined()
+  })
+
   it('stays silent when the listing fails — hydration is best-effort', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(503, { error: 'unavailable' })))
     await expect(hydrateKeeperToolApprovals()).resolves.toBeUndefined()

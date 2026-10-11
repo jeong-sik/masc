@@ -287,6 +287,10 @@ export async function fetchKeeperToolApprovals(
       }
       return value
     }
+    const askedAtSeconds = seconds('asked_at')
+    if (askedAtSeconds !== null && !Number.isFinite(askedAtSeconds * 1000)) {
+      throw new Error('Invalid tool approval inventory millisecond timestamp')
+    }
     return {
       keeper: text('keeper'),
       tool_call_id: text('tool_call_id'),
@@ -294,7 +298,7 @@ export async function fetchKeeperToolApprovals(
       args: text('args', true),
       question: text('question'),
       because: text('because', true),
-      asked_at: seconds('asked_at'),
+      asked_at: askedAtSeconds,
       timeout_sec: seconds('timeout_sec'),
     }
   })

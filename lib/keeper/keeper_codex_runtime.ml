@@ -458,9 +458,6 @@ let codex_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?r
                emit (Agent_core.Types.ContentBlockStop { index }))
             (Hashtbl.find_opt tool_indexes call_id)
         | Runtime_codex_app_server.Native_tool_started observation ->
-          Option.iter
-            (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
-            on_native_action;
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run
@@ -476,7 +473,13 @@ let codex_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?r
                 emit (Agent_core.Types.ContentBlockStart
                   {index; content_type=Runtime_native_tools.stream_content_type;
                    tool_id=Runtime_native_tools.call_id observation;
-                   tool_name=observation.tool_name})) observation.identity
+                   tool_name=observation.tool_name});
+                (* Publish the claimed block before an observer can yield or
+                   reenter with completion. Replayed starts own no new action. *)
+                Option.iter (fun observe ->
+                  Runtime_native_tools.observe_exact_action
+                    ~official_turn:turn_count ~observe observation)
+                  on_native_action) observation.identity
         | Runtime_codex_app_server.Native_tool_progress {item_id; progress} ->
           (match Hashtbl.find_opt native_tool_indexes (Runtime_native_tools.Call_id item_id) with
            | Some (Native_block_open index) ->

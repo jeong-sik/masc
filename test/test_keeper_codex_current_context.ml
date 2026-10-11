@@ -151,7 +151,7 @@ default = "codex.context"
       ?carried_front_seed ?librarian_front ?on_model_input_window_observation
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"])
-      ?official_client_continuation ?on_event
+      ?official_client_continuation ?on_event ?on_native_action
       ?(goal="Continue from current World State.") ~instructions ~world () =
     let composed_context = ref None in
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
@@ -175,7 +175,7 @@ default = "codex.context"
       ~initial_messages
       ~model_input_projection ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
       ~hooks:(Some hooks) ~context_injector:None ~context:(Some (Agent_core.Context.create ()))
-      ~event_bus:None ~raw_trace:None ~on_event ~config ()
+      ~event_bus:None ~raw_trace:None ~on_event ?on_native_action ~config ()
   in
   test ~run ~capture ~reports
 
@@ -189,8 +189,17 @@ let successful attempt = match attempt.Keeper_codex_runtime.result with
 let test_native_replay_keeps_one_block_per_identity () =
   with_fixture ~native_replay:true (fun ~run ~capture:_ ~reports:_ ->
     let events = ref [] in
+    let actions = ref [] in
     successful (run ~instructions:"Keeper instructions" ~world:"Context"
-      ~on_event:(fun event -> events := event :: !events) ());
+      ~on_event:(fun event -> events := event :: !events)
+      ~on_native_action:(fun ~official_turn:_ ~identity ~tool_name:_ ->
+        actions := identity :: !actions) ());
+    let action_ids = List.map (function
+      | Runtime_native_tools.Call_id id -> id
+      | Runtime_native_tools.Provider_step _ -> fail "fixture emitted unexpected native identity")
+      !actions |> List.sort String.compare in
+    check (list string) "each native identity contributes one action observation"
+      ["native-1"; "native-2"] action_ids;
     let starts = List.filter_map (function
       | Agent_core.Types.ContentBlockStart {index; content_type="native_tool_use"; tool_id; _} ->
           Some (index, tool_id)

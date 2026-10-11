@@ -179,6 +179,25 @@ and confirm the next officer or battle prompt before continuing.
   Return; an empty Return is not an answer. After the last unit the map comes
   back with the next province's command prompt.
 
+## Battle defection work
+
+In a March 220 province-21 battle, the current Xu Huang command accepted
+`5` for work, then `2` for `寝返り`. This opened an enemy target list containing
+Zhu Huan and Lu Meng. The target number uses a numeric entry field: `2` appeared
+in that field, and Return submitted Lu Meng. Do not send a target number without
+checking its displayed name; list positions depend on the current enemy force.
+
+The next prompt asked `いかほど金を使いますか(0-78)?`. Separate `7`, `8` presses
+entered 78; Return then opened `よろしいですか(Y/N)?`, and `y` confirmed the
+attempt. That maximum was the force's current gold, not a general input limit.
+Read the amount prompt rather than reusing the observed maximum in another battle.
+
+After confirmation, the next own command was Yue Jin. Own gold fell from 78 to
+0, while displayed troops and officers remained enemy 128 / two and own 103 /
+four. This establishes target selection, payment and command progression;
+it does **not** establish a successful defection or faction transfer. Verify an
+actual result and the target's subsequent faction before claiming success.
+
 ## A battle continuing into the next month
 
 In a manually controlled Cao Pi campaign, province 20 attacked province 21

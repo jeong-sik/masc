@@ -1,0 +1,3 @@
+### Documentation
+
+- Document verified MSX Sangokushi II battle defection inputs, numeric confirmation and the distinction between payment and successful faction transfer.

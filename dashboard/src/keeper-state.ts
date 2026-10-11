@@ -1639,13 +1639,13 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       const isCoveredToolRow = entry.role === 'tool' && (coveredByHistory || toolRowReplacement.has(entry.id))
       // In-flight (sending/streaming/queued) entries represent live state and
       // must survive history merges until they finalize.
-      // A converged assistant row supersedes its own placeholder even while the
+      // A canonical user or assistant row supersedes its own placeholder even while the
       // placeholder still reads in-flight: a stream that died before
       // REPLY_DETAILS leaves `sending` set forever, so treating in-flight as
       // unconditionally live renders the same turn twice (live 2026-07-28,
       // queue lane). Convergence requires a shared producer identity, so this
       // cannot collapse two genuinely distinct turns.
-      const supersededByHistory = entry.role === 'assistant' && coveredByHistory
+      const supersededByHistory = (entry.role === 'assistant' || entry.role === 'user') && coveredByHistory
       const shouldKeepLocalEntry = !supersededByHistory
         && (isInFlightDelivery(entry.delivery)
           || !coveredByHistory)

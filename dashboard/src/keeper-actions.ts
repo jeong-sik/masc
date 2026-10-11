@@ -1221,8 +1221,6 @@ export async function sendKeeperThreadMessage(
     }
   })()
   try {
-    finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
-
     const outcome = await streamKeeperMessage(keeperName, message, {
       operationId,
       signal: controller.signal,
@@ -1249,6 +1247,7 @@ export async function sendKeeperThreadMessage(
             throw new Error('Keeper operation acceptance identity mismatch')
           }
           operationAccepted = true
+          finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
           markLiveSendRequestAccepted(acceptedOperationId)
           upsertTrackedKeeperChatOperation({
             operationId: acceptedOperationId,
@@ -1459,12 +1458,10 @@ export async function sendKeeperThreadMessage(
         reason: errorMessage,
       }),
     })
-    // The assistant placeholder is the single transcript owner of a stream
-    // failure. Keep the optimistic user message as a delivered input row;
-    // marking both rows as errors produced two identical red error cards for
-    // one failed HTTP request.
+    // Keep failure details on the assistant entry; input delivery still follows
+    // the server acceptance receipt rather than transport initiation.
     finalizeAssistantEntry(keeperName, localId, {
-      delivery: 'delivered',
+      delivery: operationAccepted ? 'delivered' : 'error',
       error: null,
       streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
         requestId: operationAccepted ? operationId : undefined,
@@ -1494,6 +1491,10 @@ export async function sendKeeperThreadMessage(
     }
     throw err
   } finally {
+    if (!operationAccepted) {
+      updateThreadEntry(keeperName, localId, entry => entry.delivery === 'sending'
+        ? { ...entry, delivery: 'interrupted' } : entry)
+    }
     // The queued-liveness poll (Gap B above) must never outlive this send:
     // every exit path stops it here even if no reply event ever arrived.
     stopQueuedSignalPoll()

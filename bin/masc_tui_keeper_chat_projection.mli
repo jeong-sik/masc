@@ -39,8 +39,10 @@ type interactive_outcome = Applied | Stale_control | Paused | Replayed
     start, model content and operation settlement have separate events. *)
 type interactive_receipt = {outcome : interactive_outcome; chat_control_token : string;
   signalled : bool; resumed : bool; interrupt_error : string option}
-(** [signalled] is a request to interrupt the observed target, not evidence
-    that it has stopped. A failed interruption does not undo message admission. *)
+(** [signalled = true] means the exact target's interruption callback returned
+    normally, not that it stopped. A failed callback leaves [signalled = false]
+    and does not undo admission. Interactive admission currently never resumes
+    a paused Keeper ([resumed = false]). *)
 
 type acceptance = {
   interactive : interactive_receipt option;

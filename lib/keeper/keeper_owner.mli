@@ -89,10 +89,11 @@ type interactive_outcome = Applied | Stale_control | Paused | Replayed
 type interactive_receipt =
   { outcome : interactive_outcome; chat_control_token : string
   ; signalled : bool; resumed : bool; interrupt_error : string option }
-(** [signalled] records an interruption request against the exact target;
-    it is not acknowledgement of that target's termination. [resumed] records
-    release of a chat-control pause, not delivery to a model. [interrupt_error]
-    concerns interruption only: an admitted operation remains admitted. *)
+(** [signalled = true] means the exact target's interruption callback returned
+    normally, not that the target terminated. [false] can also mean the callback
+    raised; [interrupt_error] reports that failure without undoing admission.
+    Interactive admission currently returns [resumed = false] and does not
+    release a chat-control pause. None of these fields certifies model delivery. *)
 type interactive_intent = { control_token : string; target : interrupt_target option }
 
 type turn_lane =

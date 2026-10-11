@@ -58,3 +58,17 @@ export async function fetchKeeperTurnEvents(keeperName: string, turnRef: string,
   if (!response.ok) throw await apiRequestErrorFromResponse('GET', path, response)
   return parseKeeperTurnEventPage(await response.json(), turnRef, cursor)
 }
+
+export type KeeperCurrentTurn = Readonly<{ state: 'idle' } | { state: 'observed'; turnRef: string; sequence: number }>
+export async function fetchKeeperCurrentTurn(keeperName: string, signal?: AbortSignal): Promise<KeeperCurrentTurn> {
+  if (!keeperName.trim()) throw new Error('Invalid Keeper discovery request')
+  const path = `/api/v1/keepers/${encodeURIComponent(keeperName)}/turns/current`
+  const response = await fetchControlPlane(path, { method: 'GET', signal })
+  if (!response.ok) throw await apiRequestErrorFromResponse('GET', path, response)
+  const raw: unknown = await response.json()
+  if (!isRecord(raw) || raw.schema !== 'masc.keeper_current_turn.v1') throw new Error('Invalid current turn discovery')
+  if (raw.current === null) return Object.freeze({ state: 'idle' })
+  if (!isRecord(raw.current) || typeof raw.current.turn_ref !== 'string' || !raw.current.turn_ref.trim()
+    || !nonnegativeInteger(raw.current.seq)) throw new Error('Invalid current turn discovery cursor')
+  return Object.freeze({ state: 'observed', turnRef: raw.current.turn_ref, sequence: raw.current.seq })
+}

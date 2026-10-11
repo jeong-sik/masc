@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-vi.mock('./api/keeper-turn-events', () => ({ fetchKeeperTurnEvents: vi.fn() }))
-import { fetchKeeperTurnEvents, type KeeperTurnEventPage } from './api/keeper-turn-events'
+vi.mock('./api/keeper-turn-events', () => ({ fetchKeeperTurnEvents: vi.fn(), fetchKeeperCurrentTurn: vi.fn().mockResolvedValue({ state: 'idle' }) }))
+import { fetchKeeperCurrentTurn, fetchKeeperTurnEvents, type KeeperTurnEventPage } from './api/keeper-turn-events'
 import { mergeServerHistoryEntries, keeperThreads } from './keeper-state'
 import { _resetKeeperStreamBuffersForTests, applyKeeperAutonomousTurnEvent } from './keeper-stream'
-import { _resetKeeperAutonomousRecoveryForTests, recoverKnownKeeperAutonomousTurns, recoverKeeperAutonomousTurn } from './keeper-autonomous-stream'
+import { _resetKeeperAutonomousRecoveryForTests, discoverKeeperAutonomousTurn, recoverKnownKeeperAutonomousTurns, recoverKeeperAutonomousTurn } from './keeper-autonomous-stream'
 import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
 const base = { threadId: 'keeper:k', runId: 'trace#9', timestamp: 1 }
 const text = (delta: string): KeeperChatStreamEvent => ({ ...base, type: 'TEXT_MESSAGE_CONTENT', messageId: 'trace#9:assistant', textStreamScope: 0, delta })
@@ -196,6 +196,19 @@ describe('autonomous journal recovery', () => {
     await reconnect
     expect(fetchKeeperTurnEvents).toHaveBeenCalledTimes(2)
     expect(keeperThreads.value.k?.[0]?.delivery).toBe('delivered')
+  })
+  it('discovers a running turn on first open using the server identity', async () => {
+    vi.mocked(fetchKeeperCurrentTurn).mockResolvedValueOnce({ state: 'observed', turnRef: 'trace#9', sequence: 0 })
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(0, text('in progress')))
+    await discoverKeeperAutonomousTurn('k')
+    expect(keeperThreads.value.k?.[0]).toMatchObject({ source: 'autonomous_turn', turnRef: 'trace#9', text: 'in progress' })
+    expect(fetchKeeperTurnEvents).toHaveBeenLastCalledWith('k', 'trace#9', { sequence: null, offset: 0 })
+  })
+  it('does not invent a turn when discovery reports no producer', async () => {
+    vi.mocked(fetchKeeperCurrentTurn).mockResolvedValueOnce({ state: 'idle' })
+    await discoverKeeperAutonomousTurn('k')
+    expect(fetchKeeperTurnEvents).not.toHaveBeenCalled()
+    expect(keeperThreads.value.k).toBeUndefined()
   })
   it('deduplicates replay at the turn-owned reducer boundary', () => {
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('a'))

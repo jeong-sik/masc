@@ -1,4 +1,4 @@
-import { fetchKeeperTurnEvents, type KeeperTurnCursor } from './api/keeper-turn-events'
+import { fetchKeeperCurrentTurn, fetchKeeperTurnEvents, type KeeperTurnCursor } from './api/keeper-turn-events'
 import { applyKeeperAutonomousTurnEvent } from './keeper-stream'
 
 type TurnRecovery = {
@@ -69,4 +69,10 @@ export async function recoverKnownKeeperAutonomousTurns(): Promise<void> {
   }
   const results = await Promise.allSettled(reads)
   if (results.some(result => result.status === 'rejected')) throw new Error('Autonomous reconnect journal recovery incomplete')
+}
+
+/** Discover producer identity from the server; never derive it from turn count. */
+export async function discoverKeeperAutonomousTurn(name: string): Promise<void> {
+  const current = await fetchKeeperCurrentTurn(name)
+  if (current.state === 'observed') await recoverKeeperAutonomousTurn(name, current.turnRef, current.sequence, true)
 }

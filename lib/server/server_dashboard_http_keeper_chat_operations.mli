@@ -6,6 +6,7 @@ type get_route =
       { keeper_name : string
       ; raw_operation_id : string
       }
+  | Current_turn of { keeper_name : string }
   | Chat_events of { keeper_name : string }
       (** [GET /api/v1/keepers/:name/chat/events?operation_id=&since_seq=&since_offset=&limit=]
           (RFC-0412 §3.2, v2): one operation's journal as written, paged over
@@ -82,6 +83,12 @@ val chat_events_page :
     [cursor_mismatch] ({!Keeper_chat_event_log.cursor_refusal_to_wire}). Only the rows the page needs are
     decoded; a corrupt one among them is 503 [journal_corrupt]. Exposed so the
     wire contract is tested without an HTTP listener. *)
+
+val current_turn_discovery_page :
+  (Ids.Turn_ref.t * int) option -> Yojson.Safe.t
+(** The exact discovered producer turn and its last durable journal sequence,
+    or [null] when there is no registered autonomous producer. No operation
+    identity or synthetic accepted-user row is created. *)
 
 val turn_events_page :
   turn_ref:Ids.Turn_ref.t ->

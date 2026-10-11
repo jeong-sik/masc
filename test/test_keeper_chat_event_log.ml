@@ -1230,6 +1230,15 @@ let test_autonomous_turn_journal_is_live_and_replayable () =
       Stream.on_event stream (Agent_core.Types.ContentBlockDelta {index=0;delta=TextDelta "answer\n"});
       let path = L.turn_journal_path ~base_dir ~keeper_name:"k" ~turn_ref in
       let during = read_ok (L.read_journal_path_result path) in
+      let last = List.hd (List.rev during) in
+      let discovery = Server_dashboard_http_keeper_chat_operations.current_turn_discovery_page
+        (Option.map (fun current -> current, last.L.seq) (Stream.current ~base_path:base_dir ~keeper_name:"k")) in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "discovery preserves registered durable turn reference" (Ids.Turn_ref.to_string turn_ref)
+        (discovery |> member "current" |> member "turn_ref" |> to_string);
+      Alcotest.(check int) "discovery uses last committed journal sequence" last.seq
+        (discovery |> member "current" |> member "seq" |> to_int);
+      Alcotest.(check bool) "discovery creates no operation receipt" true (member "operation_id" discovery = `Null);
       Alcotest.(check bool) "thinking is readable while turn runs" true
         (List.exists (fun (entry:L.journaled_event) -> match entry.event with E.Agent_core_thinking_delta _ -> true | _ -> false) during);
       Alcotest.(check bool) "native tool activity is readable while turn runs" true

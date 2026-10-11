@@ -1,7 +1,7 @@
 ---
 rfc: "tui-pin-source-index-lazy"
 title: "TUI 스크롤 위치 고정용 소스 색인은 필요할 때만 만든다"
-status: Draft
+status: Rejected
 created: 2026-10-11
 updated: 2026-10-11
 author: claude
@@ -44,13 +44,21 @@ PageUp 300번 연속. TUI는 main에 #42262, #42275, #42286을 합친 빌드. 20
 보이는 행이 처음 나타나는 프레임에서 생긴다. 색인 하나를 만드는 데는 화면에 그리는 렌더와
 별개의 마크다운 렌더가 든다.
 
-### 1.3 이 색인을 읽는 곳
+### 1.3 이 색인을 읽는 곳 (정정)
 
-저장한 pin(`pin_points`)은 `requested_scroll_from_pin`에서 새 내용이 들어왔을 때 읽던
-위치를 되찾는 데 쓰인다. 스크롤 키가 눌리면 `Follow_live`가 `Hold_scroll`로 바뀌고 같은
-경로로 읽힌다. 새 내용이 없고 키도 없는 프레임에서 pin의 값은 읽히지 않는다.
+초안은 "새 내용이 없고 키도 없는 프레임에서 pin의 값은 읽히지 않는다"고 썼다. 이것은
+틀렸다. `requested_scroll_from_pin`은 `pin_mode`가 `Follow_live`가 아니면 **매 프레임**
+저장한 `pin_points`로 요청 스크롤 위치를 계산하고(`body_row_of_point`가 `source_body`를
+부른다), 그 결과가 화면의 스크롤이다. 스크롤을 잡고 있는 동안(`Hold_scroll`) 색인은 프레임마다
+읽힌다.
 
-## 2. 제안
+확인한 실험(2026-10-11, 합친 빌드에서 `scroll_position_for_window`를 `{ scroll =
+window.scroll; pin = state.msg_scroll_pin }`로 바꿔 색인과 pin 갱신을 건너뜀): 키 300개 중
+169개만 출력이 바뀌었다(합친 빌드는 300개). pin을 갱신하지 않으면 매 프레임 낡은 pin에서 요청
+위치가 계산되어 PageUp이 진행하지 않는다. 즉 색인은 스크롤의 일부이고, 지연 생성은 스크롤 동작을
+바꾼다. 앞서 `body_positions`를 비운 첫 실험도 `Follow_live`로 떨어져 스크롤이 0으로 돌아갔다.
+
+## 2. 제안 (1.3의 정정으로 근거가 사라졌다)
 
 pin을 프레임마다 완성해 저장하지 않고, 저장 시점에는 보이는 행의 entry 식별자와 본문 행
 번호만 담는다(`scroll_anchor`, `body_row`, `rows_below`). 원본 글자 위치는 pin이 처음

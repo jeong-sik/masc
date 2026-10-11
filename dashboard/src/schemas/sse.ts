@@ -67,6 +67,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'keeper_composite_changed',
   'keeper_chat_appended',
   'keeper_chat_operation_event',
+  'keeper_turn_stream_event',
   'keeper_waiting_inventory_changed',
   'agent_core_telemetry_sample',
   'keeper_tool_call',
@@ -1167,6 +1168,16 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
   }
   if (value.audio != null && !isSSEAudioClip(value.audio)) {
     return fail('audio', 'Expected audio clip object')
+  }
+
+  if (value.type === 'keeper_turn_stream_event') {
+    if (typeof value.name !== 'string' || value.name.trim() === '') return fail('name', 'Expected non-empty Keeper name')
+    if (typeof value.turn_ref !== 'string' || value.turn_ref.trim() === '') return fail('turn_ref', 'Expected a durable turn reference')
+    if (typeof value.seq !== 'number' || !Number.isSafeInteger(value.seq) || value.seq < 0) return fail('seq', 'Expected a nonnegative safe journal sequence')
+    if (typeof value.ts_unix !== 'number' || !Number.isFinite(value.ts_unix) || value.ts_unix < 0) return fail('ts_unix', 'Expected a finite nonnegative journal timestamp')
+    // This observer event is a cursor notification. Full content must be fetched
+    // through the authenticated turn journal endpoint, never trusted from pushes.
+    if (value.ag_ui_event !== undefined || value.event !== undefined) return fail('event', 'Turn notification cannot carry content')
   }
 
   if (value.type === 'keeper_chat_operation_event') {

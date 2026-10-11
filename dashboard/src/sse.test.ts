@@ -63,12 +63,19 @@ describe('Keeper operation server push', () => {
           runId: 'run-1', messageId: 'message-1', delta: 'must not appear',
           timestamp: 1, textStreamScope: scope },
       })))
-      expect(decoded?.ag_ui_event).toMatchObject({ type: 'RUN_ERROR', code: 'invalid_event_payload' })
+      expect(decoded?.ag_ui_event).toMatchObject({ type: 'CUSTOM', name: 'KEEPER_STREAM_PROTOCOL_ERROR', value: { kind: 'sse_parse_failed' } })
       if (!decoded) throw new Error('expected an operation protocol error')
       recordServerPushEvent(decoded)
       const entry = keeperThreads.value.sangsu?.find(item => item.id === 'operation-reply')
       expect(entry?.text).not.toContain('must not appear')
-      expect(entry?.delivery).toBe('error')
+      expect(entry?.delivery).toBe('sending')
+      expect(entry?.error).toContain('could not be decoded')
+      const recovered = parseSSEMessage({ type: 'keeper_chat_operation_event', name: 'sangsu', operation_id: operationId,
+        ag_ui_event: { type: 'TEXT_MESSAGE_CONTENT', threadId: 'keeper-consumer:sangsu', runId: 'run-1',
+          messageId: 'message-1', delta: 'valid response', timestamp: 2, textStreamScope: 0 } })
+      if (!recovered) throw new Error('expected valid recovery frame')
+      recordServerPushEvent(recovered)
+      expect(keeperThreads.value.sangsu?.find(item => item.id === 'operation-reply')?.text).toBe('valid response')
     })
 
 })

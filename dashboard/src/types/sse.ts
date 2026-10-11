@@ -23,6 +23,7 @@ export type SSEEventType =
   | 'keeper_composite_changed'
   | 'keeper_chat_appended'
   | 'keeper_chat_operation_event'
+  | 'keeper_turn_stream_event'
   | 'keeper_waiting_inventory_changed'
   | 'agent_core_telemetry_sample'
   | 'keeper_tool_call'
@@ -247,6 +248,8 @@ export interface SSEEvent {
   audio?: SSEAudioClip
   // keeper_chat_operation_event: the same AG-UI payload used by the accepted
   // stream, correlated to exactly one durable operation.
+  // Autonomous journal notification: identity and cursor only, no reasoning payload.
+  turn_ref?: string
   seq?: number
   ag_ui_event?: unknown
 }

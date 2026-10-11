@@ -1488,3 +1488,19 @@ describe('Keeper text response ownership protocol', () => {
     expect(SSEMessageSchema.safeParse(event(value)).success).toBe(false)
   })
 })
+
+
+describe('autonomous turn journal notifications', () => {
+  const notice = { type: 'keeper_turn_stream_event', name: 'fixture', turn_ref: 'trace#9', seq: 0, ts_unix: 1 }
+  it('accepts the backend cursor without inventing operation identity or content', () => {
+    expect(parseSSEMessage(notice)).toEqual(notice)
+  })
+  it.each([
+    { name: '' }, { turn_ref: '' }, { seq: undefined }, { seq: -1 },
+    { seq: Number.MAX_SAFE_INTEGER + 1 }, { seq: 0.5 },
+    { ts_unix: undefined }, { ts_unix: Infinity }, { ts_unix: -1 },
+    { event: { text: 'untrusted reasoning' } }, { ag_ui_event: { type: 'RUN_STARTED' } },
+  ])('rejects incomplete cursors and embedded content %j', (delta) => {
+    expect(SSEMessageSchema.safeParse({ ...notice, ...delta }).success).toBe(false)
+  })
+})

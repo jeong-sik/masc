@@ -450,7 +450,7 @@ export interface StreamKeeperMessageOptions {
   attachments?: KeeperConversationAttachment[]
   userBlocks?: KeeperUserInputBlock[]
   channel?: string
-  channelWorkspaceId?: string
+  resolveChannelWorkspaceId?: () => string
   turnInstructions?: string
   surfaceContext?: KeeperStreamSurfaceContext
 }
@@ -499,7 +499,7 @@ export async function streamKeeperMessage(
     attachments,
     userBlocks,
     channel,
-    channelWorkspaceId,
+    resolveChannelWorkspaceId,
     turnInstructions,
     surfaceContext,
   }: StreamKeeperMessageOptions,
@@ -521,9 +521,6 @@ export async function streamKeeperMessage(
   }
   if (channel && channel.trim() !== '') {
     body.channel = channel.trim()
-  }
-  if (channelWorkspaceId && channelWorkspaceId.trim() !== '') {
-    body.channel_workspace_id = channelWorkspaceId.trim()
   }
   if (turnInstructions && turnInstructions.trim() !== '') {
     body.turn_instructions = turnInstructions.trim()
@@ -547,7 +544,6 @@ export async function streamKeeperMessage(
   if (userBlocks && userBlocks.length > 0) {
     body.user_blocks = userBlocks.map(streamUserBlockToWire)
   }
-  const requestBody = JSON.stringify(body)
   const streamPath = '/api/v1/keepers/chat/stream'
   const assertResponseAdmission = (response: Response, admission: KeeperStreamAdmission) => {
     try {
@@ -558,6 +554,9 @@ export async function streamKeeperMessage(
     }
   }
   const postStream = async () => {
+    const channelWorkspaceId = resolveChannelWorkspaceId?.().trim()
+    const requestBody = JSON.stringify({ ...body,
+      ...(channelWorkspaceId ? { channel_workspace_id: channelWorkspaceId } : {}) })
     const headers = { ...jsonHeaders(), Accept: 'text/event-stream' }
     const admission: KeeperStreamAdmission = Object.freeze({ keeperName: name, operationId: exactOperationId,
       authRevision: currentStoredTokenRevision() })

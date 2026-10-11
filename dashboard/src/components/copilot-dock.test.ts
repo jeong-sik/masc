@@ -14,6 +14,9 @@ import {
 import { route } from '../router'
 import { keepers } from '../store'
 import { globalShortcutManager } from '../lib/global-shortcut-manager'
+import { clearStoredToken, setStoredToken } from '../api/core'
+import * as keeperApi from '../api/keeper'
+import { resetDevTokenBootstrap } from '../api/dev-token'
 
 describe('CopilotDock', () => {
   let container: HTMLDivElement
@@ -30,9 +33,14 @@ describe('CopilotDock', () => {
     // Reset the module-level shared signal so tests don't leak open state.
     const dock = useCopilotDock()
     dock.close()
+    dock.streaming.value = null
+    dock.threads.value = {}
+    clearStoredToken()
+    resetDevTokenBootstrap()
   })
 
   afterEach(() => {
+    clearStoredToken()
     render(null, container)
     container.remove()
     globalShortcutManager.unregisterAll('copilot-dock.')
@@ -306,6 +314,45 @@ describe('CopilotDock', () => {
     )
   }
 
+  it('preserves admitted partial text when stream authentication is withdrawn', async () => {
+    setStoredToken('fixture-old')
+    const raw = '  admitted partial\n'
+    const body = new ReadableStream<Uint8Array>({ start(controller) {
+      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'TEXT_MESSAGE_CONTENT',
+        messageId: 'message', threadId: 'keeper:auth-partial', timestamp: 0, delta: raw })}\n\n`))
+    } })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: 200 })))
+    const dock = useCopilotDock()
+    dock.send('input', { id: 'auth-partial', kr: 'fixture', ns: 'fixture', phase: 'Running', status: 'run' }, getSurfaceContext())
+    await waitFor(() => expect(dock.streaming.value?.shown).toBe(raw))
+    setStoredToken('fixture-new')
+    await waitFor(() => expect(dock.streaming.value).toBeNull())
+    expect(dock.threads.value['auth-partial']?.at(-1)).toMatchObject({ role: 'assistant', text: raw, delivery: 'interrupted' })
+    clearStoredToken()
+  })
+
+  it('rechecks admission when the stream result reaches the dock caller', async () => {
+    setStoredToken('fixture-old')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([
+      { type: 'TEXT_MESSAGE_CONTENT', messageId: 'message', threadId: 'keeper:auth-result', timestamp: 0, delta: 'admitted answer' },
+      { type: 'RUN_FINISHED', runId: 'run', threadId: 'keeper:auth-result', timestamp: 1 },
+    ])))
+    const original = keeperApi.streamKeeperMessage
+    const spy = vi.spyOn(keeperApi, 'streamKeeperMessage').mockImplementation((...args) => original(...args).then(outcome => {
+      setStoredToken('fixture-new')
+      return outcome
+    }))
+    try {
+      const dock = useCopilotDock()
+      dock.send('input', { id: 'auth-result', kr: 'fixture', ns: 'fixture', phase: 'Running', status: 'run' }, getSurfaceContext())
+      await waitFor(() => expect(dock.streaming.value).toBeNull())
+      expect(dock.threads.value['auth-result']?.at(-1)).toMatchObject({ text: 'admitted answer', delivery: 'interrupted' })
+    } finally {
+      spy.mockRestore()
+      clearStoredToken()
+    }
+  })
+
   const DEV_TOKEN_PATH = '/api/v1/dashboard/dev-token'
 
   /* `streamKeeperMessage` bootstraps the loopback dashboard credential before
@@ -330,10 +377,10 @@ describe('CopilotDock', () => {
 
   it('sends a message and shows a streaming reply', async () => {
     const fetchMock = dockFetchMock([
-      { type: 'TEXT_MESSAGE_START', role: 'Assistant', messageId: 'm1' },
-      { type: 'TEXT_MESSAGE_CONTENT', delta: '안녕하세요' },
-      { type: 'TEXT_MESSAGE_END' },
-      { type: 'RUN_FINISHED' },
+      { type: 'TEXT_MESSAGE_START', role: 'assistant', messageId: 'm1', threadId: 'keeper:fixture', timestamp: 0 },
+      { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm1', threadId: 'keeper:fixture', timestamp: 1, delta: '안녕하세요' },
+      { type: 'TEXT_MESSAGE_END', messageId: 'm1', threadId: 'keeper:fixture', timestamp: 2 },
+      { type: 'RUN_FINISHED', runId: 'run', threadId: 'keeper:fixture', timestamp: 3 },
     ])
     vi.stubGlobal('fetch', fetchMock)
 
@@ -363,7 +410,7 @@ describe('CopilotDock', () => {
 
   it('posts copilot channel and surface context to the keeper stream', async () => {
     window.history.replaceState({}, '', '/?agent=dashboard-eager-manta')
-    const fetchMock = dockFetchMock([{ type: 'RUN_FINISHED' }])
+    const fetchMock = dockFetchMock([{ type: 'RUN_FINISHED', runId: 'run', threadId: 'keeper:fixture', timestamp: 0 }])
     vi.stubGlobal('fetch', fetchMock)
 
     const dock = renderDock()

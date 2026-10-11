@@ -208,3 +208,5 @@ Immutable tool and Skill activity projection is separated from stream mutation i
 Editor wire contracts are separated from HTTP effects and unused revision-path plumbing is removed through the canonical runtime text identity in [#42141](https://github.com/jeong-sik/masc/pull/42141). See [tui-editor-wire/README.md](tui-editor-wire/README.md). Both candidates retain remaining semantic audit scope.
 
 Skill read access uses the canonical closed type and the unused client loaded snapshot field is removed in [#42148](https://github.com/jeong-sik/masc/pull/42148). The real server producer and client decoder share an isolated fixture. See [skill-read-contract/README.md](skill-read-contract/README.md). Production counts remain 46 partially improved and 29 pending.
+
+Runtime config data and pure diagnostic projection have a private canonical owner in [#42308](https://github.com/jeong-sik/masc/pull/42308). See [runtime-config-projection/README.md](runtime-config-projection/README.md). Storage, publication and remaining configuration semantics stay pending; production counts remain 46 partially improved and 29 pending.

@@ -556,11 +556,16 @@
       "baseline_lines": 4157,
       "kind": "production",
       "status": "partially improved; materialization, storage, cache and config semantics pending",
-      "current_lines": 4154,
+      "current_lines": 3718,
       "prs": [
-        42141
+        42141,
+        42308
       ],
-      "validation_artifact": "tui-editor-wire/README.md"
+      "validation_artifact": "tui-editor-wire/README.md",
+      "validation_artifacts": [
+        "tui-editor-wire/README.md",
+        "runtime-config-projection/README.md"
+      ]
     },
     {
       "path": "lib/runtime/runtime_claude_code.ml",

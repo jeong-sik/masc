@@ -153,13 +153,14 @@ let project ~timestamp ~redact_text state event =
                    (Option.map (fun i -> `Int i) attempt_index))
       in
       state, Some (custom ~timestamp state Runtime_attempt_started value)
-  | Agent_core_stream_message_start { stream_scope; provider_message_id; model; usage } ->
+  | Agent_core_stream_message_start { content_generation; stream_scope; provider_message_id; model; usage } ->
       let value =
         `Assoc
           ([ "stream_scope", `Int stream_scope; "provider_message_id", `String provider_message_id
            ; "model", `String model
            ]
-           @ json_opt "usage" (Option.map api_usage_to_json usage))
+           @ json_opt "content_generation" (Option.map (fun value -> `Int value) content_generation)
+       @ json_opt "usage" (Option.map api_usage_to_json usage))
       in
       state, Some (custom ~timestamp state Stream_message_start value)
   | Agent_core_stream_message_delta { stream_scope; stop_reason; usage } ->

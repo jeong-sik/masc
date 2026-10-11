@@ -132,12 +132,16 @@ type keeper_chat_event =
           text/thinking from the prior attempt while retaining finalized and
           quarantined tool evidence. *)
   | Agent_core_stream_message_start of
-      { stream_scope : int
+      { content_generation : int option
+      ; stream_scope : int
       ; provider_message_id : string
       ; model : string
       ; usage : Agent_core.Types.api_usage option
       }
-      (** [stream_scope] is the bridge's producer-call identity, shared with
+      (** [content_generation] is the captured stream bridge generation,
+          independent of provider message IDs. Absence is unobserved ownership;
+          readers must not assign the previous content generation to it.
+          [stream_scope] is the bridge's producer-call identity, shared with
           tool occurrences and retained by an exact repeated MessageStart. *)
   | Agent_core_stream_message_delta of
       { stream_scope : int

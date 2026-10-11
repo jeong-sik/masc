@@ -614,7 +614,7 @@ function validateKeeperCustomPayload(
       'because',
     ],
     KEEPER_TOOL_APPROVAL_SETTLED: ['tool_call_id', 'outcome'],
-    KEEPER_STREAM_MESSAGE_START: ['stream_scope', 'provider_message_id', 'model', 'usage'],
+    KEEPER_STREAM_MESSAGE_START: ['content_generation', 'stream_scope', 'provider_message_id', 'model', 'usage'],
     KEEPER_STREAM_MESSAGE_DELTA: ['stream_scope', 'stop_reason', 'usage'],
     KEEPER_CONTENT_BLOCK_START: ['index', 'content_type', 'tool_call_id', 'tool_call_name'],
     KEEPER_CONTENT_BLOCK_STOP: ['index'],
@@ -671,6 +671,10 @@ function validateKeeperCustomPayload(
       return observation.success ? validateNativeToolProgress(value.progress) : observation
     }
     case 'KEEPER_STREAM_MESSAGE_START': {
+      if (value.content_generation !== undefined) {
+        const generation = requiredInteger(value, 'content_generation')
+        if (!generation.success) return generation
+      }
       const scope = requiredInteger(value, 'stream_scope')
       if (!scope.success) return scope
       const provider = requiredString(value, 'provider_message_id')

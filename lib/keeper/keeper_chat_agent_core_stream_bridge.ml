@@ -886,7 +886,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       in
       let message_start =
         Agent_core_stream_message_start
-          { stream_scope; provider_message_id = id; model; usage }
+          { content_generation=Some bridge_state.content_generation; stream_scope; provider_message_id = id; model; usage }
       in
       if bridge_state.stream_phase <> Accepting_content
       then

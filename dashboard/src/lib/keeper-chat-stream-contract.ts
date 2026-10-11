@@ -203,6 +203,7 @@ type KeeperChatCustomEvent =
       type: 'CUSTOM'
       name: 'KEEPER_STREAM_MESSAGE_START'
       value: {
+        content_generation?: number
         stream_scope: number
         provider_message_id?: string
         model?: string

@@ -637,6 +637,26 @@ describe('streamKeeperMessage', () => {
     expect(events).toEqual(['RUN_FINISHED'])
   })
 
+  it('does not retry the old stream when credentials change during a pending recovery', async () => {
+    setStoredToken('synthetic-stream-dev-a', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    let complete!: (response: Response) => void
+    let streamCalls = 0
+    const fetchMock = vi.fn((path: string) => {
+      if (path === '/api/v1/dashboard/dev-token') return new Promise<Response>(done => { complete = done })
+      streamCalls += 1
+      return Promise.resolve(new Response(JSON.stringify({ error: 'credential refused', auth_error_code: 'token_expired' }), { status: 401 }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const onEvent = vi.fn()
+    const pending = streamKeeperMessage('sangsu', 'old stream input', { operationId: 'owned-recovery-stream', onEvent }).catch(error => error)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    setStoredToken('synthetic-stream-dev-b', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    complete(new Response(JSON.stringify({ token: 'obsolete-refresh', actor: 'dashboard', role: 'admin' })))
+    expect(await pending).toBeInstanceOf(KeeperStreamAuthenticationSupersededError)
+    expect(streamCalls).toBe(1)
+    expect(onEvent).not.toHaveBeenCalled()
+  })
+
   it('retries on actor_mismatch typed code', async () => {
     stubStaleToken()
     const fetchMock = stubStreamRetryFetch({

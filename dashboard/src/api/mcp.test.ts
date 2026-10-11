@@ -9,6 +9,7 @@ const {
   clearStoredToken,
   currentDashboardActor,
   currentStoredTokenRevision,
+  subscribeStoredTokenChanges,
   getStoredToken,
   getStoredTokenMeta,
   isRemoteAccess,
@@ -52,6 +53,7 @@ const {
   clearStoredToken: vi.fn().mockReturnValue({ authRevision: 0 }),
   currentDashboardActor: vi.fn().mockReturnValue('dashboard'),
   currentStoredTokenRevision: vi.fn().mockReturnValue(0),
+  subscribeStoredTokenChanges: vi.fn(() => () => {}),
   getStoredToken: vi.fn().mockReturnValue('test-stored-token'),
   getStoredTokenMeta: vi.fn().mockReturnValue({
     source: 'manual',
@@ -71,6 +73,7 @@ vi.mock('./core', () => ({
   clearStoredToken,
   currentDashboardActor,
   currentStoredTokenRevision,
+  subscribeStoredTokenChanges,
   getStoredToken,
   getStoredTokenMeta,
   isRemoteAccess,

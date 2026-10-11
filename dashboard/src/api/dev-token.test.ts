@@ -224,7 +224,7 @@ describe('ensureDevToken', () => {
       role: 'admin',
     }))
 
-    await expect(refreshDevTokenAfterAuthError('invalid_token')).resolves.toBe(true)
+    await expect(refreshDevTokenAfterAuthError('invalid_token')).resolves.toEqual({ kind: 'bound', fromRevision: 0, authRevision: 0 })
     expect(token).toBe('fresh-token')
     // Recovery replaces the token in place. Clearing first would be a second
     // token-revision change, and each one re-dials the dashboard websocket.
@@ -232,7 +232,7 @@ describe('ensureDevToken', () => {
     expect(setStoredToken).toHaveBeenCalledTimes(1)
     expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
 
-    await expect(refreshDevTokenAfterAuthError('insufficient_role')).resolves.toBe(false)
+    await expect(refreshDevTokenAfterAuthError('insufficient_role')).resolves.toBeNull()
     expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
   })
 
@@ -272,7 +272,7 @@ describe('ensureDevToken', () => {
       role: 'admin',
     }))
 
-    await expect(Promise.all([first, second])).resolves.toEqual([true, true])
+    await expect(Promise.all([first, second])).resolves.toEqual([{ kind: 'bound', fromRevision: 0, authRevision: 0 }, { kind: 'bound', fromRevision: 0, authRevision: 0 }])
     expect(token).toBe('fresh-token')
   })
 
@@ -305,7 +305,7 @@ describe('ensureDevToken', () => {
       role: 'admin',
     }))
 
-    await expect(refreshDevTokenAfterAuthError('invalid_token')).resolves.toBe(false)
+    await expect(refreshDevTokenAfterAuthError('invalid_token')).resolves.toBeNull()
     expect(token).toBe('current-token')
     // Unchanged credential, so nothing may announce a token change.
     expect(setStoredToken).not.toHaveBeenCalled()

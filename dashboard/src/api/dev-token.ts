@@ -23,7 +23,12 @@ interface DevTokenBootstrap {
   readonly promise: Promise<DevTokenBinding>
 }
 let devTokenBootstrap: DevTokenBootstrap | null = null
-let devTokenRefreshPromise: Promise<boolean> | null = null
+export type DevTokenRecovery = Extract<DevTokenBinding, { kind: 'bound' }>
+interface DevTokenRefresh {
+  readonly authRevision: number
+  readonly promise: Promise<DevTokenRecovery | null>
+}
+let devTokenRefresh: DevTokenRefresh | null = null
 
 /**
  * Tracks the outcome of the loopback dev-token bootstrap so the UI can
@@ -168,40 +173,34 @@ export function resetDevTokenBootstrap(): void {
   devTokenBootstrap = null
 }
 
-export async function refreshDevTokenAfterAuthError(code: unknown): Promise<boolean> {
-  if (!isRefreshableDashboardAuthCode(code)) return false
-  if (isRemoteAccess()) return false
-  if (getStoredTokenMeta()?.source === 'manual') return false
-  if (devTokenRefreshPromise) return devTokenRefreshPromise
-  if (!getStoredToken()) return false
+export async function refreshDevTokenAfterAuthError(
+  code: unknown,
+  authRevision = currentStoredTokenRevision(),
+): Promise<DevTokenRecovery | null> {
+  if (currentStoredTokenRevision() !== authRevision
+    || !isRefreshableDashboardAuthCode(code)
+    || isRemoteAccess()
+    || getStoredTokenMeta()?.source === 'manual'
+    || !getStoredToken()) return null
 
-  const refresh = (async () => {
-    // Re-fetch in place instead of clearing first. `clearStoredToken()` +
-    // `setStoredToken()` are two token-revision changes, and every change
-    // tears down and re-dials the dashboard websocket
-    // (`subscribeStoredTokenChanges` -> `reconnectAfterAuthTokenChange`), so
-    // one recovery produced two reconnects and two "서버 연결 복구됨"
-    // toasts. It also left a window where in-flight requests carried no
-    // Authorization header at all. `shouldRefreshDevToken()` already returns
-    // true for a stored `dev` token, so dropping the clear does not stop the
-    // re-fetch — and `ensureDevToken` only writes when the token differs.
+  const existing = devTokenRefresh?.authRevision === authRevision ? devTokenRefresh.promise : null
+  const refresh = existing ?? (async (): Promise<DevTokenRecovery | null> => {
     const rejectedToken = getStoredToken()
     resetDevTokenBootstrap()
-    await ensureDevToken()
+    const binding = await ensureDevToken()
+    if (binding.kind !== 'bound'
+      || (binding.fromRevision !== authRevision && binding.authRevision !== authRevision)
+      || currentStoredTokenRevision() !== binding.authRevision) return null
     const refreshedToken = getStoredToken()
-    // Recovery means the caller now holds a *different* credential. Getting
-    // the same token back proves the token was not the reason the request
-    // was rejected; reporting success there makes the caller retry the
-    // identical request, fail identically, and refresh again — a loop that
-    // reconnects the websocket on every pass and never terminates.
     return getStoredTokenMeta()?.source === 'dev'
       && refreshedToken !== null
-      && refreshedToken !== rejectedToken
+      && refreshedToken !== rejectedToken ? binding : null
   })()
-  devTokenRefreshPromise = refresh
+  if (!existing) devTokenRefresh = { authRevision, promise: refresh }
   try {
-    return await refresh
+    const binding = await refresh
+    return binding && currentStoredTokenRevision() === binding.authRevision ? binding : null
   } finally {
-    if (devTokenRefreshPromise === refresh) devTokenRefreshPromise = null
+    if (devTokenRefresh?.promise === refresh) devTokenRefresh = null
   }
 }

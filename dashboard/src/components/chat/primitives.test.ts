@@ -19,7 +19,8 @@ import {
 } from './primitives'
 import { _resetChatStoreForTests, readKeeperDraft } from '../../keeper-chat-store'
 import { chatHistoryEntriesFromRest, appendThreadEntry, mergeServerHistoryEntries, keeperThreads, isDefaultVisibleConversationEntry } from '../../keeper-state'
-import { applyKeeperStreamEvent, _resetKeeperStreamBuffersForTests } from '../../keeper-stream'
+import { applyKeeperStreamEvent, applyKeeperOperationTurnEvent, _resetKeeperStreamBuffersForTests } from '../../keeper-stream'
+import type { KeeperChatStreamEvent } from '../../lib/keeper-chat-stream-contract'
 import { parseTextToChatBlocks } from '../../lib/chat-blocks'
 import { operationDeliveryProvenance } from '../../keeper-delivery-provenance'
 import { collectAttachments } from './attachments'
@@ -215,6 +216,36 @@ describe('ChatTranscript', () => {
     render(html`<${ChatTranscript} keeperName="sangsu" entries=${keeperThreads.value.sangsu} emptyText="empty" variant="messenger" />`, container)
     expect(container.querySelector('[data-chat-control-status="continuation_checkpoint"]')).toBeNull()
     expect(container.querySelector('.chat-bubble')?.textContent).toContain('completed continuation body')
+  })
+
+  it('renders recovered operation Saying and Thinking beside one canonical final answer', () => {
+    keeperThreads.value = {}
+    _resetKeeperStreamBuffersForTests()
+    const operationId = 'render-historical-operation'
+    const owner = { content_generation: 1, stream_scope: 0 }
+    appendThreadEntry('sangsu', entry({ id: operationId, role: 'assistant', source: 'direct_assistant',
+      label: 'sangsu', text: 'canonical final answer', rawText: 'canonical final answer',
+      delivery: 'history', streamState: null,
+      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result') }))
+    const send = (sequence: number, event: KeeperChatStreamEvent) =>
+      applyKeeperOperationTurnEvent('sangsu', { operationId, sequence, event })
+    send(0, { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: owner })
+    send(1, { type: 'TEXT_MESSAGE_CONTENT', delta: 'checking the result', textResponse: owner })
+    send(2, { type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallName: 'Read' })
+    send(3, { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 1,
+      delta: 'provided reasoning', response: owner } })
+    send(4, { type: 'TEXT_MESSAGE_CONTENT', delta: 'canonical final answer', textResponse: owner })
+    send(5, { type: 'RUN_FINISHED' })
+    render(html`<${ChatTranscript} keeperName="sangsu" entries=${keeperThreads.value.sangsu} emptyText="empty" variant="messenger" groupToolCalls=${true} />`, container)
+    const toggle = container.querySelector('.chat-block-trace-hd') as HTMLButtonElement
+    if (toggle.getAttribute('aria-expanded') === 'false') fireEvent.click(toggle)
+    expect(container.querySelectorAll('[data-chat-trace-step="progress"]')).toHaveLength(1)
+    expect(container.querySelector('[data-chat-trace-step="progress"]')?.textContent).toContain('checking the result')
+    expect(container.querySelector('[data-chat-trace-step="think"]')?.textContent).toContain('provided reasoning')
+    const final = container.querySelectorAll('[data-chat-trace-step="chat"]')
+    expect(final).toHaveLength(1)
+    expect(final[0]?.textContent).toContain('canonical final answer')
+    expect(container.querySelector('[data-chat-tool-trace]')?.getAttribute('data-chat-turn-complete')).toBe('true')
   })
 
   it('renders one final image after repeated final-details projection', () => {

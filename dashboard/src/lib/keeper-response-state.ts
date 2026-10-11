@@ -133,3 +133,8 @@ export function sameKeeperResponseOwner(left: KeeperResponseOwner | undefined, r
   return left === undefined ? right === undefined : right !== undefined
     && left.content_generation === right.content_generation && left.stream_scope === right.stream_scope
 }
+
+/** Tool execution facts can arrive after the response's activity has ended. */
+export function keeperResponseIsRunning(state: KeeperResponseState = initialKeeperResponseState): boolean {
+  return state.kind === 'known' && state.phase === 'running'
+}

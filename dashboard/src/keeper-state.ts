@@ -1,4 +1,4 @@
-import { ownerFromUnknown, sameKeeperResponseOwner, type KeeperResponseOwner } from './lib/keeper-response-state'
+import { keeperResponseIsRunning, ownerFromUnknown, sameKeeperResponseOwner, type KeeperResponseOwner } from './lib/keeper-response-state'
 import { signal } from '@preact/signals'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import { isInFlightDelivery } from './lib/keeper-delivery'
@@ -1140,6 +1140,7 @@ export function promoteAssistantTextToProgress(
   meta: { agentCoreBlockIndex?: number } = {},
 ): void {
   updateThreadEntry(name, entryId, entry => {
+    if (!keeperResponseIsRunning(entry.responseState)) return entry
     const text = entry.rawText ?? entry.text
     if (!text.trim()) return entry
     const progress = withoutUndefined({
@@ -1264,6 +1265,7 @@ export function appendAssistantToolTraceStep(
     ts?: string
     agentCoreBlockIndex?: number
   },
+  activity: 'active' | 'observation' = 'active',
 ): void {
   const toolCallId = nonBlankToolCallId(step.toolCallId) ?? undefined
   const toolOccurrenceId = step.toolOccurrenceId.trim()
@@ -1305,8 +1307,9 @@ export function appendAssistantToolTraceStep(
     return {
       ...entry,
       traceSteps,
-      streamState: 'streaming',
-      delivery: 'streaming',
+      ...(activity === 'active' && keeperResponseIsRunning(entry.responseState) ? {
+        streamState: 'streaming' as const, delivery: 'streaming' as const,
+      } : {}),
     }
   })
 }

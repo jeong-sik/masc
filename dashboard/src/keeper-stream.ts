@@ -504,7 +504,17 @@ export interface KeeperOperationTurnEvent {
 
 type KeeperStreamEventSource =
   | { kind: 'direct' }
-  | { kind: 'operation'; operationId: string; sequence?: number }
+  | { kind: 'operation'; operationId: string; sequence?: number; observationOnly?: true }
+
+function isToolObservation(event: KeeperChatStreamEvent): boolean {
+  switch (event.type) {
+    case 'TOOL_CALL_START':
+    case 'TOOL_CALL_ARGS':
+    case 'TOOL_CALL_END': return true
+    case 'CUSTOM': return event.name === 'KEEPER_TOOL_RESULT_READY'
+    default: return false
+  }
+}
 
 /** Apply a server-pushed operation event only to the assistant bubble carrying
  * the exact operation id. Another browser can synthesize the bubble and later
@@ -550,15 +560,13 @@ export function applyKeeperOperationTurnEvent(
         'terminal_result',
       ),
   )
-  if (
-    matched
+  const outsideLiveDelivery = matched !== undefined
     && matched.delivery !== 'queued'
     && matched.delivery !== 'sending'
     && matched.delivery !== 'streaming'
-    && matched.delivery !== 'interrupted'
-  ) {
-    return null
-  }
+  const observationOnly = outsideLiveDelivery && isToolObservation(operation.event)
+  if (outsideLiveDelivery && matched.delivery !== 'interrupted' && !observationOnly) return null
+  if (observationOnly && matched.role !== 'assistant') return null
   const entryId = matched?.id ?? `operation-turn-${operationId}`
 
   if (!matched) {
@@ -594,9 +602,11 @@ export function applyKeeperOperationTurnEvent(
     keeperName,
     entryId,
     operation.event,
-    { kind: 'operation', operationId, sequence: operation.sequence },
+    { kind: 'operation', operationId, sequence: operation.sequence, ...(observationOnly ? { observationOnly: true as const } : {}) },
   )
-  if (error) {
+  if (error && observationOnly) {
+    recordStreamProtocolError(keeperName, entryId, error)
+  } else if (error) {
     finalizeAssistantEntry(keeperName, entryId, {
       text: `Keeper request failed: ${error}`,
       rawText: error,
@@ -776,9 +786,6 @@ export function applyKeeperStreamEvent(
         )
         return null
       }
-      promoteAssistantTextToProgress(keeperName, assistantEntryId, {
-        agentCoreBlockIndex: takeAgentCoreTextBlockIndex(keeperName, assistantEntryId),
-      })
       const assistantEntry = (keeperThreads.value[keeperName] ?? [])
         .find(entry => entry.id === assistantEntryId)
       const existingOccurrence = (keeperThreads.value[keeperName] ?? [])
@@ -797,6 +804,11 @@ export function applyKeeperStreamEvent(
         }
         return null
       }
+      if (!(source.kind === 'operation' && source.observationOnly)) {
+        promoteAssistantTextToProgress(keeperName, assistantEntryId, {
+          agentCoreBlockIndex: takeAgentCoreTextBlockIndex(keeperName, assistantEntryId),
+        })
+      }
       const agentCoreBlockIndex = event.toolCallBlockIndex
       const toolSteps = assistantEntry?.traceSteps?.filter(step => step.kind === 'tool') ?? []
       const toolOrdinal = toolSteps.length
@@ -809,7 +821,7 @@ export function applyKeeperStreamEvent(
         toolOccurrenceId,
         name: toolName,
         agentCoreBlockIndex,
-      })
+      }, source.kind === 'operation' && source.observationOnly ? 'observation' : 'active')
       // Insert above the live assistant bubble so the final reply text
       // stays the last entry in the transcript.
       insertThreadEntryBefore(keeperName, assistantEntryId, {

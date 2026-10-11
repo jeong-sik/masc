@@ -8,6 +8,8 @@
 
 (** {1 Types} *)
 
+type response_identity = { response_generation : int; response_scope : int }
+
 type role = User | Assistant
 
 type stream_protocol_error_kind =
@@ -148,7 +150,7 @@ type keeper_chat_event =
       ; stop_reason : Agent_core.Types.stop_reason option
       ; usage : Agent_core.Types.delta_usage option
       }
-  | Agent_core_stream_message_stop
+  | Agent_core_stream_message_stop of response_identity option
   | Agent_core_stream_ping
   | Agent_core_content_block_start of
       { index : int
@@ -392,3 +394,8 @@ val model_content_activity_of_json : Yojson.Safe.t -> (model_content_activity, s
     use their Run_started sequence as the content generation, so worker-local
     scope counters can restart without colliding in an appended journal. *)
 val publish_with_sequence : t -> keeper_chat_event -> int
+
+(** None on a stop means its response identity was not observed. A known identity
+    is an indivisible generation/scope pair; malformed or partial objects reject. *)
+val response_identity_to_json : response_identity -> Yojson.Safe.t
+val response_identity_of_json : Yojson.Safe.t -> (response_identity, string) result

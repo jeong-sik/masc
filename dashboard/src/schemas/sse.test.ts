@@ -1403,3 +1403,23 @@ describe('schema drift log aggregation', () => {
     warnSpy.mockRestore()
   })
 })
+
+
+describe('Keeper response stop ownership protocol', () => {
+  const event = (value: unknown) => ({
+    type: 'keeper_chat_operation_event', name: 'fixture', operation_id: 'kmsg-fixture',
+    ag_ui_event: { type: 'CUSTOM', threadId: 'keeper-consumer:fixture', runId: 'run-1',
+      name: 'KEEPER_STREAM_MESSAGE_STOP', value, timestamp: 1712000000 },
+  })
+  it('retains an observed response identity', () => {
+    expect(SSEMessageSchema.safeParse(event({ content_generation: 7, stream_scope: 2 })).success).toBe(true)
+  })
+  it.each([
+    {}, { content_generation: 7 }, { content_generation: 7, stream_scope: -1 },
+    { content_generation: 7, stream_scope: 0.5 },
+    { content_generation: '7', stream_scope: 2 },
+    { content_generation: 7, stream_scope: 2, extra: true },
+  ])('rejects malformed stop identity %j', value => {
+    expect(SSEMessageSchema.safeParse(event(value)).success).toBe(false)
+  })
+})

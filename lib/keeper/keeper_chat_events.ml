@@ -1,3 +1,5 @@
+type response_identity = { response_generation : int; response_scope : int }
+
 type role = User | Assistant
 
 type stream_protocol_error_kind =
@@ -107,7 +109,7 @@ type keeper_chat_event =
       ; stop_reason : Agent_core.Types.stop_reason option
       ; usage : Agent_core.Types.delta_usage option
       }
-  | Agent_core_stream_message_stop
+  | Agent_core_stream_message_stop of response_identity option
   | Agent_core_stream_ping
   | Agent_core_content_block_start of
       { index : int
@@ -222,7 +224,7 @@ let redact_content ~redact_text = function
   | (Run_started _ | Batch_bound _ | Text_message_start _ | Text_message_end
     | External_effect_completed _ | Run_finished _ | Agent_core_stream_connected
     | Agent_core_runtime_attempt_started _ | Agent_core_stream_message_start _
-    | Agent_core_stream_message_delta _ | Agent_core_stream_message_stop
+    | Agent_core_stream_message_delta _ | Agent_core_stream_message_stop _
     | Agent_core_stream_ping | Agent_core_content_block_start _
     | Agent_core_content_block_stop _ | Model_content_activity _
     | Agent_core_thinking_signature_delta _ | Tool_call_start _ | Tool_call_end _
@@ -590,3 +592,25 @@ let model_content_activity_of_json json =
       Ok {content_generation; content_scope=stream_scope; content_index=block_index; content_provider_message_id=provider_message_id; channel; state}
   | _ -> error "expected object"
 ;;
+
+let response_identity_to_json owner =
+  `Assoc ["content_generation", `Int owner.response_generation;
+          "stream_scope", `Int owner.response_scope]
+
+let response_identity_of_json = function
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    if List.sort String.compare keys <> ["content_generation"; "stream_scope"] then
+      Error "response identity requires exactly content_generation and stream_scope"
+    else
+      let ( let* ) = Result.bind in
+      let index key = match List.assoc_opt key fields with
+        | Some json ->
+          (match Runtime_json_integer.of_json json with
+           | Ok n when n >= 0 -> Ok n
+           | Ok _ | Error _ -> Error (key ^ " must be a nonnegative safe integer"))
+        | None -> Error ("missing " ^ key) in
+      let* response_generation = index "content_generation" in
+      let* response_scope = index "stream_scope" in
+      Ok {response_generation; response_scope}
+  | _ -> Error "response identity must be an object"

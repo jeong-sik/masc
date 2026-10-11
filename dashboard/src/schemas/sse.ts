@@ -555,13 +555,14 @@ function validateKeeperCustomPayload(
 ): SafeParseResult<true> {
   if ([
     'KEEPER_CONNECTED',
-    'KEEPER_STREAM_MESSAGE_STOP',
     'KEEPER_STREAM_PING',
   ].includes(name)) {
     return payload === null
       ? ok(true)
       : fail('ag_ui_event.value', `Expected null ${name} payload`)
   }
+
+  if (name === 'KEEPER_STREAM_MESSAGE_STOP' && payload === null) return ok(true)
 
   if (name === 'KEEPER_RUNTIME_ATTEMPT_STARTED' && payload === null) {
     return ok(true)
@@ -601,7 +602,7 @@ function validateKeeperCustomPayload(
   const allowedFields: Record<KeeperChatCustomEventName, readonly string[]> = {
     KEEPER_CONNECTED: [],
     KEEPER_RUNTIME_ATTEMPT_STARTED: ['runtime_id', 'attempt_index'],
-    KEEPER_STREAM_MESSAGE_STOP: [],
+    KEEPER_STREAM_MESSAGE_STOP: ['content_generation', 'stream_scope'],
     KEEPER_STREAM_PING: [],
     KEEPER_EXTERNAL_EFFECT_COMPLETED: ['target'],
     KEEPER_CHAT_OPERATION_ACCEPTED: ['operation_id', 'state', 'queued_count', 'interactive'],
@@ -766,7 +767,10 @@ function validateKeeperCustomPayload(
       return ok(true)
     }
     case 'KEEPER_CONNECTED':
-    case 'KEEPER_STREAM_MESSAGE_STOP':
+    case 'KEEPER_STREAM_MESSAGE_STOP': {
+      const generation = requiredInteger(value, 'content_generation', 0)
+      return generation.success ? requiredInteger(value, 'stream_scope', 0) : generation
+    }
     case 'KEEPER_STREAM_PING':
       // Answered above, before the field map: these carry a null payload.
       // Listed so the switch stays total. The nested-shape event is narrowed

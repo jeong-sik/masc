@@ -24,7 +24,7 @@ let delta_to_string : Live.delta -> string = function
         (match attempt_index with Some i -> string_of_int i | None -> "none")
   | Live.Stream_model_started { model; _ } -> Printf.sprintf "stream_model_started(%s)" model
   | Live.Model_content_activity activity -> Yojson.Safe.to_string (Masc.Keeper_chat_events.model_content_activity_to_json activity)
-  | Live.Stream_model_stopped -> "stream_model_stopped"
+  | Live.Stream_model_stopped _ -> "stream_model_stopped"
   | Live.Stream_details { usage; stop_reason; _ } ->
       Printf.sprintf "stream_details(%s,stop=%s)"
         (match usage with
@@ -769,7 +769,7 @@ let test_stream_model_stop_reaches_the_view () =
   let body = sse (custom "KEEPER_STREAM_MESSAGE_STOP" `Null) in
   List.iter (fun actual ->
     check (list delta) "provider stop is preserved across chunk boundaries"
-      [Live.Stream_model_stopped] actual)
+      [Live.Stream_model_stopped None] actual)
     [feed_whole body; feed_in_chunks ~size:1 body];
   List.iter (fun (label, value) ->
     let body = sse (event "CUSTOM"

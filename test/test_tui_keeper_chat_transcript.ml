@@ -1295,7 +1295,7 @@ let test_response_stop_preserves_pending_work () =
     receive {|{"type":"CUSTOM","name":"KEEPER_STREAM_MESSAGE_STOP","value":null}|};
     check bool "a subsequent valid wire stop ends only model activity" true
       (Transcript.model_activity t = Some Transcript.Activity_response_ended);
-    feed t [Live.Stream_model_stopped; Live.Stream_model_stopped; Live.Text {text=""; stream_scope=None}; Live.Thinking ""];
+    feed t [Live.Stream_model_stopped None; Live.Stream_model_stopped None; Live.Text {text=""; stream_scope=None}; Live.Thinking ""];
     check phase "provider stop leaves Keeper running" Transcript.Working (Transcript.phase t);
     check bool "response stop and empty chunks leave the transcript body unchanged" true
       (before = Transcript.drawn t);
@@ -1306,17 +1306,17 @@ let test_response_stop_preserves_pending_work () =
        | Some _ | None -> false);
     feed t [tool_started "pending" "Execute"; tool_ended "pending"];
     let pending = Transcript.tool_calls t in
-    feed t [Live.Stream_model_stopped];
+    feed t [Live.Stream_model_stopped None];
     check bool "response stop preserves existing pending execution" true
       (pending = Transcript.tool_calls t);
     feed t [tool_result "pending" "executed"; Live.Stream_model_started { generation=None;stream_scope=None; message_id=Some "response";model="observed";usage=None}; Live.Thinking "next"];
     check bool "a later response can resume reasoning with a reused id" true
       (Transcript.model_activity t = Some Transcript.Activity_reasoning);
-    feed t [Live.Stream_model_stopped; Live.Runtime_attempt_started
+    feed t [Live.Stream_model_stopped None; Live.Runtime_attempt_started
       {runtime_id=Some "retry";attempt_index=Some 1}];
     check bool "retry clears the prior response's end" false
       (Transcript.model_activity t = Some Transcript.Activity_response_ended);
-    feed t [Live.Run_finished; Live.Stream_model_stopped];
+    feed t [Live.Run_finished; Live.Stream_model_stopped None];
     check phase "a late response stop cannot reopen a completed turn" Transcript.Stream_ended
       (Transcript.phase t))
     [Live.Text {text="answer"; stream_scope=None}; Live.Thinking "reason"]

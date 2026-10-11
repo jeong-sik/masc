@@ -72,7 +72,7 @@ let delta_to_string : Live.delta -> string = function
         (match attempt_index with Some i -> string_of_int i | None -> "none")
   | Live.Stream_model_started { model; _ } -> Printf.sprintf "stream_model_started(%s)" model
   | Live.Model_content_activity activity -> Yojson.Safe.to_string (Masc.Keeper_chat_events.model_content_activity_to_json activity)
-  | Live.Stream_model_stopped -> "stream_model_stopped"
+  | Live.Stream_model_stopped _ -> "stream_model_stopped"
   | Live.Stream_details { usage; stop_reason; _ } ->
       Printf.sprintf "stream_details(%s,stop=%s)"
         (match usage with
@@ -487,7 +487,7 @@ let golden : E.keeper_chat_event list =
             ; cost_usd = None
             }
       }
-  ; E.Agent_core_stream_message_stop
+  ; E.Agent_core_stream_message_stop None
   ; E.Run_finished { run_id = "run-golden" }
   ]
 

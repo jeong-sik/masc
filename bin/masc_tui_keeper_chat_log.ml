@@ -236,6 +236,7 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
          { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref; terminal_stream_scope })
   | E.Continuation_checkpoint _ -> Some Live.Checkpoint
   | E.Agent_core_stream_connected -> None
+  | E.Provider_retry_observed _ -> None
   | E.Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
     Some (Live.Runtime_attempt_started { runtime_id; attempt_index })
   | E.Agent_core_stream_message_start { content_generation; provider_message_id; model; usage; stream_scope } ->

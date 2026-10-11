@@ -131,6 +131,10 @@ type keeper_chat_event =
   | Reply_details of reply_details
   | Continuation_checkpoint of continuation_checkpoint
   | Agent_core_stream_connected
+  | Provider_retry_observed of
+      { attempt : Runtime_native_tasks.attempt; retry : Runtime_claude_api_retry.t }
+      (** Provider retry observation with original dispatch. It carries no
+          model content or execution receipt and never advances a runtime lane. *)
   | Agent_core_runtime_attempt_started of
       { runtime_id : string option
       ; attempt_index : int option

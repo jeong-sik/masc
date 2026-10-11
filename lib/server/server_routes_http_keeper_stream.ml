@@ -2027,6 +2027,10 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
   let on_tool_stream_observation observation =
     let result =
       match observation with
+      | Keeper_hooks_agent_core.Provider_retry_observed {attempt; retry} ->
+        push_worker_event
+          (Stream_chat_event (Keeper_chat_events.Provider_retry_observed {attempt; retry}));
+        Ok ()
       | Keeper_hooks_agent_core.Runtime_attempt_started
           { runtime_id; lane_attempt_index; _ } ->
         Keeper_stream_media_accum.start_runtime_attempt worker_media_accum;

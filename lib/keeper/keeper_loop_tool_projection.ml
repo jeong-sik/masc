@@ -34,6 +34,7 @@ let on_tool_stream_observation t
      | Ok () -> ()
      | Error detail -> record_rejection t detail)
   | Keeper_hooks_agent_core.Child_content_observed _
+  | Keeper_hooks_agent_core.Provider_retry_observed _
   | Keeper_hooks_agent_core.Native_task_observed _
   | Keeper_hooks_agent_core.Native_tool_progress _
   | Keeper_hooks_agent_core.Native_tool_completion _ -> ()

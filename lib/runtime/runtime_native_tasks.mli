@@ -42,6 +42,9 @@ type attempt =
   { routing_run_id : string; runtime_id : string; lane_attempt_index : int }
 (** The materialized driver attempt captured before dispatch, not the runtime
     selected when a delayed event arrives. The index is nonnegative. *)
+val attempt_to_json : attempt -> Yojson.Safe.t
+val attempt_of_json : Yojson.Safe.t -> (attempt, string) result
+(** Shared transport codec only; decoding never grants dispatch ownership. *)
 
 type invocation =
   { receiver_generation : string; session_id : string; client_uuid : string }

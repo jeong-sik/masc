@@ -184,6 +184,10 @@ val broadcast_resolved_turn_complete :
 (** {1 Hook factory} *)
 
 type tool_stream_observation =
+  | Provider_retry_observed of
+      { attempt : Runtime_native_tasks.attempt; retry : Runtime_claude_api_retry.t }
+      (** Exact dispatched attempt and session-owned API retry; neither a
+          native tool occurrence nor model content. *)
   | Runtime_attempt_started of
       { runtime_id : string
       ; lane_attempt_index : int

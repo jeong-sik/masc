@@ -155,6 +155,10 @@ let project ~timestamp ~redact_text state event =
                    (Option.map (fun i -> `Int i) attempt_index))
       in
       state, Some (custom ~timestamp state Runtime_attempt_started value)
+  | Provider_retry_observed _ ->
+      (* Durable observation is preserved; Web/TUI wire projection is a
+         separate next integration unit, not assistant speech. *)
+      state, None
   | Agent_core_stream_message_start { content_generation; stream_scope; provider_message_id; model; usage } ->
       let value =
         `Assoc

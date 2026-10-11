@@ -129,10 +129,12 @@ let on_tool_stream_observation t observation =
         (* Preserve admitted persistence through its health/report outcome,
            without holding the unrelated root publication mutex. *)
         Eio.Cancel.protect
-    | Runtime_attempt_started _ | Turn_collected _ | Turn_closed_without_sources _
+    | Provider_retry_observed _ | Runtime_attempt_started _ | Turn_collected _ | Turn_closed_without_sources _
     | Native_tool_progress _ | Native_tool_completion _ | Official_tool_result _ ->
         with_open_stream t in
   protect_observation (fun () -> match observation with
+  | Keeper_hooks_agent_core.Provider_retry_observed {attempt; retry} ->
+      publish t (Events.Provider_retry_observed {attempt; retry})
   | Keeper_hooks_agent_core.Runtime_attempt_started {runtime_id; lane_attempt_index; _} ->
       flush t;
       let previous_scope = Accum.start_runtime_attempt t.accum in

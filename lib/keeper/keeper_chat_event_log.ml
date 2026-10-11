@@ -215,6 +215,10 @@ let keeper_chat_event_to_json event =
       ([ "message", `String message ]
        @ json_opt "request_id" (Option.map (fun value -> `String value) request_id))
   | Agent_core_stream_connected -> type_tag "agent_core_stream_connected" []
+  | Provider_retry_observed {attempt; retry} ->
+    type_tag "provider_retry_observed"
+      ["attempt", Runtime_native_tasks.attempt_to_json attempt;
+       "retry", Runtime_claude_api_retry.to_json retry]
   | Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
     type_tag
       "agent_core_runtime_attempt_started"
@@ -436,6 +440,23 @@ let keeper_chat_event_of_json json =
            ; request_id = json |> member "request_id" |> to_string_option
            })
     | "agent_core_stream_connected" -> Ok Agent_core_stream_connected
+    | "provider_retry_observed" ->
+      let fields = json |> to_assoc in
+      let* () =
+        if List.exists (fun (key,_) -> not (List.mem key ["type";"attempt";"retry"])) fields
+        then Error "unexpected provider retry event field" else Ok () in
+      let required key = match List.filter_map
+          (fun (name,value) -> if name=key then Some value else None) fields with
+        | [value] -> Ok value
+        | [] -> Error ("missing provider retry event field: " ^ key)
+        | _ :: _ :: _ -> Error ("duplicate provider retry event field: " ^ key) in
+      let* _ = required "type" in
+      let* attempt_json = required "attempt" in
+      let* retry_json = required "retry" in
+      let* attempt = Runtime_native_tasks.attempt_of_json attempt_json in
+      let* retry = Runtime_claude_api_retry.of_json retry_json
+        |> Result.map_error Runtime_claude_api_retry.error_to_string in
+      Ok (Provider_retry_observed {attempt; retry})
     | "agent_core_runtime_attempt_started" ->
       let runtime_id = json |> member "runtime_id" |> to_string_option in
       let attempt_index = json |> member "attempt_index" |> to_int_option in

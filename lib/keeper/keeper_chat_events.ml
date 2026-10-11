@@ -97,6 +97,8 @@ type keeper_chat_event =
   | Reply_details of reply_details
   | Continuation_checkpoint of continuation_checkpoint
   | Agent_core_stream_connected
+  | Provider_retry_observed of
+      { attempt : Runtime_native_tasks.attempt; retry : Runtime_claude_api_retry.t }
   | Agent_core_runtime_attempt_started of
       { runtime_id : string option
       ; attempt_index : int option
@@ -235,7 +237,7 @@ let redact_content ~redact_text = function
       args_summary=redact_text event.args_summary; result_summary=Option.map redact_text event.result_summary}
   | (Run_started _ | Batch_bound _ | Text_message_start _ | Text_message_end
     | External_effect_completed _ | Run_finished _ | Agent_core_stream_connected
-    | Agent_core_runtime_attempt_started _ | Agent_core_stream_message_start _
+    | Provider_retry_observed _ | Agent_core_runtime_attempt_started _ | Agent_core_stream_message_start _
     | Agent_core_stream_message_delta _ | Agent_core_stream_message_stop _
     | Agent_core_stream_ping | Agent_core_content_block_start _
     | Agent_core_content_block_stop _ | Model_content_activity _

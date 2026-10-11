@@ -1,5 +1,7 @@
 #use "topfind";;
 #require "yojson";;
+#mod_use "@INTEGER@";;
+#mod_use "@NATIVE_TASKS@";;
 #mod_use "@SOURCE@";;
 module R = Runtime_claude_api_retry;;
 let frames = In_channel.with_open_text "@CAPTURE@" (fun ch ->
@@ -35,3 +37,18 @@ List.iter (fun (key,value) ->
  | Ok None -> () | _ -> failwith "status misclassified as retry");;
 print_endline "PASS captured retry frames: 10";;
 print_endline "PASS session ownership, numeric shape, UUID, duplicate fields and non-retry distinction";;
+List.iter (fun report ->
+  match R.of_json (R.to_json report) with
+  | Ok restored when restored = report -> ()
+  | _ -> failwith "persisted retry roundtrip") reports;;
+let attempt : Runtime_native_tasks.attempt =
+  {routing_run_id="synthetic-routing";runtime_id="synthetic-runtime";lane_attempt_index=1};;
+(match Runtime_native_tasks.attempt_of_json (Runtime_native_tasks.attempt_to_json attempt) with
+ | Ok restored when restored = attempt -> () | _ -> failwith "attempt roundtrip");;
+(match Runtime_native_tasks.attempt_of_json
+ (Runtime_native_tasks.attempt_to_json {attempt with lane_attempt_index= -1}) with
+ | Error _ -> () | _ -> failwith "negative attempt admitted");;
+(match R.of_json (`Assoc ["observation_id",`String "r";"attempt",`Float 1e30;
+ "max_retries",`Int 10;"retry_delay_ms",`Int 1]) with
+ | Error _ -> () | _ -> failwith "unsafe JSON integer admitted");;
+print_endline "PASS persisted retry and attempt codecs; negative indices and unsafe integers rejected";;

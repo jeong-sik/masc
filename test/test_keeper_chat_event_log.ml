@@ -78,6 +78,11 @@ let all_events : E.keeper_chat_event list =
   ; E.Continuation_checkpoint { message = "paused"; request_id = Some "req-9" }
   ; E.Continuation_checkpoint { message = "paused"; request_id = None }
   ; E.Agent_core_stream_connected
+  ; E.Provider_retry_observed
+      { attempt = {Runtime_native_tasks.routing_run_id="routing-retry";
+          runtime_id="claude-fixture";lane_attempt_index=1};
+        retry = {Runtime_claude_api_retry.observation_id="retry-fixture";
+          attempt=1;max_retries=10;retry_delay_ms=615;error_status=None} }
   ; E.Agent_core_runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
   ; E.Agent_core_runtime_attempt_started { runtime_id = None; attempt_index = None }
   ; E.Agent_core_stream_message_start

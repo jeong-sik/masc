@@ -17,6 +17,17 @@ function requiredFixture<T>(value: T | undefined): T {
 }
 
 describe('keeper chat operation tracking', () => {
+  it.each(['terminal', 'future-boundary'] as const)('quarantines contradictory stored speech: %s', kind => {
+    upsertTrackedKeeperChatOperation({ operationId: 'contradictory', keeperName: 'echo', message: 'input', submittedAt: 1,
+      assistantDraft: { text: 'canonical answer', rawText: 'canonical answer', delivery: 'history', streamState: null,
+        responseState: { ...initialKeeperResponseState, phase: kind === 'terminal' ? 'terminal' : 'running', lastSequence: 2 },
+        producerTraceBoundary: kind === 'future-boundary' ? 3 : 2,
+        producerSayingReplay: { text: 'untrusted pending', timestamp: 1, owner: null, scope: null } } })
+    const draft = trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft
+    expect(draft).toMatchObject({ responseState: { kind: 'unavailable' }, delivery: 'error' })
+    expect(draft?.producerSayingReplay).toBeUndefined()
+    expect(draft?.producerTraceBoundary).toBeUndefined()
+  })
   it('restores frontend response details through repeated durable draft reads', () => {
     const details = {
       traceId: 'trace', turnRef: 'turn', providerMessageId: '', modelUsed: 'observed-model',

@@ -1502,13 +1502,13 @@ function mergeLocalAssistantObservations(
   const toolTranscriptBindings = reconcileTranscriptBindings([...exactLocalEntries, ...exactCanonicalEntries, historyEntry].map(entry => entry.toolTranscriptBindings))
   const toolAuthorityUnavailable = [...exactLocalEntries, ...exactCanonicalEntries, historyEntry]
     .some(entry => entry.toolObservationAuthority === 'unavailable')
-  const autonomousTraceBoundary = exactLocalEntries.find(entry => entry.autonomousTraceBoundary !== undefined)?.autonomousTraceBoundary
-  const autonomousSayingReplay = exactLocalEntries.find(entry => entry.autonomousSayingReplay)?.autonomousSayingReplay
+  const producerTraceBoundary = exactLocalEntries.find(entry => entry.producerTraceBoundary !== undefined)?.producerTraceBoundary
+  const producerSayingReplay = exactLocalEntries.find(entry => entry.producerSayingReplay)?.producerSayingReplay
   const mergedHistory = { ...historyEntry,
     ...(exactLocalEntries.find(entry => entry.autonomousJournalRecovery)?.autonomousJournalRecovery
       ? { autonomousJournalRecovery: exactLocalEntries.find(entry => entry.autonomousJournalRecovery)!.autonomousJournalRecovery } : {}),
-    ...(autonomousSayingReplay ? { autonomousSayingReplay } : {}),
-    ...(autonomousTraceBoundary !== undefined ? { autonomousTraceBoundary } : {}),
+    ...(producerSayingReplay ? { producerSayingReplay } : {}),
+    ...(producerTraceBoundary !== undefined ? { producerTraceBoundary } : {}),
     ...(exactLocalEntries.find(entry => entry.autonomousThinkingReplay)?.autonomousThinkingReplay
       ? { autonomousThinkingReplay: exactLocalEntries.find(entry => entry.autonomousThinkingReplay)!.autonomousThinkingReplay } : {}),
     ...(responseState ? { responseState } : {}),

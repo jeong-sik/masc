@@ -46,6 +46,14 @@ type tool_call = Keeper_chat_types.tool_call = {
   args : string;
 }
 
+(** Assign transcript slots to the exact, already filtered tool list supplied
+    to the chat append boundary. Streaming observers must not reconstruct these
+    ordinals from START counts, provider IDs, or presentation traces. The
+    resulting bindings describe the append input; durability requires a
+    successful append acknowledgement. *)
+val tool_transcript_bindings :
+  tool_call list -> (tool_call * Keeper_chat_delivery_identity.transcript_slot) list
+
 (** Closed transcript row classification. Assistant is Keeper speech;
     Request_failure is a server-owned request result and cannot acknowledge
     input or enter conversation memory. Unknown labels are refused. *)

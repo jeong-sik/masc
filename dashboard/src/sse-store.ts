@@ -527,6 +527,10 @@ async function hydrateAfterReconnect(): Promise<void> {
   } catch (err) {
     console.warn('[server-push] reconnect Agent Core replay failed', err instanceof Error ? err.message : err)
   }
+  void import('./keeper-autonomous-stream')
+    .then(mod => mod.recoverKnownKeeperAutonomousTurns())
+    .catch(error => console.warn('[server-push] autonomous journal reconnect recovery unavailable',
+      error instanceof Error ? error.name : 'read failure'))
   requestNamespaceTruthNow()
   // Recover approval-queue state that may have changed while disconnected: the
   // always-visible nav-rail approvals badge reads gateData regardless of

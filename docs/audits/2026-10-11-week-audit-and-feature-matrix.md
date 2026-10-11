@@ -182,6 +182,9 @@ tool-only 턴을 이미 수락하므로 빈 최종 텍스트 수락과도 계약
 - **(b) 전 레인 엄격 수락**: Codex 특례도 제거. 비용: 빈 최종 텍스트 하나가 후보 수 ×
   풀 요청 비용으로 번식, schedule 웨이크 노이즈.
 
+**→ (a) 채택·완료 (#42299, 2026-10-11 병합)**: 5레인 통일 + `masc_keeper_quiet_finals_total`
+게이지. 정책은 자율 웨이크 + 할 일 없음일 때만 좁게 허용. 리뷰 verdict PASS.
+
 ### 8-2. native terminal acknowledge 소비 (P2-1) — 조사 결과로 결정 소멸
 
 **코드 재검증 결과 초기 주장이 부정확함** (탐색 에이전트 전수 조사, 2026-10-11):
@@ -200,6 +203,9 @@ tool-only 턴을 이미 수락하므로 빈 최종 텍스트 수락과도 계약
 생성 경로(`keeper_owner.ml:2148-2149`)를 삭제하고, settle이 실제 acknowledge
 경로임을 주석·문구로 명시. 에러 문구 "awaiting Owner acknowledgement"는 유지
 (settle 대기 중에는 실제 상태이므로). 헌법 legacy_residue 원칙 적용 대상.
+
+**→ 완료 (#42296, 2026-10-11 병합)**: dead path 삭제, 문구 "awaiting Owner
+settlement"로 교정, 상태·settle 경로·테스트 전부 유지. 리뷰 verdict PASS.
 
 ## 9. 후속 확인 사항 (이번 감사 이후 발견)
 

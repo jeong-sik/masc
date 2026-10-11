@@ -43,7 +43,7 @@ const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const hydrateTransportHealthFromSSE = vi.fn<(payload: unknown) => void>()
 const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown, blocks?: unknown) => void>()
-const refreshActiveKeeperChatHistory = vi.fn<(opts?: { force?: boolean }) => void>()
+const refreshKnownKeeperChatHistories = vi.fn<(opts?: { force?: boolean }) => void>()
 
 async function flushAsyncWork(): Promise<void> {
   await vi.dynamicImportSettled()
@@ -104,7 +104,7 @@ async function loadSseStore() {
   }))
   vi.doMock('./keeper-runtime', () => ({
     noteKeeperChatAppended,
-    refreshActiveKeeperChatHistory,
+    refreshKnownKeeperChatHistories,
   }))
   vi.doMock('./router', () => ({ route }))
   const sseStore = await import('./sse-store')
@@ -139,7 +139,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     replayAgentCoreRuntimeTelemetry.mockClear()
     replayAgentCoreRuntimeTelemetry.mockResolvedValue(undefined)
     hydrateAgentCoreTelemetrySample.mockClear()
-    refreshActiveKeeperChatHistory.mockReset()
+    refreshKnownKeeperChatHistories.mockReset()
     hydrateFleetCompositeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockReturnValue(true)
@@ -220,7 +220,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
 
     // keeper_chat_appended events dropped outside the server replay buffer are
     // unrecoverable through the live stream, so the open panel must re-fetch.
-    expect(refreshActiveKeeperChatHistory).toHaveBeenCalledWith({ force: true })
+    expect(refreshKnownKeeperChatHistories).toHaveBeenCalledWith()
 
     vi.clearAllTimers()
     cleanup()
@@ -228,7 +228,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
 
   it('surfaces active keeper chat reconnect refresh boundary failures without stopping recovery', async () => {
     const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    refreshActiveKeeperChatHistory.mockImplementationOnce(() => {
+    refreshKnownKeeperChatHistories.mockImplementationOnce(() => {
       throw new Error('keeper chat reconnect refresh exploded')
     })
     const { sseStore, wsState } = await loadSseStore()
@@ -239,7 +239,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     wsState.dashboardWsReconnectCount.value += 1
     await flushAsyncWork()
 
-    expect(refreshActiveKeeperChatHistory).toHaveBeenCalledWith({ force: true })
+    expect(refreshKnownKeeperChatHistories).toHaveBeenCalledWith()
     expect(consoleWarn).toHaveBeenCalledWith(
       '[server-push] reconnect keeper chat re-hydration unavailable',
       'keeper chat reconnect refresh exploded',

@@ -1364,7 +1364,16 @@ export function applyKeeperStreamEvent(
         })
         if (response && !response.accepted) return null
         if (typeof value.delta !== 'string' || value.delta.length === 0) return null
-        flushProducerSaying(keeperName, assistantEntryId, source.observationOnly === true)
+        const boundaryDecision = response ?? reduceKeeperResponse(current ?? initialKeeperResponseState, {
+          kind: 'observe', owner: value.response ?? null, scope: null, source: 'body',
+        })
+        const pending = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.producerSayingReplay
+        const unownedBoundary = pending?.owner === null && value.response === undefined
+          && (current === undefined || current.kind === 'known' && current.floor === null && current.current === null)
+        if (boundaryDecision.authoritative || source.observationOnly && current?.kind !== 'unavailable'
+          && pending?.owner != null && sameKeeperResponseOwner(pending.owner, value.response) || unownedBoundary) {
+          flushProducerSaying(keeperName, assistantEntryId, source.observationOnly === true)
+        }
         const owner = value.response ? Object.freeze({ ...value.response }) : null
         const before = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
         if (!before) return null

@@ -810,7 +810,7 @@ let gap_applies ~session_id = function
 
 type turn_state =
   { open_items : (string * Msp.item_kind) list
-  ; completed_agent_messages : (string * Msp.item) list
+  ; completed_items : (string * Msp.item) list
   ; open_tool_items : int
   ; final_text : string option
   ; tool_calls : int
@@ -938,8 +938,8 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
     (match notification with
      | Msp.Item_started { session_id = sid; item } when ours sid && item_in_turn ~turn_id item
        ->
-       if List.mem_assoc item.Msp.item_id state.completed_agent_messages then
-         protocol_error "item/started" "completed agent message cannot restart"
+       if List.mem_assoc item.Msp.item_id state.completed_items then
+         protocol_error "item/started" "completed item cannot restart"
        else (match List.assoc_opt item.Msp.item_id state.open_items with
         | Some kind when kind = item.Msp.kind -> continue state
         | Some _ -> protocol_error "item/started" "open item changed kind"
@@ -954,24 +954,25 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
             ; tool_calls = state.tool_calls + 1
             }
         | kind -> continue { state with open_items = (item.Msp.item_id, kind) :: state.open_items }))
-     | Msp.Item_delta { session_id = sid; item_id; field = Msp.Delta_text; delta }
+     | Msp.Item_delta { session_id = sid; item_id; field; delta }
        when ours sid ->
-       if List.mem_assoc item_id state.completed_agent_messages then
-         protocol_error "item/delta" "completed agent message cannot receive a delta"
-       else (match List.assoc_opt item_id state.open_items with
-        | Some Msp.Agent_message ->
+       if List.mem_assoc item_id state.completed_items then
+         protocol_error "item/delta" "completed item cannot receive a delta"
+       else (match field, List.assoc_opt item_id state.open_items with
+        | Msp.Delta_text, Some Msp.Agent_message ->
           emit (Text_delta { item_id; text = delta });
           (* The model is speaking: its window applies again, whatever tool
              items are still open. *)
           io.set_receive_phase Model_turn;
           continue state
-        | Some _ | None -> continue state)
+        | (Msp.Delta_text | Msp.Delta_output | Msp.Delta_summary _ | Msp.Unrecognized_delta_field _),
+          (Some _ | None) -> continue state)
      | Msp.Item_completed { session_id = sid; item } when ours sid && item_in_turn ~turn_id item
        ->
-       (match List.assoc_opt item.Msp.item_id state.completed_agent_messages with
+       (match List.assoc_opt item.Msp.item_id state.completed_items with
         | Some previous when previous = item -> continue state
         | Some _ ->
-            protocol_error "item/completed" "agent message changed after completion"
+            protocol_error "item/completed" "item changed after completion"
         | None ->
        let* () = match List.assoc_opt item.Msp.item_id state.open_items with
          | Some kind when kind <> item.Msp.kind ->
@@ -979,6 +980,8 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
          | Some _ | None -> Ok () in
        let was_open = List.mem_assoc item.Msp.item_id state.open_items in
        let open_items = List.remove_assoc item.Msp.item_id state.open_items in
+       let state = {state with open_items;
+         completed_items = (item.Msp.item_id, item) :: state.completed_items} in
        (match item.Msp.kind with
         | Msp.Tool_call ->
           (* MSP allows a completed item that never opened (a single-shot
@@ -996,9 +999,7 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
             ; tool_calls = (if was_open then state.tool_calls else state.tool_calls + 1)
             }
         | Msp.Agent_message ->
-          let state = {state with open_items;
-            completed_agent_messages =
-              (item.Msp.item_id, item) :: state.completed_agent_messages;
+          let state = {state with
             final_text = (match item.Msp.text with
               | Some text -> Some text
               | None -> state.final_text)} in
@@ -1307,7 +1308,7 @@ let run_protocol
         ~turn_id
         ~on_stream_event
         { open_items = []
-        ; completed_agent_messages = []
+        ; completed_items = []
         ; open_tool_items = 0
         ; final_text = None
         ; call_models = []

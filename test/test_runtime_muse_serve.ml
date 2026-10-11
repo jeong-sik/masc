@@ -318,6 +318,36 @@ let test_duplicate_native_start_counts_once () =
           check int "one native call" 1 turn.tool_calls)
 ;;
 
+let test_replayed_native_completion_counts_once () =
+  List.iter (fun starts ->
+    let started = ref 0 and finished = ref 0 in
+    run_scripted
+      ~on_stream_event:(function
+        | Serve.Native_tool_started _ -> incr started
+        | Serve.Native_tool_finished _ -> incr finished
+        | _ -> ())
+      (handshake_and_session ~granted:[] @ starts @
+        [Write tool_completed; Write tool_completed; Write agent_completed; Write turn_completed])
+      (fun result _ -> match result with
+        | Error error -> fail (Serve.error_to_string error)
+        | Ok turn ->
+            check int "native completion replay keeps one start" 1 !started;
+            check int "native completion replay keeps one finish" 1 !finished;
+            check int "native completion replay keeps one call" 1 turn.tool_calls))
+    [[]; [Write tool_started]]
+;;
+
+let test_completed_native_cannot_restart () =
+  run_scripted
+    (handshake_and_session ~granted:[] @
+      [Write tool_completed; Write tool_started; Write agent_completed; Write turn_completed])
+    (fun result _ -> match result with
+      | Error (Serve.Protocol_error {stage; _}) ->
+          check string "completed native identity rejects restart" "item/started" stage
+      | Error error -> fail (Serve.error_to_string error)
+      | Ok _ -> fail "completed native identity restarted")
+;;
+
 let test_turn_with_tool_and_approval () =
   let deltas = Buffer.create 16 in
   let decisions = ref [] in
@@ -405,6 +435,7 @@ let test_compaction_reaches_the_stream () =
       | _ -> ())
     (handshake_and_session ~granted:[]
      @ [ Write compaction_completed
+       ; Write compaction_completed
        ; Write agent_started
        ; Write agent_completed
        ; Write turn_completed
@@ -1212,6 +1243,9 @@ let () =
             test_completed_agent_replay_preserves_final_reply
         ; test_case "duplicate agent start cannot admit late delta" `Quick
             test_duplicate_agent_start_cannot_admit_late_delta
+        ; test_case "replayed native completion counts once" `Quick
+            test_replayed_native_completion_counts_once
+        ; test_case "completed native cannot restart" `Quick test_completed_native_cannot_restart
         ; test_case "duplicate native start counts once" `Quick test_duplicate_native_start_counts_once
         ; test_case "completed agent cannot change kind" `Quick test_completed_agent_cannot_change_kind
         ; test_case "completed agent cannot restart" `Quick test_completed_agent_cannot_restart

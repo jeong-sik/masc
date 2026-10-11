@@ -1,3 +1,4 @@
+import { useSignal } from '@preact/signals'
 import { scanMascReferences, postsSharingReferences } from '../../lib/masc-reference'
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
@@ -770,7 +771,7 @@ function BdComposer() {
   const [mobileKeeperTarget, setMobileKeeperTarget] = useState('')
   const [mobileOpen, setMobileOpen] = useState(false)
   const [mobileAttachments, setMobileAttachments] = useState<ComposerAttachmentDraft[]>([])
-  const [submitting, setSubmitting] = useState(false)
+  const submitting = useSignal(false)
   const mobileFileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -836,7 +837,7 @@ function BdComposer() {
     && !!typedMobileMention
     && !mobileMentionTarget
     && mobileMentionOptions.length > 0
-  const mobileQuickBusy = submitting || operatorActionBusy.value
+  const mobileQuickBusy = submitting.value || operatorActionBusy.value
   const mobileAttachmentDeliveryReason = mode === 'mention'
     ? composerAttachmentDeliveryReason(mobileAttachments)
     : null
@@ -917,8 +918,8 @@ function BdComposer() {
     event?.stopPropagation()
     const body = localBody.trim()
     const title = options.compactMobile ? mobilePostTitle(body) : localTitle.trim()
-    if (!title || !body) return
-    setSubmitting(true)
+    if (submitting.value || !title || !body) return
+    submitting.value = true
     try {
       const contentWithFlair = localFlair
         ? `[flair:${localFlair}]\n${body.replace(/^\[flair:[a-z]+\]\s*/i, '')}`
@@ -934,7 +935,7 @@ function BdComposer() {
       console.warn('[board] post submit failed', err instanceof Error ? err.message : err)
       showToast('글 등록에 실패했습니다', 'error')
     } finally {
-      setSubmitting(false)
+      submitting.value = false
     }
   }
 
@@ -946,12 +947,12 @@ function BdComposer() {
 
     event?.stopPropagation()
     const body = localBody.trim()
-    if (mobileQuickDisabled) return
+    if (submitting.value || operatorActionBusy.value || mobileQuickDisabled) return
     const message = mode === 'mention'
       ? serializeComposerBody({ text: localBody, attachments: [], voice: null })
       : body
     if (!message) return
-    setSubmitting(true)
+    submitting.value = true
     try {
       if (mode === 'mention') {
         const keeperId = mobileMentionTarget
@@ -982,7 +983,7 @@ function BdComposer() {
       console.warn('[board] mobile quick compose failed', message)
       showToast(message, 'error')
     } finally {
-      setSubmitting(false)
+      submitting.value = false
     }
   }
 
@@ -1205,7 +1206,7 @@ function BdComposer() {
             disabled=${mobileQuickDisabled}
             onClick=${(e: Event) => { void submitMobileQuick(e) }}
             data-testid="bd-composer-mobile-send"
-          >${submitting ? '등록 중...' : '게시 ↑'}</button>
+          >${submitting.value ? '등록 중...' : '게시 ↑'}</button>
         </div>
         ${mode === 'post' ? html`
           <div class="bd-desktop-post-form bd-comp-box grid gap-2">
@@ -1241,10 +1242,10 @@ function BdComposer() {
               <button
                 type="button"
                 class="send ml-auto"
-                disabled=${!localTitle.trim() || !localBody.trim() || submitting}
+                disabled=${!localTitle.trim() || !localBody.trim() || submitting.value}
                 onClick=${(e: Event) => { void submitPost(e) }}
                 data-testid="bd-composer-send"
-              >${submitting ? '등록 중...' : '게시 ↑'}</button>
+              >${submitting.value ? '등록 중...' : '게시 ↑'}</button>
             </div>
           </div>
         ` : html`

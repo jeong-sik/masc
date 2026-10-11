@@ -13,7 +13,7 @@ import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExclu
 import { route } from '../../router'
 import { createPost, fetchBoardPost } from '../../api'
 import { requestBoardContextInference, voteComment } from '../../api/board'
-import { dispatchOperatorAction, operatorSnapshot } from '../../operator-store'
+import { dispatchOperatorAction, operatorSnapshot, operatorActionBusy } from '../../operator-store'
 import { PAGE_SIZE, feedVisibleLimit, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, contentCategory, selectedBoardPostId, boardComposerMode, detailPostId, detailPost, detailFocusedCommentId, detailComments, detailCommentPage, detailLoading, detailReadPhase, loadPostDetail } from './board-state'
 import { resetBoardLatencyMetrics } from '../../board-metrics'
 import type { BoardPost, OperatorSnapshot } from '../../types'
@@ -922,6 +922,33 @@ describe('BoardSurface Component', () => {
     expect(composer).toHaveAttribute('data-mobile-open', 'true')
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     expect(toggle).toHaveTextContent('접기')
+  })
+
+  it('allows independent desktop post creation while an operator action is pending', () => {
+    operatorActionBusy.value = true
+    try {
+      render(h(BoardSurface, {}))
+      fireEvent.input(screen.getByTestId('bd-composer-title'), { target: { value: 'independent post' } })
+      fireEvent.input(screen.getByTestId('bd-composer-body'), { target: { value: 'post body' } })
+      fireEvent.click(screen.getByTestId('bd-composer-send'))
+      expect(createPost).toHaveBeenCalledTimes(1)
+    } finally {
+      operatorActionBusy.value = false
+    }
+  })
+
+  it('admits one mobile post from two native send events before rerender', async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof createPost>>) => void
+    vi.mocked(createPost).mockReturnValue(new Promise(done => { resolve = done }))
+    render(h(BoardSurface, {}))
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-toggle'))
+    fireEvent.input(screen.getByTestId('bd-composer-mobile-body'), { target: { value: 'one post' } })
+    const send = screen.getByTestId('bd-composer-mobile-send')
+    send.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    send.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(createPost).toHaveBeenCalledTimes(1)
+    resolve({ id: 'test-post' })
+    await waitFor(() => expect((screen.getByTestId('bd-composer-mobile-body') as HTMLTextAreaElement).value).toBe(''))
   })
 
   it('submits the mobile quick composer using the first body line as title', async () => {

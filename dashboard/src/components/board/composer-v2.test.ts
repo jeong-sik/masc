@@ -1,6 +1,7 @@
 import { h } from 'preact'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { BroadcastSendReceipt } from '../../api/actions'
 import { ComposerV2, buildComposerV2Request } from './composer-v2'
 import {
   operatorActionBusy,
@@ -159,6 +160,33 @@ describe('ComposerV2', () => {
     operatorActionBusy.value = false
     dashboardKeepers.value = []
     vi.clearAllMocks()
+  })
+
+  it('admits one broadcast when two native send events arrive before rerender', async () => {
+    let resolve!: (value: BroadcastSendReceipt) => void
+    sendBroadcastMock.mockReturnValue(new Promise(done => { resolve = done }))
+    render(h(ComposerV2, { workspaceId: 'ops' }))
+    fireEvent.input(screen.getByLabelText('Composer v2 message'), { target: { value: 'one broadcast' } })
+    const send = screen.getByRole('button', { name: 'Send' })
+    send.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    send.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(sendBroadcastMock).toHaveBeenCalledTimes(1)
+    resolve({ ok: true, requestId: 'test-broadcast', deliveryKind: 'passive', reason: null, workspacePersisted: true })
+    await waitFor(() => expect((screen.getByLabelText('Composer v2 message') as HTMLTextAreaElement).value).toBe(''))
+  })
+
+  it('releases submission admission after a transport exception for an explicit retry', async () => {
+    sendBroadcastMock.mockRejectedValueOnce(new Error('transport exception'))
+    render(h(ComposerV2, { workspaceId: 'ops' }))
+    fireEvent.input(screen.getByLabelText('Composer v2 message'), { target: { value: 'first attempt' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(showToastMock).toHaveBeenCalledWith('transport exception', 'error'))
+    expect((screen.getByLabelText('Composer v2 message') as HTMLTextAreaElement).value).toBe('first attempt')
+    sendBroadcastMock.mockResolvedValue({ ok: true, requestId: 'retry-broadcast', deliveryKind: 'passive', reason: null, workspacePersisted: true })
+    fireEvent.input(screen.getByLabelText('Composer v2 message'), { target: { value: 'explicit next attempt' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(sendBroadcastMock).toHaveBeenCalledTimes(2))
+    expect(sendBroadcastMock).toHaveBeenLastCalledWith('dashboard-test', 'explicit next attempt')
   })
 
   it('sends broadcast drafts through the workspace broadcast transport', async () => {

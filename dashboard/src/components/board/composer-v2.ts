@@ -1,3 +1,4 @@
+import { useSignal } from '@preact/signals'
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { AtSign, Megaphone, Mic, Paperclip, Send, Square, UserRound, X } from 'lucide-preact'
@@ -185,11 +186,11 @@ export function ComposerV2({
   const [draft, setDraft] = useState('')
   const [keeperTarget, setKeeperTarget] = useState('')
   const [attachments, setAttachments] = useState<ComposerAttachmentDraft[]>([])
-  const [submitting, setSubmitting] = useState(false)
+  const submitting = useSignal(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const workspace = normalizeWorkspaceId(workspaceId)
-  const busy = submitting || operatorActionBusy.value
+  const busy = submitting.value || operatorActionBusy.value
   const mention = useOperatorMentionContext({
     message: draft,
     target: keeperTarget,
@@ -329,7 +330,7 @@ export function ComposerV2({
   }
 
   async function submit(): Promise<void> {
-    if (sendDisabled) return
+    if (submitting.value || operatorActionBusy.value || sendDisabled) return
     const message = serializeComposerBody({ text: draft, attachments: [], voice: null })
     if (!message) return
     const keeperId = deliveryKeeper
@@ -340,7 +341,7 @@ export function ComposerV2({
       keeperId,
       attachments,
     })
-    setSubmitting(true)
+    submitting.value = true
     setSubmitError(null)
     try {
       if (mode === 'dm') {
@@ -368,7 +369,7 @@ export function ComposerV2({
       setSubmitError(message)
       showToast(message, 'error')
     } finally {
-      setSubmitting(false)
+      submitting.value = false
     }
   }
 

@@ -610,14 +610,14 @@ function ToolApprovalCards({ keeperName }: { keeperName: string }): VNode | null
               class="btn"
               data-testid="keeper-tool-approval-approve"
               disabled=${approval.answering}
-              onClick=${() => void answerHeldKeeperToolApproval(keeperName, approval.toolCallId, 'approve')}
+              onClick=${() => void answerHeldKeeperToolApproval(keeperName, approval.approvalId, 'approve')}
             >승인</button>
             <button
               type="button"
               class="btn btn-secondary"
               data-testid="keeper-tool-approval-deny"
               disabled=${approval.answering}
-              onClick=${() => void answerHeldKeeperToolApproval(keeperName, approval.toolCallId, 'deny')}
+              onClick=${() => void answerHeldKeeperToolApproval(keeperName, approval.approvalId, 'deny')}
             >거절</button>
             ${approval.answering ? html`<span class="tool-approval-card-wait">전송 중…</span>` : null}
           </div>

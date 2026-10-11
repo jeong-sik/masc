@@ -1335,9 +1335,9 @@ export function applyKeeperStreamEvent(
         // Preserve the terminal fact for a known wait so a listing already
         // in flight cannot hydrate it back into an actionable approval.
         // A later REQUESTED event replaces this row with a new pending wait.
-        const current = keeperToolApprovals.value[keeperName]?.[toolCallId]
+        const current = keeperToolApprovals.value[keeperName]?.[approvalId]
         if (current?.approvalId === approvalId) {
-          settleKeeperToolApproval(keeperName, toolCallId, outcome, current)
+          settleKeeperToolApproval(keeperName, approvalId, outcome, current)
         }
         return null
       }

@@ -993,35 +993,35 @@ export function upsertKeeperToolApproval(
   const byKeeper = keeperToolApprovals.value[keeperName] ?? {}
   keeperToolApprovals.value = {
     ...keeperToolApprovals.value,
-    [keeperName]: { ...byKeeper, [approval.toolCallId]: Object.freeze({ ...approval, authRevision: currentStoredTokenRevision() }) },
+    [keeperName]: { ...byKeeper, [approval.approvalId]: Object.freeze({ ...approval, authRevision: currentStoredTokenRevision() }) },
   }
 }
 
 export function updateKeeperToolApproval(
   keeperName: string,
-  toolCallId: string,
+  approvalId: string,
   updater: (approval: KeeperToolApprovalPending) => KeeperToolApprovalPending,
   expected?: KeeperToolApprovalPending,
 ): KeeperToolApprovalPending | null {
-  const existing = keeperToolApprovals.value[keeperName]?.[toolCallId]
+  const existing = keeperToolApprovals.value[keeperName]?.[approvalId]
   if (!existing || existing.authRevision !== currentStoredTokenRevision() || (expected && existing !== expected)) return null
   const updated = Object.freeze(updater(existing))
   const current = keeperToolApprovals.value
-  if (current[keeperName]?.[toolCallId] !== existing) return null
+  if (current[keeperName]?.[approvalId] !== existing) return null
   keeperToolApprovals.value = {
     ...current,
-    [keeperName]: { ...current[keeperName], [toolCallId]: updated },
+    [keeperName]: { ...current[keeperName], [approvalId]: updated },
   }
   return updated
 }
 
 export function settleKeeperToolApproval(
   keeperName: string,
-  toolCallId: string,
+  approvalId: string,
   outcome: string,
   expected?: KeeperToolApprovalPending,
 ): KeeperToolApprovalPending | null {
-  return updateKeeperToolApproval(keeperName, toolCallId, approval => ({
+  return updateKeeperToolApproval(keeperName, approvalId, approval => ({
     ...approval,
     settled: true,
     answering: false,

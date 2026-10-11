@@ -267,7 +267,7 @@ export async function hydrateKeeperToolApprovals(): Promise<void> {
     if (!owns()) return
     // A row the stream already drew carries fresher askedAt semantics; only
     // fill gaps, never overwrite an in-flight answer with a re-hydration.
-    if (keeperToolApprovals.value[row.keeper]?.[row.tool_call_id]?.authRevision === owner.authRevision) continue
+    if (keeperToolApprovals.value[row.keeper]?.[row.approval_id]?.authRevision === owner.authRevision) continue
     upsertKeeperToolApproval(row.keeper, {
       approvalId: row.approval_id,
       toolCallId: row.tool_call_id,
@@ -287,39 +287,39 @@ export async function hydrateKeeperToolApprovals(): Promise<void> {
 
 export async function answerHeldKeeperToolApproval(
   keeperName: string,
-  toolCallId: string,
+  approvalId: string,
   decision: 'approve' | 'deny',
 ): Promise<boolean> {
-  const existing = keeperToolApprovals.value[keeperName]?.[toolCallId]
+  const existing = keeperToolApprovals.value[keeperName]?.[approvalId]
   if (!existing || existing.authRevision !== currentStoredTokenRevision() || existing.settled) return false
   if (existing.answering) return false
   const authRevision = currentStoredTokenRevision()
-  const claim = updateKeeperToolApproval(keeperName, toolCallId, approval => ({
+  const claim = updateKeeperToolApproval(keeperName, approvalId, approval => ({
     ...approval,
     answering: true,
     answeredDecision: decision,
   }), existing)
   const owns = (row: typeof claim) => row !== null
-    && keeperToolApprovals.value[keeperName]?.[toolCallId] === row
+    && keeperToolApprovals.value[keeperName]?.[approvalId] === row
     && authRevision === currentStoredTokenRevision()
   if (!owns(claim)) return false
   try {
-    const result = await answerKeeperToolApproval(keeperName, toolCallId, decision)
+    const result = await answerKeeperToolApproval(keeperName, existing.toolCallId, decision)
     if (owns(claim)) {
-      const settled = settleKeeperToolApproval(keeperName, toolCallId, result.decision, claim!)
+      const settled = settleKeeperToolApproval(keeperName, approvalId, result.decision, claim!)
       if (owns(settled)) setRecordValue(keeperActionErrors, keeperName, null)
     }
     return result.settled
   } catch (err) {
     if (!owns(claim)) return false
     const message = err instanceof Error ? err.message : String(err)
-    const retry = updateKeeperToolApproval(keeperName, toolCallId, approval => ({
+    const retry = updateKeeperToolApproval(keeperName, approvalId, approval => ({
       ...approval,
       answering: false,
       answeredDecision: null,
     }), claim!)
     if (owns(retry)) {
-      console.warn('[keeper] tool approval answer failed', { keeperName, toolCallId, message })
+      console.warn('[keeper] tool approval answer failed', { keeperName, approvalId, message })
       setRecordValue(keeperActionErrors, keeperName, message)
     }
     return false

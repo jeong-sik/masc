@@ -521,6 +521,7 @@ function handleEvent(event: SSEEvent): void {
       if (!keeperName || !operationId || !isRecord(event.ag_ui_event)) break
       applyKeeperOperationTurnEvent(keeperName, {
         operationId,
+        sequence: event.seq,
         event: event.ag_ui_event as unknown as KeeperChatStreamEvent,
       })
       if (

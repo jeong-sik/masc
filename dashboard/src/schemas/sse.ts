@@ -16,7 +16,7 @@ import {
   KEEPER_CHAT_CUSTOM_EVENT_NAMES,
   KEEPER_STREAM_PROTOCOL_ERROR_KINDS,
 } from '../lib/keeper-chat-stream-contract'
-import type { KeeperChatCustomEventName } from '../lib/keeper-chat-stream-contract'
+import type { KeeperChatCustomEventName, KeeperChatStreamEvent } from '../lib/keeper-chat-stream-contract'
 import { isRecord } from '../lib/type-guards'
 import { isAgentCoreEventType } from '../lib/sse-event-type'
 
@@ -289,8 +289,9 @@ function exactCustomObject(
 function requiredString(
   value: Record<string, unknown>,
   field: string,
+  allowBlank = false,
 ): SafeParseResult<true> {
-  return typeof value[field] === 'string' && value[field].trim() !== ''
+  return typeof value[field] === 'string' && (allowBlank || value[field].trim() !== '')
     ? ok(true)
     : fail(`ag_ui_event.value.${field}`, `Expected non-empty ${field}`)
 }
@@ -678,9 +679,9 @@ function validateKeeperCustomPayload(
       }
       const scope = requiredInteger(value, 'stream_scope')
       if (!scope.success) return scope
-      const provider = requiredString(value, 'provider_message_id')
+      const provider = requiredString(value, 'provider_message_id', true)
       if (!provider.success) return provider
-      const model = requiredString(value, 'model')
+      const model = requiredString(value, 'model', true)
       if (!model.success) return model
       return value.usage === undefined ? ok(true) : validateUsage(value.usage)
     }
@@ -795,7 +796,7 @@ function validateKeeperCustomPayload(
         if (!scope.success) return scope
       }
       const index = requiredInteger(value, 'index')
-      return index.success ? requiredString(value, 'delta') : index
+      return index.success ? requiredString(value, 'delta', true) : index
     }
     case 'KEEPER_THINKING_SIGNATURE_DELTA': {
       const index = requiredInteger(value, 'index')
@@ -1019,6 +1020,13 @@ function schema<T>(
   }
 }
 
+/** Both broadcast and direct operation streams use the same payload contract. */
+export const KeeperChatStreamEventSchema = schema<KeeperChatStreamEvent>((value) => {
+  if (!isRecord(value)) return fail('ag_ui_event', 'Expected an AG-UI event object')
+  const validated = validateKeeperChatAgUiEvent(value)
+  return validated.success ? ok(value as unknown as KeeperChatStreamEvent) : validated
+})
+
 export const SSEEventTypeSchema = schema<SSEEventType>((value) => {
   if (isSSEEventType(value)) return ok(value)
   return fail(undefined, 'Expected a known SSE event type or an agent_core:* event type')
@@ -1104,11 +1112,11 @@ function malformedKeeperOperationProjection(
     operation_id: raw.operation_id,
     ts_unix: timestamp,
     ag_ui_event: {
-      type: 'RUN_ERROR',
+      type: 'CUSTOM',
       threadId: `keeper-consumer:${raw.name}`,
       timestamp,
-      message: `Keeper stream protocol error: ${detail}`,
-      code: 'invalid_event_payload',
+      name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+      value: { kind: 'sse_parse_failed', reason: `Keeper event could not be decoded: ${detail}` },
     },
   } as SSEMessage
 }
@@ -1154,6 +1162,7 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
   }
 
   if (value.type === 'keeper_chat_operation_event') {
+    if (value.seq !== undefined && (typeof value.seq !== 'number' || !Number.isSafeInteger(value.seq) || value.seq < 0)) return fail('seq', 'Expected a nonnegative safe operation sequence')
     if (typeof value.name !== 'string' || value.name.trim() === '') {
       return fail('name', 'Expected non-empty Keeper name')
     }

@@ -1,3 +1,4 @@
+import { sameKeeperResponseOwner, type KeeperResponseOwner, initialKeeperResponseState, reduceKeeperResponse, acknowledgeKeeperResponseSequence, type KeeperResponseDecision, type KeeperResponseEvent } from './lib/keeper-response-state'
 import { keeperStreamContract } from './keeper-stream-contract'
 import {
   operationDeliveryProvenance,
@@ -52,10 +53,12 @@ export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
 const pendingAgentCoreTextBlockIndexes = new Map<string, number>()
 type ScheduledFlushHandle = ReturnType<typeof setTimeout>
 interface PendingThinkingState {
+  responseOwner?: KeeperResponseOwner
   chunks: string[]
   preview: string
   agentCoreBlockIndex?: number
   flushHandle: ScheduledFlushHandle | null
+  authoritative: boolean
 }
 
 const pendingThinkingDeltas = new Map<string, PendingThinkingState>()
@@ -209,7 +212,10 @@ function fullPendingThinkingText(pending: PendingThinkingState): string {
   return pending.chunks.join('')
 }
 
+const applyingStreamFrames = new Set<string>()
+
 function persistActiveAssistantDraft(keeperName: string, assistantEntryId: string): void {
+  if (applyingStreamFrames.has(streamEntryKey(keeperName, assistantEntryId))) return
   const entry = (keeperThreads.value[keeperName] ?? [])
     .find(candidate => candidate.id === assistantEntryId) ?? null
   if (!entry) return
@@ -230,17 +236,27 @@ function flushPendingThinkingDeltas(
     cancelStreamFlush(pending.flushHandle)
     pending.flushHandle = null
   }
+  const before = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
+  const preserveActivity = (): void => {
+    if (!pending.authoritative && before) updateThreadEntry(keeperName, assistantEntryId, entry => ({
+      ...entry, streamState: before.streamState, delivery: before.delivery,
+    }))
+  }
   if (mode === 'preview') {
     setAssistantThinkingSnapshot(keeperName, assistantEntryId, pending.preview, {
       agentCoreBlockIndex: pending.agentCoreBlockIndex,
+      responseOwner: pending.responseOwner,
     })
+    preserveActivity()
     persistActiveAssistantDraft(keeperName, assistantEntryId)
     return
   }
   pendingThinkingDeltas.delete(key)
   setAssistantThinkingSnapshot(keeperName, assistantEntryId, fullPendingThinkingText(pending), {
     agentCoreBlockIndex: pending.agentCoreBlockIndex,
+      responseOwner: pending.responseOwner,
   })
+  preserveActivity()
   persistActiveAssistantDraft(keeperName, assistantEntryId)
 }
 
@@ -257,22 +273,30 @@ function enqueueThinkingDelta(
   keeperName: string,
   assistantEntryId: string,
   delta: string,
-  meta: { agentCoreBlockIndex?: number } = {},
+  meta: { agentCoreBlockIndex?: number; responseOwner?: KeeperResponseOwner; authoritative?: boolean } = {},
 ): void {
   if (delta.length === 0) return
   const key = streamEntryKey(keeperName, assistantEntryId)
   let pending = pendingThinkingDeltas.get(key)
-  if (pending && !sameAgentCoreBlockIndex(pending.agentCoreBlockIndex, meta.agentCoreBlockIndex)) {
+  if (pending && (!sameKeeperResponseOwner(pending.responseOwner, meta.responseOwner)
+    || !sameAgentCoreBlockIndex(pending.agentCoreBlockIndex, meta.agentCoreBlockIndex)
+    || pending.authoritative !== (meta.authoritative ?? true))) {
     flushPendingThinkingDeltas(keeperName, assistantEntryId)
     pending = undefined
   }
   if (!pending) {
-    const text = delta
+    const entry = (keeperThreads.value[keeperName] ?? []).find(candidate => candidate.id === assistantEntryId)
+    const last = entry?.traceSteps?.at(-1)
+    const prefix = last?.kind === 'think' && sameKeeperResponseOwner(last.responseOwner, meta.responseOwner)
+      && sameAgentCoreBlockIndex(last.agentCoreBlockIndex, meta.agentCoreBlockIndex) ? last.text : ''
+    const text = `${prefix}${delta}`
     pending = {
+      responseOwner: meta.responseOwner,
       chunks: [text],
       preview: text,
       agentCoreBlockIndex: meta.agentCoreBlockIndex,
       flushHandle: null,
+      authoritative: meta.authoritative ?? true,
     }
     pendingThinkingDeltas.set(key, pending)
   } else {
@@ -340,12 +364,7 @@ function recordStreamProtocolError(
   } = {},
 ): void {
   updateThreadEntry(keeperName, assistantEntryId, entry => {
-    const line = `[stream protocol] ${message}`
-    return {
-      ...entry,
-      rawText: entry.rawText?.trim() ? `${entry.rawText}\n${line}` : line,
-      error: message,
-    }
+    return { ...entry, error: message }
   })
   const occurrenceId = target.toolOccurrenceId?.trim()
   if (!occurrenceId) return
@@ -490,12 +509,13 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
 
 export interface KeeperOperationTurnEvent {
   operationId: string
+  sequence?: number
   event: KeeperChatStreamEvent
 }
 
 type KeeperStreamEventSource =
   | { kind: 'direct' }
-  | { kind: 'operation'; operationId: string }
+  | { kind: 'operation'; operationId: string; sequence?: number }
 
 /** Apply a server-pushed operation event only to the assistant bubble carrying
  * the exact operation id. Another browser can synthesize the bubble and later
@@ -585,7 +605,7 @@ export function applyKeeperOperationTurnEvent(
     keeperName,
     entryId,
     operation.event,
-    { kind: 'operation', operationId },
+    { kind: 'operation', operationId, sequence: operation.sequence },
   )
   if (error) {
     finalizeAssistantEntry(keeperName, entryId, {
@@ -600,17 +620,59 @@ export function applyKeeperOperationTurnEvent(
   return error
 }
 
+function admitResponseEvent(
+  keeperName: string,
+  assistantEntryId: string,
+  event: KeeperResponseEvent,
+): KeeperResponseDecision {
+  const entry = (keeperThreads.value[keeperName] ?? []).find(candidate => candidate.id === assistantEntryId)
+  const before = entry?.responseState ?? initialKeeperResponseState
+  if (!entry) return { state: before, accepted: false, advanced: false, authoritative: false }
+  const decision = reduceKeeperResponse(before, event)
+  if (!decision.accepted) return decision
+  if (decision.advanced) {
+    flushPendingThinkingDeltas(keeperName, assistantEntryId)
+    clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
+    clearTextMessageStreamState(keeperName, assistantEntryId)
+  }
+  if (decision.state !== before) updateThreadEntry(keeperName, assistantEntryId, current => ({
+    ...current,
+    responseState: decision.state,
+    ...(decision.advanced && decision.authoritative ? {
+      streamState: 'opening' as const,
+      details: current.details ? { ...current.details, providerMessageId: null, modelUsed: null,
+        stopReason: null, usage: null, costUsd: null } : current.details,
+    } : {}),
+  }))
+  persistActiveAssistantDraft(keeperName, assistantEntryId)
+  return decision
+}
+
 export function applyKeeperStreamEvent(
   keeperName: string,
   assistantEntryId: string,
   event: KeeperChatStreamEvent,
   source: KeeperStreamEventSource = { kind: 'direct' },
 ): string | null {
-  const applyTextDelta = (payload: unknown): void => {
+  const existing = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
+  if (!existing) return null
+  const beforeSequence = existing.responseState ?? initialKeeperResponseState
+  const sequenced = acknowledgeKeeperResponseSequence(beforeSequence, source.kind === 'operation' ? source.sequence : undefined)
+  if (!sequenced) return null
+  const frameKey = streamEntryKey(keeperName, assistantEntryId)
+  if (applyingStreamFrames.has(frameKey)) return 'Reentrant Keeper stream frame'
+  applyingStreamFrames.add(frameKey)
+  let failed = false
+  const applyTextDelta = (payload: unknown, authoritative: boolean): void => {
     if (typeof payload !== 'string') return
     if (payload) {
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
+      const before = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
       appendAssistantDelta(keeperName, assistantEntryId, payload)
+      if (!authoritative && before) updateThreadEntry(keeperName, assistantEntryId, entry => ({
+        ...entry, streamState: before.streamState, delivery: before.delivery,
+      }))
+      persistActiveAssistantDraft(keeperName, assistantEntryId)
     }
   }
   const markFinalizingIfLive = (eventName: string): void => {
@@ -626,8 +688,10 @@ export function applyKeeperStreamEvent(
     })
   }
 
+  try {
   switch (event.type) {
     case 'RUN_STARTED':
+      if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'started' }).accepted) return null
       setAssistantStreamState(
         keeperName,
         assistantEntryId,
@@ -637,6 +701,8 @@ export function applyKeeperStreamEvent(
       )
       return null
     case 'TEXT_MESSAGE_START': {
+      const response = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.responseState
+      if (response && (response.kind === 'unavailable' || response.floor || response.phase === 'terminal')) return null
       const messageId = textStreamMessageId(event.messageId)
       const streamState = textMessageStreamState(keeperName, assistantEntryId)
       if (messageId !== null && streamState.endedMessageIds.has(messageId)) {
@@ -669,8 +735,12 @@ export function applyKeeperStreamEvent(
       return null
     }
     case 'TEXT_MESSAGE_CONTENT': {
+      const response = admitResponseEvent(keeperName, assistantEntryId, {
+        kind: 'observe', owner: event.textResponse ?? null, scope: event.textStreamScope ?? null, source: 'body',
+      })
+      if (!response.accepted) return null
       const messageId = textStreamMessageId(event.messageId)
-      if (messageId !== null) {
+      if (!event.textResponse && messageId !== null) {
         const streamState = textMessageStreamState(keeperName, assistantEntryId)
         if (streamState.endedMessageIds.has(messageId)) {
           // Content re-delivered after the message ended: already rendered.
@@ -683,10 +753,12 @@ export function applyKeeperStreamEvent(
         // Adopt the id when START was coalesced away by the guards above.
         streamState.activeMessageId = messageId
       }
-      applyTextDelta(event.delta)
+      applyTextDelta(event.delta, response.authoritative)
       return null
     }
     case 'TEXT_MESSAGE_END': {
+      const response = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.responseState
+      if (response && (response.kind === 'unavailable' || response.floor || response.phase === 'terminal')) return null
       const messageId = textStreamMessageId(event.messageId)
       if (messageId !== null) {
         const streamState = textMessageStreamState(keeperName, assistantEntryId)
@@ -876,6 +948,13 @@ export function applyKeeperStreamEvent(
     }
     case 'CUSTOM': {
       const customEventName: string = event.name
+      if (event.name === 'KEEPER_MODEL_CONTENT_ACTIVITY') {
+        if (event.value.state === 'observed') admitResponseEvent(keeperName, assistantEntryId, {
+          kind: 'observe', source: 'content', scope: event.value.stream_scope,
+          owner: { content_generation: event.value.generation, stream_scope: event.value.stream_scope },
+        })
+        return null
+      }
       if (event.name === 'KEEPER_TOOL_RESULT_READY') {
         const toolCallId = nonBlankToolCallId(event.value.toolCallId) ?? undefined
         const executionId = event.value.executionId
@@ -952,8 +1031,6 @@ export function applyKeeperStreamEvent(
             operationId,
             'terminal_result',
           ),
-          text: queued ? 'Queued' : entry.text,
-          rawText: queued ? 'Queued' : entry.rawText,
           delivery: queued ? 'queued' : 'sending',
           streamState: queued ? null : 'opening',
           streamContract: keeperStreamContract(
@@ -965,16 +1042,10 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_CONNECTED') {
-        setAssistantStreamState(
-          keeperName,
-          assistantEntryId,
-          'streaming',
-          'streaming',
-          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONNECTED' }),
-        )
         return null
       }
       if (event.name === 'KEEPER_RUNTIME_ATTEMPT_STARTED') {
+        if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'attempt' }).accepted) return null
         resetUnfinishedRuntimeAttempt(keeperName, assistantEntryId)
         return null
       }
@@ -1012,6 +1083,12 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_START') {
+        const response = admitResponseEvent(keeperName, assistantEntryId, {
+          kind: 'observe', source: 'header', scope: event.value.stream_scope,
+          owner: event.value.content_generation === undefined ? null
+            : { content_generation: event.value.content_generation, stream_scope: event.value.stream_scope },
+        })
+        if (!response.accepted) return null
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
         const patch: Partial<KeeperConversationDetails> = {}
@@ -1020,19 +1097,29 @@ export function applyKeeperStreamEvent(
         const usage = normalizeStreamUsage(value?.usage)
         if (providerMessageId) patch.providerMessageId = providerMessageId
         if (modelUsed) patch.modelUsed = modelUsed
-        if (usage) patch.usage = usage
-        if (usage?.costUsd !== undefined) patch.costUsd = usage.costUsd
+        const current = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.details
+        if (usage) {
+          const initial = { ...usage }
+          for (const key of Object.keys(initial) as Array<keyof typeof initial>) {
+            if (current?.usage?.[key] != null) delete initial[key]
+          }
+          patch.usage = initial
+        }
+        if (usage?.costUsd !== undefined && current?.costUsd == null) patch.costUsd = usage.costUsd
         if (Object.keys(patch).length > 0) mergeAssistantStreamDetails(keeperName, assistantEntryId, patch)
-        setAssistantStreamState(
-          keeperName,
-          assistantEntryId,
-          'streaming',
-          'streaming',
+        if (response.advanced) setAssistantStreamState(
+          keeperName, assistantEntryId, 'opening', 'streaming',
           keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_MESSAGE_START' }),
         )
+        persistActiveAssistantDraft(keeperName, assistantEntryId)
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_DELTA') {
+        if (!admitResponseEvent(keeperName, assistantEntryId, {
+          kind: 'observe', source: 'details', scope: event.value.stream_scope,
+          owner: event.value.content_generation === undefined ? null
+            : { content_generation: event.value.content_generation, stream_scope: event.value.stream_scope },
+        }).accepted) return null
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
         const patch: Partial<KeeperConversationDetails> = {}
@@ -1046,20 +1133,12 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_STOP') {
+        if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'stop', owner: event.value }).accepted) return null
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         markFinalizingIfLive('KEEPER_STREAM_MESSAGE_STOP')
         return null
       }
-      if (event.name === 'KEEPER_STREAM_PING') {
-        setAssistantStreamState(
-          keeperName,
-          assistantEntryId,
-          'streaming',
-          'streaming',
-          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_PING' }),
-        )
-        return null
-      }
+      if (event.name === 'KEEPER_STREAM_PING') return null
       if (event.name === 'KEEPER_CONTENT_BLOCK_START') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
@@ -1068,42 +1147,23 @@ export function applyKeeperStreamEvent(
         if (contentType === 'text') {
           rememberAgentCoreTextBlockIndex(keeperName, assistantEntryId, agentCoreBlockIndex)
         }
-        setAssistantStreamState(
-          keeperName,
-          assistantEntryId,
-          'streaming',
-          'streaming',
-          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONTENT_BLOCK_START' }),
-        )
         return null
       }
       if (event.name === 'KEEPER_CONTENT_BLOCK_STOP') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        setAssistantStreamState(
-          keeperName,
-          assistantEntryId,
-          'streaming',
-          'streaming',
-          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONTENT_BLOCK_STOP' }),
-        )
         return null
       }
       if (event.name === 'KEEPER_THINKING_DELTA') {
+        const response = admitResponseEvent(keeperName, assistantEntryId, {
+          kind: 'observe', source: 'body', scope: null, owner: event.value.response ?? null,
+        })
+        if (!response.accepted) return null
         const value = isRecord(event.value) ? event.value : null
         const delta = value && typeof value.delta === 'string'
           ? value.delta
           : undefined
         const agentCoreBlockIndex = value ? asNumber(value.index) : undefined
-        if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { agentCoreBlockIndex })
-        else {
-          setAssistantStreamState(
-            keeperName,
-            assistantEntryId,
-            'thinking',
-            'streaming',
-            keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_THINKING_DELTA' }),
-          )
-        }
+        if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { agentCoreBlockIndex, responseOwner: event.value.response && response.state.kind === 'known' ? response.state.current ?? undefined : undefined, authoritative: response.authoritative })
         return null
       }
       if (event.name === 'KEEPER_STREAM_PROTOCOL_ERROR') {
@@ -1128,30 +1188,15 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_THINKING_SIGNATURE_DELTA') {
-        if (!pendingThinkingDeltas.has(streamEntryKey(keeperName, assistantEntryId))) {
-          setAssistantStreamState(
-            keeperName,
-            assistantEntryId,
-            'thinking',
-            'streaming',
-            keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_THINKING_SIGNATURE_DELTA' }),
-          )
-        }
         return null
       }
       if (event.name === 'KEEPER_MEDIA_DELTA') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        setAssistantStreamState(
-          keeperName,
-          assistantEntryId,
-          'streaming',
-          'streaming',
-          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_MEDIA_DELTA' }),
-        )
         return null
       }
       if (event.name === 'KEEPER_CONTINUATION_CHECKPOINT') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
+        if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'checkpoint' }).accepted) return null
         const rawText = isRecord(event.value)
           ? asString(event.value.message, '')
           : ''
@@ -1261,6 +1306,10 @@ export function applyKeeperStreamEvent(
     }
     case 'RUN_FINISHED':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
+      admitResponseEvent(keeperName, assistantEntryId, {
+        kind: (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.details?.turnOutcome === 'continuation_checkpoint'
+          ? 'checkpoint' : 'terminal',
+      })
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
       clearTextMessageStreamState(keeperName, assistantEntryId)
       clearQuarantinedToolOccurrences(keeperName, assistantEntryId)
@@ -1294,11 +1343,29 @@ export function applyKeeperStreamEvent(
       return null
     case 'RUN_ERROR':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
+      admitResponseEvent(keeperName, assistantEntryId, { kind: 'terminal' })
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
       clearTextMessageStreamState(keeperName, assistantEntryId)
       clearQuarantinedToolOccurrences(keeperName, assistantEntryId)
       return asString(event.message, '').trim() || 'Keeper stream failed'
     default:
       return 'Unsupported Keeper stream event'
+  }
+  } catch (error) {
+    failed = true
+    throw error
+  } finally {
+    try {
+      if (!failed && source.kind === 'operation' && source.sequence !== undefined) {
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
+        updateThreadEntry(keeperName, assistantEntryId, entry => {
+          const state = acknowledgeKeeperResponseSequence(entry.responseState ?? initialKeeperResponseState, source.sequence)
+          return state ? { ...entry, responseState: state } : entry
+        })
+      }
+    } finally {
+      applyingStreamFrames.delete(frameKey)
+    }
+    if (!failed) persistActiveAssistantDraft(keeperName, assistantEntryId)
   }
 }

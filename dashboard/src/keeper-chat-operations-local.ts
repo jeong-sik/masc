@@ -1,13 +1,18 @@
+import { normalizeKeeperConversationDetails } from './keeper-message'
+import { ownerFromUnknown, keeperResponseStateFromUnknown, unavailableKeeperResponseState, type KeeperResponseState } from './lib/keeper-response-state'
 import type {
   ChatTraceStep,
   KeeperConversationAttachment,
   KeeperConversationDelivery,
   KeeperConversationEntry,
+  KeeperConversationDetails,
   KeeperConversationStreamState,
 } from './types'
 import { IN_FLIGHT_DELIVERY } from './lib/keeper-delivery'
 
 export interface TrackedKeeperChatAssistantDraft {
+  responseState?: KeeperResponseState
+  details?: KeeperConversationDetails | null
   text: string
   rawText: string
   delivery: KeeperConversationDelivery
@@ -94,6 +99,11 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
     if (text === undefined) return null
     const contentWithheld = raw.content_withheld === true || raw.contentWithheld === true
     const step: ChatTraceStep = { kind, text: contentWithheld ? '' : text }
+    if (raw.responseOwner !== undefined) {
+      const owner = ownerFromUnknown(raw.responseOwner)
+      if (!owner) return null
+      step.responseOwner = owner
+    }
     const ts = stringValue(raw.ts)
     const agentCoreBlockIndex = numberValue(raw.agentCoreBlockIndex)
     if (contentWithheld) step.contentWithheld = true
@@ -168,7 +178,11 @@ function normalizeAssistantDraft(raw: unknown): TrackedKeeperChatAssistantDraft 
   const timestamp = nullableStringValue(raw.timestamp)
   const traceSteps = normalizeTraceSteps(raw.traceSteps)
   const error = nullableStringValue(raw.error)
+  const responseState = raw.responseState === undefined ? undefined : keeperResponseStateFromUnknown(raw.responseState)
+
   return {
+    ...(responseState ? { responseState } : responseState === null ? { responseState: unavailableKeeperResponseState } : {}),
+    details: normalizeKeeperConversationDetails(raw.details),
     text,
     rawText,
     delivery,
@@ -176,6 +190,10 @@ function normalizeAssistantDraft(raw: unknown): TrackedKeeperChatAssistantDraft 
     ...(timestamp !== undefined ? { timestamp } : {}),
     ...(traceSteps ? { traceSteps } : {}),
     ...(error !== undefined ? { error } : {}),
+    ...(responseState === null || responseState?.kind === 'unavailable' ? {
+      delivery: 'error' as const, streamState: null,
+      error: 'Stored response ownership is unavailable; waiting for the authoritative operation result.',
+    } : {}),
   }
 }
 
@@ -185,6 +203,8 @@ export function trackedKeeperChatAssistantDraftFromEntry(
   if (entry.role !== 'assistant') return null
   const traceSteps = normalizeTraceSteps(entry.traceSteps)
   return {
+    ...(entry.responseState ? { responseState: entry.responseState } : {}),
+    details: entry.details ? { ...entry.details, rawPayload: undefined } : null,
     text: entry.text,
     rawText: entry.rawText ?? entry.text,
     delivery: entry.delivery,
@@ -193,6 +213,12 @@ export function trackedKeeperChatAssistantDraftFromEntry(
     ...(traceSteps ? { traceSteps } : {}),
     ...(entry.error !== undefined ? { error: entry.error } : {}),
   }
+}
+
+function unavailableAssistantDraft(): TrackedKeeperChatAssistantDraft {
+  return { text: '', rawText: '', delivery: 'error', streamState: null,
+    responseState: unavailableKeeperResponseState,
+    error: 'Stored response information is unavailable; waiting for the authoritative operation result.' }
 }
 
 function normalizeTrackedOperation(raw: unknown): TrackedKeeperChatOperation | null {
@@ -208,7 +234,9 @@ function normalizeTrackedOperation(raw: unknown): TrackedKeeperChatOperation | n
   const attachments = Array.isArray(raw.attachments)
     ? raw.attachments.map(normalizeAttachment).filter((att): att is KeeperConversationAttachment => att !== null)
     : []
-  const assistantDraft = normalizeAssistantDraft(raw.assistantDraft)
+  const assistantDraft = raw.assistantDraft === undefined ? null
+    : normalizeAssistantDraft(raw.assistantDraft) ?? unavailableAssistantDraft()
+
   return {
     operationId,
     keeperName,
@@ -261,7 +289,8 @@ export function upsertTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
   const keeperName = request.keeperName.trim()
   const message = request.message
   if (!operationId || !keeperName || !message.trim()) return
-  const assistantDraft = normalizeAssistantDraft(request.assistantDraft)
+  const assistantDraft = request.assistantDraft === undefined ? null
+    : normalizeAssistantDraft(request.assistantDraft) ?? unavailableAssistantDraft()
   const normalized: TrackedKeeperChatOperation = {
     operationId,
     keeperName,

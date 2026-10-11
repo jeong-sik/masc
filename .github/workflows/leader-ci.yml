@@ -68,9 +68,9 @@ jobs:
               raise SystemExit('Dispatch leader CI on main')
           if not any(scopes[name] is True for name in ('compile', 'tests')):
               raise SystemExit('Select at least one CI scope')
-          if scopes['tests'] and not scopes['suites'].strip():
+          if scopes.get('tests', False) and not scopes.get('suites', '').strip():
               raise SystemExit('Ordinary behavior verification requires explicit suites')
-          if scopes['suites'] and not scopes['tests']:
+          if scopes.get('suites', '') and not scopes.get('tests', False):
               raise SystemExit('Suites require the tests scope')
           Path('selection.json').write_text(os.environ['SELECTION'])
           PY
@@ -160,8 +160,8 @@ jobs:
           chosen = {job: needs[job]['result'] for option, job in keys.items() if scopes[option] is True}
           passed = bool(chosen) and needs['selection']['result'] == 'success' and all(v == 'success' for v in chosen.values())
           receipt = {'schema_version': 1, 'candidate': os.environ['CANDIDATE'],
-                     'actor': os.environ['GITHUB_ACTOR'], 'selection': json.loads(scopes['selection']),
-                     'suites': scopes['suites'], 'results': chosen, 'checks_passed': passed,
+                     'actor': os.environ['GITHUB_ACTOR'], 'selection': json.loads(scopes.get('selection', '')),
+                     'suites': scopes.get('suites', ''), 'results': chosen, 'checks_passed': passed,
                      'run_id': os.environ['GITHUB_RUN_ID'], 'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
                      'merge_authorized': False}
           Path('leader-ci-results.json').write_text(json.dumps(receipt, indent=2) + '\n')

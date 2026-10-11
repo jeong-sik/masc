@@ -88,7 +88,7 @@ type delta =
   | Model_content_activity of Masc.Keeper_chat_events.model_content_activity
       (** Exact run generation/scope/index metadata, separate from body bytes.
           Ended closes only the named Text/Thinking occurrence. *)
-  | Stream_model_stopped
+  | Stream_model_stopped of Masc.Keeper_chat_events.response_identity option
       (** The provider response ended; the Keeper turn may still be running. *)
   | Stream_details of
       { stream_scope : int option

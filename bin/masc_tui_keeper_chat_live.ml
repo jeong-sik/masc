@@ -38,7 +38,7 @@ type delta =
       ; usage : stream_usage option
       }
   | Model_content_activity of Masc.Keeper_chat_events.model_content_activity
-  | Stream_model_stopped
+  | Stream_model_stopped of Masc.Keeper_chat_events.response_identity option
   | Stream_details of
       { stream_scope : int option
       ; usage : stream_usage option
@@ -318,9 +318,12 @@ let custom_deltas_unvalidated fields =
        | Error detail -> [Undecodable detail])
   | Some "KEEPER_STREAM_MESSAGE_STOP" ->
     (match List.assoc_opt "value" fields with
-     | Some `Null -> [ Stream_model_stopped ]
-     | Some _ | None ->
-       [ Undecodable "KEEPER_STREAM_MESSAGE_STOP value must be null" ])
+     | Some `Null -> [ Stream_model_stopped None ]
+     | Some json ->
+       (match Masc.Keeper_chat_events.response_identity_of_json json with
+        | Ok owner -> [ Stream_model_stopped (Some owner) ]
+        | Error detail -> [ Undecodable detail ])
+     | None -> [ Undecodable "KEEPER_STREAM_MESSAGE_STOP requires value" ])
   | Some "KEEPER_STREAM_MESSAGE_DELTA" ->
     (* The dashboard reader already keeps both of these
        ([dashboard/src/keeper-stream.ts] KEEPER_STREAM_MESSAGE_DELTA) and draws

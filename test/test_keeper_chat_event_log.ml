@@ -87,7 +87,7 @@ let all_events : E.keeper_chat_event list =
       ; usage = Some delta_usage_partial
       }
   ; E.Agent_core_stream_message_delta { stream_scope = 0; stop_reason = None; usage = None }
-  ; E.Agent_core_stream_message_stop
+  ; E.Agent_core_stream_message_stop None
   ; E.Agent_core_stream_ping
   ; E.Agent_core_content_block_start
       { index = 0
@@ -936,7 +936,7 @@ let golden_events : E.keeper_chat_event list =
       { stream_scope = 0; stop_reason = Some Agent_core.Types.EndTurn
       ; usage = Some delta_usage_partial
       }
-  ; E.Agent_core_stream_message_stop
+  ; E.Agent_core_stream_message_stop None
   ; E.Text_message_end
   ; E.Link_block
       { url = "https://example.com"

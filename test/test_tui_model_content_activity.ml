@@ -44,13 +44,15 @@ let test_overlap_uses_event_order () =
   T.apply ~now:10. t (ended ()); assert_signal t "model content ended";
   check string "body bytes preserved" "AB" (T.text t);
   check string "reasoning bytes preserved" "R" (T.thinking t);
-  T.apply ~now:1. t L.Stream_model_stopped; assert_signal t "model response ended"
+  T.apply ~now:1. t (L.Stream_model_stopped (Some {response_generation=0; response_scope=0})); assert_signal t "model response ended"
 
 let test_scope_retry_and_fallback () =
   let t = create () in
   T.apply ~now:1. t (observed ());
   T.apply ~now:2. t start;
-  T.apply ~now:3. t (observed ()); assert_signal t "model started";
+  T.apply ~now:3. t (observed ());
+  check bool "unbound start cannot reset owned response" true
+    (T.model_activity t = Some T.Activity_answering);
   T.apply ~now:4. t (observed ~scope:1 ());
   T.apply ~now:5. t (ended ()); assert_signal t "STREAMING";
   T.apply ~now:6. t (ended ~scope:1 ()); assert_signal t "model content ended";
@@ -63,7 +65,7 @@ let test_scope_retry_and_fallback () =
      stop cannot certify that this later text has ended. *)
   T.apply ~now:12. t (L.Text {text="legacy"; stream_scope=None});
   T.apply ~now:13. t (ended ~scope:2 ~channel:E.Model_thinking ()); assert_signal t "STREAMING";
-  T.apply ~now:14. t L.Stream_model_stopped;
+  T.apply ~now:14. t (L.Stream_model_stopped (Some {response_generation=0; response_scope=2}));
   T.apply ~now:15. t (observed ~scope:2 ()); assert_signal t "model response ended";
   T.apply ~now:16. t L.Run_finished;
   T.apply ~now:17. t (observed ~scope:3 ());
@@ -161,7 +163,7 @@ let test_poisoned_scope_retires_observed_activity () =
     check bool "only actually observed blocks retire in their scope" true
       (ended=[0,0,E.Model_text;0,1,E.Model_thinking]);
     check bool "poison is not provider response or Keeper turn completion" false
-      (List.exists (function E.Agent_core_stream_message_stop | E.Run_finished _ -> true | _ -> false) (F.events f));
+      (List.exists (function E.Agent_core_stream_message_stop _ | E.Run_finished _ -> true | _ -> false) (F.events f));
     send (ContentBlockDelta {index=0;delta=TextDelta "late\n"});
     send (ContentBlockDelta {index=1;delta=ThinkingDelta "late\n"});
     let live,replay = F.snapshots f in
@@ -220,6 +222,9 @@ let test_fresh_worker_generation_in_same_journal () =
   let generation = worker "second" in
   check bool "fresh worker owns a later durable generation" true (generation > old_generation);
   publish (E.Model_content_activity (activity ~generation:old_generation E.Content_ended));
+  let stale_stop = B.translate ~redact_text:Fun.id ~base_dir:"/unused" ~stream_scope:0
+    (B.empty_state ~generation:old_generation ()) Agent_core.Types.MessageStop in
+  List.iter publish stale_stop.chat_events;
   let lines = List.rev !reversed |> List.map (fun line ->
     match J.journaled_event_of_json (J.journaled_event_to_json line) with
     | Ok line -> line | Error detail -> fail detail) in
@@ -235,9 +240,16 @@ let test_fresh_worker_generation_in_same_journal () =
   List.iter (fun log ->
     let t = T.of_log ~now:2000. log in
     check string "fresh worker with reused scope/index keeps second segment body" "second" (T.text t);
+    check bool "producer stop from old worker preserves current activity through both paths" true
+      (T.model_activity t = Some T.Activity_answering);
     assert_signal t "STREAMING";
     T.apply ~now:2000. t (ended ~generation ());
-    assert_signal t "model content ended") [live;replay]
+    assert_signal t "model content ended";
+    T.apply ~now:2001. t (L.Stream_model_stopped
+      (Some {E.response_generation=generation;response_scope=0}));
+    check bool "matching owned stop closes response through both paths" true
+      (T.model_activity t = Some T.Activity_response_ended);
+    check bool "response close retains run" true (T.phase t = T.Working)) [live;replay]
 
 let test_strict_shared_codec () =
   let valid = E.model_content_activity_to_json (activity E.Content_observed) in
@@ -285,8 +297,65 @@ let test_activity_numeric_wire_boundary () =
       ["-1";"0.5";"9007199254740992";"9007199254740993";"1e309";"\"1\""])
     ["generation";"stream_scope";"block_index"]
 
+let test_owned_response_stop () =
+  let t = create () in
+  let stop generation scope = L.Stream_model_stopped
+    (Some {E.response_generation=generation; response_scope=scope}) in
+  T.apply ~now:1. t (observed ~generation:2 ~scope:1 ~channel:E.Model_thinking ());
+  List.iter (fun delta ->
+    T.apply ~now:2. t delta;
+    check bool "unowned and stale stops retain current reasoning" true
+      (T.model_activity t = Some T.Activity_reasoning))
+    [stop 1 99; stop 2 0; stop 2 2; L.Stream_model_stopped None];
+  T.apply ~now:3. t (stop 2 1);
+  check bool "matching response stop ends model activity" true
+    (T.model_activity t = Some T.Activity_response_ended);
+  check bool "response stop does not finish keeper turn" true (T.phase t = T.Working);
+  T.apply ~now:4. t (stop 2 1);
+  check bool "duplicate response stop is idempotent" true
+    (T.model_activity t = Some T.Activity_response_ended);
+  T.apply ~now:5. t (observed ~generation:3 ~scope:0 ());
+  T.apply ~now:6. t (stop 2 1);
+  check bool "previous generation stop cannot end resumed answer" true
+    (T.model_activity t = Some T.Activity_answering);
+  T.apply ~now:7. t (L.Text {text="next";stream_scope=Some 1});
+  T.apply ~now:8. t (stop 3 0);
+  check bool "known old owner cannot end newer unbound text" true
+    (T.model_activity t = Some T.Activity_answering)
+
+let test_stop_identity_protocol () =
+  let owner = {E.response_generation=7;response_scope=2} in
+  let json = E.response_identity_to_json owner in
+  check bool "stop identity round trip" true (E.response_identity_of_json json = Ok owner);
+  let event = E.Agent_core_stream_message_stop (Some owner) in
+  check bool "durable stop preserves complete identity" true
+    (J.keeper_chat_event_of_json (J.keeper_chat_event_to_json event) = Ok event);
+  List.iter (fun fields ->
+    check bool "ambiguous durable owner rejected" true
+      (Result.is_error (J.keeper_chat_event_of_json (`Assoc
+        (("type",`String "agent_core_stream_message_stop")::fields)))))
+    [["response",json;"response",json];["response",`Null;"response",json];["response",`Null]];
+  let wire value = "data: " ^ Yojson.Safe.to_string (`Assoc
+    ["type",`String "CUSTOM";"name",`String "KEEPER_STREAM_MESSAGE_STOP";"value",value]) ^ "\n\n" in
+  check bool "live stop preserves complete identity" true
+    (match L.feed (L.create ()) (wire json) with
+     | [{delta=L.Stream_model_stopped (Some actual);_}] -> actual=owner | _ -> false);
+  List.iter (fun malformed ->
+    check bool "strict stop identity rejects malformed input" true
+      (Result.is_error (E.response_identity_of_json malformed));
+    check bool "projection rejects malformed stop" true
+      (Result.is_error (P.validate_custom_value ~name:"KEEPER_STREAM_MESSAGE_STOP" malformed));
+    check bool "live stop reports malformed identity" true
+      (match L.feed (L.create ()) (wire malformed) with
+       | [{delta=L.Undecodable _;_}] -> true | _ -> false))
+    [`Assoc []; `Assoc ["content_generation",`Int 7];
+     `Assoc ["content_generation",`Int 7;"stream_scope",`Int (-1)];
+     `Assoc ["content_generation",`Int 7;"stream_scope",`Int 2;"stream_scope",`Int 2]]
+
 let () = run "model content activity"
-  ["boundaries", [test_case "activity JSON safe-integer boundary" `Quick test_activity_numeric_wire_boundary;
+  ["boundaries", [test_case "owned response stop admission" `Quick test_owned_response_stop;
+    test_case "stop identity protocol" `Quick test_stop_identity_protocol;
+    test_case "activity JSON safe-integer boundary" `Quick test_activity_numeric_wire_boundary;
     test_case "overlap uses event order" `Quick test_overlap_uses_event_order;
     test_case "scope, response, retry, legacy and late stop" `Quick test_scope_retry_and_fallback;
     test_case "production bridge through SSE and durable replay" `Quick test_bridge_live_and_journal;

@@ -181,7 +181,7 @@ let test_the_identical_retried_call_is_settled_once () =
       check approval "the retry is settled by the remembered answer"
         Agent_core.Hooks.Approved retry;
       check (list string)
-        "the stream shows the question was raised and settled from memory"
+        "the stream shows settlement from memory without a new request"
         [ "settled(call-2,remembered_approve)" ]
         (event_labels events);
       let again =

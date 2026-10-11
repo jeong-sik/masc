@@ -59,8 +59,8 @@ val create :
     [late_approvals] bridges one gap in that: a timed-out ask is recorded
     there, and an operator's answer arriving after the wait is gone settles
     the identical retried call once instead of being dropped. The callback
-    consults it before opening a new wait, so a remembered answer still
-    publishes the requested/settled pair — the stream shows the question was
-    raised and settled from the operator's earlier word. The memory is
+    consults it before opening a new wait. A remembered answer publishes only
+    its settled observation, so the stream never offers an operator request
+    for a wait that does not exist. The memory is
     age-bounded ({!Keeper_late_approval.ttl_sec}): an answer too old to still
     be the operator's moment is reaped, and the call is asked about again. *)

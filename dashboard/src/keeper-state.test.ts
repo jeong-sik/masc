@@ -1,3 +1,5 @@
+import { initialKeeperResponseState } from './lib/keeper-response-state'
+import { applyKeeperStreamEvent, applyKeeperOperationTurnEvent } from './keeper-stream'
 import { describe, expect, it } from 'vitest'
 import { beforeEach } from 'vitest'
 import {
@@ -293,10 +295,72 @@ describe('thread history merge & persistence', () => {
     expect(isVisibleDirectConversationEntry(result[0]!)).toBe(false);
   });
 
+  it('retains the observed response cursor when canonical history replaces a response with no trace', () => {
+    const operationId = 'history-cursor-operation'
+    const provenance = operationDeliveryProvenance(operationId, 'terminal_result')
+    appendThreadEntry('echo', entry({ id: 'live-cursor', role: 'assistant', delivery: 'streaming', streamState: 'streaming', deliveryProvenance: provenance }))
+    const source = { kind: 'operation' as const, operationId, sequence: 10 }
+    applyKeeperStreamEvent('echo', 'live-cursor', { type: 'TEXT_MESSAGE_CONTENT', delta: 'answer',
+      textResponse: { content_generation: 4, stream_scope: 0 } }, source)
+    applyKeeperStreamEvent('echo', 'live-cursor', { type: 'RUN_FINISHED' }, { ...source, sequence: 11 })
+    const state = keeperThreads.value.echo[0].responseState
+    mergeServerHistoryEntries('echo', [entry({ id: 'canonical-cursor', role: 'assistant', text: 'answer', rawText: 'answer',
+      delivery: 'history', streamState: null, deliveryProvenance: provenance })])
+    expect(keeperThreads.value.echo[0].responseState).toBe(state)
+    expect(state).toMatchObject({ phase: 'terminal', lastSequence: 11, floor: { content_generation: 4, stream_scope: 0 } })
+    applyKeeperOperationTurnEvent('echo', { operationId, sequence: 10, event: {
+      type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallName: 'Read',
+    } })
+    expect(keeperThreads.value.echo.map(candidate => candidate.id)).toEqual(['canonical-cursor'])
+  })
+
+  it('shares the newest exact-operation cursor across duplicate canonical rows', () => {
+    const operationId = 'duplicate-owner-operation'
+    const provenance = operationDeliveryProvenance(operationId, 'terminal_result')
+    for (const [id, sequence] of [['older-local', 10], ['newer-local', 12]] as const) {
+      appendThreadEntry('echo', entry({ id, role: 'assistant', deliveryProvenance: provenance,
+        responseState: { ...initialKeeperResponseState, lastSequence: sequence, phase: 'terminal' } }))
+    }
+    mergeServerHistoryEntries('echo', ['canonical-first', 'canonical-last'].map(id => entry({
+      id, role: 'assistant', delivery: 'history', deliveryProvenance: provenance,
+    })))
+    for (const row of keeperThreads.value.echo) expect(row.responseState).toMatchObject({ lastSequence: 12, phase: 'terminal' })
+    applyKeeperOperationTurnEvent('echo', { operationId, sequence: 11, event: {
+      type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallName: 'Read',
+    } })
+    expect(keeperThreads.value.echo.every(row => row.role !== 'tool')).toBe(true)
+  })
+
+  it('preserves quarantine across exact-operation duplicates instead of granting missing ownership', () => {
+    const provenance = operationDeliveryProvenance('quarantined-owner', 'terminal_result')
+    appendThreadEntry('echo', entry({ id: 'unobserved-first', role: 'assistant', deliveryProvenance: provenance }))
+    appendThreadEntry('echo', entry({ id: 'quarantined-last', role: 'assistant', deliveryProvenance: provenance, responseState: { kind: 'unavailable' } }))
+    mergeServerHistoryEntries('echo', [entry({ id: 'canonical-quarantine', role: 'assistant', delivery: 'history', deliveryProvenance: provenance })])
+    expect(keeperThreads.value.echo[0].responseState).toEqual({ kind: 'unavailable' })
+  })
+
+  it('does not silently select contradictory same-cursor observations by row order', () => {
+    const provenance = operationDeliveryProvenance('conflicting-owner', 'terminal_result')
+    for (const [id, phase] of [['first', 'running'], ['last', 'terminal']] as const) {
+      appendThreadEntry('echo', entry({ id, role: 'assistant', deliveryProvenance: provenance,
+        responseState: { ...initialKeeperResponseState, lastSequence: 12, phase } }))
+    }
+    mergeServerHistoryEntries('echo', [entry({ id: 'canonical-conflict', role: 'assistant', delivery: 'history', deliveryProvenance: provenance })])
+    expect(keeperThreads.value.echo[0].responseState).toEqual({ kind: 'unavailable' })
+  })
+
+  it('does not transfer response ownership through turn correlation alone', () => {
+    appendThreadEntry('echo', entry({ id: 'correlated-local', role: 'assistant', turnRef: 'same-turn',
+      traceSteps: [{ kind: 'think', text: 'exposed trace' }], responseState: { kind: 'unavailable' } }))
+    mergeServerHistoryEntries('echo', [entry({ id: 'correlated-history', role: 'assistant', turnRef: 'same-turn', delivery: 'history' })])
+    expect(keeperThreads.value.echo.find(candidate => candidate.id === 'correlated-history')?.responseState).toBeUndefined()
+  })
+
   it('keeps canonical persisted trace over a stale local trace', () => {
     const provenance = operationDeliveryProvenance('kmsg-canonical-trace', 'terminal_result')
     appendThreadEntry('echo', entry({
       id: 'assistant-local-stale',
+      responseState: { kind: 'unavailable' },
       role: 'assistant',
       text: 'done',
       rawText: 'done',
@@ -332,6 +396,7 @@ describe('thread history merge & persistence', () => {
     const [assistant] = keeperThreads.value.echo ?? []
     expect(assistant?.id).toBe('assistant-history-canonical')
     expect(assistant?.traceSteps).toEqual(canonicalTrace)
+    expect(assistant?.responseState).toEqual({ kind: 'unavailable' })
   })
 
   it('distributes identical-text assistant turns trace 1:1 across history rows (#21748)', () => {

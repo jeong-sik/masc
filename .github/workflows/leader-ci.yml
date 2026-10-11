@@ -152,7 +152,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Download verified selection
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: approved-selection-${{ inputs.candidate }}-${{ github.run_attempt }}
           path: selection-evidence

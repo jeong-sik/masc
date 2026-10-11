@@ -59,14 +59,38 @@ jobs:
           SCOPES: ${{ toJSON(inputs) }}
           REPOSITORY: ${{ github.repository }}
           CANDIDATE: ${{ inputs.candidate }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           python3 - <<'PY'
-          import json, os
+          import json, os, urllib.request
           from pathlib import Path
           scopes = json.loads(os.environ['SCOPES'])
           if os.environ['GITHUB_REF'] != 'refs/heads/main':
               raise SystemExit('Dispatch leader CI on main')
-          if not any(scopes[name] is True for name in ('compile', 'tests')):
+          receipt = json.loads(os.environ['SELECTION'])
+          # Design contract: pin every member head pending BEFORE any
+          # verification runs, so a failing verification still leaves the
+          # guard holding until the always()-settle resolves it.
+          token = os.environ['GH_TOKEN']
+          repo = os.environ['REPOSITORY']
+          run_url = os.environ['RUN_URL']
+          for member in receipt['members']:
+              head = member['head']
+              body = json.dumps({
+                  'state': 'pending', 'context': 'leader-selected-ci',
+                  'description': 'Leader-selected CI is running',
+                  'target_url': run_url,
+              }).encode()
+              request = urllib.request.Request(
+                  f'https://api.github.com/repos/{repo}/statuses/{head}',
+                  data=body, method='POST',
+                  headers={'Authorization': f'Bearer {token}',
+                           'Accept': 'application/vnd.github+json'})
+              with urllib.request.urlopen(request) as response:
+                  if response.status != 201:
+                      raise SystemExit(f'status pin failed for {head}: {response.status}')
+                  print(f'pinned {member["pr"]}@{head[:12]}')
+          if not any(scopes.get(name) is True for name in ('compile', 'tests')):
               raise SystemExit('Select at least one CI scope')
           if scopes.get('tests', False) and not scopes.get('suites', '').strip():
               raise SystemExit('Ordinary behavior verification requires explicit suites')

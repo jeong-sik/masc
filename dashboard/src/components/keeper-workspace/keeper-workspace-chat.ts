@@ -1,3 +1,4 @@
+import { storedTokenRevision } from '../../api/token-revision'
 // Keeper Workspace — conversation pane (center). A spacious ChatHeader
 // (identity + lifecycle actions) above the reused KeeperConversationPanel
 // (layout="workspace"). The header replaces the old narrow detail-page
@@ -581,11 +582,12 @@ function ToolApprovalCards({ keeperName }: { keeperName: string }): VNode | null
   // Re-hydrate on mount: a wait whose REQUESTED event this view never saw
   // (dashboard opened mid-hold, or the stream watcher died) still deserves a
   // card, because the wait still retires itself on a timer.
+  const authRevision = storedTokenRevision.value
   useEffect(() => {
     void hydrateKeeperToolApprovals()
-  }, [keeperName])
+  }, [keeperName, authRevision])
   const byId = keeperToolApprovals.value[keeperName] ?? {}
-  const pending = Object.values(byId).filter(approval => !approval.settled)
+  const pending = Object.values(byId).filter(approval => approval.authRevision === authRevision && !approval.settled)
   if (pending.length === 0) return null
   return html`
     <div class="tool-approval-stack" data-testid="keeper-tool-approval-stack" role="region" aria-label="도구 승인 대기">

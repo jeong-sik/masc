@@ -145,6 +145,16 @@ describe('answerHeldKeeperToolApproval', () => {
     } finally { dispose() }
   })
 
+  it('does not answer an approval retained from a previous authentication', async () => {
+    setStoredToken('synthetic-approval-old-account')
+    pendingRow('old-account-call')
+    setStoredToken('synthetic-approval-new-account')
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(answerHeldKeeperToolApproval('sangsu', 'old-account-call', 'approve')).resolves.toBe(false)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('ignores a second answer for a call already being answered', async () => {
     pendingRow('call-double')
     let releaseFetch: (() => void) | undefined

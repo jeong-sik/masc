@@ -1,3 +1,4 @@
+import { currentStoredTokenRevision } from '../../api/core'
 // @vitest-environment happy-dom
 import type { TurnAnchor } from '../keeper-turn-inspector'
 import { html } from 'htm/preact'
@@ -234,6 +235,7 @@ describe('KeeperWorkspaceChat', () => {
     keeperToolApprovals.value = {
       sangsu: {
         'tool-call-1': {
+          authRevision: currentStoredTokenRevision(),
           toolCallId: 'tool-call-1',
           toolName: 'Execute',
           args: '{}',
@@ -256,6 +258,31 @@ describe('KeeperWorkspaceChat', () => {
     const card = container.querySelector('[data-testid="keeper-tool-approval-card"]')
     expect(card?.textContent).toContain('이 명령을 실행할까요?')
     expect(card?.textContent).toContain('보류 사유 · process execution requires approval')
+  })
+
+  it('retires foreign approval cards and rehydrates on mounted authentication replacement', async () => {
+    const { KeeperWorkspaceChat } = await loadChat()
+    const core = await import('../../api/core')
+    const state = await import('../../keeper-state')
+    const actions = await import('../../keeper-actions')
+    core.setStoredToken('synthetic-mounted-approval-a')
+    state.upsertKeeperToolApproval('sangsu', {
+      toolCallId: 'mounted-old-call', toolName: 'Execute', args: '{}',
+      question: 'approval', because: 'effect', askedAtMs: null, timeoutSec: null,
+      answering: false, answeredDecision: null, answeredOutcome: null, settled: false,
+    })
+    try {
+      await act(async () => { render(html`<${KeeperWorkspaceChat} keeper=${mockKeeper} />`, container) })
+      await waitFor(() => expect(container.querySelector('[data-tool-call-id="mounted-old-call"]')).not.toBeNull())
+      const calls = vi.mocked(actions.hydrateKeeperToolApprovals).mock.calls.length
+      await act(async () => { core.setStoredToken('synthetic-mounted-approval-b') })
+      await waitFor(() => expect(container.querySelector('[data-tool-call-id="mounted-old-call"]')).toBeNull())
+      await waitFor(() => expect(vi.mocked(actions.hydrateKeeperToolApprovals).mock.calls.length).toBeGreaterThan(calls))
+    } finally {
+      render(null, container)
+      core.clearStoredToken()
+      state.keeperToolApprovals.value = {}
+    }
   })
 
   it('hides the pending-approval badge when the keeper has no pending decision', async () => {

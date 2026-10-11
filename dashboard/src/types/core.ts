@@ -723,6 +723,7 @@ interface KeeperConversationUsage {
 // dashboard drew nothing while the call waited and the answer, when it came,
 // was only the 180-second timeout read as a denial nobody chose.
 export interface KeeperToolApprovalPending {
+  readonly authRevision: number
   toolCallId: string
   toolName: string
   args: string

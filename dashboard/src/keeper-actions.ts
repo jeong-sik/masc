@@ -267,7 +267,7 @@ export async function hydrateKeeperToolApprovals(): Promise<void> {
     if (!owns()) return
     // A row the stream already drew carries fresher askedAt semantics; only
     // fill gaps, never overwrite an in-flight answer with a re-hydration.
-    if (keeperToolApprovals.value[row.keeper]?.[row.tool_call_id]) continue
+    if (keeperToolApprovals.value[row.keeper]?.[row.tool_call_id]?.authRevision === owner.authRevision) continue
     upsertKeeperToolApproval(row.keeper, {
       toolCallId: row.tool_call_id,
       toolName: row.tool,
@@ -290,7 +290,7 @@ export async function answerHeldKeeperToolApproval(
   decision: 'approve' | 'deny',
 ): Promise<boolean> {
   const existing = keeperToolApprovals.value[keeperName]?.[toolCallId]
-  if (!existing || existing.settled) return false
+  if (!existing || existing.authRevision !== currentStoredTokenRevision() || existing.settled) return false
   if (existing.answering) return false
   const authRevision = currentStoredTokenRevision()
   const claim = updateKeeperToolApproval(keeperName, toolCallId, approval => ({

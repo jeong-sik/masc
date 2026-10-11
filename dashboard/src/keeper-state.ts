@@ -1,3 +1,4 @@
+import { currentStoredTokenRevision } from './api/core'
 import { reconcileTranscriptBindings } from './keeper-tool-observations'
 import { reconcileKeeperResponseStates, sameResponseObservation, unavailableKeeperResponseState, keeperResponseIsRunning, ownerFromUnknown, sameKeeperResponseOwner, type KeeperResponseOwner } from './lib/keeper-response-state'
 import { signal } from '@preact/signals'
@@ -987,12 +988,12 @@ export function appendThreadEntry(name: string, entry: KeeperConversationEntry):
 
 export function upsertKeeperToolApproval(
   keeperName: string,
-  approval: KeeperToolApprovalPending,
+  approval: Omit<KeeperToolApprovalPending, 'authRevision'>,
 ): void {
   const byKeeper = keeperToolApprovals.value[keeperName] ?? {}
   keeperToolApprovals.value = {
     ...keeperToolApprovals.value,
-    [keeperName]: { ...byKeeper, [approval.toolCallId]: approval },
+    [keeperName]: { ...byKeeper, [approval.toolCallId]: Object.freeze({ ...approval, authRevision: currentStoredTokenRevision() }) },
   }
 }
 
@@ -1003,7 +1004,7 @@ export function updateKeeperToolApproval(
   expected?: KeeperToolApprovalPending,
 ): KeeperToolApprovalPending | null {
   const existing = keeperToolApprovals.value[keeperName]?.[toolCallId]
-  if (!existing || (expected && existing !== expected)) return null
+  if (!existing || existing.authRevision !== currentStoredTokenRevision() || (expected && existing !== expected)) return null
   const updated = Object.freeze(updater(existing))
   const current = keeperToolApprovals.value
   if (current[keeperName]?.[toolCallId] !== existing) return null

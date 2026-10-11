@@ -813,3 +813,81 @@ describe('extractApiError', () => {
     expect(summary.message).toBe('Failed to load')
   })
 })
+
+describe('credential notification subscription ownership', () => {
+  it('does not deliver an ongoing notification to a newly registered subscriber', () => {
+    const late = vi.fn()
+    let releaseLate: (() => void) | undefined
+    const releaseFirst = subscribeStoredTokenChanges(() => {
+      if (!releaseLate) releaseLate = subscribeStoredTokenChanges(late)
+    })
+    try {
+      setStoredToken('synthetic-snapshot-event-a')
+      expect(late).not.toHaveBeenCalled()
+      setStoredToken('synthetic-snapshot-event-b')
+      expect(late).toHaveBeenCalledTimes(1)
+    } finally {
+      releaseFirst()
+      releaseLate?.()
+    }
+  })
+
+  it('releases only one registration when the same callback is subscribed twice', () => {
+    const listener = vi.fn()
+    const releaseFirst = subscribeStoredTokenChanges(listener)
+    const releaseSecond = subscribeStoredTokenChanges(listener)
+    try {
+      releaseFirst()
+      releaseFirst()
+      setStoredToken('synthetic-independent-subscription')
+      expect(listener).toHaveBeenCalledTimes(1)
+    } finally {
+      releaseSecond()
+    }
+  })
+
+  it('does not deliver an older event after a nested credential replacement', () => {
+    let replaced = false
+    const releaseFirst = subscribeStoredTokenChanges(() => {
+      if (!replaced) { replaced = true; setStoredToken('synthetic-nested-event-b') }
+    })
+    const later = vi.fn()
+    const releaseLater = subscribeStoredTokenChanges(later)
+    try {
+      const admittedRevision = currentStoredTokenRevision()
+      const originalPublication = setStoredToken('synthetic-nested-event-a')
+      expect(originalPublication.authRevision).toBe(admittedRevision + 1)
+      expect(currentStoredTokenRevision()).toBe(admittedRevision + 2)
+      expect(later).toHaveBeenCalledTimes(1)
+      expect(later.mock.calls[0]?.[0].token).toBe('synthetic-nested-event-b')
+      expect(getStoredToken()).toBe('synthetic-nested-event-b')
+    } finally {
+      releaseFirst()
+      releaseLater()
+    }
+  })
+})
+
+it('skips a removed registration even when its callback is registered again during delivery', () => {
+  const listener = vi.fn()
+  let releaseLater!: () => void
+  let releaseReplacement: (() => void) | undefined
+  const releaseFirst = subscribeStoredTokenChanges(() => {
+    releaseFirst()
+    releaseLater()
+    releaseReplacement = subscribeStoredTokenChanges(listener)
+  })
+  releaseLater = subscribeStoredTokenChanges(listener)
+  try {
+    setStoredToken('synthetic-replaced-registration-a')
+    expect(listener).not.toHaveBeenCalled()
+    // Releasing the old capability again must leave the replacement alive.
+    releaseLater()
+    setStoredToken('synthetic-replaced-registration-b')
+    expect(listener).toHaveBeenCalledTimes(1)
+  } finally {
+    releaseFirst()
+    releaseLater()
+    releaseReplacement?.()
+  }
+})

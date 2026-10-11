@@ -38,7 +38,10 @@ export interface StoredTokenChange {
 
 type StoredTokenChangeListener = (change: StoredTokenChange) => void
 
-const storedTokenChangeListeners = new Set<StoredTokenChangeListener>()
+interface StoredTokenSubscription {
+  readonly listener: StoredTokenChangeListener
+}
+const storedTokenChangeListeners = new Set<StoredTokenSubscription>()
 let storedTokenRevision = 0
 
 export interface StoredTokenPublication {
@@ -48,9 +51,12 @@ export interface StoredTokenPublication {
 function notifyStoredTokenChange(change: StoredTokenChange): StoredTokenPublication {
   storedTokenRevision += 1
   const publication = Object.freeze({ authRevision: storedTokenRevision })
-  for (const listener of storedTokenChangeListeners) {
+  const admittedSubscriptions: readonly StoredTokenSubscription[] = [...storedTokenChangeListeners]
+  for (const subscription of admittedSubscriptions) {
+    if (storedTokenRevision !== publication.authRevision) break
+    if (!storedTokenChangeListeners.has(subscription)) continue
     try {
-      listener(change)
+      subscription.listener(change)
     } catch (err) {
       console.warn('[dashboard-auth] token change listener failed', err)
     }
@@ -65,9 +71,10 @@ export function currentStoredTokenRevision(): number {
 export function subscribeStoredTokenChanges(
   listener: StoredTokenChangeListener,
 ): () => void {
-  storedTokenChangeListeners.add(listener)
+  const subscription = Object.freeze({ listener })
+  storedTokenChangeListeners.add(subscription)
   return () => {
-    storedTokenChangeListeners.delete(listener)
+    storedTokenChangeListeners.delete(subscription)
   }
 }
 

@@ -670,6 +670,12 @@
   yojson))
 
 (library
+ (name masc_tui_child_content)
+ (wrapped false)
+ (modules masc_tui_child_content)
+ (libraries masc masc.runtime uri yojson))
+
+(library
  (name masc_tui_native_tasks)
  (wrapped false)
  (modules masc_tui_native_tasks)

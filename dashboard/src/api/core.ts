@@ -520,11 +520,16 @@ interface ErrorResponseInfo {
   authoritativeReloadRequired?: boolean
 }
 
-async function errorResponseInfoFromResponse(res: Response): Promise<ErrorResponseInfo> {
+async function errorResponseInfoFromResponse(res: Response, signal?: AbortSignal): Promise<ErrorResponseInfo> {
   let rawText = ''
   try {
-    rawText = (await res.text()).trim()
+    const readableResponse = signal && res.body
+      ? new Response(res.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), { signal }))
+      : res
+    rawText = (await readableResponse.text()).trim()
+    signal?.throwIfAborted()
   } catch {
+    signal?.throwIfAborted()
     return {}
   }
   if (!rawText) return {}
@@ -597,8 +602,9 @@ export async function apiRequestErrorFromResponse(
   method: string,
   path: string,
   res: Response,
+  options: AbortableRequestOptions = {},
 ): Promise<ApiRequestError> {
-  const info = await errorResponseInfoFromResponse(res)
+  const info = await errorResponseInfoFromResponse(res, options.signal)
   return new ApiRequestError({
     method,
     path,

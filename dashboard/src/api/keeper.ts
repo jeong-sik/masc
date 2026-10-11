@@ -581,11 +581,28 @@ export async function streamKeeperMessage(
     }
   }
 
+  const readErrorResponse = async (response: Response, admission: KeeperStreamAdmission) => {
+    const bodyController = new AbortController()
+    const bodySignal = signal ? AbortSignal.any([signal, bodyController.signal]) : bodyController.signal
+    const releaseErrorAuthListener = subscribeStoredTokenChanges(() => bodyController.abort())
+    try {
+      assertResponseAdmission(response, admission)
+      const error = await apiRequestErrorFromResponse('POST', streamPath, response, { signal: bodySignal })
+      assertResponseAdmission(response, admission)
+      return error
+    } catch (error) {
+      assertCurrentKeeperStreamAdmission(admission)
+      throw error
+    } finally {
+      releaseErrorAuthListener()
+    }
+  }
+
   let { response: res, admission } = await postStream()
   assertResponseAdmission(res, admission)
 
   if (!res.ok) {
-    let requestError = await apiRequestErrorFromResponse('POST', streamPath, res)
+    let requestError = await readErrorResponse(res, admission)
     assertResponseAdmission(res, admission)
     if (
       res.status === 401
@@ -594,7 +611,7 @@ export async function streamKeeperMessage(
       ;({ response: res, admission } = await postStream())
       assertResponseAdmission(res, admission)
       if (!res.ok) {
-        requestError = await apiRequestErrorFromResponse('POST', streamPath, res)
+        requestError = await readErrorResponse(res, admission)
       }
     }
     assertResponseAdmission(res, admission)

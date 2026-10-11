@@ -37,6 +37,37 @@ afterEach(() => {
   }
 })
 
+describe('abortable error response body', () => {
+  it('preserves structured error data and UTF-8 across chunk boundaries', async () => {
+    const controller = new AbortController()
+    const payload = { error: '인증 오류', auth_error_code: 'token_mismatch', config_applied: true }
+    const bytes = new TextEncoder().encode(JSON.stringify(payload))
+    const body = new ReadableStream<Uint8Array>({ start(writer) {
+      for (const byte of bytes) writer.enqueue(new Uint8Array([byte]))
+      writer.close()
+    } })
+    const error = await apiRequestErrorFromResponse('POST', '/fixture', new Response(body, { status: 401 }), {
+      signal: controller.signal,
+    })
+    expect(error).toMatchObject({ status: 401, detail: '인증 오류', authErrorCode: 'token_mismatch',
+      configApplied: true, responseData: payload })
+    expect(body.locked).toBe(false)
+  })
+
+  it('disposes an unread body when cancellation was already admitted', async () => {
+    const controller = new AbortController()
+    controller.abort(new DOMException('caller cancelled', 'AbortError'))
+    const cancel = vi.fn()
+    const body = new ReadableStream<Uint8Array>({ cancel })
+    const result = apiRequestErrorFromResponse('POST', '/fixture', new Response(body, { status: 500 }), {
+      signal: controller.signal,
+    }).catch(error => error)
+    expect(await result).toMatchObject({ name: 'AbortError' })
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledTimes(1))
+    expect(body.locked).toBe(false)
+  })
+})
+
 describe('stored token metadata', () => {
   it('persists token metadata and prefers the managed dev actor', () => {
     setStoredToken('loopback-dev-token', {

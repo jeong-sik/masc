@@ -376,6 +376,46 @@ describe('streamKeeperMessage', () => {
     clearStoredToken()
   })
 
+  it.each([401, 500])('cancels the pending HTTP %s body when its admitted authentication changes', async status => {
+    setStoredToken('fixture-old')
+    const cancel = vi.fn()
+    let bodyController!: ReadableStreamDefaultController<Uint8Array>
+    const body = new ReadableStream<Uint8Array>({ start(controller) { bodyController = controller }, cancel })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(body, { status }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onEvent = vi.fn()
+    const stream = streamKeeperMessage('echo', 'input', { operationId: 'operation', onEvent }).catch(error => error)
+    await vi.waitFor(() => expect(body.locked).toBe(true))
+    setStoredToken('fixture-new')
+    try {
+      await vi.waitFor(() => expect(cancel).toHaveBeenCalledTimes(1))
+    } finally {
+      if (!cancel.mock.calls.length) bodyController.error(new Error('fixture cleanup'))
+    }
+    expect(await stream).toBeInstanceOf(KeeperStreamAuthenticationSupersededError)
+    expect(body.locked).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(onEvent).not.toHaveBeenCalled()
+    clearStoredToken()
+  })
+
+  it('preserves caller cancellation while reading an HTTP error body', async () => {
+    setStoredToken('fixture-current')
+    const caller = new AbortController()
+    const cancel = vi.fn()
+    const body = new ReadableStream<Uint8Array>({ cancel })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: 500 })))
+    const stream = streamKeeperMessage('echo', 'input', {
+      operationId: 'operation', signal: caller.signal, onEvent: vi.fn(),
+    }).catch(error => error)
+    await vi.waitFor(() => expect(body.locked).toBe(true))
+    caller.abort()
+    expect(await stream).toMatchObject({ name: 'AbortError' })
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(body.locked).toBe(false)
+    clearStoredToken()
+  })
+
   it('does not deliver a streaming response acquired under replaced credentials', async () => {
     setStoredToken('fixture-old')
     let complete!: (response: Response) => void

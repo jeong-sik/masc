@@ -2026,7 +2026,7 @@ let parse_line ~file_path line =
 
 (* Window bounds for [load]. [max_history] counts user/assistant
    messages only, so tool lines never shrink the visible conversation
-   depth. [max_secondary_lines] bounds every other row (tool rows and
+   depth. The rest of [max_total_lines] bounds every other row (tool rows and
    system receipts) so a tool-heavy turn cannot blow up the payload; the
    two together keep the window at or under [max_total_lines]. The bound
    used to be applied to the whole window from its oldest row, which made
@@ -2038,7 +2038,6 @@ let parse_line ~file_path line =
    stays. *)
 let max_history = 100
 let max_total_lines = 400
-let max_secondary_lines = max_total_lines - max_history
 
 let is_tool_message (msg : chat_message) = Role.equal msg.role Role.Tool
 
@@ -2145,7 +2144,16 @@ let find_cut ~path ~size ~before : int =
   done;
   !hi
 
-let load_page ~base_dir ~keeper_name ?before () : page =
+let load_page ~base_dir ~keeper_name ?before ?(max_total = max_total_lines) () : page =
+  (* [max_total] scales only the user/assistant share of the window. The
+     budget for tool rows and receipts stays at its full size: paging runs
+     backwards and a row pushed out of one page by that budget is older than
+     nothing the next page reads (its cursor is the oldest row returned), so a
+     smaller tool budget would drop those rows from every page. A small page
+     therefore narrows the conversation, never the tool rows a turn kept. *)
+  let max_total = max 1 (min max_total max_total_lines) in
+  let window_history = max 1 (max_history * max_total / max_total_lines) in
+  let window_secondary = max_total_lines - max_history in
   let path = chat_path ~base_dir ~keeper_name in
   if not (Sys.file_exists path) then { messages = []; has_more = false }
   else
@@ -2159,7 +2167,7 @@ let load_page ~base_dir ~keeper_name ?before () : page =
     in
     let from = if upto > tail_read_bytes then upto - tail_read_bytes else 0 in
     (* Single pass: keep a running window of the last [max_history]
-       user/assistant messages plus the newest [max_secondary_lines] of
+       user/assistant messages plus the newest [window_secondary] of
        their tool lines and receipts. A primary over the bound takes the
        whole front of the window with it, down to and including the oldest
        primary; a secondary over its bound takes only the oldest secondary,
@@ -2206,10 +2214,10 @@ let load_page ~base_dir ~keeper_name ?before () : page =
               else (
                 incr secondary_count;
                 Queue.push row secondaries);
-              while !primary_count > max_history do
+              while !primary_count > window_history do
                 pop_front ()
               done;
-              while !secondary_count > max_secondary_lines do
+              while !secondary_count > window_secondary do
                 drop_oldest_secondary ()
               done
           | Some _ | None -> ())

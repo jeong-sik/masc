@@ -146,7 +146,8 @@ type keeper_chat_event =
           [stream_scope] is the bridge's producer-call identity, shared with
           tool occurrences and retained by an exact repeated MessageStart. *)
   | Agent_core_stream_message_delta of
-      { stream_scope : int
+      { content_generation : int option
+      ; stream_scope : int
       ; stop_reason : Agent_core.Types.stop_reason option
       ; usage : Agent_core.Types.delta_usage option
       }

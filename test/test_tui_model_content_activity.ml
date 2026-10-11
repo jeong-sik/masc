@@ -352,8 +352,82 @@ let test_stop_identity_protocol () =
      `Assoc ["content_generation",`Int 7;"stream_scope",`Int (-1)];
      `Assoc ["content_generation",`Int 7;"stream_scope",`Int 2;"stream_scope",`Int 2]]
 
+let test_owned_response_details () =
+  let t = create () in
+  let details generation scope tokens = L.Stream_details {generation;stream_scope=Some scope;
+    usage=Some {L.input_tokens=Some tokens;output_tokens=None;
+      cache_read_input_tokens=None;cache_creation_input_tokens=None};stop_reason=Some Agent_core.Types.EndTurn} in
+  T.apply ~now:1. t (observed ~generation:2 ~scope:0 ());
+  T.apply ~now:2. t (details (Some 2) 0 7);
+  check bool "current details keep model activity" true (T.model_activity t=Some T.Activity_answering);
+  T.apply ~now:3. t (details (Some 1) 99 99);
+  T.apply ~now:4. t (details None 0 99);
+  let metadata = T.response_metadata t in
+  check bool "stale and unbound details cannot overwrite current counters" true
+    (Option.map (fun (usage:L.stream_usage) -> usage.input_tokens) metadata.usage=Some (Some 7));
+  T.apply ~now:5. t (details (Some 3) 0 11);
+  let metadata = T.response_metadata t in
+  check bool "first surviving details own reused scope in new generation" true (metadata.owner=Some (3,0));
+  check bool "new details retire prior activity" true (T.model_activity t=None);
+  check bool "new details carry new counters" true
+    (Option.map (fun (usage:L.stream_usage) -> usage.input_tokens) metadata.usage=Some (Some 11));
+  T.apply ~now:6. t (L.Stream_model_stopped (Some {E.response_generation=2;response_scope=0}));
+  check bool "old stop cannot end newly owned details" true (T.model_activity t=None);
+  T.apply ~now:7. t (observed ~generation:3 ());
+  check bool "content can follow details without start frame" true (T.model_activity t=Some T.Activity_answering);
+  T.apply ~now:8. t (L.Text {text="next";stream_scope=Some 2});
+  let unbound = T.response_metadata t in
+  T.apply ~now:8. t (details (Some 3) 0 99);
+  T.apply ~now:8. t (details (Some 3) 1 99);
+  check bool "old details cannot rewind newer unbound response" true (T.response_metadata t=unbound);
+  T.apply ~now:8. t L.Run_finished;
+  let before = T.response_metadata t in
+  let before_text = T.text t in
+  T.apply ~now:9. t (details (Some 4) 0 99);
+  check bool "terminal response metadata remains settled" true (T.response_metadata t=before);
+  check string "terminal details preserve authored body" before_text (T.text t)
+
+let test_details_production_identity () =
+  let translated = B.translate ~redact_text:Fun.id ~base_dir:"/unused" ~stream_scope:0
+    (B.empty_state ~generation:7 ())
+    (Agent_core.Types.MessageDelta {stop_reason=None;usage=None}) in
+  (match translated.chat_events with
+    | [E.Agent_core_stream_message_delta {content_generation=Some generation;stream_scope;_} as event] ->
+      check int "bridge details capture supplied run generation" 7 generation;
+      check int "bridge details retain server scope" 0 stream_scope;
+      check bool "journal round trip retains details identity" true
+        (J.keeper_chat_event_of_json (J.keeper_chat_event_to_json event)=Ok event);
+      check bool "empty owned details survive journal mapping" true
+        (match Log.delta_of_journaled event with
+         | Some (L.Stream_details {generation=Some 7;stream_scope=Some 0;_}) -> true | _ -> false);
+      let _, projected = Server_keeper_chat_agui_projection.project ~timestamp:0.
+        ~redact_text:Fun.id Server_keeper_chat_agui_projection.initial event in
+      let wire = Option.fold ~none:"" ~some:(Ag_ui.event_to_sse ~id:1) projected in
+      check bool "empty owned details survive producer live projection" true
+        (match L.feed (L.create ()) wire with
+         | [{delta=L.Stream_details {generation=Some 7;stream_scope=Some 0;_};_}] -> true | _ -> false)
+    | _ -> fail "bridge did not publish owned response details");
+  let malformed = `Assoc ["type",`String "agent_core_stream_message_delta";
+    "stream_scope",`Int 0;"content_generation",`Null] in
+  check bool "present invalid generation cannot become unbound details" true
+    (Result.is_error (J.keeper_chat_event_of_json malformed));
+  List.iter (fun fields ->
+    let journal = `Assoc (("type",`String "agent_core_stream_message_delta")::fields) in
+    check bool "malformed details ownership rejects durable admission" true
+      (Result.is_error (J.keeper_chat_event_of_json journal));
+    let wire = "data: " ^ Yojson.Safe.to_string (`Assoc ["type",`String "CUSTOM";
+      "name",`String "KEEPER_STREAM_MESSAGE_DELTA";"value",`Assoc fields]) ^ "\n\n" in
+    check bool "malformed details ownership reports live failure" true
+      (match L.feed (L.create ()) wire with [{delta=L.Undecodable _;_}] -> true | _ -> false))
+    [["content_generation",`Int 7];
+     ["content_generation",`Int 7;"stream_scope",`Int (-1)];
+     ["content_generation",`Int 7;"stream_scope",`Int 0;"stream_scope",`Int 1];
+     ["content_generation",`Int 7;"stream_scope",`Int 9_007_199_254_740_992]]
+
 let () = run "model content activity"
-  ["boundaries", [test_case "owned response stop admission" `Quick test_owned_response_stop;
+  ["boundaries", [test_case "owned response details" `Quick test_owned_response_details;
+    test_case "details production identity" `Quick test_details_production_identity;
+    test_case "owned response stop admission" `Quick test_owned_response_stop;
     test_case "stop identity protocol" `Quick test_stop_identity_protocol;
     test_case "activity JSON safe-integer boundary" `Quick test_activity_numeric_wire_boundary;
     test_case "overlap uses event order" `Quick test_overlap_uses_event_order;

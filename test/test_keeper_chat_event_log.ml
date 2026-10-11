@@ -83,10 +83,10 @@ let all_events : E.keeper_chat_event list =
   ; E.Agent_core_stream_message_start
       { content_generation=None; stream_scope = 0; provider_message_id = "pm-2"; model = "m"; usage = None }
   ; E.Agent_core_stream_message_delta
-      { stream_scope = 0; stop_reason = Some Agent_core.Types.EndTurn
+      {content_generation=None; stream_scope = 0; stop_reason = Some Agent_core.Types.EndTurn
       ; usage = Some delta_usage_partial
       }
-  ; E.Agent_core_stream_message_delta { stream_scope = 0; stop_reason = None; usage = None }
+  ; E.Agent_core_stream_message_delta {content_generation=None; stream_scope = 0; stop_reason = None; usage = None }
   ; E.Agent_core_stream_message_stop None
   ; E.Agent_core_stream_ping
   ; E.Agent_core_content_block_start
@@ -179,7 +179,7 @@ let test_codec_round_trip_all_constructors () =
     all_events;
   List.iter (fun charge ->
     let event = E.Agent_core_stream_message_delta
-      { stream_scope = 0;
+      {content_generation=None; stream_scope = 0;
         stop_reason = None;
         usage = Some { delta_usage_partial with cost_usd = Some charge } } in
     let encoded = L.keeper_chat_event_to_json event in
@@ -367,7 +367,7 @@ let test_journal_skips_non_finite_floats () =
        List.iteri
          (fun i charge ->
             let event = E.Agent_core_stream_message_delta
-                { stream_scope = 0
+                {content_generation=None; stream_scope = 0
                 ; stop_reason = Some Agent_core.Types.EndTurn
                 ; usage = Some { delta_usage_partial with cost_usd = Some charge } } in
             (match L.append_result journal ~seq:(4 + i) ~ts:1_762_300_001.0 event with
@@ -391,7 +391,7 @@ let test_journal_skips_non_finite_floats () =
          [ Float.nan; Float.infinity; Float.neg_infinity ];
        List.iter (fun charge ->
            let event = E.Agent_core_stream_message_delta
-               { stream_scope = 0
+               {content_generation=None; stream_scope = 0
                ; stop_reason = None
                ; usage = Some { delta_usage_partial with cost_usd = Some charge } } in
            let _, projected = Projection.project ~timestamp:1_762_300_001.0
@@ -933,7 +933,7 @@ let golden_events : E.keeper_chat_event list =
   ; E.Agent_core_stream_protocol_error protocol_error_full
   ; E.Agent_core_runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
   ; E.Agent_core_stream_message_delta
-      { stream_scope = 0; stop_reason = Some Agent_core.Types.EndTurn
+      {content_generation=None; stream_scope = 0; stop_reason = Some Agent_core.Types.EndTurn
       ; usage = Some delta_usage_partial
       }
   ; E.Agent_core_stream_message_stop None

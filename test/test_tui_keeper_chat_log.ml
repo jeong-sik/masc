@@ -472,12 +472,12 @@ let golden : E.keeper_chat_event list =
       ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:3
       }
   ; E.Text_message_end
-  ; E.Agent_core_stream_message_delta { stream_scope = 0; stop_reason = None; usage = None }
+  ; E.Agent_core_stream_message_delta {content_generation=None; stream_scope = 0; stop_reason = None; usage = None }
     (* Both facts the delta can carry, so the golden comparison says the
        journal and the wire read them the same way rather than agreeing on an
        event that carries nothing. *)
   ; E.Agent_core_stream_message_delta
-      { stream_scope = 0; stop_reason = Some Agent_core.Types.MaxTokens
+      {content_generation=None; stream_scope = 0; stop_reason = Some Agent_core.Types.MaxTokens
       ; usage =
           Some
             { Agent_core.Types.input_tokens = Some 1200
@@ -901,7 +901,7 @@ let test_a_journal_page_fills_the_log_like_the_wire_does () =
    file would still pass. *)
 let test_a_blank_reason_is_not_a_reason () =
   let delta stop_reason usage =
-    Log.delta_of_journaled (E.Agent_core_stream_message_delta { stream_scope = 0; stop_reason; usage })
+    Log.delta_of_journaled (E.Agent_core_stream_message_delta {content_generation=None; stream_scope = 0; stop_reason; usage })
   in
   (match delta (Some (Agent_core.Types.Unknown "")) None with
    | None -> ()
@@ -1076,7 +1076,7 @@ let test_missing_start_text_scope_survives_journal_and_wire () =
          E.Agent_core_stream_message_start { content_generation=None;stream_scope=2; provider_message_id="response-2";
            model="observed"; usage=None};
          E.Text_delta {text="ne"; stream_scope=Some 2};
-         E.Agent_core_stream_message_delta {stream_scope=stopped_scope;
+         E.Agent_core_stream_message_delta {content_generation=None;stream_scope=stopped_scope;
            stop_reason=Some Agent_core.Types.EndTurn; usage=None};
          E.Reply_details {reply="Done"; turn_outcome=Outcome.Visible_reply;
            (* Exercise recovery from observed text/stop scopes without a

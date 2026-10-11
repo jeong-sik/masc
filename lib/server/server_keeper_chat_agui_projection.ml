@@ -163,10 +163,11 @@ let project ~timestamp ~redact_text state event =
        @ json_opt "usage" (Option.map api_usage_to_json usage))
       in
       state, Some (custom ~timestamp state Stream_message_start value)
-  | Agent_core_stream_message_delta { stream_scope; stop_reason; usage } ->
+  | Agent_core_stream_message_delta { content_generation; stream_scope; stop_reason; usage } ->
       let value =
         `Assoc
           (["stream_scope", `Int stream_scope]
+       @ json_opt "content_generation" (Option.map (fun value -> `Int value) content_generation)
            @ json_opt "stop_reason"
              (Option.map
                 (fun reason ->

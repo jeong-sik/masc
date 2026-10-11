@@ -18,7 +18,7 @@ import {
   interruptKeeperTurn as apiInterruptKeeperTurn,
   streamKeeperMessage,
 } from './api/keeper'
-import type { KeeperStreamSurfaceContext } from './api/keeper'
+import type { KeeperStreamSurfaceContext, StreamKeeperMessageOptions } from './api/keeper'
 import { answerKeeperToolApproval } from './api/keeper'
 import { fetchKeeperToolCalls } from './api/dashboard'
 import {
@@ -1123,7 +1123,7 @@ export async function sendKeeperThreadMessage(
     blocks?: ChatBlock[]
     userBlocks?: KeeperUserInputBlock[]
     surfaceContext?: KeeperStreamSurfaceContext
-  } = {},
+  } & Pick<StreamKeeperMessageOptions, 'channel' | 'resolveChannelWorkspaceId'> = {},
 ): Promise<void> {
   const keeperName = name.trim()
   const attachments =
@@ -1235,6 +1235,8 @@ export async function sendKeeperThreadMessage(
       signal: controller.signal,
       attachments,
       userBlocks,
+      channel: options.channel,
+      resolveChannelWorkspaceId: options.resolveChannelWorkspaceId,
       surfaceContext: options.surfaceContext,
       onAdmission: admission => {
         assertCurrentKeeperStreamAdmission(admission)

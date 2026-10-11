@@ -1,3 +1,5 @@
+import { keeperThreads, _resetActiveKeeperStreamsForTests, _resetLiveSendRequestOwnersForTests } from '../keeper-state'
+import { _resetKeeperThreadMessageSendGuardsForTests } from '../keeper-actions'
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
@@ -33,7 +35,10 @@ describe('CopilotDock', () => {
     // Reset the module-level shared signal so tests don't leak open state.
     const dock = useCopilotDock()
     dock.close()
-    dock.streaming.value = null
+    dock.sending.value = {}
+    _resetActiveKeeperStreamsForTests()
+    _resetLiveSendRequestOwnersForTests()
+    _resetKeeperThreadMessageSendGuardsForTests()
     dock.threads.value = {}
     clearStoredToken()
     resetDevTokenBootstrap()
@@ -324,14 +329,14 @@ describe('CopilotDock', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: 200 })))
     const dock = useCopilotDock()
     dock.send('input', { id: 'auth-partial', kr: 'fixture', ns: 'fixture', phase: 'Running', status: 'run' }, getSurfaceContext())
-    await waitFor(() => expect(dock.streaming.value?.shown).toBe(raw))
+    await waitFor(() => expect(dock.threads.value['auth-partial']?.find(entry => entry.role === 'assistant')?.rawText).toBe(raw))
     setStoredToken('fixture-new')
-    await waitFor(() => expect(dock.streaming.value).toBeNull())
+    await waitFor(() => expect(Object.values(dock.sending.value).some(Boolean)).toBe(false))
     expect(dock.threads.value['auth-partial']?.at(-1)).toMatchObject({ role: 'assistant', text: raw, delivery: 'interrupted' })
     clearStoredToken()
   })
 
-  it('rechecks admission when the stream result reaches the dock caller', async () => {
+  it('retains the confirmed terminal receipt when authentication changes after the terminal event', async () => {
     setStoredToken('fixture-old')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([
       { type: 'TEXT_MESSAGE_CONTENT', messageId: 'message', threadId: 'keeper:auth-result', timestamp: 0, delta: 'admitted answer' },
@@ -345,8 +350,8 @@ describe('CopilotDock', () => {
     try {
       const dock = useCopilotDock()
       dock.send('input', { id: 'auth-result', kr: 'fixture', ns: 'fixture', phase: 'Running', status: 'run' }, getSurfaceContext())
-      await waitFor(() => expect(dock.streaming.value).toBeNull())
-      expect(dock.threads.value['auth-result']?.at(-1)).toMatchObject({ text: 'admitted answer', delivery: 'interrupted' })
+      await waitFor(() => expect(Object.values(dock.sending.value).some(Boolean)).toBe(false))
+      expect(dock.threads.value['auth-result']?.at(-1)).toMatchObject({ text: 'admitted answer', delivery: 'delivered', responseState: { kind: 'known', phase: 'terminal' } })
     } finally {
       spy.mockRestore()
       clearStoredToken()
@@ -375,6 +380,32 @@ describe('CopilotDock', () => {
     return mock.mock.calls.filter(([url]) => !String(url).includes(DEV_TOKEN_PATH))
   }
 
+  it('projects exposed thinking, tool occurrence and saying through the shared conversation', async () => {
+    setStoredToken('fixture-token')
+    const base = { threadId: 'keeper:masc-improver', timestamp: 1 }
+    const events = [
+      { ...base, type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta: 'exposed reasoning' } },
+      { ...base, type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 1, toolCallId: 'fixture-tool', toolCallName: 'Read' },
+      { ...base, type: 'TOOL_CALL_ARGS', toolStreamScope: 0, toolCallBlockIndex: 1, toolCallId: 'fixture-tool', delta: '{}' },
+      { ...base, type: 'TOOL_CALL_END', toolStreamScope: 0, toolCallBlockIndex: 1, toolCallId: 'fixture-tool' },
+      { ...base, type: 'TEXT_MESSAGE_START', role: 'assistant', messageId: 'message' },
+      { ...base, type: 'TEXT_MESSAGE_CONTENT', messageId: 'message', delta: 'original saying' },
+      { ...base, type: 'TEXT_MESSAGE_END', messageId: 'message' },
+      { ...base, type: 'RUN_FINISHED', runId: 'run' },
+    ]
+    vi.stubGlobal('fetch', dockFetchMock(events))
+    const dock = renderDock()
+    dock.open()
+    dock.send('original input', { id: 'masc-improver', kr: 'fixture', ns: 'fixture', phase: 'Running', status: 'run' }, getSurfaceContext())
+    await waitFor(() => expect(dock.sending.value['masc-improver']).toBe(false))
+    const rows = keeperThreads.value['masc-improver'] ?? []
+    expect(rows.find(entry => entry.role === 'assistant')?.traceSteps).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'think', text: 'exposed reasoning' })]))
+    expect(rows.find(entry => entry.role === 'tool')).toMatchObject({ label: 'Read', toolOccurrence: { kind: 'identified', streamScope: 0, blockIndex: 1 } })
+    expect(rows.find(entry => entry.role === 'assistant')?.rawText).toBe('original saying')
+    await waitFor(() => expect(container.querySelector('[data-chat-tool-call-id="fixture-tool"]')).not.toBeNull())
+    expect(dock.threads.value['masc-improver']).toBe(rows)
+  })
+
   it('sends a message and shows a streaming reply', async () => {
     const fetchMock = dockFetchMock([
       { type: 'TEXT_MESSAGE_START', role: 'assistant', messageId: 'm1', threadId: 'keeper:fixture', timestamp: 0 },
@@ -395,14 +426,10 @@ describe('CopilotDock', () => {
     expect(sendBtn?.classList.contains('dock-send')).toBe(true)
     sendBtn.click()
 
-    await waitFor(() => expect(container.querySelectorAll('[data-dock-message="user"]').length).toBe(1))
+    await waitFor(() => expect(container.querySelectorAll('[data-chat-role="user"]').length).toBe(1))
 
-    /* The streaming placeholder also carries `data-dock-message="assistant"`,
-       so waiting for the element alone resolves on "작성 중…" — the settled
-       reply only lands in the `.then` of `streamKeeperMessage`. Wait on the
-       text the test is actually about. */
     await waitFor(
-      () => expect(container.querySelector('[data-dock-message="assistant"]')?.textContent)
+      () => expect(container.querySelector('[data-chat-role="assistant"]')?.textContent)
         .toContain('안녕하세요'),
       { timeout: 3000 },
     )
@@ -423,7 +450,7 @@ describe('CopilotDock', () => {
     const body = JSON.parse(String(init.body))
     expect(body.message).toBe(text)
     expect(dock.threads.value[body.name]?.find(message => message.role === 'user')?.text).toBe(text)
-    await waitFor(() => expect(dock.streaming.value).toBeNull())
+    await waitFor(() => expect(Object.values(dock.sending.value).some(Boolean)).toBe(false))
   })
 
   it('posts copilot channel and surface context to the keeper stream', async () => {

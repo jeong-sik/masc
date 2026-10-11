@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { signal } from '@preact/signals'
 import { ChevronDown, MessageCircle, PanelRightClose, PanelRightOpen, Send, Sparkles, X } from 'lucide-preact'
 import { persistentSignal } from '../lib/persistent-signal'
 import { globalShortcutManager } from '../lib/global-shortcut-manager'
@@ -8,13 +7,12 @@ import { route } from '../router'
 import { keepers } from '../store'
 import { DASHBOARD_NAV_ITEMS } from '../config/navigation'
 import { isSubmitEnter } from '../lib/keyboard'
-import { streamKeeperMessage } from '../api/keeper'
-import { newKeeperChatOperationId } from '../keeper-delivery-provenance'
-import { currentDashboardActor, currentStoredTokenRevision } from '../api/core'
-import { assertCurrentKeeperStreamAdmission, KeeperStreamAuthenticationSupersededError,
-  type KeeperStreamAdmission } from '../api/keeper-stream-admission'
+import { currentDashboardActor } from '../api/core'
+import { sendKeeperThreadMessage } from '../keeper-actions'
+import { keeperSending, keeperThreads } from '../keeper-state'
+import { ChatTranscript } from './chat/primitives'
 import { KeeperBadge } from './keeper-badge'
-import type { Keeper, KeeperConversationDelivery } from '../types'
+import type { Keeper } from '../types'
 import { useIsMobile } from '../hooks/use-is-mobile'
 
 interface DockState {
@@ -30,23 +28,6 @@ interface SurfaceContext {
   route: string
   scene: string
   fields: Array<{ k: string; v: string; tone?: 'bad' | 'warn' | 'volt' }>
-}
-
-interface DockMessage {
-  role: 'user' | 'assistant'
-  ts: string
-  text: string
-  delivery?: KeeperConversationDelivery
-  error?: string | null
-  sug?: string[]
-}
-
-interface DockStreaming {
-  readonly operationId: string
-  keeperId: string
-  shown: string
-  full: string
-  sug: string[]
 }
 
 const FALLBACK_DOCK_STARTERS: string[] = [
@@ -68,27 +49,9 @@ const DOCK_STARTERS_BY_ROUTE: Record<string, string[]> = {
   '/logs': ['최근 오류만 정리', '경고 패턴 묶어줘', '다음 조사 경로 추천'],
 }
 
-function nowHM(): string {
-  const d = new Date()
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
 function statusLooksRunning(status?: string | null): boolean {
   const s = (status ?? '').toLowerCase()
   return s === 'running' || s === 'run' || s === 'online' || s === 'healthy'
-}
-
-function mdInline(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-}
-
-function Para({ text }: { text: string }) {
-  return text.split('\n\n').map((p, i) => html`<p key=${i} dangerouslySetInnerHTML=${{ __html: mdInline(p) }} />`)
 }
 
 export function starterPromptsForContext(ctx: Pick<SurfaceContext, 'route'>): string[] {
@@ -245,14 +208,11 @@ const dockOpen = persistentSignal<DockState>({
   key: 'dashboard:copilot-dock',
   defaultValue: { open: false, mode: 'dock', keeperId: 'masc-improver', x: null, y: null },
 })
-const dockThreads = signal<Record<string, DockMessage[]>>({})
-const dockStreaming = signal<DockStreaming | null>(null)
-
 export function useCopilotDock() {
   return {
     state: dockOpen,
-    threads: dockThreads,
-    streaming: dockStreaming,
+    threads: keeperThreads,
+    sending: keeperSending,
     open: () => { dockOpen.value = { ...dockOpen.value, open: true } },
     close: () => { dockOpen.value = { ...dockOpen.value, open: false } },
     toggle: () => { dockOpen.value = { ...dockOpen.value, open: !dockOpen.value.open } },
@@ -260,63 +220,10 @@ export function useCopilotDock() {
     setKeeper: (keeperId: string) => { dockOpen.value = { ...dockOpen.value, keeperId } },
     patch: (patch: Partial<DockState>) => { dockOpen.value = { ...dockOpen.value, ...patch } },
     send: (text: string, keeper: DockKeeper, ctx: SurfaceContext) => {
-      if (!text.trim() || dockStreaming.value) return
-      const kid = keeper.id
-      dockThreads.value = {
-        ...dockThreads.value,
-        [kid]: [...(dockThreads.value[kid] ?? []), { role: 'user', ts: nowHM(), text }],
-      }
-      const abortController = new AbortController()
-      const operationId = newKeeperChatOperationId()
-      dockStreaming.value = { operationId, keeperId: kid, shown: '', full: '', sug: [] }
-      const ownsStream = () => dockStreaming.value?.operationId === operationId
-      let admission: KeeperStreamAdmission = Object.freeze({ keeperName: kid, operationId,
-        authRevision: currentStoredTokenRevision() })
-      let replyText = ''
-      streamKeeperMessage(kid, text, {
-        operationId,
-        signal: abortController.signal,
-        channel: 'copilot',
-        resolveChannelWorkspaceId: currentDashboardActor,
-        surfaceContext: ctx,
-        onAdmission: next => {
-          assertCurrentKeeperStreamAdmission(next)
-          admission = next
-        },
-        onEvent: (event) => {
-          assertCurrentKeeperStreamAdmission(admission)
-          if (!ownsStream()) return
-          if (event.type === 'TEXT_MESSAGE_CONTENT' && typeof event.delta === 'string') {
-            replyText += event.delta
-            const current = dockStreaming.value
-            if (current && current.keeperId === kid) {
-              dockStreaming.value = { ...current, shown: replyText }
-            }
-          }
-        },
-      })
-        .then((outcome) => {
-          if (!ownsStream()) return
-          assertCurrentKeeperStreamAdmission(admission)
-          dockStreaming.value = null
-          dockThreads.value = {
-            ...dockThreads.value,
-            [kid]: [...(dockThreads.value[kid] ?? []), { role: 'assistant', ts: nowHM(), text: replyText,
-              delivery: outcome.terminal ? 'delivered' : 'interrupted' }],
-          }
-        })
-        .catch((err) => {
-          if (!ownsStream()) return
-          dockStreaming.value = null
-          const withdrawn = err instanceof KeeperStreamAuthenticationSupersededError
-            || admission.authRevision !== currentStoredTokenRevision()
-          const message = err instanceof Error ? err.message : 'Keeper stream failed'
-          dockThreads.value = {
-            ...dockThreads.value,
-            [kid]: [...(dockThreads.value[kid] ?? []), { role: 'assistant', ts: nowHM(), text: replyText,
-              delivery: withdrawn ? 'interrupted' : 'error', error: withdrawn ? null : message }],
-          }
-        })
+      if (!text.trim()) return
+      void sendKeeperThreadMessage(keeper.id, text, {
+        channel: 'copilot', resolveChannelWorkspaceId: currentDashboardActor, surfaceContext: ctx,
+      }).catch(() => { /* The shared action records delivery and error on its canonical entry. */ })
     },
   }
 }
@@ -373,40 +280,9 @@ function StatusDot({ status }: { status: string }) {
   `
 }
 
-function DockMessageRow({ m, keeper, onPick }: { m: DockMessage; keeper: DockKeeper; onPick: (s: string) => void }) {
-  const isUser = m.role === 'user'
-  return html`
-    <div class=${`dmsg ${isUser ? 'user' : ''}`} data-dock-message=${m.role}>
-      ${isUser
-        ? html`<div class="dmsg-av op">YOU<//>`
-        : html`<${KeeperBadge} id=${keeper.id} name=${keeper.kr} variant="sigil" size="lg" beat=${statusLooksRunning(keeper.status)} />`}
-      <div class="dmsg-col">
-        <div class="dmsg-hd">
-          <span class="who">${isUser ? 'operator' : keeper.kr}</span>
-          <span class="ts mono">${m.ts}</span>
-          ${m.delivery === 'interrupted' ? html`<span class="ts">응답 관측 중단</span>` : null}
-          ${m.delivery === 'delivered' && !m.text.trim() ? html`<span class="ts">표시할 본문 없음</span>` : null}
-        </div>
-        <div class=${`dbubble ${isUser ? 'user' : ''}`}><${Para} text=${m.text} /></div>
-        ${m.error ? html`<div role="alert">${m.error}</div>` : null}
-        ${!isUser && m.sug
-          ? html`
-              <div class="dsug">
-                ${m.sug.map((s, i) => html`
-                  <button key=${i} onClick=${() => onPick(s)}><span class="pre">›</span>${s}</button>
-                `)}
-              </div>
-            `
-          : null}
-      </div>
-    </div>
-  `
-}
-
 export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
   // deriveDockKeepers/getSurfaceContext are pure derivations of keepers + route.
-  // Memoized so the 40ms streaming-animation re-renders (dockStreaming.value)
-  // skip the O(N) keeper map/merge and the surface-context rebuild.
+  // Reuse context derivations while canonical stream entries update.
   const keeperRows = useMemo(() => deriveDockKeepers(keepers.value), [keepers.value])
   const keeper = keeperRows.find(k => k.id === dock.state.value.keeperId) ?? keeperRows[0] ?? {
     id: 'masc-improver',
@@ -418,7 +294,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
   const ctx = useMemo(() => getSurfaceContext(keeper.id), [route.value, keepers.value, keeper.id])
   const starterPrompts = useMemo(() => starterPromptsForContext(ctx), [ctx.route])
   const msgs = dock.threads.value[keeper.id] ?? []
-  const streaming = dock.streaming.value && dock.streaming.value.keeperId === keeper.id ? dock.streaming.value : null
+  const sending = dock.sending.value[keeper.id] === true
   const [val, setVal] = useState('')
   const [focus, setFocus] = useState(false)
   const [pickOpen, setPickOpen] = useState(false)
@@ -430,7 +306,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
   useEffect(() => {
     const el = threadRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [msgs.length, streaming?.shown, keeper.id])
+  }, [msgs, keeper.id])
 
   const doSend = (text?: string) => {
     const v = text !== undefined ? text : val
@@ -585,7 +461,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
       </div>
 
       <div class="dock-thread" ref=${threadRef}>
-        ${msgs.length === 0 && !streaming
+        ${msgs.length === 0 && !sending
           ? html`
               <div class="dock-empty">
                 <div class="ico"><${MessageCircle} size=${26} aria-hidden="true" /></div>
@@ -599,18 +475,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
               </div>
             `
           : html`
-              ${msgs.map((m, i) => html`<${DockMessageRow} key=${i} m=${m} keeper=${keeper} onPick=${doSend} />`)}
-              ${streaming
-                ? html`
-                    <div class="dmsg" data-dock-message="assistant">
-                      <${KeeperBadge} id=${keeper.id} name=${keeper.kr} variant="sigil" size="lg" beat=${true} />
-                      <div class="dmsg-col">
-                        <div class="dmsg-hd"><span class="who">${keeper.kr}</span><span class="ts mono">작성 중…</span></div>
-                        <div class="dbubble"><${Para} text=${streaming.shown} /><span class="dcaret"></span></div>
-                      </div>
-                    </div>
-                  `
-                : null}
+              <${ChatTranscript} entries=${msgs} keeperName=${keeper.id} emptyText="표시할 대화 없음" variant="messenger" />
             `}
       </div>
 
@@ -632,7 +497,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
             type="button"
             class="dock-send"
             aria-label="메시지 전송"
-            disabled=${!val.trim() || !!dock.streaming.value}
+            disabled=${!val.trim()}
             onClick=${() => doSend()}
           >
             <${Send} size=${14} aria-hidden="true" />

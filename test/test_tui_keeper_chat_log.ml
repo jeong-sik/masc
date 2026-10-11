@@ -675,6 +675,25 @@ let test_events_query_spells_both_cursors () =
 (* The pager follows has_more only while both cursors advance, starts where
    it is told from the first row, asks every later page from the byte offset
    the page before handed back, and stops at the first error. *)
+let test_journal_final_page_rejects_invalid_event_frontiers () =
+  let event seq = line seq 1. (E.Text_delta {text="authored bytes"; response=Unobserved_scope None}) in
+  let offset = match Journal.page_start_of_wire (Some 100) with
+    | Some offset -> offset | None -> fail "fixture offset" in
+  List.iter (fun (events, next_since_seq) ->
+    let fetch ~since_seq:_ ~since_offset:_ = Ok {
+      Log.source=Log.Operation "op"; events; has_more=false;
+      next_since_seq; next_since_offset=offset } in
+    match Log.read_whole_journal ~since_seq:(Journal.After_seq 1) ~fetch with
+    | Error (Log.Events_undecodable _) -> ()
+    | Ok _ -> fail "invalid final page was accepted"
+    | Error error -> fail (Log.events_error_to_string error)
+  ) [ [event 3; event 2], Journal.After_seq 2;
+      [event 2; event 2], Journal.After_seq 2;
+      [event 1], Journal.After_seq 1;
+      [event 2], Journal.After_seq 9;
+      [], Journal.After_seq 2 ]
+;;
+
 let test_read_whole_journal_pages_until_the_position_stops_moving () =
   let asked = ref [] in
   let l seq = line seq (float_of_int seq) (E.Text_delta {text=(string_of_int seq); response=Unobserved_scope (None)}) in
@@ -780,7 +799,7 @@ let test_read_whole_journal_pages_until_the_position_stops_moving () =
   let failing ~since_seq ~since_offset:_ =
     match since_seq with
     | Journal.Whole_turn ->
-        page ~events:[] ~has_more:true ~next_since_seq:(Journal.After_seq 5)
+        page ~events:[l 5] ~has_more:true ~next_since_seq:(Journal.After_seq 5)
           ~next_since_offset:40
     | Journal.After_seq _ -> Error Log.Journal_pruned
   in
@@ -1142,6 +1161,8 @@ let () =
             test_hold_seq_counts_without_an_entry
         ; test_case "the events query spells both cursors" `Quick
             test_events_query_spells_both_cursors
+        ; test_case "final pages reject invalid event frontiers" `Quick
+            test_journal_final_page_rejects_invalid_event_frontiers
         ; test_case "read_whole_journal pages until the position stops moving" `Quick
             test_read_whole_journal_pages_until_the_position_stops_moving
         ] )

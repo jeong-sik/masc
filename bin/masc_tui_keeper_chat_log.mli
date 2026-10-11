@@ -217,7 +217,9 @@ val read_whole_journal :
     [next_since_offset] of the
     page before, beside its [next_since_seq]. The read follows [has_more]
     while both cursors advance past the ones asked from. The first error ends
-    the read; a page that claims more without advancing is
+    the read. Event sequences must strictly advance from the requested
+    position and the returned sequence cursor must equal the last served
+    event (or the requested position on an empty page). A page that claims more without advancing is
     {!Events_undecodable}, naming the positions, never a shorter [Ok]. *)
 
 val read_with_operation_state :

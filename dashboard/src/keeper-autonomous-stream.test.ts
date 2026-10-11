@@ -36,6 +36,18 @@ describe('autonomous journal recovery', () => {
     await recoverKeeperAutonomousTurn('k', 'trace#9', 0)
     expect(keeperThreads.value.k?.[0]?.text).toBe('a')
   })
+  it('resumes after a later page fails without repeating already-applied speech', async () => {
+    vi.mocked(fetchKeeperTurnEvents)
+      .mockResolvedValueOnce({ ...page(0, text('first ')), hasMore: true })
+      .mockRejectedValueOnce(new Error('second page unavailable'))
+      .mockResolvedValueOnce(page(1, text('second')))
+    await expect(recoverKeeperAutonomousTurn('k', 'trace#9', 1)).rejects.toThrow('second page unavailable')
+    expect(keeperThreads.value.k?.[0]?.text).toBe('first ')
+    await recoverKeeperAutonomousTurn('k', 'trace#9', 1)
+    expect(fetchKeeperTurnEvents).toHaveBeenLastCalledWith('k', 'trace#9', { sequence: 0, offset: 1 })
+    expect(keeperThreads.value.k?.[0]?.text).toBe('first second')
+    expect(keeperThreads.value.k?.[0]?.responseState).toMatchObject({ lastSequence: 1 })
+  })
   it('does not fabricate content for a connector-only journal row', async () => {
     vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(0, null))
     await recoverKeeperAutonomousTurn('k', 'trace#9', 0)

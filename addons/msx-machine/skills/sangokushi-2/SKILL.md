@@ -160,10 +160,19 @@ and confirm the next officer or battle prompt before continuing.
   a partly drawn command menu; a later Return exposed the next officer's command
   prompt. The displayed troop totals did not change, so this does
   not establish an enemy hit or a universally valid attack direction.
-- `4` asks `誰の様子を見ますか? (0:見る RET:やめる)`. `0` displayed an officer
-  panel including soldiers, training and armament. From the officer-choice
-  prompt, `RET:やめる` indicates Return to leave. Inspect training rather than
-  assuming recruited troops are trained.
+- `4` asks `誰の様子を見ますか? (0:見る RET:やめる)`. Move the information
+  cursor with the hex-direction digits, then press `0` to inspect the officer
+  on that hex. This is an information cursor, not a troop movement command.
+  In the March 220 province-21 battle, `0` first showed Yue Jin's panel:
+  soldiers 10, training 53 and martial ability 86. Separate `2`, `2`, `0`
+  inputs then showed Xu Huang: soldiers 50, training 61 and martial ability 92.
+  That sequence depends on the current positions; it is not a universal way to
+  select Xu Huang. Confirm the displayed name before using the numbers.
+  `RET:やめる` indicates Return to leave. Inspect the resulting command prompt
+  before sending another command. Current training values do not establish a
+  training gain, and soldier values use the game's display units.
+  An empty hex did not produce a new officer panel in this observation: retained
+  information does not establish that an enemy occupies the selected hex.
 - `6` asks `全軍退却しますか(Y/N)?`; after `y` each unit asks
   `<退却>:20 <武将>はどこに退却しますか?`. Type the province number shown and
   Return; an empty Return is not an answer. After the last unit the map comes

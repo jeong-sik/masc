@@ -48,7 +48,7 @@ type scheduled =
 
 type awaiting =
   { asked_by : string
-  ; tool_call_id : string
+  ; approval_id : Masc.Keeper_tool_approval_id.t
   ; question : string
   ; asked_at : float
   ; timeout_sec : float
@@ -148,7 +148,7 @@ type tone =
     waiting on the operator and had no way to reach any of it. *)
 type destination =
   | Nowhere
-  | Keeper_holding of { keeper : string; tool_call_id : string }
+  | Keeper_holding of { keeper : string; approval_id : Masc.Keeper_tool_approval_id.t }
       (** The exact held call; one Keeper can have several awaiting answers. *)
   | Goal_to_confirm of string  (** the Goal, confirmed on its own detail *)
   | Stuck_task of string  (** the task, read on its own detail *)

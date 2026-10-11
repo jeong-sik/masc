@@ -23600,13 +23600,21 @@ and is loaded on demand through keeper_skill.
                  | Some { Masc_tui_agenda.goes_to = Masc_tui_agenda.Nowhere; _ }
                  | None -> ()
                  | Some
-                     { Masc_tui_agenda.goes_to = Masc_tui_agenda.Keeper_holding _
+                     { Masc_tui_agenda.goes_to = Masc_tui_agenda.Keeper_holding { keeper; approval_id }
                      ; _
                      } ->
-                     (* The held call is answered on the Approvals surface,
-                        which is where every held call is answered. *)
-                     close ();
-                     goto_surface state ~mailbox:async_messages Approvals
+                     let request = Home_held_call { keeper; approval_id } in
+                     (match List.find_index
+                       (fun row -> Masc_tui_home.home_request_of_approval row = request)
+                       (Masc_tui_approvals_model.approval_items state) with
+                      | None -> report_action state "system" "Request changed; choose again"
+                      | Some cursor ->
+                          close ();
+                          goto_surface ~from_reference:true state ~mailbox:async_messages Approvals;
+                          state.home_opened_request <- Some request;
+                          state.approval_cursor <- cursor;
+                          state.approval_detail_open <- true;
+                          state.approval_detail_scroll <- 0)
                  | Some
                      { Masc_tui_agenda.goes_to =
                          Masc_tui_agenda.Goal_to_confirm goal_id

@@ -5919,7 +5919,7 @@ type keeper_composer_draft = {
 (* Home links identify destinations, never an inferred approval target. The
    approval/agenda screens still own the exact request and its decision. *)
 type home_request =
-  | Home_held_call of { keeper : string; call_id : string }
+  | Home_held_call of { keeper : string; approval_id : Masc.Keeper_tool_approval_id.t }
   | Home_gate_request of string
   | Home_operator_request of string
   | Home_question of string
@@ -11865,7 +11865,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
         (List.map
            (fun (held : Tui_decode.keeper_tool_approval) ->
               { Masc_tui_agenda.asked_by = held.kta_keeper
-              ; tool_call_id = held.kta_tool_call_id
+              ; approval_id = held.kta_approval_id
               ; question = held.kta_tool
               ; asked_at = held.kta_asked_at
               ; timeout_sec = held.kta_timeout_sec

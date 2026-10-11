@@ -24,7 +24,7 @@ type scheduled =
 
 type awaiting =
   { asked_by : string
-  ; tool_call_id : string
+  ; approval_id : Masc.Keeper_tool_approval_id.t
   ; question : string
   ; asked_at : float
   ; timeout_sec : float
@@ -198,7 +198,7 @@ type tone =
    than an answer. *)
 type destination =
   | Nowhere
-  | Keeper_holding of { keeper : string; tool_call_id : string }
+  | Keeper_holding of { keeper : string; approval_id : Masc.Keeper_tool_approval_id.t }
       (** The exact held call; one Keeper can have several awaiting answers. *)
   | Goal_to_confirm of string  (** the Goal, confirmed on its own detail *)
   | Stuck_task of string  (** the task, read on its own detail *)
@@ -329,7 +329,7 @@ let overlay ~now ~localtime ~cols t =
       List.map
         (fun (held : awaiting) ->
            { tone = Question
-           ; goes_to = Keeper_holding { keeper = held.asked_by; tool_call_id = held.tool_call_id }
+           ; goes_to = Keeper_holding { keeper = held.asked_by; approval_id = held.approval_id }
            ; text =
                two_column
                  ~cols

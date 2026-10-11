@@ -385,23 +385,34 @@ let test_distinct_calls_from_one_keeper_remain_reachable () =
     ; kta_timeout_sec = 300.
     }
   in
-  let first = held "call-a" and second = held "call-b" in
+  let first = held "provider-reused" and second = held "provider-reused" in
   state.keeper_tool_approvals_observed <- true;
   state.keeper_tool_approvals <- [first; second];
+  let first_request = Masc_tui_types.Home_held_call
+    { keeper = "keeper-a"; approval_id = first.kta_approval_id } in
+  let second_request = Masc_tui_types.Home_held_call
+    { keeper = "keeper-a"; approval_id = second.kta_approval_id } in
+  check bool "same provider call has distinct Home request identities" false
+    (first_request = second_request);
+  let actions = Masc_tui_home.home_actions state in
+  check bool "Home exposes the first admission" true
+    (List.mem (Masc_tui_types.Home_request first_request) actions);
+  check bool "Home exposes the second admission" true
+    (List.mem (Masc_tui_types.Home_request second_request) actions);
   state.goals_to_confirm <- Agenda.Read [goal ~goal_id:"goal-a" "Proof"];
   let displayed = lines_of_state state in
   let advance lines =
     state.agenda_selected <- Agenda.step lines ~selected:state.agenda_selected Agenda.Next
   in
-  let target tool_call_id =
-    Agenda.Keeper_holding { keeper = "keeper-a"; tool_call_id }
+  let target held =
+    Agenda.Keeper_holding { keeper = "keeper-a"; approval_id = held.Masc.Tui_decode.kta_approval_id }
   in
   advance displayed;
   check bool "first held call is selected" true
-    (opened_target state displayed = Some (target "call-a"));
+    (opened_target state displayed = Some (target first));
   advance displayed;
   check bool "j reaches the same Keeper's second call" true
-    (opened_target state displayed = Some (target "call-b"));
+    (opened_target state displayed = Some (target second));
   let old_row = selected_row state displayed in
   advance displayed;
   check bool "j passes both calls to reach the Goal" true
@@ -412,7 +423,7 @@ let test_distinct_calls_from_one_keeper_remain_reachable () =
   check bool "the selected call moves after refresh" true
     (selected_row state refreshed <> old_row);
   check bool "refresh preserves the specific held call" true
-    (opened_target state refreshed = Some (target "call-b"))
+    (opened_target state refreshed = Some (target second))
 
 let test_goal_selection_survives_refresh_reordering () =
   let state = agenda_state () in

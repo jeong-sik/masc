@@ -5,7 +5,7 @@ open Masc_tui_approvals_model
 
 let home_request_of_approval = function
   | Keeper_tool_row held ->
-      Home_held_call { keeper = held.Tui_decode.kta_keeper; call_id = held.kta_tool_call_id }
+      Home_held_call { keeper = held.Tui_decode.kta_keeper; approval_id = held.kta_approval_id }
   | Gate_row pending -> Home_gate_request pending.Tui_decode.gp_id
   | Operator_row item -> Home_operator_request item.ap_token
 

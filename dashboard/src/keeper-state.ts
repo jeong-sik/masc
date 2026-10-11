@@ -1498,7 +1498,9 @@ function mergeLocalAssistantObservations(
   const toolAuthorityUnavailable = [...exactLocalEntries, ...exactCanonicalEntries, historyEntry]
     .some(entry => entry.toolObservationAuthority === 'unavailable')
   const autonomousTraceBoundary = exactLocalEntries.find(entry => entry.autonomousTraceBoundary !== undefined)?.autonomousTraceBoundary
+  const autonomousSayingReplay = exactLocalEntries.find(entry => entry.autonomousSayingReplay)?.autonomousSayingReplay
   const mergedHistory = { ...historyEntry,
+    ...(autonomousSayingReplay ? { autonomousSayingReplay } : {}),
     ...(autonomousTraceBoundary !== undefined ? { autonomousTraceBoundary } : {}),
     ...(exactLocalEntries.find(entry => entry.autonomousThinkingReplay)?.autonomousThinkingReplay
       ? { autonomousThinkingReplay: exactLocalEntries.find(entry => entry.autonomousThinkingReplay)!.autonomousThinkingReplay } : {}),

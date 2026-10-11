@@ -210,6 +210,17 @@ describe('autonomous journal recovery', () => {
     expect(fetchKeeperTurnEvents).not.toHaveBeenCalled()
     expect(keeperThreads.value.k).toBeUndefined()
   })
+  it('recovers historical speech before a tool while keeping the final canonical answer', () => {
+    mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
+      turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null }])
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('checking '))
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 1, text('files'))
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 2, { ...base, type: 'TOOL_CALL_START', toolStreamScope: 0,
+      toolCallBlockIndex: 1, toolCallName: 'Read' })
+    const parent = keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')
+    expect(parent).toMatchObject({ text: 'canonical answer', delivery: 'history', streamState: null,
+      traceSteps: [{ kind: 'progress', text: 'checking files' }, { kind: 'tool', name: 'Read' }] })
+  })
   it('deduplicates replay at the turn-owned reducer boundary', () => {
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('a'))
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('a'))

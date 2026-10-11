@@ -320,6 +320,33 @@ a province number change within January does not. This replay used native
 worker source `1632107405d574726b90f0ac918ceeaf98ddbbcb` and proves one campaign
 month, not victory or a normal winning ending.
 
+## Ruler death, succession and a surviving retreat
+
+A battle defeat can be followed by ruler death without ending the campaign.
+In the manually played May 220 province-21 defeat, Cao Ren's retreat prompt
+listed destinations 19 and 20. Entering `19`, Return produced
+`曹丕軍は敗れました`; this names the defeated army and does not establish
+that Cao Pi was captured. A subsequent report explicitly said
+`君主の曹丕が死亡しました`.
+
+Advance reports with `step` until an interactive prompt appears. At
+`曹丕の後継者を選んで下さい(0-52)?`, the visible list identified Xu Shu
+as number 6 with charm 85. `6`, Return produced
+`徐庶が後を継ぎ君主になりました`. Use the current list; index 6 and the
+selection range belong to that campaign state.
+
+The next event was Sun Quan's marriage proposal, delivered by Zhuge Jin:
+`1.承知する 2.断わる 3.捕らえる`. `1`, Return displayed a portrait and
+retained the input; another Return advanced to June. This verifies the
+acceptance input and event progression, not an alliance's duration or effects.
+
+At the June province-6 command, `8`, Return, `1`, Return, `19`, Return
+opened owned province 19's information. It showed Cao Xiu as governor and
+soldiers 21, gold 750 and food 50. `2`, Return opened its officer list;
+`10`, Return showed Cao Ren alive with soldiers 21. His loyalty was 64.
+The province panel does not show training or armament. This proves one
+survivor's return after defeat, not every officer's fate or a winning ending.
+
 ## Watching an all-AI game
 
 `0` at `何人でプレイしますか` starts with no human ruler and goes straight to the

@@ -29,6 +29,7 @@ const MCP_PROTOCOL_VERSION = '2026-07-28'
 const MCP_BLOCKED_MESSAGE = 'MCP 연결이 차단되었습니다.'
 const MCP_AUTH_CHANGED_MESSAGE = 'MCP authentication changed during request'
 
+export interface McpAdmission { readonly fromRevision: number; readonly authRevision: number }
 interface McpRequestBinding {
   readonly authRevision: number
 }
@@ -374,6 +375,8 @@ async function callMcpToolInternal(
   args: Record<string, unknown>,
   allowAuthRecovery = true,
   admittedRevision = currentStoredTokenRevision(),
+  onAdmission?: (admission: McpAdmission) => void,
+  publicationFromRevision = admittedRevision,
 ): Promise<string> {
   const requestId = randomUuid()
   synchronizeMcpAuthRevision()
@@ -382,6 +385,8 @@ async function callMcpToolInternal(
   try {
     const binding = await ensureBinding(admittedRevision)
     attemptedBinding = binding
+    onAdmission?.(Object.freeze({ fromRevision: publicationFromRevision, authRevision: binding.authRevision }))
+    assertBinding(binding)
     // ensureBinding may install the loopback dev credential, so classify
     // identity authority only after it returns. Never let a caller-supplied
     // transport hint override the credential used by this request.
@@ -423,7 +428,7 @@ async function callMcpToolInternal(
     if (recovery) {
       assertAuthRevision(recovery.authRevision)
       observedTokenRevision = recovery.authRevision
-      return callMcpToolInternal(toolName, args, false, recovery.authRevision)
+      return callMcpToolInternal(toolName, args, false, recovery.authRevision, onAdmission, recovery.fromRevision)
     }
     if (attemptedBinding) assertBinding(attemptedBinding)
     const message = errorToString(err)
@@ -442,8 +447,8 @@ async function callMcpToolInternal(
   }
 }
 
-export async function callMcpTool(toolName: string, args: Record<string, unknown>): Promise<string> {
-  return callMcpToolInternal(toolName, args)
+export async function callMcpTool(toolName: string, args: Record<string, unknown>, options: { onAdmission?: (admission: McpAdmission) => void } = {}): Promise<string> {
+  return callMcpToolInternal(toolName, args, true, currentStoredTokenRevision(), options.onAdmission)
 }
 
 // --- MCP tools/list — fetch tool schemas with inputSchema ---

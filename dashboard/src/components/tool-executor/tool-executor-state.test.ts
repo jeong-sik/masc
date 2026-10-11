@@ -34,6 +34,7 @@ it('does not publish a result into a replacement selection', async () => {
  let resolve!: (text: string) => void
  mocks.call.mockImplementationOnce(() => new Promise<string>(r => { resolve = r }))
  selectTool(schema('first')); const pending = executeTool()
+ await vi.waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(1))
  selectTool(schema('second')); resolve('old output'); await pending
  expect(lastResult.value).toBeNull(); expect(executing.value).toBe(false)
  expect(mocks.toast).not.toHaveBeenCalled()
@@ -44,8 +45,9 @@ it('admits a new credential execution without old cleanup clearing its busy stat
  mocks.call.mockImplementationOnce(() => new Promise<string>(r => { resolveOld = r }))
  mocks.call.mockImplementationOnce(() => new Promise<string>(r => { resolveNew = r }))
  selectTool(schema('first')); const old = executeTool()
+ await vi.waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(1))
  setStoredToken('synthetic-execution-replacement'); selectTool(schema('second'))
- const replacement = executeTool(); const calls = mocks.call.mock.calls.length
+ const replacement = executeTool(); await vi.waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(2)); const calls = mocks.call.mock.calls.length
  resolveOld('old output'); await old
  const busy = executing.value; const result = lastResult.value
  resolveNew?.('new output'); await replacement

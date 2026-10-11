@@ -7,6 +7,7 @@ import { shellAuthSummary } from '../../store'
 import { dashboardAuthAccess, type DashboardAuthRole } from '../../lib/dashboard-auth-access'
 import { errorToString } from '../../lib/format-string'
 import { currentStoredTokenRevision, subscribeStoredTokenChanges } from '../../api/core'
+import { storedTokenRevision } from '../../api/token-revision'
 
 const allToolSchemas = signal<McpToolSchema[]>([])
 export const schemasLoading = signal(false)
@@ -16,12 +17,27 @@ let schemaCacheReceipt: { readonly authRevision: number; readonly at: number } |
 export const searchQuery = signal('')
 export const tierFilter = signal<string>('all')
 
-export const selectedTool = signal<McpToolSchema | null>(null)
-export const formValues = signal<Record<string, unknown>>({})
-export const validationErrors = signal<string[]>([])
-
-export const executing = signal(false)
-export const lastResult = signal<{ success: boolean; text: string; toolName: string; timestamp: number } | null>(null)
+interface ToolResult { readonly success: boolean; readonly text: string; readonly toolName: string; readonly timestamp: number }
+interface SelectionState {
+  readonly id: symbol
+  readonly authRevision: number
+  readonly tool: McpToolSchema | null
+  readonly values: Record<string, unknown>
+  readonly errors: string[]
+  readonly result: ToolResult | null
+}
+function emptySelection(): SelectionState {
+  return Object.freeze({ id: Symbol('tool-selection'), authRevision: currentStoredTokenRevision(), tool: null, values: {}, errors: [], result: null })
+}
+const selection = signal<SelectionState>(emptySelection())
+const visibleSelection = computed(() => selection.value.authRevision === storedTokenRevision.value ? selection.value : null)
+export const selectedTool = computed(() => visibleSelection.value?.tool ?? null)
+export const formValues = computed(() => visibleSelection.value?.values ?? {})
+export const validationErrors = computed(() => visibleSelection.value?.errors ?? [])
+export const lastResult = computed(() => visibleSelection.value?.result ?? null)
+interface ExecutionOwner { readonly id: symbol; readonly authRevision: number; readonly selection: symbol }
+const execution = signal<ExecutionOwner | null>(null)
+export const executing = computed(() => execution.value !== null && execution.value.authRevision === storedTokenRevision.value)
 
 function selectedToolRequiredRole(tool: McpToolSchema | null): DashboardAuthRole {
   return tool?.annotations?.readOnlyHint === true ? 'reader' : 'worker'
@@ -46,10 +62,6 @@ export const filteredTools = computed(() => {
   return tools
 })
 
-let selectionOwner = Object.freeze({})
-interface ExecutionOwner { readonly authRevision: number; readonly selection: object }
-let executionOwner: ExecutionOwner | null = null
-
 type SchemaReadOwner =
   | { readonly kind: 'preparing'; readonly id: symbol; readonly authRevision: number }
   | { readonly kind: 'admitted'; readonly id: symbol; readonly authRevision: number }
@@ -57,7 +69,6 @@ let schemaReadOwner: SchemaReadOwner | null = null
 subscribeStoredTokenChanges(() => {
   const revision = currentStoredTokenRevision()
   if (schemaReadOwner?.kind === 'admitted' && schemaReadOwner.authRevision !== revision) schemaReadOwner = null
-  executionOwner = null
   batch(() => {
     if (schemaCacheReceipt?.authRevision !== revision) {
       schemaCacheReceipt = null
@@ -67,8 +78,6 @@ subscribeStoredTokenChanges(() => {
       schemasLoading.value = false
       schemasError.value = null
     }
-    executing.value = false
-    clearSelection()
   })
 })
 
@@ -113,70 +122,68 @@ export async function loadToolSchemas(force = false): Promise<void> {
 }
 
 export function selectTool(tool: McpToolSchema): void {
-  selectionOwner = Object.freeze({})
-  selectedTool.value = tool
-  formValues.value = buildDefaults(tool.inputSchema)
-  validationErrors.value = []
-  lastResult.value = null
+  selection.value = Object.freeze({ ...emptySelection(), tool, values: buildDefaults(tool.inputSchema) })
 }
 
 export function clearSelection(): void {
-  selectionOwner = Object.freeze({})
-  selectedTool.value = null
-  formValues.value = {}
-  validationErrors.value = []
-  lastResult.value = null
+  selection.value = emptySelection()
 }
 
 export function updateFormValues(values: Record<string, unknown>): void {
-  formValues.value = values
-  if (validationErrors.value.length > 0) {
-    validationErrors.value = validationErrors.value.filter(
-      name => values[name] === undefined || values[name] === null || values[name] === '',
-    )
-  }
+  const current = visibleSelection.value
+  if (!current) return
+  selection.value = Object.freeze({ ...current, values,
+    errors: current.errors.filter(name => values[name] === undefined || values[name] === null || values[name] === '') })
 }
 
+class ToolExecutionSupersededError extends Error {}
+
 export async function executeTool(): Promise<void> {
-  const tool = selectedTool.value
-  if (!tool || executionOwner) return
+  const submitted = visibleSelection.value
+  const tool = submitted?.tool
+  if (!submitted || !tool || executing.value) return
   const access = dashboardAuthAccess(shellAuthSummary.value, selectedToolRequiredRole(tool))
   if (!access.allowed) {
     showToast(access.reason ?? `${tool.name} 실행 권한 없음`, 'error', 6000)
     return
   }
-  const missing = validateRequired(formValues.value, tool.inputSchema)
+  const missing = validateRequired(submitted.values, tool.inputSchema)
   if (missing.length > 0) {
-    validationErrors.value = missing
+    selection.value = Object.freeze({ ...submitted, errors: missing })
     showToast(`필수 필드 누락: ${missing.join(', ')}`, 'error')
     return
   }
-  const owner = Object.freeze({ authRevision: currentStoredTokenRevision(), selection: selectionOwner })
-  const args = stripEmptyOptionals(formValues.value, tool.inputSchema)
-  executionOwner = owner
-  const owns = () => executionOwner === owner && owner.authRevision === currentStoredTokenRevision()
-  const ownsSelection = () => owns() && selectionOwner === owner.selection
+  const id = Symbol('tool-execution')
+  const args = stripEmptyOptionals(submitted.values, tool.inputSchema)
+  const owns = () => execution.value?.id === id && execution.value.authRevision === currentStoredTokenRevision()
+  const ownsSelection = () => owns() && selection.value.id === submitted.id && selection.value.authRevision === currentStoredTokenRevision()
   try {
-    executing.value = true
+    execution.value = Object.freeze({ id, authRevision: submitted.authRevision, selection: submitted.id })
     if (!ownsSelection()) return
-    lastResult.value = null
+    selection.value = Object.freeze({ ...submitted, result: null })
     if (!ownsSelection()) return
-    const text = await callMcpTool(tool.name, args)
+    const text = await callMcpTool(tool.name, args, { onAdmission: binding => {
+      const pending = execution.value
+      if (pending?.id !== id || pending.authRevision !== binding.fromRevision
+        || binding.authRevision !== currentStoredTokenRevision()
+        || selection.value.id !== submitted.id) throw new ToolExecutionSupersededError()
+      batch(() => {
+        execution.value = Object.freeze({ id, authRevision: binding.authRevision, selection: submitted.id })
+        selection.value = Object.freeze({ ...selection.value, authRevision: binding.authRevision })
+      })
+      if (!ownsSelection()) throw new ToolExecutionSupersededError()
+    } })
     if (!ownsSelection()) return
-    lastResult.value = { success: true, text, toolName: tool.name, timestamp: Date.now() }
+    selection.value = Object.freeze({ ...selection.value, result: { success: true, text, toolName: tool.name, timestamp: Date.now() } })
     if (!ownsSelection()) return
     showToast(`${tool.name} 실행 완료`, 'success')
   } catch (err) {
     if (!ownsSelection()) return
     const message = errorToString(err)
-    lastResult.value = { success: false, text: message, toolName: tool.name, timestamp: Date.now() }
+    selection.value = Object.freeze({ ...selection.value, result: { success: false, text: message, toolName: tool.name, timestamp: Date.now() } })
     if (!ownsSelection()) return
     showToast(`${tool.name} 실행 실패`, 'error')
   } finally {
-    try {
-      if (owns()) executing.value = false
-    } finally {
-      if (executionOwner === owner) executionOwner = null
-    }
+    if (execution.value?.id === id) execution.value = null
   }
 }

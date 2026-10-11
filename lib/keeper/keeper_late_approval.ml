@@ -71,6 +71,7 @@ type t =
   ; mutable uncertain : uncertain_attempt list
   ; mutable journal_error : journal_error option
   ; mutable journal_path : string option
+  ; mutable skipped_rows : int
   ; mutex : Stdlib.Mutex.t
   }
 
@@ -80,6 +81,7 @@ let create () =
   ; uncertain = []
   ; journal_error = None
   ; journal_path = None
+  ; skipped_rows = 0
   ; mutex = Stdlib.Mutex.create ()
   }
 
@@ -176,25 +178,46 @@ let bind_to_journal ?now ~base_path t =
            view is re-derived by letting the same rules that produced the
            rows act on them again, so the store cannot disagree with its
            own history. Only complete rows are returned; a torn tail was
-           already cut by the recovery read. *)
+           already cut by the recovery read. A complete row this schema
+           cannot read is replayed as nothing: one foreign or future-schema
+           line must not fence the whole store. It stays in the journal
+           (never cleaned) and lands in the log, so skipping loses no
+           evidence. Only rows carrying this schema's tag reach
+           [validate_records] — an unverifiable v2 row cannot be told
+           apart from a tampered one, so those still fail the restore. *)
+        let skipped = ref 0 in
         let records =
           snapshot.Fs_compat.bytes
           |> String.split_on_char '\n'
           |> List.filter (fun line -> line <> "")
           |> List.filter_map (fun line ->
-                 match Yojson.Safe.from_string line with
-                 | `Assoc fields ->
-                     if List.assoc_opt "schema" fields <> Some (`String journal_schema) then
-                       raise (Yojson.Json_error "unknown late approval journal schema");
+                 let parsed =
+                   try Some (Yojson.Safe.from_string line)
+                   with Yojson.Json_error _ -> None
+                 in
+                 match parsed with
+                 | Some (`Assoc fields)
+                   when List.assoc_opt "schema" fields
+                        = Some (`String journal_schema) ->
                      (match List.assoc_opt "op" fields with
                       | Some (`String ("consume" | "deliver" | "ack_uncertain")) ->
                           (match List.assoc_opt "consume_id" fields with
                            | Some (`String id) when id <> "" -> ()
-                           | _ -> raise (Yojson.Json_error "missing consume attempt identity"))
+                           | _ ->
+                               raise
+                                 (Yojson.Json_error
+                                    "missing consume attempt identity"))
                       | _ -> ());
                      Some fields
-                 | _ -> raise (Yojson.Json_error "expected journal object"))
+                 | _ ->
+                     incr skipped;
+                     Log.Keeper.warn
+                       "late_approval_journal: restore skipped an unreadable \
+                        row: %s"
+                       line;
+                     None)
         in
+        t.skipped_rows <- !skipped;
         validate_records records;
         let read_field fields name =
           match List.assoc_opt name fields with
@@ -374,6 +397,7 @@ let bind_to_journal ?now ~base_path t =
   in
   with_store t (fun () ->
       t.expired <- []; t.remembered <- []; t.uncertain <- []; t.journal_error <- None;
+      t.skipped_rows <- 0;
       (try Eio_guard.run_in_systhread ~label:"late-approval-journal-restore" restore
        with Yojson.Json_error detail -> t.journal_error <- Some (Corrupt_journal detail));
       (* Bound after restore the way every other operation reaps: a record
@@ -384,6 +408,7 @@ let bind_to_journal ?now ~base_path t =
 
 let journal_uncertain t = with_store t (fun () -> List.length t.uncertain)
 let journal_error t = with_store t (fun () -> t.journal_error)
+let journal_skipped t = with_store t (fun () -> t.skipped_rows)
 let uncertain_attempts t ~base_path = with_store t (fun () ->
   match t.journal_error with
   | Some error -> Error error

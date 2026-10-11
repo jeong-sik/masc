@@ -588,23 +588,89 @@ let test_malformed_consume_cannot_restore_approval () =
         (Result.is_error (Late.uncertain_attempts second ~base_path:workspace))))
     ["base_path"; "keeper"; "tool"; "fingerprint"; "at"]
 
-let test_pre_id_journal_fails_closed () =
+let test_pre_id_schema_rows_are_skipped_not_fatal () =
+  (* A row from before the schema tag existed names no v2 identity, so it
+     cannot settle or fence anything: restore skips it, reports it, and the
+     store keeps working. *)
   with_journal (fun ~clock:_ ~journal ~make ~remove:_ ->
     Fs_compat.mkdir_p (Filename.dirname journal);
     Out_channel.with_open_bin journal (fun out ->
       output_string out "{\"op\":\"consume\",\"at\":0}\n");
     let store = make () in
-    check bool "old schema is an explicit fault" true
-      (match Late.journal_error store with Some (Late.Corrupt_journal _) -> true | _ -> false);
-    check bool "operator read cannot claim no uncertainty" true
-      (Result.is_error (Late.uncertain_attempts store ~base_path:workspace));
+    check bool "an old-schema row is not an explicit fault" true
+      (Late.journal_error store = None);
+    check int "the unreadable row is reported" 1 (Late.journal_skipped store);
     Late.note_timed_out store ~base_path:workspace ~keeper_name:keeper
       ~tool_call_id:"new" ~tool_name:"Edit" ~args:(edit_input "lib/a.ml") ();
-    check bool "faulted store cannot create reusable answer" true
+    check bool "a new late answer still stands" true
       (Late.remember_late store ~base_path:workspace ~keeper_name:keeper
-        ~tool_call_id:"new" ~actor:"operator" Registry.Approve () = Late.No_matching_ask);
-    check bool "faulted ack explicitly unavailable" true
-      (Late.ack_uncertain store ~base_path:workspace ~keeper_name:keeper ~consume_id:"unknown" () = Late.Ack_not_journaled))
+        ~tool_call_id:"new" ~actor:"operator" Registry.Approve ()
+       = Late.Remembered { tool_name = "Edit" });
+    check bool "the old row names nothing ackable" true
+      (Late.ack_uncertain store ~base_path:workspace ~keeper_name:keeper
+        ~consume_id:"unknown" () = Late.Not_uncertain);
+    check bool "the operator read is not fenced" true
+      (Result.is_ok (Late.uncertain_attempts store ~base_path:workspace)))
+
+let test_one_foreign_row_among_valid_rows_does_not_fence_restore () =
+  with_journal (fun ~clock:_ ~journal ~make ~remove:_ ->
+    let first = make () in
+    let args = edit_input "lib/a.ml" in
+    Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+      ~tool_call_id:"call-1" ~tool_name:"Edit" ~args ();
+    ignore
+      (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:"call-1" ~actor:"operator" Registry.Approve ());
+    (* A future schema's row lands after the valid history, the way a
+       downgrade or a stray write leaves it. *)
+    let oc = open_out_gen [Open_append] 0o644 journal in
+    output_string oc
+      (Yojson.Safe.to_string
+         (`Assoc
+           [ ("schema", `String "masc.late_approval.v3")
+           ; ("op", `String "remember_late") ])
+      ^ "\n");
+    close_out oc;
+    let second = make () in
+    check bool "restore succeeds past the foreign row" true
+      (Late.journal_error second = None);
+    check int "the foreign row is counted" 1 (Late.journal_skipped second);
+    check bool "the remembered answer still settles the retry" true
+      (Late.take second ~base_path:workspace ~keeper_name:keeper
+        ~tool_name:"Edit" ~args () = Some Registry.Approve);
+    check bool "one use still consumes it" true
+      (Late.take second ~base_path:workspace ~keeper_name:keeper
+        ~tool_name:"Edit" ~args () = None);
+    (* Rebinding replays the same journal: the count is per restore, and a
+       still-skipped foreign row proves the file kept it. *)
+    let third = make () in
+    check int "the count is per restore, not cumulative" 1
+      (Late.journal_skipped third);
+    check bool "the store stays unfenced" true
+      (Late.journal_error third = None))
+
+let test_unreadable_row_shapes_are_all_counted () =
+  with_journal (fun ~clock:_ ~journal ~make ~remove:_ ->
+    let first = make () in
+    let args = edit_input "lib/a.ml" in
+    Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+      ~tool_call_id:"call-1" ~tool_name:"Edit" ~args ();
+    ignore
+      (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:"call-1" ~actor:"operator" Registry.Approve ());
+    let oc = open_out_gen [Open_append] 0o644 journal in
+    output_string oc "this is not json at all\n";
+    output_string oc "[1,2,3]\n";
+    output_string oc "{\"schema\":\"masc.late_approval.v1\"}\n";
+    close_out oc;
+    let second = make () in
+    check int "every unreadable shape is counted" 3
+      (Late.journal_skipped second);
+    check bool "the restore itself stays clean" true
+      (Late.journal_error second = None);
+    check bool "the valid history still settles the retry" true
+      (Late.take second ~base_path:workspace ~keeper_name:keeper
+        ~tool_name:"Edit" ~args () = Some Registry.Approve))
 
 let () =
   run "keeper_late_approval"
@@ -613,7 +679,12 @@ let () =
             test_later_delivery_preserves_earlier_attempt
         ; test_case "malformed v2 consume cannot resurrect approval" `Quick
             test_malformed_consume_cannot_restore_approval
-        ; test_case "pre-ID schema fails closed" `Quick test_pre_id_journal_fails_closed
+        ; test_case "pre-ID schema rows are skipped, not fatal" `Quick
+            test_pre_id_schema_rows_are_skipped_not_fatal
+        ; test_case "one foreign row among valid rows does not fence restore"
+            `Quick test_one_foreign_row_among_valid_rows_does_not_fence_restore
+        ; test_case "unreadable row shapes are all counted" `Quick
+            test_unreadable_row_shapes_are_all_counted
         ; test_case "an answer after the timeout is remembered" `Quick
             test_an_answer_after_the_timeout_is_remembered
         ; test_case "an answer that names no ask is dropped" `Quick

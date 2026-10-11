@@ -18,3 +18,14 @@ val authority_changed :
   bool
 (** Whether a candidate frame carries a different operator token or Keeper
     [(keeper, tool_call_id)] than the last accepted frame. *)
+
+type tool_answer_receipt = Confirmed | Unconfirmed
+
+val retire_tool_answer :
+  keeper_name:string ->
+  tool_call_id:string ->
+  receipt:tool_answer_receipt ->
+  Tui_decode.keeper_tool_approval list ->
+  Tui_decode.keeper_tool_approval list
+(** Retire only the named Keeper's wait after a confirmed server receipt.
+    An unavailable or invalid response preserves the pending state. *)

@@ -27,3 +27,15 @@ let resolve ~presented ~current decision =
 
 let authority_changed ~presented ~candidate =
   not (Option.equal same_identity presented candidate)
+
+type tool_answer_receipt = Confirmed | Unconfirmed
+
+let retire_tool_answer ~keeper_name ~tool_call_id ~receipt held =
+  match receipt with
+  | Unconfirmed -> held
+  | Confirmed ->
+      List.filter
+        (fun (wait : Tui_decode.keeper_tool_approval) ->
+          not (String.equal wait.kta_keeper keeper_name
+               && String.equal wait.kta_tool_call_id tool_call_id))
+        held

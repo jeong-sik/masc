@@ -17627,46 +17627,47 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       (keeper_name, tool_call_id, allow, result, generation) ->
       (* Release the single-action slot [launch_surface_tool_approval] took, so
          the header clears [submitting] and the next decision is admitted. *)
-      let flow, _owns_action =
+      let flow, owns_action =
         Approval.Flow.finish_action state.approval_flow generation
       in
-      state.approval_flow <- flow;
-      (* The listing is stale the moment an answer lands, so the settled call
-         leaves the local list at once rather than waiting for a refresh. *)
-      state.keeper_tool_approvals <-
-        List.filter
-          (fun (held : Tui_decode.keeper_tool_approval) ->
-            not (String.equal held.kta_tool_call_id tool_call_id))
-          state.keeper_tool_approvals;
-      let count = List.length (Masc_tui_approvals_model.approval_items state) in
-      if state.approval_cursor >= count then
-        state.approval_cursor <- max 0 (count - 1);
-      report_action state
-        (match result with
-         | Ok { Masc_tui_http.settled = true; _ }
-         | Ok { Masc_tui_http.remembered = true; _ } ->
-             "system"
-         | _ -> "error")
-        (match result with
-         | Ok { Masc_tui_http.settled = true; _ } ->
-             Printf.sprintf "%s %s's held call %s"
-               (if allow then "allowed" else "denied")
-               keeper_name
-               (Keeper_chat.compact_request_id tool_call_id)
-         | Ok { Masc_tui_http.settled = false; remembered = true } ->
-             Printf.sprintf
-               "too late for %s's call %s, but the answer is remembered -- \
-                the next identical call is %s without asking"
-               keeper_name
-               (Keeper_chat.compact_request_id tool_call_id)
-               (if allow then "allowed" else "denied")
-         | Ok { Masc_tui_http.settled = false; remembered = false } ->
-             Printf.sprintf
-               "too late for %s's call %s; it was no longer waiting"
-               keeper_name
-               (Keeper_chat.compact_request_id tool_call_id)
-         | Error detail -> "could not answer the held call: " ^ detail);
-      launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox
+      if owns_action then begin
+        state.approval_flow <- flow;
+        state.keeper_tool_approvals <-
+          Approval_authority.retire_tool_answer ~keeper_name ~tool_call_id
+            ~receipt:(match result with
+              | Ok _ -> Approval_authority.Confirmed
+              | Error _ -> Approval_authority.Unconfirmed)
+            state.keeper_tool_approvals;
+        let count = List.length (Masc_tui_approvals_model.approval_items state) in
+        if state.approval_cursor >= count then
+          state.approval_cursor <- max 0 (count - 1);
+        report_action state
+          (match result with
+           | Ok { Masc_tui_http.settled = true; _ }
+           | Ok { Masc_tui_http.remembered = true; _ } ->
+               "system"
+           | _ -> "error")
+          (match result with
+           | Ok { Masc_tui_http.settled = true; _ } ->
+               Printf.sprintf "%s %s's held call %s"
+                 (if allow then "allowed" else "denied")
+                 keeper_name
+                 (Keeper_chat.compact_request_id tool_call_id)
+           | Ok { Masc_tui_http.settled = false; remembered = true } ->
+               Printf.sprintf
+                 "too late for %s's call %s, but the answer is remembered -- \
+                  the next identical call is %s without asking"
+                 keeper_name
+                 (Keeper_chat.compact_request_id tool_call_id)
+                 (if allow then "allowed" else "denied")
+           | Ok { Masc_tui_http.settled = false; remembered = false } ->
+               Printf.sprintf
+                 "too late for %s's call %s; it was no longer waiting"
+                 keeper_name
+                 (Keeper_chat.compact_request_id tool_call_id)
+           | Error detail -> "could not answer the held call: " ^ detail);
+        launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox
+      end
   | Keeper_run_next_done (request, result) ->
       (match settle_keeper_run_next state request result with
        | Run_next_untracked -> ()

@@ -122,10 +122,33 @@ let test_authority_change_is_typed () =
   check bool "modal clears authority" true
     (Authority.authority_changed ~presented:(Some operator_a) ~candidate:None)
 
+let held keeper_name call_id =
+  match keeper keeper_name call_id with
+  | Masc_tui_approvals_model.Keeper_tool_row row -> row
+  | _ -> fail "expected held tool fixture"
+
+let test_failed_answer_preserves_pending_waits () =
+  let current = [ held "keeper-a" "shared-call"; held "keeper-b" "shared-call" ] in
+  let next = Authority.retire_tool_answer ~keeper_name:"keeper-a"
+    ~tool_call_id:"shared-call" ~receipt:Authority.Unconfirmed current in
+  check bool "unconfirmed answer preserves current waits" true (next == current)
+
+let test_confirmed_answer_is_keeper_scoped () =
+  let current = [ held "keeper-a" "shared-call"; held "keeper-b" "shared-call" ] in
+  let next = Authority.retire_tool_answer ~keeper_name:"keeper-a"
+    ~tool_call_id:"shared-call"
+    ~receipt:Authority.Confirmed current in
+  check (list string) "another Keeper retains its same-ID wait" [ "keeper-b" ]
+    (List.map (fun row -> row.Tui_decode.kta_keeper) next)
+
 let () =
   run "tui-approval-authority"
     [ ( "authority",
-        [ test_case "removed row has no effect" `Quick
+        [ test_case "failed answer preserves pending waits" `Quick
+            test_failed_answer_preserves_pending_waits;
+          test_case "confirmed answer is Keeper scoped" `Quick
+            test_confirmed_answer_is_keeper_scoped;
+          test_case "removed row has no effect" `Quick
             test_removed_presented_row_has_no_effect;
           test_case "reorder keeps exact row" `Quick
             test_reordered_presented_row_keeps_exact_identity;

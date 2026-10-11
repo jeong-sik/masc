@@ -1862,7 +1862,9 @@ let replay_completed_owner_wake
    Yield outside each durable transaction so other fibers remain runnable. *)
 let settle_completed_snapshot ~base_path ~keeper_name
       ?on_captured
+      ?yield
       () =
+  let yield = match yield with Some yield -> yield | None -> Eio_guard.fair_yield in
   let settle_head partition =
     let* partition =
       confirm_loaded_completed
@@ -1878,7 +1880,7 @@ let settle_completed_snapshot ~base_path ~keeper_name
       let* settled = settle_head partition in
       (match rest with
        | [] -> ()
-       | _ :: _ -> Eio_guard.fair_yield ());
+       | _ :: _ -> yield ());
       settle_snapshot settled rest
   in
   let* completed = completed_in_order ~base_path ~keeper_name in
@@ -2223,11 +2225,6 @@ module For_testing = struct
 
   let deliver_and_settle_completed = deliver_and_settle_completed
   let prunes_and_read = prunes_and_read
-  let settle_completed_snapshot ~base_path ~keeper_name ~on_captured () =
-    match on_captured with
-    | Some hook ->
-      settle_completed_snapshot ~base_path ~keeper_name ~on_captured:hook ()
-    | None -> settle_completed_snapshot ~base_path ~keeper_name ()
 
   let reconcile_quarantines = reconcile_quarantines
   let process_next = process_next

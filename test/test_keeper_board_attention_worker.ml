@@ -677,11 +677,10 @@ let test_completed_snapshot_captures_settle_and_continues_waking () =
      lands a new completion in the capture boundary, so the walk below cannot
      see it in [completed] and must come back with a continuation wake. This
      pins the comment above [settle_completed_snapshot] — completions that
-     arrive after the capture belong to the next admission snapshot. This
-     test does NOT check that the settle walk yields between members: with
-     the walk's inter-member [fair_yield] removed it still passes (measured
-     on the pushed head, 2026-10-10). Yielding is covered by nothing here;
-     watching it is tracked in task-2233's follow-up scope. *)
+     arrive after the capture belong to the next admission snapshot. The
+     settle walk's inter-member yield is pinned separately by
+     test_settle_walk_yields_between_captured_members (task-2234); this test
+     passes with it removed. *)
   let on_captured
         ~base_path
         ~keeper_name:_
@@ -709,6 +708,43 @@ let test_completed_snapshot_captures_settle_and_continues_waking () =
   Alcotest.(check (list string)) "next owner boundary delivers new completion"
     [ first.candidate_id; second.candidate_id; new_candidate.candidate_id ]
     (delivered_ids ~base_path)
+;;
+
+let test_settle_walk_yields_between_captured_members () =
+  Eio_main.run @@ fun _ ->
+  with_temp_base "board-completed-yield" @@ fun base_path ->
+  let first = record ~base_path (candidate ~id:"yield-first" ~recorded_at:1.0 ()) in
+  let _second = record ~base_path (candidate ~id:"yield-second" ~recorded_at:2.0 ()) in
+  ignore (complete_next ~base_path J.Relevant);
+  ignore (complete_next ~base_path J.Relevant);
+  (* Why not an external fiber: measured, Eio file I/O is itself a resumption
+     point, so an outside fiber runs inside member settlements even when the
+     between-members yield is removed — its ledger view cannot separate the
+     two orders. The yield seam is injected instead (same pattern as
+     drain_available's ~yield): the walk must call it exactly once for a
+     two-member snapshot, exactly between the members, and never before the
+     first settlement starts. *)
+  let yield_calls = ref 0 in
+  let mid_delivery = ref None in
+  let counting_yield () =
+    incr yield_calls;
+    mid_delivery := Some (delivered_ids ~base_path)
+  in
+  (match
+     ok "settle captured snapshot"
+       (W.settle_completed_snapshot
+          ~base_path
+          ~keeper_name:"alpha"
+          ~yield:counting_yield
+          ())
+   with
+   | W.Partition_settled { continuation_wake = None; _ } -> ()
+   | _ -> Alcotest.fail "unexpected settlement shape");
+  Alcotest.(check int) "one between-members yield for two members" 1
+    !yield_calls;
+  Alcotest.(check (option (list string)))
+    "the yield sits between the members, after the first settlement"
+    (Some [ first.candidate_id ]) !mid_delivery
 ;;
 
 let test_setup_error_stops_before_claim_without_hot_retry () =
@@ -1418,15 +1454,15 @@ let test_drain_then_settle_does_not_mint_a_ready_root () =
 
 (* The owner settlement, which runs without the worker lock, is landed in
    the gap the seam's hook defines: immediately before the wake's first
-   prune. The settlement consumes X and settles X's partition; the prunes
-   that follow drop X's row and its settled receipt, so the seam's returned
-   list is post-prune and minting over it appends nothing. With the
-   candidate read reverted in front of the prunes — the pre-#41506 order —
-   the same hook position still lets the prunes drop the row and receipt,
-   but the list minted over is the stale pre-prune read: it still names X,
-   and [ensure_roots] over a Pending candidate whose partition just settled
-   re-creates the Ready root the settled receipt no longer authorizes —
-   the wedge #41506 closed. This test is the tripwire for that revert. *)
+   prune. Under the shipped order — read after both prunes — the seam's
+   returned list is post-prune, it no longer names X, and minting over it
+   appends nothing. Moving the candidate read in front of the prunes (the
+   pre-#41506 order) does not change when the prunes run, so X's row and its
+   settled receipt are dropped just the same; what changes is the list
+   minted over. That stale list still names X as Judged, and [ensure_roots]
+   over a candidate whose partition just settled re-creates the Ready root
+   the settled receipt no longer authorizes — the wedge #41506 closed. This
+   test is the tripwire for that revert. *)
 let test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root () =
   with_temp_base "board-attention-worker-settle-between-read-and-roots" @@ fun base_path ->
   let kept = record ~base_path (candidate ~id:"candidate-overlap-race" ()) in
@@ -4598,6 +4634,10 @@ let () =
         ; Alcotest.test_case
             "completed snapshot capture defers new completions to the next wake"
             `Quick test_completed_snapshot_captures_settle_and_continues_waking
+        ; Alcotest.test_case
+            "settle walk lets another fiber run between captured members \
+             (task-2234)"
+            `Quick test_settle_walk_yields_between_captured_members
         ; Alcotest.test_case
             "discards do not hold the owner delivery slot"
             `Quick

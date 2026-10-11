@@ -1,14 +1,15 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, it, vi } from 'vitest'
-const mocks = vi.hoisted(() => ({ list: vi.fn(), toast: vi.fn() }))
-vi.mock('../../api/mcp', () => ({ listAllMcpTools: mocks.list, callMcpTool: vi.fn() }))
+const mocks = vi.hoisted(() => ({ list: vi.fn(), call: vi.fn(), toast: vi.fn() }))
+vi.mock('../../api/mcp', () => ({ listAllMcpTools: mocks.list, callMcpTool: mocks.call }))
 vi.mock('../common/toast', () => ({ showToast: mocks.toast }))
-vi.mock('../../store', async () => { const { signal } = await import('@preact/signals'); return { shellAuthSummary: signal(null) } })
+vi.mock('../../store', async () => { const { signal } = await import('@preact/signals'); return { shellAuthSummary: signal({ effective_role: 'worker' }) } })
+import type { McpToolSchema } from '../../types/json-schema'
 import { setStoredToken } from '../../api/core'
-import { filteredTools, loadToolSchemas, schemasLoading, schemasError } from './tool-executor-state'
-const schema = (name: string) => ({ name, description: name, inputSchema: { type: 'object' } })
+import { filteredTools, loadToolSchemas, schemasLoading, schemasError, selectTool, executeTool, lastResult, executing } from './tool-executor-state'
+const schema = (name: string): McpToolSchema => ({ name, description: name, inputSchema: { type: 'object' } })
 let epoch = 0
-beforeEach(() => { setStoredToken(`synthetic-owner-${++epoch}`); mocks.list.mockReset(); mocks.toast.mockClear() })
+beforeEach(() => { setStoredToken(`synthetic-owner-${++epoch}`); mocks.list.mockReset(); mocks.call.mockReset(); mocks.toast.mockClear() })
 it('retires the previous credential schema cache', async () => {
  mocks.list.mockResolvedValueOnce([schema('a')]); await loadToolSchemas(true)
  setStoredToken('synthetic-b'); expect(filteredTools.value).toEqual([])
@@ -27,4 +28,27 @@ it('admits replacement loading and ignores old failure', async () => {
  expect(filteredTools.value.map(t => t.name)).toEqual(['replacement'])
  expect(schemasError.value).toBeNull(); expect(schemasLoading.value).toBe(false)
  expect(mocks.toast).not.toHaveBeenCalled()
+})
+
+it('does not publish a result into a replacement selection', async () => {
+ let resolve!: (text: string) => void
+ mocks.call.mockImplementationOnce(() => new Promise<string>(r => { resolve = r }))
+ selectTool(schema('first')); const pending = executeTool()
+ selectTool(schema('second')); resolve('old output'); await pending
+ expect(lastResult.value).toBeNull(); expect(executing.value).toBe(false)
+ expect(mocks.toast).not.toHaveBeenCalled()
+})
+it('admits a new credential execution without old cleanup clearing its busy state', async () => {
+ let resolveOld!: (text: string) => void
+ let resolveNew!: (text: string) => void
+ mocks.call.mockImplementationOnce(() => new Promise<string>(r => { resolveOld = r }))
+ mocks.call.mockImplementationOnce(() => new Promise<string>(r => { resolveNew = r }))
+ selectTool(schema('first')); const old = executeTool()
+ setStoredToken('synthetic-execution-replacement'); selectTool(schema('second'))
+ const replacement = executeTool(); const calls = mocks.call.mock.calls.length
+ resolveOld('old output'); await old
+ const busy = executing.value; const result = lastResult.value
+ resolveNew?.('new output'); await replacement
+ expect(calls).toBe(2); expect(busy).toBe(true); expect(result).toBeNull()
+ expect(lastResult.value?.toolName).toBe('second')
 })

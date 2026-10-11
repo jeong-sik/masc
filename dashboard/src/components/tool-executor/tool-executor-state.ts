@@ -46,15 +46,21 @@ export const filteredTools = computed(() => {
   return tools
 })
 
+let selectionOwner = Object.freeze({})
+interface ExecutionOwner { readonly authRevision: number; readonly selection: object }
+let executionOwner: ExecutionOwner | null = null
+
 interface SchemaReadOwner { readonly authRevision: number }
 let schemaReadOwner: SchemaReadOwner | null = null
 subscribeStoredTokenChanges(() => {
   schemaReadOwner = null
+  executionOwner = null
   batch(() => {
     allToolSchemas.value = []
     schemasLoadedAt.value = 0
     schemasLoading.value = false
     schemasError.value = null
+    executing.value = false
     clearSelection()
   })
 })
@@ -95,6 +101,7 @@ export async function loadToolSchemas(force = false): Promise<void> {
 }
 
 export function selectTool(tool: McpToolSchema): void {
+  selectionOwner = Object.freeze({})
   selectedTool.value = tool
   formValues.value = buildDefaults(tool.inputSchema)
   validationErrors.value = []
@@ -102,6 +109,7 @@ export function selectTool(tool: McpToolSchema): void {
 }
 
 export function clearSelection(): void {
+  selectionOwner = Object.freeze({})
   selectedTool.value = null
   formValues.value = {}
   validationErrors.value = []
@@ -119,7 +127,7 @@ export function updateFormValues(values: Record<string, unknown>): void {
 
 export async function executeTool(): Promise<void> {
   const tool = selectedTool.value
-  if (!tool || executing.value) return
+  if (!tool || executionOwner) return
   const access = dashboardAuthAccess(shellAuthSummary.value, selectedToolRequiredRole(tool))
   if (!access.allowed) {
     showToast(access.reason ?? `${tool.name} 실행 권한 없음`, 'error', 6000)
@@ -131,18 +139,32 @@ export async function executeTool(): Promise<void> {
     showToast(`필수 필드 누락: ${missing.join(', ')}`, 'error')
     return
   }
-  executing.value = true
-  lastResult.value = null
+  const owner = Object.freeze({ authRevision: currentStoredTokenRevision(), selection: selectionOwner })
+  const args = stripEmptyOptionals(formValues.value, tool.inputSchema)
+  executionOwner = owner
+  const owns = () => executionOwner === owner && owner.authRevision === currentStoredTokenRevision()
+  const ownsSelection = () => owns() && selectionOwner === owner.selection
   try {
-    const args = stripEmptyOptionals(formValues.value, tool.inputSchema)
+    executing.value = true
+    if (!ownsSelection()) return
+    lastResult.value = null
+    if (!ownsSelection()) return
     const text = await callMcpTool(tool.name, args)
+    if (!ownsSelection()) return
     lastResult.value = { success: true, text, toolName: tool.name, timestamp: Date.now() }
+    if (!ownsSelection()) return
     showToast(`${tool.name} 실행 완료`, 'success')
   } catch (err) {
+    if (!ownsSelection()) return
     const message = errorToString(err)
     lastResult.value = { success: false, text: message, toolName: tool.name, timestamp: Date.now() }
+    if (!ownsSelection()) return
     showToast(`${tool.name} 실행 실패`, 'error')
   } finally {
-    executing.value = false
+    try {
+      if (owns()) executing.value = false
+    } finally {
+      if (executionOwner === owner) executionOwner = null
+    }
   }
 }

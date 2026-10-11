@@ -123,6 +123,27 @@ The `sangokushi-3-end-month` composition does the three keys in one call.
 Every city the ruler commands takes its own turn in the same month, so the
 prompt comes back with the next city's number.
 
+## Training orders complete at month progression
+
+At Cao Cao's May 189 city-9 Puyang command, military `1`, Enter,
+training `7`, Enter opened a list with Xiahou Dun, Xiahou Yuan and Cao Hong
+all at training 60. Selecting Xiahou Dun `1`, Enter retained the list.
+An empty Enter then opened `훈련시키겠습니까(Y/N)?`; `y` returned to
+commands. The military training option was subsequently red that month.
+
+Own information `4`, Enter → `2`, Enter → `1`, Enter opened the officer
+list. Choosing the current Xiahou Dun index `1`, Enter showed
+`훈련에 종사(1개월)`, training 60, morale 48 and soldiers 2181. The order
+had been assigned; the training increase had not happened yet.
+
+After ending Puyang's May commands and Chenliu's June commands with
+`0`, Enter, `y` at each named command prompt, a Puyang report displayed
+`훈련: 훈련도 상승`. Space continued to Puyang's June command.
+Reopening the same officer information showed training 79, morale 57 and
+soldiers 2181, with no pending training assignment line. This proves that
+specific one-month order and observed 60 → 79 result, not a universal gain,
+a rule for every officer, or a winning campaign.
+
 ## Going to war
 
 Observed 2026-09-29 in scenario 6 as 조예, from 17 하비 against 33 건업.

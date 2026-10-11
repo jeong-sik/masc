@@ -86,7 +86,8 @@ import {
   upsertTrackedKeeperChatOperation,
 } from './keeper-chat-operations-local'
 import { KEEPER_HISTORY_TAIL_MESSAGES } from './config/constants'
-import { clearStoredToken, setStoredToken } from './api/core'
+import { ApiRequestError, clearStoredToken, setStoredToken } from './api/core'
+import { KeeperChatOperationMissingError } from './api/keeper-operation-error'
 import {
   lookupToolCallOutput,
   resetToolCallOutputs,
@@ -1465,6 +1466,35 @@ describe('restored chat operation outcome', () => {
         streamState: 'streaming', timestamp: '2026-10-11T00:00:00Z', traceSteps: [{ kind: 'think', text: 'exposed reasoning' }] } })
   }
 
+  it.each([
+    ['echo', 'restored-op', true],
+    ['other', 'restored-op', false],
+    ['echo', 'other-operation', false],
+  ] as const)('uses a missing-operation receipt only for its exact identity (%s, %s)', async (keeper, operationId, matches) => {
+    storeDraft()
+    const missing = new KeeperChatOperationMissingError(keeper, operationId,
+      new ApiRequestError({ method: 'GET', path: '/lookup', status: 404, detail: 'fixture missing receipt' }))
+    fetchKeeperChatOperation.mockRejectedValueOnce(missing)
+    await hydrateTrackedKeeperChatOperations('echo')
+    if (matches) {
+      expect(keeperActionErrors.value.echo).toContain('서버에서 요청을 찾을 수 없습니다')
+      expect(keeperActionErrors.value.echo).not.toContain('서버 재시작')
+    } else expect(keeperActionErrors.value.echo).toContain(missing.message)
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toHaveLength(1)
+  })
+
+  it.each([
+    new Error('transport failed for /chat/operations/restored-op; cached diagnostic: unknown_operation'),
+    Object.assign(new Error('route unavailable'), { method: 'GET', status: 404, path: '/api/v1/keepers/echo/chat/operations/restored-op' }),
+  ])('does not infer lost operation from prose or an unclassified HTTP error', async error => {
+    storeDraft()
+    fetchKeeperChatOperation.mockRejectedValueOnce(error)
+    await hydrateTrackedKeeperChatOperations('echo')
+    expect(keeperActionErrors.value.echo).toContain(error.message)
+    expect(keeperActionErrors.value.echo).not.toContain('서버 재시작')
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toHaveLength(1)
+  })
+
   it.each(['resolve', 'reject'] as const)('rejects operation lookup from replaced authentication (%s)', async outcome => {
     storeDraft()
     setStoredToken('fixture-old')
@@ -1679,6 +1709,8 @@ describe('restored chat operation outcome', () => {
   it.each([
     new Error('temporary operation transport failure'),
     Object.assign(new Error('missing operation'), { method: 'GET', status: 404, path: '/api/v1/keepers/echo/chat/operations/restored-op' }),
+    new KeeperChatOperationMissingError('echo', 'restored-op',
+      new ApiRequestError({ method: 'GET', path: '/lookup', status: 404, detail: 'explicit missing operation' })),
   ])('preserves the retained terminal receipt when a later lookup fails', async failure => {
     storeDraft()
     fetchKeeperChatOperation.mockResolvedValue({ operationId: 'restored-op', state: { kind: 'succeeded', completedAt: 2, outcomeRef: 'result' } })

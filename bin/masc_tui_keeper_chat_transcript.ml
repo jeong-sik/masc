@@ -1368,8 +1368,9 @@ let start_tool ~now t ~authority ~occurrence ~tool_name =
            ; segment = t.segment
            ; started_at = now
            ; attempt = t.attempt
-           ; response_owner = Option.filter
-               (fun owner -> owner.rs_scope = occurrence.stream_scope) t.response_scope
+           ; response_owner = (match t.response_scope with
+               | Some owner when owner.rs_scope = occurrence.stream_scope -> Some owner
+               | Some _ | None -> None)
            ; occurrence
            ; call_id = occurrence.tool_call_id
            ; execution_id = None

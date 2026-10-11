@@ -1,3 +1,4 @@
+import { KeeperChatStreamEventSchema } from '../schemas/sse'
 // MASC Dashboard — Keeper operation messaging and SSE streaming
 
 import { asString, isRecord } from '../components/common/normalize'
@@ -327,16 +328,26 @@ function parseSseFrames(chunk: string): { frames: string[]; rest: string } {
   }
 }
 
-function parseSseEvent(frame: string): KeeperChatStreamEvent | null {
+function parseSseEvent(frame: string, onDecodeError?: (reason: string) => void): { event: KeeperChatStreamEvent; sequence?: number } | null {
   const dataLines = frame
     .split('\n')
     .filter(line => line.startsWith('data:'))
     .map(line => line.slice(5).trimStart())
   if (dataLines.length === 0) return null
   try {
-    return JSON.parse(dataLines.join('\n')) as KeeperChatStreamEvent
+    const ids = frame.split('\n').filter(line => line.startsWith('id:')).map(line => line.slice(3).trim())
+    if (ids.length > 1) { onDecodeError?.('Keeper stream frame has duplicate event identity.'); return null }
+    const sequence: unknown = ids.length ? JSON.parse(ids[0]!) : undefined
+    if (sequence !== undefined && (typeof sequence !== 'number' || !Number.isSafeInteger(sequence) || sequence < 0)) {
+      onDecodeError?.('Keeper stream frame has invalid event identity.'); return null
+    }
+    const parsed = KeeperChatStreamEventSchema.safeParse(JSON.parse(dataLines.join('\n')))
+    if (!parsed.success) { onDecodeError?.('A Keeper stream frame does not match the protocol.'); return null }
+    return { event: parsed.data,
+      ...(typeof sequence === 'number' ? { sequence } : {}) }
   } catch (err) {
-    console.debug('[keeper-stream] SSE frame parse failed', dataLines.join('\n').slice(0, 120), err instanceof Error ? err.message : err)
+    console.debug('[keeper-stream] SSE frame parse failed', err instanceof Error ? err.name : 'decode failure')
+    onDecodeError?.('A Keeper stream frame could not be decoded.')
     return null
   }
 }
@@ -429,7 +440,8 @@ export interface KeeperChatOperation {
 export interface StreamKeeperMessageOptions {
   operationId: string
   signal?: AbortSignal
-  onEvent: (event: KeeperChatStreamEvent) => void
+  onEvent: (event: KeeperChatStreamEvent, sequence?: number) => void
+  onDecodeError?: (reason: string) => void
   attachments?: KeeperConversationAttachment[]
   userBlocks?: KeeperUserInputBlock[]
   channel?: string
@@ -477,6 +489,7 @@ export async function streamKeeperMessage(
     operationId,
     signal,
     onEvent,
+    onDecodeError,
     attachments,
     userBlocks,
     channel,
@@ -573,9 +586,11 @@ export async function streamKeeperMessage(
       const { frames, rest } = parseSseFrames(buffer)
       buffer = rest
       for (const frame of frames) {
-        const event = parseSseEvent(frame)
-        if (!event) continue
-        onEvent(event)
+        const parsed = parseSseEvent(frame, onDecodeError)
+        if (!parsed) continue
+        const { event, sequence } = parsed
+        if (sequence === undefined) onEvent(event)
+        else onEvent(event, sequence)
         if (isTerminalKeeperStreamEvent(event)) {
           try {
             await reader.cancel()
@@ -589,9 +604,11 @@ export async function streamKeeperMessage(
     }
     const tail = buffer.trim()
     if (tail) {
-      const event = parseSseEvent(tail)
-      if (event) {
-        onEvent(event)
+      const parsed = parseSseEvent(tail, onDecodeError)
+      if (parsed) {
+        const { event, sequence } = parsed
+        if (sequence === undefined) onEvent(event)
+        else onEvent(event, sequence)
         if (isTerminalKeeperStreamEvent(event)) return { terminal: true }
       }
     }

@@ -426,6 +426,29 @@ describe('hydrateKeeperChatHistory', () => {
     return { promise, resolve, reject }
   }
 
+  it.each(['resolve', 'reject'] as const)('invalidates an older history fetch on a newer broadcast (%s)', async outcome => {
+    vi.useFakeTimers()
+    try {
+      fetchKeeperChatHistory.mockResolvedValueOnce(historyRow('initial'))
+      await hydrateKeeperChatHistory('echo')
+      const older = deferredHistory()
+      fetchKeeperChatHistory.mockReturnValueOnce(older.promise).mockResolvedValueOnce(historyRow('latest'))
+      const pending = hydrateKeeperChatHistory('echo', { force: true })
+      noteKeeperChatAppended('echo')
+      if (outcome === 'resolve') older.resolve(historyRow('stale'))
+      else older.reject(new Error('superseded failure'))
+      await pending
+      expect(keeperThreads.value.echo?.map(row => row.id)).toEqual(['initial'])
+      expect(keeperChatHistoryErrors.value.echo).toBeNull()
+      expect(keeperHydrating.value.echo).toBe(true)
+      await vi.runAllTimersAsync()
+      expect(keeperThreads.value.echo?.map(row => row.id)).toEqual(['latest'])
+      expect(keeperHydrating.value.echo).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps the latest failure when an older history succeeds', async () => {
     const older = deferredHistory()
     const latest = deferredHistory()

@@ -901,6 +901,9 @@ export function noteKeeperChatAppended(name: string, _audio?: unknown, _blocks?:
     }
     return
   }
+  // The notification supersedes any snapshot acquired before it. Invalidate
+  // immediately, before the debounced replacement fetch starts.
+  chatHistoryHydrationRequests.delete(keeperName)
   const pending = chatRefreshTimers.get(keeperName)
   if (pending) clearTimeout(pending)
   chatRefreshTimers.set(keeperName, setTimeout(() => {

@@ -198,7 +198,7 @@ Observed at 193년 7월 6 평원 (유비 defending against 원소) and at 235년
 
 A native-worker replay on source
 `daece6c0facc64524ad49a1c1bc2f60c173a25d4` completed the March–April 189
-Chenliu → Puyang siege with human inputs. These are observations from that
+Chenliu → Puyang siege with explicit key inputs. These are observations from that
 campaign, not universal gate costs or reusable coordinates.
 
 - Xiahou Dun approached the southwest gate with infantry. At his command

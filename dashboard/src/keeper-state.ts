@@ -1521,12 +1521,13 @@ function mergeLocalAssistantObservations(
         : historyEntry.traceSteps?.length ? historyEntry.traceSteps : localTraceSourceByProvenance.traceSteps,
     }
   }
-  if (historyProvenance) return mergedHistory
+  if (historyProvenance || historyEntry.source === 'autonomous_turn') return mergedHistory
   const historyTurnRef = historyEntry.turnRef?.trim()
   const localTraceSourceByTurnRef = historyTurnRef
     ? localEntries.find(
         entry =>
           entry.role === 'assistant'
+          && entry.source !== 'autonomous_turn'
           && (entry.traceSteps?.length ?? 0) > 0
           && !consumed.has(entry.id)
           && entry.deliveryProvenance == null

@@ -294,6 +294,14 @@ describe('autonomous journal recovery', () => {
     expect(parent?.responseState).toMatchObject({ phase: 'terminal', lastSequence: 2 })
     expect(parent?.traceSteps?.filter(step => step.kind === 'think') ?? []).toEqual([])
   })
+  it.each([true, false])('does not borrow another producer trace solely from a matching turn reference (autonomous history %s)', (autonomousHistory) => {
+    keeperThreads.value = { k: [{ id: 'other-producer', role: 'assistant', source: autonomousHistory ? 'direct_assistant' : 'autonomous_turn', label: 'k',
+      turnRef: 'trace#9', text: 'direct answer', delivery: 'delivered', deliveryProvenance: null,
+      traceSteps: [{ kind: 'think', text: 'other producer reasoning' }] }] }
+    mergeServerHistoryEntries('k', [{ id: 'canonical-producer', source: autonomousHistory ? 'autonomous_turn' : 'direct_assistant', role: 'assistant', label: 'k',
+      turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', details: null }])
+    expect(keeperThreads.value.k?.find(entry => entry.id === 'canonical-producer')?.traceSteps ?? []).toEqual([])
+  })
   it('deduplicates replay at the turn-owned reducer boundary', () => {
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('a'))
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('a'))

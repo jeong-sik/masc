@@ -1334,6 +1334,8 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_THINKING_DELTA' && source.kind === 'autonomous') {
+        const current = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.responseState
+        if (source.observationOnly && current?.kind === 'known' && current.phase === 'terminal') return null
         const value = event.value
         const response = source.observationOnly ? null : admitResponseEvent(keeperName, assistantEntryId, {
           kind: 'observe', owner: value.response ?? null, scope: null, source: 'body',

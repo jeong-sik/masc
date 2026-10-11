@@ -6733,7 +6733,10 @@ let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~
   let eligible = server_authority_ready state in
   (* An explicit Audit is retained intent even while reading is unconfirmed;
      it does not authorize an HTTP request. Workspace withdrawal clears it. *)
-  if mode=Masc_tui_child_content.Audit
+  let audit_running = match List.assoc_opt keeper_name state.msg_child_content_inflight with
+    | Some Masc_tui_child_content.Audit -> true
+    | None | Some Masc_tui_child_content.Poll -> false in
+  if mode=Masc_tui_child_content.Audit && not audit_running
      && not (List.mem keeper_name state.msg_child_content_audit_pending) then
     state.msg_child_content_audit_pending <- keeper_name :: state.msg_child_content_audit_pending;
   if eligible && not (List.mem_assoc keeper_name state.msg_child_content_inflight) then begin

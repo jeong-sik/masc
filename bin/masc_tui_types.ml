@@ -7509,6 +7509,9 @@ type state = {
   mutable msg_native_tasks: (string * Masc_tui_native_tasks.t) list;
   mutable msg_native_tasks_inflight: string list;
   mutable msg_native_tasks_audit_pending: string list;
+  mutable msg_child_content: (string * Masc_tui_child_content.t) list;
+  mutable msg_child_content_inflight: (string * Masc_tui_child_content.read_mode) list;
+  mutable msg_child_content_audit_pending: string list;
   (* Journal sources a stream frame named while their journal was being read,
      with the highest journal seq the frames named: the read in flight may
      have stopped short of that line, so when it lands another read starts
@@ -7671,6 +7674,14 @@ let suspend_workspace_readings state =
   (* Retired completions cannot release these slots. Keep observations and
      explicit audit intent for a confirmed read in the successor epoch. *)
   state.msg_native_tasks_inflight <- [];
+  List.iter (fun (keeper_name, mode) ->
+    match mode with
+    | Masc_tui_child_content.Poll -> ()
+    | Audit ->
+        if not (List.mem keeper_name state.msg_child_content_audit_pending) then
+          state.msg_child_content_audit_pending <- keeper_name :: state.msg_child_content_audit_pending)
+    state.msg_child_content_inflight;
+  state.msg_child_content_inflight <- [];
   let cancellations = state.workspace_observation_cancellations in
   state.workspace_observation_cancellations <- [];
   List.iter (fun (_, cancel) -> cancel ()) cancellations;
@@ -11019,6 +11030,9 @@ let create_state
   msg_native_tasks = [];
   msg_native_tasks_inflight = [];
   msg_native_tasks_audit_pending = [];
+  msg_child_content = [];
+  msg_child_content_inflight = [];
+  msg_child_content_audit_pending = [];
   msg_journal_wanted = [];
   msg_journal_reads_refused = false;
   detail_scroll = 0;

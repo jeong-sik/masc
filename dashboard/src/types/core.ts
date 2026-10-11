@@ -3,7 +3,7 @@ import type { KeeperPortraitReading } from '../lib/keeper-portrait'
 import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
 // MASC Dashboard — Core entity types (Agent, Task, Message, Board, Keeper)
 
-import type { KeeperChatDeliveryProvenance } from '../keeper-delivery-provenance'
+import type { KeeperChatDeliveryKey, KeeperChatDeliveryProvenance } from '../keeper-delivery-provenance'
 
 // --- Shared options ---
 
@@ -1072,6 +1072,9 @@ export interface KeeperConversationEntry {
   toolParentEntryId?: string
   toolOccurrenceQuarantined?: true
   toolObservationAuthority?: 'unavailable'
+  toolOwnerKey?: KeeperChatDeliveryKey
+  toolTranscriptOrdinal?: number
+  toolTranscriptBindings?: readonly { readonly deliveryKey: KeeperChatDeliveryKey; readonly executionId: string; readonly ordinal: number }[]
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
   responseState?: KeeperResponseState

@@ -333,6 +333,11 @@ let keeper_chat_event_to_json event =
        ; "execution_id", `String (Ids.Execution_id.to_string execution_id)
        ]
        @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id))
+  | Tool_transcript_committed { delivery_key; execution_id; ordinal } ->
+    type_tag "tool_transcript_committed"
+      [ "delivery_key", Keeper_chat_delivery_identity.delivery_key_to_yojson delivery_key
+      ; "execution_id", `String (Ids.Execution_id.to_string execution_id)
+      ; "ordinal", `Int ordinal ]
   | Link_block { url; title; description; image } ->
     type_tag
       "link_block"
@@ -612,6 +617,17 @@ let keeper_chat_event_of_json json =
            ; execution_id =
                Ids.Execution_id.of_string (json |> member "execution_id" |> to_string)
            })
+    | "tool_transcript_committed" ->
+      let* ordinal =
+        match json |> member "ordinal" with
+        | `Int value when value >= 0 -> Ok value
+        | _ -> Error "tool transcript ordinal must be a nonnegative integer"
+      in
+      let* delivery_key = Keeper_chat_delivery_identity.delivery_key_of_yojson (json |> member "delivery_key") in
+      Ok (Tool_transcript_committed
+        { delivery_key
+        ; execution_id = Ids.Execution_id.of_string (json |> member "execution_id" |> to_string)
+        ; ordinal })
     | "link_block" ->
       Ok
         (Link_block

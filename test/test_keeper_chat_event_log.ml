@@ -136,6 +136,8 @@ let all_events : E.keeper_chat_event list =
       ; tool_call_id = Some "tc-1"
       ; execution_id = Ids.Execution_id.of_string "exec-1"
       }
+  ; E.Tool_transcript_committed
+      { delivery_key = (match Keeper_chat_delivery_identity.Request_id.of_string "operation-1" with Ok id -> Keeper_chat_delivery_identity.Operation id | Error detail -> failwith detail); execution_id = Ids.Execution_id.of_string "exec-1"; ordinal = 0 }
   ; E.Link_block
       { url = "https://example.com"
       ; title = "Example"

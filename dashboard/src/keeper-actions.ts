@@ -4,6 +4,7 @@ import { keeperStreamContract } from './keeper-stream-contract'
 import {
   newKeeperChatOperationId,
   sameDeliveryKey,
+  toolDeliveryBelongsToProducer,
   operationDeliveryProvenance,
   sameDeliveryProvenance,
 } from './keeper-delivery-provenance'
@@ -580,6 +581,7 @@ function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation
         reason: 'awaiting durable operation terminal state',
       }),
       responseState: assistantDraft?.responseState,
+      toolTranscriptBindings: assistantDraft?.toolTranscriptBindings,
       ...(assistantDraft?.toolObservations?.kind === 'unavailable' ? { toolObservationAuthority: 'unavailable' as const } : {}),
       traceSteps: assistantDraft?.traceSteps,
       error: assistantDraft?.error ?? null,
@@ -590,15 +592,19 @@ function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation
   if (tools?.kind === 'known') {
     const parentKey = operationDeliveryProvenance(request.operationId, 'terminal_result').delivery_key
     for (const tool of tools.entries) {
-      if (!tool.deliveryProvenance || !sameDeliveryKey(parentKey, tool.deliveryProvenance.delivery_key)) continue
-      const slot = tool.deliveryProvenance.transcript_slot
+      const ownerKey = tool.toolOwnerKey ?? tool.deliveryProvenance?.delivery_key
+      if (!ownerKey || !sameDeliveryKey(parentKey, ownerKey)) continue
       const peers = (keeperThreads.value[request.keeperName] ?? []).filter(entry => {
         if (entry.id === tool.id) return true
-        const other = entry.deliveryProvenance
-        const otherSlot = other?.transcript_slot
-        return entry.role === 'tool' && other && sameDeliveryKey(other.delivery_key, tool.deliveryProvenance!.delivery_key)
-          && (slot.kind === 'tool_delivery' || slot.kind === 'tool_call')
-          && (otherSlot?.kind === 'tool_delivery' || otherSlot?.kind === 'tool_call') && slot.ordinal === otherSlot.ordinal
+        const otherKey = entry.toolOwnerKey ?? entry.deliveryProvenance?.delivery_key
+        if (entry.role !== 'tool' || !otherKey || !(entry.toolOwnerKey ? sameDeliveryKey(otherKey, ownerKey) : toolDeliveryBelongsToProducer(ownerKey, otherKey))) return false
+        if (tool.executionId && entry.executionId === tool.executionId) return true
+        const left = tool.toolOccurrence
+        const right = entry.toolOccurrence
+        if (!left || !right) return false
+        const leftCoordinates = left.kind === 'identified' ? [left] : left.coordinates
+        const rightCoordinates = right.kind === 'identified' ? [right] : right.coordinates
+        return leftCoordinates.some(a => rightCoordinates.some(b => a.streamScope === b.streamScope && a.blockIndex === b.blockIndex))
       })
       if (peers.length > 1) {
         updateThreadEntry(request.keeperName, assistantId, entry => ({ ...entry, toolObservationAuthority: 'unavailable' }))
@@ -608,10 +614,13 @@ function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation
       if (existingTool) {
         const quarantined = existingTool.toolOccurrenceQuarantined || tool.toolOccurrenceQuarantined
         const durable = { ...tool, toolCallEnded: tool.toolCallEnded || existingTool.toolCallEnded, ...(quarantined ? { toolOccurrenceQuarantined: true as const } : {}) }
-        const exactBound = slot.kind === 'tool_call' && existingTool.deliveryProvenance
-          && sameDeliveryProvenance(existingTool.deliveryProvenance, tool.deliveryProvenance)
-          && existingTool.executionId === tool.executionId
+        const canonicalSlot = existingTool.deliveryProvenance?.transcript_slot
+        const exactBound = canonicalSlot?.kind === 'tool_call' && tool.executionId != null
+          && canonicalSlot.execution_id === tool.executionId && existingTool.executionId === tool.executionId
+          && toolDeliveryBelongsToProducer(ownerKey, existingTool.deliveryProvenance!.delivery_key)
+          && (!tool.deliveryProvenance || sameDeliveryProvenance(existingTool.deliveryProvenance!, tool.deliveryProvenance))
         const live = { ...existingTool,
+          ...(exactBound ? { toolOwnerKey: ownerKey } : {}),
           ...(existingTool.toolOccurrence === undefined && exactBound ? { toolOccurrence: tool.toolOccurrence } : {}),
           toolCallId: existingTool.toolCallId ?? tool.toolCallId, toolCallEnded: tool.toolCallEnded || existingTool.toolCallEnded, ...(quarantined ? { toolOccurrenceQuarantined: true as const } : {}) }
         if (existingTool.role !== 'tool' || !toolObservationContinues(live, durable) && !toolObservationContinues(durable, live)) {

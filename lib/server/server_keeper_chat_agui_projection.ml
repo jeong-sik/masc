@@ -25,6 +25,7 @@ type custom_event_name =
   | Tool_approval_requested
   | Tool_approval_settled
   | Tool_result_ready
+  | Tool_transcript_committed
   | Native_tool_start
   | Native_tool_end
   | Native_tool_progress
@@ -66,6 +67,7 @@ let custom_event_name_to_string = function
   | Tool_approval_requested -> "KEEPER_TOOL_APPROVAL_REQUESTED"
   | Tool_approval_settled -> "KEEPER_TOOL_APPROVAL_SETTLED"
   | Tool_result_ready -> "KEEPER_TOOL_RESULT_READY"
+  | Tool_transcript_committed -> "KEEPER_TOOL_TRANSCRIPT_COMMITTED"
   | Native_tool_start -> "KEEPER_NATIVE_TOOL_START"
   | Native_tool_end -> "KEEPER_NATIVE_TOOL_END"
   | Native_tool_progress -> "KEEPER_NATIVE_TOOL_PROGRESS"
@@ -311,6 +313,11 @@ let project ~timestamp ~redact_text state event =
                      (Option.map (fun value -> `String value) occurrence.provider_message_id)
                  @ json_opt "toolCallId"
                      (Option.map (fun value -> `String value) tool_call_id)))) )
+  | Tool_transcript_committed { delivery_key; execution_id; ordinal } ->
+      (state, Some (custom ~timestamp state Tool_transcript_committed
+        (`Assoc [ "deliveryKey", Keeper_chat_delivery_identity.delivery_key_to_yojson delivery_key
+                ; "executionId", `String (Ids.Execution_id.to_string execution_id)
+                ; "ordinal", `Int ordinal ])))
   | Link_block _
   | Image_block _
   | Status_block _

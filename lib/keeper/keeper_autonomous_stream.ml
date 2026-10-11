@@ -171,6 +171,12 @@ type ending =
   | Failed of string
   | Cancelled
 
+let publish_committed_tool_bindings t bindings = with_stream t (fun () ->
+  List.iter (fun (delivery_key, slot) -> match slot with
+    | Keeper_chat_delivery_identity.Tool_call {execution_id; ordinal} ->
+      publish t (Events.Tool_transcript_committed {delivery_key; execution_id; ordinal})
+    | _ -> ()) bindings)
+
 let finish t ending =
   Eio.Cancel.protect (fun () -> with_stream t (fun () -> if not t.closed then
     Fun.protect ~finally:(fun () ->

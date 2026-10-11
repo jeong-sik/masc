@@ -507,13 +507,7 @@ let run (ctx : ctx)
      supervisor stale-turn watchdog. *)
   let result, turn_state =
     match run_once turn_state with
-    | (result, _) as settled ->
-      Keeper_autonomous_stream.finish live_stream
-        (match result with
-         | Ok result -> Keeper_autonomous_stream.Completed
-             { reply = result.Keeper_agent_run.response_text; turn_outcome = result.turn_outcome }
-         | Error error -> Keeper_autonomous_stream.Failed (Agent_core.Error.to_string error));
-      settled
+    | (_, _) as settled -> settled
     | exception (Eio.Cancel.Cancelled _ as exn) ->
       Keeper_autonomous_stream.finish live_stream Keeper_autonomous_stream.Cancelled;
       raise exn
@@ -528,7 +522,7 @@ let run (ctx : ctx)
      is per approval, not per turn: should a second tool-executing turn ever
      continue the same approval, its rows read as already present and are
      said so, not dropped silently. *)
-  (match tool_projection, hitl_resolution with
+  (try (match tool_projection, hitl_resolution with
    | None, None | None, Some _ | Some _, None -> ()
    | Some projection, Some resolution ->
      let approval_id = resolution.Keeper_event_queue.approval_id in
@@ -546,6 +540,8 @@ let run (ctx : ctx)
          ~turn_ref
          ~turn_failed:(Result.is_error result)
      in
+     Keeper_autonomous_stream.publish_committed_tool_bindings live_stream
+       persisted.Keeper_loop_tool_projection.committed_bindings;
      (* A quarantined row is missing from the projection below; the chat
         lane's live bridge would have reported the conflict as it happened,
         and this lane has no bridge, so it is said here, one line per row. *)
@@ -581,7 +577,19 @@ let run (ctx : ctx)
           ~keeper_name:meta.name
           "%s: continuation turn tool rows were not projected: %s"
           meta.name
-          (Keeper_loop_tool_projection.drop_reason_to_string reason)));
+          (Keeper_loop_tool_projection.drop_reason_to_string reason)))
+   with
+   | Eio.Cancel.Cancelled _ as exn ->
+     Keeper_autonomous_stream.finish live_stream Keeper_autonomous_stream.Cancelled;
+     raise exn
+   | exn ->
+     Keeper_autonomous_stream.finish live_stream (Keeper_autonomous_stream.Failed (Printexc.to_string exn));
+     raise exn);
+  Keeper_autonomous_stream.finish live_stream
+    (match result with
+     | Ok result -> Keeper_autonomous_stream.Completed
+         { reply = result.Keeper_agent_run.response_text; turn_outcome = result.turn_outcome }
+     | Error error -> Keeper_autonomous_stream.Failed (Agent_core.Error.to_string error));
   result, turn_state
 )
 

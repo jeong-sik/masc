@@ -1,5 +1,5 @@
-import { operationDeliveryProvenance, sameDeliveryKey } from './keeper-delivery-provenance'
-import { captureToolObservations, toolObservationContinues, toolObservationsFromUnknown, type StoredToolObservations } from './keeper-tool-observations'
+import { operationDeliveryProvenance, sameDeliveryKey, toolDeliveryBelongsToProducer } from './keeper-delivery-provenance'
+import { captureToolObservations, reconcileTranscriptBindings, toolObservationContinues, toolObservationsFromUnknown, transcriptBindingsFromUnknown, type StoredToolObservations } from './keeper-tool-observations'
 import { normalizeKeeperConversationDetails } from './keeper-message'
 import { ownerFromUnknown, keeperResponseStateFromUnknown, unavailableKeeperResponseState, type KeeperResponseState } from './lib/keeper-response-state'
 import type {
@@ -15,6 +15,7 @@ import { keeperConversationDeliveryFromUnknown } from './lib/keeper-delivery'
 export interface TrackedKeeperChatAssistantDraft {
   responseState?: KeeperResponseState
   toolObservations?: StoredToolObservations
+  toolTranscriptBindings?: KeeperConversationEntry['toolTranscriptBindings']
   details?: KeeperConversationDetails | null
   text: string
   rawText: string
@@ -180,11 +181,15 @@ function normalizeAssistantDraft(raw: unknown, operationId?: string): TrackedKee
       : parseMember(KEEPER_STREAM_STATES, raw.streamState) ?? null
   const timestamp = nullableStringValue(raw.timestamp)
   const traceSteps = normalizeTraceSteps(raw.traceSteps)
+  const bindings = raw.toolTranscriptBindings === undefined ? undefined : transcriptBindingsFromUnknown(raw.toolTranscriptBindings)
   const decodedTools = raw.toolObservations === undefined ? undefined : toolObservationsFromUnknown(raw.toolObservations)
   const toolObservations = decodedTools?.kind === 'known' && operationId !== undefined
-    && decodedTools.entries.some(tool => !tool.deliveryProvenance || !sameDeliveryKey(
-      operationDeliveryProvenance(operationId, 'terminal_result').delivery_key, tool.deliveryProvenance.delivery_key))
+    && decodedTools.entries.some(tool => !(tool.toolOwnerKey ?? tool.deliveryProvenance?.delivery_key) || !sameDeliveryKey(
+      operationDeliveryProvenance(operationId, 'terminal_result').delivery_key, tool.toolOwnerKey ?? tool.deliveryProvenance!.delivery_key)
+      || tool.toolTranscriptOrdinal !== undefined && !bindings?.some(binding => binding.executionId === tool.executionId && binding.ordinal === tool.toolTranscriptOrdinal && tool.deliveryProvenance !== null && tool.deliveryProvenance !== undefined && sameDeliveryKey(binding.deliveryKey, tool.deliveryProvenance.delivery_key)))
       ? { kind: 'unavailable' as const } : decodedTools
+  const foreignBindings = bindings?.some(binding => operationId !== undefined && !toolDeliveryBelongsToProducer(
+    operationDeliveryProvenance(operationId, 'terminal_result').delivery_key, binding.deliveryKey))
   const error = nullableStringValue(raw.error)
   const responseState = raw.responseState === undefined ? undefined : keeperResponseStateFromUnknown(raw.responseState)
 
@@ -198,6 +203,8 @@ function normalizeAssistantDraft(raw: unknown, operationId?: string): TrackedKee
     ...(timestamp !== undefined ? { timestamp } : {}),
     ...(traceSteps ? { traceSteps } : {}),
     ...(toolObservations ? { toolObservations } : {}),
+    ...(bindings ? { toolTranscriptBindings: bindings } : {}),
+    ...(bindings === null || foreignBindings ? { toolObservations: { kind: 'unavailable' as const } } : {}),
     ...(error !== undefined ? { error } : {}),
     ...(delivery === null ? {
       responseState: unavailableKeeperResponseState, delivery: 'error' as const, streamState: null,
@@ -218,6 +225,7 @@ export function trackedKeeperChatAssistantDraftFromEntry(
   const traceSteps = normalizeTraceSteps(entry.traceSteps)
   return {
     ...(entry.responseState ? { responseState: entry.responseState } : {}),
+    ...(entry.toolTranscriptBindings ? { toolTranscriptBindings: entry.toolTranscriptBindings } : {}),
     ...(toolEntries ? { toolObservations: captureToolObservations(entry, toolEntries) } : {}),
     details: entry.details ? { ...entry.details, rawPayload: undefined } : null,
     text: entry.text,
@@ -304,6 +312,8 @@ function preserveNewerDraft(
   incoming: TrackedKeeperChatAssistantDraft | undefined,
 ): TrackedKeeperChatAssistantDraft | undefined {
   if (!incoming) return stored
+  const bindings = reconcileTranscriptBindings([stored?.toolTranscriptBindings, incoming.toolTranscriptBindings])
+  incoming = { ...incoming, ...(bindings ? { toolTranscriptBindings: bindings } : bindings === null ? { toolObservations: { kind: 'unavailable' as const } } : {}) }
   if (stored?.toolObservations?.kind === 'unavailable' && incoming) {
     incoming = { ...incoming, toolObservations: stored.toolObservations }
   } else if (stored?.toolObservations && incoming && incoming.toolObservations === undefined) {

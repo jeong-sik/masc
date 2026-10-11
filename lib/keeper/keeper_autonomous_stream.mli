@@ -16,6 +16,11 @@ type ending =
   | Failed of string
   | Cancelled
 
+val publish_committed_tool_bindings :
+  t -> (Keeper_chat_delivery_identity.delivery_key * Keeper_chat_delivery_identity.transcript_slot) list -> unit
+(** Publish only append-acknowledged bindings; their explicit delivery keys may
+    belong to approval records distinct from the surrounding turn journal. *)
+
 val finish : t -> ending -> unit
 (** Flush held redacted text, publish the real terminal boundary, close the
     journal producer, and remove only this turn's current identity. Idempotent. *)

@@ -1,4 +1,4 @@
-import { operationDeliveryProvenance, toolDeliveryProvenance, toolCallDeliveryProvenance } from './keeper-delivery-provenance'
+import { operationDeliveryProvenance, toolCallDeliveryProvenance } from './keeper-delivery-provenance'
 import type { TrackedKeeperChatAssistantDraft } from './keeper-chat-operations-local'
 import { initialKeeperResponseState } from './lib/keeper-response-state'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -9,6 +9,12 @@ import {
   removeTrackedKeeperChatOperation,
   upsertTrackedKeeperChatOperation,
 } from './keeper-chat-operations-local'
+
+
+function requiredFixture<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error('Expected fixture state to exist')
+  return value
+}
 
 describe('keeper chat operation tracking', () => {
   beforeEach(() => {
@@ -113,11 +119,11 @@ describe('keeper chat operation tracking', () => {
     upsertTrackedKeeperChatOperation({ ...request, assistantDraft: draft(12, 'newest') })
     upsertTrackedKeeperChatOperation({ ...request, assistantDraft: draft(11, 'old observer') })
     upsertTrackedKeeperChatOperation(request)
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft).toMatchObject({
+    expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0]).assistantDraft).toMatchObject({
       rawText: 'newest', responseState: { lastSequence: 12 },
     })
     upsertTrackedKeeperChatOperation({ ...request, assistantDraft: draft(13, 'next event') })
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft).toMatchObject({
+    expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0]).assistantDraft).toMatchObject({
       rawText: 'next event', responseState: { lastSequence: 13 },
     })
   })
@@ -127,7 +133,7 @@ describe('keeper chat operation tracking', () => {
       upsertTrackedKeeperChatOperation({ operationId: 'terminal-draft', keeperName: 'echo', message: 'input', submittedAt: 1,
         assistantDraft: { text: 'authored bytes', rawText: 'authored bytes', delivery, streamState: null,
           responseState: { ...initialKeeperResponseState, phase: 'terminal' } } })
-      expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft).toMatchObject({
+      expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0]).assistantDraft).toMatchObject({
         delivery, streamState: null, rawText: 'authored bytes', responseState: { phase: 'terminal' },
       })
     },
@@ -138,20 +144,20 @@ describe('keeper chat operation tracking', () => {
     const parent = operationDeliveryProvenance(request.operationId, 'terminal_result')
     const tool = { id: 'tool', label: 'Read', text: '', toolCallId: 'provider-a', delivery: 'streaming' as const,
       toolOccurrence: { kind: 'identified' as const, streamScope: 1, blockIndex: 0 },
-      deliveryProvenance: toolDeliveryProvenance(parent, 0) }
+      toolOwnerKey: parent.delivery_key, deliveryProvenance: null }
     const draft: TrackedKeeperChatAssistantDraft = { text: 'body', rawText: 'body', delivery: 'streaming', streamState: null,
       toolObservations: { kind: 'known', entries: [tool] } }
     upsertTrackedKeeperChatOperation({ ...request, assistantDraft: draft })
     upsertTrackedKeeperChatOperation({ ...request, assistantDraft: { ...draft, toolObservations: { kind: 'known', entries: [
       { ...tool, executionId: 'execution', deliveryProvenance: toolCallDeliveryProvenance(parent, 'execution', 0) },
     ] } } })
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft?.toolObservations).toMatchObject({ kind: 'known', entries: [{ executionId: 'execution' }] })
+    expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0]).assistantDraft?.toolObservations).toMatchObject({ kind: 'known', entries: [{ executionId: 'execution' }] })
     upsertTrackedKeeperChatOperation({ ...request, assistantDraft: { ...draft, toolObservations: { kind: 'known', entries: [
       { ...tool, toolCallId: undefined, executionId: 'execution', deliveryProvenance: toolCallDeliveryProvenance(parent, 'execution', 0) },
     ] } } })
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft?.toolObservations).toMatchObject({ kind: 'known', entries: [{ toolCallId: 'provider-a' }] })
+    expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0]).assistantDraft?.toolObservations).toMatchObject({ kind: 'known', entries: [{ toolCallId: 'provider-a' }] })
     upsertTrackedKeeperChatOperation({ ...request, assistantDraft: { ...draft, toolObservations: { kind: 'known', entries: [] } } })
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft?.toolObservations).toEqual({ kind: 'unavailable' })
+    expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0]).assistantDraft?.toolObservations).toEqual({ kind: 'unavailable' })
   })
 
   it('retains unavailable tool authority through receipt-only and assistant-only writes', () => {
@@ -160,15 +166,15 @@ describe('keeper chat operation tracking', () => {
       toolObservations: { kind: 'unavailable' as const } }
     upsertTrackedKeeperChatOperation({ ...request, assistantDraft: draft })
     upsertTrackedKeeperChatOperation(request)
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft?.toolObservations).toEqual({ kind: 'unavailable' })
+    expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0]).assistantDraft?.toolObservations).toEqual({ kind: 'unavailable' })
     upsertTrackedKeeperChatOperation({ ...request, assistantDraft: { ...draft, toolObservations: { kind: 'known', entries: [] } } })
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft).toMatchObject({ rawText: 'authored', toolObservations: { kind: 'unavailable' } })
+    expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0]).assistantDraft).toMatchObject({ rawText: 'authored', toolObservations: { kind: 'unavailable' } })
   })
 
   it('quarantines unknown delivery without turning it into queued or losing authored bytes', () => {
     upsertTrackedKeeperChatOperation({ operationId: 'bad-delivery', keeperName: 'echo', message: 'input', submittedAt: 1,
       assistantDraft: { text: 'preserve', rawText: 'preserve', delivery: 'unrecognized' as never, streamState: null } })
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0]).toMatchObject({ message: 'input', assistantDraft: {
+    expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0])).toMatchObject({ message: 'input', assistantDraft: {
       rawText: 'preserve', delivery: 'error', responseState: { kind: 'unavailable' },
     } })
   })

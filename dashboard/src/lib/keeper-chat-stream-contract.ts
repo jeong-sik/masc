@@ -1,3 +1,4 @@
+import type { KeeperChatDeliveryKey } from '../keeper-delivery-provenance'
 export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_CONNECTED',
   'KEEPER_RUNTIME_ATTEMPT_STARTED',
@@ -24,6 +25,7 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_TOOL_APPROVAL_REQUESTED',
   'KEEPER_TOOL_APPROVAL_SETTLED',
   'KEEPER_TOOL_RESULT_READY',
+  'KEEPER_TOOL_TRANSCRIPT_COMMITTED',
   'KEEPER_NATIVE_TOOL_START',
   'KEEPER_NATIVE_TOOL_END',
   'KEEPER_NATIVE_TOOL_PROGRESS',
@@ -234,6 +236,7 @@ type KeeperChatCustomEvent =
       name: 'KEEPER_TOOL_RESULT_READY'
       value: KeeperToolStreamOccurrence & { executionId: string }
     }
+  | { type: 'CUSTOM'; name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED'; value: { deliveryKey: KeeperChatDeliveryKey; executionId: string; ordinal: number } }
   | {
       type: 'CUSTOM'
       name: 'KEEPER_CONTENT_BLOCK_START'

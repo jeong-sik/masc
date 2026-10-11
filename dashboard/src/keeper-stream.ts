@@ -2,10 +2,10 @@ import { sameKeeperResponseOwner, type KeeperResponseOwner, initialKeeperRespons
 import { keeperStreamContract } from './keeper-stream-contract'
 import {
   sameDeliveryKey,
+  toolDeliveryBelongsToProducer,
   operationDeliveryProvenance,
   isOperationDeliveryProvenance,
   toolCallDeliveryProvenance,
-  toolDeliveryProvenance,
 } from './keeper-delivery-provenance'
 import {
   keeperTurnOutcomeSuppressesReply,
@@ -67,8 +67,9 @@ function sameToolParent(
 ): boolean {
   if (!parent) return false
   const parentKey = parent.deliveryProvenance?.delivery_key
-  const toolKey = tool.deliveryProvenance?.delivery_key
-  return parentKey ? toolKey !== undefined && sameDeliveryKey(parentKey, toolKey)
+  const toolKey = tool.toolOwnerKey ?? tool.deliveryProvenance?.delivery_key
+  return parentKey ? toolKey !== undefined && (tool.toolOwnerKey !== undefined
+    ? sameDeliveryKey(parentKey, tool.toolOwnerKey) : toolDeliveryBelongsToProducer(parentKey, toolKey))
     : toolKey === undefined && tool.toolParentEntryId === parent.id
 }
 
@@ -501,7 +502,7 @@ function isToolObservation(event: KeeperChatStreamEvent): boolean {
     case 'TOOL_CALL_START':
     case 'TOOL_CALL_ARGS':
     case 'TOOL_CALL_END': return true
-    case 'CUSTOM': return event.name === 'KEEPER_TOOL_RESULT_READY'
+    case 'CUSTOM': return event.name === 'KEEPER_TOOL_RESULT_READY' || event.name === 'KEEPER_TOOL_TRANSCRIPT_COMMITTED'
     default: return false
   }
 }
@@ -806,12 +807,7 @@ export function applyKeeperStreamEvent(
         })
       }
       const agentCoreBlockIndex = event.toolCallBlockIndex
-      const toolSteps = assistantEntry?.traceSteps?.filter(step => step.kind === 'tool') ?? []
-      const toolOrdinal = toolSteps.length
-      const deliveryProvenance = toolDeliveryProvenance(
-        assistantEntry?.deliveryProvenance,
-        toolOrdinal,
-      )
+      const toolOwnerKey = assistantEntry?.deliveryProvenance?.delivery_key
       appendAssistantToolTraceStep(keeperName, assistantEntryId, {
         toolCallId,
         toolOccurrenceId,
@@ -831,8 +827,8 @@ export function applyKeeperStreamEvent(
         toolCallId,
         toolCallEnded: false,
         toolOccurrence: Object.freeze({ kind: 'identified' as const, streamScope: event.toolStreamScope, blockIndex: event.toolCallBlockIndex }),
-        ...(deliveryProvenance ? {} : { toolParentEntryId: assistantEntryId }),
-        deliveryProvenance,
+        ...(toolOwnerKey ? { toolOwnerKey } : { toolParentEntryId: assistantEntryId }),
+        deliveryProvenance: null,
         delivery: 'streaming',
         streamState: 'streaming',
         streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_START' }),
@@ -956,6 +952,44 @@ export function applyKeeperStreamEvent(
         })
         return null
       }
+      if (event.name === 'KEEPER_TOOL_TRANSCRIPT_COMMITTED') {
+        const { executionId, ordinal } = event.value
+        const deliveryKey = Object.freeze({ ...event.value.deliveryKey })
+        const entries = keeperThreads.value[keeperName] ?? []
+        const parent = entries.find(entry => entry.id === assistantEntryId)
+        if (!parent?.deliveryProvenance || parent.toolObservationAuthority === 'unavailable') return null
+        if (!toolDeliveryBelongsToProducer(parent.deliveryProvenance.delivery_key, deliveryKey)) return null
+        const previous = parent.toolTranscriptBindings ?? []
+        if (previous.some(binding => binding.executionId === executionId && (binding.ordinal !== ordinal || !sameDeliveryKey(binding.deliveryKey, deliveryKey))
+          || sameDeliveryKey(binding.deliveryKey, deliveryKey) && binding.ordinal === ordinal && binding.executionId !== executionId)) {
+          updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry, toolObservationAuthority: 'unavailable',
+            error: 'Server transcript bindings conflict; authoritative recovery is required' }))
+          return null
+        }
+        const matching = entries.filter(entry => entry.role === 'tool' && sameToolParent(parent, entry) && entry.executionId === executionId)
+        if (matching.length > 1) {
+          updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry, toolObservationAuthority: 'unavailable' }))
+          return null
+        }
+        const resource = matching[0]
+        const resourceSlot = resource?.deliveryProvenance?.transcript_slot
+        if (resource && resourceSlot?.kind === 'tool_call' && (resourceSlot.execution_id !== executionId || resourceSlot.ordinal !== ordinal
+          || !sameDeliveryKey(resource!.deliveryProvenance!.delivery_key, deliveryKey))
+          || resource?.toolTranscriptOrdinal !== undefined && resource.toolTranscriptOrdinal !== ordinal) {
+          updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry, toolObservationAuthority: 'unavailable',
+            error: 'Server transcript binding contradicts canonical tool ownership' }))
+          return null
+        }
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry,
+          toolTranscriptBindings: Object.freeze(previous.some(binding => binding.executionId === executionId) ? [...previous]
+            : [...previous, Object.freeze({ deliveryKey: deliveryKey, executionId, ordinal })]),
+        }))
+        if (matching[0]) updateThreadEntry(keeperName, matching[0].id, entry => ({ ...entry,
+          toolTranscriptOrdinal: ordinal,
+          deliveryProvenance: toolCallDeliveryProvenance({ ...parent.deliveryProvenance!, delivery_key: deliveryKey }, executionId, ordinal),
+        }))
+        return null
+      }
       if (event.name === 'KEEPER_TOOL_RESULT_READY') {
         if ((keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.toolObservationAuthority === 'unavailable') {
           updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry, error: 'Stored tool ownership is unavailable; authoritative recovery is required' }))
@@ -997,18 +1031,18 @@ export function applyKeeperStreamEvent(
             ? null
             : 'KEEPER_TOOL_RESULT_READY conflicts with the recorded execution_id'
         }
-        const ordinal = currentSlot?.kind === 'tool_delivery' || currentSlot?.kind === 'tool_call'
-          ? currentSlot.ordinal
-          : null
+        const committedBinding = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
+          ?.toolTranscriptBindings?.find(binding => binding.executionId === executionId)
+        const committedOrdinal = committedBinding?.ordinal
         if (executionOwner) {
           const canonicalSlot = executionOwner.deliveryProvenance?.transcript_slot
-          const parentKey = toolEntry.deliveryProvenance?.delivery_key
+          const parentKey = toolEntry.toolOwnerKey ?? toolEntry.deliveryProvenance?.delivery_key
           const canonicalKey = executionOwner.deliveryProvenance?.delivery_key
           // Only the server result binds a planned ordinal to an execution.
           // History alone cannot infer this association from provider correlation.
-          if (!parentKey || !canonicalKey || !sameDeliveryKey(parentKey, canonicalKey)
+          if (!parentKey || !canonicalKey || !toolDeliveryBelongsToProducer(parentKey, canonicalKey)
             || canonicalSlot?.kind !== 'tool_call' || canonicalSlot.execution_id !== executionId
-            || ordinal === null || canonicalSlot.ordinal !== ordinal
+            || committedBinding !== undefined && (!sameDeliveryKey(canonicalKey, committedBinding.deliveryKey) || canonicalSlot.ordinal !== committedBinding.ordinal)
             || executionOwner.toolOccurrence !== undefined) {
             return 'KEEPER_TOOL_RESULT_READY execution_id belongs to another tool occurrence'
           }
@@ -1026,7 +1060,7 @@ export function applyKeeperStreamEvent(
           const parent = entries.find(entry => entry.id === assistantEntryId)
           setRecordValue(keeperThreads, keeperName, entries.filter(entry => entry.id !== toolEntry.id).map(entry => {
             if (entry.id === executionOwner.id) return {
-              ...entry, toolOccurrence: toolEntry.toolOccurrence, toolCallEnded: true,
+              ...entry, toolOwnerKey: parentKey, toolOccurrence: toolEntry.toolOccurrence, toolCallEnded: true,
             }
             if (entry.role !== 'assistant' || !sameToolParent(entry, executionOwner)
               || !sameToolParent(parent, executionOwner)) return entry
@@ -1038,9 +1072,9 @@ export function applyKeeperStreamEvent(
           }))
           return null
         }
-        const deliveryProvenance = ordinal === null
-          ? toolEntry?.deliveryProvenance ?? null
-          : toolCallDeliveryProvenance(toolEntry?.deliveryProvenance, executionId, ordinal)
+        const parentProvenance = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.deliveryProvenance
+        const deliveryProvenance = committedOrdinal === undefined ? null
+          : toolCallDeliveryProvenance(parentProvenance && { ...parentProvenance, delivery_key: committedBinding!.deliveryKey }, executionId, committedOrdinal)
         markAssistantToolTraceEnded(
           keeperName,
           assistantEntryId,
@@ -1050,6 +1084,7 @@ export function applyKeeperStreamEvent(
         updateThreadEntry(keeperName, toolEntry.id, entry => ({
           ...entry,
           executionId,
+          ...(committedOrdinal !== undefined ? { toolTranscriptOrdinal: committedOrdinal } : {}),
           toolCallEnded: true,
           deliveryProvenance,
           delivery: 'delivered',

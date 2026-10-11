@@ -175,6 +175,11 @@ type keeper_chat_event =
       ; tool_call_id : string option
       ; execution_id : Ids.Execution_id.t
       }
+  | Tool_transcript_committed of
+      { delivery_key : Keeper_chat_delivery_identity.delivery_key
+      ; execution_id : Ids.Execution_id.t
+      ; ordinal : int
+      }
   | Link_block of
       { url : string
       ; title : string
@@ -233,7 +238,7 @@ let redact_content ~redact_text = function
     | Agent_core_stream_ping | Agent_core_content_block_start _
     | Agent_core_content_block_stop _ | Model_content_activity _
     | Agent_core_thinking_signature_delta _ | Tool_call_start _ | Tool_call_end _
-    | Native_tool_start _ | Tool_approval_settled _ | Tool_result_ready _ | Status_block _) as event -> event
+    | Native_tool_start _ | Tool_approval_settled _ | Tool_result_ready _ | Tool_transcript_committed _ | Status_block _) as event -> event
 ;;
 
 type published =

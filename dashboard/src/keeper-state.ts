@@ -1000,27 +1000,32 @@ export function updateKeeperToolApproval(
   keeperName: string,
   toolCallId: string,
   updater: (approval: KeeperToolApprovalPending) => KeeperToolApprovalPending,
-): void {
-  const byKeeper = keeperToolApprovals.value[keeperName]
-  const existing = byKeeper?.[toolCallId]
-  if (!existing) return
+  expected?: KeeperToolApprovalPending,
+): KeeperToolApprovalPending | null {
+  const existing = keeperToolApprovals.value[keeperName]?.[toolCallId]
+  if (!existing || (expected && existing !== expected)) return null
+  const updated = Object.freeze(updater(existing))
+  const current = keeperToolApprovals.value
+  if (current[keeperName]?.[toolCallId] !== existing) return null
   keeperToolApprovals.value = {
-    ...keeperToolApprovals.value,
-    [keeperName]: { ...byKeeper, [toolCallId]: updater(existing) },
+    ...current,
+    [keeperName]: { ...current[keeperName], [toolCallId]: updated },
   }
+  return updated
 }
 
 export function settleKeeperToolApproval(
   keeperName: string,
   toolCallId: string,
   outcome: string,
-): void {
-  updateKeeperToolApproval(keeperName, toolCallId, approval => ({
+  expected?: KeeperToolApprovalPending,
+): KeeperToolApprovalPending | null {
+  return updateKeeperToolApproval(keeperName, toolCallId, approval => ({
     ...approval,
     settled: true,
     answering: false,
     answeredOutcome: outcome,
-  }))
+  }), expected)
 }
 
 export function dropKeeperToolApproval(keeperName: string, toolCallId: string): void {

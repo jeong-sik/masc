@@ -285,28 +285,35 @@ export async function answerHeldKeeperToolApproval(
   const existing = keeperToolApprovals.value[keeperName]?.[toolCallId]
   if (!existing || existing.settled) return false
   if (existing.answering) return false
-  updateKeeperToolApproval(keeperName, toolCallId, approval => ({
+  const authRevision = currentStoredTokenRevision()
+  const claim = updateKeeperToolApproval(keeperName, toolCallId, approval => ({
     ...approval,
     answering: true,
     answeredDecision: decision,
-  }))
+  }), existing)
+  const owns = (row: typeof claim) => row !== null
+    && keeperToolApprovals.value[keeperName]?.[toolCallId] === row
+    && authRevision === currentStoredTokenRevision()
+  if (!owns(claim)) return false
   try {
     const result = await answerKeeperToolApproval(keeperName, toolCallId, decision)
-    // settled=false (late answer) still retires the card: the call is gone,
-    // and the row would otherwise promise an interaction that no longer
-    // exists. The SETTLED stream event, when it comes, is a no-op drop.
-    settleKeeperToolApproval(keeperName, toolCallId, result.decision)
-    setRecordValue(keeperActionErrors, keeperName, null)
+    if (owns(claim)) {
+      const settled = settleKeeperToolApproval(keeperName, toolCallId, result.decision, claim!)
+      if (owns(settled)) setRecordValue(keeperActionErrors, keeperName, null)
+    }
     return result.settled
   } catch (err) {
+    if (!owns(claim)) return false
     const message = err instanceof Error ? err.message : String(err)
-    console.warn('[keeper] tool approval answer failed', { keeperName, toolCallId, message })
-    updateKeeperToolApproval(keeperName, toolCallId, approval => ({
+    const retry = updateKeeperToolApproval(keeperName, toolCallId, approval => ({
       ...approval,
       answering: false,
       answeredDecision: null,
-    }))
-    setRecordValue(keeperActionErrors, keeperName, message)
+    }), claim!)
+    if (owns(retry)) {
+      console.warn('[keeper] tool approval answer failed', { keeperName, toolCallId, message })
+      setRecordValue(keeperActionErrors, keeperName, message)
+    }
     return false
   }
 }

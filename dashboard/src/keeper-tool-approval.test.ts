@@ -1,5 +1,6 @@
+import { effect } from '@preact/signals'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { keeperToolApprovals, upsertKeeperToolApproval } from './keeper-state'
+import { keeperActionErrors, keeperToolApprovals, upsertKeeperToolApproval } from './keeper-state'
 import { answerHeldKeeperToolApproval, hydrateKeeperToolApprovals } from './keeper-actions'
 
 // task-343: the answer path for a held tool call. Before this surface the
@@ -35,6 +36,7 @@ function jsonResponse(status: number, body: unknown): Response {
 afterEach(() => {
   vi.unstubAllGlobals()
   keeperToolApprovals.value = {}
+  keeperActionErrors.value = {}
 })
 
 describe('answerHeldKeeperToolApproval', () => {
@@ -88,6 +90,55 @@ describe('answerHeldKeeperToolApproval', () => {
     expect(row?.settled).toBe(false)
     expect(row?.answering).toBe(false)
     expect(row?.answeredDecision).toBeNull()
+  })
+
+  it('does not settle a replacement wait with the same provider call ID', async () => {
+    pendingRow('call-reused')
+    let resolveFetch!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { resolveFetch = resolve })))
+    const first = answerHeldKeeperToolApproval('sangsu', 'call-reused', 'approve')
+    await vi.waitFor(() => expect(resolveFetch).toBeDefined())
+    pendingRow('call-reused')
+    const replacement = keeperToolApprovals.value.sangsu!['call-reused']
+    resolveFetch(jsonResponse(200, { settled: true, decision: 'approve' }))
+    await expect(first).resolves.toBe(true)
+    expect(keeperToolApprovals.value.sangsu!['call-reused']).toBe(replacement)
+    expect(replacement?.settled).toBe(false)
+  })
+
+  it('does not publish an old failure into a replacement wait', async () => {
+    pendingRow('call-failure-reused')
+    let resolveFetch!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { resolveFetch = resolve })))
+    const first = answerHeldKeeperToolApproval('sangsu', 'call-failure-reused', 'approve')
+    await vi.waitFor(() => expect(resolveFetch).toBeDefined())
+    pendingRow('call-failure-reused')
+    const replacement = keeperToolApprovals.value.sangsu!['call-failure-reused']
+    keeperActionErrors.value = { sangsu: 'new request error' }
+    resolveFetch(jsonResponse(500, { error: 'old request failure' }))
+    await expect(first).resolves.toBe(false)
+    expect(keeperToolApprovals.value.sangsu!['call-failure-reused']).toBe(replacement)
+    expect(keeperActionErrors.value.sangsu).toBe('new request error')
+  })
+
+  it('does not dispatch after an answering observer replaces the wait', async () => {
+    pendingRow('call-observer')
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    let replaced = false
+    const dispose = effect(() => {
+      const row = keeperToolApprovals.value.sangsu?.['call-observer']
+      if (row?.answering && !replaced) {
+        replaced = true
+        pendingRow('call-observer')
+      }
+    })
+    try {
+      await expect(answerHeldKeeperToolApproval('sangsu', 'call-observer', 'approve')).resolves.toBe(false)
+      expect(replaced).toBe(true)
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(keeperToolApprovals.value.sangsu?.['call-observer']?.answering).toBe(false)
+    } finally { dispose() }
   })
 
   it('ignores a second answer for a call already being answered', async () => {

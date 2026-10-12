@@ -1193,6 +1193,14 @@ let test_multiple_approval_admissions_settle_independently () =
      | Some selected -> check string "latest admission remains selected after older replay"
          "new-call" selected.Transcript.call_id
      | None -> fail "selected admission disappeared");
+    feed t [requested ~call_id:"old-call" ~tool_name:"Write" ~question:"updated question"];
+    check int "refresh keeps both admissions" 2
+      (List.length (Transcript.awaiting_approvals t));
+    (match List.find_opt (fun pending -> String.equal pending.Transcript.call_id "old-call")
+       (Transcript.awaiting_approvals t) with
+     | Some pending -> check string "duplicate request refreshes admission"
+         "updated question" pending.Transcript.question
+     | None -> fail "refreshed admission disappeared");
     feed t [Live.Runtime_attempt_started {runtime_id=Some "codex";attempt_index=Some 1}];
     check int "attempt observation cannot settle approvals" 2
       (List.length (Transcript.awaiting_approvals t));

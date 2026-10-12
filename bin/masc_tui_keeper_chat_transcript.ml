@@ -1737,21 +1737,27 @@ let apply_delta ~now t (delta : Live.delta) =
                  "stream protocol quarantine provider correlation conflicts for occurrence %s: %s"
                  (occurrence_label occurrence) detail)))
   | Live.Approval_requested { call_id; tool_name; args; question; because } ->
+      (* The arguments go on the call's own row, which the pane already draws;
+         the prompt carries the question. *)
+      (match args with
+       | "" -> ()
+       | args ->
+           (match update_unique_call t ~call_id
+             ~eligible:(fun call -> call.authority = Masc_execution
+               && call.segment = t.segment && call.attempt = t.attempt
+               && not call.result_ready && not call.failed)
+             (fun call -> {call with args}) with
+            | Call_updated | Call_missing | Call_ambiguous | Call_conflicting -> ()));
+      (* A duplicate request refreshes the admission in place so a reused
+         call id in a new attempt can update the prompt; true replays are
+         idempotent under refresh and never reorder the selection. *)
       (match List.find_opt (fun (pending : awaiting_approval) ->
          String.equal pending.call_id call_id) t.awaiting with
-       | Some _ -> ()
+       | Some _ ->
+           t.awaiting <- List.map (fun (pending : awaiting_approval) ->
+             if String.equal pending.call_id call_id
+             then {call_id;tool_name;question;because} else pending) t.awaiting
        | None ->
-           (* The arguments go on the call's own row, which the pane already draws;
-              the prompt carries the question. *)
-           (match args with
-            | "" -> ()
-            | args ->
-                (match update_unique_call t ~call_id
-                  ~eligible:(fun call -> call.authority = Masc_execution
-                    && call.segment = t.segment && call.attempt = t.attempt
-                    && not call.result_ready && not call.failed)
-                  (fun call -> {call with args}) with
-                 | Call_updated | Call_missing | Call_ambiguous | Call_conflicting -> ()));
            t.last_approval_settlement <- None;
            t.awaiting <- {call_id;tool_name;question;because} :: t.awaiting)
   | Live.Approval_settled { call_id; outcome } ->

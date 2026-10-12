@@ -11268,9 +11268,18 @@ let resources_empty_note (list : Masc_tui_mcp.resource list option) =
 (* A successful refresh need not contain a turn that just finished. Its GET
    may have started before that turn persisted, or a row may have failed to
    decode. Session output stays until the returned page names its replacement.
-   The terminal reply shares request and role authority. Progress blocks and
+   The reply alias shares observed source, output phase and role authority. Progress blocks and
    Memory passes can contain several rows, so only their row identity proves
    replacement; neither text nor a nearby timestamp identifies them. *)
+let chat_output_alias_source (row : msg_entry) =
+  match row.me_role, row.me_turn_phase with
+  | (Message_keeper | Message_autonomous), Turn_output -> row.me_execution_source
+  | (Message_user _ | Message_status | Message_local | Message_error
+    | Message_tool | Message_skill _ | Message_thinking | Message_memory),
+    (Turn_input | Turn_progress | Turn_tool | Turn_output)
+  | (Message_keeper | Message_autonomous), (Turn_input | Turn_progress | Turn_tool) -> None
+;;
+
 let transcript_replaces_session_output ~(fresh : msg_entry list)
     (entry : msg_entry) =
   List.exists
@@ -11278,8 +11287,8 @@ let transcript_replaces_session_output ~(fresh : msg_entry list)
       String.equal row.me_keeper_name entry.me_keeper_name
       &&
       (row.me_identity = entry.me_identity
-      || (entry.me_request_id <> ""
-          && String.equal row.me_request_id entry.me_request_id
+      || (Option.fold ~none:false ~some:(fun source ->
+            chat_output_alias_source row = Some source) (chat_output_alias_source entry)
           && match entry.me_role, row.me_role with
              | Message_keeper, Message_keeper
              | Message_autonomous, Message_autonomous -> true

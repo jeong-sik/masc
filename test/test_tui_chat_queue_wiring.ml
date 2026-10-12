@@ -4966,6 +4966,25 @@ let test_older_page_keeps_the_entries_it_moved_down () =
         check string "body is carried over" old_entry.body entry.body)
       before moved)
 
+let test_output_replacement_retains_source_and_phase () =
+  let id = "same#1" in
+  let base = chat_entry ~request_id:id ~role:Tui_types.Message_keeper ~text:"same" ~at:1. () in
+  let local = {base with me_identity=Tui_types.Session_row {
+    request_id=id;turn_phase=Tui_types.Turn_output;operation_seq=0}} in
+  let persisted = {base with me_identity=Tui_types.Persisted_row "server-reply"} in
+  let replaces row = Tui_types.transcript_replaces_session_output ~fresh:[row] local in
+  check bool "actual same-source output replaces local reply" true (replaces persisted);
+  List.iter (fun source ->
+    let foreign = {persisted with me_execution_source=source} in
+    check bool "foreign or unknown source cannot replace local reply" false (replaces foreign)
+  ) [None;Some (Log.Autonomous_turn (Ids.Turn_ref.make ~trace_id:"same" ~absolute_turn:1))];
+  check bool "same-source progress cannot replace output" false
+    (replaces {persisted with me_turn_phase=Tui_types.Turn_progress});
+  check bool "unknown output grants no journal search alias" true
+    (Tui_types.chat_output_alias_source {persisted with me_execution_source=None}=None);
+  check bool "exact structural identity still proves replacement" true
+    (Tui_types.transcript_replaces_session_output ~fresh:[local] local)
+
 let test_input_reconciliation_retains_source_identity () =
   let source = Log.Autonomous_turn (Ids.Turn_ref.make ~trace_id:"same" ~absolute_turn:1) in
   let id = Log.source_key source in
@@ -6060,6 +6079,7 @@ let () =
         ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
         ; test_case "older page keeps the blocks it did not change" `Quick test_older_page_keeps_the_blocks_it_did_not_change
         ; test_case "older page keeps the entries it moved down" `Quick test_older_page_keeps_the_entries_it_moved_down
+        ; test_case "output replacement source and phase" `Quick test_output_replacement_retains_source_and_phase
         ; test_case "input reconciliation source identity" `Quick test_input_reconciliation_retains_source_identity
         ; test_case "input anchor source identity" `Quick test_input_anchor_alias_retains_source_identity
         ; test_case "block member source authority" `Quick test_block_member_keys_preserve_source_authority

@@ -3491,22 +3491,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
   Masc_tui_frame_timing.finish_stage ~name:"chat.merge" merge_started;
   { tagged_entries = tagged_layout_entries; transient_anchors; layout_entries }
 
-let search_reply_source (message : msg_entry) =
-  match message.me_role, message.me_turn_phase with
-  | (Message_keeper | Message_autonomous), Turn_output ->
-      (match message.me_execution_source with
-       | Some source -> Some source
-       | None ->
-           (match message.me_role with
-            | Message_keeper -> Some (Masc_tui_keeper_chat_log.Operation message.me_request_id)
-            | Message_autonomous ->
-                Option.map (fun turn_ref -> Masc_tui_keeper_chat_log.Autonomous_turn turn_ref)
-                  (Ids.Turn_ref.of_string message.me_request_id)
-            | Message_user _ | Message_status | Message_local | Message_error
-            | Message_tool | Message_skill _ | Message_thinking | Message_memory -> None))
-  | (Message_user _ | Message_status | Message_local | Message_error
-    | Message_tool | Message_skill _ | Message_thinking | Message_memory), _
-  | (Message_keeper | Message_autonomous), (Turn_input | Turn_progress | Turn_tool) -> None
+let search_reply_source = Masc_tui_types.chat_output_alias_source
 
 let search_anchor_of_tag = function
   | Tagged_child anchor -> Some (Search_child anchor)

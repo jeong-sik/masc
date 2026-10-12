@@ -771,13 +771,13 @@ let test_context_cycle_separates_saved_and_prepared () =
     {prepared_at = test_now; runtime_id = "fixture-runtime";
      input = O.Summarized {trace_id = "previous-trace"; end_atom = 4; boundary_line = 7}; request_bytes = 2048};
   O.record_synthesis ~config ~keeper_name
-    {observed_at=test_now; trace_id=Some trace_id; state=O.Running;
+    {observed_at=test_now; trace_id=Some trace_id; state=O.Running; stop_reason=None;
      range=Some {start_atom=1;end_atom=2;completed_end_atom=8}};
   let observed = cycle () in
   Alcotest.(check string) "synthesis is independent of ordinary drain" "running"
     (string_field "state" (member "synthesis" observed));
   O.record_synthesis ~config ~keeper_name
-    {observed_at=test_now; trace_id=Some trace_id; state=O.Cancelled;
+    {observed_at=test_now; trace_id=Some trace_id; state=O.Cancelled; stop_reason=None;
      range=Some {start_atom=1;end_atom=2;completed_end_atom=8}};
   Alcotest.(check string) "cancellation replaces running observation" "cancelled"
     (string_field "state" (member "synthesis" (cycle ())));

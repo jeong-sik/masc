@@ -36,15 +36,33 @@ type synthesis_state =
   | Disabled | Source_unavailable | Input_unavailable | Not_committed
   | Capacity_refused | Cancelled
 
+(** The local [run_continuity] branch that stopped this pass. These reasons
+    neither identify a provider failure nor prove quota, semantic rejection,
+    or remote capacity. Raw error/detail text is deliberately excluded. *)
+type stop_reason =
+  | Source_read_failed
+  | Input_build_failed
+  | No_smaller_range_evidence
+  | Narrowed_for_next_signal
+  | Indivisible_unit_uncommitted
+  | Observed_capacity_unfit
+  | Observed_capacity_disagrees
+  | Raised_during_pass
+
 type atom_range = { start_atom : int; end_atom : int; completed_end_atom : int }
 type synthesis =
   { observed_at : float
   ; trace_id : string option
   ; state : synthesis_state
+  ; stop_reason : stop_reason option
+      (** [None] for progress/success, disabled/cancelled/no-source, and absent
+          metadata without a failure cause. A new observation never inherits
+          the preceding pass's reason. *)
   ; range : atom_range option
   }
 val record_synthesis : config:Workspace.config -> keeper_name:string -> synthesis -> unit
 val latest_synthesis : config:Workspace.config -> keeper_name:string -> synthesis option
+val stop_reason_to_string : stop_reason -> string
 val synthesis_state_to_string : synthesis_state -> string
 val synthesis_to_json : synthesis -> Yojson.Safe.t
 val synthesis_of_json : Yojson.Safe.t -> (synthesis, string) result

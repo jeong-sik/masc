@@ -59,7 +59,7 @@ bash scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
 ## 스택과 병합
 
 먼저 `docs/guides/NATIVE-GITHUB-STACKS.md`를 읽고 REST PR의 `stack`과 Stacks API를 조회한다.
-Native Stack은 선택한 PR까지의 미병합 하위 PR을 함께 병합한다. 개별 PR 리뷰와 전체 범위
+Native Stack은 맨 위 PR 하나로 스택 전체를 한 번에 병합한다. 개별 PR 리뷰와 스택 전체
 병합 판정을 구분하고 포함된 모든 PR의 현재 head·독립 승인·FAIL/HOLD·변경 요청을 확인한다.
 non-main base만으로 부모 선행 병합이나 수동 retarget을 요구하지 않는다. stack 없는 일반
 브랜치 체인은 부모부터 처리한다. API 오류는 미확인이다. 구성·base·head 변경 뒤에는 다시 검토한다.
@@ -69,8 +69,10 @@ bash scripts/review/queue-ledger.sh --repo jeong-sik/masc --format tsv
 bash scripts/review/merge-guard.sh --check --repo jeong-sik/masc --pr <N> --head <SHA>
 ```
 
-외부 코딩 에이전트는 guard를 `--check`로 쓴다. Native Stack은 전체 포함 범위가 승인된 경우
-`PUT repos/{owner}/{repo}/pulls/{number}/merge-async`에 선택한 head를 `sha`로 전달한다.
+외부 코딩 에이전트는 guard를 `--check`로 쓴다. **Native Stack은 맨 위 PR 하나로 스택 전체를 한 번에
+병합한다. 아래부터 한 층씩 병합하지 않는다.** 스택 전체가 승인된 경우
+`PUT repos/{owner}/{repo}/pulls/{맨 위 PR 번호}/merge-async`에 맨 위 PR의 head를 `sha`로 전달한다.
+스택이 main과 충돌하면 `gh stack rebase`로 스택 전체를 다시 올려 한 번에 push하고, 아래층만 고쳐 push하지 않는다.
 일반 PR은 `gh pr merge --match-head-commit <SHA>`를 쓴다. `--auto`·`--admin`을 쓰지 않는다.
 병합 직전에 구성과 모든 head·리뷰를 다시 읽고 비동기 접수를 완료로 보고하지 않는다.
 

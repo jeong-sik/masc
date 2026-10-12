@@ -493,11 +493,15 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   check int "domain refusal advances through both declared slots" 2 !rejected_calls;
   check bool "failed generation replaces running state" true
     ((observation ()).state = O.Not_committed);
+  check bool "domain refusal records only the local unchanged-width branch" true
+    ((observation ()).stop_reason = Some O.No_smaller_range_evidence);
   check int "refused range keeps committed frontier" 4
     (P.read ~config ~keeper_name |> get |> some).end_atom;
   let resumed_calls = ref 0 in
   let resumed ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
     incr resumed_calls;
+    check bool "terminal reason is cleared at real resumed dispatch" true
+      ((observation ()).state = O.Running && (observation ()).stop_reason = None);
     check bool "domain refusal did not erase the next drain's measured ceiling" true
       (chars prompt <= max_chars);
     Ok answer in

@@ -1,7 +1,6 @@
 import type { KeeperConversationEntry } from './types'
-import { decodeKeeperChatDeliveryProvenance } from './api/schemas/keeper-chat-delivery-provenance'
 import { keeperConversationDeliveryFromUnknown } from './lib/keeper-delivery'
-import { sameDeliveryKey } from './keeper-delivery-provenance'
+import { decodeKeeperChatDeliveryProvenance, sameDeliveryKey } from './keeper-delivery-provenance'
 
 export type ToolObservation = Pick<KeeperConversationEntry, 'id' | 'label' | 'text' | 'rawText' | 'timestamp' | 'deliveryProvenance' | 'executionId' | 'toolCallId' | 'toolCallEnded' | 'toolOccurrence' | 'toolOccurrenceQuarantined' | 'delivery' | 'error'>
 export type StoredToolObservations = { readonly kind: 'known'; readonly entries: readonly ToolObservation[] } | { readonly kind: 'unavailable' }

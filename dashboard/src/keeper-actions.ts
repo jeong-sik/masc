@@ -1,6 +1,7 @@
 import { toolObservationContinues } from './keeper-tool-observations'
 import { initialKeeperResponseState, reduceKeeperResponse } from './lib/keeper-response-state'
 import { keeperStreamContract } from './keeper-stream-contract'
+import { normalizeKeeperStatusPayloadDeliveryProvenance } from './api/schemas/keeper-chat-delivery-provenance'
 import { keeperResponseIsFailed, keeperResponseIsTerminal } from './lib/keeper-response-state'
 import {
   newKeeperChatOperationId,
@@ -346,9 +347,6 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
     } catch {
       parsed = null
     }
-    const { normalizeKeeperStatusPayloadDeliveryProvenance } = await import(
-      './api/schemas/keeper-chat-delivery-provenance'
-    )
     parsed = normalizeKeeperStatusPayloadDeliveryProvenance(parsed)
     const detail = normalizeStatusDetail(keeperName, text, parsed)
     setStatusDetail(keeperName, detail)
@@ -1033,9 +1031,6 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
       )
       parsed = null
     }
-    const { normalizeKeeperStatusPayloadDeliveryProvenance } = await import(
-      './api/schemas/keeper-chat-delivery-provenance'
-    )
     parsed = normalizeKeeperStatusPayloadDeliveryProvenance(parsed)
     const detail = normalizeStatusDetail(keeperName, text, parsed)
     setStatusDetail(keeperName, detail)

@@ -257,6 +257,15 @@ Observed at 193년 7월 6 평원 (유비 defending against 원소) and at 235년
   429 enemy losses at 521 friendly losses; normal `1` north `8` inflicted
   149 at 303. These are one paired observation, not a universal damage
   formula or proof of which support officers participate.
+- Read attack losses after the combat animation finishes and the next
+  officer's command opens. A step-limited input response can capture an
+  intermediate frame: on January 190 day 8 at noon, northward charge
+  (`2` → `6` → `8`) first showed friendly/enemy totals 9,366/13,285,
+  then finished at 8,920/13,168. From the same restored starting totals
+  10,436/13,506, joint attack finished at 9,985/13,133. This comparison
+  favors joint attack in that state only; it establishes neither a general
+  combat formula nor victory. Observe again without sending another
+  officer command when combat is still drawing.
 - `8` (위임) asks `전군위임합니다 해제할 수 없습니다만 좋겠습니까(Y/N)?`; `y`
   hands every officer to the computer until the battle ends. Each
   `<장수>의 전술` line still waits for a key (`space`). One delegated siege ran

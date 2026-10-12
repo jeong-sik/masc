@@ -326,6 +326,37 @@ let test_missing_start_closure_preserves_retry () =
   check bool "missing-start closure and late body preserve current retry" true
     (T.model_activity t=Some (T.Activity_provider_retry retry))
 
+let test_missing_start_closure_preserves_opposite_fallback () =
+  let text scope text = L.Text {text;stream_scope=Some scope} in
+  let t = create () in
+  T.apply ~now:1. t (L.Stream_model_started {stream_scope=Some 0;
+    message_id=None;model="fixture";usage=None});
+  T.apply ~now:1. t (observed ~generation:7 ~index:9 ());
+  T.apply ~now:1. t (ended ~generation:7 ~index:9 ());
+  (* The text body survives but its Content_observed is lost: answering is a
+     fallback, not owned content. *)
+  T.apply ~now:2. t (text 0 "surviving");
+  check bool "surviving text body owns answering" true
+    (T.model_activity t=Some T.Activity_answering);
+  T.apply ~now:3. t (ended ~generation:7 ~index:0 ~channel:E.Model_thinking ());
+  check bool "thinking end preserves answering fallback" true
+    (T.model_activity t=Some T.Activity_answering);
+  T.apply ~now:4. t (ended ~generation:7 ~index:1 ());
+  check bool "text end closes the surviving fallback" true
+    (T.model_activity t=Some T.Activity_content_ended);
+  (* Symmetric: a surviving reasoning fallback outlives a text end. *)
+  let t = create () in
+  T.apply ~now:1. t (L.Stream_model_started {stream_scope=Some 0;
+    message_id=None;model="fixture";usage=None});
+  T.apply ~now:1. t (observed ~generation:7 ~index:9 ());
+  T.apply ~now:1. t (ended ~generation:7 ~index:9 ());
+  T.apply ~now:2. t (L.Thinking {text="surviving";content_index=None});
+  check bool "surviving thinking body owns reasoning" true
+    (T.model_activity t=Some T.Activity_reasoning);
+  T.apply ~now:3. t (ended ~generation:7 ~index:0 ());
+  check bool "text end preserves reasoning fallback" true
+    (T.model_activity t=Some T.Activity_reasoning)
+
 let test_thinking_index_wire_boundary () =
   let decode fields =
     let wire = "data: " ^ Yojson.Safe.to_string (`Assoc ["type",`String "CUSTOM";
@@ -345,6 +376,7 @@ let () = run "model content activity"
     test_case "thinking content index wire" `Quick test_thinking_index_wire_boundary;
     test_case "missing content start retains closure" `Quick test_missing_start_retains_content_closure;
     test_case "missing-start closure preserves retry" `Quick test_missing_start_closure_preserves_retry;
+    test_case "missing-start closure preserves opposite fallback" `Quick test_missing_start_closure_preserves_opposite_fallback;
     test_case "overlap uses event order" `Quick test_overlap_uses_event_order;
     test_case "scope, response, retry, legacy and late stop" `Quick test_scope_retry_and_fallback;
     test_case "production bridge through SSE and durable replay" `Quick test_bridge_live_and_journal;

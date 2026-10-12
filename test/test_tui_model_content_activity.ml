@@ -285,8 +285,50 @@ let test_activity_numeric_wire_boundary () =
       ["-1";"0.5";"9007199254740992";"9007199254740993";"1e309";"\"1\""])
     ["generation";"stream_scope";"block_index"]
 
+let test_missing_start_retains_content_closure () =
+  List.iter (fun with_open_piece ->
+    let t = create () in
+    T.apply ~now:1. t (L.Stream_model_started {stream_scope=Some 0;
+      message_id=None;model="fixture";usage=None});
+    if with_open_piece then T.apply ~now:2. t (observed ~generation:7 ~index:1 ())
+    else begin T.apply ~now:2. t (observed ~generation:7 ~index:9 ());
+      T.apply ~now:2. t (ended ~generation:7 ~index:9 ()) end;
+    T.apply ~now:3. t (ended ~generation:7 ~index:0 ~channel:E.Model_thinking ());
+    let expected = if with_open_piece then T.Activity_answering else T.Activity_content_ended in
+    check bool "closure with missing start preserves other open activity" true
+      (T.model_activity t=Some expected);
+    T.apply ~now:4. t (observed ~generation:7 ~index:0 ~channel:E.Model_thinking ());
+    T.apply ~now:5. t (L.Thinking {text="late exposed bytes";content_index=Some 0});
+    check bool "late header and body cannot reopen the closed occurrence" true
+      (T.model_activity t=Some expected);
+    check string "late exposed body remains available" "late exposed bytes" (T.thinking t);
+    T.apply ~now:6. t (ended ~generation:8 ~index:0 ~channel:E.Model_thinking ());
+    check bool "future closure cannot admit a response" true
+      (T.model_activity t=Some expected);
+    T.apply ~now:7. t (observed ~generation:8 ~index:0 ~channel:E.Model_thinking ());
+    check bool "new response can reuse the content index" true
+      (T.model_activity t=Some T.Activity_reasoning)
+  ) [false;true]
+
+
+let test_thinking_index_wire_boundary () =
+  let decode fields =
+    let wire = "data: " ^ Yojson.Safe.to_string (`Assoc ["type",`String "CUSTOM";
+      "name",`String "KEEPER_THINKING_DELTA";"value",`Assoc (("delta",`String "provided")::fields)]) ^ "\n\n" in
+    L.feed (L.create ()) wire in
+  check bool "reported content index survives the live boundary" true
+    (match decode ["index",`Int 7] with
+     | [{delta=L.Thinking {content_index=Some 7;_};_}] -> true | _ -> false);
+  List.iter (fun fields ->
+    check bool "invalid content index grants no occurrence authority" true
+      (match decode fields with [{delta=L.Undecodable _;_}] -> true | _ -> false)
+  ) [ []; ["index",`Int (-1)]; ["index",`Float 0.5];
+      ["index",`Int 9_007_199_254_740_992]; ["index",`Int 0;"index",`Int 1] ]
+;;
 let () = run "model content activity"
   ["boundaries", [test_case "activity JSON safe-integer boundary" `Quick test_activity_numeric_wire_boundary;
+    test_case "thinking content index wire" `Quick test_thinking_index_wire_boundary;
+    test_case "missing content start retains closure" `Quick test_missing_start_retains_content_closure;
     test_case "overlap uses event order" `Quick test_overlap_uses_event_order;
     test_case "scope, response, retry, legacy and late stop" `Quick test_scope_retry_and_fallback;
     test_case "production bridge through SSE and durable replay" `Quick test_bridge_live_and_journal;

@@ -1414,14 +1414,19 @@ let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content
              List.filter (fun (index,_,_) -> index<>activity.content_index) t.active_model_content;
            t.model_signal <- Some Scoped_model_content)
     | Content_ended ->
-      (* Unknown or older stops provide no authority over the current model
-         signal. In particular a tool/content header alone is not activity. *)
-      if scope_order = 0 then
+      (* Within the exact current response, retain closure even when its start
+         was lost, so a late body/header cannot reopen the same occurrence. *)
+      if scope_order = 0 then begin
         match List.find_opt (fun (index,_,_) -> index=activity.content_index) t.active_model_content with
         | Some (_,channel,Some _) when channel=activity.channel ->
             t.active_model_content <- List.map (fun (index,channel,at) ->
               index,channel,(if index=activity.content_index then None else at)) t.active_model_content
-        | Some (_,_,_) | None -> ()
+        | None ->
+            t.active_model_content <- t.active_model_content @
+              [activity.content_index,activity.channel,None];
+            t.model_signal <- Some Scoped_model_content
+        | Some (_,_,_) -> ()
+      end
 ;;
 
 let apply_delta ~now t (delta : Live.delta) =
@@ -1608,8 +1613,13 @@ let apply_delta ~now t (delta : Live.delta) =
       t.model_signal <- Some (Answering_at now);
       Buffer.add_string t.text_buffer text;
       trail_text ~now t text
-  | Live.Thinking {text; _} ->
-      t.model_signal <- Some (Reasoning_at now);
+  | Live.Thinking {text; content_index} ->
+      let closed_thinking = match content_index with
+        | None -> false
+        | Some index -> List.exists (fun (known, channel, at) ->
+            known = index && channel = Masc.Keeper_chat_events.Model_thinking && Option.is_none at)
+            t.active_model_content in
+      if not closed_thinking then t.model_signal <- Some (Reasoning_at now);
       Buffer.add_string t.thinking_buffer text;
       trail_thinking ~now t text
   | Live.Tool_started { occurrence; tool_name } ->

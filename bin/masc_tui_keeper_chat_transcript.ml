@@ -1421,6 +1421,8 @@ let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content
         | Some (_,channel,Some _) when channel=activity.channel ->
             t.active_model_content <- List.map (fun (index,channel,at) ->
               index,channel,(if index=activity.content_index then None else at)) t.active_model_content
+        | Some (_,_,Some _) ->
+            note_unreadable t "model content channel changed within its occurrence"
         | None ->
             t.active_model_content <- t.active_model_content @
               [activity.content_index,activity.channel,None];
@@ -1436,7 +1438,7 @@ let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content
                | Some (Provider_retry_at _ | Tool_returned_at _ | Model_response_ended) -> ()
                | None | Some (Scoped_model_content | Model_started_at _ | Reasoning_at _ | Answering_at _) ->
                    t.model_signal <- Some Scoped_model_content)
-        | Some (_,_,_) -> ()
+        | Some (_,_,None) -> ()
       end
 ;;
 

@@ -1547,8 +1547,12 @@ let model_signal_for_body t response fallback =
       when owner.response_generation = generation && owner.response_scope = scope ->
       (* Content metadata owns activity for this response. Body bytes are
          retained, but cannot reopen a closed piece or replace another open
-         channel without an observed content transition. *)
-      Scoped_model_content
+         channel without an observed content transition. A later retry or
+         tool return also owns progress until a new content observation. *)
+      (match t.model_signal with
+       | Some ((Provider_retry_at _ | Tool_returned_at _ | Model_response_ended) as signal) -> signal
+       | None | Some (Scoped_model_content | Model_started_at _ | Reasoning_at _ | Answering_at _) ->
+           Scoped_model_content)
   | (Some _ | None), (Some _ | None), (_ :: _ | []) -> fallback
 ;;
 

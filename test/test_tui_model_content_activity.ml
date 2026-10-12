@@ -603,6 +603,28 @@ let test_missing_start_closure_preserves_retry () =
   check bool "missing-start closure and late body preserve current retry" true
     (T.model_activity t=Some (T.Activity_provider_retry retry))
 
+let test_late_unindexed_body_preserves_retry () =
+  List.iter (fun body ->
+    let t = create () in
+    let retry : Masc.Runtime_claude_api_retry.t = {observation_id="retry";attempt=1;
+      max_retries=10;retry_delay_ms=1000;error_status=None} in
+    T.apply ~now:1. t (L.Runtime_attempt_started {runtime_id=Some "claude";attempt_index=Some 0});
+    T.apply ~now:2. t (observed ~generation:7 ());
+    T.apply ~now:3. t (ended ~generation:7 ());
+    T.apply ~now:4. t (L.Provider_retry_observed {attempt={routing_run_id="run";
+      runtime_id="claude";lane_attempt_index=0};retry});
+    T.apply ~now:5. t body;
+    check bool "late same-response body preserves retry activity" true
+      (T.model_activity t=Some (T.Activity_provider_retry retry));
+    check string "exposed late bytes retained independently of activity" "late"
+      (T.text t ^ T.thinking t);
+    T.apply ~now:6. t (observed ~generation:7 ~index:1 ~channel:E.Model_thinking ());
+    check bool "new observed content supersedes retry" true
+      (T.model_activity t=Some T.Activity_reasoning)
+  ) [L.Text {text="late";response=E.Observed_response {response_generation=7;response_scope=0}};
+     L.Thinking {text="late";content_index=None;
+       response=Some {E.response_generation=7;response_scope=0}}]
+
 let test_thinking_index_wire_boundary () =
   let decode fields =
     let wire = "data: " ^ Yojson.Safe.to_string (`Assoc ["type",`String "CUSTOM";
@@ -624,6 +646,7 @@ let () = run "model content activity"
     test_case "thinking content index wire" `Quick test_thinking_index_wire_boundary;
     test_case "missing content start retains closure" `Quick test_missing_start_retains_content_closure;
     test_case "missing-start closure preserves retry" `Quick test_missing_start_closure_preserves_retry;
+    test_case "late unindexed body preserves retry" `Quick test_late_unindexed_body_preserves_retry;
     test_case "owned thinking lifecycle" `Quick test_owned_thinking_lifecycle;
     test_case "owned thinking protocol" `Quick test_owned_thinking_protocol;
     test_case "owned response details" `Quick test_owned_response_details;

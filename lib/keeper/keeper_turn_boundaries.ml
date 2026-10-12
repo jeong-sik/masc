@@ -478,13 +478,12 @@ let restarts_history ~trace_id (record : record) =
 
 type history_stated = History_may_hold_atoms | History_stated_empty
 
-(* The latest line of [trace_id] decides. A line that cannot be decoded may
-   have been a line of this trace that stated atoms, so it is
-   [History_may_hold_atoms] until a later readable line of the trace says
-   otherwise. [Stale_noop] left the store's own checkpoint in place, whose atoms
-   the line does not state. [No_atom_history] says the turn saved nothing, not
-   that the history is empty: a turn that started from atoms and saved nothing
-   left them, so only a turn that also started fresh states an empty one. *)
+(* Only an actually appended restart establishes the same generation
+   boundary [Keeper_carried_front.current_generation_floor] recognizes.
+   Empty turn-end records preserve that witness; they cannot replace it:
+   the restart append can fail while the later end append succeeds. Atoms,
+   a store no-op, or an unreadable line invalidate the empty witness until
+   another restart succeeds. *)
 let history_stated ~trace_id lines =
   List.fold_left
     (fun stated (_line, decoded) ->
@@ -500,7 +499,7 @@ let history_stated ~trace_id lines =
             else (
               match position, history_at_start with
               | Empty_atom_history, (Fresh_history | Continued_history | Continued_history_from _)
-              | No_atom_history, Fresh_history -> History_stated_empty
+              | No_atom_history, Fresh_history -> stated
               | No_atom_history, (Continued_history | Continued_history_from _)
               | (Atom_history _ | Stale_noop), (Fresh_history | Continued_history | Continued_history_from _)
                 -> History_may_hold_atoms)))

@@ -9060,19 +9060,17 @@ let held_turn_of_log turn_log =
   }
 ;;
 
-(* The rows a turn's log draws itself: the keeper's words, its tool blocks
-   (with the durable outcome and duration folded in by
-   [enrich_held_logs_from_rows]), its skills (with the exact delivery record
-   folded in by the same pass), and its reasoning when it has any. What a
-   person said, what the server said about the turn (gate rows), what the
-   pane said, and a failure stay in the committed rows. The renderer uses a
-   log's failure only when no committed error row names that operation. *)
+(* A held source replaces speech, skills and observed reasoning. Tool rows
+   instead require exact receipt coverage in [compute_chat_rows_for]; hearing
+   an ending cannot prove that every tool event was retained. User/status/error
+   and memory records remain separate durable observations. *)
 let log_draws_row (held : held_turn) (row : msg_entry) =
   row.me_execution_source = Some held.ht_source
   &&
   match row.me_role with
-  | Message_keeper | Message_autonomous | Message_tool | Message_skill _ -> true
+  | Message_keeper | Message_autonomous | Message_skill _ -> true
   | Message_thinking -> held.ht_reasoning
+  | Message_tool -> false
   | Message_user _ | Message_status | Message_local | Message_error
   | Message_memory ->
       false
@@ -11454,14 +11452,14 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
         | _ -> Some row)
       rows
   in
-  (* Partial selected logs own the exact activities already drawn, even
-     when they cannot own the final reply. Keep unmatched durable activities
+  (* Selected logs own the exact tool receipts already drawn, including after
+     termination: an ending alone cannot prove every call was retained.
+     Keep unmatched durable activities
      and evidence gaps; a call name or transcript position is not identity. *)
-  let partial_logs = selected_source_logs_for_keeper state keeper_name
-    |> List.filter (fun log -> not (turn_log_holds_the_turn log)) in
+  let activity_logs = selected_source_logs_for_keeper state keeper_name in
   let remaining_activity (row : msg_entry) =
     let module Transcript = Masc_tui_keeper_chat_transcript in
-    let drawn = partial_logs
+    let drawn = activity_logs
       |> List.filter (fun log -> row.me_execution_source = Some (turn_log_execution_source log))
       |> List.concat_map (fun log -> Transcript.drawn log.tl_transcript) in
     if drawn = [] then Some row else match row.me_role with

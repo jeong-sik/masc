@@ -793,6 +793,16 @@ type chat_timeline = {
   ctl_items: chat_timeline_item list;
 }
 
+type chat_turn_key =
+  | Typed_execution of Masc_tui_keeper_chat_log.journal_source
+  | Legacy_request of string
+
+let chat_turn_key (row : msg_entry) =
+  match row.me_execution_source with
+  | Some source -> Typed_execution source
+  | None -> Legacy_request row.me_request_id
+;;
+
 (* The row's source clock before causal projection. Request rows are projected
    to a nondecreasing phase frontier by [chat_timeline_rows]. *)
 let message_display_at row =
@@ -802,7 +812,7 @@ let message_display_at row =
   | Some _ | None -> if valid row.me_at then Some row.me_at else None
 ;;
 
-(* One moment per row, with a floor per request id so a turn's rows cannot
+(* One moment per row, with a floor per typed execution key so a turn's rows cannot
    read as moving backwards.
 
    Both tables were assoc lists. A conversation carries about as many request
@@ -815,17 +825,18 @@ let chat_projected_timeline_ats messages =
   (* A held log asks for the moments of its own few rows; a 64-bucket table
      per call is what that costs when the list is small. *)
   let table_size = if List.compare_length_with messages 16 <= 0 then 8 else 64 in
-  let first_known_by_request = Hashtbl.create table_size in
+  let first_known_by_source = Hashtbl.create table_size in
   List.iter
     (fun (row : msg_entry) ->
       let request_id = row.me_request_id in
+      let source_key = chat_turn_key row in
       if (not (String.equal request_id ""))
-         && not (Hashtbl.mem first_known_by_request request_id)
+         && not (Hashtbl.mem first_known_by_source source_key)
       then
         (* A row without a moment does not claim the id: a later row of the
            same request can still be the first known one. *)
         match message_display_at row with
-        | Some at -> Hashtbl.replace first_known_by_request request_id at
+        | Some at -> Hashtbl.replace first_known_by_source source_key at
         | None -> ())
     messages;
   let floors = Hashtbl.create table_size in
@@ -833,6 +844,7 @@ let chat_projected_timeline_ats messages =
     | [] -> List.rev reversed
     | (row : msg_entry) :: rest ->
         let request_id = row.me_request_id in
+        let source_key = chat_turn_key row in
         let raw_at = message_display_at row in
         if String.equal request_id ""
         then project (raw_at :: reversed) rest
@@ -840,14 +852,14 @@ let chat_projected_timeline_ats messages =
           let projected_at =
             (* A floor recorded as [None] is a request known to have no
                moment, which is not the same as a request not seen yet. *)
-            match Hashtbl.find_opt floors request_id, raw_at with
+            match Hashtbl.find_opt floors source_key, raw_at with
             | None, Some at -> Some at
-            | None, None -> Hashtbl.find_opt first_known_by_request request_id
+            | None, None -> Hashtbl.find_opt first_known_by_source source_key
             | Some None, _ -> None
             | Some (Some floor), Some at -> Some (Float.max floor at)
             | Some (Some floor), None -> Some floor
           in
-          Hashtbl.replace floors request_id projected_at;
+          Hashtbl.replace floors source_key projected_at;
           project (projected_at :: reversed) rest
   in
   project [] messages
@@ -997,16 +1009,6 @@ let order_chat_turn_rows rows =
    Session/persisted aliases are resolved before this assembly, using the
    exact request input slot, never the message body. Non-user rows keep their
    existing producer positions. *)
-type chat_turn_key =
-  | Typed_execution of Masc_tui_keeper_chat_log.journal_source
-  | Legacy_request of string
-
-let chat_turn_key (row : msg_entry) =
-  match row.me_execution_source with
-  | Some source -> Typed_execution source
-  | None -> Legacy_request row.me_request_id
-;;
-
 type turn_sequence_evidence =
   | Sequence_unobserved
   | Sequence_observed of int

@@ -192,6 +192,11 @@ function storedModelContentActivity(
     const activity = parsed.data
     if (response.floor === null || activity.generation !== response.floor.content_generation
         || activity.stream_scope !== response.floor.stream_scope) return null
+    // An open observation needs a live response owner: the historical floor
+    // alone may outlive the attempt or continuation that owned it. Ended
+    // tombstones stay valid against the floor.
+    if (activity.state === 'observed' && !sameKeeperResponseOwner(response.current ?? undefined,
+        { content_generation: activity.generation, stream_scope: activity.stream_scope })) return null
     if (activities.some(previous => previous.generation === activity.generation
       && previous.stream_scope === activity.stream_scope && previous.block_index === activity.block_index)) return null
     activities.push(Object.freeze({ ...activity }))
@@ -343,20 +348,30 @@ function preserveContentClosure(
     right: NonNullable<TrackedKeeperChatAssistantDraft['modelContentActivity']>[number]): boolean =>
     left.generation === right.generation && left.stream_scope === right.stream_scope && left.block_index === right.block_index
   let reopened = false
-  const merged = incoming.modelContentActivity.map(activity => {
-    const previous = previousActivities.find(old => sameOccurrence(old, activity))
-    if (previous?.state === 'ended' && activity.state === 'observed') reopened = true
-    return previous?.state === 'ended' ? previous : activity
+  let restoredOpen = false
+  // Merge in stored occurrence order: the incoming snapshot may omit an
+  // earlier occurrence, and prepending the omitted rows would reverse their
+  // causal order. Occurrences only the incoming snapshot knows are newest.
+  const merged = previousActivities.map(previous => {
+    const activity = incoming.modelContentActivity.find(next => sameOccurrence(previous, next))
+    if (!activity) {
+      if (previous.state === 'observed') restoredOpen = true
+      return previous
+    }
+    if (previous.state === 'ended' && activity.state === 'observed') reopened = true
+    return previous.state === 'ended' ? previous : activity
   })
+  for (const activity of incoming.modelContentActivity) {
+    if (!merged.some(old => sameOccurrence(old, activity))) merged.push(activity)
+  }
   const conflict = incoming.modelContentActivity.some(activity => previousActivities.some(previous =>
     sameOccurrence(previous, activity) && previous.channel !== activity.channel))
   if (conflict) return { ...incoming, modelContentActivity: undefined, responseState: unavailableKeeperResponseState,
     delivery: 'error', streamState: null, error: 'Stored content channels conflict; waiting for authoritative recovery.' }
-  const missing = previousActivities.filter(previous => !merged.some(activity => sameOccurrence(previous, activity)))
-  const activities = Object.freeze([...missing, ...merged])
+  const activities = Object.freeze(merged)
   const open = activities.filter(activity => activity.state === 'observed').at(-1)
   return { ...incoming, modelContentActivity: activities,
-    ...(reopened && (incoming.streamState === 'thinking' || incoming.streamState === 'streaming' || incoming.streamState === 'waiting')
+    ...((reopened || restoredOpen) && (incoming.streamState === 'thinking' || incoming.streamState === 'streaming' || incoming.streamState === 'waiting')
       ? { streamState: open ? (open.channel === 'thinking' ? 'thinking' : 'streaming') : 'waiting' } : {}),
   }
 }

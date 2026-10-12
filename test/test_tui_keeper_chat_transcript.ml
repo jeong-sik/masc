@@ -1186,6 +1186,31 @@ let test_old_approval_settlement_cannot_clear_a_reused_provider_call () =
       (Masc.Keeper_tool_approval_id.equal pending.Transcript.approval_id approval_other_id)
   | None -> fail "old approval cleared a newer wait with the same provider ID"
 
+let test_approval_settlement_requires_admitted_call_correlation () =
+  let t = fresh () in
+  feed t [requested ~approval_id:approval_fixture_id ~call_id:"held"
+    ~tool_name:"Write" ~question:"write?";
+    Live.Approval_settled {approval_id=approval_fixture_id;call_id="foreign";outcome="approve"}];
+  (match Transcript.awaiting_approval t with
+   | Some awaiting -> check string "conflict preserves admitted call" "held" awaiting.Transcript.call_id
+   | None -> fail "conflicting settlement cleared admission");
+  check bool "correlation conflict is reported" true (Option.is_some (Transcript.unreadable t));
+  feed t [Live.Approval_settled {approval_id=approval_fixture_id;call_id="held";outcome="approve"}];
+  check bool "matching admission settles" true (Option.is_none (Transcript.awaiting_approval t))
+;;
+
+let test_approval_arguments_cannot_update_native_call () =
+  let t = fresh () in
+  let native = occurrence ~block_index:7 "approval-native" in
+  feed t [Live.Run_started; Live.Native_tool_started {occurrence=native;tool_name=Some "Read"};
+    Live.Approval_requested {approval_id=approval_fixture_id;call_id="approval-native";
+      tool_name="Read";args="foreign arguments";question="read?";because="provided"}];
+  match Transcript.tool_calls t with
+  | [call] -> check string "native arguments remain observational" "" call.Transcript.args;
+      check tool_outcome "native lifecycle unchanged" Transcript.Native_running call.outcome
+  | _ -> fail "expected one native observation"
+;;
+
 let test_the_whole_reasoning_trail_is_kept () =
   let t = fresh () in
   feed t
@@ -2828,6 +2853,8 @@ let () =
         test_case "error body and runtime context remain independent" `Quick test_failure_body_and_runtime_are_independent])
     ; ( "event timeline"
       , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
+         test_case "approval correlation matches admission" `Quick test_approval_settlement_requires_admitted_call_correlation;
+         test_case "approval args retain native authority" `Quick test_approval_arguments_cannot_update_native_call;
          test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts;
          test_case "a reported native failure shows as failure" `Quick
            test_a_reported_native_failure_shows_as_failure;

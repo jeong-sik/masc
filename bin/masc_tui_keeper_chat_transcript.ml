@@ -1929,18 +1929,23 @@ let apply_delta ~now t (delta : Live.delta) =
        | args ->
          (match
             update_unique_call t ~call_id
-              ~eligible:(fun call -> not call.result_ready && not call.failed)
+              ~eligible:(fun call -> call.authority = Masc_execution
+                && call.segment = t.segment && call.attempt = t.attempt
+                && not call.result_ready && not call.failed)
               (fun call -> { call with args })
           with
           | Call_updated | Call_missing | Call_ambiguous | Call_conflicting -> ()));
       t.last_approval_settlement <- None;
       t.awaiting <- Some { approval_id; call_id; tool_name; question; because }
-  | Live.Approval_settled { approval_id; call_id = _; outcome } ->
+  | Live.Approval_settled { approval_id; call_id; outcome } ->
       (* Cleared whatever the answer was, including none: the prompt is over
          either way, and leaving it up would ask again for a call that has
          already been decided. The approval identity prevents a late settle
          from clearing a newer wait, including one reusing the provider ID. *)
       (match t.awaiting with
+       | Some awaiting when Masc.Keeper_tool_approval_id.equal awaiting.approval_id approval_id
+           && not (String.equal awaiting.call_id call_id) ->
+           note_unreadable t "approval settlement call identity conflicts with its admission"
        | Some awaiting when Masc.Keeper_tool_approval_id.equal awaiting.approval_id approval_id ->
            t.awaiting <- None;
            t.last_approval_settlement <-

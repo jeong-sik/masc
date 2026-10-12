@@ -331,6 +331,11 @@ val ram_diff : unit -> (ram_diff, error) result
     them apart. *)
 
 type core = {
+  source_commit : string option;
+      (** The linked core's own clean-checkout Git commit, when its build
+          can establish it. [None] for dirty, archive or unowned checkouts,
+          or unavailable Git identity. Never replaced by the installation
+          pin or MASC's commit. *)
   source_digest : string;
       (** the linked ocaml-msx core's own identity: a digest of its [lib/]
           sources, computed by its build ([Msx_core_identity]). Not a
@@ -339,7 +344,8 @@ type core = {
       (** the digest of the core at the CI pin, [OCAML_MSX_SHA] in
           [scripts/opam-pin-external-deps.sh]. *)
   matches_pin : bool;
-      (** the two digests are equal. [false] means this server runs a
+      (** the two digests are equal; this does not compare Git commits.
+          [false] means this server runs a
           different core from the one CI builds against — an older opam
           copy, or a vendored checkout on another branch. *)
 }

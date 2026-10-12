@@ -636,10 +636,10 @@ let keeper_chat_history_json config name =
    Uncached: pages are user-initiated and [load_page] is already bounded I/O
    (binary-search probes plus one window slice). A cache keyed by cursor would
    add entries per click without a measured hot path asking for it. *)
-let keeper_chat_history_page_json config name ~before =
+let keeper_chat_history_page_json ?max_total config name ~before =
   let base_dir = (config : Workspace.config).base_path in
   let { Keeper_chat_store.messages; has_more } =
-    Keeper_chat_store.load_page ~base_dir ~keeper_name:name ?before ()
+    Keeper_chat_store.load_page ~base_dir ~keeper_name:name ?before ?max_total ()
   in
   let trace_block_by_turn_ref = keeper_chat_trace_blocks config name in
   let next_before =
@@ -888,20 +888,28 @@ let handle_keeper_get_subroutes state req request reqd =
          serves, minus the autonomous turns. Present but unparseable is a client
          bug, not a request for the newest page, so it is rejected rather than
          silently treated as absent. *)
-      match Server_utils.query_param req "before" with
-      | Some raw when float_of_string_opt (String.trim raw) = None ->
+      match Server_utils.query_param req "before", Server_utils.query_param req "limit" with
+      | Some raw, _ when float_of_string_opt (String.trim raw) = None ->
         Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
           (error_json "before must be a unix-seconds float")
-      | before_raw ->
+      | _, Some raw when int_of_string_opt (String.trim raw) = None ->
+        (* The same rule as [before]: a limit that does not parse is a client
+           bug, not a request for the default window. *)
+        Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+          (error_json "limit must be an integer")
+      | before_raw, limit_raw ->
         let before =
           Option.bind before_raw (fun raw -> float_of_string_opt (String.trim raw))
+        in
+        let max_total =
+          Option.bind limit_raw (fun raw -> int_of_string_opt (String.trim raw))
         in
         let config = Mcp_server.workspace_config state in
         (* The window read, its parse and the page's JSON are one job on the
            domain pool, as the cached whole-history read below already is. *)
         let page =
           Domain_pool_ref.submit_io_or_inline (fun () ->
-            keeper_chat_history_page_json config name ~before)
+            keeper_chat_history_page_json ?max_total config name ~before)
         in
         Server_auth.respond_json_value_with_cors ~status:`OK request reqd page)
   else if ends_with "/chat/history" then

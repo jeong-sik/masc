@@ -30,9 +30,14 @@ flowchart LR
 ## 기본 저장소 전략
 
 - Stacked PR로 작업합니다. 맨 아래 PR은 `main`을, 이후 PR은 직전 브랜치를 대상으로 합니다.
-  PR 하나에는 구체적인 결과 하나를 담고 스택 아래부터 통합합니다.
+  PR 하나에는 구체적인 결과 하나를 담습니다.
+- **Native Stack은 맨 위 PR 하나로 스택 전체를 한 번에 병합합니다. 아래부터 한 층씩 병합하지 않습니다.**
+  아래쪽 PR로 `merge-async`를 부르는 것도 같습니다. 한 층씩 넣으면 `main`이 움직일 때마다
+  남은 층과 다른 스택이 다시 충돌합니다.
+- 스택이 `main`과 충돌하면 `gh stack rebase`로 스택 전체를 다시 올리고 모든 층을 한 번에 push합니다.
+  아래층만 고쳐 따로 push하지 않습니다. 충돌은 맨 아래 PR이 아니라 스택 단위로 보고합니다.
 - GitHub Native Stack은 REST `stack`을 먼저 읽고 [전용 절차](NATIVE-GITHUB-STACKS.md)를 따릅니다.
-  선택한 PR 아래의 미병합 PR도 함께 병합되므로 전체 범위를 검토합니다. non-main base만으로
+  스택의 모든 PR을 검토합니다. non-main base만으로
   부모 선행 병합이나 수동 retarget을 요구하지 않습니다.
 - 동시 작업은 별도 worktree로 격리합니다. Task claim은 담당을 조율하며 파일을 잠그거나
   다른 체크아웃을 수정할 권한을 주지는 않습니다.
@@ -263,7 +268,9 @@ scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
 선택지와 placeholder를 실제 값으로 바꾸세요.
 
 병합 전에 현재 리뷰와 댓글을 다시 읽습니다. 미해결 차단 리뷰나 이후의 FAIL/HOLD 판정이
-있으면 통합하지 않습니다. 스택 아래부터 통합하며 base와 head의 변경을 검토한 뒤 진행합니다.
+있으면 통합하지 않습니다. Native Stack은 맨 위 PR 하나로 스택 전체를 한 번에 병합하며
+아래부터 한 층씩 넣지 않습니다. base와 head의 변경을 검토한 뒤 진행합니다.
+Native Stack이 아님이 확인된 일반 브랜치 체인만 부모부터 처리합니다.
 통합 조건은 [merge-guard](../../scripts/review/merge-guard.sh)와 현재
 [CI·리뷰 안내](../CI-REVIEW-WORKFLOW.md)를 따릅니다. 일반 스택은 소스 리뷰,
 Release head는 완료된 전체 CI가 필요합니다. Fork 기여자는 maintainer에게 통합을 맡깁니다.

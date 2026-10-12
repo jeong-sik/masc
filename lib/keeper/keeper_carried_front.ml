@@ -182,28 +182,22 @@ let current_generation_floor ~config ~keeper_name ~trace_id =
                 "turn boundary line %d: %s"
                 line
                 (Keeper_turn_boundaries.read_error_to_string error))
-         | ( _,
-             Ok
-               { Keeper_turn_boundaries.event =
-                   Keeper_turn_boundaries.Turn_ended { turn_ref; _ }
-               ; _
-               } )
-           :: rest
-           when String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id ->
-           let turn = Ids.Turn_ref.absolute_turn turn_ref in
-           loop
-             (Some (Option.fold ~none:turn ~some:(Int.max turn) latest_turn))
-             floor
-             rest
-         | ( _,
-             Ok
-               { Keeper_turn_boundaries.event =
-                   Keeper_turn_boundaries.History_restarted { trace_id = restarted }
-               ; _
-               } )
-           :: rest
-           when String.equal restarted trace_id ->
-           loop latest_turn latest_turn rest
+         | (_, Ok record) :: rest
+           when Keeper_turn_boundaries.restarts_history ~trace_id record ->
+           (match record.Keeper_turn_boundaries.event with
+            | Keeper_turn_boundaries.Turn_ended { turn_ref; _ } ->
+              (* The turn began from an empty history, so its end line states
+                 the atoms are numbered from zero again: the generation
+                 boundary, whether or not a turn-start marker was ever
+                 written. The boundary covers the turns that ended before the
+                 restarting turn, not the turn itself. *)
+              let turn = Ids.Turn_ref.absolute_turn turn_ref in
+              loop
+                (Some (Option.fold ~none:turn ~some:(Int.max turn) latest_turn))
+                latest_turn
+                rest
+            | Keeper_turn_boundaries.History_restarted _ ->
+              loop latest_turn latest_turn rest)
          | (_, Ok _) :: rest -> loop latest_turn floor rest
        in
        loop None None lines)

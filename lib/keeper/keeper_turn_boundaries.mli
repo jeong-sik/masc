@@ -301,6 +301,30 @@ val history_stated
   -> (int * (record, read_error) result) list
   -> history_stated
 
+(** The line says the atoms of [trace_id] are numbered from zero again: a
+    restart line, or a turn of the trace that began from an empty history.
+    Pure. This is the single predicate every consumer of restart semantics
+    shares, so a new kind of restart line updates one place. *)
+val restarts_history : trace_id:string -> record -> bool
+
+(** [history_stated] of the store's lines, for the hot per-turn path. The fold
+    behind {!history_stated} sets its state outright at every deciding line,
+    and the deciding lines are exactly the lines that are not another trace's
+    record, so the answer is carried by the last deciding line in the file.
+    A bounded tail read under the writer's lock finds it whenever the keeper's
+    latest turns were of this trace -- the common case, and the only case an
+    official-client lane ever reaches -- and answers without decoding the
+    whole store. When the window did not reach a deciding line (a long run of
+    another trace's rows, or rows older than the window), the full store is
+    read and folded instead, so the answer never depends on the window. The
+    store is not rewritten. A store that cannot be read is [Error]; a missing
+    store states nothing, like the empty line list. *)
+val history_stated_in_store
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> trace_id:string
+  -> (history_stated, string) result
+
 (** The line that states a read position: the last of [lines] ending a turn of
     [trace_id] with exactly [end_atom] atoms and [last_atom_digest], as
     [(line, recorded_at, turn_ref)]. With [through], only lines numbered at

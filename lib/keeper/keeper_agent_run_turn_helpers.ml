@@ -348,16 +348,19 @@ let restart_notice
 ;;
 
 (* Only a turn that would otherwise write at its start needs the log, so
-   continued turns do not pay for a read. A log that cannot be read is
-   reported and treated as stating nothing: the line is then written, as it
-   was before the log was consulted. *)
+   continued turns do not pay for a read. The read is tail-bounded: the last
+   deciding line of the trace carries the answer, and it is the store's last
+   row whenever the keeper's latest turns were of this trace. A log that
+   cannot be read is reported and treated as stating nothing: the line is
+   then written, as it was before the log was consulted. *)
 let history_stated_by_log ~(config : Workspace.config) ~keeper_name ~trace_id =
   match
-    Keeper_turn_boundaries.read
+    Keeper_turn_boundaries.history_stated_in_store
       ~keepers_dir:(Workspace.keepers_runtime_dir config)
       ~keeper_id:keeper_name
+      ~trace_id
   with
-  | Ok lines -> Keeper_turn_boundaries.history_stated ~trace_id lines
+  | Ok stated -> stated
   | Error detail ->
     Log.Keeper.warn
       ~keeper_name

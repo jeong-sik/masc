@@ -388,6 +388,67 @@ let read_lines ~keepers_dir =
       lines
 ;;
 
+let append_lines ~keepers_dir lines =
+  List.iter
+    (fun line ->
+       match Boundaries.append ~keepers_dir ~keeper_id line with
+       | Ok () -> ()
+       | Error error -> failf "append: %s" (Boundaries.append_error_to_string error))
+    lines
+;;
+
+let test_history_stated_in_store_answers_from_the_tail () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let describe = function
+    | Boundaries.History_may_hold_atoms -> "may hold atoms"
+    | Boundaries.History_stated_empty -> "stated empty"
+  in
+  let stated_in_store () =
+    match Boundaries.history_stated_in_store ~keepers_dir ~keeper_id ~trace_id:"trace" with
+    | Ok stated -> stated
+    | Error detail -> failf "history_stated_in_store: %s" detail
+  in
+  let check_stated label expected () =
+    check string label expected (describe (stated_in_store ()))
+  in
+  check_stated "a missing store states nothing" "may hold atoms" ();
+  append_lines ~keepers_dir
+    [ record ~turn:1 ~trace_id:"other" Boundaries.Stale_noop
+    ; record ~turn:2 ~history_at_start:Boundaries.Fresh_history Boundaries.No_atom_history
+    ];
+  check_stated "the trace's last row decides" "stated empty" ();
+  append_lines ~keepers_dir [ record ~turn:3 Boundaries.Atom_history ];
+  check_stated "a later atom row moves it back" "may hold atoms" ();
+  append_lines ~keepers_dir [ history_restarted () ];
+  check_stated "a restart row states empty" "stated empty" ();
+  (* Enough of another trace's rows follow to push every row of this trace
+     out of the bounded tail window, so the answer comes from the fallback
+     full read. *)
+  append_lines ~keepers_dir
+    (List.init 400 (fun index ->
+       record ~turn:(index + 4) ~trace_id:"other" Boundaries.Stale_noop));
+  check_stated "the fallback reads past the window" "stated empty" ();
+  (* A torn tail is a last line no reader decodes, and it decides. *)
+  let path = Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let store = Unix.openfile path [ Unix.O_WRONLY; Unix.O_APPEND ] 0o600 in
+  let torn = {|{"kind":"turn_ended"|} in
+  let written = Unix.write_substring store torn 0 (String.length torn) in
+  Unix.close store;
+  check int "the torn fragment was written whole" (String.length torn) written;
+  check_stated "a torn tail states nothing" "may hold atoms" ()
+;;
+
+(* A store no reader can open answers [Error], so the caller reports it and
+   takes the conservative branch. *)
+let test_history_stated_in_store_reports_an_unreadable_store () =
+  with_temp_keepers @@ fun keepers_dir ->
+  block_the_store ~keepers_dir;
+  match Boundaries.history_stated_in_store ~keepers_dir ~keeper_id ~trace_id:"trace" with
+  | Ok _ -> fail "a directory in the store's place states nothing without an error"
+  | Error detail ->
+    check bool "the failure says why" true (String.length detail > 0)
+;;
+
 let test_appended_lines_read_back_in_order () =
   with_temp_keepers @@ fun keepers_dir ->
   check int "a keeper with no finished turn has no line" 0
@@ -1064,6 +1125,10 @@ let () =
     ; ( "store"
       , [ test_case "appended lines read back in order" `Quick
             test_appended_lines_read_back_in_order
+        ; test_case "the store states its history from the tail" `Quick
+            test_history_stated_in_store_answers_from_the_tail
+        ; test_case "an unreadable store reports its failure" `Quick
+            test_history_stated_in_store_reports_an_unreadable_store
         ; test_case "a line no reader decodes is not written" `Quick
             test_a_line_no_reader_decodes_is_not_written
         ; test_case "the purge plan removes the log" `Quick

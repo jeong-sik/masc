@@ -213,7 +213,12 @@ val read_seed
   -> seed_read
 (** The last stored response observation in the current history generation,
     scanning newest first until a match, a different trace, or a turn at or
-    before the latest [History_restarted] boundary. The boundary is expressed
+    before the boundary the log states: a [History_restarted] line, or a turn
+    that began from an empty history, whose end line states the atoms are
+    numbered from zero again -- when the turn-start marker a fresh turn owed
+    failed to be written, that line is the only record of the restart, and it
+    fences the old generation all the same. The
+    boundary is expressed
     in the same [absolute_turn] coordinate as TurnRecord: it is the highest
     completed turn preceding that restart in file order, never a wall-clock
     comparison. Unobserved rows do not hide an older seed within that

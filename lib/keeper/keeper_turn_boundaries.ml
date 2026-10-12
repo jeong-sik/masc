@@ -508,6 +508,97 @@ let history_stated ~trace_id lines =
     lines
 ;;
 
+let record_of_trace ~trace_id (record : record) =
+  match record.event with
+  | Turn_ended { turn_ref; _ } -> String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
+  | History_restarted { trace_id = restarted } -> String.equal restarted trace_id
+;;
+
+let complete_lines rows =
+  match List.rev (String.split_on_char '\n' rows) with
+  | [] -> []
+  | _after_last_newline :: reversed -> List.rev reversed
+;;
+
+(* [history_stated] sets its state outright at every line that decides it --
+   a line that cannot be decoded, or a record of the trace -- so the last
+   deciding line of the file carries the whole answer. Rows of other traces
+   never decide. *)
+let rec last_stated_by_rows ~trace_id = function
+  | [] -> None
+  | line :: older ->
+    let decoded = decode_line line in
+    (match decoded with
+     | Error (_ : read_error) -> Some History_may_hold_atoms
+     | Ok record ->
+       if record_of_trace ~trace_id record
+       then Some (history_stated ~trace_id [ 1, decoded ])
+       else last_stated_by_rows ~trace_id older)
+;;
+
+let history_stated_of_tail ~trace_id ~full (tail : Fs_compat.Private_jsonl_tail.t) =
+  let open Fs_compat.Private_jsonl_tail in
+  match tail with
+  | Tail_missing -> Ok History_may_hold_atoms
+  | Tail_present { rows; prefix_omitted; incomplete_tail; end_offset = _ } ->
+    if incomplete_tail
+    then
+      (* The full reader reports a final fragment with no newline as a last
+         [Incomplete_line] error row, and that last row decides the fold. *)
+      Ok History_may_hold_atoms
+    else (
+      match last_stated_by_rows ~trace_id (List.rev (complete_lines rows)) with
+      | Some stated -> Ok stated
+      | None ->
+        if prefix_omitted
+        then
+          (* The window did not reach a deciding line; an older one may carry
+             the answer, so the whole store is read. *)
+          full ()
+        else Ok History_may_hold_atoms)
+;;
+
+(* The window is an I/O bound, not a decision threshold: an answer is always
+   built from the rows the window actually held, and a window that held no
+   deciding line falls back to the full read. Rows run a few hundred bytes
+   each (the header states the size), so this holds the recent rows a
+   keeper's own turns wrote and scans them in one locked pass. *)
+let history_stated_tail_window_bytes = 64 * 1024
+
+let history_stated_in_store ~keepers_dir ~keeper_id ~trace_id =
+  let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let full () =
+    Result.map (fun lines -> history_stated ~trace_id lines) (read ~keepers_dir ~keeper_id)
+  in
+  let settled cleanup_failure =
+    Log.Keeper.warn
+      ~keeper_name:keeper_id
+      "turn boundary tail read; descriptor settlement failed path=%s: %s"
+      path
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+  in
+  let unreadable error =
+    Error
+      (Printf.sprintf
+         "turn boundary store unreadable path=%s: %s"
+         path
+         (Fs_compat.Private_jsonl_tail.error_to_string error))
+  in
+  match
+    Fs_compat.read_private_jsonl_tail_locked_result
+      path
+      ~max_bytes:history_stated_tail_window_bytes
+  with
+  | Fs_compat.Private_file_succeeded tail -> history_stated_of_tail ~trace_id ~full tail
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
+    settled cleanup_failure;
+    history_stated_of_tail ~trace_id ~full value
+  | Fs_compat.Private_file_failed error -> unreadable error
+  | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    settled cleanup_failure;
+    unreadable error
+;;
+
 let witness_line ?through ~trace_id ~end_atom ~last_atom_digest lines =
   let ended_at, started_at =
     List.fold_left

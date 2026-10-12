@@ -11356,12 +11356,15 @@ type keeper_message_pending_delivery =
   | Rechecking_delivery
 
 let keeper_message_waiting_requests (state : state) ~keeper_name =
-  let module Executions = Set.Make (String) in
+  let module Executions = Set.Make (struct
+    type t = execution_source_key
+    let compare = Stdlib.compare
+  end) in
   let remember_started executions log =
     if not (String.equal (turn_log_keeper_name log) keeper_name) then executions
     else
       let started = Masc_tui_keeper_chat_log.run_started log.tl_log in
-      if started then Executions.add (turn_log_execution_id log) executions else executions
+      if started then Executions.add (turn_log_execution_source_key log) executions else executions
   in
   (* A batch's watchers receive its journal independently. A sibling's run
      start (or retained terminal log) already proves this execution consumed
@@ -11375,7 +11378,7 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
     List.rev state.msg_inflight
     |> List.filter_map (fun (entry : inflight) ->
       if not (String.equal entry.sent_request.keeper_name keeper_name)
-         || Executions.mem (turn_log_execution_id entry.log) started
+         || Executions.mem (turn_log_execution_source_key entry.log) started
          || List.exists (fun (item : Masc_tui_keeper_chat_queue.item) ->
               Masc_tui_keeper_chat_projection.same_request_identity
                 item.request entry.sent_request) local

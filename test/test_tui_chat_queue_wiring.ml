@@ -1251,6 +1251,32 @@ let visible_reply reply =
     { terminal_stream_scope = None; reply; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply; turn_ref = "trace-1#1" }
 ;;
 
+let test_pending_start_requires_same_execution_source () =
+  let raw = "trace-pending#7" in
+  let reference = match Ids.Turn_ref.of_string raw with
+    | Some reference -> reference | None -> fail "invalid typed fixture reference" in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:1.
+      [Live.Accepted {admission=Live.Queued;queue_length=1;interactive=None}] in
+  let request = {entry.sent_request with Keeper_chat.request_id=raw} in
+  let pending = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:raw ~started_at:1. in
+  Tui_types.turn_log_add ~now:2. pending ~seq:None
+    (Live.Accepted {admission=Live.Queued;queue_length=1;interactive=None});
+  state.msg_inflight <- [{entry with sent_request=request;log=pending}];
+  let started source =
+    let log = Tui_types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:1. in
+    Tui_types.turn_log_add ~now:3. log ~seq:(Some 0) Live.Run_started;
+    log in
+  state.msg_settled_logs <- [started (Masc_tui_keeper_chat_log.Autonomous_turn reference)];
+  check bool "autonomous start cannot consume direct request with same text ID" true
+    (match Tui_types.keeper_message_waiting_requests state ~keeper_name:"alpha" with
+     | [(held, Tui_types.Keeper_queued)] -> held.Keeper_chat.request_id=raw
+     | _ -> false);
+  state.msg_settled_logs <- [started (Masc_tui_keeper_chat_log.Operation raw)];
+  check int "same typed operation start retires pending input" 0
+    (List.length (Tui_types.keeper_message_waiting_requests state ~keeper_name:"alpha"))
+;;
+
 let test_queue_summary_follows_admission_and_execution () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   state.msg_tool_visibility <- Tui_types.Tools_full;
@@ -6078,7 +6104,8 @@ let () =
         ; test_case "status details and fold counts reach the frame" `Quick test_status_details_and_fold_counts_reach_the_frame ] )
     ; ( "link card layout", [ test_case "a landed preview keeps the entries" `Quick test_a_landed_preview_keeps_the_entries ] )
     ; ( "wiring"
-      , [ test_case "queue summary follows admission and execution" `Quick test_queue_summary_follows_admission_and_execution
+      , [ test_case "pending start requires same execution source" `Quick test_pending_start_requires_same_execution_source
+        ; test_case "queue summary follows admission and execution" `Quick test_queue_summary_follows_admission_and_execution
         ; test_case "checkpoint watcher allows new input" `Quick test_checkpoint_watcher_allows_new_input
         ; test_case "older queued watcher cannot rearm acknowledged stop" `Quick
             test_old_queued_watcher_does_not_rearm_esc

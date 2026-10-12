@@ -9,6 +9,8 @@ import type {
   KeeperConversationStreamState,
 } from './types'
 import { IN_FLIGHT_DELIVERY } from './lib/keeper-delivery'
+import { keeperConversationDeliveryFromUnknown } from './lib/keeper-delivery'
+import type { KeeperModelContentActivity } from './lib/keeper-chat-stream-contract'
 
 export interface TrackedKeeperChatAssistantDraft {
   runtimeAttempt?: KeeperConversationEntry['runtimeAttempt']
@@ -20,6 +22,7 @@ export interface TrackedKeeperChatAssistantDraft {
   streamState: KeeperConversationStreamState
   timestamp?: string | null
   traceSteps?: ChatTraceStep[]
+  modelContentActivity?: KeeperConversationEntry['modelContentActivity']
   error?: string | null
 }
 
@@ -177,6 +180,39 @@ function normalizeTraceSteps(raw: unknown): ChatTraceStep[] | undefined {
   return steps.length > 0 ? (steps as ChatTraceStep[]) : undefined
 }
 
+const MODEL_CONTENT_CHANNELS = ['text', 'thinking'] as const
+const MODEL_CONTENT_STATES = ['observed', 'ended'] as const
+
+function normalizeModelContentActivity(raw: unknown): KeeperConversationEntry['modelContentActivity'] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const activities: Readonly<KeeperModelContentActivity>[] = []
+  for (const item of raw) {
+    if (!isRecord(item)) return undefined
+    const generation = item.generation
+    const streamScope = item.stream_scope
+    const blockIndex = item.block_index
+    if (typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 0
+      || typeof streamScope !== 'number' || !Number.isSafeInteger(streamScope) || streamScope < 0
+      || typeof blockIndex !== 'number' || !Number.isSafeInteger(blockIndex) || blockIndex < 0) return undefined
+    const channel = parseMember(MODEL_CONTENT_CHANNELS, item.channel)
+    const state = parseMember(MODEL_CONTENT_STATES, item.state)
+    if (!channel || !state) return undefined
+    const providerMessageId = item.provider_message_id
+    if (providerMessageId !== undefined
+      && (typeof providerMessageId !== 'string' || providerMessageId.trim() === '')) return undefined
+    activities.push(Object.freeze({
+      generation,
+      stream_scope: streamScope,
+      block_index: blockIndex,
+      ...(typeof providerMessageId === 'string' ? { provider_message_id: providerMessageId } : {}),
+      channel,
+      state,
+    }))
+  }
+  return Object.freeze(activities)
+}
+
+
 function normalizeAssistantDraft(raw: unknown): TrackedKeeperChatAssistantDraft | null {
   if (!isRecord(raw)) return null
   const text = stringValue(raw.text)
@@ -189,6 +225,8 @@ function normalizeAssistantDraft(raw: unknown): TrackedKeeperChatAssistantDraft 
       : parseMember(KEEPER_STREAM_STATES, raw.streamState) ?? null
   const timestamp = nullableStringValue(raw.timestamp)
   const traceSteps = normalizeTraceSteps(raw.traceSteps)
+  const modelContentActivity = raw.modelContentActivity === undefined ? undefined
+    : normalizeModelContentActivity(raw.modelContentActivity)
   const error = nullableStringValue(raw.error)
   const runtimeAttempt = raw.runtimeAttempt === undefined ? undefined : runtimeAttemptFromUnknown(raw.runtimeAttempt)
   const responseState = raw.responseState === undefined ? undefined : keeperResponseStateFromUnknown(raw.responseState)
@@ -203,6 +241,7 @@ function normalizeAssistantDraft(raw: unknown): TrackedKeeperChatAssistantDraft 
     streamState,
     ...(timestamp !== undefined ? { timestamp } : {}),
     ...(traceSteps ? { traceSteps } : {}),
+    ...(modelContentActivity ? { modelContentActivity } : {}),
     ...(error !== undefined ? { error } : {}),
     ...(responseState === null || responseState?.kind === 'unavailable' ? {
       delivery: 'error' as const, streamState: null,
@@ -226,6 +265,7 @@ export function trackedKeeperChatAssistantDraftFromEntry(
     streamState: entry.streamState ?? null,
     timestamp: entry.timestamp ?? null,
     ...(traceSteps ? { traceSteps } : {}),
+    ...(entry.modelContentActivity ? { modelContentActivity: entry.modelContentActivity } : {}),
     ...(entry.error !== undefined ? { error: entry.error } : {}),
   }
 }

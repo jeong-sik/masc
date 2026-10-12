@@ -3376,7 +3376,10 @@ const TOOL_STATUS_TITLE: Record<ToolTraceDisplayStatus, string> = {
 // whose canonical execution_id was absent and never joined), not indefinite
 // "pending".
 function isTurnStreaming(state: KeeperConversationEntry['streamState']): boolean {
-  return state === 'opening' || state === 'thinking' || state === 'streaming' || state === 'finalizing' || state === 'retrying'
+  // 'waiting' is a live response whose observed content pieces have all
+  // closed while the model may still emit more; only a terminal delivery or
+  // a null streamState settles the turn.
+  return state === 'opening' || state === 'thinking' || state === 'streaming' || state === 'finalizing' || state === 'retrying' || state === 'waiting'
 }
 
 function toolOutputCoverageState(

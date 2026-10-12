@@ -1389,6 +1389,15 @@ let retire_model_content t =
   t.content_scope_closed <- true
 ;;
 
+(* A late body or closure must not silence current progress: retry, tool
+   return and response-ended signals survive; anything else yields. *)
+let set_signal_unless_progress t signal =
+  match t.model_signal with
+  | Some (Provider_retry_at _ | Tool_returned_at _ | Model_response_ended) -> ()
+  | None | Some (Scoped_model_content | Model_started_at _ | Reasoning_at _ | Answering_at _) ->
+      t.model_signal <- Some signal
+;;
+
 let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content_activity) =
   let open Masc.Keeper_chat_events in
   match t.phase with
@@ -1433,11 +1442,7 @@ let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content
               | Some (Answering_at _), Model_thinking
               | Some (Reasoning_at _), Model_text -> true
               | _ -> false in
-            if not keep_fallback then
-              (match t.model_signal with
-               | Some (Provider_retry_at _ | Tool_returned_at _ | Model_response_ended) -> ()
-               | None | Some (Scoped_model_content | Model_started_at _ | Reasoning_at _ | Answering_at _) ->
-                   t.model_signal <- Some Scoped_model_content)
+            if not keep_fallback then set_signal_unless_progress t Scoped_model_content
         | Some (_,_,None) -> ()
       end
 ;;
@@ -1623,10 +1628,7 @@ let apply_delta ~now t (delta : Live.delta) =
   | Live.Thinking {text=""; _} -> ()
   | Live.Text {text; stream_scope} ->
       Option.iter (enter_text_response_scope t) stream_scope;
-      (match t.model_signal with
-       | Some (Provider_retry_at _ | Tool_returned_at _ | Model_response_ended) -> ()
-       | None | Some (Scoped_model_content | Model_started_at _ | Reasoning_at _ | Answering_at _) ->
-           t.model_signal <- Some (Answering_at now));
+      set_signal_unless_progress t (Answering_at now);
       Buffer.add_string t.text_buffer text;
       trail_text ~now t text
   | Live.Thinking {text; content_index} ->
@@ -1635,11 +1637,7 @@ let apply_delta ~now t (delta : Live.delta) =
         | Some index -> List.exists (fun (known, channel, at) ->
             known = index && channel = Masc.Keeper_chat_events.Model_thinking && Option.is_none at)
             t.active_model_content in
-      if not closed_thinking then
-        (match t.model_signal with
-         | Some (Provider_retry_at _ | Tool_returned_at _ | Model_response_ended) -> ()
-         | None | Some (Scoped_model_content | Model_started_at _ | Reasoning_at _ | Answering_at _) ->
-             t.model_signal <- Some (Reasoning_at now));
+      if not closed_thinking then set_signal_unless_progress t (Reasoning_at now);
       Buffer.add_string t.thinking_buffer text;
       trail_thinking ~now t text
   | Live.Tool_started { occurrence; tool_name } ->

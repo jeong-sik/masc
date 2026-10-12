@@ -363,6 +363,8 @@ let test_late_unindexed_body_preserves_retry () =
     let retry : Masc.Runtime_claude_api_retry.t = {observation_id="retry";attempt=1;
       max_retries=10;retry_delay_ms=1000;error_status=None} in
     T.apply ~now:1. t (L.Runtime_attempt_started {runtime_id=Some "claude";attempt_index=Some 0});
+    T.apply ~now:1. t (L.Stream_model_started {stream_scope=Some 0;
+      message_id=None;model="fixture";usage=None});
     T.apply ~now:2. t (observed ~generation:7 ());
     T.apply ~now:3. t (ended ~generation:7 ());
     T.apply ~now:4. t (L.Provider_retry_observed {attempt={routing_run_id="run";

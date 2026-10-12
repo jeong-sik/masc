@@ -18729,23 +18729,26 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
    to read a key. Results arrive in bursts (a history page, then a journal
    read for each turn on it), and applying all of them in one pass held a
    keypress behind 30-60ms of work. The rest stay in the mailbox in order and
-   are applied on the next pass; a single result longer than this still runs
-   whole. About one frame, so the loop comes back to the keyboard at frame
-   rate. *)
+   are applied on the next pass. About one frame, so the loop comes back to
+   the keyboard at frame rate. *)
 let async_drain_budget_ns = 4_000_000L
 
-let drain_async_messages ?budget_ns state ~base_path ~http_refresh_inflight
+(* The pass computes one deadline from [async_drain_budget_ns] and both drains
+   in the pass share it, so the two calls together apply at most one frame of
+   queued work. No item starts past the deadline — not even the first — so a
+   spent pass leaves its mailbox for the next pass, whose fresh deadline always
+   admits at least that pass's first take. An item that starts in budget still
+   runs whole, so one pass can overrun by the single item in flight at expiry. *)
+let drain_async_messages ?deadline_ns state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup
     ~frame_presenter ~render_schedule mailbox =
-  let started_ns = Mtime_clock.elapsed_ns () in
   let over_budget () =
-    match budget_ns with
+    match deadline_ns with
     | None -> false
-    | Some budget ->
-        Int64.compare (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) budget >= 0
+    | Some deadline -> Int64.compare (Mtime_clock.elapsed_ns ()) deadline >= 0
   in
   let rec loop changed =
-    match if changed && over_budget () then None else Eio.Stream.take_nonblocking mailbox with
+    match if over_budget () then None else Eio.Stream.take_nonblocking mailbox with
     | None ->
         (match state.keeper_creation_awaiting_roster with
          | Some keeper when keeper_available_for_new_message state keeper ->
@@ -21070,8 +21073,14 @@ and is loaded on demand through keeper_skill.
                 None)
        | Masc_tui_exit_signals.Continue -> None
       in
+      (* One drain deadline for the whole pass: the pre-input drain below and
+         the post-input drain share it, so a key never waits through two
+         separately budgeted drains. *)
+      let drain_deadline_ns =
+        Int64.add (Mtime_clock.elapsed_ns ()) async_drain_budget_ns
+      in
       if
-        drain_async_messages ~budget_ns:async_drain_budget_ns state ~base_path
+        drain_async_messages ~deadline_ns:drain_deadline_ns state ~base_path
           ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
           ~frame_presenter ~render_schedule async_messages
@@ -29229,8 +29238,11 @@ and is loaded on demand through keeper_skill.
       end;
 
       Eio.Fiber.yield ();
+      (* Shares the pass deadline computed before the pre-input drain: when the
+         pass budget is spent this applies nothing and the mailbox waits for
+         the next pass. *)
       if
-        drain_async_messages ~budget_ns:async_drain_budget_ns state ~base_path
+        drain_async_messages ~deadline_ns:drain_deadline_ns state ~base_path
           ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
           ~frame_presenter ~render_schedule async_messages

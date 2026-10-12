@@ -1256,26 +1256,26 @@ describe('restored chat operation outcome', () => {
     storeDraft()
     fetchKeeperChatOperation.mockResolvedValue({ operationId: 'restored-op', state })
     await hydrateTrackedKeeperChatOperations('echo')
-    const entry = keeperThreads.value.echo.find(candidate => candidate.role === 'assistant')
+    const entry = keeperThreads.value.echo?.find(candidate => candidate.role === 'assistant')
     expect(entry).toMatchObject({ rawText: 'partial authored answer', text: 'partial authored answer',
       timestamp: '2026-10-11T00:00:00Z', traceSteps: [{ kind: 'think', text: 'exposed reasoning' }],
       streamState: null, responseState: { phase: 'terminal' } })
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft).toMatchObject({
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft).toMatchObject({
       rawText: 'partial authored answer', responseState: { phase: 'terminal' },
     })
     keeperThreads.value = {}
     await hydrateTrackedKeeperChatOperations('echo')
-    expect(keeperThreads.value.echo.find(candidate => candidate.role === 'assistant')?.rawText).toBe('partial authored answer')
+    expect(keeperThreads.value.echo?.find(candidate => candidate.role === 'assistant')?.rawText).toBe('partial authored answer')
   })
 
   it('retains observed content and tracking when operation lookup temporarily fails', async () => {
     storeDraft()
     fetchKeeperChatOperation.mockRejectedValue(new Error('temporary network failure'))
     await hydrateTrackedKeeperChatOperations('echo')
-    expect(keeperThreads.value.echo.find(candidate => candidate.role === 'assistant')).toMatchObject({
+    expect(keeperThreads.value.echo?.find(candidate => candidate.role === 'assistant')).toMatchObject({
       rawText: 'partial authored answer', timestamp: '2026-10-11T00:00:00Z', delivery: 'error',
     })
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].operationId).toBe('restored-op')
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.operationId).toBe('restored-op')
   })
   it('releases the stored observation only after the canonical operation turn replaces it', async () => {
     storeDraft()
@@ -1290,7 +1290,7 @@ describe('restored chat operation outcome', () => {
     ])
     await hydrateTrackedKeeperChatOperations('echo')
     expect(trackedKeeperChatOperationsForKeeper('echo')).toEqual([])
-    expect(keeperThreads.value.echo.filter(entry => entry.role === 'assistant')).toMatchObject([
+    expect(keeperThreads.value.echo?.filter(entry => entry.role === 'assistant')).toMatchObject([
       { id: 'canonical-assistant', text: 'complete answer', traceSteps: [{ kind: 'think', text: 'exposed reasoning' }] },
     ])
   })
@@ -1303,10 +1303,10 @@ describe('restored chat operation outcome', () => {
     fetchKeeperChatOperation.mockResolvedValue({ operationId: 'restored-op', state })
     fetchKeeperChatHistory.mockRejectedValue(new Error('history transport unavailable'))
     await hydrateTrackedKeeperChatOperations('echo')
-    expect(keeperThreads.value.echo.find(entry => entry.role === 'assistant')).toMatchObject({
+    expect(keeperThreads.value.echo?.find(entry => entry.role === 'assistant')).toMatchObject({
       delivery, rawText: 'partial authored answer', responseState: { phase: 'terminal' },
     })
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft?.delivery).toBe(delivery)
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.delivery).toBe(delivery)
     expect(keeperChatHistoryErrors.value.echo).toContain('history transport unavailable')
   })
 
@@ -1320,9 +1320,9 @@ describe('restored chat operation outcome', () => {
     keeperThreads.value = {}
     fetchKeeperChatOperation.mockRejectedValue(failure)
     await hydrateTrackedKeeperChatOperations('echo')
-    const entry = keeperThreads.value.echo.find(candidate => candidate.role === 'assistant')
+    const entry = keeperThreads.value.echo?.find(candidate => candidate.role === 'assistant')
     expect(entry).toMatchObject({ delivery: 'delivered', rawText: 'partial authored answer', responseState: { phase: 'terminal' } })
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft?.delivery).toBe('delivered')
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.delivery).toBe('delivered')
     expect(keeperActionErrors.value.echo).toBe(failure.message)
   })
 

@@ -184,7 +184,7 @@ describe('keeper chat operation tracking', () => {
       upsertTrackedKeeperChatOperation({ operationId: 'terminal-draft', keeperName: 'echo', message: 'input', submittedAt: 1,
         assistantDraft: { text: 'authored bytes', rawText: 'authored bytes', delivery, streamState: null,
           responseState: { ...initialKeeperResponseState, phase: 'terminal' } } })
-      expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft).toMatchObject({
+      expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft).toMatchObject({
         delivery, streamState: null, rawText: 'authored bytes', responseState: { phase: 'terminal' },
       })
     },

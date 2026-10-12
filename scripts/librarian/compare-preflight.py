@@ -515,7 +515,8 @@ def validate_observation(observation: dict[str, Json]) -> None:
         "model",
         "request_body_sha256",
         "decision",
-        "probabilities",
+        "reported_probabilities",
+        "reported_probability_sum",
         "confidence",
         "passed_over",
     )
@@ -525,7 +526,7 @@ def validate_observation(observation: dict[str, Json]) -> None:
         "ineligible": ("failure",),
         "question_unavailable": ("failure",),
         "failed": ("reason",),
-        "invalid_answer": ("failure", "decision", "confidence", "probabilities"),
+        "invalid_answer": ("failure", "decision", "confidence", "reported_probabilities", "reported_probability_sum"),
         "judged": ("failure", "reason"),
     }
     for key in forbidden.get(str(status), ()):
@@ -573,14 +574,14 @@ def validate_observation(observation: dict[str, Json]) -> None:
         return
     labels = ("keep_current", "needs_generation", "uncertain")
     decision = text(observation.get("decision"), "preflight decision")
-    probabilities = obj(observation.get("probabilities"), "preflight probabilities")
+    probabilities = obj(observation.get("reported_probabilities"), "preflight probabilities")
     if decision not in labels or set(probabilities) != set(labels):
         raise ValueError(
             "preflight probabilities must cover exactly the declared choices"
         )
     confidence = number(observation.get("confidence"), "preflight confidence")
     values = {
-        label: number(probabilities[label], "preflight probability") for label in labels
+        label: number(probabilities[label], "preflight probability") for label in probabilities
     }
     if not 0 <= confidence <= 1 or any(
         not 0 <= value <= 1 for value in values.values()
@@ -588,11 +589,16 @@ def validate_observation(observation: dict[str, Json]) -> None:
         raise ValueError(
             "preflight confidence and probabilities must be within zero and one"
         )
-    # Match Typesafeai_types.decode_choice's one-rounding-error-per-option bound.
-    if abs(sum(values.values()) - 1) > sys.float_info.epsilon * len(labels):
-        raise ValueError("preflight probabilities must sum to one")
-    if values[decision] != max(values.values()):
-        raise ValueError("preflight decision must have a highest probability")
+    # Reported values are not a certified normalized distribution. Preserve
+    # their diagnostic sum in declared option order, independent of JSON order.
+    total = 0.0
+    for label in labels:
+        total += values[label]
+    if number(observation.get("reported_probability_sum"), "reported probability sum") != total:
+        raise ValueError("preflight reported sum disagrees with raw values")
+    if values[decision] <= 0 or values[decision] != max(values.values()):
+        raise ValueError("preflight decision must have a positive highest reported probability")
+
 
 
 def completed_memory_output(output: dict[str, Json], current_fact_count: int) -> None:

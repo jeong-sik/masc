@@ -55,11 +55,15 @@ def observation(
         result.update(
             decision=decision,
             confidence=0.8,
-            probabilities={
+            reported_probabilities={
                 label: 0.8 if label == decision else 0.1
                 for label in ("keep_current", "needs_generation", "uncertain")
             },
         )
+        total = 0.0
+        for label in ("keep_current", "needs_generation", "uncertain"):
+            total += result["reported_probabilities"][label]
+        result["reported_probability_sum"] = total
     return result
 
 
@@ -1118,6 +1122,29 @@ class ReportCliTest(unittest.TestCase):
             self.assertIn("duplicate JSON object key", result.stderr)
             self.assertEqual(result.stdout, "")
 
+    def test_reported_sum_is_independent_of_json_key_order(self) -> None:
+        from itertools import permutations
+
+        for keys in permutations(("keep_current", "needs_generation", "uncertain")):
+            with self.subTest(keys=keys):
+                manifest = fixture()
+                observation = manifest["pairs"][0]["preflight"]["run"]["output"]["jev_preflight"]
+                values = {"keep_current": 0.7, "needs_generation": 0.2, "uncertain": 0.1}
+                observation["reported_probabilities"] = {key: values[key] for key in keys}
+                observation["reported_probability_sum"] = (0.7 + 0.2) + 0.1
+                result = self.execute(manifest)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_nonunit_reported_values_preserve_diagnostic_sum(self) -> None:
+        manifest = fixture()
+        observation = manifest["pairs"][0]["preflight"]["run"]["output"]["jev_preflight"]
+        observation["reported_probabilities"] = {
+            "keep_current": 0.8, "needs_generation": 0.4, "uncertain": 0.4
+        }
+        observation["reported_probability_sum"] = 0.8 + 0.4 + 0.4
+        result = self.execute(manifest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_huge_integer_numeric_fields_refuse_without_traceback(self) -> None:
         for place in ("run", "observation", "probability"):
             with self.subTest(place=place):
@@ -1128,7 +1155,7 @@ class ReportCliTest(unittest.TestCase):
                 elif place == "observation":
                     run["output"]["jev_preflight"]["elapsed_s"] = 10**999
                 else:
-                    run["output"]["jev_preflight"]["probabilities"]["keep_current"] = (
+                    run["output"]["jev_preflight"]["reported_probabilities"]["keep_current"] = (
                         10**999
                     )
                 result = self.execute(manifest)
@@ -1153,7 +1180,7 @@ class ReportCliTest(unittest.TestCase):
 
     def test_preflight_variants_reject_foreign_fields(self) -> None:
         for status, fields in (
-            ("invalid_answer", ("decision", "confidence", "probabilities", "failure")),
+            ("invalid_answer", ("decision", "confidence", "reported_probabilities", "failure")),
             ("judged", ("reason", "failure")),
             ("failed", ("reason",)),
             ("awaiting_answer", ("reason", "failure")),
@@ -1359,7 +1386,8 @@ class ReportCliTest(unittest.TestCase):
                 "model",
                 "request_body_sha256",
                 "decision",
-                "probabilities",
+                "reported_probabilities",
+                "reported_probability_sum",
                 "confidence",
                 "passed_over",
             ):
@@ -1393,7 +1421,8 @@ class ReportCliTest(unittest.TestCase):
             "request_body_sha256",
             "passed_over",
             "elapsed_s",
-            "probabilities",
+            "reported_probabilities",
+            "reported_probability_sum",
             "confidence",
         ):
             with self.subTest(field=field):
@@ -1413,11 +1442,11 @@ class ReportCliTest(unittest.TestCase):
             ("passed_over", {}),
             ("destination", {}),
             (
-                "probabilities",
+                "reported_probabilities",
                 {"keep_current": 0.2, "needs_generation": 0.7, "uncertain": 0.1},
             ),
             (
-                "probabilities",
+                "reported_probabilities",
                 {"keep_current": 0.8, "needs_generation": 0.2, "uncertain": 0.2},
             ),
         ):

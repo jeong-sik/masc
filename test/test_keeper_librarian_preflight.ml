@@ -267,9 +267,9 @@ let () =
       case "inconsistent-choice" `OK
         (answer_with_probabilities "keep_current"
           ["keep_current", 0.0; "needs_generation", 1.0; "uncertain", 0.0]) 1 1;
-      case "invalid-total" `OK
+      case "reported-half-total-is-not-a-distribution-proof" `OK
         (answer_with_probabilities "keep_current"
-          ["keep_current", 0.5; "needs_generation", 0.0; "uncertain", 0.0]) 1 1;
+          ["keep_current", 0.5; "needs_generation", 0.0; "uncertain", 0.0]) 1 0;
       case "provider-failed" `Service_unavailable {|{"error":"fixture unavailable"}|} 1 1;
       case ~enabled:false "opt-out" `OK (answer "keep_current") 0 1;
       case ~excluded:true "excluded" `OK (answer "keep_current") 0 1;

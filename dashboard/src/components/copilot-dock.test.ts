@@ -393,6 +393,17 @@ describe('CopilotDock', () => {
     expect(reply).not.toContain('STALE')
   })
 
+  it('does not present a reply with a dropped frame as complete', async () => {
+    const reply = await sendDockMessageAndReadReply([
+      dockContent(1, 'first half'),
+      dockContent(2, 42),
+      dockContent(3, 'second half'),
+      dockFinished,
+    ])
+    expect(reply).toContain('first halfsecond half')
+    expect(reply).toContain('incomplete reply')
+  })
+
   it('posts copilot channel and surface context to the keeper stream', async () => {
     window.history.replaceState({}, '', '/?agent=dashboard-eager-manta')
     const fetchMock = dockFetchMock([{ type: 'RUN_FINISHED' }])

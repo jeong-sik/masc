@@ -69,12 +69,12 @@ import {
   setStatusDetail,
   settleKeeperToolApproval,
   updateKeeperToolApproval,
-  updateThreadEntry,
   upsertKeeperToolApproval,
 } from './keeper-state'
 import {
   abortKeeperThreadMessage,
   applyKeeperStreamEvent,
+  failKeeperStreamOperation,
   flushPendingKeeperStreamDeltas,
 } from './keeper-stream'
 import {
@@ -1048,6 +1048,7 @@ export async function sendKeeperThreadMessage(
   setActiveStream(keeperName, operationId, assistantId, controller)
   let operationAccepted = false
   let toolCallEnded = false
+  let droppedFrame: string | null = null
   // #20849/#25898 Gap B: after ACCEPTED, the live-send SSE feed is silent
   // while the operation sits queued behind a running turn. [lastEventAt]
   // would otherwise cross STREAM_STALL_THRESHOLD_S and the composer would
@@ -1089,7 +1090,8 @@ export async function sendKeeperThreadMessage(
       userBlocks,
       surfaceContext: options.surfaceContext,
       onDecodeError: reason => {
-        updateThreadEntry(keeperName, assistantId, entry => ({ ...entry, error: reason }))
+        droppedFrame ??= reason
+        failKeeperStreamOperation(keeperName, assistantId, reason)
       },
       onEvent: (event, sequence) => {
         markKeeperStreamSignal(keeperName)
@@ -1150,7 +1152,9 @@ export async function sendKeeperThreadMessage(
     const finalText = finalEntry?.text ?? ''
     const hasFinalText = finalText.trim().length > 0
 
-    if (!outcome.terminal) {
+    // A stream that dropped a frame is as incomplete as one that was cut: the
+    // finished operation, not this partial text, is the reply.
+    if (!outcome.terminal || droppedFrame !== null) {
       if (operationAccepted) {
         removeThreadEntries(keeperName, [localId, assistantId])
         // Hand off to resume: release ownership FIRST so our own resume
@@ -1168,7 +1172,7 @@ export async function sendKeeperThreadMessage(
       // The SSE connection closed without RUN_FINISHED / RUN_ERROR —
       // keep the partial text but mark the entry so the operator can
       // tell a cut stream from a completed reply.
-      const cutMessage = '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.'
+      const cutMessage = droppedFrame ?? '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.'
       finalizeAssistantEntry(keeperName, assistantId, {
         text: finalText,
         delivery: 'interrupted',

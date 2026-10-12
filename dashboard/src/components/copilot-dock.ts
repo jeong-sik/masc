@@ -266,6 +266,7 @@ export function useCopilotDock() {
       dockStreaming.value = { keeperId: kid, shown: '', full: '', sug: [] }
       let replyText = ''
       let responseState: KeeperResponseState = initialKeeperResponseState
+      let droppedFrame: string | null = null
       const admit = (response: KeeperResponseEvent): boolean => {
         const decision = reduceKeeperResponse(responseState, response)
         responseState = decision.state
@@ -277,6 +278,7 @@ export function useCopilotDock() {
         channel: 'copilot',
         channelWorkspaceId: currentDashboardActor(),
         surfaceContext: ctx,
+        onDecodeError: reason => { droppedFrame ??= reason },
         onEvent: (event) => {
           if (event.type === 'CUSTOM' && event.name === 'KEEPER_RUNTIME_ATTEMPT_STARTED') {
             admit({ kind: 'attempt' })
@@ -297,7 +299,9 @@ export function useCopilotDock() {
       })
         .then((outcome) => {
           dockStreaming.value = null
-          const finalText = replyText.trim() || (outcome.terminal ? '(empty reply)' : '(stream ended unexpectedly)')
+          const finalText = droppedFrame !== null
+            ? `${replyText.trim()}\n(incomplete reply: ${droppedFrame})`.trim()
+            : replyText.trim() || (outcome.terminal ? '(empty reply)' : '(stream ended unexpectedly)')
           dockThreads.value = {
             ...dockThreads.value,
             [kid]: [...(dockThreads.value[kid] ?? []), { role: 'assistant', ts: nowHM(), text: finalText }],

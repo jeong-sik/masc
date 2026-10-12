@@ -636,6 +636,67 @@ describe('sendKeeperThreadMessage operation stream', () => {
     expect(thread.filter(entry => entry.role === 'assistant')).toHaveLength(1)
   })
 
+  it('does not end an accepted operation as delivered when the stream dropped a frame', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        operationId: string
+        onEvent: (event: KeeperChatStreamEvent) => void
+        onDecodeError: (reason: string) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
+      })
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'a' })
+      opts.onDecodeError('A Keeper stream frame does not match the protocol.')
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'c' })
+      opts.onEvent({ type: 'RUN_FINISHED' })
+      return { terminal: true }
+    })
+    fetchKeeperChatOperation.mockResolvedValue({
+      operationId: 'terminal',
+      state: { kind: 'cancelled', completedAt: 1 },
+    })
+
+    await sendKeeperThreadMessage('echo', 'hi')
+
+    expect(fetchKeeperChatOperation).toHaveBeenCalled()
+    const delivered = (keeperThreads.value.echo ?? []).filter(entry => (
+      entry.role === 'assistant' && entry.delivery === 'delivered' && entry.error == null
+    ))
+    expect(delivered).toHaveLength(0)
+  })
+
+  it('marks a stream that dropped a frame before acceptance as incomplete with the reason', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        onEvent: (event: KeeperChatStreamEvent) => void
+        onDecodeError: (reason: string) => void
+      },
+    ) => {
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'a' })
+      opts.onDecodeError('A Keeper stream frame could not be decoded.')
+      opts.onEvent({ type: 'RUN_FINISHED' })
+      return { terminal: true }
+    })
+
+    await sendKeeperThreadMessage('echo', 'hi')
+
+    const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
+    expect(reply).toMatchObject({
+      text: 'a',
+      delivery: 'interrupted',
+      error: 'A Keeper stream frame could not be decoded.',
+    })
+    expect(keeperActionErrors.value.echo).toBe('A Keeper stream frame could not be decoded.')
+  })
+
   it('does not abort the running operation when a second operation is accepted', async () => {
     const streams: Array<{
       operationId: string

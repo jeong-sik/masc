@@ -695,6 +695,23 @@ function admitResponseEvent(
   return decision
 }
 
+/** A frame this view dropped because it could not decode it leaves a hole in
+ * the response. The operation ends as failed with the reason on the bubble, so
+ * a later terminal frame cannot turn the truncated text into a delivered reply.
+ * A response that already finished keeps its terminal state. */
+export function failKeeperStreamOperation(
+  keeperName: string,
+  assistantEntryId: string,
+  reason: string,
+): void {
+  flushPendingThinkingDeltas(keeperName, assistantEntryId)
+  if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'failed' }).accepted) return
+  updateThreadEntry(keeperName, assistantEntryId, entry => ({
+    ...entry, error: reason, delivery: 'error', streamState: null,
+  }))
+  persistActiveAssistantDraft(keeperName, assistantEntryId)
+}
+
 export function applyKeeperStreamEvent(
   keeperName: string,
   assistantEntryId: string,
@@ -1277,6 +1294,13 @@ export function applyKeeperStreamEvent(
             )
           : undefined
         const message = streamProtocolMessage(event.value, 'stream protocol error')
+        // An undecodable frame is a hole in the response: it fails the
+        // operation instead of leaving the bubble in flight. Timeouts and
+        // quarantined tool occurrences stay diagnostic-only.
+        if (event.value?.kind === 'sse_parse_failed') {
+          failKeeperStreamOperation(keeperName, assistantEntryId, message)
+          return null
+        }
         recordStreamProtocolError(
           keeperName,
           assistantEntryId,
@@ -1286,14 +1310,6 @@ export function applyKeeperStreamEvent(
             authoritativeQuarantine: quarantinedOccurrence !== undefined,
           },
         )
-        // An undecodable frame fails the operation the way a RUN_ERROR did
-        // instead of leaving the bubble in flight. Timeouts and quarantined
-        // tool occurrences stay diagnostic-only.
-        if (event.value?.kind === 'sse_parse_failed') {
-          updateThreadEntry(keeperName, assistantEntryId, entry => ({
-            ...entry, delivery: 'error', streamState: null,
-          }))
-        }
         return null
       }
       if (event.name === 'KEEPER_THINKING_SIGNATURE_DELTA') {
@@ -1413,15 +1429,18 @@ export function applyKeeperStreamEvent(
       console.debug('keeper stream: no view for custom event', customEventName)
       return null
     }
-    case 'RUN_FINISHED':
+    case 'RUN_FINISHED': {
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      admitResponseEvent(keeperName, assistantEntryId, {
+      const finished = admitResponseEvent(keeperName, assistantEntryId, {
         kind: (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.details?.turnOutcome === 'continuation_checkpoint'
           ? 'checkpoint' : 'terminal',
       })
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
       clearTextMessageStreamState(keeperName, assistantEntryId)
       clearQuarantinedToolOccurrences(keeperName, assistantEntryId)
+      // A response with a dropped frame stays failed: finishing the stream
+      // does not make the missing frame arrive.
+      if (!finished.accepted && finished.state.kind === 'known' && finished.state.phase === 'failed') return null
       if (source.kind !== 'operation') return null
       updateThreadEntry(keeperName, assistantEntryId, entry => {
         if (!isOperationDeliveryProvenance(
@@ -1450,6 +1469,7 @@ export function applyKeeperStreamEvent(
         }
       })
       return null
+    }
     case 'RUN_ERROR':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       admitResponseEvent(keeperName, assistantEntryId, { kind: 'terminal' })

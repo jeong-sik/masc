@@ -20,6 +20,7 @@ import {
   abortKeeperThreadMessage,
   applyKeeperOperationTurnEvent,
   applyKeeperStreamEvent,
+  failKeeperStreamOperation,
 } from './keeper-stream'
 import { parseSSEMessage } from './schemas/sse'
 import {
@@ -341,10 +342,42 @@ describe('Keeper operation stream projection', () => {
     expect(diagnostic?.seq).toBeUndefined()
     if (diagnostic?.ag_ui_event) applyKeeperStreamEvent('sangsu', 'reply-1', diagnostic.ag_ui_event as never,
       { kind: 'operation', operationId: 'op-1', sequence: diagnostic.seq })
-    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'valid counterpart' },
-      { kind: 'operation', operationId: 'op-1', sequence: 12 })
-    expect(keeperThreads.value.sangsu![0]!.rawText).toBe('valid counterpart')
-    expect(keeperThreads.value.sangsu![0]!.responseState).toMatchObject({ lastSequence: 12 })
+    expect(keeperThreads.value.sangsu![0]!.responseState).toMatchObject({ lastSequence: null, phase: 'failed' })
+  })
+
+  it('keeps an operation failed when a frame was dropped and the stream still finishes', () => {
+    assistantEntry('op-1')
+    const operation = { kind: 'operation', operationId: 'op-1' } as const
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'a' }, { ...operation, sequence: 1 })
+    const diagnostic = parseSSEMessage({ type: 'keeper_chat_operation_event', name: 'sangsu', operation_id: 'op-1', seq: 2,
+      ag_ui_event: { type: 'TEXT_MESSAGE_CONTENT', delta: 123 } })
+    applyKeeperStreamEvent('sangsu', 'reply-1', diagnostic!.ag_ui_event as never, operation)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'c' }, { ...operation, sequence: 3 })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED', threadId: 't', runId: 'r', timestamp: 1 } as never, { ...operation, sequence: 4 })
+    const entry = keeperThreads.value.sangsu![0]!
+    expect(entry.rawText).toBe('a')
+    expect(entry.delivery).toBe('error')
+    expect(entry.error).toContain('sse_parse_failed')
+    expect(entry.responseState).toMatchObject({ phase: 'failed', lastSequence: 4 })
+  })
+
+  it('fails the operation for a frame dropped outside the broadcast projection', () => {
+    assistantEntry('op-1')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'a' })
+    failKeeperStreamOperation('sangsu', 'reply-1', 'A Keeper stream frame does not match the protocol.')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'c' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED', threadId: 't', runId: 'r', timestamp: 1 } as never, { kind: 'operation', operationId: 'op-1' })
+    const entry = keeperThreads.value.sangsu![0]!
+    expect(entry).toMatchObject({ rawText: 'a', delivery: 'error', error: 'A Keeper stream frame does not match the protocol.' })
+  })
+
+  it('keeps a finished response delivered when a frame fails to decode afterwards', () => {
+    assistantEntry('op-1')
+    const operation = { kind: 'operation', operationId: 'op-1' } as const
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'done' }, operation)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED', threadId: 't', runId: 'r', timestamp: 1 } as never, operation)
+    failKeeperStreamOperation('sangsu', 'reply-1', 'late undecodable frame')
+    expect(keeperThreads.value.sangsu![0]!).toMatchObject({ delivery: 'delivered', error: null, rawText: 'done' })
   })
 
   it('does not open a live bubble for a malformed diagnostic of an unknown operation', () => {

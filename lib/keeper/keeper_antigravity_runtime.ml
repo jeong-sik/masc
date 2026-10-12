@@ -250,6 +250,8 @@ type mcp_blocks =
           streamed. *)
   | Streaming
 
+type native_block = Native_open of int | Native_closed
+
 let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~turn_count ~on_native_action ~on_usage_report
     ~position ~receipts on_event =
     let emit event = Option.iter (fun callback -> callback event) on_event in
@@ -336,32 +338,34 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
                response that the runtime actually ended may close. *)
             Option.iter stop_content (Hashtbl.find_opt text_indexes (Some step_index))
           | Runtime_antigravity.Native_tool_started observation ->
-            Option.iter
-              (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
-              on_native_action;
             Host.record_raw_native_tool
               ~keeper_name
               ~raw_trace_run
               ~phase:`Started
               observation;
-            let index =
-              match Option.bind observation.identity (Hashtbl.find_opt native_tool_indexes) with
-              | Some index -> index
-              | None ->
-                  let index = !next_tool_index in
-                  incr next_tool_index;
-                  Option.iter
-                    (fun identity -> Hashtbl.add native_tool_indexes identity index)
-                    observation.identity;
-                  index
-            in
-            emit
-              (Agent_core.Types.ContentBlockStart
-                 { index
-                 ; content_type = Runtime_native_tools.stream_content_type
-                 ; tool_id = Runtime_native_tools.call_id observation
-                 ; tool_name = observation.tool_name
-                 })
+            (* An unnamed observation remains in the raw trace, but cannot
+               own a live block: its finish has no identity to close one.
+               Repeated active updates belong to the existing block. *)
+            Option.iter
+              (fun identity ->
+                 match Hashtbl.find_opt native_tool_indexes identity with
+                 | Some (Native_open _ | Native_closed) -> ()
+                 | None ->
+                     let index = !next_tool_index in
+                     incr next_tool_index;
+                     Hashtbl.add native_tool_indexes identity (Native_open index);
+                     emit
+                       (Agent_core.Types.ContentBlockStart
+                          { index
+                          ; content_type = Runtime_native_tools.stream_content_type
+                          ; tool_id = Runtime_native_tools.call_id observation
+                          ; tool_name = observation.tool_name
+                          });
+                     Option.iter (fun observe ->
+                       Runtime_native_tools.observe_exact_action
+                         ~official_turn:turn_count ~observe observation)
+                       on_native_action)
+              observation.identity
           | Runtime_antigravity.Native_tool_finished {observation; completion} ->
             Host.record_raw_native_tool
               ~keeper_name
@@ -370,14 +374,23 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
               observation;
             Option.iter
               (fun identity ->
-                 Option.iter
-                   (fun index ->
-                      Option.iter (fun finish -> finish ~block_index:index
-                        ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
-                        on_native_tool_completion;
-                      Hashtbl.remove native_tool_indexes identity;
-                      emit (Agent_core.Types.ContentBlockStop { index }))
-                   (Hashtbl.find_opt native_tool_indexes identity))
+                 match Hashtbl.find_opt native_tool_indexes identity with
+                 | Some (Native_open index) ->
+                     (* Retire ownership before a completion observer can yield
+                        or reenter this projection. *)
+                     Hashtbl.replace native_tool_indexes identity Native_closed;
+                     Fun.protect
+                       ~finally:(fun () ->
+                         Eio.Cancel.protect (fun () -> stop_content index))
+                       (fun () ->
+                         Option.iter (fun finish -> finish ~block_index:index
+                           ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                           on_native_tool_completion)
+                 | Some Native_closed -> ()
+                 | None ->
+                     (* A finish may arrive without its start. It still fences
+                        a subsequent replayed Active update for this identity. *)
+                     Hashtbl.add native_tool_indexes identity Native_closed)
               observation.identity
           | Runtime_antigravity.Usage_reported { conversation_id; model; num_turns; usage } ->
             (* Keyed as the completion hook keys an Antigravity turn: the
@@ -407,6 +420,22 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
                 {index; delta=Agent_core.Types.TextDelta remainder});
               stop_content index)
               (Keeper_official_client_text_stream.finish_response text_stream ~final_text:text);
+            let unfinished_native = Hashtbl.fold
+                (fun identity state acc -> match state with
+                  | Native_open index -> (identity, index) :: acc
+                  | Native_closed -> acc)
+                native_tool_indexes [] in
+            List.iter (fun (identity, _) ->
+              Hashtbl.replace native_tool_indexes identity Native_closed)
+              unfinished_native;
+            (* MessageStop is a transport boundary, not evidence that an
+               unfinished tool succeeded. Close its block without inventing a
+               native completion outcome. *)
+            let text_blocks = Hashtbl.fold
+                (fun _ index acc -> index :: acc) text_indexes [] in
+            List.iter stop_content
+              (List.sort_uniq Int.compare
+                 (text_blocks @ List.map snd unfinished_native));
             emit
               (Agent_core.Types.MessageDelta
                  { stop_reason = Some Agent_core.Types.EndTurn; usage = None });
@@ -1401,14 +1430,14 @@ module For_testing = struct
       event
   ;;
 
-  let project_stream ?on_event ?on_native_tool_completion events =
+  let project_stream ?on_native_action ?on_event ?on_native_tool_completion events =
     let emitted = ref [] in
     let projection =
       stream_projection ?on_native_tool_completion
         ~keeper_name:"test"
         ~raw_trace_run:None
         ~turn_count:1
-        ~on_native_action:None
+        ~on_native_action
         ~on_usage_report:None
         ~position:Keeper_usage_resolution.Fresh
         ~receipts:None

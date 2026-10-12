@@ -145,7 +145,11 @@ assert called["result"]["content"][0]["text"] == "MASC_TOOL_RESULT"
 PY
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":0,"state":"DONE","step_type":"system_message"}}\n' "$conversation"
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
+printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"DONE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
+printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
+printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
+printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":3,"state":"ACTIVE","step_type":"agent_response","text_delta":"MASC_ANTIGRAVITY_KEEPER_OK"}}\n' "$conversation"
 printf '%%s\n' "$turns" > "$turn_counter"
 printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"MASC_ANTIGRAVITY_KEEPER_OK","error":null,"num_turns":%%d,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":40,"total_tokens":16}}}\n' "$conversation" "$turns"
 |}
@@ -511,7 +515,16 @@ let test_keeper_projects_mcp_tool_and_settles () =
                             count_of Runtime_native_tools.stream_content_type
                           in
                           let mcp_count = count_of "tool_use" in
-                          check int "native tool count" 1 native_count;
+                          check int "native tool count" 2 native_count;
+                          List.iter (function
+                            | Agent_core.Types.ContentBlockStart
+                                {index; content_type; _}
+                              when String.equal content_type Runtime_native_tools.stream_content_type ->
+                                check int "native block closes once" 1
+                                  (List.length (List.filter (function
+                                    | Agent_core.Types.ContentBlockStop {index=closed} -> Int.equal index closed
+                                    | _ -> false) rest))
+                            | _ -> ()) rest;
                           check
                             bool
                             "MCP wrapper is not a second Skill action"
@@ -523,6 +536,17 @@ let test_keeper_projects_mcp_tool_and_settles () =
                             "unknown-origin tool count"
                             0
                             (List.length starts - native_count - mcp_count);
+                          let text_indexes = List.filter_map (function
+                            | Agent_core.Types.ContentBlockDelta
+                                {index; delta=Agent_core.Types.TextDelta _} -> Some index
+                            | _ -> None) rest |> List.sort_uniq Int.compare in
+                          check bool "streamed final answer has a text block" true
+                            (not (List.is_empty text_indexes));
+                          List.iter (fun index ->
+                            check int "terminal closes each streamed text block once" 1
+                              (List.length (List.filter (function
+                                | Agent_core.Types.ContentBlockStop {index=closed} -> Int.equal index closed
+                                | _ -> false) rest))) text_indexes;
                           let arguments =
                             List.find_map
                               (function
@@ -886,17 +910,16 @@ let test_keeper_projects_mcp_tool_and_settles () =
         |> List.filter (fun (record : Agent_core.Raw_trace.record) ->
           record.record_type = Agent_core.Raw_trace.Native_tool_started)
       in
-      check int "RAW trace keeps both provider wrapper steps" 2
+      check int "RAW trace keeps repeated and unfinished provider updates" 8
         (List.length native_starts);
       check bool "RAW trace keeps exact provider step and typed wrapper origin" true
         (List.for_all
            (fun (record : Agent_core.Raw_trace.record) ->
-              record.native_tool_identity
-              = Some
+              List.exists (fun step_index ->
+                record.native_tool_identity = Some
                   (Agent_core.Raw_trace.Provider_step
                      { conversation_id = "conversation-antigravity-fixture"
-                     ; step_index = 1
-                     })
+                     ; step_index })) [1; 2]
               && record.native_tool_origin = Some Agent_core.Raw_trace.Mcp_wrapper
               && record.tool_name = Some "call_mcp_tool")
            native_starts);

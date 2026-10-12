@@ -11,7 +11,9 @@ type t
 
 type delivery =
   | Immediate
-      (** Every block reaches the stream as soon as the producer opens it. *)
+      (** Every block reaches the stream as soon as the producer opens it.
+          Receipt callbacks are serialized in commit order: a reentrant commit
+          queues behind the callback currently being delivered. *)
   | Held_until_released
       (** The producer holds blocks opened before its message starts.
           Receipts committed before {!release} wait for it, so none names a
@@ -32,8 +34,14 @@ val finish : t -> call_id:string -> unit
 
 val release : t -> unit
 (** The held blocks reached the stream. Delivers the receipts that waited
-    for them, in commit order; later receipts are delivered at commit. A
-    second call does nothing. A turn that ends before its message starts
+    for them, in commit order. Receipts committed while release is notifying
+    an observer queue behind already committed receipts; nested release calls
+    do nothing. Once drained, later receipts are delivered at commit.
+    If notification raises, the attempted receipt is not retried (delivery
+    is ambiguous); unattempted queued receipts remain held for a later release.
+    For already-immediate delivery, unattempted receipts instead remain pending
+    and are drained before the next commit's receipt, or by explicit release.
+    A second completed release does nothing. A turn that ends before its message starts
     never streams its held blocks, and their receipts are never delivered. *)
 
 val hooks : t -> Agent_core.Hooks.hooks -> Agent_core.Hooks.hooks

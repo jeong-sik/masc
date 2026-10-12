@@ -1,0 +1,21 @@
+{
+  "source_head": "cd9fa7e21fcb4367605addadbd43c2004ad07621",
+  "command": "python3 test/test_antigravity_context_transport.py",
+  "exit_code": 0,
+  "tests": 4,
+  "duration_reported_seconds": 3.404,
+  "files": {
+    "test/test_antigravity_context_transport.py": "521f3df97c747619a8c670199674563ce7f7a8159b64efe9fd2cb2a9c2d034cc",
+    "scripts/antigravity-context-pty.py": "c7a023bfb30e5d240741d89a776e75feeab9e4ffb0846c90ef62c6d3e34889b6"
+  },
+  "log_sha256": "e9d8eabd98a998de41fc486e91ee7e1bf30497b524cd0b5258b4bd8f4266fc82",
+  "scope": "scripted CLI process and PTY context callback; not live provider or TUI rendering",
+  "unverified": [
+    "OCaml wire fixtures",
+    "chat input interleaving",
+    "installed new source",
+    "screenshots",
+    "formal approval",
+    "full goal"
+  ]
+}

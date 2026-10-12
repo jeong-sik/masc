@@ -138,6 +138,9 @@ type live_tool_call =
           has to say which attempt it means: a call left open on a runtime
           candidate the walk moved past is never going to return, and counting it
           as running says the new attempt is waiting on something it is not. *)
+  ; response_owner : (int * int) option
+      (** Observed response ownership at call start; missing ownership stays
+          missing instead of being filled from a later response. *)
   ; occurrence : Live.tool_occurrence
   ; call_id : string option
   ; execution_id : string option
@@ -269,7 +272,6 @@ type drawn_item =
   ; superseded_runtime_id : string option
   ; drawn : drawn
   }
-
 type response_scope = { rs_generation : int option; rs_scope : int }
 
 type t =
@@ -1308,7 +1310,16 @@ let apply_tool_result ~now t ~(occurrence : Live.tool_occurrence) ~execution_id 
             })
         with
         | Call_updated ->
-          t.model_signal <- Some (Tool_returned_at (returned.tool_name, now))
+          (* A receipt can enrich a superseded attempt after failover, or
+             arrive after operation settlement. It owns that historical call,
+             not the current model's progress observation. *)
+          (match t.phase with
+           | Waiting | Working when returned.attempt = t.attempt
+               && (match returned.response_owner, t.admitted_response_owner with
+                   | Some captured, Some current -> captured = current
+                   | Some _, None | None, (Some _ | None) -> false) ->
+               t.model_signal <- Some (Tool_returned_at (returned.tool_name, now))
+           | Waiting | Working | Stream_ended | Stream_failed _ -> ())
         | Call_missing ->
           note_unreadable t
             "KEEPER_TOOL_RESULT_READY occurrence disappeared during update"
@@ -1357,6 +1368,14 @@ let start_tool ~now t ~authority ~occurrence ~tool_name =
            ; segment = t.segment
            ; started_at = now
            ; attempt = t.attempt
+           ; response_owner = (match t.response_scope, t.admitted_response_owner with
+               | Some {rs_generation=Some generation;rs_scope}, Some owner
+                 when owner = (generation, rs_scope)
+                      && rs_scope = occurrence.stream_scope -> Some owner
+               (* The admission floor survives an attempt boundary to reject
+                  old events. It cannot supply missing response observation
+                  to a call opened before this attempt's first response. *)
+               | Some _, (Some _ | None) | None, (Some _ | None) -> None)
            ; occurrence
            ; call_id = occurrence.tool_call_id
            ; execution_id = None

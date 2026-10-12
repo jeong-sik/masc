@@ -1605,6 +1605,38 @@ let test_keeper_preserves_claude_thinking_before_tools () =
             check string "thinking does not enter final response" "Answer" (keeper_response_text turn)))
 ;;
 
+let test_result_closes_unfinished_partial_reasoning () =
+  let frame event = Yojson.Safe.to_string (`Assoc ["type", `String "stream_event";
+    "session_id", `String "__SESSION__"; "parent_tool_use_id", `Null; "event", event]) in
+  let start = frame (`Assoc ["type", `String "message_start";
+    "message", `Assoc ["id", `String "unfinished"; "model", `String "claude-fixture"]]) in
+  let block = frame (`Assoc ["type", `String "content_block_start";
+    "index", `Int 0; "content_block", `Assoc ["type", `String "thinking";
+      "thinking", `String ""]]) in
+  let piece = frame (`Assoc ["type", `String "content_block_delta";
+    "index", `Int 0; "delta", `Assoc ["type", `String "thinking_delta";
+      "thinking", `String "exposed fixture reasoning"]]) in
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let events = ref [] in
+    with_fixture [Emit (response_text ~turn_id:"anchor" ~message_id:"anchor" "Answer");
+      Emit start; Emit block; Emit piece; Emit (result_text ~turn_id:"terminal" "Answer")]
+      (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~goal:"TERMINAL_CONTENT"
+          ~on_event:(fun event -> events := event :: !events) () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok _ ->
+            let indexes = List.filter_map (function
+              | Agent_core.Types.ContentBlockDelta {index; delta=ThinkingDelta _} -> Some index
+              | _ -> None) !events |> List.sort_uniq Int.compare in
+            check bool "partial reasoning reaches its own content block" true
+              (not (List.is_empty indexes));
+            List.iter (fun index ->
+              check int "result closes each observed reasoning block once" 1
+                (List.length (List.filter (function
+                  | Agent_core.Types.ContentBlockStop {index=closed} -> Int.equal index closed
+                  | _ -> false) !events))) indexes))
+;;
+
 let test_partial_content_boundaries_keep_message_and_channel_identity () =
   let frame event = Yojson.Safe.to_string (`Assoc ["type", `String "stream_event";
     "session_id", `String "__SESSION__"; "parent_tool_use_id", `Null; "event", event]) in
@@ -1652,6 +1684,76 @@ let test_partial_content_boundaries_keep_message_and_channel_identity () =
                 `Thinking (2,"Inspect "); `Text (3,"\n\nAn"); `Stop 1;
                 `Thinking (2,"state"); `Stop 2; `Text (3,"swer"); `Stop 3;
                 `Text (4,"\n\necho"); `Stop 4; `Text (5,"echo"); `Stop 5])))
+;;
+
+let test_terminal_closes_unfinished_native_without_completion () =
+  let base_path = temp_workspace () in
+  let events = ref [] in
+  let completions = ref 0 in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [Emit (response_native_tool ~turn_id:"native-turn" ~message_id:"native-message"
+        ~call_id:"unfinished-native" ~tool_name:"Read");
+       Emit (response_text ~turn_id:"native-turn" ~message_id:"answer-message" "Answer");
+       Emit (result_text ~turn_id:"native-turn" "Answer")]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"UNFINISHED_NATIVE"
+          ~on_event:(fun event -> events := event :: !events)
+          ~on_native_tool_completion:(fun ~block_index:_ ~tool_call_id:_ _ -> incr completions) () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok _ ->
+          let events = List.rev !events in
+          let indexes = List.filter_map (function
+            | Agent_core.Types.ContentBlockStart {index;content_type="native_tool_use";_} -> Some index
+            | _ -> None) events in
+          check int "one admitted native block" 1 (List.length indexes);
+          List.iter (fun index ->
+            check int "unfinished block closes exactly once" 1
+              (List.length (List.filter (function
+                | Agent_core.Types.ContentBlockStop {index=closed} -> closed=index
+                | _ -> false) events));
+            let rec closed_before_terminal closed = function
+              | [] -> false
+              | Agent_core.Types.ContentBlockStop {index=observed} :: rest ->
+                  closed_before_terminal (closed || observed=index) rest
+              | MessageStop :: _ -> closed
+              | _ :: rest -> closed_before_terminal closed rest in
+            check bool "closure precedes terminal" true (closed_before_terminal false events)) indexes;
+          check int "no invented completion" 0 !completions))
+;;
+
+exception Native_completion_observer_failed
+
+let test_native_completion_observer_failure_closes_block () =
+  let base_path = temp_workspace () in
+  let events = ref [] in
+  let callbacks = ref 0 in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [Emit (response_native_tool ~turn_id:"native-turn" ~message_id:"native-message"
+        ~call_id:"native-failure" ~tool_name:"Read");
+       Emit (native_tool_result ~call_id:"native-failure" ~content:"observed");
+       Emit (response_text ~turn_id:"native-turn" ~message_id:"answer-message" "Answer");
+       Emit (result_text ~turn_id:"native-turn" "Answer")]
+      (fun cli_path ->
+        let outcome = run_keeper_turn ~base_path ~cli_path ~goal:"OBSERVER_FAILURE"
+          ~on_event:(fun event -> events := event :: !events)
+          ~on_native_tool_completion:(fun ~block_index:_ ~tool_call_id:_ _ ->
+            incr callbacks; raise Native_completion_observer_failed) () in
+        (* Ordinary stream observer failures are logged by the runtime;
+           operator interrupts and Eio cancellation retain propagation. *)
+        (match outcome with
+         | Ok _ -> ()
+         | Error error -> fail (Agent_core.Error.to_string error));
+        check int "observer invoked once" 1 !callbacks;
+        let indexes = List.filter_map (function
+          | Agent_core.Types.ContentBlockStart {index;content_type="native_tool_use";_} -> Some index
+          | _ -> None) !events in
+        check int "one native block admitted" 1 (List.length indexes);
+        List.iter (fun index -> check int "failure still closes native block" 1
+          (List.length (List.filter (function
+            | Agent_core.Types.ContentBlockStop {index=closed} -> index=closed
+            | _ -> false) !events))) indexes))
 ;;
 
 let test_native_completion_reaches_tui () =
@@ -5858,7 +5960,10 @@ let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_claude_code_runtime"
-    [ ( "native action", [ test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity
+    [ ( "native action", [ test_case "terminal closes unfinished native without completion" `Quick test_terminal_closes_unfinished_native_without_completion
+        ; test_case "completion observer failure closes native" `Quick test_native_completion_observer_failure_closes_block
+        ; test_case "result closes unfinished partial reasoning" `Quick test_result_closes_unfinished_partial_reasoning
+        ; test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity
         ; test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
     ; ( "usage scope"
       , [ test_case "result-only usage keeps client-turn scope" `Quick

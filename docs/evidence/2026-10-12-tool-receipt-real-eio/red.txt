@@ -1,0 +1,4 @@
+real_fiber_held=held-a,held-b,held-c
+real_fiber_immediate=immediate-b,immediate-a
+Exception: Failure "real_fiber_immediate delivery order differs".
+elapsed_seconds=0.290799

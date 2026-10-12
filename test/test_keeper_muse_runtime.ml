@@ -37,6 +37,7 @@ let test_stream_order () =
       ; Serve.Native_tool_finished (native_observation "call-1")
       ; Serve.Text_delta { item_id = "m-1"; text = "MUSE_OK" }
       ; Serve.Usage_reported { session_id; turn_id = "turn-1"; usage }
+      ; Serve.Turn_terminal_received Msp.Terminal_completed
       ; Serve.Turn_finished { text = "MASC_MUSE_OK" }
       ]
   in
@@ -120,9 +121,144 @@ let test_completed_message_suffix_is_forwarded_once () =
   check string "completion and turn finalization never repeat a suffix" "partial rest" text
 ;;
 
+let test_completed_message_replay_after_next_message () =
+  let events = Adapter.project_stream [turn_started;
+    Serve.Text_delta {item_id="first"; text="partial"};
+    Serve.Text_completed {item_id="first"; text="partial rest"};
+    Serve.Text_delta {item_id="second"; text="answer"};
+    Serve.Text_completed {item_id="first"; text="partial rest"};
+    Serve.Text_completed {item_id="second"; text="answer"};
+    Serve.Turn_finished {text="answer"}] in
+  let text = List.filter_map (function
+    | Agent_core.Types.ContentBlockDelta {delta=TextDelta text; _} -> Some text
+    | _ -> None) events |> String.concat "" in
+  check string "completed identity cannot replay into the next message"
+    "partial rest\n\nanswer" text
+;;
+
 let mcp_started call_id =
   Adapter.Mcp_tool_started
     { call_id; tool_name = "masc_probe"; arguments = `Assoc [ "marker", `String "x" ] }
+;;
+
+let test_terminal_waits_for_yielding_publication () =
+  let terminal = Adapter.Serve_event (Serve.Turn_terminal_received Msp.Terminal_cancelled) in
+  let check_terminal events =
+    let rec scan open_blocks stopped = function
+      | [] -> check bool "terminal delivered" true stopped
+      | Agent_core.Types.MessageStop :: rest ->
+          check (list int) "no unfinished block at terminal" [] open_blocks;
+          check bool "one terminal" false stopped;
+          scan open_blocks true rest
+      | ContentBlockStart {index;_} :: rest ->
+          check bool "no start after terminal" false stopped;
+          scan (index :: open_blocks) stopped rest
+      | ContentBlockDelta {delta=InputJsonSnapshot _;index} :: rest ->
+          check bool "arguments precede terminal" false stopped;
+          check bool "arguments target open block" true (List.mem index open_blocks);
+          scan open_blocks stopped rest
+      | ContentBlockStop {index} :: rest ->
+          check bool "stop targets open block" true (List.mem index open_blocks);
+          scan (List.filter ((<>) index) open_blocks) stopped rest
+      | _ :: rest -> scan open_blocks stopped rest in
+    scan [] false events
+  in
+  let decisions = ref [] in
+  let events = Adapter.project_stream_inputs
+    ~on_tool_admission:(fun ~call_id decision -> decisions := (call_id,decision) :: !decisions)
+    ~during:(function
+      | Agent_core.Types.ContentBlockStart {tool_id=Some "first";_} ->
+          [terminal;mcp_started "after-closing"]
+      | _ -> [])
+    [Adapter.Serve_event turn_started;mcp_started "first"] in
+  check_terminal events;
+  check bool "already admitted call retains ownership" true
+    (List.assoc "first" !decisions = Adapter.Admitted);
+  check bool "new admission closes during pending terminal" true
+    (List.assoc "after-closing" !decisions = Adapter.Turn_closed);
+  let held = Adapter.project_stream_inputs
+    ~during:(function
+      | Agent_core.Types.ContentBlockStart {tool_id=Some "held-first";_} ->
+          [mcp_started "held-second";terminal]
+      | _ -> [])
+    [mcp_started "held-first";Adapter.Serve_event turn_started] in
+  check_terminal held;
+  check int "both held batches publish before closure" 2
+    (List.length (List.filter (function Agent_core.Types.ContentBlockStart _ -> true | _ -> false) held));
+  check_terminal (Adapter.project_stream_inputs
+    ~during:(function Agent_core.Types.MessageStart _ -> [terminal] | _ -> [])
+    [Adapter.Serve_event turn_started]);
+  check_terminal (Adapter.project_stream_inputs
+    ~during:(function Agent_core.Types.ContentBlockStart _ -> [terminal] | _ -> [])
+    [Adapter.Serve_event turn_started;
+     Adapter.Serve_event (Serve.Native_tool_started (native_observation "native"))])
+;;
+
+let test_mcp_admission_stops_at_terminal () =
+  List.iter (fun terminal ->
+    let decisions = ref [] in
+    let receipts = Keeper_official_client_tool_receipts.create
+      ~delivery:Keeper_official_client_tool_receipts.Immediate
+      ~notify:(fun ~block_index:_ ~tool_call_id:_ ~execution_id:_ ->
+        fail "fixture has no executed receipt") in
+    let events = Adapter.project_stream_inputs ~receipts
+      ~on_tool_admission:(fun ~call_id admission -> decisions := (call_id,admission) :: !decisions)
+      ~during:(fun _ -> [])
+      [Adapter.Serve_event turn_started;
+       mcp_started "already-admitted";
+       Adapter.Serve_event terminal;
+       mcp_started "too-late";
+       Adapter.Mcp_tool_finished {call_id="already-admitted"}] in
+    check bool "only pre-terminal call admitted" true
+      (List.rev !decisions = ["already-admitted",Adapter.Admitted;"too-late",Adapter.Turn_closed]);
+    let starts = List.filter_map (function
+      | Agent_core.Types.ContentBlockStart {tool_id;_} -> tool_id
+      | _ -> None) events in
+    check (list string) "late call never publishes a block" ["already-admitted"] starts;
+    check int "late finish retains original routing cleanup" 1
+      (List.length (List.filter (function Agent_core.Types.ContentBlockStop _ -> true | _ -> false) events)))
+    [Serve.Turn_finished {text=""};
+     Serve.Turn_terminal_received (Msp.Terminal_failed {kind=Model_error;message="fixture";retryable=true});
+     Serve.Turn_terminal_received Msp.Terminal_cancelled;
+     Serve.Turn_terminal_received (Msp.Unrecognized_terminal "fixture")]
+;;
+
+let test_failed_terminal_closes_open_tools_without_success () =
+  List.iter (fun terminal ->
+    let events = Adapter.project_stream_inputs ~during:(fun _ -> [])
+      [Adapter.Serve_event turn_started;
+       mcp_started "pending-mcp";
+       Adapter.Serve_event (Serve.Native_tool_started (native_observation "pending-native"));
+       Adapter.Serve_event (Serve.Turn_terminal_received terminal);
+       Adapter.Serve_event (Serve.Usage_reported {session_id;turn_id="turn-1";usage});
+       Adapter.Serve_event (Serve.Turn_terminal_received terminal);
+       Adapter.Mcp_tool_finished {call_id="pending-mcp"};
+       Adapter.Serve_event (Serve.Native_tool_finished (native_observation "pending-native"))] in
+    let starts = List.filter_map (function
+      | Agent_core.Types.ContentBlockStart {index;_} -> Some index | _ -> None) events in
+    check int "both admitted tools" 2 (List.length starts);
+    List.iter (fun index ->
+      check int "each tool closes once" 1
+        (List.length (List.filter (function
+          | Agent_core.Types.ContentBlockStop {index=closed} -> index=closed
+          | _ -> false) events));
+      let rec closed_before_terminal closed = function
+        | [] -> false
+        | Agent_core.Types.ContentBlockStop {index=observed} :: rest ->
+            closed_before_terminal (closed || observed=index) rest
+        | MessageStop :: _ -> closed
+        | _ :: rest -> closed_before_terminal closed rest in
+      check bool "tool closes before terminal" true (closed_before_terminal false events)) starts;
+    check int "terminal once despite late finishes" 1
+      (List.length (List.filter (function Agent_core.Types.MessageStop -> true | _ -> false) events));
+    check bool "no invented successful finish" false
+      (List.exists (function Agent_core.Types.MessageDelta {stop_reason=Some _;_} -> true | _ -> false) events);
+    let reports = Adapter.usage_reports ~turn_count:1 ~position:Keeper_usage_resolution.Fresh
+      [turn_started;Serve.Turn_terminal_received terminal;
+       Serve.Usage_reported {session_id;turn_id="turn-1";usage}] in
+    check int "terminal usage still observed" 1 (List.length reports))
+    [Msp.Terminal_failed {kind=Model_error;message="fixture failure";retryable=true};
+     Msp.Terminal_cancelled;Msp.Unrecognized_terminal "fixture-terminal"]
 ;;
 
 (* The bridge can answer a MASC tool before the serve client has read the
@@ -2540,6 +2676,9 @@ let () =
     "keeper_muse_runtime"
     [ ( "stream"
       , [ test_case "identity-less native tool leaves no open block" `Quick test_native_tool_without_identity_does_not_open_a_block
+        ; test_case "failed terminal closes tools without success" `Quick test_failed_terminal_closes_open_tools_without_success
+        ; test_case "MCP admission stops at terminal" `Quick test_mcp_admission_stops_at_terminal
+        ; test_case "terminal waits for yielding publication" `Quick test_terminal_waits_for_yielding_publication
         ; test_case "projection order" `Quick test_stream_order
         ; test_case "unstreamed reply is forwarded at the end" `Quick
             test_unstreamed_reply_is_forwarded_at_the_end
@@ -2588,6 +2727,7 @@ let () =
             test_failed_muse_turn_reads_typed_usage_without_replay
         ; test_case "prepared hook tool surface controls session binding" `Quick test_hook_tool_surface_controls_session_binding
         ; test_case "completed message suffix is forwarded once" `Quick test_completed_message_suffix_is_forwarded_once
+        ; test_case "completed message replay after next message is ignored" `Quick test_completed_message_replay_after_next_message
         ; test_case "later unstreamed message reaches live consumers" `Quick test_later_unstreamed_message_reaches_live_consumers
         ; test_case "text-only host needs no session MCP" `Quick test_text_only_session_does_not_require_session_mcp
         ] )

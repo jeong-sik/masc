@@ -1,0 +1,32 @@
+{
+  "source_head": "3adb9c5cd12955a598fc767e66ca5b5e632d8bfa",
+  "red_receipt_head": "7943e34d8760152de4ed8907295da3d25596bafa",
+  "red_exit": 2,
+  "green_exit": 0,
+  "ocaml": "The OCaml toplevel, version 5.5.1",
+  "production_sources": {
+    "lib/keeper/keeper_official_client_tool_receipts.ml": "cff113f793592c290b149046b30f2168365625909cf40ed2050c86868d37fb30",
+    "lib/core/eio_guard.ml": "acbf21c8f8392777bec162644a81d944e4313905d6449c4d614f4cb021e1c331",
+    "lib/fs_compat/execution_context.ml": "52376d13858d77178a4a4ecf31961b4bf7a26c79c63668c218c002a4dd0e470e"
+  },
+  "red_source_sha256": "aa09bd0fca3707657625d5ab81173bac92e478a4e1609887e2596bf95c7e44f4",
+  "package_cma_files": [
+    {
+      "package": "eio",
+      "archive": "eio.cma",
+      "sha256": "d97273e2bde21ba9f746ff70d4b54efae4dc7c7bb3a658941b0e9f4836f8ecc2"
+    },
+    {
+      "package": "eio_main",
+      "archive": "eio_main.cma",
+      "sha256": "2f02636f62e42a94fb19b8e4dcde6f1e3f7a32c3c14f219b4a96271900757beb"
+    }
+  ],
+  "artifacts": {
+    "run.py": "5146ef1957df9b371152e07598a26768d6651b0cb32979e2fb5372e4c3f77415",
+    "red.txt": "d27873e4f9c2f6db6b727dbcc600efdd77af826b649b943c29bfef3fe72b5af2",
+    "green.txt": "9cd5825748fcfb67b4cf38e903a6f02ec1355e9a8aeb4173d1208ecfcaae044a",
+    "repro.ml.in": "1d22bff5275c4c2932251633bddcfa977ff1bab091c33f15580a5eb46bc4458d"
+  },
+  "scope": "actual Eio_main/fibers/cancellation with whole production receipt, guard and context source; hook type/Ids/join doubles, Fs_compat forwarder; no fullintegration/multidomain/HTTP/UI"
+}

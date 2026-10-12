@@ -801,6 +801,13 @@ let current_custom_names =
   ; "KEEPER_CHAT_BATCH_BOUND"; "KEEPER_EXTERNAL_EFFECT_COMPLETED"; "KEEPER_TOOL_RESULT_READY"
   ; "KEEPER_TOOL_APPROVAL_REQUESTED"; "KEEPER_TOOL_APPROVAL_SETTLED"
   ; "KEEPER_NATIVE_TOOL_START"; "KEEPER_NATIVE_TOOL_END"; "KEEPER_NATIVE_TOOL_PROGRESS"
+    (* The dashboard binds committed tool transcripts to its tool bubbles; this
+       projection carries no transcript-binding state, so the event is admitted
+       for vocabulary completeness and its payload is read past, never
+       interpreted. A direct turn that used a tool emits it right before the
+       terminal event, and without this entry the strict decoder below answers
+       [Unknown_custom_event] for an otherwise successful turn. *)
+  ; "KEEPER_TOOL_TRANSCRIPT_COMMITTED"
   ]
 
 let known_custom_names =

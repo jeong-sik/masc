@@ -557,6 +557,21 @@ let test_current_nonterminal_event_set () =
           [ "tool_call_id", `String "tool-1"
           ; "outcome", `String "approved"
           ]
+      else if String.equal name "KEEPER_TOOL_TRANSCRIPT_COMMITTED" then
+        (* The exact wire payload the server projection writes
+           ([Server_keeper_chat_agui_projection] tool_transcript_committed);
+           the TUI decoder admits the event and does not interpret it. *)
+        `Assoc
+          [ ( "deliveryKey"
+            , Keeper_chat_delivery_identity.delivery_key_to_yojson
+                (Keeper_chat_delivery_identity.Operation
+                   (Keeper_chat_delivery_identity.Request_id.of_string
+                      request.request_id
+                    |> Result.get_ok))
+            )
+          ; "executionId", `String "exec-1"
+          ; "ordinal", `Int 0
+          ]
       else `Null
     in
     event "CUSTOM"

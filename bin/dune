@@ -663,6 +663,7 @@
   ;; does not reach it.
   masc.keeper_runtime
   masc.keeper_chat_delivery_identity
+  masc.keeper_checkpoint_ref
   ; turn_sequence_of_fields reads Ids.Turn_ref, and implicit_transitive_deps
   ; is false, so the module is not reachable through the others.
   masc.masc_types

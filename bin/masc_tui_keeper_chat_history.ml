@@ -50,12 +50,17 @@ type speaker =
      Slack and Discord into the operator's own words. *)
   | Unresolved of { id : string option }
 
+type intermediate_speech =
+  | Checkpoint_speech of Keeper_checkpoint_ref.t
+  | Native_continuation_speech of Keeper_chat_delivery_identity.Request_id.t
+
 type kind =
   | Addressed_to_keeper of
       { speaker : speaker
       ; surface : Surface.t option
       }
   | Said_by_keeper
+  | Intermediate_speech of intermediate_speech
   | Autonomous_reply
   | Delivery_failed of
       { origin_request_id : string option
@@ -1293,6 +1298,14 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_so
           }
       ]
 
+let intermediate_speech_of_provenance = function
+  | Ok (Some { Delivery_identity.delivery_key = Operation_checkpoint {checkpoint;_};
+               transcript_slot = Terminal_result }) -> Some (Checkpoint_speech checkpoint)
+  | Ok (Some { Delivery_identity.delivery_key = Operation_native {continuation_id;_};
+               transcript_slot = Terminal_result }) -> Some (Native_continuation_speech continuation_id)
+  | Ok (Some _) | Ok None | Error _ -> None
+;;
+
 (* [None] is an entry this reader could not make sense of; [Some rows] is one
    it read, and those rows are empty when the entry is real and draws nothing.
    The two were one empty list, and [rows_of_json] counted every empty one as
@@ -1496,7 +1509,10 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                   ; turn_id
                   ; operation_id
                   ; execution_source
-                  ; kind = if autonomous then Autonomous_reply else Said_by_keeper
+                  ; kind = (match intermediate_speech_of_provenance
+                      (Delivery_identity.delivery_provenance_of_fields fields) with
+                      | Some boundary -> Intermediate_speech boundary
+                      | None -> if autonomous then Autonomous_reply else Said_by_keeper)
                   ; text = content
                   ; media
                   ; attachments = []
@@ -1689,7 +1705,7 @@ let annotate_recovered_interruptions rows =
     | row :: rest ->
       let row, later_reply_at =
         match row.kind with
-        | Said_by_keeper | Autonomous_reply
+        | Intermediate_speech _ | Said_by_keeper | Autonomous_reply
           when String.trim row.text <> "" ->
           row, Some row.at
         | Delivery_failed failure ->
@@ -1700,7 +1716,7 @@ let annotate_recovered_interruptions rows =
               Delivery_failed
                 { origin_request_id = failure.origin_request_id; recovered_at }
           }, later_reply_at
-        | Addressed_to_keeper _ | Said_by_keeper | Autonomous_reply
+        | Addressed_to_keeper _ | Intermediate_speech _ | Said_by_keeper | Autonomous_reply
         | Tool_calls _ | Skill_activity _ | Reasoning _ | Gate_activity _
         | Memory_activity _ | Fusion_conclusion _ ->
           row, later_reply_at

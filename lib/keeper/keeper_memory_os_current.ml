@@ -2172,7 +2172,14 @@ let check_publication_companions ~keepers_dir ~keeper_id receipt =
            && (match receipt.journal with `Assoc fields ->
                  journal_revision_links fields = Ok (Some removal.revision_links) | _ -> false) -> Ok ()
        | _ -> Error "publication and removal receipts conflict; stores preserved") in
-  let* ranges = read_durable_range_receipts ~keepers_dir ~keeper_id in
+  let* ranges, skipped = read_durable_range_receipts ~keepers_dir ~keeper_id in
+  (* Unreadable legacy rows are refused the same way validate_durable_range_
+     receipts reports them: recovery must wait until the consume path has
+     quarantined them, because an unreadable row can hide a conflicting
+     consumption identity. *)
+  let* () = match skipped with
+    | [] -> Ok ()
+    | _ -> Error ("publication and consumption receipts conflict; unreadable range rows path=" ^ durable_range_receipt_path ~keepers_dir ~keeper_id) in
   List.fold_left (fun result row ->
     let* () = result in
     let valid = match row with
@@ -2200,7 +2207,10 @@ let finalize_publication_journal ~keepers_dir ~keeper_id receipt =
       (match Yojson.Safe.from_string line with
        | json ->
          let* entry = journal_entry_of_json json in
+         (* Revisions restart after a quarantine, so a pre-quarantine entry
+            cannot finalize a publication from the current generation. *)
          (match entry with
+          | Journal_quarantined _ -> scan false rest
           | Journal_committed _ when Yojson.Safe.sort json = Yojson.Safe.sort receipt.journal ->
             scan true rest
           | _ -> scan found rest)

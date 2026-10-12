@@ -4040,6 +4040,48 @@ let test_generic_publication_reused_revision_keeps_exact_history () =
   check string "new target journal entry appended exactly once" once (Fs_compat.load_file journal)
 ;;
 
+let test_generic_publication_quarantine_requires_current_generation_journal () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let facts = [fact ~claim:"replayed publication" ()] in
+  ignore (replace ~keepers_dir ~facts () |> require_ok);
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  ignore (Current.move_aside_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    ~now:250. ~rejection:"fixture explicit quarantine" () |> require_ok);
+  let write_snapshot path content =
+    Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ~sync_parent:(fun _ -> failwith "after rename") path content in
+  (* Same timestamp, source, and facts as the pre-quarantine generation, so
+     the replacement publication reproduces its canonical journal payload. *)
+  ignore (Current.For_testing.replace_with_publication_io
+    ~write_snapshot ~sync_snapshot:(fun _ -> Error "unconfirmed")
+    ~on_committed:(fun _ _ -> ()) ~before_journal:(fun () -> ())
+    ~keepers_dir ~keeper_id:"keeper" ~now:200. ~source:(source Current.Librarian)
+    ~facts);
+  let snapshot = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    |> require_ok |> require_some in
+  check int "replayed snapshot restarts revision one" 1 snapshot.revision;
+  let outcome line =
+    Yojson.Safe.from_string line |> Yojson.Safe.Util.member "outcome" in
+  let lines = Fs_compat.load_file journal |> String.split_on_char '\n'
+    |> List.filter (fun line -> line <> "") in
+  let rec split_at_quarantine before = function
+    | [] -> List.rev before, []
+    | line :: rest ->
+      if outcome line = `String "quarantined"
+      then List.rev before, rest
+      else split_at_quarantine (line :: before) rest in
+  let before, after = split_at_quarantine [] lines in
+  let committed rows = List.filter (fun line -> outcome line = `String "committed") rows in
+  check int "current generation journals its commit after the quarantine row" 1
+    (List.length (committed after));
+  let canonical line = Yojson.Safe.sort (Yojson.Safe.from_string line) in
+  check bool "replayed payload is journalled for the current generation" true
+    (canonical (List.hd (committed before)) = canonical (List.hd (committed after)));
+  let once = Fs_compat.load_file journal in
+  ignore (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require_ok);
+  check string "replayed journal entry appended exactly once" once (Fs_compat.load_file journal)
+;;
+
 let test_revision_only_absorption_publication_recovers () =
   with_temp_keepers @@ fun keepers_dir ->
   let original = fact ~claim:"original branch" () in
@@ -4110,6 +4152,7 @@ let () =
         test_case "journal failure and notification cancellation recovery" `Quick test_generic_publication_journal_and_notification_recovery;
         test_case "journal cancellation retains producer commit" `Quick test_generic_publication_journal_cancellation_keeps_producer_commit;
         test_case "historical revision reuse matches exact entry" `Quick test_generic_publication_reused_revision_keeps_exact_history;
+        test_case "quarantine requires current-generation journal" `Quick test_generic_publication_quarantine_requires_current_generation_journal;
         test_case "revision-only absorption canonical publication" `Quick test_revision_only_absorption_publication_recovers;
         test_case "conflict preserves all stores" `Quick test_generic_publication_conflict_preserves_stores]); ( "dynamic categories", [test_case "new category survives persistence" `Quick
           test_dynamic_category_roundtrip] )

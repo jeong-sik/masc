@@ -35,16 +35,22 @@ and malformed answers use the full lane. Cancellation propagates.
 
 The shared typed Choice decoder validates the vendor protocol before a
 decision can authorize a no-change result: unique complete option coverage,
-finite probabilities in [0, 1], unit sum within machine summation roundoff,
-and a selected option with maximal probability. Ties are valid. These are
-wire-contract requirements, not an invented confidence cutoff. A valid answer
+finite reported values in [0, 1], and a selected option with a positive
+maximal reported probability. Ties are valid. No unit-sum gate, sum
+tolerance, normalization, rounding, or confidence policy is applied: the
+provider describes the sum as approximately one, and the recorded sum is a
+diagnostic computed in declared option order over the unmodified reported
+values, not a certified normalized distribution. These are wire-contract
+requirements, not an invented confidence cutoff. A valid answer
 can still be semantically wrong; model quality requires separate adversarial
 evaluation. Official contract: https://docs.typesafe.ai/primitives/choice
 (checked 2026-10-02).
 
 The existing run registration persists its input before any JEV call. Terminal
-output includes `jev_preflight` with decision, probabilities, confidence,
-elapsed time, answering model, destination and exact request-body hash.
+output includes `jev_preflight` with decision, reported values under
+`reported_probabilities`, their diagnostic sum under
+`reported_probability_sum`, confidence, elapsed time, answering model,
+destination and exact request-body hash.
 `generation_path` distinguishes `not_entered`, `full_lane` and
 `jev_no_change`. `full_lane` means entry to the generation pipeline, not a
 measured count of provider requests: projection/admission may refuse before

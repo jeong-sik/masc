@@ -387,6 +387,10 @@ type stream_event =
   | Usage_windows_reported of Runtime_provider_usage_window.report
       (** The windows a [rate_limit_event] reported, for the operator
           projection only; nothing that routes or retries reads it. *)
+  | Provider_retry_observed of Runtime_claude_api_retry.t
+      (** A root API request retry in this exact session. Independent of native
+          tool retries, fallback attempts and thinking. Malformed or other-session
+          notices are ignored; no private error text is published. *)
   | Conversation_compacted
       (** The client reported a [compact_boundary]: it summarised the
           conversation during this turn, so the copies the session held of

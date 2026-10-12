@@ -1,6 +1,7 @@
 export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_CONNECTED',
   'KEEPER_RUNTIME_ATTEMPT_STARTED',
+  'KEEPER_PROVIDER_RETRY',
   'KEEPER_STREAM_MESSAGE_START',
   'KEEPER_STREAM_MESSAGE_DELTA',
   'KEEPER_STREAM_MESSAGE_STOP',
@@ -155,7 +156,13 @@ export type KeeperModelContentActivity = {
   state: 'observed' | 'ended'
 }
 
+export type KeeperProviderRetry = {
+  attempt: { routing_run_id: string; runtime_id: string; lane_attempt_index: number }
+  retry: { observation_id: string; attempt: number; max_retries: number; retry_delay_ms: number; error_status: number | null }
+}
+
 type KeeperChatCustomEvent =
+  | { type: 'CUSTOM'; name: 'KEEPER_PROVIDER_RETRY'; value: KeeperProviderRetry }
   | { type: 'CUSTOM'; name: 'KEEPER_CONNECTED'; value: null }
   | {
       type: 'CUSTOM'

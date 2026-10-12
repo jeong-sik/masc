@@ -91,7 +91,7 @@ export function toolDeliveryProvenance(
   }
 }
 
-function sameDeliveryKey(left: KeeperChatDeliveryKey, right: KeeperChatDeliveryKey): boolean {
+export function sameDeliveryKey(left: KeeperChatDeliveryKey, right: KeeperChatDeliveryKey): boolean {
   if (left.kind !== right.kind) return false
   switch (left.kind) {
     case 'operation':

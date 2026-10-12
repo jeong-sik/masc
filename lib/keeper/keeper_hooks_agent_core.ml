@@ -228,6 +228,8 @@ let emit_client_usage_report
       ()
 
 type tool_stream_observation =
+  | Provider_retry_observed of
+      { attempt : Runtime_native_tasks.attempt; retry : Runtime_claude_api_retry.t }
   | Runtime_attempt_started of
       { runtime_id : string
       ; lane_attempt_index : int

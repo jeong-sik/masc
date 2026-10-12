@@ -231,6 +231,7 @@ type model_signal =
   | Scoped_model_content
   | Model_started_at of float
       (* STREAM_MODEL_STARTED: the endpoint answered; no token yet. *)
+  | Provider_retry_at of Runtime_claude_api_retry.t
   | Model_response_ended
       (* Provider response stop; the Keeper turn remains open. *)
   | Reasoning_at of float (* the last THINKING delta *)
@@ -838,6 +839,7 @@ let model_phase_text ~show_timing ~now t =
   in
   match t.model_signal with
   | None -> None
+  | Some (Provider_retry_at _) -> Some "provider retrying"
   | Some Model_response_ended -> Some "model response ended"
   | Some Scoped_model_content ->
       (match List.find_opt (fun (_,_,at) -> Option.is_some at) t.active_model_content with
@@ -1307,7 +1309,13 @@ let apply_tool_result ~now t ~(occurrence : Live.tool_occurrence) ~execution_id 
             })
         with
         | Call_updated ->
-          t.model_signal <- Some (Tool_returned_at (returned.tool_name, now))
+          (* A current provider retry owns the progress observation; a late
+             tool receipt must not take it. *)
+          (match t.model_signal with
+           | Some (Provider_retry_at _) -> ()
+           | None | Some (Scoped_model_content | Model_started_at _ | Model_response_ended
+               | Reasoning_at _ | Answering_at _ | Tool_returned_at _) ->
+               t.model_signal <- Some (Tool_returned_at (returned.tool_name, now)))
         | Call_missing ->
           note_unreadable t
             "KEEPER_TOOL_RESULT_READY occurrence disappeared during update"
@@ -1547,6 +1555,16 @@ let apply_delta ~now t (delta : Live.delta) =
          only answers "why has it not started yet". *)
       t.admission <- Some (admission, queue_length);
       if t.initial_receipt = None then t.initial_receipt <- Some (now, interactive)
+  | Live.Provider_retry_observed { attempt; retry } ->
+      (* The enclosing journal owns this operation; the frozen runtime attempt
+         must also match before its observation can own current progress. *)
+      (match t.phase, t.current_runtime_id with
+       | (Waiting | Working), Some runtime_id
+           when String.equal runtime_id attempt.runtime_id
+                && t.attempt = attempt.lane_attempt_index ->
+           t.model_signal <- Some (Provider_retry_at retry)
+       | (Waiting | Working), (Some _ | None)
+       | (Stream_ended | Stream_failed _), (Some _ | None) -> ())
   | Live.Runtime_attempt_started { runtime_id; attempt_index } ->
       (match t.phase with
        | Stream_ended | Stream_failed _ -> ()
@@ -2432,11 +2450,13 @@ type model_activity =
   | Activity_content_ended
   | Activity_reasoning
   | Activity_answering
+  | Activity_provider_retry of Runtime_claude_api_retry.t
   | Activity_tool_returned of string
 
 let model_activity t =
   match t.model_signal with
   | None -> None
+  | Some (Provider_retry_at retry) -> Some (Activity_provider_retry retry)
   | Some (Model_started_at _) -> Some Activity_model_started
   | Some Model_response_ended -> Some Activity_response_ended
   | Some Scoped_model_content ->

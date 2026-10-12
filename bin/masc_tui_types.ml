@@ -525,6 +525,9 @@ type chat_turn_phase =
   | Turn_input
   | Turn_progress
   | Turn_tool
+  (* Speech ending one delivery (checkpoint or native continuation): after
+     the tools that produced it, before the turn's final output. *)
+  | Turn_delivery
   | Turn_output
 
 type msg_identity =
@@ -961,7 +964,8 @@ let chat_turn_phase_rank = function
   | Turn_input -> 0
   | Turn_progress -> 1
   | Turn_tool -> 2
-  | Turn_output -> 3
+  | Turn_delivery -> 3
+  | Turn_output -> 4
 ;;
 
 let order_chat_turn_rows rows =
@@ -11254,8 +11258,9 @@ let chat_output_alias_source (row : msg_entry) =
   | (Message_keeper | Message_autonomous), Turn_output -> row.me_execution_source
   | (Message_user _ | Message_status | Message_local | Message_error
     | Message_tool | Message_skill _ | Message_thinking | Message_memory),
-    (Turn_input | Turn_progress | Turn_tool | Turn_output)
-  | (Message_keeper | Message_autonomous), (Turn_input | Turn_progress | Turn_tool) -> None
+    (Turn_input | Turn_progress | Turn_tool | Turn_delivery | Turn_output)
+  | (Message_keeper | Message_autonomous),
+    (Turn_input | Turn_progress | Turn_tool | Turn_delivery) -> None
 ;;
 
 let transcript_replaces_session_output ~(fresh : msg_entry list)

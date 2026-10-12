@@ -3389,7 +3389,7 @@ let scroll_anchor_index projection =
                       if not (Hashtbl.mem transient_indices anchor) then
                         Hashtbl.add transient_indices anchor at
                   | Some _ | None -> ())
-             | Message_user _, (Turn_input | Turn_progress | Turn_tool | Turn_output)
+             | Message_user _, (Turn_input | Turn_progress | Turn_tool | Turn_delivery | Turn_output)
              | (Message_keeper | Message_autonomous | Message_status | Message_local
                 | Message_error | Message_tool | Message_skill _ | Message_thinking | Message_memory), _ -> ())
         | Tagged_block _ -> ()) projection.tagged_entries;

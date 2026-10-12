@@ -718,14 +718,14 @@ let test_an_official_client_lane_states_its_history_empty () =
   in
   check_stated "no line yet" "may hold atoms" [];
   check_stated "a restart" "stated empty" [ 1, Ok (history_restarted ()) ];
-  check_stated "a fresh turn that saved nothing" "stated empty"
+  check_stated "a fresh turn without a restart witness" "may hold atoms"
     [ 1, Ok (record ~history_at_start:fresh Boundaries.No_atom_history) ];
   check_stated "a fresh turn after another" "stated empty"
     [ 1, Ok (history_restarted ())
     ; 2, Ok (record ~turn:1 ~history_at_start:fresh Boundaries.No_atom_history)
     ; 3, Ok (record ~turn:2 ~history_at_start:fresh Boundaries.No_atom_history)
     ];
-  check_stated "a turn that left an empty checkpoint" "stated empty"
+  check_stated "an empty checkpoint without a restart witness" "may hold atoms"
     [ 1, Ok (record Boundaries.Empty_atom_history) ];
   check_stated "a turn that ended with atoms" "may hold atoms"
     [ 1, Ok (history_restarted ()); 2, Ok (record atom_history) ];
@@ -745,6 +745,29 @@ let test_an_official_client_lane_states_its_history_empty () =
     [ 1, Ok (history_restarted ()); 2, Error (Boundaries.Not_json "torn") ];
   check_stated "another trace's lines do not move it" "may hold atoms"
     [ 1, Ok (history_restarted ~trace_id:"other" ()) ]
+;;
+
+let test_failed_restart_is_retried_after_a_successful_end () =
+  (* The missing restart append is not represented by a fake line. The
+     official-client end append succeeds afterwards and saves no checkpoint. *)
+  let ended = record ~turn:2 ~history_at_start:Boundaries.Fresh_history
+      Boundaries.No_atom_history in
+  let lines = [ 1, Ok (record atom_history); 2, Ok ended ] in
+  let notice lines =
+    Turn_helpers.restart_notice Boundaries.Fresh_history
+      Run_context.Saved_history_absent
+      (Boundaries.history_stated ~trace_id:"trace" lines)
+    |> describe_notice
+  in
+  check string "failed reset still owes a restart" "at turn start" (notice lines);
+  let recovered = lines @ [ 3, Ok (history_restarted ()) ] in
+  check string "successful retry settles the witness" "none" (notice recovered);
+  check string "ordinary fresh turn does not restart again" "none"
+    (notice (recovered @ [ 4, Ok ended ]));
+  check string "another trace cannot settle the failed restart" "at turn start"
+    (notice (lines @ [ 3, Ok (history_restarted ~trace_id:"other" ()) ]));
+  check string "a later empty end does not erase an unreadable boundary" "at turn start"
+    (notice (recovered @ [ 4, Error (Boundaries.Not_json "torn"); 5, Ok ended ]))
 ;;
 
 let record_restart ~config site =
@@ -1084,6 +1107,8 @@ let () =
             test_the_notice_follows_what_the_turn_saw
         ; test_case "an official client lane states its history empty" `Quick
             test_an_official_client_lane_states_its_history_empty
+        ; test_case "failed restart remains owed after a successful end" `Quick
+            test_failed_restart_is_retried_after_a_successful_end
         ; test_case "a restart is recorded from either site" `Quick
             test_a_restart_is_recorded_from_either_site
         ; test_case "a refused line does not stop the turn" `Quick

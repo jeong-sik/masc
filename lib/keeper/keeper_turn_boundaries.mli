@@ -283,17 +283,17 @@ val states_position
   -> record
   -> Ids.Turn_ref.t option
 
-(** What the log says the durable history of a trace holds, read from the
-    latest line of [trace_id]. *)
+(** Whether the log contains a successful restart witness for this trace
+    with no later evidence of atoms, a store no-op, or an unreadable line. *)
 type history_stated =
   | History_may_hold_atoms
-      (** The latest line states atoms or a store no-op, a line cannot be
-          decoded, or the trace has no line yet. *)
+      (** No successful restart witness, or later evidence of atoms,
+          a store no-op, or an unreadable line. Empty turn-end records alone
+          do not prove that a failed restart append was recovered. *)
   | History_stated_empty
-      (** The latest line is a restart, a turn that saved an empty history, or
-          a turn that started fresh and saved nothing. A restart written now
-          would restart nothing. A turn that started from atoms and saved
-          nothing is not this: it left them. *)
+      (** A successful [History_restarted] witness remains valid through
+          empty turn-end records. The carried-range reader recognizes that
+          same witness as its generation boundary. *)
 
 (** Pure. Lines of other traces do not move the answer. *)
 val history_stated

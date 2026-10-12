@@ -490,11 +490,11 @@ let owner_absent_rejection keeper_name =
     keeper_name
 ;;
 
-(* No file under this name is terminal for the occurrence: no Keeper can
-   consume the stimulus, so nothing is enqueued and the schedule fails with
-   this reason. Only that authoritative absence is terminal; a file the
-   store holds but cannot decode as current, and a store that did not
-   answer, keep the stimulus with a typed deferral. *)
+(* No file under this name rejects this occurrence: no Keeper can consume
+   the stimulus, so nothing is enqueued. A recurring schedule keeps its next
+   occurrence, when the owner may exist. A file the store holds but cannot
+   decode as current, and a store that did not answer, keep the stimulus with
+   a typed deferral rather than declaring the owner absent. *)
 let read_owner_meta config keeper_name =
   match
     Executor_pool_ref.submit_strict (fun () ->
@@ -513,7 +513,7 @@ let read_owner_meta config keeper_name =
           ^ Executor_pool_ref.strict_submit_error_to_string error))
   | Ok (Ok Keeper_meta_store.Meta_absent) ->
     Error
-      (Schedule_runner.Terminal_dispatch_rejection
+      (Schedule_runner.Occurrence_dispatch_rejection
          (owner_absent_rejection keeper_name))
   | Ok (Ok (Keeper_meta_store.Meta_present meta)) ->
     Ok (Owner_meta_answered (Ok meta))

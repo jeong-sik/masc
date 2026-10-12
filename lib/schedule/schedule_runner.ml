@@ -57,6 +57,7 @@ and dispatch_result =
 
 type consumer_dispatch_error =
   | Retryable_dispatch_failure of string
+  | Occurrence_dispatch_rejection of string
   | Terminal_dispatch_rejection of string
 
 type acceptance_commit = Acceptance_committed
@@ -442,15 +443,17 @@ let dispatch_result ?detail ?error occurrence_id schedule_id status =
   { occurrence_id; schedule_id; status; detail; error }
 ;;
 
-let finish_terminal_dispatch config ~now ~clock ~occurrence_id ~schedule_id error =
+let finish_failed_dispatch config ~now ~clock ~occurrence_id ~schedule_id
+    ~failure_scope error =
   match
-    Schedule_store.fail_running ~finished_at:(clock ()) config ~now ~schedule_id ~error
+    Schedule_store.fail_running ~finished_at:(clock ()) config ~now ~schedule_id
+      ~failure_scope ~error
   with
   | Ok _ -> dispatch_result ~error occurrence_id schedule_id Dispatch_failed
   | Error err ->
     let error =
       Printf.sprintf
-        "%s; failed to mark schedule failed: %s"
+        "%s; failed to record dispatch failure: %s"
         error
         (Schedule_store.store_error_to_string err)
     in
@@ -551,8 +554,12 @@ let dispatch_candidate
         with
         | Error (Retryable_dispatch_failure detail) ->
           finish_retryable_dispatch config ~now ~clock ~occurrence_id ~schedule_id detail
+        | Error (Occurrence_dispatch_rejection detail) ->
+          finish_failed_dispatch config ~now ~clock ~occurrence_id ~schedule_id
+            ~failure_scope:Schedule_store.Occurrence_failure detail
         | Error (Terminal_dispatch_rejection detail) ->
-          finish_terminal_dispatch config ~now ~clock ~occurrence_id ~schedule_id detail
+          finish_failed_dispatch config ~now ~clock ~occurrence_id ~schedule_id
+            ~failure_scope:Schedule_store.Schedule_failure detail
         | Ok (Work_accepted { detail; acceptance_commit = Acceptance_committed }) ->
           dispatch_result ~detail occurrence_id schedule_id Dispatch_succeeded))
 ;;

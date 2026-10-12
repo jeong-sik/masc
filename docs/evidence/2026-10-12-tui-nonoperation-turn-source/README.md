@@ -26,3 +26,16 @@ Fixture audit found the inherited nonoperation assistant row used unsupported
 `terminal_assistant`; corrected it to the canonical `terminal_result` codec
 variant. The fixture still has not executed; malformed provenance is intentionally
 unowned and cannot satisfy the positive ownership case.
+
+## Stronger codec measurement
+
+Artifacts: `/tmp/masc-tui-nonoperation-turn-source-codec-20261012/`.
+The whole unchanged delivery identity codec and actual Turn_ref module are
+interpreted with the parent/current source selector and its production helpers.
+Checkpoint/trace-id/execution-id surroundings are minimal stubs; checkpoint
+behavior is not under test. Actual Yojson types are loaded from the installed
+library. Initial invocation failed to load Yojson; after loading yojson.cma,
+parent exits 1 for lost canonical explicit source and current exits 0 for all
+three delivery kinds with terminal_result, plus invalid terminal_assistant,
+invalid Turn_ref and passive row refusal. This executes codec-to-source selection,
+not full History.decode, producer persistence or visible UI.

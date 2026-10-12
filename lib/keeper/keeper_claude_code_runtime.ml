@@ -154,6 +154,8 @@ let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
 (* Always installed so usage-window and turn usage reports are recorded. A
    turn nobody streams, traces or observes gets only those; its other events
    are ignored as before. *)
+type native_block_state = Native_block_open of int | Native_block_closed
+
 let claude_stream_callback ?on_provider_retry ?on_child_content_observation ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count
     ~on_native_action ~on_usage_report ~position ~on_compacted on_event =
   (* The result frame's uuid is the response identity the completion hook
@@ -274,57 +276,55 @@ let claude_stream_callback ?on_provider_retry ?on_child_content_observation ?on_
                emit (Agent_core.Types.ContentBlockStop { index }))
             (Hashtbl.find_opt tool_indexes call_id)
         | Runtime_claude_code.Native_tool_started observation ->
-          Option.iter
-            (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
-            on_native_action;
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run
             ~phase:`Started
             observation;
-          let index =
-            match Option.bind observation.identity (Hashtbl.find_opt native_tool_indexes) with
-            | Some index -> index
-            | None ->
-                let index = !next_tool_index in
-                incr next_tool_index;
-                Option.iter
-                  (fun identity -> Hashtbl.add native_tool_indexes identity index)
-                  observation.identity;
-                index
+          let start () =
+            let index = !next_tool_index in
+            incr next_tool_index;
+            Option.iter (fun identity ->
+              Hashtbl.add native_tool_indexes identity (Native_block_open index)) observation.identity;
+            emit (Agent_core.Types.ContentBlockStart
+              { index; content_type = Runtime_native_tools.stream_content_type
+              ; tool_id = Runtime_native_tools.call_id observation
+              ; tool_name = observation.tool_name });
+            (* Publish ownership before an observer can reenter with completion.
+               Replayed starts cannot own another action or a new block. *)
+            Option.iter (fun observe ->
+              Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
+              on_native_action
           in
-          emit
-            (Agent_core.Types.ContentBlockStart
-               { index
-               ; content_type = Runtime_native_tools.stream_content_type
-               ; tool_id = Runtime_native_tools.call_id observation
-               ; tool_name = observation.tool_name
-               })
+          (match Option.bind observation.identity (Hashtbl.find_opt native_tool_indexes) with
+           | Some (Native_block_open _ | Native_block_closed) -> ()
+           | None -> start ())
         | Runtime_claude_code.Native_task_observed observation ->
           Option.iter (fun observe -> observe observation) on_native_task_observation
         | Runtime_claude_code.Native_tool_progress {identity; progress} ->
-          Option.iter (fun index ->
-            Option.iter (fun observe -> observe ~block_index:index
-              ~tool_call_id:(match identity with Runtime_native_tools.Call_id id -> Some id
-                | Provider_step _ -> None) progress) on_native_tool_progress)
-            (Hashtbl.find_opt native_tool_indexes identity)
+          (match Hashtbl.find_opt native_tool_indexes identity with
+           | Some (Native_block_open index) ->
+               Option.iter (fun observe -> observe ~block_index:index
+                 ~tool_call_id:(match identity with Runtime_native_tools.Call_id id -> Some id
+                   | Provider_step _ -> None) progress) on_native_tool_progress
+           | Some Native_block_closed | None -> ())
         | Runtime_claude_code.Native_tool_finished {observation; completion} ->
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run
             ~phase:`Finished
             observation;
-          Option.iter
-            (fun identity ->
-               Option.iter
-                 (fun index ->
-                    Hashtbl.remove native_tool_indexes identity;
-                    Fun.protect
-                      ~finally:(fun () -> Eio.Cancel.protect (fun () -> stop_content index))
-                      (fun () -> Option.iter (fun finish -> finish ~block_index:index
-                        ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
-                        on_native_tool_completion))
-                 (Hashtbl.find_opt native_tool_indexes identity))
+          Option.iter (fun identity ->
+            match Hashtbl.find_opt native_tool_indexes identity with
+            | Some (Native_block_open index) ->
+                Hashtbl.replace native_tool_indexes identity Native_block_closed;
+                Fun.protect
+                  ~finally:(fun () -> Eio.Cancel.protect (fun () -> stop_content index))
+                  (fun () -> Option.iter (fun finish -> finish ~block_index:index
+                    ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                    on_native_tool_completion)
+            | Some Native_block_closed -> ()
+            | None -> Hashtbl.add native_tool_indexes identity Native_block_closed)
             observation.identity
         | Runtime_claude_code.Usage_windows_reported report ->
           record_usage_windows ~quota_scope report

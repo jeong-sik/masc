@@ -5,7 +5,6 @@ import { clearStoredToken, setStoredToken } from '../../api/core'
 import type { BroadcastSendReceipt } from '../../api/actions'
 import { ComposerV2, buildComposerV2Request } from './composer-v2'
 import {
-  operatorActionBusy,
   operatorSnapshot,
 } from '../../operator-store'
 import { keepers as dashboardKeepers } from '../../store'
@@ -146,7 +145,6 @@ describe('ComposerV2', () => {
     voiceInputState.state = 'idle'
     voiceInputState.supported = true
     voiceInputState.transcript = '스케줄러 결과 확인 바람'
-    operatorActionBusy.value = false
     operatorSnapshot.value = snapshotWithKeepers([
       { name: 'keeper-a', status: 'online' },
       { name: 'nick0cave', status: 'busy' },
@@ -159,7 +157,6 @@ describe('ComposerV2', () => {
     cleanup()
     clearStoredToken()
     operatorSnapshot.value = null
-    operatorActionBusy.value = false
     dashboardKeepers.value = []
     vi.clearAllMocks()
   })

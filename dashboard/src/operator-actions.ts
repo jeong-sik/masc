@@ -1,5 +1,7 @@
 import {
   confirmOperatorAction,
+  currentStoredTokenRevision,
+  subscribeStoredTokenChanges,
   extractApiError,
   fetchOperatorDigest,
   fetchOperatorSnapshot,
@@ -23,19 +25,34 @@ import {
   operatorDigestLoading,
   operatorDigestError,
   operatorDigestErrorStatus,
-  operatorActionBusy,
+  acquireOperatorAction,
   operatorActionLog,
 } from './operator-signals'
 import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
 
 let nextLogId = 1
 
-let snapshotRefreshInflight: Promise<void> | null = null
-let workspaceDigestRefreshInflight: Promise<void> | null = null
-let snapshotFollowup: Promise<void> | null = null
-let digestFollowup: Promise<void> | null = null
-let lastSnapshotRefreshAt = 0
-let lastWorkspaceDigestRefreshAt = 0
+interface OwnedRefresh {
+  readonly authRevision: number
+  readonly promise: Promise<void>
+}
+interface RefreshReceipt {
+  readonly authRevision: number
+  readonly at: number
+}
+let snapshotRefreshInflight: OwnedRefresh | null = null
+let workspaceDigestRefreshInflight: OwnedRefresh | null = null
+let snapshotFollowup: OwnedRefresh | null = null
+let digestFollowup: OwnedRefresh | null = null
+let lastSnapshotRefresh: RefreshReceipt | null = null
+let lastWorkspaceDigestRefresh: RefreshReceipt | null = null
+
+function createRefreshOperation(authRevision: number) {
+  let resolve!: () => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<void>((done, fail) => { resolve = done; reject = fail })
+  return { operation: Object.freeze({ authRevision, promise }), resolve, reject }
+}
 
 function stringifyUnknown(value: unknown): string {
   if (typeof value === 'string') return value
@@ -71,87 +88,153 @@ function logMessageFromResult(result: OperatorActionResult): string {
     || result.status
 }
 
-function isFresh(lastAt: number, opts?: RefreshOptions): boolean {
-  return !opts?.force && Date.now() - lastAt < UI_REFRESH_TTL_MS
+function isFresh(receipt: RefreshReceipt | null, authRevision: number, opts?: RefreshOptions): boolean {
+  return !opts?.force && receipt !== null && receipt.authRevision === authRevision
+    && Date.now() - receipt.at < UI_REFRESH_TTL_MS
 }
 
 export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<void> {
-  if (snapshotRefreshInflight) {
-    if (!opts?.force) return snapshotRefreshInflight
-    // A read admitted before the action cannot acknowledge that action.
-    // Coalesce callers behind one read admitted after the current one ends.
-    if (!snapshotFollowup) {
-      snapshotFollowup = snapshotRefreshInflight.then(() => {
+  const authRevision = currentStoredTokenRevision()
+  const existing = snapshotRefreshInflight
+  if (existing && existing.authRevision === authRevision) {
+    if (!opts?.force) return existing.promise
+    if (!snapshotFollowup || snapshotFollowup.authRevision !== authRevision) {
+      const pending = createRefreshOperation(authRevision)
+      snapshotFollowup = pending.operation
+      void existing.promise.then(async () => {
+        if (snapshotFollowup !== pending.operation || currentStoredTokenRevision() !== authRevision) return
         snapshotFollowup = null
-        return refreshOperatorSnapshot({ force: true })
-      })
+        await refreshOperatorSnapshot({ force: true })
+      }).finally(() => {
+        if (snapshotFollowup === pending.operation) snapshotFollowup = null
+      }).then(pending.resolve, pending.reject)
     }
-    return snapshotFollowup
+    return snapshotFollowup.promise
   }
-  if (isFresh(lastSnapshotRefreshAt, opts)) return
-  operatorLoading.value = true
-  operatorError.value = null
-  operatorErrorStatus.value = null
-  snapshotRefreshInflight = (async () => {
+  if (isFresh(lastSnapshotRefresh, authRevision, opts)) return
+  const pending = createRefreshOperation(authRevision)
+  const operation = pending.operation
+  const controller = new AbortController()
+  const releaseAuth = subscribeStoredTokenChanges(() => {
+    if (currentStoredTokenRevision() !== authRevision) controller.abort()
+  })
+  snapshotRefreshInflight = operation
+  const owns = () => snapshotRefreshInflight === operation && currentStoredTokenRevision() === authRevision
+  void (async () => {
     try {
-      const raw = await fetchOperatorSnapshot()
+      operatorLoading.value = true
+      if (!owns()) return
+      operatorError.value = null
+      if (!owns()) return
+      operatorErrorStatus.value = null
+      if (!owns()) return
+      const raw = await fetchOperatorSnapshot({ signal: controller.signal })
+      if (!owns()) return
       operatorSnapshot.value = normalizeOperatorSnapshot(raw)
-      lastSnapshotRefreshAt = Date.now()
-    } catch (err) {
-      const summary = extractApiError(err, 'operator 스냅샷 로드 실패')
+      if (!owns()) return
+      lastSnapshotRefresh = Object.freeze({ authRevision, at: Date.now() })
+    } catch (error) {
+      if (!owns()) return
+      const summary = extractApiError(error, 'operator 스냅샷 로드 실패')
       operatorSnapshot.value = null
-      lastSnapshotRefreshAt = 0
+      if (!owns()) return
+      lastSnapshotRefresh = null
       operatorError.value = summary.message
+      if (!owns()) return
       operatorErrorStatus.value = summary.status
     } finally {
-      operatorLoading.value = false
-      snapshotRefreshInflight = null
+      try {
+        if (owns()) operatorLoading.value = false
+      } finally {
+        if (snapshotRefreshInflight === operation) snapshotRefreshInflight = null
+        releaseAuth()
+      }
     }
-  })()
-  return snapshotRefreshInflight
+  })().then(pending.resolve, pending.reject)
+  return operation.promise
 }
 
 export async function refreshOperatorWorkspaceDigest(opts?: RefreshOptions): Promise<void> {
-  if (workspaceDigestRefreshInflight) {
-    if (!opts?.force) return workspaceDigestRefreshInflight
-    // A read admitted before the action cannot acknowledge that action.
-    // Coalesce callers behind one read admitted after the current one ends.
-    if (!digestFollowup) {
-      digestFollowup = workspaceDigestRefreshInflight.then(() => {
+  const authRevision = currentStoredTokenRevision()
+  const existing = workspaceDigestRefreshInflight
+  if (existing && existing.authRevision === authRevision) {
+    if (!opts?.force) return existing.promise
+    if (!digestFollowup || digestFollowup.authRevision !== authRevision) {
+      const pending = createRefreshOperation(authRevision)
+      digestFollowup = pending.operation
+      void existing.promise.then(async () => {
+        if (digestFollowup !== pending.operation || currentStoredTokenRevision() !== authRevision) return
         digestFollowup = null
-        return refreshOperatorWorkspaceDigest({ force: true })
-      })
+        await refreshOperatorWorkspaceDigest({ force: true })
+      }).finally(() => {
+        if (digestFollowup === pending.operation) digestFollowup = null
+      }).then(pending.resolve, pending.reject)
     }
-    return digestFollowup
+    return digestFollowup.promise
   }
-  if (isFresh(lastWorkspaceDigestRefreshAt, opts)) return
-  operatorDigestLoading.value = true
-  operatorDigestError.value = null
-  operatorDigestErrorStatus.value = null
-  workspaceDigestRefreshInflight = (async () => {
+  if (isFresh(lastWorkspaceDigestRefresh, authRevision, opts)) return
+  const pending = createRefreshOperation(authRevision)
+  const operation = pending.operation
+  const controller = new AbortController()
+  const releaseAuth = subscribeStoredTokenChanges(() => {
+    if (currentStoredTokenRevision() !== authRevision) controller.abort()
+  })
+  workspaceDigestRefreshInflight = operation
+  const owns = () => workspaceDigestRefreshInflight === operation && currentStoredTokenRevision() === authRevision
+  void (async () => {
     try {
-      const raw = await fetchOperatorDigest({ targetType: 'namespace' })
+      operatorDigestLoading.value = true
+      if (!owns()) return
+      operatorDigestError.value = null
+      if (!owns()) return
+      operatorDigestErrorStatus.value = null
+      if (!owns()) return
+      const raw = await fetchOperatorDigest({ targetType: 'namespace', signal: controller.signal })
+      if (!owns()) return
       operatorWorkspaceDigest.value = normalizeOperatorDigest(raw)
-      lastWorkspaceDigestRefreshAt = Date.now()
-    } catch (err) {
-      const summary = extractApiError(err, 'operator 다이제스트 로드 실패')
+      if (!owns()) return
+      lastWorkspaceDigestRefresh = Object.freeze({ authRevision, at: Date.now() })
+    } catch (error) {
+      if (!owns()) return
+      const summary = extractApiError(error, 'operator 다이제스트 로드 실패')
+      lastWorkspaceDigestRefresh = null
       operatorDigestError.value = summary.message
+      if (!owns()) return
       operatorDigestErrorStatus.value = summary.status
     } finally {
-      operatorDigestLoading.value = false
-      workspaceDigestRefreshInflight = null
+      try {
+        if (owns()) operatorDigestLoading.value = false
+      } finally {
+        if (workspaceDigestRefreshInflight === operation) workspaceDigestRefreshInflight = null
+        releaseAuth()
+      }
     }
-  })()
-  return workspaceDigestRefreshInflight
+  })().then(pending.resolve, pending.reject)
+  return operation.promise
+}
+
+export class OperatorActionAuthenticationSupersededError extends Error {
+  constructor() {
+    super('Operator action authentication changed before admission')
+    this.name = 'OperatorActionAuthenticationSupersededError'
+  }
+}
+
+function assertActionAdmission(authRevision: number): void {
+  if (currentStoredTokenRevision() !== authRevision) {
+    throw new OperatorActionAuthenticationSupersededError()
+  }
 }
 
 type ActionRefreshOptions = { refresh?: 'await' | 'background' }
 
-async function refreshAfterAction(options: ActionRefreshOptions): Promise<void> {
-  const refreshed = Promise.all([
-    refreshOperatorSnapshot({ force: true }),
-    refreshOperatorWorkspaceDigest({ force: true }),
-  ])
+async function refreshAfterAction(options: ActionRefreshOptions, authRevision: number): Promise<void> {
+  if (currentStoredTokenRevision() !== authRevision) return
+  const reads = [refreshOperatorSnapshot({ force: true })]
+  if (currentStoredTokenRevision() === authRevision) {
+    reads.push(refreshOperatorWorkspaceDigest({ force: true }))
+  }
+  const refreshed = Promise.all(reads)
   if (options.refresh === 'background') {
     // Both stores report their own read errors. A projection is not the action
     // receipt and must not hold its confirmation token or acknowledgement.
@@ -165,11 +248,16 @@ export async function dispatchOperatorAction(
   request: OperatorActionRequest,
   options: ActionRefreshOptions = {},
 ): Promise<OperatorActionResult> {
-  operatorActionBusy.value = true
-  operatorError.value = null
-  operatorErrorStatus.value = null
+  const authRevision = currentStoredTokenRevision()
+  const releaseAction = acquireOperatorAction()
   try {
+    assertActionAdmission(authRevision)
+    operatorError.value = null
+    assertActionAdmission(authRevision)
+    operatorErrorStatus.value = null
+    assertActionAdmission(authRevision)
     const result = await runOperatorAction(request)
+    if (currentStoredTokenRevision() !== authRevision) return result
     appendLog({
       actor: request.actor,
       action_type: request.action_type,
@@ -178,13 +266,16 @@ export async function dispatchOperatorAction(
       message: logMessageFromResult(result),
       tool_name: result.tool_name,
     })
-    await refreshAfterAction(options)
+    await refreshAfterAction(options, authRevision)
     return result
   } catch (err) {
+    if (currentStoredTokenRevision() !== authRevision) throw err
     const summary = extractApiError(err, 'operator 액션 실패')
     const message = summary.message
     operatorError.value = message
+    if (currentStoredTokenRevision() !== authRevision) throw err
     operatorErrorStatus.value = summary.status
+    if (currentStoredTokenRevision() !== authRevision) throw err
     appendLog({
       actor: request.actor,
       action_type: request.action_type,
@@ -194,7 +285,7 @@ export async function dispatchOperatorAction(
     })
     throw err
   } finally {
-    operatorActionBusy.value = false
+    releaseAction()
   }
 }
 
@@ -204,11 +295,16 @@ export async function confirmOperatorPendingAction(
   decision: 'confirm' | 'deny' = 'confirm',
   options: ActionRefreshOptions = {},
 ): Promise<OperatorActionResult> {
-  operatorActionBusy.value = true
-  operatorError.value = null
-  operatorErrorStatus.value = null
+  const authRevision = currentStoredTokenRevision()
+  const releaseAction = acquireOperatorAction()
   try {
+    assertActionAdmission(authRevision)
+    operatorError.value = null
+    assertActionAdmission(authRevision)
+    operatorErrorStatus.value = null
+    assertActionAdmission(authRevision)
     const result = await confirmOperatorAction(actor, confirmToken, decision)
+    if (currentStoredTokenRevision() !== authRevision) return result
     appendLog({
       actor,
       action_type: decision,
@@ -217,13 +313,16 @@ export async function confirmOperatorPendingAction(
       message: logMessageFromResult(result),
       tool_name: result.tool_name,
     })
-    await refreshAfterAction(options)
+    await refreshAfterAction(options, authRevision)
     return result
   } catch (err) {
+    if (currentStoredTokenRevision() !== authRevision) throw err
     const summary = extractApiError(err, 'operator 확인 실패')
     const message = summary.message
     operatorError.value = message
+    if (currentStoredTokenRevision() !== authRevision) throw err
     operatorErrorStatus.value = summary.status
+    if (currentStoredTokenRevision() !== authRevision) throw err
     appendLog({
       actor,
       action_type: decision,
@@ -233,7 +332,7 @@ export async function confirmOperatorPendingAction(
     })
     throw err
   } finally {
-    operatorActionBusy.value = false
+    releaseAction()
   }
 }
 

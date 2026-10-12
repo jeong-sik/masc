@@ -12,7 +12,7 @@ const toastMocks = vi.hoisted(() => ({
 }))
 
 const devTokenMocks = vi.hoisted(() => ({
-  refreshDevTokenAfterAuthError: vi.fn(async () => true),
+  refreshDevTokenAfterAuthError: vi.fn(async () => ({ kind: 'bound', fromRevision: 0, authRevision: 0 })),
 }))
 
 vi.mock('./api', () => apiMocks)

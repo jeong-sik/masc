@@ -38,7 +38,10 @@ export interface StoredTokenChange {
 
 type StoredTokenChangeListener = (change: StoredTokenChange) => void
 
-const storedTokenChangeListeners = new Set<StoredTokenChangeListener>()
+interface StoredTokenSubscription {
+  readonly listener: StoredTokenChangeListener
+}
+const storedTokenChangeListeners = new Set<StoredTokenSubscription>()
 let storedTokenRevision = 0
 
 export interface StoredTokenPublication {
@@ -48,9 +51,12 @@ export interface StoredTokenPublication {
 function notifyStoredTokenChange(change: StoredTokenChange): StoredTokenPublication {
   storedTokenRevision += 1
   const publication = Object.freeze({ authRevision: storedTokenRevision })
-  for (const listener of storedTokenChangeListeners) {
+  const admittedSubscriptions: readonly StoredTokenSubscription[] = [...storedTokenChangeListeners]
+  for (const subscription of admittedSubscriptions) {
+    if (storedTokenRevision !== publication.authRevision) break
+    if (!storedTokenChangeListeners.has(subscription)) continue
     try {
-      listener(change)
+      subscription.listener(change)
     } catch (err) {
       console.warn('[dashboard-auth] token change listener failed', err)
     }
@@ -65,9 +71,10 @@ export function currentStoredTokenRevision(): number {
 export function subscribeStoredTokenChanges(
   listener: StoredTokenChangeListener,
 ): () => void {
-  storedTokenChangeListeners.add(listener)
+  const subscription = Object.freeze({ listener })
+  storedTokenChangeListeners.add(subscription)
   return () => {
-    storedTokenChangeListeners.delete(listener)
+    storedTokenChangeListeners.delete(subscription)
   }
 }
 
@@ -535,8 +542,9 @@ async function errorResponseInfoFromResponse(res: Response, signal?: AbortSignal
       : res
     rawText = (await readableResponse.text()).trim()
     signal?.throwIfAborted()
-  } catch {
+  } catch (error) {
     signal?.throwIfAborted()
+    if (isAbortError(error)) throw error
     return {}
   }
   if (!rawText) return {}
@@ -636,7 +644,8 @@ async function parseJsonResponse<T>(
   let rawText = ''
   try {
     rawText = await res.text()
-  } catch {
+  } catch (error) {
+    if (isAbortError(error)) throw error
     throw new ApiRequestError({
       method,
       path,
@@ -805,7 +814,7 @@ export type GetOptions = AbortableRequestOptions & {
 export async function get<T>(path: string, opts: GetOptions & { onAdmission?: (admission: GetAdmission) => void } = {}): Promise<T> {
   const headers = authHeaders({ includeActor: opts.includeActorHeader })
   opts.onAdmission?.(Object.freeze({ path, authRevision: currentStoredTokenRevision() }))
-  const res = await fetchWithTimeout(
+  return fetchWithTimeout(
     path,
     {
       headers,
@@ -813,21 +822,23 @@ export async function get<T>(path: string, opts: GetOptions & { onAdmission?: (a
       signal: opts.signal,
     },
     opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS,
+    async (res) => {
+      if (!res.ok) {
+        const warmPayload = await bootstrapWarmPayload(path, res.clone())
+        if (warmPayload !== null) {
+          return warmPayload as T
+        }
+        throw await apiRequestErrorFromResponse('GET', path, res)
+      }
+      const data = await parseJsonResponse<T>('GET', path, res)
+      // Server may return 200 OK with {"error":"not initialized"} during startup
+      if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
+        const payload = bootstrapInitializingPayload(path)
+        if (payload !== null) return payload as T
+      }
+      return data
+    },
   )
-  if (!res.ok) {
-    const warmPayload = await bootstrapWarmPayload(path, res.clone())
-    if (warmPayload !== null) {
-      return warmPayload as T
-    }
-    throw await apiRequestErrorFromResponse('GET', path, res)
-  }
-  const data = await parseJsonResponse<T>('GET', path, res)
-  // Server may return 200 OK with {"error":"not initialized"} during startup
-  if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
-    const payload = bootstrapInitializingPayload(path)
-    if (payload !== null) return payload as T
-  }
-  return data
 }
 
 // Same wire shape as [get<T>] but exposes selected response headers
@@ -1005,15 +1016,15 @@ export async function confirmOperatorAction(
   return parseOperatorActionResult(raw)
 }
 
-export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
-  return get('/api/v1/operator', { includeActorHeader: false })
+export function fetchOperatorSnapshot(opts: AbortableRequestOptions = {}): Promise<OperatorSnapshot> {
+  return get('/api/v1/operator', { ...opts, includeActorHeader: false })
 }
 
 export function fetchOperatorDigest(options: {
   targetType?: 'namespace' | 'workspace'
   targetId?: string
   includeWorkers?: boolean
-} = {}): Promise<OperatorDigest> {
+} & AbortableRequestOptions = {}): Promise<OperatorDigest> {
   const params = new URLSearchParams()
   if (options.targetType) params.set('target_type', options.targetType)
   if (options.targetId) params.set('target_id', options.targetId)
@@ -1021,5 +1032,6 @@ export function fetchOperatorDigest(options: {
   const query = params.toString()
   return get(`/api/v1/operator/digest${query ? `?${query}` : ''}`, {
     includeActorHeader: false,
+    signal: options.signal,
   })
 }

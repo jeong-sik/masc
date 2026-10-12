@@ -553,13 +553,13 @@ export async function streamKeeperMessage(
       throw error
     }
   }
-  const postStream = async () => {
+  const postStream = async (authRevision = currentStoredTokenRevision()) => {
     const channelWorkspaceId = resolveChannelWorkspaceId?.().trim()
     const requestBody = JSON.stringify({ ...body,
       ...(channelWorkspaceId ? { channel_workspace_id: channelWorkspaceId } : {}) })
     const headers = { ...jsonHeaders(), Accept: 'text/event-stream' }
     const admission: KeeperStreamAdmission = Object.freeze({ keeperName: name, operationId: exactOperationId,
-      authRevision: currentStoredTokenRevision() })
+      authRevision })
     const acquisitionController = new AbortController()
     const requestSignal = signal
       ? AbortSignal.any([signal, acquisitionController.signal])
@@ -604,11 +604,11 @@ export async function streamKeeperMessage(
   if (!res.ok) {
     let requestError = await readErrorResponse(res, admission)
     assertResponseAdmission(res, admission)
-    if (
-      res.status === 401
-      && await refreshDevTokenAfterAuthError(requestError.authErrorCode)
-    ) {
-      ;({ response: res, admission } = await postStream())
+    const recovery = res.status === 401
+      ? await refreshDevTokenAfterAuthError(requestError.authErrorCode, admission.authRevision)
+      : null
+    if (recovery) {
+      ;({ response: res, admission } = await postStream(recovery.authRevision))
       assertResponseAdmission(res, admission)
       if (!res.ok) {
         requestError = await readErrorResponse(res, admission)

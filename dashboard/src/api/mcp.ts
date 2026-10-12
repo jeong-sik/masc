@@ -8,6 +8,7 @@ import {
   DEFAULT_MCP_TIMEOUT_MS,
   authHeaders,
   currentStoredTokenRevision,
+  subscribeStoredTokenChanges,
   currentDashboardActor,
   getStoredToken,
   getStoredTokenMeta,
@@ -185,26 +186,69 @@ async function mcpPost(
 ): Promise<string> {
   assertBinding(binding)
   const request = currentRequest(body)
-  const res = await fetchWithTimeout('/mcp', {
-    method: 'POST',
-    headers: mcpHeadersForActor(binding, request.method, request.name, actorName),
-    body: JSON.stringify(request.body),
-  }, timeoutMs)
-  assertBinding(binding)
+  const acquisitionController = new AbortController()
+  const releaseAcquisition = subscribeStoredTokenChanges(() => acquisitionController.abort())
+  let res: Response
+  try {
+    assertBinding(binding)
+    res = await fetchWithTimeout('/mcp', {
+      method: 'POST',
+      headers: mcpHeadersForActor(binding, request.method, request.name, actorName),
+      body: JSON.stringify(request.body),
+      signal: acquisitionController.signal,
+    }, timeoutMs)
+  } catch (error) {
+    assertBinding(binding)
+    throw error
+  } finally {
+    releaseAcquisition()
+  }
+  try {
+    assertBinding(binding)
+  } catch (error) {
+    void res.body?.cancel().catch(() => undefined)
+    throw error
+  }
   if (!res.ok) {
     if (res.status === 403) {
+      void res.body?.cancel().catch(() => undefined)
       blockedAuthRevision = binding.authRevision
       throw new Error(MCP_BLOCKED_MESSAGE)
     }
-    throw await apiRequestErrorFromResponse('POST', '/mcp', res)
+    const bodyController = new AbortController()
+    const releaseAuth = subscribeStoredTokenChanges(() => bodyController.abort())
+    try {
+      assertBinding(binding)
+      const error = await apiRequestErrorFromResponse('POST', '/mcp', res, { signal: bodyController.signal })
+      assertBinding(binding)
+      throw error
+    } catch (error) {
+      assertBinding(binding)
+      throw error
+    } finally {
+      releaseAuth()
+    }
   }
-  const text = await res.text()
-  assertBinding(binding)
-  return text
+  const bodyController = new AbortController()
+  const releaseAuth = subscribeStoredTokenChanges(() => bodyController.abort())
+  try {
+    assertBinding(binding)
+    const readableResponse = res.body
+      ? new Response(res.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), { signal: bodyController.signal }))
+      : res
+    const text = await readableResponse.text()
+    assertBinding(binding)
+    return text
+  } catch (error) {
+    assertBinding(binding)
+    throw error
+  } finally {
+    releaseAuth()
+  }
 }
 
-async function ensureBinding(): Promise<McpRequestBinding> {
-  const admittedRevision = currentStoredTokenRevision()
+async function ensureBinding(admittedRevision = currentStoredTokenRevision()): Promise<McpRequestBinding> {
+  assertAuthRevision(admittedRevision)
   synchronizeMcpAuthRevision()
   if (blockedAuthRevision === currentStoredTokenRevision()) {
     if (!blockedToastShown) {
@@ -329,12 +373,15 @@ async function callMcpToolInternal(
   toolName: string,
   args: Record<string, unknown>,
   allowAuthRecovery = true,
+  admittedRevision = currentStoredTokenRevision(),
 ): Promise<string> {
   const requestId = randomUuid()
   synchronizeMcpAuthRevision()
   let explicitActor: string | null = null
+  let attemptedBinding: McpRequestBinding | null = null
   try {
-    const binding = await ensureBinding()
+    const binding = await ensureBinding(admittedRevision)
+    attemptedBinding = binding
     // ensureBinding may install the loopback dev credential, so classify
     // identity authority only after it returns. Never let a caller-supplied
     // transport hint override the credential used by this request.
@@ -364,19 +411,21 @@ async function callMcpToolInternal(
     const parsed = parseMcpHttpResponse(text)
     return extractMcpText(parsed)
   } catch (err) {
+    if (attemptedBinding) assertBinding(attemptedBinding)
     const authErrorCode = err instanceof McpToolCallError
       ? err.authErrorCode
       : err instanceof ApiRequestError && err.status === 401
         ? err.authErrorCode
         : null
-    if (
-      allowAuthRecovery
-      && explicitActor === null
-      && await refreshDevTokenAfterAuthError(authErrorCode)
-    ) {
-      observedTokenRevision = currentStoredTokenRevision()
-      return callMcpToolInternal(toolName, args, false)
+    const recovery = allowAuthRecovery && explicitActor === null && attemptedBinding
+      ? await refreshDevTokenAfterAuthError(authErrorCode, attemptedBinding.authRevision)
+      : null
+    if (recovery) {
+      assertAuthRevision(recovery.authRevision)
+      observedTokenRevision = recovery.authRevision
+      return callMcpToolInternal(toolName, args, false, recovery.authRevision)
     }
+    if (attemptedBinding) assertBinding(attemptedBinding)
     const message = errorToString(err)
     const failure = toolHostFailureObservation(err)
     if (failure) {
@@ -424,8 +473,8 @@ function parseMcpListResponse(raw: string): McpListResponse {
   return parseMcpJsonText(payload) as McpListResponse
 }
 
-async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
-  const binding = await ensureBinding()
+async function listMcpTools(binding: McpRequestBinding, cursor?: string): Promise<McpToolsListResult> {
+  assertBinding(binding)
   const text = await mcpPost({
     jsonrpc: '2.0',
     method: 'tools/list',
@@ -458,12 +507,14 @@ async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
    Seen cursors decide it directly: a cursor that repeats means the server has
    not advanced, and that is the error. */
 export async function listAllMcpTools(): Promise<McpToolsListResult['tools']> {
+  const binding = await ensureBinding()
   const all: McpToolsListResult['tools'] = []
   const seenCursors = new Set<string>()
   let cursor: string | undefined
   let pages = 0
   do {
-    const page = await listMcpTools(cursor)
+    const page = await listMcpTools(binding, cursor)
+    assertBinding(binding)
     all.push(...page.tools)
     cursor = page.nextCursor
     pages++
@@ -476,6 +527,7 @@ export async function listAllMcpTools(): Promise<McpToolsListResult['tools']> {
       seenCursors.add(cursor)
     }
   } while (cursor)
+  assertBinding(binding)
   return all
 }
 

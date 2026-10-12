@@ -380,6 +380,13 @@ val subscribe_published : t -> published next
     [subscribe] contract and must not sit on a live read path. *)
 val take_nonblocking : t -> keeper_chat_event option
 
+val runtime_attempt_of_json :
+  Yojson.Safe.t -> ((string option * int option), string) result
+(** Runtime-attempt observation shared by live and journal decoding. Null or
+    absent optional fields retain None; supplied indexes must be nonnegative
+    safe integers and supplied runtime names must be nonblank. Duplicate and
+    unknown object fields are rejected. *)
+
 val api_usage_to_json : Agent_core.Types.api_usage -> Yojson.Safe.t
 
 (** JSON for cumulative mid-stream counters and provider-reported charge:

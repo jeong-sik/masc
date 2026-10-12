@@ -458,8 +458,10 @@ let keeper_chat_event_of_json json =
         |> Result.map_error Runtime_claude_api_retry.error_to_string in
       Ok (Provider_retry_observed {attempt; retry})
     | "agent_core_runtime_attempt_started" ->
-      let runtime_id = json |> member "runtime_id" |> to_string_option in
-      let attempt_index = json |> member "attempt_index" |> to_int_option in
+      let* fields = object_fields ~label:"runtime attempt journal event"
+          ~allowed:["type"; "runtime_id"; "attempt_index"] json in
+      let* runtime_id, attempt_index = runtime_attempt_of_json
+          (`Assoc (List.filter (fun (key, _) -> key <> "type") fields)) in
       Ok (Agent_core_runtime_attempt_started { runtime_id; attempt_index })
     | "agent_core_stream_message_start" ->
       let* content_generation = match List.filter (fun (key,_) -> key="content_generation")

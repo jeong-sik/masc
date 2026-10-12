@@ -844,23 +844,9 @@ let validate_custom_value ~name value =
        |> Result.map (fun _ -> ())
        |> Result.map_error (fun detail -> Malformed_event detail))
   else if String.equal name "KEEPER_RUNTIME_ATTEMPT_STARTED" then
-    match value with
-    | `Null -> Ok ()
-    | `Assoc fields ->
-      let has_invalid_fields =
-        List.exists
-          (fun (k, _) -> not (List.mem k [ "runtime_id"; "attempt_index" ]))
-          fields
-      in
-      if has_invalid_fields then
-        Error
-          (Malformed_event
-             "Keeper chat CUSTOM event KEEPER_RUNTIME_ATTEMPT_STARTED has unexpected fields")
-      else Ok ()
-    | _ ->
-      Error
-        (Malformed_event
-           "Keeper chat CUSTOM event KEEPER_RUNTIME_ATTEMPT_STARTED.value must be null or an object")
+    Masc.Keeper_chat_events.runtime_attempt_of_json value
+    |> Result.map (fun _ -> ())
+    |> Result.map_error (fun detail -> Malformed_event detail)
   else if List.mem name null_custom_names && value <> `Null
   then
     Error

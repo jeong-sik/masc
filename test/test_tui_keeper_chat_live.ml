@@ -731,16 +731,33 @@ let test_runtime_attempt_boundary_is_typed () =
     (feed_whole body_with_fields)
 
 let test_runtime_attempt_rejects_invalid_payload () =
-  let body =
-    sse
-      (custom "KEEPER_RUNTIME_ATTEMPT_STARTED"
-         (`Assoc [ "unexpected", `String "field" ]))
-  in
-  check (list delta) "runtime boundary payload rejects unexpected fields"
-    [ Live.Undecodable
-        "Keeper chat CUSTOM event KEEPER_RUNTIME_ATTEMPT_STARTED has unexpected fields"
-    ]
-    (feed_whole body)
+  List.iter (fun value ->
+    check bool "malformed attempt cannot become an unnamed advancing attempt" true
+      (match feed_whole (sse (custom "KEEPER_RUNTIME_ATTEMPT_STARTED" value)) with
+       | [Live.Undecodable _] -> true | _ -> false);
+    check bool "strict and live attempt validation agree" true
+      (Result.is_error (Masc_tui_keeper_chat_projection.validate_custom_value
+        ~name:"KEEPER_RUNTIME_ATTEMPT_STARTED" value))
+  ) [`Assoc ["unexpected",`String "field"];
+     `Assoc ["attempt_index",`Int (-1)];
+     `Assoc ["attempt_index",`String "1"];
+     `Assoc ["runtime_id",`Bool true];
+     `Assoc ["runtime_id",`String " "];
+     `Assoc ["attempt_index",`Int 9_007_199_254_740_992]];
+  List.iter (fun index ->
+    let value = `Assoc ["runtime_id",`String "observed";"attempt_index",index] in
+    check bool "safe numeric spelling retains attempt identity" true
+      (match feed_whole (sse (custom "KEEPER_RUNTIME_ATTEMPT_STARTED" value)) with
+       | [Live.Runtime_attempt_started {runtime_id=Some "observed";attempt_index=Some 1}] -> true
+       | _ -> false);
+    check bool "journal uses the same numeric attempt identity" true
+      (match Masc.Keeper_chat_event_log.keeper_chat_event_of_json (`Assoc
+        ["type",`String "agent_core_runtime_attempt_started";
+         "runtime_id",`String "observed";"attempt_index",index]) with
+       | Ok (Masc.Keeper_chat_events.Agent_core_runtime_attempt_started
+           {runtime_id=Some "observed";attempt_index=Some 1}) -> true
+       | _ -> false)
+  ) [`Int 1;`Float 1.]
 
 let test_stream_model_started_is_typed () =
   let body =

@@ -421,6 +421,26 @@ let json_opt key value =
   | None -> []
   | Some value -> [ (key, value) ]
 
+let runtime_attempt_of_json = function
+  | `Null -> Ok (None, None)
+  | `Assoc fields ->
+      let ( let* ) = Result.bind in
+      let surface = "Keeper runtime attempt" in
+      let* () = Json_util.reject_unknown_fields ~surface
+          ~allowed:["runtime_id"; "attempt_index"] fields in
+      let* runtime_id = match List.assoc_opt "runtime_id" fields with
+        | None | Some `Null -> Ok None
+        | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+        | Some _ -> Error (surface ^ ".runtime_id must be a nonblank string") in
+      let* attempt_index = match List.assoc_opt "attempt_index" fields with
+        | None | Some `Null -> Ok None
+        | Some json ->
+            (match Runtime_json_integer.of_json json with
+             | Ok index when index >= 0 -> Ok (Some index)
+             | Ok _ | Error _ -> Error (surface ^ ".attempt_index must be a nonnegative safe integer")) in
+      Ok (runtime_id, attempt_index)
+  | _ -> Error "Keeper runtime attempt must be null or an object"
+
 let api_usage_to_json (usage : Agent_core.Types.api_usage) =
   `Assoc
     ([

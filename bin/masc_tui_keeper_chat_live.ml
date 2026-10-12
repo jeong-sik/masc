@@ -294,15 +294,11 @@ let custom_deltas_unvalidated fields =
        | Error error -> [Undecodable (Projection.stream_error_to_string error)])
   | Some "KEEPER_RUNTIME_ATTEMPT_STARTED" ->
     (match List.assoc_opt "value" fields with
-     | Some `Null -> [ Runtime_attempt_started { runtime_id = None; attempt_index = None } ]
-     | Some (`Assoc v) ->
-       let runtime_id = string_field v "runtime_id" in
-       let attempt_index = nonnegative_int_field v "attempt_index" in
-       [ Runtime_attempt_started { runtime_id; attempt_index } ]
-     | Some _ | None ->
-       [ Undecodable
-           "Keeper chat CUSTOM event KEEPER_RUNTIME_ATTEMPT_STARTED.value must be null or an object"
-       ])
+     | Some value ->
+         (match Masc.Keeper_chat_events.runtime_attempt_of_json value with
+          | Ok (runtime_id, attempt_index) -> [Runtime_attempt_started {runtime_id;attempt_index}]
+          | Error detail -> [Undecodable detail])
+     | None -> [Undecodable "KEEPER_RUNTIME_ATTEMPT_STARTED requires value"])
   | Some "KEEPER_STREAM_MESSAGE_START" ->
     (match object_field fields "value" with
      | Some value ->

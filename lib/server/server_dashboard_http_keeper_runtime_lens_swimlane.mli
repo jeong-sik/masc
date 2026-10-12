@@ -63,3 +63,8 @@ val runtime_lens_swimlane_completeness :
   Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan ->
   string ->
   string
+(** The AGENT_CORE lane includes history projection observations without
+    treating them as context injection or checkpoint completion. *)
+val runtime_lens_agent_core_swimlane_json :
+  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan ->
+  runtime_lens_gap list -> Yojson.Safe.t

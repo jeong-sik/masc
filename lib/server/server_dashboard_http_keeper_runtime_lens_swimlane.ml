@@ -149,6 +149,7 @@ let event_lane = function
   | Keeper_runtime_manifest.Runtime_failed
   | Keeper_runtime_manifest.Provider_lane_resolved ->
     "masc_policy_runtime"
+  | Keeper_runtime_manifest.History_projection_observed
   | Keeper_runtime_manifest.Checkpoint_loaded
   | Keeper_runtime_manifest.Checkpoint_saved ->
     "agent_core_agent"
@@ -249,3 +250,16 @@ let runtime_lens_swimlane_json scan gaps ~lane ~label ~events
       ("events", all_events);
       ("dag_edges", `List dag_edges_json);
     ]
+
+let runtime_lens_agent_core_swimlane_json scan gaps =
+  let open Keeper_runtime_manifest in
+  let observed event = runtime_lens_event_count scan event > 0 in
+  let terminal_status =
+    if observed Checkpoint_saved then "checkpoint_saved"
+    else if observed Checkpoint_loaded then "checkpoint_loaded"
+    else if observed History_projection_observed then "projection_observed"
+    else "empty"
+  in
+  runtime_lens_swimlane_json scan gaps ~lane:"agent_core_agent" ~label:"AGENT_CORE"
+    ~events:[Checkpoint_loaded; Checkpoint_saved; History_projection_observed]
+    ~terminal_status ~synthetic_events:[]

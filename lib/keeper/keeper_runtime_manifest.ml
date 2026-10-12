@@ -35,7 +35,7 @@ let source_clock_of_string = function
 
 let source_clock_of_event = function
   | Event_bus_correlated -> Event_bus
-  | Context_injected -> Logical
+  | Context_injected | History_projection_observed -> Logical
   | _ -> Wall
 
 type logical_ordering = {
@@ -160,6 +160,7 @@ let clock_lane_of_event = function
   | Runtime_failed
   | Provider_lane_resolved ->
     "masc_policy_runtime"
+  | History_projection_observed
   | Checkpoint_loaded
   | Checkpoint_saved ->
     "agent_core_agent"

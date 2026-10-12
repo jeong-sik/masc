@@ -1,3 +1,4 @@
+import { initialKeeperResponseState, reduceKeeperResponse } from './lib/keeper-response-state'
 import { effect, untracked } from '@preact/signals'
 import { setStoredToken, clearStoredToken } from './api/core'
 import { captureToolObservations } from './keeper-tool-observations'
@@ -216,6 +217,43 @@ describe('Keeper operation stream projection', () => {
       expect(after.deliveryProvenance).toEqual(operationDeliveryProvenance('replacement-operation', 'terminal_result'))
       expect(after.streamState).toBe('opening')
       expect(after.text).toBe('replacement')
+    } finally { release() }
+  })
+
+  it('preserves a newer response admitted during retry reasoning publication', () => {
+    assistantEntry('same-operation')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: { runtime_id: 'claude', attempt_index: 0 },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: {
+        index: 0, delta: 'previous reasoning', response: { content_generation: 1, stream_scope: 0 },
+      },
+    })
+    let armed = true
+    const release = effect(() => {
+      const current = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+      if (armed && current?.traceSteps?.some(step => step.kind === 'think')) {
+        armed = false
+        const next = reduceKeeperResponse(current.responseState ?? initialKeeperResponseState, {
+          kind: 'observe', source: 'header', owner: { content_generation: 2, stream_scope: 1 }, scope: 1,
+        })
+        untracked(() => { keeperThreads.value = { sangsu: [{ ...current,
+          responseState: next.state, streamState: 'opening', delivery: 'streaming',
+        }] } })
+      }
+    })
+    try {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_PROVIDER_RETRY', value: {
+          attempt: { routing_run_id: 'routing-run', runtime_id: 'claude', lane_attempt_index: 0 },
+          retry: { observation_id: 'retry-id', attempt: 1, max_retries: 10, retry_delay_ms: 1234, error_status: null },
+        },
+      })
+      const after = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+      expect(after.responseState).toMatchObject({ current: { content_generation: 2, stream_scope: 1 } })
+      expect(after.streamState).toBe('opening')
+      expect(after.traceSteps).toMatchObject([{ kind: 'think', text: 'previous reasoning' }])
     } finally { release() }
   })
 

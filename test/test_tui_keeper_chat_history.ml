@@ -1181,7 +1181,7 @@ let test_persisted_identity_and_absolute_turn_survive_projection () =
   let decoded =
     decode
       (`List
-         [ autonomous_turn ~turn_ref:"trace-1#54" ~content:(`String "done")
+         [ autonomous_turn ~content:(`String "done")
              [ reason "consider"; tool "Execute" ] ])
   in
   check (list (option int)) "one structural turn sequence on every projection"

@@ -174,6 +174,24 @@ describe('noteKeeperChatAppended', () => {
     expect(keeperChatHistoryErrors.value.echo).toBeNull()
   })
 
+  it('retains inactive history eligibility after a failed forced refresh', async () => {
+    activeKeeperName.value = 'other'
+    fetchKeeperChatHistory.mockResolvedValueOnce([
+      { id: 'original', role: 'assistant', content: 'original answer', ts: 1 },
+    ])
+    await hydrateKeeperChatHistory('echo')
+    fetchKeeperChatHistory.mockRejectedValueOnce(new Error('temporary refresh failure'))
+    await hydrateKeeperChatHistory('echo', { force: true })
+    fetchKeeperChatHistory.mockResolvedValueOnce([
+      { id: 'latest', role: 'assistant', content: 'latest answer', ts: 2 },
+    ])
+    noteKeeperChatAppended('echo')
+    await vi.runAllTimersAsync()
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(3)
+    expect(keeperThreads.value.echo?.some(entry => entry.id === 'latest')).toBe(true)
+    expect(keeperChatHistoryErrors.value.echo).toBeNull()
+  })
+
   it('preserves a newer action error when history recovers', async () => {
     fetchKeeperChatHistory.mockRejectedValueOnce(new Error('HTTP 502'))
     await hydrateKeeperChatHistory('echo')

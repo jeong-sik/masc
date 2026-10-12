@@ -301,6 +301,40 @@ max_output_tokens = 128000
 supports_top_k = false
 ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
 
+# claude_vincent scoped twins of the two bare rows above. The exact-output
+# resolver admits only provider-scoped rows (Binding.resolve_exact matches
+# provider_name = Some <provider id> exactly, #37849's serves_bare_rows
+# serves the keeper path alone), so without these a claude_vincent slot in
+# an exact-output lane resolves to no admitted target — found against the
+# live librarian_exact lane, 2026-10-11. Fields mirror the bare rows exactly;
+# pricing stays on the bare-row fallback like every scoped row that does not
+# restate it.
+[[models]]
+id_prefix = "claude-sonnet-5-5"
+provider_name = "claude_vincent"
+base = "anthropic"
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+supports_assistant_prefill = false
+anthropic_thinking_control = "adaptive_between_tools"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+
+[[models]]
+id_prefix = "claude-haiku-5-5"
+provider_name = "claude_vincent"
+base = "anthropic"
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+supports_assistant_prefill = false
+anthropic_thinking_control = "adaptive_disabled_through_high"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+
 [[models]]
 id_prefix = "claude_code"
 base = "anthropic"

@@ -949,6 +949,44 @@ let test_ollama_cloud_v1_vendor_models_resolve_exact_capabilities () =
     [ "gemma4:31b-cloud" ]
 ;;
 
+let test_claude_vincent_scoped_rows_answer_for_the_second_account () =
+  (* The exact-output resolver admits only provider-scoped rows, so the
+     claude_vincent account needs its own twins of the claude bare rows.
+     Found live on librarian_exact, 2026-10-11: without them the slot
+     resolved to no admitted target while the same model on the catalogued
+     "claude" provider kept working through serves_bare_rows. *)
+  List.iter
+    (fun model_id ->
+       match
+         Capabilities.for_provider_model_id
+           ~wire:(Some Provider_kind.Anthropic)
+           ~allow_bare_fallback:false
+           ~provider_label:"claude_vincent"
+           ~model_id
+       with
+       | None -> failf "claude_vincent/%s should resolve exactly" model_id
+       | Some c ->
+         (* The anthropic preset defaults to a 200000 window, so the 1M here
+            is what distinguishes the scoped row answering from a fall to the
+            preset. *)
+         check (option int) (model_id ^ " context") (Some 1_000_000) c.max_context_tokens;
+         check bool (model_id ^ " tools") true c.supports_tools;
+         check bool (model_id ^ " reasoning") true c.supports_reasoning)
+    [ "claude-sonnet-5-5"; "claude-haiku-5-5" ];
+  match Model_catalog.global () with
+  | None -> fail "embedded model catalog unavailable"
+  | Some catalog ->
+    (match
+       Exact_output_catalog_binding.resolve_exact
+         ~catalog
+         ~model_entries:(Model_catalog.model_entries catalog)
+         ~provider_ref:"claude_vincent"
+         ~model_id:"claude-haiku-5-5"
+     with
+    | Error _ -> fail "claude_vincent/claude-haiku-5-5 should bind as an exact-output target"
+    | Ok _ -> ())
+;;
+
 let test_ollama_cloud_grouped_rows_have_required_axes () =
   (* Live grouped smokes for these Ollama Cloud rows exercise the same
      production workflow: tool call -> tool_result replay -> final answer while
@@ -3334,6 +3372,10 @@ let () =
             "ollama cloud v1 vendor models resolve exact capabilities"
             `Quick
             test_ollama_cloud_v1_vendor_models_resolve_exact_capabilities
+        ; test_case
+            "claude_vincent scoped rows answer for the second account"
+            `Quick
+            test_claude_vincent_scoped_rows_answer_for_the_second_account
         ; test_case
             "ollama cloud grouped rows keep required axes"
             `Quick

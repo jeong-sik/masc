@@ -7129,7 +7129,10 @@ let forget_session_rows_the_transcript_holds state keeper_name rows ~fresh =
     List.filter_map
       (fun (row : Keeper_chat_history.row) ->
         match row.Keeper_chat_history.kind with
-        | Keeper_chat_history.Addressed_to_keeper _ -> row.turn_id
+        | Keeper_chat_history.Addressed_to_keeper _ ->
+            (match row.execution_source with
+             | Some (Keeper_chat_log.Operation _ as source) -> Some source
+             | Some (Autonomous_turn _) | None -> None)
         | Keeper_chat_history.Said_by_keeper
         | Keeper_chat_history.Autonomous_reply
         | Keeper_chat_history.Delivery_failed _
@@ -7147,7 +7150,9 @@ let forget_session_rows_the_transcript_holds state keeper_name rows ~fresh =
       (fun (row : Keeper_chat_history.row) ->
         match row.Keeper_chat_history.kind with
         | Keeper_chat_history.Delivery_failed { origin_request_id; _ } ->
-            origin_request_id
+            (match row.execution_source, origin_request_id with
+             | Some (Keeper_chat_log.Operation owner as source), Some id when String.equal owner id -> Some source
+             | (Some _ | None), (Some _ | None) -> None)
         | Keeper_chat_history.Addressed_to_keeper _
         | Keeper_chat_history.Said_by_keeper
         | Keeper_chat_history.Autonomous_reply
@@ -7172,18 +7177,17 @@ let forget_session_rows_the_transcript_holds state keeper_name rows ~fresh =
         | Message_error ->
             String.equal entry.me_request_id ""
             || not
-                 (List.exists
-                    (String.equal entry.me_request_id)
-                    failures_the_transcript_holds)
+                 (Option.fold ~none:false ~some:(fun source ->
+                    List.mem source failures_the_transcript_holds) entry.me_execution_source)
         | Message_user _ ->
             (* Queue membership is not proof that a row reached the server,
                and leaving the queue is not proof either: the next request can
                enter [msg_inflight] before a transcript refresh started for the
                previous turn comes back. Replace this session row only when
-               the exact request id is in the snapshot being applied. *)
+               the exact Operation source is in the snapshot being applied. *)
             not
-              (List.exists (String.equal entry.me_request_id)
-                 user_turns_the_transcript_holds)
+              (Option.fold ~none:false ~some:(fun source ->
+                 List.mem source user_turns_the_transcript_holds) entry.me_execution_source)
         | Message_keeper | Message_autonomous | Message_tool | Message_skill _
         | Message_thinking | Message_memory ->
             not (transcript_replaces_session_output ~fresh entry))
@@ -7195,7 +7199,7 @@ let locally_submitted_at state keeper_name request_id =
       match entry.me_role with
       | Message_user (Sent_by_operator _)
         when String.equal entry.me_keeper_name keeper_name
-             && String.equal entry.me_request_id request_id ->
+             && entry.me_execution_source = Some (Keeper_chat_log.Operation request_id) ->
           entry.me_submitted_at
       (* [Sent_by_operator] is listed again because the arm above it is
          guarded: an operator row for another keeper or request falls through
@@ -7329,8 +7333,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , [] )
   in
   let submitted_at =
-    match row.Keeper_chat_history.kind, row.Keeper_chat_history.turn_id with
-    | Keeper_chat_history.Addressed_to_keeper _, Some request_id ->
+    match row.Keeper_chat_history.kind, row.Keeper_chat_history.execution_source with
+    | Keeper_chat_history.Addressed_to_keeper _, Some (Keeper_chat_log.Operation request_id) ->
         locally_submitted_at state keeper_name request_id
     | (Keeper_chat_history.Said_by_keeper
       | Keeper_chat_history.Autonomous_reply
@@ -7341,7 +7345,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
       | Keeper_chat_history.Gate_activity _
       | Keeper_chat_history.Memory_activity _
       | Keeper_chat_history.Fusion_conclusion _), _
-    | Keeper_chat_history.Addressed_to_keeper _, None -> None
+    | Keeper_chat_history.Addressed_to_keeper _, (Some (Autonomous_turn _) | None) -> None
   in
   let timestamp =
     let source_at =
@@ -7445,11 +7449,13 @@ let msg_entries_of_history_rows state keeper_name rows =
   let next_by_request = Hashtbl.create 16 in
   List.map
     (fun (row : Keeper_chat_history.row) ->
-      let request_id = Option.value ~default:"" row.turn_id in
+      let owner = match row.execution_source with
+        | Some source -> Typed_execution source
+        | None -> Legacy_request (Option.value ~default:"" row.turn_id) in
       let operation_seq =
-        Option.value ~default:0 (Hashtbl.find_opt next_by_request request_id)
+        Option.value ~default:0 (Hashtbl.find_opt next_by_request owner)
       in
-      Hashtbl.replace next_by_request request_id (operation_seq + 1);
+      Hashtbl.replace next_by_request owner (operation_seq + 1);
       msg_entry_of_history_row state keeper_name ~operation_seq row)
     rows
 ;;

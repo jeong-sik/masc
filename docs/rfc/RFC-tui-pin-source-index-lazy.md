@@ -1,13 +1,13 @@
 ---
 rfc: "tui-pin-source-index-lazy"
 title: "TUI 스크롤 위치 고정용 소스 색인은 필요할 때만 만든다"
-status: Rejected
+status: Dropped
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-12
 author: claude
 supersedes: []
 superseded_by: null
-related: ["tui-lazy-block-projection"]
+related: []
 implementation_prs: []
 ---
 

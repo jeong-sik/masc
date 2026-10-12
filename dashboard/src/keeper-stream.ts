@@ -1373,7 +1373,12 @@ export function applyKeeperStreamEvent(
         const pending = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.producerSayingReplay
         const unownedBoundary = pending?.owner === null && value.response === undefined
           && (current === undefined || current.kind === 'known' && current.floor === null && current.current === null)
-        if (boundaryDecision.authoritative || source.observationOnly && current?.kind !== 'unavailable'
+        // An unowned delta reducing from an absent response state is
+        // authoritative only because no floor exists yet; it must not flush
+        // owned pending speech into the trace.
+        const unownedThinkingAgainstOwnedPending = value.response === undefined && pending?.owner != null
+        if (boundaryDecision.authoritative && !unownedThinkingAgainstOwnedPending
+          || source.observationOnly && current?.kind !== 'unavailable'
           && pending?.owner != null && sameKeeperResponseOwner(pending.owner, value.response) || unownedBoundary) {
           flushProducerSaying(keeperName, assistantEntryId, source.observationOnly === true)
         }

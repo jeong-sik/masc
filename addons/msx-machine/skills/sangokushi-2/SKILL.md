@@ -121,6 +121,28 @@ choose from the current lists rather than reusing these officer numbers.
   the trainer list showed officer 6 unavailable; no before/after training
   statistic was measured, so this does not establish a training increase.
 
+## Recruitment food boundary and merchant resupply
+
+Inspect food before committing recruitment. In June 220 province 19,
+soldiers 21, gold 750 and food 50 preceded a recruitment of 60 and allocation
+of total 81 to Cao Ren. After confirmation, food displayed 65526, soldiers
+81 and gold 150. That food value equals `(50 - 60) mod 65536`, but this
+observation does not establish whether the cause is in the game or emulator.
+Do not count the anomalous display as legitimate resupply.
+
+A checkpoint replay at the same province resources recruited 50 instead,
+allocated Cao Ren total 71, and confirmed with empty Return then `y`.
+The resulting food was 0, soldiers 71 and gold 250. These observations
+establish this input boundary, not a universal recruitment price or limit.
+Preserve the failing checkpoint and receipt before restoring a comparison.
+
+In that food-0 state, `13`, Return opened the merchant menu; `2`, Return
+selected `米を買う`. The available officer list identified Xiahou Shang
+as 2. `2`, Return opened `米をいくら買いますか(1-137)?`.
+Entering `80`, Return returned to commands with food 80 and gold 104.
+Use the visible menu, officer list and quantity range for the current state;
+these indices and purchase cost describe this single observed transaction.
+
 ## Buying weapons
 
 At the province command prompt, `13`, Return opens the merchant menu when

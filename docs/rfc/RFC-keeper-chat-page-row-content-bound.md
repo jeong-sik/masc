@@ -1,9 +1,9 @@
 ---
 rfc: "keeper-chat-page-row-content-bound"
 title: "대화 이력 페이지는 큰 tool 행 본문을 싣지 않는다"
-status: Draft
+status: Dropped
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-12
 author: claude
 supersedes: []
 superseded_by: null
@@ -115,6 +115,15 @@ tool 행 `content`가 상한 `ROW_CONTENT_PAGE_BYTES`를 넘으면 페이지 응
 전체 본문은 TUI가 이미 쓰는 내구 호출 기록(`/calls`, `kc_input`)에서 받는다.
 새 경로는 만들지 않는 것이 기본이다(5절 4번).
 
+단, 호출 기록의 `kc_input`은 전체 본문이 아니다.
+`Keeper_tool_call_log.input_to_json`이 입력을 redact한 뒤
+`max_output_len`(4,000바이트)으로 잘라 저장한다
+(`lib/keeper_tool_call_log.ml:720`). 1.2의 23~906KB 행처럼 4KB를 넘는 tool
+행은 `/calls`에서도 잘린 미리보기만 돌아오고, 잘린 바이트는 그 응답에서
+복원할 수 없다. 5절 2번의 상세 보기 폴백도 같은 상한을 물려받는다. 잘린
+바이트를 복원하려면 잘리지 않은 아티팩트나 단건 조회 경로가 따로 필요하고,
+그 경로 없이는 데이터 손실을 받아들여야 한다.
+
 ## 3. 제약: `args`는 JSON 문자열이다
 
 TUI는 tool 행 `content`를 `args`로 받아 `Keeper_chat_tool_trail.tool_subject`에
@@ -169,7 +178,10 @@ A는 서버가 행마다 파싱 비용을 낸다. B는 응답 계약을 하나 �
 ## 6. 검증 계획
 
 - 서버: 상한 초과 행이 잘리고 `content_truncated`/`content_bytes`가 붙는 테스트,
-  경계(상한 정확히, UTF-8 다바이트 중간)에서 유효한 UTF-8과 유효한 JSON이 남는 테스트.
+  경계(상한 정확히, UTF-8 다바이트 중간)에서 유효한 UTF-8이 남는 테스트.
+  3절의 A를 고른 경우에만 잘린 `content`가 유효한 JSON으로 남는 테스트를
+  추가한다. B에서는 TUI가 잘린 `content`를 파싱하지 않으므로 잘린 `content`의
+  JSON 유효성을 요구하지 않는다.
 - TUI: 잘린 행이 `tool_subject`를 잃지 않는 테스트.
 - 재측정: 같은 PTY 드라이버와 키퍼로 페이지 크기 분포와 첫 PageUp p99를 다시 잰다.
   기대치는 정하지 않는다. 906KB 행이 든 페이지의 파싱+디코드가 줄어드는지만 본다.

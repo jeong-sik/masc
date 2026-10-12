@@ -54,18 +54,16 @@ let with_content (block : Agent_core.Types.content_block) replacement =
   | other -> other
 ;;
 
-(* The placeholder saturates every variable-length field the real marker can
-   carry: an all-'f' digest is the widest hex, [Tool_blob_store.preview_max]
-   bytes of 0xFF is the widest preview after [encode_for_agent_core] escapes it and
-   the JSON encoder escapes the escapes, and the byte count is the true one so
-   its decimal width is exact. The result is therefore never shorter than the
-   marker [materialize] will produce for the same body. *)
-let saturating_marker ~bytes =
+(* Addressing uses this exact preview and byte count. SHA256 hex digits have
+   equal encoded width, so the digest placeholder needs no body hashing.
+   Measuring the store's real preview avoids rejecting useful demotions due
+   to a worst-case preview that this body will never produce. *)
+let planned_marker ~bytes =
   match
     Tool_output.make_artifact_ref
       ~sha256:(String.make 64 'f')
       ~bytes:(String.length bytes)
-      ~preview:(String.make Tool_blob_store.preview_max '\255')
+      ~preview:(Tool_blob_store.make_preview bytes)
       ~mime:demoted_mime
   with
   | Ok reference -> Some (Tool_output.encode_for_agent_core (Tool_output.Stored reference))
@@ -105,7 +103,7 @@ let plan ?(demote_from = 0) ~measure_message_bytes ~demote_before messages =
                     match demotable_body block with
                     | None -> block
                     | Some (tool_use_id, body) ->
-                      (match saturating_marker ~bytes:body with
+                      (match planned_marker ~bytes:body with
                        | None -> block
                        | Some placeholder ->
                          staged := { tool_use_id; bytes = body } :: !staged;

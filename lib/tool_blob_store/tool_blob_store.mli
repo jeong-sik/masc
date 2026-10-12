@@ -39,14 +39,15 @@ val root_dir : t -> string
 val preview_max : int
 (** Hard ceiling on the preview length {!put} produces, in bytes.
 
-    Exported because a caller that must bound the size of a marker it has not
-    stored yet has to build a saturating candidate, and the only alternative
-    is to hardcode this number at that call site. A hardcoded copy would turn
-    a later increase here into a silent underestimate at the caller — the
-    marker would grow past the bound the caller measured against. Nothing
-    outside this module may restate the value; {!Tool_output.make_artifact_ref}
+    Callers measuring a string body's marker use {!make_preview} so planning
+    and addressing share the exact sanitized bytes. Nothing outside this
+    module should restate the ceiling; {!Tool_output.make_artifact_ref}
     does not enforce it, so it is a property of {!put}, not of
     {!Tool_output.artifact_ref}. *)
+
+val make_preview : string -> string
+(** Exact sanitized leading preview used by string blob addressing. Pure;
+    callers may use it to measure a marker before storing its original bytes. *)
 
 val put : t -> bytes:string -> mime:string -> Tool_output.t
 (** Store [bytes] under its sha256 digest. {!address} then {!put_addressed},

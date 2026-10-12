@@ -325,6 +325,7 @@ type restart_notice =
 let restart_notice
       (history_at_start : Keeper_turn_boundaries.history_at_start)
       (saved_history : Keeper_run_context.saved_history)
+      (stated : Keeper_turn_boundaries.history_stated)
   =
   match history_at_start, saved_history with
   | ( (Keeper_turn_boundaries.Continued_history
@@ -334,9 +335,39 @@ let restart_notice
       | Keeper_run_context.Saved_history_superseded ) ) -> No_restart_notice
   | ( Keeper_turn_boundaries.Fresh_history
     , (Keeper_run_context.Saved_history_loaded | Keeper_run_context.Saved_history_absent) )
-    -> Notice_at_turn_start
+    ->
+    (* The log already says the history holds no atom, so a restart would
+       restart nothing. An official client saves no checkpoint and starts
+       every turn here; a line per turn made [Keeper_carried_front] raise its
+       floor to the turn just ended and empty the seed every time. *)
+    (match stated with
+     | Keeper_turn_boundaries.History_may_hold_atoms -> Notice_at_turn_start
+     | Keeper_turn_boundaries.History_stated_empty -> No_restart_notice)
   | Keeper_turn_boundaries.Fresh_history, Keeper_run_context.Saved_history_superseded ->
     Notice_after_first_save
+;;
+
+(* Only a turn that would otherwise write at its start needs the log, so
+   continued turns do not pay for a read. The read is tail-bounded: the last
+   deciding line of the trace carries the answer, and it is the store's last
+   row whenever the keeper's latest turns were of this trace. A log that
+   cannot be read is reported and treated as stating nothing: the line is
+   then written, as it was before the log was consulted. *)
+let history_stated_by_log ~(config : Workspace.config) ~keeper_name ~trace_id =
+  match
+    Keeper_turn_boundaries.history_stated_in_store
+      ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name
+      ~trace_id
+  with
+  | Ok stated -> stated
+  | Error detail ->
+    Log.Keeper.warn
+      ~keeper_name
+      "turn boundary log not read before the restart notice: %s"
+      detail;
+    Keeper_turn_boundaries.History_may_hold_atoms
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
 ;;
 
 type restart_site =

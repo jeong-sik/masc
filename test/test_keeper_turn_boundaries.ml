@@ -388,6 +388,67 @@ let read_lines ~keepers_dir =
       lines
 ;;
 
+let append_lines ~keepers_dir lines =
+  List.iter
+    (fun line ->
+       match Boundaries.append ~keepers_dir ~keeper_id line with
+       | Ok () -> ()
+       | Error error -> failf "append: %s" (Boundaries.append_error_to_string error))
+    lines
+;;
+
+let test_history_stated_in_store_answers_from_the_tail () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let describe = function
+    | Boundaries.History_may_hold_atoms -> "may hold atoms"
+    | Boundaries.History_stated_empty -> "stated empty"
+  in
+  let stated_in_store () =
+    match Boundaries.history_stated_in_store ~keepers_dir ~keeper_id ~trace_id:"trace" with
+    | Ok stated -> stated
+    | Error detail -> failf "history_stated_in_store: %s" detail
+  in
+  let check_stated label expected () =
+    check string label expected (describe (stated_in_store ()))
+  in
+  check_stated "a missing store states nothing" "may hold atoms" ();
+  append_lines ~keepers_dir
+    [ record ~turn:1 ~trace_id:"other" Boundaries.Stale_noop
+    ; record ~turn:2 ~history_at_start:Boundaries.Fresh_history Boundaries.No_atom_history
+    ];
+  check_stated "the trace's last row decides" "stated empty" ();
+  append_lines ~keepers_dir [ record ~turn:3 Boundaries.Atom_history ];
+  check_stated "a later atom row moves it back" "may hold atoms" ();
+  append_lines ~keepers_dir [ history_restarted () ];
+  check_stated "a restart row states empty" "stated empty" ();
+  (* Enough of another trace's rows follow to push every row of this trace
+     out of the bounded tail window, so the answer comes from the fallback
+     full read. *)
+  append_lines ~keepers_dir
+    (List.init 400 (fun index ->
+       record ~turn:(index + 4) ~trace_id:"other" Boundaries.Stale_noop));
+  check_stated "the fallback reads past the window" "stated empty" ();
+  (* A torn tail is a last line no reader decodes, and it decides. *)
+  let path = Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let store = Unix.openfile path [ Unix.O_WRONLY; Unix.O_APPEND ] 0o600 in
+  let torn = {|{"kind":"turn_ended"|} in
+  let written = Unix.write_substring store torn 0 (String.length torn) in
+  Unix.close store;
+  check int "the torn fragment was written whole" (String.length torn) written;
+  check_stated "a torn tail states nothing" "may hold atoms" ()
+;;
+
+(* A store no reader can open answers [Error], so the caller reports it and
+   takes the conservative branch. *)
+let test_history_stated_in_store_reports_an_unreadable_store () =
+  with_temp_keepers @@ fun keepers_dir ->
+  block_the_store ~keepers_dir;
+  match Boundaries.history_stated_in_store ~keepers_dir ~keeper_id ~trace_id:"trace" with
+  | Ok _ -> fail "a directory in the store's place states nothing without an error"
+  | Error detail ->
+    check bool "the failure says why" true (String.length detail > 0)
+;;
+
 let test_appended_lines_read_back_in_order () =
   with_temp_keepers @@ fun keepers_dir ->
   check int "a keeper with no finished turn has no line" 0
@@ -672,9 +733,10 @@ let describe_notice = function
    start, a reader could re-read the old history, pass the line, and have no
    line left when a save of that turn then replaces the history. *)
 let test_the_notice_follows_what_the_turn_saw () =
-  let expect label history_at_start saved_history notice =
+  let expect ?(stated = Boundaries.History_may_hold_atoms) label history_at_start
+      saved_history notice =
     check string label notice
-      (describe_notice (Turn_helpers.restart_notice history_at_start saved_history))
+      (describe_notice (Turn_helpers.restart_notice history_at_start saved_history stated))
   in
   expect "loaded, and it holds no atom" Boundaries.Fresh_history
     Run_context.Saved_history_loaded "at turn start";
@@ -689,7 +751,61 @@ let test_the_notice_follows_what_the_turn_saw () =
   expect "continued, absent" Boundaries.Continued_history Run_context.Saved_history_absent
     "none";
   expect "continued, superseded" Boundaries.Continued_history Run_context.Saved_history_superseded
-    "none"
+    "none";
+  (* The log already says the history is empty: an official client starts
+     every turn here and has nothing to restart. *)
+  let stated = Boundaries.History_stated_empty in
+  expect ~stated "absent, and the log states it empty" Boundaries.Fresh_history
+    Run_context.Saved_history_absent "none";
+  expect ~stated "loaded, and the log states it empty" Boundaries.Fresh_history
+    Run_context.Saved_history_loaded "none";
+  expect ~stated "superseded: the unseen checkpoint may hold atoms" Boundaries.Fresh_history
+    Run_context.Saved_history_superseded "after the first accepted save"
+;;
+
+(* The log of an official client lane: every turn starts fresh, saves nothing
+   and ends with [No_atom_history]. Once the first turn has said so, later
+   turns owe no restart line. Before the fix each turn wrote one, and
+   [Keeper_carried_front] raised its floor to the turn just ended each time. *)
+let test_an_official_client_lane_states_its_history_empty () =
+  let fresh = Boundaries.Fresh_history in
+  let stated lines = Boundaries.history_stated ~trace_id:"trace" lines in
+  let describe = function
+    | Boundaries.History_may_hold_atoms -> "may hold atoms"
+    | Boundaries.History_stated_empty -> "stated empty"
+  in
+  let check_stated label expected lines =
+    check string label expected (describe (stated lines))
+  in
+  check_stated "no line yet" "may hold atoms" [];
+  check_stated "a restart" "stated empty" [ 1, Ok (history_restarted ()) ];
+  check_stated "a fresh turn that saved nothing" "stated empty"
+    [ 1, Ok (record ~history_at_start:fresh Boundaries.No_atom_history) ];
+  check_stated "a fresh turn after another" "stated empty"
+    [ 1, Ok (history_restarted ())
+    ; 2, Ok (record ~turn:1 ~history_at_start:fresh Boundaries.No_atom_history)
+    ; 3, Ok (record ~turn:2 ~history_at_start:fresh Boundaries.No_atom_history)
+    ];
+  check_stated "a turn that left an empty checkpoint" "stated empty"
+    [ 1, Ok (record Boundaries.Empty_atom_history) ];
+  check_stated "a turn that ended with atoms" "may hold atoms"
+    [ 1, Ok (history_restarted ()); 2, Ok (record atom_history) ];
+  check_stated "a turn that started from atoms and saved nothing left them"
+    "may hold atoms"
+    [ 1, Ok (record atom_history)
+    ; 2, Ok (record ~turn:2
+               ~history_at_start:
+                 (Boundaries.Continued_history_from { start_atom = 2; start_atom_digest = "digest" })
+               Boundaries.No_atom_history)
+    ];
+  check_stated "the store kept its own checkpoint" "may hold atoms"
+    [ 1, Ok (history_restarted ())
+    ; 2, Ok (record ~history_at_start:fresh Boundaries.Stale_noop)
+    ];
+  check_stated "a line that cannot be read" "may hold atoms"
+    [ 1, Ok (history_restarted ()); 2, Error (Boundaries.Not_json "torn") ];
+  check_stated "another trace's lines do not move it" "may hold atoms"
+    [ 1, Ok (history_restarted ~trace_id:"other" ()) ]
 ;;
 
 let record_restart ~config site =
@@ -1009,6 +1125,10 @@ let () =
     ; ( "store"
       , [ test_case "appended lines read back in order" `Quick
             test_appended_lines_read_back_in_order
+        ; test_case "the store states its history from the tail" `Quick
+            test_history_stated_in_store_answers_from_the_tail
+        ; test_case "an unreadable store reports its failure" `Quick
+            test_history_stated_in_store_reports_an_unreadable_store
         ; test_case "a line no reader decodes is not written" `Quick
             test_a_line_no_reader_decodes_is_not_written
         ; test_case "the purge plan removes the log" `Quick
@@ -1027,6 +1147,8 @@ let () =
     ; ( "restart notice"
       , [ test_case "the notice follows what the turn saw" `Quick
             test_the_notice_follows_what_the_turn_saw
+        ; test_case "an official client lane states its history empty" `Quick
+            test_an_official_client_lane_states_its_history_empty
         ; test_case "a restart is recorded from either site" `Quick
             test_a_restart_is_recorded_from_either_site
         ; test_case "a refused line does not stop the turn" `Quick

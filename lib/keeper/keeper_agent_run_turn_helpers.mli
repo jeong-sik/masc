@@ -93,7 +93,19 @@ type restart_notice =
 val restart_notice :
   Keeper_turn_boundaries.history_at_start ->
   Keeper_run_context.saved_history ->
+  Keeper_turn_boundaries.history_stated ->
   restart_notice
+
+(** What the turn boundary log says the history of [trace_id] holds. An
+    unreadable log is logged and answers [History_may_hold_atoms]. Only a
+    cancellation escapes. The read is tail-bounded: the last deciding line
+    carries the answer, and a window that held none falls back to the full
+    store, so the answer never depends on the window. *)
+val history_stated_by_log :
+  config:Workspace.config ->
+  keeper_name:string ->
+  trace_id:string ->
+  Keeper_turn_boundaries.history_stated
 
 type restart_site =
   | At_turn_start

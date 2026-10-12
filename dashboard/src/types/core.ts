@@ -1099,6 +1099,10 @@ export interface KeeperConversationEntry {
   traceSteps?: ChatTraceStep[]
   details?: KeeperConversationDetails | null
   error?: string | null
+  /** Sticky protocol diagnostic: a skipped direct-stream frame the decoder
+   *  could not recover. Terminal delivery may clear [error]; this survives to
+   *  say the transcript settled with omitted evidence. */
+  streamProtocolDiagnostic?: string | null
   surface?: SurfaceRef | null
   conversationId?: string | null
   externalMessageId?: string | null

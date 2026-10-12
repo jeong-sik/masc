@@ -228,6 +228,45 @@ describe('autonomous journal recovery', () => {
     }
     expect(fetchKeeperTurnEvents).toHaveBeenCalledTimes(2)
   })
+  it('prunes a terminal turn so a reconnect never re-reads its journal', async () => {
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce({ turnRef: 'trace#9', hasMore: false,
+      cursor: { sequence: 1, offset: 100 }, events: [
+        { sequence: 0, timestamp: 1, event: text('answer') },
+        { sequence: 1, timestamp: 1, event: { ...base, type: 'RUN_FINISHED' } },
+      ] })
+    await recoverKeeperAutonomousTurn('k', 'trace#9', 1)
+    expect(keeperThreads.value.k?.[0]).toMatchObject({ text: 'answer', delivery: 'delivered' })
+    vi.mocked(fetchKeeperCurrentTurn).mockResolvedValueOnce({ state: 'idle' })
+    await recoverKnownKeeperAutonomousTurns()
+    expect(fetchKeeperCurrentTurn).toHaveBeenCalledWith('k')
+    expect(fetchKeeperTurnEvents).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a non-terminal turn in the recovery map so a reconnect resumes from its cursor', async () => {
+    vi.mocked(fetchKeeperTurnEvents)
+      .mockResolvedValueOnce(page(0, text('answer')))
+      .mockResolvedValueOnce({ ...page(0, null), events: [] })
+    await recoverKeeperAutonomousTurn('k', 'trace#9', 0)
+    vi.mocked(fetchKeeperCurrentTurn).mockResolvedValueOnce({ state: 'idle' })
+    await recoverKnownKeeperAutonomousTurns()
+    // No terminal was consumed: the reconnect force-reads from the retained
+    // cursor, not from the beginning of the journal.
+    expect(fetchKeeperTurnEvents).toHaveBeenLastCalledWith('k', 'trace#9', { sequence: 0, offset: 1 })
+    expect(fetchKeeperTurnEvents).toHaveBeenCalledTimes(2)
+  })
+
+  it('surfaces a first-read failure on a created observation entry when no parent exists yet', async () => {
+    vi.mocked(fetchKeeperTurnEvents).mockRejectedValueOnce(new Error('journal unavailable'))
+    await expect(recoverKeeperAutonomousTurn('k', 'trace#9', 0)).rejects.toThrow('journal unavailable')
+    // The failure arrived before any event could create the parent bubble:
+    // the warning lands on the exact autonomous observation entry instead of
+    // being dropped.
+    expect(keeperThreads.value.k?.[0]).toMatchObject({
+      source: 'autonomous_turn', turnRef: 'trace#9', delivery: 'sending', streamState: 'opening',
+      autonomousJournalRecovery: { kind: 'unavailable', detail: 'journal unavailable' },
+    })
+  })
+
   it('renders saying and terminal state without a user message or operation receipt', async () => {
     vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(0, text('answer'))).mockResolvedValueOnce(page(1, { ...base, type: 'RUN_FINISHED' }))
     await recoverKeeperAutonomousTurn('k', 'trace#9', 0)

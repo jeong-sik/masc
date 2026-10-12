@@ -24,6 +24,7 @@ const { fetchKeeperToolCalls, fetchKeeperWaitingInventory } = vi.hoisted(() => (
 vi.mock('../api/keeper', () => ({
   cancelQueuedKeeperMessage: vi.fn(async () => undefined),
   fetchKeeperChatHistory,
+  fetchKeeperChatHistoryPage: vi.fn(async () => ({ messages: [], hasMore: false, nextBefore: null })),
   fetchQueuedKeeperMessageResult: vi.fn(),
   isTerminalQueuedKeeperMessage: vi.fn(() => true),
   queuedKeeperMessageError: vi.fn(() => 'request failed'),

@@ -14,6 +14,7 @@ import {
   cancelKeeperChatOperation,
   fetchKeeperChatOperation,
   fetchKeeperChatHistory,
+  fetchKeeperChatHistoryPage,
   fetchKeeperToolApprovals,
   interruptKeeperTurn as apiInterruptKeeperTurn,
   streamKeeperMessage,
@@ -523,13 +524,30 @@ async function reconcileOperationFromServerHistory(
 ): Promise<boolean> {
   const history = await fetchKeeperChatHistory(keeperName)
   const historyEntries = chatHistoryEntriesFromRest(keeperName, history)
-  if (!hasCanonicalOperationTurn(historyEntries, operationId)) {
-    return false
+  if (hasCanonicalOperationTurn(historyEntries, operationId)) {
+    mergeServerHistoryEntries(keeperName, historyEntries)
+    removeThreadEntries(keeperName, [localUserId, localAssistantId])
+    return true
   }
-
-  mergeServerHistoryEntries(keeperName, historyEntries)
-  removeThreadEntries(keeperName, [localUserId, localAssistantId])
-  return true
+  // /chat/history serves a bounded tail. A tab suspended long enough for
+  // later turns can see a settled operation evicted from that tail while its
+  // committed rows still exist, so walk the paginated direct-conversation
+  // history — matched by delivery provenance — until the canonical rows
+  // surface or the store is exhausted. Only definitive absence keeps the
+  // retained local record.
+  const pagedEntries: KeeperConversationEntry[] = []
+  let before: number | undefined
+  for (;;) {
+    const page = await fetchKeeperChatHistoryPage(keeperName, before)
+    pagedEntries.push(...chatHistoryEntriesFromRest(keeperName, page.messages))
+    if (hasCanonicalOperationTurn(pagedEntries, operationId)) {
+      mergeServerHistoryEntries(keeperName, pagedEntries)
+      removeThreadEntries(keeperName, [localUserId, localAssistantId])
+      return true
+    }
+    if (!page.hasMore || page.nextBefore === null) return false
+    before = page.nextBefore
+  }
 }
 
 function operationUserEntryId(operationId: string): string {
@@ -1174,7 +1192,15 @@ export async function sendKeeperThreadMessage(
       userBlocks,
       surfaceContext: options.surfaceContext,
       onDecodeError: reason => {
-        updateThreadEntry(keeperName, assistantId, entry => ({ ...entry, error: reason }))
+        // The skipped frame may carry text, tool, or ownership evidence, so
+        // the diagnostic must outlive the turn's terminal delivery (which
+        // clears [error]): a completed reply can still be an incomplete
+        // transcript.
+        updateThreadEntry(keeperName, assistantId, entry => ({
+          ...entry,
+          error: reason,
+          streamProtocolDiagnostic: reason,
+        }))
       },
       onEvent: (event, sequence) => {
         markKeeperStreamSignal(keeperName)

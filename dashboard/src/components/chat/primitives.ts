@@ -3127,6 +3127,13 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
             </div>
           `
         : null}
+      ${entry.streamProtocolDiagnostic
+        ? html`
+            <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-sm leading-paragraph text-[var(--bad-light)]">
+              스트림 프레임 일부를 해석하지 못했습니다. 답변은 도착했지만 내용·도구 증거가 누락됐을 수 있습니다. (${entry.streamProtocolDiagnostic})
+            </div>
+          `
+        : null}
 
       ${entry.autonomousJournalRecovery?.kind === 'unavailable'
         ? html`<div role="status" class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-sm leading-paragraph text-[var(--bad-light)]">

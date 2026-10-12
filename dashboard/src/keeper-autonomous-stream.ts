@@ -1,5 +1,5 @@
 import { fetchKeeperCurrentTurn, fetchKeeperTurnEvents, type KeeperTurnCursor } from './api/keeper-turn-events'
-import { applyKeeperAutonomousTurnEvent } from './keeper-stream'
+import { applyKeeperAutonomousTurnEvent, ensureKeeperAutonomousObservationEntry } from './keeper-stream'
 import { keeperThreads, updateThreadEntry } from './keeper-state'
 
 type TurnRecovery = {
@@ -7,6 +7,12 @@ type TurnRecovery = {
   target: number
   inFlight: Promise<void> | null
   pullRequested: boolean
+  /** The journal's own terminal event (RUN_FINISHED/RUN_ERROR) was applied.
+   *  A reconnect never re-reads a terminal turn and drops its state there;
+   *  until a terminal is seen, the notified cursor only means "everything
+   *  known so far", and a reconnect re-read is how a lost later notification
+   *  is still discovered. */
+  terminalSeen: boolean
 }
 const recovery = new Map<string, Map<string, TurnRecovery>>()
 
@@ -20,7 +26,7 @@ export function recoverKeeperAutonomousTurn(name: string, turnRef: string, seque
   if (!turns) { turns = new Map(); recovery.set(name, turns) }
   let state = turns.get(turnRef)
   if (!state) {
-    state = { cursor: { sequence: null, offset: 0 }, target: sequence, inFlight: null, pullRequested: false }
+    state = { cursor: { sequence: null, offset: 0 }, target: sequence, inFlight: null, pullRequested: false, terminalSeen: false }
     turns.set(turnRef, state)
   }
   const newerNotification = state.inFlight !== null && sequence > state.target
@@ -31,7 +37,18 @@ export function recoverKeeperAutonomousTurn(name: string, turnRef: string, seque
   const current = state
   const recoveryStatus = (status: { kind: 'unavailable'; detail: string } | null): void => {
     const parent = (keeperThreads.value[name] ?? []).find(entry => entry.source === 'autonomous_turn' && entry.turnRef === turnRef)
-    if (parent) updateThreadEntry(name, parent.id, entry => ({ ...entry, autonomousJournalRecovery: status }))
+    if (parent) {
+      updateThreadEntry(name, parent.id, entry => ({ ...entry, autonomousJournalRecovery: status }))
+      return
+    }
+    if (status === null) return
+    // The first journal request failed before any event could create the
+    // parent bubble, so attaching the diagnostic to a parent would drop it.
+    // Create the exact autonomous observation entry the journal replays into
+    // and carry the warning there; a later successful recovery applies into
+    // the same entry.
+    const entryId = ensureKeeperAutonomousObservationEntry(name, turnRef)
+    updateThreadEntry(name, entryId, entry => ({ ...entry, autonomousJournalRecovery: status }))
   }
   let failed = false
   const drain = async (): Promise<void> => {
@@ -41,7 +58,10 @@ export function recoverKeeperAutonomousTurn(name: string, turnRef: string, seque
       const before = current.cursor
       const page = await fetchKeeperTurnEvents(name, turnRef, before)
       for (const row of page.events) {
-        if (row.event) applyKeeperAutonomousTurnEvent(name, turnRef, row.sequence, row.event)
+        if (row.event) {
+          if (row.event.type === 'RUN_FINISHED' || row.event.type === 'RUN_ERROR') current.terminalSeen = true
+          applyKeeperAutonomousTurnEvent(name, turnRef, row.sequence, row.event)
+        }
       }
       current.cursor = page.cursor
       hasMore = page.hasMore
@@ -87,8 +107,21 @@ export async function recoverKeeperAutonomousHistory(name: string): Promise<void
 export async function recoverKnownKeeperAutonomousTurns(): Promise<void> {
   const keepers = Array.from(recovery, async ([name, turns]) => {
     const targets = new Map(Array.from(turns, ([turnRef, state]) => [turnRef, state.target]))
-    const reads = Array.from(targets, ([turnRef, sequence]) =>
-      recoverKeeperAutonomousTurn(name, turnRef, sequence, true))
+    const reads = Array.from(targets, ([turnRef, sequence]) => {
+      const state = turns.get(turnRef)
+      // A turn whose journal terminal was consumed is complete: a reconnect
+      // never needs to re-read it, so dropping its state here is what bounds
+      // the reconnect batch to active turns instead of every turn the
+      // session has ever seen. Non-terminal turns stay: their cursor is the
+      // resume position a reconnect continues from, which is how a terminal
+      // event whose notification was lost is still recovered. An in-flight
+      // or re-requested read still owns its state.
+      if (state && state.terminalSeen && state.inFlight === null && !state.pullRequested) {
+        turns.delete(turnRef)
+        return null
+      }
+      return recoverKeeperAutonomousTurn(name, turnRef, sequence, true)
+    }).filter((read): read is Promise<void> => read !== null)
     reads.push(fetchKeeperCurrentTurn(name).then(async current => {
       if (current.state === 'idle') return
       const knownTarget = targets.get(current.turnRef)

@@ -19,6 +19,7 @@ import {
   _flushPendingKeeperStreamDeltasForTests,
   _resetKeeperStreamBuffersForTests,
   abortKeeperThreadMessage,
+  applyKeeperAutonomousTurnEvent,
   applyKeeperOperationTurnEvent,
   applyKeeperStreamEvent,
 } from './keeper-stream'
@@ -70,6 +71,19 @@ describe('Keeper operation stream projection', () => {
     _clearTrackedKeeperChatOperationsForTests()
     keeperThreads.value = {}
     keeperToolApprovals.value = {}
+  })
+
+  it('keeps an autonomous protocol error visible after the journal terminal settles', () => {
+    applyKeeperAutonomousTurnEvent('sangsu', 'trace#1', 0, {
+      type: 'CUSTOM', name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+      value: { kind: 'sse_error', reason: 'journal frame dropped' },
+    })
+    applyKeeperAutonomousTurnEvent('sangsu', 'trace#1', 1, { type: 'RUN_FINISHED' })
+    const parent = keeperThreads.value.sangsu?.find(entry => entry.source === 'autonomous_turn')
+    expect(parent?.delivery).toBe('delivered')
+    // The terminal reply settles delivery; the protocol diagnostic marks
+    // omitted or quarantined evidence and must survive the completion.
+    expect(parent?.error).toContain('journal frame dropped')
   })
 
   it('deduplicates sequenced reasoning across transport replay and restores its prefix', () => {

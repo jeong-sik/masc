@@ -1030,6 +1030,46 @@ export async function fetchKeeperChatHistory(
     .filter((m): m is KeeperChatHistoryMessage => m !== null)
 }
 
+export interface KeeperChatHistoryPage {
+  messages: KeeperChatHistoryMessage[]
+  hasMore: boolean
+  nextBefore: number | null
+}
+
+/** One window of [GET /chat/history/page], the direct-conversation rows older
+ *  than [before] (the newest window when omitted). Autonomous turns are not
+ *  paged here: retention bounds them, so /chat/history already carried every
+ *  one. [nextBefore] is the cursor for the next page and is null when the
+ *  window is empty — callers must stop on a null cursor instead of resending
+ *  the previous one. */
+export async function fetchKeeperChatHistoryPage(
+  name: string,
+  before?: number,
+): Promise<KeeperChatHistoryPage> {
+  const query = before === undefined ? '' : `?before=${encodeURIComponent(String(before))}`
+  const { response: resp, data } = await fetchJsonWithTimeout(
+    `/api/v1/keepers/${encodeURIComponent(name)}/chat/history/page${query}`,
+    { headers: jsonHeaders() },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!resp.ok) {
+    throw new Error(`fetchKeeperChatHistoryPage: HTTP ${resp.status} ${resp.statusText}`)
+  }
+  if (!isRecord(data)
+    || data.schema !== 'masc.keeper_chat_history.page.v1'
+    || !Array.isArray(data.messages)) {
+    throw new Error('fetchKeeperChatHistoryPage: response is not a history page envelope')
+  }
+  const { safeParseKeeperChatHistoryMessage } = await import('./schemas/keeper-chat-history')
+  return {
+    messages: data.messages
+      .map(safeParseKeeperChatHistoryMessage)
+      .filter((m): m is KeeperChatHistoryMessage => m !== null),
+    hasMore: data.has_more === true,
+    nextBefore: typeof data.next_before === 'number' ? data.next_before : null,
+  }
+}
+
 // --- Keeper observability API ---
 
 export interface KeeperStateDiagramResponse {

@@ -663,24 +663,40 @@ export function applyKeeperOperationTurnEvent(
   return error
 }
 
+/** The exact autonomous observation entry one turn's journal applies into.
+ *  Creating it before the first event lets journal-recovery failures attach
+ *  their visible diagnostic to the turn they belong to instead of dropping
+ *  it for want of a parent bubble. Callers validate keeper/turn identity. */
+export function ensureKeeperAutonomousObservationEntry(
+  keeperName: string,
+  turnRef: string,
+  timestamp?: number,
+): string {
+  const entryId = `autonomous-${turnRef}`
+  const existing = (keeperThreads.value[keeperName] ?? []).find(entry => entry.source === 'autonomous_turn' && entry.turnRef === turnRef)
+  if (existing) return existing.id
+  appendThreadEntry(keeperName, {
+    id: entryId, role: 'assistant', source: 'autonomous_turn', label: keeperName,
+    turnRef, text: '', rawText: null, deliveryProvenance: null,
+    timestamp: timestamp === undefined ? null : new Date(timestamp * 1000).toISOString(),
+    delivery: 'sending', streamState: 'opening', details: null,
+    streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'keeper_turn_stream_event' }),
+  })
+  return entryId
+}
+
 /** Autonomous ownership is the durable turn reference, never a user request. */
 export function applyKeeperAutonomousTurnEvent(keeperName: string, turnRef: string, sequence: number,
   event: KeeperChatStreamEvent): string | null {
   const entries = keeperThreads.value[keeperName] ?? []
   const existing = entries.find(entry => entry.source === 'autonomous_turn' && entry.turnRef === turnRef)
-  const entryId = existing?.id ?? `autonomous-${turnRef}`
+  const entryId = existing?.id ?? ensureKeeperAutonomousObservationEntry(keeperName, turnRef, event.timestamp)
   const settled = existing !== undefined && existing.delivery !== 'sending' && existing.delivery !== 'streaming'
   const observationOnly = settled && (isToolObservation(event) || event.type === 'TEXT_MESSAGE_CONTENT' || event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR' || event.type === 'CUSTOM'
     && (event.name === 'KEEPER_THINKING_DELTA' || event.name === 'KEEPER_STREAM_PROTOCOL_ERROR'
       || event.name === 'KEEPER_STREAM_MESSAGE_START' || event.name === 'KEEPER_STREAM_MESSAGE_DELTA'
       || event.name === 'KEEPER_STREAM_MESSAGE_STOP' || event.name === 'KEEPER_MODEL_CONTENT_ACTIVITY'))
   if (settled && !observationOnly) return null
-  if (!existing) appendThreadEntry(keeperName, {
-    id: entryId, role: 'assistant', source: 'autonomous_turn', label: keeperName,
-    turnRef, text: '', rawText: null, deliveryProvenance: null, timestamp: event.timestamp === undefined ? null : new Date(event.timestamp * 1000).toISOString(),
-    delivery: 'sending', streamState: 'opening', details: null,
-    streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'keeper_turn_stream_event' }),
-  })
   const error = applyKeeperStreamEvent(keeperName, entryId, event,
     { kind: 'autonomous', turnRef, sequence, ...(observationOnly ? { observationOnly: true as const } : {}) })
   if (observationOnly && existing) updateThreadEntry(keeperName, entryId, entry => ({ ...entry,
@@ -1534,9 +1550,14 @@ export function applyKeeperStreamEvent(
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
       clearTextMessageStreamState(keeperName, assistantEntryId)
       if (source.kind === 'autonomous') {
+        // A terminal reply settles delivery; it does not erase diagnostics the
+        // turn already recorded. A decode failure or a KEEPER_STREAM_PROTOCOL_ERROR
+        // marks omitted or quarantined evidence, and the journal can replay
+        // RUN_FINISHED for an already-failed entry as observation-only: clearing
+        // [error] there would make an incomplete transcript read as clean.
         updateThreadEntry(keeperName, assistantEntryId, entry => entry.source === 'autonomous_turn' && entry.turnRef === source.turnRef
           ? { ...entry, delivery: source.observationOnly ? entry.delivery : entry.delivery === 'no_reply' ? 'no_reply' : 'delivered',
-            autonomousSayingReplay: undefined, streamState: null, error: null,
+            autonomousSayingReplay: undefined, streamState: null,
             streamContract: keeperStreamContract('sse_event', 'backend_terminal_event', { eventName: 'RUN_FINISHED' }) }
           : entry)
         return null

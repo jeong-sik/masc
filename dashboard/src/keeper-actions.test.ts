@@ -13,11 +13,13 @@ const {
   cancelKeeperChatOperation,
   fetchKeeperChatOperation,
   fetchKeeperChatHistory,
+  fetchKeeperChatHistoryPage,
   streamKeeperMessage,
 } = vi.hoisted(() => ({
   cancelKeeperChatOperation: vi.fn(),
   fetchKeeperChatOperation: vi.fn(),
   fetchKeeperChatHistory: vi.fn(),
+  fetchKeeperChatHistoryPage: vi.fn(async () => ({ messages: [] as unknown[], hasMore: false, nextBefore: null as number | null })),
   streamKeeperMessage: vi.fn(),
 }))
 const { fetchKeeperToolCalls } = vi.hoisted(() => ({
@@ -33,6 +35,7 @@ vi.mock('./api/keeper', () => ({
   cancelKeeperChatOperation,
   fetchKeeperChatOperation,
   fetchKeeperChatHistory,
+  fetchKeeperChatHistoryPage,
   streamKeeperMessage,
 }))
 vi.mock('./api/dashboard', () => ({ fetchKeeperToolCalls }))
@@ -597,6 +600,39 @@ describe('sendKeeperThreadMessage operation stream', () => {
       return { terminal: true }
     }
   }
+
+  it('retains a sticky protocol diagnostic when a skipped frame precedes a completed reply', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        operationId: string
+        onEvent: (event: KeeperChatStreamEvent) => void
+        onDecodeError?: (reason: string) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
+      })
+      opts.onDecodeError?.('A Keeper stream frame does not match the protocol.')
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'partial answer' })
+      opts.onEvent({ type: 'RUN_FINISHED' })
+      return { terminal: true }
+    })
+
+    await sendKeeperThreadMessage('echo', 'hi')
+
+    const reply = keeperThreads.value.echo?.find(entry => entry.role === 'assistant')
+    // Terminal delivery clears the transient [error] field as before, but the
+    // skipped frame may have carried text, tool, or ownership evidence: the
+    // sticky diagnostic says this completed reply can be an incomplete
+    // transcript.
+    expect(reply?.delivery).toBe('delivered')
+    expect(reply?.error).toBeNull()
+    expect(reply?.streamProtocolDiagnostic).toBe('A Keeper stream frame does not match the protocol.')
+  })
 
   it('preserves authored request blocks and the completed reply', async () => {
     const text = '    첫 줄\nSKILL.md 설명\n\n\n끝  \n\n'
@@ -1215,6 +1251,8 @@ describe('restored chat operation outcome', () => {
     fetchKeeperChatOperation.mockReset()
     fetchKeeperChatHistory.mockReset()
     fetchKeeperChatHistory.mockResolvedValue([])
+    fetchKeeperChatHistoryPage.mockReset()
+    fetchKeeperChatHistoryPage.mockResolvedValue({ messages: [], hasMore: false, nextBefore: null })
   })
   afterEach(() => _clearTrackedKeeperChatOperationsForTests())
 
@@ -1247,6 +1285,43 @@ describe('restored chat operation outcome', () => {
       rawText: 'authored', traceSteps: [{ toolOccurrenceId: 'canonical-tool' }],
     })
     expect(requiredFixture(keeperThreads.value.echo).find(entry => entry.role === 'assistant')?.toolObservationAuthority).toBeUndefined()
+  })
+
+  it('walks paginated history by delivery provenance before releasing the settled operation', async () => {
+    storeDraft()
+    fetchKeeperChatOperation.mockResolvedValue({ operationId: 'restored-op', state: { kind: 'succeeded', completedAt: 2, outcomeRef: 'result' } })
+    // The bounded tail evicted the operation; the committed rows survive in
+    // an older page.
+    fetchKeeperChatHistory.mockResolvedValue([])
+    fetchKeeperChatHistoryPage
+      .mockResolvedValueOnce({ messages: [], hasMore: true, nextBefore: 999 })
+      .mockResolvedValueOnce({ messages: [
+        { id: 'paged-user', role: 'user', content: 'input', ts: 1,
+          delivery_provenance: { delivery_key: { kind: 'operation', operation_id: 'restored-op' }, transcript_slot: { kind: 'accepted_user' } },
+          delivery_provenance_status: 'valid' },
+        { id: 'paged-assistant', role: 'assistant', content: 'complete answer', ts: 2,
+          delivery_provenance: { delivery_key: { kind: 'operation', operation_id: 'restored-op' }, transcript_slot: { kind: 'terminal_result' } },
+          delivery_provenance_status: 'valid' },
+      ], hasMore: false, nextBefore: null })
+    await hydrateTrackedKeeperChatOperations('echo')
+    expect(fetchKeeperChatHistoryPage).toHaveBeenCalledTimes(2)
+    expect(fetchKeeperChatHistoryPage).toHaveBeenLastCalledWith('echo', 999)
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toEqual([])
+    expect(requiredFixture(keeperThreads.value.echo).find(entry => entry.id === 'paged-assistant'))
+      .toMatchObject({ text: 'complete answer', delivery: 'history' })
+  })
+
+  it('retains the settled operation when paginated history exhausts without the canonical rows', async () => {
+    storeDraft()
+    fetchKeeperChatOperation.mockResolvedValue({ operationId: 'restored-op', state: { kind: 'succeeded', completedAt: 2, outcomeRef: 'result' } })
+    fetchKeeperChatHistory.mockResolvedValue([])
+    fetchKeeperChatHistoryPage.mockResolvedValue({ messages: [], hasMore: false, nextBefore: null })
+    await hydrateTrackedKeeperChatOperations('echo')
+    expect(fetchKeeperChatHistoryPage).toHaveBeenCalledTimes(1)
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toHaveLength(1)
+    expect(requiredFixture(keeperThreads.value.echo).find(entry => entry.role === 'assistant')).toMatchObject({
+      rawText: 'partial authored answer', responseState: { phase: 'terminal' },
+    })
   })
 
   it.each([

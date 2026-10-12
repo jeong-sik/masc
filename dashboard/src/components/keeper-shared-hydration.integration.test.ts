@@ -42,6 +42,7 @@ const { exactToolCallLookup } = vi.hoisted(() => ({
 vi.mock('../api/keeper', () => ({
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
+  fetchKeeperChatHistoryPage: vi.fn(async () => ({ messages: [], hasMore: false, nextBefore: null })),
   fetchQueuedKeeperMessageResult,
   isTerminalQueuedKeeperMessage,
   queuedKeeperMessageError,

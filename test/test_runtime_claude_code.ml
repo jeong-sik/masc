@@ -1184,6 +1184,30 @@ let test_usage_windows_are_reported_without_changing_the_turn () =
             failf "expected one readable usage report, got %d" (List.length reports)))
 ;;
 
+(* Claude Code 2.1.296 reports the fate of a queued inbound command as a
+   top-level `command_lifecycle` frame (schema: its SDK output types). The
+   turn must end with its own result frame whether the frames arrive before
+   admission or in the middle of the turn. *)
+let command_lifecycle_frame state =
+  Printf.sprintf
+    {|{"type":"command_lifecycle","command_uuid":"cmd-1","state":"%s","uuid":"life-%s","session_id":"__SESSION__"}|}
+    state state
+;;
+
+let test_command_lifecycle_frames_do_not_fail_the_turn () =
+  with_fixture
+    ~before_initialize_response:[ Emit (command_lifecycle_frame "queued") ]
+    [ Emit (command_lifecycle_frame "started")
+    ; Emit assistant
+    ; Emit (command_lifecycle_frame "refused")
+    ; Emit result
+    ]
+    (fun path ->
+       match run_fixture path with
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok turn -> check string "turn completes" "MASC_CLAUDE_OK" turn.text)
+;;
+
 let test_quota_is_structurally_classified () =
   with_fixture [ Emit rate_limit_rejected; Emit quota_result ] (fun path ->
     match run_fixture path with
@@ -4430,6 +4454,8 @@ let () =
             test_result_of_another_session_reports_no_spend
         ; test_case "usage windows are reported without changing the turn" `Quick
             test_usage_windows_are_reported_without_changing_the_turn
+        ; test_case "command_lifecycle frames do not fail the turn" `Quick
+            test_command_lifecycle_frames_do_not_fail_the_turn
         ; test_case
             "rejected rate limit overrides success flag"
             `Quick

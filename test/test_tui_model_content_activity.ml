@@ -455,6 +455,40 @@ let test_owned_thinking_lifecycle () =
   T.apply ~now:13. t (think 4 0 "late");
   check string "terminal reasoning cannot append late bytes" (retry_body ^ "freshunbound") (T.thinking t)
 
+let test_owned_thinking_refines_unbound_text_scope () =
+  let t = T.create ~keeper_name:"fixture" ~request_id:"r" ~started_at:0. in
+  T.apply ~now:0. t L.Run_started;
+  T.apply ~now:1. t (L.Text {text="Let me look."; stream_scope=Some 0});
+  T.apply ~now:2. t (L.Thinking {text="checking";
+    response=Some {E.response_generation=2; response_scope=0}});
+  check bool "refinement records the owned response" true
+    ((T.response_metadata t).owner=Some (2,0));
+  T.apply ~now:3. t (L.Reply_details {terminal_stream_scope=None; reply="Let me look.";
+    turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="trace-1#3"});
+  let kinds = List.map (fun (item : T.drawn_item) -> match item.T.drawn with
+    | T.Drawn_text _ -> `Text | T.Drawn_reply _ -> `Reply | _ -> `Other) (T.drawn t) in
+  check bool "the record replaces the observed stretch instead of duplicating it" true
+    (kinds=[`Reply; `Other])
+
+let test_owned_stop_closes_response_without_current_activity () =
+  let t = T.create ~keeper_name:"fixture" ~request_id:"r" ~started_at:0. in
+  T.apply ~now:0. t L.Run_started;
+  let stop generation scope = L.Stream_model_stopped
+    (Some {E.response_generation=generation; response_scope=scope}) in
+  let think generation scope text = L.Thinking {text;
+    response=Some {E.response_generation=generation; response_scope=scope}} in
+  T.apply ~now:1. t (stop 2 0);
+  T.apply ~now:2. t (think 2 0 "late");
+  check string "reasoning cannot join a response that already stopped" "" (T.thinking t);
+  check bool "a stop without current response raises no end signal" true
+    (T.model_activity t=None);
+  check bool "no response is established after its stop" true
+    ((T.response_metadata t).owner=None);
+  T.apply ~now:3. t (stop 3 0);
+  T.apply ~now:4. t (stop 2 0);
+  T.apply ~now:5. t (think 3 0 "late3");
+  check string "an older stop cannot reopen a newer closure" "" (T.thinking t)
+
 let test_owned_thinking_protocol () =
   let translated = B.translate ~redact_text:Fun.id ~base_dir:"/unused" ~stream_scope:0
     (B.empty_state ~generation:7 ())
@@ -491,6 +525,8 @@ let test_owned_thinking_protocol () =
 
 let () = run "model content activity"
   ["boundaries", [test_case "owned thinking lifecycle" `Quick test_owned_thinking_lifecycle;
+    test_case "owned thinking refines unbound text scope" `Quick test_owned_thinking_refines_unbound_text_scope;
+    test_case "owned stop closes response without current activity" `Quick test_owned_stop_closes_response_without_current_activity;
     test_case "owned thinking protocol" `Quick test_owned_thinking_protocol;
     test_case "owned response details" `Quick test_owned_response_details;
     test_case "details production identity" `Quick test_details_production_identity;

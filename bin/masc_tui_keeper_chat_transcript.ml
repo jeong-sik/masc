@@ -1420,7 +1420,15 @@ let admit_response_identity t generation stream_scope =
                && Option.fold ~none:false ~some:(fun response ->
                     response.rs_generation=None && response.rs_scope > scope) t.response_scope -> false
            | Some _ | None ->
-             if t.response_scope <> Some {rs_generation=Some generation;rs_scope=scope} then begin
+             (* A surviving scoped delta can record its response before the
+                generation is known. Naming that same scope refines the
+                unbound boundary; it must not open another response, or the
+                preceding stretch falls outside terminal reconciliation. *)
+             let refines_unbound_scope = match t.response_scope with
+               | Some {rs_generation=None;rs_scope} -> rs_scope=scope
+               | Some {rs_generation=Some _;_} | None -> false in
+             if t.response_scope <> Some {rs_generation=Some generation;rs_scope=scope}
+                && not refines_unbound_scope then begin
                begin_response t;
                retire_model_content t;
                t.observed_model <- None;
@@ -1662,10 +1670,18 @@ let apply_delta ~now t (delta : Live.delta) =
             owner.response_generation = generation && owner.response_scope = rs_scope
         | None, _ -> t.admitted_response_owner = None
         | Some _, None | Some _, Some {rs_generation = None; _} -> false in
+      (* An owned stop is a closure fact even when the start or body was
+         missed and it cannot end the mutable current activity. Only the
+         newest closure moves the watermark: a stale stop must not reopen
+         a response a newer stop already closed. *)
+      (match owner with
+       | Some owner ->
+           let incoming = owner.response_generation, owner.response_scope in
+           (match t.closed_response_owner with
+            | Some closed when compare incoming closed <= 0 -> ()
+            | Some _ | None -> t.closed_response_owner <- Some incoming)
+       | None -> ());
       if owns_current_response then begin
-        (match owner with
-         | Some owner -> t.closed_response_owner <- Some (owner.response_generation,owner.response_scope)
-         | None -> ());
         retire_model_content t;
         t.model_signal <- Some Model_response_ended
       end

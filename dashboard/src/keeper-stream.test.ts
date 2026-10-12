@@ -208,6 +208,44 @@ describe('Keeper operation stream projection', () => {
     ])
   })
 
+  it('drops owned thinking that arrives after its response stops', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_MESSAGE_START',
+      value: { content_generation: 2, stream_scope: 0, model: 'fixture' },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'current', response: { content_generation: 2, stream_scope: 0 } },
+    })
+    _flushPendingKeeperStreamDeltasForTests()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_MESSAGE_STOP',
+      value: { content_generation: 2, stream_scope: 0 },
+    })
+    const stopped = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(stopped?.streamState).toBe('finalizing')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'stale', response: { content_generation: 2, stream_scope: 0 } },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'older', response: { content_generation: 1, stream_scope: 9 } },
+    })
+    _flushPendingKeeperStreamDeltasForTests()
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.streamState).toBe('finalizing')
+    expect(reply?.traceSteps).toEqual([
+      { kind: 'think', text: 'current', ts: expect.any(String), agentCoreBlockIndex: 0 },
+    ])
+  })
+
   it('resets unfinished narrative at a runtime attempt boundary and keeps tool evidence', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {

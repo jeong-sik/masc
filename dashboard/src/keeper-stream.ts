@@ -301,6 +301,30 @@ function flushAllPendingThinkingDeltas(): void {
   }
 }
 
+// Stale thinking bytes must not revive a response the TUI already closed:
+// after a stop, flushing would move the entry back to 'thinking' and append
+// old reasoning to the current answer. Same-response thinking is admitted
+// only while the entry still shows that response as live.
+function assistantStreamResponseIsLive(keeperName: string, assistantEntryId: string): boolean {
+  const entry = (keeperThreads.value[keeperName] ?? [])
+    .find(candidate => candidate.id === assistantEntryId) ?? null
+  if (!entry) return true
+  return entry.streamState === 'opening' || entry.streamState === 'thinking' || entry.streamState === 'streaming'
+}
+
+function isStaleThinkingResponse(
+  keeperName: string,
+  assistantEntryId: string,
+  owner: StreamResponseOwner,
+): boolean {
+  const admitted = admittedStreamResponseOwner(keeperName, assistantEntryId)
+  if (!admitted) return false
+  const order = compareStreamResponseOwners(owner, admitted)
+  if (order < 0) return true
+  if (order > 0) return false
+  return !assistantStreamResponseIsLive(keeperName, assistantEntryId)
+}
+
 function enqueueThinkingDelta(
   keeperName: string,
   assistantEntryId: string,
@@ -1149,6 +1173,9 @@ export function applyKeeperStreamEvent(
           ? value.delta
           : undefined
         const agentCoreBlockIndex = value ? asNumber(value.index) : undefined
+        const owner = streamResponseOwnerFromFields(value?.response)
+        if (owner && isStaleThinkingResponse(keeperName, assistantEntryId, owner)) return null
+        if (owner) admitStreamResponseOwner(keeperName, assistantEntryId, owner)
         if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { agentCoreBlockIndex })
         else {
           setAssistantStreamState(

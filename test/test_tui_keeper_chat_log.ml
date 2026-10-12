@@ -734,6 +734,39 @@ let test_journal_empty_page_rejects_unserved_byte_advances () =
   ) [whole_turn; resumed]
 ;;
 
+(* Each way a later page can disagree with the cursor it was asked from. The
+   first page is served normally so the second one is asked from a real
+   offset. *)
+let test_journal_page_rejects_cursor_disagreement () =
+  let event seq = line seq 1. (E.Text_delta {text="authored bytes"; response=Unobserved_scope None}) in
+  let offset value = match Journal.page_start_of_wire (Some value) with
+    | Some offset -> offset | None -> fail "fixture offset" in
+  let pages ~second =
+    let calls = ref 0 in
+    fun ~since_seq:_ ~since_offset:_ ->
+      incr calls;
+      if !calls = 1
+      then Ok { Log.source=Log.Operation "op"; events=[event 2]; has_more=true;
+                next_since_seq=Journal.After_seq 2; next_since_offset=offset 100 }
+      else Ok (second ()) in
+  let second ~events ~has_more ~next_since_seq ~next_since_offset () =
+    { Log.source=Log.Operation "op"; events; has_more; next_since_seq;
+      next_since_offset=offset next_since_offset } in
+  List.iter (fun (label, page) ->
+    match Log.read_whole_journal ~since_seq:Journal.Whole_turn ~fetch:(pages ~second:page) with
+    | Error (Log.Events_undecodable _) -> ()
+    | Ok _ -> fail (label ^ " was accepted")
+    | Error error -> fail (Log.events_error_to_string error))
+    [ "an empty last page that moves the offset back",
+      second ~events:[] ~has_more:false ~next_since_seq:(Journal.After_seq 2) ~next_since_offset:50;
+      "a last page with events whose offset did not move",
+      second ~events:[event 3] ~has_more:false ~next_since_seq:(Journal.After_seq 3) ~next_since_offset:100;
+      "a last page with events whose offset moved back",
+      second ~events:[event 3] ~has_more:false ~next_since_seq:(Journal.After_seq 3) ~next_since_offset:50;
+      "an empty page that claims more and advances only the sequence",
+      second ~events:[] ~has_more:true ~next_since_seq:(Journal.After_seq 9) ~next_since_offset:200 ]
+;;
+
 let test_read_whole_journal_pages_until_the_position_stops_moving () =
   let asked = ref [] in
   let l seq = line seq (float_of_int seq) (E.Text_delta {text=(string_of_int seq); response=Unobserved_scope (None)}) in
@@ -1205,6 +1238,8 @@ let () =
             test_journal_final_page_accepts_valid_resume_and_sequence_gaps
         ; test_case "final pages reject invalid event frontiers" `Quick
             test_journal_final_page_rejects_invalid_event_frontiers
+        ; test_case "a page that disagrees with its cursor is rejected" `Quick
+            test_journal_page_rejects_cursor_disagreement
         ; test_case "read_whole_journal pages until the position stops moving" `Quick
             test_read_whole_journal_pages_until_the_position_stops_moving
         ; test_case "empty pages cannot skip unserved byte ranges" `Quick

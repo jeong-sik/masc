@@ -612,7 +612,6 @@ let read_whole_journal ~fetch ~since_seq =
                 (Journal.replay_position_to_string next_since_seq)
                 (Journal.page_start_offset next_since_offset)))
       else if event_frontier since_seq events <> Some next_since_seq
-        || (has_more && events = [])
         || Journal.page_start_offset next_since_offset < Journal.page_start_offset since_offset
         || (events = [] && not held_sequence_scan
             && Journal.page_start_offset next_since_offset > Journal.page_start_offset since_offset)

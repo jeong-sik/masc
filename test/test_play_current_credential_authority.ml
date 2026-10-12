@@ -45,7 +45,42 @@ let with_workspace f =
       ~ledger_dir:(Filename.concat base_path "ledger") ~saves_dir:(Filename.concat base_path "saves")
       ~checkpoint_dir:(Filename.concat base_path "checkpoints") ~program_name:"spin.com"
       ~program_bytes:"\xeb\xfe" ~files:[] ~announce:ignore) in
-    f base_path state operator)
+    (* #42001: machine actions on the HTTP surface go through an attached
+       worker. Attach one for the success paths; the pre-attach 503 refusal
+       assertions keep covering the unattached surface. The real clock drives
+       the fixture's readiness polling; the product mock clock stays in
+       Time_compat for timestamp determinism. The root switch comes from
+       Eio_context.with_test_env, which the attach dispatch needs as the
+       server background owner (lane_addon_runtime Attach). *)
+    Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+      ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+      (fun () ->
+        (* The attach dispatch needs a loaded runtime state, and machine
+           tools refuse calls while machines.dos is off. Seed the same minimal
+           runtime.toml the seat fixture loads, then restore the prior state
+           so other suites are unaffected. *)
+        Masc.Lane_addon_runtime.For_testing.reset ();
+        let runtime_path = Filename.concat base_path "runtime.toml" in
+        Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+[machines.dos]
+enabled = true
+[machines.msx]
+enabled = true
+|});
+        (match Runtime.init_default ~config_path:runtime_path with
+         | Ok () -> () | Error detail -> fail detail);
+        Machine_worker_fixture.with_dos ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
+          (fun ~invoke:_ ~detach ->
+            f base_path state operator;
+            detach ())))
 
 let dispatch ~state ~token ~meth ~target ~body =
   let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
@@ -310,6 +345,9 @@ let test_seat_reports_controller_recovery holder =
   check (option string) "observing departure never releases the controller" (Some "guest") (controller ());
   let moved = dispatch ~state ~token:operator ~meth:"POST" ~target:"/api/v1/dos/step"
     ~body:{|{"steps":1,"until_ready":false}|} in
+
+  if status moved <> (if recoverable then 200 else 400)
+  then prerr_endline ("PROBE moved=" ^ moved);
   check int "only an actual move can recover a departed controller" (if recoverable then 200 else 400) (status moved);
   check (option string) "the authoritative move retains or recovers the expected holder"
     (Some (if recoverable then "operator" else "guest")) (controller ())

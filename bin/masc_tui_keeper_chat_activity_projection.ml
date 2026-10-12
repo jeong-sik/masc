@@ -151,7 +151,8 @@ let pad_to width text =
    ("...e+0061"). *)
 let tool_name_display_cap = 64
 
-let display_tool_name name =
+let display_tool_name wire_name =
+  let name = Masc.Tool_display.label wire_name in
   let length = String.length name in
   if length <= tool_name_display_cap then name
   else String.sub name 0 48 ^ ".." ^ String.sub name (length - 14) 14

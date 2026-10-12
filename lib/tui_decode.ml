@@ -3773,7 +3773,7 @@ type gate_snapshot = {
    the two cannot drift. *)
 let gate_display_tool ~operation input =
   if not (String.equal operation Keeper_identity_gate.gate_operation) then
-    operation
+    Tool_display.label operation
   else
     match input with
     | Some input -> (

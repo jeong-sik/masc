@@ -409,10 +409,14 @@ let test_reply_details_is_read_whole () =
     (feed_whole (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ()))))
 
 let test_native_tool_end_without_completion_is_reported () =
-  check bool "a native end without completion is undecodable" true
+  (* An END with no completion is a wire-valid record of a call whose
+     outcome was never recorded (#42241), not an undecodable frame. *)
+  check bool "a native end without completion reads as completion_unrecorded" true
     (match feed_whole (sse (custom "KEEPER_NATIVE_TOOL_END"
        (`Assoc ["toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 1]))) with
-     | [ Live.Undecodable _ ] -> true
+     | [ Live.Native_tool_ended { occurrence = o; completion } ] ->
+       o = occurrence ~scope:0 ~block_index:1 ~call_id:None ()
+       && completion = Runtime_native_tools.completion_unrecorded
      | _ -> false)
 
 let test_reply_details_short_of_a_field_is_reported () =
@@ -928,7 +932,7 @@ let () =
         ; test_case "reply details is read whole" `Quick test_reply_details_is_read_whole
         ; test_case "reply details short of a field is reported" `Quick
             test_reply_details_short_of_a_field_is_reported
-        ; test_case "native end without completion is reported" `Quick
+        ; test_case "native end without completion reads as unrecorded" `Quick
             test_native_tool_end_without_completion_is_reported
         ; test_case "unknown custom event is reported" `Quick
             test_unknown_custom_event_is_reported

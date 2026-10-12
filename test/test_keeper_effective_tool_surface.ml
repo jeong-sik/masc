@@ -733,18 +733,23 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
          | Ok meta -> { meta with current_task_id }
          | Error detail -> fail detail
        in
+       (* A snapshot whose configuration is unreadable holds no entries, so a
+          held Task's pin is not known to be deleted. Resolution fails with
+          the typed configuration error rather than listing the pin as an
+          unavailable Skill and letting the turn run without it. *)
        (match
-          validate_observed_task_skills
+          resolve_observed_task_skills
             ~config
             ~meta:(meta ())
             ~skill_snapshot:
               (Skill_catalog_snapshot.config_unreadable ~detail:"fixture")
         with
-        | Ok () -> fail "held task's missing skill was not inspected"
+        | Ok _ -> fail "an unreadable Skill configuration did not stop resolution"
         | Error error ->
-          let rendered = Agent_core.Error.to_string error in
-          check bool "the held exact skill is named" true
-            (String_util.contains_substring rendered "guide"));
+          (match Keeper_task_skill_turn.of_core_error error with
+           | Some (Keeper_task_skill_turn.Skill_config_unreadable { detail }) ->
+             check string "the unreadable detail is carried" "fixture" detail
+           | Some _ | None -> fail "the failure is not the typed unreadable error"));
        (match
           validate_observed_task_skills
             ~config ~meta:(meta ()) ~skill_snapshot:snapshot
@@ -897,14 +902,16 @@ let test_unprojectable_task_skill_is_a_typed_row () =
       (Skill_reference.equal row.Keeper_task_skill_turn.reference huge);
     check (list string) "the row keeps the Task that pinned it" [ "task-001" ] row.task_ids;
     check bool "the row carries the typed size refusal" true
-      (match row.error with
-       | Keeper_skill_catalog.Body_too_large_to_read { skill = "huge"; _ } -> true
-       | _ -> false);
+      (match row.reason with
+       | Keeper_task_skill_turn.Catalog_entry_unprojectable
+           (Keeper_skill_catalog.Body_too_large_to_read { skill = "huge"; _ }) ->
+         true
+       | Catalog_entry_unprojectable _ | Pin_unresolved _ -> false);
     check (list string) "the left-out list the renderers draw names the row"
       [ Printf.sprintf "%s: %s"
           (Skill_catalog_snapshot.identity_to_yojson huge.Skill_reference.identity
            |> Yojson.Safe.to_string)
-          (Keeper_skill_catalog.error_to_string row.error)
+          (Keeper_task_skill_turn.unavailable_reason_to_string row.reason)
       ; Keeper_task_skill_turn.unprojectable_to_string row
       ]
       surface.skills_left_out;
@@ -915,7 +922,7 @@ let test_unprojectable_task_skill_is_a_typed_row () =
      with
      | `List [ wire ] ->
        check string "the wire row names the catalog error code"
-         (Keeper_skill_catalog.error_code row.error)
+         (Keeper_task_skill_turn.unavailable_reason_code row.reason)
          (wire |> member "error_code" |> to_string);
        check (list string) "the wire row names the Task" [ "task-001" ]
          (wire |> member "task_ids" |> to_list |> List.map to_string)

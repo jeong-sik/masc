@@ -871,7 +871,9 @@ let render_approvals (state : state) =
               Printf.sprintf "  %s  %s  %s  %s"
                 (fit_width (Terminal_text.single_line held.kta_keeper) name_width)
                 (fit_width
-                   ("tool: " ^ Terminal_text.single_line held.kta_tool)
+                   ("tool: "
+                   ^ Terminal_text.single_line
+                       (Masc.Tool_display.label held.kta_tool))
                    20)
                 (fit_width
                    (Masc_tui_answering.duration_text remaining ^ " left")

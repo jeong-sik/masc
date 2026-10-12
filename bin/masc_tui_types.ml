@@ -1175,26 +1175,39 @@ let compare_projected_chat_rows left right =
   | None, None -> compare_projected_chat_row_tie left right
 ;;
 
+(* An input replacement slot is producer identity plus observed Operation
+   ownership. Anchors and local/server reconciliation share this authority. *)
+let chat_operation_input_slot (row : msg_entry) =
+  match row.me_role, row.me_execution_source with
+  | Message_user _, Some (Masc_tui_keeper_chat_log.Operation owner as source) ->
+      let request_id, phase, seq = match row.me_identity with
+        | Session_row {request_id;turn_phase;operation_seq} -> request_id,turn_phase,operation_seq
+        | Persisted_row _ | Persisted_legacy_row _ ->
+            row.me_request_id,row.me_turn_phase,row.me_operation_seq in
+      if String.equal owner request_id then Some (source,phase,seq) else None
+  | (Message_user _ | Message_keeper | Message_autonomous | Message_status | Message_local
+    | Message_error | Message_tool | Message_skill _ | Message_thinking | Message_memory),
+    (Some _ | None) -> None
+;;
+
 let chat_timeline ~loaded ~session ~queued_request_ids =
-  let queued request_id =
-    List.exists (String.equal request_id) queued_request_ids
-  in
-  let visible rows = List.filter (fun row -> not (queued row.me_request_id)) rows in
+  let visible rows = List.filter (fun row ->
+    match row.me_execution_source with
+    | Some (Masc_tui_keeper_chat_log.Operation id) ->
+        not (List.exists (String.equal id) queued_request_ids)
+    | Some (Autonomous_turn _) | None -> true) rows in
   let loaded = visible loaded in
   let persisted_user_slots = Hashtbl.create 64 in
   List.iter (fun (row : msg_entry) ->
-    if is_user_row row && row.me_request_id <> "" then
-      match row.me_identity with
-      | Persisted_row _ ->
-          Hashtbl.replace persisted_user_slots
-            (row.me_keeper_name, row.me_request_id, row.me_turn_phase, row.me_operation_seq) ()
-      | Persisted_legacy_row _ | Session_row _ -> ()) loaded;
+    match row.me_identity, chat_operation_input_slot row with
+    | Persisted_row _, Some slot ->
+        Hashtbl.replace persisted_user_slots (row.me_keeper_name,slot) ()
+    | (Persisted_row _ | Persisted_legacy_row _ | Session_row _), (Some _ | None) -> ()) loaded;
   let session = visible session |> List.filter (fun (row : msg_entry) ->
-    match row.me_identity with
-    | Session_row {request_id; turn_phase; operation_seq} when is_user_row row && request_id <> "" ->
-        not (Hashtbl.mem persisted_user_slots
-          (row.me_keeper_name, request_id, turn_phase, operation_seq))
-    | Session_row _ | Persisted_row _ | Persisted_legacy_row _ -> true) in
+    match row.me_identity, chat_operation_input_slot row with
+    | Session_row _, Some slot ->
+        not (Hashtbl.mem persisted_user_slots (row.me_keeper_name,slot))
+    | (Session_row _ | Persisted_row _ | Persisted_legacy_row _), (Some _ | None) -> true) in
   { ctl_items = chat_timeline_slots (loaded @ session) }
 ;;
 
@@ -1656,30 +1669,16 @@ let chat_settled_insertion_index ?(member_ids = []) ~request_id ~timeline_at pos
 let msg_anchor entry =
   { ma_identity = entry.me_identity
   ; ma_session_user_slot =
-      (match entry.me_identity, entry.me_role, entry.me_execution_source with
-       | Session_row { request_id; turn_phase; operation_seq }, Message_user _,
-         Some (Masc_tui_keeper_chat_log.Operation owner as source) when String.equal owner request_id ->
-           Some (source, turn_phase, operation_seq)
-       | (Persisted_row _ | Persisted_legacy_row _ | Session_row _),
-         (Message_user _ | Message_keeper | Message_autonomous | Message_status | Message_local
-         | Message_error | Message_tool | Message_skill _ | Message_thinking | Message_memory),
-         (Some _ | None) -> None)
+      (match entry.me_identity with
+       | Session_row _ -> chat_operation_input_slot entry
+       | Persisted_row _ | Persisted_legacy_row _ -> None)
   }
 
 let same_msg_anchor anchor entry =
   anchor.ma_identity = entry.me_identity
-  ||
-  match anchor.ma_session_user_slot, entry.me_role with
-  | Some (source, turn_phase, operation_seq), Message_user _ ->
-      entry.me_execution_source = Some source
-      && turn_phase = entry.me_turn_phase
-      && Int.equal operation_seq entry.me_operation_seq
-  | Some _,
-    (Message_keeper | Message_autonomous | Message_status | Message_local
-    | Message_error | Message_tool | Message_skill _ | Message_thinking
-    | Message_memory)
-  | None, _ ->
-      false
+  || Option.fold ~none:false
+       ~some:(fun slot -> chat_operation_input_slot entry = Some slot)
+       anchor.ma_session_user_slot
 
 let msg_index_of_anchor entries anchor =
   List.find_mapi

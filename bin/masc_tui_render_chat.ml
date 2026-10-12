@@ -3542,9 +3542,9 @@ let projection_index_of_anchor projection =
           | Tagged_row row ->
               add (History_identity row.me_identity) at;
               (match row.me_role with
-               | Message_user _ -> Option.iter (fun source ->
-                   add (History_user_slot (source, row.me_turn_phase, row.me_operation_seq)) at)
-                   row.me_execution_source
+               | Message_user _ -> Option.iter (fun (source, phase, seq) ->
+                   add (History_user_slot (source, phase, seq)) at)
+                   (Masc_tui_types.chat_operation_input_slot row)
                | Message_keeper | Message_autonomous | Message_status | Message_local
                | Message_error | Message_tool | Message_skill _ | Message_thinking | Message_memory -> ());
               Option.iter (fun source -> add (History_reply source) at) (search_reply_source row)

@@ -417,6 +417,18 @@ deployment and battle commands; it was not an emulator stall.
   All five destination answers did not establish five arrivals. The missing
   officer's fate was not verified; do not promise lossless retreat.
 
+When an officer is absent from the retreat destination, inspect the lost
+province and its current faction before declaring the officer dead or missing.
+In June 221 province-16 defense, six officers answered destination 9 after a
+forced retreat. July province-9's roster confirmed Zhang Liao, Sun Li,
+Li Dian, Dian Man and Xiahou Hui, but not Lu Qian. Information from province 6
+required an investigator before showing enemy province 16. Its ruler was
+Sun Quan; the roster included Lu Qian and the former governor Dong Heng.
+Their personal panels explicitly showed Sun Quan service: Lu Qian troops 10,
+loyalty 43, and Dong Heng troops 1, loyalty 45. This verifies their later
+faction and survival, not the cause or exact timing of transfer, a successful
+retreat for all selected officers, or a campaign win.
+
 An October province-21 counterattack also exposed a difference between
 strategic and battle totals. The province had soldiers 9 and 11 officers.
 After selecting a foreign ruler and Zhu Huan as reinforcement messenger, nine

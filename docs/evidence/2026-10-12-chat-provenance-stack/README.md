@@ -35,7 +35,11 @@ async continuation, reconnect/failover and provider parity still require actual
 integration evidence. Source probes do not establish all runtimes or sustained
 10-turn / 1h / 2h / 4h / 24h behavior. No production readiness is asserted.
 
-Repository branch rules reject direct updates to existing branches. Fixture
-corrections and this changelog therefore use subsequent branches and draft PRs;
-this does not bypass approval or merge rules. Formal approval and current-scope
-merge admission remain required separately from local source review.
+Fixture corrections arrived as later PRs in this stack: #42534 and #42536 carry
+the canonical fixtures superseding the original HOLD fixtures noted for #42533
+and #42535. Updating the same open PR branch remains the normal procedure (see
+docs/guides/CONTRIBUTOR-WORKFLOW.md); a new branch is required only after a PR
+has merged. The active repository rulesets only guard `main` and `release/*`
+(deletion and non-fast-forward, plus PR review for `main`). This does not bypass
+approval or merge rules. Formal approval and current-scope merge admission remain
+required separately from local source review.

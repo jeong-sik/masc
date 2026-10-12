@@ -95,7 +95,12 @@
       "path": "bin/masc_tui_render_chat.ml",
       "baseline_lines": 3924,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; exact call evidence separated; remaining rendering, string decoration, search and cache semantics pending",
+      "current_lines": 5009,
+      "prs": [
+        42320
+      ],
+      "validation_artifact": "chat-call-evidence/README.md"
     },
     {
       "path": "bin/masc_tui_render_prim.ml",
@@ -556,11 +561,16 @@
       "baseline_lines": 4157,
       "kind": "production",
       "status": "partially improved; materialization, storage, cache and config semantics pending",
-      "current_lines": 4154,
+      "current_lines": 3718,
       "prs": [
-        42141
+        42141,
+        42308
       ],
-      "validation_artifact": "tui-editor-wire/README.md"
+      "validation_artifact": "tui-editor-wire/README.md",
+      "validation_artifacts": [
+        "tui-editor-wire/README.md",
+        "runtime-config-projection/README.md"
+      ]
     },
     {
       "path": "lib/runtime/runtime_claude_code.ml",

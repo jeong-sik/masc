@@ -930,18 +930,18 @@ let test_an_autonomous_turn_draws_what_it_did () =
            in
            let row n = List.nth rows n in
            check bool "a call that returned carries the finished glyph" true
-             (starts_with "\xe2\x9c\x93 masc_task_history" (row 0));
+             (starts_with "\xe2\x9c\x93 MascTaskHistory" (row 0));
            check bool "and its duration" true
-             (starts_with "\xe2\x9c\x93 masc_task_history \xc2\xb7 32ms" (row 0));
+             (starts_with "\xe2\x9c\x93 MascTaskHistory \xc2\xb7 32ms" (row 0));
            check bool "a call that returned an error carries its own glyph" true
-             (starts_with "\xe2\x9c\x97 tool_execute" (row 1));
+             (starts_with "\xe2\x9c\x97 ToolExecute" (row 1));
            (* A settled attempt with no observed result is an evidence gap,
               distinct from both a still-running call and a failed call. *)
            check bool "a call the trace never saw finish carries its own glyph"
              true
-             (starts_with "○ keeper_task_claim" (row 2));
+             (starts_with "○ KeeperTaskClaim" (row 2));
            check bool "a step with no status says it was not recorded" true
-             (starts_with "? read_file" (row 3))
+             (starts_with "? ReadFile" (row 3))
        | History.Addressed_to_keeper _ | History.Said_by_keeper
        | History.Autonomous_reply
        | History.Delivery_failed _ | History.Skill_activity _

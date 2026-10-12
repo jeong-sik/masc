@@ -1602,13 +1602,13 @@ let apply_delta ~now t (delta : Live.delta) =
          frame is lost, this chunk is the first thing that says the previous
          response's model, counters and stop no longer apply. *)
       Option.iter (enter_text_response_scope t) stream_scope
-  | Live.Thinking "" -> ()
+  | Live.Thinking {text=""; _} -> ()
   | Live.Text {text; stream_scope} ->
       Option.iter (enter_text_response_scope t) stream_scope;
       t.model_signal <- Some (Answering_at now);
       Buffer.add_string t.text_buffer text;
       trail_text ~now t text
-  | Live.Thinking text ->
+  | Live.Thinking {text; _} ->
       t.model_signal <- Some (Reasoning_at now);
       Buffer.add_string t.thinking_buffer text;
       trail_thinking ~now t text

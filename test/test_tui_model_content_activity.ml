@@ -31,7 +31,7 @@ let test_overlap_uses_event_order () =
   (* Wall clock moves backwards. The last event, not the biggest clock, owns
      the label; stopping it returns to the newest remaining active event. *)
   List.iter (fun (now,delta) -> T.apply ~now t delta)
-    [90.,L.Text {text="A"; stream_scope=None}; 90.,observed (); 80.,L.Thinking "R";
+    [90.,L.Text {text="A"; stream_scope=None}; 90.,observed (); 80.,L.Thinking {text="R";content_index=None};
      80.,observed ~index:1 ~channel:E.Model_thinking ();
      70.,L.Text {text="B"; stream_scope=None}; 70.,observed ~index:2 ()];
   assert_signal t "STREAMING";

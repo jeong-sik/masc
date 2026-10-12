@@ -105,7 +105,10 @@ type delta =
           KEEPER_STREAM_MESSAGE_DELTA), so they arrive together here too. At
           least one of the two is present. *)
   | Text of {text : string; stream_scope : int option}  (** Assistant text to append. *)
-  | Thinking of string  (** Reasoning text to append. *)
+  | Thinking of { text : string; content_index : int option }
+      (** Supplied reasoning bytes and the reported content index. Canonical
+          live/journal frames retain the reported index; response ownership is
+          unbound until the response-identity stack lands. *)
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }
   | Native_tool_progress of

@@ -71,5 +71,16 @@ val delivery_provenance_fields :
 val delivery_provenance_of_fields :
   (string * Yojson.Safe.t) list -> (delivery_provenance option, string) result
 
+(** Validates a wire row role against its typed transcript slot. Shared by
+    durable storage and presentation readers; role labels are protocol values. *)
+val validate_delivery_role :
+  role_label:string -> delivery_provenance -> (unit, string) result
+
+(** Reads provenance and validates its row role. Unaddressed rows retain
+    [Ok None]; addressed rows with absent, invalid or incompatible role return
+    [Error] and grant no execution authority. *)
+val row_delivery_provenance_of_fields :
+  (string * Yojson.Safe.t) list -> (delivery_provenance option, string) result
+
 val delivery_provenance_equal :
   delivery_provenance -> delivery_provenance -> bool

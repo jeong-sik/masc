@@ -459,7 +459,7 @@ let explicit_turn_id_of_fields fields =
 
 let turn_id_of_fields fields =
   let explicit_turn () = explicit_turn_id_of_fields fields in
-  match Delivery_identity.delivery_provenance_of_fields fields with
+  match Delivery_identity.row_delivery_provenance_of_fields fields with
   | Ok (Some provenance) ->
       (match provenance.Delivery_identity.delivery_key with
        | Delivery_identity.Operation_native {operation_id=request_id; _}
@@ -479,7 +479,7 @@ let turn_id_of_fields fields =
    rows use their explicit turn_ref; other delivery keys retain append
    identity without acquiring an operation or inventing turn ownership. *)
 let operation_id_of_fields fields =
-  match Delivery_identity.delivery_provenance_of_fields fields with
+  match Delivery_identity.row_delivery_provenance_of_fields fields with
   | Ok
       (Some
          { Delivery_identity.delivery_key =
@@ -503,7 +503,7 @@ let execution_source_of_fields fields =
   match operation_id_of_fields fields with
   | Some operation_id -> Some (Masc_tui_keeper_chat_log.Operation operation_id)
   | None ->
-      (match Delivery_identity.delivery_provenance_of_fields fields with
+      (match Delivery_identity.row_delivery_provenance_of_fields fields with
        | Ok None ->
            let raw = explicit_turn_id_of_fields fields in
            Option.bind raw (fun raw ->
@@ -524,7 +524,7 @@ let execution_source_of_fields fields =
 ;;
 
 let failure_execution_source_of_fields fields =
-  match Delivery_identity.delivery_provenance_of_fields fields with
+  match Delivery_identity.row_delivery_provenance_of_fields fields with
   | Ok (Some { Delivery_identity.transcript_slot = Terminal_result; _ }) ->
       execution_source_of_fields fields
   | Ok (Some _) | Ok None | Error _ -> None
@@ -1524,7 +1524,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                   ; operation_id
                   ; execution_source
                   ; kind = (match intermediate_speech_of_provenance
-                      (Delivery_identity.delivery_provenance_of_fields fields) with
+                      (Delivery_identity.row_delivery_provenance_of_fields fields) with
                       | Some boundary -> Intermediate_speech boundary
                       | None -> if autonomous then Autonomous_reply else Said_by_keeper)
                   ; text = content

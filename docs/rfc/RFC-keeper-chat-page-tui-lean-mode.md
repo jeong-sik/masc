@@ -3,11 +3,11 @@ rfc: "keeper-chat-page-tui-lean-mode"
 title: "대화 이력 페이지에 TUI 전용 응답 모드를 둔다"
 status: Draft
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-12
 author: claude
 supersedes: []
 superseded_by: null
-related: ["keeper-chat-page-row-content-bound", "tui-lazy-block-projection"]
+related: []
 implementation_prs: []
 ---
 
@@ -16,9 +16,9 @@ implementation_prs: []
 ## 0. 요약
 
 `/api/v1/keepers/<k>/chat/history/page`에 요청 파라미터로 TUI가 읽지 않는 행 필드
-(`stream_contract`, `transcript_slot`)를 뺀 응답을 받는 모드를 둔다. 기본 응답은
-바꾸지 않는다. 대시보드는 지금과 같다. 이 문서는 결정을 받기 위한 초안이고 코드는
-바꾸지 않는다.
+(`stream_contract`)를 뺀 응답을 받는 모드를 둔다. `transcript_slot`은
+`delivery_key`와 한 쌍으로 디코드되므로 남긴다(2절). 기본 응답은 바꾸지 않는다.
+대시보드는 지금과 같다. 이 문서는 결정을 받기 위한 초안이고 코드는 바꾸지 않는다.
 
 ## 1. 배경 (실측)
 
@@ -34,11 +34,12 @@ TUI는 main에 #42262, #42275, #42204를 합친 빌드. 이력 서빙은 스텁 
 | 필드 | 이슈 #42200의 페이지 크기 비중 | TUI가 읽는가 |
 |---|---|---|
 | `stream_contract` | 25% (106KB / 403KB) | 아니오 |
-| `transcript_slot` | 6% (25KB) | 아니오 |
+| `transcript_slot` | 6% (25KB) | 예 — `delivery_key`와 한 쌍으로 읽음(2절) |
 | `delivery_key` | 7% (28KB) | 예 (`delivery_key`로 읽음) |
 | `content` | 25% (102KB) | 예 |
 
-두 필드를 지우면 JSON 바이트가 약 30% 줄었다.
+두 필드를 지우면 JSON 바이트가 약 30% 줄었다. 제안(2절)은 `transcript_slot`을
+남기므로 기대 절감은 `stream_contract` 몫인 약 25%다.
 
 ### 1.2 지연에 미치는 효과 (상한)
 
@@ -71,7 +72,8 @@ average가 23~188(중앙값 72)이라 키 응답 70개 이상인 쌍은 구간�
 첫 PageUp에서는 일관되게 낮은 쪽이지만 차이가 5쌍 측정(1.2)보다 작다. PageDown과 두
 번째 PageUp에서는 차이를 말할 수 없다. 첫 PageUp p99 38.1ms는 목표 20ms에 못 미친다.
 이 모드가 주는 것은 첫 PageUp 구간의 p95 수 ms 수준이고, 구현 비용(응답 계약 확장)에
-비해 작다. 그래서 이 RFC는 구현을 권하지 않는다. 다른 요인(페이지 도착 메시지,
+비해 작다. 위 측정은 두 필드를 뺀 것이라 `transcript_slot`을 남기는 제안의 효과는
+더 작다. 그래서 이 RFC는 구현을 권하지 않는다. 다른 요인(페이지 도착 메시지,
 저널 스파이크)을 먼저 줄인 뒤에도 응답 크기가 남는 몫이면 다시 연다.
 
 ### 1.3 이전 안이 못 얻은 근거
@@ -82,21 +84,32 @@ average가 23~188(중앙값 72)이라 키 응답 70개 이상인 쌍은 구간�
 
 ## 2. 제안
 
-요청에 `?lean=1`을 받으면 각 행에서 `stream_contract`와 `transcript_slot`을 싣지 않는다.
+요청에 `?lean=1`을 받으면 각 행에서 `stream_contract`을 싣지 않는다.
 `lean`이 없거나 `0`이면 지금과 같다. 알 수 없는 값은 400으로 거절한다(기존 `limit`
 파라미터의 정책과 같다).
 
+`transcript_slot`은 빼지 않는다. `delivery_provenance_of_fields`가
+`delivery_key`와 `transcript_slot` 중 하나만 있으면 오류를 내고
+(`lib/keeper_chat_delivery_identity/keeper_chat_delivery_identity.ml`),
+TUI의 `turn_id_of_fields`/`operation_id_of_fields`는 그 오류를 신원 없음으로
+다뤄(`bin/masc_tui_keeper_chat_history.ml`) 턴 묶음과 operation 저널 조회가
+깨진다. provenance 쌍은 디코더와 계약을 함께 고치지 않는 한 같이 둔다.
+
 TUI는 `fetch_keeper_chat_history_page`에서 `lean=1`을 보낸다. `/chat/history`(꼬리 창)는
-소비자가 대시보드라서 이 문서의 범위가 아니다.
+이 문서의 측정이 페이지 경로만 다루므로 범위가 아니다. 다만 꼬리 창의 소비자도
+대시보드만이 아니다 — TUI가 채팅 진입·이력 새로고침(`bin/masc_tui.ml`의 이력 로드
+경로)과 `/copy`(`Keeper_chat_copy_loaded` 경로)에서
+`fetch_keeper_chat_history`(`bin/masc_tui_http.ml`, `/chat/history` 행)로 같은 필드를
+그대로 받는다. 꼬리 경로에도 opt-in lean 응답을 둘지는 열린 질문 4번으로 남긴다.
 
 ## 3. 제약과 위험
 
 - 대시보드는 `stream_contract`를 읽는다(`keeper-chat-history.ts`, `keeper-state.ts`).
   `lean`은 TUI만 보낸다. 대시보드는 `lean`을 보내지 않으므로 영향이 없다.
-- TUI가 나중에 `stream_contract`나 `transcript_slot`을 읽게 되면 그 시점에 이 모드가
-  조용히 값을 빼 버린다. 디코더가 필드의 부재를 오류로 보는지, 기본값으로 메우는지를
-  확인해야 하고, 메우면 안 된다(없음과 비어 있음을 구분한다).
-- 서버 구현은 행을 직렬화하는 자리에서 두 필드를 건너뛰는 것이어야 하고, 완성된 JSON에서
+- TUI가 나중에 `stream_contract`을 읽게 되면 그 시점에 이 모드가 조용히 값을 빼
+  버린다. 디코더가 필드의 부재를 오류로 보는지, 기본값으로 메우는지를 확인해야 하고,
+  메우면 안 된다(없음과 비어 있음을 구분한다).
+- 서버 구현은 행을 직렬화하는 자리에서 그 필드를 건너뛰는 것이어야 하고, 완성된 JSON에서
   지우는 후처리가 아니어야 한다.
 
 ## 4. 열린 질문
@@ -104,12 +117,15 @@ TUI는 `fetch_keeper_chat_history_page`에서 `lean=1`을 보낸다. `/chat/hist
 1. 파라미터 이름과 형태(`lean=1`, `fields=...`). 필드 목록을 받는 쪽이 더 일반적이지만
    계약이 넓어진다.
 2. `delivery_key`(7%)와 `blocks`, `skill_activations`도 화면에 쓰이는지 같은 대조가
-   필요하다. 이 문서는 TUI가 읽지 않는 두 필드만 다룬다.
+   필요하다. 이 문서는 TUI가 읽지 않는 `stream_contract`만 다룬다.
 3. 부하가 낮은 상태에서의 재측정. 1.2의 표본은 5~6쌍이다.
+4. `/chat/history`(꼬리 창)의 opt-in lean 응답 여부. TUI가 채팅 진입·새로고침·`/copy`에서
+   이 경로를 읽으므로(2절), 페이지 경로에만 lean을 두면 그 읽기에는 미사용 필드가
+   그대로 전송된다.
 
 ## 5. 검증 계획
 
-- 서버: `lean=1`일 때 두 필드가 없고 나머지는 같다는 테스트, `lean=2` 거절 테스트,
+- 서버: `lean=1`일 때 `stream_contract`이 없고 나머지는 같다는 테스트, `lean=2` 거절 테스트,
   `lean`이 없을 때 응답이 바뀌지 않는 테스트.
 - TUI: `lean=1` 응답을 디코드해서 기존 행과 같은 `msg_entry`가 나오는 테스트.
 - 재측정: 같은 PTY 드라이버와 스텁으로 12쌍 이상, load average 30 미만에서.

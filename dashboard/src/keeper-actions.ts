@@ -828,19 +828,28 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
       }
       if (errorMessage) setRecordValue(keeperActionErrors, request.keeperName, errorMessage)
       persistTrackedOperationAssistantDraft(request.keeperName, request.operationId, assistantId)
-      const reconciliationAuthRevision = currentStoredTokenRevision()
-      try {
-        const canonical = await reconcileOperationFromServerHistory(
-          request.keeperName, request.operationId, operationUserEntryId(request.operationId), assistantId,
-        )
-        if (canonical && reconciliationAuthRevision === currentStoredTokenRevision()) {
-          removeTrackedKeeperChatOperation(request.operationId)
+      // A revision change mid-reconciliation must not strand the recovery:
+      // the retain is correct, but the mount effect never re-runs for the
+      // same keeper, so retry under the new revision while still holding
+      // the hydration guard. Each retry implies a fresh revision change.
+      for (;;) {
+        const reconciliationAuthRevision = currentStoredTokenRevision()
+        try {
+          const canonical = await reconcileOperationFromServerHistory(
+            request.keeperName, request.operationId, operationUserEntryId(request.operationId), assistantId,
+          )
+          if (canonical && reconciliationAuthRevision === currentStoredTokenRevision()) {
+            removeTrackedKeeperChatOperation(request.operationId)
+            break
+          }
+          if (reconciliationAuthRevision === currentStoredTokenRevision()) break
+        } catch (historyError) {
+          if (reconciliationAuthRevision !== currentStoredTokenRevision()) continue
+          // A missing observation cannot revoke the authoritative terminal receipt.
+          const detail = historyError instanceof Error ? historyError.message : 'Chat history unavailable'
+          setRecordValue(keeperChatHistoryErrors, request.keeperName, `이전 대화 불러오기 실패: ${detail}`)
+          break
         }
-      } catch (historyError) {
-        if (reconciliationAuthRevision !== currentStoredTokenRevision()) return
-        // A missing observation cannot revoke the authoritative terminal receipt.
-        const detail = historyError instanceof Error ? historyError.message : 'Chat history unavailable'
-        setRecordValue(keeperChatHistoryErrors, request.keeperName, `이전 대화 불러오기 실패: ${detail}`)
       }
       return
     }

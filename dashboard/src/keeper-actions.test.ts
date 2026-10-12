@@ -1524,6 +1524,35 @@ describe('restored chat operation outcome', () => {
     clearStoredToken()
   })
 
+  it('reconciles a retained recovery under the new revision without remounting', async () => {
+    storeDraft()
+    setStoredToken('fixture-old')
+    fetchKeeperChatOperation.mockResolvedValue({ operationId: 'restored-op', state: { kind: 'succeeded', completedAt: 2, outcomeRef: 'result' } })
+    let resolve!: (rows: unknown[]) => void
+    fetchKeeperChatHistory.mockReturnValueOnce(new Promise(yes => { resolve = yes }))
+    fetchKeeperChatHistory.mockResolvedValueOnce([
+      { id: 'current-user', role: 'user', content: 'input', ts: 1,
+        delivery_provenance: operationDeliveryProvenance('restored-op', 'accepted_user'), delivery_provenance_status: 'valid' },
+      { id: 'current-assistant', role: 'assistant', content: 'current scope answer', ts: 2,
+        delivery_provenance: operationDeliveryProvenance('restored-op', 'terminal_result'), delivery_provenance_status: 'valid' },
+    ])
+    const recovery = hydrateTrackedKeeperChatOperations('echo')
+    await vi.waitFor(() => expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1))
+    setStoredToken('fixture-new')
+    resolve([
+      { id: 'old-user', role: 'user', content: 'input', ts: 1,
+        delivery_provenance: operationDeliveryProvenance('restored-op', 'accepted_user'), delivery_provenance_status: 'valid' },
+      { id: 'old-assistant', role: 'assistant', content: 'old scope answer', ts: 2,
+        delivery_provenance: operationDeliveryProvenance('restored-op', 'terminal_result'), delivery_provenance_status: 'valid' },
+    ])
+    await recovery
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toEqual([])
+    expect(keeperThreads.value.echo?.some(entry => entry.id === 'current-assistant')).toBe(true)
+    expect(keeperThreads.value.echo?.some(entry => entry.id === 'old-assistant')).toBe(false)
+    clearStoredToken()
+  })
+
   it.each([false, true])('restores durable quarantine into canonical history (continuation=%s)', async continuation => {
     const provenance = toolCallDeliveryProvenance(operationDeliveryProvenance('restored-op', 'terminal_result'), 'execution', 0)
     const storedTool = { toolOwnerKey: operationDeliveryProvenance('restored-op', 'terminal_result').delivery_key, id: 'stored-tool', label: 'Read', text: '', rawText: 'stored args', delivery: 'error' as const,

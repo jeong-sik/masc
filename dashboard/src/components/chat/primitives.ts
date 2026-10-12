@@ -3172,6 +3172,19 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   `
 })
 
+// A history row can carry both a persisted status block and published
+// thinking/tool steps. Both surface branches render this section so status
+// rows do not lose their published trace.
+function PublishedTraceSection({ steps }: { steps?: ChatTraceStep[] }) {
+  if (!steps?.length) return null
+  return html`
+    <section data-chat-published-trace>
+      <p>서버 기록 · 아래 관측 활동과의 상대적 순서는 확인되지 않았습니다.</p>
+      <${ToolTraceCard} tools=${[]} traceSteps=${steps} turnComplete=${true} />
+    </section>
+  `
+}
+
 function ChatMessageSurface({
   entry,
   showMetadata = true,
@@ -3188,14 +3201,11 @@ function ChatMessageSurface({
   action?: ChatTranscriptAction
 }) {
   return chatControlStatus(entry)
-    ? html`<${ChatControlStatusCard} entry=${entry} action=${action} />`
+    ? html`
+      <${PublishedTraceSection} steps=${entry.publishedTraceSteps} />
+      <${ChatControlStatusCard} entry=${entry} action=${action} />`
     : html`
-      ${entry.publishedTraceSteps?.length ? html`
-        <section data-chat-published-trace>
-          <p>서버 기록 · 아래 관측 활동과의 상대적 순서는 확인되지 않았습니다.</p>
-          <${ToolTraceCard} tools=${[]} traceSteps=${entry.publishedTraceSteps} turnComplete=${true} />
-        </section>
-      ` : null}
+      <${PublishedTraceSection} steps=${entry.publishedTraceSteps} />
         <${ChatMessageBubble}
           entry=${entry}
           showMetadata=${showMetadata}
@@ -3508,9 +3518,13 @@ function ToolTraceStep({
   // RFC-0358 keeps autonomous arguments/results off the transcript even when
   // its canonical execution hydrates. Edit evidence below is an independent,
   // typed receipt projection, not permission to expose the raw tool body.
+  // A persisted inline result stays visible until the exact-output lookup
+  // resolves, even when the step carries an execution ID: hydration may be
+  // loading, denied, or gone (404), and must not gate the durable result.
+  // Live steps carry no inline result, so the lookup still owns them.
   const resultView = structuralSummary ? null
     : output ? toolOutputDisplay(output.output)
-      : (traceOnly && traceStep?.result ? { text: traceStep.result, truncated: false } : null)
+      : (traceStep?.result ? { text: traceStep.result, truncated: false } : null)
   const hasResult = resultView !== null && resultView.text.trim() !== ''
   // Expandable when there is anything to show: args, a result, or a still-pending
   // call (so the operator can open it and see "출력 대기 중…").

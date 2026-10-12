@@ -254,6 +254,61 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('[data-chat-tool-trace]')?.getAttribute('data-chat-turn-complete')).toBe('true')
   })
 
+  it('renders published traces for status rows', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'status-with-trace',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            rawText: '',
+            blocks: [{ t: 'status', kind: 'external_effect_pending' }],
+            publishedTraceSteps: [{ kind: 'think', text: 'published reasoning' }],
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    expect(container.querySelector('[data-chat-control-status="external_effect_pending"]')).not.toBeNull()
+    const trace = container.querySelector('[data-chat-published-trace]')
+    expect(trace).not.toBeNull()
+    expect(trace?.textContent).toContain('published reasoning')
+  })
+
+  it('keeps the published inline result while output hydration is pending', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'published-tool-result',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            rawText: '',
+            publishedTraceSteps: [{ kind: 'tool', name: 'Read', executionId: 'exec-pending-1',
+              status: 'ok', args: '{}', result: 'persisted file contents' }],
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const step = container.querySelector('[data-chat-published-trace] [data-chat-trace-step="tool"]')
+    expect(step).not.toBeNull()
+    fireEvent.click(step!.querySelector('.chat-block-tstep-row')!)
+    expect(step?.textContent).toContain('persisted file contents')
+    expect(step?.textContent).not.toContain('출력 대기 중…')
+  })
+
   it('renders one final image after repeated final-details projection', () => {
     _resetKeeperStreamBuffersForTests()
     keeperThreads.value = {}

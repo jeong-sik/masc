@@ -28,10 +28,10 @@
 | Memory 생산·소거·흡수 | 결함 | M-1~M-4 P1, M-5~M-10 | 스택 #41916이 M-2, M-4, M-7을 메우는지는 확인 못 함 |
 | Memory 강화(reinforcement) | 설계상 없음 | M-15 | RFC-0418에서 일부러 뺌 |
 | Skills 자동 재생성 | 없음 | 코드 검색 결과 0건 | 수동 publish만 있음. 프롬프트 한 문단(`keeper.md:58`)이 전부 |
-| Skills 카탈로그·Task pin | 결함 | S-1 P1 | Skill을 수정하거나 지우면, 그 Skill을 pin한 Task의 Keeper가 매 턴 setup에서 실패함 |
+| Skills 카탈로그·Task pin | 확인됨 | S-1(설계상 동작: `docs/SKILLS-FLOW.md` §2a, `keeper_task_skill_turn.ml`의 `Reference_resolution_failed`) | pin한 Skill이 삭제·변경되면 frozen snapshot에서 해소되지 않아 typed admission error로 setup 실패. pin 우회 수리는 Task를 다른 지시로 돌릴 수 있어 P1 아님. 열린 #42208과 정합성 확인 필요 |
 | Board / 후보 원장 | 부분 | BOARD-1 P1(못 읽는 행이 하나라도 있으면 prune이 영구히 멈춤. 열린 #38068이 같은 뿌리를 다룸), BOARD-2 | #41506이 consumed 행은 지움 |
 | Task FSM | 확인됨 | 전이를 모두 명시함 | |
-| Goal | 부분 | GOAL-1 P3(refuted 뒤 순환을 끝내는 규칙이 없음. keeper가 매번 다시 요청해야만 도는 경로라서 관측되기 전까지는 잠복 결함) | FSM 전이 쌍은 모두 명시되어 있어 확인됨. 같은 결함을 닫힌 #31244가 "관측 없음, 잠복"으로 닫음 |
+| Goal | 확인됨 | GOAL-1(설계상 동작: `lib/goal/goal_phase.ml` — refuted는 Verifying→Executing으로 돌리고 새 `request_complete`로만 재검증. 실패한 증거를 그대로 다시 내지 않기 위한 명시적 완료 신호) | FSM 전이 쌍은 모두 명시되어 있어 확인됨. 닫힌 #31244("관측 없음, 잠복")와 같은 경로 |
 | HITL | 부분 | HITL-1, HITL-2 | 늦게 온 승인을 메모리에만 기억함 |
 | Access Control | 미확인 | 범위를 확인한 뒤 별도로 기록 | 이 문서에는 상세를 싣지 않음 |
 | Multi Lane | 부분 | LANE-1(거절 원인이 2초 뒤에 사라짐), LANE-2(미확인) | lane action이 재시작 때 닫히는 것은 확인됨 |
@@ -44,7 +44,7 @@
 | TUI 연결·가시성 | 부분 | LANE-1, SCH-6, E-04(Rejected가 안 보임), TUI-1(`*_error`가 약 50개) | |
 | 토큰·캐시 | 부분 | W1 P1, W3, W5, W7, W8 | 접두 캐시와 keeper_tool_search는 문제 없음 |
 
-## P1 목록 (13건)
+## P1 목록 (12건)
 
 크기는 읽고 어림잡은 값이에요. 측정한 값이 아니에요.
 
@@ -62,7 +62,6 @@
 | M-2 | 철회한 주장이 다시 살아남 | 중간 | #42214 |
 | M-3 | write 도구가 lane이 꺼진 채로 ok:true를 돌려주고, 큐 상한이 없음 | 작음~중간 | #42215 |
 | M-4 | 후보 reason을 파싱만 하고 쓰지 않음. not_durable write가 기록 없이 사라짐 | 중간 | #42216 |
-| S-1 | Skill을 수정하거나 지우면 pin한 Task의 Keeper가 매 턴 실패함 | 작음 | PR #42208 |
 
 ## 공통 주제
 

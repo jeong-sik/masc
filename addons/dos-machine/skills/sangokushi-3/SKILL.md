@@ -251,6 +251,14 @@ Observed at 193년 7월 6 평원 (유비 defending against 원소) and at 235년
   At January 190 Puyang, Li Dian answered `n` after approaching Guo Si;
   the next officer command opened with both army totals unchanged. This
   allows approaching support without accepting the immediate attack.
+- Movement can also trigger an enemy surprise attack. At February 190
+  city-20 defense, Cao Hong's north `8` movement changed friendly troops
+  4,021 → 3,695 while enemy troops stayed 5,856. Replaying from the saved
+  command with 10,000 steps for the direction input, then short observations
+  (100,000 steps and later 1,000,000), exposed `앗! 적병이다` followed by
+  `적의 기습을 받았다!`. Preserve the resulting branch before restoring the
+  pre-action checkpoint to inspect a missed event. A later command screen
+  and troop difference alone do not identify the cause of a movement loss.
 - For a verified enemy hex, attack `2` → joint `2` → direction executes
   an 일제 attack when the menu allows it. From the same January 190
   day-6 noon checkpoint, Xiahou Yuan's north `8` joint attack inflicted

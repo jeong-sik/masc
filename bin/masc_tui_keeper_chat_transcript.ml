@@ -1533,7 +1533,10 @@ let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content
         | None ->
             t.active_model_content <- t.active_model_content @
               [activity.content_index,activity.channel,None];
-            t.model_signal <- Some Scoped_model_content
+            (match t.model_signal with
+             | Some (Provider_retry_at _ | Tool_returned_at _ | Model_response_ended) -> ()
+             | None | Some (Scoped_model_content | Model_started_at _ | Reasoning_at _ | Answering_at _) ->
+                 t.model_signal <- Some Scoped_model_content)
         | Some (_,_,_) -> ()
       end
 ;;

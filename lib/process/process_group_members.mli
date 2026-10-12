@@ -29,3 +29,8 @@ val live_member_left : int -> bool option
 (** Whether group [pgid] holds a member that is neither a zombie nor exiting,
     from the kernel's member snapshot, whoever started it. [None] when there
     is no snapshot, which is every platform but Darwin. *)
+
+val proc_live_member_left : int -> bool option
+(** Whether group [pgid] holds a member that is neither a zombie ([Z]) nor
+    dead ([X]), from [/proc]. [None] when there is no [/proc], which is every
+    platform but Linux. *)

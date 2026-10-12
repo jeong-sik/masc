@@ -108,7 +108,11 @@ let group_id_has_members group =
   group > 1
   &&
   match Unix.kill (-group) 0 with
-  | () -> true
+  | () ->
+    (* kill(2) also reaches zombies, which are not processes left running. *)
+    (match Process_group_members.proc_live_member_left group with
+     | Some false -> false
+     | Some true | None -> true)
   | exception Unix.Unix_error (Unix.ESRCH, _, _) -> false
   | exception Unix.Unix_error (Unix.EPERM, _, _) ->
     Option.value ~default:true (Process_group_members.live_member_left group)

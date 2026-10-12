@@ -1,6 +1,6 @@
 import { effect, untracked } from '@preact/signals'
 import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   _resetActiveKeeperStreamsForTests,
   _resetLiveSendRequestOwnersForTests,
@@ -15,6 +15,7 @@ import { keeperThreads, keeperToolApprovals } from './keeper-state'
 import {
   _flushPendingKeeperStreamDeltasForTests,
   _resetKeeperStreamBuffersForTests,
+  KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS,
   abortKeeperThreadMessage,
   applyKeeperOperationTurnEvent,
   applyKeeperStreamEvent,
@@ -50,6 +51,11 @@ function assistantEntry(operationId?: string): void {
       : {}),
     details: null,
   })
+}
+
+function requiredFixture<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error('missing required fixture')
+  return value
 }
 
 describe('Keeper operation stream projection', () => {
@@ -184,7 +190,7 @@ describe('Keeper operation stream projection', () => {
     const diagnostic = parseSSEMessage({ type: 'keeper_chat_operation_event', name: 'sangsu', operation_id: 'op-1', seq: 12,
       ag_ui_event: { type: 'TEXT_MESSAGE_CONTENT', delta: 123 } })
     expect(diagnostic?.seq).toBeUndefined()
-    if (diagnostic?.ag_ui_event) applyKeeperStreamEvent('sangsu', 'reply-1', diagnostic.ag_ui_event,
+    if (diagnostic?.ag_ui_event) applyKeeperStreamEvent('sangsu', 'reply-1', diagnostic.ag_ui_event as KeeperChatStreamEvent,
       { kind: 'operation', operationId: 'op-1', sequence: diagnostic.seq })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'valid counterpart' },
       { kind: 'operation', operationId: 'op-1', sequence: 12 })
@@ -273,7 +279,7 @@ describe('Keeper operation stream projection', () => {
       if (hasBody) {
         applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'authored text' })
       }
-      const before = keeperThreads.value.sangsu[0]
+      const before = requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0])
       expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
         type: 'CUSTOM',
         name: 'KEEPER_MODEL_CONTENT_ACTIVITY',
@@ -281,8 +287,8 @@ describe('Keeper operation stream projection', () => {
       })).toBeNull()
       // This view does not draw the side metadata. It must neither announce
       // model progress nor finalize a live response or append authored bytes.
-      expect(keeperThreads.value.sangsu[0].rawText).toBe(before.rawText)
-      expect(keeperThreads.value.sangsu[0].delivery).not.toBe('ok')
+      expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).rawText).toBe(before.rawText)
+      expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).delivery).not.toBe('ok')
     }
   })
 

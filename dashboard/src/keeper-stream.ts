@@ -15,7 +15,8 @@ import {
 } from './keeper-message'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import type { KeeperChatStreamEvent } from './api'
-import type { KeeperConversationDetails } from './types'
+import { currentStoredTokenRevision } from './api/core'
+import type { KeeperConversationDetails, KeeperConversationEntry } from './types'
 import {
   appendAssistantDelta,
   appendThreadEntry,
@@ -804,16 +805,10 @@ function admitResponseEvent(
   if (decision.advanced) {
     flushPendingThinkingDeltas(keeperName, assistantEntryId)
     clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
-    clearTextMessageStreamState(keeperName, assistantEntryId)
   }
   if (decision.state !== before) updateThreadEntry(keeperName, assistantEntryId, current => ({
     ...current,
     responseState: decision.state,
-    ...(decision.advanced && decision.authoritative ? {
-      streamState: 'opening' as const,
-      details: current.details ? { ...current.details, providerMessageId: null, modelUsed: null,
-        stopReason: null, usage: null, costUsd: null } : current.details,
-    } : {}),
   }))
   persistActiveAssistantDraft(keeperName, assistantEntryId)
   return decision
@@ -874,7 +869,6 @@ export function applyKeeperStreamEvent(
         keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'RUN_STARTED' }),
       )
       return null
-    }
     case 'TEXT_MESSAGE_START': {
       const response = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.responseState
       if (response && (response.kind === 'unavailable' || response.floor || response.phase === 'terminal')) return null
@@ -1233,9 +1227,14 @@ export function applyKeeperStreamEvent(
         const value = event.value
         const observed = value?.runtime_id !== undefined && value.attempt_index !== undefined
           ? Object.freeze({ runtimeId: value.runtime_id, index: value.attempt_index }) : undefined
-        // An unbound header carries no authority: it cannot revoke the known
-        // attempt admission floor, nor wipe partial progress when no floor exists.
-        if (!observed) return null
+        // An unbound header carries no authority: it cannot revoke an
+        // established attempt floor, but it still opens a boundary on a
+        // fresh entry so unfinished narrative cannot leak across attempts.
+        if (!observed) {
+          if (current?.runtimeAttempt) return null
+          resetUnfinishedRuntimeAttempt(keeperName, assistantEntryId, undefined)
+          return null
+        }
         if (observed && current?.runtimeAttempt) {
           if (observed.index < current.runtimeAttempt.index) return null
           if (observed.index === current.runtimeAttempt.index) {
@@ -1249,6 +1248,9 @@ export function applyKeeperStreamEvent(
       if (event.name === 'KEEPER_PROVIDER_RETRY') {
         const ownsProgress = (entry: KeeperConversationEntry | undefined): boolean => {
           if (!entry) return false
+          // A progress-only observation must not regress a response that
+          // already carries authored text.
+          if (entry.text) return false
           return (entry.delivery === 'sending' || entry.delivery === 'streaming')
             && entry.runtimeAttempt?.runtimeId === event.value.attempt.runtime_id
             && entry.runtimeAttempt.index === event.value.attempt.lane_attempt_index
@@ -1325,8 +1327,11 @@ export function applyKeeperStreamEvent(
         }
         if (usage?.costUsd !== undefined && current?.costUsd == null) patch.costUsd = usage.costUsd
         if (Object.keys(patch).length > 0) mergeAssistantStreamDetails(keeperName, assistantEntryId, patch)
-        if (response.advanced) setAssistantStreamState(
-          keeperName, assistantEntryId, 'opening', 'streaming',
+        setAssistantStreamState(
+          keeperName,
+          assistantEntryId,
+          'streaming',
+          'streaming',
           keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_MESSAGE_START' }),
         )
         persistActiveAssistantDraft(keeperName, assistantEntryId)

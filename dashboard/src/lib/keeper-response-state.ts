@@ -68,10 +68,14 @@ export function reduceKeeperResponse(state: KeeperResponseState, event: KeeperRe
     if (!event.owner) {
       return state.floor ? refuse() : { state, accepted: true, advanced: false, authoritative: true }
     }
-    if (!state.current || compareOwner(event.owner, state.current) !== 0
+    // No established current owner (header-only observation so far): the
+    // ownership gate upstream already rejected stale stops, so accept.
+    if (!state.current) return { state, accepted: true, advanced: false, authoritative: true }
+    if (compareOwner(event.owner, state.current) !== 0
       || (state.closed && compareOwner(event.owner, state.closed) <= 0)) return refuse()
     return { state: Object.freeze({ ...state, closed: state.current }), accepted: true, advanced: false, authoritative: true }
   }
+  if (event.kind !== 'observe') return refuse()
   if (!event.owner) {
     if (state.floor && event.source !== 'body') return refuse()
     const partial = event.scope !== null

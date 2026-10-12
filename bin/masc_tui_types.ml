@@ -1361,12 +1361,23 @@ let chat_timeline_rows timeline =
 let string_mem needle haystack = List.exists (String.equal needle) haystack
 ;;
 
+(* One source-to-member mapping for timeline and block ownership. Display IDs
+   never erase the Operation/Autonomous_turn distinction. *)
+let chat_execution_member_keys ~source ~member_ids =
+  match source with
+  | Masc_tui_keeper_chat_log.Operation _ ->
+      List.sort_uniq String.compare (Masc_tui_keeper_chat_log.source_key source :: member_ids)
+      |> List.map (fun id -> Typed_execution (Masc_tui_keeper_chat_log.Operation id))
+  | Autonomous_turn _ -> [Typed_execution source]
+;;
+
 let chat_request_timeline_at ?(member_ids = []) ~request_id messages =
+  let keys = chat_execution_member_keys
+      ~source:(Masc_tui_keeper_chat_log.Operation request_id) ~member_ids in
   let request_rows =
     List.filter
       (fun (message : msg_entry) ->
-        String.equal message.me_request_id request_id
-        || string_mem message.me_request_id member_ids)
+        List.mem (chat_turn_key message) keys)
       messages
   in
   match List.rev (chat_projected_timeline_ats request_rows) with
@@ -1381,10 +1392,11 @@ let chat_live_timeline_at ?(member_ids = []) ~request_id ~started_at ~request_me
   | None ->
       let valid at = Float.is_finite at && at > 0. in
       let started_at = if valid started_at then Some started_at else None in
+      let keys = chat_execution_member_keys
+          ~source:(Masc_tui_keeper_chat_log.Operation request_id) ~member_ids in
       let has_committed_request =
         List.exists
-          (fun (message : msg_entry) ->
-            String.equal message.me_request_id request_id)
+          (fun (message : msg_entry) -> List.mem (chat_turn_key message) keys)
           request_messages
       in
       if not has_committed_request
@@ -1563,16 +1575,6 @@ type chat_log_timeline_context =
   ; clt_timeline_at : float option
   ; clt_insertion : int
   }
-
-(* One source-to-member mapping for timeline and block ownership. Display IDs
-   never erase the Operation/Autonomous_turn distinction. *)
-let chat_execution_member_keys ~source ~member_ids =
-  match source with
-  | Masc_tui_keeper_chat_log.Operation _ ->
-      List.sort_uniq String.compare (Masc_tui_keeper_chat_log.source_key source :: member_ids)
-      |> List.map (fun id -> Typed_execution (Masc_tui_keeper_chat_log.Operation id))
-  | Autonomous_turn _ -> [Typed_execution source]
-;;
 
 let chat_log_timeline_context index ~member_ids ~source ~started_at =
   let keys = chat_execution_member_keys ~source ~member_ids in

@@ -47,18 +47,43 @@ def read_note(path: str | None, tag: str, from_github: bool) -> str:
 
 
 def added_bullets(note: str) -> list[str]:
-    """Return the top-level bullets of the `### Added` section."""
+    """Return the top-level bullets of the `### Added` section.
+
+    A bullet is joined with its continuation lines (wrapped text and nested
+    `  - ` items) before marker matching. The generated notes hard-wrap at
+    ~72 columns, so a `가이드 없음(...)` marker often lands on a wrapped
+    line rather than the `- ` line; matching per physical line undercounts.
+    """
     bullets: list[str] = []
     inside = False
+    current: str | None = None
     for line in note.splitlines():
         if line.startswith("### "):
+            if current is not None:
+                bullets.append(current)
+                current = None
             inside = line.strip().lower().startswith("### added")
             continue
         if line.startswith("#") and inside:
+            if current is not None:
+                bullets.append(current)
+                current = None
             inside = False
             continue
-        if inside and line.startswith("- "):
-            bullets.append(line[2:].strip())
+        if not inside:
+            continue
+        if line.startswith("- "):
+            if current is not None:
+                bullets.append(current)
+            current = line[2:].strip()
+        elif line.strip() == "":
+            if current is not None:
+                bullets.append(current)
+                current = None
+        elif current is not None:
+            current += " " + line.strip()
+    if current is not None:
+        bullets.append(current)
     return bullets
 
 

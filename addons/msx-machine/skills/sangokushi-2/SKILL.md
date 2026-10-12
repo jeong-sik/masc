@@ -250,6 +250,15 @@ units, the first command summary showed own troops 100 and enemy troops
 side membership after deployment; it does not isolate the cause of the
 change or prove that the earlier loyalty-85 reward prevents it.
 
+## Check numeric input before submitting
+
+Held keys can repeat in numeric fields. During the May 221 province-21
+retreat, `2` held for 5 frames entered `22`; a 1-frame tap was not accepted.
+Separate 3-frame taps entered `2`, then `0`, and Return submitted the visible
+`20`. These timings describe that prompt only. Observe the displayed number
+before Return, and adjust the hold when a digit repeats or is missed; do not
+infer the submitted destination from the intended key list.
+
 ## Going to war
 
 Observed 220年1月 as 曹丕, from 20 against 31 (劉備).

@@ -11,6 +11,17 @@ type candidate = { sequence : int; request_id : string; fact : fact }
 type state = { generation : string; last_sequence : int; pending : candidate list }
 type batch = { generation : string; rows : candidate list }
 
+type append_error =
+  | Capacity_exceeded of { required_bytes : int; limit_bytes : int }
+  | Append_failed of string
+
+let append_error_to_string = function
+  | Capacity_exceeded { required_bytes; limit_bytes } ->
+    Printf.sprintf
+      "pending admission queue byte cap exceeded: appending would write %d bytes over the %d byte cap set by %s; the append was refused before any write and pending input is unchanged"
+      required_bytes limit_bytes Env_config.KeeperMemoryOs.pending_max_bytes_env_key
+  | Append_failed detail -> detail
+
 let suffix = ".memory-admission.json"
 let path ~keepers_dir ~keeper_id = Filename.concat keepers_dir (keeper_id ^ suffix)
 let candidates batch = batch.rows
@@ -72,12 +83,14 @@ let state_of_json = function
     { generation; last_sequence; pending = List.rev pending }
   | _ -> wire_here Expected_object
 
-let protect action =
+let protect_with ~on_error action =
   try action () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Sys_error detail -> Error detail
+  | Sys_error detail -> Error (on_error detail)
   | Unix.Unix_error (error, fn, arg) ->
-    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
+    Error (on_error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error)))
+
+let protect action = protect_with ~on_error:Fun.id action
 
 let read ~keepers_dir ~keeper_id =
   protect (fun () ->
@@ -103,32 +116,37 @@ let write ~keepers_dir ~keeper_id (state : state) =
 let append_within_cap ~keepers_dir ~keeper_id state =
   let cap = Env_config.KeeperMemoryOs.pending_max_bytes () in
   let bytes = String.length (Yojson.Safe.to_string (state_to_json state)) in
-  if bytes <= cap then write ~keepers_dir ~keeper_id state
-  else Error (Printf.sprintf
-    "pending admission queue byte cap exceeded: appending would write %d bytes over the %d byte cap set by %s; the append was refused before any write and pending input is unchanged"
-    bytes cap Env_config.KeeperMemoryOs.pending_max_bytes_env_key)
+  if bytes <= cap then
+    write ~keepers_dir ~keeper_id state
+    |> Result.map_error (fun detail -> Append_failed detail)
+  else Error (Capacity_exceeded {required_bytes = bytes; limit_bytes = cap})
 
-let locked ~keepers_dir ~keeper_id action = protect (fun () ->
+let locked_with ~on_error ~keepers_dir ~keeper_id action = protect_with ~on_error (fun () ->
   Fs_compat.mkdir_p keepers_dir;
   Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
     File_lock_eio.with_lock (path ~keepers_dir ~keeper_id) action))
 
+let locked ~keepers_dir ~keeper_id action =
+  locked_with ~on_error:Fun.id ~keepers_dir ~keeper_id action
+
 let append ~keepers_dir ~keeper_id ~request_id fact =
+  let wire_error error = Append_failed (wire_error_to_string error) in
   let* () = canonical_string "request_id" ["request_id", `String request_id]
-    |> Result.map ignore |> Result.map_error wire_error_to_string in
-  let* fact = fact_of_json (fact_to_json fact) |> Result.map_error wire_error_to_string in
-  locked ~keepers_dir ~keeper_id (fun () ->
-    let* prior = read ~keepers_dir ~keeper_id in
+    |> Result.map ignore |> Result.map_error wire_error in
+  let* fact = fact_of_json (fact_to_json fact) |> Result.map_error wire_error in
+  locked_with ~on_error:(fun detail -> Append_failed detail) ~keepers_dir ~keeper_id (fun () ->
+    let* prior = read ~keepers_dir ~keeper_id
+      |> Result.map_error (fun detail -> Append_failed detail) in
     let state = match prior with
       | Some state -> state
       | None -> { generation = Random_id.prefixed ~prefix:"explicit-writes-" ~bytes:16;
                   last_sequence = 0; pending = [] } in
     match List.find_opt (fun row -> String.equal row.request_id request_id) state.pending with
     | Some row when row.fact = fact -> Ok row
-    | Some _ -> Error "pending admission request identity has different content"
+    | Some _ -> Error (Append_failed "pending admission request identity has different content")
     | None ->
       let previous = state.last_sequence in
-      if previous = max_int then Error "pending admission sequence exhausted"
+      if previous = max_int then Error (Append_failed "pending admission sequence exhausted")
       else
         let row = {sequence = previous+1; request_id; fact} in
         let+ () = append_within_cap ~keepers_dir ~keeper_id

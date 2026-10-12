@@ -538,7 +538,7 @@ let test_preflight_reads_admission_queue_without_consuming () =
       origin = {kind = Authored; trace_id = "admission-preflight"};
       basis = Observed Transcript } in
   (match Queue.append ~keepers_dir ~keeper_id:"pending" ~request_id:"request" fact with
-   | Ok _ -> () | Error detail -> fail detail);
+   | Ok _ -> () | Error detail -> fail (Queue.append_error_to_string detail));
   let path = Queue.path ~keepers_dir ~keeper_id:"pending" in
   let before = Fs_compat.load_file path in
   (match D.run scan ~base_path with

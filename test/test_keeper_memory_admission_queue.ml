@@ -14,7 +14,7 @@ let with_store f =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree keepers_dir)
     (fun () -> f keepers_dir)
 let append keepers_dir request_id claim =
-  Queue.append ~keepers_dir ~keeper_id:"keeper" ~request_id (fact claim) |> require
+  Queue.append ~keepers_dir ~keeper_id:"keeper" ~request_id (fact claim) |> Result.map_error Queue.append_error_to_string |> require
 let pending keepers_dir = Queue.read_pending ~keepers_dir ~keeper_id:"keeper" |> require
 let batch keepers_dir = match pending keepers_dir with Some batch -> batch | None -> fail "missing candidates"
 let acknowledge keepers_dir = Queue.acknowledge_committed ~keepers_dir ~keeper_id:"keeper" |> require
@@ -304,9 +304,10 @@ let test_byte_cap_refuses_append_before_write () = with_store (fun keepers_dir -
   (* The current file exactly meets the cap; growing it must be refused. *)
   (match Queue.append ~keepers_dir ~keeper_id:"keeper" ~request_id:"two" (fact "second rule") with
    | Ok _ -> fail "append past the byte cap was accepted"
-   | Error detail ->
-     check bool "refusal names the byte cap" true
-       (Astring.String.is_infix ~affix:"byte cap" detail));
+   | Error (Queue.Append_failed detail) -> fail detail
+   | Error (Queue.Capacity_exceeded {required_bytes; limit_bytes}) ->
+     check int "declared cap" size_after_one limit_bytes;
+     check bool "candidate exceeds actual serialized capacity" true (required_bytes > limit_bytes));
   check string "refusal rewrote no pending bytes" before (Fs_compat.load_file queue_path);
   check int "refused row is not pending" 1
     (List.length (Queue.candidates (batch keepers_dir)));

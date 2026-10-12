@@ -27,7 +27,9 @@ let with_workspace f =
     Eio_mock.Clock.set_time clock 1893455900.;
     Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
     Eio.Switch.run @@ fun sw ->
+    let runtime_snapshot = Runtime.For_testing.snapshot () in
     Eio.Switch.on_release sw (fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
       Dos_lane.install_activity_observer None;
       (match Dos_lane.screen () with
        | Ok { controller; _ } ->
@@ -37,15 +39,38 @@ let with_workspace f =
       Time_compat.clear_clock ();
       Fs_compat.remove_tree base_path;
       Fs_compat.clear_fs ());
+    Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
+      ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
     Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
     Auth.save_auth_config base_path { D.default_auth_config with enabled = true; require_token = true };
     let operator, _ = auth_ok (Auth.create_token_without_expiry base_path ~agent_name:"operator" ~role:D.Admin) in
     let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+    (* Machine routes read the host activity configuration from the published
+       runtime state ([Runtime.machine_configuration]); with none published the
+       worker refuses every call with activity_unobserved. Publish it the way
+       the server boots, so the routes exercise credential authority instead. *)
+    let runtime_path = Filename.concat base_path "runtime.toml" in
+    Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+|});
+    (match Runtime.init_default ~config_path:runtime_path with
+     | Ok () -> () | Error detail -> fail detail);
+    Masc.Lane_addon_runtime.For_testing.reset ();
     let _screen = dos_ok (Dos_lane.load ~who:"operator"
       ~ledger_dir:(Filename.concat base_path "ledger") ~saves_dir:(Filename.concat base_path "saves")
       ~checkpoint_dir:(Filename.concat base_path "checkpoints") ~program_name:"spin.com"
       ~program_bytes:"\xeb\xfe" ~files:[] ~announce:ignore) in
-    f base_path state operator)
+    Machine_worker_fixture.with_dos ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
+      (fun ~invoke:_ ~detach ->
+        f base_path state operator;
+        detach ())))
 
 let dispatch ~state ~token ~meth ~target ~body =
   let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with

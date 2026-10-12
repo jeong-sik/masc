@@ -369,6 +369,7 @@ let test_manifest_event_vocabulary_is_pinned () =
     ; "pre_dispatch_blocked"
     ; "provider_lane_resolved"
     ; "context_injected"
+    ; "history_projection_observed"
     ; "event_bus_correlated"
     ; "checkpoint_loaded"
     ; "checkpoint_saved"
@@ -378,6 +379,32 @@ let test_manifest_event_vocabulary_is_pinned () =
     (List.map
        Keeper_runtime_manifest.event_kind_to_string
        Keeper_runtime_manifest.all_event_kinds)
+;;
+
+let test_history_projection_preserves_context_diagnostics () =
+  let scan = Runtime_lens_scan.make_runtime_manifest_scan
+    ~path:"/tmp/projection-context-fixture.jsonl" ~limit:64
+    ~scan_line_limit:64 ~scan_scope:"test" in
+  let context = { (manifest_row ~event:Keeper_runtime_manifest.Context_injected)
+    with decision = `Assoc ["context_digest", `String "injected-context"] } in
+  let projection = { (manifest_row ~event:Keeper_runtime_manifest.History_projection_observed)
+    with decision = `Assoc ["scope", `String "first_request_projection_in_provider_attempt_not_delivery"] } in
+  let scan = Runtime_lens_scan.update_runtime_manifest_scan scan context in
+  let scan = Runtime_lens_scan.update_runtime_manifest_scan scan projection in
+  check int "projection is not a context injection" 1 scan.context_injected_count;
+  (match scan.latest_context_injected_row with
+   | Some row -> check bool "latest actual injection remains selected" true (row = context)
+   | None -> fail "actual context injection disappeared");
+  check int "projection event remains observable" 1
+    (Hashtbl.find scan.event_counts "history_projection_observed");
+  let projection_only = scan_of_events [Keeper_runtime_manifest.History_projection_observed] in
+  let lane = Runtime_lens_swimlane.runtime_lens_agent_core_swimlane_json projection_only [] in
+  check int "actual lane includes projection observation" 1
+    Yojson.Safe.Util.(lane |> member "event_count" |> to_int);
+  check string "projection alone is not an empty lane" "projection_observed"
+    (string_member "terminal_status" lane);
+  check string "projection alone does not prove checkpoint completion" "incomplete"
+    (string_member "completeness" lane)
 ;;
 
 let test_runtime_lane_asserts_dispatch_closure () =
@@ -979,6 +1006,9 @@ let () =
             `Quick
             test_no_lane_policy_names_a_retired_provider_lane
         ] )
+    ; ( "history_projection_context_diagnostics"
+      , [ test_case "projection preserves injected context" `Quick
+            test_history_projection_preserves_context_diagnostics ] )
     ; ( "runtime_manifest_scan"
       , [ test_case
             "surfaces unsupported rows without repeated warnings"

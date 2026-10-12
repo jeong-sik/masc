@@ -159,26 +159,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                 ~synthetic_events:[]
             );
             ( "agent_core_agent",
-              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"agent_core_agent"
-                ~label:"AGENT_CORE"
-                ~events:
-                  [
-                    Keeper_runtime_manifest.Checkpoint_loaded;
-                    Keeper_runtime_manifest.Checkpoint_saved;
-                  ]
-                ~terminal_status:
-                  (if
-                     runtime_lens_event_count scan
-                       Keeper_runtime_manifest.Checkpoint_saved
-                     > 0
-                   then "checkpoint_saved"
-                   else if
-                     runtime_lens_event_count scan
-                       Keeper_runtime_manifest.Checkpoint_loaded
-                     > 0
-                   then "checkpoint_loaded"
-                   else "empty")
-                ~synthetic_events:[] );
+              runtime_lens_agent_core_swimlane_json swimlane_scan gaps );
             ( "tool_runtime",
               runtime_lens_swimlane_json swimlane_scan gaps ~lane:"tool_runtime"
                 ~label:"Tool Runtime"

@@ -1,13 +1,14 @@
 # Intermediate delivery speech boundary
 
-Base: `ca72565034d8dc6cde91e33f40b699ef6ac16116`.
+Base: `4e53900b524099f434871c243b531fdbde59c29f` (rebuilt L26 tip).
 
 Canonical `Operation_checkpoint` and `Operation_native` deliveries with a
 `Terminal_result` slot were classified as root reply output. The slot ends that
 delivery; it does not establish completion of the root operation. History now
 retains the checkpoint or native continuation identity in `Intermediate_speech`.
-The executable projects these rows as progress and excludes them from latest
-reply selection for `/copy`. Original content is retained. Root operation and
+The executable projects these rows into the delivery phase (after the
+delivery's tools, before the turn's final output) and excludes them from
+latest reply selection for `/copy`. Original content is retained. Root operation and
 unknown speech classification remain unchanged; this change does not establish
 their terminal authority.
 

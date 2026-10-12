@@ -2,7 +2,8 @@
    once it is assembled.
 
    These are the rules the pane draws by: a turn appears where its first row
-   appeared, its rows read input then progress then tools then output, a user
+   appeared, its rows read input then progress then tools then delivery then
+   output, a user
    line the transcript already holds does not appear twice, and a turn stops
    claiming a number when its rows disagree about which turn it was. They were
    only checked through the surfaces that draw them, so the assembly could be
@@ -49,6 +50,11 @@ let keeper ?turn_sequence ?operation_seq ~request_id text at =
 let tool ?operation_seq ~request_id text at =
   row ?operation_seq ~request_id ~role:Tui_types.Message_tool
     ~phase:Tui_types.Turn_tool ~text at
+;;
+
+let delivery ?operation_seq ~request_id text at =
+  row ?operation_seq ~request_id ~role:Tui_types.Message_keeper
+    ~phase:Tui_types.Turn_delivery ~text at
 ;;
 
 let memory text at =
@@ -114,6 +120,20 @@ let test_rows_read_input_progress_tools_output () =
   Alcotest.(check (list string))
     "phases order the turn, whatever order the rows arrived in"
     [ "ask"; "tool call"; "answer" ]
+    (List.map (fun (r : Tui_types.msg_entry) -> r.me_text) (sole_turn rows).ct_rows)
+;;
+
+let test_delivery_speech_reads_after_its_tools () =
+  let rows =
+    [ user ~request_id:"a" ~operation_seq:1 "ask" 1.0
+    ; delivery ~request_id:"a" ~operation_seq:3 "checkpoint said" 3.0
+    ; tool ~request_id:"a" ~operation_seq:2 "tool call" 2.0
+    ; keeper ~request_id:"a" ~operation_seq:4 "answer" 4.0
+    ]
+  in
+  Alcotest.(check (list string))
+    "delivery speech stays after the tools that produced it, before final output"
+    [ "ask"; "tool call"; "checkpoint said"; "answer" ]
     (List.map (fun (r : Tui_types.msg_entry) -> r.me_text) (sole_turn rows).ct_rows)
 ;;
 
@@ -453,6 +473,8 @@ let () =
             test_a_turn_sits_where_its_first_row_did;
           Alcotest.test_case "rows read input, progress, tools, output" `Quick
             test_rows_read_input_progress_tools_output;
+          Alcotest.test_case "delivery speech reads after its tools" `Quick
+            test_delivery_speech_reads_after_its_tools;
           Alcotest.test_case "rows of one phase keep their sequence" `Quick
             test_rows_of_one_phase_keep_their_sequence;
           Alcotest.test_case "the same user line appears once" `Quick

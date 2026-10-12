@@ -7223,7 +7223,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         in
         (Message_user author, Turn_input, row.text, None, [])
     | Keeper_chat_history.Intermediate_speech _ ->
-        (Message_keeper, Turn_progress, row.text, None, [])
+        (Message_keeper, Turn_delivery, row.text, None, [])
     | Keeper_chat_history.Said_by_keeper ->
         (Message_keeper, Turn_output, row.text, None, [])
     | Keeper_chat_history.Autonomous_reply ->

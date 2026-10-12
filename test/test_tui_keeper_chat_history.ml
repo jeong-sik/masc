@@ -777,7 +777,13 @@ let test_an_addressed_row_says_who_sent_it_not_only_what_to_draw () =
        (addressed ~speaker_authority:"external" ~speaker_name:"spruce"
           ~surface:(surface "broadcast") "hi"));
   check bool "an unnamed external row is not the operator either" false
-    (is_operator (addressed ~speaker_authority:"external" "hi"))
+    (is_operator (addressed ~speaker_authority:"external" "hi"));
+  check bool "explicit owner authority wins over a display name" true
+    (is_operator (addressed ~speaker_name:"owner-display" "hi"));
+  check bool "unknown authority remains unresolved despite a display name" true
+    (match speaker (addressed ~speaker_authority:"unknown" ~speaker_name:"someone" "hi") with
+     | History.Unresolved _ -> true
+     | History.Operator | History.Named _ -> false)
 
 let test_consecutive_tool_rows_become_one_block () =
   let decoded =

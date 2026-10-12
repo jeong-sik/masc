@@ -2498,6 +2498,43 @@ describe('refused response events leave the entry unchanged', () => {
   })
 })
 
+describe('late tool starts after a response ended', () => {
+  beforeEach(() => {
+    _resetKeeperStreamBuffersForTests()
+    keeperThreads.value = {}
+  })
+  const operation = (sequence: number) => ({ kind: 'operation' as const, operationId: 'op-late', sequence })
+  const lateStart = {
+    type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallId: 'provider-late', toolCallName: 'Read',
+  } as unknown as KeeperChatStreamEvent
+
+  it.each(['finished', 'failed'])('keeps the reply text and delivery of a %s response', ending => {
+    assistantEntry('op-late')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'final answer' }, operation(1))
+    if (ending === 'finished') {
+      applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED', runId: 'run-1' } as unknown as KeeperChatStreamEvent, operation(2))
+    } else {
+      failKeeperStreamOperation('sangsu', 'reply-1', 'A Keeper stream frame does not match the protocol.')
+    }
+    const before = keeperThreads.value.sangsu!.find(row => row.id === 'reply-1')!
+    expect(before.delivery).toBe(ending === 'finished' ? 'delivered' : 'error')
+    applyKeeperStreamEvent('sangsu', 'reply-1', lateStart, operation(3))
+    const after = keeperThreads.value.sangsu!.find(row => row.id === 'reply-1')!
+    expect(after).toMatchObject({ text: 'final answer', rawText: 'final answer', delivery: before.delivery, streamState: before.streamState })
+    expect(after.traceSteps?.some(step => step.kind === 'progress')).toBe(false)
+    expect(after.traceSteps).toMatchObject([{ kind: 'tool', toolOccurrenceId: expect.any(String) }])
+  })
+
+  it('still moves the text of a running response into the turn timeline', () => {
+    assistantEntry('op-late')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'lead-in' }, operation(1))
+    applyKeeperStreamEvent('sangsu', 'reply-1', lateStart, operation(2))
+    const after = keeperThreads.value.sangsu!.find(row => row.id === 'reply-1')!
+    expect(after).toMatchObject({ text: '', delivery: 'streaming' })
+    expect(after.traceSteps).toMatchObject([{ kind: 'progress', text: 'lead-in' }, { kind: 'tool' }])
+  })
+})
+
 describe('owned text message replay', () => {
   beforeEach(() => {
     _resetKeeperStreamBuffersForTests()

@@ -1069,14 +1069,20 @@ let test_unusable_skill_config_stops_resolution_unlike_a_stale_pin () =
     (function
       | Selection.Skill_config_unreadable { detail } ->
         check string "the unreadable detail is carried" "disk gone" detail
-      | Selection.Skill_config_rejected _ | Selection.Tool_surface_unavailable _ ->
+      | Selection.Skill_config_rejected _
+      | Selection.Tool_surface_unavailable _
+      | Selection.Skill_source_unreadable _
+      | Selection.Skill_entry_unreadable _ ->
         fail "unreadable configuration was not the unreadable error");
   expect_error
     ~label:"rejected"
     ~snapshot:(Snapshot.config_rejected ~source_text:"not toml" ~diagnostics:[])
     (function
       | Selection.Skill_config_rejected _ -> ()
-      | Selection.Skill_config_unreadable _ | Selection.Tool_surface_unavailable _ ->
+      | Selection.Skill_config_unreadable _
+      | Selection.Tool_surface_unavailable _
+      | Selection.Skill_source_unreadable _
+      | Selection.Skill_entry_unreadable _ ->
         fail "rejected configuration was not the rejected error");
   (match
      Selection.resolve_for_task
@@ -1090,6 +1096,127 @@ let test_unusable_skill_config_stops_resolution_unlike_a_stale_pin () =
    | Error error ->
      failf "a Task with no pin failed on an unreadable configuration: %s"
        (Selection.error_to_string error))
+;;
+
+(* A configured snapshot whose scan of the pinned Skill's source failed holds
+   no entry for the pin, but the Skill may still exist there: resolving it as
+   deleted would run the turn without its procedure. *)
+let test_unreadable_source_stops_resolution_unlike_a_stale_pin () =
+  let config = config (source_row ~id:"only" ~path:"skills") in
+  let source =
+    match config.sources with
+    | [ source ] -> source
+    | _ -> fail "expected one source"
+  in
+  let resolved = Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source in
+  let snapshot =
+    match
+      Snapshot.configured ~config
+        [ { Snapshot.source = resolved
+          ; observation =
+              Snapshot.Source_unavailable
+                { resolved_path = "/workspace/skills"
+                ; operation = Snapshot.Read_source_directory
+                ; detail = "fixture"
+                }
+          ; candidates = []
+          }
+        ]
+    with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "fixture snapshot was rejected"
+  in
+  let identity =
+    Reference.make_identity ~source_id:source.id ~package_id:(package "guide") ~name:"guide"
+  in
+  let reference = Reference.make ~identity ~content_revision:stale_revision in
+  (match Selection.resolve_for_task ~snapshot ~task_id:"task-1" [ reference ] with
+   | Ok selection ->
+     failf "resolution kept going with %d unavailable row(s)"
+       (List.length selection.Selection.unprojectable)
+   | Error error ->
+     (match error with
+      | Selection.Skill_source_unreadable { source_id; observation = _ } ->
+        check string "the unreadable source is named" "only" source_id;
+        check string "the wire code names the unreadable source"
+          "task_skill_source_unreadable" (Selection.error_code error)
+      | Selection.Skill_config_rejected _
+      | Selection.Skill_config_unreadable _
+      | Selection.Tool_surface_unavailable _
+      | Selection.Skill_entry_unreadable _ ->
+        fail "an unreadable source was not the source-unreadable error"))
+;;
+
+(* The source scanned, but the pinned package's document could not be read:
+   same unknown, same typed failure, naming the pin rather than the source. *)
+let test_unreadable_candidate_stops_resolution_unlike_a_stale_pin () =
+  let config = config (source_row ~id:"only" ~path:"skills") in
+  let source =
+    match config.sources with
+    | [ source ] -> source
+    | _ -> fail "expected one source"
+  in
+  let resolved = Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source in
+  let resolved_path =
+    match resolved.resolution with
+    | Skill_source_config.Resolved path -> path
+    | _ -> fail "fixture source did not resolve"
+  in
+  let snapshot =
+    match
+      Snapshot.configured ~config
+        [ { Snapshot.source = resolved
+          ; observation = Snapshot.Source_ready { resolved_path; candidates = 1 }
+          ; candidates =
+              [ Snapshot.Candidate_unreadable
+                  { directory = "guide"; path = "guide/SKILL.md"; detail = "fixture" }
+              ]
+          }
+        ]
+    with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "fixture snapshot was rejected"
+  in
+  let identity =
+    Reference.make_identity ~source_id:source.id ~package_id:(package "guide") ~name:"guide"
+  in
+  let reference = Reference.make ~identity ~content_revision:stale_revision in
+  (match Selection.resolve_for_task ~snapshot ~task_id:"task-1" [ reference ] with
+   | Ok selection ->
+     failf "resolution kept going with %d unavailable row(s)"
+       (List.length selection.Selection.unprojectable)
+   | Error error ->
+     (match error with
+      | Selection.Skill_entry_unreadable { reference = failed; path; detail } ->
+        check bool "the unreadable pin is named" true (Reference.equal failed reference);
+        check string "the unreadable path is carried" "guide/SKILL.md" path;
+        check string "the unreadable detail is carried" "fixture" detail;
+        check string "the wire code names the unreadable entry"
+          "task_skill_entry_unreadable" (Selection.error_code error)
+      | Selection.Skill_config_rejected _
+      | Selection.Skill_config_unreadable _
+      | Selection.Tool_surface_unavailable _
+      | Selection.Skill_source_unreadable _ ->
+        fail "an unreadable candidate was not the entry-unreadable error"))
+;;
+
+(* A source unconfigured after the Task pinned it has no scan in the snapshot:
+   nothing can still hold the Skill, so the pin reads as deleted. *)
+let test_pin_into_unconfigured_source_reads_as_deleted () =
+  let snapshot, _, _ = two_skill_snapshot () in
+  let elsewhere =
+    match Skill_source_config.source_id_of_string "elsewhere" with
+    | Ok id -> id
+    | Error detail -> fail detail
+  in
+  let identity =
+    Reference.make_identity ~source_id:elsewhere ~package_id:(package "guide") ~name:"guide"
+  in
+  let reference = Reference.make ~identity ~content_revision:stale_revision in
+  let selection = resolve_ok ~snapshot ~task_id:"task-1" [ reference ] in
+  (match selection.Selection.unprojectable with
+   | [ { Selection.reason = Selection.Pin_unresolved (Snapshot.Identity_not_found _); _ } ] -> ()
+   | _ -> fail "a pin into an unconfigured source is not one identity-not-found row")
 ;;
 
 let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
@@ -1344,6 +1471,12 @@ let () =
             test_deleted_skill_pin_does_not_stop_resolution
         ; test_case "unusable Skill configuration stops resolution, a stale pin does not" `Quick
             test_unusable_skill_config_stops_resolution_unlike_a_stale_pin
+        ; test_case "unreadable source stops resolution, a stale pin does not" `Quick
+            test_unreadable_source_stops_resolution_unlike_a_stale_pin
+        ; test_case "unreadable candidate stops resolution, a stale pin does not" `Quick
+            test_unreadable_candidate_stops_resolution_unlike_a_stale_pin
+        ; test_case "pin into an unconfigured source reads as deleted" `Quick
+            test_pin_into_unconfigured_source_reads_as_deleted
         ] )
     ]
 ;;

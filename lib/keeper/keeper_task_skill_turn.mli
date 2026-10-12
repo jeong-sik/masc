@@ -8,6 +8,21 @@ type error =
           read, so it holds no entries and no pin can be told apart from a
           deleted Skill. Resolution fails when any Task pins a Skill; a stale
           pin against a configured snapshot is an {!unprojectable} row. *)
+  | Skill_source_unreadable of
+      { source_id : string
+      ; observation : Skill_catalog_snapshot.source_observation
+      }
+      (** The scan of the pinned Skill's source did not read successfully, so
+          the Skill may still exist there. Resolution fails rather than
+          listing the pin as deleted. *)
+  | Skill_entry_unreadable of
+      { reference : Skill_reference.t
+      ; path : string
+      ; detail : string
+      }
+      (** The pinned package's document could not be read, so the Skill may
+          still exist. Resolution fails rather than listing the pin as
+          deleted. *)
 
 type selected = private
   { reference : Skill_reference.t
@@ -22,10 +37,12 @@ type unavailable_reason =
           ({!Keeper_skill_catalog.Entry_unavailable}), such as an instruction
           body over the inline read boundary. *)
   | Pin_unresolved of Skill_catalog_snapshot.reference_resolution_error
-      (** The pinned exact reference no longer resolves: no entry has its
-          identity ([Identity_not_found]), or the entry that does has another
-          content revision ([Content_revision_mismatch]). The Skill was
-          deleted or edited after the Task pinned it. *)
+      (** The pinned exact reference no longer resolves against a
+          successfully scanned source: no entry has its identity
+          ([Identity_not_found]), or the entry that does has another content
+          revision ([Content_revision_mismatch]). The Skill was deleted or
+          edited after the Task pinned it. A pin into an unreadable source or
+          entry is a setup failure instead. *)
 
 type unprojectable = private
   { reference : Skill_reference.t

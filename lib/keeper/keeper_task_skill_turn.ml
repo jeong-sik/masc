@@ -2,6 +2,15 @@ type error =
   | Tool_surface_unavailable of string
   | Skill_config_rejected of { diagnostics : Skill_source_config.diagnostic list }
   | Skill_config_unreadable of { detail : string }
+  | Skill_source_unreadable of
+      { source_id : string
+      ; observation : Skill_catalog_snapshot.source_observation
+      }
+  | Skill_entry_unreadable of
+      { reference : Skill_reference.t
+      ; path : string
+      ; detail : string
+      }
 
 type selected =
   { reference : Skill_reference.t
@@ -49,25 +58,89 @@ let require_configured snapshot references =
   | _ :: _, Config_unreadable { detail } -> Error (Skill_config_unreadable { detail })
 ;;
 
+(* A pin that resolves to no entry is stale only when its source was read
+   successfully. A configured snapshot still carries a scan per source, and a
+   scan whose observation is not ready -- or whose read of the pinned package
+   failed -- may still hold the Skill: downgrading that pin would run the turn
+   without its procedure and misreport the cause as a deletion. A source the
+   snapshot does not scan at all was unconfigured after the Task pinned it,
+   which reads as deleted: building a configured snapshot refuses scans that
+   omit a configured source. *)
+let unreadable_pin_error ~snapshot ~reference = function
+  | Skill_catalog_snapshot.Content_revision_mismatch _ -> None
+  | Skill_catalog_snapshot.Identity_not_found identity ->
+    let source_id = Skill_reference.identity_source_id_to_string identity in
+    let scan =
+      List.find_opt
+        (fun (scan : Skill_catalog_snapshot.source_scan) ->
+           String.equal
+             (Skill_source_config.source_id_to_string scan.source.source.id)
+             source_id)
+        (Skill_catalog_snapshot.sources snapshot)
+    in
+    (match scan with
+     | None -> None
+     | Some scan ->
+       (match scan.observation with
+        | Skill_catalog_snapshot.Source_ready _ ->
+          let package_id = Skill_reference.identity_package_id_to_string identity in
+          let unreadable =
+            List.find_opt
+              (fun (rejection : Skill_catalog_snapshot.rejection) ->
+                 String.equal
+                   (Skill_source_config.source_id_to_string rejection.source_id)
+                   source_id
+                 && (match rejection.package_id with
+                     | Some package ->
+                       String.equal (Skill_reference.package_id_to_string package) package_id
+                     | None -> false)
+                 && (match rejection.reason with
+                     | Skill_catalog_snapshot.Document_unreadable _ -> true
+                     | Skill_catalog_snapshot.Document_rejected _
+                     | Skill_catalog_snapshot.Exact_identity_duplicate _
+                     | Skill_catalog_snapshot.Invalid_package_id _ -> false))
+              (Skill_catalog_snapshot.rejections snapshot)
+          in
+          (match unreadable with
+           | None -> None
+           | Some rejection ->
+             (match rejection.reason with
+              | Skill_catalog_snapshot.Document_unreadable { path; detail } ->
+                Some (Skill_entry_unreadable { reference; path; detail })
+              | Skill_catalog_snapshot.Document_rejected _
+              | Skill_catalog_snapshot.Exact_identity_duplicate _
+              | Skill_catalog_snapshot.Invalid_package_id _ -> None))
+        | (Skill_catalog_snapshot.Source_missing _
+          | Skill_catalog_snapshot.Source_not_directory _
+          | Skill_catalog_snapshot.Source_unavailable _
+          | Skill_catalog_snapshot.Source_unresolved _) as observation ->
+          Some (Skill_source_unreadable { source_id; observation })))
+;;
+
 (* Against a configured snapshot, a pinned reference it cannot give back is a
-   Skill that is unavailable this turn, never a setup failure
-   (docs/SKILLS-FLOW.md section 2a). Two cases: the snapshot holds the identity but the catalog cannot
-   project the entry (an instruction body over the inline read boundary,
-   #39138), and the pin no longer resolves because the Skill was edited or
-   deleted after the Task pinned it. Failing setup for either would stop every
-   turn of a Keeper whose current or held Task pins one, including turns about
-   other Tasks, until that Task is released: no path re-pins a Task. *)
+   Skill that is unavailable this turn rather than a setup failure
+   (docs/SKILLS-FLOW.md section 2a): the snapshot holds the identity but the
+   catalog cannot project the entry (an instruction body over the inline read
+   boundary, #39138), or the pin no longer resolves because the Skill was
+   edited or deleted after the Task pinned it. Failing setup for either would
+   stop every turn of a Keeper whose current or held Task pins one, including
+   turns about other Tasks, until that Task is released: no path re-pins a
+   Task. The downgrade holds only for successfully scanned sources; a pin
+   into an unreadable source or entry stops setup above instead. *)
 let resolve_with_task_ids ?descriptors ~snapshot ~task_ids references =
   let rec loop resolved unprojectable = function
     | [] -> Ok { selected = List.rev resolved; unprojectable = List.rev unprojectable; descriptor_authority = descriptors }
     | reference :: rest ->
       (match Skill_catalog_snapshot.resolve_reference snapshot reference with
        | Error resolution ->
-         loop
-           resolved
-           ({ reference; reason = Pin_unresolved resolution; task_ids }
-            :: unprojectable)
-           rest
+         (match unreadable_pin_error ~snapshot ~reference resolution with
+          | Some error -> Error error
+          | None ->
+            loop
+              resolved
+              ({ reference; reason = Pin_unresolved resolution; task_ids }
+               :: unprojectable)
+              rest)
        | Ok entry ->
          (match Keeper_skill_catalog.project_entry_or_fallback ?descriptors snapshot entry with
           | Keeper_skill_catalog.Projected skill ->
@@ -241,6 +314,35 @@ let error_code = function
   | Tool_surface_unavailable _ -> "lane_addon_surface_unavailable"
   | Skill_config_rejected _ -> "task_skill_config_rejected"
   | Skill_config_unreadable _ -> "task_skill_config_unreadable"
+  | Skill_source_unreadable _ -> "task_skill_source_unreadable"
+  | Skill_entry_unreadable _ -> "task_skill_entry_unreadable"
+;;
+
+let source_observation_to_string = function
+  | Skill_catalog_snapshot.Source_ready _ -> "ready"
+  | Skill_catalog_snapshot.Source_missing { resolved_path } ->
+    Printf.sprintf "source directory is missing: %s" resolved_path
+  | Skill_catalog_snapshot.Source_not_directory { resolved_path; kind = _ } ->
+    Printf.sprintf "source path is not a directory: %s" resolved_path
+  | Skill_catalog_snapshot.Source_unavailable { resolved_path; operation; detail } ->
+    Printf.sprintf "%s failed on %s: %s"
+      (Skill_catalog_snapshot.source_operation_to_string operation)
+      resolved_path
+      detail
+  | Skill_catalog_snapshot.Source_unresolved resolution ->
+    (match resolution with
+     | Skill_source_config.Resolved path ->
+       Printf.sprintf "source did not resolve: %s" path
+     | Skill_source_config.Anchor_unavailable anchor ->
+       Printf.sprintf "source anchor is unavailable: %s"
+         (Skill_source_config.anchor_to_string anchor)
+     | Skill_source_config.Anchor_invalid { anchor; rejection } ->
+       Printf.sprintf "source anchor is invalid: %s: %s"
+         (Skill_source_config.anchor_to_string anchor)
+         (Skill_source_config.anchor_rejection_to_string rejection)
+     | Skill_source_config.Path_rejected rejection ->
+       Printf.sprintf "source path is rejected: %s"
+         (Skill_source_config.path_rejection_to_string rejection))
 ;;
 
 let error_to_string = function
@@ -250,6 +352,16 @@ let error_to_string = function
     ^ String.concat "; " (List.map Skill_source_config.diagnostic_to_string diagnostics)
   | Skill_config_unreadable { detail } ->
     "Skill configuration is unreadable, so Task Skills cannot be resolved: " ^ detail
+  | Skill_source_unreadable { source_id; observation } ->
+    Printf.sprintf
+      "Skill source %s was not read successfully, so a Task pin into it cannot be told apart from a deleted Skill: %s"
+      source_id
+      (source_observation_to_string observation)
+  | Skill_entry_unreadable { reference; path; detail } ->
+    Printf.sprintf "Skill %s could not be read (%s), so its Task pin cannot be told apart from a deleted Skill: %s"
+      (Skill_reference.to_yojson reference |> Yojson.Safe.to_string)
+      path
+      detail
 ;;
 
 let core_error error =

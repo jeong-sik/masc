@@ -114,7 +114,11 @@ Claimed/InProgress, task-364 수리)가 지명한 exact reference를 frozen snap
 catalog가 투영하지 못하는 entry는 그 Task의 unavailable row이며 턴을 막지 않는다.
 이유(`error_code`, `detail`)는 prompt와 로그에 보인다. Skill 설정이 거절됐거나 읽히지 않은
 snapshot은 entry가 없어서 모든 pin이 "삭제됨"으로 보이므로, pin이 하나라도 있으면
-`Skill_config_rejected` / `Skill_config_unreadable`로 턴을 실패시킨다. Profile 이름 선택에서 제외된 알려진
+`Skill_config_rejected` / `Skill_config_unreadable`로 턴을 실패시킨다.
+pin한 source를 성공적으로 읽지 못했거나(스캔 실패·미확인·경로 문제 등) pin한 package의
+문서를 읽지 못한 경우도 Skill이 아직 있을 수 있으므로 `Skill_source_unreadable` /
+`Skill_entry_unreadable`로 턴을 실패시킨다. 해소되지 않는 pin을 stale(삭제·수정됨)로
+내리는 것은 성공적으로 읽힌 source에 대해서만 한다. Profile 이름 선택에서 제외된 알려진
 Task Skill도 실행 projection과 prompt에서 unavailable이며 admission 전체를 막지 않는다.
 지시 본문은 `keeper_skill`이 직접 서빙하므로 `Read`와 무관하다. 통과하면
 `Keeper_tool_composition_surface.make_tools`가:

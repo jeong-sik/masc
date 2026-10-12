@@ -145,6 +145,45 @@ describe('Keeper operation stream projection', () => {
 
   })
 
+  it('keeps newer retry progress after the real thinking publication timer fires', () => {
+    vi.useFakeTimers()
+    try {
+      assistantEntry()
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: { runtime_id: 'claude', attempt_index: 0 },
+      })
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: {
+          index: 0, delta: 'exposed reasoning prefix', response: { content_generation: 1, stream_scope: 0 },
+        },
+      })
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_PROVIDER_RETRY', value: {
+          attempt: { routing_run_id: 'routing-run', runtime_id: 'claude', lane_attempt_index: 0 },
+          retry: { observation_id: 'retry-id', attempt: 1, max_retries: 10, retry_delay_ms: 1234, error_status: null },
+        },
+      })
+      const entry = () => requiredFixture(keeperThreads.value.sangsu?.find(row => row.id === 'reply-1'))
+      expect(entry().streamState).toBe('retrying')
+      vi.advanceTimersByTime(KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS)
+      expect(entry().streamState).toBe('retrying')
+      expect(entry().traceSteps).toMatchObject([{ kind: 'think', text: 'exposed reasoning prefix' }])
+      expect(entry().text).toBe('')
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: {
+          index: 0, delta: ' recovered', response: { content_generation: 1, stream_scope: 0 },
+        },
+      })
+      vi.advanceTimersByTime(KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS)
+      expect(entry().streamState).toBe('thinking')
+      expect(entry().traceSteps).toMatchObject([{ kind: 'think', text: 'exposed reasoning prefix recovered' }])
+
+    } finally {
+      _resetKeeperStreamBuffersForTests()
+      vi.useRealTimers()
+    }
+  })
+
   it('deduplicates sequenced reasoning across transport replay and restores its prefix', () => {
     assistantEntry()
     const owner = { content_generation: 4, stream_scope: 2 }

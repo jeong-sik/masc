@@ -1021,20 +1021,25 @@ status: reference
 : 후보가 보낸 provider 응답을 MASC가 이번 turn의 답으로 받지 않기로 한 관측
   (`Agent_core.Types.AcceptRejected` → `Keeper_internal_error.Accept_rejected`).
   "provider가 실패했다"와 다른 관측이다 — 응답은 도착했고, 받아들이지 않기로 한
-  것이다. 두 닫힌 질문의 짝으로 기록된다(`lib/keeper_runtime/keeper_internal_error.ml`).
-  - 거절 이유 `accept_rejection_kind`(둘) — `no_usable_progress`(답 안에 이 turn을
-    나르는 쓸 만한 내용이 없음)·`predicate_rejected`(내용은 있으나 수용 조건이
-    기각함).
-  - 응답 모양 `accept_response_shape`(일곱) — `empty`·`thinking_only`·
-    `blank_text_only`·`tool_result_only`·`media_only`·
-    `mixed_without_deliverable_content`·`has_deliverable_content`.
+  것이다. 두 닫힌 질문의 짝으로 기록된다(`lib/keeper_runtime/keeper_internal_error.mli`).
+  - 거절 이유 `accept_rejection_kind`(둘) — `Accept_no_usable_progress`(답 안에 이
+    turn을 나르는 쓸 만한 내용이 없음)·`Accept_predicate_rejected`(내용은 있으나
+    수용 조건이 기각함).
+  - 응답 모양 `accept_response_shape`(일곱) — `Accept_response_empty`·
+    `Accept_response_thinking_only`·`Accept_response_blank_text_only`·
+    `Accept_response_tool_result_only`·`Accept_response_media_only`·
+    `Accept_response_mixed_without_deliverable_content`·
+    `Accept_response_has_deliverable_content`.
   거절 기록이 곧 재시도 이유는 아니다. 세 갈래 재시도 이유는 응답 모양에 따라
-  `accept_no_progress_retry_kind`가 닫아 놓는다 — `Empty_no_progress`·
-  `Thinking_only_no_progress`·`Truncated_no_progress`(`stop_reason`이
-  MaxTokens인 no-progress 거절만) — 이 밖의 거절은 재시도 이유를 갖지 않는다.
-  이 세 이름은 Failure Route의 `No_progress_*` 회전과, 이 turn이 다음 후보에게
-  넘어가며 영수증에 적는 `degraded_retry_reason`(`empty_no_progress`·
-  `thinking_only_no_progress`·`truncated_no_progress`)과 같은 사실의 세 표기다.
+  `accept_no_progress_retry_kind`가 닫아 놓는다 — `Empty_no_progress`(빈 응답)·
+  `Thinking_only_no_progress`(thinking-only). 이 둘은 `stop_reason`과 무관하게
+  모양이 정한다(EndTurn이든 MaxTokens든 그대로다). `Truncated_no_progress`는
+  `stop_reason`이 MaxTokens인 나머지 모양이다. 이 밖의 거절은 재시도 이유를
+  갖지 않는다.
+  이 세 이름은 Failure Route의 `No_progress_empty`·`No_progress_thinking_only`·
+  `No_progress_truncated` 회전과, 이 turn이 다음 후보에게 넘어가며 영수증에 적는
+  `degraded_retry_reason`(`empty_no_progress`·`thinking_only_no_progress`·
+  `truncated_no_progress`)과 같은 사실의 세 표기다.
   응답을 뽑는 질의는 둘을 섞지 말고 레이어를 구분해 거른다. 거절이 이 후보 쪽
   일인지는 Accept Rejection이 답하지 않는다 — Candidate Fault가 그 답이다.
   → [keeper_internal_error](../../lib/keeper_runtime/keeper_internal_error.mli)
@@ -1051,8 +1056,8 @@ status: reference
   Rotate_now 매치에서 `()`로 실패가 이 후보의 고장을 증명하지 않는다. 남기면
   자매 후보가 답하는 동안 head가 영영 뒤로 밀리므로(RFC-0458 §3.4, §6), 창
   초과(`Context_window_exceeded`)도 "작은 turn에 답 못 한 증거가 아니다"
-  (#38984)로 같은 팔에 속한다. 이 팔과 구분되는
-  두 팔이 있다 — `Server_error_not_transient`는 `note_failed_attempt`로
+  (#38984)로 같은 팔에 속한다. 이 팔과 구분되는 두 팔이 있다 —
+  `Server_error_not_transient`는 `note_failed_attempt`로
   `server_error` 실패를 남기고(답하지 못한 사실 자체가 증거),
   `Authorization_refused`(403)는 증거 대신 usage-read 질문을 한 번 던진다.
   반대 방향 관측도 비대칭이다 — `Retry_after_observed`의 `Empty_completion`은

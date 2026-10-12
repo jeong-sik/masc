@@ -1,4 +1,4 @@
-import { sameKeeperResponseOwner, type KeeperResponseOwner, initialKeeperResponseState, reduceKeeperResponse, acknowledgeKeeperResponseSequence, type KeeperResponseDecision, type KeeperResponseEvent } from './lib/keeper-response-state'
+import { sameKeeperResponseOwner, type KeeperResponseOwner, initialKeeperResponseState, keeperResponseEventOf, reduceKeeperResponse, acknowledgeKeeperResponseSequence, type KeeperResponseDecision, type KeeperResponseEvent } from './lib/keeper-response-state'
 import { keeperStreamContract } from './keeper-stream-contract'
 import {
   sameDeliveryKey,
@@ -660,6 +660,19 @@ export function applyKeeperOperationTurnEvent(
   return error
 }
 
+/** Admit a stream frame through the reducer event it maps to. A frame that
+ * names no response is not gated and leaves the state alone. */
+function admitStreamEvent(
+  keeperName: string,
+  assistantEntryId: string,
+  event: KeeperChatStreamEvent,
+): KeeperResponseDecision {
+  const mapped = keeperResponseEventOf(event)
+  if (mapped) return admitResponseEvent(keeperName, assistantEntryId, mapped)
+  const entry = (keeperThreads.value[keeperName] ?? []).find(candidate => candidate.id === assistantEntryId)
+  return { state: entry?.responseState ?? initialKeeperResponseState, accepted: true, advanced: false, authoritative: false, reopens: false }
+}
+
 function admitResponseEvent(
   keeperName: string,
   assistantEntryId: string,
@@ -667,7 +680,7 @@ function admitResponseEvent(
 ): KeeperResponseDecision {
   const entry = (keeperThreads.value[keeperName] ?? []).find(candidate => candidate.id === assistantEntryId)
   const before = entry?.responseState ?? initialKeeperResponseState
-  if (!entry) return { state: before, accepted: false, advanced: false, authoritative: false }
+  if (!entry) return { state: before, accepted: false, advanced: false, authoritative: false, reopens: false }
   const decision = reduceKeeperResponse(before, event)
   if (!decision.accepted) return decision
   if (decision.advanced) {
@@ -675,17 +688,14 @@ function admitResponseEvent(
     clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
     clearTextMessageStreamState(keeperName, assistantEntryId)
   }
-  // A content-activity observation is side metadata with no authored body:
-  // it may raise the ownership floor for a newer generation, but it must not
-  // reopen a stopped response or wipe provider/usage details the way a real
-  // response header or content advance does.
-  const reopenResponse = decision.advanced
-    && decision.authoritative
-    && !(event.kind === 'observe' && event.source === 'content')
+  // A response that reopens the entry replaces the details of the previous
+  // one. Until its own header arrives they stay empty rather than label the
+  // new response with the old model, provider id and usage. The reducer
+  // decides when an event reopens: content-activity metadata does not.
   if (decision.state !== before) updateThreadEntry(keeperName, assistantEntryId, current => ({
     ...current,
     responseState: decision.state,
-    ...(reopenResponse ? {
+    ...(decision.reopens ? {
       streamState: 'opening' as const,
       details: current.details ? { ...current.details, providerMessageId: null, modelUsed: null,
         stopReason: null, usage: null, costUsd: null } : current.details,
@@ -758,7 +768,7 @@ export function applyKeeperStreamEvent(
   try {
   switch (event.type) {
     case 'RUN_STARTED':
-      if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'started' }).accepted) return null
+      if (!admitStreamEvent(keeperName, assistantEntryId, event).accepted) return null
       setAssistantStreamState(
         keeperName,
         assistantEntryId,
@@ -768,7 +778,7 @@ export function applyKeeperStreamEvent(
       )
       return null
     case 'TEXT_MESSAGE_START': {
-      if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'text-boundary' }).accepted) return null
+      if (!admitStreamEvent(keeperName, assistantEntryId, event).accepted) return null
       const messageId = textStreamMessageId(event.messageId)
       const streamState = textMessageStreamState(keeperName, assistantEntryId)
       if (messageId !== null && streamState.endedMessageIds.has(messageId)) {
@@ -801,9 +811,7 @@ export function applyKeeperStreamEvent(
       return null
     }
     case 'TEXT_MESSAGE_CONTENT': {
-      const response = admitResponseEvent(keeperName, assistantEntryId, {
-        kind: 'observe', owner: event.textResponse ?? null, scope: event.textStreamScope ?? null, source: 'body',
-      })
+      const response = admitStreamEvent(keeperName, assistantEntryId, event)
       if (!response.accepted) return null
       const messageId = textStreamMessageId(event.messageId)
       if (messageId !== null) {
@@ -823,7 +831,7 @@ export function applyKeeperStreamEvent(
       return null
     }
     case 'TEXT_MESSAGE_END': {
-      if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'text-boundary' }).accepted) return null
+      if (!admitStreamEvent(keeperName, assistantEntryId, event).accepted) return null
       const messageId = textStreamMessageId(event.messageId)
       if (messageId !== null) {
         const streamState = textMessageStreamState(keeperName, assistantEntryId)
@@ -1014,10 +1022,7 @@ export function applyKeeperStreamEvent(
     case 'CUSTOM': {
       const customEventName: string = event.name
       if (event.name === 'KEEPER_MODEL_CONTENT_ACTIVITY') {
-        if (event.value.state === 'observed') admitResponseEvent(keeperName, assistantEntryId, {
-          kind: 'observe', source: 'content', scope: event.value.stream_scope,
-          owner: { content_generation: event.value.generation, stream_scope: event.value.stream_scope },
-        })
+        admitStreamEvent(keeperName, assistantEntryId, event)
         return null
       }
       if (event.name === 'KEEPER_TOOL_RESULT_READY') {
@@ -1110,7 +1115,7 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_RUNTIME_ATTEMPT_STARTED') {
-        if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'attempt' }).accepted) return null
+        if (!admitStreamEvent(keeperName, assistantEntryId, event).accepted) return null
         const current = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
         const value = event.value
         const observed = value?.runtime_id !== undefined && value.attempt_index !== undefined
@@ -1191,11 +1196,7 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_START') {
-        const response = admitResponseEvent(keeperName, assistantEntryId, {
-          kind: 'observe', source: 'header', scope: event.value.stream_scope,
-          owner: event.value.content_generation === undefined ? null
-            : { content_generation: event.value.content_generation, stream_scope: event.value.stream_scope },
-        })
+        const response = admitStreamEvent(keeperName, assistantEntryId, event)
         if (!response.accepted) return null
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
@@ -1223,11 +1224,7 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_DELTA') {
-        if (!admitResponseEvent(keeperName, assistantEntryId, {
-          kind: 'observe', source: 'details', scope: event.value.stream_scope,
-          owner: event.value.content_generation === undefined ? null
-            : { content_generation: event.value.content_generation, stream_scope: event.value.stream_scope },
-        }).accepted) return null
+        if (!admitStreamEvent(keeperName, assistantEntryId, event).accepted) return null
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
         const patch: Partial<KeeperConversationDetails> = {}
@@ -1241,7 +1238,7 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_STOP') {
-        if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'stop', owner: event.value }).accepted) return null
+        if (!admitStreamEvent(keeperName, assistantEntryId, event).accepted) return null
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         markFinalizingIfLive('KEEPER_STREAM_MESSAGE_STOP')
         return null
@@ -1262,9 +1259,7 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_THINKING_DELTA') {
-        const response = admitResponseEvent(keeperName, assistantEntryId, {
-          kind: 'observe', source: 'body', scope: null, owner: event.value.response ?? null,
-        })
+        const response = admitStreamEvent(keeperName, assistantEntryId, event)
         if (!response.accepted) return null
         const value = isRecord(event.value) ? event.value : null
         const delta = value && typeof value.delta === 'string'
@@ -1314,7 +1309,7 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_CONTINUATION_CHECKPOINT') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'checkpoint' }).accepted) return null
+        if (!admitStreamEvent(keeperName, assistantEntryId, event).accepted) return null
         const rawText = isRecord(event.value)
           ? asString(event.value.message, '')
           : ''
@@ -1465,7 +1460,7 @@ export function applyKeeperStreamEvent(
     }
     case 'RUN_ERROR':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      admitResponseEvent(keeperName, assistantEntryId, { kind: 'terminal' })
+      admitStreamEvent(keeperName, assistantEntryId, event)
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
       clearTextMessageStreamState(keeperName, assistantEntryId)
       clearQuarantinedToolOccurrences(keeperName, assistantEntryId)

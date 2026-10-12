@@ -1,3 +1,5 @@
+import type { KeeperChatStreamEvent } from './keeper-chat-stream-contract'
+
 export interface KeeperResponseOwner {
   readonly content_generation: number
   readonly stream_scope: number
@@ -27,6 +29,9 @@ export interface KeeperResponseDecision {
   readonly accepted: boolean
   readonly advanced: boolean
   readonly authoritative: boolean
+  /** The event began a newer response with authored content, so the previous
+   * response's details no longer describe the entry. */
+  readonly reopens: boolean
 }
 
 export const initialKeeperResponseState: ObservedKeeperResponseState = Object.freeze({
@@ -46,17 +51,17 @@ export function acknowledgeKeeperResponseSequence(state: KeeperResponseState, se
 }
 
 export function reduceKeeperResponse(state: KeeperResponseState, event: KeeperResponseEvent): KeeperResponseDecision {
-  const refuse = (): KeeperResponseDecision => ({ state, accepted: false, advanced: false, authoritative: false })
+  const refuse = (): KeeperResponseDecision => ({ state, accepted: false, advanced: false, authoritative: false, reopens: false })
   if (state.kind === 'unavailable') return refuse()
   // A failed operation takes no further response events: its stream has a hole.
   if (state.phase === 'failed') return refuse()
   const settle = (next: ObservedKeeperResponseState): KeeperResponseDecision => (
-    { state: Object.freeze(next), accepted: true, advanced: false, authoritative: false }
+    { state: Object.freeze(next), accepted: true, advanced: false, authoritative: false, reopens: false }
   )
   switch (event.kind) {
     case 'started':
       if (state.phase === 'terminal' || (state.phase === 'running' && state.floor !== null)) return refuse()
-      return settle({ ...state, phase: 'running', current: null, partialScope: null })
+      return settle({ ...state, phase: 'running' })
     case 'failed':
       return state.phase === 'terminal' ? refuse() : settle({ ...state, phase: 'failed' })
     case 'terminal':
@@ -69,7 +74,7 @@ export function reduceKeeperResponse(state: KeeperResponseState, event: KeeperRe
       // START and END of a text message mark message boundaries for replay
       // guards and display only; they do not name a response, so any live
       // phase admits them.
-      return state.phase === 'terminal' ? refuse() : { state, accepted: true, advanced: false, authoritative: false }
+      return state.phase === 'terminal' ? refuse() : { state, accepted: true, advanced: false, authoritative: false, reopens: false }
     case 'attempt':
       if (state.phase !== 'running') return refuse()
       return settle({ ...state, current: null, partialScope: null })
@@ -77,27 +82,21 @@ export function reduceKeeperResponse(state: KeeperResponseState, event: KeeperRe
       if (event.owner && !ownerFromUnknown(event.owner)) return refuse()
       if (state.phase !== 'running') return refuse()
       if (!event.owner) {
-        return state.floor ? refuse() : { state, accepted: true, advanced: false, authoritative: true }
+        return state.floor ? refuse() : { state, accepted: true, advanced: false, authoritative: true, reopens: false }
       }
       if (!state.current || compareOwner(event.owner, state.current) !== 0
         || (state.closed && compareOwner(event.owner, state.closed) <= 0)) return refuse()
-      return { state: Object.freeze({ ...state, closed: state.current }), accepted: true, advanced: false, authoritative: true }
+      return { state: Object.freeze({ ...state, closed: state.current }), accepted: true, advanced: false, authoritative: true, reopens: false }
     case 'observe':
       return observeResponse(state, event)
-    default:
-      return assertNeverResponseEvent(event)
   }
-}
-
-function assertNeverResponseEvent(event: never): never {
-  throw new Error(`Unhandled Keeper response event: ${JSON.stringify(event)}`)
 }
 
 function observeResponse(
   state: ObservedKeeperResponseState,
   event: Extract<KeeperResponseEvent, { kind: 'observe' }>,
 ): KeeperResponseDecision {
-  const refuse = (): KeeperResponseDecision => ({ state, accepted: false, advanced: false, authoritative: false })
+  const refuse = (): KeeperResponseDecision => ({ state, accepted: false, advanced: false, authoritative: false, reopens: false })
   if (event.owner && !ownerFromUnknown(event.owner)) return refuse()
   if (event.scope !== null && (!Number.isSafeInteger(event.scope) || event.scope < 0)) return refuse()
   if (state.phase !== 'running') return refuse()
@@ -107,7 +106,7 @@ function observeResponse(
     return {
       state: partial ? Object.freeze({ ...state, current: null, partialScope: event.scope }) : state,
       accepted: true, advanced: partial && (state.current !== null || state.partialScope !== event.scope),
-      authoritative: state.floor === null,
+      authoritative: state.floor === null, reopens: false,
     }
   }
   const incoming = Object.freeze({ content_generation: event.owner.content_generation, stream_scope: event.owner.stream_scope })
@@ -117,17 +116,19 @@ function observeResponse(
     // A continuation or replay of the in-flight response stays admissible,
     // but never past its closure (details may still annotate the closed one).
     if (state.closed && compareOwner(incoming, state.closed) <= 0 && event.source !== 'details') return refuse()
-    return { state, accepted: true, advanced: false, authoritative: true }
+    return { state, accepted: true, advanced: false, authoritative: true, reopens: false }
   }
   // An attempt retires the admitted owner to the floor without clearing it,
   // so an equal identity past the advance is stale, not a re-admission.
   if (state.floor && compareOwner(incoming, state.floor) <= 0) return refuse()
   if (state.floor && incoming.content_generation === state.floor.content_generation
     && state.partialScope !== null && incoming.stream_scope < state.partialScope) return refuse()
-  if (state.closed && compareOwner(incoming, state.closed) <= 0) return refuse()
   return {
     state: Object.freeze({ ...state, floor: incoming, current: incoming, partialScope: null }),
     accepted: true, advanced: true, authoritative: true,
+    // Content-activity metadata may raise the floor for a newer generation,
+    // but it has no authored body and must not reopen a stopped response.
+    reopens: event.source !== 'content',
   }
 }
 
@@ -174,4 +175,52 @@ export function sameKeeperResponseOwner(left: KeeperResponseOwner | undefined, r
  * terminal frame completes it; only the stored transcript can replace it. */
 export function keeperResponseIsFailed(state: KeeperResponseState | undefined): boolean {
   return state?.kind === 'known' && state.phase === 'failed'
+}
+
+/** The one mapping from a stream frame to the reducer event that admits it, shared
+ * by the thread stream and the Copilot dock. A frame that names no response
+ * (tool calls, usage, diagnostics) maps to null and is not gated. A finished
+ * run maps to terminal; a caller that knows the turn ended at a checkpoint
+ * admits a checkpoint instead. */
+export function keeperResponseEventOf(event: KeeperChatStreamEvent): KeeperResponseEvent | null {
+  switch (event.type) {
+    case 'RUN_STARTED':
+      return { kind: 'started' }
+    case 'RUN_FINISHED':
+    case 'RUN_ERROR':
+      return { kind: 'terminal' }
+    case 'TEXT_MESSAGE_START':
+    case 'TEXT_MESSAGE_END':
+      return { kind: 'text-boundary' }
+    case 'TEXT_MESSAGE_CONTENT':
+      return { kind: 'observe', source: 'body', owner: event.textResponse ?? null, scope: event.textStreamScope ?? null }
+    case 'CUSTOM':
+      switch (event.name) {
+        case 'KEEPER_RUNTIME_ATTEMPT_STARTED':
+          return { kind: 'attempt' }
+        case 'KEEPER_CONTINUATION_CHECKPOINT':
+          return { kind: 'checkpoint' }
+        case 'KEEPER_STREAM_MESSAGE_START':
+        case 'KEEPER_STREAM_MESSAGE_DELTA':
+          return {
+            kind: 'observe', source: event.name === 'KEEPER_STREAM_MESSAGE_START' ? 'header' : 'details',
+            scope: event.value.stream_scope,
+            owner: event.value.content_generation === undefined ? null
+              : { content_generation: event.value.content_generation, stream_scope: event.value.stream_scope },
+          }
+        case 'KEEPER_STREAM_MESSAGE_STOP':
+          return { kind: 'stop', owner: event.value }
+        case 'KEEPER_THINKING_DELTA':
+          return { kind: 'observe', source: 'body', scope: null, owner: event.value.response ?? null }
+        case 'KEEPER_MODEL_CONTENT_ACTIVITY':
+          return event.value.state === 'observed'
+            ? { kind: 'observe', source: 'content', scope: event.value.stream_scope,
+                owner: { content_generation: event.value.generation, stream_scope: event.value.stream_scope } }
+            : null
+        default:
+          return null
+      }
+    default:
+      return null
+  }
 }

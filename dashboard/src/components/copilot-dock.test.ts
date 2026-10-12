@@ -393,6 +393,45 @@ describe('CopilotDock', () => {
     expect(reply).not.toContain('STALE')
   })
 
+  const dockCustom = (timestamp: number, name: string, value: unknown) => (
+    { type: 'CUSTOM', threadId: 'keeper-consumer:sangsu', timestamp, runId: 'run-1', name, value }
+  )
+  const dockOwner = (generation: number) => ({ content_generation: generation, stream_scope: 0 })
+
+  it('refuses a delayed delta of an older response after a newer header', async () => {
+    const reply = await sendDockMessageAndReadReply([
+      dockContent(1, 'second', { textResponse: dockOwner(2) }),
+      dockCustom(2, 'KEEPER_STREAM_MESSAGE_START', { ...dockOwner(3), provider_message_id: '', model: '' }),
+      dockContent(3, 'LATE-FROM-2', { textResponse: dockOwner(2) }),
+      dockContent(4, 'third', { textResponse: dockOwner(3) }),
+      dockFinished,
+    ])
+    expect(reply).toContain('secondthird')
+    expect(reply).not.toContain('LATE-FROM-2')
+  })
+
+  it('refuses a delta of a response after its stop', async () => {
+    const reply = await sendDockMessageAndReadReply([
+      dockContent(1, 'done', { textResponse: dockOwner(2) }),
+      dockCustom(2, 'KEEPER_STREAM_MESSAGE_STOP', dockOwner(2)),
+      dockContent(3, 'AFTER-STOP', { textResponse: dockOwner(2) }),
+      dockFinished,
+    ])
+    expect(reply).toContain('done')
+    expect(reply).not.toContain('AFTER-STOP')
+  })
+
+  it('refuses a delta older than an observed content-activity generation', async () => {
+    const reply = await sendDockMessageAndReadReply([
+      dockContent(1, 'three', { textResponse: dockOwner(3) }),
+      dockCustom(2, 'KEEPER_MODEL_CONTENT_ACTIVITY', { generation: 4, stream_scope: 0, block_index: 0, channel: 'text', state: 'observed' }),
+      dockContent(3, 'LATE-FROM-3', { textResponse: dockOwner(3) }),
+      dockFinished,
+    ])
+    expect(reply).toContain('three')
+    expect(reply).not.toContain('LATE-FROM-3')
+  })
+
   it('does not present a reply with a dropped frame as complete', async () => {
     const reply = await sendDockMessageAndReadReply([
       dockContent(1, 'first half'),

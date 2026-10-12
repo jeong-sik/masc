@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   acknowledgeKeeperResponseSequence,
   initialKeeperResponseState,
+  keeperResponseEventOf,
   keeperResponseStateFromUnknown,
   ownerFromUnknown,
   reduceKeeperResponse,
@@ -65,7 +66,7 @@ describe('reduceKeeperResponse lifecycle phases', () => {
   it('refuses every event for an unavailable state and keeps it unavailable', () => {
     for (const event of ALL_EVENTS) {
       const decision = reduceKeeperResponse(unavailableKeeperResponseState, event)
-      expect(decision).toEqual({ state: unavailableKeeperResponseState, accepted: false, advanced: false, authoritative: false })
+      expect(decision).toEqual({ state: unavailableKeeperResponseState, accepted: false, advanced: false, authoritative: false, reopens: false })
     }
   })
 
@@ -139,6 +140,32 @@ describe('reduceKeeperResponse lifecycle phases', () => {
 
   it('an unowned partial scope alone does not close text boundaries', () => {
     expect(run([observe(null, 3), { kind: 'text-boundary' }]).last.accepted).toBe(true)
+  })
+})
+
+describe('reduceKeeperResponse stop outside the running phase', () => {
+  it.each([
+    ['terminal', [observe(1), { kind: 'terminal' }] as const],
+    ['awaiting-continuation', [observe(1), { kind: 'checkpoint' }] as const],
+    ['failed', [observe(1), { kind: 'failed' }] as const],
+  ])('refuses a stop in the %s phase', (_phase, events) => {
+    const state = run(events).state
+    for (const stop of [{ kind: 'stop', owner: owner(1) }, { kind: 'stop', owner: null }] as const) {
+      const decision = reduceKeeperResponse(state, stop)
+      expect(decision.accepted).toBe(false)
+      expect(decision.state).toBe(state)
+    }
+  })
+})
+
+describe('reduceKeeperResponse reopens', () => {
+  it('reopens only for a newer response with authored content', () => {
+    expect(run([observe(1)]).last.reopens).toBe(true)
+    expect(run([observe(1), observe(2)]).last.reopens).toBe(true)
+    expect(run([observe(1), observe(1)]).last.reopens).toBe(false)
+    expect(run([observe(1), observe(2, 0, 'content')]).last).toMatchObject({ advanced: true, reopens: false })
+    expect(run([observe(null, 3)]).last).toMatchObject({ advanced: true, reopens: false })
+    expect(run([observe(1), { kind: 'stop', owner: owner(1) }]).last.reopens).toBe(false)
   })
 })
 
@@ -435,5 +462,40 @@ describe('keeperResponseStateFromUnknown', () => {
       expect(reduceKeeperResponse(restored, event).accepted).toBe(reduceKeeperResponse(live, event).accepted)
     }
     expect(reduceKeeperResponse(restored, observe(7, 0)).accepted).toBe(true)
+  })
+})
+
+describe('keeperResponseEventOf', () => {
+  const base = { threadId: 't', timestamp: 1 }
+  it('maps every frame that names a response to one reducer event', () => {
+    expect(keeperResponseEventOf({ ...base, type: 'RUN_STARTED', runId: 'r' } as never)).toEqual({ kind: 'started' })
+    expect(keeperResponseEventOf({ ...base, type: 'RUN_FINISHED', runId: 'r' } as never)).toEqual({ kind: 'terminal' })
+    expect(keeperResponseEventOf({ ...base, type: 'RUN_ERROR', message: 'x' } as never)).toEqual({ kind: 'terminal' })
+    expect(keeperResponseEventOf({ ...base, type: 'TEXT_MESSAGE_START', messageId: 'm' } as never)).toEqual({ kind: 'text-boundary' })
+    expect(keeperResponseEventOf({ ...base, type: 'TEXT_MESSAGE_END', messageId: 'm' } as never)).toEqual({ kind: 'text-boundary' })
+    expect(keeperResponseEventOf({ ...base, type: 'TEXT_MESSAGE_CONTENT', delta: 'x', textResponse: owner(2, 1) } as never))
+      .toEqual({ kind: 'observe', source: 'body', owner: owner(2, 1), scope: null })
+    expect(keeperResponseEventOf({ ...base, type: 'TEXT_MESSAGE_CONTENT', delta: 'x', textStreamScope: 4 } as never))
+      .toEqual({ kind: 'observe', source: 'body', owner: null, scope: 4 })
+    const custom = (name: string, value: unknown) => ({ ...base, type: 'CUSTOM', name, value }) as never
+    expect(keeperResponseEventOf(custom('KEEPER_RUNTIME_ATTEMPT_STARTED', null))).toEqual({ kind: 'attempt' })
+    expect(keeperResponseEventOf(custom('KEEPER_CONTINUATION_CHECKPOINT', { message: '' }))).toEqual({ kind: 'checkpoint' })
+    expect(keeperResponseEventOf(custom('KEEPER_STREAM_MESSAGE_START', { ...owner(3), stream_scope: 2 })))
+      .toEqual({ kind: 'observe', source: 'header', scope: 2, owner: { content_generation: 3, stream_scope: 2 } })
+    expect(keeperResponseEventOf(custom('KEEPER_STREAM_MESSAGE_DELTA', { stream_scope: 2 })))
+      .toEqual({ kind: 'observe', source: 'details', scope: 2, owner: null })
+    expect(keeperResponseEventOf(custom('KEEPER_STREAM_MESSAGE_STOP', owner(3)))).toEqual({ kind: 'stop', owner: owner(3) })
+    expect(keeperResponseEventOf(custom('KEEPER_THINKING_DELTA', { index: 0, delta: 'x', response: owner(4) })))
+      .toEqual({ kind: 'observe', source: 'body', scope: null, owner: owner(4) })
+    expect(keeperResponseEventOf(custom('KEEPER_MODEL_CONTENT_ACTIVITY', { generation: 5, stream_scope: 1, state: 'observed' })))
+      .toEqual({ kind: 'observe', source: 'content', scope: 1, owner: owner(5, 1) })
+  })
+
+  it('does not gate frames that name no response', () => {
+    const custom = (name: string, value: unknown) => ({ ...base, type: 'CUSTOM', name, value }) as never
+    expect(keeperResponseEventOf(custom('KEEPER_MODEL_CONTENT_ACTIVITY', { generation: 5, stream_scope: 1, state: 'ended' }))).toBeNull()
+    expect(keeperResponseEventOf(custom('KEEPER_STREAM_PING', null))).toBeNull()
+    expect(keeperResponseEventOf(custom('KEEPER_FUTURE_EVENT', null))).toBeNull()
+    expect(keeperResponseEventOf({ ...base, type: 'TOOL_CALL_START' } as never)).toBeNull()
   })
 })

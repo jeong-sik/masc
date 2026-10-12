@@ -1,7 +1,7 @@
 let event_approval_fixture_id = Masc.Keeper_tool_approval_id.fresh ()
 
 (* RFC-0412 stage 3a — the per-operation event log behind the keeper chat
-   pane. Seq dedup, the attempt counter, the committed flag and revision, the
+   pane. Seq dedup, the committed flag and revision, the
    v2 page decoder, and the golden case: a journal decoded through
    [delta_of_journaled] equals the same journal projected by the server to
    AG-UI, encoded as SSE, and read by the live decoder. *)
@@ -157,16 +157,18 @@ let test_resume_position_follows_the_highest_held () =
   check position "gaps do not matter, order does not matter" (Journal.After_seq 4)
     (Log.resume_position t)
 
-let test_attempt_advances_on_runtime_attempt_started () =
+let test_runtime_attempt_observations_preserve_identity () =
   let t = log () in
-  ignore (Log.add t ~seq:(Some 0) Live.Run_started : bool);
-  ignore (Log.add t ~seq:(Some 1) (Live.Text {text="first try"; response=Unobserved_scope (None)}) : bool);
-  ignore (Log.add t ~seq:(Some 2) (Live.Runtime_attempt_started { runtime_id = None; attempt_index = None }) : bool);
-  ignore (Log.add t ~seq:(Some 3) (Live.Text {text="second try"; response=Unobserved_scope (None)}) : bool);
-  check int "current attempt" 1 (Log.attempt t);
-  check (list int) "each entry keeps the attempt it arrived in"
-    [ 0; 0; 1; 1 ]
-    (List.map (fun (entry : Log.entry) -> entry.attempt) (Log.entries t))
+  List.iteri (fun seq index ->
+    ignore (Log.add t ~seq:(Some seq)
+      (Live.Runtime_attempt_started {runtime_id=Some "observed";attempt_index=Some index}) : bool))
+    [7;7;3;8];
+  let indices = Log.entries t |> List.filter_map (fun (entry : Log.entry) ->
+    match entry.delta with
+    | Live.Runtime_attempt_started {attempt_index;_} -> attempt_index
+    | _ -> None) in
+  check (list int) "log preserves supplied attempt observations for transcript decisions"
+    [7;7;3;8] indices
 
 let test_commit_is_idempotent_and_bumps_once () =
   let t = log () in
@@ -949,9 +951,7 @@ let test_a_journal_page_fills_the_log_like_the_wire_does () =
   check position "the journal-fed log is ahead by the trailing undrawn frames"
     (Journal.After_seq (List.length golden + 1)) (Log.resume_position from_journal);
   check position "the wire-fed log stops at the last drawn frame"
-    (Journal.After_seq (List.length golden - 1)) (Log.resume_position from_wire);
-  check int "same attempt" (Log.attempt from_wire) (Log.attempt from_journal);
-  check bool "the wire's attempt advanced past the retry" true (Log.attempt from_wire = 1)
+    (Journal.After_seq (List.length golden - 1)) (Log.resume_position from_wire)
 
 (* A reason that is only whitespace is not a reason. The live arm drops it
    rather than drawing [stopped: ] with nothing after it, so the replay arm
@@ -1182,8 +1182,8 @@ let () =
             test_seq_dedup_and_none_never_dedupes
         ; test_case "last seq follows the highest held" `Quick
             test_resume_position_follows_the_highest_held
-        ; test_case "attempt advances on runtime attempt started" `Quick
-            test_attempt_advances_on_runtime_attempt_started
+        ; test_case "runtime attempt observations retain identity" `Quick
+            test_runtime_attempt_observations_preserve_identity
         ; test_case "commit is idempotent and bumps once" `Quick
             test_commit_is_idempotent_and_bumps_once
         ; test_case "a blank reason is not a reason" `Quick

@@ -14,7 +14,6 @@ type entry =
             run_error); such entries are never deduplicated. Acceptance is
             retained separately as request metadata. *)
   ; at : float option (** Observed event time; journal reads preserve [ts]. *)
-  ; attempt : int  (** 0-based runtime attempt this entry belongs to. *)
   ; delta : Masc_tui_keeper_chat_live.delta
   }
 
@@ -42,9 +41,8 @@ val add : ?at:float -> t -> seq:int option -> Masc_tui_keeper_chat_live.delta ->
 (** Acceptance updates the first/latest request receipt without appending a
     journal entry or advancing its cursor. Other deltas append unless [seq]
     is [Some n] and an entry with seq [n] is already
-    held; returns whether it was added. A [Runtime_attempt_started] delta
-    advances the attempt before it is stored, so it is the first entry of the
-    new attempt. *)
+    held; returns whether it was added. Runtime attempt observations remain
+    in the original delta; the transcript owns their interpretation. *)
 
 val hold_seq : t -> int -> unit
 (** Holds a journal position without an entry: a line the pane draws nothing
@@ -99,7 +97,6 @@ val resume_position : t -> Masc.Keeper_chat_event_log.replay_position
     turn the journal-fed log's position can exceed the wire-fed one by the
     trailing undrawn frames — harmless for a [since_seq] resume, which then
     replays a few frames that draw nothing. *)
-val attempt : t -> int  (** Current attempt; [0] before any retry. *)
 
 val commit : t -> unit
 (** The turn settled: the log is the committed record of it. Idempotent. *)

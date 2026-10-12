@@ -11,7 +11,6 @@ let source_key = function
 type entry =
   { seq : int option
   ; at : float option
-  ; attempt : int
   ; delta : Live.delta
   }
 
@@ -33,7 +32,6 @@ type t =
   ; held_seqs : (int, unit) Hashtbl.t
   ; mutable resume_position : Journal.replay_position
         (* After the highest seq held; the whole turn while none is. *)
-  ; mutable attempt : int
   ; mutable committed : bool
   ; mutable revision : int
   ; mutable operation_state : Keeper_chat_operation.state option
@@ -52,7 +50,6 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; run_started = false
   ; held_seqs = Hashtbl.create 64
   ; resume_position = Journal.Whole_turn
-  ; attempt = 0
   ; committed = false
   ; revision = 0
   ; operation_state = None
@@ -73,7 +70,6 @@ let priority_unavailable t = t.priority_unavailable
 let has_entries t = match t.reversed_entries with [] -> false | _ :: _ -> true
 let run_started t = t.run_started
 let resume_position t = t.resume_position
-let attempt t = t.attempt
 let committed t = t.committed
 let revision t = t.revision
 
@@ -155,7 +151,7 @@ let note_priority_unavailable t =
 let add ?at t ~seq (delta : Live.delta) =
   match delta with
   | Live.Accepted _ ->
-      let entry = { seq = None; at; attempt = 0; delta } in
+      let entry = { seq = None; at; delta } in
       if t.first_acceptance = None then t.first_acceptance <- Some entry;
       t.latest_acceptance <- Some entry;
       bump t;
@@ -169,23 +165,12 @@ let add ?at t ~seq (delta : Live.delta) =
   if duplicate
   then false
   else begin
-    (match delta with
-     | Live.Runtime_attempt_started _ -> t.attempt <- t.attempt + 1
-     | Live.Run_started | Live.Batch_bound _ | Live.Text _ | Live.Thinking _ | Live.Stream_model_started _
-     | Live.Provider_retry_observed _ | Live.Model_content_activity _
-     | Live.Stream_details _ | Live.Stream_model_stopped _
-     | Live.Native_tool_started _ | Live.Native_tool_ended _ | Live.Native_tool_progress _
-     | Live.Tool_started _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
-     | Live.Stream_protocol_error _ | Live.Approval_requested _
-     | Live.Approval_settled _ | Live.Accepted _ | Live.Checkpoint
-     | Live.External_effect_completed | Live.Reply_details _ | Live.Run_failed _
-     | Live.Run_finished | Live.Undecodable _ -> ());
     (match seq with
      | Some seq ->
        Hashtbl.replace t.held_seqs seq ();
        t.resume_position <- Journal.replay_position_advance t.resume_position seq
      | None -> ());
-    t.reversed_entries <- { seq; at; attempt = t.attempt; delta } :: t.reversed_entries;
+    t.reversed_entries <- { seq; at; delta } :: t.reversed_entries;
     (match delta with Live.Run_started -> t.run_started <- true | _ -> ());
     bump t;
     true

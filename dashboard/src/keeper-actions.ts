@@ -575,6 +575,7 @@ function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation
         requestId: request.operationId,
         reason: 'awaiting durable operation terminal state',
       }),
+      runtimeAttempt: assistantDraft?.runtimeAttempt,
       traceSteps: assistantDraft?.traceSteps,
       error: assistantDraft?.error ?? null,
       details: null,

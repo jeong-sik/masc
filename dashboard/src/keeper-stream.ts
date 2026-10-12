@@ -638,6 +638,7 @@ export function applyKeeperStreamEvent(
         keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'RUN_STARTED' }),
       )
       return null
+    }
     case 'TEXT_MESSAGE_START': {
       const messageId = textStreamMessageId(event.messageId)
       const streamState = textMessageStreamState(keeperName, assistantEntryId)

@@ -8,6 +8,7 @@ import type {
 import { IN_FLIGHT_DELIVERY } from './lib/keeper-delivery'
 
 export interface TrackedKeeperChatAssistantDraft {
+  runtimeAttempt?: KeeperConversationEntry['runtimeAttempt']
   text: string
   rawText: string
   delivery: KeeperConversationDelivery
@@ -149,6 +150,15 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
   return null
 }
 
+function runtimeAttemptFromUnknown(raw: unknown): KeeperConversationEntry['runtimeAttempt'] {
+  if (!isRecord(raw)) return undefined
+  const runtimeId = stringValue(raw.runtimeId)
+  const index = raw.index
+  if (runtimeId === undefined || runtimeId === '' || typeof index !== 'number'
+    || !Number.isSafeInteger(index) || index < 0) return undefined
+  return Object.freeze({ runtimeId, index })
+}
+
 function normalizeTraceSteps(raw: unknown): ChatTraceStep[] | undefined {
   if (!Array.isArray(raw)) return undefined
   const steps = raw.map(normalizeTraceStep)
@@ -169,7 +179,9 @@ function normalizeAssistantDraft(raw: unknown): TrackedKeeperChatAssistantDraft 
   const timestamp = nullableStringValue(raw.timestamp)
   const traceSteps = normalizeTraceSteps(raw.traceSteps)
   const error = nullableStringValue(raw.error)
+  const runtimeAttempt = raw.runtimeAttempt === undefined ? undefined : runtimeAttemptFromUnknown(raw.runtimeAttempt)
   return {
+    ...(runtimeAttempt ? { runtimeAttempt } : {}),
     text,
     rawText,
     delivery,
@@ -186,6 +198,7 @@ export function trackedKeeperChatAssistantDraftFromEntry(
   if (entry.role !== 'assistant') return null
   const traceSteps = normalizeTraceSteps(entry.traceSteps)
   return {
+    ...(entry.runtimeAttempt ? { runtimeAttempt: entry.runtimeAttempt } : {}),
     text: entry.text,
     rawText: entry.rawText ?? entry.text,
     delivery: entry.delivery,

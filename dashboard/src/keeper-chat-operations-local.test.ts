@@ -101,4 +101,17 @@ describe('keeper chat operation tracking', () => {
       }),
     ])
   })
+  it('preserves the running attempt identity for retry gating after reload', () => {
+    upsertTrackedKeeperChatOperation({ operationId: 'attempt-identity', keeperName: 'echo', message: 'input', submittedAt: 1,
+      assistantDraft: { text: 'partial', rawText: 'partial', delivery: 'streaming', streamState: 'retrying',
+        runtimeAttempt: { runtimeId: 'claude', index: 1 } } })
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.runtimeAttempt).toEqual({
+      runtimeId: 'claude', index: 1,
+    })
+    window.localStorage.setItem('masc_keeper_chat_operations_v1', JSON.stringify([{ operationId: 'attempt-identity',
+      keeperName: 'echo', message: 'input', submittedAt: 1,
+      assistantDraft: { text: 'partial', rawText: 'partial', delivery: 'streaming', streamState: 'retrying',
+        runtimeAttempt: { runtimeId: 'claude', index: -1 } } }]))
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.runtimeAttempt).toBeUndefined()
+  })
 })

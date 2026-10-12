@@ -330,10 +330,10 @@ describe('CopilotDock', () => {
 
   it('sends a message and shows a streaming reply', async () => {
     const fetchMock = dockFetchMock([
-      { type: 'TEXT_MESSAGE_START', role: 'Assistant', messageId: 'm1' },
-      { type: 'TEXT_MESSAGE_CONTENT', delta: '안녕하세요' },
-      { type: 'TEXT_MESSAGE_END' },
-      { type: 'RUN_FINISHED' },
+      { type: 'TEXT_MESSAGE_START', threadId: 'keeper-consumer:sangsu', timestamp: 1, role: 'assistant', messageId: 'm1' },
+      { type: 'TEXT_MESSAGE_CONTENT', threadId: 'keeper-consumer:sangsu', timestamp: 2, messageId: 'm1', delta: '안녕하세요' },
+      { type: 'TEXT_MESSAGE_END', threadId: 'keeper-consumer:sangsu', timestamp: 3, messageId: 'm1' },
+      { type: 'RUN_FINISHED', threadId: 'keeper-consumer:sangsu', timestamp: 4, runId: 'run-1' },
     ])
     vi.stubGlobal('fetch', fetchMock)
 

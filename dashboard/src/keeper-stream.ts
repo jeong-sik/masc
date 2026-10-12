@@ -1395,15 +1395,24 @@ export function applyKeeperStreamEvent(
               quarantinedOccurrence.toolCallBlockIndex,
             )
           : undefined
+        const message = streamProtocolMessage(event.value, 'stream protocol error')
         recordStreamProtocolError(
           keeperName,
           assistantEntryId,
-          streamProtocolMessage(event.value, 'stream protocol error'),
+          message,
           {
             toolOccurrenceId,
             authoritativeQuarantine: quarantinedOccurrence !== undefined,
           },
         )
+        // An undecodable frame fails the operation the way a RUN_ERROR did
+        // instead of leaving the bubble in flight. Timeouts and quarantined
+        // tool occurrences stay diagnostic-only.
+        if (event.value?.kind === 'sse_parse_failed') {
+          updateThreadEntry(keeperName, assistantEntryId, entry => ({
+            ...entry, delivery: 'error', streamState: null,
+          }))
+        }
         return null
       }
       if (event.name === 'KEEPER_THINKING_SIGNATURE_DELTA') {

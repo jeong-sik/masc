@@ -79,10 +79,12 @@ unknown. A valid store and an empty health list do not prove that all observatio
 were received or persisted. No success registry or unrelated inventory is added.
 
 The full-audit read primitive is deliberately not attached to periodic polling.
-A future authenticated receiver/read transport and TUI consumer need a distinct
-unchecked change-hint path and explicit audited refresh, preserving the
-corruption contract without repeatedly scanning unchanged history. This unit
-adds neither endpoint nor TUI row integration nor cross-root/Child ordering.
+The pure TUI snapshot reader below already consumes these codecs through a
+caller-supplied fetch; a future authenticated receiver/read transport and the
+actual TUI launcher still need a distinct unchecked change-hint path and
+explicit audited refresh, preserving the corruption contract without repeatedly
+scanning unchanged history. This unit adds neither endpoint nor TUI row
+integration nor cross-root/Child ordering.
 
 ## Scoped read contract and unchecked discovery hints
 

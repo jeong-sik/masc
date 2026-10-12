@@ -5026,6 +5026,35 @@ let test_input_anchor_alias_retains_source_identity () =
   check bool "unobserved session cannot create an operation slot alias" true
     ((Tui_types.msg_anchor {local with me_execution_source=None}).ma_session_user_slot=None)
 
+let test_timeline_user_dedup_requires_exact_source () =
+  let user = Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}) in
+  let source = Log.Autonomous_turn (Ids.Turn_ref.make ~trace_id:"same" ~absolute_turn:1) in
+  let id = Log.source_key source in
+  let local =
+    { (chat_entry ~request_id:id ~role:user ~text:"operator input" ~at:10. ()) with
+      Tui_types.me_identity = Tui_types.Session_row
+        { request_id = id; turn_phase = Tui_types.Turn_input; operation_seq = 0 } } in
+  let persisted_as ~text ~at execution_source =
+    { (chat_entry ~request_id:id ~role:user ~text ~at ()) with
+      Tui_types.me_identity = Tui_types.Persisted_row "server-user-row";
+      Tui_types.me_execution_source = execution_source } in
+  let timeline_texts loaded =
+    Tui_types.chat_timeline ~loaded ~session:[ local ] ~queued_request_ids:[]
+    |> Tui_types.chat_timeline_rows
+    |> List.map (fun row -> row.Tui_types.me_text) in
+  check bool "colliding autonomous row does not drop the local input" true
+    (List.mem "operator input"
+       (timeline_texts [ persisted_as ~text:"autonomous speech" ~at:11. (Some source) ]));
+  check bool "colliding unobserved row does not drop the local input" true
+    (List.mem "operator input"
+       (timeline_texts [ persisted_as ~text:"unobserved speech" ~at:11. None ]));
+  let genuine =
+    { local with
+      Tui_types.me_identity = Tui_types.Persisted_row "server-own-row";
+      Tui_types.me_text = "operator input\n" } in
+  check (list string) "the genuine persisted copy still replaces the local row"
+    [ "operator input\n" ] (timeline_texts [ genuine ])
+
 let test_block_member_keys_preserve_source_authority () =
   let source = Log.Autonomous_turn (Ids.Turn_ref.make ~trace_id:"same" ~absolute_turn:1) in
   let id = Log.source_key source in
@@ -6084,6 +6113,7 @@ let () =
         ; test_case "older page keeps the entries it moved down" `Quick test_older_page_keeps_the_entries_it_moved_down
         ; test_case "enrichment can be limited to one log" `Quick test_enrichment_can_be_limited_to_one_log
         ; test_case "input anchor source identity" `Quick test_input_anchor_alias_retains_source_identity
+        ; test_case "timeline user dedup requires exact source" `Quick test_timeline_user_dedup_requires_exact_source
         ; test_case "block member source authority" `Quick test_block_member_keys_preserve_source_authority
         ; test_case "timeline failure source kind" `Quick test_timeline_error_retains_execution_source_kind
         ; test_case "batch member source kind" `Quick test_batch_members_preserve_execution_source_kind

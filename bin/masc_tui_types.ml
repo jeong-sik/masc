@@ -1172,19 +1172,25 @@ let chat_timeline ~loaded ~session ~queued_request_ids =
   in
   let visible rows = List.filter (fun row -> not (queued row.me_request_id)) rows in
   let loaded = visible loaded in
+  (* A persisted user row replaces the local session row only for the exact
+     turn slot it was persisted from. The slot carries the observed execution
+     source, so a row another source persisted under the same textual
+     request/phase/position cannot claim the operator's input, and an unknown
+     source matches no local row -- the same authority the session input
+     anchor aliases require. *)
   let persisted_user_slots = Hashtbl.create 64 in
   List.iter (fun (row : msg_entry) ->
     if is_user_row row && row.me_request_id <> "" then
       match row.me_identity with
       | Persisted_row _ ->
           Hashtbl.replace persisted_user_slots
-            (row.me_keeper_name, row.me_request_id, row.me_turn_phase, row.me_operation_seq) ()
+            (row.me_keeper_name, row.me_request_id, row.me_turn_phase, row.me_operation_seq, row.me_execution_source) ()
       | Persisted_legacy_row _ | Session_row _ -> ()) loaded;
   let session = visible session |> List.filter (fun (row : msg_entry) ->
     match row.me_identity with
     | Session_row {request_id; turn_phase; operation_seq} when is_user_row row && request_id <> "" ->
         not (Hashtbl.mem persisted_user_slots
-          (row.me_keeper_name, request_id, turn_phase, operation_seq))
+          (row.me_keeper_name, request_id, turn_phase, operation_seq, row.me_execution_source))
     | Session_row _ | Persisted_row _ | Persisted_legacy_row _ -> true) in
   { ctl_items = chat_timeline_slots (loaded @ session) }
 ;;

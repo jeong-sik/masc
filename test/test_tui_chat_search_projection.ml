@@ -272,6 +272,35 @@ let test_indexed_scroll_anchors () = at_sizes (fun origin ->
   check bool "negative index has no anchor" true
     (Option.is_none (Render.scroll_anchor_at projection (-1))))
 
+let test_pending_pin_promotes_only_to_exact_source_row () = at_sizes (fun origin ->
+  let state = state origin in
+  let foreign =
+    { (row ~id:"foreign" ~request_id:"same" ~role:user ~text:"FOREIGN_USER_NEEDLE" 1.) with
+      T.me_execution_source =
+        Some (Log.Autonomous_turn (Ids.Turn_ref.make ~trace_id:"same" ~absolute_turn:1)) } in
+  state.msg_loaded <- [
+    foreign;
+    row ~id:"own" ~request_id:"same" ~role:user ~text:"OWN_USER_NEEDLE" 2.;
+  ];
+  let projection = Render.keeper_message_projection state ~keeper_name:"alpha" ~chat_cols:80 in
+  let index_of_row_id row_id =
+    match
+      List.find_index
+        (fun (tag, _) ->
+           match Render.search_anchor_of_tag tag with
+           | Some (T.Search_history { row_anchor; _ }) ->
+             row_anchor.T.ma_identity = T.Persisted_row row_id
+           | Some _ | None -> false)
+        projection.tagged_entries
+    with
+    | Some index -> index
+    | None -> fail ("projected conversation lost: " ^ row_id) in
+  let foreign_at = index_of_row_id "foreign" in
+  let own_at = index_of_row_id "own" in
+  check bool "the colliding rows sort as distinct entries" true (foreign_at <> own_at);
+  check (option int) "pending pin promotes to the exact-operation row" (Some own_at)
+    (Render.projection_index_of_scroll_anchor projection (T.Scroll_pending "same")))
+
 let test_repeat_survives_reasoning_visibility_and_backfill () = at_sizes (fun origin ->
   let state = state origin in
   state.msg_reasoning_visibility <- T.Reasoning_full;
@@ -1503,6 +1532,8 @@ let () = run "chat search projection" [
     test_case "bottom-up diagram repeat follows drawn rows" `Quick
       test_bottom_up_diagram_repeat_follows_drawn_rows;
     test_case "scroll anchors reuse typed indexed lookup" `Quick test_indexed_scroll_anchors;
+    test_case "pending pin promotes only to the exact-operation row" `Quick
+      test_pending_pin_promotes_only_to_exact_source_row;
     test_case "a settled conversation keeps its measured list" `Quick
       test_a_settled_conversation_keeps_its_measured_list;
     test_case "held replies and full suffix geometry" `Quick test_settled_reply_and_complete_suffix;

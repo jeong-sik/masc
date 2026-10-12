@@ -3389,14 +3389,21 @@ let scroll_anchor_index projection =
             Hashtbl.add transient_indices anchor (offset + at)
         | Some _ | None -> ()) projection.transient_anchors;
       (* A pending input is promoted into the durable user row by Run_started.
-         The request identity continues to name that same speech position. *)
+         The request identity continues to name that same speech position.
+         The pin names the operator's own waiting input, so it promotes only
+         into the durable row of that exact operation: a row another source
+         persisted under the same textual request id must not capture it. *)
       List.iteri (fun at (tag, _) -> match tag with
         | Tagged_row row ->
             (match row.me_role, row.me_turn_phase with
              | Message_user _, Turn_input when row.me_request_id <> "" ->
-                 let anchor = Scroll_pending row.me_request_id in
-                 if not (Hashtbl.mem transient_indices anchor) then
-                   Hashtbl.add transient_indices anchor at
+                 (match row.me_execution_source with
+                  | Some (Masc_tui_keeper_chat_log.Operation owner)
+                    when String.equal owner row.me_request_id ->
+                      let anchor = Scroll_pending row.me_request_id in
+                      if not (Hashtbl.mem transient_indices anchor) then
+                        Hashtbl.add transient_indices anchor at
+                  | Some _ | None -> ())
              | Message_user _, (Turn_input | Turn_progress | Turn_tool | Turn_output)
              | (Message_keeper | Message_autonomous | Message_status | Message_local
                 | Message_error | Message_tool | Message_skill _ | Message_thinking | Message_memory), _ -> ())

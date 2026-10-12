@@ -1,0 +1,9 @@
+# Readonly runtime continuity observation
+
+`reports/chat-runtime-observation-20261012-0325.json` contains only selected status metadata from a new readonly `masc_keeper_status` call and installed-TUI identity commands. No Keeper request, configuration change, restart, schedule or broadcast was submitted by this observation. Tool input/output bodies and operational instructions are excluded.
+
+The prior observation at 02:54:48 UTC (`reports/chat-keeper-readonly-observation-20261012.json`) saw current turn 5914 with completed turn 5913. The new observation recorded at 03:25:17 UTC sees current turn 5915 running, completed receipt turn 5914 at 03:20:34 UTC, and a tool execution correlated to turn 5915. This establishes progress between two points, not uninterrupted observation or full chat pipeline correctness. The current selected runtime model label is glm-5.3-flash; provider/model identity was not independently attested.
+
+`command -v masc-tui`, `shasum -a 256` and installed `masc-tui --version` returned the installed executable path, hash and 0.50.0. The inspected branch dune-project also states 0.50.0. Equal version labels do not establish equal commits or installation of recent chat changes. Process enumeration failed with `operation not permitted`; no running process binary identity was inferred from it.
+
+#42556 source review and separate review response passed at cc7755904244697f69a156fe01cb39f21b965a64. Its selected state probe remains distinct from this readonly runtime observation. Complete semantic SSE decoding/reduction, input incorporation, broadcast/asynchronous interleaving, all-provider parity, installation of the changes and actual terminal/dashboard screenshots remain unverified. No local Dune build, CI dispatch/watch, formal GitHub approval or merge was performed.

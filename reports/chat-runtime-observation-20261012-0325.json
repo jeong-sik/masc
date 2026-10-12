@@ -1,0 +1,32 @@
+{
+  "observed_at": {
+    "current_time": "2026-10-12 03:25:17 UTC"
+  },
+  "keeper": "e-masc-the-leader",
+  "keepalive_running": true,
+  "current": {
+    "turn_id": 5915,
+    "phase": "running",
+    "selected_model": "glm-5.3-flash"
+  },
+  "completed": {
+    "turn_count": 5914,
+    "recorded_at": "2026-10-12T03:20:34Z",
+    "runtime_outcome": "completed"
+  },
+  "latest_tool": {
+    "execution_id": "exec-1791775480668-06a3",
+    "keeper_turn_id": 5915,
+    "record_kind": "tool_call"
+  },
+  "limitations": [
+    "readonly status; no request submitted",
+    "selected runtime label not independently proven model identity",
+    "does not establish recent source installation or visible UI"
+  ],
+  "installed_tui": {
+    "version": "0.50.0",
+    "sha256": "924569d3d101c331ebcca50f5ac40611e044db0ed31fa8671f1cc79a4031ff65",
+    "commit": "unverified"
+  }
+}

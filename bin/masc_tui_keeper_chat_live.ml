@@ -550,14 +550,12 @@ let frame_deltas (frame : Sse_wire.frame) =
       | Projection.Sse_data _ | Projection.Sse_noncanonical_data -> None in
   let at, deltas = match Yojson.Safe.from_string frame.data with
     | json ->
-        let at = match json with
-          | `Assoc fields ->
-              (match List.assoc_opt "timestamp" fields with
-               | Some (`Int seconds) when seconds >= 0 -> Some (float_of_int seconds)
-               | Some (`Float seconds) when Float.is_finite seconds && seconds >= 0. -> Some seconds
-               | _ -> None)
-          | _ -> None in
-        at, event_deltas json
+        let timestamp = match json with
+          | `Assoc fields -> Projection.event_timestamp_of_fields ~surface:"Keeper live event" fields
+          | _ -> Ok None in
+        (match timestamp with
+         | Ok at -> at, event_deltas json
+         | Error detail -> None, [Undecodable detail])
     | exception Yojson.Json_error detail -> None, [ Undecodable ("invalid JSON: " ^ detail) ] in
   List.map (fun delta -> {seq; at; delta}) deltas
 

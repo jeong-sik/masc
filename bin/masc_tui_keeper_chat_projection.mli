@@ -255,3 +255,9 @@ val reconciliation_failure_detail : credential_sent:bool -> error -> string
     terminal and live stream decoders. *)
 val unique_object_fields :
   surface:string -> Yojson.Safe.t -> ((string * Yojson.Safe.t) list, string) result
+
+(** Server event time in epoch seconds. Absent time remains unobserved;
+    duplicate/null/malformed supplied time rejects. Finite nonnegative Int or
+    Float values are accepted. Strict events additionally require presence. *)
+val event_timestamp_of_fields :
+  surface:string -> (string * Yojson.Safe.t) list -> (float option, string) result

@@ -324,6 +324,12 @@ let test_frame_timestamps_keep_server_epoch_seconds () =
         (Printf.sprintf "server time survives %d-byte chunks" size)
         expected actual)
     [ 1; 17; String.length body ]
+  ; List.iter (fun timestamp ->
+      let decoder = Live.create () in
+      match Live.feed decoder (frame 10 (Some timestamp) "untrusted") with
+      | [{Live.at=None; delta=Live.Undecodable _; _}] -> ()
+      | _ -> fail "malformed timestamp admitted stream content")
+      [`Null; `String "1791363125"; `Int (-1); `Float (-1.)]
 
 let test_an_id_held_across_a_chunk_boundary () =
   let decoder = Live.create () in

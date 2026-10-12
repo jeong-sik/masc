@@ -566,16 +566,13 @@ let optional_nonnegative_int ~surface field fields =
   | Some _ ->
       Error (Printf.sprintf "%s.%s must be a nonnegative integer" surface field)
 
-let required_finite_nonnegative_number ~surface field fields =
-  let valid value = Float.is_finite value && value >= 0.0 in
-  match List.assoc_opt field fields with
-  | Some (`Float value) when valid value -> Ok ()
-  | Some (`Int value) when value >= 0 -> Ok ()
-  | Some _ ->
-      Error
-        (Printf.sprintf "%s.%s must be a finite nonnegative number" surface
-           field)
-  | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+let event_timestamp_of_fields ~surface fields =
+  let error () = Error (surface ^ ".timestamp must be one finite nonnegative number") in
+  match List.filter (fun (key, _) -> key = "timestamp") fields with
+  | [] -> Ok None
+  | [(_, `Int value)] when value >= 0 -> Ok (Some (float_of_int value))
+  | [(_, `Float value)] when Float.is_finite value && value >= 0. -> Ok (Some value)
+  | _ -> error ()
 
 let expected_thread_id request = "keeper:" ^ request.keeper_name
 let expected_run_id request = "keeper-operation-run-" ^ request.request_id
@@ -592,8 +589,10 @@ let validate_expected_string ~surface ~field ~expected fields =
   else Error (Event_identity_mismatch { field; expected; received })
 
 let validate_timestamp ~surface fields =
-  required_finite_nonnegative_number ~surface "timestamp" fields
-  |> Result.map_error (fun detail -> Malformed_event detail)
+  match event_timestamp_of_fields ~surface fields with
+  | Ok (Some _) -> Ok ()
+  | Ok None -> Error (Malformed_event (surface ^ ".timestamp is required"))
+  | Error detail -> Error (Malformed_event detail)
 
 let validate_exact_fields ~surface ~allowed fields =
   Json_util.reject_unknown_fields ~surface ~allowed fields

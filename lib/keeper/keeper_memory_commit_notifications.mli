@@ -2,7 +2,10 @@
 
     This is a wake signal, not a durable event journal or a semantic approval.
     Consumers must read the current stores when processing a wake; revisions can
-    arrive out of order after concurrent writers release their store locks. *)
+    arrive out of order after concurrent writers release their store locks.
+    Ordinary Memory publication recovery may dispatch the same revision again.
+    Wake consumers must treat (keepers_dir, keeper_id, store, revision)
+    idempotently. A completed dispatch is not durable subscriber delivery. *)
 
 type store = Ordinary | Source_bound
 

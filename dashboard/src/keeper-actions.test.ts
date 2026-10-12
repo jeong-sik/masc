@@ -556,6 +556,29 @@ describe('hydrateKeeperChatHistory', () => {
     }
   })
 
+  it.each(['status', 'full-history'] as const)('does not release busy owned by an in-flight %s load when a queued refresh is cancelled by an auth change', async kind => {
+    vi.useFakeTimers()
+    try {
+      setStoredToken('fixture-before')
+      fetchKeeperChatHistory.mockResolvedValueOnce(historyRow('initial'))
+      await hydrateKeeperChatHistory('echo')
+      callMcpTool.mockReset()
+      let completeDetail!: (value: string) => void
+      callMcpTool.mockReturnValueOnce(new Promise<string>(resolve => { completeDetail = resolve }))
+      const detail = kind === 'status' ? hydrateKeeperStatus('echo', true) : loadFullKeeperHistory('echo')
+      expect(keeperHydrating.value.echo).toBe(true)
+      noteKeeperChatAppended('echo')
+      setStoredToken('fixture-after')
+      await vi.runAllTimersAsync()
+      expect(keeperHydrating.value.echo).toBe(true)
+      completeDetail('{"name":"echo"}')
+      await detail
+      expect(keeperHydrating.value.echo).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it.each(['resolve', 'reject'] as const)('rejects history acquired under a replaced authentication revision (%s)', async outcome => {
     setStoredToken('fixture-before')
     const old = deferredHistory()

@@ -326,6 +326,7 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
   const keeperName = name.trim()
   if (!keeperName) return null
   if (!force && keeperStatusDetails.value[keeperName]) return keeperStatusDetails.value[keeperName]
+  beginKeeperDetailHydration(keeperName)
   setRecordValue(keeperHydrating, keeperName, true)
   setRecordValue(keeperActionErrors, keeperName, null)
   try {
@@ -357,6 +358,7 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
     setRecordValue(keeperActionErrors, keeperName, message)
     return null
   } finally {
+    endKeeperDetailHydration(keeperName)
     setRecordValue(keeperHydrating, keeperName, false)
   }
 }
@@ -374,11 +376,31 @@ function ownsChatHistoryRequest(keeperName: string, request: ChatHistoryRequest)
   return chatHistoryHydrationRequests.get(keeperName) === request
     && request.authRevision === currentStoredTokenRevision()
 }
+// `hydrateKeeperStatus` and `loadFullKeeperHistory` also drive
+// `keeperHydrating` but never register in `chatHistoryHydrationRequests`.
+// Reference-counted so the scheduled-refresh cleanup can release only a
+// refresh-orphaned busy state instead of treating the chat request map as
+// a proxy for every busy-signal owner.
+const keeperDetailHydrationInFlight = new Map<string, number>()
+function beginKeeperDetailHydration(keeperName: string): void {
+  keeperDetailHydrationInFlight.set(keeperName, (keeperDetailHydrationInFlight.get(keeperName) ?? 0) + 1)
+}
+function endKeeperDetailHydration(keeperName: string): void {
+  const remaining = (keeperDetailHydrationInFlight.get(keeperName) ?? 0) - 1
+  if (remaining > 0) keeperDetailHydrationInFlight.set(keeperName, remaining)
+  else keeperDetailHydrationInFlight.delete(keeperName)
+}
+function releaseOrphanedChatRefreshBusy(keeperName: string): void {
+  if (chatHistoryHydrationRequests.has(keeperName)) return
+  if (keeperDetailHydrationInFlight.has(keeperName)) return
+  setRecordValue(keeperHydrating, keeperName, false)
+}
 /** Test-only: reset the once-per-keeper hydration guard. */
 export function _resetChatHydrationForTests(): void {
   hydratedChatKeepers.clear()
   chatHistoryHydrationRequests.clear()
   chatRefreshStates.clear()
+  keeperDetailHydrationInFlight.clear()
   keeperChatHistoryErrors.value = {}
   keeperChatHistoryHydration.value = {}
 }
@@ -513,7 +535,7 @@ function scheduleChatRefresh(keeperName: string): void {
     if (chatRefreshStates.get(keeperName)?.token !== token) return
     if (authRevision !== currentStoredTokenRevision()) {
       chatRefreshStates.delete(keeperName)
-      if (!chatHistoryHydrationRequests.has(keeperName)) setRecordValue(keeperHydrating, keeperName, false)
+      releaseOrphanedChatRefreshBusy(keeperName)
       return
     }
     chatRefreshStates.set(keeperName, { kind: 'running', token, authRevision, invalidated: false })
@@ -522,7 +544,7 @@ function scheduleChatRefresh(keeperName: string): void {
       if (settled?.kind !== 'running' || settled.token !== token) return
       chatRefreshStates.delete(keeperName)
       if (settled.invalidated && authRevision === currentStoredTokenRevision()) scheduleChatRefresh(keeperName)
-      else if (!chatHistoryHydrationRequests.has(keeperName)) setRecordValue(keeperHydrating, keeperName, false)
+      else releaseOrphanedChatRefreshBusy(keeperName)
     })
   })
 }
@@ -978,6 +1000,7 @@ export async function refreshKnownKeeperChatHistories(): Promise<void> {
 export async function loadFullKeeperHistory(name: string): Promise<void> {
   const keeperName = name.trim()
   if (!keeperName) return
+  beginKeeperDetailHydration(keeperName)
   setRecordValue(keeperHydrating, keeperName, true)
   try {
     const text = await callMcpTool('masc_keeper_status', {
@@ -1013,6 +1036,7 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
   } catch (err) {
     console.warn(`[keeper] full history load failed for ${keeperName}`, err instanceof Error ? err.message : err)
   } finally {
+    endKeeperDetailHydration(keeperName)
     setRecordValue(keeperHydrating, keeperName, false)
   }
 }

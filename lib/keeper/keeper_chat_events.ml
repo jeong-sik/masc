@@ -633,7 +633,14 @@ let text_response_of_fields ~owner_field ~scope_field fields =
   | [], [] -> Ok (Unobserved_scope None)
   | [(_, value)], [] -> Result.map (fun owner -> Observed_response owner) (response_identity_of_json value)
   | [], [(_, value)] ->
-    (match Runtime_json_integer.of_json value with
-     | Ok scope when scope >= 0 -> Ok (Unobserved_scope (Some scope))
-     | Ok _ | Error _ -> Error "text scope must be a nonnegative safe integer")
+    (* A scope is a JSON integer on the wire; an integral float is malformed
+       here even when it names a safe value, so it must not downgrade to an
+       unknown or accepted scope. The integer decoder still enforces the
+       safe-integer range once the shape is established. *)
+    (match value with
+     | `Int _ ->
+       (match Runtime_json_integer.of_json value with
+        | Ok scope when scope >= 0 -> Ok (Unobserved_scope (Some scope))
+        | Ok _ | Error _ -> Error "text scope must be a nonnegative safe integer")
+     | _ -> Error "text scope must be a nonnegative safe integer")
   | _ -> Error "text response has conflicting or duplicate ownership fields"

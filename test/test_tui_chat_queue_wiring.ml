@@ -4966,6 +4966,24 @@ let test_older_page_keeps_the_entries_it_moved_down () =
         check string "body is carried over" old_entry.body entry.body)
       before moved)
 
+let test_batch_members_preserve_execution_source_kind () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let reference = Ids.Turn_ref.make ~trace_id:"same" ~absolute_turn:1 in
+  let source = Log.Autonomous_turn reference in
+  let autonomous = Tui_types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:1. in
+  let collision = Tui_types.turn_log_execution_id autonomous in
+  let direct = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"batch-input" ~started_at:2. in
+  Tui_types.turn_log_add ~now:2. direct ~seq:(Some 0)
+    (Live.Batch_bound {operation_id="batch-input";execution_id=collision});
+  state.msg_settled_logs <- [direct;autonomous];
+  let members source = Tui_types.chat_execution_member_ids state ~keeper_name:"alpha"
+    ~source in
+  check (list string) "autonomous source cannot inherit colliding direct input"
+    [collision] (members source);
+  check (list string) "operation retains its actual batch input"
+    (List.sort_uniq String.compare [collision;"batch-input"])
+    (members (Log.Operation collision))
+
 let test_batch_reply_follows_all_original_inputs () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous = Masc_tui_ansi.get_terminal_size () in
@@ -5967,6 +5985,7 @@ let () =
         ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
         ; test_case "older page keeps the blocks it did not change" `Quick test_older_page_keeps_the_blocks_it_did_not_change
         ; test_case "older page keeps the entries it moved down" `Quick test_older_page_keeps_the_entries_it_moved_down
+        ; test_case "batch member source kind" `Quick test_batch_members_preserve_execution_source_kind
         ; test_case "batch reply follows all original inputs" `Quick test_batch_reply_follows_all_original_inputs
         ; test_case "observed checkpoint retains earlier output" `Quick test_observed_checkpoint_retains_earlier_output
         ; test_case "every request of a held batch is held for journal reads" `Quick

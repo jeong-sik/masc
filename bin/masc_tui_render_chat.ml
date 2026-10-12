@@ -2909,7 +2909,8 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
   let log_projection ~committed:_ ~preludes (turn_log : Masc_tui_types.turn_log) =
     let transcript = turn_log.tl_transcript in
     let request_id = Masc_tui_types.turn_log_execution_id turn_log in
-    let member_ids = member_ids_of ~execution_id:request_id in
+    let member_ids = member_ids_of
+        ~source:(Masc_tui_types.turn_log_execution_source turn_log) in
     let started_at = Keeper_chat_transcript.started_at transcript in
     let request_label = request_id in
     let { Masc_tui_types.clt_committed_error = committed_error
@@ -3114,7 +3115,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
       , Masc_tui_types.turn_log_request_id turn_log )
     in
     let member_ids =
-      member_ids_of ~execution_id:(Masc_tui_types.turn_log_execution_id turn_log)
+      member_ids_of ~source:(Masc_tui_types.turn_log_execution_source turn_log)
     in
     let revision = Keeper_chat_transcript.revision turn_log.tl_transcript in
     let preludes = admission_preludes turn_log in

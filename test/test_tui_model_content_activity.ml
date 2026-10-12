@@ -323,8 +323,8 @@ let test_owned_response_stop () =
     (T.model_activity t = Some T.Activity_answering);
   T.apply ~now:7. t (L.Text {text="next";response=Unobserved_scope (Some 1)});
   T.apply ~now:8. t (stop 3 0);
-  check bool "known old owner cannot end newer unbound text" true
-    (T.model_activity t = None);
+  check bool "unobserved text cannot displace matching stop authority" true
+    (T.model_activity t = Some T.Activity_response_ended);
   check string "unbound text body remains" "next" (T.text t)
 
 let test_stop_identity_protocol () =
@@ -380,10 +380,15 @@ let test_owned_response_details () =
   T.apply ~now:7. t (observed ~generation:3 ());
   check bool "content can follow details without start frame" true (T.model_activity t=Some T.Activity_answering);
   T.apply ~now:8. t (L.Text {text="next";response=Unobserved_scope (Some 2)});
-  let unbound = T.response_metadata t in
+  check bool "unobserved scope cannot displace details owner" true
+    ((T.response_metadata t).owner=Some (3,0));
   T.apply ~now:8. t (details (Some 3) 0 99);
+  check bool "matching details can still update observed counters" true
+    (Option.map (fun (usage:L.stream_usage) -> usage.input_tokens)
+      (T.response_metadata t).usage=Some (Some 99));
   T.apply ~now:8. t (details (Some 3) 1 99);
-  check bool "old details cannot rewind newer unbound response" true (T.response_metadata t=unbound);
+  check bool "observed details can advance despite unobserved scope" true
+    ((T.response_metadata t).owner=Some (3,1));
   T.apply ~now:8. t L.Run_finished;
   let before = T.response_metadata t in
   let before_text = T.text t in
@@ -514,15 +519,17 @@ let test_owned_text_lifecycle () =
   check string "retry cannot reopen stopped text identity" retry_body (T.text t);
   T.apply ~now:9. t (text 4 0 "fresh");
   T.apply ~now:10. t (L.Text {text="unknown";response=E.Unobserved_scope (Some 0)});
-  check bool "unknown same scope cannot inherit generation" true ((T.response_metadata t).owner=None);
+  check bool "unknown same scope cannot displace observed generation" true
+    ((T.response_metadata t).owner=Some (4,0));
   T.apply ~now:11. t (text 5 0 "");
   check bool "empty owned text retains response boundary" true ((T.response_metadata t).owner=Some (5,0));
   check bool "empty text does not fabricate model activity" true (T.model_activity t=None);
   T.apply ~now:12. t (L.Text {text="scope-two";response=E.Unobserved_scope (Some 2)});
-  let unknown_owner = T.response_metadata t in
+  check bool "unobserved later scope cannot acquire response authority" true
+    ((T.response_metadata t).owner=Some (5,0));
   List.iter (fun delta -> T.apply ~now:12. t delta;
-    check bool "intermediate owned event cannot rewind partial response" true
-      (T.response_metadata t=unknown_owner))
+    check bool "observed event retains its supplied response authority" true
+      ((T.response_metadata t).owner=Some (5,1)))
     [text 5 1 "intermediate";
      L.Stream_model_started {generation=Some 5;stream_scope=Some 1;message_id=None;model="stale";usage=None};
      observed ~generation:5 ~scope:1 ()];

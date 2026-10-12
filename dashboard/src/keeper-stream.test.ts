@@ -184,6 +184,41 @@ describe('Keeper operation stream projection', () => {
     }
   })
 
+  it('does not publish retry onto a same-runtime operation replaced during thinking flush', () => {
+    assistantEntry('original-operation')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: { runtime_id: 'claude', attempt_index: 0 },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: {
+        index: 0, delta: 'exposed reasoning', response: { content_generation: 1, stream_scope: 0 },
+      },
+    })
+    let armed = true
+    const release = effect(() => {
+      const current = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+      if (armed && current?.traceSteps?.some(step => step.kind === 'think')) {
+        armed = false
+        untracked(() => { keeperThreads.value = { sangsu: [{ ...current,
+          deliveryProvenance: operationDeliveryProvenance('replacement-operation', 'terminal_result'),
+          delivery: 'streaming', streamState: 'opening', text: 'replacement', rawText: 'replacement', traceSteps: [],
+        }] } })
+      }
+    })
+    try {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_PROVIDER_RETRY', value: {
+          attempt: { routing_run_id: 'routing-run', runtime_id: 'claude', lane_attempt_index: 0 },
+          retry: { observation_id: 'retry-id', attempt: 1, max_retries: 10, retry_delay_ms: 1234, error_status: null },
+        },
+      })
+      const after = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+      expect(after.deliveryProvenance).toEqual(operationDeliveryProvenance('replacement-operation', 'terminal_result'))
+      expect(after.streamState).toBe('opening')
+      expect(after.text).toBe('replacement')
+    } finally { release() }
+  })
+
   it('deduplicates sequenced reasoning across transport replay and restores its prefix', () => {
     assistantEntry()
     const owner = { content_generation: 4, stream_scope: 2 }

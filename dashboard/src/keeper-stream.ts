@@ -1326,12 +1326,13 @@ export function applyKeeperStreamEvent(
             && entry.runtimeAttempt.index === event.value.attempt.lane_attempt_index
         }
         const current = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
-        if (!ownsProgress(current)) return null
+        if (!current || !ownsProgress(current)) return null
+        const publicationOwner = captureThinkingPublicationOwner(current, currentStoredTokenRevision())
         // Commit earlier reasoning before this later progress observation. Its
         // scheduled preview cannot subsequently republish an older activity.
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         updateThreadEntry(keeperName, assistantEntryId, entry => {
-          if (!ownsProgress(entry)) return entry
+          if (!ownsProgress(entry) || !ownsThinkingPublication(publicationOwner, entry, currentStoredTokenRevision())) return entry
           return { ...entry, streamState: 'retrying', delivery: 'streaming',
             streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_PROVIDER_RETRY' }) }
         })

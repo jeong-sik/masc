@@ -20,3 +20,11 @@ From dashboard:
 - `git diff --check`: exit 0.
 
 No build, CI, real socket, provider turn, installation, browser or screenshot validation. Prior source PASS for #42490 did not establish this timer boundary; the separate review-response HOLD and executed failure remain part of the evidence.
+
+## Executed reentrant replacement counterexample
+
+At intermediate head `1d01519a09efee377809595f7cc2f713aa73a866`, a real Preact signals observer replaces the assistant row with another operation during the Thinking flush. The replacement intentionally retains the same runtime ID and attempt index. Targeted `-t 'same-runtime operation replaced'` exited 1: expected replacement `opening`, received original operation `retrying`. This is an actual state/publication counterexample with synthetic operation data.
+
+The final correction captures the existing immutable publication owner before flushing and verifies operation delivery identity, target source/turn and credential generation after that effect boundary, as well as runtime/phase. It reuses existing ownership logic rather than creating a parallel registry.
+
+Final corrected stream suite: exit 0, 128 tests, 835 ms. Final `tsc --noEmit`: exit 0. These supersede the earlier 127-test pass for the corrected scope; both failures remain recorded.

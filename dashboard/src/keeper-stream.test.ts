@@ -2151,4 +2151,22 @@ describe('applyKeeperStreamEvent tool calls', () => {
       expect(after.traceSteps).toMatchObject([{ kind: 'think', text: 'earlier reasoning' }])
     } finally { release() }
   })
+
+  it('preserves direct closed thinking while retaining late exposed bytes', () => {
+    assistantEntry()
+    const emit = (event: KeeperChatStreamEvent) => applyKeeperStreamEvent('sangsu', 'reply-1', event)
+    const entry = () => requiredFixture(keeperThreads.value.sangsu?.find(row => row.role === 'assistant'))
+    emit({ type: 'RUN_STARTED' })
+    emit({ type: 'CUSTOM', name: 'KEEPER_MODEL_CONTENT_ACTIVITY',
+      value: { generation: 1, stream_scope: 0, block_index: 0, channel: 'thinking', state: 'observed' } })
+    emit({ type: 'CUSTOM', name: 'KEEPER_MODEL_CONTENT_ACTIVITY',
+      value: { generation: 1, stream_scope: 0, block_index: 0, channel: 'thinking', state: 'ended' } })
+    expect(entry().streamState).toBe('waiting')
+    emit({ type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'late exposed reasoning' } })
+    _flushPendingKeeperStreamDeltasForTests()
+    expect(entry().streamState).toBe('waiting')
+    expect(entry().modelContentActivity).toMatchObject([{ state: 'ended' }])
+    expect(entry().traceSteps).toMatchObject([{ kind: 'think', text: 'late exposed reasoning' }])
+  })
 })

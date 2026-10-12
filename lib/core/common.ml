@@ -54,7 +54,10 @@ let keepers_runtime_dirname = "keepers"
    have. The server's config-root seed has always dropped them; [masc init] did
    not, and on 2026-09-05 that produced four keepers that could not boot on a
    host without Docker and a hand-built sandbox image. [dune] is a build input
-   ocaml-crunch swept up with the tree, not runtime config. *)
+   ocaml-crunch swept up with the tree, not runtime config. [keeper.env] is
+   the retired deploy-time credential file: a gitignored copy left in an
+   upgraded checkout would otherwise be crunched into the binary and seeded
+   into fresh roots with its API keys. *)
 let default_keepers_dirname = "keepers-default"
 
 let first_path_segment rel =
@@ -65,6 +68,7 @@ let first_path_segment rel =
 let seeds_into_fresh_config_root rel =
   let first_segment = first_path_segment rel in
   (not (String.equal (Filename.basename rel) "dune"))
+  && (not (String.equal (Filename.basename rel) "keeper.env"))
   && (not (String.equal first_segment keepers_runtime_dirname))
   && not (String.equal first_segment default_keepers_dirname)
 

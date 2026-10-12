@@ -63,8 +63,9 @@ val seeds_into_fresh_config_root : string -> bool
     [false] for keeper manifests — the roster is declared per workspace, and the
     shipped examples autoboot into a sandbox the host may not have — for
     {!default_keepers_dirname}, which seeds under a different name and so is
-    routed through {!fresh_config_root_keeper_seed_target}, and for [dune], a
-    build input rather than runtime config. *)
+    routed through {!fresh_config_root_keeper_seed_target}, for [dune], a
+    build input rather than runtime config, and for [keeper.env], the retired
+    deploy-time credential file, which must never seed fresh roots. *)
 
 val fresh_config_root_keeper_seed_target : string -> string option
 (** Where a {!default_keepers_dirname} asset lands in a fresh config root:

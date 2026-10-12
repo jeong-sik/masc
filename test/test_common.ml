@@ -167,8 +167,8 @@ let test_frontmatter_line_without_colon_is_skipped () =
   check int "only one field" 1 (List.length parsed.Frontmatter.fields)
 
 (* The predicate both config-root seeds ask ([masc init] and the server's own
-   bootstrap). Its whole job is to keep two categories out, so the cases below
-   pin the boundary rather than a sample. *)
+   bootstrap). Its whole job is to keep the excluded categories out, so the
+   cases below pin the boundary rather than a sample. *)
 let test_seeds_admits_distribution_assets () =
   List.iter
     (fun rel ->
@@ -178,7 +178,6 @@ let test_seeds_admits_distribution_assets () =
     ; "tools/masc_status.toml"
     ; "mcp/prompts.toml"
     ; "identity/github.toml"
-    ; "keeper.env"
     ]
 
 let test_seeds_rejects_keeper_manifests () =
@@ -191,6 +190,15 @@ let test_seeds_rejects_dune_files () =
   check bool "top-level dune" false (Common.seeds_into_fresh_config_root "dune");
   check bool "nested dune" false
     (Common.seeds_into_fresh_config_root "prompts/dune")
+
+(* The retired deploy-time credential file must never seed a fresh root: a
+   gitignored copy left in an upgraded checkout is crunched into the binary
+   with its API keys, and both seed paths ask this predicate. *)
+let test_seeds_rejects_retired_keeper_env () =
+  check bool "top-level keeper.env" false
+    (Common.seeds_into_fresh_config_root "keeper.env");
+  check bool "nested keeper.env" false
+    (Common.seeds_into_fresh_config_root "prompts/keeper.env")
 
 (* "keepers" is rejected as a whole segment, not as a prefix: a directory that
    merely starts with those letters is ordinary distribution config. The one
@@ -242,6 +250,8 @@ let () =
       test_case "rejects keeper manifests" `Quick
         test_seeds_rejects_keeper_manifests;
       test_case "rejects dune files" `Quick test_seeds_rejects_dune_files;
+      test_case "rejects the retired keeper.env" `Quick
+        test_seeds_rejects_retired_keeper_env;
       test_case "rejects the default roster verbatim" `Quick
         test_seeds_rejects_default_roster_verbatim;
       test_case "default roster seeds into the keepers dir" `Quick

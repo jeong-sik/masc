@@ -27,56 +27,13 @@ chmod +x \
     "$FIXTURE_DIR/repo/scripts/deploy.sh" \
     "$FIXTURE_DIR/repo/_build/default/bin/main_eio.exe" \
     "$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe"
-printf '%s\n' 'false' > "$FIXTURE_DIR/repo/config/keeper.env"
-
 sleep 30 &
 SLEEP_PID=$!
 printf '%s\n' "$SLEEP_PID" > "$FIXTURE_DIR/runtime/.masc/masc-prod.pid"
 
-if MASC_BASE_PATH="$FIXTURE_DIR/runtime" \
-    bash "$FIXTURE_DIR/repo/scripts/deploy.sh" --skip-build
-then
-    echo "expected invalid keeper.env to reject deployment" >&2
-    exit 1
-fi
-
-if ! kill -0 "$SLEEP_PID" 2>/dev/null; then
-    echo "deployment stopped the serving process before env validation" >&2
-    exit 1
-fi
-
-echo "deploy preflight preserves the serving process on env failure"
-
-# An env file entry reusing a deployment control name must abort the deploy
-# before the stop step instead of redirecting which PID gets killed.
-printf 'PID_FILE=%s\n' "$FIXTURE_DIR/hijack.pid" \
-    > "$FIXTURE_DIR/repo/config/keeper.env"
-
-OVERRIDE_ERR="$FIXTURE_DIR/deploy-override.err"
-if MASC_BASE_PATH="$FIXTURE_DIR/runtime" \
-    bash "$FIXTURE_DIR/repo/scripts/deploy.sh" --skip-build 2>"$OVERRIDE_ERR"
-then
-    echo "expected control-variable override in keeper.env to reject deployment" >&2
-    exit 1
-fi
-
-if ! grep -q "readonly variable" "$OVERRIDE_ERR"; then
-    echo "deployment failed for a reason other than the control-variable freeze" >&2
-    cat "$OVERRIDE_ERR" >&2
-    exit 1
-fi
-
-if ! kill -0 "$SLEEP_PID" 2>/dev/null; then
-    echo "deployment stopped the serving process on control-variable override" >&2
-    exit 1
-fi
-
-echo "deploy preflight rejects control-variable overrides before touching prod"
-
 # The new build refuses the live runtime.toml before the stop step, so the
 # serving process keeps running and its editor can still change the value
 # (#39311). The helper here stands in for one that refuses the file.
-printf '' > "$FIXTURE_DIR/repo/config/keeper.env"
 cp "$ROOT_DIR/scripts/check-runtime-deployment-preflight.sh" \
     "$FIXTURE_DIR/repo/scripts/check-runtime-deployment-preflight.sh"
 chmod +x "$FIXTURE_DIR/repo/scripts/check-runtime-deployment-preflight.sh"

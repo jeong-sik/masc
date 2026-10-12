@@ -819,6 +819,55 @@ let test_a_refused_line_does_not_stop_the_turn () =
   the_store_is_still_blocked ~keepers_dir
 ;;
 
+let test_a_failed_restart_is_recovered_through_the_store () =
+  with_workspace @@ fun ~config ~keepers_dir ->
+  let append written =
+    match Boundaries.append ~keepers_dir ~keeper_id written with
+    | Ok () -> ()
+    | Error error -> fail (Boundaries.append_error_to_string error)
+  in
+  append (record ~trace_id:started_trace atom_history);
+  let path = Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let preserved = path ^ ".fixture-preserved" in
+  (* Preserve the pre-reset rows while refusing the real append. Only this
+     temporary fixture swaps paths; production code uses its normal store. *)
+  Unix.rename path preserved;
+  block_the_store ~keepers_dir;
+  let before = restart_failures Turn_helpers.At_turn_start in
+  record_restart ~config Turn_helpers.At_turn_start;
+  check (float 0.0001) "the actual restart append was refused" (before +. 1.0)
+    (restart_failures Turn_helpers.At_turn_start);
+  the_store_is_still_blocked ~keepers_dir;
+  Unix.rmdir path;
+  Unix.rename preserved path;
+  let ended turn =
+    record ~trace_id:started_trace ~turn ~history_at_start:Boundaries.Fresh_history
+      Boundaries.No_atom_history
+  in
+  append (ended 2);
+  let notice () =
+    Turn_helpers.restart_notice Boundaries.Fresh_history
+      Run_context.Saved_history_absent
+      (Turn_helpers.history_stated_by_log ~config ~keeper_name:keeper_id
+         ~trace_id:started_trace)
+    |> describe_notice
+  in
+  check string "end success does not settle the failed restart" "at turn start"
+    (notice ());
+  check int "only the prior and end records landed" 2
+    (List.length (read_lines ~keepers_dir));
+  record_restart ~config Turn_helpers.At_turn_start;
+  check string "the stored retry settles the reset" "none" (notice ());
+  (match List.rev (read_lines ~keepers_dir) with
+   | (_, { Boundaries.event = Boundaries.History_restarted { trace_id }; _ }) :: _ ->
+     check string "the generation reader's witness names the same trace"
+       started_trace trace_id
+   | _ -> fail "the successful retry left no explicit generation witness");
+  append (ended 3);
+  check string "a later ordinary turn preserves the stored witness" "none"
+    (notice ())
+;;
+
 (* Every pair. The one that is easy to get wrong is a turn whose finalize save
    the store refused as stale: it replaced nothing, so it restarts nothing and
    owes no line. Writing one there puts a restart ahead of lines that are
@@ -1113,6 +1162,8 @@ let () =
             test_a_restart_is_recorded_from_either_site
         ; test_case "a refused line does not stop the turn" `Quick
             test_a_refused_line_does_not_stop_the_turn
+        ; test_case "failed restart recovers through the actual store" `Quick
+            test_a_failed_restart_is_recovered_through_the_store
         ; test_case "only an accepted finalize save owes the line" `Quick
             test_only_an_accepted_finalize_save_owes_the_line
         ] )

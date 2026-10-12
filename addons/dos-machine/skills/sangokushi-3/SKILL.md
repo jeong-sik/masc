@@ -175,6 +175,15 @@ soldiers 2181, with no pending training assignment line. This proves that
 specific one-month order and observed 60 → 79 result, not a universal gain,
 a rule for every officer, or a winning campaign.
 
+A February 190 Chenliu order selected six officers. After an intervening
+city-20 defense and retreat, March Chenliu's report still displayed
+`훈련: 훈련도 상승`. Individual information confirmed Cao Cao 53 → 91,
+Xiahou Yuan 68 → 100, and Cao Ang, Li Dian, Cao Ren and Chen Gong 60 → 98.
+Their troops remained 2,500, 1,637, 1,900, 589, 939 and 1,500 respectively.
+The March roster indices differed from the selection list: identify officers
+by their visible names before comparing their results. This verifies those
+six completed orders despite the intervening battle, not a fixed training gain.
+
 ## Going to war
 
 Observed 2026-09-29 in scenario 6 as 조예, from 17 하비 against 33 건업.
@@ -278,6 +287,28 @@ Observed at 193년 7월 6 평원 (유비 defending against 원소) and at 235년
   hands every officer to the computer until the battle ends. Each
   `<장수>의 전술` line still waits for a key (`space`). One delegated siege ran
   from day 1 to day 10 and returned to the attacker city's command prompt.
+
+## Castle capture can force retreat after a wait
+
+In February 190 city-20 defense, waiting with Xiahou Dun and then Cao Hong
+was followed by `조조군의 성이 함락되었습니다`. The next prompt asked where
+to retreat Xiahou Dun, although friendly troops remained 3,695 and enemy
+troops 5,856. A long observation reached the retreat selector without
+retaining that transient capture notice. Do not infer a misrouted command
+or voluntary retreat solely from the later destination prompt.
+
+Preserve the resulting checkpoint, then use short observations from the
+pre-action checkpoint to inspect missed messages. In this replay, separate
+100,000-step observations and a later 1,000,000-step observation exposed
+Cao Hong's mobility notice and the castle-capture notice. These intervals
+are observations from this branch, not a required timing rule.
+
+The destination list offered only `10.진류`. Each named officer answered
+with `1`, `0`, Enter: first Xiahou Dun, then Cao Hong. The game reported
+`조조군은 패배했습니다`, resumed AI strategy turns, and reached March
+Chenliu commands. Its own roster confirmed both officers present. Answering
+a destination alone does not prove arrival, and arrival does not preserve
+the lost city or establish a campaign win.
 
 ## A manual siege, an ongoing battle and reinforcements
 

@@ -694,9 +694,13 @@ val status_row_survives_folding : status_kind -> bool
     Exhaustive over [status_kind] on purpose: a new kind has to say which
     side it is on rather than inherit an answer. *)
 
+val awaiting_approvals : t -> awaiting_approval list
+(** All observed pending admissions, most recently requested first. Each
+    admission remains pending until its matching settlement is observed. *)
+
 val awaiting_approval : t -> awaiting_approval option
-(** The call the turn is held at, if any. One at a time: the turn cannot reach
-    a second call while it is waiting on this one. *)
+(** The currently selected admission for the pane's /approve and /deny actions:
+    the first of {!awaiting_approvals}, if any. Other admissions remain pending. *)
 
 val status_rows :
   ?compact:bool -> ?show_timing:bool -> now:float -> t -> (status_kind * string) list

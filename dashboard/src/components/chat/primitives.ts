@@ -4942,7 +4942,14 @@ function ChatComposerSession({
   }
   const setDraft = (value: string) => {
     if (isControlled) onDraftChange?.(value)
-    else if (draftPersistStoreKey) writeKeeperDraft(draftPersistStoreKey, value, authRevision)
+    else if (draftPersistStoreKey) {
+      // Whole-text writes obey the same compare-and-set ownership as sends:
+      // a stale textarea event (grow, slash Escape) must not clobber a newer
+      // snapshot published by the other mounted surface. The tracked signal
+      // rerenders this control with the canonical text instead.
+      if (!ownsDraft()) return
+      writeKeeperDraft(draftPersistStoreKey, value, authRevision)
+    }
     else setLocalDraft(value)
   }
   const ownsDraft = () => draftSnapshot === null

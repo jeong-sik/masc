@@ -360,7 +360,7 @@ describe('CopilotDock', () => {
     } })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: 200 })))
     const dock = useCopilotDock()
-    dock.send('input', { id: 'auth-partial', kr: 'fixture', ns: 'fixture', phase: 'Running', status: 'run' }, getSurfaceContext())
+    dock.send('input', { id: 'auth-partial', name: 'auth-partial', kr: 'fixture', ns: 'fixture', phase: 'Running', status: 'run' }, getSurfaceContext())
     await waitFor(() => expect(dock.threads.value['auth-partial']?.find(entry => entry.role === 'assistant')?.rawText).toBe(raw))
     setStoredToken('fixture-new')
     await waitFor(() => expect(Object.values(dock.sending.value).some(Boolean)).toBe(false))
@@ -381,7 +381,7 @@ describe('CopilotDock', () => {
     }))
     try {
       const dock = useCopilotDock()
-      dock.send('input', { id: 'auth-result', kr: 'fixture', ns: 'fixture', phase: 'Running', status: 'run' }, getSurfaceContext())
+      dock.send('input', { id: 'auth-result', name: 'auth-result', kr: 'fixture', ns: 'fixture', phase: 'Running', status: 'run' }, getSurfaceContext())
       await waitFor(() => expect(Object.values(dock.sending.value).some(Boolean)).toBe(false))
       expect(dock.threads.value['auth-result']?.at(-1)).toMatchObject({ text: 'admitted answer', delivery: 'delivered', responseState: { kind: 'known', phase: 'terminal' } })
     } finally {
@@ -428,7 +428,7 @@ describe('CopilotDock', () => {
     vi.stubGlobal('fetch', dockFetchMock(events))
     const dock = renderDock()
     dock.open()
-    dock.send('original input', { id: 'masc-improver', kr: 'fixture', ns: 'fixture', phase: 'Running', status: 'run' }, getSurfaceContext())
+    dock.send('original input', { id: 'masc-improver', name: 'masc-improver', kr: 'fixture', ns: 'fixture', phase: 'Running', status: 'run' }, getSurfaceContext())
     await waitFor(() => expect(dock.sending.value['masc-improver']).toBe(false))
     const rows = keeperThreads.value['masc-improver'] ?? []
     expect(rows.find(entry => entry.role === 'assistant')?.traceSteps).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'think', text: 'exposed reasoning' })]))
@@ -535,6 +535,91 @@ describe('CopilotDock', () => {
       expect(dock.send).not.toHaveBeenCalled()
       expect(readKeeperDraft('masc-improver')).toBe('newer main draft')
       await waitFor(() => expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('newer main draft'))
+    } finally {
+      render(null, main)
+      main.remove()
+    }
+  })
+
+  it('keys the shared composer draft by Keeper name, not registry keeper_id', async () => {
+    keepers.value = [
+      { name: 'keeper-alpha', keeper_id: 'registry-alpha-9', koreanName: '알파', status: 'running', phase: 'Running', runtime_id: 'fleet', needs_attention: false, total_turns: 0, context_ratio: 0.2 },
+    ] as unknown as typeof keepers.value
+    setStoredToken('fixture-current')
+    const main = document.createElement('div')
+    document.body.appendChild(main)
+    try {
+      render(h(ChatComposer, { placeholder: 'main', disabled: false, streaming: false,
+        draftPersistKey: 'keeper-alpha', onSend: vi.fn() }), main)
+      const mainInput = main.querySelector('textarea')!
+      fireEvent.input(mainInput, { target: { value: 'shared draft' } })
+      const dock = renderDock()
+      dock.setKeeper('registry-alpha-9')
+      dock.open()
+      await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
+      expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('shared draft')
+      fireEvent.input(container.querySelector('textarea')!, { target: { value: 'edited in the dock' } })
+      expect(readKeeperDraft('keeper-alpha')).toBe('edited in the dock')
+      expect(readKeeperDraft('registry-alpha-9')).toBe('')
+    } finally {
+      render(null, main)
+      main.remove()
+    }
+  })
+
+  it('ignores a stale Dock keystroke that would overwrite a newer main-pane draft', async () => {
+    setStoredToken('fixture-current')
+    const main = document.createElement('div')
+    document.body.appendChild(main)
+    try {
+      render(h(ChatComposer, { placeholder: 'main', disabled: false, streaming: false,
+        draftPersistKey: 'masc-improver', onSend: vi.fn() }), main)
+      const mainInput = main.querySelector('textarea')!
+      fireEvent.input(mainInput, { target: { value: 'first draft' } })
+      const actual = useCopilotDock()
+      const dock = { ...actual, send: vi.fn() }
+      render(h(DockHarness, { dock }), container)
+      dock.open()
+      await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
+      const dockInput = container.querySelector('textarea')!
+      expect(dockInput.value).toBe('first draft')
+      mainInput.value = 'newer main draft'
+      mainInput.dispatchEvent(new Event('input', { bubbles: true }))
+      // One keystroke queued in the same pre-rerender window must not erase
+      // the newer snapshot the main pane just published.
+      dockInput.value = 'first draftx'
+      dockInput.dispatchEvent(new Event('input', { bubbles: true }))
+      expect(readKeeperDraft('masc-improver')).toBe('newer main draft')
+      await waitFor(() => expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('newer main draft'))
+    } finally {
+      render(null, main)
+      main.remove()
+    }
+  })
+
+  it('keeps a newer Dock draft when a stale main-pane slash Escape lands', async () => {
+    setStoredToken('fixture-current')
+    const main = document.createElement('div')
+    document.body.appendChild(main)
+    try {
+      render(h(ChatComposer, { placeholder: 'main', disabled: false, streaming: false,
+        draftPersistKey: 'masc-improver',
+        commands: [{ id: 'help', group: 'util', label: '도움', run: vi.fn() }],
+        onSend: vi.fn() }), main)
+      const mainInput = main.querySelector('textarea')!
+      fireEvent.input(mainInput, { target: { value: '/he' } })
+      const actual = useCopilotDock()
+      const dock = { ...actual, send: vi.fn() }
+      render(h(DockHarness, { dock }), container)
+      dock.open()
+      await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
+      const dockInput = container.querySelector('textarea')!
+      dockInput.value = 'newer dock draft'
+      dockInput.dispatchEvent(new Event('input', { bubbles: true }))
+      // Escape from the stale slash menu must not clear the Dock's newer text.
+      mainInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      expect(readKeeperDraft('masc-improver')).toBe('newer dock draft')
+      await waitFor(() => expect((main.querySelector('textarea') as HTMLTextAreaElement).value).toBe('newer dock draft'))
     } finally {
       render(null, main)
       main.remove()

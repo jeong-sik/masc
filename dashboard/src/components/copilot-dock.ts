@@ -183,7 +183,11 @@ export function getSurfaceContext(selectedKeeperId?: string | null): SurfaceCont
 }
 
 interface DockKeeper {
+  /** Canonical Keeper name. Thread lookups and sends use [id], but the
+   *  shared composer draft is keyed by the Keeper name so the Dock and the
+   *  main panel read one store entry per Keeper. */
   id: string
+  name: string
   kr: string
   ns: string
   phase: string
@@ -194,11 +198,12 @@ function deriveDockKeepers(keeperRows: Keeper[]): DockKeeper[] {
   if (keeperRows.length === 0) {
     // Minimal fallback only when the store has not hydrated yet.
     return [
-      { id: 'masc-improver', kr: 'MASC Improver', ns: 'fleet', phase: 'Running', status: 'run' },
+      { id: 'masc-improver', name: 'masc-improver', kr: 'MASC Improver', ns: 'fleet', phase: 'Running', status: 'run' },
     ]
   }
   return keeperRows.map(k => ({
     id: k.keeper_id ?? k.name,
+    name: k.name,
     kr: k.koreanName ?? k.name,
     ns: k.runtime_canonical ?? k.runtime_id ?? 'fleet',
     phase: k.phase ?? k.lifecycle_phase ?? k.status,
@@ -288,6 +293,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
   const keeperRows = useMemo(() => deriveDockKeepers(keepers.value), [keepers.value])
   const keeper = keeperRows.find(k => k.id === dock.state.value.keeperId) ?? keeperRows[0] ?? {
     id: 'masc-improver',
+    name: 'masc-improver',
     kr: 'MASC Improver',
     ns: 'fleet',
     phase: 'Running',
@@ -480,8 +486,8 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
 
       <div class="dock-composer">
         <${ChatComposer}
-          key=${keeper.id}
-          draftPersistKey=${keeper.id}
+          key=${keeper.name}
+          draftPersistKey=${keeper.name}
           keeperLabel=${keeper.kr}
           placeholder=${`${keeper.kr}에게… (이 화면 기준)`}
           disabled=${false}

@@ -181,6 +181,16 @@
 
 @media (max-width: 1180px) {
   .dock.docked { width: 320px; }
+  /* The shared ChatComposer ships global chrome (.composer padding, a
+     non-wrapping tools row) that leaves the textarea a few dozen pixels wide
+     inside the 320px dock. Un-nest the padding, give the textarea its own
+     full-width line, and let the utility controls wrap beneath it. */
+  .dock-composer .composer { padding: 0; border-top: 0; background: transparent; }
+  .dock-composer .composer-inner { max-width: none; padding: 0; }
+  .dock-composer .composer-box { flex-wrap: wrap; }
+  .dock-composer .composer-textarea { flex: 1 1 100%; }
+  .dock-composer .composer-tools { flex-wrap: wrap; row-gap: 4px; }
+  .dock-composer .composer-tools .send { margin-left: auto; }
 }
 @media (max-width: 860px) {
   .dock.docked { position: fixed; right: 0; top: 50px; bottom: 0; width: 320px; z-index: 60; box-shadow: var(--shadow-pop); }

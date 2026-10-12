@@ -231,7 +231,7 @@ type model_signal =
   | Scoped_model_content
   | Model_started_at of float
       (* STREAM_MODEL_STARTED: the endpoint answered; no token yet. *)
-  | Provider_retry_at of Masc.Runtime_claude_api_retry.t
+  | Provider_retry_at of Runtime_claude_api_retry.t
   | Model_response_ended
       (* Provider response stop; the Keeper turn remains open. *)
   | Reasoning_at of float (* the last THINKING delta *)
@@ -2450,7 +2450,7 @@ type model_activity =
   | Activity_content_ended
   | Activity_reasoning
   | Activity_answering
-  | Activity_provider_retry of Masc.Runtime_claude_api_retry.t
+  | Activity_provider_retry of Runtime_claude_api_retry.t
   | Activity_tool_returned of string
 
 let model_activity t =

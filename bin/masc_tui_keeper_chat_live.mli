@@ -76,8 +76,8 @@ type delta =
       (** New resolved-runtime attempt: discard unfinished text/thinking from
           the prior attempt while retaining tool evidence. *)
   | Provider_retry_observed of
-      { attempt : Masc.Runtime_native_tasks.attempt
-      ; retry : Masc.Runtime_claude_api_retry.t
+      { attempt : Runtime_native_tasks.attempt
+      ; retry : Runtime_claude_api_retry.t
       }
   | Stream_model_started of
       { generation : int option

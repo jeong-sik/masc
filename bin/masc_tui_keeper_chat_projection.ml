@@ -821,9 +821,9 @@ let decode_provider_retry value =
       | None -> Error ("KEEPER_PROVIDER_RETRY.value requires " ^ key) in
     let* attempt_json = required "attempt" in
     let* retry_json = required "retry" in
-    let* attempt = Masc.Runtime_native_tasks.attempt_of_json attempt_json in
-    let* retry = Masc.Runtime_claude_api_retry.of_json retry_json
-      |> Result.map_error Masc.Runtime_claude_api_retry.error_to_string in
+    let* attempt = Runtime_native_tasks.attempt_of_json attempt_json in
+    let* retry = Runtime_claude_api_retry.of_json retry_json
+      |> Result.map_error Runtime_claude_api_retry.error_to_string in
     Ok (attempt, retry)
   in
   decode () |> Result.map_error (fun detail -> Malformed_event detail)

@@ -2621,7 +2621,7 @@ let test_scoped_details_retire_prior_response_usage () =
 
 let test_provider_retry_progress_owner () =
   let t = fresh () in
-  let retry : Masc.Runtime_claude_api_retry.t =
+  let retry : Runtime_claude_api_retry.t =
     { observation_id="retry-observation"; attempt=1; max_retries=10;
       retry_delay_ms=1234; error_status=None } in
   let event runtime_id lane_attempt_index = Live.Provider_retry_observed
@@ -2636,7 +2636,7 @@ let test_provider_retry_progress_owner () =
   feed t [event "other" 0; event "claude" 1];
   check bool "foreign attempts cannot overwrite current retry" true
     (Transcript.model_activity t = Some (Transcript.Activity_provider_retry retry));
-  feed t [Live.Stream_model_started {stream_scope=Some 0;
+  feed t [Live.Stream_model_started {generation=None;stream_scope=Some 0;
     message_id=Some "response";model="claude";usage=None}];
   check bool "actual model response supersedes retry activity" true
     (Transcript.model_activity t = Some Transcript.Activity_model_started);

@@ -39,25 +39,6 @@ SKIP_BUILD=false
 RESTART_TUNNEL=false
 PREPARE_UNDER_DEPLOYMENT_LEASE=false
 
-preserve_env_override() {
-    local name="$1"
-    local flag_var="__PRESERVE_${name}_SET"
-    local value_var="__PRESERVE_${name}_VALUE"
-    if [ "${!name+x}" = "x" ]; then
-        printf -v "$flag_var" '%s' "1"
-        printf -v "$value_var" '%s' "${!name}"
-    fi
-}
-
-restore_env_override() {
-    local name="$1"
-    local flag_var="__PRESERVE_${name}_SET"
-    local value_var="__PRESERVE_${name}_VALUE"
-    if [ "${!flag_var:-}" = "1" ]; then
-        export "$name=${!value_var}"
-    fi
-}
-
 while [[ $# -gt 0 ]]; do
     case $1 in
         --skip-build) SKIP_BUILD=true; shift ;;
@@ -120,31 +101,10 @@ if [ "$PREPARE_UNDER_DEPLOYMENT_LEASE" = true ]; then
     exit 0
 fi
 
-# Load and validate runtime environment before stopping the serving process.
-# BasePath was frozen above and is intentionally not recomputed from env files.
-# Deployment control variables are frozen before sourcing: an env file entry
-# reusing one of these names aborts the deploy here, while the serving process
-# is still untouched, instead of silently redirecting which PID is stopped,
-# which launchd label is checked, or where the new runtime starts.
-KEEPER_ENV="$REPO_DIR/config/keeper.env"
 readonly SCRIPT_DIR REPO_DIR RELEASE_DIR PROD_PORT HEALTH_URL BASE_PATH \
     RUNTIME_ROOT PID_FILE LOG_DIR LAUNCHD_LABEL SKIP_BUILD RESTART_TUNNEL \
     PREPARE_UNDER_DEPLOYMENT_LEASE BUILD_EXE BUILD_PREFLIGHT_HELPER RELEASE_EXE \
-    BACKUP_EXE KEEPER_ENV
-preserve_env_override MASC_CONFIG_DIR
-if [ -f "$KEEPER_ENV" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$KEEPER_ENV"
-    set +a
-fi
-if [ -f "$REPO_DIR/.env" ]; then
-    set -a
-    # shellcheck disable=SC1091
-    source "$REPO_DIR/.env"
-    set +a
-fi
-restore_env_override MASC_CONFIG_DIR
+    BACKUP_EXE
 
 if [ ! -d "$RUNTIME_ROOT" ] || [ -L "$RUNTIME_ROOT" ]; then
     echo "Error: deployment requires an existing exact runtime directory at $RUNTIME_ROOT" >&2

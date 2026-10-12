@@ -178,7 +178,6 @@ let test_seeds_admits_distribution_assets () =
     ; "tools/masc_status.toml"
     ; "mcp/prompts.toml"
     ; "identity/github.toml"
-    ; "keeper.env"
     ]
 
 let test_seeds_rejects_keeper_manifests () =

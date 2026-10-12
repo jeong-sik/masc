@@ -458,8 +458,6 @@
       이미 있는 환경변수를 또 만드는 것일 수 있다.
       그게 꼭 환경변수여야만 되는 일인가?
       TOML 로 환경 값을 쓰고 있는데도 환경변수를 따로 쓰는 이유가 있는가?
-      (참고: config/keeper.env 는 OCaml 런타임이 읽지 않는다.
-       scripts/deploy.sh 전용 API 키 export 파일이다.)
     </item>
 
     <item id="legacy_residue">

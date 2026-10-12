@@ -1,0 +1,25 @@
+{
+  "cli_version": "codex-cli 0.162.1",
+  "exec": {
+    "ephemeral": true,
+    "ignore_user_config": true,
+    "sandbox": "read-only",
+    "exit_code": 1,
+    "json_event_count": 0,
+    "stderr_terminal": "Error: failed to initialize in-process app-server client: Operation not permitted (os error 1)"
+  },
+  "app_server": {
+    "transport": "stdio",
+    "initialize_request_written": true,
+    "initialize_response_observed": false,
+    "initialized_sent": false,
+    "permission_profile_list_sent": false,
+    "exit_code": 1,
+    "json_event_count": 0,
+    "stderr_terminal": "Error: Operation not permitted (os error 1)"
+  },
+  "verdict": "STARTUP_FAILED",
+  "model_turn_verified": false,
+  "masc_adapter_verified": false,
+  "installed_ui_verified": false
+}

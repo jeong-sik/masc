@@ -1516,14 +1516,26 @@ let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content
              List.filter (fun (index,_,_) -> index<>activity.content_index) t.active_model_content;
            t.model_signal <- Some Scoped_model_content)
     | Content_ended ->
-      (* Unknown or older stops provide no authority over the current model
-         signal. In particular a tool/content header alone is not activity. *)
-      if scope_order = 0 then
+      (* A stop cannot admit a response. Within the exact current response,
+         retain closure even when its start was lost, so a late body/header
+         cannot reopen the same occurrence. Other open pieces keep ownership. *)
+      if t.response_scope = Some {rs_generation=Some activity.content_generation;
+                                  rs_scope=activity.content_scope} then begin
+        if scope_order > 0 then begin
+          t.content_scope <- Some incoming;
+          t.content_scope_closed <- false;
+          t.active_model_content <- []
+        end;
         match List.find_opt (fun (index,_,_) -> index=activity.content_index) t.active_model_content with
         | Some (_,channel,Some _) when channel=activity.channel ->
             t.active_model_content <- List.map (fun (index,channel,at) ->
               index,channel,(if index=activity.content_index then None else at)) t.active_model_content
-        | Some (_,_,_) | None -> ()
+        | None ->
+            t.active_model_content <- t.active_model_content @
+              [activity.content_index,activity.channel,None];
+            t.model_signal <- Some Scoped_model_content
+        | Some (_,_,_) -> ()
+      end
 ;;
 
 let model_signal_for_body t response fallback =

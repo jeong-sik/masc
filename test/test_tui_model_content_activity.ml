@@ -564,6 +564,30 @@ let test_owned_text_protocol () =
      ["response",owner;"response",owner];["stream_scope",`Int (-1)];
      ["stream_scope",`Int 9_007_199_254_740_992]]
 
+let test_missing_start_retains_content_closure () =
+  List.iter (fun with_open_piece ->
+    let t = create () in
+    T.apply ~now:1. t (L.Stream_model_started {generation=Some 7;stream_scope=Some 0;
+      message_id=None;model="fixture";usage=None});
+    if with_open_piece then T.apply ~now:2. t (observed ~generation:7 ~index:1 ());
+    T.apply ~now:3. t (ended ~generation:7 ~index:0 ~channel:E.Model_thinking ());
+    let expected = if with_open_piece then T.Activity_answering else T.Activity_content_ended in
+    check bool "closure with missing start preserves other open activity" true
+      (T.model_activity t=Some expected);
+    T.apply ~now:4. t (observed ~generation:7 ~index:0 ~channel:E.Model_thinking ());
+    T.apply ~now:5. t (L.Thinking {text="late exposed bytes";content_index=Some 0;
+      response=Some {E.response_generation=7;response_scope=0}});
+    check bool "late header and body cannot reopen the closed occurrence" true
+      (T.model_activity t=Some expected);
+    check string "late exposed body remains available" "late exposed bytes" (T.thinking t);
+    T.apply ~now:6. t (ended ~generation:8 ~index:0 ~channel:E.Model_thinking ());
+    check bool "future closure cannot admit a response" true
+      ((T.response_metadata t).owner=Some (7,0));
+    T.apply ~now:7. t (observed ~generation:8 ~index:0 ~channel:E.Model_thinking ());
+    check bool "new response can reuse the content index" true
+      (T.model_activity t=Some T.Activity_reasoning)
+  ) [false;true]
+
 let test_thinking_index_wire_boundary () =
   let decode fields =
     let wire = "data: " ^ Yojson.Safe.to_string (`Assoc ["type",`String "CUSTOM";
@@ -583,6 +607,7 @@ let () = run "model content activity"
   ["boundaries", [test_case "owned text lifecycle" `Quick test_owned_text_lifecycle;
     test_case "owned text protocol" `Quick test_owned_text_protocol;
     test_case "thinking content index wire" `Quick test_thinking_index_wire_boundary;
+    test_case "missing content start retains closure" `Quick test_missing_start_retains_content_closure;
     test_case "owned thinking lifecycle" `Quick test_owned_thinking_lifecycle;
     test_case "owned thinking protocol" `Quick test_owned_thinking_protocol;
     test_case "owned response details" `Quick test_owned_response_details;

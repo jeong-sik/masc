@@ -5,7 +5,9 @@ import {
   trackedKeeperChatOperationsForKeeper,
   removeTrackedKeeperChatOperation,
   upsertTrackedKeeperChatOperation,
+  type TrackedKeeperChatAssistantDraft,
 } from './keeper-chat-operations-local'
+import { initialKeeperResponseState } from './lib/keeper-response-state'
 
 describe('keeper chat operation tracking', () => {
   beforeEach(() => {
@@ -113,5 +115,57 @@ describe('keeper chat operation tracking', () => {
       assistantDraft: { text: 'partial', rawText: 'partial', delivery: 'streaming', streamState: 'retrying',
         runtimeAttempt: { runtimeId: 'claude', index: -1 } } }]))
     expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.runtimeAttempt).toBeUndefined()
+  })
+
+  it.each(['foreign owner', 'duplicate', 'unknown channel', 'negative index', 'extra field'] as const)(
+    'quarantines invalid stored content inventory: %s', kind => {
+      const activity = { generation: 1, stream_scope: 0, block_index: 0, channel: 'thinking', state: 'ended' }
+      const invalid = kind === 'duplicate' ? [activity, activity] : [{ ...activity,
+        ...(kind === 'foreign owner' ? { generation: 2 } : {}),
+        ...(kind === 'unknown channel' ? { channel: 'tool' } : {}),
+        ...(kind === 'negative index' ? { block_index: -1 } : {}),
+        ...(kind === 'extra field' ? { text: 'not metadata' } : {}),
+      }]
+      const owner = { content_generation: 1, stream_scope: 0 }
+      upsertTrackedKeeperChatOperation({ operationId: 'content', keeperName: 'echo', message: 'input', submittedAt: 1,
+        assistantDraft: { text: 'preserved answer', rawText: 'preserved answer', delivery: 'streaming', streamState: 'waiting',
+          modelContentActivity: invalid as never,
+          responseState: { ...initialKeeperResponseState, floor: owner, current: owner, lastSequence: 2 } } })
+      expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft).toMatchObject({
+        text: 'preserved answer', responseState: { kind: 'unavailable' }, delivery: 'error', streamState: null,
+      })
+    },
+  )
+
+  it('preserves closed content when a same-response draft omits or reopens its inventory', () => {
+    const owner = { content_generation: 1, stream_scope: 0 }
+    const activity = { generation: 1, stream_scope: 0, block_index: 0, channel: 'thinking' as const, state: 'ended' as const }
+    const draft: TrackedKeeperChatAssistantDraft = { text: '', rawText: '', delivery: 'streaming', streamState: 'waiting',
+      responseState: { ...initialKeeperResponseState, floor: owner, current: owner, lastSequence: 2 } }
+    const request = { operationId: 'content', keeperName: 'echo', message: 'input', submittedAt: 1 }
+    upsertTrackedKeeperChatOperation({ ...request, assistantDraft: { ...draft, modelContentActivity: [activity] } })
+    upsertTrackedKeeperChatOperation({ ...request, assistantDraft: draft })
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.modelContentActivity).toEqual([activity])
+    upsertTrackedKeeperChatOperation({ ...request, assistantDraft: { ...draft,
+      streamState: 'thinking', modelContentActivity: [{ ...activity, state: 'observed' }] } })
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.modelContentActivity).toEqual([activity])
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.streamState).toBe('waiting')
+  })
+
+  it('does not carry closed occurrences into a newer response', () => {
+    const request = { operationId: 'content', keeperName: 'echo', message: 'input', submittedAt: 1 }
+    for (const generation of [1, 2]) {
+      const owner = { content_generation: generation, stream_scope: 0 }
+      upsertTrackedKeeperChatOperation({ ...request, assistantDraft: {
+        text: '', rawText: '', delivery: 'streaming', streamState: generation === 1 ? 'waiting' : 'thinking',
+        responseState: { ...initialKeeperResponseState, floor: owner, current: owner, lastSequence: generation },
+        modelContentActivity: [{ generation, stream_scope: 0, block_index: 0, channel: 'thinking',
+          state: generation === 1 ? 'ended' : 'observed' }],
+      } })
+    }
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.modelContentActivity).toMatchObject([
+      { generation: 2, state: 'observed' },
+    ])
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.modelContentActivity).toHaveLength(1)
   })
 })

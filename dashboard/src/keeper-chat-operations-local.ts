@@ -1,5 +1,6 @@
 import { normalizeKeeperConversationDetails } from './keeper-message'
-import { ownerFromUnknown, keeperResponseStateFromUnknown, unavailableKeeperResponseState, type KeeperResponseState } from './lib/keeper-response-state'
+import { ownerFromUnknown, keeperResponseStateFromUnknown, unavailableKeeperResponseState, sameKeeperResponseOwner, type KeeperResponseState } from './lib/keeper-response-state'
+import { KeeperModelContentActivitySchema } from './schemas/sse'
 import type {
   ChatTraceStep,
   KeeperConversationAttachment,
@@ -10,10 +11,8 @@ import type {
 } from './types'
 import { IN_FLIGHT_DELIVERY } from './lib/keeper-delivery'
 import { keeperConversationDeliveryFromUnknown } from './lib/keeper-delivery'
-import type { KeeperModelContentActivity } from './lib/keeper-chat-stream-contract'
 
 export interface TrackedKeeperChatAssistantDraft {
-  runtimeAttempt?: KeeperConversationEntry['runtimeAttempt']
   responseState?: KeeperResponseState
   details?: KeeperConversationDetails | null
   text: string
@@ -180,34 +179,22 @@ function normalizeTraceSteps(raw: unknown): ChatTraceStep[] | undefined {
   return steps.length > 0 ? (steps as ChatTraceStep[]) : undefined
 }
 
-const MODEL_CONTENT_CHANNELS = ['text', 'thinking'] as const
-const MODEL_CONTENT_STATES = ['observed', 'ended'] as const
-
-function normalizeModelContentActivity(raw: unknown): KeeperConversationEntry['modelContentActivity'] | undefined {
-  if (!Array.isArray(raw)) return undefined
-  const activities: Readonly<KeeperModelContentActivity>[] = []
-  for (const item of raw) {
-    if (!isRecord(item)) return undefined
-    const generation = item.generation
-    const streamScope = item.stream_scope
-    const blockIndex = item.block_index
-    if (typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 0
-      || typeof streamScope !== 'number' || !Number.isSafeInteger(streamScope) || streamScope < 0
-      || typeof blockIndex !== 'number' || !Number.isSafeInteger(blockIndex) || blockIndex < 0) return undefined
-    const channel = parseMember(MODEL_CONTENT_CHANNELS, item.channel)
-    const state = parseMember(MODEL_CONTENT_STATES, item.state)
-    if (!channel || !state) return undefined
-    const providerMessageId = item.provider_message_id
-    if (providerMessageId !== undefined
-      && (typeof providerMessageId !== 'string' || providerMessageId.trim() === '')) return undefined
-    activities.push(Object.freeze({
-      generation,
-      stream_scope: streamScope,
-      block_index: blockIndex,
-      ...(typeof providerMessageId === 'string' ? { provider_message_id: providerMessageId } : {}),
-      channel,
-      state,
-    }))
+function storedModelContentActivity(
+  raw: unknown,
+  response: KeeperResponseState | null | undefined,
+): KeeperConversationEntry['modelContentActivity'] | null {
+  if (raw === undefined) return undefined
+  if (!Array.isArray(raw) || response?.kind !== 'known') return null
+  const activities: NonNullable<KeeperConversationEntry['modelContentActivity']>[number][] = []
+  for (const value of raw) {
+    const parsed = KeeperModelContentActivitySchema.safeParse(value)
+    if (!parsed.success) return null
+    const activity = parsed.data
+    if (response.floor === null || activity.generation !== response.floor.content_generation
+        || activity.stream_scope !== response.floor.stream_scope) return null
+    if (activities.some(previous => previous.generation === activity.generation
+      && previous.stream_scope === activity.stream_scope && previous.block_index === activity.block_index)) return null
+    activities.push(Object.freeze({ ...activity }))
   }
   return Object.freeze(activities)
 }
@@ -225,11 +212,10 @@ function normalizeAssistantDraft(raw: unknown): TrackedKeeperChatAssistantDraft 
       : parseMember(KEEPER_STREAM_STATES, raw.streamState) ?? null
   const timestamp = nullableStringValue(raw.timestamp)
   const traceSteps = normalizeTraceSteps(raw.traceSteps)
-  const modelContentActivity = raw.modelContentActivity === undefined ? undefined
-    : normalizeModelContentActivity(raw.modelContentActivity)
   const error = nullableStringValue(raw.error)
   const runtimeAttempt = raw.runtimeAttempt === undefined ? undefined : runtimeAttemptFromUnknown(raw.runtimeAttempt)
   const responseState = raw.responseState === undefined ? undefined : keeperResponseStateFromUnknown(raw.responseState)
+  const modelContentActivity = storedModelContentActivity(raw.modelContentActivity, responseState)
 
   return {
     ...(runtimeAttempt ? { runtimeAttempt } : {}),
@@ -247,6 +233,10 @@ function normalizeAssistantDraft(raw: unknown): TrackedKeeperChatAssistantDraft 
       delivery: 'error' as const, streamState: null,
       error: 'Stored response ownership is unavailable; waiting for the authoritative operation result.',
     } : {}),
+    ...(modelContentActivity === null ? {
+      responseState: unavailableKeeperResponseState, delivery: 'error' as const, streamState: null,
+      error: 'Stored content ownership is unavailable; waiting for authoritative recovery.',
+    } : {}),
   }
 }
 
@@ -256,7 +246,6 @@ export function trackedKeeperChatAssistantDraftFromEntry(
   if (entry.role !== 'assistant') return null
   const traceSteps = normalizeTraceSteps(entry.traceSteps)
   return {
-    ...(entry.runtimeAttempt ? { runtimeAttempt: entry.runtimeAttempt } : {}),
     ...(entry.responseState ? { responseState: entry.responseState } : {}),
     details: entry.details ? { ...entry.details, rawPayload: undefined } : null,
     text: entry.text,
@@ -339,6 +328,39 @@ export function trackedKeeperChatOperationsForKeeper(keeperName: string): Tracke
   return readAll().filter(request => request.keeperName === name)
 }
 
+function preserveContentClosure(
+  stored: TrackedKeeperChatAssistantDraft | undefined,
+  incoming: TrackedKeeperChatAssistantDraft,
+): TrackedKeeperChatAssistantDraft {
+  const before = stored?.responseState
+  const after = incoming.responseState
+  const previousActivities = stored?.modelContentActivity
+  if (!previousActivities || before?.kind !== 'known' || after?.kind !== 'known'
+      || before.current === null || after.current === null
+      || !sameKeeperResponseOwner(before.current, after.current)) return incoming
+  if (incoming.modelContentActivity === undefined) return { ...incoming, modelContentActivity: previousActivities }
+  const sameOccurrence = (left: NonNullable<TrackedKeeperChatAssistantDraft['modelContentActivity']>[number],
+    right: NonNullable<TrackedKeeperChatAssistantDraft['modelContentActivity']>[number]): boolean =>
+    left.generation === right.generation && left.stream_scope === right.stream_scope && left.block_index === right.block_index
+  let reopened = false
+  const merged = incoming.modelContentActivity.map(activity => {
+    const previous = previousActivities.find(old => sameOccurrence(old, activity))
+    if (previous?.state === 'ended' && activity.state === 'observed') reopened = true
+    return previous?.state === 'ended' ? previous : activity
+  })
+  const conflict = incoming.modelContentActivity.some(activity => previousActivities.some(previous =>
+    sameOccurrence(previous, activity) && previous.channel !== activity.channel))
+  if (conflict) return { ...incoming, modelContentActivity: undefined, responseState: unavailableKeeperResponseState,
+    delivery: 'error', streamState: null, error: 'Stored content channels conflict; waiting for authoritative recovery.' }
+  const missing = previousActivities.filter(previous => !merged.some(activity => sameOccurrence(previous, activity)))
+  const activities = Object.freeze([...missing, ...merged])
+  const open = activities.filter(activity => activity.state === 'observed').at(-1)
+  return { ...incoming, modelContentActivity: activities,
+    ...(reopened && (incoming.streamState === 'thinking' || incoming.streamState === 'streaming' || incoming.streamState === 'waiting')
+      ? { streamState: open ? (open.channel === 'thinking' ? 'thinking' : 'streaming') : 'waiting' } : {}),
+  }
+}
+
 export function upsertTrackedKeeperChatOperation(request: TrackedKeeperChatOperation): void {
   const operationId = request.operationId.trim()
   const keeperName = request.keeperName.trim()
@@ -354,7 +376,12 @@ export function upsertTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
     ...(request.attachments && request.attachments.length > 0 ? { attachments: request.attachments } : {}),
     ...(assistantDraft ? { assistantDraft } : {}),
   }
-  const next = readAll().filter(existing => existing.operationId !== operationId)
+  const existingRequests = readAll()
+  const previous = existingRequests.find(existing => existing.operationId === operationId)
+  if (normalized.assistantDraft !== undefined) {
+    normalized.assistantDraft = preserveContentClosure(previous?.assistantDraft, normalized.assistantDraft)
+  }
+  const next = existingRequests.filter(existing => existing.operationId !== operationId)
   next.push(normalized)
   writeAll(next)
 }

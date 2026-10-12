@@ -689,6 +689,37 @@ let test_server_transcript_deferral_preserves_final_slot ~native () =
       ~tool_calls:[tool "exec-before-retry"] () with
     | Error _ -> () | Ok () -> fail "old effect was allowed under a new attempt provenance")
 
+(* The live commit events and the persisted rows must name the same key and the
+   same positions: ordinals count the whole call list, and a call without an
+   execution identity commits nothing. *)
+let test_committed_tool_events_match_the_append_ownership ~native () =
+  let operation_id = Keeper_chat_delivery_identity.Request_id.of_string "committed-events-op"
+    |> require "delivery ID" in
+  let resumed_from =
+    if native then Some (Keeper_semantic_execution.Official_client
+        {client_kind=Codex; runtime_id="codex.default"; session_id="provider/session";
+         turn_id="native-turn"; tool_surface_sha256=String.make 64 'a';
+         frame=Keeper_repetition_snapshot.empty})
+    else None in
+  let call execution_id : Keeper_chat_store.tool_call =
+    {call_id="provider-id"; execution_id=Option.map Ids.Execution_id.of_string execution_id;
+     call_name="Execute"; args="{}"} in
+  let calls = [call None; call (Some "exec-a"); call None; call (Some "exec-b")] in
+  let expected_key = Server_keeper_operation_transcript.tool_delivery_key ~operation_id ~resumed_from
+    |> require "delivery key" in
+  let events = Server_keeper_operation_transcript.committed_tool_events ~operation_id ~resumed_from calls
+    |> require "commit events" in
+  check int "only calls with an execution identity commit" 2 (List.length events);
+  List.iter2 (fun event (execution, ordinal) -> match event with
+    | Keeper_chat_events.Tool_transcript_committed c ->
+      check bool "same delivery key as the append" true
+        (Keeper_chat_delivery_identity.delivery_key_equal expected_key c.delivery_key);
+      check string "execution" execution (Ids.Execution_id.to_string c.execution_id);
+      check int "ordinal counts the whole call list" ordinal c.ordinal
+    | _ -> fail "expected a commit event") events [("exec-a", 1); ("exec-b", 3)];
+  check bool "no calls, no events" true
+    (Server_keeper_operation_transcript.committed_tool_events ~operation_id ~resumed_from [] = Ok [])
+
 let () = run "direct runtime continuation" ["http", [test_case
   "rate limit after tool result resumes same operation across owner restart" `Quick
   (test_http_effect_checkpoint_owner_restart_alternate ~interleave:false ~lose_retained:false ~projection_failure:false);
@@ -716,4 +747,8 @@ let () = run "direct runtime continuation" ["http", [test_case
     test_case "server persistence keeps final answer and both tool attempts" `Quick
     (test_server_transcript_deferral_preserves_final_slot ~native:false);
     test_case "native Gate preserves original and resumed tool ordinals across reload" `Quick
-    (test_server_transcript_deferral_preserves_final_slot ~native:true)]]
+    (test_server_transcript_deferral_preserves_final_slot ~native:true);
+    test_case "live commit events carry the append's key and positions" `Quick
+    (test_committed_tool_events_match_the_append_ownership ~native:false);
+    test_case "live commit events under a native continuation key" `Quick
+    (test_committed_tool_events_match_the_append_ownership ~native:true)]]

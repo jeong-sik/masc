@@ -20,6 +20,15 @@ let tool_delivery_key ~operation_id ~resumed_from =
         (Digestif.SHA256.(digest_string canonical |> to_hex)) in
       Ok (Keeper_chat_delivery_identity.Operation_native {operation_id; continuation_id})
 
+let committed_tool_events ~operation_id ~resumed_from tool_calls =
+  Result.map
+    (fun delivery_key ->
+      List.map
+        (fun ({ execution_id; ordinal } : Keeper_chat_store.tool_ownership) ->
+          Keeper_chat_events.Tool_transcript_committed { delivery_key; execution_id; ordinal })
+        (Keeper_chat_store.tool_ownerships tool_calls))
+    (tool_delivery_key ~operation_id ~resumed_from)
+
 let persist ~base_dir ~keeper_name ~operation_id ~resumed_from ~settlement
     ~tool_calls ?surface ?conversation_id ?blocks ?turn_ref ?stream_lifecycle () =
   let ( let* ) = Result.bind in

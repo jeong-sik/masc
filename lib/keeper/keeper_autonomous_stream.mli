@@ -16,9 +16,9 @@ type ending =
   | Failed of string
   | Cancelled
 
-val publish_committed_tool_bindings :
-  t -> (Keeper_chat_delivery_identity.delivery_key * Keeper_chat_delivery_identity.transcript_slot) list -> unit
-(** Publish only append-acknowledged bindings; their explicit delivery keys may
+val publish_committed_tool_ownerships :
+  t -> (Keeper_chat_delivery_identity.delivery_key * Keeper_chat_store.tool_ownership) list -> unit
+(** Publish only append-acknowledged ownerships; their explicit delivery keys may
     belong to approval records distinct from the surrounding turn journal. *)
 
 val finish : t -> ending -> unit

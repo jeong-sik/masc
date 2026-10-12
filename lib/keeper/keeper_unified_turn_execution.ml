@@ -506,12 +506,11 @@ let run (ctx : ctx)
      liveness, tool-level timeouts, max-turn limits, and the optional
      supervisor stale-turn watchdog. *)
   let result, turn_state =
-    match run_once turn_state with
-    | (_, _) as settled -> settled
-    | exception (Eio.Cancel.Cancelled _ as exn) ->
+    try run_once turn_state with
+    | Eio.Cancel.Cancelled _ as exn ->
       Keeper_autonomous_stream.finish live_stream Keeper_autonomous_stream.Cancelled;
       raise exn
-    | exception exn ->
+    | exn ->
       Keeper_autonomous_stream.finish live_stream (Keeper_autonomous_stream.Failed (Printexc.to_string exn));
       raise exn
   in
@@ -540,8 +539,8 @@ let run (ctx : ctx)
          ~turn_ref
          ~turn_failed:(Result.is_error result)
      in
-     Keeper_autonomous_stream.publish_committed_tool_bindings live_stream
-       persisted.Keeper_loop_tool_projection.committed_bindings;
+     Keeper_autonomous_stream.publish_committed_tool_ownerships live_stream
+       persisted.Keeper_loop_tool_projection.committed_ownerships;
      (* A quarantined row is missing from the projection below; the chat
         lane's live bridge would have reported the conflict as it happened,
         and this lane has no bridge, so it is said here, one line per row. *)

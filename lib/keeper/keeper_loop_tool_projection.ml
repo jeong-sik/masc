@@ -72,7 +72,7 @@ type protocol_error =
 
 type persisted =
   { outcome : outcome
-  ; committed_bindings : (Keeper_chat_delivery_identity.delivery_key * Keeper_chat_delivery_identity.transcript_slot) list
+  ; committed_ownerships : (Keeper_chat_delivery_identity.delivery_key * Keeper_chat_store.tool_ownership) list
   ; quarantined : protocol_error list
   }
 
@@ -109,7 +109,7 @@ let persist_continuation t ~base_dir ~keeper_name ~approval_id ~turn_ref ~turn_f
   let quarantined = Keeper_stream_tool_accum.take_protocol_errors t.accum in
   (* The rejection is read before the rows: a refused seal finalizes nothing,
      so an empty row list under a rejection is the drop, not an idle turn. *)
-  let outcome, committed_bindings =
+  let outcome, committed_ownerships =
     match !(t.rejection), tool_calls with
     | Some detail, _ -> Projection_dropped (Mapping_rejected detail), []
     | None, [] -> Nothing_to_project, []
@@ -132,10 +132,10 @@ let persist_continuation t ~base_dir ~keeper_name ~approval_id ~turn_ref ~turn_f
              with
              | Ok (Keeper_chat_store.Appended _ as result) ->
                Projected result,
-               List.map (fun (_, slot) -> delivery_key, slot)
-                 (Keeper_chat_store.tool_transcript_bindings tool_calls)
+               List.map (fun ownership -> delivery_key, ownership)
+                 (Keeper_chat_store.tool_ownerships tool_calls)
              | Ok (Keeper_chat_store.Already_present _ as result) -> Projected result, []
              | Error detail -> Projection_dropped (Append_failed detail), [])))
   in
-  { outcome; committed_bindings; quarantined }
+  { outcome; committed_ownerships; quarantined }
 ;;

@@ -992,6 +992,20 @@ let tool_transcript_slot ~ordinal (call : tool_call) =
     Keeper_chat_delivery_identity.Tool_call { execution_id; ordinal }
   | None -> Keeper_chat_delivery_identity.Tool_delivery { ordinal }
 
+type tool_ownership =
+  { execution_id : Ids.Execution_id.t
+  ; ordinal : int
+  }
+
+let tool_ownerships calls =
+  List.concat
+    (List.mapi
+       (fun ordinal (call : tool_call) ->
+         match call.execution_id with
+         | Some execution_id -> [ { execution_id; ordinal } ]
+         | None -> [])
+       calls)
+
 let tool_transcript_bindings calls =
   List.mapi (fun ordinal call -> call, tool_transcript_slot ~ordinal call) calls
 

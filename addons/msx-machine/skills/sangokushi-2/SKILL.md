@@ -284,6 +284,12 @@ and confirm the next officer or battle prompt before continuing.
 - `1` gives `1.通常移動 2.誘導移動`; `1` again asks `どの方向ですか?` with
   `機動力 N`. `2` moved the unit one hex down and spent the rest of its
   mobility, and the next unit's menu came up.
+- Guided movement `1` → `2` asks `どこに仕掛けますか?`. In an
+  April province-21 branch, south `2` then opened the own movement direction
+  prompt with mobility 4; north `8` moved Xu Huang and advanced the day.
+  Subsequent information queries found Zhu Ran two hexes south, rather than
+  one: the move succeeded, but enemy pursuit was not observed. No `0`
+  placement input was needed between the two direction prompts.
 - `2` opens `1.通常 2.一斉 3.火計 4.突撃`. In the observed province-27
   battle, `1` then asked `どの方向ですか?`. Choosing direction `9` returned
   a partly drawn command menu; a later Return exposed the next officer's command

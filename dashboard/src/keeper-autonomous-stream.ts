@@ -1,20 +1,41 @@
 import { fetchKeeperCurrentTurn, fetchKeeperTurnEvents, type KeeperTurnCursor } from './api/keeper-turn-events'
 import { applyKeeperAutonomousTurnEvent, ensureKeeperAutonomousObservationEntry } from './keeper-stream'
 import { keeperThreads, updateThreadEntry } from './keeper-state'
+import type { KeeperConversationEntry } from './types'
 
 type TurnRecovery = {
   cursor: KeeperTurnCursor
   target: number
   inFlight: Promise<void> | null
   pullRequested: boolean
-  /** The journal's own terminal event (RUN_FINISHED/RUN_ERROR) was applied.
-   *  A reconnect never re-reads a terminal turn and drops its state there;
+  /** The journal's terminal event (RUN_FINISHED/RUN_ERROR) was applied, or the
+   *  turn's entry already carries a terminal receipt (seeded at creation).
+   *  A terminal turn never produces a later notification, so its state ends
+   *  with the read that consumed it instead of lingering for a reconnect;
    *  until a terminal is seen, the notified cursor only means "everything
    *  known so far", and a reconnect re-read is how a lost later notification
    *  is still discovered. */
   terminalSeen: boolean
 }
 const recovery = new Map<string, Map<string, TurnRecovery>>()
+
+function autonomousTurnEntry(name: string, turnRef: string): KeeperConversationEntry | undefined {
+  return (keeperThreads.value[name] ?? []).find(entry => entry.source === 'autonomous_turn' && entry.turnRef === turnRef)
+}
+
+function autonomousTurnReceiptIsTerminal(entry: KeeperConversationEntry | undefined): boolean {
+  const response = entry?.responseState
+  return response?.kind === 'known' && response.phase === 'terminal'
+}
+
+function pruneKeeperAutonomousRecovery(name: string, turnRef: string, state: TurnRecovery): void {
+  const turns = recovery.get(name)
+  if (turns?.get(turnRef) !== state) return
+  // Drop only the turn: the keeper key stays so a reconnect still discovers
+  // a turn that started while disconnected. Keeper keys are bounded by the
+  // roster, not by turns.
+  turns.delete(turnRef)
+}
 
 /** Notifications carry no content. Recover the canonical authenticated journal
  * with one request chain per exact Keeper/turn, coalescing newer notifications. */
@@ -26,7 +47,21 @@ export function recoverKeeperAutonomousTurn(name: string, turnRef: string, seque
   if (!turns) { turns = new Map(); recovery.set(name, turns) }
   let state = turns.get(turnRef)
   if (!state) {
-    state = { cursor: { sequence: null, offset: 0 }, target: sequence, inFlight: null, pullRequested: false, terminalSeen: false }
+    const known = autonomousTurnEntry(name, turnRef)
+    if (!force) {
+      // A pruned terminal turn keeps its receipt on its entry: a duplicate
+      // notification for consumed journal rows is a no-op without re-reading.
+      // Forced reads bypass this and re-verify the journal from the start.
+      const response = known?.responseState
+      if (response?.kind === 'known' && response.phase === 'terminal'
+        && response.lastSequence !== null && response.lastSequence >= sequence) {
+        return Promise.resolve()
+      }
+    }
+    // Seed completion from the entry receipt: the walk still applies any
+    // rows beyond it, but the turn already ended so this read prunes.
+    const seededTerminal = autonomousTurnReceiptIsTerminal(known)
+    state = { cursor: { sequence: null, offset: 0 }, target: sequence, inFlight: null, pullRequested: false, terminalSeen: seededTerminal }
     turns.set(turnRef, state)
   }
   const newerNotification = state.inFlight !== null && sequence > state.target
@@ -84,6 +119,13 @@ export function recoverKeeperAutonomousTurn(name: string, turnRef: string, seque
       void recoverKeeperAutonomousTurn(name, turnRef, current.target, current.pullRequested).catch(error => {
         console.debug('[keeper-autonomous-stream] journal recovery failed', error instanceof Error ? error.name : 'read failure')
       })
+    } else if (current.terminalSeen) {
+      // The journal terminal is consumed: this turn can never produce a
+      // later notification, so its recovery state ends with this read
+      // instead of lingering until the next reconnect. A duplicate
+      // notification for consumed rows is a no-op against the entry
+      // receipt; a forced read re-verifies the journal and prunes again.
+      pruneKeeperAutonomousRecovery(name, turnRef, current)
     }
   })
   return current.inFlight
@@ -117,7 +159,7 @@ export async function recoverKnownKeeperAutonomousTurns(): Promise<void> {
       // event whose notification was lost is still recovered. An in-flight
       // or re-requested read still owns its state.
       if (state && state.terminalSeen && state.inFlight === null && !state.pullRequested) {
-        turns.delete(turnRef)
+        pruneKeeperAutonomousRecovery(name, turnRef, state)
         return null
       }
       return recoverKeeperAutonomousTurn(name, turnRef, sequence, true)

@@ -115,6 +115,23 @@ describe('autonomous journal recovery', () => {
       expect.objectContaining({ kind: 'think', text: 'exposed completed tail' }),
     ]))
   })
+  it('prunes terminal recovery state when the read ends instead of waiting for a reconnect', async () => {
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(0, text('answer')))
+    await recoverKeeperAutonomousTurn('k', 'trace#9', 0)
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(1, { ...base, type: 'RUN_FINISHED' }))
+    await recoverKeeperAutonomousTurn('k', 'trace#9', 1)
+    expect(keeperThreads.value.k?.[0]).toMatchObject({ responseState: { phase: 'terminal', lastSequence: 1 } })
+    // A duplicate notification for consumed rows is a no-op against the
+    // entry receipt: no resumed cursor, no re-read.
+    await recoverKeeperAutonomousTurn('k', 'trace#9', 1)
+    expect(fetchKeeperTurnEvents).toHaveBeenCalledTimes(2)
+    // A forced read re-verifies from the journal start instead of resuming.
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce({ turnRef: 'trace#9', hasMore: false,
+      cursor: { sequence: 1, offset: 2 }, events: [] })
+    await recoverKeeperAutonomousTurn('k', 'trace#9', 1, true)
+    expect(fetchKeeperTurnEvents).toHaveBeenCalledTimes(3)
+    expect(fetchKeeperTurnEvents).toHaveBeenNthCalledWith(3, 'k', 'trace#9', { sequence: null, offset: 0 })
+  })
   it('retains separate reasoning snapshots across interleaved Keeper pages', async () => {
     try {
       const pending = new Map<string, (page: KeeperTurnEventPage) => void>()

@@ -1179,6 +1179,35 @@ let test_approval_arguments_cannot_update_native_call () =
       check tool_outcome "native lifecycle unchanged" Transcript.Native_running call.outcome
   | _ -> fail "expected one native observation"
 ;;
+let test_multiple_approval_admissions_settle_independently () =
+  List.iter (fun settle_new_first ->
+    let t = fresh () in
+    let old_request = requested ~call_id:"old-call"
+      ~tool_name:"Write" ~question:"old question" in
+    let new_request = requested ~call_id:"new-call"
+      ~tool_name:"Read" ~question:"new question" in
+    feed t [Live.Run_started; old_request; new_request; old_request];
+    check int "both admissions retained without replay duplication" 2
+      (List.length (Transcript.awaiting_approvals t));
+    (match Transcript.awaiting_approval t with
+     | Some selected -> check string "latest admission remains selected after older replay"
+         "new-call" selected.Transcript.call_id
+     | None -> fail "selected admission disappeared");
+    feed t [Live.Runtime_attempt_started {runtime_id=Some "codex";attempt_index=Some 1}];
+    check int "attempt observation cannot settle approvals" 2
+      (List.length (Transcript.awaiting_approvals t));
+    let first_call, remaining_call =
+      if settle_new_first then "new-call", "old-call"
+      else "old-call", "new-call" in
+    feed t [Live.Approval_settled {call_id=first_call;outcome="approve"}];
+    (match Transcript.awaiting_approvals t with
+     | [remaining] -> check string "only matching admission removed"
+         remaining_call remaining.Transcript.call_id
+     | _ -> fail "settlement lost a different pending admission");
+    feed t [Live.Approval_settled {call_id=remaining_call;outcome="deny"}];
+    check int "both individually settled" 0 (List.length (Transcript.awaiting_approvals t)))
+    [false;true]
+;;
 let test_the_whole_reasoning_trail_is_kept () =
   let t = fresh () in
   feed t
@@ -2545,6 +2574,7 @@ let () =
         test_case "error body and runtime context remain independent" `Quick test_failure_body_and_runtime_are_independent])
     ; ( "event timeline"
       , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
+         test_case "multiple approvals settle independently" `Quick test_multiple_approval_admissions_settle_independently;
          test_case "approval args retain native authority" `Quick test_approval_arguments_cannot_update_native_call;
          test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts;
          test_case "a reported native failure shows as failure" `Quick

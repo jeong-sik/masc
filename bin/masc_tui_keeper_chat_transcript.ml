@@ -301,7 +301,7 @@ type t =
   ; mutable checkpoints : int
   ; mutable unreadable_count : int
   ; mutable last_unreadable : string
-  ; mutable awaiting : awaiting_approval option
+  ; mutable awaiting : awaiting_approval list
   ; mutable last_approval_settlement : approval_settlement option
   ; (* What the server said when it took the request, and how long its chat
        queue was at that moment. [None] until the acceptance arrives, which is
@@ -421,7 +421,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; checkpoints = 0
   ; unreadable_count = 0
   ; last_unreadable = ""
-  ; awaiting = None
+  ; awaiting = []
   ; last_approval_settlement = None
   ; admission = None
   ; initial_receipt = None
@@ -605,7 +605,17 @@ let note_interrupt t interrupt =
 let text t = safe_block (Buffer.contents t.text_buffer)
 let thinking t = safe_block (Buffer.contents t.thinking_buffer)
 
-let awaiting_approval t = t.awaiting
+let awaiting_approvals t = t.awaiting
+let awaiting_approval t = match t.awaiting with [] -> None | selected :: _ -> Some selected
+
+let approval_held_call_ids t current_calls =
+  List.filter_map (fun (awaiting : awaiting_approval) ->
+    match List.filter (fun (call : live_tool_call) ->
+      call.authority = Masc_execution && not call.result_ready && not call.failed
+      && Option.exists (String.equal awaiting.call_id) call.call_id) current_calls with
+    | [call] -> Some call.local_id
+    | [] | _ :: _ :: _ -> None) t.awaiting
+
 
 let unreadable t =
   if t.unreadable_count = 0 then None
@@ -889,27 +899,10 @@ let phase_text ~show_timing ~now t =
         |> List.filter (fun (call : live_tool_call) -> call.segment = t.segment && call.attempt = t.attempt)
         |> List.rev
       in
-      let awaiting_call =
-        match t.awaiting with
-        | None -> None
-        | Some awaiting ->
-            (* Provider ids need not be unique. Exclude a held call only when
-               the current attempt identifies exactly one pending occurrence.
-               A completed earlier use of the same provider id cannot be held. *)
-            (match List.filter
-               (fun (call : live_tool_call) ->
-                 Option.exists (String.equal awaiting.call_id) call.call_id
-                 && (match (activity_of_live_call t call).outcome with
-                     | Started | Native_running | Awaiting_result -> true
-                     | Returned | Native_ended | Native_failed | Failed | Never_returned
-                     | Outcome_unrecorded -> false))
-               current_calls with
-             | [call] -> Some call.local_id
-             | _ -> None)
-      in
+      let awaiting_calls = approval_held_call_ids t current_calls in
       let activities_now =
         current_calls
-        |> List.filter (fun (call : live_tool_call) -> Some call.local_id <> awaiting_call)
+        |> List.filter (fun (call : live_tool_call) -> not (List.mem call.local_id awaiting_calls))
         |> List.map (activity_of_live_call t)
       in
       let describe_pending label outcome =
@@ -931,15 +924,16 @@ let phase_text ~show_timing ~now t =
           | Outcome_unrecorded -> false)
         activities_now in
       let approval_pending = match t.awaiting, has_pending_activity with
-        | Some awaiting, false -> "approval pending: " ^ awaiting.tool_name ^ " · "
-        | Some _, true | None, _ -> "" in
+        | _ :: _, false -> "approval pending: " ^
+            String.concat ", " (List.map (fun (pending : awaiting_approval) -> pending.tool_name) t.awaiting) ^ " · "
+        | _ :: _, true | [], _ -> "" in
       (* Keep the age beside the current pending calls. A held approval's
          age belongs to the approval surface, not another call's progress. *)
       let in_this_call =
         if not show_timing then "" else
         match List.filter
           (fun (call : live_tool_call) ->
-            Some call.local_id <> awaiting_call
+            not (List.mem call.local_id awaiting_calls)
             && (match (activity_of_live_call t call).outcome with
                 | Started | Native_running | Awaiting_result -> true
                 | Returned | Native_ended | Native_failed | Failed | Never_returned
@@ -1095,19 +1089,9 @@ let compact_progress_text ~show_timing ~now t =
         let current_calls = t.reversed_tool_calls
           |> List.filter (fun (call : live_tool_call) ->
                call.segment = t.segment && call.attempt = t.attempt) in
-        let held = match t.awaiting with
-          | None -> None
-          | Some awaiting ->
-              (match List.filter (fun (call : live_tool_call) ->
-                Option.exists (String.equal awaiting.call_id) call.call_id
-                && match (activity_of_live_call t call).outcome with
-                   | Started | Awaiting_result | Native_running -> true
-                   | Returned | Native_ended | Native_failed | Failed | Never_returned
-                   | Outcome_unrecorded -> false)
-                current_calls with
-               | [call] -> Some call.local_id | _ -> None) in
+        let held = approval_held_call_ids t current_calls in
         let pending = current_calls
-          |> List.filter (fun (call : live_tool_call) -> Some call.local_id <> held)
+          |> List.filter (fun (call : live_tool_call) -> not (List.mem call.local_id held))
           |> List.rev
           |> List.filter_map (fun call ->
                let activity = activity_of_live_call t call in
@@ -1120,8 +1104,9 @@ let compact_progress_text ~show_timing ~now t =
         in
         match t.awaiting, pending with
         | _, _ :: _ -> String.concat " · " pending
-        | Some awaiting, [] -> "approval pending: " ^ awaiting.tool_name
-        | None, [] ->
+        | _ :: _, [] -> "approval pending: " ^
+            String.concat ", " (List.map (fun (pending : awaiting_approval) -> pending.tool_name) t.awaiting)
+        | [], [] ->
             match model_phase_text ~show_timing ~now t with
             | Some phase -> phase
             | None -> "waiting for response"
@@ -1139,14 +1124,18 @@ let compact_progress_text ~show_timing ~now t =
    on, so it is styled like the others that need them rather than like
    progress. *)
 let awaiting_text t =
-  Option.map
-    (fun (awaiting : awaiting_approval) ->
-      let base = Printf.sprintf "/approve · /deny · approval for %s: %s"
-        awaiting.tool_name awaiting.question in
-      match awaiting.because with
-      | "" -> base
-      | because -> Printf.sprintf "%s\n  because %s" base because)
-    t.awaiting
+  let prompt ~selected (awaiting : awaiting_approval) =
+    let prefix = if selected then "/approve · /deny · approval for " else "also awaiting approval for " in
+    let base = prefix ^ awaiting.tool_name ^ ": " ^ awaiting.question in
+    match awaiting.because with
+    | "" -> base
+    | because -> Printf.sprintf "%s\n  because %s" base because
+  in
+  match t.awaiting with
+  | [] -> None
+  | selected :: others ->
+      Some (String.concat "\n" (prompt ~selected:true selected ::
+        List.map (prompt ~selected:false) others))
 
 let status_rows ?(compact = false) ?(show_timing = true) ~now t =
   [ (if awaiting_continuation t then None
@@ -1552,7 +1541,8 @@ let apply_delta ~now t (delta : Live.delta) =
         t.model_signal <- None;
         t.current_stream_scope <- None;
         t.runtime_named_at <- Some now;
-        t.awaiting <- None;
+        (* Runtime replacement is not an approval settlement. Admissions keep
+           their own identity until the corresponding decision is observed. *)
         (match t.phase with
          | Waiting | Working -> t.phase <- Working
          | Stream_ended | Stream_failed _ -> ())
@@ -1747,35 +1737,37 @@ let apply_delta ~now t (delta : Live.delta) =
                  "stream protocol quarantine provider correlation conflicts for occurrence %s: %s"
                  (occurrence_label occurrence) detail)))
   | Live.Approval_requested { call_id; tool_name; args; question; because } ->
-      (* The arguments go on the call's own row, which the pane already draws;
-         the prompt carries the question. *)
-      (match args with
-       | "" -> ()
-       | args ->
-         (match
-            update_unique_call t ~call_id
-              ~eligible:(fun call -> call.authority = Masc_execution
-                && call.segment = t.segment && call.attempt = t.attempt
-                && not call.result_ready && not call.failed)
-              (fun call -> { call with args })
-          with
-          | Call_updated | Call_missing | Call_ambiguous | Call_conflicting -> ()));
-      t.last_approval_settlement <- None;
-      t.awaiting <- Some { call_id; tool_name; question; because }
+      (match List.find_opt (fun (pending : awaiting_approval) ->
+         String.equal pending.call_id call_id) t.awaiting with
+       | Some _ -> ()
+       | None ->
+           (* The arguments go on the call's own row, which the pane already draws;
+              the prompt carries the question. *)
+           (match args with
+            | "" -> ()
+            | args ->
+                (match update_unique_call t ~call_id
+                  ~eligible:(fun call -> call.authority = Masc_execution
+                    && call.segment = t.segment && call.attempt = t.attempt
+                    && not call.result_ready && not call.failed)
+                  (fun call -> {call with args}) with
+                 | Call_updated | Call_missing | Call_ambiguous | Call_conflicting -> ()));
+           t.last_approval_settlement <- None;
+           t.awaiting <- {call_id;tool_name;question;because} :: t.awaiting)
   | Live.Approval_settled { call_id; outcome } ->
       (* Cleared whatever the answer was, including none: the prompt is over
          either way, and leaving it up would ask again for a call that has
          already been decided. Guarded by id so a late settle for a superseded
          call cannot clear a prompt now waiting on a different one. *)
-      (match t.awaiting with
-       | Some awaiting when String.equal awaiting.call_id call_id ->
-           t.awaiting <- None;
-           t.last_approval_settlement <-
-             Some
-               { settled_tool_name = awaiting.tool_name
-               ; settled_outcome = approval_outcome_of_string outcome
-               }
-       | Some _ | None -> ())
+      (match List.find_opt (fun (pending : awaiting_approval) ->
+         String.equal pending.call_id call_id) t.awaiting with
+       | Some pending ->
+           t.awaiting <- List.filter (fun (other : awaiting_approval) ->
+             not (String.equal other.call_id call_id)) t.awaiting;
+           t.last_approval_settlement <- Some {
+             settled_tool_name = pending.tool_name;
+             settled_outcome = approval_outcome_of_string outcome}
+       | None -> ())
   | Live.Checkpoint -> t.checkpoints <- t.checkpoints + 1
   | Live.External_effect_completed ->
       (* The turn handed work to something outside it and that work finished.

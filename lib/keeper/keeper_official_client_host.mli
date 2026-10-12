@@ -131,6 +131,7 @@ type raw_trace_stage =
   | Tool_finish
   | Native_tool_start
   | Native_tool_finish
+  | Context_compaction
   | Run_finish
 
 val observe_raw_trace

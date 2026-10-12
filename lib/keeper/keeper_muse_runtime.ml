@@ -561,6 +561,33 @@ type observed_turn =
   ; model : string option
   }
 
+let compaction_observation_to_json ~runtime_id (compaction : Msp.compaction) =
+  let trigger = function
+    | Msp.Compaction_manual -> `Assoc ["kind", `String "manual"]
+    | Msp.Compaction_auto -> `Assoc ["kind", `String "auto"]
+    | Msp.Unrecognized_compaction_trigger value ->
+      `Assoc ["kind", `String "unrecognized"; "value", `String value] in
+  let outcome = function
+    | Msp.Compaction_compacted -> `Assoc ["kind", `String "compacted"]
+    | Msp.Compaction_noop -> `Assoc ["kind", `String "noop"]
+    | Msp.Compaction_failed -> `Assoc ["kind", `String "failed"]
+    | Msp.Compaction_cancelled -> `Assoc ["kind", `String "cancelled"]
+    | Msp.Unrecognized_compaction_outcome value ->
+      `Assoc ["kind", `String "unrecognized"; "value", `String value] in
+  let optional encode = function None -> `Null | Some value -> encode value in
+  `Assoc
+    [ "schema", `String "masc.muse-compaction-observation.v1"
+    ; "source", `String "runtime_muse_serve.compaction_observed"
+    ; "runtime_id", `String runtime_id
+    ; "phase", `String "native_item_completed"
+    ; "evidence", `String "provider_reported_metadata"
+    ; "trigger", optional trigger compaction.trigger
+    ; "outcome", optional outcome compaction.outcome
+    ; "tokens_before", optional (fun value -> `Int value) compaction.tokens_before
+    ; "tokens_after", optional (fun value -> `Int value) compaction.tokens_after
+    ]
+;;
+
 type stream_projection =
   { on_serve_event : Serve.stream_event -> unit
   ; on_tool_started :
@@ -701,8 +728,14 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
             tool_name
             (approval_decision_label decision)
         | Serve.Compaction_observed compaction ->
-          (* The host rewrote what the model sees and the turn still
-             completes, so this line is the turn's only record of it. *)
+          (* Secondary trace evidence must not change provider admission or
+             retry safety. The existing observer preserves reserved controls. *)
+          Option.iter (fun active ->
+            ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Context_compaction (fun () ->
+              Agent_core.Raw_trace.record_hook_invoked active
+                ~hook_name:"muse_compaction" ~hook_decision:"observed"
+                ~hook_detail:(Yojson.Safe.to_string
+                  (compaction_observation_to_json ~runtime_id compaction)) ()))) raw_trace_run;
           let unreported = "unreported" in
           let shown to_string = function
             | Some value -> to_string value
@@ -710,7 +743,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
           in
           Log.Keeper.info
             ~keeper_name
-            "%s host compacted the session: trigger=%s outcome=%s strategy=%s \
+            "%s host reported a compaction item: trigger=%s outcome=%s strategy=%s \
              tokens_before=%s tokens_after=%s"
             runtime_label
             (shown Msp.compaction_trigger_to_string compaction.Msp.trigger)

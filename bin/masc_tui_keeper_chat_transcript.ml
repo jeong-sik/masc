@@ -1424,10 +1424,18 @@ let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content
         | None ->
             t.active_model_content <- t.active_model_content @
               [activity.content_index,activity.channel,None];
-            (match t.model_signal with
-             | Some (Provider_retry_at _ | Tool_returned_at _ | Model_response_ended) -> ()
-             | None | Some (Scoped_model_content | Model_started_at _ | Reasoning_at _ | Answering_at _) ->
-                 t.model_signal <- Some Scoped_model_content)
+            (* A missing-start end must not silence the other channel's
+               surviving fallback: a thinking end keeps an answering
+               fallback, and a text end keeps a reasoning fallback. *)
+            let keep_fallback = match t.model_signal, activity.channel with
+              | Some (Answering_at _), Model_thinking
+              | Some (Reasoning_at _), Model_text -> true
+              | _ -> false in
+            if not keep_fallback then
+              (match t.model_signal with
+               | Some (Provider_retry_at _ | Tool_returned_at _ | Model_response_ended) -> ()
+               | None | Some (Scoped_model_content | Model_started_at _ | Reasoning_at _ | Answering_at _) ->
+                   t.model_signal <- Some Scoped_model_content)
         | Some (_,_,_) -> ()
       end
 ;;

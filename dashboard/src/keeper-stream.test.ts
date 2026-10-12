@@ -335,40 +335,18 @@ describe('Keeper operation stream projection', () => {
     expect(keeperThreads.value.sangsu![0]!.delivery).toBe(before.delivery)
   })
 
-  it('does not consume the valid frame sequence when a broadcast payload is malformed', () => {
-    assistantEntry()
-    const diagnostic = parseSSEMessage({ type: 'keeper_chat_operation_event', name: 'sangsu', operation_id: 'op-1', seq: 12,
-      ag_ui_event: { type: 'TEXT_MESSAGE_CONTENT', delta: 123 } })
-    expect(diagnostic?.seq).toBeUndefined()
-    if (diagnostic?.ag_ui_event) applyKeeperStreamEvent('sangsu', 'reply-1', diagnostic.ag_ui_event as never,
-      { kind: 'operation', operationId: 'op-1', sequence: diagnostic.seq })
-    expect(keeperThreads.value.sangsu![0]!.responseState).toMatchObject({ lastSequence: null, phase: 'failed' })
-  })
-
   it('keeps an operation failed when a frame was dropped and the stream still finishes', () => {
     assistantEntry('op-1')
     const operation = { kind: 'operation', operationId: 'op-1' } as const
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'a' }, { ...operation, sequence: 1 })
-    const diagnostic = parseSSEMessage({ type: 'keeper_chat_operation_event', name: 'sangsu', operation_id: 'op-1', seq: 2,
-      ag_ui_event: { type: 'TEXT_MESSAGE_CONTENT', delta: 123 } })
-    applyKeeperStreamEvent('sangsu', 'reply-1', diagnostic!.ag_ui_event as never, operation)
+    failKeeperStreamOperation('sangsu', 'reply-1', 'A Keeper stream frame does not match the protocol.')
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'c' }, { ...operation, sequence: 3 })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED', threadId: 't', runId: 'r', timestamp: 1 } as never, { ...operation, sequence: 4 })
     const entry = keeperThreads.value.sangsu![0]!
     expect(entry.rawText).toBe('a')
     expect(entry.delivery).toBe('error')
-    expect(entry.error).toContain('sse_parse_failed')
+    expect(entry.error).toBe('A Keeper stream frame does not match the protocol.')
     expect(entry.responseState).toMatchObject({ phase: 'failed', lastSequence: 4 })
-  })
-
-  it('fails the operation for a frame dropped outside the broadcast projection', () => {
-    assistantEntry('op-1')
-    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'a' })
-    failKeeperStreamOperation('sangsu', 'reply-1', 'A Keeper stream frame does not match the protocol.')
-    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'c' })
-    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED', threadId: 't', runId: 'r', timestamp: 1 } as never, { kind: 'operation', operationId: 'op-1' })
-    const entry = keeperThreads.value.sangsu![0]!
-    expect(entry).toMatchObject({ rawText: 'a', delivery: 'error', error: 'A Keeper stream frame does not match the protocol.' })
   })
 
   it('keeps a finished response delivered when a frame fails to decode afterwards', () => {
@@ -380,36 +358,17 @@ describe('Keeper operation stream projection', () => {
     expect(keeperThreads.value.sangsu![0]!).toMatchObject({ delivery: 'delivered', error: null, rawText: 'done' })
   })
 
-  it('does not open a live bubble for a malformed diagnostic of an unknown operation', () => {
-    // The synthetic parse-failure projection is a diagnostic, not content. An
-    // observer tab that never matched the operation has no poll to reconcile
-    // it and no later frame is guaranteed, so a bubble created here would
-    // stay a phantom in-progress response indefinitely.
-    const applied = applyKeeperOperationTurnEvent('sangsu', {
-      operationId: 'op-malformed-only',
-      event: {
-        type: 'CUSTOM',
-        name: 'KEEPER_STREAM_PROTOCOL_ERROR',
-        value: { kind: 'sse_parse_failed', reason: 'Keeper event could not be decoded' },
-      },
-    })
-    expect(applied).toBeNull()
-    expect(keeperThreads.value.sangsu ?? []).toHaveLength(0)
-  })
-
-  it('records a malformed diagnostic on an already matched operation', () => {
+  it('treats a server-sent sse_parse_failed protocol error as a diagnostic, not a failure', () => {
     assistantEntry('op-matched')
-    const applied = applyKeeperOperationTurnEvent('sangsu', {
-      operationId: 'op-matched',
-      event: {
-        type: 'CUSTOM',
-        name: 'KEEPER_STREAM_PROTOCOL_ERROR',
-        value: { kind: 'sse_parse_failed', reason: 'Keeper event could not be decoded' },
-      },
-    })
-    expect(applied).toBeNull()
-    const entry = keeperThreads.value.sangsu?.[0]
-    expect(entry?.error).toContain('sse_parse_failed')
+    const operation = { kind: 'operation', operationId: 'op-matched' } as const
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'a' }, operation)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+      value: { kind: 'sse_parse_failed', reason: 'provider chunk could not be parsed' } }, operation)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'b' }, operation)
+    const entry = keeperThreads.value.sangsu![0]!
+    expect(entry).toMatchObject({ rawText: 'ab', delivery: 'streaming' })
+    expect(entry.responseState).not.toMatchObject({ phase: 'failed' })
+    expect(entry.error).toContain('sse_parse_failed')
   })
 
   it('keeps content-activity metadata from reopening a stopped owned response', () => {

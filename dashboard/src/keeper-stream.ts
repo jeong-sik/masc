@@ -1294,13 +1294,6 @@ export function applyKeeperStreamEvent(
             )
           : undefined
         const message = streamProtocolMessage(event.value, 'stream protocol error')
-        // An undecodable frame is a hole in the response: it fails the
-        // operation instead of leaving the bubble in flight. Timeouts and
-        // quarantined tool occurrences stay diagnostic-only.
-        if (event.value?.kind === 'sse_parse_failed') {
-          failKeeperStreamOperation(keeperName, assistantEntryId, message)
-          return null
-        }
         recordStreamProtocolError(
           keeperName,
           assistantEntryId,

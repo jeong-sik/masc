@@ -63,7 +63,8 @@ val delivery_provenance_fields :
   delivery_provenance -> (string * Yojson.Safe.t) list
 
 (** Reads the pair back out of a row's fields. [Ok None] when neither field
-    is present; [Error] when only one is present or either fails to decode.
+    is present; [Error] when only one is present, either is repeated, or either
+    fails to decode.
     Both durable readers decode through this function, so the pair
     invariant cannot drift between them; they differ only in what they do
     with [Error] — see {!Keeper_chat_store.chat_message} and the
@@ -76,7 +77,7 @@ val delivery_provenance_of_fields :
 val validate_delivery_role :
   role_label:string -> delivery_provenance -> (unit, string) result
 
-(** Reads provenance and validates its row role. Unaddressed rows retain
+(** Reads provenance and validates its unique row role. Unaddressed rows retain
     [Ok None]; addressed rows with absent, invalid or incompatible role return
     [Error] and grant no execution authority. *)
 val row_delivery_provenance_of_fields :

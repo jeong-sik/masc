@@ -176,6 +176,27 @@ let test_provenance_pair_is_all_or_nothing () =
     ]
 ;;
 
+let test_duplicate_row_authority_is_rejected () =
+  let provenance =
+    { Identity.delivery_key = Identity.Operation (Identity.Request_id.of_string "direct" |> expect_ok)
+    ; transcript_slot = Identity.Accepted_user }
+  in
+  let fields = Identity.delivery_provenance_fields provenance in
+  List.iter (fun field ->
+    match Identity.delivery_provenance_of_fields (field :: fields) with
+    | Error _ -> ()
+    | Ok _ -> fail "duplicate provenance field granted authority") fields;
+  List.iter (fun second_role ->
+    match Identity.row_delivery_provenance_of_fields
+      (("role", `String "user") :: ("role", `String second_role) :: fields) with
+    | Error _ -> ()
+    | Ok _ -> fail "duplicate row role granted authority") ["user"; "assistant"];
+  match Identity.row_delivery_provenance_of_fields (("role", `String "user") :: fields) with
+  | Ok (Some decoded) -> check bool "unique row retains authority" true
+      (Identity.delivery_provenance_equal provenance decoded)
+  | Ok None | Error _ -> fail "unique canonical row was refused"
+;;
+
 let () =
   run
     "keeper chat delivery identity"
@@ -202,6 +223,8 @@ let () =
             "delivery-only slot rejects execution identity"
             `Quick
             test_tool_delivery_rejects_execution_identity
+        ; test_case "duplicate row authority rejected" `Quick
+            test_duplicate_row_authority_is_rejected
         ; test_case
             "provenance pair is all or nothing"
             `Quick

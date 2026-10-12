@@ -521,7 +521,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
                in
                Ansi.dim,
                Tool_table.effective_tool_line
-                 ~name:(Terminal_text.single_line tool.et_name)
+                 ~name:(Terminal_text.single_line (Masc.Tool_display.list_label tool.et_name))
                  ~origin:(Terminal_text.single_line source))
             ets_tools
         in
@@ -1260,7 +1260,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
               in
               ( Masc_tui_theme.tone Masc_tui_theme.Normal,
                 Tool_table.catalog_tool_line ~metadata
-                  ~name:(Terminal_text.single_line tool.tl_name)
+                  ~name:(Terminal_text.single_line (Masc.Tool_display.list_label tool.tl_name))
                   ~direct:(if tool.tl_direct_call then "yes" else "no")
                   ~surfaces:(Terminal_text.single_line surfaces) ))
         registered_rows

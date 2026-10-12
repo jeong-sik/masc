@@ -13,6 +13,21 @@ let tests =
     ("empty string", `Quick, check "empty-string" ~input:"" ~expected:"");
   ]
 
+(* task-2245: the tools list mixes wire tool names with skill slugs. A slug
+   contains '-' and is already the readable name, so it passes through;
+   snake_case and Pascal names still get the Pascal label. *)
+let list_check name ~input ~expected () =
+  Alcotest.(check string) name expected (Masc.Tool_display.list_label input)
+
+let list_tests =
+  [
+    ("slug unchanged", `Quick, list_check "slug" ~input:"browser-lanes" ~expected:"browser-lanes");
+    ("slug multi dash", `Quick, list_check "slug" ~input:"msx-play" ~expected:"msx-play");
+    ("snake labeled", `Quick, list_check "snake" ~input:"keeper_task_done" ~expected:"KeeperTaskDone");
+    ("pascal unchanged", `Quick, list_check "pascal" ~input:"WebFetch" ~expected:"WebFetch");
+    ("empty string", `Quick, list_check "empty" ~input:"" ~expected:"");
+  ]
+
 (* task-2239: the gate row a human decides on draws its tool through the same
    label. A row whose operation is not an identity call shows the label while
    the wire name stays the identity on gp_operation. (The identity-call row,
@@ -80,6 +95,7 @@ let () =
   Alcotest.run "tool_display"
     [
       ("label", tests);
+      ("list label", list_tests);
       ("gate row", [ ("non-identity row shows the label", `Quick, gate_row_shows_the_display_label) ]);
       ("registry", [ ("labels are injective", `Quick, registry_is_injective) ]);
     ]

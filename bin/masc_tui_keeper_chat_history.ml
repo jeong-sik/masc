@@ -509,7 +509,18 @@ let execution_source_of_fields fields =
            Option.bind raw (fun raw ->
              Option.map (fun reference -> Masc_tui_keeper_chat_log.Autonomous_turn reference)
                (Ids.Turn_ref.of_string raw))
-       | Ok (Some _) | Error _ -> None)
+       | Ok (Some { Delivery_identity.delivery_key =
+                      (Delivery_identity.Fusion_run _
+                      | Delivery_identity.Workspace_message _
+                      | Delivery_identity.Approval_lifecycle _); _ }) ->
+           Option.bind (string_field fields "turn_ref") (fun raw ->
+             Option.map (fun reference -> Masc_tui_keeper_chat_log.Autonomous_turn reference)
+               (Ids.Turn_ref.of_string raw))
+       | Ok (Some { Delivery_identity.delivery_key =
+                      (Delivery_identity.Operation _
+                      | Delivery_identity.Operation_checkpoint _
+                      | Delivery_identity.Operation_native _); _ })
+       | Error _ -> None)
 ;;
 
 let autonomous_speech_of_fields ~execution_source fields =

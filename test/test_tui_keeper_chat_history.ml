@@ -621,6 +621,14 @@ let test_delivery_keys_do_not_invent_turn_ownership () =
     check (list (option string)) "only the actual operation names its journal"
       [None;None;None;Some "shared-id"]
       (List.map (fun r -> r.History.operation_id) decoded.History.rows);
+    let autonomous_source =
+      Option.map (fun reference -> Masc_tui_keeper_chat_log.Autonomous_turn reference)
+        (Ids.Turn_ref.of_string "trace-1#54")
+    in
+    check bool "explicit nonoperation turn source retained without passive ownership" true
+      (List.map (fun r -> r.History.execution_source) decoded.History.rows =
+         [None; autonomous_source; autonomous_source;
+          Some (Masc_tui_keeper_chat_log.Operation "shared-id")]);
     List.iter (fun (r:History.row) -> check bool "append row identity remains available" true
       (Option.is_some r.structural_id)) decoded.History.rows;
     let context = List.hd decoded.History.rows

@@ -1,4 +1,9 @@
 (test
+ (name test_tool_display)
+ (modules test_tool_display)
+ (libraries masc alcotest))
+
+(test
  (name test_tui_play_room)
  (modules test_tui_play_room)
  (libraries alcotest yojson masc masc_tui_play_room))

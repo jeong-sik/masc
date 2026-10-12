@@ -1,0 +1,9 @@
+# Missing MessageStart response boundary
+
+`apply_model_content` can admit a new generation/scope from a surviving Content_observed event. Previously it cleared old metadata but did not call `begin_response`, so the earlier speech stretch remained eligible as the current response's terminal candidate and adjacent reasoning stretches could lack a response boundary. Both MessageStart and scoped details already use this existing boundary mechanism.
+
+Call `begin_response` only when Content_observed establishes changed response metadata. Repeated current activity, stale activity and Content_ended do not create boundaries. Existing original buffers and prior trail nodes remain intact. No wire identity, provider ID, textual heuristic or renderer policy was added.
+
+Actual production `apply_model_content`, `begin_response`, `response_is_closed` and `response_precedes_current` were interpreted unchanged except for the fix. Parent failed with `surviving content did not establish response boundary`; current passed with `surviving content begins response; repeat/stale/stop keep boundary stable`. Files/logs and generation script are `/tmp/masc-content-response-boundary-20261012/`.
+
+The harness substitutes minimal external channel/state/record types and a no-op diagnostic sink; existing begin_response executes on a minimal typed trail containing a prior-speech sentinel. It checks first-stretch index, retained prior node, boundary stability and cleared old model/usage. This is selected production-state evidence, not full transcript/terminal reconciliation, actual body coalescing, SSE decoding, runtime or UI proof. No renderer/row-order/snapshot test was added. The changed production file passed syntax-only parsing and git diff --check passed. No full typecheck/build/CI/fixture execution/installation/screenshot/formal approval or merge is claimed.

@@ -1485,6 +1485,10 @@ let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content
           | Some order -> order > 0
           | None -> true in
         if response_changed then begin
+          (* A surviving content event can establish a response even when
+             MessageStart was lost. Its boundary must also retire earlier
+             speech as a candidate for this response's terminal reply. *)
+          begin_response t;
           t.observed_model <- None;
           t.observed_usage <- None;
           t.observed_stop_reason <- None;

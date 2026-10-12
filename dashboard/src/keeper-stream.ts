@@ -744,21 +744,41 @@ function admitResponseEvent(
   if (!entry) return { state: before, accepted: false, advanced: false, authoritative: false }
   const decision = reduceKeeperResponse(before, event)
   if (!decision.accepted) return decision
+  const publicationOwner = captureThinkingPublicationOwner(entry, currentStoredTokenRevision())
+  const ownsAdmission = (current: KeeperConversationEntry | undefined): boolean =>
+    (current?.responseState ?? initialKeeperResponseState) === before
+      && ownsThinkingPublication(publicationOwner, current, currentStoredTokenRevision())
+  const refused = (): KeeperResponseDecision => ({
+    state: (keeperThreads.value[keeperName] ?? []).find(candidate => candidate.id === assistantEntryId)?.responseState ?? initialKeeperResponseState,
+    accepted: false, advanced: false, authoritative: false,
+  })
   if (decision.advanced) {
     flushPendingThinkingDeltas(keeperName, assistantEntryId)
+    const current = (keeperThreads.value[keeperName] ?? []).find(candidate => candidate.id === assistantEntryId)
+    if (!ownsAdmission(current)) return refused()
     clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
     clearTextMessageStreamState(keeperName, assistantEntryId)
   }
-  if (decision.state !== before) updateThreadEntry(keeperName, assistantEntryId, current => ({
-    ...current,
-    responseState: decision.state,
-    ...(decision.advanced && decision.authoritative ? {
-      replyBlockSource: undefined,
-      streamState: 'opening' as const,
-      details: current.details ? { ...current.details, providerMessageId: null, modelUsed: null,
-        stopReason: null, usage: null, costUsd: null } : current.details,
-    } : {}),
-  }))
+  if (decision.state !== before) {
+    let published = false
+    updateThreadEntry(keeperName, assistantEntryId, current => {
+      if (!ownsAdmission(current)) return current
+      published = true
+      return {
+        ...current,
+        responseState: decision.state,
+        ...(decision.advanced && decision.authoritative ? {
+          replyBlockSource: undefined,
+          streamState: 'opening' as const,
+          details: current.details ? { ...current.details, providerMessageId: null, modelUsed: null,
+            stopReason: null, usage: null, costUsd: null } : current.details,
+        } : {}),
+      }
+    })
+    const current = (keeperThreads.value[keeperName] ?? []).find(candidate => candidate.id === assistantEntryId)
+    if (!published || current?.responseState !== decision.state
+        || !ownsThinkingPublication(publicationOwner, current, currentStoredTokenRevision())) return refused()
+  }
   persistActiveAssistantDraft(keeperName, assistantEntryId)
   return decision
 }

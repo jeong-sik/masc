@@ -15,3 +15,10 @@
     match these labels. Changing this rule means updating those needles too. *)
 
 val label : string -> string
+
+(** Label for names shown in the tools list, which mixes wire tool names with
+    skill slugs. A name containing ['-'] is a slug and already the readable
+    name, so it is returned unchanged; anything else goes through [label].
+    Display-only like [label]. *)
+
+val list_label : string -> string

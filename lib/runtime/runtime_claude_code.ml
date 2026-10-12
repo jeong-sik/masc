@@ -916,6 +916,26 @@ let task_observation_candidate fields =
     List.exists (fun kind -> List.mem key (task_fields kind)) kinds) fields
 ;;
 
+(* The retry notice's producer field set: what the strict decoder reads, plus
+   the private error text it deliberately drops. This allowlist only decides
+   which malformed (duplicate-key) frames reach that decoder instead of
+   failing the turn; the decoder stays the final arbiter. *)
+let api_retry_fields =
+  [ "type"; "subtype"; "session_id"; "uuid"; "attempt"; "max_retries"
+  ; "retry_delay_ms"; "error_status"; "error"
+  ]
+;;
+
+let api_retry_observation_candidate fields =
+  let subtypes = List.filter_map
+    (fun (key,value) -> if key="subtype" then Some value else None) fields in
+  (* Like task telemetry: every discriminator must name a retry notice, so
+     mixed frames still fail closed at the uniqueness gate. *)
+  subtypes <> []
+  && List.for_all (function `String "api_retry" -> true | _ -> false) subtypes
+  && List.for_all (fun (key,_) -> List.mem key api_retry_fields) fields
+;;
+
 let parse_wire_line line =
   let stage = "stream-json message" in
   let* json = parse_json_value ~stage line in
@@ -942,7 +962,8 @@ let parse_wire_line line =
              && List.exists (function "tool_name", `String "Agent" -> true | _ -> false) fields
              && List.mem_assoc "subagent_type" fields
              && List.for_all (fun (key,_) -> List.mem key agent_retry_fields) fields)
-       | [ `String "system" ] -> task_observation_candidate fields
+       | [ `String "system" ] ->
+           task_observation_candidate fields || api_retry_observation_candidate fields
        | _ -> false)
     | _ -> false
   in

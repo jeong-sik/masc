@@ -4333,11 +4333,38 @@ let test_provider_retry_observes_exact_session_without_changing_reply () =
       | reports -> failf "expected one owned retry, got %d" (List.length reports))
 ;;
 
+(* A retry notice with a duplicate field is malformed telemetry, not a turn
+   error: it must reach the tolerant retry decoder and be dropped, while the
+   model reply stays intact. *)
+let test_provider_retry_with_duplicate_field_is_ignored_without_failing_turn () =
+  let reports = ref [] in
+  let on_stream_event = function
+    | Runtime_claude_code.Provider_retry_observed retry -> reports := retry :: !reports
+    | _ -> () in
+  let malformed =
+    Yojson.Safe.to_string (`Assoc [
+      "type",`String "system";"subtype",`String "api_retry";
+      "session_id",`String "__SESSION__";"uuid",`String "dupe-retry";
+      "attempt",`Int 1;"attempt",`Int 1;"max_retries",`Int 10;
+      "retry_delay_ms",`Int 615;"error_status",`Null;
+      "error",`String "PRIVATE_RETRY_DIAGNOSTIC"])
+  in
+  with_fixture [Emit malformed; Emit assistant; Emit result] (fun path ->
+    match run_fixture ~on_stream_event path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn ->
+      check string "malformed retry notice does not replace model reply" "MASC_CLAUDE_OK" turn.text;
+      check int "malformed retry notice is dropped" 0 (List.length !reports))
+;;
+
 let () =
   run
     "runtime_claude_code"
-    [ ( "provider retry", [test_case "owned retry preserves healthy reply" `Quick
-          test_provider_retry_observes_exact_session_without_changing_reply])
+    [ ( "provider retry",
+        [ test_case "owned retry preserves healthy reply" `Quick
+            test_provider_retry_observes_exact_session_without_changing_reply
+        ; test_case "duplicate-field retry is dropped without failing turn" `Quick
+            test_provider_retry_with_duplicate_field_is_ignored_without_failing_turn ])
     ; ( "native posture argv (RFC-0390)"
       , [ test_case
             "posture selects --tools"

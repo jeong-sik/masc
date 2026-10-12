@@ -2633,9 +2633,12 @@ let test_pending_input_enters_transcript_only_when_execution_is_observed () =
   state.msg_inflight <- [{entry with phase=Turn_reconciling; log=lagging}];
   state.msg_loaded_keeper <- Some "alpha";
   state.msg_loaded <- [{user with me_identity=Persisted_row "persisted-input"; me_at=45.}];
-  check (list string) "persisted input survives an older queued receipt" ["queued input"]
-    (Tui_types.chat_rows_for state "alpha" |> List.map (fun row -> row.Tui_types.me_text));
-  check int "authoritative input is not also shown pending" 0 (List.length (waiting ()))
+  check bool "persistence alone retains reconnect delivery uncertainty" true
+    (match waiting () with
+     | [(pending, Tui_types.Rechecking_delivery)] ->
+         pending.Keeper_chat.request_id = request.request_id
+     | _ -> false)
+
 ;;
 
 let test_an_execute_call_leads_with_its_exit_and_output () =

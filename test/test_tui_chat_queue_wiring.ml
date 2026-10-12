@@ -4966,6 +4966,22 @@ let test_older_page_keeps_the_entries_it_moved_down () =
         check string "body is carried over" old_entry.body entry.body)
       before moved)
 
+let test_block_member_keys_preserve_source_authority () =
+  let source = Log.Autonomous_turn (Ids.Turn_ref.make ~trace_id:"same" ~absolute_turn:1) in
+  let id = Log.source_key source in
+  let autonomous_keys = Tui_types.chat_execution_member_keys ~source ~member_ids:[id;"follower"] in
+  check bool "autonomous execution grants no operation member authority" true
+    (autonomous_keys=[Tui_types.Typed_execution source]);
+  let direct_keys = Tui_types.chat_execution_member_keys ~source:(Log.Operation id)
+    ~member_ids:[id;"follower";"follower"] in
+  check bool "direct batch retains exact operation members" true
+    (direct_keys=List.map (fun member -> Tui_types.Typed_execution (Log.Operation member))
+      (List.sort_uniq String.compare [id;"follower"]));
+  check bool "equal display IDs never grant cross-kind membership" false
+    (List.exists (fun key -> List.mem key autonomous_keys) direct_keys);
+  check bool "unobserved identity does not match a typed member" false
+    (List.mem (Tui_types.Legacy_request id) direct_keys)
+
 let test_timeline_error_retains_execution_source_kind () =
   let source = Log.Autonomous_turn (Ids.Turn_ref.make ~trace_id:"same" ~absolute_turn:1) in
   let id = Log.source_key source in
@@ -6006,6 +6022,7 @@ let () =
         ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
         ; test_case "older page keeps the blocks it did not change" `Quick test_older_page_keeps_the_blocks_it_did_not_change
         ; test_case "older page keeps the entries it moved down" `Quick test_older_page_keeps_the_entries_it_moved_down
+        ; test_case "block member source authority" `Quick test_block_member_keys_preserve_source_authority
         ; test_case "timeline failure source kind" `Quick test_timeline_error_retains_execution_source_kind
         ; test_case "batch member source kind" `Quick test_batch_members_preserve_execution_source_kind
         ; test_case "batch reply follows all original inputs" `Quick test_batch_reply_follows_all_original_inputs

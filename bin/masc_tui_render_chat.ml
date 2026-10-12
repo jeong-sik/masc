@@ -2584,7 +2584,6 @@ type log_entry = {
 
 type log_block = {
   lb_log : Masc_tui_types.turn_log;
-  lb_request_id : string;
   lb_member_ids : string list;
   lb_insertion : int;
   lb_timeline_at : float option;
@@ -3101,7 +3100,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                 match item.origin with Admission_of_request _ -> false | _ -> true)
               (Keeper_chat_transcript.drawn transcript))
     in
-    { lb_log = turn_log; lb_request_id = request_id; lb_member_ids = member_ids; lb_insertion = insertion; lb_timeline_at = timeline_at;
+    { lb_log = turn_log; lb_member_ids = member_ids; lb_insertion = insertion; lb_timeline_at = timeline_at;
       lb_entries = entries }
   in
   (* One projection per held log per change of its inputs, settled or
@@ -3346,39 +3345,36 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
        itself. A live block's turn has not closed: its last row continues
        until the stream ends. Rows of other requests keep the corners the
        entry memo gave them. *)
-    let block_requests =
-      List.map (fun block -> block.lb_request_id) blocks
-    in
-    (* Requests whose turn has not closed: the live block's and every
-       observed block's. Their last row continues until the stream ends. *)
-    let open_request_ids =
-      List.map (fun block -> block.lb_request_id) open_blocks
-    in
-    (* The first block that lists a request id among its members owns it. *)
+    let block_owner block =
+      Masc_tui_types.Typed_execution (Masc_tui_types.turn_log_execution_source block.lb_log) in
+    let block_requests = List.map block_owner blocks in
+    (* Open execution ownership stays typed even when display IDs coincide. *)
+    let open_request_ids = List.map block_owner open_blocks in
     let block_of_member = Hashtbl.create 16 in
     List.iter
       (fun block ->
-        List.iter
-          (fun member_id ->
-            if not (Hashtbl.mem block_of_member member_id)
-            then Hashtbl.add block_of_member member_id block.lb_request_id)
-          block.lb_member_ids)
+        let source = Masc_tui_types.turn_log_execution_source block.lb_log in
+        Masc_tui_types.chat_execution_member_keys ~source ~member_ids:block.lb_member_ids
+        |> List.iter (fun member ->
+          if not (Hashtbl.mem block_of_member member)
+          then Hashtbl.add block_of_member member (block_owner block)))
       blocks;
     let block_request_set = Hashtbl.create 16 in
-    List.iter (fun id -> Hashtbl.replace block_request_set id ()) block_requests;
+    List.iter (fun owner -> Hashtbl.replace block_request_set owner ()) block_requests;
     let request_of = function
       | Tagged_row (message : Masc_tui_types.msg_entry) ->
-          let request_id = match Hashtbl.find_opt block_of_member message.me_request_id with
-           | Some request_id -> request_id
-           | None -> message.me_request_id in
-          if request_id = "" then None else Some request_id
+          if message.me_request_id = "" then None
+          else
+            let owner = Masc_tui_types.chat_turn_key message in
+            Some (Option.value ~default:owner (Hashtbl.find_opt block_of_member owner))
       | Tagged_child _ -> None
       | Tagged_block (_, Some (Keeper_chat_transcript.Admission_of_request _), _) -> None
-      | Tagged_block (log, _, _) -> Some (Masc_tui_types.turn_log_execution_id log)
+      | Tagged_block (log, _, _) ->
+          Some (Masc_tui_types.Typed_execution (Masc_tui_types.turn_log_execution_source log))
     in
     let edges = Hashtbl.create 16 in
     let close_run ~at_tail request_id indices =
-      let remains_open = at_tail && Masc_tui_types.string_mem request_id open_request_ids in
+      let remains_open = at_tail && List.mem request_id open_request_ids in
       match List.rev indices with
       | [] -> ()
       | [only] -> Hashtbl.replace edges only (if remains_open then Turn_opens else Turn_alone)
@@ -3412,7 +3408,9 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
             in
             ( tag
             , { entry with
-                Message_layout.request_label = request_id;
+                Message_layout.request_label = (match request_id with
+                  | Masc_tui_types.Typed_execution source -> Masc_tui_keeper_chat_log.source_key source
+                  | Legacy_request id -> id);
                 turn_rail =
                   turn_rail_of ~siding ~edge
                     ~style:entry.Message_layout.style

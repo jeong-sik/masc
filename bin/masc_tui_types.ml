@@ -1549,13 +1549,19 @@ type chat_log_timeline_context =
   ; clt_insertion : int
   }
 
+(* One source-to-member mapping for timeline and block ownership. Display IDs
+   never erase the Operation/Autonomous_turn distinction. *)
+let chat_execution_member_keys ~source ~member_ids =
+  match source with
+  | Masc_tui_keeper_chat_log.Operation _ ->
+      List.sort_uniq String.compare (Masc_tui_keeper_chat_log.source_key source :: member_ids)
+      |> List.map (fun id -> Typed_execution (Masc_tui_keeper_chat_log.Operation id))
+  | Autonomous_turn _ -> [Typed_execution source]
+;;
+
 let chat_log_timeline_context index ~member_ids ~source ~started_at =
   let request_id = Masc_tui_keeper_chat_log.source_key source in
-  let keys = match source with
-    | Masc_tui_keeper_chat_log.Operation _ ->
-        List.sort_uniq String.compare (request_id :: member_ids)
-        |> List.map (fun id -> Typed_execution (Masc_tui_keeper_chat_log.Operation id))
-    | Autonomous_turn _ -> [Typed_execution source] in
+  let keys = chat_execution_member_keys ~source ~member_ids in
   let owns message = List.mem (chat_turn_key message) keys in
   let own_messages =
     List.concat_map (fun id -> Hashtbl.find_all index.cti_by_request id) keys

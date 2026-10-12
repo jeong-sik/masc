@@ -181,9 +181,9 @@ let memory_os_current_store =
 let librarian_range_receipt_store =
   { store = "Librarian range receipt ledger"
   ; on_refusal =
-      "every Memory write for that keeper -- the librarian, keeper_memory_write \
-       and retraction -- reconciles the ledger first and fails, and the \
-       Librarian cannot prove which range it already committed"
+      "a structurally broken ledger file still fails the reconcile, so the \
+       Librarian cannot prove which range it already committed; single \
+       unreadable entries are quarantined aside instead and the pass proceeds"
   ; scan =
       (fun ~base_path ->
          let keepers_dir =

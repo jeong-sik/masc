@@ -384,22 +384,44 @@ let durable_range_receipts_to_json receipts =
   `Assoc [ "receipts", `List (List.map durable_range_receipt_to_json receipts) ]
 ;;
 
+(* A receipt entry this binary cannot decode: legacy bytes from a schema it
+   no longer writes. One such entry used to wedge the whole ledger: every
+   pass failed the file and continuity never advanced, which is how a
+   pre-#42020 [explicit_write_range_id] entry froze five keepers'
+   snapshots and grew their carried ranges until fresh sessions failed
+   (#42597). A receipt is evidence for skipping already-committed work, so
+   an unverifiable receipt reads as no receipt, never as an honored one
+   (#32461); the skipped bytes move aside with their reason instead of
+   being silently dropped. *)
+type skipped_range_receipt =
+  { index : int
+  ; reason : string
+  ; entry : Yojson.Safe.t
+  }
+
 let durable_range_receipts_of_json = function
   | `Assoc fields ->
     let* () = exact_field_names_result [ "receipts" ] fields in
     let* receipts = wire_list_field "receipts" fields in
-    let* decoded = List.fold_right
-      (fun json accumulated ->
-         let* accumulated = accumulated in
-         let+ receipt = durable_range_receipt_of_json json in
-         receipt :: accumulated)
-      receipts (Ok []) in
+    let decoded, skipped =
+      List.fold_left
+        (fun (ok, skipped) (index, json) ->
+           match durable_range_receipt_of_json json with
+           | Ok receipt -> receipt :: ok, skipped
+           | Error error ->
+             ( ok
+             , { index; reason = wire_error_to_string error; entry = json }
+               :: skipped ))
+        ([], [])
+        (List.mapi (fun index json -> index, json) receipts)
+    in
+    let decoded = List.rev decoded in
     let candidates = List.filter_map (function
       | Prepared {range_id; _} | Committed {range_id; _} -> consumed_candidate range_id) decoded in
     let+ () = validate_unique_explicit_candidates candidates
       |> Result.map_error (fun detail ->
         {path=[Wire_field "receipts"]; reason=Unknown_token detail}) in
-    decoded
+    decoded, List.rev skipped
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     wire_here Expected_object
 ;;
@@ -411,7 +433,7 @@ let durable_range_receipt_decodes = Atomic.make 0
 let read_durable_range_receipts ~keepers_dir ~keeper_id =
   let path = durable_range_receipt_path ~keepers_dir ~keeper_id in
   match Fs_compat.load_file_opt path with
-  | None -> Ok []
+  | None -> Ok ([], [])
   | Some content ->
     Atomic.incr durable_range_receipt_decodes;
     (match Yojson.Safe.from_string content with
@@ -438,8 +460,19 @@ let read_durable_range_receipts ~keepers_dir ~keeper_id =
 ;;
 
 let validate_durable_range_receipts ~keepers_dir ~keeper_id =
-  (* See read_durable_range_receipts: the read is the validation; the receipt value is intentionally discarded. *)
-  read_durable_range_receipts ~keepers_dir ~keeper_id |> Result.map ignore
+  (* The read is the validation. Skipped entries keep the row invalid until
+     the consume path quarantines them and rewrites the file without them,
+     so the audit keeps pointing at legacy bytes while they are still on
+     disk. This audit never heals: it only reports. *)
+  match read_durable_range_receipts ~keepers_dir ~keeper_id with
+  | Error _ as error -> error
+  | Ok (_, []) -> Ok ()
+  | Ok (_, skipped) ->
+    Error
+      (Printf.sprintf
+         "durable Librarian range receipt holds %d unreadable entries path=%s"
+         (List.length skipped)
+         (durable_range_receipt_path ~keepers_dir ~keeper_id))
 ;;
 
 (* Same regular file with the same size and timestamps. An atomic replace
@@ -452,6 +485,20 @@ let same_file_identity a b =
   && a.Unix.st_ctime = b.Unix.st_ctime
 
 module Path_map = Map.Make (String)
+
+(* Moved up from beside the snapshot quarantine: the receipt reconcile below
+   quarantines undecodable entries the same way. *)
+let unused_rejected_path ~snapshot_path ~now =
+  let base = Printf.sprintf "%s.rejected-%.0f" snapshot_path now in
+  if not (Fs_compat.file_exists base)
+  then base
+  else (
+    let rec next attempt =
+      let candidate = Printf.sprintf "%s-%d" base attempt in
+      if Fs_compat.file_exists candidate then next (attempt + 1) else candidate
+    in
+    next 2)
+;;
 
 (* A reconcile against the snapshot at [fixed_revision] whose bytes hash to
    [fixed_snapshot_sha256] returned the cached receipts unchanged. *)
@@ -501,14 +548,16 @@ let inspect_receipt_file path =
 
 type durable_range_receipt_read =
   | Cached_receipts of durable_range_receipt_cache_entry
-  | Uncached_receipts of durable_range_receipt list
+  | Uncached_receipts of durable_range_receipt list * skipped_range_receipt list
 
 (* A cached entry answers only while the file still has the identity it had
    when it was decoded. An entry is published only when the file kept one
    identity across the decode and its ctime was already settled when the read
    began, so every later change to the file gives it an identity the entry
    does not match. A missing, non-regular, recently changed, or concurrently
-   changed file is decoded on every read. *)
+   changed file is decoded on every read, as is a file with skipped entries:
+   only clean files are cached, so a cache hit proves there was nothing to
+   skip and the consume path rewrites a healing file on its next pass. *)
 let read_durable_range_receipts_cached ~keepers_dir ~keeper_id =
   let path = durable_range_receipt_path ~keepers_dir ~keeper_id in
   let started = Unix.gettimeofday () in
@@ -518,16 +567,17 @@ let read_durable_range_receipts_cached ~keepers_dir ~keeper_id =
     Ok (Cached_receipts cached)
   | (Some _ | None), (Some _ | None) ->
     forget_durable_range_receipts path;
-    let* receipts = read_durable_range_receipts ~keepers_dir ~keeper_id in
+    let* receipts, skipped = read_durable_range_receipts ~keepers_dir ~keeper_id in
     (match before, inspect_receipt_file path with
      | Some before, Some after
        when same_file_identity before after
-            && started -. before.Unix.st_ctime > receipt_identity_settle_seconds ->
+            && started -. before.Unix.st_ctime > receipt_identity_settle_seconds
+            && skipped = [] ->
        let entry = { receipt_identity = after; receipts; fixed_point = None } in
        update_durable_range_receipt_cache path
          (fun (_ : durable_range_receipt_cache_entry option) -> Some entry);
        Ok (Cached_receipts entry)
-     | (Some _ | None), (Some _ | None) -> Ok (Uncached_receipts receipts))
+     | (Some _ | None), (Some _ | None) -> Ok (Uncached_receipts (receipts, skipped)))
 ;;
 
 let mark_receipt_fixed_point ~keepers_dir ~keeper_id entry fixed_point =
@@ -572,6 +622,44 @@ let remove_durable_range_receipts ~keepers_dir ~keeper_id =
   removed
 ;;
 
+(* Move undecodable receipt entries aside before the ledger is rewritten
+   without them. Recovering by destroying the only copy of the rejected
+   state is not recovery, so a sidecar write failure keeps the entries in
+   place and fails the pass: it retries instead of wedging, because the
+   next pass quarantines them again. *)
+let quarantine_skipped_range_receipts ~keepers_dir ~keeper_id ~skipped =
+  match skipped with
+  | [] -> Ok ()
+  | _ :: _ ->
+    let receipt_path = durable_range_receipt_path ~keepers_dir ~keeper_id in
+    let rejected_path =
+      unused_rejected_path ~snapshot_path:receipt_path ~now:(Unix.gettimeofday ())
+    in
+    let entry_to_json { index; reason; entry } =
+      `Assoc [ "index", `Int index; "reason", `String reason; "entry", entry ]
+    in
+    let payload =
+      Yojson.Safe.to_string (`Assoc [ "receipts", `List (List.map entry_to_json skipped) ])
+    in
+    (match Fs_compat.save_file_atomic_strict rejected_path payload with
+     | Ok () ->
+       Log.Keeper.warn
+         ~keeper_name:keeper_id
+         "durable Librarian range receipts quarantined path=%s rejected_path=%s skipped=%s"
+         receipt_path
+         rejected_path
+         (String.concat ";"
+            (List.map (fun skipped -> Printf.sprintf "%d:%s" skipped.index skipped.reason) skipped));
+       Ok ()
+     | Error message ->
+       Error
+         (Printf.sprintf
+            "durable Librarian range receipt quarantine failed path=%s rejected_path=%s: %s"
+            receipt_path
+            rejected_path
+            message))
+;;
+
 let sha256 content = Digestif.SHA256.(digest_string content |> to_hex)
 
 let receipt_range_id = function
@@ -606,10 +694,10 @@ let reconcile_durable_range_receipts
     Option.map (fun (current, content) -> current, lazy (sha256 content)) snapshot
   in
   let* read = read_durable_range_receipts_cached ~keepers_dir ~keeper_id in
-  let receipts, cached =
+  let receipts, skipped, cached =
     match read with
-    | Cached_receipts entry -> entry.receipts, Some entry
-    | Uncached_receipts receipts -> receipts, None
+    | Cached_receipts entry -> entry.receipts, [], Some entry
+    | Uncached_receipts (receipts, skipped) -> receipts, skipped, None
   in
   (* A reconcile that returned the receipts unchanged at revision R with bytes S
      kept every receipt: each was committed, their keys were distinct, and each
@@ -657,7 +745,12 @@ let reconcile_durable_range_receipts
            else (Hashtbl.add seen key (); receipt :: kept)) []
       |> List.rev
     in
-    if receipts = reconciled
+    (* Skipped entries never reach [reconciled], so a file that only lost
+       legacy entries rewrites itself clean the first pass that reads it; a
+       file left with nothing is removed. The quarantine runs before either
+       write: the ledger must not forget bytes it has not preserved. *)
+    let* () = quarantine_skipped_range_receipts ~keepers_dir ~keeper_id ~skipped in
+    if receipts = reconciled && skipped = []
     then (
       (match cached, snapshot with
        | Some entry, Some (current, digest) ->
@@ -1642,18 +1735,6 @@ let journal_quarantine_to_json ~now ~rejection ~rejected_path =
    quarantine kept — the one thing this path promises not to do. The search
    runs under the snapshot lock the writer already holds, so the name it
    settles on is still free when the rename happens. *)
-let unused_rejected_path ~snapshot_path ~now =
-  let base = Printf.sprintf "%s.rejected-%.0f" snapshot_path now in
-  if not (Fs_compat.file_exists base)
-  then base
-  else (
-    let rec next attempt =
-      let candidate = Printf.sprintf "%s-%d" base attempt in
-      if Fs_compat.file_exists candidate then next (attempt + 1) else candidate
-    in
-    next 2)
-;;
-
 let append_snapshot_quarantine ~keepers_dir ~keeper_id ~now ~rejection ~rejected_path =
   append_journal_line
     ~keepers_dir
@@ -2788,11 +2869,13 @@ type receipt_read = Reconcile_receipts | Preserve_authority of string
    every stored byte even when the caller subsequently rejects queue coverage. *)
 let preserved_committed_receipts ~keepers_dir ~keeper_id ~snapshot ~queue_generation =
   (* The cached read decodes the sidecar only when its file identity changed.
-     Nothing here writes the sidecar or marks a fixed point. *)
+     Nothing here writes the sidecar or marks a fixed point. Entries the
+     read skipped are ignored here; the reconcile path quarantines and
+     rewrites them away. *)
   let* read = read_durable_range_receipts_cached ~keepers_dir ~keeper_id in
   let receipts = match read with
     | Cached_receipts entry -> entry.receipts
-    | Uncached_receipts receipts -> receipts in
+    | Uncached_receipts (receipts, _) -> receipts in
   let receipts = List.filter (fun receipt ->
     match consumed_candidate (receipt_range_id receipt) with
     | Some candidate -> String.equal candidate.queue_generation queue_generation

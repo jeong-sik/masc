@@ -495,6 +495,77 @@ describe('Keeper operation stream projection', () => {
     })
   })
 
+  it('recognizes a replayed tool start already persisted under the server row id', () => {
+    const operationId = 'persisted-tool-replay'
+    appendThreadEntry('sangsu', { id: 'hist-reply', role: 'assistant', source: 'direct_assistant', label: 'sangsu',
+      text: 'canonical answer', rawText: 'canonical answer', timestamp: '2026-10-11T00:00:00Z', delivery: 'history', streamState: null,
+      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'), details: null })
+    appendThreadEntry('sangsu', { id: 'server-row-7', role: 'tool', source: 'tool_result', label: 'Read',
+      text: '{"path":"file"}', rawText: '{"path":"file"}', timestamp: '2026-10-11T00:00:01Z', delivery: 'history', streamState: null,
+      toolCallId: 'tc-persisted', toolCallEnded: true,
+      deliveryProvenance: {
+        delivery_key: { kind: 'operation', operation_id: operationId },
+        transcript_slot: { kind: 'tool_delivery', ordinal: 0 },
+      },
+      details: null })
+
+    applyKeeperOperationTurnEvent('sangsu', { operationId, event: {
+      type: 'TOOL_CALL_START', ...toolOccurrence(3), toolCallId: 'tc-persisted', toolCallName: 'Read',
+    } })
+
+    const tools = (keeperThreads.value.sangsu ?? []).filter(entry => entry.role === 'tool')
+    expect(tools).toHaveLength(1)
+    expect(tools[0]).toMatchObject({ id: 'server-row-7', delivery: 'history' })
+    expect(keeperThreads.value.sangsu?.find(entry => entry.id === 'hist-reply')?.traceSteps).toBeUndefined()
+  })
+
+  it('still creates a streaming occurrence for a replayed start with no persisted provenance', () => {
+    const operationId = 'unpersisted-tool-replay'
+    appendThreadEntry('sangsu', { id: 'hist-reply', role: 'assistant', source: 'direct_assistant', label: 'sangsu',
+      text: 'canonical answer', rawText: 'canonical answer', timestamp: '2026-10-11T00:00:00Z', delivery: 'history', streamState: null,
+      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'), details: null })
+
+    applyKeeperOperationTurnEvent('sangsu', { operationId, event: {
+      type: 'TOOL_CALL_START', ...toolOccurrence(3), toolCallId: 'tc-unpersisted', toolCallName: 'Write',
+    } })
+
+    expect(keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-delivery-hist-reply-stream-0-block-3')).toMatchObject({
+      role: 'tool',
+      label: 'Write',
+      delivery: 'streaming',
+    })
+  })
+
+  it('admits an occurrence-scoped quarantine replay so the late occurrence is marked errored', () => {
+    const operationId = 'quarantined-tool-replay'
+    appendThreadEntry('sangsu', { id: 'quar-reply', role: 'assistant', source: 'direct_assistant', label: 'sangsu',
+      text: 'canonical answer', rawText: 'canonical answer', timestamp: '2026-10-11T00:00:00Z', delivery: 'history', streamState: null,
+      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'), details: null })
+
+    // No provider tool_call_id on the replayed start, so the observation
+    // path creates the local occurrence row for the quarantine to mark.
+    applyKeeperOperationTurnEvent('sangsu', { operationId, event: {
+      type: 'TOOL_CALL_START', ...toolOccurrence(5), toolCallName: 'Read',
+    } })
+    applyKeeperOperationTurnEvent('sangsu', { operationId, event: {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+      value: {
+        kind: 'tool_args_without_start',
+        index: 5,
+        reason: 'occurrence quarantined by the server',
+        quarantined_occurrence: { ...toolOccurrence(5), providerMessageId: 'provider-message-1' },
+      },
+    } })
+
+    const tool = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-delivery-quar-reply-stream-0-block-5')
+    expect(tool).toMatchObject({ delivery: 'error', toolCallEnded: true })
+    expect(tool?.error).toContain('tool_args_without_start')
+    expect(keeperThreads.value.sangsu?.find(entry => entry.id === 'quar-reply')?.traceSteps).toMatchObject([
+      { kind: 'tool', name: 'Read', status: 'err' },
+    ])
+  })
+
   it('keeps tools live after an owned model stop while the operation is still running', () => {
     assistantEntry()
     const owner = { content_generation: 3, stream_scope: 0 }

@@ -537,7 +537,14 @@ function isToolObservation(event: KeeperChatStreamEvent): boolean {
     case 'TOOL_CALL_START':
     case 'TOOL_CALL_ARGS':
     case 'TOOL_CALL_END': return true
-    case 'CUSTOM': return event.name === 'KEEPER_TOOL_RESULT_READY'
+    case 'CUSTOM':
+      if (event.name === 'KEEPER_TOOL_RESULT_READY') return true
+      // An occurrence-scoped quarantine is authoritative evidence about one
+      // tool occurrence; admitting it for a converged turn lets the
+      // protocol-error handler mark that occurrence's trace and row errored
+      // instead of leaving a replayed late start pending forever.
+      return event.name === 'KEEPER_STREAM_PROTOCOL_ERROR'
+        && event.value.quarantined_occurrence !== undefined
     default: return false
   }
 }
@@ -876,6 +883,19 @@ export function applyKeeperStreamEvent(
           )
         }
         return null
+      }
+      if (source.kind === 'operation' && source.observationOnly && toolCallId) {
+        // A journal replay can re-deliver the start of an occurrence the
+        // server already persisted: REST history mints its own row ids, so
+        // the generated occurrence id above cannot see the durable row and
+        // would insert a second streaming occurrence next to it. Correlate
+        // on the operation's durable tool-call provenance first.
+        const persistedOccurrence = (keeperThreads.value[keeperName] ?? [])
+          .find(entry => entry.role === 'tool'
+            && entry.toolCallId === toolCallId
+            && entry.deliveryProvenance?.delivery_key.kind === 'operation'
+            && entry.deliveryProvenance.delivery_key.operation_id === source.operationId)
+        if (persistedOccurrence) return null
       }
       if (!(source.kind === 'operation' && source.observationOnly)) {
         promoteAssistantTextToProgress(keeperName, assistantEntryId, {

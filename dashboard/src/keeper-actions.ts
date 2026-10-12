@@ -1200,6 +1200,17 @@ export async function sendKeeperThreadMessage(
           event,
           { kind: 'operation', operationId, sequence },
         )
+        if (event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR') {
+          // The direct reader cancels itself on the terminal event, while
+          // clearActiveStream in the send tail still holds live-send
+          // ownership through the remaining bookkeeping. The server
+          // broadcasts every operation event before publishing it to the
+          // direct sink, so a post-terminal tool frame can land on the
+          // observer connection in this interval; with ownership still
+          // held the broadcast guard discards it and the canceled direct
+          // stream never carries it. Release at the terminal event itself.
+          releaseLiveSendRequest(operationId)
+        }
         // First reply-bearing event: the stream itself is the liveness
         // signal now — retire the queued poll.
         if (

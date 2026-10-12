@@ -891,6 +891,13 @@ export function applyKeeperStreamEvent(
         )
         return null
       }
+      // A TOOL_CALL_START is a producer boundary: buffered intermediate speech
+      // must flush here even when canonical history already supplied the tool
+      // row and this occurrence turns out idempotent below.
+      if (source.kind === 'autonomous' || source.kind === 'operation' && source.observationOnly) {
+        flushProducerSaying(keeperName, assistantEntryId, source.observationOnly === true)
+        if (source.sequence !== undefined) updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry, producerTraceBoundary: source.sequence }))
+      }
       const assistantEntry = (keeperThreads.value[keeperName] ?? [])
         .find(entry => entry.id === assistantEntryId)
       const existingOccurrence = (keeperThreads.value[keeperName] ?? [])
@@ -908,10 +915,6 @@ export function applyKeeperStreamEvent(
           )
         }
         return null
-      }
-      if (source.kind === 'autonomous' || source.kind === 'operation' && source.observationOnly) {
-        flushProducerSaying(keeperName, assistantEntryId, source.observationOnly === true)
-        if (source.sequence !== undefined) updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry, producerTraceBoundary: source.sequence }))
       }
       if (!(source.kind !== 'direct' && source.observationOnly)) {
         promoteAssistantTextToProgress(keeperName, assistantEntryId, {

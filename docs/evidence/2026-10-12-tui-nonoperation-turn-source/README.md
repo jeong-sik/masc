@@ -21,3 +21,8 @@ pipeline were not executed by this harness.
 Two changed files pass syntax-only parsing and diff whitespace checking. Existing
 canonical wire fixture now checks source ownership but is unexecuted. Full
 build/typecheck, runtime/UI/screenshots, CI, approval and merge are unverified.
+
+Fixture audit found the inherited nonoperation assistant row used unsupported
+`terminal_assistant`; corrected it to the canonical `terminal_result` codec
+variant. The fixture still has not executed; malformed provenance is intentionally
+unowned and cannot satisfy the positive ownership case.

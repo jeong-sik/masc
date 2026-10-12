@@ -1623,7 +1623,10 @@ let apply_delta ~now t (delta : Live.delta) =
   | Live.Thinking {text=""; _} -> ()
   | Live.Text {text; stream_scope} ->
       Option.iter (enter_text_response_scope t) stream_scope;
-      t.model_signal <- Some (Answering_at now);
+      (match t.model_signal with
+       | Some (Provider_retry_at _ | Tool_returned_at _ | Model_response_ended) -> ()
+       | None | Some (Scoped_model_content | Model_started_at _ | Reasoning_at _ | Answering_at _) ->
+           t.model_signal <- Some (Answering_at now));
       Buffer.add_string t.text_buffer text;
       trail_text ~now t text
   | Live.Thinking {text; content_index} ->
@@ -1632,7 +1635,11 @@ let apply_delta ~now t (delta : Live.delta) =
         | Some index -> List.exists (fun (known, channel, at) ->
             known = index && channel = Masc.Keeper_chat_events.Model_thinking && Option.is_none at)
             t.active_model_content in
-      if not closed_thinking then t.model_signal <- Some (Reasoning_at now);
+      if not closed_thinking then
+        (match t.model_signal with
+         | Some (Provider_retry_at _ | Tool_returned_at _ | Model_response_ended) -> ()
+         | None | Some (Scoped_model_content | Model_started_at _ | Reasoning_at _ | Answering_at _) ->
+             t.model_signal <- Some (Reasoning_at now));
       Buffer.add_string t.thinking_buffer text;
       trail_thinking ~now t text
   | Live.Tool_started { occurrence; tool_name } ->

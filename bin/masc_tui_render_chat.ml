@@ -2917,7 +2917,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
         ; clt_timeline_at = timeline_at
         ; clt_insertion = insertion } =
       Masc_tui_types.chat_log_timeline_context timeline_index ~member_ids
-        ~request_id ~started_at
+        ~source:(Masc_tui_types.turn_log_execution_source turn_log) ~started_at
     in
     let keeper_label =
       Keeper_chat.terminal_safe_text
@@ -3129,7 +3129,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
         ; clt_timeline_at = timeline_at
         ; clt_insertion = insertion } =
       Masc_tui_types.chat_log_timeline_context timeline_index ~member_ids
-        ~request_id:(Masc_tui_types.turn_log_execution_id turn_log)
+        ~source:(Masc_tui_types.turn_log_execution_source turn_log)
         ~started_at:(Keeper_chat_transcript.started_at turn_log.tl_transcript)
     in
     let palette_generation =

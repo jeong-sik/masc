@@ -4054,7 +4054,7 @@ let test_indexed_timeline_context_matches_the_full_list_functions () =
             (Tui_types.chat_index_insertion index ~lower_bound:0 ~timeline_at:clock))
         [ None; Some (-1.); Some 0.; Some 7.; Some 30.5; Some 59.; Some 1000. ];
       let got =
-        Tui_types.chat_log_timeline_context index ~member_ids ~request_id ~started_at
+        Tui_types.chat_log_timeline_context index ~member_ids ~source:(Log.Operation request_id) ~started_at
       in
       incr checked;
       check (option (float 0.)) "timeline moment" timeline_at got.clt_timeline_at;
@@ -4965,6 +4965,27 @@ let test_older_page_keeps_the_entries_it_moved_down () =
            (entry : Masc_tui_message_layout.entry) ->
         check string "body is carried over" old_entry.body entry.body)
       before moved)
+
+let test_timeline_error_retains_execution_source_kind () =
+  let source = Log.Autonomous_turn (Ids.Turn_ref.make ~trace_id:"same" ~absolute_turn:1) in
+  let id = Log.source_key source in
+  let direct_error = chat_entry ~request_id:id ~role:Tui_types.Message_error ~text:"failed" ~at:2. () in
+  let autonomous = { (chat_entry ~request_id:id ~role:Tui_types.Message_autonomous ~text:"answer" ~at:1. ())
+    with me_execution_source=Some source } in
+  let unresolved = {direct_error with me_execution_source=None} in
+  let rows = [direct_error;autonomous;unresolved] in
+  let index = Tui_types.chat_timeline_index ~messages:rows
+    ~visible:(List.combine rows (Tui_types.chat_projected_timeline_ats rows)) in
+  let context source = Tui_types.chat_log_timeline_context index ~member_ids:[id] ~source ~started_at:1. in
+  check bool "direct failure cannot mark colliding autonomous execution failed" false
+    (context source).clt_committed_error;
+  check bool "direct execution retains its actual failure" true
+    (context (Log.Operation id)).clt_committed_error;
+  let unknown_only = Tui_types.chat_timeline_index ~messages:[unresolved]
+    ~visible:[unresolved,Some 2.] in
+  check bool "unresolved row cannot grant committed failure ownership" false
+    (Tui_types.chat_log_timeline_context unknown_only ~member_ids:[id]
+      ~source:(Log.Operation id) ~started_at:1.).clt_committed_error
 
 let test_batch_members_preserve_execution_source_kind () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
@@ -5985,6 +6006,7 @@ let () =
         ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
         ; test_case "older page keeps the blocks it did not change" `Quick test_older_page_keeps_the_blocks_it_did_not_change
         ; test_case "older page keeps the entries it moved down" `Quick test_older_page_keeps_the_entries_it_moved_down
+        ; test_case "timeline failure source kind" `Quick test_timeline_error_retains_execution_source_kind
         ; test_case "batch member source kind" `Quick test_batch_members_preserve_execution_source_kind
         ; test_case "batch reply follows all original inputs" `Quick test_batch_reply_follows_all_original_inputs
         ; test_case "observed checkpoint retains earlier output" `Quick test_observed_checkpoint_retains_earlier_output

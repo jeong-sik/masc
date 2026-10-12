@@ -1424,14 +1424,14 @@ let chat_block_insertion_index ~member_ids ~bounds ~request_id ~timeline_at
   find 0 positioned_messages
 ;;
 
-(* One frame's committed rows indexed by request id, so a held log finds its
+(* One frame's committed rows indexed by typed turn ownership, so a held log finds its
    own rows without walking every row. [chat_log_timeline_context] returns what
    [chat_live_timeline_at] and [chat_block_insertion_index] return for the same
    log on the full lists; the test compares the two on generated rows. *)
 type chat_timeline_index =
-  { cti_by_request : (string, int * msg_entry) Hashtbl.t
+  { cti_by_request : (chat_turn_key, int * msg_entry) Hashtbl.t
   ; cti_visible : (msg_entry * float option) array
-  ; cti_visible_by_request : (string, int * msg_entry * float option) Hashtbl.t
+  ; cti_visible_by_request : (chat_turn_key, int * msg_entry * float option) Hashtbl.t
   ; cti_max_at : float option
   ; cti_all_finite : bool
   ; cti_prefix_max : float array
@@ -1451,13 +1451,13 @@ let chat_timeline_index ~messages ~visible =
   let by_request = Hashtbl.create 64 in
   List.iteri
     (fun position (message : msg_entry) ->
-      Hashtbl.add by_request message.me_request_id (position, message))
+      Hashtbl.add by_request (chat_turn_key message) (position, message))
     messages;
   let cti_visible = Array.of_list visible in
   let visible_by_request = Hashtbl.create 64 in
   Array.iteri
     (fun index ((message : msg_entry), at) ->
-      Hashtbl.add visible_by_request message.me_request_id (index, message, at))
+      Hashtbl.add visible_by_request (chat_turn_key message) (index, message, at))
     cti_visible;
   let max_of_some acc at =
     match acc, at with
@@ -1549,17 +1549,23 @@ type chat_log_timeline_context =
   ; clt_insertion : int
   }
 
-let chat_log_timeline_context index ~member_ids ~request_id ~started_at =
-  let ids = List.sort_uniq String.compare (request_id :: member_ids) in
+let chat_log_timeline_context index ~member_ids ~source ~started_at =
+  let request_id = Masc_tui_keeper_chat_log.source_key source in
+  let keys = match source with
+    | Masc_tui_keeper_chat_log.Operation _ ->
+        List.sort_uniq String.compare (request_id :: member_ids)
+        |> List.map (fun id -> Typed_execution (Masc_tui_keeper_chat_log.Operation id))
+    | Autonomous_turn _ -> [Typed_execution source] in
+  let owns message = List.mem (chat_turn_key message) keys in
   let own_messages =
-    List.concat_map (fun id -> Hashtbl.find_all index.cti_by_request id) ids
+    List.concat_map (fun id -> Hashtbl.find_all index.cti_by_request id) keys
     |> List.sort (fun (left, _) (right, _) -> Int.compare left right)
     |> List.map snd
   in
   let clt_committed_error =
     List.exists
       (fun (message : msg_entry) ->
-        message.me_role = Message_error && string_mem message.me_request_id member_ids)
+        message.me_role = Message_error)
       own_messages
   in
   let request_messages =
@@ -1581,7 +1587,7 @@ let chat_log_timeline_context index ~member_ids ~request_id ~started_at =
         else
           let excluded_at =
             List.concat_map (fun id -> Hashtbl.find_all index.cti_visible_by_request id)
-              (List.sort_uniq String.compare member_ids)
+              keys
             |> List.filter (fun (_, (message : msg_entry), _) ->
                  message.me_turn_phase <> Turn_input)
           in
@@ -1589,8 +1595,7 @@ let chat_log_timeline_context index ~member_ids ~request_id ~started_at =
             let scan () =
               Array.fold_left
                 (fun latest ((message : msg_entry), at) ->
-                  if string_mem message.me_request_id member_ids
-                     && message.me_turn_phase <> Turn_input
+                  if owns message && message.me_turn_phase <> Turn_input
                   then latest
                   else
                     match latest, at with
@@ -1611,7 +1616,7 @@ let chat_log_timeline_context index ~member_ids ~request_id ~started_at =
            | Some started_at, Some at -> Some (Float.max started_at at))
   in
   let lower_bound =
-    List.concat_map (fun id -> Hashtbl.find_all index.cti_visible_by_request id) ids
+    List.concat_map (fun id -> Hashtbl.find_all index.cti_visible_by_request id) keys
     |> List.fold_left
          (fun lower_bound (position, (message : msg_entry), _) ->
            if message.me_turn_phase = Turn_input

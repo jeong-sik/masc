@@ -611,7 +611,7 @@ let test_delivery_keys_do_not_invent_turn_ownership () =
         ~transcript_slot:(tool_transcript_slot "approval-exec" 0)
         ~tool_call_name:"Read" "{}";
       row ~id:"assistant-row" ~role:"assistant" ~delivery_key:key ~turn_ref:"trace-1#54"
-        ~transcript_slot:(transcript_slot "terminal_assistant") "done";
+        ~transcript_slot:(transcript_slot "terminal_result") "done";
       row ~id:"operator-row" ~role:"user" ~delivery_key:(operation_key "shared-id")
         ~transcript_slot:(transcript_slot "accepted_user") "operator request"])
     in

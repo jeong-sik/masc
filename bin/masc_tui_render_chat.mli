@@ -114,6 +114,12 @@ val scroll_anchor_at :
   chat_projection -> int -> Masc_tui_types.chat_scroll_anchor option
 (** The anchor of the entry at a position; [None] outside the projection. *)
 
+val projection_index_of_scroll_anchor :
+  chat_projection -> Masc_tui_types.chat_scroll_anchor -> int option
+(** The entry a scroll pin resolves to: durable anchors by typed matching,
+    pending and polled anchors by their transient registration. A pending
+    input's promotion lands on its exact-operation durable row only. *)
+
 val with_transient_tail :
   Message_layout.entry list -> transient:Message_layout.entry list ->
   Message_layout.entry list

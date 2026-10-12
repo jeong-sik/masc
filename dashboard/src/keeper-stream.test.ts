@@ -2049,4 +2049,39 @@ describe('applyKeeperStreamEvent tool calls', () => {
       expect(after.traceSteps).toMatchObject([{ kind: 'think', text: 'previous reasoning' }])
     } finally { release() }
   })
+
+  it('does not roll back response admission after thinking publication admits a newer owner', () => {
+    assistantEntry('same-operation')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: {
+        index: 0, delta: 'previous reasoning',
+      },
+    })
+    let armed = true
+    const release = effect(() => {
+      const current = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+      const reachedBoundary = current?.traceSteps?.some(step => step.kind === 'think')
+      if (armed && current && reachedBoundary) {
+        armed = false
+        const next = reduceKeeperResponse(current.responseState ?? initialKeeperResponseState, {
+          kind: 'observe', source: 'header', owner: { content_generation: 3, stream_scope: 2 }, scope: 2,
+        })
+        untracked(() => { keeperThreads.value = { sangsu: [{ ...current,
+          responseState: next.state, streamState: 'streaming', text: 'newer answer', rawText: 'newer answer',
+        }] } })
+      }
+    })
+    try {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: {
+          stream_scope: 1, provider_message_id: 'older-header', model: 'older-model',
+        },
+      })
+      const after = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+      expect(after.responseState).toMatchObject({ current: { content_generation: 3, stream_scope: 2 } })
+      expect(after.streamState).toBe('streaming')
+      expect(after.text).toBe('newer answer')
+      expect(after.details?.providerMessageId).not.toBe('older-header')
+    } finally { release() }
+  })
 })

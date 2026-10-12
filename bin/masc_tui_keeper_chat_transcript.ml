@@ -1598,6 +1598,18 @@ let apply_delta ~now t (delta : Live.delta) =
         t.observed_usage <- None;
         t.observed_stop_reason <- None;
         t.response_scope <- None;
+        (* An advancing attempt starts a newer response. The prior owner may
+           never emit MessageStop, and an equal identity is not "preceding", so
+           demote it to the stale floor: its bytes and anything older can no
+           longer append or replace metadata in the new attempt. *)
+        (match t.admitted_response_owner with
+         | Some owner ->
+           t.closed_response_owner <- Some
+             (match t.closed_response_owner with
+              | Some closed when compare closed owner >= 0 -> closed
+              | Some _ | None -> owner)
+         | None -> ());
+        t.admitted_response_owner <- None;
         t.stop_scope <- None;
         retire_model_content t;
         t.model_signal <- None;

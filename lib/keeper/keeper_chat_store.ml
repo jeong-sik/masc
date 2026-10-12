@@ -549,38 +549,6 @@ let validate_delivery_execution_identity ~execution_id
           Error "non-tool transcript slot forbids row execution_id")
 ;;
 
-let validate_delivery_role ~role_label
-    (provenance : Keeper_chat_delivery_identity.delivery_provenance) =
-  match provenance.transcript_slot, role_label with
-  | Keeper_chat_delivery_identity.Accepted_user, "user"
-  | Keeper_chat_delivery_identity.Terminal_result, ("assistant" | "request_failure")
-  | ( Keeper_chat_delivery_identity.Approval_request
-    | Keeper_chat_delivery_identity.Approval_resolution
-    | Keeper_chat_delivery_identity.Approval_replay
-    | Keeper_chat_delivery_identity.Approval_replay_correction
-    | Keeper_chat_delivery_identity.Approval_continuation ),
-    "system"
-  | ( Keeper_chat_delivery_identity.Tool_call _
-    | Keeper_chat_delivery_identity.Tool_delivery _ ),
-    "tool" ->
-    Ok ()
-  | Keeper_chat_delivery_identity.Accepted_user, _ ->
-    Error "accepted_user transcript slot requires a user row"
-  | Keeper_chat_delivery_identity.Terminal_result, _ ->
-    Error "terminal_result transcript slot requires an assistant or request_failure row"
-  | ( Keeper_chat_delivery_identity.Approval_request
-    | Keeper_chat_delivery_identity.Approval_resolution
-    | Keeper_chat_delivery_identity.Approval_replay
-    | Keeper_chat_delivery_identity.Approval_replay_correction
-    | Keeper_chat_delivery_identity.Approval_continuation ),
-    _ ->
-    Error "approval lifecycle transcript slot requires a system row"
-  | ( Keeper_chat_delivery_identity.Tool_call _
-    | Keeper_chat_delivery_identity.Tool_delivery _ ),
-    _ ->
-    Error "tool transcript slot requires a tool row"
-;;
-
 type scanned_provenance =
   | No_provenance
   | Valid_provenance of
@@ -612,7 +580,7 @@ let provenance_of_line ~line_number line =
            | Some (`String value) -> value
            | Some _ | None -> ""
          in
-         (match validate_delivery_role ~role_label provenance with
+         (match Keeper_chat_delivery_identity.validate_delivery_role ~role_label provenance with
           | Error detail ->
             Ok
               (Poisoned_delivery_key
@@ -1911,7 +1879,7 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
     let delivery_execution_identity_valid =
       match delivery_provenance with
       | Some provenance ->
-        (match validate_delivery_role ~role_label provenance with
+        (match Keeper_chat_delivery_identity.validate_delivery_role ~role_label provenance with
          | Error detail ->
            report_persistence_read_drop
              ~reason:Read_drop_reason.Invalid_payload

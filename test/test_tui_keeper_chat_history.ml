@@ -1928,6 +1928,18 @@ let test_failure_requires_canonical_terminal_provenance () =
     | _ -> fail "failure record was not retained") payloads
 ;;
 
+let test_role_slot_mismatch_grants_no_execution_authority () =
+  let cases = ["assistant", "accepted_user"; "user", "terminal_result";
+               "tool", "accepted_user"; "system", "terminal_result"] in
+  List.iter (fun (role, slot) ->
+    let decoded = decode (`List [row ~role
+      ~delivery_key:(operation_key "direct")
+      ~transcript_slot:(transcript_slot slot) "provided body"]) in
+    check bool "incompatible row has no operation ownership" true
+      (List.for_all (fun (row : History.row) ->
+        row.execution_source = None && row.operation_id = None) decoded.rows)) cases
+;;
+
 let () =
   run "tui_keeper_chat_history"
     [ ( "rows"
@@ -1966,6 +1978,8 @@ let () =
             test_a_fenced_core_cause_draws_nothing
         ; test_case "unrelated failure is not marked recovered" `Quick
             test_unrelated_failure_is_not_marked_recovered
+        ; test_case "role slot mismatch grants no authority" `Quick
+            test_role_slot_mismatch_grants_no_execution_authority
         ; test_case "failure requires canonical terminal provenance" `Quick
             test_failure_requires_canonical_terminal_provenance
         ; test_case "rows carry the operation id only for direct turns" `Quick

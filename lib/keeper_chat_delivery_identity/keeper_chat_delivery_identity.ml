@@ -363,6 +363,48 @@ let delivery_provenance_of_fields fields =
     Ok (Some { delivery_key; transcript_slot })
 ;;
 
+let validate_delivery_role ~role_label
+    (provenance : delivery_provenance) =
+  match provenance.transcript_slot, role_label with
+  | Accepted_user, "user"
+  | Terminal_result, ("assistant" | "request_failure")
+  | ( Approval_request
+    | Approval_resolution
+    | Approval_replay
+    | Approval_replay_correction
+    | Approval_continuation ),
+    "system"
+  | ( Tool_call _
+    | Tool_delivery _ ),
+    "tool" ->
+    Ok ()
+  | Accepted_user, _ ->
+    Error "accepted_user transcript slot requires a user row"
+  | Terminal_result, _ ->
+    Error "terminal_result transcript slot requires an assistant or request_failure row"
+  | ( Approval_request
+    | Approval_resolution
+    | Approval_replay
+    | Approval_replay_correction
+    | Approval_continuation ),
+    _ ->
+    Error "approval lifecycle transcript slot requires a system row"
+  | ( Tool_call _
+    | Tool_delivery _ ),
+    _ ->
+    Error "tool transcript slot requires a tool row"
+;;
+
+let row_delivery_provenance_of_fields fields =
+  let* provenance = delivery_provenance_of_fields fields in
+  match provenance with
+  | None -> Ok None
+  | Some provenance ->
+      let* role_label = string_field "role" fields in
+      let* () = validate_delivery_role ~role_label provenance in
+      Ok (Some provenance)
+;;
+
 let delivery_provenance_equal left right =
   delivery_key_equal left.delivery_key right.delivery_key
   && transcript_slot_equal left.transcript_slot right.transcript_slot

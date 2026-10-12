@@ -1569,14 +1569,12 @@ function mergeLocalToolObservations(
   const slot = provenance.transcript_slot
   const marker = slot.kind === 'tool_call' && matches.some(entry => entry.toolTranscriptOrdinal === slot.ordinal) ? slot.ordinal : undefined
   const correlations = [...new Set([history, ...matches].flatMap(entry => entry.toolCallId ? [entry.toolCallId] : []))]
-  const parents = [...new Set([history, ...matches].flatMap(entry => [...(entry.toolParentEntryId ? [entry.toolParentEntryId] : []), ...(entry.toolParentCandidates ?? [])]))]
   const first = coordinates[0]
-  const conflicting = parents.length > 1 || correlations.length > 1 || matches.some(entry => entry.toolOccurrence?.kind === 'conflicting')
+  const conflicting = correlations.length > 1 || matches.some(entry => entry.toolOccurrence?.kind === 'conflicting')
     || (first && coordinates.some(value => value.streamScope !== first.streamScope || value.blockIndex !== first.blockIndex))
   return {
     ...history,
     toolOwnerKey: history.toolOwnerKey ?? matches.find(entry => entry.toolOwnerKey !== undefined)?.toolOwnerKey,
-    ...(parents.length === 1 ? { toolParentEntryId: parents[0] } : parents.length > 1 ? { toolParentCandidates: Object.freeze(parents) } : {}),
     ...(marker !== undefined ? { toolTranscriptOrdinal: marker } : {}),
     ...(correlations.length === 1 ? { toolCallId: correlations[0] } : {}),
     ...(first ? { toolOccurrence: conflicting
@@ -1584,6 +1582,46 @@ function mergeLocalToolObservations(
       : Object.freeze({ kind: 'identified' as const, ...first }) } : {}),
     ...(conflicting || matches.some(entry => entry.toolOccurrenceQuarantined) ? { toolOccurrenceQuarantined: true as const } : {}),
     ...(matches.some(entry => entry.toolCallEnded === true) ? { toolCallEnded: true } : {}),
+  }
+}
+
+/** Point the tool steps of a trace at the canonical row that replaced the row
+ *  they named. A step moves only when the canonical row belongs to the same
+ *  producer as the trace's own delivery. */
+function remapToolTraceTargets(
+  entry: KeeperConversationEntry,
+  replacements: ReadonlyMap<string, KeeperConversationEntry>,
+): KeeperConversationEntry {
+  if (!entry.traceSteps) return entry
+  return {
+    ...entry,
+    traceSteps: entry.traceSteps.map(step => {
+      if (step.kind !== 'tool' || !step.toolOccurrenceId) return step
+      const replacement = replacements.get(step.toolOccurrenceId)
+      const parentKey = entry.deliveryProvenance?.delivery_key
+      const toolKey = replacement?.deliveryProvenance?.delivery_key
+      return replacement && parentKey && toolKey && toolDeliveryBelongsToProducer(parentKey, toolKey)
+        ? { ...step, toolOccurrenceId: replacement.id } : step
+    }),
+  }
+}
+
+/** Fold the live tool rows that report the same execution as one canonical row
+ *  into that row. The canonical row keeps its position and every other entry is
+ *  left as it is, so an acknowledgement does not reorder the thread. */
+export function foldToolRowsIntoCanonical(name: string, canonicalId: string): void {
+  const thread = keeperThreads.value[name] ?? []
+  const canonical = thread.find(entry => entry.id === canonicalId)
+  if (!canonical || canonical.role !== 'tool' || !canonical.deliveryProvenance) return
+  const observed = thread.filter(entry => entry.id !== canonicalId && matchesCanonicalTool(entry, canonical))
+  if (observed.length === 0) return
+  const folded = mergeLocalToolObservations(canonical, thread)
+  const replacements = new Map(observed.map(entry => [entry.id, folded] as const))
+  keeperThreads.value = {
+    ...keeperThreads.value,
+    [name]: thread
+      .filter(entry => !replacements.has(entry.id))
+      .map(entry => entry.id === canonicalId ? folded : remapToolTraceTargets(entry, replacements)),
   }
 }
 
@@ -1615,17 +1653,7 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       if (matchesCanonicalTool(previous, row)) toolRowReplacement.set(previous.id, row)
     }
   }
-  const remapTrace = (entry: KeeperConversationEntry): KeeperConversationEntry => entry.traceSteps ? {
-    ...entry,
-    traceSteps: entry.traceSteps.map(step => {
-      if (step.kind !== 'tool' || !step.toolOccurrenceId) return step
-      const replacement = toolRowReplacement.get(step.toolOccurrenceId)
-      const parentKey = entry.deliveryProvenance?.delivery_key
-      const toolKey = replacement?.deliveryProvenance?.delivery_key
-      return replacement && parentKey && toolKey && toolDeliveryBelongsToProducer(parentKey, toolKey)
-        ? { ...step, toolOccurrenceId: replacement.id } : step
-    }),
-  } : entry
+  const remapTrace = (entry: KeeperConversationEntry) => remapToolTraceTargets(entry, toolRowReplacement)
   const historyEntries = reconciled.map(remapTrace)
   const localEntries = existing.filter(
     entry => {

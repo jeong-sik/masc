@@ -19,7 +19,7 @@ import type { KeeperConversationDetails, KeeperConversationEntry } from './types
 import {
   appendAssistantDelta,
   appendThreadEntry,
-  mergeServerHistoryEntries,
+  foldToolRowsIntoCanonical,
   promoteAssistantTextToProgress,
   appendAssistantToolTraceArgsDelta,
   setAssistantToolTraceArgsSnapshot,
@@ -85,7 +85,7 @@ function sameToolParent(
   const toolKey = tool.toolOwnerKey ?? tool.deliveryProvenance?.delivery_key
   return parentKey ? toolKey !== undefined && (tool.toolOwnerKey !== undefined
     ? sameDeliveryKey(parentKey, tool.toolOwnerKey) : toolDeliveryBelongsToProducer(parentKey, toolKey))
-    : tool.toolOwnerKey === undefined && (tool.toolParentEntryId === parent.id || tool.toolParentCandidates?.includes(parent.id) === true)
+    : toolKey === undefined && tool.toolParentEntryId === parent.id
 }
 
 function convergeAcknowledgedTool(keeperName: string, parent: KeeperConversationEntry,
@@ -96,15 +96,11 @@ function convergeAcknowledgedTool(keeperName: string, parent: KeeperConversation
     && entry.deliveryProvenance.transcript_slot.execution_id === binding.executionId
     && entry.deliveryProvenance.transcript_slot.ordinal === binding.ordinal
     && sameDeliveryKey(entry.deliveryProvenance.delivery_key, binding.deliveryKey))
-  if (canonical.length > 1 || canonical.some(entry => entry.toolOccurrenceQuarantined
-    || entry.toolParentCandidates?.length || entry.toolParentEntryId !== undefined && entry.toolParentEntryId !== parent.id)) {
+  if (canonical.length > 1 || canonical.some(entry => entry.toolOccurrenceQuarantined)) {
     updateThreadEntry(keeperName, parent.id, entry => ({ ...entry, toolObservationAuthority: 'unavailable',
-      error: 'Acknowledged tool transcript has conflicting parent associations' }))
+      error: 'Acknowledged tool transcript conflicts with canonical history' }))
   } else if (canonical[0]) {
-    const durable = canonical[0]
-    // Retain the full inventory while the shared reconciler folds only the
-    // acknowledged fact and its explicit parent/occurrence observations.
-    mergeServerHistoryEntries(keeperName, [durable, ...entries.filter(entry => entry.id !== durable.id)])
+    foldToolRowsIntoCanonical(keeperName, canonical[0].id)
   }
 }
 
@@ -1091,9 +1087,9 @@ export function applyKeeperStreamEvent(
           return null
         }
         const resource = matching[0]
-        if (resource?.toolOccurrenceQuarantined || resource?.toolParentCandidates?.length) {
+        if (resource?.toolOccurrenceQuarantined) {
           updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry, toolObservationAuthority: 'unavailable',
-            error: 'Acknowledged tool transcript is quarantined under disputed parent ownership' }))
+            error: 'Acknowledged tool transcript is quarantined under a disputed occurrence' }))
           return null
         }
         const resourceSlot = resource?.deliveryProvenance?.transcript_slot

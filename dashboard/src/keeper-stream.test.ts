@@ -1,6 +1,7 @@
 import { effect, untracked } from '@preact/signals'
 import { captureToolObservations } from './keeper-tool-observations'
 import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
+import type { KeeperConversationEntry } from './types/core'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   _resetActiveKeeperStreamsForTests,
@@ -804,6 +805,76 @@ describe('Keeper operation stream projection', () => {
     expect(requiredFixture(keeperThreads.value.sangsu).find(row => row.id === 'early-canonical')).toMatchObject({
       toolOwnerKey: deliveryKey, executionId: 'early-execution', toolOccurrence: { streamScope: 0, blockIndex: 0 },
     })
+  })
+
+  it('folds canonical history into the tool row when the result arrives after the acknowledgement', () => {
+    const operationId = 'late-result-operation'
+    assistantEntry(operationId)
+    const source = { kind: 'operation' as const, operationId }
+    const deliveryKey = { kind: 'operation' as const, operation_id: operationId }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(),
+      toolCallId: 'provider-tool', toolCallName: 'Read' }, source)
+    appendThreadEntry('sangsu', { id: 'late-canonical', role: 'tool', source: 'tool_result', label: 'Read',
+      text: 'stored output', delivery: 'history',
+      deliveryProvenance: { delivery_key: deliveryKey, transcript_slot: { kind: 'tool_call', execution_id: 'late-execution', ordinal: 0 } } })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED',
+      value: { deliveryKey, executionId: 'late-execution', ordinal: 0 } }, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(), toolCallId: 'provider-tool', executionId: 'late-execution' } }, source)
+    const tools = requiredFixture(keeperThreads.value.sangsu).filter(row => row.role === 'tool')
+    expect(tools.map(row => row.id)).toEqual(['late-canonical'])
+    expect(tools[0]?.toolOwnerKey).toEqual(deliveryKey)
+  })
+
+  it('refuses an acknowledgement whose canonical history row is quarantined or duplicated', () => {
+    const operationId = 'conflicting-canonical-operation'
+    const deliveryKey = { kind: 'operation' as const, operation_id: operationId }
+    const canonicalRow = (id: string, extra: Partial<KeeperConversationEntry> = {}): KeeperConversationEntry => ({
+      id, role: 'tool', source: 'tool_result', label: 'Read', text: 'stored output', delivery: 'history',
+      deliveryProvenance: { delivery_key: deliveryKey, transcript_slot: { kind: 'tool_call', execution_id: 'canonical-execution', ordinal: 0 } },
+      ...extra })
+    for (const [label, rows] of [
+      ['quarantined', [canonicalRow('canonical-a', { toolOccurrenceQuarantined: true })]],
+      ['duplicated', [canonicalRow('canonical-a'), canonicalRow('canonical-b')]],
+    ] as const) {
+      keeperThreads.value = {}
+      assistantEntry(operationId)
+      const source = { kind: 'operation' as const, operationId }
+      applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(),
+        toolCallId: 'provider-tool', toolCallName: 'Read' }, source)
+      applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+        value: { ...toolOccurrence(), toolCallId: 'provider-tool', executionId: 'canonical-execution' } }, source)
+      for (const row of rows) appendThreadEntry('sangsu', row)
+      applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED',
+        value: { deliveryKey, executionId: 'canonical-execution', ordinal: 0 } }, source)
+      expect(requiredFixture(keeperThreads.value.sangsu).find(row => row.id === 'reply-1'), label).toMatchObject({
+        toolObservationAuthority: 'unavailable',
+        error: 'Acknowledged tool transcript conflicts with canonical history',
+      })
+      expect(requiredFixture(keeperThreads.value.sangsu).filter(row => row.role === 'tool' && row.id.startsWith('canonical')), label)
+        .toHaveLength(rows.length)
+    }
+  })
+
+  it('refuses an acknowledgement for a tool row quarantined under a disputed occurrence', () => {
+    const operationId = 'quarantined-resource-operation'
+    assistantEntry(operationId)
+    const source = { kind: 'operation' as const, operationId }
+    const deliveryKey = { kind: 'operation' as const, operation_id: operationId }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(),
+      toolCallId: 'provider-tool', toolCallName: 'Read' }, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(), toolCallId: 'provider-tool', executionId: 'quarantined-execution' } }, source)
+    const tool = requiredFixture(keeperThreads.value.sangsu).find(row => row.role === 'tool')!
+    updateThreadEntry('sangsu', tool.id, entry => ({ ...entry, toolOccurrenceQuarantined: true }))
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED',
+      value: { deliveryKey, executionId: 'quarantined-execution', ordinal: 0 } }, source)
+    const after = requiredFixture(keeperThreads.value.sangsu)
+    expect(after.find(row => row.id === 'reply-1')).toMatchObject({
+      toolObservationAuthority: 'unavailable',
+      error: 'Acknowledged tool transcript is quarantined under a disputed occurrence',
+    })
+    expect(after.find(row => row.id === tool.id)?.deliveryProvenance ?? null).toBeNull()
   })
 
   it('keeps every disputed tool coordinate quarantined through canonical replacement', () => {

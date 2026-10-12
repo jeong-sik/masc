@@ -11,6 +11,7 @@ import {
   attachKeeperAudioClip,
   chatHistoryEntriesFromRest as normalizeChatHistoryEntriesFromRest,
   finalizeAssistantEntry,
+  foldToolRowsIntoCanonical,
   insertThreadEntryBefore,
   isDefaultVisibleConversationEntry,
   isToolConversationEntry,
@@ -1987,5 +1988,38 @@ describe('RFC-0235 audio clip normalization', () => {
     })
     expect(attached).toBe(false)
     expect(keeperThreads.value.echo?.[0]?.audio).toBeUndefined()
+  })
+})
+
+describe('foldToolRowsIntoCanonical', () => {
+  const deliveryKey = { kind: 'operation' as const, operation_id: 'fold-operation' }
+  const provenance = { delivery_key: deliveryKey, transcript_slot: { kind: 'tool_call' as const, execution_id: 'fold-execution', ordinal: 0 } }
+  const row = (id: string, extra: Partial<KeeperConversationEntry>): KeeperConversationEntry => ({
+    id, role: 'tool', source: 'tool_result', label: 'Read', text: '', delivery: 'history', ...extra })
+
+  it('replaces the live rows of one execution in place and leaves the other entries where they are', () => {
+    const later = '2026-10-12T10:00:00.000Z'
+    const earlier = '2026-10-12T09:00:00.000Z'
+    keeperThreads.value = { echo: [
+      { id: 'reply', role: 'assistant', source: 'direct_assistant', label: 'echo', text: '', rawText: '',
+        timestamp: later, delivery: 'sending', streamState: 'streaming', details: null,
+        deliveryProvenance: operationDeliveryProvenance('fold-operation', 'terminal_result'),
+        traceSteps: [{ kind: 'tool', name: 'Read', status: 'ok', ts: later, toolOccurrenceId: 'live-tool' } as ChatTraceStep] },
+      row('canonical', { text: 'stored output', deliveryProvenance: provenance, timestamp: later }),
+      row('earlier-note', { role: 'assistant', source: 'direct_assistant', timestamp: earlier }),
+      row('live-tool', { delivery: 'delivered', deliveryProvenance: provenance, toolCallId: 'provider-tool' }),
+    ] }
+    foldToolRowsIntoCanonical('echo', 'canonical')
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.map(entry => entry.id)).toEqual(['reply', 'canonical', 'earlier-note'])
+    expect(thread.find(entry => entry.id === 'canonical')).toMatchObject({ toolCallId: 'provider-tool', text: 'stored output' })
+    expect(thread.find(entry => entry.id === 'reply')?.traceSteps).toMatchObject([{ toolOccurrenceId: 'canonical' }])
+  })
+
+  it('does nothing when no other row reports the execution', () => {
+    keeperThreads.value = { echo: [row('canonical', { deliveryProvenance: provenance })] }
+    const before = keeperThreads.value.echo
+    foldToolRowsIntoCanonical('echo', 'canonical')
+    expect(keeperThreads.value.echo).toBe(before)
   })
 })

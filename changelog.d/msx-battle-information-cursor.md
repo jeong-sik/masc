@@ -1,3 +1,0 @@
-### Documentation
-
-- Explain how to inspect another MSX Sangokushi II officer with the battle information cursor, including position-dependent inputs and display-unit limits.

@@ -1575,7 +1575,6 @@ let chat_execution_member_keys ~source ~member_ids =
 ;;
 
 let chat_log_timeline_context index ~member_ids ~source ~started_at =
-  let request_id = Masc_tui_keeper_chat_log.source_key source in
   let keys = chat_execution_member_keys ~source ~member_ids in
   let owns message = List.mem (chat_turn_key message) keys in
   let own_messages =
@@ -1593,16 +1592,14 @@ let chat_log_timeline_context index ~member_ids ~source ~started_at =
     List.filter (fun (message : msg_entry) -> message.me_turn_phase = Turn_input) own_messages
   in
   let clt_timeline_at =
-    match chat_request_timeline_at ~member_ids ~request_id request_messages with
-    | Some _ as at -> at
-    | None ->
+    (* The index has already selected exact source-owned input rows. Display
+       aliases cannot narrow that authority a second time. *)
+    match List.rev (chat_projected_timeline_ats request_messages) with
+    | Some at :: _ -> Some at
+    | None :: _ | [] ->
         let valid at = Float.is_finite at && at > 0. in
         let started_at = if valid started_at then Some started_at else None in
-        let has_committed_request =
-          List.exists
-            (fun (message : msg_entry) -> String.equal message.me_request_id request_id)
-            request_messages
-        in
+        let has_committed_request = request_messages <> [] in
         if not has_committed_request
         then started_at
         else

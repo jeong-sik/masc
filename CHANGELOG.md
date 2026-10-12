@@ -43,6 +43,10 @@
   not have; the current-package line follows the version bump, and the
   changelog/release lines follow the published release (#42316).
 
+### Internal
+
+- Add regression coverage for recall pin publication generations, idempotent retirement and blob maintenance over retired generations (#41849).
+
 ## [0.51.0] - 2026-10-10
 
 ### Upgrade notes

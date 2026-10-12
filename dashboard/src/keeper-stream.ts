@@ -1,6 +1,8 @@
 import { sameKeeperResponseOwner, type KeeperResponseOwner, initialKeeperResponseState, reduceKeeperResponse, acknowledgeKeeperResponseSequence, type KeeperResponseDecision, type KeeperResponseEvent } from './lib/keeper-response-state'
 import { keeperStreamContract } from './keeper-stream-contract'
 import {
+  sameDeliveryKey,
+  type KeeperChatDeliveryKey,
   operationDeliveryProvenance,
   isOperationDeliveryProvenance,
   toolCallDeliveryProvenance,
@@ -52,6 +54,12 @@ export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
 
 const pendingAgentCoreTextBlockIndexes = new Map<string, number>()
 type ScheduledFlushHandle = ReturnType<typeof setTimeout>
+interface ThinkingPublicationOwner {
+  readonly authRevision: number
+  readonly deliveryKey: KeeperChatDeliveryKey | null
+  readonly targetSource: KeeperConversationEntry['source']
+  readonly turnRef: string | null | undefined
+}
 interface PendingThinkingState {
   responseOwner?: KeeperResponseOwner
   chunks: string[]
@@ -224,6 +232,19 @@ function persistActiveAssistantDraft(keeperName: string, assistantEntryId: strin
   const deliveryKey = entry.deliveryProvenance?.delivery_key
   if (deliveryKey?.kind !== 'operation') return
   updateTrackedKeeperChatAssistantDraft(deliveryKey.operation_id, entry)
+}
+
+function captureThinkingPublicationOwner(entry: KeeperConversationEntry, authRevision: number): ThinkingPublicationOwner {
+  return Object.freeze({ authRevision,
+    deliveryKey: entry.deliveryProvenance ? Object.freeze({ ...entry.deliveryProvenance.delivery_key }) : null,
+    targetSource: entry.source, turnRef: entry.turnRef })
+}
+
+function ownsThinkingPublication(pending: ThinkingPublicationOwner, entry: KeeperConversationEntry | undefined, authRevision: number): boolean {
+  return entry !== undefined && entry.role === 'assistant' && pending.authRevision === authRevision
+    && entry.source === pending.targetSource && entry.turnRef === pending.turnRef
+    && (pending.deliveryKey === null || entry.deliveryProvenance != null
+      && sameDeliveryKey(pending.deliveryKey, entry.deliveryProvenance.delivery_key))
 }
 
 function flushPendingThinkingDeltas(

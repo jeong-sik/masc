@@ -76,6 +76,12 @@ type speaker =
           person reading this pane wrote it -- folding the two turned messages
           that arrived from Slack and Discord into the reader's own words. *)
 
+(** Speech ending a checkpoint or native delivery, without establishing root
+    operation completion. The payload retains the delivery boundary. *)
+type intermediate_speech =
+  | Checkpoint_speech of Keeper_checkpoint_ref.t
+  | Native_continuation_speech of Keeper_chat_delivery_identity.Request_id.t
+
 (** What one row of the transcript is. *)
 type kind =
   | Addressed_to_keeper of
@@ -86,6 +92,7 @@ type kind =
                 was not taught — unlabelled beats guessed. *)
       }
   | Said_by_keeper
+  | Intermediate_speech of intermediate_speech
   | Autonomous_reply
       (** What an autonomous turn said after its trace. Always something: a
           turn that wrote nothing produces no row at all, because nobody asked

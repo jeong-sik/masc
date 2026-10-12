@@ -729,6 +729,7 @@ let adapter_loop_with_transport
     | Agent_core_runtime_attempt_started _ ->
         Keeper_chat_response_ownership.retire_attempt ownership;
         continue ~acc_text:"" ()
+    | Provider_retry_observed _ -> continue ()
     | Text_message_start { message_id = _; role = _ } ->
         continue ()
     | Reply_details _

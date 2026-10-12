@@ -361,6 +361,7 @@ type stream_event =
       }
   | Native_task_observed of native_task_observation
   | Usage_windows_reported of Runtime_provider_usage_window.report
+  | Provider_retry_observed of Runtime_claude_api_retry.t
   | Conversation_compacted
   | Usage_reported of
       { session_id : string
@@ -915,6 +916,26 @@ let task_observation_candidate fields =
     List.exists (fun kind -> List.mem key (task_fields kind)) kinds) fields
 ;;
 
+(* The retry notice's producer field set: what the strict decoder reads, plus
+   the private error text it deliberately drops. This allowlist only decides
+   which malformed (duplicate-key) frames reach that decoder instead of
+   failing the turn; the decoder stays the final arbiter. *)
+let api_retry_fields =
+  [ "type"; "subtype"; "session_id"; "uuid"; "attempt"; "max_retries"
+  ; "retry_delay_ms"; "error_status"; "error"
+  ]
+;;
+
+let api_retry_observation_candidate fields =
+  let subtypes = List.filter_map
+    (fun (key,value) -> if key="subtype" then Some value else None) fields in
+  (* Like task telemetry: every discriminator must name a retry notice, so
+     mixed frames still fail closed at the uniqueness gate. *)
+  subtypes <> []
+  && List.for_all (function `String "api_retry" -> true | _ -> false) subtypes
+  && List.for_all (fun (key,_) -> List.mem key api_retry_fields) fields
+;;
+
 let parse_wire_line line =
   let stage = "stream-json message" in
   let* json = parse_json_value ~stage line in
@@ -941,7 +962,8 @@ let parse_wire_line line =
              && List.exists (function "tool_name", `String "Agent" -> true | _ -> false) fields
              && List.mem_assoc "subagent_type" fields
              && List.for_all (fun (key,_) -> List.mem key agent_retry_fields) fields)
-       | [ `String "system" ] -> task_observation_candidate fields
+       | [ `String "system" ] ->
+           task_observation_candidate fields || api_retry_observation_candidate fields
        | _ -> false)
     | _ -> false
   in
@@ -2384,6 +2406,10 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     let* subtype = optional_string "system message" "subtype" fields in
     (match subtype with
      | Some "compact_boundary" -> emit_stream_event on_stream_event Conversation_compacted
+     | Some "api_retry" ->
+         (match Runtime_claude_api_retry.decode ~expected_session_id (`Assoc fields) with
+          | Ok (Some retry) -> emit_stream_event on_stream_event (Provider_retry_observed retry)
+          | Ok None | Error _ -> ())
      | Some value when Option.is_some (task_kind value) ->
          Option.iter (fun observation ->
            emit_stream_event on_stream_event (Native_task_observed observation))

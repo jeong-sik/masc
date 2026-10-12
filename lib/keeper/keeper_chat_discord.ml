@@ -444,6 +444,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     | Agent_core_runtime_attempt_started _ ->
         Keeper_chat_response_ownership.retire_attempt ownership;
         continue ~acc_text:"" ()
+    | Provider_retry_observed _ -> continue ()
     | Text_message_start _ -> continue ()
     | Reply_details _
     | Batch_bound _

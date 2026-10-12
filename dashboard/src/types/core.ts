@@ -1,3 +1,4 @@
+import type { KeeperResponseOwner, KeeperResponseState } from '../lib/keeper-response-state'
 import type { KeeperPortraitReading } from '../lib/keeper-portrait'
 import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
 // MASC Dashboard — Core entity types (Agent, Task, Message, Board, Keeper)
@@ -903,6 +904,7 @@ export type ChatMermaidBlock = { t: 'mermaid'; source: string; caption?: string 
 // ChatThinkingBlock's `redacted`, which means the provider itself sent only a
 // signature.
 export type ChatTraceThinkStep = {
+  responseOwner?: KeeperResponseOwner
   kind: 'think'
   text: string
   contentWithheld?: boolean
@@ -974,6 +976,7 @@ export type KeeperConversationStreamState =
   | 'cancelling'
   | 'opening'
   | 'thinking'
+  | 'retrying'
   | 'streaming'
   | 'finalizing'
   | null
@@ -1064,6 +1067,8 @@ export interface KeeperConversationEntry {
   toolCallEnded?: boolean
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
+  runtimeAttempt?: Readonly<{ runtimeId: string; index: number }>
+  responseState?: KeeperResponseState
   streamContract?: KeeperConversationStreamContract | null
   attachments?: KeeperConversationAttachment[]
   /** Exact ordered multimodal input sent to the Keeper. Kept on optimistic and

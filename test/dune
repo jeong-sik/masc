@@ -1012,6 +1012,9 @@
   ;; test_keeper_turn_driver_failover builds the operation id the chat lane's
   ;; failure continuation carries; the type is opaque without its own library.
   masc.keeper_operation_identity
+  ;; test_keeper_chat_event_log replays provider retry observations; the wire
+  ;; payloads live in the runtime library.
+  masc.runtime
   ;; test_keeper_model_input_demotion installs a one-worker Domain_pool to
   ;; prove materialize addresses its bodies there.
   masc.masc_core eio_main
@@ -3451,6 +3454,7 @@
   masc.string_util
   fmt
   masc
+  masc.runtime
   masc.agent_core
   masc.masc_types
   masc.keeper_chat_operations
@@ -3531,7 +3535,7 @@
 (test
  (name test_tui_keeper_chat_live)
  (modules test_tui_keeper_chat_live)
- (libraries alcotest agent_core fmt masc masc_tui_keeper_chat_live masc_tui_keeper_chat_projection yojson))
+ (libraries alcotest agent_core fmt masc masc.runtime masc_tui_keeper_chat_live masc_tui_keeper_chat_projection yojson))
 
 (test
  (name test_tui_measurement)

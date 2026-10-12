@@ -333,6 +333,10 @@ val run_named :
      independent of root stream scope, current input or active native blocks. *)
   ?on_native_task_observation:
     (attempt:Runtime_native_tasks.attempt -> Keeper_claude_task_binding.bound -> unit) ->
+  ?on_provider_retry:
+    (attempt:Runtime_native_tasks.attempt -> Runtime_claude_api_retry.t -> unit) ->
+  (* Session-owned Claude API retry with the original dispatched runtime
+     attempt, independent of tools and model content. *)
   (* Frozen materialized dispatch and original input/native ownership. This
      callback is independent of active tool blocks and root stream scopes. *)
   ?on_native_tool_progress:

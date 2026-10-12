@@ -30,6 +30,10 @@ type delta =
       { runtime_id : string option
       ; attempt_index : int option
       }
+  | Provider_retry_observed of
+      { attempt : Masc.Runtime_native_tasks.attempt
+      ; retry : Masc.Runtime_claude_api_retry.t
+      }
   | Stream_model_started of
       { generation : int option
       ; message_id : string option
@@ -279,6 +283,12 @@ let custom_deltas_unvalidated fields =
      | None -> [Undecodable "KEEPER_CHAT_BATCH_BOUND requires value"]
      | Some value -> match Projection.decode_batch_binding value with
        | Ok binding -> [Batch_bound binding]
+       | Error error -> [Undecodable (Projection.stream_error_to_string error)])
+  | Some "KEEPER_PROVIDER_RETRY" ->
+    (match List.assoc_opt "value" fields with
+     | None -> [Undecodable "KEEPER_PROVIDER_RETRY requires value"]
+     | Some value -> match Projection.decode_provider_retry value with
+       | Ok (attempt, retry) -> [Provider_retry_observed {attempt; retry}]
        | Error error -> [Undecodable (Projection.stream_error_to_string error)])
   | Some "KEEPER_RUNTIME_ATTEMPT_STARTED" ->
     (match List.assoc_opt "value" fields with

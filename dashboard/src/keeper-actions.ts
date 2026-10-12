@@ -767,8 +767,12 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
       const assistantStillLocal = (keeperThreads.value[request.keeperName] ?? [])
         .find(entry => entry.id === assistantId)
       if (assistantStillLocal) {
+        // Discard the final pending speech tail before persisting, exactly as
+        // the stream terminal handlers do; a terminal-plus-pending draft reads
+        // back as corrupt and loses the buffered speech.
         finalizeAssistantEntry(request.keeperName, assistantId, {
           responseState: reduceKeeperResponse(assistantStillLocal.responseState ?? initialKeeperResponseState, { kind: 'terminal' }).state,
+          producerSayingReplay: undefined,
           delivery: assistantDelivery,
           streamState: null,
           error: errorMessage,

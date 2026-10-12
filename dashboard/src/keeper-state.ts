@@ -1502,8 +1502,24 @@ function mergeLocalAssistantObservations(
   const toolTranscriptBindings = reconcileTranscriptBindings([...exactLocalEntries, ...exactCanonicalEntries, historyEntry].map(entry => entry.toolTranscriptBindings))
   const toolAuthorityUnavailable = [...exactLocalEntries, ...exactCanonicalEntries, historyEntry]
     .some(entry => entry.toolObservationAuthority === 'unavailable')
-  const producerTraceBoundary = exactLocalEntries.find(entry => entry.producerTraceBoundary !== undefined)?.producerTraceBoundary
-  const producerSayingReplay = exactLocalEntries.find(entry => entry.producerSayingReplay)?.producerSayingReplay
+  // Pending speech is only coherent with the boundary recorded by the same
+  // local snapshot that owns the reconciled response frontier: an older
+  // duplicate row must not pair its buffered tail with a newer frontier, and
+  // no pending speech crosses a terminal frontier.
+  const frontierSequence = responseState?.kind === 'known' ? responseState.lastSequence : null
+  const frontierLocalEntry = frontierSequence !== null
+    ? exactLocalEntries.find(entry => entry.responseState?.kind === 'known' && entry.responseState.lastSequence === frontierSequence)
+    : undefined
+  const legacyPendingSource = frontierSequence === null
+    && (responseState === undefined || responseState.kind === 'known' && responseState.phase !== 'terminal')
+    ? exactLocalEntries.find(entry => entry.producerSayingReplay)
+    : undefined
+  const pendingSource = frontierLocalEntry ?? legacyPendingSource
+  const producerSayingReplay = responseState?.kind === 'known' && responseState.phase === 'terminal'
+    ? undefined
+    : pendingSource?.producerSayingReplay
+  const producerTraceBoundary = (frontierLocalEntry
+    ?? exactLocalEntries.find(entry => entry.producerTraceBoundary !== undefined))?.producerTraceBoundary
   const mergedHistory = { ...historyEntry,
     ...(exactLocalEntries.find(entry => entry.autonomousJournalRecovery)?.autonomousJournalRecovery
       ? { autonomousJournalRecovery: exactLocalEntries.find(entry => entry.autonomousJournalRecovery)!.autonomousJournalRecovery } : {}),

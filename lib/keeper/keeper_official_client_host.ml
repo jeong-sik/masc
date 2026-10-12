@@ -812,12 +812,13 @@ let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
         | Error error -> leave_out (Does_not_fit error)))
 ;;
 
-(* Claude Code and a fresh Codex thread apply their capacity before choosing
-   a carried front. The zero-history floor must survive that choice: a seed
-   would otherwise restore an atom the provider just refused. A resumed Codex
-   thread sends no history and never enters this function. Antigravity and
-   Muse Code cut nothing, so they compose with [carried_start_range] and
-   [compose_librarian_range] directly. *)
+(* Every official-client lane applies its capacity before choosing a
+   carried front. The zero-history floor must survive that choice: a seed
+   would otherwise restore an atom the provider just refused. A resumed
+   thread sends no history and never enters this function. *)
+let start_seed_capacity_bytes_of_max_context ~max_context = max_context
+;;
+
 let start_range_projection
     ~measure_message_bytes ~capacity_bytes ~unbounded_capacity_bytes
     ~reserved_bytes ?on_model_input_window_observation ?carried_front_seed

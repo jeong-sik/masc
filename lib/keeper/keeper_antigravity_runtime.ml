@@ -98,60 +98,43 @@ let system_instructions_label () =
 let current_goal_label () = required_label (Antigravity_input_frame.current_goal_label ())
 let prompt_section_separator = Antigravity_input_frame.section_separator
 
+let unbounded_model_input_capacity_bytes = max_int
+
 (* The carried front is a position in durable checkpoint history, so admit it
    before the source projection appends its bounded Gate replay reference.
-   The range goes out as composed, as on Claude Code's first attempt, and
-   the CLI compacts its own conversation. The observation is mapped back to
-   the durable history: a source-only atom is transmitted context, but cannot
-   become a front that a later checkpoint history is expected to open. *)
+   The Start seed is cut to [seed_capacity_bytes] by measured bytes before
+   anything is written, through the capacity-first projection the Claude
+   Code and Codex lanes share: the CLI fails an oversized seed without a
+   typed overflow the shrink ladder could answer, so an unbounded first
+   attempt cannot stand here. Only history is measured, in the canonical
+   encoding: what the attempt sends besides it is not charged against the
+   capacity, and the observation maps back to the durable history, where
+   a source-only atom is transmitted context but cannot become a front
+   that a later checkpoint history is expected to open. *)
 let carried_history_projection
     ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
-    ~turn_start ~keeper_name ~runtime_id source_projection
+    ~seed_capacity_bytes ~turn_start ~keeper_name ~runtime_id source_projection
   : Agent_core.Agent.model_input_projection
   =
   fun history_messages ->
-  let* librarian_front = Host.read_librarian_front librarian_front history_messages in
-  let carried_front_seed = Host.read_seed_once carried_front_seed in
-  (* Nothing cuts the range, so a working state a Librarian snapshot names
-     displaces none of its atoms and goes in front of it
-     ([Host.compose_librarian_range], RFC-0460). *)
-  let compose librarian_front =
-    let carried =
-      Host.carried_start_range
-        ~keeper_name
-        ~runtime_id
-        ~carried_front_seed
-        ~librarian_front
-        ~own_first_atom:0
-        ~turn_start
-        history_messages
-    in
-    let* sent =
-      match source_projection with
-      | None -> Ok carried.Host.messages
-      | Some project -> project carried.Host.messages
-    in
-    Ok { Host.carried; sent; atoms_kept = Host.carried_atoms carried }
-  in
   let* windowed =
-    Host.compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
+    Host.start_range_projection
+      ~measure_message_bytes:Host.measure_message_bytes
+      ~capacity_bytes:seed_capacity_bytes
+      ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
+      ~reserved_bytes:0
+      ?on_model_input_window_observation
+      ?carried_front_seed
+      ?librarian_front
+      ?on_carried_front
+      ~turn_start
+      ~keeper_name
+      ~runtime_id
+      history_messages
   in
-  Option.iter
-    (fun observe ->
-       observe
-         windowed.Host.carried.Host.front
-         ~transmitted_bytes:windowed.Host.carried.Host.transmitted_bytes)
-    on_carried_front;
-  Option.iter
-    (fun observe ->
-       Option.iter
-         observe
-         (Runtime_model_input_tail_window.observe
-            ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest history_messages)
-            ~history_atom_count:windowed.Host.carried.Host.history_atom_count
-            (Host.windowed_projection windowed)))
-    on_model_input_window_observation;
-  Ok windowed.Host.sent
+  (match source_projection with
+   | None -> Ok windowed
+   | Some project -> project windowed)
 ;;
 
 let prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : Host.prepared_turn) =
@@ -449,6 +432,7 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
 ;;
 
 let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+    ~seed_capacity_bytes
     ~on_model_input_window_observation
     ~carried_front_seed
     ~librarian_front
@@ -691,6 +675,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             ?carried_front_seed
             ?librarian_front
             ?on_carried_front
+            ~seed_capacity_bytes
             ~turn_start
             ~keeper_name
             ~runtime_id
@@ -1322,7 +1307,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                   recovery_detail))))
 ;;
 
-let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~seed_capacity_bytes ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1353,6 +1338,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
         ~required_native_posture
         ~runtime_id
         ~keeper_name
+        ~seed_capacity_bytes
         ~on_model_input_window_observation
         ~carried_front_seed
         ~librarian_front
@@ -1455,4 +1441,5 @@ module For_testing = struct
   ;;
 
   let carried_history_projection = carried_history_projection
+  let unbounded_capacity_bytes = unbounded_model_input_capacity_bytes
 end

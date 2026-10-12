@@ -1078,6 +1078,7 @@ let test_spawn_failure_is_pre_dispatch () =
                       ~pre_tool_rejects:(ref [])
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-pre-dispatch"
+                      ~seed_capacity_bytes:Keeper_antigravity_runtime.For_testing.unbounded_capacity_bytes
                       ~base_path
                       ~goal:"spawn should fail"
                       ~goal_blocks:None
@@ -1178,6 +1179,7 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
                       ~pre_tool_rejects:(ref [])
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-blank-prompt"
+                      ~seed_capacity_bytes:Keeper_antigravity_runtime.For_testing.unbounded_capacity_bytes
                       ~base_path
                       ~goal:"the prompt is blank"
                       ~goal_blocks:None
@@ -1226,14 +1228,20 @@ let plain_user_message text : Agent_core.Types.message =
   }
 ;;
 
+(* Fixtures below test range logic, not the byte cap, so they run the
+   projection uncut unless a case names a capacity. *)
 let carried_projection ?on_model_input_window_observation ?carried_front_seed ?librarian_front
-    ?on_carried_front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
+    ?on_carried_front
+    ?(seed_capacity_bytes =
+      Keeper_antigravity_runtime.For_testing.unbounded_capacity_bytes)
+    ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
     source =
   Keeper_antigravity_runtime.For_testing.carried_history_projection
     ?on_model_input_window_observation
     ?carried_front_seed
     ?librarian_front
     ?on_carried_front
+    ~seed_capacity_bytes
     ~turn_start
     ~keeper_name:"alpha"
     ~runtime_id:"antigravity_subscription.gemini"
@@ -1353,13 +1361,14 @@ let agent_core_range ?(turn_start = Keeper_carried_front.Turn_boundary { end_ato
 ;;
 
 let project_range ?on_model_input_window_observation ?carried_front_seed ?librarian_front
-    ?on_carried_front ?turn_start messages =
+    ?on_carried_front ?seed_capacity_bytes ?turn_start messages =
   let project =
     carried_projection
       ?on_model_input_window_observation
       ?carried_front_seed
       ?librarian_front
       ?on_carried_front
+      ?seed_capacity_bytes
       ?turn_start
       None
   in
@@ -1571,6 +1580,55 @@ let test_a_front_from_another_history_is_dropped () =
     (encoded_history projected)
 ;;
 
+(* A Start seed over the seed capacity goes out cut to the newest atoms
+   that fit: the CLI fails an oversized seed without a typed overflow the
+   shrink ladder could answer, so the first attempt must already fit. *)
+let test_a_start_seed_is_cut_to_its_capacity () =
+  let observed = ref None in
+  let history =
+    List.init 10 (fun index ->
+      plain_user_message
+        (Printf.sprintf "history-%02d:%s" index (String.make 1024 'x')))
+  in
+  let measure = Keeper_official_client_host.measure_message_bytes in
+  (* Room for exactly the newest two atoms above the zero-history floor:
+     far below the window quantum, so the cut is exact rather than
+     quantized. *)
+  let newest_two =
+    match List.rev history with
+    | newest :: before :: _ -> measure newest + measure before
+    | _ -> fail "the history has at least two messages"
+  in
+  let seed_capacity_bytes =
+    match
+      Runtime_model_input_tail_window.minimum_capacity_bytes
+        ~measure_message_bytes:measure history
+    with
+    | Some floor_bytes -> floor_bytes + newest_two
+    | None -> fail "a history this long has a framed floor"
+  in
+  let project =
+    carried_projection
+      ~seed_capacity_bytes
+      ~on_model_input_window_observation:(fun reading -> observed := Some reading)
+      None
+  in
+  match project history with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    let expected = List.filteri (fun index _ -> index >= 8) history in
+    check (list string) "the seed carries the newest atoms that fit"
+      (encoded_history expected)
+      (encoded_history carried);
+    (match !observed with
+     | None -> fail "the projection reported no window"
+     | Some reading ->
+       check int "the reading counts the whole history" 10
+         reading.Runtime_model_input_tail_window.total_atoms;
+       check int "and says only the fitting atoms went" 2
+         reading.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
 (* The projection keys an Antigravity usage report as the completion hook
    keys the turn: the CLI's own turn count, the identity built from it, the
    conversation-cumulative scope, and the inclusive input (100 exclusive +
@@ -1670,6 +1728,7 @@ let test_losing_claim_cannot_publish_native_policy () =
           ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0})
           ~accepts_image_input:false ~required_native_posture:Runtime_native_tools.Native_read
           ~runtime_id:"antigravity.gemini" ~keeper_name ~pre_tool_rejects:(ref []) ~base_path
+          ~seed_capacity_bytes:Keeper_antigravity_runtime.For_testing.unbounded_capacity_bytes
           ~goal:"Losing candidate" ~goal_blocks:None ~system_prompt:"Policy race fixture."
           ~tools:[] ~initial_messages:[] ~model_input_projection:None
           ~on_transmitted_model_input:(fun _ -> ()) ~hooks:(Some hooks)
@@ -1726,6 +1785,7 @@ let test_native_policy_failure_releases_claim () =
           ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0})
           ~accepts_image_input:false ~required_native_posture:Runtime_native_tools.Native_read
           ~runtime_id:"antigravity.gemini" ~keeper_name ~pre_tool_rejects:(ref []) ~base_path
+          ~seed_capacity_bytes:Keeper_antigravity_runtime.For_testing.unbounded_capacity_bytes
           ~goal:"Losing candidate" ~goal_blocks:None ~system_prompt:"Policy race fixture."
           ~tools:[] ~initial_messages:[] ~model_input_projection:None
           ~on_transmitted_model_input:(fun _ -> ()) ~hooks:(Some hooks)
@@ -1866,6 +1926,10 @@ let () =
               "a front from another history is dropped"
               `Quick
               test_a_front_from_another_history_is_dropped
+          ; test_case
+              "a start seed is cut to its capacity"
+              `Quick
+              test_a_start_seed_is_cut_to_its_capacity
           ; test_case
               "stream usage is keyed by the CLI's turn"
               `Quick

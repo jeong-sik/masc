@@ -49,6 +49,7 @@ val run :
   turn_timeout_s:float option ->
   quota_scope:Runtime_quota_window.scope ->
   keeper_name:string ->
+  seed_capacity_bytes:int ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
   workspace_root:string ->
@@ -108,10 +109,11 @@ val run :
     a managed read profile. Only exact attached MCP requests are approved.
     Native none is unsupported. This is not an MASC-only execution claim.
 
-    Start carries canonical history as composed, and the host compacts its
-    own input. Resume reports the history held by the
-    vendor session and sends the current goal and context. No top-level
-    runtime routing is exposed here. *)
+    Start carries the newest canonical history that fits
+    [seed_capacity_bytes], cut by measured bytes before anything is written;
+    the host's own compaction is not relied upon to shrink the seed. Resume
+    reports the history held by the vendor session and sends the current
+    goal and context. No top-level runtime routing is exposed here. *)
 
 module For_testing : sig
   val usage_reports
@@ -166,4 +168,26 @@ module For_testing : sig
   val native_posture_note : Runtime_native_tools.posture -> string list
   (** What a start prompt's system section adds after the system prompt to
       tell the model the session's posture. *)
+
+  val carried_history_projection
+    :  ?on_model_input_window_observation:
+         (Runtime_model_input_tail_window.window_observation -> unit)
+    -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
+    -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
+    -> ?on_carried_front:
+         (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit)
+    -> seed_capacity_bytes:int
+    -> turn_start:Keeper_carried_front.turn_start
+    -> keeper_name:string
+    -> runtime_id:string
+    -> Agent_core.Agent.model_input_projection option
+    -> Agent_core.Agent.model_input_projection
+  (** The Start seed projection: starts from the admitted carried front,
+      cuts the seed to [seed_capacity_bytes] by measured bytes, and runs
+      the source projection. *)
+
+  val unbounded_capacity_bytes : int
+  (** The capacity that applies no byte cut: the range goes out as the
+      fronts compose it. Fixtures that test range logic rather than the cap
+      pass this. *)
 end

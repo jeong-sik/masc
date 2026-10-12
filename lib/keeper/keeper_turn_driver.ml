@@ -2691,6 +2691,9 @@ let run_named
             ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
+            ~seed_capacity_bytes:
+              (Keeper_official_client_host.start_seed_capacity_bytes_of_max_context
+                 ~max_context:(Runtime_instance.max_context_of_runtime runtime))
             ~carried_front_seed:official_client_carried_front_seed
             ~librarian_front:
               (official_client_librarian_front ~attempt_messages:initial_messages)
@@ -2822,6 +2825,9 @@ let run_named
             ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
+            ~seed_capacity_bytes:
+              (Keeper_official_client_host.start_seed_capacity_bytes_of_max_context
+                 ~max_context:(Runtime_instance.max_context_of_runtime runtime))
             ~carried_front_seed:official_client_carried_front_seed
             ~librarian_front:
               (official_client_librarian_front ~attempt_messages:initial_messages)

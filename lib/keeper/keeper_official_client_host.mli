@@ -529,12 +529,27 @@ val start_range_projection :
   runtime_id:string ->
   Agent_core.Types.message list ->
   (Agent_core.Types.message list, Agent_core.Error.t) result
-(** Capacity-first Start projection shared by Claude Code and Codex. The
-    zero-history floor stays empty; otherwise the latest of the capacity,
+(** Capacity-first Start projection shared by every official-client lane.
+    The zero-history floor stays empty; otherwise the latest of the capacity,
     seed, Librarian, and turn-start fronts is composed and observed once.
-    Source-specific projection runs after this range. Antigravity and Muse
-    Code cut nothing, so they compose with {!carried_start_range} and
-    {!compose_librarian_range} directly. *)
+    Source-specific projection runs after this range. Claude Code and Codex
+    start unbounded and narrow on the provider's typed overflow; Antigravity
+    and Muse Code bound the first attempt, because their hosts fail an
+    oversized seed without a typed overflow the shrink ladder could answer
+    (a 5 MB seed against muse-spark-1.3 failed its compaction above the
+    host's hard threshold on every fresh session, 2026-10-12). *)
+
+val start_seed_capacity_bytes_of_max_context : max_context:int -> int
+(** The Start seed byte budget for a lane that bounds its first attempt,
+    from the runtime's resolved token window.
+
+    Byte-level tokenizers emit at least one byte per token, so a history of
+    at most [max_context] bytes carries at most [max_context] tokens: the
+    byte cap is the sound side of the declared window, not an estimate of
+    it. The bound covers history bytes only, as on the Claude Code and
+    Codex lanes; what an attempt sends besides history is not charged
+    against it. Calibrating a host whose usable input sits below its
+    declared window stays the binding's job ([max-context]). *)
 
 val prepare_turn :
   runtime_label:string ->

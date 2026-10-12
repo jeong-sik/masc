@@ -452,6 +452,61 @@ let test_start_prompt_frames_system_history_and_goal () =
      | _ -> fail "a section is missing from the start prompt")
 ;;
 
+(* A Start seed over the seed capacity goes out cut to the newest atoms
+   that fit: the host fails an oversized seed without a typed overflow the
+   shrink ladder could answer, so the first attempt must already fit
+   (muse-spark-1.3 refused a 5 MB seed on every fresh session,
+   2026-10-12). *)
+let test_a_start_seed_is_cut_to_its_capacity () =
+  let observed = ref None in
+  let history =
+    List.init 10 (fun index ->
+      user_message
+        (Printf.sprintf "history-%02d:%s" index (String.make 1024 'x')))
+  in
+  let measure = Keeper_official_client_host.measure_message_bytes in
+  (* Room for exactly the newest two atoms above the zero-history floor:
+     far below the window quantum, so the cut is exact rather than
+     quantized. *)
+  let newest_two =
+    match List.rev history with
+    | newest :: before :: _ -> measure newest + measure before
+    | _ -> fail "the history has at least two messages"
+  in
+  let seed_capacity_bytes =
+    match
+      Runtime_model_input_tail_window.minimum_capacity_bytes
+        ~measure_message_bytes:measure history
+    with
+    | Some floor_bytes -> floor_bytes + newest_two
+    | None -> fail "a history this long has a framed floor"
+  in
+  let project =
+    Adapter.carried_history_projection
+      ~seed_capacity_bytes
+      ~on_model_input_window_observation:(fun reading -> observed := Some reading)
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~keeper_name:"alpha"
+      ~runtime_id:"muse.muse-spark-1.3"
+      None
+  in
+  let encoded = List.map Keeper_official_client_host.encode_history_message in
+  match project history with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    let expected = List.filteri (fun index _ -> index >= 8) history in
+    check (list string) "the seed carries the newest atoms that fit"
+      (encoded expected)
+      (encoded carried);
+    (match !observed with
+     | None -> fail "the projection reported no window"
+     | Some reading ->
+       check int "the reading counts the whole history" 10
+         reading.Runtime_model_input_tail_window.total_atoms;
+       check int "and says only the fitting atoms went" 2
+         reading.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
 (* ── One turn through a scripted [muse serve] ────────────────────────── *)
 
 let write_file ~mode path contents =
@@ -878,6 +933,7 @@ let run_turn_with ?composed_context ?goal_blocks ?(accepts_image_input = false) 
       ~accepts_image_input
       ~runtime_id
       ~keeper_name
+      ~seed_capacity_bytes:Keeper_muse_runtime.For_testing.unbounded_capacity_bytes
       ~pre_tool_rejects:(ref [])
       ~base_path
       ~workspace_root:(Option.value workspace_root ~default:(playground ~base_path))
@@ -2572,6 +2628,10 @@ let () =
     ; ( "prompt"
       , [ test_case "start prompt frames system, history and goal" `Quick
             test_start_prompt_frames_system_history_and_goal
+        ] )
+    ; ( "model input window"
+      , [ test_case "a start seed is cut to its capacity" `Quick
+            test_a_start_seed_is_cut_to_its_capacity
         ] )
     ; ( "scripted host"
       , [ test_case "start and resume through muse serve with a MASC tool" `Quick

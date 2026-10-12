@@ -55,6 +55,7 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
       ; timeout_s = 1.; add_dirs = [] } in
     let outcome = Keeper_antigravity_runtime.run
         ~turn_start:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 }) ~accepts_image_input:false ~runtime_id ~keeper_name
+        ~seed_capacity_bytes:Keeper_antigravity_runtime.For_testing.unbounded_capacity_bytes
         ~pre_tool_rejects:(ref []) ~base_path ~goal:"synthetic claim probe"
         ~goal_blocks:None ~system_prompt:"Synthetic claim probe."
         ~tools:[] ~initial_messages:[] ~model_input_projection:None
@@ -74,6 +75,7 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
           (Filename.concat base_path "absent-synthetic-account"))
         ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
         ~accepts_image_input:false ~runtime_id ~keeper_name
+        ~seed_capacity_bytes:Keeper_muse_runtime.For_testing.unbounded_capacity_bytes
         ~pre_tool_rejects:(ref []) ~base_path ~workspace_root:base_path
         ~goal:"synthetic claim probe" ~goal_blocks:None
         ~system_prompt:"Synthetic claim probe."

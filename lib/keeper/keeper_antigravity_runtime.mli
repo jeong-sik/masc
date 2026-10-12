@@ -21,6 +21,7 @@ val run :
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
   keeper_name:string ->
+  seed_capacity_bytes:int ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
   goal:string ->
@@ -74,6 +75,10 @@ val run :
     input. A resumed conversation reports [Held_by_client_session]: the CLI
     re-sends just the new turn, so what the model reads is not this process's
     to measure.
+
+    A fresh conversation carries the newest canonical history that fits
+    [seed_capacity_bytes], cut by measured bytes before anything is written;
+    the CLI's own compaction is not relied upon to shrink the seed.
 
     [librarian_front] reads the turn's continuity choice as a position in the
     history a fresh conversation starts from
@@ -144,15 +149,21 @@ module For_testing : sig
     -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
     -> ?on_carried_front:
          (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit)
+    -> seed_capacity_bytes:int
     -> turn_start:Keeper_carried_front.turn_start
     -> keeper_name:string
     -> runtime_id:string
     -> Agent_core.Agent.model_input_projection option
     -> Agent_core.Agent.model_input_projection
-  (** Starts from the admitted carried front and runs the source projection;
-      the range goes out as composed. A Librarian front's
-      working state goes in front of the range
-      ({!Keeper_official_client_host.compose_librarian_range}, RFC-0460). A
-      Gate replay reference reaches the provider-bound input without becoming
-      a front in the durable checkpoint vocabulary. *)
+  (** Starts from the admitted carried front, cuts the seed to
+      [seed_capacity_bytes] by measured bytes, and runs the source
+      projection. A Librarian front's working state goes in front of the
+      range ({!Keeper_official_client_host.compose_librarian_range},
+      RFC-0460). A Gate replay reference reaches the provider-bound input
+      without becoming a front in the durable checkpoint vocabulary. *)
+
+  val unbounded_capacity_bytes : int
+  (** The capacity that applies no byte cut: the range goes out as the
+      fronts compose it. Fixtures that test range logic rather than the cap
+      pass this. *)
 end

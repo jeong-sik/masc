@@ -612,7 +612,7 @@ describe('Keeper operation stream projection', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', result, source)).toBeNull()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', { ...result,
       value: { ...result.value, toolCallId: 'provider-b' } }, source)).toBe(KEEPER_TOOL_RESULT_REFUSALS.providerCorrelationConflict)
-    expect(keeperThreads.value.sangsu.filter(row => row.role === 'tool')).toMatchObject([
+    expect(keeperThreads.value.sangsu?.filter(row => row.role === 'tool')).toMatchObject([
       { executionId: 'same-execution', toolCallId: 'provider-a' },
     ])
   })

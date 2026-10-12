@@ -66,7 +66,8 @@ let tool_transcript_slot execution_id ordinal =
 
 let origin_request_id = function
   | History.Delivery_failed { origin_request_id; _ } -> origin_request_id
-  | History.Addressed_to_keeper _ | History.Said_by_keeper
+  | History.Addressed_to_keeper _ | History.Intermediate_speech _
+  | History.Said_by_keeper
   | History.Autonomous_reply
   | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _
   | History.Gate_activity _ | History.Memory_activity _
@@ -85,6 +86,7 @@ let joined_label speaker surface =
 let kind_to_string : History.kind -> string = function
   | History.Addressed_to_keeper { speaker; surface } ->
       Printf.sprintf "addressed(%s)" (joined_label speaker surface)
+  | History.Intermediate_speech _
   | History.Said_by_keeper -> "keeper"
   | History.Autonomous_reply -> "autonomous"
   | History.Delivery_failed _ -> "delivery_failed"
@@ -324,7 +326,8 @@ let test_roles_map_to_what_the_pane_draws () =
           | Masc_tui_message_layout.No_pass -> true
           | Masc_tui_message_layout.Pass_failed _
           | Masc_tui_message_layout.Pass_committed -> false)
-   | History.Addressed_to_keeper _ | History.Said_by_keeper
+   | History.Addressed_to_keeper _ | History.Intermediate_speech _
+   | History.Said_by_keeper
    | History.Autonomous_reply | History.Delivery_failed _
    | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _
    | History.Fusion_conclusion _ ->
@@ -740,6 +743,7 @@ let test_an_addressed_row_says_who_sent_it_not_only_what_to_draw () =
   let speaker json =
     match (List.hd (decode (`List [ json ])).History.rows).History.kind with
     | History.Addressed_to_keeper { speaker; _ } -> speaker
+    | History.Intermediate_speech _
     | History.Said_by_keeper | History.Autonomous_reply
     | History.Delivery_failed _ | History.Tool_calls _
     | History.Skill_activity _ | History.Reasoning _
@@ -804,7 +808,8 @@ let test_consecutive_tool_rows_become_one_block () =
                   (fun (activity : Transcript.tool_activity) ->
                     activity.outcome = Transcript.Outcome_unrecorded)
                   block.activities)
-       | History.Addressed_to_keeper _ | History.Said_by_keeper
+       | History.Addressed_to_keeper _ | History.Intermediate_speech _
+       | History.Said_by_keeper
        | History.Autonomous_reply
        | History.Delivery_failed _ | History.Skill_activity _
        | History.Reasoning _
@@ -942,7 +947,8 @@ let test_an_autonomous_turn_draws_what_it_did () =
              (starts_with "○ keeper_task_claim" (row 2));
            check bool "a step with no status says it was not recorded" true
              (starts_with "? read_file" (row 3))
-       | History.Addressed_to_keeper _ | History.Said_by_keeper
+       | History.Addressed_to_keeper _ | History.Intermediate_speech _
+       | History.Said_by_keeper
        | History.Autonomous_reply
        | History.Delivery_failed _ | History.Skill_activity _
        | History.Reasoning _
@@ -1401,7 +1407,8 @@ let test_memory_commit_names_added_removed_and_drop_reason () =
                       reason = "superseded by live evidence" } ] ->
                   true
               | _ -> false)
-       | History.Addressed_to_keeper _ | History.Said_by_keeper
+       | History.Addressed_to_keeper _ | History.Intermediate_speech _
+       | History.Said_by_keeper
        | History.Autonomous_reply | History.Delivery_failed _
        | History.Tool_calls _ | History.Skill_activity _
        | History.Reasoning _ | History.Fusion_conclusion _ ->
@@ -1508,7 +1515,8 @@ let test_memory_failure_keeps_kind_and_detail () =
               | Masc_tui_message_layout.Pass_failed _
               | Masc_tui_message_layout.Pass_committed
               | Masc_tui_message_layout.No_pass -> false)
-       | History.Addressed_to_keeper _ | History.Said_by_keeper
+       | History.Addressed_to_keeper _ | History.Intermediate_speech _
+       | History.Said_by_keeper
        | History.Autonomous_reply | History.Delivery_failed _
        | History.Tool_calls _ | History.Skill_activity _
        | History.Reasoning _ | History.Fusion_conclusion _ ->
@@ -1794,6 +1802,7 @@ let test_a_fusion_block_names_the_run_ahead_of_the_conclusion () =
            check string "board post id" "p-fus-1" fusion_board_post_id
        | _ -> failf "expected a fusion pointer row first") |> ignore;
       match conclusion.History.kind with
+      | History.Intermediate_speech _
       | History.Said_by_keeper ->
           check string "the conclusion stays the row's text"
             "Fusion deliberation (run kmsg-fus-1) — answer — 결론 본문"
@@ -1809,6 +1818,7 @@ let test_a_fusion_block_without_a_post_id_makes_no_row () =
   with
   | { History.rows = [ conclusion ]; _ } -> (
       match conclusion.History.kind with
+      | History.Intermediate_speech _
       | History.Said_by_keeper -> ()
       | _ -> failf "expected only the conclusion row")
   | { History.rows = other; _ } ->
@@ -1832,10 +1842,33 @@ let test_operation_and_autonomous_sources_keep_typed_tool_blocks () =
       Some (Masc_tui_keeper_chat_log.Autonomous_turn turn)])
 ;;
 
+let test_intermediate_speech_retains_delivery_boundary () =
+  let key kind extras = `Assoc (["kind",`String kind;"operation_id",`String "same-operation"] @ extras) in
+  let checkpoint = key "operation_checkpoint" ["trace_id",`String "checkpoint-trace";
+    "turn_count",`Int 7;"sha256",`String (String.make 64 'a')] in
+  let native = key "operation_native" ["continuation_id",`String "native-input"] in
+  let read delivery_key = decode (`List [row ~role:"assistant" ~delivery_key
+    ~transcript_slot:(transcript_slot "terminal_result") "provided speech"]) in
+  (match (read checkpoint).History.rows with
+   | [{kind=History.Intermediate_speech (History.Checkpoint_speech checkpoint);text;_}] ->
+       check int "exact checkpoint turn retained" 7 checkpoint.Keeper_checkpoint_ref.turn_count;
+       check string "checkpoint speech bytes retained" "provided speech" text
+   | _ -> fail "checkpoint delivery lost its intermediate boundary");
+  (match (read native).History.rows with
+   | [{kind=History.Intermediate_speech (History.Native_continuation_speech id);text;_}] ->
+       check string "actual continuation identity retained" "native-input"
+         (Keeper_chat_delivery_identity.Request_id.to_string id);
+       check string "native continuation speech bytes retained" "provided speech" text
+   | _ -> fail "native delivery lost its intermediate boundary");
+  (match (read (key "operation" [])).History.rows with
+   | [{kind=History.Said_by_keeper;_}] -> ()
+   | _ -> fail "root operation result incorrectly classified as intermediate")
+
 let () =
   run "tui_keeper_chat_history"
     [ ( "rows"
-      , [ test_case "operation and autonomous sources keep typed tool blocks" `Quick
+      , [ test_case "intermediate speech delivery boundary" `Quick test_intermediate_speech_retains_delivery_boundary;
+          test_case "operation and autonomous sources keep typed tool blocks" `Quick
             test_operation_and_autonomous_sources_keep_typed_tool_blocks
         ; test_case "roles map to what the pane draws" `Quick
             test_roles_map_to_what_the_pane_draws

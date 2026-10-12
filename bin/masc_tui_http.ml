@@ -1644,6 +1644,7 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
                        then None
                        else
                          match row.kind with
+                         | Masc_tui_keeper_chat_history.Intermediate_speech _
                          | Masc_tui_keeper_chat_history.Said_by_keeper
                          | Masc_tui_keeper_chat_history.Autonomous_reply ->
                              if row.text = "" then None

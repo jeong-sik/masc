@@ -3468,6 +3468,8 @@
  (libraries
   masc_tui_keeper_chat_log
   masc.masc_types
+  masc.keeper_checkpoint_ref
+  masc.keeper_chat_delivery_identity
   masc_tui_image_preview
   ; The journal lines are the layout's typed values, matched by constructor.
   masc_tui_message_layout

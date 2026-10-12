@@ -7133,6 +7133,7 @@ let forget_session_rows_the_transcript_holds state keeper_name rows ~fresh =
             (match row.execution_source with
              | Some (Keeper_chat_log.Operation _ as source) -> Some source
              | Some (Autonomous_turn _) | None -> None)
+        | Keeper_chat_history.Intermediate_speech _
         | Keeper_chat_history.Said_by_keeper
         | Keeper_chat_history.Autonomous_reply
         | Keeper_chat_history.Delivery_failed _
@@ -7154,6 +7155,7 @@ let forget_session_rows_the_transcript_holds state keeper_name rows ~fresh =
              | Some (Keeper_chat_log.Operation owner as source), Some id when String.equal owner id -> Some source
              | (Some _ | None), (Some _ | None) -> None)
         | Keeper_chat_history.Addressed_to_keeper _
+        | Keeper_chat_history.Intermediate_speech _
         | Keeper_chat_history.Said_by_keeper
         | Keeper_chat_history.Autonomous_reply
         | Keeper_chat_history.Tool_calls _
@@ -7225,6 +7227,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
           }
     | Keeper_chat_history.Memory_activity _
     | Keeper_chat_history.Addressed_to_keeper _
+    | Keeper_chat_history.Intermediate_speech _
     | Keeper_chat_history.Said_by_keeper
     | Keeper_chat_history.Autonomous_reply
     | Keeper_chat_history.Delivery_failed _
@@ -7238,6 +7241,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     | Keeper_chat_history.Memory_activity { summary; journal = _; pass = _ } -> summary
     | Keeper_chat_history.Gate_activity _
     | Keeper_chat_history.Addressed_to_keeper _
+    | Keeper_chat_history.Intermediate_speech _
     | Keeper_chat_history.Said_by_keeper
     | Keeper_chat_history.Autonomous_reply
     | Keeper_chat_history.Delivery_failed _
@@ -7269,6 +7273,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
               Sent_by_other { speaker = name; surface = arrived_by }
         in
         (Message_user author, Turn_input, row.text, None, [])
+    | Keeper_chat_history.Intermediate_speech _ ->
+        (Message_keeper, Turn_progress, row.text, None, [])
     | Keeper_chat_history.Said_by_keeper ->
         (Message_keeper, Turn_output, row.text, None, [])
     | Keeper_chat_history.Autonomous_reply ->
@@ -7337,6 +7343,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     | Keeper_chat_history.Addressed_to_keeper _, Some (Keeper_chat_log.Operation request_id) ->
         locally_submitted_at state keeper_name request_id
     | (Keeper_chat_history.Said_by_keeper
+      | Keeper_chat_history.Intermediate_speech _
       | Keeper_chat_history.Autonomous_reply
       | Keeper_chat_history.Delivery_failed _
       | Keeper_chat_history.Tool_calls _
@@ -7401,6 +7408,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
              journal
        | Keeper_chat_history.Gate_activity _
        | Keeper_chat_history.Addressed_to_keeper _
+       | Keeper_chat_history.Intermediate_speech _
        | Keeper_chat_history.Said_by_keeper
        | Keeper_chat_history.Autonomous_reply
        | Keeper_chat_history.Delivery_failed _
@@ -7423,6 +7431,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
            pass
        | Keeper_chat_history.Gate_activity _
        | Keeper_chat_history.Addressed_to_keeper _
+       | Keeper_chat_history.Intermediate_speech _
        | Keeper_chat_history.Said_by_keeper
        | Keeper_chat_history.Autonomous_reply
        | Keeper_chat_history.Delivery_failed _
@@ -17792,6 +17801,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                  | Keeper_chat_history.Gate_activity _
                  | Keeper_chat_history.Memory_activity _
                  | Keeper_chat_history.Fusion_conclusion _
+                 | Keeper_chat_history.Intermediate_speech _
                  | Keeper_chat_history.Said_by_keeper
                  | Keeper_chat_history.Autonomous_reply -> selected)
                None rows

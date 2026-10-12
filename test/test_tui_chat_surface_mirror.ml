@@ -65,6 +65,7 @@ let decoded_surface surface =
   | Ok { History.rows = [ row ]; _ } ->
     (match row.History.kind with
      | History.Addressed_to_keeper { surface; _ } -> surface
+     | History.Intermediate_speech _
      | History.Said_by_keeper | History.Autonomous_reply
      | History.Delivery_failed _ | History.Tool_calls _
      | History.Skill_activity _ | History.Reasoning _

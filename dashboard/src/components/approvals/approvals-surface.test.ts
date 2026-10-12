@@ -627,7 +627,8 @@ describe('ApprovalsSurface', () => {
     const panel = container.querySelector('[data-testid="approval-detail-panel"]')
     expect(panel).not.toBeNull()
     expect(panel?.getAttribute('data-approval-id')).toBe('appr-1')
-    expect(panel?.textContent).toContain('fs_write Gate 요청')
+    // Wire name now renders through the shared display-label rule: fs_write → FsWrite.
+    expect(panel?.textContent).toContain('FsWrite Gate 요청')
     expect(panel?.textContent).toContain('Keeper lane nonblocking')
     expect(panel?.textContent).toContain('goal G-1')
     expect(panel?.textContent).toContain('first approval preview')
@@ -638,7 +639,7 @@ describe('ApprovalsSurface', () => {
 
     const switchedPanel = container.querySelector('[data-testid="approval-detail-panel"]')
     expect(switchedPanel?.getAttribute('data-approval-id')).toBe('appr-2')
-    expect(switchedPanel?.textContent).toContain('shell Gate 요청')
+    expect(switchedPanel?.textContent).toContain('Shell Gate 요청')
     expect(switchedPanel?.textContent).toContain('second approval preview')
     expect(switchedPanel?.textContent).not.toContain('first approval preview')
     expect(container.querySelector('[data-approval-id="appr-1"]')?.getAttribute('data-selected')).toBe('false')

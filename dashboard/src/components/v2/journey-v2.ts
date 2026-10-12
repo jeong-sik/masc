@@ -33,6 +33,7 @@ import {
 import { journal } from '../../sse'
 import { isErrorJournalEntry } from '../../journal-entry'
 import { errorToString } from '../../lib/format-string'
+import { toolDisplayLabel } from '../../lib/tool-display-label'
 import { useManagedAsyncResource } from '../../lib/use-managed-async-resource'
 import { keepers } from '../../store'
 import type { JournalEntry, Keeper } from '../../types'
@@ -334,7 +335,9 @@ function TurnCard({
                     ${row.map(t => {
                       const st = entryStatus(t.entry.status)
                       const width = Math.max(3, ((t.dur || 300) / span) * 100)
-                      const label = t.entry.toolName ?? t.entry.summary
+                      const rawLabel = t.entry.toolName ?? t.entry.summary
+                      const label =
+                        t.entry.toolName != null ? toolDisplayLabel(t.entry.toolName) : rawLabel
                       return html`
                         <button
                           key=${t.entry.id}
@@ -360,7 +363,7 @@ function TurnCard({
                     return html`
                       <div class="jw-detail" data-tone=${st.tone}>
                         <div class="jw-detail-h">
-                          <b class="mono">${sel.kind === 'thinking' ? 'thinking' : sel.toolName ?? sel.summary}</b>
+                          <b class="mono">${sel.kind === 'thinking' ? 'thinking' : sel.toolName != null ? toolDisplayLabel(sel.toolName) : sel.summary}</b>
                           <span class="lq-chip" data-tone=${st.tone}>${st.lbl}</span>
                           ${dev
                             ? html`<span class="jw-src mono">${ENTRY_SOURCE[sel.source] ?? sel.source}</span>`

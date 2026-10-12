@@ -31,6 +31,7 @@ import type {
 import { TELEMETRY_AUTO_REFRESH_MS } from '../../config/constants'
 import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import { formatDateTimeKo, formatDurationCompound } from '../../lib/format-time'
+import { toolDisplayLabel } from '../../lib/tool-display-label'
 import {
   keeperResolvedApprovalDecisionClass,
   keeperResolvedApprovalDecisionTone,
@@ -146,18 +147,22 @@ const IDENTITY_CALL_OPERATION = 'identity_call'
 
 /** What a human reads as "the tool". An identity_call carries its real
  *  target inside the input (provider_id · remote_name); the closed operation
- *  name alone would make every outside-service row read the same. */
+ *  name alone would make every outside-service row read the same. Every
+ *  other wire name goes through the shared display-label rule so the card
+ *  reads KeeperTaskDone, not keeper_task_done. */
 function approvalToolDisplay(item: KeeperApprovalQueueItem): string {
-  if (item.tool_name !== IDENTITY_CALL_OPERATION) return item.tool_name
-  const input = item.input
-  if (typeof input === 'object' && input !== null && !Array.isArray(input)) {
-    const record = input as Record<string, unknown>
-    const provider = typeof record.provider_id === 'string' ? record.provider_id.trim() : ''
-    const remote = typeof record.remote_name === 'string' ? record.remote_name.trim() : ''
-    if (provider && remote) return `${provider} · ${remote}`
-    if (remote) return remote
+  if (item.tool_name === IDENTITY_CALL_OPERATION) {
+    const input = item.input
+    if (typeof input === 'object' && input !== null && !Array.isArray(input)) {
+      const record = input as Record<string, unknown>
+      const provider = typeof record.provider_id === 'string' ? record.provider_id.trim() : ''
+      const remote = typeof record.remote_name === 'string' ? record.remote_name.trim() : ''
+      if (provider && remote) return `${provider} · ${remote}`
+      if (remote) return remote
+    }
+    return item.tool_name
   }
-  return item.tool_name
+  return toolDisplayLabel(item.tool_name)
 }
 
 function approvalTitle(item: KeeperApprovalQueueItem): string {

@@ -7,6 +7,7 @@ import { JsonViewerCard, parseJsonLikeData } from '../common/json-viewer'
 import { TimeAgo } from '../common/time-ago'
 import { Markdown } from '../common/markdown'
 import { truncate } from '../../lib/truncate'
+import { toolDisplayLabel } from '../../lib/tool-display-label'
 import { asNullableString, asRecord, extractCodeLocation, type CodeLocation } from '../common/normalize'
 import { deriveTokPerSec, formatCost, formatMsCompact, formatTokPerSec } from '../../lib/format-number'
 import { toolCategory, durationColor, formatArgs as sharedFormatArgs } from '../tool-call-shared'
@@ -603,7 +604,7 @@ function AgentCoreDetail({ event }: { event: UnifiedTraceEvent }) {
         </div>
         <div class="flex items-center gap-2 text-xs">
           <span class="text-[var(--color-fg-disabled)]">도구:</span>
-          <span class="font-mono text-[var(--color-fg-primary)]">${toolName}</span>
+          <span class="font-mono text-[var(--color-fg-primary)]">${toolDisplayLabel(toolName)}</span>
         </div>
       </div>
     `
@@ -772,7 +773,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
           ${event.kind === 'tool_call' && event.toolName
-            ? html`<span class="text-xs font-mono font-medium ${style.color}">${event.toolName}</span>`
+            ? html`<span class="text-xs font-mono font-medium ${style.color}">${toolDisplayLabel(event.toolName)}</span>`
             : html`<span class="text-3xs font-medium uppercase tracking-wider ${kindStyle.color}">${kindStyle.label}</span>`}
           <${TraceBadge} tone="neutral" wide>
             ${event.sourceLane === 'agentCore' ? 'Agent Core' : 'MASC'}

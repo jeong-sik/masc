@@ -43,18 +43,22 @@ let failed previous error = {previous with error=Some error}
 let stores state = state.stores
 let records (store:store) = Lazy.Mutexed.force store.history.ordered
 let errors state =
+  (* Sticky audited evidence is the authoritative persistence-failure source;
+     a current inventory reports the same scoped pair only until it is audited.
+     Union here so each pair is published from a single place. *)
+  let inventory_failures = match state.inventory with
+    | None -> []
+    | Some inventory ->
+        List.filter_map (fun (receiver,status) -> match status with
+          | Ok _ -> None
+          | Error code -> Some (receiver,code)) inventory.receivers in
+  let persistence_failures =
+    state.audit_failures
+    @ List.filter (fun pair -> not (List.mem pair state.audit_failures)) inventory_failures in
   Option.to_list state.error
-  @ List.map (fun (receiver,code) -> Persistence (receiver,code)) state.audit_failures
+  @ List.map (fun (receiver,code) -> Persistence (receiver,code)) persistence_failures
   @ List.filter_map (fun (store:store) ->
       Option.map (fun error -> Receiver_read (store.receiver,store.store_id,error)) store.error) state.stores
-  @ (match state.inventory with None -> [] | Some inventory ->
-      List.filter_map (fun (receiver,status) -> match status with
-        | Ok _ -> None
-        | Error code ->
-            (* Audited inventory and sticky audit evidence can report the same
-               scoped failure. Keep distinct codes, but publish this fact once. *)
-            if List.mem (receiver,code) state.audit_failures then None
-            else Some (Persistence (receiver,code))) inventory.receivers)
 let code_text = function
   | Read.Store_missing -> "store missing" | Invalid_scope -> "invalid scope"
   | Invalid_observation -> "invalid observation" | Cursor_store_mismatch -> "store incarnation changed"

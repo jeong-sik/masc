@@ -1086,7 +1086,10 @@ let elapsed_text ~now t =
   | Some ended ->
       if ended < t.started_at then None
       else Some (Masc_tui_message_layout.span_text (ended -. t.started_at))
-  | None -> Masc_tui_message_layout.age_text ~now ~since:t.started_at
+  | None ->
+      (match t.phase with
+       | Waiting | Working -> Masc_tui_message_layout.age_text ~now ~since:t.started_at
+       | Stream_ended | Stream_failed _ -> None)
 
 let progress_text ~show_timing ~now t =
   let phase = phase_text ~show_timing ~now t in

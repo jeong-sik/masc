@@ -674,9 +674,8 @@ let test_events_query_spells_both_cursors () =
     (query ~since_seq:(Journal.After_seq 7) ~since_offset:(offset 212))
 ;;
 
-(* The pager follows has_more only while both cursors advance, starts where
-   it is told from the first row, asks every later page from the byte offset
-   the page before handed back, and stops at the first error. *)
+(* A last page whose events or cursor cannot follow the position it was asked
+   from is an error, never a shorter journal. *)
 let test_journal_final_page_rejects_invalid_event_frontiers () =
   let event seq = line seq 1. (E.Text_delta {text="authored bytes"; response=Unobserved_scope None}) in
   let offset = match Journal.page_start_of_wire (Some 100) with
@@ -767,6 +766,9 @@ let test_journal_page_rejects_cursor_disagreement () =
       second ~events:[] ~has_more:true ~next_since_seq:(Journal.After_seq 9) ~next_since_offset:200 ]
 ;;
 
+(* The pager follows has_more only while both cursors advance, starts where
+   it is told from the first row, asks every later page from the byte offset
+   the page before handed back, and stops at the first error. *)
 let test_read_whole_journal_pages_until_the_position_stops_moving () =
   let asked = ref [] in
   let l seq = line seq (float_of_int seq) (E.Text_delta {text=(string_of_int seq); response=Unobserved_scope (None)}) in

@@ -1,4 +1,5 @@
-import { operationDeliveryProvenance, toolCallDeliveryProvenance } from './keeper-delivery-provenance'
+import { operationDeliveryProvenance } from './keeper-delivery-provenance'
+import { toolCallDeliveryProvenance } from './test-support/tool-delivery-provenance'
 import type { TrackedKeeperChatAssistantDraft } from './keeper-chat-operations-local'
 import { initialKeeperResponseState } from './lib/keeper-response-state'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'

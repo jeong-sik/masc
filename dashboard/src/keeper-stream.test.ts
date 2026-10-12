@@ -30,9 +30,9 @@ import {
 import { parseSSEMessage } from './schemas/sse'
 import {
   operationDeliveryProvenance,
-  toolCallDeliveryProvenance,
   isOperationDeliveryProvenance,
 } from './keeper-delivery-provenance'
+import { toolCallDeliveryProvenance } from './test-support/tool-delivery-provenance'
 import {
   _clearTrackedKeeperChatOperationsForTests,
   trackedKeeperChatOperationsForKeeper,

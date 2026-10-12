@@ -1,4 +1,5 @@
-import { operationDeliveryProvenance, toolCallDeliveryProvenance } from './keeper-delivery-provenance'
+import { operationDeliveryProvenance } from './keeper-delivery-provenance'
+import { toolCallDeliveryProvenance } from './test-support/tool-delivery-provenance'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ApiCore from './api/core'
 

@@ -64,33 +64,6 @@ export function newKeeperChatOperationId(): string {
   return `kmsg-${crypto.randomUUID()}`
 }
 
-export function toolCallDeliveryProvenance(
-  parent: KeeperChatDeliveryProvenance | null | undefined,
-  executionId: string,
-  ordinal: number,
-): KeeperChatDeliveryProvenance | null {
-  if (!parent) return null
-  return {
-    delivery_key: parent.delivery_key,
-    transcript_slot: {
-      kind: 'tool_call',
-      execution_id: executionId,
-      ordinal,
-    },
-  }
-}
-
-export function toolDeliveryProvenance(
-  parent: KeeperChatDeliveryProvenance | null | undefined,
-  ordinal: number,
-): KeeperChatDeliveryProvenance | null {
-  if (!parent) return null
-  return {
-    delivery_key: parent.delivery_key,
-    transcript_slot: { kind: 'tool_delivery', ordinal },
-  }
-}
-
 export function sameDeliveryKey(left: KeeperChatDeliveryKey, right: KeeperChatDeliveryKey): boolean {
   if (left.kind !== right.kind) return false
   switch (left.kind) {

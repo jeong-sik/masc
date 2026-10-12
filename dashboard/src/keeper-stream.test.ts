@@ -168,6 +168,46 @@ describe('Keeper operation stream projection', () => {
     expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).responseState).toMatchObject({ lastSequence: 12 })
   })
 
+
+  it('keeps newer retry progress after the real thinking publication timer fires', () => {
+    vi.useFakeTimers()
+    try {
+      assistantEntry()
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: { runtime_id: 'claude', attempt_index: 0 },
+      })
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: {
+          index: 0, delta: 'exposed reasoning prefix',
+        },
+      })
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_PROVIDER_RETRY', value: {
+          attempt: { routing_run_id: 'routing-run', runtime_id: 'claude', lane_attempt_index: 0 },
+          retry: { observation_id: 'retry-id', attempt: 1, max_retries: 10, retry_delay_ms: 1234, error_status: null },
+        },
+      })
+      const entry = () => requiredFixture(keeperThreads.value.sangsu?.find(row => row.id === 'reply-1'))
+      expect(entry().streamState).toBe('retrying')
+      vi.advanceTimersByTime(KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS)
+      expect(entry().streamState).toBe('retrying')
+      expect(entry().traceSteps).toMatchObject([{ kind: 'think', text: 'exposed reasoning prefix' }])
+      expect(entry().text).toBe('')
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: {
+          index: 0, delta: ' recovered',
+        },
+      })
+      vi.advanceTimersByTime(KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS)
+      expect(entry().streamState).toBe('thinking')
+      expect(entry().traceSteps).toMatchObject([{ kind: 'think', text: 'exposed reasoning prefix recovered' }])
+
+    } finally {
+      _resetKeeperStreamBuffersForTests()
+      vi.useRealTimers()
+    }
+  })
+
   it.each(['observed', 'ended'] as const)('keeps content %s metadata outside model progress and body state', state => {
     assistantEntry()
     for (const hasBody of [false, true]) {

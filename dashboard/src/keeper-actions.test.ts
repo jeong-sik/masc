@@ -1294,7 +1294,11 @@ describe('restored chat operation outcome', () => {
     // an older page.
     fetchKeeperChatHistory.mockResolvedValue([])
     fetchKeeperChatHistoryPage
-      .mockResolvedValueOnce({ messages: [], hasMore: true, nextBefore: 999 })
+      .mockResolvedValueOnce({ messages: [
+        { id: 'decoy-user', role: 'user', content: 'other turn', ts: 1000,
+          delivery_provenance: { delivery_key: { kind: 'operation', operation_id: 'other-op' }, transcript_slot: { kind: 'accepted_user' } },
+          delivery_provenance_status: 'valid' },
+      ], hasMore: true, nextBefore: 999 })
       .mockResolvedValueOnce({ messages: [
         { id: 'paged-user', role: 'user', content: 'input', ts: 1,
           delivery_provenance: { delivery_key: { kind: 'operation', operation_id: 'restored-op' }, transcript_slot: { kind: 'accepted_user' } },
@@ -1322,6 +1326,51 @@ describe('restored chat operation outcome', () => {
     expect(requiredFixture(keeperThreads.value.echo).find(entry => entry.role === 'assistant')).toMatchObject({
       rawText: 'partial authored answer', responseState: { phase: 'terminal' },
     })
+  })
+
+  it('stops the paginated walk when the server repeats the cursor', async () => {
+    storeDraft()
+    fetchKeeperChatOperation.mockResolvedValue({ operationId: 'restored-op', state: { kind: 'succeeded', completedAt: 2, outcomeRef: 'result' } })
+    fetchKeeperChatHistory.mockResolvedValue([])
+    const decoy = (id: string) => ({ id, role: 'user', content: 'other turn', ts: 2000000000,
+      delivery_provenance: { delivery_key: { kind: 'operation', operation_id: 'other-op' }, transcript_slot: { kind: 'accepted_user' } },
+      delivery_provenance_status: 'valid' })
+    fetchKeeperChatHistoryPage
+      .mockResolvedValueOnce({ messages: [decoy('decoy-1')], hasMore: true, nextBefore: 500 })
+      .mockResolvedValueOnce({ messages: [decoy('decoy-2')], hasMore: true, nextBefore: 500 })
+    await hydrateTrackedKeeperChatOperations('echo')
+    expect(fetchKeeperChatHistoryPage).toHaveBeenCalledTimes(2)
+    expect(fetchKeeperChatHistoryPage).toHaveBeenLastCalledWith('echo', 500)
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toHaveLength(1)
+    expect(requiredFixture(keeperThreads.value.echo).find(entry => entry.role === 'assistant')).toMatchObject({
+      rawText: 'partial authored answer', responseState: { phase: 'terminal' },
+    })
+  })
+
+  it('stops the paginated walk at pages older than the local submit', async () => {
+    upsertTrackedKeeperChatOperation({ operationId: 'restored-op', keeperName: 'echo', message: 'input', submittedAt: 1760000000000,
+      assistantDraft: { text: 'partial authored answer', rawText: 'partial authored answer', delivery: 'streaming',
+        streamState: 'streaming', timestamp: '2026-10-11T00:00:00Z', traceSteps: [{ kind: 'think', text: 'exposed reasoning' }] } })
+    fetchKeeperChatOperation.mockResolvedValue({ operationId: 'restored-op', state: { kind: 'succeeded', completedAt: 2, outcomeRef: 'result' } })
+    fetchKeeperChatHistory.mockResolvedValue([])
+    fetchKeeperChatHistoryPage.mockResolvedValue({ messages: [
+      { id: 'older-user', role: 'user', content: 'older turn', ts: 1750000000,
+        delivery_provenance: { delivery_key: { kind: 'operation', operation_id: 'other-op' }, transcript_slot: { kind: 'accepted_user' } },
+        delivery_provenance_status: 'valid' },
+    ], hasMore: true, nextBefore: 500 })
+    await hydrateTrackedKeeperChatOperations('echo')
+    expect(fetchKeeperChatHistoryPage).toHaveBeenCalledTimes(1)
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toHaveLength(1)
+  })
+
+  it('stops the paginated walk on an empty page that claims more', async () => {
+    storeDraft()
+    fetchKeeperChatOperation.mockResolvedValue({ operationId: 'restored-op', state: { kind: 'succeeded', completedAt: 2, outcomeRef: 'result' } })
+    fetchKeeperChatHistory.mockResolvedValue([])
+    fetchKeeperChatHistoryPage.mockResolvedValue({ messages: [], hasMore: true, nextBefore: 999 })
+    await hydrateTrackedKeeperChatOperations('echo')
+    expect(fetchKeeperChatHistoryPage).toHaveBeenCalledTimes(1)
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toHaveLength(1)
   })
 
   it.each([

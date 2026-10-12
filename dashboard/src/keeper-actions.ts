@@ -516,6 +516,24 @@ function hasCanonicalOperationTurn(
   return hasUser && hasAssistant
 }
 
+function threadEntryTimestampMs(keeperName: string, entryId: string): number | null {
+  const timestamp = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === entryId)?.timestamp
+  if (typeof timestamp !== 'string') return null
+  const parsed = Date.parse(timestamp)
+  return Number.isNaN(parsed) ? null : parsed
+}
+
+function newestEntryTimestampMs(entries: readonly KeeperConversationEntry[]): number | null {
+  let newest: number | null = null
+  for (const entry of entries) {
+    if (typeof entry.timestamp !== 'string') continue
+    const parsed = Date.parse(entry.timestamp)
+    if (Number.isNaN(parsed)) continue
+    if (newest === null || parsed > newest) newest = parsed
+  }
+  return newest
+}
+
 async function reconcileOperationFromServerHistory(
   keeperName: string,
   operationId: string,
@@ -536,14 +554,29 @@ async function reconcileOperationFromServerHistory(
   // surface or the store is exhausted. Only definitive absence keeps the
   // retained local record.
   const pagedEntries: KeeperConversationEntry[] = []
+  // The local user row is the earliest row this operation could have
+  // committed: a page older than it cannot hold the canonical turn, so the
+  // walk ends there instead of rescanning the whole store on every
+  // reconcile of a never-persisted operation.
+  const localUserAtMs = threadEntryTimestampMs(keeperName, localUserId)
   let before: number | undefined
   for (;;) {
     const page = await fetchKeeperChatHistoryPage(keeperName, before)
-    pagedEntries.push(...chatHistoryEntriesFromRest(keeperName, page.messages))
+    // The server sends next_before=null for an empty window. An empty page
+    // that still claims more — or a cursor that does not advance — is a
+    // stuck server: stop instead of looping on the same window.
+    if (page.messages.length === 0) return false
+    if (before !== undefined && page.nextBefore !== null && page.nextBefore >= before) return false
+    const converted = chatHistoryEntriesFromRest(keeperName, page.messages)
+    pagedEntries.push(...converted)
     if (hasCanonicalOperationTurn(pagedEntries, operationId)) {
       mergeServerHistoryEntries(keeperName, pagedEntries)
       removeThreadEntries(keeperName, [localUserId, localAssistantId])
       return true
+    }
+    if (localUserAtMs !== null) {
+      const pageNewestMs = newestEntryTimestampMs(converted)
+      if (pageNewestMs !== null && pageNewestMs < localUserAtMs) return false
     }
     if (!page.hasMore || page.nextBefore === null) return false
     before = page.nextBefore

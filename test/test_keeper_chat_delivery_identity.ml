@@ -197,6 +197,32 @@ let test_duplicate_row_authority_is_rejected () =
   | Ok None | Error _ -> fail "unique canonical row was refused"
 ;;
 
+let test_unique_optional_field_rejects_repeats () =
+  (match Identity.unique_optional_field "role" [ "id", `String "msg-1" ] with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "an absent field decoded as present"
+   | Error error -> fail error);
+  (match Identity.unique_optional_field "role" [ "role", `String "user" ] with
+   | Ok (Some (`String "user")) -> ()
+   | Ok _ -> fail "a unique field decoded to the wrong value"
+   | Error error -> fail error);
+  List.iter
+    (fun roles ->
+      match Identity.unique_optional_field "role" roles with
+      | Error _ -> ()
+      | Ok _ -> fail "a repeated row field was accepted")
+    [ [ "role", `String "user"; "role", `String "user" ]
+    ; [ "role", `String "user"; "role", `String "assistant" ]
+    ];
+  (match
+     Identity.unique_optional_field "role"
+       [ "role", `String "user"; "id", `String "a"; "id", `String "b" ]
+   with
+   | Ok (Some (`String "user")) -> ()
+   | Ok _ -> fail "an unrelated repeated field disturbed the read"
+   | Error error -> fail error)
+;;
+
 let () =
   run
     "keeper chat delivery identity"
@@ -225,6 +251,8 @@ let () =
             test_tool_delivery_rejects_execution_identity
         ; test_case "duplicate row authority rejected" `Quick
             test_duplicate_row_authority_is_rejected
+        ; test_case "unique optional field rejects repeats" `Quick
+            test_unique_optional_field_rejects_repeats
         ; test_case
             "provenance pair is all or nothing"
             `Quick

@@ -575,8 +575,13 @@ let provenance_of_line ~line_number line =
        | Error detail -> fail detail
        | Ok None -> Ok No_provenance
        | Ok (Some provenance) ->
+         let* role =
+           match Keeper_chat_delivery_identity.unique_optional_field "role" fields with
+           | Error detail -> fail detail
+           | Ok role -> Ok role
+         in
          let role_label =
-           match List.assoc_opt "role" fields with
+           match role with
            | Some (`String value) -> value
            | Some _ | None -> ""
          in
@@ -1877,37 +1882,56 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
     let delivery_execution_identity_valid =
       match delivery_provenance with
       | Some provenance ->
-        (match Keeper_chat_delivery_identity.validate_delivery_role ~role_label provenance with
-         | Error detail ->
+        let repeated_role_error =
+          (* A non-object row decodes no provenance (see above), so [Some
+             provenance] always carries its fields; the fallback only keeps
+             the match total. *)
+          match json with
+          | `Assoc fields ->
+            (match Keeper_chat_delivery_identity.unique_optional_field "role" fields with
+             | Ok _ -> None
+             | Error detail -> Some detail)
+          | _ -> None
+        in
+        (match repeated_role_error with
+         | Some detail ->
            report_persistence_read_drop
              ~reason:Read_drop_reason.Invalid_payload
              ~path:file_path
              ~detail:(Printf.sprintf "invalid delivery row role: %s" detail);
            false
-         | Ok () ->
-           (match execution_id_result with
+         | None ->
+           (match Keeper_chat_delivery_identity.validate_delivery_role ~role_label provenance with
             | Error detail ->
               report_persistence_read_drop
                 ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
-                ~detail:(Printf.sprintf "invalid execution identity: %s" detail);
+                ~detail:(Printf.sprintf "invalid delivery row role: %s" detail);
               false
-            | Ok execution_id ->
-              (match
-                 validate_delivery_execution_identity
-                   ~execution_id
-                   delivery_provenance
-               with
-               | Ok () -> true
+            | Ok () ->
+              (match execution_id_result with
                | Error detail ->
                  report_persistence_read_drop
                    ~reason:Read_drop_reason.Invalid_payload
                    ~path:file_path
-                   ~detail:
-                     (Printf.sprintf
-                        "invalid delivery execution identity: %s"
-                        detail);
-                 false)))
+                   ~detail:(Printf.sprintf "invalid execution identity: %s" detail);
+                 false
+               | Ok execution_id ->
+                 (match
+                    validate_delivery_execution_identity
+                      ~execution_id
+                      delivery_provenance
+                  with
+                  | Ok () -> true
+                  | Error detail ->
+                    report_persistence_read_drop
+                      ~reason:Read_drop_reason.Invalid_payload
+                      ~path:file_path
+                      ~detail:
+                        (Printf.sprintf
+                           "invalid delivery execution identity: %s"
+                           detail);
+                    false))))
       | None ->
         (match execution_id_result with
          | Ok _ -> true

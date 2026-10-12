@@ -1852,9 +1852,9 @@ let test_compact_and_full_keep_the_same_typed_facts () =
   check int "compact retains the same source omission count" 2
     compact.omitted_steps;
   check (list string) "full keeps the shipping row bytes"
-    [ "✓ read_file a.ml · 12ms"
-    ; "✗ edit_file b.ml · 18ms"
-    ; "? glob"
+    [ "✓ ReadFile a.ml · 12ms"
+    ; "✗ EditFile b.ml · 18ms"
+    ; "? Glob"
     ; "(2 steps not carried by the transcript)"
     ]
     full.details;
@@ -1877,7 +1877,7 @@ let test_compact_and_full_keep_the_same_typed_facts () =
   (* The mark opens the row and the names follow it; the row does not spell
      the TOOLS label the transcript already draws beside it. *)
   check bool "the inventory row opens with the block's mark and a name" true
-    (String.starts_with ~prefix:"✗ read_file 1" inventory);
+    (String.starts_with ~prefix:"✗ ReadFile 1" inventory);
   check bool "the inventory row does not spell its own label" false
     (contains ~needle:"Tools" inventory);
   check bool "the inventory row claims no fold" false

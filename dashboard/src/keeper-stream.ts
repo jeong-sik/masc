@@ -982,8 +982,9 @@ export function applyKeeperStreamEvent(
         const value = event.value
         const observed = value?.runtime_id !== undefined && value.attempt_index !== undefined
           ? Object.freeze({ runtimeId: value.runtime_id, index: value.attempt_index }) : undefined
-        // An unbound header cannot revoke the known attempt admission floor.
-        if (!observed && current?.runtimeAttempt) return null
+        // An unbound header carries no authority: it cannot revoke the known
+        // attempt admission floor, nor wipe partial progress when no floor exists.
+        if (!observed) return null
         if (observed && current?.runtimeAttempt) {
           if (observed.index < current.runtimeAttempt.index) return null
           if (observed.index === current.runtimeAttempt.index) {

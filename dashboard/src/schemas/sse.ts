@@ -856,7 +856,8 @@ function validateKeeperCustomPayload(
         : validateQuarantinedToolOccurrence(value.quarantined_occurrence)
     }
     case 'KEEPER_CONTINUATION_CHECKPOINT': {
-      const message = requiredString(value, 'message')
+      // The server sends an empty message on every checkpoint turn.
+      const message = requiredString(value, 'message', true)
       return message.success ? optionalString(value, 'request_id') : message
     }
     case 'KEEPER_REPLY_DETAILS': {
@@ -892,7 +893,10 @@ function validateKeeperCustomPayload(
   return fail('ag_ui_event.name', `No payload contract for ${String(unhandled)}`)
 }
 
-function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseResult<true> {
+function validateKeeperChatAgUiEvent(
+  value: Record<string, unknown>,
+  options: { readonly tolerateUnknownCustomName?: boolean } = {},
+): SafeParseResult<true> {
   if (
     typeof value.type !== 'string'
     || !KEEPER_CHAT_AG_UI_EVENT_TYPES.has(value.type)
@@ -983,6 +987,14 @@ function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseR
     case 'TOOL_CALL_END':
       return validateToolStreamOccurrence(value, 'ag_ui_event')
     case 'CUSTOM':
+      // The direct stream tolerates a name this build has not learned: the
+      // frame carries nothing this view draws, so it is dropped with a debug
+      // line instead of failing the reply (a server that adds an event before
+      // the dashboard learns it did that on 2026-08-24).
+      if (options.tolerateUnknownCustomName && typeof value.name === 'string' && value.name.trim() !== ''
+        && !isKeeperCustomEventName(value.name)) {
+        return ok(true)
+      }
       if (typeof value.name !== 'string' || !isKeeperCustomEventName(value.name)) {
         return fail('ag_ui_event.name', 'Expected a supported Keeper custom event name')
       }
@@ -1040,10 +1052,11 @@ function schema<T>(
   }
 }
 
-/** Both broadcast and direct operation streams use the same payload contract. */
+/** Both broadcast and direct operation streams use the same payload contract.
+ * The direct stream additionally lets an unknown CUSTOM event name through. */
 export const KeeperChatStreamEventSchema = schema<KeeperChatStreamEvent>((value) => {
   if (!isRecord(value)) return fail('ag_ui_event', 'Expected an AG-UI event object')
-  const validated = validateKeeperChatAgUiEvent(value)
+  const validated = validateKeeperChatAgUiEvent(value, { tolerateUnknownCustomName: true })
   return validated.success ? ok(value as unknown as KeeperChatStreamEvent) : validated
 })
 

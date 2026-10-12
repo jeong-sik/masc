@@ -1,0 +1,35 @@
+{
+  "observed_at_utc": "2026-10-11T09:58:19Z",
+  "source_base_head": "5822c58ac916da3c1a8dd05aa90ab21027410f10",
+  "keeper_status": {
+    "transport": "masc_keeper_status MCP",
+    "keeper": "e-masc-the-leader",
+    "fast": true,
+    "tail_messages": 0,
+    "runtime_phase": "running",
+    "fiber_health": "alive",
+    "paused": false,
+    "runtime_blocker_state": "clear",
+    "scope": "read-only status response; no turn execution or source deployment proven"
+  },
+  "installed_tui": {
+    "command": "masc-tui --build-commit",
+    "reported_commit": "c0ed3b7b05a04d5843e37e49efd0f3012460cfbf",
+    "matches_source_base": false,
+    "scope": "installed binary version only; no TUI interaction or screenshot"
+  },
+  "browser_probe": {
+    "method": "Python Playwright Chromium headless launch with remote-debugging-pipe; no HTTP listener",
+    "result": "launch_failed",
+    "exception": "TargetClosedError",
+    "process_signal": "SIGTRAP",
+    "error": "bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer: Permission denied (1100)",
+    "page_created": false,
+    "screenshot_captured": false
+  },
+  "next_required_evidence": [
+    "current source installed and runtime build identity confirmed",
+    "provider turn behavior and actual UI interaction",
+    "browser and TUI visible artifact capture in an execution context that permits those operations"
+  ]
+}

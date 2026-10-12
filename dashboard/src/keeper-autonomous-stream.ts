@@ -1,5 +1,6 @@
 import { fetchKeeperCurrentTurn, fetchKeeperTurnEvents, type KeeperTurnCursor } from './api/keeper-turn-events'
 import { applyKeeperAutonomousTurnEvent } from './keeper-stream'
+import { keeperThreads, updateThreadEntry } from './keeper-state'
 
 type TurnRecovery = {
   cursor: KeeperTurnCursor
@@ -28,6 +29,10 @@ export function recoverKeeperAutonomousTurn(name: string, turnRef: string, seque
   if (state.inFlight) return state.inFlight
   if (!state.pullRequested && state.cursor.sequence !== null && state.cursor.sequence >= state.target) return Promise.resolve()
   const current = state
+  const recoveryStatus = (status: { kind: 'unavailable'; detail: string } | null): void => {
+    const parent = (keeperThreads.value[name] ?? []).find(entry => entry.source === 'autonomous_turn' && entry.turnRef === turnRef)
+    if (parent) updateThreadEntry(name, parent.id, entry => ({ ...entry, autonomousJournalRecovery: status }))
+  }
   let failed = false
   const drain = async (): Promise<void> => {
     let hasMore = false
@@ -46,7 +51,11 @@ export function recoverKeeperAutonomousTurn(name: string, turnRef: string, seque
       }
     } while (hasMore || current.pullRequested || current.cursor.sequence === null || current.cursor.sequence < current.target)
   }
-  current.inFlight = drain().catch(error => { failed = true; throw error }).finally(() => {
+  current.inFlight = drain().then(() => recoveryStatus(null)).catch(error => {
+    failed = true
+    recoveryStatus({ kind: 'unavailable', detail: error instanceof Error ? error.message : 'Journal recovery failed' })
+    throw error
+  }).finally(() => {
     current.inFlight = null
     // A notification can arrive in the microtask between drain and cleanup.
     // A fresh request received during a failed read still owns a recovery
@@ -62,14 +71,36 @@ export function recoverKeeperAutonomousTurn(name: string, turnRef: string, seque
 
 export function _resetKeeperAutonomousRecoveryForTests(): void { recovery.clear() }
 
-/** A reconnect may have lost the last notification, including completion.
- * Pull each already-discovered journal once; no periodic polling is introduced. */
+/** Persisted autonomous identity discovers completed turns as well as live
+ * ones. Replay only explicit autonomous rows, never matching text or counters. */
+export async function recoverKeeperAutonomousHistory(name: string): Promise<void> {
+  const turns = new Set((keeperThreads.value[name] ?? []).flatMap(entry =>
+    entry.source === 'autonomous_turn' && entry.turnRef ? [entry.turnRef] : []))
+  const results = await Promise.allSettled(Array.from(turns, turnRef =>
+    recoverKeeperAutonomousTurn(name, turnRef, 0, true)))
+  if (results.some(result => result.status === 'rejected')) throw new Error('Autonomous history journal recovery incomplete')
+}
+
+/** A reconnect may have lost completion or the first notice of a new turn.
+ * Discover the current producer for each known Keeper and recover its known
+ * journals as well; no periodic polling is introduced. */
 export async function recoverKnownKeeperAutonomousTurns(): Promise<void> {
-  const reads: Promise<void>[] = []
-  for (const [name, turns] of recovery) for (const [turnRef, state] of turns) {
-    reads.push(recoverKeeperAutonomousTurn(name, turnRef, state.target, true))
-  }
-  const results = await Promise.allSettled(reads)
+  const keepers = Array.from(recovery, async ([name, turns]) => {
+    const targets = new Map(Array.from(turns, ([turnRef, state]) => [turnRef, state.target]))
+    const reads = Array.from(targets, ([turnRef, sequence]) =>
+      recoverKeeperAutonomousTurn(name, turnRef, sequence, true))
+    reads.push(fetchKeeperCurrentTurn(name).then(async current => {
+      if (current.state === 'idle') return
+      const knownTarget = targets.get(current.turnRef)
+      if (knownTarget !== undefined && current.sequence <= knownTarget) return
+      await recoverKeeperAutonomousTurn(name, current.turnRef, current.sequence, true)
+    }))
+    const results = await Promise.allSettled(reads)
+    if (results.some(result => result.status === 'rejected')) {
+      throw new Error('Autonomous Keeper reconnect recovery incomplete')
+    }
+  })
+  const results = await Promise.allSettled(keepers)
   if (results.some(result => result.status === 'rejected')) throw new Error('Autonomous reconnect journal recovery incomplete')
 }
 

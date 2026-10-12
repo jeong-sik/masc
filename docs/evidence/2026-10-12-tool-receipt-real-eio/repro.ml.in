@@ -1,0 +1,95 @@
+#use "topfind";;
+#require "eio_main";;
+module Ids = struct module Execution_id = struct type t = string let of_string x = x end end;;
+module Agent_core = struct
+ module Tool_contract = struct module Invocation = struct type t = string ref let tool_use_id t = !t end end
+ module Hooks = struct
+  type stage = Validation_before_execution | Execution
+  type event = PreToolUse of {invocation:Tool_contract.Invocation.t}
+   | PostToolUse of {invocation:Tool_contract.Invocation.t}
+   | PostToolUseFailure of {invocation:Tool_contract.Invocation.t;stage:stage}
+   | Other
+  type decision = Continue
+  type hooks = {pre_tool_use:(event -> decision) option;post_tool_use:(event -> decision) option;post_tool_use_failure:(event -> decision) option;unused:unit}
+ end
+end;;
+module Keeper_execution_join = struct
+ let joined = Hashtbl.create 8
+ let record ~invocation ~execution_id = Hashtbl.replace joined invocation execution_id
+ let peek ~invocation = Hashtbl.find_opt joined invocation
+end;;
+#mod_use __EXECUTION_CONTEXT__;;
+module Fs_compat = struct
+ type execution_context = Execution_context.t = Eio_fiber | Non_eio
+ let execution_context = Execution_context.current
+end;;
+#mod_use __EIO_GUARD__;;
+#use __RECEIPTS__;;
+let commit receipts id index =
+ start receipts ~call_id:id ~block_index:index;
+ let invocation = ref id in bind receipts invocation;
+ Keeper_execution_join.record ~invocation ~execution_id:("exec-" ^ id);
+ Fun.protect ~finally:(fun () -> finish receipts ~call_id:id)
+   (fun () -> committed receipts invocation);;
+let check label expected observed =
+ let got = List.rev !observed in
+ Printf.printf "%s=%s\n%!" label (String.concat "," got);
+ if got <> expected then failwith (label ^ " delivery order differs");;
+Eio_main.run (fun _ ->
+ Eio_guard.enable ();
+ if Execution_context.current () <> Execution_context.Eio_fiber then failwith "real Eio context absent";
+ let held_observed = ref [] in
+ let entered, entered_r = Eio.Promise.create () in
+ let committed_c, committed_c_r = Eio.Promise.create () in
+ let held = create ~delivery:Held_until_released ~notify:(fun ~block_index:_ ~tool_call_id ~execution_id:_ ->
+   if tool_call_id = "held-a" then (
+     Eio.Promise.resolve entered_r (); Eio.Promise.await committed_c);
+   held_observed := tool_call_id :: !held_observed) in
+ commit held "held-a" 1;commit held "held-b" 2;
+ Eio.Fiber.both (fun () -> release held)
+   (fun () -> Eio.Promise.await entered;commit held "held-c" 3;Eio.Promise.resolve committed_c_r ());
+ check "real_fiber_held" ["held-a";"held-b";"held-c"] held_observed;
+ let immediate_observed = ref [] in
+ let entered, entered_r = Eio.Promise.create () in
+ let committed_b, committed_b_r = Eio.Promise.create () in
+ let immediate = create ~delivery:Immediate ~notify:(fun ~block_index:_ ~tool_call_id ~execution_id:_ ->
+   if tool_call_id = "immediate-a" then (
+     Eio.Promise.resolve entered_r ();Eio.Promise.await committed_b);
+   immediate_observed := tool_call_id :: !immediate_observed) in
+ Eio.Fiber.both (fun () -> commit immediate "immediate-a" 1)
+   (fun () -> Eio.Promise.await entered;commit immediate "immediate-b" 2;Eio.Promise.resolve committed_b_r ());
+ check "real_fiber_immediate" ["immediate-a";"immediate-b"] immediate_observed;
+ let guarded_observed = ref [] in
+ let guarded = create ~delivery:Immediate ~notify:(fun ~block_index:_ ~tool_call_id ~execution_id:_ ->
+   Eio.Fiber.yield ();guarded_observed := tool_call_id :: !guarded_observed) in
+ let cancelled = ref false in
+ (match Eio.Cancel.sub (fun cc ->
+   let original : Agent_core.Hooks.hooks = {pre_tool_use=None;post_tool_use=Some (fun _ ->
+     Eio.Cancel.cancel cc Exit;Eio.Fiber.check ();Agent_core.Hooks.Continue);
+     post_tool_use_failure=None;unused=()} in
+   let hooks = hooks guarded original in
+   let invocation = ref "guarded" in
+   start guarded ~call_id:"guarded" ~block_index:1;
+   Fun.protect ~finally:(fun () -> finish guarded ~call_id:"guarded") (fun () ->
+     ignore ((Option.get hooks.pre_tool_use) (Agent_core.Hooks.PreToolUse {invocation}));
+     Keeper_execution_join.record ~invocation ~execution_id:"exec-guarded";
+     ignore ((Option.get hooks.post_tool_use) (Agent_core.Hooks.PostToolUse {invocation})))) with
+  | () -> failwith "original post-hook cancellation swallowed"
+  | exception Eio.Cancel.Cancelled _ -> cancelled := true);
+ if not !cancelled then failwith "missing cancellation";
+ check "real_guard_cleanup" ["guarded"] guarded_observed;
+ let pending_observed = ref [] in
+ let inject = ref (fun () -> ()) in
+ let pending = create ~delivery:Immediate ~notify:(fun ~block_index:_ ~tool_call_id ~execution_id:_ ->
+   pending_observed := tool_call_id :: !pending_observed;
+   if tool_call_id="cancel-a" then !inject ()) in
+ let cancelled = ref false in
+ (match Eio.Cancel.sub (fun cc ->
+   inject := (fun () -> commit pending "pending-b" 2;Eio.Cancel.cancel cc Exit;Eio.Fiber.check ());
+   commit pending "cancel-a" 1) with
+  | () -> failwith "observer cancellation swallowed"
+  | exception Eio.Cancel.Cancelled _ -> cancelled := true);
+ if not !cancelled then failwith "observer cancellation absent";
+ commit pending "next-c" 3;
+ check "real_cancel_pending_recovery" ["cancel-a";"pending-b";"next-c"] pending_observed;
+ print_endline "PASS: four actual Eio fiber/guard/cancellation scenarios");;

@@ -338,9 +338,6 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
                response that the runtime actually ended may close. *)
             Option.iter stop_content (Hashtbl.find_opt text_indexes (Some step_index))
           | Runtime_antigravity.Native_tool_started observation ->
-            Option.iter
-              (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
-              on_native_action;
             Host.record_raw_native_tool
               ~keeper_name
               ~raw_trace_run
@@ -363,7 +360,11 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
                           ; content_type = Runtime_native_tools.stream_content_type
                           ; tool_id = Runtime_native_tools.call_id observation
                           ; tool_name = observation.tool_name
-                          }))
+                          });
+                     Option.iter (fun observe ->
+                       Runtime_native_tools.observe_exact_action
+                         ~official_turn:turn_count ~observe observation)
+                       on_native_action)
               observation.identity
           | Runtime_antigravity.Native_tool_finished {observation; completion} ->
             Host.record_raw_native_tool
@@ -378,10 +379,13 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
                      (* Retire ownership before a completion observer can yield
                         or reenter this projection. *)
                      Hashtbl.replace native_tool_indexes identity Native_closed;
-                     Option.iter (fun finish -> finish ~block_index:index
-                       ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
-                       on_native_tool_completion;
-                     stop_content index
+                     Fun.protect
+                       ~finally:(fun () ->
+                         Eio.Cancel.protect (fun () -> stop_content index))
+                       (fun () ->
+                         Option.iter (fun finish -> finish ~block_index:index
+                           ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                           on_native_tool_completion)
                  | Some Native_closed -> ()
                  | None ->
                      (* A finish may arrive without its start. It still fences
@@ -1426,14 +1430,14 @@ module For_testing = struct
       event
   ;;
 
-  let project_stream ?on_event ?on_native_tool_completion events =
+  let project_stream ?on_native_action ?on_event ?on_native_tool_completion events =
     let emitted = ref [] in
     let projection =
       stream_projection ?on_native_tool_completion
         ~keeper_name:"test"
         ~raw_trace_run:None
         ~turn_count:1
-        ~on_native_action:None
+        ~on_native_action
         ~on_usage_report:None
         ~position:Keeper_usage_resolution.Fresh
         ~receipts:None

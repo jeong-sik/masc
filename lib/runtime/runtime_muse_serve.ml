@@ -810,6 +810,7 @@ let gap_applies ~session_id = function
 
 type turn_state =
   { open_items : (string * Msp.item_kind) list
+  ; completed_items : (string * Msp.item) list
   ; open_tool_items : int
   ; final_text : string option
   ; tool_calls : int
@@ -937,7 +938,12 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
     (match notification with
      | Msp.Item_started { session_id = sid; item } when ours sid && item_in_turn ~turn_id item
        ->
-       (match item.Msp.kind with
+       if List.mem_assoc item.Msp.item_id state.completed_items then
+         protocol_error "item/started" "completed item cannot restart"
+       else (match List.assoc_opt item.Msp.item_id state.open_items with
+        | Some kind when kind = item.Msp.kind -> continue state
+        | Some _ -> protocol_error "item/started" "open item changed kind"
+        | None -> (match item.Msp.kind with
         | Msp.Tool_call ->
           emit (Native_tool_started (observation item));
           io.set_receive_phase Tool_item_running;
@@ -947,21 +953,35 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
             ; open_tool_items = state.open_tool_items + 1
             ; tool_calls = state.tool_calls + 1
             }
-        | kind -> continue { state with open_items = (item.Msp.item_id, kind) :: state.open_items })
-     | Msp.Item_delta { session_id = sid; item_id; field = Msp.Delta_text; delta }
+        | kind -> continue { state with open_items = (item.Msp.item_id, kind) :: state.open_items }))
+     | Msp.Item_delta { session_id = sid; item_id; field; delta }
        when ours sid ->
-       (match List.assoc_opt item_id state.open_items with
-        | Some Msp.Agent_message ->
+       if List.mem_assoc item_id state.completed_items then
+         protocol_error "item/delta" "completed item cannot receive a delta"
+       else (match field, List.assoc_opt item_id state.open_items with
+        | Msp.Delta_text, Some Msp.Agent_message ->
           emit (Text_delta { item_id; text = delta });
           (* The model is speaking: its window applies again, whatever tool
              items are still open. *)
           io.set_receive_phase Model_turn;
           continue state
-        | Some _ | None -> continue state)
+        | (Msp.Delta_text | Msp.Delta_output | Msp.Delta_summary _ | Msp.Unrecognized_delta_field _),
+          (Some _ | None) -> continue state)
      | Msp.Item_completed { session_id = sid; item } when ours sid && item_in_turn ~turn_id item
        ->
+       (match List.assoc_opt item.Msp.item_id state.completed_items with
+        | Some previous when previous = item -> continue state
+        | Some _ ->
+            protocol_error "item/completed" "item changed after completion"
+        | None ->
+       let* () = match List.assoc_opt item.Msp.item_id state.open_items with
+         | Some kind when kind <> item.Msp.kind ->
+             protocol_error "item/completed" "open item changed kind"
+         | Some _ | None -> Ok () in
        let was_open = List.mem_assoc item.Msp.item_id state.open_items in
        let open_items = List.remove_assoc item.Msp.item_id state.open_items in
+       let state = {state with open_items;
+         completed_items = (item.Msp.item_id, item) :: state.completed_items} in
        (match item.Msp.kind with
         | Msp.Tool_call ->
           (* MSP allows a completed item that never opened (a single-shot
@@ -979,20 +999,18 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
             ; tool_calls = (if was_open then state.tool_calls else state.tool_calls + 1)
             }
         | Msp.Agent_message ->
-          Option.iter (fun text -> emit (Text_completed {item_id=item.Msp.item_id; text})) item.Msp.text;
-          continue
-            { state with
-              open_items
-            ; final_text =
-                (match item.Msp.text with
-                 | Some text -> Some text
-                 | None -> state.final_text)
-            }
+          let state = {state with
+            final_text = (match item.Msp.text with
+              | Some text -> Some text
+              | None -> state.final_text)} in
+          Option.iter (fun text ->
+            emit (Text_completed {item_id=item.Msp.item_id; text})) item.Msp.text;
+          continue state
         | Msp.Compaction ->
           Option.iter (fun compaction -> emit (Compaction_observed compaction))
             item.Msp.compaction;
           continue { state with open_items }
-        | _ -> continue { state with open_items })
+        | _ -> continue { state with open_items }))
      | Msp.Usage_changed usage ->
        emit (Subscription_usage_observed usage);
        continue state
@@ -1290,6 +1308,7 @@ let run_protocol
         ~turn_id
         ~on_stream_event
         { open_items = []
+        ; completed_items = []
         ; open_tool_items = 0
         ; final_text = None
         ; call_models = []

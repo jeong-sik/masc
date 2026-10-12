@@ -205,6 +205,46 @@ let test_parse_empty_choices () =
 
 (* ── openai_chunk_to_events ─────────────────────────────── *)
 
+let test_openai_terminal_content_owner () =
+  let state = S.create_openai_stream_state () in
+  let send data =
+    fst (S.openai_sse_parse_result_to_events state
+      (S.parse_openai_sse_chunk ~streaming_reasoning:(RD.Delta_field "reasoning_content") data))
+  in
+  let content = {|{"id":"c","model":"glm","choices":[{"delta":{"content":"answer","reasoning_content":"exposed"},"finish_reason":null}]}|} in
+  let finish = {|{"id":"c","model":"glm","choices":[{"delta":{},"finish_reason":"stop"}]}|} in
+  let opened = send content in
+  let starts = List.filter_map (function ContentBlockStart {index;_} -> Some index | _ -> None) opened in
+  Alcotest.(check int) "reasoning and saying opened" 2 (List.length starts);
+  let closed = send finish in
+  let stops = List.filter_map (function ContentBlockStop {index} -> Some index | _ -> None) closed in
+  Alcotest.(check (list int)) "each opened block closes" (List.sort compare starts) (List.sort compare stops);
+  Alcotest.(check int) "repeated finish emits nothing" 0 (List.length (send finish));
+  let rejected = function [SSEParseFailed _] -> () | _ -> Alcotest.fail "expected rejection without content" in
+  rejected (send content);
+  rejected (send {|{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"late","function":{"name":"Execute","arguments":"{}"}}]},"finish_reason":null}]}|});
+  rejected (send {|{"choices":[{"delta":{},"finish_reason":"length"}]}|});
+  (match send {|{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}|} with
+   | [MessageDelta {stop_reason=None;usage=Some _}] -> ()
+   | _ -> Alcotest.fail "usage trailer survives content closure");
+  (match send "[DONE]" with [MessageStop] -> () | _ -> Alcotest.fail "one message stop");
+  Alcotest.(check int) "repeated sentinel emits nothing" 0 (List.length (send "[DONE]"));
+  rejected (send content)
+;;
+
+let test_openai_sentinel_closes_unfinished_content () =
+  let state = S.create_openai_stream_state ~inline_reasoning:true () in
+  let send data = fst (S.openai_sse_parse_result_to_events state
+    (S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning data)) in
+  ignore (send {|{"id":"c","model":"m","choices":[{"delta":{"content":"<think>unfinished"},"finish_reason":null}]}|});
+  let events = send "[DONE]" in
+  Alcotest.(check bool) "unfinished reasoning closes before message stop" true
+    (match List.rev events with MessageStop :: ContentBlockStop _ :: _ -> true | _ -> false);
+  Alcotest.(check bool) "no fabricated successful finish" false
+    (List.exists (function MessageDelta {stop_reason=Some _;_} -> true | _ -> false) events);
+  Alcotest.(check int) "no duplicate closure" 0 (List.length (send "[DONE]"))
+;;
+
 let test_events_text_first_chunk () =
   let state = S.create_openai_stream_state () in
   let chunk : S.openai_chunk =
@@ -2080,7 +2120,9 @@ let () =
         ] )
     ; ( "inline_transaction_rollback", [test_case "rejected chunk preserves framing" `Quick test_rejected_chunk_preserves_inline_framing] )
     ; ( "openai_chunk_to_events"
-      , [ test_case "reported complete prelude once" `Quick test_reported_prelude_uses_complete_pair_once
+      , [ test_case "terminal content ownership and usage trailer" `Quick test_openai_terminal_content_owner
+        ; test_case "sentinel closes unfinished content" `Quick test_openai_sentinel_closes_unfinished_content
+        ; test_case "reported complete prelude once" `Quick test_reported_prelude_uses_complete_pair_once
         ; test_case "metadata-poor output preserves content and usage" `Quick test_metadata_poor_output_never_gets_a_late_start
         ; test_case "reported prelude is request local" `Quick test_reported_prelude_is_request_local
         ; test_case "text first chunk" `Quick test_events_text_first_chunk

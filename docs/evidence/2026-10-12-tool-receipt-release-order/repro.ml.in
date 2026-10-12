@@ -1,0 +1,63 @@
+module Ids = struct module Execution_id = struct type t = string let of_string x = x end end;;
+module Agent_core = struct
+ module Tool_contract = struct module Invocation = struct type t = string ref let tool_use_id t = !t end end
+ module Hooks = struct
+  type stage = Validation_before_execution | Execution
+  type event = PreToolUse of {invocation:Tool_contract.Invocation.t}
+   | PostToolUse of {invocation:Tool_contract.Invocation.t}
+   | PostToolUseFailure of {invocation:Tool_contract.Invocation.t;stage:stage}
+   | Other
+  type decision = Continue
+  type hooks = {pre_tool_use:(event -> decision) option;post_tool_use:(event -> decision) option;post_tool_use_failure:(event -> decision) option;unused:unit}
+ end
+end;;
+module Keeper_execution_join = struct
+ let joined = Hashtbl.create 8
+ let record ~invocation ~execution_id = Hashtbl.replace joined invocation execution_id
+ let peek ~invocation = Hashtbl.find_opt joined invocation
+end;;
+module Eio_guard = struct let protect ~finally f = Fun.protect ~finally f end;;
+#use __SOURCE_FILE__;;
+let observed = ref [];;
+let reenter = ref (fun () -> ());;
+let receipts = create ~delivery:Held_until_released ~notify:(fun ~block_index:_ ~tool_call_id ~execution_id:_ ->
+ observed := tool_call_id :: !observed;
+ if tool_call_id = "a" then !reenter ()) ;;
+let commit id index =
+ start receipts ~call_id:id ~block_index:index;
+ let invocation = ref id in
+ bind receipts invocation;
+ Keeper_execution_join.record ~invocation ~execution_id:("exec-" ^ id);
+ committed receipts invocation;
+ finish receipts ~call_id:id;;
+commit "a" 1;; commit "b" 2;;
+reenter := (fun () -> commit "c" 3; release receipts);;
+release receipts;;
+let got = List.rev !observed;;
+Printf.printf "observed=%s\n" (String.concat "," got);;
+if got <> ["a";"b";"c"] then (prerr_endline "FAIL: reentrant receipt overtook earlier commit"; exit 1);;
+print_endline "PASS: reentrant release preserves commit order";;
+let failed = ref false;;
+let observed_failure = ref [];;
+let add_reentrant = ref (fun () -> ());;
+let recovering = create ~delivery:Held_until_released ~notify:(fun ~block_index:_ ~tool_call_id ~execution_id:_ ->
+ observed_failure := tool_call_id :: !observed_failure;
+ if tool_call_id = "failure-a" && not !failed then (
+   failed := true; !add_reentrant (); raise Exit)) ;;
+let commit_recovering id index =
+ start recovering ~call_id:id ~block_index:index;
+ let invocation = ref id in
+ bind recovering invocation;
+ Keeper_execution_join.record ~invocation ~execution_id:("exec-" ^ id);
+ committed recovering invocation;
+ finish recovering ~call_id:id;;
+commit_recovering "failure-a" 1;; commit_recovering "failure-b" 2;;
+add_reentrant := (fun () -> commit_recovering "failure-c" 3; release recovering);;
+(match release recovering with () -> failwith "notification failure was swallowed" | exception Exit -> ());;
+release recovering;; release recovering;;
+commit_recovering "immediate-d" 4;;
+let recovered = List.rev !observed_failure;;
+Printf.printf "recovered=%s\n" (String.concat "," recovered);;
+if recovered <> ["failure-a";"failure-b";"failure-c";"immediate-d"] then (
+ prerr_endline "FAIL: queued receipts lost or ambiguous notification retried";exit 1);;
+print_endline "PASS: unattempted receipts retained, nested release is inert, later commits immediate";;

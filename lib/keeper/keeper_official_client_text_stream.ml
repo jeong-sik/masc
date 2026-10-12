@@ -3,6 +3,7 @@ type 'message t =
   ; shown : Buffer.t (* every delta forwarded this turn, breaks included *)
   ; raw : Buffer.t (* provider pieces, without presentation separators *)
   ; current : Buffer.t (* the text of the message streaming now *)
+  ; mutable completed_messages : 'message list
   ; mutable previous_messages : string list
   ; mutable message : 'message option
         (* that message's identity, once the wire named it *)
@@ -15,6 +16,7 @@ let create ~equal () =
   ; shown = Buffer.create 256
   ; raw = Buffer.create 256
   ; current = Buffer.create 256
+  ; completed_messages = []
   ; previous_messages = []
   ; message = None
   ; after_tool_row = false
@@ -77,11 +79,16 @@ let suffix_after ~prefix text =
 ;;
 
 let complete_message t ~message ~text =
-  if String.equal text "" then None
-  else if starts_new_message t ~message:(Some message)
-  then Some (forward t ~message:(Some message) text)
-  else Option.map (forward t ~message:(Some message))
-      (suffix_after ~prefix:(Buffer.contents t.current) text)
+  if List.exists (t.equal message) t.completed_messages then None
+  else (
+    (* Completion is an identity-owned terminal event. Remember it even when
+       it carries no missing text, before any later message becomes current. *)
+    t.completed_messages <- message :: t.completed_messages;
+    if String.equal text "" then None
+    else if starts_new_message t ~message:(Some message)
+    then Some (forward t ~message:(Some message) text)
+    else Option.map (forward t ~message:(Some message))
+        (suffix_after ~prefix:(Buffer.contents t.current) text))
 ;;
 
 let remainder t ~final_text =

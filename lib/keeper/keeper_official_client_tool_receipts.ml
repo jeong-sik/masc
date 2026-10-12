@@ -15,7 +15,8 @@ type receipt =
 
 type state =
   | Holding of receipt list  (** newest first *)
-  | Delivering
+  | Notifying of receipt Queue.t
+  | Delivering of receipt Queue.t
 
 type t =
   { active : (string, active) Hashtbl.t
@@ -27,7 +28,7 @@ let create ~delivery ~notify =
   { active = Hashtbl.create 8
   ; state =
       (match delivery with
-       | Immediate -> Delivering
+       | Immediate -> Delivering (Queue.create ())
        | Held_until_released -> Holding [])
   ; notify
   }
@@ -45,12 +46,33 @@ let finish t ~call_id =
 let deliver t { block_index; tool_call_id; execution_id } =
   t.notify ~block_index ~tool_call_id ~execution_id
 
+let notify_pending t ~delivery pending =
+    t.state <- Notifying pending;
+    let rec drain () =
+      if Queue.is_empty pending then t.state <- Delivering pending
+      else
+        let receipt = Queue.take pending in
+        match deliver t receipt with
+        | () -> drain ()
+        | exception exn ->
+          (* The current notification may already have side effects. Keep
+             only unattempted receipts, including commits made reentrantly. *)
+          t.state <-
+            (match delivery with
+             | Immediate -> Delivering pending
+             | Held_until_released ->
+               Holding (Queue.fold (fun held receipt -> receipt :: held) [] pending));
+          raise exn
+    in
+    drain ()
+
 let release t =
   match t.state with
-  | Delivering -> ()
+  | Notifying _ -> ()
+  | Delivering pending -> notify_pending t ~delivery:Immediate pending
   | Holding held ->
-    t.state <- Delivering;
-    List.iter (deliver t) (List.rev held)
+    let pending = Queue.of_seq (List.to_seq (List.rev held)) in
+    notify_pending t ~delivery:Held_until_released pending
 
 let bind t invocation =
   match
@@ -76,7 +98,10 @@ let committed t invocation =
          }
        in
        (match t.state with
-        | Delivering -> deliver t receipt
+        | Delivering pending ->
+          Queue.add receipt pending;
+          notify_pending t ~delivery:Immediate pending
+        | Notifying pending -> Queue.add receipt pending
         | Holding held -> t.state <- Holding (receipt :: held))
      | None -> ())
   | Some _ | None -> failwith "official-client receipt has no exact producer invocation"

@@ -512,6 +512,15 @@ let execution_source_of_fields fields =
        | Ok (Some _) | Error _ -> None)
 ;;
 
+let autonomous_speech_of_fields ~execution_source fields =
+  match execution_source with
+  | Some (Masc_tui_keeper_chat_log.Autonomous_turn source) ->
+      Option.fold ~none:false
+        ~some:(fun marker -> marker = source)
+        (Option.bind (autonomous_turn_id_of_fields fields) Ids.Turn_ref.of_string)
+  | Some (Masc_tui_keeper_chat_log.Operation _) | None -> false
+;;
+
 let turn_sequence_of_fields fields =
   Option.bind (explicit_turn_id_of_fields fields) (fun raw ->
     Option.map Ids.Turn_ref.absolute_turn (Ids.Turn_ref.of_string raw))
@@ -1430,9 +1439,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
              -- but its calls are already in the transcript as
              [role: "tool"] rows, and reading both drew every call twice. *)
           let autonomous =
-            match assoc_opt "autonomous_turn" fields with
-            | Some (`Assoc _) -> true
-            | Some _ | None -> false
+            autonomous_speech_of_fields ~execution_source fields
           in
           let skill_projection = skill_projection_of_fields fields in
           let fusion_rows =

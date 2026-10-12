@@ -1864,6 +1864,34 @@ let test_intermediate_speech_retains_delivery_boundary () =
    | [{kind=History.Said_by_keeper;_}] -> ()
    | _ -> fail "root operation result incorrectly classified as intermediate")
 
+let test_autonomous_marker_requires_matching_source () =
+  let marker value payload =
+    match payload with
+    | `Assoc fields -> `Assoc (("autonomous_turn", value) :: fields)
+    | _ -> fail "fixture row must be an object"
+  in
+  let turn_marker turn = `Assoc ["turn_id", `String turn] in
+  let cases =
+    [ marker (`Assoc []) (row ~role:"assistant" "")
+    ; marker (turn_marker "invalid") (row ~role:"assistant" "")
+    ; marker (turn_marker "trace-1#54")
+        (row ~role:"assistant" ~delivery_key:(operation_key "direct")
+           ~transcript_slot:(transcript_slot "terminal_result") "")
+    ; marker (turn_marker "trace-1#54")
+        (row ~role:"assistant" ~turn_ref:"trace-2#55" "")
+    ]
+  in
+  List.iter (fun payload ->
+    match (decode (`List [payload])).History.rows with
+    | [{History.kind = History.Said_by_keeper; text; _}] ->
+        check string "empty original speech retained" "" text
+    | _ -> fail "unproven autonomous marker suppressed original speech") cases;
+  match (decode (`List [autonomous_turn ~content:(`String "provided") []])).History.rows with
+  | [{History.kind = History.Autonomous_reply; text; _}] ->
+      check string "valid autonomous speech retained" "provided" text
+  | _ -> fail "valid marker lost autonomous ownership"
+;;
+
 let () =
   run "tui_keeper_chat_history"
     [ ( "rows"
@@ -1914,6 +1942,8 @@ let () =
             test_consecutive_tools_from_different_turns_do_not_merge
         ; test_case "autonomous trace rows retain turn_ref" `Quick
             test_autonomous_trace_rows_keep_the_turn_ref
+        ; test_case "autonomous marker requires matching source" `Quick
+            test_autonomous_marker_requires_matching_source
         ; test_case "an autonomous turn is identified by its marker" `Quick
             test_an_autonomous_turn_is_identified_by_its_marker
         ; test_case "a silent autonomous turn draws no row" `Quick

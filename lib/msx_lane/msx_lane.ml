@@ -1002,6 +1002,7 @@ let change_disk ~path ~backup_path =
 let pinned_core_source_digest = "cc6489f2ddae4a48596b4879b3c0e368"
 
 type core = {
+  source_commit : string option;
   source_digest : string;
   pinned_source_digest : string;
   matches_pin : bool;
@@ -1009,7 +1010,8 @@ type core = {
 [@@deriving yojson]
 
 let core =
-  { source_digest = Msx_core_identity.source_digest
+  { source_commit = Msx_core_identity.source_commit
+  ; source_digest = Msx_core_identity.source_digest
   ; pinned_source_digest = pinned_core_source_digest
   ; matches_pin = String.equal Msx_core_identity.source_digest pinned_core_source_digest
   }

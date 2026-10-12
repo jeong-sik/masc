@@ -314,13 +314,42 @@ describe('MCP 2026-07-28 dashboard client', () => {
     const response = deferred<Response>()
     fetchWithTimeout.mockImplementationOnce(() => response.promise)
 
-    const { callMcpTool } = await import('./mcp')
+    const { callMcpTool, mcpCallFailureDisposition } = await import('./mcp')
     const request = callMcpTool('masc_status', {})
     await vi.waitFor(() => expect(fetchWithTimeout).toHaveBeenCalledTimes(1))
 
     revision = 1
     response.resolve(okToolResponse())
-    await expect(request).rejects.toThrow('MCP authentication changed during request')
+    const error = await request.catch((err: unknown) => err)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe('MCP authentication changed during request')
+    // The request was already in flight, so the outcome genuinely is unknown.
+    expect(mcpCallFailureDisposition(error)).toBe('outcome_unknown')
+  })
+
+  it('classifies a credential change during bootstrap as a known pre-effect failure', async () => {
+    getStoredToken.mockReturnValue(null)
+    getStoredTokenMeta.mockReturnValue(null)
+    let revision = 0
+    currentStoredTokenRevision.mockImplementation(() => revision)
+    const bootstrap = deferred<Response>()
+    fetchWithTimeout.mockImplementationOnce(() => bootstrap.promise)
+
+    const { callMcpTool, mcpCallFailureDisposition } = await import('./mcp')
+    const request = callMcpTool('masc_status', {})
+    await vi.waitFor(() => expect(fetchWithTimeout).toHaveBeenCalledTimes(1))
+
+    revision = 1
+    bootstrap.resolve(new Response(JSON.stringify({
+      token: 'loopback-dev-token', actor: 'dashboard', role: 'admin',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+    const error = await request.catch((err: unknown) => err)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe('MCP authentication changed during request')
+    // No /mcp request was ever dispatched, so callers may retry.
+    expect(mcpCallFailureDisposition(error)).toBe('known_pre_effect')
+    expect(callsByMethod('tools/call')).toHaveLength(0)
   })
 
   it('reports transport failures without legacy session telemetry', async () => {

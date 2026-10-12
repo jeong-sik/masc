@@ -119,6 +119,17 @@ function authChangedError(): Error {
   return new Error(MCP_AUTH_CHANGED_MESSAGE)
 }
 
+// A credential change detected before any /mcp request is dispatched never
+// reached a tool, so the failure is known pre-effect and the caller may
+// retry. Auth changes detected after fetchWithTimeout() starts keep the
+// plain authChangedError() and its outcome_unknown classification.
+class McpPreDispatchAuthChangedError extends Error {
+  constructor() {
+    super(MCP_AUTH_CHANGED_MESSAGE)
+    this.name = 'McpPreDispatchAuthChangedError'
+  }
+}
+
 function assertAuthRevision(expectedRevision: number): void {
   if (currentStoredTokenRevision() !== expectedRevision) {
     throw authChangedError()
@@ -264,7 +275,9 @@ async function ensureBinding(admittedRevision = currentStoredTokenRevision()): P
   }
   const bootstrap = await ensureDevToken()
   if (bootstrap.kind === 'superseded'
-    || (bootstrap.fromRevision !== admittedRevision && bootstrap.authRevision !== admittedRevision)) throw authChangedError()
+    || (bootstrap.fromRevision !== admittedRevision && bootstrap.authRevision !== admittedRevision)) {
+    throw new McpPreDispatchAuthChangedError()
+  }
   const authRevision = bootstrap.authRevision
   assertAuthRevision(authRevision)
   observedTokenRevision = authRevision
@@ -322,6 +335,7 @@ export type McpCallFailureDisposition =
 
 export function mcpCallFailureDisposition(error: unknown): McpCallFailureDisposition {
   if (error instanceof McpToolCallError) return 'known_tool_response'
+  if (error instanceof McpPreDispatchAuthChangedError) return 'known_pre_effect'
   if (error instanceof McpProtocolError && error.code === -32001) {
     return 'known_pre_effect'
   }

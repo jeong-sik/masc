@@ -323,7 +323,7 @@ let test_cancelled_turn_response_carries_the_actor ~sw ~clock ~base_path ~state 
   check string "the response echoes the token owner as actor" "probe-operator"
     (U.member "actor" json |> U.to_string)
 
-let test_tool_approval_expected_workspace_admission ~sw ~clock ~base_path:_ ~state ~token ~keeper:_ =
+let test_tool_approval_expected_workspace_admission ~sw ~clock ~base_path ~state ~token ~keeper:_ =
   let config = Mcp_server.workspace_config state in
   let base = Unix.realpath config.base_path in
   let root = Unix.realpath (Workspace.masc_root_dir config) in
@@ -436,7 +436,7 @@ let test_tool_approval_expected_workspace_admission ~sw ~clock ~base_path:_ ~sta
   (* 7. Seed a timed-out ask: foreign rejection leaves it unconsumed; matching consumes and remembers it *)
   let late_store = Keeper_late_approval.shared () in
   let late_call_id = "call-late-workspace-1" in
-  Keeper_late_approval.note_timed_out late_store
+  Keeper_late_approval.note_timed_out late_store ~base_path
     ~keeper_name:"decision-canary" ~tool_call_id:late_call_id
     ~tool_name:"Execute" ~args:(`Assoc []) ();
   (* Foreign workspace dispatch rejects and leaves the late ask unconsumed *)

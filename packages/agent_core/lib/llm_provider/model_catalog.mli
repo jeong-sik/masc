@@ -44,6 +44,9 @@ type model_entry =
         unique strings. *)
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
+  ; supports_assistant_prefill : bool option
+    (** Whether Anthropic Messages accepts a final assistant continuation.
+        Model-catalog declarations override the provider default. *)
   ; supports_prompt_caching : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option

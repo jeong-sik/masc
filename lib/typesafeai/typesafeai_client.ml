@@ -227,3 +227,21 @@ let evaluate
 module For_testing = struct
   let transport_failure = transport_failure
 end
+
+type failure_kind = Capacity_refused | Other_refusal
+
+let failure_kind failure =
+  let unique_field name fields =
+    match List.filter (fun (key,_) -> String.equal key name) fields with
+    | [_,value] -> Some value | [] | _ :: _ -> None in
+  let capacity (attempt : attempt) = match attempt.refusal with
+    | Http_response_failure {status=400;body;_} ->
+      (try match Yojson.Safe.from_string body with
+       | `Assoc fields ->
+         (match unique_field "detail" fields with
+          | Some (`Assoc detail) -> unique_field "error_type" detail = Some (`String "max_tokens_exceeded")
+          | _ -> false)
+       | _ -> false
+       with Yojson.Json_error _ -> false)
+    | Transport_failure _ | Http_response_failure _ -> false in
+  if List.for_all capacity (attempts failure) then Capacity_refused else Other_refusal

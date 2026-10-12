@@ -122,7 +122,11 @@ val dedup_window_bytes : int
 
 val record : base_path:string -> item -> record_result
 (** Appends [Recorded item] unless [event_id] already appears within the
-    last {!dedup_window_bytes} of the log. The dedup scan is bounded to
+    last {!dedup_window_bytes} of the log. The scan and append share one
+    admission lock with strict readers. A new item's persisted [received_at]
+    is sampled under that lock, replacing the caller's ingress timestamp;
+    duplicate admission preserves the stored item and samples no new time.
+    The dedup scan is bounded to
     that recent tail (gateway redelivery is always recent), so a
     duplicate older than the window is re-appended rather than
     suppressed — a rare, harmless duplicate, never data loss. *)
@@ -200,3 +204,7 @@ val store_read_error : base_path:string -> keeper_name:string -> string option
     otherwise. A log that will not parse is the Keeper's own evidence failing,
     which no other surface reports; the operator inventory raises a row on it.
     Reading is all-or-nothing by line, so one bad row fails the whole load. *)
+
+module For_testing : sig
+  val record_with_clock : now:(unit -> float) -> base_path:string -> item -> record_result
+end

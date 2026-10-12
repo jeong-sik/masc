@@ -44,6 +44,8 @@ type worker_event = Started of string | Startup_failed of string
 
 type fake = {
   events : worker_event list ref;
+  state_owners : (string, string option) Hashtbl.t;
+  recovered_state_owners : (string, string option) Hashtbl.t;
   observations : (string * Yojson.Safe.t) list ref;
   recovery_barrier : unit Eio.Promise.t option ref;
   startup_available : bool ref;
@@ -61,16 +63,20 @@ let output : Types.output = {
 }
 
 let make_backend () =
-  let state = { events = ref []; observations = ref []; recovery_barrier = ref None;
+  let state = { events = ref []; state_owners=Hashtbl.create 4; recovered_state_owners=Hashtbl.create 4; observations = ref []; recovery_barrier = ref None;
                 startup_available = ref true; startup_barrier = ref None; cleanup_available = ref true;
                 image_available = ref true } in
   let record event = state.events := event :: !(state.events) in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~instance_id ~(package : Types.package) ~binding:_ ~on_created ->
+    start = (fun ~sw:_ ~state_owner ~instance_id ~(package : Types.package) ~binding:_ ~on_created ->
+      Hashtbl.replace state.state_owners instance_id
+        (Option.map Lane_addon_worker_state.volume_name state_owner);
       let stopped, release_stop = Eio.Promise.create () in
       let stop_sent = ref false in
       let connection : Runtime.For_testing.connection = {
         container_id = Store.digest instance_id;
+        exported_tools = (fun () -> []);
+        call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));
         action_schema = (fun () -> None);
         act = (fun ~arguments:_ -> Error "read-only fixture");
         observe = (fun ~binding ~sources:_ ->
@@ -99,10 +105,12 @@ let make_backend () =
         Option.iter Eio.Promise.await !(state.startup_barrier);
         Ok connection
       end);
-    acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+    acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
     image_ready = (fun ~package:_ ->
       if !(state.image_available) then Ok () else Error "image is not on the host");
-    recover_stop = (fun ~instance_id ~container_id ->
+    recover_stop = (fun ~state_owner ~instance_id ~container_id ->
+      Hashtbl.replace state.recovered_state_owners instance_id
+        (Option.map Lane_addon_worker_state.volume_name state_owner);
       if Option.exists (fun id -> id <> Store.digest instance_id) container_id
       then Error "persisted container does not belong to instance"
       else begin
@@ -246,6 +254,11 @@ let test_changed_binding_retires_before_replacement () =
   with_fixture (fun env _ config directory packages state ->
     let clock = Eio.Stdenv.clock env in
     let manifest = package packages "ready" in
+    let manifest_bytes = In_channel.with_open_bin manifest In_channel.input_all in
+    write manifest (manifest_bytes ^ {|
+[world.state]
+mode = "persistent"
+|});
     let path = Filename.concat directory "observer.toml" in
     write path (declaration ~id:"observer" ~manifest ());
     ignore (reconcile config directory);
@@ -262,6 +275,10 @@ let test_changed_binding_retires_before_replacement () =
     let new_id = declared_instance config "observer" |> text "instance_id" in
     check bool "changed semantics create a new execution identity" true (old_id <> new_id);
     await_ready clock config new_id;
+    let original_state = Hashtbl.find state.state_owners old_id in
+    check bool "persistent installation has a state owner" true (Option.is_some original_state);
+    check (option string) "new incarnation retains the logical installation state"
+      original_state (Hashtbl.find state.state_owners new_id);
     check string "replacement receives changed binding" "changed"
       (List.assoc new_id !(state.observations) |> text "setting");
     check int "only one current owner" 1 (List.length (active config));
@@ -379,6 +396,11 @@ let test_restart_recovers_exact_owner_before_replacement () =
   with_fixture (fun env sw config directory packages state ->
     let clock = Eio.Stdenv.clock env in
     let manifest = package packages "ready" in
+    let manifest_bytes = In_channel.with_open_bin manifest In_channel.input_all in
+    write manifest (manifest_bytes ^ {|
+[world.state]
+mode = "persistent"
+|});
     let path = Filename.concat directory "observer.toml" in
     let bytes = declaration ~id:"observer" ~manifest () in
     write path bytes;
@@ -416,6 +438,12 @@ let test_restart_recovers_exact_owner_before_replacement () =
     let replacement = declared_instance config "observer" |> text "instance_id" in
     check bool "restart uses a fresh instance after cleanup" true (replacement <> old_id);
     await_ready clock config replacement;
+    let original_state = Hashtbl.find state.state_owners old_id in
+    check bool "persistent installation has a state owner" true (Option.is_some original_state);
+    check (option string) "new incarnation retains the logical installation state"
+      original_state (Hashtbl.find state.state_owners replacement);
+    check (option string) "historical cleanup restores the original state owner"
+      original_state (Hashtbl.find state.recovered_state_owners old_id);
     let relevant = List.rev !(state.events) |> List.filter (function
       | Recovery_completed _ -> true | Started id -> id = replacement | _ -> false) in
     check bool "recovery confirmation precedes replacement acquisition" true

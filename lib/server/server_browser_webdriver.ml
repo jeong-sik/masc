@@ -148,7 +148,7 @@ let await_driver ~clock ~pool ~endpoint ~process ~log_path =
    browser that relaunched itself outside the group does, then removes the
    record. *)
 let launch_driver ~sw ~env ~masc_root ~record_path ~driver =
-  let lane = Filename.concat masc_root "browser-lane" in
+  let lane = Filename.concat masc_root Common.browser_lane_dirname in
   let log_path = Filename.concat lane "geckodriver.log" in
   let prepared =
     match Fs_compat.mkdir_p (Browser_driver_process.profile_root ~masc_root) with

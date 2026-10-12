@@ -1592,6 +1592,10 @@ let test_concurrent_execution_opt_ins_are_exact () =
     (* File reads and pure ranking; revalidate serialized by the file lock,
        appends by the per-path mutex, log-once flag an Atomic. *)
     ; "keeper_memory_search"
+    (* Evaluator state is per invocation; source revalidation uses its store
+       lock, and evaluation/retrieval appends use per-path locks. Current
+       evidence and permission are rechecked after the yielding model call. *)
+    ; "keeper_memory_select"
     ; "keeper_portrait_read"
     (* Artifact fetch plus static validation; catalog cache is Atomic. *)
     ; "keeper_skill_validate"

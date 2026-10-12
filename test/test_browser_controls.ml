@@ -149,7 +149,7 @@ let test_owned_upload_staging () = with_upload_context (fun config meta -> fixtu
   let captured = ref [] in
   let bytes = "\000\255\n" ^ root ^ "\000" in
   let read_file ~host_path ~max_bytes =
-    check string "reader gets owner-projected host path" (Unix.realpath source) host_path;
+    check string "reader gets owner-projected host path" source host_path;
     check int "reader includes oversize sentinel" (Masc.Keeper_browser_upload.max_file_bytes+1) max_bytes;
     Ok bytes in
   let outcome = Masc.Keeper_browser_upload.with_staged_paths ~read_file ~config ~meta

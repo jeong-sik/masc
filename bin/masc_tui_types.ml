@@ -14,6 +14,8 @@ module Snapshot_read : sig
   type intent = Poll | Refresh
 
   val idle : t
+  (** Stable per-source ticket for correlating runtime diagnostics. *)
+  val request_id : request -> int
   val start : intent:intent -> t -> t * request option
   val invalidate : t -> t
   (** Retire a pending owner without reusing its request number. *)
@@ -26,6 +28,7 @@ end = struct
   type intent = Poll | Refresh
 
   let idle = { next = 0; pending = None }
+  let request_id request = request
 
   let invalidate state = { state with pending = None }
 
@@ -98,14 +101,35 @@ let server_is_booting
 ;;
 
 type workspace_authority = Workspace_authority of int
+type workspace_reply_kind = Workspace_observation | Workspace_operation_outcome
 
 type workspace_identity =
   | Workspace_identity_unread
   | Workspace_identity_match
+  | Workspace_identity_match_unconfirmed of string
+      (** The last read that could say served this workspace; the latest
+          could not say (it failed, the server was starting, or a path was
+          missing) and the string says why. The rows that read authorized stay
+          on screen. It is not [Workspace_identity_match], so nothing that needs
+          a fresh match -- a decision, a write, applying a new read -- runs until
+          a read says match again. *)
   | Workspace_identity_mismatch of
       { local_base_path : string
       ; server_base_path : string
       }
+
+(* A task POST has already succeeded. Only its dependent handoff/reading
+   waits for identity recovery; creating or cancelling the task is never
+   repeated. Authority also prevents A -> B -> A from reviving a handoff. *)
+type task_followup =
+  | Task_handoff of { keeper : string; task_id : string; title : string; body : string }
+  | Task_cancel_refresh of string
+
+type pending_task_followup =
+  { tf_workspace : Tui_decode.server_identity
+  ; tf_authority : workspace_authority
+  ; tf_action : task_followup
+  }
 
 type workspace_input_identity =
   { wi_base_path : string
@@ -142,28 +166,72 @@ let server_workspace_matches ~expected reading =
   | None, (Ok _ | Error _) | Some _, Error _ -> false
 ;;
 
+(* What the paths alone say, booting or not. *)
+let workspace_identity_of_paths ~local_base_path (identity : Tui_decode.server_identity) =
+  let local_base_path = canonical_path local_base_path in
+  let server_base_path = canonical_path identity.sid_base_path in
+  (* The server reports its cluster-aware masc root ([<base>/.masc] for the
+     default cluster, [<base>/.masc/clusters/<name>] otherwise). Compose
+     the local one with the same function from the same cluster selection:
+     a plain [<base>/.masc] calls every healthy non-default-cluster server
+     a mismatch, and every Keeper message is refused. *)
+  let local_masc_root = canonical_path
+    (Workspace_utils.masc_root_dir_from ~base_path:local_base_path
+       ~cluster_name:(Env_config_core.cluster_name ())) in
+  let server_masc_root = canonical_path identity.sid_masc_root in
+  if String.equal local_base_path ""
+  then Workspace_identity_unread
+  else if
+    (server_base_path <> "" && not (String.equal local_base_path server_base_path))
+    || (server_masc_root <> "" && not (String.equal local_masc_root server_masc_root))
+  then Workspace_identity_mismatch { local_base_path; server_base_path }
+  else if String.equal server_base_path "" || String.equal server_masc_root ""
+  then Workspace_identity_unread
+  else Workspace_identity_match
+;;
+
 let workspace_identity_of_refresh ~local_base_path reading =
   match reading with
   | Error _ -> Workspace_identity_unread
-  | Ok identity ->
-    let local_base_path = canonical_path local_base_path in
-    let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
-    (* The server reports its cluster-aware masc root ([<base>/.masc] for the
-       default cluster, [<base>/.masc/clusters/<name>] otherwise). Compose
-       the local one with the same function from the same cluster selection:
-       a plain [<base>/.masc] calls every healthy non-default-cluster server
-       a mismatch, and every Keeper message is refused. *)
-    let local_masc_root = canonical_path
-      (Workspace_utils.masc_root_dir_from ~base_path:local_base_path
-         ~cluster_name:(Env_config_core.cluster_name ())) in
-    let server_masc_root = canonical_path identity.sid_masc_root in
-    if String.equal local_base_path "" || String.equal server_base_path ""
-       || String.equal server_masc_root "" || server_is_booting reading
-    then Workspace_identity_unread
-    else if String.equal local_base_path server_base_path
-         && String.equal local_masc_root server_masc_root
-    then Workspace_identity_match
-    else Workspace_identity_mismatch { local_base_path; server_base_path }
+  | Ok _ when server_is_booting reading -> Workspace_identity_unread
+  | Ok identity -> workspace_identity_of_paths ~local_base_path identity
+;;
+
+let unconfirmed_identity_reason reading =
+  match reading with
+  | Error detail -> detail
+  | Ok _ when server_is_booting reading -> "the server is starting"
+  | Ok _ -> "the server did not report a complete workspace path"
+;;
+
+(* A read that cannot say which workspace the server serves does not say it
+   serves another one. After a match it keeps that match, unconfirmed; only a
+   read that names a different workspace withdraws what the match authorized.
+   A booting server's paths do name its workspace: one that names another
+   workspace answers unread, so the match is withdrawn as before. *)
+let next_workspace_identity ~previous ~local_base_path reading =
+  let names_another_workspace =
+    match reading with
+    | Ok identity ->
+      (match workspace_identity_of_paths ~local_base_path identity with
+       | Workspace_identity_mismatch _ -> true
+       | Workspace_identity_unread | Workspace_identity_match
+       | Workspace_identity_match_unconfirmed _ -> false)
+    | Error _ -> false
+  in
+  match workspace_identity_of_refresh ~local_base_path reading, previous with
+  | Workspace_identity_unread
+  , (Workspace_identity_match | Workspace_identity_match_unconfirmed _)
+    when not names_another_workspace ->
+    Workspace_identity_match_unconfirmed (unconfirmed_identity_reason reading)
+  | Workspace_identity_unread
+  , ( Workspace_identity_unread | Workspace_identity_match
+    | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _ ) ->
+    Workspace_identity_unread
+  | ( (Workspace_identity_match
+      | Workspace_identity_match_unconfirmed _
+      | Workspace_identity_mismatch _) as next )
+  , _ -> next
 ;;
 
 (* A Broadcast retry belongs to the verified workspace store, not to the
@@ -311,9 +379,7 @@ type tool_visibility =
   | Tools_results
   | Tools_full
 
-(* How much of the Librarian/Memory journal the chat pane draws. Summary is
-   the resting state: one header line per journal pass, so the conversation
-   keeps the pane and the change itself stays one keypress away. *)
+(* Journal activity is opt-in; it never interrupts the default conversation. *)
 type memory_visibility =
   | Memory_hidden
   | Memory_summary
@@ -337,9 +403,7 @@ let memory_visibility_to_string = function
   | Memory_full -> "full"
 ;;
 
-(* From the resting summary toward more, then none, then back: the first
-   press answers "what changed exactly", the second clears the lane, the
-   third restores the default. *)
+(* Hidden -> summary -> full -> hidden, through Ctrl-N. *)
 let next_memory_visibility = function
   | Memory_summary -> Memory_full
   | Memory_full -> Memory_hidden
@@ -352,30 +416,13 @@ let origin_display_to_string = function
   | Masc_tui_message_layout.Origin_bare -> "off"
 ;;
 
-(* The chat modes worth a place in the header.
-
-   Reasoning starts folded, tools compact, and the memory journal at its
-   one-line summary, so the answer remains the strongest level in the pane.
-   At rest those defaults say nothing unusual and therefore cost no header
-   width.
-
-   So only a mode away from its default appears. That is exactly when the
-   operator needs reminding: reasoning is missing from the pane because they
-   hid it, not because the keeper stopped thinking. At rest the header is what
-   it was before any of these modes existed.
-
-   Discovery lives in the footer and the help overlay, which name Ctrl-R,
-   Ctrl-D, Ctrl-N, and Ctrl-F whether or not a mode is on. *)
+(* Name only modes the operator expanded; the resting chat needs no badges. *)
 let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
   let parts =
     List.filter_map Fun.id
       [ (match memory with
-         | Memory_summary -> None
-         (* Named for the rows it governs, which the pane labels JOURNAL and
-            the footer reaches with Ctrl-N:journal. It read "memory" here and
-            "journal" there, so pressing the key and looking for what moved
-            meant knowing the two words were one axis. *)
-         | Memory_hidden -> Some "journal:off"
+         | Memory_hidden -> None
+         | Memory_summary -> Some "journal:summary"
          | Memory_full -> Some "journal:full")
       ; (match origin with
          | Masc_tui_message_layout.Origin_bare -> None
@@ -400,8 +447,7 @@ let next_reasoning_visibility = function
   | Reasoning_full -> Reasoning_hidden
 ;;
 
-(* Start without clocks; Ctrl-F adds the short clock, then full headings,
-   then returns to the reading layout. *)
+(* Conversation -> inline metadata -> full origin heading -> conversation. *)
 let next_origin_display = function
   | Masc_tui_message_layout.Origin_bare -> Masc_tui_message_layout.Origin_inline
   | Masc_tui_message_layout.Origin_inline -> Masc_tui_message_layout.Origin_row
@@ -519,6 +565,9 @@ type msg_entry = {
           timestamps never move rows; phase then this sequence is the order. *)
   me_text: string;
   me_image: Masc_tui_image_preview.preview;
+  me_media: Masc_tui_chat_media.t list;
+      (** Original decoded output metadata. A journal may replace the prose,
+          but does not own these durable media records or their image action. *)
   me_memory_summary: string option;
       (** Producer-built compact text for a Memory journal row. [None] for
           ordinary conversation and neutral system rows; renderers never
@@ -546,6 +595,7 @@ type msg_entry = {
   me_timestamp: string;
   me_keeper_name: string;
   me_request_id: string;
+  me_execution_source: Masc_tui_keeper_chat_log.journal_source option;
   (* Producer observation time. Conversation and auxiliary rows share one
      chronological surface. Within a request, later phases clamp to the latest
      earlier-phase clock before the rows merge with parallel lanes. *)
@@ -762,7 +812,10 @@ let message_display_at row =
    are created and dropped inside the call, so this is still a map from rows
    to moments and nothing outside sees them. *)
 let chat_projected_timeline_ats messages =
-  let first_known_by_request = Hashtbl.create 64 in
+  (* A held log asks for the moments of its own few rows; a 64-bucket table
+     per call is what that costs when the list is small. *)
+  let table_size = if List.compare_length_with messages 16 <= 0 then 8 else 64 in
+  let first_known_by_request = Hashtbl.create table_size in
   List.iter
     (fun (row : msg_entry) ->
       let request_id = row.me_request_id in
@@ -775,7 +828,7 @@ let chat_projected_timeline_ats messages =
         | Some at -> Hashtbl.replace first_known_by_request request_id at
         | None -> ())
     messages;
-  let floors = Hashtbl.create 64 in
+  let floors = Hashtbl.create table_size in
   let rec project reversed = function
     | [] -> List.rev reversed
     | (row : msg_entry) :: rest ->
@@ -809,6 +862,89 @@ type msg_anchor =
           so this exact turn slot is the one permitted cross-identity match.
           Other rows remain identity-only anchors. *)
   }
+
+(* Search and scroll pins use the same projected history and journal rows.
+   A surviving journal stretch keeps its origin when reasoning is folded or
+   a final reply replaces its streamed text. *)
+type chat_search_anchor =
+  | Search_admission of string
+      (** Full request identity: admission belongs to the input even when
+          batch binding changes the execution that consumes it. *)
+  | Search_history of {
+      row_anchor : msg_anchor;
+      reply_source : Masc_tui_keeper_chat_log.journal_source option;
+        (** Only a durable terminal reply slot may be replaced by a journal's
+            canonical reply. Progress/tool rows do not acquire this alias. *)
+    }
+  | Search_journal of {
+      source : Masc_tui_keeper_chat_log.journal_source;
+      origin : Masc_tui_keeper_chat_transcript.drawn_origin;
+      canonical_reply : bool;
+    }
+
+type chat_search_cursor = {
+  search_workspace : workspace_authority;
+  search_keeper : string;
+  matched_anchor : chat_search_anchor;
+  matched_position : Masc_tui_chat_search.position;
+    (** Original body/field position, independent of wrapping, clipping and
+        diagram/source representation. *)
+  older_anchors : chat_search_anchor list;
+    (** Nearest older first. If reconciliation removes the matched stretch,
+        continue at a surviving older row instead of restarting at the tail. *)
+}
+
+type polled_scroll_part = Polled_status | Polled_speech
+
+type chat_scroll_anchor =
+  | Scroll_durable of chat_search_anchor
+  | Scroll_pending of string
+  | Scroll_polled of string * int * polled_scroll_part
+
+type chat_pin_mode = Follow_live | Hold_scroll | Hold_search
+(** [Follow_live] is the last frame's structural snapshot, activated by a
+    scroll key before asynchronous arrivals. It never stops tail following. *)
+
+type chat_source_position =
+  | Durable_position of Masc_tui_chat_search.position
+  | Polled_body_byte of { offset : int; sanitizer_expansion : int; semantic_expansion : int }
+
+(* A polled absolute byte is owned by the generation in Scroll_polled.
+   Sanitizer escape and semantic normalization expansions retain separate
+   identities, so distinct emitted bytes cannot collide by scalar addition. *)
+type chat_scroll_point = {
+  scroll_anchor : chat_scroll_anchor;
+  body_row : int;
+  source_position : chat_source_position option;
+    (** Exact semantic byte retained across physical reflow. [None] is a
+        generated or transient row whose source has no stable byte map. *)
+  rows_below : int;
+    (** Physical body-row ordinal within the projected entry, and its distance
+        from the viewport bottom. Neither field is a text/clock identity. *)
+}
+
+type held_polled_excerpt = {
+  held_anchor : chat_scroll_anchor;
+  held_preview : Tui_decode.keeper_turn_preview;
+  held_entry : Masc_tui_message_layout.entry;
+}
+
+type chat_scroll_pin = {
+  pin_workspace : workspace_authority;
+  pin_keeper : string;
+  pin_scroll : int;
+  pin_mode : chat_pin_mode;
+  held_transients : held_polled_excerpt list;
+  pin_points : chat_scroll_point list;
+    (** Drawn origins, oldest first. If a folded or replaced stretch disappears,
+        a surviving origin can still hold the reader's position. A viewport
+        containing only transient rows may retain an origin outside it. *)
+}
+
+type chat_scroll_position = {
+  scroll : int;
+  pin : chat_scroll_pin option;
+}
 
 let chat_turn_phase_of_role = function
   | Message_user _ -> Turn_input
@@ -847,18 +983,31 @@ let order_chat_turn_rows rows =
    [order_chat_turn_rows] is a stable sort, so sorting once over the arrival
    order lands every row where sorting after each arrival did.
 
-   [ctb_user_texts] is what recognises a user line the transcript already
-   holds. Two user rows of one request with the same text are one line
-   submitted twice -- the session copy and the server's persisted copy -- and
-   only one belongs on screen. Within a turn the request id is fixed, so the
-   text alone is the question, and the table answers it without walking the
-   turn. Non-user rows never fold: two tool rows with the same text are two
-   calls. *)
+   USER rows deduplicate only by their typed row identity. Distinct persisted
+   IDs or input positions remain distinct even when their text is identical.
+   Session/persisted aliases are resolved before this assembly, using the
+   exact request input slot, never the message body. Non-user rows keep their
+   existing producer positions. *)
+type chat_turn_key =
+  | Typed_execution of Masc_tui_keeper_chat_log.journal_source
+  | Legacy_request of string
+
+let chat_turn_key (row : msg_entry) =
+  match row.me_execution_source with
+  | Some source -> Typed_execution source
+  | None -> Legacy_request row.me_request_id
+;;
+
+type turn_sequence_evidence =
+  | Sequence_unobserved
+  | Sequence_observed of int
+  | Sequence_conflicting
+
 type chat_turn_builder = {
   ctb_request_id : string;
   mutable ctb_rows_rev : msg_entry list;
-  mutable ctb_turn_sequence : int option;
-  ctb_user_texts : (string, unit) Hashtbl.t;
+  mutable ctb_turn_sequence : turn_sequence_evidence;
+  ctb_user_identities : (msg_identity, unit) Hashtbl.t;
 }
 
 type chat_timeline_slot =
@@ -875,14 +1024,26 @@ let is_user_row row =
       false
 ;;
 
+(* Legacy history ordinals restart for each page. They identify neither a
+   stored row nor a local input and cannot authorize collapsing observations. *)
+let stable_user_identity row =
+  if not (is_user_row row) then None
+  else match row.me_identity with
+    | (Persisted_row _ | Session_row _) as identity -> Some identity
+    | Persisted_legacy_row _ -> None
+;;
+
 (* Two rows of one turn can disagree about which turn of the conversation it
    was. A disagreement is not a tie to break: the turn stops claiming a
    number rather than picking one of them. *)
 let merge_turn_sequence held arriving =
   match held, arriving with
-  | None, sequence | sequence, None -> sequence
-  | Some left, Some right when Int.equal left right -> Some left
-  | Some _, Some _ -> None
+  | Sequence_conflicting, (None | Some _) -> Sequence_conflicting
+  | Sequence_unobserved, None -> Sequence_unobserved
+  | Sequence_unobserved, Some sequence -> Sequence_observed sequence
+  | Sequence_observed sequence, None -> Sequence_observed sequence
+  | Sequence_observed left, Some right when Int.equal left right -> Sequence_observed left
+  | Sequence_observed _, Some _ -> Sequence_conflicting
 ;;
 
 (* The conversation's rows as turns, journal lines and unowned lines, in the
@@ -894,7 +1055,7 @@ let merge_turn_sequence held arriving =
    slots keep the order the walk found. *)
 let chat_timeline_slots rows =
   let slots_rev = ref [] in
-  let builders : (string, chat_turn_builder) Hashtbl.t = Hashtbl.create 64 in
+  let builders : (chat_turn_key, chat_turn_builder) Hashtbl.t = Hashtbl.create 64 in
   List.iter
     (fun (row : msg_entry) ->
       if row.me_role = Message_memory
@@ -902,7 +1063,7 @@ let chat_timeline_slots rows =
       else if String.equal row.me_request_id ""
       then slots_rev := Slot_unowned row :: !slots_rev
       else
-        match Hashtbl.find_opt builders row.me_request_id with
+        match Hashtbl.find_opt builders (chat_turn_key row) with
         | Some builder ->
             (* The sequence is merged even when the row itself folds into a
                line already held: a duplicate still carries what it knows
@@ -910,25 +1071,26 @@ let chat_timeline_slots rows =
             builder.ctb_turn_sequence <-
               merge_turn_sequence builder.ctb_turn_sequence row.me_turn_sequence;
             let folds =
-              is_user_row row && Hashtbl.mem builder.ctb_user_texts row.me_text
+              Option.exists (Hashtbl.mem builder.ctb_user_identities) (stable_user_identity row)
             in
             if not folds
             then begin
-              if is_user_row row
-              then Hashtbl.replace builder.ctb_user_texts row.me_text ();
+              Option.iter (fun identity -> Hashtbl.replace builder.ctb_user_identities identity ())
+                (stable_user_identity row);
               builder.ctb_rows_rev <- row :: builder.ctb_rows_rev
             end
         | None ->
-            let user_texts = Hashtbl.create 4 in
-            if is_user_row row then Hashtbl.replace user_texts row.me_text ();
+            let user_identities = Hashtbl.create 4 in
+            Option.iter (fun identity -> Hashtbl.replace user_identities identity ()) (stable_user_identity row);
             let builder =
               { ctb_request_id = row.me_request_id
               ; ctb_rows_rev = [ row ]
-              ; ctb_turn_sequence = row.me_turn_sequence
-              ; ctb_user_texts = user_texts
+              ; ctb_turn_sequence = Option.fold ~none:Sequence_unobserved
+                  ~some:(fun sequence -> Sequence_observed sequence) row.me_turn_sequence
+              ; ctb_user_identities = user_identities
               }
             in
-            Hashtbl.replace builders row.me_request_id builder;
+            Hashtbl.replace builders (chat_turn_key row) builder;
             slots_rev := Slot_turn builder :: !slots_rev)
     rows;
   List.rev_map
@@ -938,7 +1100,9 @@ let chat_timeline_slots rows =
       | Slot_turn builder ->
           Chat_turn
             { ct_request_id = builder.ctb_request_id
-            ; ct_turn_sequence = builder.ctb_turn_sequence
+            ; ct_turn_sequence = (match builder.ctb_turn_sequence with
+                | Sequence_observed sequence -> Some sequence
+                | Sequence_unobserved | Sequence_conflicting -> None)
             ; ct_rows = order_chat_turn_rows (List.rev builder.ctb_rows_rev)
             })
     !slots_rev
@@ -1007,7 +1171,22 @@ let chat_timeline ~loaded ~session ~queued_request_ids =
     List.exists (String.equal request_id) queued_request_ids
   in
   let visible rows = List.filter (fun row -> not (queued row.me_request_id)) rows in
-  { ctl_items = chat_timeline_slots (visible loaded @ visible session) }
+  let loaded = visible loaded in
+  let persisted_user_slots = Hashtbl.create 64 in
+  List.iter (fun (row : msg_entry) ->
+    if is_user_row row && row.me_request_id <> "" then
+      match row.me_identity with
+      | Persisted_row _ ->
+          Hashtbl.replace persisted_user_slots
+            (row.me_keeper_name, row.me_request_id, row.me_turn_phase, row.me_operation_seq) ()
+      | Persisted_legacy_row _ | Session_row _ -> ()) loaded;
+  let session = visible session |> List.filter (fun (row : msg_entry) ->
+    match row.me_identity with
+    | Session_row {request_id; turn_phase; operation_seq} when is_user_row row && request_id <> "" ->
+        not (Hashtbl.mem persisted_user_slots
+          (row.me_keeper_name, request_id, turn_phase, operation_seq))
+    | Session_row _ | Persisted_row _ | Persisted_legacy_row _ -> true) in
+  { ctl_items = chat_timeline_slots (loaded @ session) }
 ;;
 
 (* Which lane a chat row belongs to, asked of the row rather than of where it
@@ -1024,7 +1203,7 @@ let chat_timeline ~loaded ~session ~queued_request_ids =
    ({!chat_timeline_slots}); this is the same question asked of one row, so a
    renderer can draw the boundary without rebuilding the timeline. *)
 type chat_row_lane =
-  | Lane_turn of string
+  | Lane_turn of chat_turn_key
       (** Produced inside the turn with this request id. *)
   | Lane_unowned
       (** No request owns it: another agent's broadcast, a system line. It
@@ -1038,7 +1217,7 @@ type chat_row_lane =
 let chat_row_lane (row : msg_entry) =
   if row.me_role = Message_memory then Lane_memory
   else if String.equal row.me_request_id "" then Lane_unowned
-  else Lane_turn row.me_request_id
+  else Lane_turn (chat_turn_key row)
 
 (* Where a row sits in its turn, for a renderer drawing the turn's edges. *)
 type turn_edge =
@@ -1101,7 +1280,7 @@ let mark_turn_edges rows =
         | Lane_turn request_id ->
             if
               match running with
-              | Some current -> String.equal current request_id
+              | Some current -> current = request_id
               | None -> false
             then walk running (index :: run) tl
             else (
@@ -1153,12 +1332,17 @@ let chat_timeline_rows timeline =
   |> List.map (fun projected -> projected.pcr_row)
 ;;
 
+(* String membership without polymorphic compare. Request ids are strings and
+   these lookups run per message per held log on every frame. *)
+let string_mem needle haystack = List.exists (String.equal needle) haystack
+;;
+
 let chat_request_timeline_at ?(member_ids = []) ~request_id messages =
   let request_rows =
     List.filter
       (fun (message : msg_entry) ->
         String.equal message.me_request_id request_id
-        || List.mem message.me_request_id member_ids)
+        || string_mem message.me_request_id member_ids)
       messages
   in
   match List.rev (chat_projected_timeline_ats request_rows) with
@@ -1203,7 +1387,7 @@ let chat_block_insertion_index ~member_ids ~bounds ~request_id ~timeline_at
     List.fold_left
       (fun (index, lower_bound) ((row : msg_entry), _) ->
         ( index + 1
-        , if (String.equal row.me_request_id request_id || List.mem row.me_request_id member_ids) && bounds row
+        , if (String.equal row.me_request_id request_id || string_mem row.me_request_id member_ids) && bounds row
           then index + 1
           else lower_bound ))
       (0, 0) positioned_messages
@@ -1229,6 +1413,207 @@ let chat_block_insertion_index ~member_ids ~bounds ~request_id ~timeline_at
         else find (index + 1) rest
   in
   find 0 positioned_messages
+;;
+
+(* One frame's committed rows indexed by request id, so a held log finds its
+   own rows without walking every row. [chat_log_timeline_context] returns what
+   [chat_live_timeline_at] and [chat_block_insertion_index] return for the same
+   log on the full lists; the test compares the two on generated rows. *)
+type chat_timeline_index =
+  { cti_by_request : (string, int * msg_entry) Hashtbl.t
+  ; cti_visible : (msg_entry * float option) array
+  ; cti_visible_by_request : (string, int * msg_entry * float option) Hashtbl.t
+  ; cti_max_at : float option
+  ; cti_all_finite : bool
+  ; cti_prefix_max : float array
+        (** running maximum of the moments up to each row; [neg_infinity]
+            before the first one *)
+  ; cti_first_without_moment : int
+  ; cti_first_flagged_without_moment : int
+  ; cti_first_flagged_at : (float, int) Hashtbl.t
+        (** per moment, the first row there that a tied live turn precedes *)
+  }
+
+(* A tied live turn precedes unowned and memory rows. *)
+let chat_row_yields_a_tie (row : msg_entry) =
+  row.me_role = Message_memory || String.equal row.me_request_id ""
+
+let chat_timeline_index ~messages ~visible =
+  let by_request = Hashtbl.create 64 in
+  List.iteri
+    (fun position (message : msg_entry) ->
+      Hashtbl.add by_request message.me_request_id (position, message))
+    messages;
+  let cti_visible = Array.of_list visible in
+  let visible_by_request = Hashtbl.create 64 in
+  Array.iteri
+    (fun index ((message : msg_entry), at) ->
+      Hashtbl.add visible_by_request message.me_request_id (index, message, at))
+    cti_visible;
+  let max_of_some acc at =
+    match acc, at with
+    | None, at -> at
+    | acc, None -> acc
+    | Some left, Some right -> Some (Float.max left right)
+  in
+  let length = Array.length cti_visible in
+  let prefix_max = Array.make length neg_infinity in
+  let first_without_moment = ref length in
+  let first_flagged_without_moment = ref length in
+  let first_flagged_at = Hashtbl.create 16 in
+  let running = ref neg_infinity in
+  Array.iteri
+    (fun index ((row : msg_entry), at) ->
+      (match at with
+       | Some at ->
+           if at > !running then running := at;
+           if chat_row_yields_a_tie row && not (Hashtbl.mem first_flagged_at at)
+           then Hashtbl.add first_flagged_at at index
+       | None ->
+           if index < !first_without_moment then first_without_moment := index;
+           if chat_row_yields_a_tie row && index < !first_flagged_without_moment
+           then first_flagged_without_moment := index);
+      prefix_max.(index) <- !running)
+    cti_visible;
+  { cti_by_request = by_request
+  ; cti_visible
+  ; cti_prefix_max = prefix_max
+  ; cti_first_without_moment = !first_without_moment
+  ; cti_first_flagged_without_moment = !first_flagged_without_moment
+  ; cti_first_flagged_at = first_flagged_at
+  ; cti_visible_by_request = visible_by_request
+  ; cti_max_at = Array.fold_left (fun acc (_, at) -> max_of_some acc at) None cti_visible
+  ; cti_all_finite =
+      Array.for_all
+        (fun (_, at) -> match at with None -> true | Some at -> Float.is_finite at)
+        cti_visible
+  }
+
+(* The first visible row at or after [lower_bound] that a live turn at
+   [timeline_at] precedes, or the row count when none. Same walk as
+   [chat_block_insertion_index], over the frame's index. *)
+let chat_index_insertion index ~lower_bound ~timeline_at =
+  let length = Array.length index.cti_visible in
+  let live_precedes ((row : msg_entry), row_at) =
+    match timeline_at, row_at with
+    | Some live_at, Some row_at ->
+        let by_time = Float.compare live_at row_at in
+        if by_time <> 0 then by_time < 0 else chat_row_yields_a_tie row
+    | Some _, None -> true
+    | None, Some _ -> false
+    | None, None -> chat_row_yields_a_tie row
+  in
+  let rec walk position =
+    if position >= length then length
+    else if live_precedes index.cti_visible.(position) then position
+    else walk (position + 1)
+  in
+  if lower_bound > 0 || not index.cti_all_finite then walk lower_bound
+  else
+    (* From the first row, the answer is the earliest of three kinds of row;
+       the running maximum is non-decreasing, so the later-moment kind is a
+       binary search. *)
+    match timeline_at with
+    | None -> index.cti_first_flagged_without_moment
+    | Some live_at ->
+        let first_later =
+          let rec search low high =
+            if low >= high then low
+            else
+              let middle = (low + high) / 2 in
+              if index.cti_prefix_max.(middle) > live_at
+              then search low middle
+              else search (middle + 1) high
+          in
+          search 0 length
+        in
+        let first_tied =
+          Option.value ~default:length
+            (Hashtbl.find_opt index.cti_first_flagged_at live_at)
+        in
+        min first_later (min first_tied index.cti_first_without_moment)
+;;
+
+type chat_log_timeline_context =
+  { clt_committed_error : bool
+  ; clt_timeline_at : float option
+  ; clt_insertion : int
+  }
+
+let chat_log_timeline_context index ~member_ids ~request_id ~started_at =
+  let ids = List.sort_uniq String.compare (request_id :: member_ids) in
+  let own_messages =
+    List.concat_map (fun id -> Hashtbl.find_all index.cti_by_request id) ids
+    |> List.sort (fun (left, _) (right, _) -> Int.compare left right)
+    |> List.map snd
+  in
+  let clt_committed_error =
+    List.exists
+      (fun (message : msg_entry) ->
+        message.me_role = Message_error && string_mem message.me_request_id member_ids)
+      own_messages
+  in
+  let request_messages =
+    List.filter (fun (message : msg_entry) -> message.me_turn_phase = Turn_input) own_messages
+  in
+  let clt_timeline_at =
+    match chat_request_timeline_at ~member_ids ~request_id request_messages with
+    | Some _ as at -> at
+    | None ->
+        let valid at = Float.is_finite at && at > 0. in
+        let started_at = if valid started_at then Some started_at else None in
+        let has_committed_request =
+          List.exists
+            (fun (message : msg_entry) -> String.equal message.me_request_id request_id)
+            request_messages
+        in
+        if not has_committed_request
+        then started_at
+        else
+          let excluded_at =
+            List.concat_map (fun id -> Hashtbl.find_all index.cti_visible_by_request id)
+              (List.sort_uniq String.compare member_ids)
+            |> List.filter (fun (_, (message : msg_entry), _) ->
+                 message.me_turn_phase <> Turn_input)
+          in
+          let others_max =
+            let scan () =
+              Array.fold_left
+                (fun latest ((message : msg_entry), at) ->
+                  if string_mem message.me_request_id member_ids
+                     && message.me_turn_phase <> Turn_input
+                  then latest
+                  else
+                    match latest, at with
+                    | None, at -> at
+                    | at, None -> at
+                    | Some latest, Some at -> Some (Float.max latest at))
+                None index.cti_visible
+            in
+            if excluded_at = [] && index.cti_all_finite then index.cti_max_at
+            else if index.cti_all_finite
+                    && not (List.exists (fun (_, _, at) -> at = index.cti_max_at) excluded_at)
+            then index.cti_max_at
+            else scan ()
+          in
+          (match started_at, others_max with
+           | started_at, None -> started_at
+           | None, at -> at
+           | Some started_at, Some at -> Some (Float.max started_at at))
+  in
+  let lower_bound =
+    List.concat_map (fun id -> Hashtbl.find_all index.cti_visible_by_request id) ids
+    |> List.fold_left
+         (fun lower_bound (position, (message : msg_entry), _) ->
+           if message.me_turn_phase = Turn_input
+           then max lower_bound (position + 1)
+           else lower_bound)
+         0
+  in
+  { clt_committed_error
+  ; clt_timeline_at
+  ; clt_insertion = chat_index_insertion index ~lower_bound ~timeline_at:clt_timeline_at
+  }
 ;;
 
 let chat_live_insertion_index ?(member_ids = []) ~request_id ~timeline_at positioned_messages =
@@ -2563,18 +2948,20 @@ type identity_login_request = {
   ilr_keeper: string;
   ilr_provider: string;
   ilr_generation: int;
+  ilr_origin: Tui_decode.server_identity option;
 }
 
 (* Login-completion expectation, held across a transient authority loss.
    Where [identity_login_started] is the consent the pane presents, this is
    only what the tick polls on: the workspace that admitted the login and
-   which Keeper/provider is still waiting. No URL is carried, so an old
+   which Keeper/provider/attempt is still waiting. No URL is carried, so an old
    consent is never resurrected, and the expectation alone cannot attach
    anyone to anything. *)
 type identity_login_expectation = {
   ile_origin: Tui_decode.server_identity;
   ile_keeper: string;
   ile_provider: string;
+  ile_attempt_id: string;
 }
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the legal
@@ -2779,8 +3166,11 @@ and surface_needs_of_surface : surface -> surface_needs = function
         ; needs_provider_history = true
         ; needs_account_emails = true
       }
+  (* The Models pane names the account behind a provider id, so Config reads
+     account emails as Usage does. *)
+  | Config -> { nothing with needs_account_emails = true }
   | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
-  | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
+  | Repositories | Code | Changes | Connectors | Runtime | Resources
   | Tools ->
       nothing
 
@@ -2950,19 +3340,18 @@ let turn_log_create ~keeper_name ~request_id ~started_at =
   turn_log_create_for_source ~keeper_name ~source:(Masc_tui_keeper_chat_log.Operation request_id) ~started_at
 ;;
 
-(* The acceptance is the server taking the POST, not a fact about the turn:
-   it never went through the bus, carries no seq, and comes again with every
-   re-POST after a cut. The transcript reads it (it answers "why has this not
-   started"); the log does not keep it, so a resend adds no entry and a log
-   that heard nothing but the acceptance has nothing to draw. *)
+(* Acceptance belongs to the request, not the execution journal. Keep its
+   first/latest scalar observations so rebuilding a transcript retains the
+   original notice without duplicating it on every re-POST. *)
 let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   match delta with
   | Masc_tui_keeper_chat_live.Accepted _ ->
+      ignore (Masc_tui_keeper_chat_log.add ~at:now turn_log.tl_log ~seq:None delta);
       Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
   | Masc_tui_keeper_chat_live.Batch_bound _
   | Masc_tui_keeper_chat_live.Run_started | Masc_tui_keeper_chat_live.Text _
   | Masc_tui_keeper_chat_live.Thinking _ | Masc_tui_keeper_chat_live.Tool_started _
-  | Masc_tui_keeper_chat_live.Native_tool_started _ | Masc_tui_keeper_chat_live.Native_tool_ended _
+  | Masc_tui_keeper_chat_live.Native_tool_started _ | Masc_tui_keeper_chat_live.Native_tool_ended _ | Masc_tui_keeper_chat_live.Native_tool_progress _
   | Masc_tui_keeper_chat_live.Tool_args _ | Masc_tui_keeper_chat_live.Tool_ended _
   | Masc_tui_keeper_chat_live.Tool_result _
   | Masc_tui_keeper_chat_live.Stream_protocol_error _
@@ -2974,9 +3363,19 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.Runtime_attempt_started _
   | Masc_tui_keeper_chat_live.Stream_model_started _
   | Masc_tui_keeper_chat_live.Stream_details _
+  | Masc_tui_keeper_chat_live.Model_content_activity _
+  | Masc_tui_keeper_chat_live.Stream_model_stopped
   | Masc_tui_keeper_chat_live.Undecodable _ ->
       if Masc_tui_keeper_chat_log.add ~at:now turn_log.tl_log ~seq delta
       then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
+;;
+
+let turn_log_note_priority_unavailable turn_log =
+  match Masc_tui_keeper_chat_transcript.admission turn_log.tl_transcript with
+  | Some ((Masc_tui_keeper_chat_live.Running | Settled), _) ->
+      Masc_tui_keeper_chat_log.note_priority_unavailable turn_log.tl_log;
+      Masc_tui_keeper_chat_transcript.note_priority_unavailable turn_log.tl_transcript
+  | Some (Queued, _) | None -> ()
 ;;
 
 (* A v2 journal page: the log's own fold ({!Masc_tui_keeper_chat_log.add_journaled})
@@ -3001,11 +3400,15 @@ let turn_log_request_id turn_log = Masc_tui_keeper_chat_log.request_id turn_log.
 let turn_log_execution_id turn_log = Masc_tui_keeper_chat_transcript.execution_id turn_log.tl_transcript
 let turn_log_started_at turn_log = Masc_tui_keeper_chat_log.started_at turn_log.tl_log
 
-(* Fetch each journal identity once, newest first by its earliest history row.
-   Held and unavailable sources are excluded; the source-aware caller keeps
-   operation and autonomous endpoint routing separate from these display keys. *)
+type journal_key = string * Masc_tui_keeper_chat_log.journal_source
+
+let turn_log_journal_key log : journal_key =
+  turn_log_keeper_name log, Masc_tui_keeper_chat_log.source log.tl_log
+
+(* Fetch each scoped journal once, newest first by its earliest history row.
+   Display strings never decide whether two sources are the same journal. *)
 let journal_fetch_targets ~held ~unavailable
-    (candidates : (string * float) list) =
+    (candidates : (journal_key * float) list) =
   let earliest = Hashtbl.create 16 in
   List.iter
     (fun (operation_id, at) ->
@@ -3013,32 +3416,28 @@ let journal_fetch_targets ~held ~unavailable
       | Some seen when seen <= at -> ()
       | Some _ | None -> Hashtbl.replace earliest operation_id at)
     candidates;
+  (* One table of the keys not to fetch, instead of two list scans for every
+     candidate: the candidates are a page's worth and [held] is every log the
+     session holds. *)
+  let excluded = Hashtbl.create (List.length held + List.length unavailable + 1) in
+  List.iter (fun key -> Hashtbl.replace excluded key ()) held;
+  List.iter (fun key -> Hashtbl.replace excluded key ()) unavailable;
   Hashtbl.fold (fun operation_id at acc -> (operation_id, at) :: acc) earliest []
-  |> List.filter (fun (operation_id, _) ->
-         not
-           (List.exists (String.equal operation_id) held
-           || List.exists (String.equal operation_id) unavailable))
+  |> List.filter (fun (operation_id, _) -> not (Hashtbl.mem excluded operation_id))
   |> List.stable_sort (fun (id_a, at_a) (id_b, at_b) ->
          match Float.compare at_b at_a with
-         | 0 -> String.compare id_a id_b
+         | 0 -> compare id_a id_b
          | order -> order)
 ;;
 
 let journal_source_of_history (row : Masc_tui_keeper_chat_history.row) =
-  match row.operation_id, row.turn_sequence, row.turn_id with
-  | Some operation_id, _, _ -> Some (Masc_tui_keeper_chat_log.Operation operation_id)
-  | None, Some _, Some turn_id ->
-      Option.map (fun turn_ref -> Masc_tui_keeper_chat_log.Autonomous_turn turn_ref)
-        (Ids.Turn_ref.of_string turn_id)
-  | None, _, _ -> None
+  row.execution_source
 ;;
 
-let journal_source_fetch_targets ~held ~unavailable candidates =
-  let keyed = List.map (fun (source, at) -> Masc_tui_keeper_chat_log.source_key source, at) candidates in
+let journal_source_fetch_targets ~keeper_name ~held ~unavailable candidates =
+  let keyed = List.map (fun (source, at) -> (keeper_name, source), at) candidates in
   journal_fetch_targets ~held ~unavailable keyed
-  |> List.filter_map (fun (key, at) ->
-      List.find_map (fun (source, _) ->
-        if Masc_tui_keeper_chat_log.source_key source = key then Some (source, at) else None) candidates)
+  |> List.map (fun ((_, source), at) -> source, at)
 ;;
 
 let autonomous_journal_candidates ~keeper_name rows =
@@ -3086,6 +3485,18 @@ let turn_log_holds_the_turn turn_log =
       false
 ;;
 
+(* History or operation records may close progress before the journal tail.
+   A heard terminal event or a successful replay after a terminal operation
+   retires replay; a checkpoint's Run_finished leaves the fold Waiting. *)
+let turn_log_has_ended turn_log =
+  match Masc_tui_keeper_chat_transcript.ending_source turn_log.tl_transcript,
+        Masc_tui_keeper_chat_transcript.phase turn_log.tl_transcript with
+  | Ending_heard_in_stream, (Stream_ended | Stream_failed _) -> true
+  | Ending_heard_in_stream, (Waiting | Working) -> false
+  | Ending_read_from_record, (Waiting | Working | Stream_ended | Stream_failed _) ->
+      Masc_tui_keeper_chat_log.terminal_replay turn_log.tl_log = Masc_tui_keeper_chat_log.Replayed_after_terminal
+;;
+
 type inflight_phase =
   | Turn_preflight of Masc_tui_keeper_chat_queue.item
       (** Retained local input; no HTTP POST has been attempted. *)
@@ -3105,6 +3516,8 @@ type inflight =
    through its own query axis: a keeper's playground via [?keeper=] (where a
    Changes row's clone-relative path lives), a registered repository via
    [?repo_id=] (what a Repositories row names). *)
+type code_file_load_intent = Open_code_file | Refresh_code_file
+
 type code_workspace_scope =
   | Code_scope_project
   | Code_scope_keeper of string
@@ -3150,6 +3563,8 @@ type code_history_entry =
 
 type code_history_listing = {
   chl_entries: code_history_entry list;
+  chl_git_error: string option;
+      (** None means the Git read succeeded, including an empty result. *)
   chl_activity_note: string;
       (** Coverage or failure of the durable Keeper-change read. Git commits
           remain visible when this says unavailable. *)
@@ -3288,6 +3703,7 @@ type voice_agent_session =
             the way the wizard carries it. *)
   ; vas_status : string option
   ; vas_saving : bool
+  ; vas_lookup : (string * string option) option
   }
 
 let voice_agent_open ~agents ~revision =
@@ -3298,6 +3714,7 @@ let voice_agent_open ~agents ~revision =
   ; vas_revision = revision
   ; vas_status = None
   ; vas_saving = false
+  ; vas_lookup = None
   }
 
 (* The two axes move on their own keys -- the keeper under up and down, the
@@ -3613,18 +4030,51 @@ module Browser_lane_view = struct
     | Viewport_refresh of { tab_id : int; expected_url : string }
     | Viewport_cadence of int
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
+  let operation_is_read = function
+    | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _
+    | Scene_refresh _ | Scene_focus _ | Scene_follow_refresh _
+    | Viewport_refresh _ | Viewport_cadence _ -> true
+    | Open_session | Close_session | Goto _ | Scene_scroll _ | Scene_click _
+    | Scene_follow _ | Viewport_pointer _ -> false
+
+  (* A committed gesture is never retried. Only its discarded observation
+     can be resumed after workspace identity is reconfirmed. *)
+  let observation_after_effect = function
+    | Scene_scroll {tab_id; scene_view; scope; _} ->
+        Some (Scene_refresh {tab_id; scene_view; scope})
+    | Scene_click {tab_id; scope; _} ->
+        Some (Scene_refresh {tab_id; scene_view=Browser_lane.Content; scope})
+    | Discover _ | Read | Open_session | Close_session | Goto _ | Screenshot _
+    | Read_refresh | Scene_read _ | Scene_regions _ | Scene_refresh _
+    | Scene_focus _ | Scene_follow _ | Scene_follow_refresh _
+    | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> None
+
   type load = Idle | No_browser | Loading of int * operation | Failed of string
   type read_continuation = No_read_continuation | Deferred_read
   type read_view = Text_view | Scene_view of {
     scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
+  (* What the server said of the BiDi host when it listed the connections:
+     the host's own record, read by the server. Nothing is reported before a
+     discovery answers, after one that failed, and by a server from before
+     the report existed. A report this build cannot read keeps the paragraph
+     the server wrote for the operator, when it has one. *)
+  type bidi_host =
+    | Host_not_reported
+    | Host_reported of Masc.Browser_bidi_host_status.report
+    | Host_report_unreadable of { detail : string; message : string option }
   (* A pointer gesture that was not sent, because the connection the
      screenshot came from does not serve it. [serving_listed] is whether a
-     listed connection does. *)
+     listed connection does, and [host] what was known of the BiDi host then:
+     the rows say why it was not sent as of the moment it was not. *)
   type unserved_gesture = {
     asked : Browser_lane.live_transport;
     capability : Browser_lane.live_capability;
     serving_listed : bool;
+    host : bidi_host;
   }
+  (* One answer of the connection list: the connections and the BiDi host
+     are as of the same read. *)
+  type discovered = { listed : client list; bidi_host : bidi_host }
   (* [clients] is what the last discovery answered, and [None] until one has:
      a discovery that failed leaves no list rather than an empty one, so the
      picker cannot tell an operator there is no browser when it could not ask.
@@ -3643,6 +4093,7 @@ module Browser_lane_view = struct
     refresh_pending : int option;
     read_continuation : read_continuation;
     unserved_gesture : unserved_gesture option;
+    bidi_host : bidi_host;
   }
 
   let source_name = Browser_lane.Lane_name.to_wire
@@ -3663,7 +4114,8 @@ module Browser_lane_view = struct
       source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; scene_scope = None;
       scene_guard = None; scene_delta = None; read_view = Text_view; refresh_pending = None;
-      read_continuation = No_read_continuation; unserved_gesture = None }
+      read_continuation = No_read_continuation; unserved_gesture = None;
+      bidi_host = Host_not_reported }
   let switch_source source _t = { (create ()) with source }
   let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0; scene_scope = None;
     scene_guard = None; scene_delta = None; read_view = Text_view }
@@ -3846,15 +4298,384 @@ module Browser_lane_view = struct
               List.exists (fun (other : client) ->
                 Browser_lane.live_transport_serves other.transport capability)
                 (listed_clients t) in
-            Pointer_unserved {asked = client.transport; capability; serving_listed}
+            Pointer_unserved {asked = client.transport; capability; serving_listed; host = t.bidi_host}
   let refuse_gesture unserved t = {t with unserved_gesture = Some unserved}
   let withdraw_unserved_gesture t = match t.unserved_gesture with
     | None -> t
     | Some _ -> {t with unserved_gesture = None}
+  (* The BiDi host in the operator's words, as lines: what a line opens
+     with, and what it says. A line this file writes whole fits 74 cells,
+     which is an 80-column surface behind its two-cell indent. What another
+     program wrote, a reason, an address, a path, is a line of its own. *)
+  type host_breaks = At_spaces | At_slashes
+  type host_line = { lead : string; said : string; breaks : host_breaks }
+  let host_line said = { lead = ""; said; breaks = At_spaces }
+  let host_said lead said = { lead; said; breaks = At_spaces }
+  let host_time seconds = Time_codec.rfc3339_of_unix seconds
+  (* Where a running host stands beside the connection list. A host serves
+     hover and drag on the server that lists the client its record names, as
+     a BiDi connection. Only a host that has its session polls, so a listed
+     client is an attached host whatever its record has caught up to. A BiDi
+     connection under another ID may be this host, registered again under an
+     ID it could not write down, so hover and drag are not said to be
+     refused beside one. *)
+  type host_standing =
+    | Host_serving
+    | Host_unlisted
+    | Host_beside_another_bidi
+    | Host_connecting
+  let host_standing (clients : client list) (entry : Masc.Browser_bidi_host_record.entry) =
+    let named = Browser_lane.client_id_to_string entry.client_id in
+    let bidi =
+      List.filter (fun (client : client) -> client.transport = Browser_lane.Webdriver_bidi) clients in
+    match
+      List.exists (fun (client : client) -> String.equal client.client_id named) bidi,
+      bidi, entry.attached_at
+    with
+    | true, _, (Some _ | None) -> Host_serving
+    | false, [], Some _ -> Host_unlisted
+    | false, _ :: _, Some _ -> Host_beside_another_bidi
+    | false, _, None -> Host_connecting
+  (* What comes before the next host, by what became of the last one's
+     session. A Firefox that holds a session refuses every host until it is
+     restarted; one that holds none takes the next host as it is. A host
+     that never got a session left none, and what kept it from one is still
+     there. A refusal says Firefox held a session then, not that it holds
+     one now, so the next host is tried before a restart. A host that ended
+     a session on another profile says so first: another Firefox holds that
+     port, and the Keeper one cannot open it until that one is quit. Where
+     MASC starts the Keeper Firefox, its next start restarts a Firefox on its
+     port only when MASC's record shows MASC started it, and the operator
+     quits any other there first; a session on another port is not in its
+     way. *)
+  type host_restart = Operator_restarts | Masc_restarts_there | Masc_starts_elsewhere
+  let host_restart (keeper : Masc.Browser_bidi_host_status.keeper)
+      (entry : Masc.Browser_bidi_host_record.entry) =
+    match keeper with
+    | Masc_starts { port; _ } ->
+        if Masc.Browser_bidi_host_status.recorded_on_port entry ~port then Masc_restarts_there
+        else Masc_starts_elsewhere
+    | Lane_off | Not_configured | Not_known -> Operator_restarts
+  let not_in_the_way_of_masc =
+    "That Firefox is not on MASC's port, so it does not stop MASC's start"
+  (* Where a session is held there: what MASC's next start does about it. *)
+  let masc_held_lines = function
+    | Operator_restarts -> []
+    | Masc_restarts_there ->
+        ["MASC restarts that Firefox only if MASC's record shows MASC started it";
+         "Otherwise the operator quits it first"]
+    | Masc_starts_elsewhere -> [not_in_the_way_of_masc]
+  (* Where a session may be held there: what MASC's start after a refusal
+     does about it. *)
+  let masc_maybe_held_lines = function
+    | Operator_restarts -> []
+    | Masc_restarts_there ->
+        ["If Firefox refuses the next host, the start after restarts that Firefox";
+         "only if MASC's record shows MASC started it · or the operator quits it"]
+    | Masc_starts_elsewhere -> [not_in_the_way_of_masc]
+  let host_session_lines restart (entry : Masc.Browser_bidi_host_record.entry)
+      (ending : Masc.Browser_bidi_host_record.ending) =
+    match ending.because with
+    | Profile_not_kept { expected; found = Some found } ->
+        [host_line "Another Firefox holds that port · quit it so one on the kept profile can open it";
+         { lead = "It runs: "; said = found; breaks = At_slashes };
+         { lead = "Kept: "; said = expected; breaks = At_slashes }]
+    | Profile_not_kept { expected; found = None } ->
+        [host_line "The Firefox there did not say its profile · quit it unless it runs the kept one";
+         { lead = "Kept: "; said = expected; breaks = At_slashes }]
+    | Reason_only ->
+    List.map host_line
+      (match entry.attached_at, ending.session with
+       | Some _, No_session_left -> ["That Firefox takes the next host if it still runs"]
+       | None, No_session_left ->
+           (match restart with
+            | Operator_restarts ->
+                ["It got no session · check that Firefox answers at that address first"]
+            | Masc_restarts_there | Masc_starts_elsewhere ->
+                ["It got no session and left none in Firefox"])
+       | (Some _ | None), Session_left ->
+           (match restart with
+            | Operator_restarts ->
+                ["Session end not confirmed · restart that Firefox before attaching"]
+            | Masc_restarts_there | Masc_starts_elsewhere ->
+                "Session end not confirmed · that Firefox refuses hosts while it holds it"
+                :: masc_held_lines restart)
+       | (Some _ | None), Session_unknown ->
+           (match restart with
+            | Operator_restarts ->
+                ["Could not ask Firefox to end the session · restart it if it still runs"]
+            | Masc_restarts_there | Masc_starts_elsewhere ->
+                "Could not ask Firefox to end the session · it holds it if it still runs"
+                :: masc_maybe_held_lines restart)
+       | (Some _ | None), Session_refused ->
+           "Firefox refused this host a session · it held one then"
+           :: (match restart with
+               | Operator_restarts ->
+                   ["Stop a host still attached there · restart that Firefox if refused again"]
+               | Masc_restarts_there | Masc_starts_elsewhere -> masc_held_lines restart))
+  (* The results the host holds no acknowledgement for: how many, and the
+     last one. Without an acknowledgement the server may still have taken it,
+     so the cause is said only when it settles that. *)
+  let host_unacknowledged_lines (entry : Masc.Browser_bidi_host_record.entry) =
+    match List.rev entry.unacknowledged with
+    | [] -> []
+    | last :: earlier ->
+        let count = 1 + List.length earlier in
+        let verb = match last.verb with
+          | Some verb -> Masc.Browser_bidi_peer.verb_to_wire verb
+          | None -> "unknown verb" in
+        let outcome = match last.outcome with
+          | Succeeded -> "ran" | Not_started -> "not started" | Unknown -> "outcome unknown" in
+        let cause = match last.cause with
+          | Refused -> ", refused" | Not_sent -> ", not sent" | Unconfirmed -> "" in
+        let request = match last.request_id with
+          | Some id -> Masc.Browser_bidi_host_record.request_id_to_wire id
+          | None -> "not a UUID" in
+        [host_line (Printf.sprintf "%d result%s unacknowledged · last: %s, %s%s"
+           count (if count = 1 then "" else "s") verb outcome cause);
+         host_line (Printf.sprintf "at %s · request %s" (host_time last.at) request)]
+  (* Where MASC starts the Keeper Firefox, what starts it takes the place of
+     the command the operator would run. A launcher that is not there yet
+     is still installed first. *)
+  let host_masc_lines ~port ~profile (standing : Masc.Browser_bidi_host_status.launcher_standing) =
+    (match standing with
+     | Launcher_installed -> []
+     | Launcher_not_installed -> [host_line "Install the browser lane in this workspace first"]
+     | Launcher_needs_reinstall ->
+         [host_line "Install the browser lane again first: its launcher is not as installed"])
+    @ [host_line "MASC starts the Keeper Firefox and its host, whichever is not running";
+       host_line
+         (Printf.sprintf "at the next server start, or a Keeper's next hover or drag · port %d" port);
+       { lead = "Profile: "; said = profile; breaks = At_slashes };
+       host_line (transport_setup_row [Browser_lane.Webdriver_bidi])]
+  (* MASC's last start, where it says something of this configuration. *)
+  let host_last_start_lines (note : Masc.Browser_bidi_host_status.last_start_note) =
+    match note with
+    | No_note -> []
+    | Start_record_unreadable detail ->
+        [host_line "MASC's last start: its record cannot be read"; host_said "Detail: " detail]
+    | Failed_start { at; not_attached } ->
+        let kind, why = match (not_attached : Masc.Browser_keeper_firefox_starter.not_attached) with
+          | Operator_needed why -> "waits for the operator", why
+          | Start_failed why -> "failed, the next tries again", why
+          | Not_listed_in_time why -> "no connection in time", why in
+        [host_line (Printf.sprintf "MASC's last start, %s: %s" (host_time at) kind);
+         host_said "Why: " why]
+  (* How a host is started. [address] is the one the last host was given,
+     which is the one to give again while that Firefox runs; with none the
+     launcher's own words stand, and say PORT for the port. A launcher that
+     is not there, or not as an installation wrote it, is not one to run.
+     The path and the address come from files: each is written as one shell
+     word, so neither reads as more of the command than it is. *)
+  let host_attach_lines ~address (attach : Masc.Browser_bidi_host_status.attach) =
+    let lead = "Attach: " in
+    let under = String.make (String.length lead) ' ' in
+    (match attach.standing with
+     | Launcher_installed ->
+         { lead; said = Filename.quote attach.launcher; breaks = At_slashes }
+         :: (match address with
+             | Some address ->
+                 [host_said under (Masc.Browser_bidi_host_status.bidi_url_flag ^ " " ^ Filename.quote address)]
+             | None ->
+                 [host_said under attach.arguments;
+                  host_said under
+                    ("PORT: the " ^ Masc.Browser_bidi_host_status.firefox_flag ^ " Firefox was started with")])
+     | Launcher_not_installed -> [host_said lead "install the browser lane in this workspace first"]
+     | Launcher_needs_reinstall ->
+         [host_said lead "install the browser lane again first (launcher not as installed)"])
+    @ [host_line (transport_setup_row [Browser_lane.Webdriver_bidi])]
+  (* The listed connection can outlive its host, or belong to another
+     host. Keep that distinction visible beside a report that says none ran
+     here or that this host ended. *)
+  let host_connection_note t =
+    let bidi_listed =
+      List.exists (fun (client : client) -> client.transport = Browser_lane.Webdriver_bidi)
+        (listed_clients t) in
+    match t.bidi_host with
+    | Host_reported { state = (Never_started | Ended _ | Died _); _ } when bidi_listed ->
+        [host_line "A listed BiDi connection may be stale or belong to another host"]
+    | Host_not_reported | Host_report_unreadable _ | Host_reported _ -> []
+  (* Everything the picker says of the BiDi host: whether one runs, what
+     stands in the way of the next one, how one is started, and, where MASC
+     starts it, what MASC's last start left. A host that is running is not
+     told how to start one. *)
+  let bidi_host_lines t =
+    match t.bidi_host with
+    | Host_not_reported -> []
+    | Host_report_unreadable { detail; message } ->
+        (* The server's paragraph is longer than most screens have rows for,
+           so where the host's state is said in full comes before it. *)
+        [host_line "BiDi host: this TUI cannot read the server's report";
+         host_line "masc doctor reads the host's record and says where the host stands";
+         host_said "Detail: " detail]
+        @ (match message with None -> [] | Some message -> [host_said "Server: " message])
+    | Host_reported report ->
+        let attach ~address =
+          match report.keeper with
+          | Masc_starts { port; profile; last_start = _ } ->
+              host_masc_lines ~port ~profile report.attach.standing
+          | Lane_off -> host_attach_lines ~address report.attach
+          | Not_configured ->
+              host_attach_lines ~address report.attach
+              @ [host_line "With [browser.live.bidi] in runtime.toml, MASC starts Firefox and host"]
+          | Not_known -> host_attach_lines ~address report.attach in
+        (match report.state with
+         | Never_started ->
+             [host_line "BiDi host: none has run for this workspace"]
+             @ host_connection_note t @ attach ~address:None
+         | Record_missing_but_locked ->
+             [host_line "BiDi host: one holds the workspace lock, but its record is missing";
+              host_line "Do not start another host · inspect the existing process"]
+         | Running entry ->
+             (* The first row is the one a short screen keeps, so it says
+                where the host stands beside the list, not only that it runs. *)
+             let state name = host_line (Printf.sprintf "BiDi host: %s · pid %d" name entry.pid) in
+             let at = host_said "At: " entry.bidi_url in
+             (match host_standing (listed_clients t) entry with
+              | Host_serving -> [state "attached"; at]
+              | Host_unlisted ->
+                  state "attached, not listed by this server"
+                  :: List.map host_line
+                       ["No BiDi connection is listed · hover and drag stay refused";
+                        "With MASC_HTTP_BASE_URL or MASC_HTTP_PORT set, it polls another server";
+                        "If none appears, stop it and start it from a shell without them"]
+                  @ [at]
+              | Host_beside_another_bidi ->
+                  state "attached, not listed under its recorded ID"
+                  :: List.map host_line
+                       ["Another BiDi connection is listed · this host's if it registered again";
+                        "Otherwise that is another host, and this one polls elsewhere or stopped"]
+                  @ [at]
+              | Host_connecting -> [state "connecting"; at])
+             @ host_unacknowledged_lines entry
+         | Ended (entry, ending) ->
+             (* What to do comes before why: on a screen that holds two of
+                these rows, the step is the one that has to be there. *)
+             [host_line (Printf.sprintf "BiDi host: ended %s · pid %d" (host_time ending.at) entry.pid)]
+             @ host_session_lines (host_restart report.keeper entry) entry ending
+             @ host_connection_note t
+             @ [host_said "Reason: " ending.reason]
+             @ host_unacknowledged_lines entry
+             @ attach ~address:(Some entry.bidi_url)
+         | Died entry ->
+             [host_line (Printf.sprintf "BiDi host: pid %d is gone · no reason recorded" entry.pid)]
+             @ List.map host_line
+                 (match host_restart report.keeper entry with
+                  | Operator_restarts ->
+                      ["Its session may be left in Firefox · restart Firefox if a host is refused"]
+                  | (Masc_restarts_there | Masc_starts_elsewhere) as restart ->
+                      "Its session may be left in Firefox" :: masc_maybe_held_lines restart)
+             @ host_connection_note t
+             @ host_unacknowledged_lines entry
+             @ attach ~address:(Some entry.bidi_url)
+         | Unreadable { detail; held = Some true } ->
+             (* What to do comes before why, as for a host that ended. *)
+             [host_line "BiDi host: one runs, and its record cannot be read";
+              host_line "Stop that host before starting another · it refuses a second one";
+              host_said "Detail: " detail]
+         | Unreadable { detail; held = Some false } ->
+             [host_line "BiDi host: none runs, and the last record cannot be read";
+              host_said "Detail: " detail]
+             @ attach ~address:None
+         | Unreadable { detail; held = None } ->
+             [host_line "BiDi host: could not check whether one runs";
+              host_said "Detail: " detail])
+        @ host_last_start_lines
+            (Masc.Browser_bidi_host_status.last_start_note report.keeper report.state)
+        (* A lane that is off serves no host, whatever the host's state. *)
+        @ (match report.keeper with
+           | Lane_off ->
+               [host_line "Live lane off in runtime.toml · it serves nothing, MASC starts nothing"]
+           | Masc_starts _ | Not_configured | Not_known -> [])
+  (* A path on rows of [max_cells], broken before a slash so each name
+     stays whole. A single name longer than a row has nowhere better to
+     break and is cut where the row ends, with every cell of it kept: a
+     space in a name is part of the path. *)
+  let host_path_rows ~max_cells path =
+    let cells = Masc_tui_message_layout.display_width in
+    let pieces =
+      let length = String.length path in
+      let rec cut start index pieces =
+        if index >= length then
+          if index > start then String.sub path start (index - start) :: pieces else pieces
+        else if Char.equal path.[index] '/' && index > start then
+          cut index (index + 1) (String.sub path start (index - start) :: pieces)
+        else cut start (index + 1) pieces
+      in
+      List.rev (cut 0 0 [])
+    in
+    let close current rows = if String.equal current "" then rows else current :: rows in
+    let rows, current =
+      List.fold_left (fun (rows, current) piece ->
+          if cells (current ^ piece) <= max_cells then rows, current ^ piece
+          else if cells piece <= max_cells then close current rows, piece
+          else
+            match List.rev (Masc_tui_message_layout.split_cells ~max_cells piece) with
+            | [] -> close current rows, ""
+            | last :: earlier -> earlier @ close current rows, last)
+        ([], "") pieces
+    in
+    List.rev (close current rows)
+  (* A line on as many rows as it needs at [width] cells: the first behind
+     its lead, the rest under what the lead opened. Nothing is cut, so a
+     reason or a path longer than the screen is still read whole. What is
+     said is made printable first, so the rows are measured as they are
+     drawn. *)
+  let host_line_rows ~width { lead; said; breaks } =
+    let said = Masc.Tui_terminal_text.sanitize_terminal_text said in
+    let rows_of ~max_cells = match breaks with
+      | At_spaces -> Masc_tui_message_layout.wrap_words ~max_cells said
+      | At_slashes -> host_path_rows ~max_cells said in
+    let beside = width - String.length lead in
+    (* A screen so narrow that the lead takes more of a row than it leaves
+       gives the lead a row of its own and what is said the whole width. *)
+    if beside < String.length lead then
+      (match String.trim lead with "" -> [] | lead -> [lead]) @ rows_of ~max_cells:(Int.max 1 width)
+    else
+      let under = String.make (String.length lead) ' ' in
+      match rows_of ~max_cells:beside with
+      | [] -> [lead]
+      | first :: rest -> (lead ^ first) :: List.map (fun row -> under ^ row) rest
+  let bidi_host_rows ~width t = List.concat_map (host_line_rows ~width) (bidi_host_lines t)
+  (* The one row a refused gesture has for the BiDi host. It is this file's
+     words only, so it fits whatever the record holds; the picker says the
+     rest. *)
+  let bidi_host_brief = function
+    | Host_not_reported -> None
+    | Host_report_unreadable _ ->
+        Some "BiDi host: this TUI cannot read the server's report · b:details"
+    | Host_reported report ->
+        Some (match report.state with
+          | Never_started ->
+              (match report.keeper with
+               | Masc_starts _ ->
+                   "BiDi host: none has run for this workspace · b:how MASC starts one"
+               | Lane_off | Not_configured | Not_known ->
+                   "BiDi host: none has run for this workspace · b:how to attach")
+          | Record_missing_but_locked ->
+              "BiDi host: lock held, record missing · b:inspect the existing process"
+          (* A gesture is refused for want of a listed BiDi connection, so a
+             host that runs is one this server does not list. *)
+          | Running { attached_at = Some _; pid; _ } ->
+              Printf.sprintf "BiDi host: pid %d attached, not listed by this server · b:details" pid
+          | Running { attached_at = None; pid; _ } ->
+              Printf.sprintf "BiDi host: pid %d is connecting · b:details" pid
+          | Ended (_, ending) ->
+              Printf.sprintf "BiDi host: ended %s · b:why and what next" (host_time ending.at)
+          | Died entry ->
+              Printf.sprintf "BiDi host: pid %d is gone, no reason recorded · b:what next" entry.pid
+          | Unreadable { held = Some true; _ } ->
+              "BiDi host: one runs, and its record cannot be read · b:details"
+          | Unreadable { held = Some false; _ } ->
+              "BiDi host: none runs, and the last record cannot be read · b:details"
+          | Unreadable { held = None; _ } -> "BiDi host: could not check whether one runs · b:details")
   (* The rows a refused gesture draws: what was not sent and why, then the
      operator's next step. With a serving connection listed the step is the
-     picker and fits the same row; with none listed it is where attaching one
-     is written, on a row of its own. Each row fits 80 columns. *)
+     picker and fits the same row. With none listed, a gesture a BiDi
+     connection serves says where the BiDi host stood and points at the
+     picker for the rest; without a report, and for other work, the second
+     row is where attaching a connection is written. Each row fits 80
+     columns, and there are never more than two. *)
   let unserved_gesture_rows (unserved : unserved_gesture) =
     let cause = "Not sent · " ^ lacking_clause unserved.asked [unserved.capability] in
     match Browser_lane.live_transports_serving unserved.capability with
@@ -3862,8 +4683,58 @@ module Browser_lane_view = struct
     | serving when unserved.serving_listed ->
         [cause ^ " · " ^ transport_names serving ^ " serves it · b:choose browser"]
     | serving ->
+        let host =
+          if List.mem Browser_lane.Webdriver_bidi serving then bidi_host_brief unserved.host else None
+        in
         [cause ^ " · no " ^ transport_names serving ^ " connection is listed";
-         transport_setup_row serving]
+         Option.value host ~default:(transport_setup_row serving)]
+  (* The rows of the gesture the view holds as refused. They are drawn from
+     what the gesture kept, so what is learned of the host afterwards does
+     not rewrite why it was not sent. *)
+  let unserved_rows t = match t.unserved_gesture with
+    | None -> []
+    | Some unserved -> unserved_gesture_rows unserved
+  (* Whether the BiDi host's rows report a host: one that runs or ran, or
+     a record or report that cannot be read. With no host yet they only say
+     how one is started. *)
+  let host_rows_report_a_host t = match t.bidi_host with
+    | Host_not_reported -> false
+    | Host_report_unreadable _ -> true
+    | Host_reported report ->
+        (match report.state with
+         | Never_started -> false
+         | Record_missing_but_locked -> true
+         | Running _ | Ended _ | Died _ | Unreadable _ -> true)
+  (* The rows of a host report a short screen reads first: where the host
+     stands, and what that asks of the operator. *)
+  let picker_host_head_rows = 2
+  let picker_host_head rows =
+    List.filteri (fun index _ -> index < picker_host_head_rows) rows,
+    List.filteri (fun index _ -> index >= picker_host_head_rows) rows
+  (* What the picker keeps for the rows under its choices, which the cursor
+     cannot reach, when there are more of them than this: the first two, and
+     the row that says how many more the screen could not hold. *)
+  let picker_rows_below_wanted = picker_host_head_rows + 1
+  (* What it keeps when the screen has no room for those beside the choices:
+     the first row and the row that counts the rest. *)
+  let picker_rows_below_least = 2
+  (* Choosing is what the picker is for. On a terminal that would be left
+     with fewer choices than this beside the rows below, or fewer than there
+     are when there are fewer than this, the choices keep the room. *)
+  let picker_least_choices = 3
+  (* How many of [rows] the picker gives its choices. [rows] is what the
+     screen has for the choices and all that is drawn after them, and
+     [below] how many rows that is. *)
+  let picker_choice_rows ~rows ~choices ~below =
+    let rows = Int.max 1 rows in
+    let least = Int.min picker_least_choices choices in
+    let kept_below kept = Int.min below kept in
+    match
+      List.find_opt (fun kept -> rows - kept_below kept >= least)
+        [picker_rows_below_wanted; picker_rows_below_least]
+    with
+    | Some kept -> rows - kept_below kept
+    | None -> rows
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
@@ -3914,16 +4785,20 @@ module Browser_lane_view = struct
       | Connected_browser client -> choose_client client t
       | Stagehand_browser -> switch_source Stagehand t
       | Automation_browser -> switch_source Automation t
+  (* The picker shows nothing of the read before the one it is waiting on:
+     the list and the BiDi host report go together, as they came. *)
+  let withdraw_discovery t = { t with clients = None; bidi_host = Host_not_reported }
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
         (match result with
          | Error detail when t.source <> Live && purpose = Choose_client ->
-             { t with clients = None; client_picker = Some 0; load = Failed detail }, false
-         | Error detail -> { t with clients = None; selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
+             { t with clients = None; bidi_host = Host_not_reported; client_picker = Some 0;
+               load = Failed detail }, false
+         | Error detail -> { t with clients = None; bidi_host = Host_not_reported; selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
              scroll = 0; client_picker = Some 0; load = Failed detail }, false
-         | Ok clients ->
-             let next = { t with clients = Some clients; load = Idle } in
+         | Ok { listed = clients; bidi_host } ->
+             let next = { t with clients = Some clients; bidi_host; load = Idle } in
              if t.source <> Live && purpose = Choose_client then
                { next with client_picker = Some 0 }, false
              else
@@ -3979,6 +4854,33 @@ module Browser_lane_view = struct
                 else loop (client :: acc) rest
           in loop [] rows
       | _ -> Error "expected browser clients array"
+  (* The BiDi host's part of the same answer. A report this TUI cannot read
+     does not cost the operator the connection list, nor the paragraph the
+     server wrote for them. *)
+  let decode_bidi_host = function
+    | None | Some `Null -> Host_not_reported
+    | Some report ->
+        (match Masc.Browser_bidi_host_status.report_of_json report with
+         | Ok report -> Host_reported report
+         | Error detail ->
+             let message = match report with
+               | `Assoc fields ->
+                   (match List.assoc_opt "message" fields with
+                    | Some (`String message) -> Some message
+                    | Some _ | None -> None)
+               | _ -> None in
+             Host_report_unreadable { detail; message })
+  let decode_discovery json =
+    let* listed = decode_clients json in
+    (* The same [data] the connections were read from. A server from before
+       the report has no such field. *)
+    let* data = field "data" json in
+    let* reported =
+      match data with
+      | `Assoc fields -> Ok (List.assoc_opt "bidiHost" fields)
+      | _ -> Error "expected object"
+    in
+    Ok { listed; bidi_host = decode_bidi_host reported }
   let parse_client_id source json =
     let* value = field "clientId" json in
     match source, value with
@@ -4554,8 +5456,21 @@ module Browser_history = struct
     | Listing
     | List_failed of string
     | Entries of { entries : entry list; cursor : int; selection : selection }
-  type t = { keeper_name : string; content : content; scroll : int }
-  let create keeper_name = {keeper_name;content=Listing;scroll=0}
+  type resume = Reload_list | Reload_selection
+  type t = { keeper_name : string; content : content; scroll : int; resume : resume option }
+  let create keeper_name = {keeper_name;content=Listing;scroll=0;resume=None}
+  let start_read ~reload t =
+    let content = if reload then Listing else match t.content with
+      | Entries entries -> Entries {entries with selection=Loading}
+      | Listing | List_failed _ -> t.content in
+    {t with content; resume=None}
+  let suspend t =
+    let detail = "Workspace identity is unconfirmed; reading will resume after recovery" in
+    match t.content with
+    | Listing -> {t with content=List_failed detail; resume=Some Reload_list}
+    | Entries ({selection=Loading; _} as entries) ->
+        {t with content=Entries {entries with selection=Failed detail}; resume=Some Reload_selection}
+    | List_failed _ | Entries _ -> t
   let entries (snapshot : Tui_decode.keeper_calls_snapshot) =
     snapshot.kcs_entries |> List.rev |> List.concat_map (fun (call : Tui_decode.keeper_call) ->
       match call.kc_execution_id with
@@ -4567,7 +5482,7 @@ module Browser_history = struct
     | Entries {entries;cursor;_} -> List.nth_opt entries cursor
     | Listing | List_failed _ -> None
   let select cursor entries t =
-    {t with content=Entries {entries;cursor;selection=Loading};scroll=0}
+    {t with content=Entries {entries;cursor;selection=Loading};scroll=0;resume=None}
   let move delta t = match t.content with
     | Entries {entries;cursor;_} when entries <> [] ->
         let next = max 0 (min (List.length entries - 1) (cursor + delta)) in
@@ -4813,17 +5728,14 @@ let browser_lane_url_line ~cols draft =
   let safe = Masc_tui_keeper_chat_projection.terminal_safe_text draft in
   "  URL> " ^ Masc_tui_message_layout.input_viewport ~max_cells:(max 1 (cols - 12)) safe ^ "▏"
 
-type workspace_activity_read = {
-  war_at : float;
-  war_hours : float;
-  war_keepers : (string * (Tui_decode.file_change_snapshot, string) result) list;
-}
+type workspace_activity_read = Tui_decode.repository_activity_snapshot
 
 type runtime_config_reading = {
   rcv_path : string;
   rcv_source_text : string;
   rcv_rows : (string * string) list list;
   rcv_metadata : Masc_tui_runtime_config_view.metadata;
+  rcv_account_emails : (Masc_tui_account_login.account_emails, string) result;
 }
 
 type runtime_config_edit_view = Config_edit_draft | Config_edit_current of (string * string) list list
@@ -4837,6 +5749,7 @@ type runtime_config_edit_session = {
 (* One MSX frame as the server hands it over (RFC-0439 §3.7): native-resolution
    RGB plus what to title it. The spectator downsamples the pixels itself. *)
 type msx_menu_mode = Boot_game | Change_disk
+type machine_interaction = Observe_machine | Control_machine
 
 (* One row of the MSX load menu. The highlight is kept as the row itself, not
    its position: rows come and go while the menu is open (the DOS watch row
@@ -5043,6 +5956,21 @@ type play_invite =
   ; shown_name : string option
   }
 
+type play_change_kind = Masc_tui_play_pending.kind = Issue_invite of string | Revoke_invite of string
+type play_change_request = {
+  change_ticket : unit ref;
+  change_id : string;
+  change_workspace : workspace_input_identity;
+  change_kind : play_change_kind;
+}
+type play_change = Preparing_invite_change of play_change_request
+  | Sending_invite_change of play_change_request | Unknown_invite_change of play_change_request
+  (* Sent by this process, then settled in the journal by another TUI that
+     verified it finished. It owns only its response: an issue response
+     carries the only copy of the invite link. *)
+  | Detached_invite_change of play_change_request
+type play_change_outcome = Change_confirmed | Change_unknown
+
 type keeper_priority_control = {
   priority_generation : int;
   priority_requests : Masc_tui_keeper_chat_projection.request list;
@@ -5089,6 +6017,18 @@ type schedule_form_refusal =
   ; sfr_workspace : workspace_input_identity option
   }
 
+type sent_image_read =
+  { sir_generation : int
+  ; sir_view : surface
+  ; sir_keeper : string option
+  ; sir_name : string
+  ; sir_authority : unit ref
+  }
+
+type lane_nested_read =
+  | Lane_subscriptions_read
+  | Lane_declaration_read of { path : string; edit : bool }
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5130,6 +6070,7 @@ type state = {
   mutable help_open: bool;
   mutable keeper_deletions_open: bool;
   mutable keeper_deletions_loading: bool;
+  mutable keeper_deletions_retry_receipt: (int * string) option;
   mutable keeper_deletions_generation: int;
   mutable keeper_deletions_cursor: int;
   mutable keeper_deletions_scroll: int;
@@ -5164,6 +6105,8 @@ type state = {
   mutable keeper_chat_control_pending : (string * int64) list;
   mutable keeper_interactive_waiting : (string * string * local_intervention) list;
   mutable keeper_queue_inflight : string list;
+  mutable keeper_queue_readings : string list;
+  mutable keeper_queue_inspections : (string * unit ref) list;
   (* Exact requests awaiting admission and accepted requests awaiting their
      ordered run-next call. No priority intent is inferred from queue text. *)
   mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request list;
@@ -5209,6 +6152,9 @@ type state = {
   (* A saved activation may finish while its panel is closed. It belongs to
      this workspace and is cleared when workspace authority is withdrawn. *)
   mutable account_login_detached: Masc_tui_account_login.t list;
+  mutable account_login_readings: (Masc_tui_account_login.t * int * Masc_tui_account_login.action) list;
+  mutable account_login_activation_resume: (Masc_tui_account_login.t * int * Masc_tui_account_login.saved) list;
+  mutable account_login_read_resume: (Masc_tui_account_login.t * int * Masc_tui_account_login.action) list;
   mutable context_inspector_open: bool;
   mutable context_inspector_keeper: string option;
   mutable context_inspector_loading: bool;
@@ -5309,8 +6255,11 @@ type state = {
   local_base_path: string;
   mutable workspace_identity: workspace_identity;
   mutable workspace_authority: workspace_authority;
+  mutable workspace_read_authority: unit ref;
+  mutable pending_task_followups: pending_task_followup list;
   mutable suspended_keeper_inputs: (workspace_input_identity option * suspended_keeper_input) list;
   mutable workspace_cancellations: (unit ref * (unit -> unit)) list;
+  mutable workspace_observation_cancellations: (unit ref * (unit -> unit)) list;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
@@ -5326,6 +6275,7 @@ type state = {
   mutable browser_viewport : (Browser_lane_view.screenshot * string) option;
   mutable image_request_generation: int;
   (* Any new input cancels an outstanding asynchronous image preview. *)
+  mutable sent_image_read: sent_image_read option;
   (* The MSX spectator screen, the image overlay's twin: while [msx_open] is
      set the loop draws no frames and every key belongs to the emulator. The
      machine is [Option] so it exists only once the screen has been opened,
@@ -5337,6 +6287,7 @@ type state = {
   mutable msx_last_poll_ns: int64;
   (* Which machine the spectator shows. The menu picks it. *)
   mutable machine_source: Masc.Machine_lane.t;
+  mutable machine_interaction: machine_interaction;
   (* The last live read of each machine. [msx_live] is [Showing] the picture
      [msx_frame] holds, with its change mark, whether a live read or a tick
      answer drew it: the tick returns its picture and mark from one snapshot,
@@ -5352,10 +6303,15 @@ type state = {
   mutable dos_activity: Masc_tui_machine_live.activity_entry list;
   (* Locally retained invite cards, newest first. The selected card remains
      open until the operator closes it; the modal sweep leaves it alone. *)
+  mutable collab: Masc_tui_collab.t option;
+  mutable play_room: Masc_tui_play_room.t option;
+  mutable play_room_quarantine: (workspace_input_identity * Masc_tui_play_room.t) option;
   mutable play_invite: play_invite;
+  mutable play_invite_quarantine: (workspace_input_identity * play_invite) option;
   mutable play_invite_scroll: int;
-  (* Serialize issue requests so their one-time answers arrive in order. *)
-  mutable play_invite_inflight: bool;
+  (* Serialize issue and revoke across chat/Collab owners, including a closed
+     view: a delayed receipt must not revive or erase a reissued card. *)
+  mutable play_changes: play_change list;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -5407,6 +6363,8 @@ type state = {
   (* The keeper-voice screen, drawn instead of the voice pane while it is
      open. Never both this and the wizard: each is a whole surface. *)
   mutable voice_agent_voices: voice_agent_session option;
+  mutable lane_nested_read_resume: (int * lane_nested_read) option;
+  mutable lane_installer_read_resume: (int * Masc_tui_lane_installer.read) option;
   (* The number the next wizard save is sent under. Never reused, so a reply
      for a save made by a session that has since closed cannot match the one
      open now. *)
@@ -5446,6 +6404,7 @@ type state = {
   mutable prompts_librarian_input: (string * string list) option;
   mutable prompts_librarian_input_error: string option;
   mutable prompts_librarian_input_loading: bool;
+  mutable prompts_librarian_input_requested: string option;
   (* Prompt presets (#32777). The pane holds the listing, the name being
      typed for a save, the preset armed for a restore or delete, and the last report —
      which stays on screen because it is the only place the skipped keys and
@@ -5800,6 +6759,7 @@ type state = {
   mutable gate_error: string option;
   mutable gate_snapshot_observed: bool;
   mutable gate_snapshot_read: Snapshot_read.t;
+  mutable gate_receipt_refresh_pending: bool;
   (* Keepers whose approval gate runs every call unasked. Names only: the
      wire carries (keeper, mode) pairs and [auto] is the absent default, so
      what the pane needs is exactly the yolo set. *)
@@ -5858,7 +6818,9 @@ type state = {
       (** What [/find] was last given on this pane, or [""] before it is used.
           Kept so the arg-less form continues the same search instead of
           asking for the text again. *)
-  mutable msg_find_at: msg_anchor option;
+  msg_search_generation: int Atomic.t;
+      (** Async search admission generation; shared target reset retires old jobs. *)
+  mutable msg_find_at: chat_search_cursor option;
       (** Structural identity of the message [/find] last landed on. The next
           search resolves it in the current causal timeline and starts
           strictly older. An index cannot survive a broadcast or Journal
@@ -5958,6 +6920,8 @@ type state = {
   mutable schedule_form_refusal: schedule_form_refusal option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
+  mutable keeper_lanes_reread_pending: bool;
+  mutable keeper_lanes_resume: bool;
   mutable lane_inventory: Masc.Tui_decode_lane_inventory.snapshot option;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
@@ -6022,16 +6986,20 @@ type state = {
   mutable tools_scroll: int;
   mutable tools_skill_cursor: int;
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
+  mutable tools_evidence_request: unit ref option;
+  mutable tools_evidence_reference: Skill_reference.t option;
   mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
   mutable lane_addons: Masc_tui_lane_addons.t option;
   mutable lane_addons_cached: Masc_tui_lane_addons.t;
   mutable lane_addons_generation: int;
+  mutable lane_addons_reading: int option;
   mutable browser_lane: Browser_lane_view.t option;
   mutable browser_history: Browser_history.t option;
   mutable browser_history_generation: int;
   mutable browser_lane_visibility: browser_lane_visibility;
   mutable browser_lane_generation: int;
+  mutable browser_lane_read_resume: (int * Browser_lane_view.t * Browser_lane_view.operation) option;
   mutable connectors: Masc.Tui_decode_connectors.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_inflight: bool;
@@ -6093,6 +7061,7 @@ type state = {
   mutable runtime_lane_replacement_selection:
     (slot_editor_target * slot_editor_identity * slot_editor_identity) option;
   mutable runtime_lane_write: runtime_lane_write;
+  mutable runtime_dim_refusals: bool;
   mutable runtime_cursor: int;
   mutable runtime_surface_generation: int;
   mutable runtime_surface_inflight: int option;
@@ -6192,6 +7161,7 @@ type state = {
      that row's line number in the whole file, so the lookups are scattered
      rather than sequential and a list walked from the front on every one. *)
   mutable code_file: (string, (string * string) list array) Masc_tui_fetched.t;
+  mutable code_file_resume_intent: code_file_load_intent;
   mutable code_file_scroll: int;
   (* The line the pane's cursor is on (0-based), the anchor a language-server
      question is asked at. j/k move it; the scroll follows to keep it
@@ -6222,6 +7192,9 @@ type state = {
   mutable code_history:
     (code_workspace_scope * string, code_history_listing) Masc_tui_fetched.t;
   mutable code_history_open: bool;
+  mutable code_history_expanded: int option;
+      (** Listing occurrence whose recorded text is expanded. Reset when a new
+          listing lands; equal payloads remain distinct timeline records. *)
   mutable code_history_scroll: int;  (** Physical wrapped rows; Enter resolves the visible row owner. *)
   (* The file pane's diff view: d on an open file swaps the content for what
      the working tree holds against HEAD, keyed the same way. One overlay at
@@ -6467,16 +7440,13 @@ type state = {
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: (int * string) option;
   mutable msg_copy_generation: int;
-  (* The newest row [msg_scroll] counts back from, by causal row identity, while the
-     operator is reading back. Counting from whatever is newest right now made
-     the count mean something different every time a reply landed: the new rows
-     go on that end, so the same count lands further down and the window slides
-     toward text nobody asked to see. Pinned when they scroll off the bottom
-     and released when they return to it, which is also how they get back to
-     following the turn. *)
-  mutable msg_scroll_pin: msg_anchor option;
-  (* How many rows above the newest the chat pane is showing. 0 is the bottom,
-     where the pane follows a running turn. Held rather than derived: an
+  mutable chat_command_reads: (unit ref * unit ref * string) list;
+  mutable msg_copy_pending: (int * string * unit ref) option;
+  (* Actual projected body rows on the last scrolled frame. History and journal
+     origins share the same pin, including their canonical reply aliases. *)
+  mutable msg_scroll_pin: chat_scroll_pin option;
+  (* How many rows above the newest the chat pane is showing. 0 without an
+     explicit search pin follows the running turn. Held rather than derived: an
      operator reading back should stay where they are while the keeper keeps
      talking. *)
   mutable msg_scroll: int;
@@ -6487,6 +7457,7 @@ type state = {
   mutable msg_older_cursor: float option;
   mutable msg_older_exist: bool;
   mutable msg_older_loading: bool;
+  mutable msg_older_resume: (string * float) option;
   mutable msg_older_error: string option;
   (* Presentation-only defaults come from the CLI and can be changed in the
      pane without mutating the transcript. *)
@@ -6531,23 +7502,22 @@ type state = {
      pruned, or unreadable -- so a refresh does not ask for them again this
      session. A request that never got an answer is not here: the next
      refresh asks again. *)
-  mutable msg_journal_unavailable: string list;
+  mutable msg_journal_unavailable: journal_key list;
   (* Journal sources a fiber is reading right now, so a load that
      arrives before the read returns does not start a second one. *)
-  mutable msg_journal_inflight: string list;
+  mutable msg_journal_inflight: journal_key list;
+  mutable msg_native_tasks: (string * Masc_tui_native_tasks.t) list;
+  mutable msg_native_tasks_inflight: string list;
+  mutable msg_native_tasks_audit_pending: string list;
   (* Journal sources a stream frame named while their journal was being read,
      with the highest journal seq the frames named: the read in flight may
      have stopped short of that line, so when it lands another read starts
      from where it stopped -- unless it reached the line, which ends the
-     chain. One entry per operation, however many frames arrived. *)
-  mutable msg_journal_wanted: (string * int option) list;
+     chain. One entry per Keeper and typed source, however many frames arrived. *)
+  mutable msg_journal_wanted: (journal_key * int option) list;
   (* The server refused this client's credential for the journal endpoint.
      Said once; no journal is asked for again this session. *)
   mutable msg_journal_reads_refused: bool;
-  (* The settled logs held when [msg_scroll_pin] was taken. Their rows were on
-     the screen the operator anchored, so they are not rows that arrived
-     since; a log held later is. *)
-  mutable msg_scroll_pin_settled: turn_log list;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
@@ -6558,12 +7528,326 @@ type state = {
    them. A successful health response with missing paths is still unread;
    only comparable paths can confirm that an origin has been replaced. *)
 let server_authority_ready state =
+  (* An unconfirmed match keeps the identity it last confirmed so its rows
+     stay on screen; that identity does not authorize a new read. *)
+  (match state.workspace_identity with
+   | Workspace_identity_match_unconfirmed _ -> false
+   | Workspace_identity_unread | Workspace_identity_match
+   | Workspace_identity_mismatch _ -> true)
+  &&
   match state.server_identity with
   | Some identity ->
       identity.Tui_decode.sid_state_ready <> Some false
       && not (String.equal identity.sid_base_path "")
       && not (String.equal identity.sid_masc_root "")
   | None -> false
+
+let remember_task_followup state ~expected_workspace action =
+  state.pending_task_followups <- state.pending_task_followups @
+    [{tf_workspace = expected_workspace; tf_authority = state.workspace_authority;
+      tf_action = action}]
+
+(* Consume each ready followup once, leaving unread identity/roster work
+   pending. A comparable foreign workspace retires it even if that workspace
+   has not finished booting. *)
+let take_task_followups state ~ready =
+  let foreign held =
+    held.tf_authority <> state.workspace_authority
+    || match state.server_identity with
+       | Some current when current.Tui_decode.sid_base_path <> ""
+                           && current.sid_masc_root <> "" ->
+           not (String.equal (canonical_path held.tf_workspace.sid_base_path)
+                  (canonical_path current.sid_base_path)
+                && String.equal (canonical_path held.tf_workspace.sid_masc_root)
+                     (canonical_path current.sid_masc_root))
+       | Some _ | None -> false
+  in
+  let run, withdrawn, waiting = List.fold_left (fun (run, withdrawn, waiting) held ->
+    if foreign held then run, held.tf_action :: withdrawn, waiting
+    else if state.workspace_identity = Workspace_identity_match
+            && server_workspace_matches ~expected:(Some held.tf_workspace)
+                 (match state.server_identity with Some id -> Ok id | None -> Error "unread")
+            && ready held.tf_action
+    then held.tf_action :: run, withdrawn, waiting
+    else run, withdrawn, held :: waiting)
+    ([], [], []) state.pending_task_followups in
+  state.pending_task_followups <- List.rev waiting;
+  List.rev run, List.rev withdrawn
+
+let workspace_reply_admitted state ~authority ~reading ~kind =
+  authority = state.workspace_authority
+  && match kind with
+     | Workspace_operation_outcome -> true
+     | Workspace_observation ->
+       server_authority_ready state
+       && match reading with
+          | Some admitted -> admitted == state.workspace_read_authority
+          | None -> false
+
+(* A POST receipt can outlive the GET started after it, including a result
+   already queued when identity is lost. Never promote that GET's authority
+   merely because it shares a completion with an admitted operation. *)
+let workspace_operation_reply state ~authority ~reading (receipt, observation) =
+  let observation = match observation with
+    | Error _ -> observation
+    | Ok _ when workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation -> observation
+    | Ok _ -> Error "Action outcome retained; follow-up reading was retired while workspace identity was unconfirmed. Refresh before acting again."
+  in
+  receipt, observation
+
+let retain_resource_read state ~uri =
+  let same_resource = match state.resource_content with
+    | Some (current, _) -> String.equal current uri
+    | None -> false in
+  state.resource_pending_uri <- Some uri;
+  if not same_resource then begin
+    state.resource_content <- None;
+    state.resource_content_error <- None;
+    state.resource_scroll <- 0
+  end
+
+let retain_sandbox_log_read state ~keeper_name =
+  state.keeper_sandbox_logs_requested <- Some keeper_name;
+  state.keeper_sandbox_logs_origin <- state.server_identity
+
+type retired_operation_observation =
+  | Browser_scene_observation of int * Browser_lane_view.t * Browser_lane_view.operation
+  | Lane_subscriptions_observation of int
+
+let retain_operation_observation state = function
+  | Browser_scene_observation (generation, prior, operation) ->
+      (match state.browser_lane with
+       | Some current when generation = state.browser_lane_generation
+           && prior.source = current.source
+           && prior.selected_client = current.selected_client
+           && prior.selected_tab = current.selected_tab ->
+             state.browser_lane_read_resume <- Some (generation, current, operation);
+             true
+       | _ -> false)
+  | Lane_subscriptions_observation generation ->
+      (match state.lane_addons with
+       | Some view when view.generation = generation
+           && Option.is_some view.subscription_panel ->
+             state.lane_nested_read_resume <- Some (generation, Lane_subscriptions_read);
+             true
+       | _ -> false)
+
+(* The deletion overlay keeps its confirmed inventory while identity is
+   unavailable. Invalidate the read generation as well: reconfirming A must
+   not admit a reply that was in flight during an uncertain A -> B -> A. *)
+let suspend_keeper_deletions_read state =
+  state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
+  state.keeper_deletions_loading <- false
+
+let suspend_account_login_read (view : Masc_tui_account_login.t) =
+  view.phase <- (match view.phase with
+    | Masc_tui_account_login.Finished outcome -> Finished {outcome with refresh_failed=true}
+    | Loading | Providers _ | Logging | Models | Documented_context _ | Saving
+    | Removing | Failed | Removal _ -> Failed);
+  view.notice <- "Workspace reading is unconfirmed; read again after identity returns."
+
+let suspend_voice_wizard_read state =
+  let module Wizard = Masc_tui_voice_wizard_session in
+  state.voice_wizard <- Option.map (fun (session : Wizard.voice_wizard_session) ->
+    match session.vws_save with
+    | Wizard.Save_unanswered {request; _} ->
+        Option.value ~default:session (Wizard.voice_wizard_after_reread session ~request
+          (Error "workspace identity is unconfirmed; the save outcome is still unknown"))
+    | Save_probing request ->
+        Option.value ~default:session (Wizard.voice_wizard_after_probe session ~request
+          (Error "Configuration saved; endpoint probe retired while workspace identity was unconfirmed."))
+    | Save_not_sent | Save_sending _ | Save_settled
+    | Save_needs_reopen _ -> session) state.voice_wizard
+
+(* Observation receipts have a shorter lifetime than admitted operations.
+   Retire their owners without cancelling a write or erasing its outcome,
+   the rows already shown, navigation, or the operator's draft. *)
+let retire_keeper_message_search state =
+  Atomic.incr state.msg_search_generation
+
+let suspend_workspace_readings state =
+  retire_keeper_message_search state;
+  state.workspace_read_authority <- ref ();
+  (* Retired completions cannot release these slots. Keep observations and
+     explicit audit intent for a confirmed read in the successor epoch. *)
+  state.msg_native_tasks_inflight <- [];
+  let cancellations = state.workspace_observation_cancellations in
+  state.workspace_observation_cancellations <- [];
+  List.iter (fun (_, cancel) -> cancel ()) cancellations;
+  state.observer <- Observer_off;
+  state.detail_read_authority <- ref ();
+  state.detail_reads <- [];
+  suspend_keeper_deletions_read state;
+  suspend_voice_wizard_read state;
+  state.keeper_queue_inflight <- List.filter
+    (fun keeper -> not (List.mem keeper state.keeper_queue_readings)) state.keeper_queue_inflight;
+  state.keeper_queue_readings <- [];
+  List.iter (fun ((view : Masc_tui_account_login.t), generation, action) ->
+    if view.generation = generation then begin
+      state.account_login_read_resume <- (view, generation, action)
+        :: List.filter (fun (pending, _, _) -> pending != view) state.account_login_read_resume;
+      suspend_account_login_read view
+    end)
+    state.account_login_readings;
+  state.account_login_readings <- [];
+  state.tools_evidence_request <- None;
+  state.browser_history_generation <- state.browser_history_generation + 1;
+  state.browser_history <- Option.map Browser_history.suspend state.browser_history;
+  state.browser_lane <- Option.map (fun (view : Browser_lane_view.t) ->
+    match view.load with
+    | Browser_lane_view.Loading (generation, operation) when Browser_lane_view.operation_is_read operation ->
+        state.browser_lane_read_resume <- Some (generation, view, operation);
+        {view with load=Browser_lane_view.Idle; refresh_pending=None}
+    | _ -> view) state.browser_lane;
+  let suspend_lane (view : Masc_tui_lane_addons.t) =
+    if state.lane_addons_reading = Some view.generation then begin
+      Option.iter (fun read -> state.lane_installer_read_resume <- Some (view.generation, read))
+        (Option.bind view.installer Masc_tui_lane_installer.pending_read);
+      {view with loading=false; installer=Option.map Masc_tui_lane_installer.suspend_read view.installer}
+    end else view in
+  state.lane_addons <- Option.map suspend_lane state.lane_addons;
+  state.lane_addons_cached <- suspend_lane state.lane_addons_cached;
+  state.lane_addons_reading <- None;
+  state.board_detail <- Masc_tui_board_detail.suspend state.board_detail;
+  state.acting_pane_changes <- Masc_tui_fetched.suspend state.acting_pane_changes;
+  state.prompts <- Masc_tui_fetched.suspend state.prompts;
+  state.preset_detail <- Masc_tui_fetched.suspend state.preset_detail;
+  state.keeper_board_quarantines <- Masc_tui_fetched.suspend state.keeper_board_quarantines;
+  state.workspace_activity <- Masc_tui_fetched.suspend state.workspace_activity;
+  state.memory_input <- Masc_tui_fetched.suspend state.memory_input;
+  state.memory_facts <- Masc_tui_fetched.suspend state.memory_facts;
+  state.code_listing <- Masc_tui_fetched.suspend state.code_listing;
+  state.code_file <- Masc_tui_fetched.suspend state.code_file;
+  state.code_history <- Masc_tui_fetched.suspend state.code_history;
+  state.code_diff <- Masc_tui_fetched.suspend state.code_diff;
+  state.code_blame <- Masc_tui_fetched.suspend state.code_blame;
+  state.code_lsp_query <- Masc_tui_fetched.suspend state.code_lsp_query;
+  state.fusion_runs <- Masc_tui_fetched.suspend state.fusion_runs;
+  (match state.goal_confirmation with
+   | Masc_tui_planning_detail.Inspecting reading ->
+       state.goal_confirmation <- Masc_tui_planning_detail.Inspecting
+         (Masc_tui_fetched.suspend reading)
+   | Masc_tui_planning_detail.Submitting _ -> ());
+  state.exact_activity_sessions <- List.map Masc_tui_exact_activity.suspend_read state.exact_activity_sessions;
+  state.browser_activity_sessions <- List.map Masc_tui_browser_activity.suspend_read state.browser_activity_sessions;
+  state.machine_activity_sessions <- List.map Masc_tui_machine_activity.suspend_read state.machine_activity_sessions;
+  let suspend_application (view : Masc_tui_lane_addons.t) =
+    {view with application_reading = Masc_tui_lane_application.suspend view.application_reading} in
+  state.lane_addons <- Option.map suspend_application state.lane_addons;
+  state.lane_addons_cached <- suspend_application state.lane_addons_cached;
+  state.keeper_tool_approvals_read <- Snapshot_read.invalidate state.keeper_tool_approvals_read;
+  state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
+  state.schedules_read <- Snapshot_read.invalidate state.schedules_read;
+  state.keeper_sandbox_logs_inflight <- None;
+  (* A reread queued behind the retired read is satisfied by the replacement
+     read that reconfirmation launches; keep only its demand. *)
+  state.keeper_lanes_resume <-
+    state.keeper_lanes_resume || state.keeper_lanes_inflight || state.keeper_lanes_reread_pending;
+  state.keeper_lanes_inflight <- false;
+  state.keeper_lanes_reread_pending <- false;
+  state.connectors_inflight <- false;
+  state.connectors_reload_after_inflight <- false;
+  state.memory_health_inflight <- false;
+  state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
+  (match state.runtime_catalog_reading with
+   | Runtime_catalog_loading -> state.runtime_catalog_reading <- Runtime_catalog_unread
+   | Runtime_catalog_unread | Runtime_catalog_failed _ | Runtime_catalog_read -> ());
+  state.runtime_config_read <- `Idle;
+  state.runtime_params_loading <- false;
+  state.standalone_lanes_inflight <- false;
+  state.standalone_lanes_reread_pending <- false;
+  state.runtime_surface_inflight <- None;
+  state.runtime_surface_force_pending <- false;
+  state.clients_surface_inflight <- false;
+  state.repositories_inflight <- false;
+  state.tools_read_inflight <- None;
+  state.harness_inflight <- false;
+  state.verification_inflight <- false;
+  state.verification_refresh_after_inflight <- false;
+  state.fusion_detail_inflight <- None;
+  state.fusion_historical_inflight <- None;
+  state.lane_runs_loading <- false;
+  state.schedule_wake_history_inflight <- None;
+  state.keeper_turns_inflight <- false;
+  state.keeper_calls_loading <- false;
+  state.keeper_calls_refresh_pending <- false;
+  state.msg_file_changes_loading <- false;
+  state.msg_file_changes_refresh_pending <- false;
+  state.msg_history_inflight <- None;
+  if state.msg_older_loading then
+    state.msg_older_resume <-
+      (match state.msg_target_keeper_name, state.msg_older_cursor with
+       | Some keeper, Some before -> Some (keeper, before)
+       | _ -> None);
+  state.msg_older_loading <- false;
+  state.msg_journal_inflight <- [];
+  state.context_inspector_loading <- false;
+  state.prompts_librarian_input_loading <- false;
+  state.msx_live_in_flight <- None;
+  state.dos_live_in_flight <- None;
+  (* The room's read reply is discarded with this reading; without a release
+     its pending slot would block every later poll. *)
+  state.play_room <- Option.map Masc_tui_play_room.retire_read state.play_room
+
+(* A discarded bundle proves its observation interval was inconsistent,
+   even when its last probe sees the original workspace again. Retire that
+   interval before allowing the last identity to confirm a new reading. *)
+let retire_refused_workspace_readings state ~detail latest =
+  suspend_workspace_readings state;
+  match latest with
+  | Some (Ok _ as reading) -> reading
+  | Some (Error _) | None -> Error detail
+
+let begin_keeper_deletions_read state =
+  if not (server_authority_ready state) || state.keeper_deletions_loading then None
+  else (
+    state.keeper_deletions_loading <- true;
+    state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
+    Some state.keeper_deletions_generation)
+
+let apply_keeper_deletions_read state ~generation
+    (result : (Masc_tui_keeper_control.deletion_inventory, string) result) =
+  if generation = state.keeper_deletions_generation then (
+    state.keeper_deletions_loading <- false;
+    if server_authority_ready state then (
+      let selected = match state.keeper_deletions with
+        | Some (Ok inventory) -> List.nth_opt inventory.operations state.keeper_deletions_cursor
+        | Some (Error _) | None -> None in
+      state.keeper_deletions <- Some result;
+      match result with
+      | Error _ -> ()
+      | Ok inventory ->
+        (match state.keeper_deletions_retry_receipt with
+         | Some (received_at, _) when generation > received_at ->
+             state.keeper_deletions_retry_receipt <- None
+         | _ -> ());
+        let same_operation row = match selected with
+          | None -> false
+          | Some previous -> Masc.Keeper_shutdown_types.Operation_id.equal
+              (Masc_tui_keeper_control.deletion_operation_id row)
+              (Masc_tui_keeper_control.deletion_operation_id previous) in
+        let rec find index = function
+          | [] -> None
+          | row :: rest -> if same_operation row then Some index else find (index + 1) rest in
+        state.keeper_deletions_cursor <- (match find 0 inventory.operations with
+          | Some index -> index | None -> 0)))
+
+(* Why a write launched under [authority] must not go out now: the workspace
+   moved since launch, or the server identity is not confirmed (unread, or a
+   match kept unconfirmed). [None] means it may be sent. *)
+let write_authority_refusal state authority =
+  if authority <> state.workspace_authority then Some "Workspace authority withdrawn"
+  else if not (server_authority_ready state) then Some "Workspace identity is unconfirmed"
+  else None
+
+let begin_preset_detail_read state ~name =
+  if not (server_authority_ready state) then None
+  else
+    match Masc_tui_fetched.start ~equal:String.equal state.preset_detail ~key:name with
+    | Masc_tui_fetched.Already_loading -> None
+    | Masc_tui_fetched.Started (next, request) ->
+        state.preset_detail <- next;
+        Some request
 
 (* The one definition of "same workspace" used to admit a held expectation
    back into the poll after authority is restored. Same answer as the screen
@@ -6657,7 +7941,7 @@ let identity_logins_for_keeper (state : state) keeper_name =
 
 (* A recovered provider read may still be pending browser consent. Continue
    the existing cadence without resurrecting the withdrawn consent URL. *)
-let identity_login_pending_for_keeper (state : state) keeper_name =
+let identity_login_pending_for_keeper (state : state) ~now:_ keeper_name =
   server_authority_ready state
   && List.exists (fun expectation ->
        String.equal expectation.ile_keeper keeper_name
@@ -6668,10 +7952,10 @@ let identity_login_pending_for_keeper (state : state) keeper_name =
    after each one from any surface: an operator who consented in a browser
    and then left the Identity tab, or opened another Keeper, still sees the
    login land. *)
-let identity_login_pending_keepers (state : state) =
+let identity_login_pending_keepers (state : state) ~now =
   state.identity_login_expectations
   |> List.filter_map (fun expectation ->
-       if identity_login_pending_for_keeper state expectation.ile_keeper
+       if identity_login_pending_for_keeper state ~now expectation.ile_keeper
        then Some expectation.ile_keeper
        else None)
   |> List.sort_uniq String.compare
@@ -6683,7 +7967,8 @@ let start_identity_login_request (state : state) ~keeper_name ~provider_id =
   let request =
     { ilr_keeper = keeper_name;
       ilr_provider = provider_id;
-      ilr_generation = state.identity_login_generation }
+      ilr_generation = state.identity_login_generation;
+      ilr_origin = state.server_identity }
   in
   state.identity_login_requests <-
     request :: List.filter
@@ -6731,27 +8016,62 @@ let remember_identity_login (state : state) login =
   (match state.server_identity with
    | Some origin when server_authority_ready state ->
        remember_identity_login_expectation state
-         { ile_origin=origin; ile_keeper=login.ils_keeper; ile_provider=login.ils_provider }
+         { ile_origin=origin; ile_keeper=login.ils_keeper; ile_provider=login.ils_provider;
+           ile_attempt_id=login.ils_attempt_id }
    | _ -> ())
 
-let retire_identity_logins (state : state) ~keeper_name ~providers =
-  (* The wait ends when consent lands (attached) or when it never can (the
-     provider is no longer declared). A provider removed mid-consent left
-     its wait polling for the life of the process before the inventory's
-     absence counted as an answer. *)
+(* A terminal observation retires both the browser URL and its background
+   wait. Only disappearance invalidates an in-flight replacement request:
+   expiry of the previous consent does not expire the replacement. *)
+type identity_login_retirement =
+  | Login_provider_inventory of string * identity_provider list
+  | Login_keeper_inventory of string list
+  | Login_deadline of float
+
+let retire_identity_login_state (state : state) retirement =
+  let disappeared ~keeper ~provider =
+    match retirement with
+    | Login_provider_inventory (name, providers) ->
+        String.equal keeper name
+        && not (identity_provider_declared ~providers ~provider_id:provider)
+    | Login_keeper_inventory names -> not (List.mem keeper names)
+    | Login_deadline _ -> false
+  in
+  let keep ~keeper ~provider ~expires_at =
+    not (disappeared ~keeper ~provider)
+    && (match retirement with
+       (* The catalog only says the provider is attached, not which attempt
+          attached it: on a re-login the previous credentials still report
+          attached and would drop the fresh consent URL before its attempt
+          ended. An inventory retire therefore keeps consent URLs; the
+          attempt's own terminal status or its deadline ends them. *)
+       | Login_provider_inventory _ -> true
+       | Login_keeper_inventory _ -> true
+       | Login_deadline now -> expires_at > now)
+  in
   state.identity_login_expectations <- List.filter
-    (fun expectation ->
-      let provider_id = expectation.ile_provider in
-      not (String.equal expectation.ile_keeper keeper_name
-           && (identity_provider_attached ~providers ~provider_id
-               || not (identity_provider_declared ~providers ~provider_id))))
+    (fun held -> not (disappeared ~keeper:held.ile_keeper ~provider:held.ile_provider))
     state.identity_login_expectations;
-  state.identity_logins <-
-    List.filter
-      (fun login ->
-        not (String.equal login.ils_keeper keeper_name
-             && identity_login_landed ~providers ~login))
-      state.identity_logins
+  state.identity_logins <- List.filter
+    (fun login -> keep ~keeper:login.ils_keeper ~provider:login.ils_provider
+       ~expires_at:login.ils_expires_at) state.identity_logins;
+  state.identity_login_requests <- List.filter
+    (fun request -> not (disappeared ~keeper:request.ilr_keeper
+       ~provider:request.ilr_provider)) state.identity_login_requests
+
+let retire_identity_logins state ~keeper_name ~providers =
+  retire_identity_login_state state (Login_provider_inventory (keeper_name, providers))
+
+let reconcile_identity_login_keepers state ~keeper_names ~error =
+  (* A partial/error roster is not evidence that a Keeper was deleted. *)
+  match error with
+  | Some _ -> ()
+  | None -> retire_identity_login_state state (Login_keeper_inventory keeper_names)
+
+let expire_identity_logins state ~now =
+  let displayed = List.length state.identity_logins in
+  retire_identity_login_state state (Login_deadline now);
+  List.length state.identity_logins <> displayed
 
 (* A workspace rework rerun keeps the workspace but ends every login it had
    admitted, so every expectation retires with it. Nothing here runs for a
@@ -6964,6 +8284,7 @@ let reconcile_fusion_launch (state : state) =
   state.view <> Fusion && abandon_fusion_launch state
 
 type text_input_target =
+  | Text_collab_form
   | Text_account_login
   | Text_browser_url
   | Text_ask_answer
@@ -7019,7 +8340,11 @@ let text_input_target (state : state) ~compact_viewport =
     && state.detail_tab = Detail_github
     && not compact_viewport
   in
-  if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
+  if Option.is_some state.collab then
+    (match state.collab with
+     | Some view when not compact_viewport && Masc_tui_collab.text_input_active view -> Some Text_collab_form
+     | Some _ | None -> None)
+  else if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
   else if state.keeper_deletions_open then None
   (* A drop reason takes every key on the goal detail it was opened on, so
      its letters never reach the lifecycle keys under it. *)
@@ -7106,7 +8431,7 @@ let text_input_target (state : state) ~compact_viewport =
    function exists to stop. *)
 let quit_key_allowed_for = function
   | Some
-      ( Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
+      ( Text_collab_form | Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
       | Text_runtime_account_form | Text_runtime_model_form
       | Text_voice_wizard | Text_palette | Text_row_search
@@ -7146,12 +8471,22 @@ let live_for_keeper state keeper_name =
 (* Scoped by keeper like every other reading of the settled logs: a request
    id is minted per send, but the rule that one turn has one source is a
    rule per keeper's conversation. *)
-let settled_log_for_request state ~keeper_name request_id =
+let settled_log_for_source state ~keeper_name source =
   List.find_opt
     (fun turn_log ->
       String.equal (turn_log_keeper_name turn_log) keeper_name
-      && String.equal (turn_log_request_id turn_log) request_id)
+      && Masc_tui_keeper_chat_log.source turn_log.tl_log = source)
     state.msg_settled_logs
+;;
+
+let settled_log_for_request state ~keeper_name request_id =
+  settled_log_for_source state ~keeper_name (Masc_tui_keeper_chat_log.Operation request_id)
+;;
+
+let turn_log_execution_source log =
+  match Masc_tui_keeper_chat_log.source log.tl_log with
+  | Operation _ -> Masc_tui_keeper_chat_log.Operation (turn_log_execution_id log)
+  | Autonomous_turn _ as source -> source
 ;;
 
 (* Choose one execution source before classifying it as settled or observed.
@@ -7177,58 +8512,105 @@ let turn_log_preferred ~candidate ~held =
       && turn_log_request_id held <> turn_log_execution_id held
 ;;
 
+(* The execution source as plain data, so a hash table can hold it.
+   [Ids.Turn_ref.t] is abstract; its [equal] compares exactly these two fields. *)
+type execution_source_key =
+  | Operation_key of string
+  | Autonomous_turn_key of string * int
+
+let execution_source_key_of_source : Masc_tui_keeper_chat_log.journal_source -> execution_source_key =
+  function
+  | Operation id -> Operation_key id
+  | Autonomous_turn turn_ref ->
+    Autonomous_turn_key (Ids.Turn_ref.trace_id turn_ref, Ids.Turn_ref.absolute_turn turn_ref)
+
+let turn_log_execution_source_key log =
+  execution_source_key_of_source (turn_log_execution_source log)
+
+(* One log per execution source, in the order each source first appeared.
+   A later log for a seen source takes that first position when
+   [turn_log_preferred] says it holds more of the turn. Linear in the number
+   of logs: this runs for every drawn frame, so the pairwise search it replaces
+   grew with the square of the transcript. *)
+let selected_source_logs_with_origin state keeper_name =
+  let slots : (execution_source_key, (turn_log * bool) ref) Hashtbl.t =
+    Hashtbl.create 16
+  in
+  (* Whether a log is one the session holds as settled, decided once per
+     candidate: settled candidates are in that list by construction, and the
+     few streaming ones are looked up in it. *)
+  let from_settled = List.map (fun log -> log, true) state.msg_settled_logs in
+  let streaming =
+    List.map (fun (entry : inflight) -> entry.log) (List.rev state.msg_inflight)
+    @ Option.to_list state.msg_live
+    |> List.map (fun log -> log, List.memq log state.msg_settled_logs)
+  in
+  let first_seen_newest_first =
+    from_settled @ streaming
+    |> List.filter (fun (log, _) -> String.equal (turn_log_keeper_name log) keeper_name)
+    |> List.fold_left (fun order ((log, _) as candidate) ->
+      let key = turn_log_execution_source_key log in
+      match Hashtbl.find_opt slots key with
+      | None ->
+        let slot = ref candidate in
+        Hashtbl.add slots key slot;
+        slot :: order
+      | Some slot ->
+        if turn_log_preferred ~candidate:log ~held:(fst !slot) then slot := candidate;
+        order) []
+  in
+  List.rev_map (fun slot -> !slot) first_seen_newest_first
+;;
+
 let selected_source_logs_for_keeper state keeper_name =
-  (state.msg_settled_logs
-   @ List.map (fun (entry : inflight) -> entry.log) (List.rev state.msg_inflight)
-   @ Option.to_list state.msg_live)
-  |> List.filter (fun log -> String.equal (turn_log_keeper_name log) keeper_name)
-  |> List.fold_left (fun selected log ->
-    let execution_id = turn_log_execution_id log in
-    match List.find_opt (fun prior -> turn_log_execution_id prior = execution_id) selected with
-    | None -> selected @ [log]
-    | Some prior when turn_log_preferred ~candidate:log ~held:prior ->
-      List.map (fun prior -> if turn_log_execution_id prior = execution_id then log else prior) selected
-    | Some _ -> selected) []
+  List.map fst (selected_source_logs_with_origin state keeper_name)
 ;;
 
 (* Batch watchers keep their original request identities. All inputs bound to
    one execution must precede its output, even if a follower's more complete
    journal is the selected source. Never join by message text. *)
+let chat_execution_member_index state ~keeper_name =
+  let by_execution : (string, string) Hashtbl.t = Hashtbl.create 16 in
+  state.msg_settled_logs
+  @ List.map (fun (entry : inflight) -> entry.log) state.msg_inflight
+  @ Option.to_list state.msg_live
+  |> List.iter (fun log ->
+      if turn_log_keeper_name log = keeper_name then
+        Hashtbl.add by_execution (turn_log_execution_id log) (turn_log_request_id log));
+  fun ~execution_id ->
+    execution_id :: Hashtbl.find_all by_execution execution_id
+    |> List.sort_uniq String.compare
+;;
+
 let chat_execution_member_ids state ~keeper_name ~execution_id =
-  execution_id ::
-  (state.msg_settled_logs
-   @ List.map (fun (entry : inflight) -> entry.log) state.msg_inflight
-   @ Option.to_list state.msg_live
-   |> List.filter_map (fun log ->
-       if turn_log_keeper_name log = keeper_name
-          && turn_log_execution_id log = execution_id
-       then Some (turn_log_request_id log) else None))
-  |> List.sort_uniq String.compare
+  chat_execution_member_index state ~keeper_name ~execution_id
 ;;
 
 (* Existing consumers ask for held sources, but selection must also account
    for every subscription that the renderer can draw. *)
 let settled_logs_for_keeper state keeper_name =
-  selected_source_logs_for_keeper state keeper_name
-  |> List.filter (fun log -> List.exists (( == ) log) state.msg_settled_logs)
+  selected_source_logs_with_origin state keeper_name
+  |> List.filter_map (fun (log, settled) -> if settled then Some log else None)
 ;;
 
-(* The requests a history load for [keeper_name] reads no journal for: every
-   settled log that stands for its turn, every request still in flight, and
+(* The sources a history load for [keeper_name] reads no journal for: every
+   log with a terminal event, every request still in flight, and
    every journal already being read. The settled logs are not
    {!settled_logs_for_keeper}, which keeps one log per execution for drawing:
    the other requests of a batch are held too, and leaving them out asked for
    their journals again on every history load, so the server decoded each of
    those journals whole on every refresh. *)
-let journal_held_request_ids state keeper_name =
+let journal_held_keys state keeper_name =
   List.filter_map
     (fun log ->
-      if String.equal (turn_log_keeper_name log) keeper_name && turn_log_holds_the_turn log
-      then Some (turn_log_request_id log)
+      if String.equal (turn_log_keeper_name log) keeper_name && turn_log_has_ended log
+      then Some (turn_log_journal_key log)
       else None)
     state.msg_settled_logs
-  @ List.map (fun entry -> entry.sent_request.request_id) state.msg_inflight
-  @ state.msg_journal_inflight
+  @ List.filter_map (fun entry ->
+      if String.equal entry.sent_request.keeper_name keeper_name
+      then Some (turn_log_journal_key entry.log) else None) state.msg_inflight
+  @ List.filter (fun (keeper, _) -> String.equal keeper keeper_name) state.msg_journal_inflight
 ;;
 
 (* A journal's permanent failure says nothing about the exact operation
@@ -7238,22 +8620,34 @@ let journal_held_request_ids state keeper_name =
    Autonomous turns have no operation record, and pane-owned requests settle
    through their own subscription. *)
 let unavailable_journal_operation_targets state keeper_name =
+  let table keys =
+    let table = Hashtbl.create (List.length keys + 1) in
+    List.iter (fun key -> Hashtbl.replace table key ()) keys;
+    table
+  in
+  let unavailable = table state.msg_journal_unavailable in
+  let inflight = table state.msg_journal_inflight in
   state.msg_settled_logs
   |> List.filter_map (fun log ->
-      let request_id = turn_log_request_id log in
-      let journal_unavailable = state.msg_journal_reads_refused
-        || List.mem request_id state.msg_journal_unavailable in
-      let read_inflight = List.mem request_id state.msg_journal_inflight in
-      let owned = List.exists (fun (entry : inflight) ->
-        String.equal entry.sent_request.request_id request_id) state.msg_inflight in
-      let terminal = Option.exists Keeper_chat_operation.is_terminal
-        (Masc_tui_keeper_chat_log.operation_state log.tl_log) in
+      (* The cheap tests that most logs fail come first; each condition is a
+         pure read, so the order changes the cost and not the answer. *)
       match Masc_tui_keeper_chat_log.source log.tl_log with
       | Operation operation_id
-        when String.equal (turn_log_keeper_name log) keeper_name
-             && journal_unavailable && not read_inflight && not owned && not terminal
-             && not (turn_log_holds_the_turn log) ->
-          Some operation_id
+        when String.equal (turn_log_keeper_name log) keeper_name ->
+          let key = turn_log_journal_key log in
+          let journal_unavailable = state.msg_journal_reads_refused
+            || Hashtbl.mem unavailable key in
+          if journal_unavailable
+             && (not (Hashtbl.mem inflight key))
+             && (not
+                   (List.exists (fun (entry : inflight) ->
+                      turn_log_journal_key entry.log = key) state.msg_inflight))
+             && (not
+                   (Option.exists Keeper_chat_operation.is_terminal
+                      (Masc_tui_keeper_chat_log.operation_state log.tl_log)))
+             && not (turn_log_holds_the_turn log)
+          then Some operation_id
+          else None
       | Operation _ | Autonomous_turn _ -> None)
   |> List.sort_uniq String.compare
 ;;
@@ -7270,11 +8664,33 @@ let unavailable_journal_operation_targets state keeper_name =
    value, or the memo keeps answering with the loaded rows the log now
    draws. *)
 let hold_settled_log state turn_log =
-  let request_id = turn_log_request_id turn_log in
+  let source = Masc_tui_keeper_chat_log.source turn_log.tl_log in
   let keeper_name = turn_log_keeper_name turn_log in
+  (* A journal has no HTTP acceptance. Whichever execution log wins must
+     retain the first receipt observed for this exact request, without
+     putting that receipt in the journal or resetting execution state. *)
+  let inherit_acceptance ~from ~into =
+    if Masc_tui_keeper_chat_log.first_acceptance into.tl_log = None then begin
+      let copy (entry : Masc_tui_keeper_chat_log.entry) =
+        turn_log_add ~now:(Option.value entry.at ~default:(turn_log_started_at from))
+          into ~seq:None entry.delta
+      in
+      Option.iter copy (Masc_tui_keeper_chat_log.first_acceptance from.tl_log);
+      Option.iter copy (Masc_tui_keeper_chat_log.latest_acceptance from.tl_log)
+    end;
+    if Masc_tui_keeper_chat_log.priority_unavailable from.tl_log then begin
+      Masc_tui_keeper_chat_log.note_priority_unavailable into.tl_log;
+      Masc_tui_keeper_chat_transcript.note_priority_unavailable into.tl_transcript
+    end
+  in
   let replaceable =
-    match settled_log_for_request state ~keeper_name request_id with
-    | Some existing -> existing == turn_log || not (turn_log_holds_the_turn existing)
+    match settled_log_for_source state ~keeper_name source with
+    | Some existing when existing == turn_log -> true
+    | Some existing ->
+        let replace = not (turn_log_holds_the_turn existing) in
+        if replace then inherit_acceptance ~from:existing ~into:turn_log
+        else inherit_acceptance ~from:turn_log ~into:existing;
+        replace
     | None -> true
   in
   if replaceable then begin
@@ -7291,40 +8707,40 @@ let hold_settled_log state turn_log =
            (fun held ->
              not
                (String.equal (turn_log_keeper_name held) keeper_name
-               && String.equal (turn_log_request_id held) request_id))
+               && Masc_tui_keeper_chat_log.source held.tl_log = source))
            state.msg_settled_logs)
   end
 ;;
 
-let remember_journal_unavailable state operation_id =
-  if not (List.exists (String.equal operation_id) state.msg_journal_unavailable)
-  then state.msg_journal_unavailable <- operation_id :: state.msg_journal_unavailable
+let remember_journal_unavailable state key =
+  if not (List.mem key state.msg_journal_unavailable)
+  then state.msg_journal_unavailable <- key :: state.msg_journal_unavailable
 ;;
 
-let journal_read_started state operation_id =
-  if not (List.exists (String.equal operation_id) state.msg_journal_inflight)
-  then state.msg_journal_inflight <- operation_id :: state.msg_journal_inflight
+let journal_read_started state key =
+  if not (List.mem key state.msg_journal_inflight)
+  then state.msg_journal_inflight <- key :: state.msg_journal_inflight
 ;;
 
-let journal_read_finished state operation_id =
+let journal_read_finished state key =
   state.msg_journal_inflight <-
     List.filter
-      (fun inflight -> not (String.equal inflight operation_id))
+      (fun inflight -> inflight <> key)
       state.msg_journal_inflight
 ;;
 
 (* The highest seq named wins; a frame with no seq (the settle terminal)
    never lowers what an earlier frame named. *)
-let journal_read_wanted state operation_id seq =
+let journal_read_wanted state key seq =
   let highest =
-    match List.assoc_opt operation_id state.msg_journal_wanted, seq with
+    match List.assoc_opt key state.msg_journal_wanted, seq with
     | Some (Some held), Some seq -> Some (max held seq)
     | Some (Some held), None -> Some held
     | Some None, seq | None, seq -> seq
   in
   state.msg_journal_wanted <-
-    (operation_id, highest)
-    :: List.remove_assoc operation_id state.msg_journal_wanted
+    (key, highest)
+    :: List.remove_assoc key state.msg_journal_wanted
 ;;
 
 type journal_wanted =
@@ -7334,11 +8750,11 @@ type journal_wanted =
 (* Whether a read was wanted for this operation while one was in flight, and
    the fact taken: the caller decides the read it stands for, against the
    seq the frames named. *)
-let take_journal_wanted state operation_id =
-  match List.assoc_opt operation_id state.msg_journal_wanted with
+let take_journal_wanted state key =
+  match List.assoc_opt key state.msg_journal_wanted with
   | Some highest_seq ->
       state.msg_journal_wanted <-
-        List.remove_assoc operation_id state.msg_journal_wanted;
+        List.remove_assoc key state.msg_journal_wanted;
       Wanted { highest_seq }
   | None -> Not_wanted
 ;;
@@ -7358,12 +8774,47 @@ let journal_log_started_at ~fallback
   | _ :: _ | [] -> fallback
 ;;
 
+(* The mailbox's journal-result transition. A valid partial read remains
+   followable even when a separate history GET already contains the answer.
+   Availability is evidence from the endpoint, never inferred from history. *)
+let record_terminal_replay state log replay =
+  Masc_tui_keeper_chat_log.observe_terminal_replay log.tl_log replay;
+  if Masc_tui_keeper_chat_log.terminal_replay log.tl_log =
+       Masc_tui_keeper_chat_log.Replayed_after_terminal then
+    hold_settled_log state log
+;;
 
-(* Where a journal read starts for this operation: after what a held log of
+let receive_journal_result state ~keeper_name ~source ~started_at journal =
+  let key = keeper_name, source in
+  journal_read_finished state key;
+  match journal with
+  | Ok lines ->
+      let log =
+        match settled_log_for_source state ~keeper_name source with
+        | Some held -> held
+        | None -> turn_log_create_for_source ~keeper_name ~source
+            ~started_at:(journal_log_started_at ~fallback:started_at lines)
+      in
+      let accepted = turn_log_add_journaled log lines in
+      Masc_tui_keeper_chat_log.commit log.tl_log;
+      if lines <> [] || Masc_tui_keeper_chat_log.has_entries log.tl_log
+      then hold_settled_log state log;
+      Ok (log, accepted)
+  | Error error ->
+      (match error with
+       | Masc_tui_keeper_chat_log.Unknown_operation | Journal_pruned | Journal_missing
+       | Journal_unavailable _ | Events_denied _ | Events_undecodable _ ->
+           remember_journal_unavailable state key
+       | Cursor_refused _ | Events_refused _ | Events_transport _ -> ());
+      Error error
+;;
+
+
+(* Where a journal read starts for this source: after what a held log of
    it already has (a cut live stream's partial log, or an earlier read of a
    turn still running), or the whole journal. *)
-let journal_resume_position state ~keeper_name operation_id =
-  match settled_log_for_request state ~keeper_name operation_id with
+let journal_resume_position state ~keeper_name source =
+  match settled_log_for_source state ~keeper_name source with
   | Some held when not (turn_log_holds_the_turn held) ->
       Masc_tui_keeper_chat_log.resume_position held.tl_log
   | Some _ | None -> Masc.Keeper_chat_event_log.Whole_turn
@@ -7399,29 +8850,29 @@ type journal_follow =
           announced, so another starts when it lands. *)
 
 let journal_follow_for_source state ~keeper_name ~source ~seq ~at =
-  let request_id = Masc_tui_keeper_chat_log.source_key source in
+  let key = keeper_name, source in
   let own_request =
     List.exists
-      (fun entry -> String.equal entry.sent_request.request_id request_id)
+      (fun entry -> turn_log_journal_key entry.log = key)
       state.msg_inflight
   in
-  let held = settled_log_for_request state ~keeper_name request_id in
+  let held = settled_log_for_source state ~keeper_name source in
   if own_request
      || state.msg_journal_reads_refused
-     || List.exists (String.equal request_id) state.msg_journal_unavailable
+     || List.mem key state.msg_journal_unavailable
   then Follow_nothing
   else
     match held with
-    | Some held when turn_log_holds_the_turn held -> Follow_nothing
+    | Some held when turn_log_has_ended held -> Follow_nothing
     | held ->
-        let since_seq = journal_resume_position state ~keeper_name request_id in
+        let since_seq = journal_resume_position state ~keeper_name source in
         let already_held =
           match seq with
           | Some seq -> not (Masc.Keeper_chat_event_log.seq_is_after since_seq seq)
           | None -> false
         in
         if already_held then Follow_nothing
-        else if List.exists (String.equal request_id) state.msg_journal_inflight
+        else if List.mem key state.msg_journal_inflight
         then Follow_read_after_inflight
         else
           Follow_read
@@ -7433,15 +8884,13 @@ let journal_follow_for_source state ~keeper_name ~source ~seq ~at =
             }
 ;;
 
-(* Whether the loaded transcript says this turn is over: the keeper's reply,
-   or a failure, is on record. A journal that still cannot stand for such a
-   turn has nothing more coming -- the settle-time failure is never journaled
-   (#33108) -- so it is not worth asking for again. *)
-let loaded_turn_has_ended state ~keeper_name request_id =
+(* A recorded output can replace the polled text preview. It does not prove
+   the journal ended: persistence and terminal publication are separate. *)
+let loaded_turn_has_output state ~keeper_name source =
   Option.exists (String.equal keeper_name) state.msg_loaded_keeper
   && List.exists
        (fun (row : msg_entry) ->
-         String.equal row.me_request_id request_id
+         row.me_execution_source = Some source
          &&
          match row.me_role with
          | Message_keeper | Message_autonomous | Message_error -> true
@@ -7477,25 +8926,30 @@ let loaded_turn_has_ended state ~keeper_name request_id =
    ([hold_settled_log]), which is how a cut stream's turn is followed to its
    end. Answered per frame from the same list the settled blocks come from,
    so a log that comes to hold its turn leaves here the frame it does. *)
+(* Visual progress may close from an authoritative operation record while
+   its partial journal remains eligible for replay. History rows and journal
+   availability do not settle the transcript's phase. *)
 let observed_log_has_ended state log =
-  loaded_turn_has_ended state ~keeper_name:(turn_log_keeper_name log)
-    (turn_log_execution_id log)
-  || match Masc_tui_keeper_chat_transcript.phase log.tl_transcript with
-     | Masc_tui_keeper_chat_transcript.Stream_ended
-     | Masc_tui_keeper_chat_transcript.Stream_failed _ -> true
-     | Masc_tui_keeper_chat_transcript.Waiting
-     | Masc_tui_keeper_chat_transcript.Working -> false
+  match Masc_tui_keeper_chat_transcript.phase log.tl_transcript with
+  | Stream_ended | Stream_failed _ -> true
+  | Waiting | Working ->
+      (* An autonomous final row has no operation record to poll. It closes
+         visual progress only; the transcript and replay cursor stay open. *)
+      match turn_log_execution_source log with
+      | Masc_tui_keeper_chat_log.Operation _ -> false
+      | Masc_tui_keeper_chat_log.Autonomous_turn _ as source ->
+          loaded_turn_has_output state ~keeper_name:(turn_log_keeper_name log) source
 ;;
 
 let observed_log_is_unavailable state log =
-  List.exists (String.equal (turn_log_request_id log)) state.msg_journal_unavailable
+  List.mem (turn_log_journal_key log) state.msg_journal_unavailable
 ;;
 
 let observed_logs_for_keeper state keeper_name =
   let in_flight log =
     List.exists
       (fun entry ->
-        String.equal entry.sent_request.request_id (turn_log_request_id log))
+        turn_log_journal_key entry.log = turn_log_journal_key log)
       state.msg_inflight
   in
   settled_logs_for_keeper state keeper_name
@@ -7537,7 +8991,9 @@ let observed_turn_text_drawn state keeper_name =
     (observed_logs_for_keeper state keeper_name
      |> List.filter (fun log ->
           not (observed_log_has_ended state log)
-          && not (observed_log_is_unavailable state log)))
+          && not (observed_log_is_unavailable state log)
+          && not (loaded_turn_has_output state
+              ~keeper_name:(turn_log_keeper_name log) (turn_log_execution_source log))))
 ;;
 
 (* Whether a reasoning row is drawn at all under this visibility. The
@@ -7554,12 +9010,12 @@ let reasoning_drawn = function
    durable trace row -- "N reasoning steps, content withheld" -- as the only
    record that the keeper thought at all, and that row stays. *)
 type held_turn =
-  { ht_request_id : string
+  { ht_source : Masc_tui_keeper_chat_log.journal_source
   ; ht_reasoning : bool
   }
 
 let held_turn_of_log turn_log =
-  { ht_request_id = turn_log_execution_id turn_log
+  { ht_source = turn_log_execution_source turn_log
   ; ht_reasoning =
       Masc_tui_keeper_chat_transcript.thinking_lines turn_log.tl_transcript <> []
   }
@@ -7573,7 +9029,7 @@ let held_turn_of_log turn_log =
    pane said, and a failure stay in the committed rows. The renderer uses a
    log's failure only when no committed error row names that operation. *)
 let log_draws_row (held : held_turn) (row : msg_entry) =
-  String.equal row.me_request_id held.ht_request_id
+  row.me_execution_source = Some held.ht_source
   &&
   match row.me_role with
   | Message_keeper | Message_autonomous | Message_tool | Message_skill _ -> true
@@ -7586,13 +9042,39 @@ let log_draws_row (held : held_turn) (row : msg_entry) =
 (* The committed rows the pane still draws once these turns are held by
    settled logs: a turn has one source, and for a held turn that is the log.
    The same list when nothing is held, so the memo above it can tell. *)
+let media_remainder (row : msg_entry) =
+  match row.me_role, row.me_media with
+  | (Message_keeper | Message_autonomous), (_ :: _ as media) ->
+      Some {row with me_text =
+        Masc_tui_chat_media.append_text ~text:"" media
+        |> Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true}
+  | (Message_keeper | Message_autonomous), []
+  | (Message_tool | Message_skill _ | Message_thinking | Message_user _
+    | Message_status | Message_local | Message_error | Message_memory), _ -> None
+;;
+
 let rows_the_logs_do_not_draw ~held rows =
   match held with
   | [] -> rows
   | held ->
-      List.filter
+      (* A log draws only rows of its own execution source, so each row is
+         tested against the held turns that share its source, not all of
+         them. *)
+      let by_source : (execution_source_key, held_turn) Hashtbl.t = Hashtbl.create 16 in
+      List.iter
+        (fun (turn : held_turn) ->
+          Hashtbl.add by_source (execution_source_key_of_source turn.ht_source) turn)
+        held;
+      List.filter_map
         (fun (row : msg_entry) ->
-          not (List.exists (fun turn -> log_draws_row turn row) held))
+          let candidates =
+            match row.me_execution_source with
+            | None -> []
+            | Some source ->
+              Hashtbl.find_all by_source (execution_source_key_of_source source)
+          in
+          if List.exists (fun turn -> log_draws_row turn row) candidates
+          then media_remainder row else Some row)
         rows
 ;;
 
@@ -7604,14 +9086,39 @@ let rows_the_logs_do_not_draw ~held rows =
    about those calls and reads. A skill evidence gap on a loaded row
    (missing, unreadable) names no read and is not carried over. Run where
    loaded rows arrive and where a journal log is held. *)
-let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
+let same_skill_invocation ~inventory
+    (left : Masc_tui_keeper_chat_transcript.skill_activity)
+    (right : Masc_tui_keeper_chat_transcript.skill_activity) =
+  Option.is_some left.turn_ref && Option.is_some left.skill_tool_use_id
+  && left.turn_ref = right.turn_ref
+  && left.skill_tool_use_id = right.skill_tool_use_id
+  && (match left.runtime_id, right.runtime_id with
+      | Some left, Some right -> String.equal left right
+      | None, _ | _, None ->
+          let runtimes = left :: right :: inventory
+            |> List.filter_map (fun (candidate : Masc_tui_keeper_chat_transcript.skill_activity) ->
+              if candidate.turn_ref=left.turn_ref && candidate.skill_tool_use_id=left.skill_tool_use_id
+              then candidate.runtime_id else None)
+            |> List.sort_uniq String.compare in
+          match runtimes with [] | [_] -> true | _ :: _ :: _ -> false)
+
+let skills_drawn_by_items items =
+  List.concat_map (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+    match item.drawn with Drawn_skill skills -> skills | _ -> []) items
+
+let skills_in_source_rows ~keeper_name source rows =
+  List.concat_map (fun (row : msg_entry) ->
+    if String.equal row.me_keeper_name keeper_name && row.me_execution_source=source
+    then row.me_skill_block else []) rows
+
+let enrich_held_logs_from_rows ?only state ~keeper_name (rows : msg_entry list) =
   List.iter
     (fun turn_log ->
-      let request_id = turn_log_execution_id turn_log in
+      let execution_source = turn_log_execution_source turn_log in
       List.iter
         (fun (row : msg_entry) ->
           match row.me_tool_block with
-          | Some block when String.equal row.me_request_id request_id ->
+          | Some block when row.me_execution_source = Some execution_source ->
               List.iter
                 (fun (activity : Masc_tui_keeper_chat_transcript.tool_activity) ->
                   match activity.execution_id with
@@ -7628,26 +9135,27 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
       (* The stream has no event for a delivery, so without this the log's
          skill row stays at what the read call alone says while the loaded
          row that knew better is left out of the timeline (#36882). *)
+      (* Freeze candidates before any row is enriched, so nullable runtime
+         completion cannot depend on which durable record arrives first. *)
+      let observed_skills = skills_drawn_by_items
+        (Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript) in
+      let inventory = observed_skills @ skills_in_source_rows ~keeper_name (Some execution_source)
+        (rows @ state.msg_loaded @ state.msg_history) in
       List.iter
         (fun (row : msg_entry) ->
-          if String.equal row.me_request_id request_id then
+          if String.equal row.me_keeper_name keeper_name
+             && row.me_execution_source = Some execution_source then
             List.iter (fun (skill : Masc_tui_keeper_chat_transcript.skill_activity) ->
-              let observed =
-                Option.is_some skill.turn_ref && Option.is_some skill.skill_tool_use_id
-                && List.exists (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
-                  match item.drawn with
-                  | Drawn_skill skills -> List.exists
-                      (fun (shown : Masc_tui_keeper_chat_transcript.skill_activity) ->
-                        shown.turn_ref = skill.turn_ref
-                        && shown.skill_tool_use_id = skill.skill_tool_use_id) skills
-                  | Drawn_tools _ | Drawn_thinking _ | Drawn_text _ | Drawn_reply _
-                  | Drawn_status _ | Drawn_error _ -> false)
-                    (Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript) in
+              let observed = List.exists (fun shown ->
+                same_skill_invocation ~inventory shown skill) observed_skills in
               if turn_log_holds_the_turn turn_log || observed then
-                Masc_tui_keeper_chat_transcript.note_skill_activity turn_log.tl_transcript skill)
+                Masc_tui_keeper_chat_transcript.note_skill_activity ~runtime_inventory:inventory
+                  turn_log.tl_transcript skill)
               row.me_skill_block)
         rows)
-    (selected_source_logs_for_keeper state keeper_name)
+    (match only with
+     | Some turn_log -> [ turn_log ]
+     | None -> selected_source_logs_for_keeper state keeper_name)
 ;;
 
 (* Settling a turn: its log is committed and, when it has anything to draw,
@@ -7656,7 +9164,9 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
    executable so the decision is linkable by a test. *)
 let settle_turn_log state (entry : inflight) =
   Masc_tui_keeper_chat_log.commit entry.log.tl_log;
-  if Masc_tui_keeper_chat_log.entries entry.log.tl_log <> [] then
+  if Masc_tui_keeper_chat_log.has_entries entry.log.tl_log
+     || Option.is_some (Masc_tui_keeper_chat_transcript.admission_prelude entry.log.tl_transcript)
+  then
     hold_settled_log state entry.log;
   match state.msg_live with
   | Some visible
@@ -7793,6 +9303,8 @@ let withdraw_keeper_chat_requests (state : state) =
   state.keeper_chat_control_tokens <- [];
   state.keeper_chat_control_pending <- [];
   state.keeper_queue_inflight <- [];
+  state.keeper_queue_readings <- [];
+  state.keeper_queue_inspections <- [];
   state.keeper_run_next_pending <- [];
   state.keeper_run_next_ready <- [];
   state.keeper_run_next_inflight <- [];
@@ -8058,8 +9570,8 @@ let pending_detail_read (state : state) ~tab ~keeper =
 (* The tick may reopen a provider read only after the old response settles and
    the same workspace confirms the waiting Keeper's login. The expectation
    carries no consent URL or authorization; it only keeps the read alive. *)
-let identity_login_recovery_poll_ready (state : state) keeper_name =
-  identity_login_pending_for_keeper state keeper_name
+let identity_login_recovery_poll_ready (state : state) ~now keeper_name =
+  identity_login_pending_for_keeper state ~now keeper_name
   && Option.is_none (pending_detail_read state ~tab:Detail_identity ~keeper:keeper_name)
 
 let detail_read_started state ~tab ~keeper =
@@ -8152,7 +9664,8 @@ let keeper_detail_target_matches state keeper_name =
    only to the currently selected Keeper and the newest request generation. *)
 let apply_keeper_schedules_read state request result =
   let current = finish_detail_read state request in
-  if current && keeper_detail_target_matches state request.drr_keeper then
+  if current && server_authority_ready state
+     && keeper_detail_target_matches state request.drr_keeper then
     match result with
     | Ok snapshot ->
         state.keeper_schedules <- Some (request.drr_keeper, snapshot);
@@ -8172,15 +9685,12 @@ let workspace_activity_rows (state : state) =
       match Masc_tui_fetched.value (Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id) with
       | None -> []
       | Some reading ->
-          List.concat_map (fun (_, result) -> match result with
-            | Error _ -> []
-            | Ok (snapshot : Tui_decode.file_change_snapshot) ->
-                List.filter_map (fun (change : Tui_decode.file_change) ->
-                  match change.fc_location with
-                  | Tui_decode.Fc_in_repo location when String.equal location.repo_id repo_id ->
-                      Some (change, location.relative_path)
-                  | Tui_decode.Fc_in_repo _ | Tui_decode.Fc_in_bundle _ | Tui_decode.Fc_at_absolute_path _ -> None)
-                  snapshot.fcs_changes) reading.war_keepers
+          List.filter_map (fun (change : Tui_decode.file_change) ->
+            match change.fc_location with
+            | Tui_decode.Fc_in_repo location when String.equal location.repo_id repo_id ->
+                Some (change, location.relative_path)
+            | Tui_decode.Fc_in_repo _ | Tui_decode.Fc_in_bundle _ | Tui_decode.Fc_at_absolute_path _ -> None)
+            reading.Tui_decode.ras_changes
           |> List.sort (fun ((a : Tui_decode.file_change), _) ((b : Tui_decode.file_change), _) ->
               Float.compare b.fc_at a.fc_at)
 
@@ -8245,6 +9755,7 @@ let set_code_scope state scope =
   if state.code_scope <> scope then begin
     state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
     state.code_file <- Masc_tui_fetched.clear state.code_file;
+    state.code_file_resume_intent <- Refresh_code_file;
     state.code_lsp_note <- None;
     state.code_target_line <- None
   end;
@@ -8258,6 +9769,7 @@ let enter_keeper_code_file state ~keeper ~path =
   state.code_cursor <- 0;
   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
   state.code_file <- Masc_tui_fetched.clear state.code_file;
+  state.code_file_resume_intent <- Refresh_code_file;
   state.code_file_cursor <- 0;
   state.code_file_scroll <- 0;
   state.code_file_hscroll <- 0;
@@ -8373,6 +9885,13 @@ let composing_for_keeper (state : state) keeper_name =
   && Masc_tui_message_input.length state.msg_input > 0
   && Option.exists (String.equal keeper_name) state.msg_target_keeper_name
 
+(* Recall owns this Keeper's queued input until the edit is submitted or
+   abandoned. Earlier Enter/control authorization cannot send its old body. *)
+let recalling_for_keeper (state : state) keeper_name =
+  match state.msg_recall_replaces with
+  | Some editing -> String.equal editing.request.keeper_name keeper_name
+  | None -> false
+
 (* A fresh Enter may bypass input held by an explicit stop. A refused
    preflight keeps its place until local resume; unmarked input remains owned
    by the generic drainer and its composer/recall checks. *)
@@ -8388,7 +9907,8 @@ let next_authorized_keeper_input state keeper_name =
       | Some (_, _, Retained_before_dispatch) -> None
       | Some (_, _, (Awaiting_control _ | Retained_after_stop)) | None -> ready rest
   in
-  ready (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name)
+  if recalling_for_keeper state keeper_name then None
+  else ready (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name)
 
 (** The next target both the input path and footer agree is safe to select.
     A pending request or live transcript stays pinned to its Keeper until that
@@ -8477,6 +9997,231 @@ let play_invite_forget current name =
        | Some _ | None -> current.shown_name)
   }
 
+let withdraw_play_invite_workspace state
+    ~(previous : workspace_input_identity option) ~(current : workspace_input_identity option) =
+  let hidden invite = {invite with shown_name = None} in
+  match current with
+  | None ->
+      (* Losing a health response removes display/action authority, not the
+         only copy of a credential. Keep it sealed under its confirmed origin. *)
+      (match previous, state.play_invite.cards with
+       | Some workspace, _ :: _ ->
+           state.play_invite_quarantine <- Some (workspace, hidden state.play_invite)
+       | (Some _ | None), [] | None, _ :: _ -> ());
+      state.play_invite <- {cards = []; shown_name = None}
+  | Some workspace ->
+      let retained =
+        (* A retained chat origin may still name this workspace after its
+           live presentation was withdrawn. The sealed copy owns recovery. *)
+        match state.play_invite_quarantine with
+        | Some (owner, invite) when owner = workspace -> hidden invite
+        | Some _ | None ->
+            if previous = Some workspace then hidden state.play_invite
+            else {cards = []; shown_name = None} in
+      state.play_invite <- retained;
+      state.play_invite_quarantine <- None
+
+let withdraw_play_room_workspace state
+    ~(previous : workspace_input_identity option) ~(current : workspace_input_identity option) =
+  match current with
+  | None ->
+      (match previous, state.play_room with
+       | Some workspace, Some room ->
+           state.play_room_quarantine <- Some (workspace, Masc_tui_play_room.suspend room)
+       | (Some _ | None), None | None, Some _ -> ());
+      state.play_room <- None
+  | Some workspace ->
+      let retained = match state.play_room_quarantine with
+        | Some (owner, room) when owner = workspace -> Some room
+        | Some _ | None ->
+            if previous = Some workspace then Option.map Masc_tui_play_room.suspend state.play_room
+            else None in
+      state.play_room <- retained;
+      state.play_room_quarantine <- None
+
+let play_change_request = function
+  | Preparing_invite_change request | Sending_invite_change request | Unknown_invite_change request
+  | Detached_invite_change request -> request
+
+let workspace_change_origin state =
+  match state.workspace_identity, workspace_input_identity_of_server state.server_identity with
+  | Workspace_identity_match, Some origin -> Ok origin
+  | ( Workspace_identity_unread
+    | Workspace_identity_mismatch _
+    (* An unconfirmed read is not a fresh match, and an invite change is a
+       write: refuse it until a read says match again. *)
+    | Workspace_identity_match_unconfirmed _ )
+    , _
+  | Workspace_identity_match, None ->
+      Error "Invite changes require a verified server matching this TUI's local workspace."
+
+let current_play_change state origin =
+  List.find_opt (fun change -> (play_change_request change).change_workspace = origin) state.play_changes
+
+let play_pending_path state =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path:state.local_base_path)
+    "tui-play-pending.jsonl"
+
+let play_pending_entry request : Masc_tui_play_pending.entry =
+  {id=request.change_id; base_path=request.change_workspace.wi_base_path;
+   masc_root=request.change_workspace.wi_masc_root; kind=request.change_kind}
+
+let read_play_changes state =
+  if state.local_base_path = "" then Error "The local workspace for Play recovery is unavailable."
+  else Result.map (fun pending ->
+    let journal = List.map (fun (entry : Masc_tui_play_pending.entry) ->
+      match List.find_opt (fun held -> play_pending_entry (play_change_request held) = entry) state.play_changes with
+      | Some held -> held
+      | None -> Unknown_invite_change {change_ticket=ref (); change_id=entry.id;
+          change_workspace={wi_base_path=entry.base_path; wi_masc_root=entry.masc_root};
+          change_kind=entry.kind}) pending in
+    (* Another TUI may settle a request this process sent before its response
+       is consumed. Keep that request as the owner of its response. *)
+    let detached = List.filter_map (function
+      | (Sending_invite_change request | Detached_invite_change request)
+        when not (List.mem (play_pending_entry request) pending) -> Some (Detached_invite_change request)
+      | Preparing_invite_change _ | Sending_invite_change _ | Unknown_invite_change _
+      | Detached_invite_change _ -> None) state.play_changes in
+    state.play_changes <- journal @ detached)
+    (Masc_tui_play_pending.read ~path:(play_pending_path state))
+
+let play_change_pending_notice = "An invite change is still pending; wait for its result."
+let play_change_unknown_notice request =
+  let action, name = match request.change_kind with
+    | Issue_invite name -> "issue", name | Revoke_invite name -> "revoke", name in
+  Printf.sprintf "Invite %s for %s has an unknown outcome. Further changes are blocked; open Collab and use u only after verifying the original server request has finished."
+    action (Masc.Tui_terminal_text.sanitize_terminal_text name)
+
+let play_change_access state =
+  match workspace_change_origin state with
+  | Error detail -> Masc_tui_collab.Read_only detail
+  | Ok origin ->
+      match read_play_changes state with
+      | Error detail -> Masc_tui_collab.Read_only ("Play recovery unavailable: " ^ detail)
+      | Ok () -> match current_play_change state origin with
+      | None -> Masc_tui_collab.Writable
+      | Some (Preparing_invite_change _ | Sending_invite_change _ | Detached_invite_change _) ->
+          Masc_tui_collab.Pending play_change_pending_notice
+      | Some (Unknown_invite_change request) -> Masc_tui_collab.Uncertain
+          {request_id=request.change_id; notice=play_change_unknown_notice request}
+
+let begin_play_change state kind =
+  match workspace_change_origin state with
+  | Error detail -> Error detail
+  | Ok origin ->
+      let ( let* ) = Result.bind in
+      let* () = read_play_changes state in
+      match current_play_change state origin with
+      | Some (Preparing_invite_change _ | Sending_invite_change _ | Detached_invite_change _) ->
+          Error play_change_pending_notice
+      | Some (Unknown_invite_change request) -> Error (play_change_unknown_notice request)
+      | None ->
+          let request = {change_ticket = ref (); change_id=Random_id.uuid_v7 ();
+            change_workspace = origin; change_kind = kind} in
+          let* () = Masc_tui_play_pending.prepare ~path:(play_pending_path state) (play_pending_entry request) in
+          state.play_changes <- Preparing_invite_change request :: state.play_changes;
+          Ok request
+
+(* Only the HTTP call boundary advances a prepared request. Cancellation while
+   verifying authority has not sent a mutation and can release its journal. *)
+let dispatch_play_change state request =
+  let admitted = ref false in
+  state.play_changes <- List.map (function
+    | Preparing_invite_change held when held.change_ticket == request.change_ticket ->
+        admitted := true; Sending_invite_change held
+    | change -> change) state.play_changes;
+  !admitted
+
+let play_change_dispatched state request =
+  List.exists (function
+    | Sending_invite_change held | Unknown_invite_change held | Detached_invite_change held ->
+        held.change_ticket == request.change_ticket
+    | Preparing_invite_change _ -> false) state.play_changes
+
+let finish_play_change state request outcome =
+  let matches change = (play_change_request change).change_ticket == request.change_ticket in
+  let owns = List.exists matches state.play_changes in
+  (* The journal already settled a detached request; its response only
+     leaves this process. *)
+  let detached = List.exists (function
+    | Detached_invite_change held -> held.change_ticket == request.change_ticket
+    | Preparing_invite_change _ | Sending_invite_change _ | Unknown_invite_change _ -> false)
+    state.play_changes in
+  let settled = owns && not detached && (match outcome with
+    | Change_unknown -> false
+    | Change_confirmed ->
+        (match Masc_tui_play_pending.settle ~path:(play_pending_path state) (play_pending_entry request) with
+         | Ok settled -> settled | Error _ -> false)) in
+  if owns then state.play_changes <- List.filter_map (fun change ->
+    if not (matches change) then Some change
+    else if detached then None
+    else match outcome with
+    | Change_confirmed when settled -> None
+    | Change_confirmed | Change_unknown -> Some (Unknown_invite_change request)) state.play_changes;
+  owns
+
+let withdraw_play_changes state =
+  List.iter (function
+    | Preparing_invite_change request -> ignore (finish_play_change state request Change_confirmed)
+    | Sending_invite_change _ | Unknown_invite_change _ | Detached_invite_change _ -> ()) state.play_changes;
+  state.play_changes <- List.filter_map (function
+    | Preparing_invite_change request | Sending_invite_change request -> Some (Unknown_invite_change request)
+    | Unknown_invite_change _ as change -> Some change
+    (* The journal already settled a detached request, and withdrawal cancels
+       the fiber its response would come back on. Kept, it would block every
+       later invite change with nothing left to finish it. *)
+    | Detached_invite_change _ -> None) state.play_changes
+
+(* An issue response queued before withdrawal is refused by [Workspace_scoped],
+   yet it proves its request finished and holds the only copy of a one-time
+   link. While the request is still this process's, it settles like any
+   confirmed answer, and the card is kept closed under the workspace that
+   issued it, by the rule [withdraw_play_invite_workspace] applies to the live
+   cards: with them while that workspace is served, sealed while no server is
+   read, and dropped once a different one is. *)
+let retain_withdrawn_play_invite state (request : play_change_request) card =
+  let origin = request.change_workspace in
+  let closed invite = {(play_invite_store invite card) with shown_name = invite.shown_name} in
+  if finish_play_change state request Change_confirmed then
+    match workspace_input_identity_of_server state.server_identity with
+    | Some current when current = origin -> state.play_invite <- closed state.play_invite
+    | Some _ -> ()
+    | None ->
+        (match state.play_invite_quarantine with
+         | Some (owner, invite) when owner = origin ->
+             state.play_invite_quarantine <- Some (owner, closed invite)
+         | None ->
+             state.play_invite_quarantine <- Some (origin, closed {cards = []; shown_name = None})
+         (* A confirmed read clears the quarantine, and a request needs one,
+            so the slot cannot hold another workspace's cards here. *)
+         | Some _ -> ())
+
+let resolve_play_change state ~request_id =
+  match workspace_change_origin state with
+  | Error detail -> Error detail
+  | Ok origin ->
+      let ( let* ) = Result.bind in
+      let* () = read_play_changes state in
+      match current_play_change state origin with
+      | Some (Unknown_invite_change request) when request.change_id = request_id ->
+          let* settled = Masc_tui_play_pending.settle ~path:(play_pending_path state) (play_pending_entry request) in
+          let* () = read_play_changes state in
+          if settled then Ok ()
+          else Error "The invite request changed; inspect the current request before resolving it."
+      | Some (Unknown_invite_change _) ->
+          Error "The invite request changed; inspect the current request before resolving it."
+      | Some (Preparing_invite_change _ | Sending_invite_change _ | Detached_invite_change _) ->
+          Error play_change_pending_notice
+      | None -> Error "There is no unknown invite change in this workspace."
+
+let withdraw_machine_control state =
+  state.machine_interaction <- Observe_machine;
+  state.msx_open <- false;
+  state.msx_menu_open <- false;
+  state.msx_live <- Masc_tui_machine_live.Unread;
+  state.msx_frame <- None;
+  state.msx_live_in_flight <- None
+
 (* The overlays that take every key while they are open. Each answers its own
    keys and swallows the rest in its dispatch arm, so nothing drawn under it --
    the composer, a surface binding, a press on a row -- may act first. Every
@@ -8485,10 +10230,12 @@ let play_invite_forget current name =
 let modal_owns_keys (state : state) =
   state.help_open || state.keeper_deletions_open || state.agenda_open
   || state.context_inspector_open || state.about_open
+  || state.repository_changes_open
   || (state.view = Lanes && Option.is_some state.exact_activity_open)
   || (state.view = Lanes && Option.is_some state.browser_activity_open)
   || (state.view = Lanes && Option.is_some state.machine_activity_open)
   || Option.is_some state.client_detail
+  || Option.is_some state.collab
   || Option.is_some (play_card_shown state)
 
 let close_context_inspector (state : state) =
@@ -8506,6 +10253,23 @@ let close_agenda (state : state) =
   state.agenda_navigation <- Agenda_read_rows;
   state.agenda_selected <- Masc_tui_agenda.Nowhere
 
+(* Closed the way the overlay's own Esc closes it, so a handoff chat that
+   clears the key modals never leaves the overlay's half-read state behind. *)
+let close_repository_changes (state : state) =
+  state.repository_changes_open <- false;
+  state.repository_changes_return_chat <- false;
+  state.repository_changes_scope <- None;
+  state.repository_changes <- None;
+  state.repository_changes_error <- None;
+  state.repository_changes_cursor <- 0;
+  state.repository_changes_scroll <- 0;
+  state.repository_changes_diff <- None;
+  state.repository_changes_diff_error <- None;
+  state.repository_changes_diff_path <- None;
+  state.repository_changes_diff_hscroll <- 0;
+  state.repository_changes_diff_max_width <- 0;
+  state.repository_changes_diff_scroll <- 0
+
 (* Every overlay [modal_owns_keys] names, closed the way its own Esc closes
    it, except the invite card: an unrelated event that clears the screen must
    not take the only copy of a link with it. The inspector and the agenda are
@@ -8518,11 +10282,13 @@ let close_key_modals (state : state) =
   state.keeper_deletions_open <- false;
   state.client_detail <- None;
   state.client_detail_scroll <- 0;
+  state.collab <- None;
   state.exact_activity_open <- None;
   state.browser_activity_open <- None;
   state.machine_activity_open <- None;
   if state.agenda_open then close_agenda state;
-  if state.context_inspector_open then close_context_inspector state
+  if state.context_inspector_open then close_context_inspector state;
+  if state.repository_changes_open then close_repository_changes state
 
 let create_state
     ?(reasoning_visibility = Reasoning_folded)
@@ -8556,6 +10322,7 @@ let create_state
   help_open = false;
   keeper_deletions_open = false;
   keeper_deletions_loading = false;
+  keeper_deletions_retry_receipt = None;
   keeper_deletions_generation = 0;
   keeper_deletions_cursor = 0;
   keeper_deletions_scroll = 0;
@@ -8572,6 +10339,8 @@ let create_state
   keeper_chat_control_pending = [];
   keeper_interactive_waiting = [];
   keeper_queue_inflight = [];
+  keeper_queue_readings = [];
+  keeper_queue_inspections = [];
   keeper_run_next_pending = [];
   keeper_run_next_ready = [];
   keeper_priority_controls = [];
@@ -8588,6 +10357,9 @@ let create_state
   keeper_turns_observed_at = None;
   account_login = None;
   account_login_detached = [];
+  account_login_readings = [];
+  account_login_read_resume = [];
+  account_login_activation_resume = [];
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;
@@ -8625,7 +10397,10 @@ let create_state
   server_identity = None;
   local_base_path;
   workspace_authority = Workspace_authority 0;
+  workspace_read_authority = ref ();
   workspace_cancellations = [];
+  workspace_observation_cancellations = [];
+  pending_task_followups = [];
   suspended_keeper_inputs = [];
   workspace_identity =
     (if String.equal local_base_path ""
@@ -8635,18 +10410,24 @@ let create_state
   image_open = false;
   browser_viewport = None;
   image_request_generation = 0;
+  sent_image_read = None;
   msx_open = false;
   msx_frame = None;
   msx_last_poll_ns = 0L;
   machine_source = Masc.Machine_lane.Msx;
+  machine_interaction = Observe_machine;
   msx_live = Masc_tui_machine_live.Unread;
   dos_live = Masc_tui_machine_live.Unread;
   msx_live_in_flight = None;
   dos_live_in_flight = None;
   dos_activity = [];
+  collab = None;
+  play_room = None;
+  play_room_quarantine = None;
   play_invite = { cards = []; shown_name = None };
+  play_invite_quarantine = None;
   play_invite_scroll = 0;
-  play_invite_inflight = false;
+  play_changes = [];
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;
@@ -8665,6 +10446,8 @@ let create_state
   voice_setup_error = None;
   voice_wizard = None;
   voice_agent_voices = None;
+  lane_nested_read_resume = None;
+  lane_installer_read_resume = None;
   voice_wizard_requests = 0;
   resources_list = None;
   resources_error = None;
@@ -8695,6 +10478,7 @@ let create_state
   prompts_librarian_input = None;
   prompts_librarian_input_error = None;
   prompts_librarian_input_loading = false;
+  prompts_librarian_input_requested = None;
   exact_activity_sessions = [];
   exact_activity_open = None;
   exact_activity_generation = 0;
@@ -8861,6 +10645,7 @@ let create_state
   gate_error = None;
   gate_snapshot_observed = false;
   gate_snapshot_read = Snapshot_read.idle;
+  gate_receipt_refresh_pending = false;
   keeper_yolo_names = [];
   keeper_tool_modes_observed = false;
   keeper_tool_modes_error = None;
@@ -8888,6 +10673,7 @@ let create_state
   board_list_reading = Board_list_unread;
   board_cursor = 0;
   msg_find = "";
+  msg_search_generation = Atomic.make 0;
   msg_find_at = None;
   board_sort = Board_hot;
   board_hearth = None;
@@ -8934,6 +10720,8 @@ let create_state
   schedule_form_refusal = None;
   lanes = None;
   keeper_lanes_inflight = false;
+  keeper_lanes_reread_pending = false;
+  keeper_lanes_resume = false;
   lane_inventory = None;
   standalone_lanes = None;
   standalone_lanes_error = None;
@@ -8981,16 +10769,20 @@ let create_state
   tools_scroll = 0;
   tools_skill_cursor = 0;
   tools_skill_evidence = None;
+  tools_evidence_request = None;
+  tools_evidence_reference = None;
   tools_async_observation = None;
   tools_async_observation_error = None;
   lane_addons = None;
   lane_addons_cached = Masc_tui_lane_addons.initial;
   lane_addons_generation = 0;
+  lane_addons_reading = None;
   browser_lane = None;
   browser_history = None;
   browser_history_generation = 0;
   browser_lane_visibility = Browser_lane_hidden;
   browser_lane_generation = 0;
+  browser_lane_read_resume = None;
   connectors = None;
   connectors_error = None;
   connectors_inflight = false;
@@ -9020,6 +10812,7 @@ let create_state
   runtime_lane_cursor_after_write = None;
   runtime_lane_replacement_selection = None;
   runtime_lane_write = Lane_write_idle;
+  runtime_dim_refusals = true;
   runtime_cursor = 0;
   runtime_surface_generation = 0;
   runtime_surface_inflight = None;
@@ -9081,6 +10874,7 @@ let create_state
   code_listing = Masc_tui_fetched.initial;
   code_cursor = 0;
   code_file = Masc_tui_fetched.initial;
+  code_file_resume_intent = Refresh_code_file;
   code_file_scroll = 0;
   code_file_cursor = 0;
   code_lsp_note = None;
@@ -9092,6 +10886,7 @@ let create_state
   code_focus_file = Left_pane;
   code_history = Masc_tui_fetched.initial;
   code_history_open = false;
+  code_history_expanded = None;
   code_history_scroll = 0;
   code_diff = Masc_tui_fetched.initial;
   code_diff_open = false;
@@ -9195,17 +10990,20 @@ let create_state
   msg_file_changes_refresh_pending = false;
   msg_file_changes_error = None;
   msg_file_changes_generation = 0;
-  msg_memory_visibility = Memory_summary;
+  msg_memory_visibility = Memory_hidden;
   msg_memory_error = None;
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
   msg_history_inflight = None;
   msg_copy_generation = 0;
+  msg_copy_pending = None;
+  chat_command_reads = [];
   msg_scroll = 0;
   msg_scroll_pin = None;
   msg_older_cursor = None;
   msg_older_exist = false;
   msg_older_loading = false;
+  msg_older_resume = None;
   msg_older_error = None;
   msg_reasoning_visibility = reasoning_visibility;
   (* Chat opens on the answer, not its bookkeeping. The gutter still carries
@@ -9220,9 +11018,11 @@ let create_state
   msg_settled_logs = [];
   msg_journal_unavailable = [];
   msg_journal_inflight = [];
+  msg_native_tasks = [];
+  msg_native_tasks_inflight = [];
+  msg_native_tasks_audit_pending = [];
   msg_journal_wanted = [];
   msg_journal_reads_refused = false;
-  msg_scroll_pin_settled = [];
   detail_scroll = 0;
   workspace;
   port;
@@ -9406,7 +11206,8 @@ let local_rows_page (state : state) ~error =
 (* A remote roster is its own observation, never evidence of a local read. *)
 let keeper_rows_page (state : state) ~error =
   match state.workspace_identity with
-  | Workspace_identity_match -> local_rows_page state ~error
+  | Workspace_identity_match | Workspace_identity_match_unconfirmed _ ->
+    local_rows_page state ~error
   | Workspace_identity_unread -> empty_page_of ~error ~snapshot:None
   | Workspace_identity_mismatch _ ->
     empty_page_of ~error ~snapshot:
@@ -9464,6 +11265,7 @@ let restore_keeper_chat_page (state : state) keeper_name =
        in
        state.msg_loaded_pages <-
          (loaded_keeper, page) :: List.remove_assoc loaded_keeper state.msg_loaded_pages);
+  retire_keeper_message_search state;
   (* Requests that belonged to the outgoing page cannot publish into a page
      restored during A -> B -> A, even before the next GET starts. *)
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
@@ -9509,10 +11311,7 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
   let remember_started executions log =
     if not (String.equal (turn_log_keeper_name log) keeper_name) then executions
     else
-      let started = List.exists (fun (entry : Masc_tui_keeper_chat_log.entry) ->
-          match entry.delta with
-          | Masc_tui_keeper_chat_live.Run_started -> true
-          | _ -> false) (Masc_tui_keeper_chat_log.entries log.tl_log) in
+      let started = Masc_tui_keeper_chat_log.run_started log.tl_log in
       if started then Executions.add (turn_log_execution_id log) executions else executions
   in
   (* A batch's watchers receive its journal independently. A sibling's run
@@ -9577,13 +11376,6 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
       (fun entry -> String.equal entry.me_keeper_name keeper_name)
       state.msg_history
   in
-  let session = List.map (fun (row : msg_entry) ->
-      if is_user_row row
-         && Option.is_some (Option.bind
-              (settled_log_for_request state ~keeper_name row.me_request_id)
-              (fun log -> Masc_tui_keeper_chat_transcript.rejection log.tl_transcript))
-      then { row with me_text = "전송 거절됨\n" ^ row.me_text }
-      else row) session in
   let held =
     selected_source_logs_for_keeper state keeper_name
     |> List.filter turn_log_holds_the_turn
@@ -9606,16 +11398,17 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
                | Masc_tui_keeper_chat_transcript.Drawn_reply _ -> true
                | _ -> false)
              (Masc_tui_keeper_chat_transcript.drawn log.tl_transcript)
-         then Some (turn_log_execution_id log)
+         then Some (turn_log_execution_source log)
          else None)
   in
   let without_partial_replies rows =
-    List.filter
+    List.filter_map
       (fun (row : msg_entry) ->
         match row.me_role with
-        | Message_keeper | Message_autonomous ->
-            not (List.exists (String.equal row.me_request_id) partial_replies)
-        | _ -> true)
+        | Message_keeper | Message_autonomous
+          when List.exists (fun source -> row.me_execution_source = Some source) partial_replies ->
+            media_remainder row
+        | _ -> Some row)
       rows
   in
   (* Partial selected logs own the exact activities already drawn, even
@@ -9626,7 +11419,7 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
   let remaining_activity (row : msg_entry) =
     let module Transcript = Masc_tui_keeper_chat_transcript in
     let drawn = partial_logs
-      |> List.filter (fun log -> String.equal row.me_request_id (turn_log_execution_id log))
+      |> List.filter (fun log -> row.me_execution_source = Some (turn_log_execution_source log))
       |> List.concat_map (fun log -> Transcript.drawn log.tl_transcript) in
     if drawn = [] then Some row else match row.me_role with
     | Message_tool ->
@@ -9644,14 +11437,13 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
              else Some {row with me_tool_block=Some (Transcript.tool_block
                ~omitted_steps:block.omitted_steps activities)})
     | Message_skill _ when row.me_skill_block <> [] ->
-        let observed = List.concat_map (fun (item : Transcript.drawn_item) ->
-          match item.drawn with Drawn_skill skills -> skills | _ -> []) drawn in
+        let observed = skills_drawn_by_items drawn in
+        let inventory = observed @ skills_in_source_rows ~keeper_name row.me_execution_source (loaded @ session) in
+        (* A missing runtime can be completed by the other observation, but
+           two known runtimes belong to distinct invocations. *)
         let skills = List.filter (fun (skill : Transcript.skill_activity) ->
           not (List.exists (fun (shown : Transcript.skill_activity) ->
-            Option.is_some skill.skill_tool_use_id
-            && skill.skill_tool_use_id = shown.skill_tool_use_id
-            && skill.turn_ref = shown.turn_ref
-            && skill.runtime_id = shown.runtime_id) observed)) row.me_skill_block in
+            same_skill_invocation ~inventory skill shown) observed)) row.me_skill_block in
         if skills = [] then None
         else Some {row with me_skill_block=skills;
           me_role=Message_skill (Transcript.skill_block_state skills)}
@@ -9777,25 +11569,25 @@ let merge_paged_history ~(paged : msg_entry list) ~(fresh : msg_entry list) =
     (held @ fresh)
 
 let set_msg_scroll (state : state) rows =
+  (* Every caller is a reader's move: a scroll key, the wheel, End, Ctrl-E,
+     sending, switching Keeper or leaving the pane. A /find still running
+     would otherwise land later and pull the view back to its match, so the
+     move retires it. The search applies its own result without coming
+     through here. *)
+  retire_keeper_message_search state;
   let rows = max 0 rows in
-  if rows = 0 then begin
-    state.msg_scroll <- 0;
-    state.msg_scroll_pin <- None;
-    state.msg_scroll_pin_settled <- []
-  end
-  else begin
-    if state.msg_scroll = 0 then begin
-      state.msg_scroll_pin <-
-        (match state.msg_target_keeper_name with
-         | None -> None
-         | Some keeper_name ->
-           (match List.rev (chat_rows_for state keeper_name) with
-            | newest :: _ -> Some (msg_anchor newest)
-            | [] -> None));
-      state.msg_scroll_pin_settled <- state.msg_settled_logs
-    end;
-    state.msg_scroll <- rows
-  end
+  (* A painted empty projection has no speech position to hold. Do not let a
+     wheel/Home request become a deferred scroll against future arrivals. *)
+  let rows = match state.msg_scroll_pin with
+    | Some {pin_mode=Follow_live;pin_points=[];_} -> 0
+    | Some _ | None -> rows in
+  state.msg_scroll <- rows;
+  state.msg_scroll_pin <- Option.map (fun pin ->
+    if rows = 0 then
+      {pin with pin_mode=Follow_live; pin_scroll=0; held_transients=[];
+        pin_points=List.map (fun point ->
+          {point with rows_below=point.rows_below + pin.pin_scroll}) pin.pin_points}
+    else {pin with pin_mode=Hold_scroll}) state.msg_scroll_pin
 
 (* Rows the composer needs beyond its first. Folded into the status-row count
    because that one number already sets both the history height and the cursor
@@ -9821,7 +11613,7 @@ let composer_extra_rows (state : state) =
 type clamped_scroll =
   | Task_detail of int
   | Board_read of (int * int)
-  | Message_scroll of int
+  | Message_scroll of chat_scroll_position
   | Schedule_detail_scroll of int
   | Keeper_detail of int
   | Keeper_calls of int
@@ -9923,7 +11715,9 @@ let apply_clamped_scroll (state : state) = function
       state.board_scroll <- body;
       state.board_comment_scroll <- comments;
       state.board_comment_landing <- None
-  | Message_scroll value -> set_msg_scroll state value
+  | Message_scroll { scroll; pin } ->
+      state.msg_scroll <- max 0 scroll;
+      state.msg_scroll_pin <- pin
   | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value
@@ -11579,6 +13373,19 @@ let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
   option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
 
+let runtime_row_deemphasized state (option : Tui_decode.runtime_option) =
+  state.runtime_dim_refusals
+  && (runtime_option_refusing option
+      || match state.runtime_surface with
+         | None -> false
+         | Some snapshot ->
+             (match runtime_spent_usage snapshot.Tui_decode.rss_resolved option with
+              | Ok (_ :: _) -> true
+              | Ok [] | Error _ -> false))
+
+let toggle_runtime_dim_refusals state =
+  state.runtime_dim_refusals <- not state.runtime_dim_refusals
+
 let runtime_quota_label (runtime : Tui_decode.runtime_option) =
   if not runtime.ro_quota_exhausted then None
   else Some (match runtime.ro_quota_resets_at with
@@ -12344,8 +14151,13 @@ let conversation_urls (state : state) : string list =
 
    The fact itself used to live in the footer alone, seventh of nine hints,
    and the footer drops hints from its tail on a narrow terminal: the one
-   thing that changes what the arrow keys do was among the first to go. *)
-let keeper_message_reading_back (state : state) = state.msg_scroll > 0
+   thing that changes what the arrow keys do was among the first to go.
+
+   A frame passes its restored pin position through [scroll] before feedback
+   stores that position. Its chrome must budget and draw against that same
+   position even when an arrival changed it since the previous paint. *)
+let keeper_message_reading_back ?scroll (state : state) =
+  Option.value scroll ~default:state.msg_scroll > 0
 
 type keeper_message_pending_preview_row =
   | Pending_preview_item of int * Masc_tui_keeper_chat_queue.item
@@ -12404,6 +14216,7 @@ let keeper_message_timing_visible (state : state) =
 
 let keeper_message_unfolded_status_rows (state : state) live ~now =
   Masc_tui_keeper_chat_transcript.status_rows
+    ~compact:(state.msg_origin_display = Masc_tui_message_layout.Origin_bare)
     ~show_timing:(keeper_message_timing_visible state) ~now live
 
 (* The most recently submitted input can be queued behind the execution that
@@ -12455,7 +14268,10 @@ let keeper_message_visible_status_rows (state : state) live ~now =
   if state.msg_turn_folded then
     List.filter
       (fun (kind, _) ->
-        Masc_tui_keeper_chat_transcript.status_row_survives_folding kind)
+        match kind with
+        | Masc_tui_keeper_chat_transcript.Attention
+          when state.msg_origin_display = Masc_tui_message_layout.Origin_bare -> true
+        | _ -> Masc_tui_keeper_chat_transcript.status_row_survives_folding kind)
       rows
   else rows
 
@@ -12466,6 +14282,16 @@ let keeper_message_folded_status_count (state : state) live ~now =
   else
     List.length (keeper_message_unfolded_status_rows state live ~now)
     - List.length (keeper_message_visible_status_rows state live ~now)
+
+let keeper_message_standalone_details_hint (state : state) live ~now =
+  keeper_message_folded_status_count state live ~now > 0
+  && not (List.exists
+    (fun (kind, _) -> kind = Masc_tui_keeper_chat_transcript.Progress)
+    (keeper_message_visible_status_rows state live ~now))
+
+let keeper_message_counted_status_rows state live ~now =
+  List.length (keeper_message_visible_status_rows state live ~now)
+  + if keeper_message_standalone_details_hint state live ~now then 1 else 0
 
 let keeper_observed_turn (state : state) keeper_name =
   if Option.is_some state.keeper_turns_error then None
@@ -12674,6 +14500,17 @@ let keeper_message_activity_rows (state : state) =
   | (Tools_compact | Tools_results), None -> []
   | (Tools_compact | Tools_results), Some keeper_name ->
       let waiting = keeper_message_waiting_requests state ~keeper_name in
+      (* The progress row speaks for one execution. Only that execution's
+         phase is a duplicate here; another request of this Keeper -- one that
+         is still finalising while a newer one leads the progress row -- keeps
+         its own clause. *)
+      let progress_execution =
+        Option.map turn_log_execution_id (keeper_message_status_log state) in
+      let shown_by_progress entry =
+        progress_execution = Some (turn_log_execution_id entry.log) in
+      (* A running turn the server reports but no request here owns is named
+         only when no progress row is drawn at all. *)
+      let has_progress = Option.is_some progress_execution in
       let clauses = ref [] and urgent = ref [] in
       let add text = clauses := text :: !clauses in
       let attention text = urgent := text :: !urgent in
@@ -12691,20 +14528,26 @@ let keeper_message_activity_rows (state : state) =
                   && Masc_tui_keeper_chat_projection.same_request_identity
                     request entry.sent_request) waiting)
           | Turn_preflight _ | Turn_streaming -> false) own then
-        attention "메시지 전달 재확인 중";
+        attention "메시지 전송 확인 중";
       let has_working = any_phase (fun transcript ->
         Masc_tui_keeper_chat_transcript.phase transcript = Working) in
-      if has_working then add "기존 작업 처리 중";
-      if any_phase (fun transcript -> Masc_tui_keeper_chat_transcript.phase transcript = Stream_ended) then
+      let unshown_phase phase = List.exists (fun entry ->
+          not (shown_by_progress entry) && phase entry.log.tl_transcript) own in
+      if unshown_phase (fun transcript ->
+          Masc_tui_keeper_chat_transcript.phase transcript = Working) then
+        add "기존 작업 처리 중";
+      if unshown_phase (fun transcript ->
+          Masc_tui_keeper_chat_transcript.phase transcript = Stream_ended) then
         add "응답 마무리 중";
       List.iter (fun (admission, text) ->
           if List.exists (fun entry ->
-              entry.phase = Turn_streaming
+              not (shown_by_progress entry)
+              && entry.phase = Turn_streaming
               && Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript = Waiting
               && not (Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript)
               && Option.map fst (Masc_tui_keeper_chat_transcript.admission entry.log.tl_transcript) = admission) own
           then add text)
-        [None, "메시지 접수 확인 중";
+        [None, "메시지 전송 확인 중";
          Some Masc_tui_keeper_chat_live.Running, "응답 시작 중";
          Some Settled, "완료된 응답을 다시 읽는 중"];
       if not has_working then
@@ -12713,7 +14556,8 @@ let keeper_message_activity_rows (state : state) =
          | None -> List.iter (fun (row : Tui_decode.keeper_turn_row) ->
              if String.equal row.ktr_keeper_name keeper_name then
                match row.ktr_state with
-               | Keeper_turn_running _ -> add "기존 작업 처리 중"
+               | Keeper_turn_running _ ->
+                   if not has_progress then add "기존 작업 처리 중"
                | Keeper_turn_unavailable _ -> attention "현재 작업 확인 불가"
                | Keeper_turn_idle -> ()) state.keeper_turns);
       if waiting <> [] then begin
@@ -12721,8 +14565,8 @@ let keeper_message_activity_rows (state : state) =
         let count delivery = List.length (List.filter (fun (_, kind) -> kind = delivery) waiting) in
         List.iter (fun (delivery, text) -> let n = count delivery in
           if n > 0 then add (Printf.sprintf "%d건 %s" n text))
-          [Local_pending, "전송 전"; Awaiting_receipt, "접수 확인 중";
-           Rechecking_delivery, "전달 재확인 중"];
+          [Local_pending, "전송 대기"; Awaiting_receipt, "전송 중";
+           Rechecking_delivery, "전송 확인 중"];
         let requests = List.map fst waiting in
         let holds request = List.exists
           (Masc_tui_keeper_chat_projection.same_request_identity request) requests in
@@ -12738,9 +14582,9 @@ let keeper_message_activity_rows (state : state) =
         else if List.for_all (fun request -> List.exists (fun (received, result) ->
             Masc_tui_keeper_chat_projection.same_request_identity request received
             && Result.is_ok result) receipts) requests then
-          add "다음 순서로 접수됨"
-        else if receipts <> [] then add "일부 메시지 다음 순서로 접수됨"
-        else if count Keeper_queued > 0 then add "접수됨"
+          add "다음 순서로 전달 대기"
+        else if receipts <> [] then add "일부 메시지 다음 순서로 전달 대기"
+        else if count Keeper_queued > 0 then add "처리 대기"
       end;
       if List.exists (fun (name, _, intervention) ->
           String.equal name keeper_name && intervention = Retained_after_stop)
@@ -12748,15 +14592,10 @@ let keeper_message_activity_rows (state : state) =
       else if List.exists (fun (name, _, intervention) ->
           String.equal name keeper_name && intervention = Retained_before_dispatch)
           state.keeper_interactive_waiting then attention "전송 전 보관 중 · /queue resume";
-      let folded = match keeper_message_status_log state with
-        | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
-            keeper_message_folded_status_count state live.tl_transcript ~now:(Unix.gettimeofday ())
-        | Some _ | None -> 0 in
       let keys =
-        (match keeper_observed_stop_hint state with None -> "" | Some _ -> " · Esc:중단")
-        ^ (if folded > 0 then Printf.sprintf " · +%d" folded else "") in
+        match keeper_observed_stop_hint state with None -> "" | Some _ -> " · Esc:중단" in
       match List.rev !urgent @ List.rev !clauses with
-      | [] when folded = 0 -> []
+      | [] -> []
       | parts -> [{ Masc_tui_answering.lead = String.concat " · " parts;
           rest = ""; keys }]
 ;;
@@ -12811,10 +14650,12 @@ let keeper_message_inflight_drawn (state : state) =
         state.msg_inflight
     | Some _ | None -> state.msg_inflight
   in
+  (* Background Keepers are visible in the roster and Activity pane. Only
+     this conversation's diagnostic requests belong beside its composer. *)
   let uncovered = match state.msg_tool_visibility with
-    | Tools_full -> uncovered
-    | Tools_compact | Tools_results -> List.filter (fun entry ->
-        state.msg_target_keeper_name <> Some entry.sent_request.keeper_name) uncovered in
+    | Tools_full -> List.filter (fun entry ->
+        state.msg_target_keeper_name = Some entry.sent_request.keeper_name) uncovered
+    | Tools_compact | Tools_results -> [] in
   List.fold_left
     (fun groups entry ->
       let execution_id = turn_log_execution_id entry.log in
@@ -12845,11 +14686,9 @@ let keeper_message_inflight_drawn (state : state) =
         @ [ { representative = entry; count = 1; reconciling_count = reconciling } ])
     [] uncovered
 
-(* Foreign turns keep the complete stop command ahead of their descriptive
-   status. Count these physical rows with the same pane width as rendering;
-   otherwise wrapping a long Keeper name would cover the composer below. *)
-let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
-  let width = Masc_tui_frame.inner_width ~cols:chat_cols in
+(* The current conversation's extra request diagnostics, shared by the
+   renderer and its row budget. Background work stays on the Activity pane. *)
+let keeper_message_inflight_rows (state : state) ~chat_cols:_ ~now =
   let batch_label group =
     if group.count = 1 then ""
     else Printf.sprintf "%d messages in one turn · " group.count
@@ -12880,21 +14719,10 @@ let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
       (Masc_tui_keeper_chat_projection.compact_request_id
          (turn_log_execution_id group.representative.log)) age
   in
-  let mine, others = List.partition
-      (fun group -> state.msg_target_keeper_name =
-          Some group.representative.sent_request.keeper_name)
-      (keeper_message_inflight_drawn state) in
-  List.map (fun group -> true, summary group) mine
-  @ List.concat_map (fun group ->
-      let name = Masc.Tui_terminal_text.sanitize_terminal_text
-          group.representative.sent_request.keeper_name in
-      let command_rows =
-        Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
-          ("/interrupt " ^ name)
-        |> List.map (fun line -> false, "  " ^ line) in
-      command_rows @ [false, summary group]) others
+  List.map (fun group -> true, summary group)
+    (keeper_message_inflight_drawn state)
 
-let keeper_message_status_rows (state : state) ~terminal_cols =
+let keeper_message_status_rows ?scroll (state : state) ~terminal_cols =
   let chat_cols = Masc_tui_roster_pane.content_cols
       ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
   let unavailable_target =
@@ -12919,9 +14747,8 @@ let keeper_message_status_rows (state : state) ~terminal_cols =
             different number of rows than the pane draws. The age in the
             progress row changes the text, never the row count, so the
             two clock reads cannot disagree on the number. *)
-         List.length
-           (keeper_message_visible_status_rows state live.tl_transcript
-              ~now:(Unix.gettimeofday ())))
+         keeper_message_counted_status_rows state live.tl_transcript
+           ~now:(Unix.gettimeofday ()))
   (* The promoted line and the queued ones are entries in the history now --
      the chat pane appends them to the same stream it scrolls, so the
      conversation holds one time axis. Nothing is reserved for them here:
@@ -12943,26 +14770,25 @@ let keeper_message_status_rows (state : state) ~terminal_cols =
          1
      | Some _ | None -> 0)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
-  + (if state.msg_memory_visibility <> Memory_hidden
-        && Option.is_some state.msg_memory_error then 1 else 0)
-  + (if state.msg_memory_visibility <> Memory_hidden
-        && state.msg_memory_dropped > 0 then 1 else 0)
+  + (if Option.is_some state.msg_memory_error then 1 else 0)
+  + (if state.msg_memory_dropped > 0 then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)
-  + (if keeper_message_reading_back state then 1 else 0)
+  + (if keeper_message_reading_back ?scroll state then 1 else 0)
   + composer_extra_rows state
 
-let keeper_message_command_window state ~terminal_rows ~terminal_cols =
+let keeper_message_command_window ?scroll state ~terminal_rows ~terminal_cols =
   match state.view, state.keeper_message_focus, state.voice_capture,
         state.msg_recall_replaces with
-  | Keepers Keeper_message, Right_pane, None, None when state.msg_scroll = 0 ->
+  | Keepers Keeper_message, Right_pane, None, None
+    when not (keeper_message_reading_back ?scroll state) ->
     let keeper_names = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
     (match Masc_tui_command.menu ~keeper_names ~state:state.msg_command_menu
         (Masc_tui_message_input.contents state.msg_input) with
      | None -> None
      | Some menu ->
-       let status_rows = keeper_message_status_rows state ~terminal_cols + 1 in
+       let status_rows = keeper_message_status_rows ?scroll state ~terminal_cols + 1 in
        let chat_cols = Masc_tui_roster_pane.content_cols
            ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
        let history_rows = Masc_tui_message_layout.message_history_height
@@ -12979,8 +14805,8 @@ let keeper_message_command_window state ~terminal_rows ~terminal_cols =
    At the live edge, reserve that possible row only for the support threshold;
    once reading back, it is already part of [keeper_message_status_rows]. The
    rendered history still uses the exact rows it currently draws. *)
-let keeper_message_support_status_rows state ~status_rows =
-  status_rows + if keeper_message_reading_back state then 0 else 1
+let keeper_message_support_status_rows ?scroll state ~status_rows =
+  status_rows + if keeper_message_reading_back ?scroll state then 0 else 1
 
 
 (* The Code pane asks the server for at most this many entries per directory

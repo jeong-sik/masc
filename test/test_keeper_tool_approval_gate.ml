@@ -6,6 +6,7 @@ module Events = Masc.Keeper_chat_events
 module Keeper_chat_events_publish = Masc.Keeper_chat_events
 
 let keeper = "keeper.one"
+let workspace = "/tmp/test-workspace"
 
 let invocation ~tool_use_id =
   Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn:1
@@ -50,7 +51,7 @@ let with_gate ~timeout_sec f =
         Gate.create ~redact_text:Fun.id ~registry
           ~late_approvals:(Masc.Keeper_late_approval.create ())
           ~publish:(Keeper_chat_events_publish.publish events)
-          ~clock ~keeper_name:keeper ~timeout_sec
+          ~clock ~base_path:workspace ~keeper_name:keeper ~timeout_sec
       in
       f ~clock ~registry ~events ~gate)
 
@@ -76,7 +77,7 @@ let test_a_read_runs_without_asking () =
   with_gate ~timeout_sec:1.0 (fun ~clock:_ ~registry:_ ~events:_ ~gate ->
       check string "reading is not put to an operator" "continue"
         (decision_to_string
-           (gate.Gate.pre_tool_use
+           (gate.Gate.pre_tool_use ~identity_tool_index:gate.Gate.identity_tool_index
               (pre_tool_use_event ~tool_name:"Read"
                  ~input:(`Assoc [ "file_path", `String "a.ml" ])))))
 
@@ -86,7 +87,7 @@ let test_execute_hook_delegates_without_interactive_wait () =
           let input = `Assoc [ "argv", `List (List.map (fun arg -> `String arg) argv)
                             ; "cwd", `String "." ] in
           check string "Execute reaches its runtime permission owner" "continue"
-            (decision_to_string (gate.Gate.pre_tool_use
+            (decision_to_string (gate.Gate.pre_tool_use ~identity_tool_index:gate.Gate.identity_tool_index
                (pre_tool_use_event ~tool_name:"Execute" ~input))))
         [ [ "ls" ]; [ "rg"; "needle"; "." ]; [ "rm"; "fixture-only" ] ];
       check int "no duplicate interactive wait" 0 (List.length (Registry.pending registry));
@@ -96,7 +97,7 @@ let test_filesystem_hook_delegates_without_interactive_wait () =
   with_gate ~timeout_sec:180.0 (fun ~clock:_ ~registry ~events ~gate ->
     List.iter (fun tool_name ->
       check string "filesystem call reaches its resolved authorization owner" "continue"
-        (decision_to_string (gate.Gate.pre_tool_use
+        (decision_to_string (gate.Gate.pre_tool_use ~identity_tool_index:gate.Gate.identity_tool_index
           (pre_tool_use_event ~tool_name ~input:(`Assoc ["file_path", `String "result.txt"])))))
       ["Write"; "Edit"; "tool_write_file"; "tool_edit_file"];
     check int "no native wait created" 0 (List.length (Registry.pending registry));
@@ -108,7 +109,7 @@ let test_other_stages_pass_through () =
          not be turned into an approval prompt. *)
       check string "a turn boundary is not a tool call" "continue"
         (decision_to_string
-           (gate.Gate.pre_tool_use
+           (gate.Gate.pre_tool_use ~identity_tool_index:gate.Gate.identity_tool_index
               (Agent_core.Hooks.BeforeTurn { turn = 1; messages = [] }))))
 
 (* ── the callback half ────────────────────────────────────────────── *)
@@ -201,7 +202,7 @@ let test_a_synthetic_composition_asks_with_its_node_name () =
         gate.Gate.composition_plan_index
         ~composition:"keeper_compose_gate_fixture"
         ~node_tools:[ "Read"; "unclassified_fixture_tool"; "Grep" ];
-          match gate.Gate.pre_tool_use (pre_tool_use_event
+          match gate.Gate.pre_tool_use ~identity_tool_index:gate.Gate.identity_tool_index (pre_tool_use_event
                  ~tool_name:"keeper_compose_gate_fixture"
                  ~input:(`Assoc [])) with
           | Agent_core.Hooks.ElicitToolApproval { because; _ } ->

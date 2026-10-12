@@ -34,6 +34,7 @@ let make_routes ~port ~host:_ ~sw ~clock =
   |> Server_routes_http_routes_msx.add_routes
   |> Server_routes_http_routes_dos.add_routes
   |> Server_routes_http_routes_play_page.add_routes
+  |> Server_routes_http_routes_play_room.add_routes
   |> Server_routes_http_routes_play_guide.add_routes
   |> Server_routes_http_routes_play_pad.add_routes
   |> Server_routes_http_routes_play.add_routes

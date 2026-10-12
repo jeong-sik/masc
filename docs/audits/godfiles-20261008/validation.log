@@ -1,0 +1,25 @@
+Scope: parse-only OCaml syntax and changed-fragment parsing; no typecheck, build, behavior, CI or runtime claim.
+Source snapshot before evidence/changelog commit: 3e50f665f79367f2541e70c7d3ce12d0c170b0f2
+ocamlc -stop-after parsing -impl lib/dated_jsonl/dated_jsonl.ml => exit 0
+ocamlc -stop-after parsing -impl lib/dated_jsonl/dated_jsonl_layout.ml => exit 0
+ocamlc -stop-after parsing -intf lib/dated_jsonl/dated_jsonl_layout.mli => exit 0
+ocamlc -stop-after parsing -impl lib/keeper/keeper_chat_projection.ml => exit 0
+ocamlc -stop-after parsing -intf lib/keeper/keeper_chat_projection.mli => exit 0
+ocamlc -stop-after parsing -impl lib/keeper/keeper_chat_store.ml => exit 0
+ocamlc -stop-after parsing -intf lib/keeper/keeper_chat_store.mli => exit 0
+ocamlc -stop-after parsing -impl lib/keeper/keeper_chat_types.ml => exit 0
+ocamlc -stop-after parsing -intf lib/keeper/keeper_chat_types.mli => exit 0
+ocamlc -stop-after parsing -impl lib/keeper/keeper_tool_filesystem_runtime.ml => exit 0
+ocamlc -stop-after parsing -impl lib/keeper/keeper_tool_read_window.ml => exit 0
+ocamlc -stop-after parsing -intf lib/keeper/keeper_tool_read_window.mli => exit 0
+ocamlc -stop-after parsing -impl lib/runtime/runtime_protocol.ml => exit 0
+ocamlc -stop-after parsing -intf lib/runtime/runtime_protocol.mli => exit 0
+ocamlc -stop-after parsing -impl lib/runtime/runtime_toml.ml => exit 0
+ocamlc -stop-after parsing -intf lib/runtime/runtime_toml.mli => exit 0
+ocamlc -stop-after parsing -impl test/test_keeper_chat_store.ml => exit 0
+git diff 559c028cc22bc79c320de58d0a004abb1547eaa2 --check => exit 0
+parse_fragment(changelog.d/41868.md) => PASS
+parse_fragment(changelog.d/41858.md) => PASS
+parse_fragment(changelog.d/41871.md) => PASS
+parse_fragment(changelog.d/41872.md) => PASS
+parse_fragment(changelog.d/41879.md) => PASS

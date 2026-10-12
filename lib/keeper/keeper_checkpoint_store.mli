@@ -362,8 +362,8 @@ type checkpoint_installation =
     operation journal owns that authority.
 
     The closed result distinguishes [Not_installed] from [Installed].
-    Observer, release-lock, unwind, and history failures after durable commit
-    remain typed [auxiliary] facts beside the exact installed reference; they
+    Observer, release-lock, and unwind failures after durable commit remain
+    typed [auxiliary] facts beside the exact installed reference; they
     never become install failures or retry signals. An exception before commit
     is re-raised with its original raw backtrace. *)
 val save_agent_core_if_source :

@@ -1,0 +1,8 @@
+# Adjust manifest_path when copying this declaration outside this directory.
+id = "msx-machine"
+enabled = true
+run_id = "shared-msx"
+manifest_path = "../../../addons/msx-machine/lane.toml"
+
+[binding]
+sources = []

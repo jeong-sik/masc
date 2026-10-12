@@ -14,6 +14,9 @@ type check_id =
   | Sandbox
   | Keeper_persistence
   | Browser_lane
+  | Browser_bidi_host
+      (** Whether a BiDi browser host runs for the workspace and why the last
+          one ended, from that host's record on disk. *)
 
 (** Whether an [Invalid] check keeps the workspace's existing history from opening.
     [Required_to_open]: the workspace, a loadable runtime.toml and Keeper
@@ -46,6 +49,12 @@ type t =
     fails it is Invalid, because the server refuses to boot on it. Persistence
     does not establish model, sandbox or running health. *)
 val inspect : base_path:string option -> t
+
+(** {!inspect} for a running server: who starts the Keeper Firefox is read
+    from the browser configuration it loaded, which its other answers use,
+    and not from the file. {!inspect} reads the workspace's [runtime.toml]
+    and uses its browser tables only when the whole file loads. *)
+val inspect_loaded : configuration:Browser_configuration.t option -> base_path:string option -> t
 
 (** The wire name of a check, as serialized in [id]. *)
 val check_id_name : check_id -> string

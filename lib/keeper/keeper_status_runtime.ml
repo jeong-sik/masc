@@ -262,7 +262,7 @@ let keepalive_running_of_phase (phase : Keeper_state_machine.phase option) =
 
    Failing is its own reading. Its keepalive still runs turns, so it is not
    offline, but the state machine enters Failing only on evidence that turns or
-   heartbeats are failing or that the credential was archived. Read as healthy,
+   heartbeats are failing. Read as healthy,
    a keeper four failed turns deep drew "healthy" and "failing" on one TUI chat
    header (msx-retro-mania, 2026-09-15). *)
 let keeper_health_state ~meta ~(phase : Keeper_state_machine.phase option)

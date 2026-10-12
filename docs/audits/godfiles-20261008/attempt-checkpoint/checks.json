@@ -1,0 +1,22 @@
+{
+  "base_sha": "a21200bec43675e133936fb149217551d78e801a",
+  "build": {
+    "command": "opam exec -- dune build --root . -j 4 test/test_keeper_turn_driver_accept.exe test/test_keeper_turn_driver_failover.exe",
+    "exit_code": 0
+  },
+  "tests": [
+    {
+      "command": "_build/default/test/test_keeper_turn_driver_accept.exe test accept 0-1,6,38,43",
+      "exit_code": 0,
+      "executed": 5
+    },
+    {
+      "command": "_build/default/test/test_keeper_turn_driver_failover.exe test runtime_lane_resolution 13-18",
+      "exit_code": 0,
+      "executed": 6
+    }
+  ],
+  "driver_lines_before": 3290,
+  "driver_lines_after": 3234,
+  "scope": "focused compilation and selected existing scenarios, including loopback-refusal driver dispatch; no live provider or deployment"
+}

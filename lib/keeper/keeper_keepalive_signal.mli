@@ -149,11 +149,13 @@ val wakeup_keeper :
 
 val wakeup_relevant_keeper_for_board_signal :
   ?dispatch_attention:(Keeper_board_attention_candidate.candidate list -> unit) ->
+  ?dispatch_discoverable_post:(Board_dispatch.board_signal -> unit) ->
   config:Workspace.config -> Board_dispatch.addressed_board_signal -> unit
 (** Route typed immediate audiences to durable Keeper stimulus queues.
-    Discoverable posts have no immediate recipient, so their durable Board
-    record is consumed by each Keeper owner's cursor instead of performing a
-    fleet-wide metadata/candidate write on the Board producer fiber. *)
+    [dispatch_discoverable_post] reserves and asynchronously admits normal
+    discoverable posts to one event batch. Owners retain durable cursor catchup.
+    Without that callback, established owners use their cursor and only initial
+    cursor fallbacks persist on the producer fiber. *)
 
 (** Per-stage timing accumulator for Phase 0 profiling. *)
 type stage_timing = {

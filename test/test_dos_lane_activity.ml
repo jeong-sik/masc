@@ -30,10 +30,10 @@ let test_off_retains () = with_machine @@ fun directory saves checkpoints load -
   current := Machine_configuration.Disabled;
   rejected "load" (load ());
   rejected "step" (Dos_lane.step ~who ~steps:1 ~until_ready:false);
-  rejected "press" (Dos_lane.press ~who ~keys:["space"] ~steps:1);
-  rejected "Play pad owner" (Dos_lane.press_into ~saves_name:"game" ~who ~keys:["space"] ~steps:1);
+  rejected "press" (Dos_lane.press ~until_ready:true ~who ~keys:["space"] ~steps:1);
+  rejected "Play pad owner" (Dos_lane.press_into ~until_ready:true ~saves_name:"game" ~who ~keys:["space"] ~steps:1);
   rejected "click" (Dos_lane.click ~who ~x:0 ~y:0 ~buttons:1 ~steps:2);
-  rejected "type" (Dos_lane.type_text ~who ~text:"a" ~steps:1);
+  rejected "type" (Dos_lane.type_text ~until_ready:true ~who ~text:"a" ~steps:1);
   rejected "pass to another holder" (Dos_lane.pass ~who ~to_:(Some "next") ~announce:ignore);
   rejected "restore" (Dos_lane.restore ~who ~dir:checkpoints ~slot ~ledger_dir:directory ~saves_dir_of:(fun _ -> saves) ~announce:ignore);
   let after = require (Dos_lane.capture_with_identity ()) in
@@ -57,7 +57,7 @@ let test_unobserved () = with_machine @@ fun _ _ _ _ ->
 let test_accepted_finishes () = with_machine @@ fun _ _ _ _ ->
   let calls = ref 0 in
   Dos_lane.install_activity_observer (Some (fun () -> incr calls; let result= !current in current:=Machine_configuration.Disabled; result));
-  ignore (require (Dos_lane.press ~who ~keys:["space"] ~steps:Dos_lane.max_steps_per_call));
+  ignore (require (Dos_lane.press ~until_ready:true ~who ~keys:["space"] ~steps:Dos_lane.max_steps_per_call));
   check int "single admission for key and checkpoint" 1 !calls;
   rejected "next step" (Dos_lane.step ~who ~steps:1 ~until_ready:false)
 let () = run "DOS activity with retained state"

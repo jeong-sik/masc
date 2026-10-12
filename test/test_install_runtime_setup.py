@@ -646,7 +646,7 @@ class RuntimeSetupAdapter(unittest.TestCase):
                    repr(str(ROOT / 'scripts/install-runtime-setup.py')) +
                    '); m=importlib.util.module_from_spec(s); s.loader.exec_module(m);\n'
                    'try:\n'
-                   '    m.pick("Choose a connection", ["Claude Code / claude-opus-5"])\n'
+                   '    m.pick("Choose a connection", ["Claude Code / claude-opus-5-5"])\n'
                    'except m.SetupError as error:\n'
                    '    print(json.dumps({"cancelled": str(error)}))')
         process = subprocess.Popen([sys.executable, '-c', program], stdin=slave, stderr=slave,
@@ -2020,9 +2020,7 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 elif choice == 'muse':
                     account = base / 'selected-muse-account'
                     account.mkdir(mode=0o700)
-                    # Muse reserves 11,946 tokens before the user's prompt;
-                    # the shared 8,192-token fixture cannot hold that host.
-                    selected.update(account_home=str(account), max_context=200_000)
+                    selected.update(account_home=str(account))
                 env = {k: v for k, v in os.environ.items() if not k.startswith(('MASC_', 'AGENT_CORE_'))}
                 with patch.dict(os.environ, env, clear=True):
                     result = SETUP.configure(BINARY, base, selected)

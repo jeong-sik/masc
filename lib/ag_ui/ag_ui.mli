@@ -45,6 +45,8 @@ type event = private {
       (** Text chunk or tool args fragment. *)
   tool_call_id : string option;
   tool_call_name : string option;
+  text_stream_scope : int option;
+      (** Response identity for text chunks, independently of tool occurrence scope. *)
   tool_stream_scope : int option;
   provider_message_id : string option;
   tool_call_block_index : int option;
@@ -67,6 +69,7 @@ val make_event :
   ?delta:string option ->
   ?tool_call_id:string option ->
   ?tool_call_name:string option ->
+  ?text_stream_scope:int option ->
   ?tool_stream_scope:int option ->
   ?provider_message_id:string option ->
   ?tool_call_block_index:int option ->

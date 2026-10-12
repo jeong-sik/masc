@@ -1235,10 +1235,9 @@ let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
       let generation = !execution_publication_generation in
       clear_execution_default_light_http_body ();
       let publish json =
-        execution_cache.Server_dashboard_http_cache.current
-        <- { (Server_dashboard_http_cache.snapshot execution_cache) with
-             json = with_execution_publication_generation ~generation json
-           };
+        let json = with_execution_publication_generation ~generation json in
+        Server_dashboard_http_cache.update_cached_surface execution_cache
+          (fun current -> { current with json });
         Patched ()
       in
       match (Server_dashboard_http_cache.snapshot execution_cache).json with

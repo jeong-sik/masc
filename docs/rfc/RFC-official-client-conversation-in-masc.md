@@ -3,7 +3,7 @@ rfc: "official-client-conversation-in-masc"
 title: "Record official-client turns in the keeper checkpoint so the token window can bound their sessions"
 status: Draft
 created: 2026-09-16
-updated: 2026-09-16
+updated: 2026-10-07
 author: vincent
 related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bounded-restart"]
 ---
@@ -217,7 +217,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 ## 3. 현재 동작
 
 - **세션을 새로 여는 때** (`keeper_claude_code_runtime.ml:519-524`, `keeper_official_client_session_store.ml:810-869`): 저장 상태가 없거나 `ready` 일 때, `client_kind`·`runtime_id` 가 바뀌었을 때, 도구 표면 digest 가 바뀌었을 때, 복구가 승계되거나 새 시작을 고른 때. 그 밖에는 저장된 settlement 로 resume 한다.
-- **새 세션의 이력 씨앗** (`:1193-1213`): 체크포인트 이력을 `min(max-prompt-bytes, max-request-body-bytes)` 바이트로 자른다. 라이브 설정은 둘 다 524,288 이다. 고정으로 붙는 맥락이 먼저 이 용량을 쓰고, 남은 자리를 60 atom 단위로 자른다(`runtime_model_input_tail_window.ml`).
+- **새 세션의 이력 씨앗**: Librarian 앞머리와 carried range로 조립한다. Antigravity와 Muse는 조립된 범위를 로컬 바이트 상한으로 자르지 않고 보낸다. Claude Code와 Codex도 첫 시도에는 별도 시작 상한을 두지 않으며, 공급자의 typed overflow 뒤 재시도에서만 줄인 용량을 창에 전달한다. 모델의 `max-context`는 이 시작 입력의 바이트 상한으로 변환하지 않는다(#41369).
 - **resume 턴** (`:579-613`, `runtime_claude_code.ml:1329-1331`): 프롬프트는 goal 한 줄이고 `--resume=<id>` 로 띄운다.
 - **usage** (`runtime_claude_code.ml:98-118`): 턴 레코드는 가장 최근 요청의 usage 를 `per_request` 로 적는다(#36725).
 - **원래 세션이 필요한 이어가기**
@@ -332,7 +332,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 | §7 | 이 RFC 에서 |
 |---|---|
 | 1. 창은 토큰으로 선언한다 | `W` 하나를 쓴다 |
-| 2. 본문 상한은 판정에만 쓴다 | 원칙 유지. 예외: Antigravity 는 typed overflow 가 없어 선언된 `max-prompt-bytes` 안에서 fresh-session 씨앗을 임시로 자른다. 미선언은 거절한다. 대체: agy usage `input_tokens` 로 만든 토큰 창과 "trajectory cleared" 의 typed 분류 (#37123) |
+| 2. 본문 상한은 판정에만 쓴다 | Antigravity와 Muse도 로컬 시작 상한 없이 조립된 범위를 보낸다(#41369). Antigravity의 typed oversized 거절 부재와 "trajectory cleared"의 원인 구분은 별도 문제이며, 입력 전달이 클라이언트 내부의 보존을 증명하지는 않는다(#37123, #41341). |
 | 5. 앞부분 흔들림을 재고 그 이상 늘리지 않는다 | 매 턴 새 세션은 고정부와 씨앗을 매번 다시 쓴다. 지금 resume 턴의 재기록 비율은 0.001 이다. §11 에서 잰다 |
 | 6. 도구 호출과 결과는 같이 남거나 같이 빠진다 | §5.6 이 짝을 id 로 남긴다. 씨앗 자르기는 지금 규칙 그대로다 |
 | 7. 요약하지 않는다 | §5.7 뒤에 `DISABLE_COMPACT=1`. 대화 원문은 체크포인트에 있다 |
@@ -368,10 +368,10 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 | 6 | 턴 대화를 체크포인트에(§5.6) | §8 2·3번 | 체크포인트 쓰기 증가 |
 | 7 | 씨앗을 토큰으로, 매 턴 새 세션, `DISABLE_COMPACT`(§5.7) | 5·6단계 | 요청 하나가 `W + 턴 증가` 안으로 |
 
-Antigravity 임시 guard 를 배포하기 전에는 운영 중인 `antigravity-cli` 모델마다
-실측한 `max-prompt-bytes`를 명시한다. 저장소 seed는 새 설정에만 들어가며 기존
-설정의 모델 행을 덮지 않는다. 선언이 빠진 기존 모델은 조용히 무제한으로
-돌아가지 않고 typed `InvalidConfig(max_prompt_bytes)`로 거절된다.
+Antigravity와 Muse의 시작 입력에는 별도 바이트 상한을 선언하지 않는다(#41369).
+Muse의 작은 `max-context`도 호스트 고정비와 비교해 로드나 readiness를 거절하지 않는다.
+공식 클라이언트의 압축·입력 거절·세션 소실은 해당 클라이언트가 실제로 보고한
+결과로 관측한다. §5.7의 토큰 기반 세션 정책은 여전히 구현 전 제안이다.
 
 ## 11. 배포 후 측정
 

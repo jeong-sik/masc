@@ -545,12 +545,12 @@ val drop_by_post_id :
   unit ->
   (Keeper_event_queue.stimulus list, string) result
 
-type queue_residence_unknown_reason =
+type queue_residence_unknown_reason = Keeper_event_queue_fleet_projection.queue_residence_unknown_reason =
   | First_admission_not_recorded
   | Queue_observation_incomplete
       (** Queue storage observation is unavailable/incomplete. *)
 
-type queue_residence = Unknown of queue_residence_unknown_reason
+type queue_residence = Keeper_event_queue_fleet_projection.queue_residence = Unknown of queue_residence_unknown_reason
 (** Diagnostic evidence only. Persisted queue entries do not record their first
     admission time. Source timestamps, revisions and file mtimes cannot supply
     it, including for an empty queue or a newly observed pending entry. *)
@@ -558,7 +558,7 @@ type queue_residence = Unknown of queue_residence_unknown_reason
 val queue_residence_to_yojson : queue_residence -> Yojson.Safe.t
 (** The unknown residence duration is JSON null, with an explicit reason. *)
 
-type owner_lifecycle =
+type owner_lifecycle = Keeper_event_queue_fleet_projection.owner_lifecycle =
   | Runnable
   | Recoverable
   | Retained_disabled

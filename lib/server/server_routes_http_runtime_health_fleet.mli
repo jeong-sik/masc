@@ -14,6 +14,15 @@ val keeper_owner_health_json : unit -> Yojson.Safe.t
 val keeper_board_event_collection_health_json : unit -> Yojson.Safe.t
 (** Preserves an unread census as unavailable rather than a healthy empty fleet. *)
 
+val keeper_hitl_gate_health_json : unit -> Yojson.Safe.t
+(** The keeper_hitl_gate section (task-1665, design D1). Live waits from the
+    tool-approval registry over the durable ask counts from the asking
+    workspace's queue; see {!Keeper_hitl_gate_health} for the closed
+    aggregation. Every computation failure is a distinct projection rather
+    than a zero: no server state keeps the live side under
+    [snapshot_not_ready], an unread queue goes [unavailable] with an
+    operator demand, never an empty count. *)
+
 val paused_keeper_count : Yojson.Safe.t -> int
 
 val runtime_base_path_opt : unit -> string option

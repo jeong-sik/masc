@@ -1,0 +1,5 @@
+ASSERT worker_start_failed
+ASSERT identity_unbound
+ASSERT completion_persistence_uncertain
+ASSERT judgment_resolution_failed
+ASSERT exact_state_not_completed

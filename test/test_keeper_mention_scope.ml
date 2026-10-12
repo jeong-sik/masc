@@ -45,7 +45,7 @@ let test_empty_targets () =
 
 let msg ~role ?(id = "test-msg") ?(ts = 1.0) ?(surface = None) ?(speaker = None)
     ?(audio = None)
-    ?(kind = Store.Row_kind.Utterance) ?(turn_ref = None) content
+    ?(turn_ref = None) content
   : Store.chat_message
   =
   { id
@@ -64,7 +64,6 @@ let msg ~role ?(id = "test-msg") ?(ts = 1.0) ?(surface = None) ?(speaker = None)
   ; audio
   ; blocks = None
   ; mentions = Masc.Keeper_lane_mentions.mention_ids_of_content content
-  ; kind
   ; turn_ref
   ; stream_lifecycle = None
   ; approval_lifecycle = None
@@ -135,13 +134,13 @@ let test_empty_carrier_row_does_not_answer_the_delivery () =
               { kind = Masc.Keeper_chat_blocks.Continuation_checkpoint }
           ]
     ; delivery_provenance =
-        provenance Keeper_chat_delivery_identity.Terminal_assistant
+        provenance Keeper_chat_delivery_identity.Terminal_result
     }
   in
   let spoken_reply =
     { (msg ~role:Store.Role.Assistant ~id:"a2" ~ts:12.0 "on it") with
       delivery_provenance =
-        provenance Keeper_chat_delivery_identity.Terminal_assistant
+        provenance Keeper_chat_delivery_identity.Terminal_result
     }
   in
   (* A media-only reply is persisted with empty content and completes as
@@ -154,7 +153,7 @@ let test_empty_carrier_row_does_not_answer_the_delivery () =
               { src = "masc://media/1.png"; cap = None }
           ]
     ; delivery_provenance =
-        provenance Keeper_chat_delivery_identity.Terminal_assistant
+        provenance Keeper_chat_delivery_identity.Terminal_result
     }
   in
   check (list string) "empty carrier row leaves the message pending"
@@ -412,7 +411,6 @@ let tool_line : Store.chat_message =
   ; audio = None
   ; blocks = None
   ; mentions = []
-  ; kind = Store.Row_kind.Utterance
   ; turn_ref = None
   ; stream_lifecycle = None
   ; approval_lifecycle = None
@@ -436,9 +434,8 @@ let test_transport_failure_does_not_clear () =
      turn. A real utterance afterwards still clears. *)
   let turn_ref = turn_ref 7 in
   let failure =
-    msg ~role:Store.Role.Assistant ~ts:10.5
+    msg ~role:Store.Role.Request_failure ~ts:10.5
       ~turn_ref
-      ~kind:Store.Row_kind.Transport_failure
       "Keeper request failed: Idle detected"
   in
   let messages =

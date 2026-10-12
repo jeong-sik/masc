@@ -2407,7 +2407,8 @@ let test_counterpart_range_reads_beyond_recent_windows () =
          ; metadata = []
          }
        in
-       match Keeper_external_attention.record ~base_path:base_dir item with
+       match Keeper_external_attention.For_testing.record_with_clock
+         ~now:(fun () -> item.Keeper_external_attention.received_at) ~base_path:base_dir item with
        | `Recorded -> ()
        | `Duplicate _ -> fail "unexpected duplicate external fixture"
        | `Error detail -> fail detail)
@@ -2464,7 +2465,8 @@ let test_counterpart_range_includes_upper_boundary_once () =
       ; metadata = []
       }
     in
-    match Keeper_external_attention.record ~base_path:base_dir item with
+    match Keeper_external_attention.For_testing.record_with_clock
+         ~now:(fun () -> item.Keeper_external_attention.received_at) ~base_path:base_dir item with
     | `Recorded -> ()
     | `Duplicate _ -> fail "unexpected duplicate external fixture"
     | `Error detail -> fail detail
@@ -2520,7 +2522,8 @@ let test_external_chat_pair_straddling_a_boundary_is_not_duplicated () =
     ; metadata = []
     }
   in
-  (match Keeper_external_attention.record ~base_path:base_dir item with
+  (match Keeper_external_attention.For_testing.record_with_clock
+         ~now:(fun () -> item.Keeper_external_attention.received_at) ~base_path:base_dir item with
    | `Recorded -> ()
    | `Duplicate _ -> fail "unexpected duplicate external fixture"
    | `Error detail -> fail detail);

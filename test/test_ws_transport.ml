@@ -498,7 +498,8 @@ let test_backpressure_gate_stale_ack_throttles_delivery () =
   let before = read_counter name in
   Ws.__test_reset_env_caches ();
   with_env_var "MASC_WS_ACK_STALE_THRESHOLD_SEC" "0.001" (fun () ->
-    let session = Ws.new_session ~id:"stale-ack" ~wsd:(Obj.magic ()) in
+    let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
+      ~base_path:(Filename.get_temp_dir_name ())) ~id:"stale-ack" ~wsd:(Obj.magic ()) in
     Atomic.set session.dashboard_auth (Ws.Authenticated { agent = None });
     Atomic.set session.dashboard_last_delta_seq 1;
     Atomic.set session.dashboard_last_delta_at (Unix.gettimeofday () -. 10.0);
@@ -526,8 +527,59 @@ let test_inbound_size_env_defaults () =
 
 (* ====== Inbound dispatch admission ====== *)
 
+let test_dashboard_hello_keeps_upgrade_runtime_authority () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run @@ fun sw ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let parent = Masc_test_deps.setup_test_workspace () in
+    let base_a = Filename.concat parent "runtime-alpha" in
+    let base_b = Filename.concat parent "runtime-beta" in
+    List.iter (fun base -> Fs_compat.mkdir_p (Filename.concat base Common.masc_dirname))
+      [base_a;base_b];
+    let auth_a = Masc_test_deps.make_sse_auth base_a "same-reader" in
+    let auth_b = Masc_test_deps.make_sse_auth base_b "same-reader" in
+    let id = "ws-runtime-authority" in
+    let session = Ws.new_session ~id ~wsd:(Obj.magic ())
+      ~runtime_authority:(Sse.runtime_authority_exn ~base_path:base_a) in
+    let hello (auth : Sse.registration_auth) request_id =
+      let state = Masc.Mcp_server.For_testing.create_state ~base_path:auth.config in
+      let params = match auth.token with
+        | Some token -> ["token", `String token]
+        | None -> [] in
+      let request = Yojson.Safe.to_string (`Assoc [
+        "jsonrpc", `String "2.0"; "id", `Int request_id;
+        "method", `String "dashboard/hello"; "params", `Assoc params ]) in
+      (* Use the registered WS handler through the production dispatcher. The
+         request's server state supplies the root; params cannot override it. *)
+      Masc.Mcp_server_eio.handle_request ~clock:(Eio.Stdenv.clock env) ~sw
+        ~mcp_session_id:id state request in
+    Ws.with_sessions_rw (fun () -> Hashtbl.replace Ws.sessions id session);
+    Fun.protect ~finally:(fun () ->
+      Ws.with_sessions_rw (fun () -> Hashtbl.remove Ws.sessions id);
+      Masc_test_deps.cleanup_test_workspace parent) (fun () ->
+      let foreign = hello auth_b 1 in
+      Alcotest.(check int) "foreign hello is an invalid request"
+        (Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Invalid_request)
+        Yojson.Safe.Util.(foreign |> member "error" |> member "code" |> to_int);
+      Alcotest.(check string) "another root cannot authorize this upgrade"
+        "dashboard/hello belongs to a different runtime"
+        Yojson.Safe.Util.(foreign |> member "error" |> member "message" |> to_string);
+      Alcotest.(check bool) "foreign root did not authenticate the socket" false
+        (Ws.dashboard_auth_is_authenticated (Atomic.get session.dashboard_auth));
+      let accepted = hello auth_a 2 in
+      Alcotest.(check bool) "bound-root hello returns an authenticated session" true
+        Yojson.Safe.Util.(accepted |> member "result" |> member "session"
+          |> member "authenticated" |> to_bool);
+      Alcotest.(check bool) "the socket authenticates only its bound runtime" true
+        (Ws.dashboard_auth_is_authenticated (Atomic.get session.dashboard_auth));
+      Alcotest.(check (option string)) "authentication retains the bound-root credential"
+        (Some "same-reader")
+        (Ws.dashboard_auth_agent (Atomic.get session.dashboard_auth))))
+;;
+
 let with_registered_test_session sid f =
-  let session = Ws.new_session ~id:sid ~wsd:(Obj.magic ()) in
+  let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
+      ~base_path:(Filename.get_temp_dir_name ())) ~id:sid ~wsd:(Obj.magic ()) in
   Ws.with_sessions_rw (fun () -> Hashtbl.replace Ws.sessions sid session);
   Fun.protect
     ~finally:(fun () ->
@@ -842,7 +894,8 @@ let test_dashboard_auth_authenticated_tokenless () =
 (* ====== Cross-fiber scalar state (Atomic.t) ====== *)
 
 let test_new_session_initializes_pong_state () =
-  let session = Ws.new_session ~id:"pong-state-init" ~wsd:(Obj.magic ()) in
+  let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
+      ~base_path:(Filename.get_temp_dir_name ())) ~id:"pong-state-init" ~wsd:(Obj.magic ()) in
   Alcotest.(check bool) "closed starts false" false (Atomic.get session.closed);
   Alcotest.(check bool) "last_pong_at is in the recent past"
     true
@@ -859,7 +912,8 @@ let test_new_session_initializes_pong_state () =
     0 (Atomic.get session.inbound_dispatches)
 
 let test_record_pong_refreshes_last_pong_at () =
-  let session = Ws.new_session ~id:"pong-refresh" ~wsd:(Obj.magic ()) in
+  let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
+      ~base_path:(Filename.get_temp_dir_name ())) ~id:"pong-refresh" ~wsd:(Obj.magic ()) in
   let before = Atomic.get session.last_pong_at in
   Unix.sleepf 0.005;
   Ws.record_pong session;
@@ -941,7 +995,8 @@ let test_dashboard_seq_no_lost_updates_across_domains () =
      meaningless.  Skip rather than assert a vacuous green. *)
   if Domain.recommended_domain_count () < 2 then ()
   else
-  let session = Ws.new_session ~id:"seq-xdomain" ~wsd:(Obj.magic ()) in
+  let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
+      ~base_path:(Filename.get_temp_dir_name ())) ~id:"seq-xdomain" ~wsd:(Obj.magic ()) in
   let iters = 1_000_000 in
   (* Two-way start barrier: each domain announces arrival and spins until both
      are present, so the increment loops run in true overlap.  Without it the
@@ -1068,6 +1123,8 @@ let () =
         test_inbound_dispatch_rejects_gone_or_closed_session;
     ]);
     ("external_subscriber", [
+      Alcotest.test_case "dashboard hello keeps upgrade runtime authority" `Quick
+        test_dashboard_hello_keeps_upgrade_runtime_authority;
       Alcotest.test_case "single subscriber receives broadcast" `Quick
         test_ws_external_subscriber_receives_broadcast;
       Alcotest.test_case "multi-session broadcast" `Quick

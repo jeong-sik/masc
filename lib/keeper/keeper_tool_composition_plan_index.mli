@@ -35,3 +35,11 @@ val node_tools : t -> composition:string -> string list option
 (** The tools [composition] runs, or [None] when this name was never
     recorded — which for a caller means "not a composition I know", not "a
     composition that runs nothing". *)
+
+val bind_descriptors : t -> Keeper_tool_descriptor.t list -> unit
+(** Bind this approval turn to its exact immutable descriptor values. Rebinding
+    to a different surface is refused, including structurally identical copies.
+    Dynamic tools and composition nodes are judged against the same authority. *)
+val descriptors : t -> Keeper_tool_descriptor.t list option
+(** [None] denotes a compatibility caller which has not bound a turn surface;
+    [Some []] is a frozen empty surface and must not fall back to global tools. *)

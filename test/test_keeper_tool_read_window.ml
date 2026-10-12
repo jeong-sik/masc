@@ -441,10 +441,13 @@ let test_refusals_of_what_the_caller_named_are_policy () =
     policy
     (class_of [ "path", `String "/etc/passwd" ]);
   Alcotest.(check (option string)) "empty path" policy (class_of [ "path", `String "" ]);
-  Alcotest.(check (option string))
-    "a readable file is not refused"
-    None
-    (class_of [ "path", `String "repos/masc/sample.ml" ])
+  let execution = Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
+    ~turn_sandbox_factory:None ~config ~meta
+    ~args:(`Assoc [ "path", `String "repos/masc/sample.ml" ]) in
+  match execution.disposition with
+  | Tool_result.Completed () -> ()
+  | Tool_result.Failed _ | Tool_result.Deferred () ->
+    Alcotest.failf "a readable file is refused: %s" execution.raw_output
 ;;
 
 let test_legacy_max_bytes_args_unchanged () =
@@ -532,11 +535,90 @@ let test_window_offsets_follow_the_body_first_line () =
     ~expected_next:(Some 25_002)
 ;;
 
+let test_schema_integer_coordinates_survive_lowering () =
+  setup @@ fun ~config:_ ~meta:_ ~playground ->
+  write_file (Filename.concat playground "repos/masc/sample.ml") (numbered_lines 5);
+  List.iter (fun value ->
+    let input = `Assoc
+      [ "file_path", `String "repos/masc/sample.ml"; "offset", value; "limit", value ] in
+    let args =
+      match Masc.Keeper_tool_descriptor_resolution.validated_descriptor_and_input_for_tool_call
+              ~tool_name:"Read" ~input with
+      | Some (Ok (_, args)) -> args
+      | Some (Error error) -> Alcotest.fail (Tool_result.message error)
+      | None -> Alcotest.fail "Read descriptor missing"
+    in
+    let execution = Keeper_tool_filesystem_runtime.handle_owned_read_file_with_outcome
+      ~ownership_root:(Unix.realpath playground) ~args in
+    let raw = execution.raw_output in
+    if not (parse_ok raw) then Alcotest.failf "Read %s failed: %s"
+      (Yojson.Safe.to_string input) raw;
+    Alcotest.(check (option string)) "requested two lines from line two"
+      (Some "line-002\nline-003\n") (parse_string "content" raw))
+    [ `Intlit "2"; `Float 2.0 ]
+;;
+
+let test_invalid_coordinates_do_not_become_absence () =
+  setup @@ fun ~config ~meta ~playground ->
+  write_file (Filename.concat playground "repos/masc/sample.ml") (numbered_lines 5);
+  let handlers =
+    [ (fun args -> Keeper_tool_filesystem_runtime.handle_owned_read_file_with_outcome
+        ~ownership_root:(Unix.realpath playground) ~args)
+    ; (fun args -> Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
+        ~turn_sandbox_factory:None ~config ~meta ~args) ] in
+  List.iter (fun handle ->
+  List.iter (fun field ->
+    List.iter (fun value ->
+      let execution = handle
+        (`Assoc [ "path", `String "repos/masc/sample.ml"; field, value ]) in
+      match execution.Masc.Keeper_tool_execution.disposition with
+      | Tool_result.Failed failure ->
+        Alcotest.(check bool) "invalid coordinate is caller policy"
+          true (failure = Tool_result.Policy_rejection);
+        Alcotest.(check (option string)) "no file content delivered"
+          None (parse_string "content" execution.raw_output);
+        let error = parse_string "error" execution.raw_output |> Option.value ~default:"" in
+        Alcotest.(check bool) "error identifies the coordinate" true
+          (Astring.String.is_infix ~affix:field error)
+      | Tool_result.Completed () | Tool_result.Deferred () ->
+        Alcotest.failf "%s=%s returned file content instead of rejecting: %s"
+          field (Yojson.Safe.to_string ~std:false value) execution.raw_output)
+      [ `Intlit "99999999999999999999999999999999999"
+      ; `Int 0; `Int (-1); `String "2"; `String "oops"; `Null; `Float 2.5
+      ; `Float infinity; `Float nan; `Float (-. (float_of_int min_int))
+      ; `Bool true; `List []; `Assoc [] ])
+    [ "offset"; "limit" ]) handlers
+;;
+
+let test_non_object_read_arguments_are_rejected () =
+  setup @@ fun ~config ~meta ~playground ->
+  let check execution =
+    match execution.Masc.Keeper_tool_execution.disposition with
+    | Tool_result.Failed Tool_result.Policy_rejection ->
+      let error = parse_string "error" execution.raw_output |> Option.value ~default:"" in
+      Alcotest.(check bool) "error names the object contract" true
+        (Astring.String.is_infix ~affix:"object" error)
+    | Tool_result.Failed _ | Tool_result.Completed () | Tool_result.Deferred () ->
+      Alcotest.failf "non-object Read arguments were not rejected as caller policy: %s"
+        execution.raw_output
+  in
+  Keeper_tool_filesystem_runtime.handle_owned_read_file_with_outcome
+    ~ownership_root:(Unix.realpath playground) ~args:`Null |> check;
+  Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
+    ~turn_sandbox_factory:None ~config ~meta ~args:`Null |> check
+;;
+
 let () =
   Alcotest.run
     "keeper_tool_read_window"
     [ ( "read-line-window"
-      , [ Alcotest.test_case "wire limit means lines" `Quick test_wire_limit_means_lines
+      , [ Alcotest.test_case "schema integer coordinates survive lowering" `Quick
+            test_schema_integer_coordinates_survive_lowering
+        ; Alcotest.test_case "invalid coordinates do not become absence" `Quick
+            test_invalid_coordinates_do_not_become_absence
+        ; Alcotest.test_case "non-object Read arguments are rejected" `Quick
+            test_non_object_read_arguments_are_rejected
+        ; Alcotest.test_case "wire limit means lines" `Quick test_wire_limit_means_lines
         ; Alcotest.test_case "offset window mid file" `Quick test_offset_window_mid_file
         ; Alcotest.test_case "tail window reaches EOF" `Quick test_tail_window_reaches_eof
         ; Alcotest.test_case

@@ -171,12 +171,14 @@ let account_emails_of_inventory json =
     account_emails_of_json ~integration_ids:(List.filter_map (fun row -> string (field "id" row)) rows)
       (field "account_emails" json)
   | _ -> Email_list_unrecognized
-let emails_of_document json =
+let account_emails_of_document json =
   let rows = field "account_emails" json in
   let integration_ids = match rows with
     | `List rows -> List.filter_map (fun row -> string (field "integration_id" row)) rows
     | _ -> [] in
-  match account_emails_of_json ~integration_ids rows with
+  account_emails_of_json ~integration_ids rows
+let emails_of_document json =
+  match account_emails_of_document json with
   | Email_rows {rows; unattributed} ->
     let emails = List.filter_map (function
       | id, Email email -> Some (id, email)

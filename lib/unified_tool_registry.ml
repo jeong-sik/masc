@@ -104,6 +104,7 @@ let tag_of_runtime_handler
   | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
+  | Tool_memory_select
   | Tool_memory_retract
   | Tool_memory_write
   | Tool_constitution_write
@@ -122,6 +123,7 @@ let tag_of_runtime_handler
   | Tool_masc_fusion_decision
   | Tool_masc_file_dispatch
   | Tool_keeper_webmcp_dispatch
+  | Tool_lane_addon _
   | Tool_analyze_image -> Mod_external
 
 (** Resolve only exact schema or descriptor membership. *)

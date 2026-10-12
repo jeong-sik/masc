@@ -130,13 +130,15 @@ let kind_of_string = function
      falls back to it), and a path this route cannot check is not one to take
      from a caller. *)
   | "macos_say" -> Ok Voice_config.Macos_say
+  | "espeak_ng" -> Ok Voice_config.Espeak_ng
   | "whisper_cli" -> Ok Voice_config.Whisper_cli
   | other ->
     Error
       (Invalid_request
          (Printf.sprintf
             "unknown endpoint kind %S; expected \"openai_compat\", \
-             \"elevenlabs_direct\", \"voice_mcp\", \"macos_say\" or \"whisper_cli\""
+             \"elevenlabs_direct\", \"voice_mcp\", \"macos_say\", \"espeak_ng\" or \
+             \"whisper_cli\""
             other))
 
 (* Which section a kind can serve. A kind installed in the section it cannot
@@ -150,9 +152,11 @@ let kind_serves_section kind (section : Voice_setup.section) =
   | Voice_config.Elevenlabs_direct, (Voice_setup.Tts | Voice_setup.Stt)
   | Voice_config.Voice_mcp, Voice_setup.Tts
   | Voice_config.Macos_say, Voice_setup.Tts
+  | Voice_config.Espeak_ng, Voice_setup.Tts
   | Voice_config.Whisper_cli, Voice_setup.Stt -> true
   | Voice_config.Voice_mcp, Voice_setup.Stt
   | Voice_config.Macos_say, Voice_setup.Stt
+  | Voice_config.Espeak_ng, Voice_setup.Stt
   | Voice_config.Whisper_cli, Voice_setup.Tts -> false
 
 let ( let* ) = Result.bind

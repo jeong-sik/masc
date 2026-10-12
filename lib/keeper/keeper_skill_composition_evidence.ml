@@ -339,13 +339,27 @@ let store_dir config =
   Filename.concat (Workspace.masc_root_dir config) store_dirname
 ;;
 
-let path config reference =
+(* Layout: one append-only directory per exact reference, holding one file per
+   composition run. Runs never overwrite each other, so a run that started
+   earlier but finished later cannot clobber a newer record. The pre-append
+   layout kept a single [<partition>.json] per reference; that file is still
+   honoured as a load candidate so evidence written before this layout remains
+   readable. *)
+let reference_dir config reference =
+  Filename.concat (store_dir config) (partition reference)
+;;
+
+let run_path config reference composition_run_id =
+  Filename.concat (reference_dir config reference) (composition_run_id ^ ".json")
+;;
+
+let legacy_path config reference =
   Filename.concat (store_dir config) (partition reference ^ ".json")
 ;;
 
-let load_path config expected_reference =
+let load_file config expected_reference path =
   let ownership_root = Workspace.masc_root_dir config in
-  match Fs_compat.load_owned_regular_file ~ownership_root (path config expected_reference) with
+  match Fs_compat.load_owned_regular_file ~ownership_root path with
   | Error error -> Error (Read_failed error)
   | Ok None -> Ok None
   | Ok (Some bytes) ->
@@ -359,7 +373,56 @@ let load_path config expected_reference =
        else Error (Invalid_record "reference does not match its partition"))
 ;;
 
-let load_latest config reference = load_path config reference
+let scan_runs config reference =
+  let ownership_root = Workspace.masc_root_dir config in
+  match
+    Fs_compat.read_owned_directory_if_present
+      ~owner_uid:(Unix.geteuid ())
+      ~ownership_root
+      (reference_dir config reference)
+  with
+  | Error error -> Error (Read_failed error)
+  | Ok None -> Ok []
+  | Ok (Some names) ->
+    let ( let* ) = Result.bind in
+    names
+    |> List.sort String.compare
+    |> List.filter (fun name -> Filename.check_suffix name ".json")
+    |> List.fold_left
+         (fun acc name ->
+            let* acc = acc in
+            let* value =
+              load_file
+                config
+                reference
+                (Filename.concat (reference_dir config reference) name)
+            in
+            Ok (Option.fold ~none:acc ~some:(fun value -> value :: acc) value))
+         (Ok [])
+;;
+
+(* Total order for "latest": recorded_at first; the uuid v7 run id breaks
+   ties so selection stays deterministic even for equal timestamps. *)
+let newest_order a b =
+  match Float.compare a.recorded_at b.recorded_at with
+  | 0 -> String.compare a.composition_run_id b.composition_run_id
+  | order -> order
+;;
+
+let load_latest config reference =
+  let ( let* ) = Result.bind in
+  let* runs = scan_runs config reference in
+  let* legacy = load_file config reference (legacy_path config reference) in
+  Ok
+    (List.fold_left
+       (fun newest candidate ->
+          match newest with
+          | None -> Some candidate
+          | Some newest ->
+            Some (if newest_order candidate newest > 0 then candidate else newest))
+       None
+       (List.filter_map Fun.id (legacy :: List.map Option.some runs)))
+;;
 
 let prepare_store_directory config =
   let ownership_root = Workspace.masc_root_dir config in
@@ -374,11 +437,18 @@ let prepare_store_directory config =
 let save_latest config value =
   let ( let* ) = Result.bind in
   let* _lease = prepare_store_directory config in
-  let target = path config value.reference in
-  let lock_path = target ^ ".lock" in
+  let* _reference_lease =
+    Keeper_fs_durable_directory.ensure
+      ~before_prepare:(fun () -> ())
+      ~before_directory_fsync:(fun _ -> ())
+      ~ownership_root:(Workspace.masc_root_dir config)
+      (reference_dir config value.reference)
+    |> Result.map_error (fun error -> Directory_prepare_failed error)
+  in
+  let target = run_path config value.reference value.composition_run_id in
+  let lock_path = (reference_dir config value.reference) ^ ".lock" in
   match
     File_lock_eio.with_durable_lock_observed ~lock_path (fun () ->
-      let* _existing = load_path config value.reference in
       Keeper_fs.save_json_durable_atomic
         ~ownership_root:(Workspace.masc_root_dir config)
         ~pretty:false

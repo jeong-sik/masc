@@ -1,0 +1,188 @@
+(** What is said of a workspace's BiDi browser host: the host's own record,
+    beside the launcher it is started with and the connections this process's
+    server lists. [masc doctor], the dashboard's onboarding check, the
+    connection list the TUI reads and the browser tools answer from this one
+    observation. *)
+
+(** Who starts the Keeper Firefox and its host, from the workspace's
+    configuration (RFC-browser-keeper-firefox §3.7). *)
+type keeper =
+  | Masc_starts of
+      { port : int
+      ; profile : string
+      ; last_start : Browser_keeper_firefox_start_record.read
+          (** What MASC's last start came to. *)
+      }
+      (** [runtime.toml] has [\[browser.live.bidi\]] and the live lane is on:
+          MASC starts them at a server start and for a Keeper's hover or
+          drag. *)
+  | Lane_off  (** The table is there and [\[browser.live\] enabled = false]. *)
+  | Not_configured  (** No [\[browser.live.bidi\]]: the operator starts them. *)
+  | Not_known  (** No configuration was given to read it from. *)
+
+(** [None]: no configuration was loaded or read. A start's record is read
+    only where MASC starts them. *)
+val keeper_of_configuration : base_path:string -> Browser_configuration.t option -> keeper
+
+type observation =
+  { lane : Browser_lane_launcher.t
+        (** The launcher, and the server with the connections it listed. *)
+  ; record : Browser_bidi_host_record.state
+        (** What the host's record and its lock say. It is read from disk, so
+            it is known without a server. *)
+  ; keeper : keeper
+  }
+
+(** Reads the record, the launcher and, where MASC starts them, its last
+    start, then asks this process's server. Reading can let other fibers
+    run, so the server is asked last: a host that attached during the reads
+    is in the list the observation holds. [configuration] is the one this
+    process loaded, or the workspace's [runtime.toml] read for it. *)
+val observe : base_path:string -> configuration:Browser_configuration.t option -> observation
+
+(** The observation with no last start, for an answer that already says
+    what the start it asked for came to. *)
+val without_last_start : observation -> observation
+
+(** The lane's connections an answer lists beside what it says of the host:
+    the list the observation was made from, so the two say of one list. A
+    process that bound no listener was not asked for one, and its lane is
+    listed by this call. *)
+val listed_clients : observation -> Browser_lane.client_info list
+
+(** What the record, the lock and the observed server say together. *)
+type verdict =
+  | Host_absent
+      (** No host has run and no browser lane is installed: there is nothing
+          to say of one. *)
+  | Host_serving
+      (** A host runs and the observed server lists its client as a BiDi
+          connection, so hover and drag are served there. *)
+  | Host_unverified
+      (** A host's status is unverified: its record is missing while its lock
+          is held, it is still connecting, no server is observed here, or the
+          observed one does not list the client its record names. *)
+  | Host_not_running
+      (** None runs: the last one ended or died, or none has run where a
+          lane is installed. *)
+  | Host_unreadable  (** The record or its lock cannot be read. *)
+
+val verdict : observation -> verdict
+
+(** Whether a host runs and is attached, when and why the last one ended,
+    and what the operator does next. That step follows what became of the
+    last host's session:
+    - ended because the Firefox there ran another profile, or did not say
+      which: that Firefox is quit first, so one on the kept profile can open
+      the port;
+    - ended, or never given: the Firefox takes the next host as it is; a
+      host that never got one needs a Firefox that answers at its address
+      first;
+    - not confirmed ended, or the connection gone before it could be ended:
+      the Firefox is restarted before the next host;
+    - refused, or a host that left no reason: the next host is run first,
+      and the Firefox is restarted when that host is refused a session.
+    The command names the address the last host was given. With a server
+    observed it also says whether that server lists a running host's client,
+    and when it lists a BiDi connection that is not the host the record
+    names.
+
+    Where MASC starts them ({!Masc_starts}), the operator's steps give way
+    to what MASC's next start does, and a last start that showed no
+    connection, and did not come before the last host started, is said with
+    when and why. A lane turned off, and a workspace with no table, add a
+    sentence to the paragraph that says so.
+
+    A path, an address and the reason for ending come from files and from
+    the host. In a command the operator runs, a path and an address are
+    written as one shell word. Elsewhere in the paragraph they are written
+    as read. The reason is set in quotes, with a quote in it marked. *)
+val message : observation -> string
+
+(** The launcher a host is started with, as the observation found it. *)
+type launcher_standing =
+  | Launcher_installed
+  | Launcher_not_installed  (** The browser lane is installed first. *)
+  | Launcher_needs_reinstall
+      (** A launcher is there and is not as one installation wrote it: the
+          lane is installed again before it is run. *)
+
+(** The host's option that names the address it attaches to. The host
+    parses it under this name, and every command said here is written
+    with it. *)
+val bidi_url_flag : string
+
+(** The host's option that names the profile its Firefox must run. A host
+    given it ends a session on any other profile. *)
+val firefox_profile_flag : string
+
+(** Firefox's option that opens its BiDi address on a port. *)
+val firefox_flag : string
+
+(** How a host is started, for a Firefox the operator started with
+    [--remote-debugging-port PORT]: where this workspace's launcher is, or
+    will be once the lane is installed, and what it is given. *)
+type attach = { launcher : string; arguments : string; standing : launcher_standing }
+
+(** What a reader is told of the BiDi host: the state its record and lock
+    say, how one is attached, who starts it, and {!message}. *)
+type report =
+  { state : Browser_bidi_host_record.state
+  ; attach : attach
+  ; keeper : keeper
+  ; message : string
+  }
+
+(** What is said of MASC's last start beside a host's state. *)
+type last_start_note =
+  | No_note
+  | Failed_start of { at : float; not_attached : Browser_keeper_firefox_starter.not_attached }
+      (** It ended at [at] with no connection listed. *)
+  | Start_record_unreadable of string
+
+(** Where MASC starts the Keeper Firefox, its last start when it showed no
+    connection, was for the configured port and profile
+    ({!Browser_keeper_firefox_start_record.for_configuration}), and ended no
+    earlier than what the state says since: an ended host's end, a dead or
+    running host's attach (its start when it never attached). {!message}
+    says it, and the TUI shows it. *)
+val last_start_note : keeper -> Browser_bidi_host_record.state -> last_start_note
+
+(** Whether the host [entry] names was given an address on [port]. A
+    session held in a Firefox there is in the way of MASC's next start on
+    that port, which restarts the Keeper Firefox MASC is shown to have
+    started; one held on another port is not. An address that names no port
+    is not on it. *)
+val recorded_on_port : Browser_bidi_host_record.entry -> port:int -> bool
+
+val report : observation -> report
+
+(** An object with exactly these fields. [state] ([never_started],
+    [record_missing_but_locked], [running], [ended], [died], [unreadable])
+    and what it was read from:
+    [record] (the host's own record, null when there is none or it cannot be
+    read), [lock_held] (true or false when there is no record or the state
+    turns on the lock, null otherwise and for a lock that could not be asked)
+    and [detail] (why the record or the lock cannot be read, null otherwise). Then [attach], an
+    object with exactly [launcher], [arguments] and [launcher_state]
+    ([installed], [not_installed] or [needs_reinstall]); [keeper], an object
+    whose [kind] is [masc_starts] (with [port], [profile] and [last_start]:
+    [absent], [recorded] with its [entry], or [unreadable] with its
+    [detail]), [lane_off], [not_configured] or [not_known]; and [message]. *)
+val report_to_json : report -> Yojson.Safe.t
+
+(** Reads what {!report_to_json} wrote. A field more, fewer or twice, in the
+    report, in [attach], in [keeper] or in its [last_start], is another
+    layout and is refused, as is a kind this reader does not know. The
+    profile, a last start's detail and the message hold no control
+    character. The state is
+    worked out again from [record] and [lock_held] by
+    {!Browser_bidi_host_record.state_of} and has to be the one [state]
+    names. *)
+val report_of_json : Yojson.Safe.t -> (report, string) result
+
+val to_json : observation -> Yojson.Safe.t
+
+(** [state] and [message] alone, for an answer a Keeper passes on to the
+    operator: the record itself stays with the readers that show it. *)
+val summary_to_json : observation -> Yojson.Safe.t

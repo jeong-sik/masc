@@ -10,6 +10,7 @@ type 'a launch =
   (unit -> ('a, string) result) -> unit
 
 let start_board_post_refresh state ~host ~port ~post_id ~launch =
+  if server_authority_ready state then begin
   if state.board_history_post_id <> Some post_id then
     state.board_history_post_id <- None;
   match Board_detail.start state.board_detail ~post_id with
@@ -20,6 +21,8 @@ let start_board_post_refresh state ~host ~port ~post_id ~launch =
     launch
       ~deliver:(fun result -> Board_post_refresh_done (request, result))
       (fun () -> Masc_tui_loader.load_board_post ~full_history ~host ~port ~post_id ())
+
+  end
 
 let start_board_post state ~host ~launch ~report ~(title : string) ~(body : string) ?hearth () =
   if state.workspace_identity <> Workspace_identity_match then begin

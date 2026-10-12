@@ -7,6 +7,7 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_STREAM_PING',
   'KEEPER_CONTENT_BLOCK_START',
   'KEEPER_CONTENT_BLOCK_STOP',
+  'KEEPER_MODEL_CONTENT_ACTIVITY',
   'KEEPER_THINKING_DELTA',
   'KEEPER_THINKING_SIGNATURE_DELTA',
   'KEEPER_MEDIA_DELTA',
@@ -23,6 +24,9 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_TOOL_APPROVAL_REQUESTED',
   'KEEPER_TOOL_APPROVAL_SETTLED',
   'KEEPER_TOOL_RESULT_READY',
+  'KEEPER_NATIVE_TOOL_START',
+  'KEEPER_NATIVE_TOOL_END',
+  'KEEPER_NATIVE_TOOL_PROGRESS',
   // #29742 and #29744 both registered the two approval events for the same
   // main-red and both merged, leaving them listed twice. A duplicate entry
   // makes the contract array longer than the OCaml codec's vocabulary and
@@ -110,10 +114,45 @@ type KeeperToolStreamOccurrence = {
   toolCallId?: string
 }
 
+/** Provider observation only: no MASC execution receipt or inferred success. */
+export type KeeperNativeToolObservation = KeeperToolStreamOccurrence & {
+  toolCallName?: string
+}
+
+/** Wire projection of Runtime_native_tools.completion. A reported completion
+ * is not a success verdict; absent is_error and absent exit status stay null. */
+export type KeeperNativeToolCompletion = { exit_code: number | null } & (
+  | { kind: 'end_observed' | 'completion_reported' | 'error_reported' | 'decline_reported' }
+  | { kind: 'result_received'; is_error: boolean | null }
+  | { kind: 'unrecognized_status'; status: string }
+  | { kind: 'completion_unrecorded'; exit_code: null }
+)
+
+export type KeeperNativeToolProgress =
+  | { kind: 'output_observed'; byte_count: number }
+  | { kind: 'message_reported'; message: string }
+  // Provider-reported elapsed seconds, independent of local arrival timers.
+  | { kind: 'heartbeat_reported'; elapsed_seconds: number }
+  | { kind: 'retry_reported'; agent_id: string; subagent_type: string;
+      attempt: number; max_retries: number; retry_delay_ms: number;
+      error_status: number | null; error_category: string }
+  | { kind: 'retry_cleared'; agent_id: string; subagent_type: string }
+
 type KeeperQuarantinedToolOccurrence = {
   toolStreamScope: number
   toolCallBlockIndex: number
   providerMessageId?: string
+}
+
+/** Side metadata for an exact model content occurrence, never body bytes,
+ * tool progress, or proof that the whole response/turn has ended. */
+export type KeeperModelContentActivity = {
+  generation: number
+  stream_scope: number
+  block_index: number
+  provider_message_id?: string
+  channel: 'text' | 'thinking'
+  state: 'observed' | 'ended'
 }
 
 type KeeperChatCustomEvent =
@@ -164,6 +203,7 @@ type KeeperChatCustomEvent =
       type: 'CUSTOM'
       name: 'KEEPER_STREAM_MESSAGE_START'
       value: {
+        stream_scope: number
         provider_message_id?: string
         model?: string
         usage?: KeeperStreamUsage
@@ -172,10 +212,22 @@ type KeeperChatCustomEvent =
   | {
       type: 'CUSTOM'
       name: 'KEEPER_STREAM_MESSAGE_DELTA'
-      value: { stop_reason?: string; usage?: KeeperStreamDeltaUsage }
+      value: { stream_scope: number; stop_reason?: string; usage?: KeeperStreamDeltaUsage }
     }
   | { type: 'CUSTOM'; name: 'KEEPER_STREAM_MESSAGE_STOP'; value: null }
   | { type: 'CUSTOM'; name: 'KEEPER_STREAM_PING'; value: null }
+  | { type: 'CUSTOM'; name: 'KEEPER_NATIVE_TOOL_START'; value: KeeperNativeToolObservation }
+  | {
+      type: 'CUSTOM'
+      name: 'KEEPER_NATIVE_TOOL_END'
+      // Older streams omit completion: only an end was observed.
+      value: KeeperNativeToolObservation & { completion?: KeeperNativeToolCompletion }
+    }
+  | {
+      type: 'CUSTOM'
+      name: 'KEEPER_NATIVE_TOOL_PROGRESS'
+      value: KeeperNativeToolObservation & { progress: KeeperNativeToolProgress }
+    }
   | {
       type: 'CUSTOM'
       name: 'KEEPER_TOOL_RESULT_READY'
@@ -192,6 +244,7 @@ type KeeperChatCustomEvent =
       }
     }
   | { type: 'CUSTOM'; name: 'KEEPER_CONTENT_BLOCK_STOP'; value: { index?: number } }
+  | { type: 'CUSTOM'; name: 'KEEPER_MODEL_CONTENT_ACTIVITY'; value: KeeperModelContentActivity }
   | {
       type: 'CUSTOM'
       name: 'KEEPER_THINKING_DELTA'
@@ -246,7 +299,12 @@ type KeeperChatCustomEvent =
   | {
       type: 'CUSTOM'
       name: 'KEEPER_REPLY_DETAILS'
-      value: { reply?: string; turn_outcome?: KeeperTurnOutcome; turn_ref?: string }
+      value: {
+        reply?: string
+        turn_outcome?: KeeperTurnOutcome
+        turn_ref?: string
+        terminal_stream_scope?: number
+      }
     }
 
 type KeeperChatStreamEventBase = {
@@ -259,7 +317,7 @@ export type KeeperChatStreamEvent = KeeperChatStreamEventBase & (
   | { type: 'RUN_STARTED' | 'RUN_FINISHED' }
   | { type: 'RUN_ERROR'; message?: string; code?: string }
   | { type: 'TEXT_MESSAGE_START'; messageId?: string; role?: 'assistant' | 'user' }
-  | { type: 'TEXT_MESSAGE_CONTENT'; messageId?: string; delta?: string }
+  | { type: 'TEXT_MESSAGE_CONTENT'; messageId?: string; delta?: string; textStreamScope?: number }
   | { type: 'TEXT_MESSAGE_END'; messageId?: string }
   | (KeeperToolStreamOccurrence & { type: 'TOOL_CALL_START'; toolCallName?: string })
   | (KeeperToolStreamOccurrence & { type: 'TOOL_CALL_ARGS'; delta?: string; snapshot?: string })

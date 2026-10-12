@@ -24,11 +24,12 @@ type t =
 type verdict = Absent | Connected | Aligned | Unverified | Misconfigured
 
 let host_directory base_path =
-  List.fold_left Filename.concat base_path [ Common.masc_dirname; "browser-lane"; "host" ]
+  List.fold_left Filename.concat base_path [ Common.masc_dirname; Common.browser_lane_dirname; "host" ]
 
 (* install-host.sh writes both files in one installation; the names and the
    declaration's fields are the contract between that script and this reader. *)
 let launcher_name = "launch"
+let launcher_path ~base_path = Filename.concat (host_directory base_path) launcher_name
 let declaration_name = "launch.json"
 let declaration_fields = [ "destination"; "launcher_sha256" ]
 
@@ -98,7 +99,7 @@ let install ~base_path =
     "the MASC browser host installer, install-host.sh (%s in the MASC repository), with \
      --base-path %s"
     (Browser_lane.live_transport_setup_doc Browser_lane.Web_extension)
-    base_path
+    (Filename.quote base_path)
 
 let reinstall ~base_path =
   Printf.sprintf

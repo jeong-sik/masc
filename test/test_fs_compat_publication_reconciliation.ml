@@ -2,6 +2,7 @@ open Alcotest
 
 module Recovery = Fs_compat_test_support.Publication_recovery_for_testing
 module Core = Fs_compat_internal.Capability_recovery_obligation
+module Reconciler = Fs_compat_internal.Capability_recovery_reconciler
 
 let with_tmp_dir f =
   let path = Filename.temp_file "masc_publication_reconcile_" ".tmp" in
@@ -127,11 +128,7 @@ let reconcile ~fs:_ registry owner =
   | Error error -> fail (Recovery.reconciliation_error_to_string error)
 ;;
 
-let report_kinds = Recovery.report_row_kinds
-
 let report_ready = Recovery.report_is_ready
-
-let report_text = Recovery.report_to_string
 
 (* Tests pin the durable layout for fault injection only. Production traversal
    remains capability-relative and never reconstructs these paths. *)
@@ -146,8 +143,8 @@ let owner_area_path ~registry_root ~owner area =
   Filename.concat (owner_lane_path ~registry_root ~owner) area
 ;;
 
-let report_has_kind expected report =
-  List.exists (( = ) expected) (report_kinds report)
+let report_has_row predicate report =
+  List.exists predicate (Reconciler.report_rows report)
 ;;
 
 let test_prepared_absent_becomes_forensic () =
@@ -170,10 +167,12 @@ let test_prepared_absent_becomes_forensic () =
   let owner = inventory_owner registry owner_name in
   let report = reconcile ~fs registry owner in
   check bool "ready" true (report_ready report);
-  (match report_kinds report with
-   | [ Recovery.Publication_recovery_prepared_reconciled
-         Recovery.Publication_recovery_prepared_unmaterialized ] -> ()
-   | _ -> fail (report_text report));
+  (match Reconciler.report_rows report with
+   | [ Reconciler.Prepared_reconciled
+         { operation_id; outcome = Reconciler.Prepared_unmaterialized } ] ->
+     check string "reconciled operation" "11111111-1111-4111-8111-111111111111"
+       operation_id
+   | _ -> fail (Reconciler.report_to_string report));
   let forensic_path =
     Filename.concat
       (owner_area_path ~registry_root ~owner:owner_name "forensic")
@@ -256,10 +255,14 @@ let test_bound_stage_is_preserved () =
   let owner = inventory_owner registry owner_name in
   let report = reconcile ~fs registry owner in
   check bool "ready" true (report_ready report);
-  (match report_kinds report with
-   | [ Recovery.Publication_recovery_bound_reconciled
-         Recovery.Publication_recovery_bound_stage_preserved ] -> ()
-   | _ -> fail (report_text report));
+  (match Reconciler.report_rows report with
+   | [ Reconciler.Bound_reconciled
+         { operation_id = observed_operation_id
+         ; outcome = Reconciler.Bound_stage_preserved _
+         } ] ->
+     check string "reconciled operation" (Uuidm.to_string operation_id)
+       observed_operation_id
+   | _ -> fail (Reconciler.report_to_string report));
   let forensic_path =
     Filename.concat
       (owner_area_path ~registry_root ~owner:owner_name "forensic")
@@ -311,10 +314,12 @@ let test_allowed_root_identity_mismatch_is_forensic () =
   let owner = inventory_owner registry owner_name in
   let report = reconcile ~fs registry owner in
   check bool "mismatch source resolved" true (report_ready report);
-  (match report_kinds report with
-   | [ Recovery.Publication_recovery_prepared_reconciled
-         Recovery.Publication_recovery_prepared_allowed_root_mismatch ] -> ()
-   | _ -> fail (report_text report));
+  (match Reconciler.report_rows report with
+   | [ Reconciler.Prepared_reconciled
+         { operation_id; outcome = Reconciler.Prepared_allowed_root_mismatch _ } ] ->
+     check string "reconciled operation" "33333333-3333-4333-8333-333333333333"
+       operation_id
+   | _ -> fail (Reconciler.report_to_string report));
   let forensic_path =
     Filename.concat
       (owner_area_path ~registry_root ~owner:owner_name "forensic")
@@ -572,13 +577,13 @@ let test_corrupt_and_invalid_rows_block_only_owner () =
   check bool
     "corrupt row explicit"
     true
-    (report_has_kind
-       Recovery.Publication_recovery_corrupt_record_preserved
+    (report_has_row
+       (function Reconciler.Corrupt_record_preserved _ -> true | _ -> false)
        report);
   check bool
     "invalid row explicit"
     true
-    (report_has_kind Recovery.Publication_recovery_invalid_record_name report);
+    (report_has_row (function Reconciler.Invalid_record_name _ -> true | _ -> false) report);
   (match Recovery.with_lane ~registry ~owner:owner_name (fun _ -> ()) with
    | Error (Recovery.Reconciliation_blocked _) -> ()
    | Error error -> fail (Recovery.lane_open_error_to_string error)
@@ -616,8 +621,8 @@ let test_transition_failure_is_explicit () =
   check bool
     "transition failure explicit"
     true
-    (report_has_kind
-       Recovery.Publication_recovery_record_transition_failed
+    (report_has_row
+       (function Reconciler.Record_transition_failed _ -> true | _ -> false)
        report)
 ;;
 
@@ -658,20 +663,20 @@ let test_missing_area_preserves_sources_and_continues_inventory () =
   check bool
     "missing forensic area is explicit"
     true
-    (report_has_kind
-       Recovery.Publication_recovery_area_inventory_unavailable
+    (report_has_row
+       (function Reconciler.Area_inventory_unavailable _ -> true | _ -> false)
        report);
   check bool
     "prepared source retains unavailable transition evidence"
     true
-    (report_has_kind
-       Recovery.Publication_recovery_source_transition_capabilities_unavailable
+    (report_has_row
+       (function Reconciler.Source_transition_capabilities_unavailable _ -> true | _ -> false)
        report);
   check bool
     "owned area continued to corrupt record"
     true
-    (report_has_kind
-       Recovery.Publication_recovery_corrupt_record_preserved
+    (report_has_row
+       (function Reconciler.Corrupt_record_preserved _ -> true | _ -> false)
        report);
   check bool "prepared source remains" true (Sys.file_exists active_record);
   check bool "missing area was not recreated" false (Sys.file_exists forensic_path)
@@ -713,14 +718,14 @@ let test_counterpart_area_unavailable_preserves_prepared_source () =
   check bool
     "counterpart area failure is explicit"
     true
-    (report_has_kind
-       Recovery.Publication_recovery_area_inventory_unavailable
+    (report_has_row
+       (function Reconciler.Area_inventory_unavailable _ -> true | _ -> false)
        report);
   check bool
     "source transition is fenced"
     true
-    (report_has_kind
-       Recovery.Publication_recovery_source_transition_capabilities_unavailable
+    (report_has_row
+       (function Reconciler.Source_transition_capabilities_unavailable _ -> true | _ -> false)
        report);
   check bool "prepared source remains" true (Sys.file_exists active_record);
   check bool "forensic record was not created" false (Sys.file_exists forensic_record);
@@ -756,7 +761,7 @@ let test_unexpected_lane_entry_is_preserved_and_blocks_owner () =
   check bool
     "lane residue is explicit"
     true
-    (report_has_kind Recovery.Publication_recovery_unexpected_lane_entry report);
+    (report_has_row (function Reconciler.Unexpected_lane_entry _ -> true | _ -> false) report);
   let residue_after = Unix.lstat residue_path in
   check int "residue inode unchanged" residue_before.st_ino residue_after.st_ino;
   check string
@@ -787,13 +792,13 @@ let test_wrong_area_permissions_are_not_repaired () =
   check bool
     "wrong permission area is explicit"
     true
-    (report_has_kind
-       Recovery.Publication_recovery_area_inventory_unavailable
+    (report_has_row
+       (function Reconciler.Area_inventory_unavailable _ -> true | _ -> false)
        report);
   check bool
     "active area still inventoried"
     true
-    (report_has_kind Recovery.Publication_recovery_invalid_record_name report);
+    (report_has_row (function Reconciler.Invalid_record_name _ -> true | _ -> false) report);
   check int
     "startup reconciliation did not chmod"
     0o750
@@ -1713,7 +1718,7 @@ let test_structured_report_preserves_corrupt_evidence () =
   check bool
     "diagnostic report excludes crafted secret"
     false
-    (contains_exact_substring ~needle:secret (report_text report));
+    (contains_exact_substring ~needle:secret (Reconciler.report_to_string report));
   check bool
     "structured report excludes forensic raw payload"
     false

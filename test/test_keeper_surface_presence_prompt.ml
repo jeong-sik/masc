@@ -214,18 +214,26 @@ let test_the_keeper_sees_the_call_it_got_rejected_for () =
             ; calls =
                 [ { Actions.tool = "keeper_board_post"
                   ; input = {|{"title":"status"}|}
+                  ; source_position = 0
+                  ; provenance = {task_id=None; trace_id=None}
                   ; outcome = Actions.Ok_call
                   }
                 ; { Actions.tool = "keeper_broadcast"
                   ; input = "{}"
+                  ; source_position = 1
+                  ; provenance = {task_id=None; trace_id=None}
                   ; outcome = Actions.Failed_call (Some {|"message": MISSING|})
                   }
                 ; { Actions.tool = "keeper_task_release"
                   ; input = {|{"task":"t-1"}|}
+                  ; source_position = 2
+                  ; provenance = {task_id=None; trace_id=None}
                   ; outcome = Actions.Unrecorded_call
                   }
                 ; { Actions.tool = "keeper_task_claim"
                   ; input = {|{"task":"t-2"}|}
+                  ; source_position = 3
+                  ; provenance = {task_id=None; trace_id=None}
                   ; outcome = Actions.Deferred_call
                   }
                 ]
@@ -267,6 +275,8 @@ let turn_with_a_large_refusal turn_id =
   ; calls =
       [ { Actions.tool = "keeper_board_post"
         ; input = large_refusal_input turn_id
+        ; source_position = turn_id
+        ; provenance = {task_id=None; trace_id=None}
         ; outcome = Actions.Failed_call (Some "too large")
         }
       ]

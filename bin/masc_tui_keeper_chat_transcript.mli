@@ -13,7 +13,7 @@ type phase =
   | Waiting  (** The request went out; the run has not started. *)
   | Working  (** The run started and the stream is open. *)
   | Stream_ended  (** The run reported it finished. *)
-  | Stream_failed of string  (** The run reported an error. *)
+  | Stream_failed of string  (** Original reported error; runtime context is separate. *)
 
 (** How a closed {!phase} was learned. *)
 type ending_source =
@@ -51,8 +51,12 @@ type tool_outcome =
   | Returned
   | Native_running
   | Native_ended
-      (** The provider ended its native tool step; no MASC result or success
-          receipt was reported. *)
+      (** The provider ended its native tool step; optional native completion
+          metadata is separate from a MASC execution receipt. *)
+  | Native_failed
+      (** The provider's own report says its native tool step did not
+          succeed: an error, a decline or a nonzero exit. A provider
+          observation, not a MASC execution receipt. *)
   | Failed
   | Never_returned
       (** No result was observed here before the attempt ended. This does not
@@ -70,6 +74,15 @@ val received_marker : string
 
 val all_outcomes : tool_outcome list
 (** Every outcome, in rollup order. *)
+
+(** Last provider progress observation projected onto its native tool row. *)
+type native_progress =
+  { output_bytes : int option (** Cumulative received output bytes; no raw output. *)
+  ; message : string option (** Latest redacted full MCP message; sanitized at render. *)
+  ; provider_elapsed_seconds : int option (** Provider report, independent of local elapsed; may decrease. *)
+  ; updated_at : float (** Consumer-supplied event time; normal live input uses SSE time or receipt fallback. *)
+  ; elapsed : float option (** Time between observed start and update, if ordered; not provider duration. *)
+  }
 
 (** One tool call as shared by the live turn and durable history decoders.
     This remains typed until {!project_tool_block}; consumers never recover
@@ -90,6 +103,10 @@ type tool_activity = private
           arguments are still arriving or carry no known key. Same naming as
           the connector trail and the dashboard. *)
   ; outcome : tool_outcome
+  ; native_completion : Runtime_native_tools.completion option
+  ; native_progress : native_progress option
+  ; native_retry : Runtime_native_tools.retry_observation option
+      (** Separate from heartbeat/output timing and model activity. *)
   ; duration : string option
       (** The source's duration label. Live events do not currently carry one,
           so they retain [None]. *)
@@ -234,6 +251,9 @@ type tool_projection = private
   }
 
 val make_tool_activity :
+  ?native_progress:native_progress ->
+  ?native_retry:Runtime_native_tools.retry_observation ->
+  ?native_completion:Runtime_native_tools.completion ->
   ?execution_id:string ->
   call_id:string option ->
   tool_name:string ->
@@ -244,6 +264,19 @@ val make_tool_activity :
   tool_activity
 (** Build an activity and derive its [subject] through the shared tool-subject
     authority. History and live projection must not derive it independently. *)
+
+val native_completion_status : Runtime_native_tools.completion -> string
+(** Provider observation only; never implies a persisted MASC execution receipt.
+    Generated words only: an unrecognized status is named, not quoted, so the
+    compact and full rows that the phrase dresser colours carry no provider text. *)
+
+val native_progress_details : ?include_elapsed:bool -> tool_activity -> string option
+(** Terminal-safe provider progress and byte metadata. Results omit elapsed
+    observation time; Full opts in with [include_elapsed=true]. *)
+
+val native_completion_summary : Runtime_native_tools.completion -> string
+(** {!native_completion_status} plus the provider's own word for an
+    unrecognized status. For the results view, which draws it undressed. *)
 
 val descriptor_of_tool_name : string -> Masc.Keeper_tool_descriptor.t option
 (** The registry's descriptor for a tool name as a trace carries it: the
@@ -296,10 +329,9 @@ val keeper_name : t -> string
 val request_id : t -> string
 val execution_id : t -> string
 (** Shared batch execution owner, or the singleton request identity. *)
-val rejection : t -> string option
 val note_rejection : now:float -> t -> string -> unit
-(** A verified pre-execution refusal. Retained separately from user content;
-    an interrupted or unverified transport is never a rejection. *)
+(** Ends the turn as failed with the detail of a verified pre-execution
+    refusal. An interrupted or unverified transport is never a rejection. *)
 val started_at : t -> float
 (** The dispatch instant supplied to {!create}. Exposed as typed timeline
     input so a live turn keeps its original civil-hour rail while it grows. *)
@@ -340,14 +372,16 @@ val note_tool_outcome :
     durable outcome that says less than the stream saw ([Never_returned],
     unrecorded) changes nothing. *)
 
-val note_skill_activity : t -> skill_activity -> unit
+val note_skill_activity : ?runtime_inventory:skill_activity list -> t -> skill_activity -> unit
 (** Folds in the exact delivery record of one skill read -- the states the
     wire has no event for ([Skill_served_only], [Skill_delivered],
     [Skill_used]), the calls the read led to, and the proof ids -- keyed by
-    [(turn_ref, skill_tool_use_id)]. A record in a state the stream speaks for
+    [(turn_ref, skill_tool_use_id, invocation runtime)]. A record in a state the stream speaks for
     itself (calling, pending, failed) or an evidence gap changes nothing,
     and neither does one without that complete identity. A second record for the
-    same identity replaces the first. {!drawn} lays the record over the skill item
+    same identity replaces the first. [runtime_inventory] supplies the frozen
+    source batch when records are reconciled together; nullable completion must
+    remain unique across that batch. {!drawn} lays the record over the skill item
     derived from the same call, and draws it on its own when the trail never
     saw that call. *)
 
@@ -357,6 +391,18 @@ val revision : t -> int
     drawn from this transcript. *)
 
 val phase : t -> phase
+
+(** What the model side is doing, read from the latest model signal, without
+    the words the progress row draws for it. *)
+type model_activity =
+  | Activity_model_started
+  | Activity_response_ended
+  | Activity_content_ended
+  | Activity_reasoning
+  | Activity_answering
+  | Activity_tool_returned of string
+
+val model_activity : t -> model_activity option
 
 val ending_source : t -> ending_source
 (** {!Ending_read_from_record} only after {!close_from_operation_record} closed
@@ -368,6 +414,10 @@ val awaiting_continuation : t -> bool
 val admission : t -> (Masc_tui_keeper_chat_live.admission * int) option
 (** Server acceptance and queue length observed at acceptance, if received.
     This remains historical after the run starts; inspect [phase] alongside it. *)
+
+val note_priority_unavailable : t -> unit
+(** The local priority intent found this request already Running/Settled;
+    include its feedback in the request's admission prelude. *)
 val interrupt : t -> interrupt
 val text : t -> string
 val thinking : t -> string
@@ -466,6 +516,7 @@ type reply =
   ; reply_at : float (** Recorded observation time, including checkpoints. *)
   ; reply_outcome : Masc.Keeper_turn_outcome.t
   ; reply_turn_ref : string
+  ; reply_stream_scope : int option
   }
 
 val reply : t -> reply option
@@ -492,17 +543,43 @@ type drawn =
   | Drawn_tools of tool_block
   | Drawn_text of string  (** A reply stretch as it streamed. *)
   | Drawn_reply of string
-      (** The recorded visible reply, standing where the current attempt's
-          last streamed stretch was: the record is the store's text for the
-          turn's terminal message, so it is the text drawn there. *)
+      (** The recorded visible reply. It replaces the response's one observed
+          text stretch, or has a separate final row when multiple stretches
+          cannot be mapped back from the canonical flat body. *)
   | Drawn_status of string
-      (** How a turn without visible reply text ended, from the recorded
-          reply through {!turn_status_text}. *)
+      (** Request admission feedback, or how a turn without visible reply
+          text ended, from the recorded reply through {!turn_status_text}. *)
   | Drawn_error of string
       (** The terminal stream failure, after any partial text and tools. *)
 
+type drawn_origin =
+  | Admission_of_request of string
+      (** An HTTP receipt owned by the full request id, outside execution
+          segments. It never establishes that the input was consumed. *)
+  | Text_stretch of int
+  | Thinking_stretch of int
+  | Tool_stretch of int
+  | Unstreamed_skills
+  | Reply_of_segment of int
+  | Error_of_segment of int
+(** Source-local identity, independent of visibility and rendered position.
+    Stretch and tool ids are allocated monotonically across the whole log,
+    including retries and continuation segments. Replay of the same ordered
+    events produces the same ids. A recorded reply replacing streamed text
+    retains the surviving text stretch's origin. *)
+
+type response_part = Observed_response | Final_response
+(** A split presentation when a flat final reply has no mapping back to the
+    response's multiple observed text stretches. Observed text retains its
+    original place and bytes; the recorded final reply has its own row. *)
+
 type drawn_item =
-  { at : float option
+  { origin : drawn_origin
+  ; response_part : response_part option
+        (** [Some] distinguishes observed and final text only when they must
+            be displayed separately. [None] keeps the ordinary presentation;
+            it does not change the authority represented by [drawn]. *)
+  ; at : float option
         (** First observed event time for this stretch; [None] for delivery
             records whose stream event was unavailable. Journal replay keeps
             the recorded time, rather than the time the page was fetched. *)
@@ -515,18 +592,26 @@ type drawn_item =
   ; drawn : drawn
   }
 
+val admission_prelude : t -> drawn_item option
+(** The first request receipt's notice, if any. Independent of execution,
+    retries and continuation segments; a replay cannot replace it. *)
+
 val drawn : t -> drawn_item list
 (** The trail flattened -- a superseded block's rows in place, tagged with
     their attempt -- and reconciled with the recorded reply. A terminal
     failure appends one [Drawn_error], preserving any prior reply or checkpoint.
     Without a reply, the trail stays as it is.
     The recorded reply is the terminal message's text, not
-    the whole turn's, so with a [Visible_reply] it stands for the text
-    stretch that streamed after the current attempt's last tool or skill
-    round: that one stretch is replaced by one [Drawn_reply] carrying the
-    record's text, and the reply is appended when nothing streamed after that
-    round. Text that streamed before a round is progress and stays as it
-    streamed, like the stretches of the turn's earlier rounds. The reply is this turn's because the log this transcript
+    the whole turn's, so a [Visible_reply] belongs to the final response
+    window. Provider message starts, tool
+    rounds, retries and continuations open a new window. The last text stretch
+    becomes one [Drawn_reply] at its existing position and origin when it is
+    the response window's only text stretch. If multiple stretches were
+    observed, their text, order and origins remain unchanged, marked
+    [Observed_response], and the recorded reply is appended at its own event
+    time with [Final_response]. No string matching or splitting infers a
+    mapping absent from the flat canonical reply. If no text streamed in that
+    window, the reply is appended with the ordinary presentation. The reply is this turn's because the log this transcript
     projects is one operation's and both the stream and the journal reach it
     by that id; the two texts are not compared. With a blank [Visible_reply]
     or any control outcome, one [Drawn_status] is appended and the streamed
@@ -536,9 +621,12 @@ val drawn : t -> drawn_item list
     drawn as that record, unless the item is [Skill_failed]: the server
     records a composition's delivery from an error tool result too, so a
     record cannot turn a call the stream saw fail into a finished read.
-    Records no skill item carries form one more [Drawn_skill], ahead of the
-    stretch the reply stands for, or ahead of the appended reply or status
-    row when no stretch streamed. *)
+    Records no skill item carries form one more [Drawn_skill] before the
+    terminal stretch when its observed stream scope matches the recorded
+    reply's terminal scope. That stretch is reconciled once. Without this
+    provenance their position relative to streamed text is unknown: they
+    follow the observed trail and its text is preserved before the appended
+    reply or status. *)
 
 val of_log : now:float -> Masc_tui_keeper_chat_log.t -> t
 (** Replays entries in journal order using each recorded event time. [now]
@@ -594,7 +682,8 @@ val awaiting_approval : t -> awaiting_approval option
 (** The call the turn is held at, if any. One at a time: the turn cannot reach
     a second call while it is waiting on this one. *)
 
-val status_rows : ?show_timing:bool -> now:float -> t -> (status_kind * string) list
+val status_rows :
+  ?compact:bool -> ?show_timing:bool -> now:float -> t -> (status_kind * string) list
 (** The status rows the chat pane draws for this turn.
 
     Returned as a list rather than drawn directly because the pane's row
@@ -603,12 +692,16 @@ val status_rows : ?show_timing:bool -> now:float -> t -> (status_kind * string) 
     once went missing while the send hint still read Enter:send
     (see [keeper_message_status_rows]). One list, counted and drawn.
 
+    [compact] keeps the current activity and age without the runtime identity
+    and cumulative tool inventory. Attention and approval rows are unchanged.
+
     Between continuation segments there is no progress row: the open
     request is retained, but no run is starting. Approval and diagnostic rows
     remain available. A subsequent [Run_started] restores progress.
 
     [show_timing] defaults to true. When false, generated request, call and
-    silence ages are omitted; activity, approvals and error text remain.
+    silence ages are omitted from the compact row as well; activity,
+    approvals and error text remain.
 
     The progress row carries the turn's age, measured against [now] rather
     than a clock read here so a test can state the instant. A [now] before

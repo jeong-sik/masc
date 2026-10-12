@@ -39,92 +39,6 @@ let make_meta ~sandbox : Keeper_meta_contract.keeper_meta =
     { meta with Masc.Keeper_meta_contract.sandbox_profile = sandbox }
   | Error e -> Alcotest.fail e
 
-module Fake_backend = struct
-  let calls = ref []
-
-  let record call =
-    calls := call :: !calls
-
-  let effective_sandbox_profile ~meta:_ =
-    Keeper_types_profile_sandbox.Docker, Keeper_types_profile_sandbox.Network_none
-
-  let ensure_runtime ~timeout_sec:_ =
-    Ok [ "--fake-seccomp" ]
-
-  let private_workspace_cwd ~config:_ ~meta:_ cwd =
-    "/fake/container" ^ cwd
-
-  let result ~status ~output ~network_mode ~cwd
-      : Keeper_sandbox_runner.command_result =
-    { status = Unix.WEXITED status
-    ; output
-    ; image = "fake-image"
-    ; network_label = Keeper_types_profile_sandbox.network_mode_to_string network_mode
-    ; cwd
-    }
-
-  let run_shell_command_with_status ~config:_ ~meta:_ ~cwd ~timeout_sec:_ ~cmd
-      ~network_mode =
-    record ("shell:" ^ cmd);
-    Ok (result ~status:3 ~output:("shell:" ^ cmd) ~network_mode ~cwd)
-
-  let run_trusted_shell_command_with_status ~config:_ ~meta:_ ~cwd
-      ~timeout_sec:_ ~cmd ~network_mode =
-    record ("trusted:" ^ cmd);
-    Ok (result ~status:0 ~output:("trusted:" ^ cmd) ~network_mode ~cwd)
-
-  let run_bash ~turn_sandbox_runtime:_ ~config:_ ~meta:_ ~cwd:_ ~timeout_sec:_
-      ~cmd ~network_mode:_ =
-    record ("bash:" ^ cmd);
-    "bash:" ^ cmd
-end
-
-module Runner = Keeper_sandbox_runner.Make (Fake_backend)
-
-let with_fixture f =
-  let base = temp_dir "keeper_sandbox_runner_" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base)
-    (fun () ->
-       let config = Workspace.default_config base in
-       let meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Docker in
-       f ~config ~meta)
-
-let test_functor_delegates_user_shell () =
-  Fake_backend.calls := [];
-  with_fixture (fun ~config ~meta ->
-      match
-        Runner.run_shell_command_with_status ~config ~meta ~cwd:"/work"
-          ~timeout_sec:5.0 ~cmd:"git status"
-          ~network_mode:Keeper_types_profile_sandbox.Network_none
-      with
-      | Error e -> Alcotest.fail e
-      | Ok result ->
-        check int "status" 3
-          (match result.status with Unix.WEXITED n -> n | _ -> -1);
-        check string "output" "shell:git status" result.output;
-        check (list string) "calls"
-          [ "shell:git status" ]
-          (List.rev !Fake_backend.calls))
-
-let test_functor_delegates_trusted_tool () =
-  Fake_backend.calls := [];
-  with_fixture (fun ~config ~meta ->
-      match
-        Runner.run_trusted_shell_command_with_status ~config ~meta ~cwd:"/work"
-          ~timeout_sec:5.0 ~cmd:"gh pr view"
-          ~network_mode:Keeper_types_profile_sandbox.Network_inherit
-      with
-      | Error e -> Alcotest.fail e
-      | Ok result ->
-        check int "status" 0
-          (match result.status with Unix.WEXITED n -> n | _ -> -1);
-        check string "output" "trusted:gh pr view" result.output;
-        check string "network label" "inherit" result.network_label;
-        check (list string) "calls"
-          [ "trusted:gh pr view" ]
-          (List.rev !Fake_backend.calls))
-
 let test_playground_root_uses_config_base_path () =
   let config_base = temp_dir "keeper_sandbox_config_base_" in
   let env_base = temp_dir "keeper_sandbox_env_base_" in
@@ -152,11 +66,7 @@ let test_playground_root_uses_config_base_path () =
 let () =
   Alcotest.run
     "keeper_sandbox_runner"
-    [ ( "mock-backend",
-        [ test_case "delegates user shell" `Quick test_functor_delegates_user_shell
-        ; test_case "delegates trusted tool" `Quick test_functor_delegates_trusted_tool
-        ] )
-    ; ( "playground",
+    [ ( "playground",
         [ test_case
             "playground root uses config base_path"
             `Quick

@@ -237,6 +237,20 @@ type tool_stream_observation =
       { turn : int
       ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
       }
+  | Child_content_observed of
+      { attempt : Runtime_native_tasks.attempt
+      ; observation : Keeper_claude_task_binding.child_observation
+      }
+  | Native_task_observed of
+      { attempt : Runtime_native_tasks.attempt
+      ; bound : Keeper_claude_task_binding.bound }
+  | Native_tool_progress of
+      { block_index : int; tool_call_id : string option; progress : Runtime_native_tools.progress }
+  | Native_tool_completion of
+      { block_index : int
+      ; tool_call_id : string option
+      ; completion : Runtime_native_tools.completion
+      }
   | Official_tool_result of
       { block_index : int
       ; tool_call_id : string
@@ -746,10 +760,10 @@ let make_hooks
            here, at the same boundary the live accumulator computes them, so a
            row and a live call of the same call answer the same identity. *)
         let progress_io_fingerprints =
-          Keeper_tool_progress_identity.digest_tool_io
+          Keeper_tool_progress_identity.digest_tool_io ~base_path:config.base_path
             ~tool_name
             ~input
-            ~output_text
+            ~output_text ()
         in
         (* Full record read: log_call no longer falls back to ambient
            context (RFC-0225 §3.3), so every field this row should carry

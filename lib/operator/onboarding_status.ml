@@ -11,6 +11,7 @@ type check_id =
   | Sandbox
   | Keeper_persistence
   | Browser_lane
+  | Browser_bidi_host
 
 type role = Required_to_open | Advisory
 
@@ -52,6 +53,7 @@ let check_id_name = function
   | Sandbox -> "sandbox"
   | Keeper_persistence -> "keeper_persistence"
   | Browser_lane -> "browser_lane"
+  | Browser_bidi_host -> "browser_bidi_host"
 
 (* Existing history opens on what every Keeper in the workspace shares: the
    workspace, a runtime.toml the server can load, and Keeper metadata its boot
@@ -65,7 +67,7 @@ let check_id_name = function
    is a separate surface; its drift is reported the same way. *)
 let role = function
   | Workspace | Runtime_configuration | Keeper_persistence -> Required_to_open
-  | Model_connection | Keeper_declaration | Sandbox | Browser_lane -> Advisory
+  | Model_connection | Keeper_declaration | Sandbox | Browser_lane | Browser_bidi_host -> Advisory
 
 let role_name = function
   | Required_to_open -> "required_to_open"
@@ -180,21 +182,51 @@ let keeper_checks base_path =
        "Check the selected sandbox service and prepare imp's isolated workspace."
        [Configure_sandbox; Start_imp]]
 
-(* The browser tools read the same observation when no browser answers, so an
-   operator and a Keeper are told the same cause. *)
-let browser_lane_check base_path =
-  let observation =
-    Browser_lane_launcher.observe ~base_path ~server:(Browser_lane_launcher.current_server ()) in
-  let message = Browser_lane_launcher.message observation in
-  match Browser_lane_launcher.verdict observation with
-  | Browser_lane_launcher.Absent -> []
-  | Browser_lane_launcher.Connected | Browser_lane_launcher.Aligned ->
-    [check Browser_lane Satisfied message [Inspect_configuration]]
-  | Browser_lane_launcher.Unverified ->
-    [check Browser_lane Needs_verification message [Inspect_configuration]]
-  | Browser_lane_launcher.Misconfigured -> [check Browser_lane Invalid message [Inspect_configuration]]
+(* The BiDi host is read from its own record on disk, so this answers with
+   no server running. A workspace with no browser lane installed and no host
+   record has nothing to say about one. A running host is satisfied only
+   where the observed server lists its client: that is where hover and drag
+   are served. *)
+let browser_bidi_host_check host =
+  let report condition =
+    [check Browser_bidi_host condition (Browser_bidi_host_status.message host)
+       [Inspect_configuration]]
+  in
+  match Browser_bidi_host_status.verdict host with
+  | Browser_bidi_host_status.Host_absent -> []
+  | Browser_bidi_host_status.Host_serving -> report Satisfied
+  | Browser_bidi_host_status.Host_unverified -> report Needs_verification
+  | Browser_bidi_host_status.Host_not_running -> report Needs_setup
+  | Browser_bidi_host_status.Host_unreadable -> report Invalid
 
-let inspect ~base_path =
+(* The browser tools read the same observation when no browser answers, so an
+   operator and a Keeper are told the same cause. One observation answers both
+   checks, so they say of one launcher and one list of connections. *)
+(* The browser tables of the workspace's runtime.toml, for a reader with no
+   server: only when the whole file loads, as a server loads it, since a
+   server that refuses the file has no browser configuration either. [None]
+   otherwise: who starts the Keeper Firefox is then not known. *)
+let browser_configuration config_path =
+  if not (Sys.file_exists config_path) then None
+  else
+    match Runtime.load_list ~config_path with
+    | Error _ -> None
+    | Ok _ -> Result.to_option (Browser_configuration.of_file config_path)
+
+let browser_lane_check ~configuration base_path =
+  let host = Browser_bidi_host_status.observe ~base_path ~configuration in
+  let observation = host.lane in
+  let message = Browser_lane_launcher.message observation in
+  (match Browser_lane_launcher.verdict observation with
+   | Browser_lane_launcher.Absent -> []
+   | Browser_lane_launcher.Connected | Browser_lane_launcher.Aligned ->
+     [check Browser_lane Satisfied message [Inspect_configuration]]
+   | Browser_lane_launcher.Unverified ->
+     [check Browser_lane Needs_verification message [Inspect_configuration]]
+   | Browser_lane_launcher.Misconfigured -> [check Browser_lane Invalid message [Inspect_configuration]])
+  @ browser_bidi_host_check host
+
+let inspected ~browser ~base_path =
   match base_path with
   | None ->
     { base_path = None; selected_runtime = None; selected_model = None;
@@ -214,7 +246,11 @@ let inspect ~base_path =
       { base_path = Some base_path; selected_runtime; selected_model;
         checks = check Workspace Satisfied "Workspace found." [Choose_workspace]
           :: (models @ keeper_checks base_path @ [persistence_check base_path]
-              @ browser_lane_check base_path) }
+              @ browser_lane_check ~configuration:(browser config_path) base_path) }
+
+let inspect ~base_path = inspected ~browser:browser_configuration ~base_path
+
+let inspect_loaded ~configuration ~base_path = inspected ~browser:(fun _ -> configuration) ~base_path
 
 let optional_string = function None -> `Null | Some value -> `String value
 

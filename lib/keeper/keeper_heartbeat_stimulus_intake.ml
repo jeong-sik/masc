@@ -1068,7 +1068,7 @@ let heartbeat_event_intake
             | Keeper_world_observation.Completion_authority_rejected _
             | Keeper_world_observation.Task_outcome _
             | Keeper_world_observation.Task_cancelled _
-            | Keeper_world_observation.Delegate_completed
+            | Keeper_world_observation.Delegate_completed _
             | Keeper_world_observation.Ask_answered_row _
             | Keeper_world_observation.Composition_completed ->
               Log.Keeper.info

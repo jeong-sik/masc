@@ -268,16 +268,18 @@ let test_binary_previews_are_utf8_without_changing_stored_bytes () =
       ]
     in
     List.iter (fun payload ->
+      with_temp_dir (fun file_ingest_base ->
+      let file_store = B.create ~base_path:file_ingest_base in
       let path = Filename.concat dir "input.bin" in
       Out_channel.with_open_bin path (fun channel -> output_string channel payload);
       let references =
-        [ B.put store ~bytes:payload ~mime:"application/octet-stream" |> stored_ref_exn
-        ; B.put_durable store ~bytes:payload ~mime:"application/octet-stream"
-        ; B.put_file_durable store ~path ~mime:"application/octet-stream"
+        [ store, (B.put store ~bytes:payload ~mime:"application/octet-stream" |> stored_ref_exn)
+        ; store, B.put_durable store ~bytes:payload ~mime:"application/octet-stream"
+        ; file_store, B.put_file_durable file_store ~path ~mime:"application/octet-stream"
         ]
       in
-      let first = List.hd references in
-      List.iter (fun (reference : O.artifact_ref) ->
+      let _, first = List.hd references in
+      List.iter (fun (store, (reference : O.artifact_ref)) ->
         Alcotest.(check bool) "preview is valid UTF-8" true
           (String.is_valid_utf_8 reference.preview);
         Alcotest.(check bool) "preview keeps byte ceiling" true
@@ -292,7 +294,7 @@ let test_binary_previews_are_utf8_without_changing_stored_bytes () =
         if payload = unicode then
           Alcotest.(check string) "valid Unicode remains readable"
             unicode reference.preview)
-        references)
+        references))
       payloads)
 
 let test_put_then_fetch_bounded_ranges () =

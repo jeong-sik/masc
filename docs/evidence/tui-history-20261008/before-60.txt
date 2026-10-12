@@ -1,0 +1,30 @@
+ Dashboard  Work  Keepers  Usage  Board  ▸Workspace  System
+
+   MASC Workspace / Code  21:19:09  HTTP [connected]
+   ▸ history: notes/[draft](final).lua
+ ──────────────────────────────────────────────────────────
+    rows 1-2 of 2
+    History unavailable: git log: HTTP 503: git source
+    offline
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k:scroll  Left / Esc:back  Enter:open  …?
+ › to alpha   (i to write)

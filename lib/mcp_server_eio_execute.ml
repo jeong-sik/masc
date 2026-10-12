@@ -446,13 +446,14 @@ let execute_tool_eio
                      match owner_keeper_identity with
                      | Some (keeper_name, _) ->
                        Some (Keeper_candle_tools.handle ~operation ~base_path:config.base_path
-                         ~keeper_name ~tool_name:name ~start_time ~args:coerced_args)
+                         ~keeper_name ~keeper_names:(Play_seat.keeper_names config)
+                         ~tool_name:name ~start_time ~args:coerced_args)
                      | None ->
                        Some (Tool_result.make_err ~tool_name:name ~start_time
                          ~class_:Tool_result.Policy_rejection
                          "Candle tools require an authenticated Keeper; a supplied caller name is not a wallet identity") in
-                   let dispatch () =
-                     Tool_misc.dispatch
+                   let dispatch ?dos_admission () =
+                     Tool_misc.dispatch ?dos_admission
                        ~lane_access
                        { Tool_misc.config
                        ; agent_name
@@ -484,13 +485,7 @@ let execute_tool_eio
                                endpoint does not have)"
                               name))
                     | (Some _ | None), None ->
-                      (match
-                         Keeper_dos_controller.execute ~config ~who:agent_name ~name
-                           ~args:coerced_args ~run:dispatch
-                       with
-                       | Ok result -> result
-                       | Error refusal ->
-                         Some (Keeper_dos_controller.refusal_result ~tool_name:name refusal)))
+                      dispatch ())
                  | Mod_library ->
                    Tool_library.dispatch
                      { Tool_library.base_path = config.base_path; agent_name }

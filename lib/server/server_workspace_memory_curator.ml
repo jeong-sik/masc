@@ -158,7 +158,11 @@ let execute_http ~(resolved : Runtime_exact_output_registry.resolved_lane) ~requ
     (match flow with
      | Ok success ->
        let candidate = Exact.flow_success_candidate success.transport_success in
-       Ok (success.accepted, candidate.visit.identity.candidate_id)
+       Ok
+         ( success.accepted
+         , candidate.visit.identity.candidate_id
+         , (Exact.flow_success_output success.transport_success).usage
+           |> Option.map Runs.usage_of_api_usage )
      | Error (Exact.Flow_execution_terminal { cause; _ }) ->
        let detail = String.concat "; "
          (List.rev !size_refusals @ List.rev !output_refusals @ [flow_failure cause]) in
@@ -233,8 +237,8 @@ let request ~base_path =
 type execution =
   { configuration : Yojson.Safe.t
   ; execute : rendered_prompt:string -> selected:Ledger.pending_fact list
-      -> ledger:Ledger.t -> (Yojson.Safe.t * string, execution_failure) result
-  ; summarize : batch:Briefing.batch -> (Yojson.Safe.t * string, execution_failure) result
+      -> ledger:Ledger.t -> (Yojson.Safe.t * string * Runs.usage option, execution_failure) result
+  ; summarize : batch:Briefing.batch -> (Yojson.Safe.t * string * Runs.usage option, execution_failure) result
   }
 
 let prepare_execution ~base_path =
@@ -306,10 +310,10 @@ let classify ~base_path ~prepare =
        (* Durable exact input precedes every provider call. *)
        Runs.register_running registry ~run_id ~lane:Runs.Workspace_curator
          ~actor:base_path ~started_at ~input:(Runs.Exact_input input);
-       let complete ?selected_slot outcome output =
+       let complete ?selected_slot ?usage outcome output =
          match Runs.mark_completed registry ~run_id ~outcome
            ~elapsed_s:(Mtime.Span.to_float_ns (Mtime.span monotonic_start (Mtime_clock.now ())) /. 1e9)
-           ~selected_slot ~output with
+           ~selected_slot ?usage ~output () with
          | Ok () -> ()
          | Error error -> Log.Server.error "workspace curator completion %s: %s"
              run_id (Runs.completion_error_to_string error) in
@@ -325,7 +329,7 @@ let classify ~base_path ~prepare =
            ignore (fail failure);
            `Refused (execution_failure_detail failure)
          | Error (Execution_failed _ as failure) -> `Done (fail failure)
-         | Ok (raw, slot) ->
+         | Ok (raw, slot, usage) ->
          let result =
            let* assignments = Decision.decode ~selected:batch.selected raw in
            let* updated = Ledger.apply change.ledger ~selected:batch.selected assignments
@@ -335,7 +339,7 @@ let classify ~base_path ~prepare =
          `Done (match result with
           | Error detail -> fail (Execution_failed detail)
           | Ok (raw, slot, updated) ->
-            complete ~selected_slot:slot Runs.Succeeded
+            complete ~selected_slot:slot ?usage Runs.Succeeded
               (`Assoc [ "decision", raw
                       ; "ledger_sha256", `String (sha (Yojson.Safe.to_string (Ledger.to_json updated)))
                       ; "remaining_count", `Int (List.length batch.remaining)
@@ -405,10 +409,10 @@ let refresh_briefing ~base_path ~prepare =
         ; "remaining_count", `Int (Briefing.remaining_count batch) ] in
       Runs.register_running registry ~run_id ~lane:Runs.Workspace_curator
         ~actor:base_path ~started_at ~input:(Runs.Exact_input input);
-      let complete ?selected_slot outcome output =
+      let complete ?selected_slot ?usage outcome output =
         match Runs.mark_completed registry ~run_id ~outcome
           ~elapsed_s:(Mtime.Span.to_float_ns (Mtime.span monotonic_start (Mtime_clock.now ())) /. 1e9)
-          ~selected_slot ~output with
+          ~selected_slot ?usage ~output () with
         | Ok () -> ()
         | Error error -> Log.Server.error "workspace briefing completion %s: %s"
             run_id (Runs.completion_error_to_string error) in
@@ -423,7 +427,7 @@ let refresh_briefing ~base_path ~prepare =
           ignore (fail (Input_too_large detail));
           `Refused detail
         | Error ((Execution_failed _ | Output_too_large _) as failure) -> `Done (fail failure)
-        | Ok (raw, slot) ->
+        | Ok (raw, slot, usage) ->
         let result =
           let* text = Briefing.decode_output raw in
           let* updated = Briefing.accept batch ~text in
@@ -433,7 +437,7 @@ let refresh_briefing ~base_path ~prepare =
          | Error detail -> fail (Execution_failed detail)
          | Ok (text, slot, updated) ->
            let more = Briefing.needs_refresh ~sources ~contract updated in
-           complete ~selected_slot:slot Runs.Succeeded
+           complete ~selected_slot:slot ?usage Runs.Succeeded
              (`Assoc [ "phase", `String "briefing"
                      ; "briefing", `String text
                      ; "briefing_bytes", `Int (String.length text)

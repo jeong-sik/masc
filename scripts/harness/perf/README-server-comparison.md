@@ -3,7 +3,7 @@
 The existing `bench-tests.yml` workflow accepts `compare_server=true` and the
 baseline/candidate run, artifact and full source IDs. It consumes successful
 `linux-x64-probe.yml` outputs on Ubuntu 24.04; it does not compile or deploy.
-`compare_tui` and `compare_server` are mutually exclusive.
+A dispatch that selects more than one comparison mode is refused.
 
 The artifact verifier checks repository, source, workflow, successful run,
 attempt, ZIP size/digest, exact five-member layout, all four executable hashes

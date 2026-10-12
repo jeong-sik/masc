@@ -79,6 +79,12 @@ compute_scope() {
 }
 read_current_pr
 current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || refuse "complete review diff unavailable"
+# Merge admission must establish the policy-specific CI identity before
+# review verdicts are parsed. Release verdicts are bound to this selected run;
+# checking reviews first would leave release_run empty and admit another run.
+if [ "$merge_check" -eq 1 ]; then
+  check_current_ci
+fi
 # Read-only candidate admission uses repository review evidence; Actions
 # installation tokens cannot query /user. Review/check paths still require
 # the caller identity for self-approval and owned change-request rules.
@@ -144,6 +150,14 @@ check_verdict() {
   if [ -n "$state" ] && [ "$state" != PASS ]; then
     [ -n "$approvals" ] || emit_refusal_detail
     refuse "latest structured verdict is $state"
+  fi
+  if [ "$state" = PASS ] && [ "$review_policy" = source ] && [ "$cited" != - ]; then
+    [ -n "$approvals" ] || emit_refusal_detail
+    refuse "source verdict must not cite a CI run (cited $cited)"
+  fi
+  if [ "$state" = PASS ] && [ "$review_policy" = release ] && [ "$cited" != "$release_run" ]; then
+    [ -n "$approvals" ] || emit_refusal_detail
+    refuse "release verdict cites run $cited, admitted run is $release_run"
   fi
 }
 check_reviews

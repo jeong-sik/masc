@@ -66,6 +66,22 @@ val inspect :
     {!max_total_image_bytes}; they are arguments so a test can reach the
     refusal with a document small enough to write inline. *)
 
+val extract_text :
+  ?max_pages:int ->
+  ?max_extracted_bytes:int ->
+  deadline:Monotonic_deadline.t ->
+  budget_sec:float ->
+  base_path:string ->
+  bytes:string ->
+  unit ->
+  (string list, error) result
+(** The text half of {!inspect}: one string per page, no rendering, no image
+    policy. The caller's [deadline] is shared by every Poppler call of the
+    extraction and nothing here starts another clock; [budget_sec] is only the
+    figure a {!Poppler_budget_spent} reports. Same source cap, private owned
+    directory (removed on release), scrubbed environment, extracted-text cap
+    and dependency check as {!inspect}. *)
+
 module For_testing : sig
   val inspect_with_budget :
     budget_sec:float -> base_path:string -> max_image_bytes:int -> bytes:string ->

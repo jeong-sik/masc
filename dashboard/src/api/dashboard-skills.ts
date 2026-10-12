@@ -152,7 +152,6 @@ export interface SkillProfile {
   }
   context: {
     body_bytes: number
-    eager_body_bytes: number
     discovery_bytes: number
     tool_schema_bytes: number | null
   }
@@ -710,7 +709,6 @@ const SkillProfileDetailsFields = {
   }),
   context: Schema.Struct({
     body_bytes: NonNegativeSafeIntegerSchema,
-    eager_body_bytes: NonNegativeSafeIntegerSchema,
     discovery_bytes: NonNegativeSafeIntegerSchema,
     tool_schema_bytes: Schema.NullOr(NonNegativeSafeIntegerSchema),
   }),

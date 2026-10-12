@@ -146,7 +146,7 @@ let ask_context (ctx : context) arguments : Mcp_tool_runtime_ask.context =
 (* The wire name is parsed once and the operations are matched, so an operation
    added to [Tool_schemas_misc.misc_operation] is a compile error here. [None]
    means the name is not this facade's -- the tag dispatcher owns that case. *)
-let dispatch ?(lane_access = Lane_addon_sources.Unauthenticated) ctx ~name ~args : Tool_result.result option =
+let dispatch ?dos_admission ?(lane_access = Lane_addon_sources.Unauthenticated) ctx ~name ~args : Tool_result.result option =
   let start = Tool_timing.start () in
   (* Lane ownership uses the verified Keeper principal. The session name is
      still the attribution for unrelated tools and operator calls. *)
@@ -164,8 +164,8 @@ let dispatch ?(lane_access = Lane_addon_sources.Unauthenticated) ctx ~name ~args
   | None -> None
   | Some (Tool_schemas_misc.Misc_lane_declaration_read | Tool_schemas_misc.Misc_lane_declaration_save as operation) ->
       let result = match operation with
-        | Tool_schemas_misc.Misc_lane_declaration_read -> Lane_addon_runtime.read_declaration ~caller:lane_caller ~access:lane_access ~config:ctx.config args
-        | _ -> Lane_addon_runtime.save_declaration ~caller:lane_caller ~access:lane_access ~config:ctx.config args in
+        | Tool_schemas_misc.Misc_lane_declaration_read -> Lane_addon_runtime.read_declaration ~access:lane_access ~config:ctx.config args
+        | _ -> Lane_addon_runtime.save_declaration ~access:lane_access ~config:ctx.config args in
       Some (match result with
         | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
         | Error error ->
@@ -217,6 +217,20 @@ let dispatch ?(lane_access = Lane_addon_sources.Unauthenticated) ctx ~name ~args
       Some (match Lane_addon_runtime.dispatch ~caller:lane_caller ~access:lane_access ~config:ctx.config ~operation:Lane_addon_runtime.Evidence args with
         | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
         | Error error -> lane_error error)
+  | Some Tool_schemas_misc.Misc_play_room ->
+      let speaker = match lane_access with
+        | Lane_addon_sources.Keeper _ -> Play_room.Keeper
+        | Operator_configuration | Unauthenticated -> Play_room.Participant in
+      Some (match Result.bind (Play_room.parse_action args) (fun action ->
+        Play_room.perform ~base_path:ctx.config.base_path ~who:lane_caller ~speaker
+          ~now:(Time_compat.now ()) action) with
+        | Ok snapshot -> Tool_result.make_ok ~tool_name:name ~start_time:start
+            ~data:(Play_room.snapshot_json ~viewer:lane_caller snapshot) ()
+        | Error error ->
+            let class_ = match error with
+              | Play_room.Invalid_request _ | Conflict _ -> Tool_result.Workflow_rejection
+              | Unavailable _ -> Tool_result.Runtime_failure in
+            Tool_result.make_err ~tool_name:name ~start_time:start ~class_ (Play_room.error_message error))
   | Some Tool_schemas_misc.Misc_config ->
       Some (Tool_misc_introspection.handle_config ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_dashboard ->
@@ -254,94 +268,33 @@ let dispatch ?(lane_access = Lane_addon_sources.Unauthenticated) ctx ~name ~args
       Some (Tool_misc_browser_lane.handle_act ~base_path:ctx.config.base_path ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_browser_instruct ->
       Some (Tool_misc_browser_lane.handle_instruct ~tool_name:name ~start_time:start args)
-  | Some Tool_schemas_misc.Misc_msx_load ->
-      Some
-        (Tool_misc_msx_lane.handle_load ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_msx_change_disk ->
-      Some (Tool_misc_msx_lane.handle_change_disk ~tool_name:name ~start_time:start
-        ~base_path:ctx.config.base_path args)
-  | Some (Tool_schemas_misc.Misc_msx_save as operation)
-  | Some (Tool_schemas_misc.Misc_msx_restore as operation) ->
-      Some (Tool_misc_msx_lane.handle_checkpoint
-        ~restore:(operation = Tool_schemas_misc.Misc_msx_restore)
-        ~tool_name:name ~start_time:start ~base_path:ctx.config.base_path args)
-  | Some Tool_schemas_misc.Misc_msx_eject ->
-      Some
-        (Tool_misc_msx_lane.handle_eject ~tool_name:name ~start_time:start
-           ~agent_name:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_msx_screen ->
-      Some (Tool_misc_msx_lane.handle_screen ~tool_name:name ~start_time:start args)
-  | Some Tool_schemas_misc.Misc_msx_meta ->
-      Some (Tool_misc_msx_lane.handle_meta ~tool_name:name ~start_time:start ())
-  | Some Tool_schemas_misc.Misc_msx_checkpoint_info ->
-      Some
-        (Tool_misc_msx_lane.handle_checkpoint_info ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path args)
-  | Some Tool_schemas_misc.Misc_msx_press ->
-      Some
-        (Tool_misc_msx_lane.handle_press ~tool_name:name ~start_time:start
-           ~who:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_msx_peek ->
-      Some (Tool_misc_msx_lane.handle_peek ~tool_name:name ~start_time:start args)
-  | Some Tool_schemas_misc.Misc_msx_ram_diff ->
-      Some (Tool_misc_msx_lane.handle_ram_diff ~tool_name:name ~start_time:start ())
-  | Some Tool_schemas_misc.Misc_msx_step ->
-      Some (Tool_misc_msx_lane.handle_step ~tool_name:name ~start_time:start args)
-  | Some Tool_schemas_misc.Misc_msx_step_until_change ->
-      Some
-        (Tool_misc_msx_lane.handle_step_until_change ~tool_name:name
-           ~start_time:start args)
-  | Some Tool_schemas_misc.Misc_dos_load ->
-      Some
-        (Tool_misc_dos_lane.handle_load ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_meta ->
-      Some (Tool_misc_dos_lane.handle_meta ~tool_name:name ~start_time:start)
-  | Some Tool_schemas_misc.Misc_dos_inventory ->
-      Some
-        (Tool_misc_dos_lane.handle_inventory ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path)
-  | Some Tool_schemas_misc.Misc_dos_eject ->
-      Some
-        (Tool_misc_dos_lane.handle_eject ~tool_name:name ~start_time:start
-           ~agent_name:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_screen ->
-      Some
-        (Tool_misc_dos_lane.handle_screen ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path args)
-  | Some Tool_schemas_misc.Misc_dos_step ->
-      Some
-        (Tool_misc_dos_lane.handle_step ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~who:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_pass ->
-      Some
-        (Tool_misc_dos_lane.handle_pass ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_press ->
-      Some
-        (Tool_misc_dos_lane.handle_press ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~who:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_click ->
-      Some
-        (Tool_misc_dos_lane.handle_click ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~who:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_type ->
-      Some
-        (Tool_misc_dos_lane.handle_type ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~who:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_peek ->
-      Some
-        (Tool_misc_dos_lane.handle_peek ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path args)
-  | Some Tool_schemas_misc.Misc_dos_save ->
-      Some
-        (Tool_misc_dos_lane.handle_save ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~who:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_restore ->
-      Some
-        (Tool_misc_dos_lane.handle_restore ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name args)
+  | Some Tool_schemas_misc.Misc_msx_load
+  | Some Tool_schemas_misc.Misc_msx_change_disk
+  | Some Tool_schemas_misc.Misc_msx_export_disk
+  | Some Tool_schemas_misc.Misc_msx_save
+  | Some Tool_schemas_misc.Misc_msx_restore
+  | Some Tool_schemas_misc.Misc_msx_eject
+  | Some Tool_schemas_misc.Misc_msx_screen
+  | Some Tool_schemas_misc.Misc_msx_meta
+  | Some Tool_schemas_misc.Misc_msx_checkpoint_info
+  | Some Tool_schemas_misc.Misc_msx_press
+  | Some Tool_schemas_misc.Misc_msx_peek
+  | Some Tool_schemas_misc.Misc_msx_ram_diff
+  | Some Tool_schemas_misc.Misc_msx_step
+  | Some Tool_schemas_misc.Misc_msx_step_until_change
+  | Some Tool_schemas_misc.Misc_dos_load
+  | Some Tool_schemas_misc.Misc_dos_meta
+  | Some Tool_schemas_misc.Misc_dos_inventory
+  | Some Tool_schemas_misc.Misc_dos_eject
+  | Some Tool_schemas_misc.Misc_dos_screen
+  | Some Tool_schemas_misc.Misc_dos_step
+  | Some Tool_schemas_misc.Misc_dos_pass
+  | Some Tool_schemas_misc.Misc_dos_press
+  | Some Tool_schemas_misc.Misc_dos_click
+  | Some Tool_schemas_misc.Misc_dos_type
+  | Some Tool_schemas_misc.Misc_dos_peek
+  | Some Tool_schemas_misc.Misc_dos_save
+  | Some Tool_schemas_misc.Misc_dos_restore -> None
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -354,6 +307,7 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_candle_purchase
   | Tool_schemas_misc.Misc_candle_equip
   | Tool_schemas_misc.Misc_candle_gift
+  | Tool_schemas_misc.Misc_play_room
   | Tool_schemas_misc.Misc_lane_updates -> false
   | Tool_schemas_misc.Misc_lane_action_status
   | Tool_schemas_misc.Misc_lane_inspect
@@ -393,6 +347,7 @@ let is_read_only = function
   (* Loading, ejecting, pressing and stepping change the shared machine. *)
   | Tool_schemas_misc.Misc_msx_load
   | Tool_schemas_misc.Misc_msx_eject
+  | Tool_schemas_misc.Misc_msx_export_disk
   | Tool_schemas_misc.Misc_msx_save
   | Tool_schemas_misc.Misc_msx_restore
   | Tool_schemas_misc.Misc_msx_change_disk

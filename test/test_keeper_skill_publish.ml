@@ -124,7 +124,7 @@ let args ?(package_id = "proposed") ?(evidence = [ `String "memory:fact-1" ]) so
 ;;
 
 let call config args =
-  let result = Keeper_skill_publish.handle ~config ~keeper_name ~args in
+  let result = Keeper_skill_publish.handle ~descriptors:(Keeper_tool_descriptor.all_descriptors ()) ~config ~keeper_name ~args in
   match result.Keeper_tool_execution.data with
   | Some data -> result, data
   | None -> fail "missing typed result"
@@ -457,7 +457,7 @@ let test_refusal_names_the_path_and_why () =
   in
   let error =
     match
-      Server_skill_editor.create
+      Server_skill_editor.create ~descriptors:(Ok (Keeper_tool_descriptor.all_descriptors ()))
         ~base_path
         ~source_id
         ~package_id:"blocked"

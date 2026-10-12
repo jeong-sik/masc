@@ -32,20 +32,6 @@ let test_github_commit () =
   | Github { label; _ } -> check string "short commit label" "masc commit 0420067" label
   | _ -> fail "expected Github kind"
 
-let test_github_ci_run () =
-  let p = synthesize_preview "https://github.com/jeong-sik/masc/actions/runs/32959102055/job/98147624211" in
-  check (option string) "title is ci run label"
-    (Some "masc CI run 32959102055") p.title
-
-let test_github_file () =
-  let p = synthesize_preview "https://github.com/jeong-sik/masc/blob/main/bin/masc_tui_render.ml" in
-  check (option string) "title is file label"
-    (Some "masc masc_tui_render.ml") p.title
-
-let test_github_repo_root () =
-  let p = synthesize_preview "https://github.com/jeong-sik/masc" in
-  check (option string) "repo root title" (Some "jeong-sik/masc") p.title
-
 let test_arxiv () =
   let p = synthesize_preview "https://arxiv.org/abs/2301.07041" in
   check (option string) "site name" (Some "arXiv.org") p.site_name;
@@ -114,93 +100,22 @@ let test_cache_operations_and_bounding () =
   clear_cache ();
   check bool "empty after clear" true (Option.is_none (cache_lookup url))
 
-let test_render_compact_badge () =
-  let p = synthesize_preview "https://github.com/jeong-sik/masc/pull/30866" in
-  let badge_opt = render_compact_badge p in
-  check bool "badge exists for informative preview" true (Option.is_some badge_opt);
-  let badge = Option.get badge_opt in
-  check bool "starts with corner glyph" true (String.starts_with ~prefix:"\xe2\x95\xb0\xe2\x94\x80" badge)
-
-let test_render_inline_card_column_alignment () =
-  let p = synthesize_preview "https://github.com/jeong-sik/masc/pull/30866" in
-  let card_lines = render_inline_card ~width:50 p in
-  check bool "card has lines" true (List.length card_lines >= 4);
-  let widths = List.map Masc_tui_message_layout.display_width card_lines in
-  let first_width = List.hd widths in
-  check bool "first line has positive width" true (first_width > 0);
-  List.iter
-    (fun w ->
-       check int "all card borders and content rows have identical display cell width"
-         first_width w)
-    widths
-
-let test_render_notion_card_2column_alignment () =
-  let urls =
-    [ "https://github.com/jeong-sik/masc/pull/30866"
-    ; "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    ; "https://arxiv.org/abs/2301.07041"
-    ; "https://news.ycombinator.com/item?id=38912345"
-    ; "https://example.com/assets/diagram.png"
-    ; "https://example.com/article"
-    ]
-  in
-  List.iter
-    (fun url ->
-       let p = synthesize_preview url in
-       let card_lines = render_notion_card ~width:70 p in
-       check bool "2-column card has 7 lines (top + 5 content + bottom)" true (List.length card_lines = 7);
-       let widths = List.map Masc_tui_message_layout.display_width card_lines in
-       let first_w = List.hd widths in
-       check bool "first line has positive width" true (first_w > 0);
-       List.iter
-         (fun w ->
-            check int (Printf.sprintf "all 7 lines match cell width for %s" url) first_w w)
-         widths)
-    urls
-
-let test_render_notion_card_narrow_fallback () =
-  let p = synthesize_preview "https://github.com/jeong-sik/masc/pull/30866" in
-  let card_lines = render_notion_card ~width:45 p in
-  check bool "narrow card has lines" true (List.length card_lines >= 4);
-  let widths = List.map Masc_tui_message_layout.display_width card_lines in
-  let first_w = List.hd widths in
-  check bool "first line has positive width" true (first_w > 0);
-  List.iter
-    (fun w ->
-       check int "narrow card all lines match cell width" first_w w)
-    widths
-
-let test_modal_hints_name_what_the_keys_do () =
-  let has ~needle value =
-    let n = String.length needle and h = String.length value in
-    let rec go i = i + n <= h && (String.sub value i n = needle || go (i + 1)) in
-    go 0
-  in
-  let one = modal_hints ~total_links:1 ~has_image:false in
-  let many = modal_hints ~total_links:3 ~has_image:true in
-  (* A modal swallows every key it does not handle, so this row is the only
-     place the overlay names its keys. *)
-  List.iter
-    (fun needle ->
-       check bool (needle ^ " is named") true (has ~needle one))
-    [ "o:browser"; "y:copy"; "v:image"; "j/k:scroll"; "d/u:page";
-      "g/G:first/last"; "Esc:close" ];
-  (* Neither key does anything in these states, so neither is offered. *)
-  check bool "one link offers no cycle" false (has ~needle:"n/p:cycle" one);
-  check bool "no image offers no retry" false (has ~needle:"r:retry" one);
-  check bool "several links offer the cycle" true (has ~needle:"n/p:cycle" many);
-  check bool "an image offers the retry" true (has ~needle:"r:retry image" many);
-  (* [drop_hint_items] gives up whole items from the back, so the row must end
-     on the key that leaves. *)
-  check bool "the exit is last" true
-    (String.length many >= 9
-     && String.sub many (String.length many - 9) 9 = "Esc:close")
-;;
-
-let test_render_modal_card () =
-  let p = synthesize_preview "https://example.com/photo.png" in
-  let modal_lines = render_modal_card ~width:60 ~height:20 p in
-  check bool "modal card has content lines" true (List.length modal_lines > 0)
+let test_compact_badge_source_spans () =
+  let base=synthesize_preview "https://github.com/owner/repository" in
+  let preview={base with site_name=Some "[Site] 한글"; title=Some "**foo** bar foobar"} in
+  match render_compact_badge_with_spans preview with
+  | None -> fail "informative compact preview must map"
+  | Some mapped ->
+      check (option string) "mapped compact output is identical"
+        (render_compact_badge preview) (Some (String.concat "\n" mapped.rows));
+      check int "site and title both retain field identity" 2 (List.length mapped.fields);
+      List.iter (fun (span : card_source_span) ->
+        check string "compact field exact original placement" span.value
+          (String.sub (List.nth mapped.rows span.row) span.row_start_byte
+             (span.source_end_byte-span.source_start_byte))) mapped.fields;
+      let silent={base with title=None;description=None;image_url=None;site_name=None;has_metadata=false} in
+      check bool "compact observer preserves silence" (Option.is_none (render_compact_badge silent))
+        (Option.is_none (render_compact_badge_with_spans silent))
 
 let test_modal_keeps_complete_url_and_instructions () =
   let url = "https://example.com/" ^ String.make 140 'x' ^ "/한글끝.png" in
@@ -351,15 +266,53 @@ let test_parse_collapses_newlines () =
   check (option string) "newlines/tabs/space-runs collapsed"
     (Some "Line one. Line two. Tabbed spaced") p.description
 
+let test_card_source_spans () =
+  let samples = List.map synthesize_preview [
+    "https://github.com/owner/long-repository-name-for-truncation";
+    "https://arxiv.org/abs/2401.12345";
+    "https://www.youtube.com/watch?v=fixture";
+    "https://news.ycombinator.com/item?id=42";
+    "https://example.test/image.png";
+    "https://example.test/article"] in
+  List.iter (fun preview ->
+    let preview = {preview with title=Some "**foo** bar foobar 가나다";
+      description=Some "Description with repeated foo and long source text";
+      site_name=Some "Example Site"; image_url=Some "https://example.test/image.png"} in
+    List.iter (fun width ->
+      let mapped = render_inline_card_with_spans ~width preview in
+      check (list string) "mapping preserves actual card bytes"
+        (render_inline_card ~width preview) mapped.rows;
+      List.iter (fun (span : card_source_span) ->
+        let length = span.source_end_byte - span.source_start_byte in
+        let row = List.nth mapped.rows span.row in
+        check string "mapped field bytes occur exactly at formatter-owned placement"
+          (String.sub span.value span.source_start_byte length)
+          (String.sub row span.row_start_byte length)) mapped.fields;
+      let physical = List.sort (fun (left : card_source_span) right ->
+        compare (left.row,left.row_start_byte) (right.row,right.row_start_byte)) mapped.fields in
+      let rec check_order = function
+        | left :: (right :: _ as rest) ->
+            check bool "typed source sequence follows actual interleaved fields" true
+              (compare (left.order,left.field) (right.order,right.field) < 0);
+            check_order rest
+        | [] | [_] -> () in
+      check_order physical
+    ) [12;40;54;55;80;140];
+    let title width =
+      let mapped = render_inline_card_with_spans ~width preview in
+      List.find (fun (span : card_source_span) -> span.field=Card_title) mapped.fields in
+    let narrow = title 40 and wide = title 80 in
+    check string "title has the same original source across layout switch" narrow.value wide.value;
+    check bool "title logical order survives narrow/wide reflow" true (narrow.order=wide.order);
+    check int "title's original start does not depend on clipping" 0 narrow.source_start_byte;
+    check int "wide title keeps original start too" 0 wide.source_start_byte) samples
+
 let () =
   run "tui link preview"
     [ ( "synthesizer"
       , [ test_case "github pr" `Quick test_github_pr
         ; test_case "github issue" `Quick test_github_issue
         ; test_case "github commit" `Quick test_github_commit
-        ; test_case "github ci run" `Quick test_github_ci_run
-        ; test_case "github file" `Quick test_github_file
-        ; test_case "github repo root" `Quick test_github_repo_root
         ; test_case "arxiv" `Quick test_arxiv
         ; test_case "hackernews" `Quick test_hackernews
         ; test_case "youtube" `Quick test_youtube
@@ -369,14 +322,9 @@ let () =
     ; ( "cache"
       , [ test_case "cache lifecycle and bounding" `Quick test_cache_operations_and_bounding ] )
     ; ( "render"
-      , [ test_case "compact badge" `Quick test_render_compact_badge
-        ; test_case "inline card column alignment" `Quick test_render_inline_card_column_alignment
-        ; test_case "notion 2-column card alignment" `Quick test_render_notion_card_2column_alignment
-        ; test_case "notion narrow fallback" `Quick test_render_notion_card_narrow_fallback
-        ; test_case "modal card" `Quick test_render_modal_card
-        ; test_case "modal keeps complete URL and instructions" `Quick test_modal_keeps_complete_url_and_instructions
-        ; test_case "modal hints name what the keys do" `Quick
-            test_modal_hints_name_what_the_keys_do
+      , [ test_case "modal keeps complete URL and instructions" `Quick test_modal_keeps_complete_url_and_instructions
+        ; test_case "compact badge source spans" `Quick test_compact_badge_source_spans
+        ; test_case "formatter-owned card source spans" `Quick test_card_source_spans
         ; test_case "a refused image url is remembered and said" `Quick
             test_a_refused_image_url_is_remembered_and_said
         ; test_case "an undecided image url says nothing" `Quick

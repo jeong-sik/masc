@@ -30,16 +30,27 @@ type delta =
       { runtime_id : string option
       ; attempt_index : int option
       }
-  | Stream_model_started of { model : string }
-  | Stream_details of
-      { usage : stream_usage option
-      ; stop_reason : string option
+  | Stream_model_started of
+      { message_id : string option
+      ; stream_scope : int option
+      ; model : string
+      ; usage : stream_usage option
       }
-  | Text of string
+  | Model_content_activity of Masc.Keeper_chat_events.model_content_activity
+  | Stream_model_stopped
+  | Stream_details of
+      { stream_scope : int option
+      ; usage : stream_usage option
+      ; stop_reason : Agent_core.Types.stop_reason option
+      }
+  | Text of {text : string; stream_scope : int option}
   | Thinking of string
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }
-  | Native_tool_ended of { occurrence : tool_occurrence }
+  | Native_tool_progress of
+      { occurrence : tool_occurrence; progress : Runtime_native_tools.progress }
+  | Native_tool_ended of
+      { occurrence : tool_occurrence; completion : Runtime_native_tools.completion }
   | Tool_started of
       { occurrence : tool_occurrence
       ; tool_name : string
@@ -84,6 +95,7 @@ type delta =
       { reply : string
       ; turn_outcome : Masc.Keeper_turn_outcome.t
       ; turn_ref : string
+      ; terminal_stream_scope : int option
       }
   | Run_failed of { message : string }
   | Run_finished
@@ -107,6 +119,12 @@ let nonnegative_int_field fields name =
   match List.assoc_opt name fields with
   | Some (`Int value) when value >= 0 -> Some value
   | Some _ | None -> None
+
+let optional_stream_scope fields name =
+  match List.filter (fun (key, _) -> key = name) fields with
+  | [] -> Ok None
+  | [(_, `Int scope)] when scope >= 0 -> Ok (Some scope)
+  | _ -> Error (name ^ " must be one nonnegative integer")
 
 (* The one place that reads a usage object, for both the live wire arm and the
    journal replay in {!Masc_tui_keeper_chat_log}: the producer writes the same
@@ -141,9 +159,13 @@ let optional_nonblank_string fields name =
   | Some _ -> Error (name ^ " must be a nonblank string when present")
 
 let tool_occurrence ~event fields =
+  let index field = Option.bind (List.assoc_opt field fields) (fun json ->
+    match Runtime_json_integer.of_json json with
+    | Ok value when value >= 0 -> Some value
+    | Ok _ | Error _ -> None) in
   match
-    nonnegative_int_field fields "toolStreamScope",
-    nonnegative_int_field fields "toolCallBlockIndex"
+    index "toolStreamScope",
+    index "toolCallBlockIndex"
   with
   | Some stream_scope, Some block_index ->
     (match
@@ -153,8 +175,8 @@ let tool_occurrence ~event fields =
      | Ok provider_message_id, Ok tool_call_id ->
        Ok { stream_scope; block_index; provider_message_id; tool_call_id }
      | Error detail, _ | _, Error detail -> Error (event ^ " " ^ detail))
-  | None, _ -> Error (event ^ " has no nonnegative toolStreamScope")
-  | _, None -> Error (event ^ " has no nonnegative toolCallBlockIndex")
+  | None, _ -> Error (event ^ " has no nonnegative safe integer toolStreamScope")
+  | _, None -> Error (event ^ " has no nonnegative safe integer toolCallBlockIndex")
 
 (* [required] reads one string field and names the event in the failure, so an
    Undecodable row says which event was short of what. *)
@@ -191,7 +213,7 @@ let tool_start_deltas fields =
 let custom_deltas_unvalidated fields =
   match string_field fields "name" with
   | None -> [ Undecodable "CUSTOM has no name" ]
-  | Some ("KEEPER_NATIVE_TOOL_START" | "KEEPER_NATIVE_TOOL_END" as event) ->
+  | Some ("KEEPER_NATIVE_TOOL_START" | "KEEPER_NATIVE_TOOL_END" | "KEEPER_NATIVE_TOOL_PROGRESS" as event) ->
       (match object_field fields "value" with
        | None -> [Undecodable (event ^ " value is not an object")]
        | Some value ->
@@ -200,7 +222,25 @@ let custom_deltas_unvalidated fields =
            | Ok occurrence ->
                if event = "KEEPER_NATIVE_TOOL_START" then
                  [Native_tool_started {occurrence; tool_name = string_field value "toolCallName"}]
-               else [Native_tool_ended {occurrence}])
+               else if event = "KEEPER_NATIVE_TOOL_PROGRESS" then
+                 (match List.assoc_opt "progress" value with
+                  | None -> [Undecodable (event ^ ": progress is required")]
+                  | Some json -> (match Runtime_native_tools.progress_of_json json with
+                      | Ok progress -> [Native_tool_progress {occurrence; progress}]
+                      | Error detail -> [Undecodable (event ^ ": " ^ detail)]))
+               else
+                 (* The wire contract permits an END without a completion:
+                    an older sender closes the occurrence without terminal
+                    metadata, so whether the provider reported a status is
+                    not known and it reads as completion_unrecorded. A
+                    present completion must be exactly one and well-formed. *)
+                 (match List.filter (fun (key, _) -> String.equal key "completion") value with
+                  | [] -> [Native_tool_ended {occurrence; completion = Runtime_native_tools.completion_unrecorded}]
+                  | [_, json] ->
+                      (match Runtime_native_tools.completion_of_json json with
+                       | Ok completion -> [Native_tool_ended {occurrence; completion}]
+                       | Error detail -> [Undecodable (event ^ ": " ^ detail)])
+                  | _ -> [Undecodable (event ^ " must carry at most one completion")]))
   | Some "KEEPER_THINKING_DELTA" -> (
       match object_field fields "value" with
       | None -> [ Undecodable "KEEPER_THINKING_DELTA value is not an object" ]
@@ -248,10 +288,30 @@ let custom_deltas_unvalidated fields =
     (match object_field fields "value" with
      | Some value ->
        (match string_field value "model" with
-        | Some model when String.trim model <> "" ->
-          [ Stream_model_started { model = String.trim model } ]
+        | Some model ->
+          (* A start establishes response and usage even when the provider
+             has no model label. Presentation handles that absent label. *)
+          [ Stream_model_started
+              { message_id = Option.bind (string_field value "provider_message_id")
+                  (fun id -> if String.trim id = "" then None else Some id)
+              ; stream_scope = nonnegative_int_field value "stream_scope"
+              ; model = String.trim model
+              ; usage = Option.bind (List.assoc_opt "usage" value) stream_usage_of_usage_json
+              } ]
         | _ -> [])
      | None -> [])
+  | Some "KEEPER_MODEL_CONTENT_ACTIVITY" ->
+    (match List.assoc_opt "value" fields with
+     | None -> [Undecodable "KEEPER_MODEL_CONTENT_ACTIVITY requires value"]
+     | Some json ->
+       match Masc.Keeper_chat_events.model_content_activity_of_json json with
+       | Ok activity -> [Model_content_activity activity]
+       | Error detail -> [Undecodable detail])
+  | Some "KEEPER_STREAM_MESSAGE_STOP" ->
+    (match List.assoc_opt "value" fields with
+     | Some `Null -> [ Stream_model_stopped ]
+     | Some _ | None ->
+       [ Undecodable "KEEPER_STREAM_MESSAGE_STOP value must be null" ])
   | Some "KEEPER_STREAM_MESSAGE_DELTA" ->
     (* The dashboard reader already keeps both of these
        ([dashboard/src/keeper-stream.ts] KEEPER_STREAM_MESSAGE_DELTA) and draws
@@ -269,12 +329,12 @@ let custom_deltas_unvalidated fields =
        let stop_reason =
          match List.assoc_opt "stop_reason" value with
          | Some (`String reason) when String.trim reason <> "" ->
-           Some (String.trim reason)
+           Some (Agent_core.Types.stop_reason_of_string (String.trim reason))
          | Some _ | None -> None
        in
        if usage = None && stop_reason = None
        then []
-       else [ Stream_details { usage; stop_reason } ]
+       else [ Stream_details { usage; stop_reason; stream_scope = nonnegative_int_field value "stream_scope" } ]
      | None -> [])
   | Some "KEEPER_TOOL_RESULT_READY" -> (
       match object_field fields "value" with
@@ -372,8 +432,8 @@ let custom_deltas_unvalidated fields =
   | Some "KEEPER_CONTINUATION_CHECKPOINT" -> [ Checkpoint ]
   | Some "KEEPER_EXTERNAL_EFFECT_COMPLETED" -> [ External_effect_completed ]
   | Some "KEEPER_REPLY_DETAILS" -> (
-      (* The same three fields the strict decoder requires
-         (decode_reply_details); read leniently here, as every other event. *)
+      (* The recorded reply and optional terminal stream provenance use the
+         same schema as the strict completion decoder. *)
       match object_field fields "value" with
       | None -> [ Undecodable "KEEPER_REPLY_DETAILS value is not an object" ]
       | Some value -> (
@@ -381,12 +441,14 @@ let custom_deltas_unvalidated fields =
             ( string_field value "reply"
             , Option.bind (string_field value "turn_outcome")
                 Masc.Keeper_turn_outcome.of_label
-            , Option.bind (string_field value "turn_ref") Ids.Turn_ref.of_string )
+            , Option.bind (string_field value "turn_ref") Ids.Turn_ref.of_string
+            , optional_stream_scope value "terminal_stream_scope" )
           with
-          | Some reply, Some turn_outcome, Some turn_ref ->
+          | Some reply, Some turn_outcome, Some turn_ref, Ok terminal_stream_scope ->
               [ Reply_details
-                  { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref }
+                  { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref; terminal_stream_scope }
               ]
+          | _, _, _, Error detail -> [Undecodable detail]
           | _ ->
               [ Undecodable
                   "KEEPER_REPLY_DETAILS needs reply, a known turn_outcome and \
@@ -427,8 +489,13 @@ let event_deltas (event : Yojson.Safe.t) =
               }
           ]
       | Some "TEXT_MESSAGE_CONTENT" ->
-          required ~event:"TEXT_MESSAGE_CONTENT" ~field:"delta" fields
-            (fun delta -> Text delta)
+          (match List.filter (fun (key, _) -> key = "textStreamScope") fields with
+           | [] -> required ~event:"TEXT_MESSAGE_CONTENT" ~field:"delta" fields
+               (fun text -> Text {text; stream_scope=None})
+           | [_, `Int scope] when scope >= 0 ->
+               required ~event:"TEXT_MESSAGE_CONTENT" ~field:"delta" fields
+                 (fun text -> Text {text; stream_scope=Some scope})
+           | _ -> [Undecodable "TEXT_MESSAGE_CONTENT.textStreamScope must be one nonnegative integer"])
       | Some "TOOL_CALL_START" -> tool_start_deltas fields
       | Some "TOOL_CALL_ARGS" -> tool_args_deltas fields
       | Some "TOOL_CALL_END" ->

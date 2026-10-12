@@ -192,8 +192,8 @@ let test_the_byte_ceiling_blocks_the_write_that_would_cross_it () =
       Alcotest.(check int) "the blocked write added nothing" written
         (List.length (held ~base_path)))
 
-let test_the_byte_ceiling_is_the_agreed_8192 () =
-  Alcotest.(check int) "the world's article ceiling is 8192 bytes" 8192
+let test_the_byte_ceiling_is_the_agreed_12288 () =
+  Alcotest.(check int) "the world's article ceiling is 12288 bytes" 12288
     Tools.render_byte_ceiling
 
 let test_the_byte_ceiling_admits_a_render_of_exactly_the_ceiling () =
@@ -415,8 +415,8 @@ let () =
             test_an_empty_norm_is_refused;
           Alcotest.test_case "the byte ceiling blocks the crossing write" `Quick
             test_the_byte_ceiling_blocks_the_write_that_would_cross_it;
-          Alcotest.test_case "the byte ceiling is the agreed 8192" `Quick
-            test_the_byte_ceiling_is_the_agreed_8192;
+          Alcotest.test_case "the byte ceiling is the agreed 12288" `Quick
+            test_the_byte_ceiling_is_the_agreed_12288;
           Alcotest.test_case "a render of exactly the ceiling is admitted"
             `Quick test_the_byte_ceiling_admits_a_render_of_exactly_the_ceiling;
           Alcotest.test_case "a norm longer than one sentence is refused"

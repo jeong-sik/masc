@@ -97,10 +97,25 @@ let test_clearing_forgets_it () =
     (view (F.clear ready) ~key:"a" = F.Absent)
 ;;
 
+let test_suspension_keeps_reader_key_and_refuses_retired_answers () =
+  let initial, old = started (F.start ~equal F.initial ~key:"source.ml") in
+  let suspended = F.suspend initial in
+  check (option string) "pending file remains selected" (Some "source.ml") (F.current_key suspended);
+  check bool "late answer is retired" false (F.is_current ~equal suspended old);
+  let restarted, current = started (F.start ~equal suspended ~key:"source.ml") in
+  check bool "new read owns a different generation" false (F.same_request ~equal old current);
+  let ready = F.complete ~equal restarted current (Ok "original") in
+  let refreshing, _ = started (F.start ~equal ready ~key:"source.ml") in
+  match view (F.suspend refreshing) ~key:"source.ml" with
+  | F.Stale (text, _) -> check string "last value is retained honestly" "original" text
+  | _ -> fail "interrupted refresh was not marked stale"
+;;
+
 let () =
   run "tui_fetched"
     [ ( "states"
-      , [ test_case "the four states are distinguishable" `Quick
+      , [ test_case "suspended reader retains its key" `Quick test_suspension_keeps_reader_key_and_refuses_retired_answers
+        ; test_case "the four states are distinguishable" `Quick
             test_the_four_states_are_distinguishable
         ; test_case "a pane asks once per key" `Quick test_a_pane_asks_once_per_key
         ; test_case "an answer for a key left behind is dropped" `Quick

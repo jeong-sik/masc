@@ -15,6 +15,8 @@ val owner : t -> owner
 val request_owner : request -> owner
 val same_owner : owner -> owner -> bool
 val busy : t -> bool
+val suspend_read : t -> t
+(** Retire only a pending observation; preserve admitted saves and drafts. *)
 val suspend : t -> t
 (** Withdraw read authority and pending callbacks; retain the activity draft.
     A fresh read is required even when returning to the same workspace. *)

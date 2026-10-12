@@ -97,6 +97,7 @@ let direct_turn_dynamic_context
       ~(held_task_skills : Keeper_world_observation_inputs.held_task_skills list)
       ~(task_skill_surfaces : (string * Keeper_skill_catalog.exact_surface list) list)
       ~(workspace_memory : Workspace_memory_ledger.observation)
+      ~(workspace_memory_access : Keeper_request_tool_access.t option)
       ~(lane_updates : (Yojson.Safe.t,string) result)
       ~(approval_authority_text : string)
       ~(recent_direct_conversation_text : string)
@@ -107,7 +108,7 @@ let direct_turn_dynamic_context
   =
   ([ direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces ]
    @ Option.to_list
-       (Keeper_unified_prompt.format_workspace_memory_observation workspace_memory)
+       (Keeper_unified_prompt.format_workspace_memory_observation ?access:workspace_memory_access workspace_memory)
    @ Option.to_list (Lane_addon_subscription.render lane_updates)
    @ [ approval_authority_text
   ; recent_direct_conversation_text
@@ -532,7 +533,7 @@ let run_keeper_invocation_turn_admitted_inner
         | Keeper_direct_native_continuation.Resume resumed ->
           Ok (binding, Some resumed, None)
         | Keeper_direct_native_continuation.Terminal_pending _ ->
-          Error "native execution is terminal and awaiting Owner acknowledgement; it cannot be dispatched again"
+          Error "native execution is terminal and awaiting Owner settlement; it cannot be dispatched again"
         | Keeper_direct_native_continuation.No_pending ->
           let* direct_resume = (match Keeper_direct_gate_continuation.load
           ~config:ctx.config ~meta ~operation_id ~session_dir with
@@ -681,7 +682,8 @@ let run_keeper_invocation_turn_admitted_inner
                 ~base_path:ctx.config.base_path
             in
             let task_skill_selection =
-              Keeper_task_skill_turn.resolve_observations
+              Keeper_task_skill_turn.resolve_live_observations
+                  ~config:ctx.config ~keeper_name:meta.name
                 ~snapshot:skill_snapshot ~current_task ~held_task_skills
             in
             let task_skill_surfaces =
@@ -712,6 +714,7 @@ let run_keeper_invocation_turn_admitted_inner
              | Workspace_memory_ledger.Unavailable detail ->
                Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
              | Missing | Available _ -> ());
+            Keeper_workspace_memory_observation_metrics.record workspace_memory;
             let build_turn_prompt ~base_system_prompt:_ ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
@@ -770,12 +773,13 @@ let run_keeper_invocation_turn_admitted_inner
                           ""))
                 | Some false | None -> ""
               in
-              let dynamic_context =
+              let render_dynamic_context workspace_memory_access =
                 direct_turn_dynamic_context
                   ~current_task
                   ~held_task_skills
                   ~task_skill_surfaces
                   ~workspace_memory
+                  ~workspace_memory_access
                   ~lane_updates
                   ~approval_authority_text:
                     (Keeper_unified_prompt.format_approval_authority_observation
@@ -788,7 +792,8 @@ let run_keeper_invocation_turn_admitted_inner
               (* The system prompt is the base prompt [Keeper_run_context]
                  built, shared with autonomous turns. Channel-specific input
                  stays in [dynamic_context] and the persisted user message. *)
-              { dynamic_context; dynamic_context_for_tools = None }
+              { dynamic_context = render_dynamic_context None;
+                dynamic_context_for_tools = Some (fun access -> render_dynamic_context (Some access)) }
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();

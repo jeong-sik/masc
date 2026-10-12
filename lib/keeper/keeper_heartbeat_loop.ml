@@ -916,6 +916,7 @@ let run_keepalive_unified_turn
          Keeper_board_attention_worker.settle_completed_snapshot
            ~base_path:ctx.config.base_path
            ~keeper_name:meta_after_triage.name
+           ()
        with
        | Error detail ->
          Log.Keeper.error

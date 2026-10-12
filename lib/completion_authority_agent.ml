@@ -569,6 +569,11 @@ type stop_cause =
       ; detail : string
       ; evaluator_runtime : string
       ; retryable_runtimes : string list
+      ; model_absent_runtimes : string list
+          (** Candidates whose typed refusal was model-absence (a retired or
+              unknown model): permanent for the unchanged request, excluded
+              from [retryable_runtimes], and named here so the stall record
+              carries per-candidate outcomes (2026-10-07 audit F-02). *)
       ; retry : retry_request
       }
   | Raised of { detail : string }
@@ -595,7 +600,15 @@ let registry_outcome_of_stop_cause : stop_cause -> Verification_run_registry.out
   | Infrastructure_unavailable { stage; detail } ->
     Verification_run_registry.Infrastructure_unavailable { stage; detail }
   | Commit_failed { detail } -> Verification_run_registry.Commit_failed { detail }
-  | Not_reviewed { gate; detail; _ } -> Verification_run_registry.Not_reviewed { gate; detail }
+  | Not_reviewed { gate; detail; model_absent_runtimes; _ } ->
+    (* Display-only suffix naming permanently refused candidates; never
+       matched. The typed field on [stop_cause] is the machine-readable form. *)
+    let detail =
+      if model_absent_runtimes = []
+      then detail
+      else Printf.sprintf "%s | model_absent=%s" detail (String.concat "," model_absent_runtimes)
+    in
+    Verification_run_registry.Not_reviewed { gate; detail }
   | Raised { detail } -> Verification_run_registry.Raised { detail }
 ;;
 
@@ -906,6 +919,7 @@ let process_task_once
              ; detail
              ; evaluator_runtime
              ; retryable_runtimes = result.retryable_runtimes
+             ; model_absent_runtimes = result.model_absent_runtimes
              ; retry = retry_request_of_evaluator_retryable result.evaluator_error_retryable
              }
          in
@@ -1335,6 +1349,7 @@ module For_testing = struct
         ; detail : string
         ; evaluator_runtime : string
         ; retryable_runtimes : string list
+        ; model_absent_runtimes : string list
         ; retry : retry_request
         }
     | Raised of { detail : string }

@@ -395,7 +395,9 @@ let handle_heartbeat
 ;;
 
 (** Subscribe server-streaming handler: push workspace events to the agent. *)
-let handle_subscribe (bytes : string) : string Grpc_eio.Stream.t =
+let subscription_id_sequence = Atomic.make 0
+
+let handle_subscribe ~runtime_authority (bytes : string) : string Grpc_eio.Stream.t =
   let req =
     decode_request_or_raise ~rpc:"Subscribe" T.SubscribeRequest.of_bytes_result bytes
   in
@@ -419,7 +421,10 @@ let handle_subscribe (bytes : string) : string Grpc_eio.Stream.t =
   Transport_metrics.set_grpc_subscribers (Atomic.get active_subscribe_streams);
   let events_count = ref 0 in
   let stream_closed = Atomic.make false in
-  let sub_id = Printf.sprintf "grpc-subscribe-%s-%Ld" req.agent_name (now_ms ()) in
+  (* Identity belongs to this subscription occurrence, never its agent or
+     wall-clock millisecond: simultaneous roots may subscribe as one agent. *)
+  let sub_id = Printf.sprintf "grpc-subscribe-%d"
+      (Atomic.fetch_and_add subscription_id_sequence 1) in
   let cleanup_subscriber ?exn () =
     if Atomic.compare_and_set stream_closed false true
     then (
@@ -468,7 +473,7 @@ let handle_subscribe (bytes : string) : string Grpc_eio.Stream.t =
      mid-flight by a config change; newly-subscribing clients pick up
      the new value. *)
   let max_buffer = stream_max_buffer () in
-  Sse.subscribe_external
+  Sse.subscribe_external ~runtime_authority
     ~id:sub_id
     ~is_alive:(fun () ->
       (not (Atomic.get stream_closed)) && not (Grpc_eio.Stream.is_closed stream))
@@ -534,6 +539,8 @@ let create_service
   |> Grpc_eio.Service.add_unary "Broadcast" (handle_broadcast workspace_config)
   |> Grpc_eio.Service.add_unary "GetStatus" (handle_get_status workspace_config)
   |> Grpc_eio.Service.add_unary "ToolCall" (handle_tool_call tool_dispatcher)
-  |> Grpc_eio.Service.add_server_streaming "Subscribe" handle_subscribe
+  |> Grpc_eio.Service.add_server_streaming "Subscribe"
+       (handle_subscribe ~runtime_authority:(Sse.runtime_authority_exn
+          ~base_path:workspace_config.base_path))
   |> Grpc_eio.Service.add_bidi_streaming "Heartbeat" (handle_heartbeat workspace_config)
 ;;

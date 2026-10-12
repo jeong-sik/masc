@@ -12,6 +12,7 @@ type palette_action =
      unreachable whenever the lane had been opened once. This one names the
      list and closes the lane to get there. *)
   | Palette_connectors
+  | Palette_collab
   | Palette_msx
   | Palette_dos
   | Palette_lane_addons

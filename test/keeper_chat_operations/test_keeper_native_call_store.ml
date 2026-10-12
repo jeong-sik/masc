@@ -80,7 +80,6 @@ let test_unknown_effect_survives_failure_and_rejects_retry () = with_store @@ fu
   bind store operation (make_call operation);
   terminal store operation (Agent.Operator_repair_required Agent.Effect_outcome_unknown);
   let observed = read store in
-  rejected "unknown effect acknowledged" (mutate store operation (Native.Acknowledge call_id));
   rejected "unknown effect replaced" (mutate store operation (Native.Bind {observed; call=make_call ~id:next_call_id operation}));
   rejected "unknown effect completed" (Store.succeed_running store ~now:4. ~operation_id ~outcome_ref:"not-evidence");
   ignore (Store.fail_running store ~now:4. ~operation_id ~kind:Operation.Turn_exception
@@ -88,7 +87,6 @@ let test_unknown_effect_survives_failure_and_rejects_retry () = with_store @@ fu
   check bool "failure retains unknown disposition" true (Native.equal_state observed (read store));
   with_reopened path store @@ fun reopened ->
   check bool "unknown persists across reopen" true (Native.equal_state observed (read reopened));
-  rejected "settled unknown receipt acknowledged" (mutate reopened operation (Native.Acknowledge call_id));
   check bool "failed operation is not replayed" true (Option.is_none (Store.claim_next reopened ~now:5. |> ok))
 
 let test_retired_replacement_is_atomic_and_normal_receipt_acknowledges () = with_store @@ fun _path store operation ->

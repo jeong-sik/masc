@@ -269,6 +269,31 @@ interrupted execution; MASC does not silently replay potentially completed
 effects. A changed conversation or tool surface also requires recovery instead
 of replaying the original input into a new session.
 
+## Retrieve memory for a purpose
+
+When available in the Keeper's tool surface, `keeper_memory_select` accepts a
+`purpose`, such as “Which approval applies to E17 production now?” It evaluates
+current ordinary and source-bound memories with their provenance. `keeper_memory_search`
+remains the text-search tool, including explicit historical lookup.
+
+The personal memory notice guides the Keeper to purpose selection only when
+policy permits it and the tool is offered directly or loadable through an
+offered discovery tool with a live loader. Rendering this notice does not call
+selection or inject stored claims. Otherwise, the notice keeps the existing
+search, artifact-only or unavailable route according to the tools actually offered.
+
+Selection requires `typesafeai.workspace_memory_selection_enabled`, an enabled
+TypeSafe lane and an armed destination; Keeper exclusions apply. Selected
+memories are labeled `current_decision` or `comparison`. A comparison retains
+its original event and environment; it does not establish the current event's
+state. The answer contains current claims and provenance references or counts,
+while full historical witnesses remain in the private evaluation journal.
+
+Changed or unavailable evidence stays unresolved. An empty selection is not
+proof that no relevant policy exists. An optional positive `limit` applies after
+assessment and reports truncated selections separately. Calling the tool retrieves
+memory for that request; it does not turn on automatic prompt injection.
+
 ## Where the numbers here came from
 
 Every count in this document was read from one live runtime on 2026-08-25 —

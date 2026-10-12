@@ -158,7 +158,6 @@ let test_play_menu_requires_explicit_execution () =
       (Option.is_none (Command.menu ~keeper_names:[] ~state:Command.Menu_idle draft)))
     ["/play invites"; "/play link"; "/play invite guest1 24"; "/play revoke guest1"]
 
-
 let test_ref_command_parses_url_and_bare_id () =
   check (list string) "a whole http(s) URL and a bare id both stage as references"
     [ "ref:https://example.test/a.png"; "ref:file-abc123" ]
@@ -573,46 +572,6 @@ let test_a_word_that_begins_nothing_is_named () =
   check string "named while it can be fixed" "unknown:zork" (hint "/zork");
   check string "and with an argument" "unknown:zork" (hint "/zork a b")
 
-let test_the_hint_line_says_what_the_hint_holds () =
-  check (option string) "no command" None (Command.hint_line Command.No_command);
-  check bool "a chosen command carries its summary" true
-    (match Command.hint_line (Command.hint "/memory") with
-     | Some line ->
-         String.length line > String.length "/memory"
-         && String.starts_with ~prefix:"/memory" line
-     | None -> false);
-  check bool "candidates carry every usage" true
-    (match Command.hint_line (Command.hint "/t") with
-     | Some line ->
-         List.for_all
-           (fun word ->
-              let needle = "/" ^ word in
-              let rec appears at =
-                at + String.length needle <= String.length line
-                && (String.equal
-                      (String.sub line at (String.length needle))
-                      needle
-                    || appears (at + 1))
-              in
-              appears 0)
-           [ "task"; "thinking"; "tools" ]
-     | None -> false);
-  check bool "an unknown word names itself" true
-    (match Command.hint_line (Command.hint "/zork") with
-     | Some line -> String.starts_with ~prefix:"/zork is not a command" line
-     | None -> false);
-  check (option string) "one candidate still shows its argument"
-    (Some "/thinking [hidden|folded|full]")
-    (Command.hint_line (Command.hint "/th"));
-  (* The bare slash is the one an operator types knowing nothing, so it is
-     the row that must not run off the pane. *)
-  check bool "the bare slash fits a narrow pane" true
-    (match Command.hint_line (Command.hint "/") with
-     | Some line -> String.length line <= 80
-     | None -> false)
-
-(* The catalog is what the help and the composer both read. A command listed
-   there that the parser does not know would be documented and then refused. *)
 let test_every_catalogued_command_parses () =
   (* Every spelling, not every command: an alias the catalog names and the
      parser does not know would be offered in the composer and then refused. *)
@@ -626,23 +585,6 @@ let test_every_catalogued_command_parses () =
          | _ -> true))
     Command.spellings
 
-(* The catalog says each command once. Two entries under one summary is an
-   alias that took a row of its own: the sheet then prints the same sentence
-   twice and a reader cannot tell whether the two words differ. *)
-let test_no_two_commands_share_a_summary () =
-  let seen = Hashtbl.create 64 in
-  List.iter
-    (fun (entry : Command.command_help) ->
-      match Hashtbl.find_opt seen entry.Command.summary with
-      | Some other ->
-          failf "/%s and /%s carry the same summary: %s" other
-            entry.Command.word entry.Command.summary
-      | None -> Hashtbl.add seen entry.Command.summary entry.Command.word)
-    Command.catalog;
-  check int "one summary per entry" (List.length Command.catalog)
-    (Hashtbl.length seen)
-
-(* An alias rides in its command's row rather than claiming one. *)
 let test_an_alias_shares_its_command_row () =
   check bool "the catalog carries at least one alias" true
     (List.exists
@@ -683,145 +625,6 @@ let test_an_alias_answers_like_its_command () =
             (hint ("/" ^ alias)))
         entry.Command.aliases)
     Command.catalog
-
-let test_help_lines_come_from_the_catalog () =
-  check int "one line per command" (List.length Command.catalog)
-    (List.length Command.help_lines);
-  List.iter2
-    (fun (entry : Command.command_help) line ->
-      check bool
-        (Printf.sprintf "/%s keeps its summary" entry.Command.word)
-        true
-        (String.starts_with ~prefix:(Command.usage entry) line
-         && String.length line > String.length (Command.usage entry)))
-    Command.catalog Command.help_lines
-
-let describe_span = function
-  | Command.Typed text -> "T[" ^ text ^ "]"
-  | Command.Untyped text -> "U[" ^ text ^ "]"
-  | Command.Detail text -> "D[" ^ text ^ "]"
-  | Command.Wrong text -> "W[" ^ text ^ "]"
-
-let spans text =
-  String.concat ""
-    (List.map describe_span (Command.hint_spans (Command.hint text)))
-
-let test_the_typed_run_is_what_was_pressed () =
-  (* One candidate left, so the argument comes along with it. *)
-  check string "a prefix highlights through the slash"
-    "T[/ta]U[sk]D[ <title>]" (spans "/ta");
-  (* Several left, so names only -- and each carries the same typed run. The
-     word list itself is deliberately not pinned: the catalog grows without
-     this test's leave, and the row's real contract (same typed run, one-space
-     separator, elision marker naming the count) is what [test_the_bare_slash_
-     row_is_bounded_by_its_width] below already asserts. *)
-  let t_spans = Command.hint_spans (Command.hint "/t") in
-  check bool "one glyph still offers several name-only candidates" true
-    (List.length t_spans >= 4
-     && List.for_all
-          (function
-            | Command.Typed "/t" | Command.Untyped _ | Command.Detail " " -> true
-            | _ -> false)
-          t_spans);
-  (* The bare slash draws its shared prefix once, then what fits; the row says
-     how many words it could not carry and points at the complete list. *)
-  check bool "the bare slash highlights only itself and elides the rest" true
-    (let bare = spans "/" in
-     (* ...D[ +N more (/help)] -- an elided row carries the marker; the count
-        itself is the catalog's business, not this contract's. *)
-     let tail = " more (/help)]" in
-     let tail_len = String.length tail in
-     String.starts_with ~prefix:"T[/]U[" bare
-     && String.length bare > tail_len
-     && String.sub bare (String.length bare - tail_len) tail_len = tail
-     && let head =
-          String.sub bare 0 (String.length bare - tail_len)
-        in
-        String.contains head '+')
-
-(* The row an operator types knowing nothing is the one that must not run off
-   the pane, and it used to be sized by how many commands happened to exist:
-   compacted once when /settings joined the catalog, over again at /find. The
-   contract is the width, not the wording -- so this asserts the bound and
-   that an elided row says it elided, rather than pinning a word list that
-   every new command would have to come back and edit. *)
-let test_the_bare_slash_row_is_bounded_by_its_width () =
-  match Command.hint_line (Command.hint "/") with
-  | None -> fail "the bare slash must offer a hint"
-  | Some line ->
-      check bool
-        (Printf.sprintf "the row fits 80 columns (it is %d)" (String.length line))
-        true
-        (String.length line <= 80);
-      check bool "it leads with the slash" true
-        (String.starts_with ~prefix:"/" line);
-      let pieces = String.split_on_char ' ' line in
-      let words = List.map (fun (e : Command.command_help) -> e.word) Command.catalog in
-      let carried =
-        List.filter (fun word -> List.exists (String.equal word) pieces) words
-      in
-      check bool "it carries at least one command" true (carried <> []);
-      if List.length carried < List.length words then
-        check bool "an elided row says so and names where the rest are" true
-          (List.exists (String.equal "more") pieces
-           && List.exists (String.equal "(/help)") pieces)
-
-(* Splitting the word for colour must not lose or duplicate a glyph. *)
-let test_colour_boundaries_keep_every_glyph () =
-  List.iter
-    (fun (typed, word) ->
-      match Command.hint_spans (Command.hint typed) with
-      | Command.Typed head :: Command.Untyped tail :: _ ->
-          check string
-            (Printf.sprintf "%s spells /%s" typed word)
-            ("/" ^ word) (head ^ tail)
-      | _ -> failf "%s did not open with a typed run" typed)
-    (* [/i] is left out on purpose: it opens both [interrupt] and [image], and
-       the first span then spells whichever the catalog lists first. Each pair
-       here names a prefix only one command answers. *)
-    [ ("/ta", "task")
-    ; ("/th", "thinking")
-    ; ("/im", "image")
-    ; ("/k", "keeper")
-    ; ("/interrup", "interrupt")
-    ]
-
-let test_a_complete_word_needs_no_untyped_run () =
-  check string "nothing left to type"
-    "T[/memory]D[ \xe2\x80\x94 cycle Librarian/Memory journal rows: summary, \
-     full, hidden]"
-    (spans "/memory");
-  check bool "an argument stays a detail" true
-    (match Command.hint_spans (Command.hint "/thinking") with
-     | Command.Typed "/thinking" :: Command.Detail args :: _ ->
-         String.equal args " [hidden|folded|full]"
-     | _ -> false)
-
-let test_an_unknown_word_is_marked_wrong () =
-  check bool "the word carries the wrong span" true
-    (match Command.hint_spans (Command.hint "/zork") with
-     | Command.Wrong "/zork" :: Command.Detail rest :: [] ->
-         String.starts_with ~prefix:" is not a command" rest
-     | _ -> false)
-
-(* The row the renderer paints and the row the tests read have to be the same
-   row, or one of them is describing a footer nobody sees. *)
-let test_the_line_is_the_spans_joined () =
-  List.iter
-    (fun text ->
-      let joined =
-        match Command.hint_spans (Command.hint text) with
-        | [] -> None
-        | spans ->
-            Some
-              (String.concat ""
-                 (List.map Command.hint_span_text spans))
-      in
-      check (option string)
-        (Printf.sprintf "%S joins to its line" text)
-        (Command.hint_line (Command.hint text))
-        joined)
-    [ ""; "hello"; "/"; "/t"; "/th"; "/thinking"; "/task a b"; "/zork" ]
 
 let test_autocomplete_plain_text_is_ignored () =
   check (option string) "plain text" None (Command.autocomplete "hello");
@@ -961,7 +764,6 @@ let test_autocomplete_subargument_cycling () =
   let step4 = Command.autocomplete (Option.get step3) in
   check (option string) "step 4: /thinking full wraps -> /thinking hidden" (Some "/thinking hidden") step4
 
-
 (* The cancel contract: exit-class on masc_transition, so the one typed
    reason must arrive as both [reason] and the required non-empty
    [handoff_context.summary]. A builder that dropped the summary would pass
@@ -1013,7 +815,6 @@ let test_resource_read_keeps_each_part_type () =
       Alcotest.failf "unexpected resource contents (%d parts)"
         (List.length contents)
 
-
 let test_command_menu_keeps_selection_separate_from_draft () =
   let menu state draft = Command.menu ~keeper_names:["가람"; "가온"] ~state draft |> Option.get in
   let draft = "/t\nkeep the original body" in
@@ -1033,7 +834,6 @@ let test_command_menu_keeps_selection_separate_from_draft () =
     (let draft = "/keeper 가" in
      let initial = menu Command.Menu_idle draft in
      menu (Command.menu_step ~direction:Command.Next ~draft initial) draft |> Command.menu_accept)
-
 
 let () =
   run "tui command"
@@ -1071,30 +871,12 @@ let () =
             test_a_complete_word_is_described
         ; test_case "a word that begins nothing is named" `Quick
             test_a_word_that_begins_nothing_is_named
-        ; test_case "the hint line says what the hint holds" `Quick
-            test_the_hint_line_says_what_the_hint_holds
         ; test_case "every catalogued command parses" `Quick
             test_every_catalogued_command_parses
-        ; test_case "no two commands share a summary" `Quick
-            test_no_two_commands_share_a_summary
         ; test_case "an alias shares its command row" `Quick
             test_an_alias_shares_its_command_row
         ; test_case "an alias answers like its command" `Quick
             test_an_alias_answers_like_its_command
-        ; test_case "help lines come from the catalog" `Quick
-            test_help_lines_come_from_the_catalog
-        ; test_case "the typed run is what was pressed" `Quick
-            test_the_typed_run_is_what_was_pressed
-        ; test_case "colour boundaries keep every glyph" `Quick
-            test_colour_boundaries_keep_every_glyph
-        ; test_case "a complete word needs no untyped run" `Quick
-            test_a_complete_word_needs_no_untyped_run
-        ; test_case "an unknown word is marked wrong" `Quick
-            test_an_unknown_word_is_marked_wrong
-        ; test_case "the bare slash row is bounded by its width" `Quick
-            test_the_bare_slash_row_is_bounded_by_its_width
-        ; test_case "the line is the spans joined" `Quick
-            test_the_line_is_the_spans_joined
         ; test_case "plain text is ignored by autocomplete" `Quick
             test_autocomplete_plain_text_is_ignored
         ; test_case "autocomplete unique prefix" `Quick

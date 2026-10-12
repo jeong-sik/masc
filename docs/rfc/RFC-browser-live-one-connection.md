@@ -3,9 +3,9 @@ rfc: "browser-live-one-connection"
 title: "Let one live connection do a whole browser task"
 status: Accepted
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-09
 author: vincent + claude
-related: ["browser-lane-stagehand", "setup-web-search-and-browser-lane"]
+related: ["browser-lane-stagehand", "setup-web-search-and-browser-lane", "browser-keeper-firefox"]
 ---
 
 # RFC — live 브라우저 일 하나를 한 연결로 끝낸다
@@ -81,7 +81,7 @@ BiDi 연결의 `hover_at` 과 `drag` 는 실제 Firefox 157.0.1 에서 확인했
   설계 문서는 "확장 ID 나 URL 과 잇지 않는다"고 적었다 (`docs/design/browser-bidi-live-host.md`).
 - WebExtension API 가 BiDi context ID 를 알려 주는지는 확인하지 못했다. 확인 필요.
 
-### 2.4 BiDi 연결은 운영자가 손으로 붙인다
+### 2.4 BiDi 연결을 붙이는 길
 
 - Firefox 를 `--remote-debugging-port` 로 띄워야 한다. 주소는 `ws://127.0.0.1:PORT/session` 이다.
   ([MDN](https://developer.mozilla.org/en-US/docs/Web/WebDriver/How_to/Create_BiDi_connection), 2026-10-08 확인)
@@ -90,23 +90,21 @@ BiDi 연결의 `hover_at` 과 `drag` 는 실제 Firefox 157.0.1 에서 확인했
   loopback 에서만 받는다.
   ([Mozilla Remote Agent Security](https://firefox-source-docs.mozilla.org/remote/Security.html), 2026-10-08 확인)
 - host 는 `masc-browser-host --bidi-url ws://127.0.0.1:PORT/session` 으로 띄운다.
-  이 명령을 대신 실행해 주는 것이 없다.
-  `connectors/browser/install-host.sh` 와 `scripts/install-local-build.sh` 에 BiDi 가 나오지 않는다.
-  손으로 붙이는 절차는 #41817 이 `docs/design/browser-bidi-live-host.md` 와 host README 에 적었다.
-- BiDi host 는 세 경우에 끝난다 (`run_bidi`): 명령의 결과를 모르게 됐을 때, 서버에 묻는 요청(poll)이 실패했을 때,
-  결과를 서버에 보내지 못했을 때. 확장 host 는 실패하면 잠시 뒤 다시 묻지만 BiDi host 는 다시 묻지 않는다.
-  그래서 MASC 서버를 재시작하면 BiDi host 가 끝난다. 다시 띄우는 것도 손으로 한다.
-  #41851 이 이것을 바꿨다. poll 과 결과 전송이 실패해도 끝나지 않고 다시 한다(§3.B 의 4).
-- 끝난 이유는 host 자기 로그에만 남는다 (`bin/masc_browser_host.ml`). 서버는 연결이 끊겼다는 것만 안다.
-- BiDi 소켓이 끊겨도 host 는 끝나지 않는다. `Browser_bidi_peer.with_connection` 은 끊긴 것을 적어 두기만 하고,
-  `run_bidi` 의 poll 은 peer 를 보지 않고 계속 돈다. 그 뒤에 온 읽기 요청은 실패로 답하고 다시 poll 한다.
-  그래서 Firefox 를 꺼도 서버의 연결 목록에는 그 BiDi 연결이 남는다.
-  #41851 뒤로는 host 가 끝나고 서버에 disconnect 를 보낸다. 실제 Firefox 157.0.1 을 꺼서 확인했다.
+  `runtime.toml` 에 `[browser.live.bidi]` 를 적은 워크스페이스는 MASC 서버가 뜰 때 Firefox 와 host 를 같이 띄운다
+  (RFC-browser-keeper-firefox). 표가 없으면 운영자가 `docs/design/browser-bidi-live-host.md` 와
+  host README 의 절차대로 손으로 붙인다.
+- BiDi host 는 넷 가운데 하나로 끝난다(`browser_host.ml` 의 `run_bidi`): BiDi 연결이 끝났을 때(일을 기다리는 동안도),
+  명령의 결과를 모르게 됐을 때, 다시 물어도 바뀌지 않을 까닭으로 서버가 등록을 거절했을 때, 운영자가 멈추라고 했을 때.
+  서버가 답하지 않으면 확장 host 처럼 workspace 가 적은 주소로 다시 묻는다(§3.B 의 4). 그래서 MASC 서버를 재시작해도 끝나지 않는다.
+- 끝난 이유는 host 기록(`.masc/browser-lane/bidi-host.json`)에 남는다. 연결 목록·doctor·Keeper 답이 그 기록을 읽는다.
+- Firefox 를 끄면 BiDi 연결이 끝나서 host 도 끝나고, 서버에 disconnect 를 보낸다. 실제 Firefox 157.0.1 을 꺼서 확인했다.
 - 서버가 연결의 등록을 끝내는 경우가 있다. poll 이 120초 넘게 없으면 서버가 그 `client_id` 를 끝내고
   (`Browser_lane.lane_connected_window_sec`, `retired_clients`), 그 뒤의 poll 에는 HTTP 400 으로 답한다.
   같은 ID 로는 서버가 다시 뜰 때까지 못 붙는다.
   확장 host 는 이때 끝나고, 확장이 5초 뒤 새 host 를 띄워 새 ID 로 붙는다 (`background.js`).
-  BiDi host 는 다시 띄워 주는 것이 없다.
+  BiDi host 는 끝나지 않고 새 ID 로 다시 등록한다.
+- 끝난 BiDi host 는 `[browser.live.bidi]` 를 적은 워크스페이스에서 다음 서버 시작이 다시 띄운다(RFC-browser-keeper-firefox).
+  표가 없으면 운영자가 다시 띄운다.
 - BiDi 세션은 소켓보다 오래 남는다. Firefox 157.0.1 을 임시 프로필로 띄워 쟀다(2026-10-08, headless).
   - 세션을 끝내지 않고 소켓만 닫으면 같은 Firefox 에 다시 붙지 못한다. 프로세스를 죽여서 닫힌 경우도 같다.
     다음 `session.new` 가 `session not created`("Maximum number of active sessions")로 거절된다.
@@ -216,15 +214,18 @@ WebExtension 은 지금처럼 "설치만 하면 읽는" 연결로 둔다.
      새 서버는 그 요청을 모른다. 요청 ID 는 서버 메모리에만 있고 재시작하면 사라진다.
      그래서 이미 일어난 동작을 Keeper 가 다시 시킬 수 있다는 위험은 남는다. 확장 host 도 지금 같다(`Issuer_moved`).
      줄이는 것은 두 가지다. 전달하지 못한 결과를 아래 host 기록 파일에 남겨 TUI 가 보여 준다
-     (요청 ID, 동작 이름, 성공·실패·모름, 시각. 페이지 내용과 인자는 넣지 않는다).
+     (요청 ID, 동작 이름, 성공·시작 안 함·모름, 전달하지 못한 까닭, 시각. 페이지 내용과 인자는 넣지 않는다).
      Keeper 스킬에는 서버가 다시 뜬 뒤 첫 동작 전에 페이지를 다시 읽으라고 적는다.
      서버가 요청과 결과를 재시작 너머로 기억해 스스로 맞추는 것은 이 RFC 가 다루지 않는다.
-   - 서버가 등록을 거절하면(HTTP 400, §2.4) 까닭에 따라 다르게 한다.
+   - 서버가 등록을 거절하면(HTTP 400, §2.4) 까닭에 따라 다르게 한다. #41898 에서 했다.
+     까닭은 400 응답 본문의 코드로 읽는다(`client_disconnected`, `client_identity_changed`).
      서버가 이 연결을 끝낸 것이면 새 `client_id` 로 다시 등록한다.
      poll 은 host 가 쉬는 동안에만 보내므로 그때 걸려 있는 동작이 없다.
      탭 번호와 관측은 연결마다 따로라서 Keeper 는 새 연결의 탭 목록부터 다시 읽는다.
      그 밖의 거절(헤더가 틀림, 같은 ID 인데 브라우저 정보가 바뀜)은 다시 물어도 같은 답이므로 끝내고 이유를 남긴다.
      같은 ID 로 끝없이 다시 묻지 않는다.
+     어떤 ID 로 보낸 첫 poll 에 바로 "끝냈다"는 답이 오면 그것도 끝낸다. 조용해서 끝난 ID 가 아니고, 새 ID 를 또 받아도 같은 답일 것이기 때문이다.
+     서버는 poll 이 도착할 때 ID 를 등록한다. 그래서 답을 못 받은 poll 이라도 한 번 보낸 ID 는 서버가 끝냈을 수 있다고 본다.
    - BiDi 연결이 끊기면 host 가 끝난다. 일을 기다리는 중이어도 끝난다. #41851 에서 했다.
      그 전에는 끝나지 않고 죽은 연결로 남았다(§2.4).
    - 정리하면 host 가 끝나는 경우는 셋이다: 명령의 결과를 모르게 됐을 때, BiDi 연결이 끊겼을 때,
@@ -246,20 +247,37 @@ WebExtension 은 지금처럼 "설치만 하면 읽는" 연결로 둔다.
        Firefox 는 살아 있는데 소켓만 끊긴 것이면 SIGKILL 과 같다. Firefox 를 다시 띄운다.
      - Firefox 가 `session.end` 에 답하지 않는 경우: 정해 둔 시간만 기다리고 끝난다. 이것도 SIGKILL 과 같다.
      세션을 끝내지 못한 채 끝날 때는 host 가 그 사실과 할 일을 로그와 기록 파일에 적는다.
-   - 끝난 이유와 전달하지 못한 결과는 workspace 의 파일 하나에 남긴다(`<base>/.masc/browser-lane/` 아래).
-     이 문서는 그 파일을 host 기록 파일이라 부른다. 서버, TUI, `masc doctor` 가 읽는다.
-     파일은 host 가 붙을 때부터 있다. host 는 붙으면서 자기 pid, 프로세스 시작 시각, `client_id`, BiDi 주소를 적고,
-     끝나면서 끝난 시각과 이유를 적는다.
-     읽는 쪽은 같은 장비에 있으므로 그 pid 가 살아 있는지 직접 본다. 그래서 서버 없이도 네 상태가 갈린다.
-     - 붙어 있음: 끝난 기록이 없고 그 프로세스가 살아 있다. 서버가 내려가 host 가 다시 묻는 중이어도 이 상태다.
-     - 끝남: 끝난 기록이 있다.
-     - 기록 없이 죽음: 끝난 기록이 없는데 그 프로세스가 없다. SIGKILL 이나 crash 다. 세션이 Firefox 에 남았을 수 있다.
-     - 붙인 적 없음: 파일이 없다.
-     pid 가 다른 프로세스에 다시 쓰인 경우는 같이 적어 둔 시작 시각으로 거른다.
-     새 host 는 붙으면서 이전 기록을 덮어쓴다. 살아 있는 host 의 기록이 있으면 덮어쓰지 않고 그 pid 를 말하며 끝난다.
-     시각을 주기적으로 갱신하는 heartbeat 는 두지 않는다. 프로세스를 직접 볼 수 있어서 필요 없고,
+   - 끝난 이유와 전달하지 못한 결과는 workspace 의 파일에 남긴다(`<base>/.masc/browser-lane/` 아래). #41919 에서 했다.
+     이 문서는 그 파일들을 host 기록이라 부른다. 서버, TUI, `masc doctor` 가 읽는다.
+     host 는 뜨자마자 자기 pid, 뜬 시각, `client_id`, BiDi 주소를 적는다(`bidi-host.json`).
+     Firefox 가 세션을 주면 그 시각을 더하고, 끝나면서 끝난 시각과 이유, 세션이 Firefox 에 남았는지를 적는다.
+     세션은 넷 가운데 하나다.
+     - 남지 않음: Firefox 가 끝났다고 답했거나, 이 연결에는 세션이 없다고 답했거나(`invalid session id`), 세션을 청하기 전에 끝났거나,
+       Firefox 가 `session not created` 가 아닌 다른 오류로 세션을 주지 않았다.
+     - 거절당함: Firefox 가 `session not created` 로 세션을 주지 않았다. Firefox 는 세션을 하나 쥐고 있는 동안 이렇게 답한다.
+       붙어 있는 다른 host 의 것이거나, 죽은 host 가 남긴 것이다. 이 host 가 물었을 때 그 세션이 있었다는 뜻이다.
+       그 세션은 주인 host 가 끝내거나 Firefox 를 다시 띄울 때까지 남는다. 지금도 있는지는 기록이 말하지 않는다.
+     - 남음: 끝내 달라고 했는데 끝냈다는 답을 못 받았다. 다른 오류로 답했거나 시간 안에 답이 없었다. 남아 있는 것으로 본다.
+     - 모름: 물어볼 연결이 이미 끊겼다. Firefox 가 꺼졌으면 세션도 없고, 살아 있으면 남아 있다.
+     host 는 떠 있는 동안 잠금 파일(`bidi-host.lock`)을 쥐고 있다. host 가 어떻게 죽든 커널이 그 잠금을 푼다.
+     읽는 쪽은 같은 장비에 있으므로 그 잠금을 직접 본다. 그래서 서버 없이도 상태가 갈린다.
+     - 실행 중: 끝난 기록이 없고 잠금이 잡혀 있다. 세션을 받은 시각이 있으면 붙어 있고, 없으면 붙는 중이다.
+       서버가 내려가 host 가 다시 묻는 중이어도 이 상태다.
+     - 끝남: 끝난 기록이 있다. 붙지 못하고 끝난 host 도 까닭을 여기에 남긴다.
+     - 기록 없이 죽음: 끝난 기록이 없는데 잠금을 쥔 프로세스가 없다. SIGKILL 이나 crash 다.
+       순서대로 끝났지만 끝난 기록을 쓰지 못한 host 도 이렇게 읽힌다. 세션이 Firefox 에 남았을 수 있다.
+     - 띄운 적 없음: 파일이 없다.
+     한 workspace 에 BiDi host 는 하나다. 새 host 는 뜨면서 이전 기록을 덮어쓴다.
+     잠금이 잡혀 있으면 덮어쓰지 않고, Firefox 에 아무것도 묻지 않은 채 그 pid 를 말하며 끝난다.
+     시각을 주기적으로 갱신하는 heartbeat 는 두지 않는다. 잠금을 직접 볼 수 있어서 필요 없고,
      죽은 host 가 남긴 시각을 "살아 있음"으로 읽을 일도 없다.
      서버가 떠 있지 않아도 남고, 다시 뜬 서버도 읽을 수 있다.
+     서버의 확인을 받지 못한 결과는 같은 기록의 목록(`unacknowledged`)에 남긴다. 새 host 가 뜨면 기록째 새로 쓴다.
+     결과마다 요청 UUID, 동작 이름, 명령이 어떻게 됐는지, 확인을 못 받은 까닭을 적는다.
+     까닭은 셋이다. 서버가 받지 않겠다는 상태 코드로 답함, host 가 한 번도 보내지 못함, 확인이 오지 않음.
+     서버는 결과를 받은 뒤에 답하므로, 확인이 오지 않은 결과는 서버에 도착했을 수도 있다.
+     host 가 읽지 못한 답과, 한 번 보낸 뒤 다시 보내지 못한 결과도 "확인이 오지 않음"이다.
+     기록을 바꿀 때마다 파일을 통째로 바꿔 쓴다. 그래서 읽는 쪽은 한 host 의 기록만 본다.
 
 탭 번호와 관측은 한 연결 안에서만 쓰이므로 대응표가 필요 없다.
 
@@ -343,7 +361,7 @@ B 의 순서:
      실제 Firefox 에서 붙는지, 탭이 그대로인지 본다.
      명령이 답을 못 받아 끝난 경우에도 `session.end` 가 나가는지 본다.
      SIGKILL 뒤와, Firefox 는 살아 있는데 소켓만 끊긴 뒤에는 붙지 못하고 까닭을 말하는지 본다.
-   - `masc doctor` 가 네 상태(붙어 있음, 끝남, 기록 없이 죽음, 붙인 적 없음)를 서버가 떠 있을 때와 꺼져 있을 때 각각 말하는지 본다.
+   - `masc doctor` 가 네 상태(실행 중, 끝남, 기록 없이 죽음, 띄운 적 없음)를 서버가 떠 있을 때와 꺼져 있을 때 각각 말하는지 본다.
      서버가 꺼져 host 가 다시 묻는 중일 때 "붙어 있음"으로 말하는지, 새 host 가 붙으면 이전의 "끝남" 기록이 사라지는지도 본다.
    - 설정 명령의 BiDi 단계가 host 를 띄우지 않고 끝나는지 본다.
 5. 받는 쪽 확인: `kidsnote-incoming-dd-manager` 가 실제 Slack 에서 리액션 하나를 달고,
@@ -368,5 +386,16 @@ B 의 순서:
 - §5 의 1번: 붙이는 명령, TUI 와 `masc doctor` 의 상태 표시,
   그리고 §3.B 의 4 가 적은 host 의 동작.
   그 가운데 서버 재시작에 끝나지 않기와 끊긴 BiDi 에 끝나기는 #41851 에서 했다.
-  세션 끝내기는 #41853 에서 했다.
-  남은 것은 서버가 끝낸 연결을 새 ID 로 다시 등록하기와 기록 파일이다.
+  세션 끝내기는 #41853 에서, 서버가 끝낸 연결을 새 ID 로 다시 등록하기는 #41898 에서 했다.
+  host 기록은 #41919 에서 host 가 쓰게 했다.
+  그 기록을 읽어 말하는 것은 #41971 에서 했다: `masc doctor` 의 `browser_bidi_host` 줄,
+  서버 연결 목록의 `bidiHost`, Keeper 가 받는 거절 답의 `bidiHost`.
+  doctor 는 host 가 붙어 있어도 답하는 서버의 연결 목록에 그 host 가 있을 때만 `satisfied` 로 판정한다.
+  서버 밖에서 도는 `masc doctor` 는 "붙어 있음"을 말하고 `needs_verification` 으로 판정한다.
+  세 곳이 말하는 문장은 마지막 host 의 세션이 어떻게 됐는지에 따라 다음 host 앞에 할 일을 달리 말한다.
+  TUI 의 표시는 #41973 에서 했다: 브라우저 고르기 목록 아래의 BiDi host 줄들과,
+  보내지 않은 drag 아래의 host 상태 줄 하나(TUI 가 보내는 포인터 동작 가운데 BiDi 가 맡는 것은 drag 다). 서버가 연결 목록과 함께 주는 `bidiHost` 를 읽는다.
+  남은 것은 설정 명령의 확인 단계다.
+  설정 명령의 단계는 RFC `setup-web-search-and-browser-lane` 의 명령(`masc browser-lane-setup`)에 더하는 것인데,
+  그 RFC 는 Draft 이고 명령이 아직 없다. 명령이 생긴 뒤에 더한다. 그 단계가 말할 내용 가운데
+  host 기록의 상태와 붙이는 명령은 `masc doctor` 가 이미 말한다.

@@ -1,0 +1,4 @@
+10:11:34 input_policy ollama_cloud small context_owner=agent_core turn_boundary=boundary:4373 blob_reader_available
+10:11:34 carried ollama_cloud first_atom 4238 atoms 136/4374 bytes 191230
+10:11:49 input_policy muse_6dc7c062 small context_owner=official_client applied=false
+10:11:50 carried muse_6dc7c062 first_atom 4238 atoms 137/4375 bytes 848823

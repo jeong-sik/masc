@@ -61,8 +61,8 @@ let valid_of_projection snapshot entry skill diagnostics =
     }
 ;;
 
-let item_of_entry snapshot (entry : Skill_catalog_snapshot.entry) =
-  match Keeper_skill_catalog.project_entry_or_fallback snapshot entry with
+let item_of_entry ~descriptors snapshot (entry : Skill_catalog_snapshot.entry) =
+  match Keeper_skill_catalog.project_entry_or_fallback ~descriptors snapshot entry with
   | Projected skill -> valid_of_projection snapshot entry skill []
   | Frozen_instruction { skill; diagnostic } ->
     valid_of_projection snapshot entry skill [ diagnostic ]
@@ -90,9 +90,9 @@ let item_of_rejection (rejection : Skill_catalog_snapshot.rejection) =
     }
 ;;
 
-let of_snapshot snapshot =
+let of_snapshot ?(descriptors = Keeper_tool_descriptor.all_descriptors ()) snapshot =
   let projected =
-    Skill_catalog_snapshot.entries snapshot |> List.map (item_of_entry snapshot)
+    Skill_catalog_snapshot.entries snapshot |> List.map (item_of_entry ~descriptors snapshot)
   in
   let rejected =
     Skill_catalog_snapshot.rejections snapshot |> List.map item_of_rejection

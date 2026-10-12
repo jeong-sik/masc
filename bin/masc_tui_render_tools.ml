@@ -453,7 +453,6 @@ let tools_display_lines ?(cols = 80) (state : state) =
                    ets_tool_surface_bytes;
                    ets_skill_tool_surface_bytes;
                    ets_skill_discovery_bytes;
-                   ets_skill_eager_body_bytes;
                    ets_skill_body_bytes;
                    ets_tools;
                    ets_tool_surface_sha256;
@@ -843,9 +842,8 @@ let tools_display_lines ?(cols = 80) (state : state) =
           "   deferred resource bound=" ^ Terminal_text.single_line resource_bound;
           Ansi.bold,
           Printf.sprintf
-            "   Skill context: profile discovery=%dB · eager=%dB · deferred bodies=%s · skill tool schema=%s/%s all tools"
+            "   Skill context: profile discovery=%dB · deferred bodies=%s · skill tool schema=%s/%s all tools"
             ets_skill_discovery_bytes
-            ets_skill_eager_body_bytes
             (byte_count ets_skill_body_bytes)
             (byte_count ets_skill_tool_surface_bytes)
             (byte_count ets_tool_surface_bytes);

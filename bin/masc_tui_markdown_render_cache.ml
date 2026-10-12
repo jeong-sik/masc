@@ -30,6 +30,31 @@ module Streaming = struct
   }
 end
 
+type row_extent = { count : int; nonblank_end : int }
+
+type measurement = { height : int; nonblank_lines : int }
+
+type logical_lines = { nonblank : int; last_nonblank : bool }
+
+let append_logical_lines held text start =
+  let nonblank = ref held.nonblank and last_nonblank = ref held.last_nonblank in
+  for at = start to String.length text - 1 do
+    match text.[at] with
+    | '\n' -> last_nonblank := false
+    | ' ' | '\t' | '\r' | '\012' -> ()
+    | _ -> if not !last_nonblank then (incr nonblank; last_nonblank := true)
+  done;
+  { nonblank = !nonblank; last_nonblank = !last_nonblank }
+
+type 'identity measured = {
+  measure_key : 'identity Streaming.key;
+  measure_text : string;
+  measure_stable_source_len : int;
+  measure_stable_rows : row_extent;
+  measure_height : int;
+  measure_logical_lines : logical_lines;
+}
+
 (* One store per kind, each keyed by the identity that owns the result, so a
    lookup is a hash rather than a walk of everything retained. The pane looks
    one of these up for every message it walks, and a scrolled transcript walks
@@ -39,12 +64,14 @@ end
 type 'identity t = {
   completed : ('identity, 'identity Completed.rendered) Masc_tui_lru.t;
   growing : ('identity, 'identity Streaming.growing) Masc_tui_lru.t;
+  measured : ('identity, 'identity measured) Masc_tui_lru.t;
 }
 
 let create ~capacity =
   if capacity <= 0 then invalid_arg "Markdown render cache capacity must be positive";
   { completed = Masc_tui_lru.create ~capacity;
     growing = Masc_tui_lru.create ~capacity;
+    measured = Masc_tui_lru.create ~capacity;
   }
 
 (* The identity finds the entry; the rest of the key says whether what was
@@ -161,6 +188,52 @@ let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
       remember_growing cache updated;
       rows
   | Some _ | None -> reset_growing cache ~key ~text ~renderer
+
+let row_extent rows =
+  List.fold_left (fun extent row ->
+    let count = extent.count + 1 in
+    { count;
+      nonblank_end = if String.trim row = "" then extent.nonblank_end else count })
+    { count = 0; nonblank_end = 0 } rows
+
+let append_extent left right =
+  { count = left.count + right.count;
+    nonblank_end = if right.nonblank_end = 0 then left.nonblank_end
+      else left.count + right.nonblank_end }
+
+let measure_growing_details cache ~theme_revision ~palette_generation ~width ~renderer
+    ~identity ~text =
+  let key : _ Streaming.key =
+    { identity; width; theme_revision; palette_generation } in
+  let previous = match Masc_tui_lru.find cache.measured identity with
+    | Some measured when same_visual_rest key measured.measure_key -> Some measured
+    | Some _ | None -> None in
+  match previous with
+  | Some measured when String.equal measured.measure_text text ->
+      {height=measured.measure_height; nonblank_lines=measured.measure_logical_lines.nonblank}
+  | Some _ | None ->
+    let source_start, stable, logical_start, logical = match previous with
+      | Some measured when String.starts_with ~prefix:measured.measure_text text ->
+        measured.measure_stable_source_len, measured.measure_stable_rows,
+        String.length measured.measure_text, measured.measure_logical_lines
+      | Some _ | None -> 0, { count = 0; nonblank_end = 0 }, 0,
+          {nonblank=0; last_nonblank=false} in
+    let measure_logical_lines = append_logical_lines logical text logical_start in
+    let pending = String.sub text source_start (String.length text - source_start) in
+    let rendered = renderer ~width pending in
+    validate_streaming_render ~source_length:(String.length pending) rendered;
+    let extent = append_extent stable (row_extent rendered.rows) in
+    let measure_height = Int.max 1 extent.nonblank_end in
+    let newly_stable = row_extent (take rendered.mutable_row_start rendered.rows) in
+    Masc_tui_lru.set cache.measured identity
+      { measure_key = key; measure_text = text;
+        measure_stable_source_len = source_start + rendered.mutable_source_start;
+        measure_stable_rows = append_extent stable newly_stable;
+        measure_height; measure_logical_lines };
+    {height=measure_height; nonblank_lines=measure_logical_lines.nonblank}
+
+let measure_growing cache ~theme_revision ~palette_generation ~width ~renderer ~identity ~text =
+  (measure_growing_details cache ~theme_revision ~palette_generation ~width ~renderer ~identity ~text).height
 
 module For_testing = struct
   let retained_entries cache = Masc_tui_lru.size cache.completed

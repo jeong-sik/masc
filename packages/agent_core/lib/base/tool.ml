@@ -157,8 +157,26 @@ let descriptor_to_yojson = function
       ]
 ;;
 
+(* A schema is immutable — the record is [private] with only two constructors
+   and every field holds immutable data — so physical schema identity
+   determines the wire form. Memoizing on that identity turns the per-step
+   re-serialization of an unchanged tool surface into a table lookup. The
+   ephemeron holds keys weakly, so a schema nobody references releases its
+   cached wire form instead of outliving its tool. *)
+module Wire_schema_key = struct
+  type t = Types.tool_schema
+
+  let equal = (==)
+  let hash (schema : t) = Hashtbl.hash schema.name
+end
+
+module Wire_schema_cache = Ephemeron.K1.Make (Wire_schema_key)
+
+let wire_schema_cache : Yojson.Safe.t Wire_schema_cache.t = Wire_schema_cache.create 0
+let wire_schema_cache_mutex = Stdlib.Mutex.create ()
+
 (** Schema to JSON *)
-let wire_json_of_schema (schema : Types.tool_schema) =
+let wire_json_of_schema_uncached (schema : Types.tool_schema) =
   `Assoc
     ([ "name", `String schema.name
      ; "description", `String schema.description
@@ -174,6 +192,18 @@ let wire_json_of_schema (schema : Types.tool_schema) =
      match schema.strict with
      | Some strict -> [ "strict", `Bool strict ]
      | None -> [])
+;;
+
+let wire_json_of_schema schema =
+  Stdlib.Mutex.protect wire_schema_cache_mutex (fun () ->
+    match Wire_schema_cache.find_opt wire_schema_cache schema with
+    | Some cached -> cached
+    | None ->
+      Wire_schema_cache.clean wire_schema_cache;
+      let json = wire_json_of_schema_uncached schema in
+      Wire_schema_cache.add wire_schema_cache schema json;
+      json)
+;;
 ;;
 
 (* What one tool costs the request that carries it. Exported so a caller

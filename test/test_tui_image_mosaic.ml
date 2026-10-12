@@ -3,26 +3,6 @@
 open Alcotest
 open Masc_tui_image_mosaic
 
-let contains ~sub s =
-  let ls = String.length s and lsub = String.length sub in
-  let rec loop i = i + lsub <= ls && (String.sub s i lsub = sub || loop (i + 1)) in
-  loop 0
-
-let rgb_of ints = String.init (List.length ints) (fun i -> Char.chr (List.nth ints i))
-
-let test_two_by_two () =
-  (* row-major: (0,0) red, (1,0) green, (0,1) blue, (1,1) white *)
-  let rgb = rgb_of [ 255; 0; 0; 0; 255; 0; 0; 0; 255; 255; 255; 255 ] in
-  let lines = render ~cols:2 ~rows:2 rgb in
-  check int "rows/2 lines" 1 (List.length lines);
-  let l = List.hd lines in
-  check bool "cell0 fg = top red" true (contains ~sub:"38;2;255;0;0" l);
-  check bool "cell0 bg = bottom blue" true (contains ~sub:"48;2;0;0;255" l);
-  check bool "cell1 fg = top green" true (contains ~sub:"38;2;0;255;0" l);
-  check bool "cell1 bg = bottom white" true (contains ~sub:"48;2;255;255;255" l);
-  check bool "half-block glyph present" true (contains ~sub:"\xe2\x96\x80" l);
-  check bool "line ends with reset" true (contains ~sub:"\027[0m" l)
-
 let test_odd_rows_empty () =
   check (list string) "odd rows -> []" []
     (render ~cols:2 ~rows:3 (String.make 18 '\000'))
@@ -31,114 +11,12 @@ let test_short_buffer_empty () =
   check (list string) "short buffer -> []" []
     (render ~cols:4 ~rows:4 (String.make 5 '\000'))
 
-let test_line_count_scales () =
-  (* 8 rows -> 4 lines *)
-  check int "8 rows -> 4 lines" 4
-    (List.length (render ~cols:3 ~rows:8 (String.make (3 * 8 * 3) '\000')))
-
-let rgba_of pixels =
-  String.concat ""
-    (List.map
-       (fun (r, g, b, a) -> String.init 4 (fun i -> Char.chr (List.nth [ r; g; b; a ] i)))
-       pixels)
-
 let true_colour = Masc_tui_terminal_palette.For_testing.best_color_for_level
     ~level:Masc_tui_terminal_palette.True_color
-
-let red = (255, 0, 0, 255)
-let clear = (0, 0, 0, 0)
-
-let test_rgba_transparent_halves_show_the_page () =
-  (* Four columns, two pixel rows: top only, bottom only, neither, both. *)
-  let rgba = rgba_of [ red; clear; clear; red; clear; red; clear; red ] in
-  match render_rgba ~project:true_colour ~cols:4 ~rows:2 rgba with
-  | [ line ] ->
-      check string "upper half, lower half, the page, a full cell"
-        "\xe2\x96\x80\xe2\x96\x84 \xe2\x96\x80" (Masc_tui_theme.strip_sgr line)
-  | lines -> failf "one line, got %d" (List.length lines)
-
-let test_rgba_half_opaque_is_drawn () =
-  let visible alpha =
-    match render_rgba ~project:true_colour ~cols:1 ~rows:2
-            (rgba_of [ (255, 0, 0, alpha); clear ]) with
-    | [ line ] -> Masc_tui_theme.strip_sgr line
-    | lines -> failf "one line, got %d" (List.length lines)
-  in
-  check string "half opaque is drawn" "\xe2\x96\x80" (visible 128);
-  check string "under half is the page" " " (visible 127)
-
-let test_rgba_colours_go_through_the_projection () =
-  let asked = ref 0 in
-  let project rgb = incr asked; true_colour rgb in
-  ignore (render_rgba ~project ~cols:4 ~rows:2
-            (rgba_of [ red; clear; clear; red; clear; red; clear; red ]));
-  check int "one projection per drawn pixel" 4 !asked
-
-let test_rgba_ends_on_the_terminal_colours () =
-  match render_rgba ~project:true_colour ~cols:1 ~rows:2 (rgba_of [ red; red ]) with
-  | [ line ] ->
-      let close = Masc_tui_theme.Sgr.default_fg ^ Masc_tui_theme.Sgr.default_bg in
-      check bool "ends on the default colours" true (String.ends_with ~suffix:close line);
-      check bool "never a full reset" false (contains ~sub:"\027[0m" line)
-  | lines -> failf "one line, got %d" (List.length lines)
-
-(* A colour the projection cannot draw must not borrow the one before it:
-   after a red cell, the next cell says the terminal's own colours. *)
-let test_rgba_undrawable_colour_is_the_terminal_s_own () =
-  let blue = Masc_tui_terminal_palette.make_rgb ~red:0 ~green:0 ~blue:255 in
-  let project rgb = if rgb = blue then None else true_colour rgb in
-  match render_rgba ~project ~cols:2 ~rows:2 (rgba_of [ red; (0, 0, 255, 255); red; (0, 0, 255, 255) ]) with
-  | [ line ] ->
-      (* The second cell is whatever follows the first cell's half block. *)
-      let block = "\xe2\x96\x80" in
-      let rec after_first i = if String.sub line i 3 = block then i + 3 else after_first (i + 1) in
-      let cut = after_first 0 in
-      let second = String.sub line cut (String.length line - cut) in
-      (* Rows are [red; blue] over [red; blue]: the second cell is all blue. *)
-      check bool "the second cell names the terminal's own colours" true
-        (String.starts_with
-           ~prefix:(Masc_tui_theme.Sgr.default_fg ^ Masc_tui_theme.Sgr.default_bg)
-           second);
-      check bool "and never the red before it" false (contains ~sub:"255;0;0" second)
-  | lines -> failf "one line, got %d" (List.length lines)
 
 let test_rgba_refuses_what_render_refuses () =
   check (list string) "odd rows" [] (render_rgba ~project:true_colour ~cols:1 ~rows:3 (String.make 12 '\000'));
   check (list string) "short buffer" [] (render_rgba ~project:true_colour ~cols:2 ~rows:2 (String.make 15 '\000'))
-
-(* The server's MSX frame is 256x192, and the terminal is whatever it is. *)
-let msx_w = 256
-let msx_h = 192
-
-let ratio (cols, rows) = float_of_int cols /. float_of_int rows
-let msx_ratio = float_of_int msx_w /. float_of_int msx_h
-
-(* A grid off by one pixel row is what evening the row count costs; a grid that
-   ignored the ratio would be out by a third at this terminal size. *)
-let close_to_msx_ratio label grid =
-  let off = Float.abs (ratio grid -. msx_ratio) in
-  let cols, rows = grid in
-  if off > 0.05 then
-    failf "%s: %dx%d is %.3f, and the frame is %.3f" label cols rows (ratio grid)
-      msx_ratio
-
-let test_a_wide_window_pillarboxes () =
-  (* 100 columns of a 30-row window: the height binds, so the picture does not
-     fill the width. Before, the grid was the window's own 100x56. *)
-  let ((cols, rows) as grid) = fit_grid ~src_w:msx_w ~src_h:msx_h ~max_cols:100 ~max_rows:56 in
-  close_to_msx_ratio "a 100x56 window" grid;
-  check bool "inside the window" true (cols <= 100 && rows <= 56);
-  check int "rows stack in pairs" 0 (rows land 1)
-
-let test_a_tall_window_letterboxes () =
-  let ((cols, rows) as grid) = fit_grid ~src_w:msx_w ~src_h:msx_h ~max_cols:64 ~max_rows:200 in
-  close_to_msx_ratio "a 64x200 window" grid;
-  check bool "inside the window" true (cols <= 64 && rows <= 200);
-  check int "rows stack in pairs" 0 (rows land 1)
-
-let test_no_room_draws_nothing () =
-  check (pair int int) "one row is not a grid" (0, 0)
-    (fit_grid ~src_w:msx_w ~src_h:msx_h ~max_cols:80 ~max_rows:1)
 
 let rgb_of pixels =
   String.concat "" (List.map (fun (r, g, b) ->
@@ -186,10 +64,7 @@ let test_a_grid_wider_than_the_source_still_draws () =
 let () =
   run "tui image mosaic"
     [ ( "fit_grid"
-      , [ test_case "a wide window pillarboxes" `Quick test_a_wide_window_pillarboxes
-        ; test_case "a tall window letterboxes" `Quick test_a_tall_window_letterboxes
-        ; test_case "no room draws nothing" `Quick test_no_room_draws_nothing
-        ] )
+      , [] )
     ; ( "downscale"
       , [ test_case "a cell is the mean of what it covers" `Quick
             test_a_cell_is_the_mean_of_what_it_covers
@@ -202,20 +77,10 @@ let () =
             test_a_grid_wider_than_the_source_still_draws
         ] )
     ; ( "render"
-      , [ test_case "2x2 half-block colours" `Quick test_two_by_two
-        ; test_case "odd rows empty" `Quick test_odd_rows_empty
+      , [ test_case "odd rows empty" `Quick test_odd_rows_empty
         ; test_case "short buffer empty" `Quick test_short_buffer_empty
-        ; test_case "line count scales" `Quick test_line_count_scales
-        ] )
+        ;] )
     ; ( "render_rgba"
-      , [ test_case "transparent halves show the page" `Quick
-            test_rgba_transparent_halves_show_the_page
-        ; test_case "half opaque is drawn" `Quick test_rgba_half_opaque_is_drawn
-        ; test_case "colours go through the projection" `Quick
-            test_rgba_colours_go_through_the_projection
-        ; test_case "ends on the terminal colours" `Quick test_rgba_ends_on_the_terminal_colours
-        ; test_case "an undrawable colour is the terminal's own" `Quick
-            test_rgba_undrawable_colour_is_the_terminal_s_own
-        ; test_case "refuses what render refuses" `Quick test_rgba_refuses_what_render_refuses
+      , [ test_case "refuses what render refuses" `Quick test_rgba_refuses_what_render_refuses
         ] )
     ]

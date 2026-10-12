@@ -154,7 +154,7 @@ let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
 (* Always installed so usage-window and turn usage reports are recorded. A
    turn nobody streams, traces or observes gets only those; its other events
    are ignored as before. *)
-let claude_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count
+let claude_stream_callback ?on_child_content_observation ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count
     ~on_native_action ~on_usage_report ~position ~on_compacted on_event =
   (* The result frame's uuid is the response identity the completion hook
      also writes for a Claude Code turn; the session is the conversation. *)
@@ -173,8 +173,8 @@ let claude_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~t
            })
       on_usage_report
   in
-  match on_event, raw_trace_run, on_native_action, receipts with
-  | None, None, None, None ->
+  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion, on_native_tool_progress, on_native_task_observation, on_child_content_observation with
+  | None, None, None, None, None, None, None, None ->
     Some
       (function
         | Runtime_claude_code.Usage_windows_reported report ->
@@ -182,39 +182,63 @@ let claude_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~t
         | Runtime_claude_code.Conversation_compacted -> on_compacted ()
         | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
           report_usage ~session_id ~turn_id ~model usage
-        | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-        | Native_tool_started _ | Native_tool_finished _ | Turn_finished _ -> ())
+        | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+        | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Turn_finished _ -> ())
   | _ ->
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
-    let thinking_indexes = Hashtbl.create 8 in
+    let content_indexes = Hashtbl.create 8 in
+    let closed_content = Hashtbl.create 8 in
+    let first_text = ref true in
+    let last_text_index = ref None in
+    let fresh_text_index () =
+      if !first_text then (first_text := false; 0)
+      else let index = !next_tool_index in incr next_tool_index; index
+    in
+    let content_index block channel =
+      match Hashtbl.find_opt content_indexes (block, channel) with
+      | Some index -> index
+      | None ->
+          let index = match channel with
+            | Runtime_claude_code.Text_content -> fresh_text_index ()
+            | Thinking_content ->
+                let index = !next_tool_index in incr next_tool_index; index in
+          Hashtbl.add content_indexes (block, channel) index;
+          index
+    in
+    let stop_content index =
+      if not (Hashtbl.mem closed_content index) then begin
+        Hashtbl.add closed_content index ();
+        emit (Agent_core.Types.ContentBlockStop {index})
+      end
+    in
     let tool_indexes = Hashtbl.create 8 in
     let native_tool_indexes = Hashtbl.create 8 in
     (* Each [message.id] is one model response; the text blocks it carries are
        one assistant message, and the next response's text is the next. *)
     let text_stream = Keeper_official_client_text_stream.create ~equal:String.equal () in
-    let emit_text text =
-      emit
-        (Agent_core.Types.ContentBlockDelta
-           { index = 0; delta = Agent_core.Types.TextDelta text })
+    let emit_text ~index text =
+      emit (Agent_core.Types.ContentBlockDelta
+        { index; delta = Agent_core.Types.TextDelta text })
     in
     Some
       (function
         | Runtime_claude_code.Turn_started { turn_id; model } ->
           emit (Agent_core.Types.MessageStart { id = turn_id; model; usage = None })
-        | Runtime_claude_code.Text_delta { message_id; text } ->
-          emit_text
+        | Runtime_claude_code.Text_delta { message_id; block; text } ->
+          let index = content_index block Runtime_claude_code.Text_content in
+          last_text_index := Some index;
+          emit_text ~index
             (Keeper_official_client_text_stream.forward text_stream ~message:message_id text)
-        | Runtime_claude_code.Thinking_delta { message_id; text } ->
-          let index = match Hashtbl.find_opt thinking_indexes message_id with
-            | Some index -> index
-            | None ->
-                let index = !next_tool_index in
-                incr next_tool_index;
-                Hashtbl.add thinking_indexes message_id index;
-                index in
+        | Runtime_claude_code.Thinking_delta { block; text; _ } ->
+          let index = content_index block Runtime_claude_code.Thinking_content in
           emit (Agent_core.Types.ContentBlockDelta
             { index; delta = Agent_core.Types.ThinkingDelta text })
+        | Runtime_claude_code.Child_content_observed content ->
+          (* Child content never enters root SSE, content indexes or usage. *)
+          Option.iter (fun observe -> observe content) on_child_content_observation
+        | Runtime_claude_code.Content_block_stopped {block; channel} ->
+          Option.iter stop_content (Hashtbl.find_opt content_indexes (block, channel))
         | Runtime_claude_code.Dynamic_tool_started
             { call_id; tool_name; arguments } ->
           Keeper_official_client_text_stream.tool_row text_stream;
@@ -275,7 +299,15 @@ let claude_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~t
                ; tool_id = Runtime_native_tools.call_id observation
                ; tool_name = observation.tool_name
                })
-        | Runtime_claude_code.Native_tool_finished observation ->
+        | Runtime_claude_code.Native_task_observed observation ->
+          Option.iter (fun observe -> observe observation) on_native_task_observation
+        | Runtime_claude_code.Native_tool_progress {identity; progress} ->
+          Option.iter (fun index ->
+            Option.iter (fun observe -> observe ~block_index:index
+              ~tool_call_id:(match identity with Runtime_native_tools.Call_id id -> Some id
+                | Provider_step _ -> None) progress) on_native_tool_progress)
+            (Hashtbl.find_opt native_tool_indexes identity)
+        | Runtime_claude_code.Native_tool_finished {observation; completion} ->
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run
@@ -285,6 +317,9 @@ let claude_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~t
             (fun identity ->
                Option.iter
                  (fun index ->
+                    Option.iter (fun finish -> finish ~block_index:index
+                      ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                      on_native_tool_completion;
                     Hashtbl.remove native_tool_indexes identity;
                     emit (Agent_core.Types.ContentBlockStop { index }))
                  (Hashtbl.find_opt native_tool_indexes identity))
@@ -295,8 +330,12 @@ let claude_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~t
         | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
           report_usage ~session_id ~turn_id ~model usage
         | Runtime_claude_code.Turn_finished { text } ->
-          Option.iter
-            emit_text
+          Option.iter (fun remainder ->
+            let index = match !last_text_index with
+              | Some index when not (Hashtbl.mem closed_content index) -> index
+              | Some _ | None -> fresh_text_index () in
+            emit_text ~index remainder;
+            stop_content index)
             (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
           emit
             (Agent_core.Types.MessageDelta
@@ -583,7 +622,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
-    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation ~on_child_content_observation
     ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.claude_code) =
   context_overflow_retry_safe := false;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
@@ -820,6 +859,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let terminal_error = ref None in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        ~base_path
         ~content_transport:Runtime_official_client_tool.Mcp
         ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
@@ -918,6 +958,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        ~base_path
         ~content_transport:Runtime_official_client_tool.Mcp
         ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
@@ -1168,8 +1209,29 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       Printexc.raise_with_backtrace exn backtrace
     in
     let turn_result =
+      (* This scope owns one actual CLI invocation, not the routed candidate or
+         its capacity retries. Input observations precede native registration. *)
+      let task_binding = match on_native_task_observation, on_child_content_observation with
+        | None, None -> None
+        | Some _, _ | _, Some _ -> Some (Keeper_claude_task_binding.create ()) in
+      let on_input_observation = Option.map
+          Keeper_claude_task_binding.observe_input task_binding in
+      let on_bound_task = match task_binding, on_native_task_observation with
+        | Some binding, Some observe -> Some (fun observation ->
+            match Keeper_claude_task_binding.bind_task binding observation with
+            | Ok bound -> observe bound
+            | Error reason -> Log.Runtime_agent.debug
+                "Claude native task input binding unavailable: %s"
+                (Keeper_claude_task_binding.rejection_to_string reason))
+        | None, _ | _, None -> None in
+      let on_bound_child = match task_binding, on_child_content_observation with
+        | Some binding, Some observe -> Some (fun content ->
+            observe (Keeper_claude_task_binding.observe_child binding content))
+        | None, _ | _, None -> None in
       let on_stream_event =
-        claude_stream_callback ?receipts
+        claude_stream_callback ?receipts ?on_native_tool_progress ?on_native_tool_completion
+          ?on_native_task_observation:on_bound_task
+          ?on_child_content_observation:on_bound_child
           ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~position:
@@ -1220,7 +1282,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                    ~turn_id
                    ~turn_count
                    ~updated_at:(Time_compat.now ())))
-             ?on_stream_event
+             ?on_stream_event ?on_input_observation
              client_config
              ~prompt
              ~images
@@ -1419,7 +1481,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                   recovery_detail))))
 ;;
 
-let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1431,6 +1493,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
     ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
+    ?on_native_tool_progress ?on_native_tool_completion ?on_child_content_observation ?on_native_task_observation
     ?on_native_action
     ?on_usage_report
     ?on_tool_execution
@@ -1447,26 +1510,20 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
   let observed_next_shrink_capacity_bytes = ref None in
   let observed_floor_capacity_bytes = ref None in
   let context_overflow_retry_safe = ref false in
-  let starting_capacity_bytes =
-    (* Every turn starts at the runtime's own ceiling when it has one, and
-       unbounded otherwise: the provider's typed overflow is what narrows it.
-       The shrink below cuts only the conversation window; the pinned
-       briefing is sent whole. *)
-    Option.value
-      (Runtime.prompt_capacity_bytes_of_runtime_id runtime_id)
-      ~default:unbounded_model_input_capacity_bytes
-  in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
-        ~starting_capacity:starting_capacity_bytes
+        ?on_memory_capacity_refusal
+        ~on_memory_retry:(fun () ->
+          resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ())
+        (* The provider's typed overflow narrows the initially unbounded turn. *)
+        ~starting_capacity:unbounded_model_input_capacity_bytes
         ~same_run_retry_authorized:(fun () ->
-          !context_overflow_retry_safe
-          && Option.is_some !observed_next_shrink_capacity_bytes)
-        ~shrink_capacity:(fun ~capacity:_ ~default_capacity ->
+          !context_overflow_retry_safe)
+        ~shrink_capacity:(fun ~capacity ~default_capacity:_ ->
           Option.value
             !observed_next_shrink_capacity_bytes
-            ~default:(max 1 default_capacity))
+            ~default:capacity)
         ~final_shrink_capacity:(fun ~capacity:_ ->
           !observed_floor_capacity_bytes)
         (* This runtime shrinks to the size the provider itself named
@@ -1543,7 +1600,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
             ~on_event
             ~effect_disposition
             ~context_overflow_retry_safe
-        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation ~on_child_content_observation
             ~on_usage_report
             ~on_tool_execution
             ~config)

@@ -1,0 +1,12 @@
+{
+  "scenario": "persisted failure history after completed media",
+  "scope": "local production ChatTranscript and REST normalization fixture",
+  "imageDecoded": true,
+  "audioPlayed": true,
+  "failureKept": true,
+  "retainedWorkVisible": true,
+  "failureQuotedAsChat": false,
+  "diagnosticsToggleAndCopy": true,
+  "pageErrors": [],
+  "browser": "149.0.7827.55"
+}

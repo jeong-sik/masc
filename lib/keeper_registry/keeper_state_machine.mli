@@ -22,7 +22,7 @@
 type phase =
   | Offline       (** Registered but no heartbeat fiber started *)
   | Running       (** Healthy heartbeat loop executing *)
-  | Failing       (** Any heartbeat/turn failure or archived credential, probing recovery *)
+  | Failing       (** Any heartbeat/turn failure, probing recovery *)
   | Draining      (** Graceful shutdown: completing current turn *)
   | Paused        (** Explicitly operator-paused; fiber sleeping *)
   | Stopped       (** Clean exit, terminal *)
@@ -62,7 +62,6 @@ type conditions = {
   (** Supervisor has requested immediate restart of a stopped fiber. *)
   drain_complete : bool;
   (** Current turn finished, no pending work *)
-  credential_archived : bool;
 }
 
 val default_conditions : conditions
@@ -142,8 +141,7 @@ val transition_error_to_string : transition_error -> string
 (** Derive phase from conditions. Pure, priority-ordered.
     This is the SOLE function that determines keeper phase.
 
-    Priority (first match wins) — mirrors the [DerivePhase] action in
-    [specs/keeper-state-machine/KeeperStateMachine.tla]:
+    Priority (first match wins):
     2.  Stopped (stop_requested + drain_complete)
         -- Checked first because a clean drain wins even if the fiber
         subsequently exits.
@@ -152,12 +150,8 @@ val transition_error_to_string : transition_error -> string
     5.  Crashed (~fiber_alive)
     6.  Draining (stop_requested) -- in-progress stop
     7.  Paused (operator_paused)
-    9.  Failing (latest health failure or structural failure observation)
-    10. Running (fiber_alive)
-    11. Offline (default fallback for inconsistent zero-state)
-
-    The order above is the ground truth enforced by
-    [keeper_state_machine.ml] and TLC. *)
+    9.  Failing (~heartbeat_healthy or ~turn_healthy)
+    10. Running -- fiber_alive holds here because 4 and 5 took a dead fiber *)
 val derive_phase : conditions -> phase
 
 (** Pure condition updater: given current conditions and an event,

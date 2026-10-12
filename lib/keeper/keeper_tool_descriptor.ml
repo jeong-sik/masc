@@ -91,6 +91,7 @@ type input_translation =
       }
 
 type runtime_handler =
+  | Tool_lane_addon of Lane_addon_tool_export.t
   | Tool_execute
   | Tool_search_files
   | Tool_read_file
@@ -106,6 +107,7 @@ type runtime_handler =
   | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
+  | Tool_memory_select
   | Tool_memory_retract
   | Tool_memory_write
   | Tool_constitution_write
@@ -223,6 +225,7 @@ let input_schema_source_to_string = function
 ;;
 
 let runtime_handler_to_string = function
+  | Tool_lane_addon _ -> "tool_lane_addon"
   | Tool_execute -> "tool_execute"
   | Tool_search_files -> "tool_search_files"
   | Tool_read_file -> "tool_read_file"
@@ -238,6 +241,7 @@ let runtime_handler_to_string = function
   | Tool_skill_publish -> "tool_skill_publish"
   | Tool_workspace_memory_read -> "tool_workspace_memory_read"
   | Tool_memory_search -> "tool_memory_search"
+  | Tool_memory_select -> "tool_memory_select"
   | Tool_memory_retract -> "tool_memory_retract"
   | Tool_memory_write -> "tool_memory_write"
   | Tool_constitution_write -> "tool_constitution_write"
@@ -475,7 +479,8 @@ let descriptor
   let execution =
     match runtime_handler with
     | Tool_surface_post -> Terminal
-    | ( Tool_execute
+    | ( Tool_lane_addon _
+      | Tool_execute
       | Tool_memory_write
       | Tool_memory_retract
       | Tool_constitution_write
@@ -497,6 +502,7 @@ let descriptor
       | Tool_skill_publish
       | Tool_workspace_memory_read
       | Tool_memory_search
+      | Tool_memory_select
       | Tool_library_search
       | Tool_library_read
       | Tool_surface_read
@@ -1337,6 +1343,10 @@ let workspace_memory_schema_source, workspace_memory_schema =
   base_schema_declared "keeper_workspace_memory_read"
 ;;
 
+let memory_select_schema_source, memory_select_schema =
+  base_schema_declared "keeper_memory_select"
+;;
+
 let memory_search_schema_source, memory_search_schema =
   base_schema_declared "keeper_memory_search"
 ;;
@@ -1501,46 +1511,6 @@ let board_stats_output_schema =
       ]
     ~required:
       [ "post_count"; "comment_count"; "expired_pending"; "last_sweep"; "backend" ]
-;;
-
-(* Keeper_msx_screen.handle captures observation and pixels together, then adds
-   a handle in the calling Keeper's vision store. This is the Keeper dispatch
-   contract, not the generic MCP screen result (which has no image handle). *)
-let msx_screen_output_schema =
-  let string_schema = `Assoc [ "type", `String "string" ] in
-  let integer_schema = `Assoc [ "type", `String "integer" ] in
-  let nullable_string =
-    `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
-  in
-  let sprite =
-    object_output_schema
-      ~properties:(List.map (fun name -> name, integer_schema)
-        [ "index"; "x"; "y"; "pattern"; "color" ])
-      ~required:[ "index"; "x"; "y"; "pattern"; "color" ]
-  in
-  object_output_schema
-    ~properties:
-      [ "frame", integer_schema
-      ; "mode", string_schema
-      ; "pc", string_schema
-      ; "halted", `Assoc [ "type", `String "boolean" ]
-      ; "cartridge", nullable_string
-      ; "disk", nullable_string
-      ; "screen_text", string_schema
-      ; "screen_view", string_schema
-      ; "tiles", `Assoc [ "type", `String "array"; "items", string_schema ]
-      ; "sprites", `Assoc [ "type", `String "array"; "items", sprite ]
-      ; "artifact", string_schema
-      ; "media_type", string_schema
-      ; "width", integer_schema
-      ; "height", integer_schema
-      ; "bytes", integer_schema
-      ]
-    ~required:
-      (* [sprites] rides the response only when the call asked for it. *)
-      [ "frame"; "mode"; "pc"; "halted"; "cartridge"; "disk"
-      ; "screen_text"; "screen_view"; "tiles"; "artifact"
-      ; "media_type"; "width"; "height"; "bytes" ]
 ;;
 
 let portrait_read_output_schema =
@@ -2629,6 +2599,18 @@ let internal_descriptors : t list =
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
+      ~input_schema_source:memory_select_schema_source
+      ~id:"keeper.memory.select"
+      ~name:"keeper_memory_select"
+      ~description:memory_select_schema.description
+      ~input_schema:memory_select_schema.input_schema
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_memory_select
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
       ~input_schema_source:memory_retract_schema_source
       ~id:"keeper.memory.retract"
       ~name:"keeper_memory_retract"
@@ -3068,6 +3050,7 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_declaration_read" "masc_lane_declaration_read" ~readonly:true
   ; masc_misc_descriptor "lane_declaration_save" "masc_lane_declaration_save" ~readonly:false
   ; masc_misc_descriptor "lane_updates" "masc_lane_updates" ~readonly:false
+  ; masc_misc_descriptor "play_room" "masc_play_room" ~readonly:false
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_inspect" "masc_lane_inspect" ~readonly:true
   ; masc_misc_descriptor "lane_observe" "masc_lane_observe" ~readonly:false
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_slice" "masc_lane_slice" ~readonly:true
@@ -3081,37 +3064,6 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "candle_purchase" "keeper_candle_purchase" ~readonly:false
   ; masc_misc_descriptor "candle_equip" "keeper_candle_equip" ~readonly:false
   ; masc_misc_descriptor "candle_gift" "keeper_candle_gift" ~readonly:false
-  (* MSX lane (RFC-0439 §3.5): the shared machine is one piece of state, so
-     none of these opts into concurrent batches. *)
-  ; masc_misc_descriptor "msx_load" "masc_msx_load" ~readonly:false
-  ; masc_misc_descriptor "msx_eject" "masc_msx_eject" ~readonly:false
-  ; masc_misc_descriptor "msx_save" "masc_msx_save" ~readonly:false
-  ; masc_misc_descriptor "msx_restore" "masc_msx_restore" ~readonly:false
-  ; masc_misc_descriptor "msx_change_disk" "masc_msx_change_disk" ~readonly:false
-  ; (masc_misc_descriptor "msx_screen" "masc_msx_screen" ~readonly:true
-     |> with_composable_output (Json_output { schema = msx_screen_output_schema }))
-  ; masc_misc_descriptor "msx_meta" "masc_msx_meta" ~readonly:true
-  ; masc_misc_descriptor "msx_checkpoint_info" "masc_msx_checkpoint_info"
-      ~readonly:true
-  ; masc_misc_descriptor "msx_press" "masc_msx_press" ~readonly:false
-  ; masc_misc_descriptor "msx_step" "masc_msx_step" ~readonly:false
-  ; masc_misc_descriptor "msx_step_until_change" "masc_msx_step_until_change"
-      ~readonly:false
-  ; masc_misc_descriptor "msx_peek" "masc_msx_peek" ~readonly:true
-  ; masc_misc_descriptor "msx_ram_diff" "masc_msx_ram_diff" ~readonly:true
-  ; masc_misc_descriptor "dos_load" "masc_dos_load" ~readonly:false
-  ; masc_misc_descriptor "dos_meta" "masc_dos_meta" ~readonly:true
-  ; masc_misc_descriptor "dos_inventory" "masc_dos_inventory" ~readonly:true
-  ; masc_misc_descriptor "dos_eject" "masc_dos_eject" ~readonly:false
-  ; masc_misc_descriptor "dos_screen" "masc_dos_screen" ~readonly:true
-  ; masc_misc_descriptor "dos_step" "masc_dos_step" ~readonly:false
-  ; masc_misc_descriptor "dos_press" "masc_dos_press" ~readonly:false
-  ; masc_misc_descriptor "dos_click" "masc_dos_click" ~readonly:false
-  ; masc_misc_descriptor "dos_type" "masc_dos_type" ~readonly:false
-  ; masc_misc_descriptor "dos_peek" "masc_dos_peek" ~readonly:true
-  ; masc_misc_descriptor "dos_pass" "masc_dos_pass" ~readonly:false
-  ; masc_misc_descriptor "dos_save" "masc_dos_save" ~readonly:false
-  ; masc_misc_descriptor "dos_restore" "masc_dos_restore" ~readonly:false
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "dashboard"
        "masc_dashboard"
        (* Concurrent: config reads plus pure text generation; the dashboard

@@ -136,14 +136,16 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
     List.fold_left add_delta (needs Types.Overview, 0) destinations
   in
   (* Home no longer fetches Goal measurement. Entering Work now adds that
-     request beside planning: Work 2 + Keepers 2 + Usage 5 + Board 1. *)
+     request beside planning: Work 2 + Keepers 2 + Usage 5 + Board 1. Config
+     adds one: the Models pane names the account behind a provider id, so
+     entering Config reads account emails. *)
   let work_delta =
     Types.surface_needs_delta ~previous:(needs Types.Overview)
       ~next:(needs Types.Planning)
   in
   check bool "entering Work adds the Goal measurement absent from Home" true
     work_delta.Types.needs_overview_goals;
-  check int "only newly visible scoped requests are planned" 10 dataset_count
+  check int "only newly visible scoped requests are planned" 11 dataset_count
 ;;
 
 let test_equal_needs_have_no_delta () =
@@ -209,10 +211,13 @@ let test_usage_asks_for_keeper_usage () =
 
 (* Account emails are read on every Usage refresh, like its other readings,
    so a sign-in, a failed read or another server on the port shows on the
-   next tick. Plan usage is on Usage, and no other surface draws them. *)
-let test_only_usage_asks_for_account_emails () =
+   next tick. Plan usage is on Usage, and the Models pane on Config names the
+   account behind a provider id. No other surface draws them. *)
+let test_usage_and_config_ask_for_account_emails () =
   check bool "Usage asks for them" true
     (needs Types.Metrics).Types.needs_account_emails;
+  check bool "Config asks for them" true
+    (needs Types.Config).Types.needs_account_emails;
   List.iter
     (fun (label, surface) ->
       check bool (label ^ " does not") false
@@ -233,8 +238,8 @@ let () =
             test_only_work_asks_for_the_goal_tree
         ; test_case "Usage owns Keeper usage" `Quick
             test_usage_asks_for_keeper_usage
-        ; test_case "only Usage asks for account emails" `Quick
-            test_only_usage_asks_for_account_emails
+        ; test_case "Usage and Config ask for account emails" `Quick
+            test_usage_and_config_ask_for_account_emails
         ; test_case "every keeper sub-mode asks for the roster" `Quick
             test_every_keeper_sub_mode_still_asks_for_the_roster
         ; test_case "the keeper pane asks for the roster wherever it is drawn"

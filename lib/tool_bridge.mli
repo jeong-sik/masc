@@ -49,6 +49,7 @@ val attach_artifact_manifest :
 val maybe_externalize :
   ?base_path:string ->
   ?stored_preview:string ->
+  ?answer_fingerprint:string ->
   ?mime:string ->
   ?threshold_bytes:int ->
   string ->
@@ -70,6 +71,7 @@ val failure_next_move : Tool_result.tool_failure_class -> string option
 
 val to_agent_core_typed_result :
   ?base_path:string ->
+  ?answer_reader:(string -> Yojson.Safe.t option) ->
   ?model_projection:Tool_output.model_projection ->
   ?on_externalization_error:(externalization_error -> unit) ->
   Tool_result.result ->
@@ -136,6 +138,7 @@ val agent_core_tool_of_masc :
 val agent_core_tool_of_masc_with_execution_env :
   ?descriptor:Agent_core.Tool.descriptor ->
   ?base_path:string ->
+  ?answer_reader:(string -> Yojson.Safe.t option) ->
   ?model_projection:(unit -> Tool_output.model_projection) ->
   ?on_externalization_error:(externalization_error -> unit) ->
   name:string ->

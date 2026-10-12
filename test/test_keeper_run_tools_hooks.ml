@@ -59,6 +59,40 @@ let make_meta ?(sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh) name 
   | Error e -> Alcotest.fail e
 ;;
 
+let test_request_projection_distinguishes_loadable_and_suppressed_reader () =
+  let meta = make_meta "shared-memory-request-access" in
+  let tool name = Agent_core.Tool.create ~name ~description:"fixture" ~parameters:[]
+    (fun _ -> Ok {Agent_core.Types.content="";content_blocks=None;_meta=None}) in
+  let reader = tool "keeper_workspace_memory_read" in
+  let loader = tool "keeper_tool_search" in
+  let project access = match Masc.Keeper_request_tool_access.route access
+      ~name:"keeper_workspace_memory_read" with
+    | Direct -> "direct" | Discoverable -> "discoverable" | Unavailable -> "unavailable" in
+  List.iter (fun turn_kind ->
+    let recalls = ref 0 in
+    let prepare ?(post_tool_round = false) ~loader_alive tools =
+      fst (Masc.Keeper_run_tools_hooks.prepare_request_dynamic_context
+        ~meta ~turn_kind ~system_prompt:"system" ~user_message:"current purpose"
+        ~post_tool_round ~dynamic_context:"provisional"
+        ~dynamic_context_for_tools:(Some project)
+        ~host_recall:(fun ~context ->
+          incr recalls;
+          check string "host sees the projected request context" "unavailable" context;
+          " + source-scoped host evidence")
+        ~deferred_names:["keeper_workspace_memory_read"] ~loader_alive tools) in
+    check string "reader remains directly callable" "direct" (prepare ~loader_alive:false [reader]);
+    check string "live loader can obtain allowed deferred reader" "discoverable"
+      (prepare ~loader_alive:true [loader]);
+    check string "tool suppression cannot be bypassed by a defer declaration" "unavailable + source-scoped host evidence"
+      (prepare ~loader_alive:true []);
+    check string "missing loader agent cannot promise discovery" "unavailable + source-scoped host evidence"
+      (prepare ~loader_alive:false [loader]);
+    check int "host runs only for the two unavailable surfaces" 2 !recalls;
+    check string "tool result rounds retain their existing context" "provisional"
+      (prepare ~post_tool_round:true ~loader_alive:false []);
+    check int "post-tool round does not rerun host retrieval" 2 !recalls) [Turn_record.Direct; Autonomous]
+;;
+
 let test_prompt_metrics_follow_request_tool_projection () =
   let meta = make_meta "request-tool-projection-metrics" in
   let system_prompt = "system instructions" in
@@ -66,8 +100,8 @@ let test_prompt_metrics_follow_request_tool_projection () =
   let reader = Agent_core.Tool.create ~name:"keeper_artifact_read"
       ~description:"read saved evidence" ~parameters:[]
       (fun _ -> Ok { Agent_core.Types.content = ""; content_blocks = None; _meta = None }) in
-  let project tools =
-    match tools with
+  let project access =
+    match Masc.Keeper_request_tool_access.offered access with
     | [] -> "Recent work: unavailable reader"
     | [_] -> "Recent work: retrievable artifact abc123, next inspect consumer"
     | _ -> fail "unexpected offered surface"
@@ -100,12 +134,16 @@ let test_prompt_metrics_follow_request_tool_projection () =
       ["system_prompt",system_prompt; "user_message",user_message]
   in
   let projected, emit = prepare [reader] in
-  check string "actual offered reader selects evidence" (project [reader]) projected;
+  check string "actual offered reader selects evidence"
+    (project (Masc.Keeper_request_tool_access.create
+      ~offered:[reader] ~deferred_names:[] ~loader_alive:false)) projected;
   check bool "projection alone is not a prepared request" true (world_bytes () = None);
   emit ();
   check_metric projected;
   let unavailable, emit = prepare [] in
-  check string "another request uses its own tool surface" (project []) unavailable;
+  check string "another request uses its own tool surface"
+    (project (Masc.Keeper_request_tool_access.create
+      ~offered:[] ~deferred_names:[] ~loader_alive:false)) unavailable;
   emit ();
   check_metric unavailable;
   let exception Projection_failed in
@@ -119,7 +157,15 @@ let test_prompt_metrics_follow_request_tool_projection () =
   check_metric unavailable;
   let _, emit = prepare ~turn_kind:Turn_record.Direct [reader] in
   emit ();
-  check_metric unavailable
+  check_metric unavailable;
+  let extended, emit = Masc.Keeper_run_tools_hooks.prepare_request_dynamic_context
+    ~meta ~turn_kind:Turn_record.Autonomous ~system_prompt ~user_message ~post_tool_round:false
+    ~dynamic_context:"provisional" ~dynamic_context_for_tools:(Some project)
+    ~host_recall:(fun ~context:_ -> "\nHOST_SELECTED_EVIDENCE") [] in
+  emit ();
+  check_metric extended;
+  check bool "host evidence is included in the measured request" true
+    (String_util.contains_substring extended "HOST_SELECTED_EVIDENCE")
 ;;
 
 (* #23469: relative tool paths anchor at the keeper's playground sandbox
@@ -2140,6 +2186,8 @@ let () =
             "prompt metrics measure offered-tool projection at request assembly"
             `Quick
             test_prompt_metrics_follow_request_tool_projection
+        ; test_case "request projection distinguishes deferred and suppressed memory readers" `Quick
+            test_request_projection_distinguishes_loadable_and_suppressed_reader
         ; test_case
             "the predicate is positional, not containment"
             `Quick

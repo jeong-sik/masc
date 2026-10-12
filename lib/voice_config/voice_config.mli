@@ -21,6 +21,7 @@ type endpoint_kind =
   | Elevenlabs_direct
   | Voice_mcp
   | Macos_say
+  | Espeak_ng
   | Whisper_cli
 
 val endpoint_kind_of_name : string -> endpoint_kind option
@@ -31,7 +32,8 @@ val endpoint_kind_of_name : string -> endpoint_kind option
 val string_of_endpoint_kind : endpoint_kind -> string
 (** [string_of_endpoint_kind k] returns the canonical lowercase
     label: ["openai_compat"] / ["elevenlabs_direct"] /
-    ["voice_mcp"].  Used by config matchers and provider routing. *)
+    ["voice_mcp"] / ["macos_say"] / ["espeak_ng"] / ["whisper_cli"].
+    Used by config matchers and provider routing. *)
 
 (** {1 Endpoint record} *)
 

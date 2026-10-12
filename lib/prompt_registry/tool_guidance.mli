@@ -9,7 +9,7 @@
     OCaml (#32848 precedent).
 
     Domain-specific guidance keeps its own local variant next to the producer
-    ([keeper_tool_filesystem_runtime.fs_guidance], the [keeper.gate_replay]
+    ([Keeper_tool_filesystem_guidance.t], the [keeper.gate_replay]
     state arms, [Exec_policy.block_reason], [Subset_rewrite.t]); this type is
     only for guidance with no single domain home. *)
 

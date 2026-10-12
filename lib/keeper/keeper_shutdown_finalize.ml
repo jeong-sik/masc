@@ -932,7 +932,7 @@ let complete_cleanup
            | Retain_operator_pause -> ()
            | Remove_meta ->
              (match
-                Keeper_dos_controller.release_retired
+                Keeper_dos_controller.release_retired ~config
                   ~keeper_name:operation.keeper_name
                   ~by:operation.actor
               with

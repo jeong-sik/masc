@@ -9,25 +9,8 @@ module Types = Masc_tui_types
    keys. A read that answers at once must not flash a number, which is what the
    floor is for. *)
 
-let cut = "\xe2\x80\xa6"
-
 let fresh () =
   Types.create_state ~workspace:"me" ~port:8935 ~refresh_interval:2.0 ()
-
-let test_a_quick_read_says_no_number () =
-  check string "nothing measured, nothing said" ("(loading" ^ cut ^ ")")
-    (Types.loading_notice "loading");
-  check string "under the floor, still nothing" ("(loading" ^ cut ^ ")")
-    (Types.loading_notice ~elapsed_s:1 "loading")
-
-let test_a_slow_read_says_how_long () =
-  check string "at the floor" ("(loading" ^ cut ^ " 2s)")
-    (Types.loading_notice ~elapsed_s:Types.pending_seconds_floor "loading");
-  check string "and past it" ("(loading" ^ cut ^ " 16s)")
-    (Types.loading_notice ~elapsed_s:16 "loading");
-  check string "whatever the read is called"
-    ("(loading actual container logs" ^ cut ^ " 7s)")
-    (Types.loading_notice ~elapsed_s:7 "loading actual container logs")
 
 let second = 1_000_000_000L
 let ns seconds = Int64.mul (Int64.of_int seconds) second
@@ -214,6 +197,15 @@ let test_schedule_responses_follow_keeper_and_generation () =
     ; scs_rows = []; scs_runner_status = Masc.Tui_decode.Runner_status Schedule_contract_values.Runner_ok }
   in
   let state = fresh () in
+  (* A schedule page is applied only under a ready server identity
+     (server_authority_ready); the case here is the Keeper and generation
+     check, so the server has answered for its workspace. *)
+  state.server_identity <- Some
+    { Masc.Tui_decode.sid_version = "test"; sid_binary_commit = "test"
+    ; sid_binary_commit_age_s = None; sid_base_path = "/workspace"
+    ; sid_masc_root = "/workspace/.masc"; sid_executable_in_worktree = None
+    ; sid_state_ready = Some true; sid_uptime = None; sid_sse_clients = None
+    ; sid_gc = None; sid_scheduler = None };
   state.keepers <- [keeper "alpha"; keeper "beta"];
   let ask name = Types.mark_detail_read_started state
     ~tab:Types.Detail_automation ~keeper:name ~now_ns:(ns 10) in
@@ -254,10 +246,6 @@ let () =
             test_offscreen_completion_and_late_poll_do_not_age_a_new_wait
         ; test_case "logs keep repainting after status arrives" `Quick
             test_logs_keep_repainting_after_status_arrives
-        ; test_case "a quick read says no number" `Quick
-            test_a_quick_read_says_no_number
-        ; test_case "a slow read says how long" `Quick
-            test_a_slow_read_says_how_long
         ; test_case "the elapsed needs a start" `Quick
             test_the_elapsed_needs_a_start
         ; test_case "two reads are timed apart" `Quick

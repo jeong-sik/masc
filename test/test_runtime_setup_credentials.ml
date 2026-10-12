@@ -41,12 +41,12 @@ let test_stale_connection_never_receives_key () =
     let path = Filename.concat home "runtime.toml" in
     let original = "[runtime]\n" in
     let changed = "[runtime]\n# concurrently edited endpoint/configuration\n" in
-    let expected = Runtime.config_observation ~path original in
+    let expected = Runtime.config_source_revision_of_text original in
     Out_channel.with_open_bin path (fun out -> output_string out changed);
     let pending = match Runtime_setup_credentials.save ~secret:"fixture-secret" () with
       | Ok pending -> pending | Error error -> fail (Runtime_setup_credentials.error_message error) in
     (match Runtime_setup_credentials.apply_to_provider ~runtime_config_path:path
-      ~provider_id:"provider" ~expected_source_revision:(Runtime.config_source_revision_to_string expected.source_revision) pending with
+      ~provider_id:"provider" ~expected_source_revision:(Runtime.config_source_revision_to_string expected) pending with
      | Error Configuration_changed -> () | _ -> fail "stale connection must be rejected under the config lock");
     check string "concurrent config preserved" changed (In_channel.with_open_text path In_channel.input_all);
     Runtime_setup_credentials.remove_uncommitted pending;
@@ -74,11 +74,11 @@ api-name = "deepseek-v4-pro"
 default = "deepseek.chat"
 |} in
     Out_channel.with_open_bin path (fun out -> output_string out original);
-    let expected = Runtime.config_observation ~path original in
+    let expected = Runtime.config_source_revision_of_text original in
     let pending = match Runtime_setup_credentials.save ~secret:"committed-fixture-key" () with
       | Ok pending -> pending | Error error -> fail (Runtime_setup_credentials.error_message error) in
     (match Runtime_setup_credentials.apply_to_provider ~runtime_config_path:path
-      ~provider_id:"deepseek" ~expected_source_revision:(Runtime.config_source_revision_to_string expected.source_revision) pending with
+      ~provider_id:"deepseek" ~expected_source_revision:(Runtime.config_source_revision_to_string expected) pending with
      | Ok _ -> () | Error error -> fail (Runtime_setup_credentials.error_message error));
     Runtime_setup_credentials.remove_uncommitted pending;
     let reference = Runtime_setup_credentials.reference_path pending in

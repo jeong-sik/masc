@@ -141,6 +141,7 @@ module KeeperMemoryOs : sig
 
   val librarian_env_key : string
   val facts_max_bytes_env_key : string
+  val pending_max_bytes_env_key : string
   val category_cap_env_key : string
   val facts_per_category_cap_env_key : string
 
@@ -154,6 +155,14 @@ module KeeperMemoryOs : sig
   (** Fixed upper bound on the rendered current facts of one Keeper, ordinary
       plus source-bound. The live 2026-09-28 maximum was 464,514 bytes; the
       default is 512 KiB. A malformed explicit value raises Config_error. *)
+
+  val pending_max_bytes : unit -> int
+  (** Fixed upper bound on the serialized pending admission queue of one
+      Keeper. An append that would exceed it is refused before any write, so
+      the queue file cannot grow without bound while judgement is blocked.
+      Live explicit-write intake peaked at 2,830 entries/day (2026-10-06,
+      docs/audits/2026-10-07-week-audit/C-librarian-memory-skills.md); the
+      default is 16 MiB. A malformed explicit value raises Config_error. *)
 
   val librarian_config_state : unit -> librarian_config_state
   (** Typed projection of the effective librarian toggle. Blank or absent

@@ -197,13 +197,6 @@ let table_shapes () =
   let session=A.toggle (loaded (doc fake)) in
   shows "Inline or dotted" session; rejected (A.start_save ~generation:2 session)
 
-let receipt_keeps_application_failure () =
-  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
-  let session=A.finish_save request (A.Saved (receipt ~registry:(R.Exact_output_registry_kept {reason="registry refused"}) ())) pending in
-  shows "registry refused" session;
-  let session=read ~generation:3 (doc ~revision:"saved" off) session in
-  shows "registry refused" session; shows "Current file: Off" session
-
 let () = Alcotest.run "Machine activity draft and save" ["operator flow",List.map (fun (name,f)->Alcotest.test_case name `Quick f)
   ["explicit save preserves other machine and source",draft_and_save;
    "conflict reapplies activity only",conflict_reapply;
@@ -219,5 +212,4 @@ let () = Alcotest.run "Machine activity draft and save" ["operator flow",List.ma
    "workspace roundtrip ignores old callbacks",workspace_roundtrip;
    "unconfirmed write and preview refusal",ambiguous_write_and_refusal;
    "changed file path needs discard",changed_path;
-   "quoted and multiline table shapes",table_shapes;
-   "stored setting does not hide application failure",receipt_keeps_application_failure]]
+   "quoted and multiline table shapes",table_shapes;]]

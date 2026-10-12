@@ -1,5 +1,6 @@
 type provider =
   | Macos_say
+  | Espeak_ng
   | Whisper_cli
   | Elevenlabs
   | Openai_compatible
@@ -7,6 +8,7 @@ type provider =
 
 let provider_label = function
   | Macos_say -> "macos_say"
+  | Espeak_ng -> "espeak_ng"
   | Whisper_cli -> "whisper_cli"
   | Elevenlabs -> "elevenlabs"
   | Openai_compatible -> "openai_compatible"
@@ -15,6 +17,7 @@ let provider_label = function
 
 let provider_of_label = function
   | "macos_say" -> Some Macos_say
+  | "espeak_ng" -> Some Espeak_ng
   | "whisper_cli" -> Some Whisper_cli
   | "elevenlabs" -> Some Elevenlabs
   | "openai_compatible" -> Some Openai_compatible
@@ -29,16 +32,18 @@ let provider_of_label = function
    reports as not asked. Speech out is not offered whisper-cli for the mirror
    reason.
 
-   say leads speech out and whisper-cli leads speech in because they are the
-   two entries that need no address and no key: the command is on the machine
-   or it is not, and nothing about them is a purchase. *)
+   say leads speech out, espeak-ng follows it, and whisper-cli leads speech
+   in, because they are the entries that need no address and no key: the
+   command is on the machine or it is not, and nothing about them is a
+   purchase. *)
 let providers_for = function
-  | Voice_setup.Tts -> [ Macos_say; Elevenlabs; Openai_compatible; Mcp_tool ]
+  | Voice_setup.Tts -> [ Macos_say; Espeak_ng; Elevenlabs; Openai_compatible; Mcp_tool ]
   | Voice_setup.Stt -> [ Whisper_cli; Elevenlabs; Openai_compatible ]
 ;;
 
 let kind_of_provider = function
   | Macos_say -> Voice_config.Macos_say
+  | Espeak_ng -> Voice_config.Espeak_ng
   | Whisper_cli -> Voice_config.Whisper_cli
   | Elevenlabs -> Voice_config.Elevenlabs_direct
   | Openai_compatible -> Voice_config.Openai_compat
@@ -69,12 +74,12 @@ let blank ~section ~provider =
                | Elevenlabs -> Voice_config.default_elevenlabs_base_url
                (* A command is reached by running it, so there is no address to
                   prefill and none to type. *)
-               | Openai_compatible | Mcp_tool | Macos_say | Whisper_cli -> "")
+               | Openai_compatible | Mcp_tool | Macos_say | Espeak_ng | Whisper_cli -> "")
   ; credential_variable =
       (match provider with
        | Elevenlabs -> elevenlabs_credential_variable
        (* Nothing leaves the machine for a command, so there is no key. *)
-       | Openai_compatible | Mcp_tool | Macos_say | Whisper_cli -> "")
+       | Openai_compatible | Mcp_tool | Macos_say | Espeak_ng | Whisper_cli -> "")
   ; model = ""
   ; voice = ""
   ; timeout_seconds = None
@@ -117,10 +122,10 @@ let blank_text value = String.equal (String.trim value) ""
 let gaps draft =
   let required =
     match draft.provider with
-    (* say is asked for a voice, not a model, and runs a command on this
-       machine: a name is all it needs beyond the voice speech out adds
-       below. *)
-    | Macos_say -> [ Endpoint_id_is_blank ]
+    (* say and espeak-ng are asked for a voice, not a model, and run a
+       command on this machine: a name is all either needs beyond the voice
+       speech out adds below. *)
+    | Macos_say | Espeak_ng -> [ Endpoint_id_is_blank ]
     (* whisper-cli is asked for the file it loads rather than a name a provider
        looks up, so the model is required and nothing else is. *)
     | Whisper_cli -> [ Endpoint_id_is_blank; Model_is_blank ]
@@ -154,17 +159,17 @@ let endpoint_of_draft ?voice draft : Voice_config.endpoint =
                 | Elevenlabs | Openai_compatible -> optional draft.address
                 (* The loader refuses an address on a command kind, so the
                    draft cannot carry one into the file. *)
-                | Mcp_tool | Macos_say | Whisper_cli -> None)
+                | Mcp_tool | Macos_say | Espeak_ng | Whisper_cli -> None)
   ; mcp_url = (match draft.provider with
                | Mcp_tool -> optional draft.address
-               | Elevenlabs | Openai_compatible | Macos_say | Whisper_cli -> None)
+               | Elevenlabs | Openai_compatible | Macos_say | Espeak_ng | Whisper_cli -> None)
   ; health_url = None
   ; api_key_env = optional draft.credential_variable
   ; enabled = true
   ; timeout_seconds = draft.timeout_seconds
   (* Set only where the section default is someone else's; see {!changes}. *)
   ; default_voice = voice
-  (* Left unset so the two command kinds run the name they are normally
+  (* Left unset so the command kinds run the name they are normally
      installed under, which the overlay supplies. Pointing an endpoint at a
      binary PATH does not carry is an edit to the file, not a question worth
      asking everyone who sets one up. *)
@@ -230,19 +235,19 @@ type step =
 let steps draft =
   let address =
     match draft.provider with
-    | Elevenlabs | Macos_say | Whisper_cli -> []
+    | Elevenlabs | Macos_say | Espeak_ng | Whisper_cli -> []
     | Openai_compatible | Mcp_tool -> [ Address ]
   in
   let credential =
     match draft.provider with
     | Elevenlabs | Openai_compatible -> [ Credential ]
-    | Mcp_tool | Macos_say | Whisper_cli -> []
+    | Mcp_tool | Macos_say | Espeak_ng | Whisper_cli -> []
   in
-  (* say takes a voice, not a model: it is the one entry here that is asked for
-     no model at all. *)
+  (* say and espeak-ng take a voice, not a model: they are the entries here
+     asked for no model at all. *)
   let model =
     match draft.provider with
-    | Macos_say -> []
+    | Macos_say | Espeak_ng -> []
     | Whisper_cli | Elevenlabs | Openai_compatible | Mcp_tool -> [ Model ]
   in
   let voice =

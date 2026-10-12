@@ -1,0 +1,17 @@
+{
+  "base_sha": "78a64bc1d2fabc28456f899f1c942f3d93e94bd2",
+  "build": {
+    "command": "opam exec -- dune build --root . -j 4 test/test_fs_compat_publication_reconciliation.exe",
+    "exit_code": 0
+  },
+  "tests": [
+    {
+      "command": "_build/default/test/test_fs_compat_publication_reconciliation.exe test 'recovery evidence preservation'",
+      "exit_code": 0,
+      "executed": 14
+    }
+  ],
+  "atomic_write_lines_before": 2773,
+  "atomic_write_lines_after": 2640,
+  "scope": "focused compilation and existing isolated recovery evidence scenarios; other groups, full CI and live runtime remain unverified"
+}

@@ -1,0 +1,15 @@
+{
+  "base": "d2c318d470b5d388fb04848606c8af5527271833",
+  "unchanged_thinking_helpers_sha256": "d02535e8f88bc5de036f801bf107de9b226f348643d50a71429abbb7483583bb",
+  "projected_body_sha256": "3e4b5260f4274f9084357ef64d616e49a4ad0346caf78381447188af2a67e1dc",
+  "unchanged_parser_sha256": "11c8c8188c74d17e1e7c2a370880b978465de31a0662aeddf5cdb9cd55f93ca9",
+  "remaining_worker_sha256": "f2e69d4ba1768e0554782a1e30a75302601fc0d1571ec71eccc5d0ba289933c2",
+  "declared_edits": [
+    "move request projection/thinking helpers/domain parser/version constant",
+    "lift host-fact and optional configuration acquisition into capture_context_bundle before pure projection",
+    "bind worker and existing tests directly to request owner",
+    "remove two testing forwarders and their interface declarations",
+    "move domain-validation section header"
+  ],
+  "comparison": "all compared bodies match after declared edits"
+}

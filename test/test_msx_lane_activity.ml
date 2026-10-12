@@ -74,8 +74,26 @@ let test_accepted_finishes () = with_machine @@ fun _ ->
   check bool "last key edge releases the key" true
     (match List.rev (Msx_lane.ledger ()) with entry::_ -> not entry.Msx_lane.down | [] -> false);
   rejected "subsequent step" (Msx_lane.step ~frames:1)
+let test_checkpoint_effect_evidence () = with_machine @@ fun directory ->
+  let path = Filename.concat directory "evidence.json" in
+  let saved = require (Msx_lane.save ~path) in
+  let info = require (Msx_lane.checkpoint_info ~path) in
+  check string "save digest names committed bytes" info.sha256 saved.checkpoint_sha256;
+  let restored = require (Msx_lane.restore ~path ~ledger_dir:directory) in
+  check string "restore digest names decoded bytes" saved.checkpoint_sha256 restored.checkpoint_sha256;
+  check bool "restore creates a distinct incarnation" false
+    (saved.mark.incarnation = restored.mark.incarnation);
+  check bool "restore advances change mark" true (restored.mark.count > saved.mark.count);
+  check int "effect observation is restored frame" saved.observation.frame restored.observation.frame;
+  ignore (require (Msx_lane.step ~frames:1));
+  let later = match Msx_lane.live ~since:None with
+    | Changed (mark, _) -> mark | _ -> fail "expected current pixels" in
+  check string "later step is same history" restored.mark.incarnation later.incarnation;
+  check bool "effect evidence remains earlier than later frame" true (later.count > restored.mark.count)
+
 let () = run "MSX activity with retained state"
-  ["activity", [test_case "configuration and reserved namespace" `Quick test_configuration;
+  ["activity", [test_case "checkpoint evidence belongs to completed effect" `Quick test_checkpoint_effect_evidence;
+    test_case "configuration and reserved namespace" `Quick test_configuration;
     test_case "off refuses mutation and preserves machine/checkpoint" `Quick test_off_retains;
     test_case "unobserved refuses execution but allows inspection/cleanup" `Quick test_unobserved;
     test_case "accepted input finishes after off" `Quick test_accepted_finishes]]

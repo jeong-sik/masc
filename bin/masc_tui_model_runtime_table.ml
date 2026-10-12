@@ -7,16 +7,44 @@ type row =
   ; context : (string * int) option
   ; model_context : int option
   ; max_tokens : int option
+  ; same_login : string list
+  ; login_group : int option
+  ; account_label : string option
   }
 
 let models_table = Runtime_toml_namespace.(key Models)
 
-let parse lines =
+let parse ?(account_groups = []) lines =
   let text = String.concat "\n" lines in
   let ( let* ) = Result.bind in
   let* config = Runtime_toml.parse_string text
     |> Result.map_error (fun errors -> String.concat "; "
       (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors)) in
+  (* Membership was resolved beside this source on the server, whose client
+     environment owns inherited homes. Never infer it from the TUI's HOME. *)
+  let* () =
+    if List.exists (List.exists (fun id ->
+      Option.is_none (Runtime_schema.provider_of_id config id))) account_groups
+    then Error "account groups name a provider absent from this source" else Ok () in
+  let same_login (provider : Runtime_schema.provider) =
+    match List.find_opt (List.mem provider.id) account_groups with
+    | None -> []
+    | Some ids -> List.filter (fun id -> not (String.equal id provider.id)) ids
+        |> List.sort_uniq String.compare in
+  (* A login is named by its smallest provider id. Rows sort by that name, so
+     the ids of one login sit next to each other; a login with one id keeps
+     its own id as the name and its old place. *)
+  let login_name (provider : Runtime_schema.provider) =
+    List.fold_left min provider.id (same_login provider) in
+  let shared_logins =
+    List.filter_map (fun (provider : Runtime_schema.provider) ->
+      match same_login provider with
+      | [] -> None
+      | _ :: _ -> Some (login_name provider)) config.providers
+    |> List.sort_uniq String.compare in
+  let login_group provider =
+    List.find_index (String.equal (login_name provider)) shared_logins
+    |> Option.map (fun index -> index + 1) in
   let rows = List.filter_map (fun (binding : Runtime_schema.binding) ->
     match List.find_opt (fun (model : Runtime_schema.model_spec) ->
       String.equal model.id binding.model_id) config.models,
@@ -31,10 +59,15 @@ let parse lines =
         api_name = Some model.api_name;
         reasoning_effort = Option.map Llm_provider.Reasoning_effort.to_string model.reasoning_effort;
         temperature = Option.map (Printf.sprintf "%.15g") model.temperature;
-        max_tokens = binding.max_tokens; context; model_context = model.max_context }
+        max_tokens = binding.max_tokens; context; model_context = model.max_context;
+        same_login = same_login provider; login_group = login_group provider;
+        account_label = None }
     | None, _ | _, None -> None) config.bindings in
-  Ok (List.sort (fun a b -> match String.compare a.provider b.provider with
-    | 0 -> String.compare a.model b.model | c -> c) rows)
+  let login_of row = List.fold_left min row.provider row.same_login in
+  Ok (List.sort (fun a b -> match String.compare (login_of a) (login_of b) with
+    | 0 -> (match String.compare a.provider b.provider with
+      | 0 -> String.compare a.model b.model | c -> c)
+    | c -> c) rows)
 
 (* ASCII, not an em dash: padding counts bytes, and a multi-byte dash makes
    every column after it hang one cell short of where the header sits. *)
@@ -72,28 +105,45 @@ let toml_key name =
 
 let section head model = Printf.sprintf "[%s.%s]" head (toml_key model)
 
-let detail_lines row =
+let detail_lines ?account_email ?keepers row =
   let api_name, api_note =
     match row.api_name with
     | Some api when not (String.equal api row.model) -> api, " (api-name override)"
     | Some api -> api, " (same as binding)"
     | None -> row.model, " (default; api-name key absent)"
   in
-  [ Printf.sprintf "Binding: provider=%s  model=%s" row.provider row.model
-  ; Printf.sprintf "API model: %s%s" api_name api_note
-  ; Printf.sprintf
-      "%s  reasoning-effort=%s  temperature=%s"
-      (section models_table row.model)
-      (value_or_absent row.reasoning_effort)
-      (value_or_absent row.temperature)
-  ; Printf.sprintf
-      "%s  max-tokens=%s"
-      (section row.provider row.model)
-      (tokens_text row.max_tokens)
-  ; (match row.context with None -> "Context: undeclared; Runtime shows the resolved catalog value"
-     | Some (source, n) -> Printf.sprintf "Context: %d tokens (%s); model specification: %s" n source (tokens_text row.model_context))
-  ; "- means that key is absent; add or edit it in the section shown above."
-  ]
+  let account =
+    (match account_email with
+     | Some email -> [ Printf.sprintf "Account: %s" email ]
+     | None -> [])
+    @ (match row.same_login with
+       | [] -> []
+       | others ->
+         [ Printf.sprintf "Same login as %s (shared account-home)"
+             (String.concat ", " others) ])
+    @ (match keepers with
+       | None -> []
+       | Some [] -> [ "Keepers assigned directly (lanes not counted): none" ]
+       | Some names ->
+         [ Printf.sprintf "Keepers assigned directly (lanes not counted): %d - %s"
+             (List.length names) (String.concat ", " names) ])
+  in
+  [ Printf.sprintf "Binding: provider=%s  model=%s" row.provider row.model ]
+  @ account
+  @ [ Printf.sprintf "API model: %s%s" api_name api_note
+    ; Printf.sprintf
+        "%s  reasoning-effort=%s  temperature=%s"
+        (section models_table row.model)
+        (value_or_absent row.reasoning_effort)
+        (value_or_absent row.temperature)
+    ; Printf.sprintf
+        "%s  max-tokens=%s"
+        (section row.provider row.model)
+        (tokens_text row.max_tokens)
+    ; (match row.context with None -> "Context: undeclared; Runtime shows the resolved catalog value"
+       | Some (source, n) -> Printf.sprintf "Context: %d tokens (%s); model specification: %s" n source (tokens_text row.model_context))
+    ; "- means that key is absent; add or edit it in the section shown above."
+    ]
 
 let pad s n =
   (* Cells, not bytes. Model and provider names come from runtime.toml, so
@@ -117,9 +167,37 @@ let temperature_width = 11
 let tokens_width = 11
 let gutter = 2
 
+(* The provider column names the account beside the id: the label the pane
+   read for the login, or [#n] when the id shares its login with others and
+   no label was read. Every width and every drawn row measures this text. *)
+let provider_text r =
+  match r.account_label, r.login_group with
+  | Some label, _ -> r.provider ^ " " ^ label
+  | None, Some group -> Printf.sprintf "%s #%d" r.provider group
+  | None, None -> r.provider
+
+let account_label_cells = 18
+
+let account_label_of_email email =
+  let local = match String.index_opt email '@' with
+    | Some at when at > 0 -> String.sub email 0 at
+    | Some _ | None -> email in
+  if Masc_tui_message_layout.display_width local <= account_label_cells then local
+  else Masc_tui_message_layout.fit_width local account_label_cells
+
+let keepers_on_login ~rows ~assignments row =
+  let providers = row.provider :: row.same_login in
+  let runtime_ids = List.filter_map (fun candidate ->
+    if List.mem candidate.provider providers
+    then Some (candidate.provider ^ "." ^ candidate.model) else None) rows in
+  List.filter_map (fun (keeper, runtime_id) ->
+    if List.mem runtime_id runtime_ids
+    then Some keeper else None) assignments
+  |> List.sort_uniq String.compare
+
 let provider_width_of rows =
   List.fold_left
-    (fun acc r -> max acc (Masc_tui_message_layout.display_width r.provider))
+    (fun acc r -> max acc (Masc_tui_message_layout.display_width (provider_text r)))
     (Masc_tui_message_layout.display_width "provider")
     rows
 
@@ -188,7 +266,7 @@ let fits ~width rows =
 let stacked_lines ~pane rows =
   let wrap text = Masc_tui_message_layout.wrap_words ~max_cells:pane text in
   let item r =
-    wrap (Printf.sprintf "%s %s" r.provider (model_text r))
+    wrap (Printf.sprintf "%s %s" (provider_text r) (model_text r))
     @ wrap
         (Printf.sprintf
            "effort %s · temperature %s · max-tokens %s"
@@ -215,7 +293,7 @@ let stacked_item_starts ~pane rows =
     List.length (Masc_tui_message_layout.wrap_words ~max_cells:pane text)
   in
   let item_len r =
-    wrap_len (Printf.sprintf "%s %s" r.provider (model_text r))
+    wrap_len (Printf.sprintf "%s %s" (provider_text r) (model_text r))
     + wrap_len
         (Printf.sprintf
            "effort %s · temperature %s · max-tokens %s"
@@ -244,7 +322,7 @@ let render ~width ?pane rows =
     ^ "max-tokens"
   in
   let line r =
-    pad r.provider provider_width
+    pad (provider_text r) provider_width
     ^ String.make gutter ' '
     ^ pad (clip (model_text r) model_width) model_width
     ^ String.make gutter ' '

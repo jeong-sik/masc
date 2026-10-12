@@ -63,7 +63,7 @@ type source =
 type window_role =
   | Gates_model_calls
       (** Spending it refuses model calls on the account: Claude and Codex
-          windows, OpenRouter's credit limit, Z.AI's TOKENS_LIMIT, both Kimi
+          windows, OpenRouter's API key credit limit, Z.AI's TOKENS_LIMIT, both Kimi
           counts, Ollama's session and weekly allowance while its purchased
           balance is zero, Antigravity's 5-hour and weekly buckets, Muse
           Code's rolling and weekly windows. *)
@@ -151,13 +151,14 @@ val decode_codex_rate_limits_read : Yojson.Safe.t -> (report, decode_error) resu
 
 val decode_openrouter_key : Yojson.Safe.t -> (report, decode_error) result
 (** OpenRouter [GET /api/v1/key].  A numeric [data.limit] above 0 gives one
-    {!Provider_label} window "credit limit" with {!Usd} use
+    {!Provider_label} window "API key credit limit" with {!Usd} use
     [limit - limit_remaining] and its cap, with [limit_remaining] within
     [0..limit]. With a null [limit], a reported [usage] gives an uncapped
-    "credit usage (all time)" window; absent usage gives no window. [limit_reset] is
+    "API key usage (all time)" window; absent usage gives no window. [limit_reset] is
     not read.  [data.free_model_daily_requests] gives "free model requests,
     daily" as [used / limit], with [used] within [0..limit].  Neither states
-    a reset time.
+    a reset time. These windows report API key spending, not account credits
+    or the account balance.
 
     Each HTTP decoder below refuses a report that states the same
     [(limit_id, kind)] twice ({!Duplicate_window}), and a value outside its

@@ -1,0 +1,29 @@
+id = "dos-machine"
+revision = "0.1.0"
+title = "DOS machine"
+contributions = ["observe"]
+image = "masc-lane-dos-machine:0.1.0"
+command = ["/usr/local/bin/masc-dos-addon-worker", "--base-path", "/state"]
+
+[world.skills]
+directory = "skills"
+
+[world.state]
+mode = "persistent"
+
+[world.tools]
+invocation = "host_context"
+export = [
+  "masc_dos_load", "masc_dos_eject", "masc_dos_pass", "masc_dos_meta",
+  "masc_dos_inventory", "masc_dos_screen", "masc_dos_step", "masc_dos_press",
+  "masc_dos_click", "masc_dos_type", "masc_dos_peek", "masc_dos_save", "masc_dos_restore"
+]
+
+[world.outputs.screen]
+lanes = ["dos/screen"]
+
+[resources]
+cpus = 1.0
+memory_bytes = 536870912
+pids = 32
+max_reply_bytes = 4194304

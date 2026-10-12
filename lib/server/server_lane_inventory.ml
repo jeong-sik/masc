@@ -9,7 +9,7 @@ type selection =
   | Declaration of string
   | Manual_instance of { instance_id : string; incarnation : string }
 type declaration = Valid of Config.declaration | Invalid of string list | Absent | Unobserved
-type machine_publication = No_screen | Stable | Running
+type machine_publication = No_screen | Stable | Running | Publication_unavailable
 type state =
   | Exact_state of Exact_projection.lane_configuration
   | Browser_clients of Browser_lane.activity * int
@@ -60,13 +60,33 @@ let package_rows ~(declarations : Config.snapshot) ~(instances : Addon.inventory
   declared @ manual
 
 let machine_publication = function
-  | Machine_live_publication.No_screen -> No_screen
-  | Machine_live_publication.Stable _ -> Stable
-  | Machine_live_publication.Running _ -> Running
+  | Error _ -> Publication_unavailable
+  | Ok None -> No_screen
+  | Ok (Some (snapshot : Addon.export_observation)) ->
+      let loaded = List.filter_map (fun (row : Lane_addon_types.row) ->
+        List.assoc_opt "machine_loaded" row.fields) snapshot.output.rows in
+      match loaded with
+      | [`Bool false] -> No_screen
+      | [`Bool true] -> if snapshot.refreshing then Running else Stable
+      | _ -> Publication_unavailable
+
+let machine_state ~config ~configuration machine =
+  let activity = match configuration with
+    | None -> Machine_configuration.Unobserved
+    | Some configuration ->
+        let enabled = match machine with
+          | Machine_lane.Msx -> configuration.Machine_configuration.msx_enabled
+          | Machine_lane.Dos -> configuration.Machine_configuration.dos_enabled in
+        if enabled then Machine_configuration.Enabled else Disabled in
+  let name = match machine with Machine_lane.Msx -> "masc_msx_screen" | Dos -> "masc_dos_screen" in
+  let publication = Addon.observation_for_export ~config ~access:Lane_addon_sources.Unauthenticated ~name
+    |> machine_publication in
+  Machine_state (activity,publication)
 
 let snapshot ~config =
   let exact = Exact_projection.observe () in
   let browser_activity = Server_browser_configuration.activity_snapshot () in
+  let machine_configuration = Runtime.machine_configuration () in
   let builtin = Lane_id.all_of_builtin |> List.map (fun lane ->
     let selection,state = match lane with
       | Lane_id.Exact id -> Exact id,Exact_state (Exact_projection.configuration exact id)
@@ -74,9 +94,7 @@ let snapshot ~config =
           Browser id,(match Browser_lane.inventory_observation ~observed_activity:(browser_activity id) id with
             | {Browser_lane.activity; backend=Live_clients count} -> Browser_clients (activity,count)
             | {Browser_lane.activity; backend=Executor_registered registered} -> Browser_executor (activity,registered))
-      | Lane_id.Machine id -> Machine id,(match id with
-          | Machine_lane.Msx -> Machine_state (Msx_lane.activity (), machine_publication (Msx_lane.current_publication ()))
-          | Machine_lane.Dos -> Machine_state (Dos_lane.activity (), machine_publication (Dos_lane.current_publication ()))) in
+      | Lane_id.Machine id -> Machine id,machine_state ~config ~configuration:machine_configuration id in
     {id=Lane_id.to_wire (Lane_id.Builtin lane); label=Lane_manifest.label lane;
      purpose=Lane_manifest.purpose lane; selection; state}) in
   let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
@@ -134,7 +152,7 @@ let state_json = function
   | Browser_executor (activity,registered) -> `Assoc ["kind",str "browser_executor";"activity",browser_activity_json activity;"registered",`Bool registered]
   | Machine_state (activity,publication) -> `Assoc ["kind",str "machine";
       "activity",str (Machine_configuration.activity_to_wire activity);
-      "publication",str (match publication with No_screen -> "no_screen" | Stable -> "stable" | Running -> "running")]
+      "publication",str (match publication with No_screen -> "no_screen" | Stable -> "stable" | Running -> "running" | Publication_unavailable -> "unavailable")]
   | Package_state {declaration;instances} -> `Assoc ["kind",str "package";
       "declaration",optional declaration_json declaration;"instances",`List (List.map instance_json instances)]
 let row_to_json row = `Assoc ["id",str row.id;"label",str row.label;"purpose",str row.purpose;
@@ -145,6 +163,7 @@ let to_json t = `Assoc ["schema",str "masc.lane-inventory/v1";"observed_at",`Flo
     "owner_present",`Bool t.owner_present;"issues",`List (List.map (fun (path,detail) ->
       `Assoc ["source_path",str path;"message",str detail]) t.issues)]]
 module For_testing = struct
+  let machine_publication = machine_publication
   let package_rows = package_rows
   let row_to_json = row_to_json
 end

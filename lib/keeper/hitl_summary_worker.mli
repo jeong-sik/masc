@@ -99,16 +99,6 @@ module For_testing : sig
 
   val system_prompt : unit -> (string, string) result
 
-  val build_context_bundle
-    :  entry:Keeper_approval_queue_rules_types.pending_approval
-    -> Yojson.Safe.t
-
-  val parse_summary
-    :  generated_at:float
-    -> model_run_id:string
-    -> Yojson.Safe.t
-    -> (Keeper_approval_queue_rules_types.hitl_context_summary, string) result
-
   type prepared_flow
 
   val with_outcome_sink : flow_outcome option ref -> (unit -> 'a) -> 'a

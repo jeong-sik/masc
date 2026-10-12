@@ -203,6 +203,7 @@ type report =
   }
 
 type purge_error =
+  | Repetition_boundary_invalid of string
   | Invalid_config of string
   | Invalid_input_structure of Keeper_transcript_unit.structural_error
   | Invalid_output_structure of Keeper_transcript_unit.structural_error
@@ -259,5 +260,5 @@ val purge
   -> progress:Keeper_librarian_progress.t option
   -> Agent_core.Checkpoint.t
   -> (Agent_core.Checkpoint.t * report, purge_error) result
-(** Apply {!purge_messages} to [ckpt.messages], leaving every other field
-    unchanged. *)
+(** Apply {!purge_messages} to [ckpt.messages], resetting the repetition history generation in a copied context when
+    recovery drops messages. Other fields and the input checkpoint are unchanged. *)

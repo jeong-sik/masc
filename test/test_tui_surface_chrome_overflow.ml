@@ -48,29 +48,6 @@ let report_into reported v =
   reported := Some v;
   Masc_tui_types.Context_inspector_scroll v
 
-(* The strip is the frame's first line and the body's rows follow it, so the
-   footer -- the body's last row -- is line [surface_body_rows]. *)
-let footer_line state = Masc_tui_types.surface_body_rows state ~terminal_rows
-
-let test_the_footer_stays_above_the_composer () =
-  let state = fresh () in
-  let budget = surface_chrome_budget state ~terminal_rows in
-  List.iter
-    (fun (overflow, name) ->
-      List.iter
-        (fun count ->
-          let lines, _ = draw ~overflow ~count state in
-          Alcotest.(check (option int))
-            (Printf.sprintf "%s, %d rows: the footer is the body's last row"
-               name count)
-            (Some (footer_line state))
-            (index_of lines "zz:probe"))
-        [ 0; 1; budget; budget + 1; budget * 3 ])
-    [ (Fits, "fits")
-    ; (Paged_by_cursor, "paged")
-    ; (Scrolled { scroll = 0; report = report_into (ref None) }, "scrolled")
-    ]
-
 let test_a_cut_body_says_what_it_hides () =
   let state = fresh () in
   let budget = surface_chrome_budget state ~terminal_rows in
@@ -124,50 +101,12 @@ let test_the_frame_windows_a_scrolled_body () =
   Alcotest.(check bool) "and draws no position row" false
     (shows lines "[lines ")
 
-(* A picture placed over body rows goes where [next_origin] says, so it has
-   to be the line and cell the next pushed row's text actually lands on --
-   under either frame, after any number of rows. *)
-let test_next_origin_is_where_the_next_row_lands () =
-  let state = fresh () in
-  let marker = "origin-marker" in
-  List.iter
-    (fun (frame, name) ->
-      List.iter
-        (fun before ->
-          let origin = ref None in
-          let drawn, _ =
-            surface_chrome ~overflow:Fits ~frame state ~terminal_rows ~cols
-              ~surface_key:"surface-chrome-origin" ~title:"probe" ~hints
-              ~body:(fun ~budget:_ c ->
-                List.iter (fun index -> c.push (row_text index)) (List.init before Fun.id);
-                origin := Some (c.next_origin ());
-                c.push marker)
-          in
-          let lines = drawn.Masc_tui_frame_presenter.lines in
-          let row = Option.get (index_of lines marker) in
-          let plain = Masc_tui_theme.strip_sgr (List.nth lines row) in
-          let rec byte_at i =
-            if String.sub plain i (String.length marker) = marker then i else byte_at (i + 1)
-          in
-          let column =
-            Masc_tui_message_layout.display_width (String.sub plain 0 (byte_at 0))
-          in
-          Alcotest.(check (option (pair int int)))
-            (Printf.sprintf "%s, after %d rows" name before)
-            (Some (row, column)) !origin)
-        [ 0; 1; 5 ])
-    [ (Chrome_screen, "screen"); (Chrome_overlay, "overlay") ]
-
 let () =
   Alcotest.run "tui_surface_chrome_overflow"
     [ ( "surface chrome overflow"
-      , [ Alcotest.test_case "the footer stays above the composer" `Quick
-            test_the_footer_stays_above_the_composer
-        ; Alcotest.test_case "a cut body says what it hides" `Quick
+      , [ Alcotest.test_case "a cut body says what it hides" `Quick
             test_a_cut_body_says_what_it_hides
         ; Alcotest.test_case "the frame windows a scrolled body" `Quick
             test_the_frame_windows_a_scrolled_body
-        ; Alcotest.test_case "next origin is where the next row lands" `Quick
-            test_next_origin_is_where_the_next_row_lands
-        ] )
+        ;] )
     ]

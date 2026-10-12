@@ -40,3 +40,13 @@ the displayed event, not every event in its group. Already running or changed
 items can be refused; the TUI reports the server's result before refreshing the
 snapshot. Local messages have not reached the server yet and are lost if the TUI
 exits before submitting them.
+
+Keeper chat also shows a separate `NATIVE TASKS` section when native-task
+observations or read failures are available. Reported status and terminal
+notices remain visible after the root turn ends; they do not establish that a
+provider process is still live. Registration alone reports no running status.
+Task reads follow chat refresh even while reading older rows. Ctrl-D expands
+original execution and receiver details. Task usage is provider-reported and
+does not add to root model usage. Unavailable reads retain earlier observations
+with an explicit failure. Providers without observations receive no synthetic
+tasks or completion states.

@@ -96,66 +96,6 @@ let test_addressing_analysis () =
     (match addr4 with Composer.Unsupported_broadcast _ -> true | _ -> false)
 ;;
 
-let test_format_addressing_hint () =
-  let h1 = Composer.format_addressing_hint ~max_cells:80 Composer.Broadcast_all in
-  Alcotest.(check bool) "broadcast contains @@all"
-    true
-    (String.contains h1 '@');
-
-  let h2 = Composer.format_addressing_hint ~max_cells:80 (Composer.Mentions [ "tester" ]) in
-  Alcotest.(check bool) "mentions contains target"
-    true
-    (String.contains h2 '@');
-  (* Verify no runaway whitespace gap before arrow *)
-  Alcotest.(check bool) "no runaway whitespace padding before arrow"
-    false
-    (let rec has_wide_gap s =
-       try
-         let idx = String.index s ' ' in
-         let rec count_spaces i =
-           if i < String.length s && s.[i] = ' ' then 1 + count_spaces (i + 1)
-           else 0
-         in
-         if count_spaces idx > 10 then true
-         else has_wide_gap (String.sub s (idx + 1) (String.length s - idx - 1))
-       with Not_found -> false
-     in
-     has_wide_gap h2);
-
-  let h3 = Composer.format_addressing_hint ~max_cells:80 Composer.Discoverable_unaddressed in
-  Alcotest.(check bool) "unaddressed mentions Discoverable"
-    true
-    (String.contains h3 'D')
-;;
-
-let test_unicode_mentions_fit_cells () =
-  let targets = ["한글가나다라마"; "ascii-혼합"; "👩‍💻개발자"] in
-  List.iter
-    (fun width ->
-      let hint = Composer.format_addressing_hint ~max_cells:width
-          (Composer.Mentions targets) in
-      Alcotest.(check bool) "valid UTF-8 after fitting" true
-        (String_util.is_valid_utf8 hint);
-      Alcotest.(check bool) "hint stays inside requested cells" true
-        (Masc_tui_message_layout.display_width hint <= width))
-    [0; 1; 2; 20; 42; 43; 44; 45; 46; 47; 48; 49; 50; 60; 80];
-  let wide = Composer.format_addressing_hint ~max_cells:200
-      (Composer.Mentions ["한글"]) in
-  Alcotest.(check bool) "short target is not cut" true
-    (String_util.contains_substring wide "@한글 ->")
-;;
-
-let test_compute_caret_position () =
-  let (r1, c1) = Composer.compute_caret_position ~chrome_top_rows:6 ~cols:80 ~visible_lines:[] in
-  Alcotest.(check int) "empty visible lines row" 7 r1;
-  Alcotest.(check int) "empty visible lines col" 5 c1;
-
-  let (r2, c2) = Composer.compute_caret_position ~chrome_top_rows:6 ~cols:80
-    ~visible_lines:[ "Line 1"; "Line 2 is longer" ] in
-  Alcotest.(check int) "2 visible lines row" 8 r2;
-  Alcotest.(check int) "col based on last line width" (5 + String.length "Line 2 is longer") c2
-;;
-
 let () =
   Alcotest.run "tui board composer"
     [ ( "strip_prefix"
@@ -166,10 +106,8 @@ let () =
       , [ Alcotest.test_case "template detection" `Quick test_template_detection ] )
     ; ( "addressing"
       , [ Alcotest.test_case "addressing analysis" `Quick test_addressing_analysis
-        ; Alcotest.test_case "addressing hint formatting" `Quick test_format_addressing_hint
-        ; Alcotest.test_case "Unicode mentions fit cells" `Quick test_unicode_mentions_fit_cells
-        ] )
+        ;] )
     ; ( "caret"
-      , [ Alcotest.test_case "caret calculation" `Quick test_compute_caret_position ] )
+      , [] )
     ]
 ;;

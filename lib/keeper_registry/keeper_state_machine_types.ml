@@ -28,7 +28,6 @@ type conditions =
   ; stop_requested : bool
   ; restart_requested : bool
   ; drain_complete : bool
-  ; credential_archived : bool
   }
 
 let default_conditions =
@@ -41,7 +40,6 @@ let default_conditions =
   ; stop_requested = false
   ; restart_requested = false
   ; drain_complete = false
-  ; credential_archived = false
   }
 ;;
 

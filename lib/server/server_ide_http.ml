@@ -69,7 +69,7 @@ let canonical_path path =
   try Unix.realpath path with
   | Unix.Unix_error _ -> path
 
-let resolve_file_activity_repository ~base_path ~repo_id =
+let find_registered_repository ~base_path ~repo_id =
   match Repo_store.load_all ~base_path with
   | Error detail -> Error (`Unavailable detail)
   | Ok repositories -> (
@@ -105,15 +105,23 @@ let resolve_file_activity_repository ~base_path ~repo_id =
                "more than one registered repository uses id " ^ repo_id
              | None ->
                "more than one registered repository resolves to the project base path"))
-      | [ repository ] -> (
-          match Agent_observation.canonical_url_of_remote repository.url with
-          | Some codebase -> Ok (repository, codebase)
-          | None ->
-            Error
-              (`No_codebase
-                (Printf.sprintf
-                   "repository %s has no canonical codebase"
-                   repository.id))))
+      | [ repository ] -> Ok repository)
+
+(* File activity keys rows by codebase as well as repository, so it also needs
+   the remote's canonical form. Repository activity filters by the exact
+   repository ID alone and uses [find_registered_repository] directly. *)
+let resolve_file_activity_repository ~base_path ~repo_id =
+  match find_registered_repository ~base_path ~repo_id with
+  | Error (`Unavailable _ | `Not_found _ | `Ambiguous _ as error) -> Error error
+  | Ok (repository : Repo_manager_types.repository) -> (
+      match Agent_observation.canonical_url_of_remote repository.url with
+      | Some codebase -> Ok (repository, codebase)
+      | None ->
+        Error
+          (`No_codebase
+            (Printf.sprintf
+               "repository %s has no canonical codebase"
+               repository.id)))
 
 let file_activity_json ~codebase ~repo_id ~file_path ~window_hours =
   let tally = Keeper_tool_call_log.file_change_tally ~window_hours () in
@@ -168,6 +176,24 @@ let file_activity_json ~codebase ~repo_id ~file_path ~window_hours =
     ; "unattributed_over_budget", `Int unattributed_over_budget
     ; "unattributed_malformed", `Int unattributed_malformed
     ]
+;;
+
+let repository_activity_json ~repo_id ~window_hours =
+  (* The fleet tally advances its shared ledger cursor once, independent of
+     roster size or assignment. No keeper-specific scan or row cap. *)
+  let tally = Keeper_tool_call_log.file_change_tally ~window_hours () in
+  let in_repo = function
+    | Keeper_tool_call_file_change.In_repo location -> String.equal location.repo_id repo_id
+    | In_bundle _ | At_absolute_path _ -> false in
+  let changes = List.filter (fun (row : Keeper_tool_call_file_change.t) -> in_repo row.location) tally.changes in
+  let incomplete, unattributed = List.fold_left (fun (known, unknown) row ->
+      match row.Keeper_tool_call_file_change.ur_location with
+      | None -> known, unknown + 1
+      | Some location -> known + (if in_repo location then 1 else 0), unknown)
+      (0, 0) tally.unreadable_rows in
+  `Assoc ["repo_id", `String repo_id; "window_hours", `Float window_hours;
+          "changes", `List (List.map Keeper_tool_call_file_change.to_json changes);
+          "incomplete", `Int incomplete; "unattributed", `Int unattributed]
 ;;
 
 let file_activity_cache_ttl_sec = 10.0
@@ -452,6 +478,27 @@ let add_routes router =
            reqd)
       request
       reqd)
+  |> Http.Router.get "/api/v1/ide/repository-activity" (fun request reqd ->
+    (* Exact before/after content has the same admin gate as file activity. *)
+    with_token_permission_auth ~permission:Masc_domain.CanAdmin
+      (fun state _agent_name _req reqd ->
+        let uri = Uri.of_string request.target in
+        match required_query_param uri "repo_id", file_activity_window_hours uri with
+        | Error detail, _ | _, Error detail ->
+          Http.Response.json_value ~status:`Bad_request ~request (json_error detail) reqd
+        | Ok repo_id, Ok window_hours ->
+          match find_registered_repository ~base_path:(base_path_of_state state) ~repo_id:(Some repo_id) with
+          | Error (`Unavailable detail) ->
+            Http.Response.json_value ~status:`Service_unavailable ~request (json_error detail) reqd
+          | Error (`Not_found detail) ->
+            Http.Response.json_value ~status:`Not_found ~request (json_error detail) reqd
+          | Error (`Ambiguous detail) ->
+            Http.Response.json_value ~status:`Conflict ~request (json_error detail) reqd
+          | Ok _ ->
+            let data = Domain_pool_ref.submit_io_or_inline (fun () ->
+              repository_activity_json ~repo_id ~window_hours) in
+            Http.Response.json_value ~compress:true ~request (json_ok data) reqd)
+      request reqd)
   |> Http.Router.get "/api/v1/ide/file-activity" (fun request reqd ->
     (* Same data, same gate as [/api/v1/keepers/:name/file-changes]: every
        row carries the exact text a keeper wrote (before/after strings, whole

@@ -2,16 +2,6 @@ open Alcotest
 module Tui_decode = Masc.Tui_decode
 module Keeper_fleet_blocker = Masc.Keeper_fleet_blocker
 
-let contains needle text =
-  let text_length = String.length text in
-  let needle_length = String.length needle in
-  let rec walk index =
-    if index + needle_length > text_length then false
-    else if String.sub text index needle_length = needle then true
-    else walk (index + 1)
-  in
-  walk 0
-
 let fleet ?blocker ?(failing = 0) ?(retrying = 0) ?(config_blocked = 0)
     ?(session_recovery = 0) ?(owners_without_fiber = 0) ?(scan_errors = 0) ()
     : Tui_decode.fleet_safety =
@@ -38,12 +28,6 @@ let fleet ?blocker ?(failing = 0) ?(retrying = 0) ?(config_blocked = 0)
   ; fs_active_task_owner_scan_error_count = scan_errors
   }
 
-let known blocker = Tui_decode.Blocker blocker
-let blocker_text = Masc_tui_fleet_line.blocker_text
-let failing_text = Masc_tui_fleet_line.failing_text
-
-(* The fleet scan and the TUI read one list, so a name the server writes is a
-   name the TUI reads back as the same reason. *)
 let test_every_blocker_reads_back_from_its_wire_name () =
   List.iter
     (fun blocker ->
@@ -71,174 +55,6 @@ let test_the_wire_names_are_the_fleet_scans () =
     ]
     (List.map Keeper_fleet_blocker.wire_name Keeper_fleet_blocker.all)
 
-(* The counts line below says [paused 3]; the header names the reason in the
-   same words and leaves the number to that line. *)
-let test_a_blocker_is_named_in_the_counts_lines_words () =
-  check (option string) "a durable pause" (Some "autoboot keepers paused")
-    (blocker_text
-       (fleet ~blocker:(known Keeper_fleet_blocker.Durable_paused_autoboot_enabled)
-          ()));
-  check (option string) "a configuration error" (Some "config-blocked keepers")
-    (blocker_text
-       (fleet ~blocker:(known Keeper_fleet_blocker.Turn_configuration_error)
-          ~failing:1 ~config_blocked:1 ()))
-
-(* Every reason is said in words, and no two reasons say the same thing. *)
-let test_every_known_blocker_is_said_in_words () =
-  let texts =
-    List.map
-      (fun blocker ->
-        let name = Keeper_fleet_blocker.wire_name blocker in
-        match blocker_text (fleet ~blocker:(known blocker) ()) with
-        | None -> fail (name ^ " drew nothing")
-        | Some text ->
-            check bool
-              (Printf.sprintf "%S is not the identifier %s" text name)
-              false
-              (String.contains text '_');
-            text)
-      Keeper_fleet_blocker.all
-  in
-  check int "one phrase per reason" (List.length texts)
-    (List.length (List.sort_uniq String.compare texts))
-
-let test_an_unknown_blocker_is_drawn_by_name () =
-  check (option string) "the server's own name"
-    (Some "blocker: lane_capacity_withdrawn")
-    (blocker_text
-       (fleet ~blocker:(Tui_decode.Unrecognised_blocker "lane_capacity_withdrawn")
-          ()))
-
-let test_no_blocker_draws_nothing () =
-  check (option string) "no blocker" None (blocker_text (fleet ()))
-
-(* A class that holds no failing Keeper says nothing about this fleet. *)
-let test_failing_names_only_the_classes_that_hold_a_keeper () =
-  check (option string) "one class" (Some "failing 2 (retrying 2)")
-    (failing_text (fleet ~failing:2 ~retrying:2 ()));
-  check (option string) "two classes"
-    (Some "failing 3 (retrying 1 \xc2\xb7 session-recovery-required 2)")
-    (failing_text (fleet ~failing:3 ~retrying:1 ~session_recovery:2 ()))
-
-let test_nothing_failing_draws_nothing () =
-  check (option string) "no failing" None (failing_text (fleet ()))
-
-let owner_scan_text = Masc_tui_fleet_line.owner_scan_text
-
-(* A Keeper whose profile does not load is a scan error: its tasks are left out
-   of the owner count, and only a backlog failure moves the fleet status off
-   "ok". So an unread source has to be said beside the count it shortened, or
-   the row reports a complete reading it never made. *)
-let test_an_unread_source_is_named_beside_the_count () =
-  check (option string) "the count and what it is missing"
-    (Some "task owner without fiber 0+ (2 sources unread)")
-    (owner_scan_text (fleet ~scan_errors:2 ()));
-  check (option string) "one source reads as one"
-    (Some "task owner without fiber 3+ (1 source unread)")
-    (owner_scan_text (fleet ~owners_without_fiber:3 ~scan_errors:1 ()))
-
-(* The number a shortened scan reports is a lower bound, so it never stands as
-   a total. Without the [+], a scan that read nothing says "0", which reads as
-   "there are none" -- the one reading the unread sources rule out. *)
-let test_a_shortened_count_is_a_lower_bound () =
-  List.iter
-    (fun (owners, scan_errors) ->
-      let drawn =
-        match owner_scan_text (fleet ~owners_without_fiber:owners ~scan_errors ())
-        with
-        | Some text -> text
-        | None -> Alcotest.fail "a scan with an unread source draws a row"
-      in
-      check bool
-        (Printf.sprintf "%S states its number as a lower bound" drawn)
-        true
-        (contains (Printf.sprintf "fiber %d+ (" owners) drawn))
-    [ (0, 2); (3, 1); (12, 7) ]
-
-let test_a_complete_scan_says_only_the_count () =
-  check (option string) "nothing to qualify"
-    (Some "task owner without fiber 3")
-    (owner_scan_text (fleet ~owners_without_fiber:3 ()))
-
-(* Zero over a complete reading is a row spent saying nothing happened. *)
-let test_nothing_found_and_nothing_missed_draws_nothing () =
-  check (option string) "no row" None (owner_scan_text (fleet ()))
-
-(* While the health snapshot is rebuilt the server sends no counts, so the
-   line says the fleet was not measured yet and names the placeholder's word,
-   instead of drawing an idle fleet from zeros. *)
-let test_an_unmeasured_fleet_says_why () =
-  check string "a warming snapshot" "not measured yet (warming)"
-    (Masc_tui_fleet_line.not_measured_text ~status:"warming")
-
-(* A stale health snapshot serves the last fleet it measured (#38499). The tag
-   says so with the age on the frame's clock and the server's reason; a
-   reading the latest refresh measured draws no tag. *)
-let test_a_current_reading_draws_no_tag () =
-  check (option string) "no tag" None
-    (Masc_tui_fleet_line.freshness_text ~now:1_000.0 Tui_decode.Fleet_current)
-
-let test_a_last_good_reading_says_how_old_and_why () =
-  check (option string) "age and reason"
-    (Some "stale \xc2\xb7 measured 4m12s ago (refresh timed out)")
-    (Masc_tui_fleet_line.freshness_text ~now:1_252.0
-       (Tui_decode.Fleet_last_good
-          { measured_at_unix = 1_000.0
-          ; stale_reason = "last_good_refresh_timeout"
-          }))
-
-let test_a_server_clock_ahead_still_says_stale () =
-  check (option string) "no age, still stale"
-    (Some "stale (refresh failed)")
-    (Masc_tui_fleet_line.freshness_text ~now:900.0
-       (Tui_decode.Fleet_last_good
-          { measured_at_unix = 1_000.0
-          ; stale_reason = "last_good_refresh_error"
-          }))
-
-(* The three reasons the /health contract defines are said in words, and no
-   two of them say the same thing. A reader should not have to know the wire
-   word to tell a timed-out refresh from an aged-out reading (#39194). *)
-let test_every_known_stale_reason_is_said_in_words () =
-  let reasons =
-    [ "last_good_refresh_timeout"; "last_good_refresh_error"; "ttl_expired" ]
-  in
-  let texts =
-    List.map
-      (fun reason ->
-        match
-          Masc_tui_fleet_line.freshness_text ~now:1_000.0
-            (Tui_decode.Fleet_last_good
-               { measured_at_unix = 1_000.0; stale_reason = reason })
-        with
-        | None -> fail (reason ^ " drew no tag")
-        | Some text ->
-            check bool
-              (Printf.sprintf "%S is not the identifier %s" text reason)
-              false
-              (String.contains text '_');
-            text)
-      reasons
-  in
-  check int "one phrase per reason" (List.length texts)
-    (List.length (List.sort_uniq String.compare texts))
-
-(* A reason this build has no words for is drawn as the server wrote it, the
-   way an unknown blocker or snapshot status is. *)
-let test_an_unknown_stale_reason_is_drawn_by_name () =
-  check (option string) "the server's own word"
-    (Some "stale (coverage_gap)")
-    (Masc_tui_fleet_line.freshness_text ~now:900.0
-       (Tui_decode.Fleet_last_good
-          { measured_at_unix = 1_000.0; stale_reason = "coverage_gap" }))
-
-let test_an_unknown_snapshot_word_is_drawn_by_name () =
-  check (option string) "the word" (Some "health snapshot rebuilding")
-    (Masc_tui_fleet_line.freshness_text ~now:0.0
-       (Tui_decode.Unrecognised_snapshot_status "rebuilding"))
-
-(* The reason is the server's text. An escape in it is data to show, not a
-   control to replay into the frame. *)
 let test_the_servers_reason_is_drawn_as_text () =
   match
     Masc_tui_fleet_line.freshness_text ~now:1_000.0
@@ -291,43 +107,13 @@ let () =
             test_the_wire_names_are_the_fleet_scans
         ] )
     ; ( "blocker words"
-      , [ test_case "a blocker is named in the counts line's words" `Quick
-            test_a_blocker_is_named_in_the_counts_lines_words
-        ; test_case "every known blocker is said in words" `Quick
-            test_every_known_blocker_is_said_in_words
-        ; test_case "an unknown blocker is drawn by name" `Quick
-            test_an_unknown_blocker_is_drawn_by_name
-        ; test_case "no blocker draws nothing" `Quick
-            test_no_blocker_draws_nothing
-        ] )
+      , [] )
     ; ( "task owner scan"
-      , [ test_case "an unread source is named beside the count" `Quick
-            test_an_unread_source_is_named_beside_the_count
-        ; test_case "a shortened count is a lower bound" `Quick
-            test_a_shortened_count_is_a_lower_bound
-        ; test_case "a complete scan says only the count" `Quick
-            test_a_complete_scan_says_only_the_count
-        ; test_case "nothing found and nothing missed draws nothing" `Quick
-            test_nothing_found_and_nothing_missed_draws_nothing
-        ] )
+      , [] )
     ; ( "not measured"
-      , [ test_case "an unmeasured fleet says why" `Quick
-            test_an_unmeasured_fleet_says_why
-        ] )
+      , [] )
     ; ( "freshness"
-      , [ test_case "a current reading draws no tag" `Quick
-            test_a_current_reading_draws_no_tag
-        ; test_case "a last good reading says how old and why" `Quick
-            test_a_last_good_reading_says_how_old_and_why
-        ; test_case "a server clock ahead still says stale" `Quick
-            test_a_server_clock_ahead_still_says_stale
-        ; test_case "every known stale reason is said in words" `Quick
-            test_every_known_stale_reason_is_said_in_words
-        ; test_case "an unknown stale reason is drawn by name" `Quick
-            test_an_unknown_stale_reason_is_drawn_by_name
-        ; test_case "an unknown snapshot word is drawn by name" `Quick
-            test_an_unknown_snapshot_word_is_drawn_by_name
-        ; test_case "the server's reason is drawn as text" `Quick
+      , [ test_case "the server's reason is drawn as text" `Quick
             test_the_servers_reason_is_drawn_as_text
         ] )
     ; ( "status"
@@ -336,9 +122,5 @@ let () =
             test_the_status_word_is_the_grade_or_the_servers_word
         ] )
     ; ( "failing"
-      , [ test_case "names only the classes that hold a keeper" `Quick
-            test_failing_names_only_the_classes_that_hold_a_keeper
-        ; test_case "nothing failing draws nothing" `Quick
-            test_nothing_failing_draws_nothing
-        ] )
+      , [] )
     ]

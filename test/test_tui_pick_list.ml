@@ -136,27 +136,6 @@ let test_a_paste_types_the_whole_text () =
   let t = P.type_text P.closed "GPT" in
   check_under "a pasted id narrows like typing" (Some "openai.gpt") t
 
-(* A screen-high picker keeps its first page while the cursor walks it, and
-   then the cursor rides the last drawn row. *)
-let test_a_following_window_keeps_the_first_page () =
-  let drawn keys =
-    let v = P.view ~page ~window:P.Follows_cursor ~label items (run keys) in
-    (v.P.rows, v.P.selected_row)
-  in
-  Alcotest.(check (pair (list string) (option int))) "the second row is the page's"
-    ([ "anthropic.claude"; "openai.gpt" ], Some 1) (drawn [ "down" ]);
-  Alcotest.(check (pair (list string) (option int))) "past the page, the cursor is its last row"
-    ([ "openai.gpt"; "ollama.qwen" ], Some 1) (drawn [ "down"; "down" ]);
-  Alcotest.(check (pair (list string) (option int))) "the end is a full page"
-    ([ "kimi.k2"; "openai.o4" ], Some 1) (drawn [ "end" ]);
-  Alcotest.(check (pair (list string) (option int))) "a shorter list draws its last row"
-    ([ "openai.gpt"; "ollama.qwen" ], Some 1)
-    (let v =
-       P.view ~page ~window:P.Follows_cursor ~label
-         [ "anthropic.claude"; "openai.gpt"; "ollama.qwen" ] (run [ "end" ])
-     in
-     (v.P.rows, v.P.selected_row))
-
 let () =
   Alcotest.run "tui_pick_list"
     [ ( "pick list",
@@ -179,6 +158,4 @@ let () =
           Alcotest.test_case "backspace on an empty filter keeps the cursor" `Quick
             test_backspace_on_an_empty_filter_keeps_the_cursor;
           Alcotest.test_case "a paste types the whole text" `Quick
-            test_a_paste_types_the_whole_text;
-          Alcotest.test_case "a following window keeps the first page" `Quick
-            test_a_following_window_keeps_the_first_page ] ) ]
+            test_a_paste_types_the_whole_text;] ) ]

@@ -98,10 +98,6 @@ type load_failure =
       ; high_water_tokens : int
       ; max_context : int
       }
-  | Muse_window_below_host_overhead of
-      { runtime_id : string
-      ; max_context : int
-      }
   | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable
 (* A dangling reference is an operator typo, and unlike every other drop reason
    it is not survivable by ignoring the binding: the runtime the operator
@@ -239,14 +235,6 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       runtime_id
       high_water_tokens
       max_context
-  | Muse_window_below_host_overhead { runtime_id; max_context } ->
-    Printf.sprintf
-      "%s: runtime %S has no start-prompt ceiling: %s, so the host compacts any \
-       input. Raise max-context"
-      config_path
-      runtime_id
-      (Runtime_muse_prompt_capacity.error_to_string
-         (Runtime_muse_prompt_capacity.Window_below_host_overhead { max_context }))
   | Admission_allowances_disagree disagreements ->
     let allowance_text (allowance : Llm_provider.Provider_admission_state.allowance) =
       match allowance.priority_run_limit with
@@ -336,7 +324,6 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Lane_candidate_unresolved _
   | Max_context_absent _
   | Context_marks_exceed_max_context _
-  | Muse_window_below_host_overhead _
   | Admission_allowances_disagree _
   | Exact_slot_body_deadlines_absent _
   | Exact_lane_cli_slot_unservable _ -> to_diagnostic_text ~config_path failure

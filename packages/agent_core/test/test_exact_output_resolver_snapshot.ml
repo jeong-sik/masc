@@ -853,6 +853,7 @@ let test_every_functional_projection_field_changes_generation () =
     ; ( "document capability"
       , target_catalog ~model_extra:"supports_document_input = true\n" () )
     ; "audio capability", target_catalog ~model_extra:"supports_audio_input = true\n" ()
+    ; "assistant prefill admission", target_catalog ~model_extra:"supports_assistant_prefill = false\n" ()
     ; ( "supported models"
       , target_catalog ~model_extra:"supported_models = [\"snapshot-model\"]\n" () )
     ; "codec", target_catalog ~kind:"ollama" ~request_path:"/api/chat" ()
@@ -867,6 +868,16 @@ let test_every_functional_projection_field_changes_generation () =
          true
          (generation base <> generation changed))
     variants;
+  let prefill_changed =
+    snapshot (target_catalog ~model_extra:"supports_assistant_prefill = false\n" ()) in
+  check bool "prefill admission changes canonical catalog evidence" true
+    (evidence base <> evidence prefill_changed);
+  check bool "prefill admission changes selected target identity" true
+    (identity (resolve base "snapshot-target")
+     <> identity (resolve prefill_changed "snapshot-target"));
+  check bool "prefill admission change reaches plan fingerprint" true
+    (EO.plan_fingerprint (ready (resolve base "snapshot-target"))
+     <> EO.plan_fingerprint (ready (resolve prefill_changed "snapshot-target")));
   let endpoint_changed = snapshot (target_catalog ~base_url:"https://other.example" ()) in
   check
     bool

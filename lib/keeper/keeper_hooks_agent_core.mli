@@ -197,6 +197,25 @@ type tool_stream_observation =
       ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
       }
       (** Agent Core retained the exact pre-admission mapping before tools run. *)
+  | Child_content_observed of
+      { attempt : Runtime_native_tasks.attempt
+      ; observation : Keeper_claude_task_binding.child_observation }
+      (** Actual private body/binding fact and original dispatch. Durable sinks
+          handle this without root content/lifecycle or network-cutoff authority. *)
+  | Native_task_observed of
+      { attempt : Runtime_native_tasks.attempt
+      ; bound : Keeper_claude_task_binding.bound }
+      (** Original invocation/input/native owner, with its frozen dispatch.
+          Task metadata is not a native block progress event or tool receipt. *)
+  | Native_tool_progress of
+      { block_index : int; tool_call_id : string option; progress : Runtime_native_tools.progress }
+  | Native_tool_completion of
+      { block_index : int
+      ; tool_call_id : string option
+      ; completion : Runtime_native_tools.completion
+      }
+      (** Native provider report at its original stream block. Does not name
+          a MASC execution; consumers stamp the current scope on receipt. *)
   | Official_tool_result of
       { block_index : int
       ; tool_call_id : string

@@ -123,7 +123,7 @@ describe('startIdentityLogin', () => {
         provider: 'atlassian',
         provider_label: 'Atlassian',
         authorize_url: 'https://auth.atlassian.com/authorize?x=1',
-        state: 'abc',
+        attempt_id: 'fixture-attempt',
         registered_now: true,
         expires_at: 1786000600,
       }),

@@ -14,6 +14,7 @@ let target =
   testable
     (Fmt.of_to_string (function
       | None -> "none"
+      | Some Tui_types.Text_collab_form -> "collab-form"
       | Some Tui_types.Text_account_login -> "account-login"
       | Some Tui_types.Text_preset_name -> "preset-name"
       | Some Tui_types.Text_runtime_lane_name -> "runtime-lane-name"
@@ -40,12 +41,39 @@ let fresh_state () =
   Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
 ;;
 
+let test_collab_input_ownership () =
+  let state = fresh_state () in
+  state.palette_open <- true;
+  let view, read = Masc_tui_collab.loading (Masc_tui_collab.create ()) in
+  let view = Masc_tui_collab.listed view read (Ok
+      [{ Masc.Tui_decode.pi_name = "guest1"; pi_expires_at = None;
+         pi_expired = false; pi_holds_controller = false }]) in
+  let show view = state.collab <- Some view in
+  show view;
+  check target "Collab browsing hides the underlying palette" None
+    (Tui_types.text_input_target state ~compact_viewport:false);
+  let naming, _ = Masc_tui_collab.key view "n" in
+  show naming;
+  check target "the name form owns text" (Some Tui_types.Text_collab_form)
+    (Tui_types.text_input_target state ~compact_viewport:false);
+  check target "a hidden compact form takes no text" None
+    (Tui_types.text_input_target state ~compact_viewport:true);
+  let hours, _ = Masc_tui_collab.key (Masc_tui_collab.paste naming "guest1") "enter" in
+  show hours;
+  check target "the lifetime form owns text" (Some Tui_types.Text_collab_form)
+    (Tui_types.text_input_target state ~compact_viewport:false);
+  let confirmation, _ = Masc_tui_collab.key view "x" in
+  show confirmation;
+  check target "confirmation does not expose the hidden palette" None
+    (Tui_types.text_input_target state ~compact_viewport:false)
+
 let test_model_form_requires_current_workspace_reading () =
   let state = fresh_state () in
   let row : Masc_tui_model_runtime_table.row =
     { model="shared-name"; provider="shared-provider"; api_name=Some "api-model";
       reasoning_effort=None; temperature=None; context=Some ("binding",8192);
-      model_context=None; max_tokens=None } in
+      model_context=None; max_tokens=None; same_login=[]; login_group=None;
+      account_label=None } in
   state.config_models_rows <- [row];
   check bool "retained rows cannot open without a current reading" true
     (Result.is_error (Tui_types.selected_config_model state));
@@ -55,7 +83,7 @@ let test_model_form_requires_current_workspace_reading () =
       routing=Routing_active; routing_requires_restart=false; keeper=Not_configured;
       keeper_requires_restart=false; configured_count=0; pending_keys=[];
       applied_keys=[]; preempted_keys=[] } in
-  state.runtime_config_view <- Some {rcv_path="runtime.toml";rcv_source_text="";rcv_rows=[];rcv_metadata=metadata};
+  state.runtime_config_view <- Some {rcv_path="runtime.toml";rcv_source_text="";rcv_rows=[];rcv_metadata=metadata;rcv_account_emails=Ok (Masc_tui_account_login.Email_rows {rows=[]; unattributed=0})};
   check bool "current successful reading permits the selected model" true
     (Tui_types.selected_config_model state=Ok row);
   state.runtime_config_view_error <- Some "read failed";
@@ -615,7 +643,8 @@ let () =
   Alcotest.run
     "tui text input target"
     [ ( "which field takes text",
-        [ test_case "model forms require current workspace config" `Quick test_model_form_requires_current_workspace_reading;
+        [ test_case "Collab forms own pasted input" `Quick test_collab_input_ownership;
+          test_case "model forms require current workspace config" `Quick test_model_form_requires_current_workspace_reading;
           test_case "ask answer input ownership" `Quick test_ask_answer_input_ownership;
           test_case "reader discards active and queued voice" `Quick test_reader_discards_active_and_queued_voice;
           test_case "workspace withdrawal discards queued voice" `Quick test_workspace_withdrawal_discards_queued_voice;

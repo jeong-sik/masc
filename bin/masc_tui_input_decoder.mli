@@ -22,7 +22,7 @@ type reply =
 type event =
   | Key of string
   | Paste of Masc_tui_paste.t  (** Everything between [200~] and [201~]. *)
-  | Mouse_wheel of Masc.Tui_decode.wheel_direction * int * int
+  | Mouse_wheel of Masc.Tui_mouse_protocol.wheel_direction * int * int
   | Mouse_left_press of int * int
   | Mouse_left_release of int * int
   | Reply of reply

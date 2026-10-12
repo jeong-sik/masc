@@ -7,6 +7,11 @@ function nonEmptyParts(parts: Array<string | null | undefined>): string[] {
   return parts.filter((value): value is string => Boolean(value))
 }
 
+function assistantPrefillControl(value: boolean | undefined): string | null {
+  if (typeof value !== 'boolean') return null
+  return value ? 'assistant-prefill' : 'assistant-prefill off'
+}
+
 function runtimeSnapshotPromptCache(item: DashboardRuntimeProviderSnapshot): string | null {
   if (item.supports_prompt_caching !== true) return null
   return 'prompt-cache'
@@ -34,6 +39,7 @@ export function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapsh
     item.supports_named_tool_choice ? 'named' : null,
     item.supports_parallel_tool_calls ? 'parallel' : null,
     item.supports_system_prompt ? 'system-prompt' : null,
+    assistantPrefillControl(item.supports_assistant_prefill),
     runtimeSnapshotPromptCache(item),
     item.emits_usage_tokens ? 'usage' : null,
   ])
@@ -198,6 +204,7 @@ export function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapsho
     caps?.supports_named_tool_choice ? 'named' : null,
     caps?.supports_parallel_tool_calls ? 'parallel' : null,
     caps?.supports_system_prompt ? 'system-prompt' : null,
+    assistantPrefillControl(caps?.supports_assistant_prefill),
     caps?.supports_prompt_caching
       ? 'prompt-cache'
       : null,
@@ -298,6 +305,7 @@ export function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProvid
     caps.task ? `task:${caps.task}` : null,
     caps.supports_native_streaming ? 'native-stream' : null,
     caps.supports_system_prompt ? 'system-prompt' : null,
+    assistantPrefillControl(caps.supports_assistant_prefill),
     caps.supports_prompt_caching
       ? 'prompt-cache'
       : null,

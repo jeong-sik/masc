@@ -14,6 +14,15 @@ status: active
 > 대시보드의 모든 section 을 표·피드·상세로 표현한다. `code > ide-shell` 은
 > "키퍼가 만든 diff/PR 을 읽고 판정하는 화면"으로 축소해 수용한다.
 
+## 2026-10-08 파일 작업 흐름 재점검
+
+[현재 TUI IDE 감사](../../audits/2026-10-08-tui-ide-completion.md)는 Keeper 작업에서
+파일·기록된 변경·Task 근거로 이어지는 흐름을 다시 확인한다. Git 실패 시 Keeper
+이력도 사라지는 문제, 이력 새로고침 누락, 기록된 변경 내용으로 이어지지 않는
+동작을 두 단계 소스 변경으로 수리한다. 기존 메모 가이드의 별도 저장소 설명도
+실제 파일 주석 구현에 맞춘다. 아래 과거의 `main` 표시는 당시 소스 병합 상태이며
+현재 설치된 바이너리나 이번 변경의 검증 완료를 뜻하지 않는다.
+
 ## 운영자 피드백 20항목 재감사 (2026-09-01)
 
 이 표는 2026-09-01의 `main`과 병합 PR을 다시 읽은 결과다. `main`은 근거
@@ -46,8 +55,8 @@ PR에서는 빌드를 실행하지 않았으므로, 아래 표를 실행 바이�
 
 ### 남은 완료 게이트
 
-- 운영자가 빌드한 `main` exact HEAD에서 compiled tests와 영향을 받은 PTY
-  화면을 확인한다.
+- 운영자가 빌드한 `main` exact HEAD에서 compiled tests를 돌리고 바뀐 화면을
+  직접 확인한다.
 - 실행 바이너리 identity가 그 HEAD와 일치하는지 다시 확인한다. 소스 병합만으로
   이 캠페인의 런타임 검증까지 완료됐다고 처리하지 않는다.
 
@@ -100,8 +109,8 @@ Harness, Repositories, Connectors, Tools, Autonomy, System Logs.
 - 화면 추가 = 폴링 화면 템플릿 복제(Harness 가 본보기), surface variant 삽입
   위치를 task 가 고정한다(같은 줄 충돌 방지). 빈 본문은 `empty_page_of` 세
   구분.
-- 모든 PR: Alcotest(디코더) + PTY 프레임 테스트(`test/test_tui_keyboard_input.py`)
-  + `docs/TUI-GUIDE.md` 절 + 라이브 `:8935` tmux 캡처를 PR 에. 테스트를 어딘가에
+- 모든 PR: Alcotest(디코더·상태 전이) + `docs/TUI-GUIDE.md` 절 + 라이브 `:8935`
+  tmux 캡처를 PR 에. 화면 문구·배치·행 순서를 확인하는 테스트는 만들지 않는다. 테스트를 어딘가에
   따로 등록할 필요는 없다. `test/dune` 에 스탠자를 추가하면 CI 가 `@test/runtest`
   로 같이 돈다 — 894개를 손으로 나열하던 목록 파일은 #30010 이 걷어냈다.
 - 대시보드 불변식 `INV-DASH-001~007` (`docs/spec/10-dashboard.md`) 을 TUI 도

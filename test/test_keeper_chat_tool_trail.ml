@@ -191,7 +191,7 @@ let tool_snapshot id snapshot =
 ;;
 
 let test_no_tools_renders_nothing () =
-  let t = trail_of [ Events.Text_delta "answered from memory" ] in
+  let t = trail_of [ Events.Text_delta {text="answered from memory"; stream_scope=None} ] in
   Alcotest.(check int) "no calls" 0 (Trail.call_count t);
   Alcotest.(check (option string)) "no block" None (Trail.render t)
 ;;

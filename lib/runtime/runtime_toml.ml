@@ -137,20 +137,16 @@ let partition_results
 
 (* --- Protocol string -> Runtime_schema.api_format --- *)
 
-type editor_transport =
-  | Endpoint
-  | Command
+type editor_transport = Runtime_protocol.editor_transport = Endpoint | Command
 
-type editor_semantics =
-  | Http_provider
-  | Official_client
+type editor_semantics = Runtime_protocol.editor_semantics = Http_provider | Official_client
 
-type editor_credential_policy =
+type editor_credential_policy = Runtime_protocol.editor_credential_policy =
   | Credentials_optional
   | Credentials_forbidden
   | Credentials_file_required
 
-type editor_protocol =
+type editor_protocol = Runtime_protocol.editor_protocol =
   { protocol : string
   ; transport : editor_transport
   ; semantics : editor_semantics
@@ -160,117 +156,8 @@ type editor_protocol =
   ; required_provider_fields : string list
   }
 
-type protocol_declaration =
-  { protocol : string
-  ; api_format : Runtime_schema.api_format
-  ; editor : editor_protocol option
-  }
-
-let http_editor protocol =
-  Some
-    { protocol
-    ; transport = Endpoint
-    ; semantics = Http_provider
-    ; credential_policy = Credentials_optional
-    ; requires_non_interactive = false
-    ; provider_fields = []
-    ; required_provider_fields = []
-    }
-;;
-
-let official_client_editor protocol =
-  Some
-    { protocol
-    ; transport = Command
-    ; semantics = Official_client
-    ; credential_policy = Credentials_forbidden
-    ; requires_non_interactive = true
-    ; provider_fields = [ "account-home" ]
-    ; required_provider_fields = []
-    }
-;;
-
-let muse_serve_protocol = "muse-serve"
-let muse_serve_editor =
-  Option.map (fun (editor : editor_protocol) ->
-    { editor with required_provider_fields = ["account-home"] })
-    (official_client_editor muse_serve_protocol)
-
-let antigravity_editor =
-  Some
-    { protocol = "antigravity-cli"
-    ; transport = Command
-    ; semantics = Official_client
-    ; credential_policy = Credentials_file_required
-    ; requires_non_interactive = true
-    ; provider_fields = [ "agent"; "effort"; "timeout-s" ]
-    ; required_provider_fields = [ "timeout-s" ]
-    }
-;;
-
-let hidden_protocol protocol api_format =
-  { protocol; api_format; editor = None }
-;;
-
-let http_protocol protocol api_format =
-  { protocol; api_format; editor = http_editor protocol }
-;;
-
-let official_client_protocol protocol api_format =
-  { protocol; api_format; editor = official_client_editor protocol }
-;;
-
-let protocol_declarations =
-  [ hidden_protocol "messages-cli" Runtime_schema.Messages_api
-  ; http_protocol "messages-http" Runtime_schema.Messages_api
-  ; hidden_protocol "openai-compatible-cli" Runtime_schema.Chat_completions_api
-  ; http_protocol
-      "openai-compatible-http"
-      Runtime_schema.Chat_completions_api
-  ; http_protocol "ollama-http" Runtime_schema.Ollama_api
-  ; http_protocol "gemini-http" Runtime_schema.Gemini_api
-  ; http_protocol "vertex-gemini" Runtime_schema.Vertex_gemini_api
-  ; official_client_protocol
-      "codex-app-server"
-      Runtime_schema.Codex_app_server_runtime
-  ; official_client_protocol "claude-code" Runtime_schema.Claude_code_runtime
-  ; { protocol = "antigravity-cli"
-    ; api_format = Runtime_schema.Antigravity_cli_runtime
-    ; editor = antigravity_editor
-    }
-  ; { protocol = muse_serve_protocol
-    ; api_format = Runtime_schema.Muse_serve_runtime
-    ; editor = muse_serve_editor
-    }
-  ]
-;;
-
-let protocol_declaration protocol =
-  List.find_opt
-    (fun declaration -> String.equal declaration.protocol protocol)
-    protocol_declarations
-;;
-
-let editor_protocols = List.filter_map (fun declaration -> declaration.editor) protocol_declarations
-
-let canonical_protocol_of_protocol protocol =
-  Option.map (fun declaration -> declaration.protocol) (protocol_declaration protocol)
-;;
-
-let unknown_protocol_error s =
-  Printf.sprintf
-    "unknown protocol %S: expected one of %s"
-    s
-    (String.concat ", " (List.map (fun declaration -> declaration.protocol) protocol_declarations))
-;;
-
-let api_format_of_protocol (s : string)
-  : (Runtime_schema.api_format, string) result
-  =
-  match protocol_declaration s with
-  | Some declaration -> Ok declaration.api_format
-  | None -> Error (unknown_protocol_error s)
-;;
+let editor_protocols = Runtime_protocol.editor_protocols
+let api_format_of_protocol = Runtime_protocol.api_format_of_protocol
 
 (* --- Transport extraction --- *)
 
@@ -849,12 +736,9 @@ let parse_provider (id : string) (tbl : Otoml.t)
     | Error errors -> Error errors
     | Ok None -> Error (error (path ^ ".protocol") "missing required field 'protocol'")
     | Ok (Some p) ->
-      (match api_format_of_protocol p with
-       | Ok fmt ->
-         (match canonical_protocol_of_protocol p with
-          | Some protocol -> Ok (protocol, fmt)
-          | None -> Error (error (path ^ ".protocol") (unknown_protocol_error p)))
-       | Error e -> Error (error (path ^ ".protocol") e))
+      Result.map_error
+        (fun detail -> error (path ^ ".protocol") detail)
+        (Runtime_protocol.resolve p)
   in
   let transport_result = transport_of_provider ~path tbl id in
   match display_name_result, protocol_result, transport_result with
@@ -1144,6 +1028,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     ; "supports-response-format-json"
     ; "supports-structured-output"
     ; "supports-system-prompt"
+    ; "supports-assistant-prefill"
     ; "supports-prompt-caching"
     ; "supports-top-k"
     ; "supports-min-p"
@@ -1240,6 +1125,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   let* supports_response_format_json = b "supports-response-format-json" in
   let* supports_structured_output = b "supports-structured-output" in
   let* supports_system_prompt = b "supports-system-prompt" in
+  let* supports_assistant_prefill = b "supports-assistant-prefill" in
   let* supports_prompt_caching = b "supports-prompt-caching" in
   let* supports_top_k = b "supports-top-k" in
   let* supports_min_p = b "supports-min-p" in
@@ -1264,6 +1150,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     ; supports_response_format_json
     ; supports_structured_output
     ; supports_system_prompt
+    ; supports_assistant_prefill
     ; supports_prompt_caching
     ; supports_top_k
     ; supports_min_p
@@ -3150,6 +3037,7 @@ let typesafeai_keys =
   ; "context_review"
   ; "skill_applicability"
   ; "librarian_preflight"
+  ; "workspace_memory_selection_enabled"
   ; "excluded_keepers"
   ]
 ;;
@@ -3330,6 +3218,10 @@ let parse_typesafeai (toml : Otoml.t)
       typed_find_or "a boolean" path tbl "librarian_preflight" Otoml.get_boolean
         ~default:d.librarian_preflight
     in
+    let workspace_memory_selection_enabled =
+      typed_find_or "a boolean" path tbl "workspace_memory_selection_enabled" Otoml.get_boolean
+        ~default:d.workspace_memory_selection_enabled
+    in
     (match
        ( unknown
        , enabled
@@ -3340,6 +3232,7 @@ let parse_typesafeai (toml : Otoml.t)
        , context_review
        , skill_applicability
        , librarian_preflight
+       , workspace_memory_selection_enabled
        , excluded_keepers )
      with
      | ( []
@@ -3351,6 +3244,7 @@ let parse_typesafeai (toml : Otoml.t)
        , Ok context_review
        , Ok skill_applicability
        , Ok librarian_preflight
+       , Ok workspace_memory_selection_enabled
        , Ok excluded_keepers ) ->
        Ok
          { Runtime_schema.lane_enabled
@@ -3361,6 +3255,7 @@ let parse_typesafeai (toml : Otoml.t)
          ; context_review
          ; skill_applicability
          ; librarian_preflight
+         ; workspace_memory_selection_enabled
          ; excluded_keepers
          }
      | _ ->
@@ -3374,6 +3269,7 @@ let parse_typesafeai (toml : Otoml.t)
           @ result_errors context_review
           @ result_errors skill_applicability
           @ result_errors librarian_preflight
+          @ result_errors workspace_memory_selection_enabled
           @ result_errors excluded_keepers))
   | Some _ -> Error (error path "[typesafeai] must be a TOML table")
 ;;

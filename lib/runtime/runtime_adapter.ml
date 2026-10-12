@@ -587,6 +587,7 @@ let model_capabilities_override_of_model_spec
          ; supports_video_input = media caps.supports_video_input
          ; supports_native_streaming = spec.streaming
          ; supports_system_prompt = stated caps.supports_system_prompt ~default:base.supports_system_prompt
+         ; supports_assistant_prefill = stated caps.supports_assistant_prefill ~default:base.supports_assistant_prefill
          ; supports_prompt_caching = stated caps.supports_prompt_caching ~default:base.supports_prompt_caching
          ; supports_top_k = stated caps.supports_top_k ~default:base.supports_top_k
          ; supports_min_p = stated caps.supports_min_p ~default:base.supports_min_p

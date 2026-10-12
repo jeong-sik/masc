@@ -9,6 +9,9 @@
 type t =
   | Offset_not_1_based of { offset : int }
   | Limit_not_positive of { limit : int }
+  | Invalid_read_integer of
+      { coordinate : Keeper_tool_read_window.coordinate; value : Yojson.Safe.t }
+  | Invalid_read_arguments of { value : Yojson.Safe.t }
   | Available_cwds_partial of
       { limit : string
       ; cwds : string

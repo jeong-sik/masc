@@ -18,7 +18,6 @@ jobs:
       - name: Build production dashboard once
         run: |
           corepack enable && corepack prepare pnpm@10.31.0 --activate
-          (cd dashboard && pnpm install --frozen-lockfile)
           scripts/build-dashboard-if-needed.sh --force
       - uses: actions/upload-artifact@v7
         with:
@@ -284,8 +283,7 @@ jobs:
       # cannot boot it the way the server binary is booted above. --help
       # returns before that check, which is enough to prove the shipped file
       # loads its dynamic libraries -- the one thing that differs between this
-      # runner and the machine that downloads the asset. Rendering is covered
-      # by test/test_tui_keyboard_input.py in CI, over a real PTY.
+      # runner and the machine that downloads the asset.
       - name: Terminal UI binary smoke (dynamic link)
         run: |
           "$MASC_BIN_DIR"/masc_tui.exe --help < /dev/null > /tmp/masc-tui-help.txt
@@ -367,6 +365,12 @@ jobs:
       # probed once here: a shim that cannot answer --probe is not an asset.
       # It is built before the installer smoke so the smoke can stage it and
       # check that install.sh places it with its sha256 sidecar (B-2).
+      - name: Prepare static shim compiler
+        if: matrix.shim-arch != ''
+        uses: ./.github/actions/prepare-shim-builder
+        with:
+          arch: ${{ matrix.shim-arch }}
+
       - name: Build exec shim (static ${{ matrix.shim-arch }})
         if: matrix.shim-arch != ''
         run: |
@@ -469,10 +473,17 @@ jobs:
           tag_day="$(TZ=UTC git log -1 --date=format-local:%Y-%m-%d --format=%cd HEAD)"
           test -n "$tag_day"
           # The page lists what a reader acts on and counts the rest; the
-          # counted entries are read in the tagged CHANGELOG.md.
+          # counted entries come from the complete record when one is retained.
+          counts_args=()
+          details_path="docs/releases/v${ver}-full-changelog.md"
+          if [[ -f "$details_path" ]]; then
+            counts_args=(--counts-changelog "$details_path"
+              --counts-changelog-url "https://github.com/${GITHUB_REPOSITORY}/blob/v${ver}/${details_path}")
+          fi
           python3 scripts/ci/changelog-section.py "$ver" CHANGELOG.md release-body.md \
             --append compare-link.md --max-chars 125000 --expect-date "$tag_day" \
-            --changelog-url "https://github.com/${GITHUB_REPOSITORY}/blob/v${ver}/CHANGELOG.md"
+            --changelog-url "https://github.com/${GITHUB_REPOSITORY}/blob/v${ver}/CHANGELOG.md" \
+            "${counts_args[@]}"
 
       - name: Retain the exact release body checked by this RC
         uses: actions/upload-artifact@v7

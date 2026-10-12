@@ -300,14 +300,16 @@ let test_running_wake_missing_says_whether_the_wake_finished () =
       ]
   in
   Workspace_core.write_text config (schedules_path config) (Yojson.Safe.to_string state_json);
-  (match fail_running config ~now:204.0 ~schedule_id:settled.schedule_id ~error:"x" with
+  (match fail_running config ~now:204.0 ~schedule_id:settled.schedule_id
+      ~failure_scope:Schedule_failure ~error:"x" with
    | Error (Running_wake_settled { schedule_id; wake }) ->
      check string "settled names the schedule" settled.schedule_id schedule_id;
      check string "settled carries the finished wake" "succeeded"
        (Schedule_domain.wake_status_to_string wake.status)
    | Ok _ -> fail "a running schedule without a running wake was failed"
    | Error err -> fail (store_error_to_string err));
-  (match fail_running config ~now:204.0 ~schedule_id:absent.schedule_id ~error:"x" with
+  (match fail_running config ~now:204.0 ~schedule_id:absent.schedule_id
+      ~failure_scope:Schedule_failure ~error:"x" with
    | Error (Running_wake_absent { schedule_id }) ->
      check string "absent names the schedule" absent.schedule_id schedule_id
    | Ok _ -> fail "a running schedule without any wake was failed"
@@ -366,7 +368,8 @@ let test_a_recurring_occurrence_is_not_settled_by_an_earlier_wake () =
       ]
   in
   Workspace_core.write_text config (schedules_path config) (Yojson.Safe.to_string state_json);
-  match fail_running config ~now:(second_due +. 1.0) ~schedule_id ~error:"x" with
+  match fail_running config ~now:(second_due +. 1.0) ~schedule_id
+      ~failure_scope:Occurrence_failure ~error:"x" with
   | Error (Running_wake_absent { schedule_id = refused }) ->
     check string "absent names the schedule" schedule_id refused
   | Error (Running_wake_settled _) ->

@@ -1,0 +1,16 @@
+Actual source: message_layout.ml, footer.ml; exact strip_sgr function from theme.ml. Selected existing footer tests interpreted; no application build.
+Exit: 0
+Testing `Quiet footer'.
+This run has ID `Y2IAVWHO'.
+
+  [OK]          fitting          0   test_port_closes_every_footer.
+  [OK]          fitting          1   test_extra_facts_precede_port.
+  [OK]          fitting          2   test_literal_search_status_survives_hint...
+  [OK]          fitting          3   test_narrow_width_drops_whole_hint_items.
+  [OK]          fitting          4   test_a_workspace_mismatch_outlives_the_k...
+  [OK]          fitting          5   test_an_armed_action_outlives_every_notice.
+  [OK]          fitting          6   test_ansi_keeper_keys_remain_individuall...
+  [OK]          fitting          7   test_the_cut_keeps_the_way_out.
+
+Full test results in `<temporary-run-directory>/_build/_tests/Quiet footer'.
+Test Successful in 0.022s. 8 tests run.

@@ -7,9 +7,14 @@ val create : unit -> t
 (** Allocate ownership before starting the child. *)
 
 val spawn :
-  t -> string -> string list -> string array ->
+  ?cwd:string -> t -> string -> string list -> string array ->
   Unix.file_descr -> Unix.file_descr -> Unix.file_descr -> unit
-(** Uses libc PATH lookup, just like [Unix.create_process_env]. *)
+(** Uses libc PATH lookup. When supplied, [cwd] is opened for directory search
+    before spawn and applied to the child through that descriptor. The parent's
+    directory is unchanged. The descriptor closes on success and spawn failure. *)
+
+exception Directory_unavailable of { cwd : string; error : Unix.error }
+(** The requested directory could not be opened before a child existed. *)
 
 val poll : t -> Unix.process_status option
 (** [None] means the leader is still running. On exit, clean remaining group

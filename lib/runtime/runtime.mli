@@ -117,6 +117,9 @@ type 'a config_lock_receipt = private
   ; warnings : config_lock_warning list
   }
 
+val config_source_revision_of_text : string -> config_source_revision
+(** Pure identity of the source text, independent of its storage path. *)
+
 val config_observation : path:string -> string -> config_observation
 (** Pure source identity used inside callers' locked config edits. *)
 
@@ -758,10 +761,6 @@ val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
     one row demotes every sibling backed by the same account. [None] when
     the runtime id is unknown. Consumed by
     {!Runtime_quota_window.demote_order} and the matching note site. *)
-
-val prompt_capacity_bytes_of_runtime_id : string -> int option
-(** {!Runtime_instance.prompt_capacity_bytes} of the runtime with this id, or [None] when the
-    id is unknown or no ceiling applies. *)
 
 val context_marks_of_runtime_id : string -> Runtime_schema.context_marks option
 (** The binding's eviction marks, or [None] when the binding declares none

@@ -168,6 +168,8 @@ let broadcast_tools_list_changed () =
   Mcp_subscriptions.notify_tools_list_changed notification
 ;;
 
+let () = Lane_addon_runtime.register_tool_change_handler broadcast_tools_list_changed
+
 let dedup_strings items = items |> List.sort_uniq String.compare
 let core_status_resource_ids = [ "status"; "status.json"; "events"; "events.json" ]
 
@@ -309,6 +311,68 @@ let handle_server_discover_eio ?(profile = Full) id =
 
 let public_tool_help_schemas () = Config.visible_tool_schemas ()
 
+let addon_exports_for_request ~profile ~auth_token state =
+  let config = Mcp_server.workspace_config state in
+  let reserved = List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+      Config.raw_all_tool_schemas in
+  let permitted ~agent_name ~principal access =
+    Lane_addon_runtime.tool_exports ~config ~access ~reserved
+    |> Result.map (fun exports ->
+      let exports = List.filter (fun (export : Lane_addon_runtime.tool_export) ->
+        (* Retained tool metadata owns known permissions even when execution is
+           supplied by an Add-on. Unknown package tools use the generic Lane
+           action permission; package-provided annotations grant no role. *)
+        let permission_tool = match Tool_catalog.registered_metadata export.tool.name with
+          | Some _ -> export.tool.name
+          | None -> "masc_lane_act" in
+        let profile_permits = match profile with
+          | Full -> true
+          | Seat -> TP.is_seat_tool export.tool.name
+          | Managed_agent | Operator_remote -> false in
+        profile_permits && Result.is_ok (Auth.authorize_tool_v2 config.base_path ~agent_name
+          ~token:auth_token ~tool_name:permission_tool)) exports in
+      access, principal, reserved, exports) in
+  match profile with
+  | Managed_agent | Operator_remote ->
+      Ok (Lane_addon_sources.Unauthenticated, Lane_addon_call_context.Anonymous, reserved, [])
+  | Full | Seat ->
+      match auth_token with
+      | None -> permitted ~agent_name:"anonymous" ~principal:Lane_addon_call_context.Anonymous
+          Lane_addon_sources.Unauthenticated
+      | Some token ->
+          match Auth.find_credential_by_token config.base_path ~token with
+          | Error _ when not (Auth.is_auth_enabled config.base_path) ->
+              permitted ~agent_name:"anonymous" ~principal:Lane_addon_call_context.Anonymous
+                Lane_addon_sources.Unauthenticated
+          | Error error -> Error (Masc_domain.masc_error_to_string error)
+          | Ok credential ->
+              let access = match credential.role with
+                | Masc_domain.Admin -> Lane_addon_sources.Operator_configuration
+                | Masc_domain.Worker ->
+                    (match Keeper_meta_store.read_meta_resolved config credential.agent_name with
+                     | Ok (Some (keeper, _)) -> Lane_addon_sources.Keeper keeper
+                     | Ok None | Error _ -> Lane_addon_sources.Unauthenticated)
+                | Masc_domain.Player -> Lane_addon_sources.Unauthenticated in
+              let principal = match access with
+                | Lane_addon_sources.Keeper keeper -> Lane_addon_call_context.Keeper keeper
+                | Operator_configuration | Unauthenticated ->
+                    Lane_addon_call_context.Authenticated_agent credential.agent_name in
+              permitted ~agent_name:credential.agent_name ~principal access
+;;
+
+(* The worker SDK still models 2025 tool execution hints and a legacy [icon].
+   Neither is part of the 2026 core Tool shape. Publish the supported standard
+   fields explicitly; task extensions require separate host negotiation. *)
+let addon_tool_json (tool : Mcp_protocol.Mcp_types.tool) =
+  `Assoc (
+    ["name", `String tool.name; "inputSchema", tool.input_schema]
+    @ TP.maybe_assoc_field "description" (Option.map (fun s -> `String s) tool.description)
+    @ TP.maybe_assoc_field "title" (Option.map (fun s -> `String s) tool.title)
+    @ TP.maybe_assoc_field "outputSchema" tool.output_schema
+    @ TP.maybe_assoc_field "annotations"
+        (Option.map Mcp_protocol.Mcp_types.tool_annotations_to_yojson tool.annotations))
+;;
+
 let handle_list_tools_eio
       ?(profile = Full)
       ?names
@@ -316,6 +380,7 @@ let handle_list_tools_eio
       ?(include_usage = false)
       ?cursor
       ?agent_id
+      ?auth_token
       state
       id
   =
@@ -328,22 +393,23 @@ let handle_list_tools_eio
            (Mcp_server.workspace_config state))
     else None
   in
+  match addon_exports_for_request ~profile ~auth_token state with
+  | Error detail -> make_error_typed ~id Mcp_error_code.Invalid_request detail
+  | Ok (_, _, _, exports) ->
   let tools =
-    TP.tool_schemas_for_profile
-      ~include_hidden
-      state
-      profile
+    (TP.tool_schemas_for_profile ~include_hidden state profile
+      |> List.map (fun (schema : Masc_domain.tool_schema) ->
+          schema.name, TP.tool_json_for_profile ?usage_summary profile schema))
+    @ List.map (fun (export : Lane_addon_runtime.tool_export) ->
+        export.tool.name, addon_tool_json export.tool) exports
     |> (match names with
       | None -> Fun.id
-      | Some wanted ->
-        List.filter (fun (schema : Masc_domain.tool_schema) ->
-          List.mem schema.name wanted))
-    |> List.sort (fun (a : Masc_domain.tool_schema) (b : Masc_domain.tool_schema) ->
-      String.compare a.name b.name)
+      | Some wanted -> List.filter (fun (name, _) -> List.mem name wanted))
+    |> List.sort (fun (a, _) (b, _) -> String.compare a b)
   in
   (match agent_id with
    | Some aid ->
-     let tool_names = List.map (fun (s : Masc_domain.tool_schema) -> s.name) tools in
+     let tool_names = List.map fst tools in
      let profile_str =
        match profile with
        | Full -> "full"
@@ -364,7 +430,7 @@ let handle_list_tools_eio
   | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
   | Ok (page, next_cursor) ->
     let result_fields =
-      [ "tools", `List (List.map (TP.tool_json_for_profile ?usage_summary profile) page) ]
+      [ "tools", `List (List.map snd page) ]
       @ TP.maybe_assoc_field
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
@@ -1009,6 +1075,7 @@ let handle_request
                        in
                        handle_list_tools_eio
                          ~profile:list_profile
+                         ?auth_token
                          ?names
                          ~include_hidden
                          ~include_usage
@@ -1068,6 +1135,60 @@ let handle_request
                         | Operator_remote | Managed_agent | Seat -> profile
                         | Full -> Full
                       in
+                      let addon =
+                        if Config.is_raw_tool_name name then Ok None
+                        else addon_exports_for_request ~profile:call_profile ~auth_token state
+                          |> Result.map (fun (access, principal, reserved, exports) ->
+                              Option.map (fun export -> access, principal, reserved, export)
+                                (List.find_opt (fun (export : Lane_addon_runtime.tool_export) ->
+                                  String.equal export.tool.name name) exports)) in
+                      match addon with
+                      | Error detail -> failed_tool_call_error ~tool_name:name Mcp_error_code.Invalid_request detail
+                      | Ok (Some (access, principal, reserved, export)) ->
+                          let wire_result = ref None in
+                          let execute ~sw:_ ~clock:_ ~workspace_scope ?profile:_ ?mcp_session_id
+                              ?invocation_ref:_ ?auth_token ?(internal_keeper_runtime=false)
+                              ?on_caller_resolved state ~name ~arguments =
+                            let config = workspace_scope.Mcp_server.config in
+                            let identity = Client_registry_eio.get_or_create_identity ?mcp_session_id arguments in
+                            let caller = Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
+                              ~identity ~cached_resolved_agent:(Option.bind mcp_session_id Client_registry_eio.get_resolved_name)
+                              ~auth_token ~internal_keeper_runtime
+                              ~direct_call_authority:Mcp_server_eio_caller_identity.Restricted_profile
+                              ~workspace_initialized:(fun () -> Workspace.is_initialized config)
+                              ~log_mcp_exn:Mcp_server_eio_helpers.log_mcp_exn in
+                            Option.iter (fun observe -> observe caller) on_caller_resolved;
+                            let _ = state in
+                            let start_time = Tool_timing.start () in
+                            match Machine_addon_host.call ~principal ~config ~access ~reserved ~export ~arguments with
+                            | Ok result ->
+                                wire_result := Some result;
+                                let data = Mcp_protocol.Mcp_types.tool_result_to_yojson result in
+                                (match result.is_error with
+                                 | Some true ->
+                                     let class_, effect_disposition = Lane_addon_tool_result.failure result in
+                                     Tool_result.make_err ~tool_name:name ~start_time ~class_ ~effect_disposition
+                                       ?metadata:result._meta ~data (Agent_core.Mcp.text_of_tool_result result)
+                                 | None | Some false -> Tool_result.make_ok ~tool_name:name ~start_time ~data ())
+                            | Error (Lane_addon_runtime.Host_refusal refusal) ->
+                                let class_, detail = match refusal with
+                                  | Lane_addon_call_context.Rejected detail | Activity_disabled detail -> Tool_result.Workflow_rejection, detail
+                                  | Unavailable detail | Activity_unobserved detail -> Tool_result.Runtime_failure, detail in
+                                Tool_result.make_err ~tool_name:name ~start_time ~class_
+                                  ~effect_disposition:Tool_result.Proven_pre_effect detail
+                            | Error (Lane_addon_runtime.Unavailable detail) ->
+                                Tool_result.make_err ~tool_name:name ~start_time
+                                  ~class_:Tool_result.Workflow_rejection
+                                  ~effect_disposition:Tool_result.Proven_pre_effect detail
+                            | Error (Lane_addon_runtime.Outcome_unknown detail) ->
+                                Tool_result.make_err ~tool_name:name ~start_time
+                                  ~class_:Tool_result.Runtime_failure detail in
+                          Mcp_server_eio_call_tool.handle_call_tool_eio
+                            ~execute_tool_eio:execute ~maybe_emit_resource_notifications
+                            ~broadcast_tools_list_changed ~wire_result:(fun () -> !wire_result)
+                            ~sw ~clock ~profile:call_profile ?mcp_session_id ?auth_token
+                            ~internal_keeper_runtime state id call
+                      | Ok None ->
                       if
                         not
                           (TP.tool_allowed_in_profile state

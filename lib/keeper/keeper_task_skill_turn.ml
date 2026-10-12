@@ -1,4 +1,5 @@
 type error =
+  | Tool_surface_unavailable of string
   | Reference_resolution_failed of
       { reference : Skill_reference.t
       ; error : Skill_catalog_snapshot.reference_resolution_error
@@ -20,6 +21,7 @@ type unprojectable =
 type t =
   { selected : selected list
   ; unprojectable : unprojectable list
+  ; descriptor_authority : Keeper_tool_descriptor.t list option
   }
 
 type partition =
@@ -29,20 +31,21 @@ type partition =
 
 type Agent_core.Error.carrier += Task_skill_resolution_error of error
 
-(* Only a reference the frozen snapshot does not hold stops the turn. A held
+(* An unavailable Tool authority or a reference absent from the frozen snapshot
+   stops setup. A held
    entry the catalog cannot project is a known Skill that is unavailable this
    turn (docs/SKILLS-FLOW.md section 2a); today that is an instruction body
    over the inline read boundary (#39138). Failing setup for it would stop
    every turn of a Keeper whose current or held Task pins one, including turns
    about other Tasks. *)
-let resolve_with_task_ids ~snapshot ~task_ids references =
+let resolve_with_task_ids ?descriptors ~snapshot ~task_ids references =
   let rec loop resolved unprojectable = function
-    | [] -> Ok { selected = List.rev resolved; unprojectable = List.rev unprojectable }
+    | [] -> Ok { selected = List.rev resolved; unprojectable = List.rev unprojectable; descriptor_authority = descriptors }
     | reference :: rest ->
       (match Skill_catalog_snapshot.resolve_reference snapshot reference with
        | Error error -> Error (Reference_resolution_failed { reference; error })
        | Ok entry ->
-         (match Keeper_skill_catalog.project_entry_or_fallback snapshot entry with
+         (match Keeper_skill_catalog.project_entry_or_fallback ?descriptors snapshot entry with
           | Keeper_skill_catalog.Projected skill ->
             loop
               ({ reference; skill; diagnostic = None; task_ids } :: resolved)
@@ -70,7 +73,7 @@ let resolve_for_task ~snapshot ~task_id references =
   resolve_with_task_ids ~snapshot ~task_ids:[ task_id ] references
 ;;
 
-let empty = { selected = []; unprojectable = [] }
+let empty = { selected = []; unprojectable = []; descriptor_authority = None }
 
 (* One row per exact reference, carrying every Task id that pinned it. *)
 let merge_rows ~reference ~task_ids ~with_task_ids rows =
@@ -96,7 +99,14 @@ let merge_rows ~reference ~task_ids ~with_task_ids rows =
 ;;
 
 let merge selections =
-  { selected =
+  let descriptor_authority = List.fold_left (fun authority selection ->
+    match authority, selection.descriptor_authority with
+    | None, other | other, None -> other
+    | Some first, Some next when List.length first = List.length next
+        && List.for_all2 ( == ) first next -> authority
+    | Some _, Some _ -> invalid_arg "Task selections have different frozen Tool authority") None selections in
+  { descriptor_authority
+  ; selected =
       merge_rows
         ~reference:(fun (row : selected) -> row.reference)
         ~task_ids:(fun (row : selected) -> row.task_ids)
@@ -136,6 +146,26 @@ let resolve_observations ~snapshot ~current_task ~held_task_skills =
   loop [] (current @ held)
 ;;
 
+let descriptors selection = selection.descriptor_authority
+
+let with_descriptors ~descriptors ~snapshot selection =
+  let requests = List.map (fun (row : selected) -> row.reference,row.task_ids) selection.selected
+    @ List.map (fun (row : unprojectable) -> row.reference,row.task_ids) selection.unprojectable in
+  let rec loop selections = function
+    | [] -> Ok { (merge (List.rev selections)) with descriptor_authority = Some descriptors }
+    | (reference, task_ids) :: rest ->
+        Result.bind (resolve_with_task_ids ~descriptors ~snapshot ~task_ids [reference])
+          (fun selected -> loop (selected :: selections) rest) in
+  loop [] requests
+
+let resolve_live_observations ~config ~keeper_name ~snapshot ~current_task ~held_task_skills =
+  let exports = (Keeper_lane_addon_runtime.snapshot ~config ~keeper_name).exports in
+  let descriptors = Keeper_tool_descriptor.all_descriptors ()
+    @ List.map Keeper_lane_addon_descriptor.create exports in
+  Result.bind (resolve_observations ~snapshot ~current_task ~held_task_skills)
+    (with_descriptors ~descriptors ~snapshot)
+;;
+
 let unprojectable_to_string (row : unprojectable) =
   let pinned_by =
     match row.task_ids with
@@ -159,6 +189,7 @@ let unprojectable_to_yojson (row : unprojectable) =
 ;;
 
 let error_code = function
+  | Tool_surface_unavailable _ -> "lane_addon_surface_unavailable"
   | Reference_resolution_failed
       { error = Skill_catalog_snapshot.Identity_not_found _; _ } ->
     "task_skill_identity_not_found"
@@ -172,6 +203,7 @@ let reference_json reference =
 ;;
 
 let error_to_string = function
+  | Tool_surface_unavailable detail -> "Lane Add-on tool surface unavailable: " ^ detail
   | Reference_resolution_failed
       { reference; error = Skill_catalog_snapshot.Identity_not_found _ } ->
     Printf.sprintf "Task Skill identity is absent from the frozen snapshot: %s"
@@ -270,14 +302,18 @@ let exact_task_surfaces
       ~current_task
       ~held_task_skills
   =
-  let global, _ = Keeper_skill_catalog.of_snapshot snapshot in
+  let descriptors = match selection.descriptor_authority with
+    | Some descriptors -> descriptors
+    | None -> Keeper_tool_descriptor.all_descriptors () in
+  let global, _ = Keeper_skill_catalog.of_snapshot ~descriptors snapshot in
   let projection =
-    Keeper_capability_surface.create
+    Keeper_capability_surface.create_with_descriptors
+      ~tool_descriptors:descriptors
       ~tool_deny
       ~sandbox_profile
       ~skill_names
       ~global_skill_catalog:global
-      ~skill_inventory:(Keeper_skill_inventory.of_snapshot snapshot)
+      ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors snapshot)
       ~task_skills:(skills selection)
     |> Keeper_capability_surface.skill_projection
   in

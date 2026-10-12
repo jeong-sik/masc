@@ -807,7 +807,7 @@ beanie = %d
     let item = match Keeper_portrait_item.of_id id with Some item -> item | None -> fail "catalog item missing" in
     let expected = Keeper_portrait_item.preview item starting in
     let call ?(slot="head") item = Keeper_candle_tools.handle ~operation:Keeper_candle_tools.Equip
-      ~base_path ~keeper_name:keeper ~tool_name:"keeper_candle_equip" ~start_time:(Tool_timing.start ())
+      ~base_path ~keeper_name:keeper ~keeper_names:(Ok []) ~tool_name:"keeper_candle_equip" ~start_time:(Tool_timing.start ())
       ~args:(`Assoc ["slot", `String slot;"item",`String item]) in
     let accepted = function Tool_result.Completed _ as result -> Tool_result.data result
       | other -> fail (Tool_result.message other) in

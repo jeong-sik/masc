@@ -290,12 +290,23 @@ let prepare_with_store_sync ~sync_store ~account_home =
 let prepare ~account_home =
   prepare_with_store_sync ~sync_store:sync_directory ~account_home
 
+let keeper_identity ~keeper_name ~account_home =
+  digest (Yojson.Safe.to_string (`List [ `String keeper_name; `String account_home ]))
+;;
+
+let keeper_identity_dir ~runtime_root ~keeper_name ~account_home =
+  List.fold_left
+    Filename.concat
+    runtime_root
+    [ "official-clients"; "muse"; keeper_identity ~keeper_name ~account_home ]
+;;
+
 let prepare_native_workspace ~runtime_root ~keeper_name ~account_home =
   let* account_home = Runtime_account_home.of_string account_home
     |> Result.map_error (fun detail -> Invalid_account_home detail) in
   if Filename.is_relative runtime_root then unavailable "runtime root must be absolute"
   else protect (fun () ->
-    let identity = digest (Yojson.Safe.to_string (`List [ `String keeper_name; `String account_home ])) in
+    let identity = keeper_identity ~keeper_name ~account_home in
     Eio_guard.run_in_systhread ~label:"muse-native-workspace" (fun () ->
       directories runtime_root [ "official-clients", true; "muse", true; identity, true; "workspace", true ]))
 

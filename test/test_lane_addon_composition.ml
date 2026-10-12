@@ -63,15 +63,17 @@ let with_fixture ?(acquire=Lane_addon_sources.acquire) ?produce_package ?(produc
                 directory (Runtime.configuration_directory config);
               let received = Hashtbl.create 4 and stopped = ref [] in
               let backend : Runtime.For_testing.backend = {
-                start=(fun ~sw:_ ~instance_id ~package ~binding:_ ~on_created ->
+                start=(fun ~sw:_ ~state_owner:_ ~instance_id ~package ~binding:_ ~on_created ->
                   let connection : Runtime.For_testing.connection = {
                     container_id=Store.digest instance_id;
+                    exported_tools = (fun () -> []);
+                    call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));
                     action_schema = (fun () -> None);
                     act = (fun ~arguments:_ -> Error "read-only fixture");
                     observe=(fun ~binding ~sources ->
                       Hashtbl.replace received instance_id sources;
                       Ok (match produce_package with
-                        | Some produce_package -> produce_package package ~binding ~sources
+                        | Some produce_package -> produce_package ~instance_id package ~binding ~sources
                         | None -> produce ~binding ~sources));
                     stop=(fun () ->
                       stop_attempts := instance_id :: !stop_attempts;
@@ -80,7 +82,7 @@ let with_fixture ?(acquire=Lane_addon_sources.acquire) ?produce_package ?(produc
                   on_created connection; Ok connection);
                 image_ready=(fun ~package:_ -> Ok ());
                 acquire;
-                recover_stop=(fun ~instance_id:_ ~container_id:_ -> Ok ())} in
+                recover_stop=(fun ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ())} in
               Runtime.For_testing.with_backend backend (fun () ->
                 (* Exceptional exits cancel the Eio switch before the outer
                    cleanup removes this fresh directory. Normal exits retire
@@ -129,11 +131,11 @@ let test_pending_notification_does_not_repeat_same_completed_input () =
   let entered,enter = Eio.Promise.create () and released,release = Eio.Promise.create () in
   let acquisitions = ref 0 and calls = ref 0 in
   let consumer binding = member "value" binding=`String "judge" in
-  let acquire ~access ~store ~package ~resolve_lane_output ~binding =
+  let acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~binding =
     if consumer binding then (
       incr acquisitions;
       if !acquisitions=1 then (Eio.Promise.resolve enter (); Eio.Promise.await released));
-    Lane_addon_sources.acquire ~access ~store ~package ~resolve_lane_output ~binding in
+    Lane_addon_sources.acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~binding in
   let produce ~binding ~sources:_ = if consumer binding then incr calls; output in
   with_fixture ~acquire ~produce (fun clock config root directory _received _stopped ->
     let producer_manifest = manifest ~name:"producer" root in
@@ -517,13 +519,51 @@ print(json.dumps(ProtocolCase().call("msx-observer", json.loads(sys.argv[2]), js
     | Unix.WEXITED 0 -> unwrap (Types.output_of_json (Yojson.Safe.from_string bytes))
     | _ -> fail "MSX observer stdio process failed")
 
+(* An msx_capture source reads the shared worker that exports masc_msx_screen.
+   That worker is the shipped MSX worker server over in-process MCP pipes. *)
+let with_msx_worker ~clock ~base_path f =
+  Eio.Switch.run (fun sw ->
+    let request_source, request_sink = Eio_unix.pipe sw in
+    let response_source, response_sink = Eio_unix.pipe sw in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      Mcp_protocol_eio.Server.run (Msx_addon_worker.create ~base_path ())
+        ~stdin:request_source ~stdout:response_sink ~clock ();
+      `Stop_daemon);
+    let client = Mcp_protocol_eio.Client.create ~stdin:response_source ~stdout:request_sink ~clock () in
+    ignore (unwrap (Mcp_protocol_eio.Client.initialize client
+      ~client_name:"composition-machine" ~client_version:"1"));
+    f client)
+
+(* The worker's lane_observe answer, through the host conversions
+   Lane_addon_worker applies before committing it: packet decode stores the
+   screen artifact, then the input-history transfer becomes ledger evidence. *)
+let msx_worker_output ~store ~history ~instance_id ~max_response_bytes client =
+  let call ~name ~arguments = Mcp_protocol_eio.Client.call_tool client ~name ~arguments () in
+  let result = unwrap (call ~name:"lane_observe"
+    ~arguments:(`Assoc ["binding", `Assoc []; "sources", `List []])) in
+  let packet = match result.Mcp_protocol.Mcp_types.structured_content with
+    | Some packet -> packet | None -> fail "MSX worker lane_observe has no structuredContent" in
+  let output = unwrap (Lane_addon_packet.decode ~store packet) in
+  unwrap (Lane_addon_machine_history.retain history ~store ~instance_id ~max_response_bytes ~call output)
+
 let test_native_msx_history_crosses_worker_freeze_and_detach () =
-  with_fixture ~produce:msx_observer (fun clock config root _directory _received _stopped ->
+  let machine = ref None and history = Lane_addon_machine_history.create () in
+  let produce_package ~instance_id (package : Types.package) ~binding ~sources =
+    if List.mem "masc_msx_screen" package.exported_tools then
+      match !machine with
+      | Some (store, client) -> msx_worker_output ~store ~history ~instance_id
+          ~max_response_bytes:package.resources.max_reply_bytes client
+      | None -> fail "MSX worker observed before its client connected"
+    else msx_observer ~binding ~sources in
+  with_fixture ~produce_package (fun clock config root _directory _received _stopped ->
     let msx = function Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
     let ledger_dir = Filename.concat root "native-machine" in
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
     Fun.protect ~finally:(fun () ->
       Msx_lane.install_activity_observer None;
       ignore (Msx_lane.eject ())) (fun () ->
+      with_msx_worker ~clock ~base_path:root (fun client ->
+      machine := Some (store, client);
       Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
       ignore (msx (Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None));
       let press who name =
@@ -534,16 +574,27 @@ let test_native_msx_history_crosses_worker_freeze_and_detach () =
       let expected = List.rev before.input_ledger
         |> List.map (fun entry -> Yojson.Safe.to_string (Msx_lane.entry_json entry) ^ "\n")
         |> String.concat "" in
+      (* The shipped msx-machine package declares this reply bound; the screen
+         artifact it publishes is read back under it. *)
+      let machine_manifest = manifest ~name:"msx-machine" ~max_reply_bytes:4194304 root in
+      write machine_manifest (In_channel.with_open_bin machine_manifest In_channel.input_all
+        ^ "\n[world.tools]\nexport = [\"masc_msx_screen\"]\n");
+      let machine_id = dispatch config Runtime.Attach ["manifest_path", `String machine_manifest;
+        "run_id", `String "native-machine"; "binding", `Assoc ["sources", `List []]]
+        |> text "instance_id" in
+      await clock (fun () -> let current = instance config machine_id in
+        member "observation_seq" current = `Int 1 && text "kind" (member "phase" current) = "attached");
       let id = dispatch config Runtime.Attach ["manifest_path", `String (manifest root);
         "run_id", `String "native-history"; "binding", `Assoc ["machine_id", `String "workspace-msx";
           "sources", `List [`Assoc ["kind", `String "msx_capture"; "source_id", `String "native"]]]]
         |> text "instance_id" in
       await clock (fun () -> member "observation_seq" (instance config id) = `Int 1);
-      let row = inspect config |> list "rows" |> List.hd in
+      (* The machine worker publishes its own screen row; read the observer's. *)
+      let row = inspect config |> list "rows" |> List.find (fun row ->
+        String.starts_with ~prefix:(id ^ "/") (text "lane_id" row)) in
       let reference = unwrap (Types.evidence_of_json (row |> member "fields" |> member "input_ledger" |> member "evidence")) in
       check string "worker preserves exact machine incarnation" before.incarnation
         (row |> member "fields" |> text "machine_incarnation");
-      let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
       check string "native input records survive the worker" expected (unwrap (Store.read_jsonl store reference));
       let selected = text "id" row in
       let args = ["instance_id", `String id; "row_ids", `List [`String selected]] in
@@ -553,6 +604,9 @@ let test_native_msx_history_crosses_worker_freeze_and_detach () =
       await clock (fun () -> member "observation_seq" (instance config id) = `Int 2);
       ignore (dispatch config Runtime.Detach ["instance_id", `String id]);
       await clock (fun () -> text "kind" (member "phase" (instance config id)) = "detached");
+      (* The worker client closes with this scope; no later observation may use it. *)
+      ignore (dispatch config Runtime.Detach ["instance_id", `String machine_id]);
+      await clock (fun () -> text "kind" (member "phase" (instance config machine_id)) = "detached");
       Runtime.For_testing.reset ();
       ignore (dispatch config Runtime.Evidence args);
       let published = unwrap (Store.publish_for_keeper ~base_path:root store frozen) in
@@ -584,7 +638,7 @@ let test_native_msx_history_crosses_worker_freeze_and_detach () =
         else reconstruct (count - 1) (unwrap (Types.evidence_of_json (member "previous" node)))
             (text "record" node :: records) in
       check string "full original history remains readable after Detach and Lane-store removal"
-        expected (reconstruct before.input_count reference [])))
+        expected (reconstruct before.input_count reference []))))
 
 let fusion_package (package : Types.package) ~binding ~sources =
   let tests = Filename.concat package.directory "../tests" in
@@ -619,7 +673,7 @@ print(json.dumps(output))
     | _ -> fail "Fusion package MCP stdio observation failed")
 
 let test_native_fusion_report_is_readable_after_detach () =
-  let produce_package (package : Types.package) ~binding ~sources =
+  let produce_package ~instance_id:_ (package : Types.package) ~binding ~sources =
     (* The generic manifest names its file separately from its package id. *)
     if package.id = "generic-package" then output
     else fusion_package package ~binding ~sources in
@@ -880,26 +934,26 @@ let test_private_visibility_crosses_declared_output_graph () = with_fixture (fun
     let stored = view owner |> list "instances" |> List.find (fun row -> text "instance_id" row = id) in
     check string "durable policy retains authoritative Fusion owner through graph" owner
       (stored |> member "visibility" |> text "keeper")) ids;
-  let document caller access = Lane_addon_runtime.read_declaration ~caller ~access ~config
+  let document access = Lane_addon_runtime.read_declaration ~access ~config
     (`Assoc ["source_path",`String source_path]) in
   check bool "owner can read own saved declaration" true
-    (Result.is_ok (document owner (Lane_addon_sources.Keeper owner)));
+    (Result.is_ok (document (Lane_addon_sources.Keeper owner)));
   check bool "foreign declaration read is refused" true
-    (Result.is_error (document "foreign" (Lane_addon_sources.Keeper "foreign")));
+    (Result.is_error (document (Lane_addon_sources.Keeper "foreign")));
   let new_source = Printf.sprintf {|id="keeper-saved"
 run_id="world"
 manifest_path=%S
 [binding]
 sources=%s
 |} package (fusion_source run_id) in
-  let save caller access = Lane_addon_runtime.save_declaration ~caller ~access ~config
+  let save access = Lane_addon_runtime.save_declaration ~access ~config
     (`Assoc ["mode",`String "create";"file_name",`String "keeper-saved.toml";"source_text",`String new_source]) in
-  check bool "unverified attribution cannot save an owned-looking Fusion declaration" true
-    (Result.is_error (save owner Lane_addon_sources.Unauthenticated));
+  check bool "unauthenticated access cannot save an owned-looking Fusion declaration" true
+    (Result.is_error (save Lane_addon_sources.Unauthenticated));
   check bool "foreign Keeper cannot persist a private declaration" true
-    (Result.is_error (save "foreign" (Lane_addon_sources.Keeper "foreign")));
+    (Result.is_error (save (Lane_addon_sources.Keeper "foreign")));
   check bool "actual owner can save the configuration" true
-    (Result.is_ok (save owner (Lane_addon_sources.Keeper owner)));
+    (Result.is_ok (save (Lane_addon_sources.Keeper owner)));
   reconcile config directory;
   let saved = active config "keeper-saved" |> text "instance_id" in
   check bool "operator reconciliation preserves saving Keeper read access" true
@@ -908,34 +962,34 @@ sources=%s
   let saved_path = Filename.concat directory "keeper-saved.toml" in
   write saved_path "id = [";
   reconcile config directory;
-  let saved_document caller access = Lane_addon_runtime.read_declaration ~caller ~access ~config
+  let saved_document access = Lane_addon_runtime.read_declaration ~access ~config
     (`Assoc ["source_path",`String saved_path]) in
-  let broken = saved_document owner (Lane_addon_sources.Keeper owner) in
+  let broken = saved_document (Lane_addon_sources.Keeper owner) in
   let current_revision = Store.digest "id = [" in
   check bool "prior ownership does not disclose unadmitted malformed bytes" true
     (Result.is_error broken);
   check bool "foreign Keeper cannot read malformed private bytes" true
-    (Result.is_error (saved_document "foreign" (Lane_addon_sources.Keeper "foreign")));
-  let repair caller access = Lane_addon_runtime.save_declaration ~caller ~access ~config
+    (Result.is_error (saved_document (Lane_addon_sources.Keeper "foreign")));
+  let repair access = Lane_addon_runtime.save_declaration ~access ~config
     (`Assoc ["mode",`String "save";"file_name",`String "keeper-saved.toml";
       "expected_source_revision",`String current_revision;
       "source_text",`String new_source]) in
   check bool "foreign Keeper cannot repair another owner's malformed declaration" true
-    (Result.is_error (repair "foreign" (Lane_addon_sources.Keeper "foreign")));
+    (Result.is_error (repair (Lane_addon_sources.Keeper "foreign")));
   let unowned_path = Filename.concat directory "unowned.toml" in
   write unowned_path "id = [";
   check bool "malformed file without an applied owner grants no raw read" true
-    (Result.is_error (Lane_addon_runtime.read_declaration ~caller:owner
+    (Result.is_error (Lane_addon_runtime.read_declaration
       ~access:(Lane_addon_sources.Keeper owner) ~config
       (`Assoc ["source_path",`String unowned_path])));
   check bool "malformed file without an applied owner grants no replacement" true
-    (Result.is_error (Lane_addon_runtime.save_declaration ~caller:owner
+    (Result.is_error (Lane_addon_runtime.save_declaration
       ~access:(Lane_addon_sources.Keeper owner) ~config
       (`Assoc ["mode",`String "save";"file_name",`String "unowned.toml";
         "expected_source_revision",`String (Lane_addon_store.digest "id = [");
         "source_text",`String new_source])));
   check bool "applied owner can commit corrected declaration with exact CAS" true
-    (Result.is_ok (repair owner (Lane_addon_sources.Keeper owner)));
+    (Result.is_ok (repair (Lane_addon_sources.Keeper owner)));
   check string "repair wrote the authorized bytes" new_source
     (In_channel.with_open_bin saved_path In_channel.input_all))
 
@@ -1038,7 +1092,7 @@ manifest_path=%S
 [binding]
 sources=%s
 |} package (fusion_source run) in
-    let save ?revision bytes = Lane_addon_runtime.save_declaration ~caller:owner
+    let save ?revision bytes = Lane_addon_runtime.save_declaration
       ~access:(Lane_addon_sources.Keeper owner) ~config (`Assoc ([
         "mode",`String (if Option.is_none revision then "create" else "save");
         "file_name",`String "owned.toml"; "source_text",`String bytes] @
@@ -1046,7 +1100,7 @@ sources=%s
     let require_document = function Ok value -> value | Error error -> fail error.Lane_addon_declaration.message in
     ignore (save (source old_run) |> require_document);
     let path = Filename.concat directory "owned.toml" in
-    let read keeper = Lane_addon_runtime.read_declaration ~caller:keeper
+    let read keeper = Lane_addon_runtime.read_declaration
       ~access:(Lane_addon_sources.Keeper keeper) ~config (`Assoc ["source_path",`String path]) in
     let operator_path = declare directory package "operator-created" (fusion_source old_run) in
     reconcile config directory;
@@ -1078,7 +1132,7 @@ sources=%s
     let malformed = "id = \"unfinished" in
     write operator_path malformed;
     check bool "operator-created malformed replacement is not disclosed to prior owner" true
-      (Result.is_error (Lane_addon_runtime.read_declaration ~caller:owner
+      (Result.is_error (Lane_addon_runtime.read_declaration
         ~access:(Lane_addon_sources.Keeper owner) ~config
         (`Assoc ["source_path",`String operator_path])));
     write path malformed;
@@ -1113,7 +1167,7 @@ let test_pending_document_owner_rejects_replaced_source () =
     let store_root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
     unwrap (Lane_addon_document_owner.prepare ~root:store_root ~source_path:path ~keeper:"owner"
       ~prior_revision:None ~proposed_revision:(Store.digest bytes));
-    let read () = Lane_addon_runtime.read_declaration ~caller:"owner"
+    let read () = Lane_addon_runtime.read_declaration
       ~access:(Lane_addon_sources.Keeper "owner") ~config (`Assoc ["source_path",`String path]) in
     check bool "pending admission authorizes only exact proposed bytes" true (Result.is_ok (read ()));
     write path (bytes ^ "\nforeign = true\n");

@@ -25,11 +25,7 @@ let with_clean_model_catalog_override f =
    lookup succeeded — is what separates "gpt-5.6-sol found its own row" from
    "gpt-5.6-sol silently landed on gpt-5". *)
 let subscription_model_rows =
-  [ "claude-opus-5", "claude-opus-5"
-    (* Opus 5.5 needs a row of its own for the same reason as Fable 5.1 below:
-       5.5 reads cached tokens at 0.05x the base input price and 5 reads them
-       at 0.1x, and it refuses forced tool use where 5 takes it. *)
-  ; "claude-opus-5-5", "claude-opus-5-5"
+  [ "claude-opus-5-5", "claude-opus-5-5"
   ; "claude-fable-5", "claude-fable-5"
     (* Fable 5.1 needs a row of its own even though "claude-fable-5" prefixes
        it: 5.1 reads cached tokens at 0.025x the base input price and 5 reads
@@ -40,6 +36,7 @@ let subscription_model_rows =
     (* Sonnet 5.5 refuses forced tool use where sonnet-5 takes it, and
        "claude-sonnet-5" prefixes it, so it needs its own row. *)
   ; "claude-sonnet-5-5", "claude-sonnet-5-5"
+  ; "claude-haiku-5-5", "claude-haiku-5-5"
   ; "gpt-5.6-sol", "gpt-5.6-sol"
   ; "gpt-5.6-terra", "gpt-5.6-terra"
   ; "gpt-5.6-luna", "gpt-5.6"
@@ -59,6 +56,168 @@ let subscription_model_rows =
   ; "gemini-3.1-pro-high", "gemini-3.1-pro"
   ; "gpt-oss-120b-medium", "gpt-oss-120b"
   ]
+;;
+
+(* Haiku 5.5 departs from the "anthropic" base in three places, and each one is
+   a request the API answers with 400 when the row is wrong: sampling fields,
+   the shape that turns thinking off, and the effort that shape may carry. Its
+   price is the fourth: the model is priced by prompt length and a row holds one
+   rate, so the row states none.
+   https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide *)
+let test_haiku_5_5_row_reaches_the_wire () =
+  let module Backend = Llm_provider.Backend_anthropic in
+  let module Effort = Llm_provider.Reasoning_effort in
+  let model_id = "claude-haiku-5-5" in
+  let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Haiku 5.5 wire" in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let messages = [ Llm_provider.Types.make_message ~role:User [ Text "hello" ] ] in
+    let config ?temperature ?top_p ?top_k ?enable_thinking ?reasoning_effort () =
+      Llm_provider.Provider_config.make
+        ~kind:Anthropic ~model_id
+        ~base_url:"https://api.anthropic.com" ~max_tokens:1024
+        ?temperature ?top_p ?top_k ?enable_thinking ?reasoning_effort ()
+    in
+    let body config = Backend.build_request ~config ~messages () |> Yojson.Safe.from_string in
+    let member name body = Yojson.Safe.Util.member name body in
+    let thinking body = member "thinking" body in
+    let sampled = body (config ~temperature:0.2 ~top_p:0.5 ~top_k:40 ()) in
+    check bool "temperature is not sent" true (member "temperature" sampled = `Null);
+    check bool "top_p is not sent" true (member "top_p" sampled = `Null);
+    check bool "top_k is not sent" true (member "top_k" sampled = `Null);
+    check (option bool) "top_k is not offered" (Some false)
+      (Option.map
+         (fun (caps : Capabilities.capabilities) -> caps.supports_top_k)
+         (Capabilities.for_model_id_catalog model_id));
+    check bool "default leaves adaptive choice to the provider" true
+      (thinking (body (config ())) = `Null);
+    check bool "thinking on asks for adaptive" true
+      (thinking (body (config ~enable_thinking:true ()))
+       = `Assoc [ "type", `String "adaptive" ]);
+    let off = body (config ~enable_thinking:false ()) in
+    check bool "thinking off sends disabled" true
+      (thinking off = `Assoc [ "type", `String "disabled" ]);
+    check bool "the disabled request names no effort" true
+      (member "output_config" off = `Null);
+    List.iter (fun effort ->
+      let disabled = config ~enable_thinking:false ~reasoning_effort:effort () in
+      let check_wire wire =
+        check bool "explicit low-high effort keeps disabled thinking" true
+          (thinking wire = `Assoc ["type", `String "disabled"]);
+        check string "explicit effort reaches output config" (Effort.to_string effort)
+          (Yojson.Safe.Util.(member "output_config" wire |> member "effort" |> to_string)) in
+      check_wire (body disabled);
+      check_wire (Backend.build_count_tokens_request ~config:disabled ~messages ()
+                  |> Yojson.Safe.from_string);
+      let artifact = match Backend.build_request_artifact_with_thinking_control
+        ~anthropic_thinking_control:(Some Capabilities.Anthropic_adaptive_disabled_through_high)
+        ~config:disabled ~messages () with
+        | Ok value -> value
+        | Error _ -> fail "disabled effort artifact was refused" in
+      check_wire (Backend.request_payload artifact |> Yojson.Safe.from_string))
+      [Effort.Low; Effort.Medium; Effort.High];
+    (* The API takes [disabled] at high effort or below and answers 400 above
+       it, so these two must not reach the wire. *)
+    List.iter
+      (fun effort ->
+        check bool
+          (Printf.sprintf "thinking off at %s is refused" (Effort.to_string effort))
+          true
+          (match body (config ~enable_thinking:false ~reasoning_effort:effort ()) with
+           | _ -> false
+           | exception Invalid_argument _ -> true))
+      [ Effort.XHigh; Effort.Max ];
+    check bool "no flat price is stated" true
+      (Option.is_none (Llm_provider.Pricing.pricing_for_model_opt model_id)))
+;;
+
+(* Every entry point reaches the shared Anthropic serializer: ordinary and
+   streaming inspection, plus the explicit-policy artifact used by exact
+   generation/counting. Rejection preserves the caller's history. *)
+let test_haiku_prefill_admission () =
+  let module P = Llm_provider in
+  let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Haiku prefill" in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let user = P.Types.make_message ~role:User [ Text "hello" ] in
+    let assistant = P.Types.make_message ~role:Assistant [ Text "Continue:" ] in
+    let expected_refusal =
+      "Backend_anthropic.build_request: model \"claude-haiku-5-5\" does not accept a final assistant prefill; end messages with a user turn" in
+    let prefill = [user; assistant] in
+    let continued = prefill @ [user] in
+    let config ?enable_thinking ?(response_format = P.Types.Off)
+        ?(kind = P.Provider_config.Anthropic)
+        ?(model_id = "claude-haiku-5-5") () =
+      P.Provider_config.make ~kind ~model_id
+        ~base_url:"https://api.anthropic.com" ~max_tokens:1024
+        ?enable_thinking ~response_format () in
+    List.iter (fun enable_thinking ->
+      List.iter (fun response_format ->
+      let config = config ?enable_thinking ~response_format () in
+      List.iter (fun stream ->
+        check bool "prefill rejected before ordinary/streaming request is emitted" true
+          (match P.Complete.inspect_serialized_request ~stream ~config ~messages:prefill () with
+           | Error (P.Http_client.AcceptRejected {reason}) -> String.equal reason expected_refusal
+           | Ok _ | Error _ -> false);
+        check bool "user-ending history with previous assistant remains accepted" true
+          (Result.is_ok
+            (P.Complete.inspect_serialized_request ~stream ~config ~messages:continued ())))
+        [false; true];
+      check bool "exact shared serializer artifact rejects the same prefill" true
+        (match P.Backend_anthropic.build_request_artifact_with_thinking_control
+          ~stream:false ~anthropic_thinking_control:(Some Capabilities.Anthropic_adaptive_default)
+          ~config ~messages:prefill () with
+         | _ -> false
+         | exception Invalid_argument reason -> String.equal reason expected_refusal);
+      check bool "counting cannot admit a refused completion" true
+        (match P.Backend_anthropic.build_count_tokens_request ~config ~messages:prefill () with
+         | _ -> false
+         | exception Invalid_argument reason -> String.equal reason expected_refusal)) [P.Types.Off; JsonMode]) [None; Some false];
+    List.iter (fun config ->
+      List.iter (fun stream ->
+        check bool "other model and Kimi continuation behavior is preserved" true
+          (Result.is_ok
+            (P.Complete.inspect_serialized_request ~stream ~config ~messages:prefill ())))
+        [false; true])
+      [config ~model_id:"claude-haiku-4-5" ();
+       config ~kind:P.Provider_config.Kimi ~model_id:"kimi-k2" ()];
+    check (list string) "refusal never rewrites assistant content" ["Continue:"]
+      (List.filter_map (function P.Types.Text text -> Some text | _ -> None) assistant.content))
+;;
+
+let test_documented_claude_prefill_exclusions () =
+  let module P = Llm_provider in
+  let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Claude prefill exclusions" in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let user = P.Types.make_message ~role:User [Text "hello"] in
+    let assistant = P.Types.make_message ~role:Assistant [Text "Continue:"] in
+    let prefill = [user; assistant] in
+    let config model_id = P.Provider_config.make ~kind:Anthropic ~model_id
+      ~base_url:"https://api.anthropic.com" ~max_tokens:1024 () in
+    List.iter (fun model_id ->
+      let config = config model_id in
+      let expected = Printf.sprintf
+        "Backend_anthropic.build_request: model %S does not accept a final assistant prefill; end messages with a user turn"
+        model_id in
+      check (option bool) (model_id ^ " catalog excludes prefill") (Some false)
+        (Option.map (fun (caps : Capabilities.capabilities) -> caps.supports_assistant_prefill)
+           (Capabilities.for_model_id_catalog model_id));
+      List.iter (fun stream ->
+        check bool (model_id ^ " refuses final assistant before dispatch") true
+          (match P.Complete.inspect_serialized_request ~stream ~config ~messages:prefill () with
+           | Error (P.Http_client.AcceptRejected {reason}) -> String.equal reason expected
+           | Ok _ | Error _ -> false);
+        check bool (model_id ^ " retains accepted user-ending history") true
+          (Result.is_ok (P.Complete.inspect_serialized_request ~stream ~config
+            ~messages:(prefill @ [user]) ()))) [false; true])
+      ["claude-fable-5"; "claude-fable-5-1"; "claude-mythos-5"; "claude-mythos-preview";
+       "claude-opus-5-5"; "claude-sonnet-5"; "claude-sonnet-5-5"];
+    List.iter (fun model_id ->
+      check bool (model_id ^ " keeps existing default admission") true
+        (Result.is_ok (P.Complete.inspect_serialized_request ~stream:false
+          ~config:(config model_id) ~messages:prefill ())))
+      ["claude-haiku-4-5"; "unlisted-model"])
 ;;
 
 let test_subscription_models_resolve_their_own_rows () =
@@ -134,7 +293,7 @@ let test_sonnet_5_5_thinking_modes_reach_the_wire () =
    row under test: a comparison that sources both sides from the catalog passes
    whatever the catalog happens to say, including a row that admits nothing. *)
 let subscription_model_efforts =
-  [ None, "claude-opus-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
+  [ None, "claude-opus-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
     (* Probed on /v1/responses 2026-09-07: sol, terra and luna each answer 400
        for "minimal" -- the message names the model -- and 200 for none, low,
        medium, high, xhigh and max. The list this replaces came from the
@@ -160,6 +319,7 @@ let subscription_model_efforts =
        effort parameter set (checked 2026-09-23), as the other Claude rows. *)
   ; None, "claude-opus-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "claude-sonnet-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "claude-haiku-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "gpt-6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ; "ultra" ]
   ; None, "gpt-6.1-sol", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-6-astra", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
@@ -224,12 +384,12 @@ let test_responses_sol_rejects_codex_only_ultra () =
    The list covers the Anthropic models masc runs. The Mythos rows are left out
    because they are not part of that set; they carry the same gap, and Mythos
    5.1 shares Fable 5.1's 0.025x cache read, so a row of its own comes with
-   whichever change starts running them. *)
+   whichever change starts running them. Haiku 5.5 is left out because its row
+   states no price at all, so it has no multiplier to carry. *)
 let anthropic_cache_pricing_rows =
-  [ "claude-opus-5", 1.25, 0.1
-  ; "claude-opus-5-5", 1.25, 0.05
+  [ "claude-opus-5-5", 1.25, 0.05
   ; "claude-sonnet-5", 1.25, 0.1
-  ; "claude-sonnet-5-5", 1.25, 0.1
+  ; "claude-sonnet-5-5", 1.25, 0.05
   ; "claude-fable-5", 1.25, 0.1
   ; "claude-fable-5-1", 1.25, 0.025
   ]
@@ -255,6 +415,78 @@ let test_anthropic_rows_price_cache_tokens () =
            (Some expected_read)
            entry.cache_read_multiplier)
     anthropic_cache_pricing_rows
+;;
+
+(* What the Messages API answered for each model on 2026-10-08. A sampling
+   parameter with a non-default value came back 400 on every one of them, so a
+   row has to keep all three off the wire. Forced tool use -- tool_choice "any"
+   or a named tool -- came back 400 on the three marked false and 200 on the
+   rest. The flags are read through the resolved capabilities, the way a
+   request is checked, so a 5.5 or 5.1 id that fell back to the shorter row
+   would show here. *)
+let claude_rows_forced_tool_choice =
+  [ "claude-opus-5-5", false
+  ; "claude-sonnet-5", true
+  ; "claude-sonnet-5-5", false
+  ; "claude-fable-5", true
+  ; "claude-fable-5-1", false
+  ; "claude-haiku-5-5", true
+  ]
+;;
+
+let test_claude_rows_keep_sampling_parameters_off_the_wire () =
+  let module Backend = Llm_provider.Backend_anthropic in
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"Claude sampling"
+  in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let messages = [ Llm_provider.Types.make_message ~role:User [ Text "hello" ] ] in
+    List.iter
+      (fun (model_id, _) ->
+         let config =
+           Llm_provider.Provider_config.make
+             ~kind:Anthropic ~model_id
+             ~base_url:"https://api.anthropic.com" ~max_tokens:1024
+             ~temperature:0.2 ~top_p:0.5 ~top_k:40 ()
+         in
+         let body = Backend.build_request ~config ~messages () |> Yojson.Safe.from_string in
+         List.iter
+           (fun field ->
+              check bool
+                (Printf.sprintf "%s does not send %s" model_id field)
+                true
+                (Yojson.Safe.Util.member field body = `Null))
+           [ "temperature"; "top_p"; "top_k" ];
+         check (option bool)
+           (model_id ^ " does not offer top_k")
+           (Some false)
+           (Option.map
+              (fun (caps : Capabilities.capabilities) -> caps.supports_top_k)
+              (Capabilities.for_model_id_catalog model_id)))
+      claude_rows_forced_tool_choice)
+;;
+
+let test_claude_rows_state_forced_tool_choice_as_the_api_takes_it () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"Claude tool_choice"
+  in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    List.iter
+      (fun (model_id, accepted) ->
+         match Capabilities.for_model_id_catalog model_id with
+         | None -> failf "%s resolves to no capabilities" model_id
+         | Some (caps : Capabilities.capabilities) ->
+           check bool
+             (model_id ^ " required tool_choice")
+             accepted
+             caps.supports_required_tool_choice;
+           check bool
+             (model_id ^ " named tool_choice")
+             accepted
+             caps.supports_named_tool_choice)
+      claude_rows_forced_tool_choice)
 ;;
 
 let test_load_default_catalog () =
@@ -934,6 +1166,14 @@ let () =
             `Quick
             test_anthropic_rows_price_cache_tokens
         ; test_case
+            "Claude rows keep sampling parameters off the wire"
+            `Quick
+            test_claude_rows_keep_sampling_parameters_off_the_wire
+        ; test_case
+            "Claude rows state forced tool_choice as the API takes it"
+            `Quick
+            test_claude_rows_state_forced_tool_choice_as_the_api_takes_it
+        ; test_case
             "Ollama Cloud v1 vendor rows preserve probe truth"
             `Quick
             test_ollama_cloud_v1_vendor_rows_preserve_probe_truth
@@ -977,6 +1217,13 @@ let () =
             "Sonnet 5.5 thinking modes reach the wire"
             `Quick
             test_sonnet_5_5_thinking_modes_reach_the_wire
+        ; test_case
+            "Haiku 5.5 row reaches the wire"
+            `Quick
+            test_haiku_5_5_row_reaches_the_wire
+        ; test_case "Haiku final assistant admission" `Quick test_haiku_prefill_admission
+        ; test_case "Documented Claude prefill exclusions" `Quick
+            test_documented_claude_prefill_exclusions
         ; test_case
             "subscription models admit their reasoning efforts"
             `Quick

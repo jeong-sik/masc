@@ -72,22 +72,26 @@ let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_re
    inside the app-server connection. The shared catalog clamp is for clients
    without that discovery contract. *)
 
-let project_messages messages =
+let project_messages ~assembly messages =
   let rec loop developer history = function
     | [] -> Ok (List.rev developer, List.rev history)
     | (message : Agent_core.Types.message) :: rest ->
-      let text = Host.encode_history_message message in
       (match message.role with
-       | Agent_core.Types.System -> loop (text :: developer) history rest
+       | Agent_core.Types.System ->
+         let projection=Keeper_context_submission_link.encoded_carrier ~assembly ~selected_blocks:None message in
+         loop (projection :: developer) history rest
        | Agent_core.Types.User ->
+         let text = Host.encode_history_message message in
          loop developer
            ({ Runtime_codex_app_server.role = User; text } :: history)
            rest
        | Agent_core.Types.Assistant ->
+         let text = Host.encode_history_message message in
          loop developer
            ({ Runtime_codex_app_server.role = Assistant; text } :: history)
            rest
        | Agent_core.Types.Tool ->
+         let text = Host.encode_history_message message in
          loop developer
            ({ Runtime_codex_app_server.role = User; text } :: history)
            rest)
@@ -305,7 +309,7 @@ let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
 (* Always installed so usage-window reports and the thread's usage counts are
    recorded. A turn nobody streams, traces or observes gets only those; its
    other events are ignored as before. *)
-let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
+let codex_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
     ~on_usage_report ~position on_event =
   (* The thread's running count, reported under the app-server turn id (the
      identity the completion hook also writes for a Codex turn) and the
@@ -334,37 +338,65 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
            })
       on_usage_report
   in
-  match on_event, raw_trace_run, on_native_action, receipts with
-  | None, None, None, None ->
+  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion, on_native_tool_progress with
+  | None, None, None, None, None, None ->
     Some
       (function
         | Runtime_codex_app_server.Usage_windows_reported report ->
           record_usage_windows ~quota_scope report
         | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
           report_usage ~thread_id ~turn_id ~model frame
-        | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-        | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
+        | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+        | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
         | Compaction_observed | Turn_finished _ -> ())
   | _ ->
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
     let thinking_indexes = Hashtbl.create 8 in
+    let text_indexes = Hashtbl.create 8 in
+    let closed_content = Hashtbl.create 8 in
+    let first_text = ref true in
+    let current_text = ref None in
+    let last_text_index = ref None in
+    let fresh_text_index () =
+      if !first_text then (first_text := false; 0)
+      else let index = !next_tool_index in incr next_tool_index; index
+    in
+    let text_index item_id =
+      let key = match item_id with Some _ -> item_id | None -> !current_text in
+      let index = match Hashtbl.find_opt text_indexes key with
+        | Some index -> index
+        | None ->
+            let index = match key, Hashtbl.find_opt text_indexes None with
+              | Some _, Some index when not (Hashtbl.mem closed_content index) ->
+                  Hashtbl.remove text_indexes None; index
+              | _ -> fresh_text_index () in
+            Hashtbl.replace text_indexes key index; index in
+      current_text := key;
+      last_text_index := Some index;
+      index
+    in
+    let stop_content index =
+      if not (Hashtbl.mem closed_content index) then begin
+        Hashtbl.add closed_content index ();
+        emit (Agent_core.Types.ContentBlockStop {index})
+      end
+    in
     let tool_indexes = Hashtbl.create 8 in
     let native_tool_indexes = Hashtbl.create 8 in
     (* Each agentMessage item is one assistant message; a commentary item and
        the final answer after it are two. *)
     let text_stream = Keeper_official_client_text_stream.create ~equal:String.equal () in
-    let emit_text text =
-      emit
-        (Agent_core.Types.ContentBlockDelta
-           { index = 0; delta = Agent_core.Types.TextDelta text })
+    let emit_text ~index text =
+      emit (Agent_core.Types.ContentBlockDelta
+        { index; delta = Agent_core.Types.TextDelta text })
     in
     Some
       (function
         | Runtime_codex_app_server.Turn_started { turn_id; model } ->
           emit (Agent_core.Types.MessageStart { id = turn_id; model; usage = None })
         | Runtime_codex_app_server.Text_delta { item_id; delta } ->
-          emit_text
+          emit_text ~index:(text_index item_id)
             (Keeper_official_client_text_stream.forward text_stream ~message:item_id delta)
         | Runtime_codex_app_server.Thinking_delta { item_id; part; delta } ->
           let key = item_id, part in
@@ -377,6 +409,22 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
                 index in
           emit (Agent_core.Types.ContentBlockDelta
             { index; delta = Agent_core.Types.ThinkingDelta delta })
+        | Runtime_codex_app_server.Text_completed {item_id; source} ->
+          let key = match item_id with Some _ -> item_id | None -> !current_text in
+          let index = match Hashtbl.find_opt text_indexes key with
+            | Some _ as found -> found
+            | None when source = Runtime_codex_app_server.Adopted_anonymous_content ->
+                let found = Hashtbl.find_opt text_indexes None in
+                Option.iter (fun index ->
+                  Hashtbl.remove text_indexes None;
+                  Hashtbl.replace text_indexes key index) found;
+                found
+            | None -> None in
+          Option.iter stop_content index;
+          if key = !current_text then current_text := None;
+          if key = None then Hashtbl.remove text_indexes None
+        | Runtime_codex_app_server.Thinking_completed {item_id; part} ->
+          Option.iter stop_content (Hashtbl.find_opt thinking_indexes (item_id, part))
         | Runtime_codex_app_server.Dynamic_tool_started
             { call_id; tool_name; arguments } ->
           Keeper_official_client_text_stream.tool_row text_stream;
@@ -434,7 +482,12 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
                ; tool_id = Runtime_native_tools.call_id observation
                ; tool_name = observation.tool_name
                })
-        | Runtime_codex_app_server.Native_tool_finished observation ->
+        | Runtime_codex_app_server.Native_tool_progress {item_id; progress} ->
+          Option.iter (fun index ->
+            Option.iter (fun observe -> observe ~block_index:index ~tool_call_id:(Some item_id) progress)
+              on_native_tool_progress)
+            (Hashtbl.find_opt native_tool_indexes (Runtime_native_tools.Call_id item_id))
+        | Runtime_codex_app_server.Native_tool_finished {observation; completion} ->
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run
@@ -444,6 +497,9 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
             (fun identity ->
                Option.iter
                  (fun index ->
+                    Option.iter (fun finish -> finish ~block_index:index
+                      ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                      on_native_tool_completion;
                     Hashtbl.remove native_tool_indexes identity;
                     emit (Agent_core.Types.ContentBlockStop { index }))
                  (Hashtbl.find_opt native_tool_indexes identity))
@@ -460,8 +516,12 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
         | Runtime_codex_app_server.Compaction_observed ->
           Log.Keeper.info ~keeper_name "Codex context compaction completed"
         | Runtime_codex_app_server.Turn_finished { text } ->
-          Option.iter
-            emit_text
+          Option.iter (fun remainder ->
+            let index = match !last_text_index with
+              | Some index when not (Hashtbl.mem closed_content index) -> index
+              | Some _ | None -> fresh_text_index () in
+            emit_text ~index remainder;
+            stop_content index)
             (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
           emit
             (Agent_core.Types.MessageDelta
@@ -578,18 +638,37 @@ let codex_error_to_core_error = function
     Agent_core.Error.Provider
       (Llm_provider.Error.ParseError
          { detail = Printf.sprintf "%s: %s" stage detail })
-  | Runtime_codex_app_server.Rpc_error { method_; code; message; _ } ->
-    Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderReportedError
-         { provider = "codex_app_server"
-         ; error_type = Some "rpc_error"
-         ; detail =
-             Printf.sprintf
-               "%s%s: %s"
-               method_
-               (Option.fold ~none:"" ~some:(Printf.sprintf " (code %d)") code)
-               message
-         })
+  | Runtime_codex_app_server.Rpc_error { method_; code; message; _ } as error ->
+    (* The app-server refuses a turn/start whose input text exceeds its own
+       character limit with invalid_params (-32602) and typed data
+       (input_error_code = "input_too_large"), before any tool runs
+       (turn_processor.rs, input_too_large_error). Lower it to the typed size
+       refusal so the shrink ladder narrows the carried front and retries on
+       the same candidate; [InputCapacity] would rotate to a candidate that
+       refuses the same input. The status is the canonical payload-too-large
+       signal this type names; the app-server's own code is a generic
+       invalid-params, and the size fact is the typed data the parser already
+       witnessed. *)
+    (match Runtime_codex_app_server.input_capacity_refusal error with
+     | Some _ ->
+       Agent_core.Error.Api
+         (Agent_core.Retry.InvalidRequest
+            { message = Runtime_codex_app_server.error_to_string error
+            ; reason =
+                Agent_core.Retry.Request_body_refused_by_provider { status = 413 }
+            })
+     | None ->
+       Agent_core.Error.Provider
+         (Llm_provider.Error.ProviderReportedError
+            { provider = "codex_app_server"
+            ; error_type = Some "rpc_error"
+            ; detail =
+                Printf.sprintf
+                  "%s%s: %s"
+                  method_
+                  (Option.fold ~none:"" ~some:(Printf.sprintf " (code %d)") code)
+                  message
+            }))
   | Runtime_codex_app_server.Unsupported_server_request method_ ->
     Agent_core.Error.Provider
       (Llm_provider.Error.UnknownVariant
@@ -764,7 +843,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
-    ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+    ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_native_tool_progress
     ~on_usage_report ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -903,10 +982,12 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
               images )
     in
     let posture_notes = native_posture_note native_posture in
+    let composed_context = Option.bind composed_context (fun read -> read ()) in
     let compose_developer_instructions developer_messages =
-      (prepared.system_prompt :: posture_notes) @ developer_messages
-      |> List.filter (fun text -> String.trim text <> "")
-      |> String.concat "\n\n"
+      (List.map Keeper_context_submission_link.literal (prepared.system_prompt :: posture_notes)) @ developer_messages
+      |> List.filter (fun piece -> String.trim (Keeper_context_submission_link.text piece) <> "")
+      |> Keeper_context_submission_link.concat ~separator:"\n\n"
+      |> Keeper_context_submission_link.trim
     in
     let* () = Keeper_official_task_reference.require_preserved
       ~reference:historical_task_message prepared.messages
@@ -932,7 +1013,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let* history, context_frontier, composed_developer_instructions =
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
         let* developer_messages, history =
-          project_messages
+          project_messages ~assembly:composed_context
             (match thread_mode with
              | Runtime_codex_app_server.Start -> prepared.messages
              | Runtime_codex_app_server.Resume _ ->
@@ -969,33 +1050,24 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
            not see a blank keeper prompt behind the posture note this lane
            appends (#33165). *)
         let composed_developer_instructions =
-          compose_developer_instructions developer_messages |> String.trim
+          compose_developer_instructions developer_messages
         in
         Ok (history, context_frontier, composed_developer_instructions))
     in
-    let composed_context =
-      match composed_context with
-      | None -> None
-      | Some read -> read ()
-    in
-    let prompt, held_context =
+    let prompt, held_context, prompt_projection =
       match thread_mode with
       | Runtime_codex_app_server.Start ->
-        prompt, Host.start_held_context ?composed_context prepared.messages
+        prompt, Host.start_held_context ?composed_context prepared.messages,
+        Keeper_context_submission_link.literal prompt
       | Runtime_codex_app_server.Resume _ ->
-        let delivery =
-          Host.resume_prompt
-            ~goal:prompt
-            ?composed_context
-            ~held:(Keeper_official_client_session_store.held_context_for_resume
-                     claim_plan ~expected:stored_session)
-            prepared.messages
-        in
-        delivery.prompt, delivery.held_context
+        let delivery = Host.resume_prompt ~goal:prompt ?composed_context
+          ~held:(Keeper_official_client_session_store.held_context_for_resume
+            claim_plan ~expected:stored_session) prepared.messages in
+        delivery.prompt, delivery.held_context, delivery.context_projection
     in
     let context_frontier = { context_frontier with held_context } in
     let settled_held_context = ref held_context in
-    let developer_instructions = Some composed_developer_instructions in
+    let developer_instructions = Some (Keeper_context_submission_link.text composed_developer_instructions) in
     (* No developer items: a Start carries the per-turn context in
        [developerInstructions], a Resume in front of its goal. *)
     let developer_context = [] in
@@ -1034,6 +1106,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let terminal_error = ref None in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        ~base_path
         ~content_transport:Runtime_official_client_tool.Codex
         ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
@@ -1121,6 +1194,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        ~base_path
         ~content_transport:Runtime_official_client_tool.Codex
         ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
@@ -1309,7 +1383,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let turn_result =
       try
         let observe_stream =
-          codex_stream_callback ?receipts
+          codex_stream_callback ?receipts ?on_native_tool_completion ?on_native_tool_progress
           ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~position:
@@ -1333,7 +1407,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
               | Runtime_codex_app_server.Counted { last = Context_estimate _; _ }
               | Context_window_filled _ -> settled_held_context := []
               | Counted { last = Request_usage _; _ } -> ())
-           | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _
+           | Native_tool_progress _ | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _
            | Dynamic_tool_finished _ | Elicitation_cancelled _
            | Usage_windows_reported _ | Turn_finished _ -> ());
           Option.iter (fun observe -> observe event) observe_stream
@@ -1395,6 +1469,28 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                ~expected
                ~session_id:thread_id
                ~updated_at:(Time_compat.now ())))
+         ~on_context_submission:(fun observation ->
+           let logical_context_bindings = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+             match observation.Runtime_codex_app_server.method_ with
+             | Thread_start | Thread_resume -> Keeper_context_submission_link.binding_to_json
+                 ~slot:Developer_instructions composed_developer_instructions observation
+             | Turn_start -> Keeper_context_submission_link.binding_to_json
+                 ~slot:(Turn_text (List.length images)) prompt_projection observation
+             | Thread_inject_items -> `Assoc ["status", `String "out_of_scope_history"]
+             | Turn_steer -> `Assoc ["status", `String "out_of_scope_host_notice"]
+             | Dynamic_tool_response -> `Assoc ["status", `String "out_of_scope_tool_result"]) in
+           let detail=`Assoc ["keeper",`String keeper_name;
+             "runtime_profile",`String runtime_id;"client_turn_ordinal",`Int turn_count;
+             "submission",Runtime_codex_app_server.context_submission_to_json observation;
+             "logical_context_bindings", logical_context_bindings] in
+           match raw_trace_run with
+           | None -> Log.Keeper.warn ~keeper_name
+               "Codex context submission measurement unavailable: no raw-trace attempt binding"
+           | Some active ->
+             ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Context_submission (fun () ->
+               Agent_core.Raw_trace.record_hook_invoked active
+                 ~hook_name:"codex_context_submission" ~hook_decision:"stdin_write_completed"
+                 ~hook_detail:(Yojson.Safe.to_string detail) ())))
          ~on_prompt_sent:report_transmitted_input
          ~on_turn_starting:(fun ~thread_id ->
            update_session "turn-starting transition" (fun expected ->
@@ -1476,7 +1572,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          { Agent_core.Types.id = turn.turn_id
          ; model = turn.model
          ; stop_reason = EndTurn
-         ; content = (match turn.text with None -> [] | Some text -> [ Text text ])
+         ; content = [ Text turn.text ]
          ; usage = spend
          ; telemetry =
              Some
@@ -1641,7 +1737,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1654,6 +1750,8 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
     ?on_official_client_tool_boundary
     ?on_tool_execution
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
+    ?on_native_tool_progress
+    ?on_native_tool_completion
     ?on_native_action
     ?on_usage_report
     ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.codex_app_server) () =
@@ -1681,6 +1779,9 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
+        ?on_memory_capacity_refusal
+        ~on_memory_retry:(fun () ->
+          resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ())
       ~starting_capacity:unbounded_model_input_capacity_bytes
       (* A continuation always resumes its original thread, and a Resume's
          input is the same at every capacity; the retry would be a fresh
@@ -1689,12 +1790,11 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
       ~same_run_retry_authorized:(fun () ->
         Option.is_none official_client_continuation
         && Keeper_provider_attempt_effect.allows_same_turn_retry
-             (Atomic.get effect_disposition)
-        && Option.is_some !observed_next_shrink_capacity_bytes)
-      ~shrink_capacity:(fun ~capacity:_ ~default_capacity ->
+             (Atomic.get effect_disposition))
+      ~shrink_capacity:(fun ~capacity ~default_capacity:_ ->
         Option.value
           !observed_next_shrink_capacity_bytes
-          ~default:(max 1 default_capacity))
+          ~default:capacity)
       (* This runtime shrinks to the size the provider itself named
          ([observed_next_shrink_capacity_bytes]), not to a fraction of a
          request-body cap. There is no
@@ -1710,7 +1810,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
             ();
           Log.Keeper.warn
             ~keeper_name
-            "Codex typed context overflow; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
+            "Codex typed context overflow or input refusal; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
             shrink_attempt
             previous_capacity_bytes
             capacity_bytes)
@@ -1768,7 +1868,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
           ~context_injector
           ~context
           ~terminal_effect_state
-        ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+        ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_native_tool_progress
           ~on_usage_report
           ~event_bus
           ~raw_trace

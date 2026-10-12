@@ -41,6 +41,26 @@ let () =
       ~bytes:2 ~mime:Masc.Browser_observation.mime ~preview:"" |> Result.map_error Tool_output.make_error_to_string |> ok in
   let entry : History.entry = {at=1.;execution_id="exec-observation";artifact} in
   let selected = History.select 0 [entry;{entry with execution_id="exec-older"}] waiting in
+  let suspended = History.suspend selected in
+  expect "read retirement releases the loading selection" (match suspended.content with
+    | Entries {selection=Failed _; _} -> true | _ -> false);
+  expect "same selected artifact is retained for recovery"
+    (History.selected suspended = History.selected selected);
+  expect "selection recovery is explicit" (suspended.resume = Some History.Reload_selection);
+  expect "list recovery is explicit"
+    ((History.suspend waiting).resume = Some History.Reload_list);
+  let retry = History.start_read ~reload:false suspended in
+  expect "retried selection owns its loading state" (match retry.content with
+    | Entries {selection=Loading; _} -> true | _ -> false);
+  expect "retry consumes the previous resume intent" (retry.resume = None);
+  let suspended_again = History.suspend retry in
+  expect "a second outage retains the same artifact for another retry"
+    (History.selected suspended_again = History.selected selected
+     && suspended_again.resume = Some History.Reload_selection);
+  let list_retry = History.start_read ~reload:true (History.suspend waiting) in
+  expect "retried list is still recoverable through a second outage"
+    (list_retry.content = History.Listing
+     && (History.suspend list_retry).resume = Some History.Reload_list);
   expect "newer bound does not start another fetch" (History.move (-1) selected=None);
   let older = match History.move 1 selected with Some value -> value | None -> failwith "older observation missing" in
   expect "moving observation selects a distinct receipt"

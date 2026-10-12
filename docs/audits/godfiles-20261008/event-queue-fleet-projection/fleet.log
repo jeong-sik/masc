@@ -1,0 +1,7 @@
+Testing `Fleet queue projection'.
+This run has ID `S8HOBC4P'.
+
+  [OK]          durable observation          0   owner lifecycle and failed q...
+
+Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/Fleet queue projection'.
+Test Successful in 0.008s. 1 test run.

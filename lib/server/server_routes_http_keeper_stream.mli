@@ -322,7 +322,8 @@ val operation_runner :
   Keeper_owner.operation_runner
 (** Production runner installed into every Keeper Owner. It leaves the FIFO
     head Queued until the Keeper registry entry exists and is healthy, then
-    claims exactly once, streams events by operation id, and joins terminal
+    claims exactly once, streams events by runtime base, Keeper and operation id,
+    and joins terminal
     connector delivery before returning. *)
 
 (** {1 Testing helpers} *)
@@ -364,7 +365,7 @@ type translated_keeper_stream_event =
 (** Result of translating one typed AGENT_CORE stream event into keeper chat events. *)
 
 type operation_wire_stream = Wire_started | Wire_terminal_sent
-(** Wire-terminal accounting for one keeper chat operation: whether a live
+(** Wire-terminal accounting for one runtime base, Keeper and operation id: whether a live
     AG-UI audience exists and whether a terminal event (RUN_FINISHED/
     RUN_ERROR) made it out. The stream counts as open from sink registration
     — not from the first projected event — so a turn that fails after claim
@@ -453,9 +454,10 @@ module For_testing : sig
     failure_class:Tool_result.tool_failure_class ->
     Yojson.Safe.t
 
-  val note_operation_wire_event : operation_id:string -> Ag_ui.event -> unit
+  val note_operation_wire_event :
+    base_path:string -> keeper_name:string -> operation_id:string -> Ag_ui.event -> unit
   val take_operation_wire_stream :
-    operation_id:string -> operation_wire_stream option
+    base_path:string -> keeper_name:string -> operation_id:string -> operation_wire_stream option
   val synthesize_wire_terminal_on_settle :
     base_path:string ->
     keeper_name:string ->
@@ -469,6 +471,8 @@ module For_testing : sig
     execution:Keeper_owner.operation_execution ->
     unit
   val register_operation_live_sink :
+    base_path:string ->
+    keeper_name:string ->
     operation_id:string ->
     (seq:int option -> Ag_ui.event -> unit) ->
     unit ->

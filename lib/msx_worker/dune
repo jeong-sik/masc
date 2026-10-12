@@ -1,0 +1,9 @@
+(include_subdirs no)
+(library
+ (name msx_addon_worker)
+ (public_name masc.msx_worker)
+ (libraries
+  masc.machine_input_history masc.machine_observation_packet
+  masc.lane_addon_tool_result masc.lane_addon_call_context masc.msx_tools masc.msx_lane masc.tool_types masc.masc_types
+  masc.tool_input_contract masc.masc_tool_surface masc.embedded_config
+  masc.masc_compression time_compat mcp_protocol mcp_protocol.eio base64 digestif yojson))

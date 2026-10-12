@@ -1,0 +1,4 @@
+File "lib/process/process_eio.ml", line 619, characters 7-36:
+619 |      | Eio.Cancel.Cancelled _ as exn ->
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error (warning 11 [redundant-case]): this match case is unused.

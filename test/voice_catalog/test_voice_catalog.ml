@@ -44,6 +44,7 @@ let test_the_answer_becomes_pickable_rows () =
       { Voice.voice_id = "QQ00AAbbCCddEEffGGhh"
       ; voice_name = Some "Korean Bright Voice"
       ; voice_language = Some "ko"
+      ; voice_aliases = []
       }
       (List.nth voices 0);
     (* A voice whose labels carry no language is still pickable; it just shows
@@ -53,6 +54,7 @@ let test_the_answer_becomes_pickable_rows () =
       { Voice.voice_id = "SS22CCddEEffGGhhIIjj"
       ; voice_name = Some "English Narrator"
       ; voice_language = None
+      ; voice_aliases = []
       }
       (List.nth voices 2)
 

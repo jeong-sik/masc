@@ -19,8 +19,11 @@
     callback with no hook is never reached. *)
 
 type t =
-  { pre_tool_use : Agent_core.Hooks.hook
+  { pre_tool_use : identity_tool_index:Keeper_identity_tool_index.t -> Agent_core.Hooks.hook
   ; tool_approval : Agent_core.Hooks.tool_approval_callback
+  ; identity_tool_index : Keeper_identity_tool_index.t
+      (** Empty at stream creation; agent setup copies the gate with the exact
+          admitted offering before dispatch. Retained gates are unaffected. *)
   ; composition_plan_index : Keeper_tool_composition_plan_index.t
   }
 
@@ -30,6 +33,7 @@ val create :
   publish:(Keeper_chat_events.keeper_chat_event -> unit) ->
   redact_text:(string -> string) ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  base_path:string ->
   keeper_name:string ->
   timeout_sec:float ->
   t

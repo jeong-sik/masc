@@ -1,0 +1,17 @@
+{
+  "command": [
+    "opam",
+    "exec",
+    "--",
+    "dune",
+    "exec",
+    "-j4",
+    "test/test_keeper_tool_read_window.exe",
+    "--",
+    "test",
+    "read-line-window",
+    "0-2,11,15-16"
+  ],
+  "exit_code": 1,
+  "elapsed_seconds": 72.032
+}

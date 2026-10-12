@@ -1,0 +1,13 @@
+{
+  "base": "bf73f2c61e6b45821d29b92a204223c3e3c7fedf",
+  "built_source_head": "208da407ccdb8560515ec9a4a0e5f7e144479606",
+  "comment_only_head": "da7a42138e92f7a59b363895d8a8641a0e1d64c1",
+  "build_command": "opam exec -- dune build test/test_runtime_config_validity.exe",
+  "build_exit": 0,
+  "test_command": "_build/default/test/test_runtime_config_validity.exe test 'runtime TOML gate' 46,57,75 --color=never",
+  "test_exit": 0,
+  "run": "TSNDC2DJ",
+  "passed": 3,
+  "initial_build_failed": true,
+  "scope": "Selected isolated configuration/registry and local HTTP fixture cases; no external provider or live runtime."
+}

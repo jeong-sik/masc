@@ -134,11 +134,13 @@ let thinking_config_for_config wire (config : Provider_config.t) =
      | Some true, Capabilities.Anthropic_always_adaptive -> None
      | ( Some true
        , ( Capabilities.Anthropic_adaptive_default
+         | Capabilities.Anthropic_adaptive_disabled_through_high
          | Capabilities.Anthropic_adaptive_between_tools
          | Capabilities.Anthropic_adaptive_only
          | Capabilities.Anthropic_adaptive_preferred ) ) ->
        Some (`Assoc [ "type", `String "adaptive" ])
-     | Some false, Capabilities.Anthropic_adaptive_default ->
+     | Some false, (Capabilities.Anthropic_adaptive_default
+                   | Capabilities.Anthropic_adaptive_disabled_through_high) ->
        Some (`Assoc [ "type", `String "disabled" ])
      | Some false, Capabilities.Anthropic_adaptive_between_tools ->
        Some (`Assoc [ "type", `String "between_tools" ])
@@ -170,6 +172,17 @@ let validate_thinking_controls wire (config : Provider_config.t) =
     Error
       (Printf.sprintf
          "model %S between_tools thinking accepts only low, medium or high effort"
+         config.model_id)
+  (* Haiku 5.5 permits disabled thinking at low through high effort.
+     This policy is declared by the model row, not inferred from its name. *)
+  | Capabilities.Anthropic_adaptive_disabled_through_high, Some false,
+    (None | Some (Reasoning_effort.Low | Medium | High)) ->
+    Provider_config.validate_reasoning_effort_request config
+  | Capabilities.Anthropic_adaptive_disabled_through_high, Some false,
+    Some (Reasoning_effort.None_ | Minimal | XHigh | Max | Ultra) ->
+    Error
+      (Printf.sprintf
+         "model %S disabled thinking accepts only low, medium or high effort"
          config.model_id)
   | _, Some false, Some effort ->
     Error
@@ -472,6 +485,15 @@ let build_request_payload
       projection.messages
   in
   let messages = Api_common.merge_tool_result_followup_user_messages projected_messages in
+  (match config.kind, caps.supports_assistant_prefill, List.rev messages with
+   | Provider_config.Anthropic, false, { role = Assistant; _ } :: _ ->
+     invalid_arg
+       (Printf.sprintf
+          "Backend_anthropic.build_request: model %S does not accept a final assistant prefill; end messages with a user turn"
+          config.model_id)
+   | Provider_config.Anthropic, (true | false), _
+   | (Provider_config.Kimi | Provider_config.OpenAI_compat | Provider_config.Ollama
+     | Provider_config.Gemini | Provider_config.Glm), _, _ -> ());
   let message_to_json =
     match config.kind with
     | Provider_config.Anthropic -> anthropic_message_to_json

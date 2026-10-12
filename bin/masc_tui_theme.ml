@@ -446,7 +446,7 @@ module Syntax = struct
   let diff_removed = Sgr.red
 end
 
-let strip_sgr text =
+let strip_sgr_internal ?on_span text =
   (* Rows carry only SGR sequences (ESC '[' … 'm'). Copy ordinary spans,
      preserving their bytes, and allocate the buffer only after finding an opener. *)
   let length = String.length text in
@@ -457,10 +457,11 @@ let strip_sgr text =
     | None -> None
   in
   match next_sgr 0 with
-  | None -> text
+  | None -> Option.iter (fun emit -> emit 0 length) on_span; text
   | Some first ->
       let buf = Buffer.create length in
       let rec copy_span start opener =
+        Option.iter (fun emit -> emit start (opener-start)) on_span;
         Buffer.add_substring buf text start (opener - start);
         match String.index_from_opt text (opener + 2) 'm' with
         | None -> Buffer.contents buf
@@ -469,10 +470,19 @@ let strip_sgr text =
             match next_sgr start with
             | Some opener -> copy_span start opener
             | None ->
+                Option.iter (fun emit -> emit start (length-start)) on_span;
                 Buffer.add_substring buf text start (length - start);
                 Buffer.contents buf
       in
       copy_span 0 first
+
+let strip_sgr text = strip_sgr_internal text
+
+let strip_sgr_with_positions text =
+  let spans=ref [] in
+  let text=strip_sgr_internal ~on_span:(fun start length ->
+    spans:=Array.init length (fun i -> start+i) :: !spans) text in
+  text, Array.concat (List.rev !spans)
 
 module Glyph = struct
   (* How far a piece of work has got: not started, being worked, finished,

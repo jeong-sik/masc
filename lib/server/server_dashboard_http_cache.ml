@@ -14,15 +14,23 @@ type cached_surface_payload = {
   etag : string;
 }
 
-type cached_surface = {
-  mutable current : surface_snapshot;
-  mutable memoized_payload : (surface_snapshot * cached_surface_payload) option;
+type publication = {
+  current : surface_snapshot;
+  memoized_payload : cached_surface_payload option;
 }
 
-let snapshot surface = surface.current
+type cached_surface = publication Atomic.t
+
+let snapshot surface = (Atomic.get surface).current
+
+let rec update_cached_surface surface transform =
+  let previous = Atomic.get surface in
+  let next = { current = transform previous.current; memoized_payload = None } in
+  if not (Atomic.compare_and_set surface previous next) then
+    update_cached_surface surface transform
 
 let create_cached_surface json =
-  {
+  Atomic.make {
     current =
       {
         json;
@@ -39,49 +47,44 @@ let now_cache_stamp () =
   ts
 
 
-(* Each mutator swaps a whole snapshot in one write. The previous form wrote
-   the fields one at a time and was only free of torn reads because nothing
-   between the writes could yield; a log call or a move onto a worker domain
-   would have broken that silently. *)
 let mark_cached_surface_attempt surface =
   let ts = now_cache_stamp () in
-  surface.current <-
-    { surface.current with last_attempt_unix = Some ts }
+  update_cached_surface surface (fun current ->
+    { current with last_attempt_unix = Some ts })
 
 let mark_cached_surface_success surface json =
   let ts = now_cache_stamp () in
-  surface.current <-
-    { surface.current with
+  update_cached_surface surface (fun current ->
+    { current with
       json
     ; last_success_unix = Some ts
     ; last_error = None
     ; last_error_unix = None
-    }
+    })
 
 let mark_cached_surface_error_message surface message =
   let ts = now_cache_stamp () in
-  surface.current <-
-    { surface.current with
+  update_cached_surface surface (fun current ->
+    { current with
       last_error = Some message
     ; last_error_unix = Some ts
-    }
+    })
 
 let mark_cached_surface_error surface exn =
   mark_cached_surface_error_message surface (Printexc.to_string exn)
 ;;
 
-let invalidate_cached_surface surface =
-  surface.memoized_payload <- None;
-  surface.current <-
-    { surface.current with
-      last_success_unix = None
+let invalidate_cached_surface ?json surface =
+  update_cached_surface surface (fun current ->
+    { json = (match json with Some json -> json | None -> current.json)
+    ; last_success_unix = None
     ; last_attempt_unix = None
     ; last_error = None
     ; last_error_unix = None
-    }
+    })
 
 let upsert_assoc_field key value fields =
-  (key, value) :: List.remove_assoc key fields
+  (key, value) :: List.filter (fun (existing, _) -> not (String.equal key existing)) fields
 
 let extend_projection_diagnostics json extra_fields =
   match json with
@@ -92,28 +95,16 @@ let extend_projection_diagnostics json extra_fields =
         | _ -> []
       in
       let merged =
-        (* Merge [extra_fields] into [existing] in a single traversal. The
-           prior fold ran one [upsert_assoc_field] per extra field, and
-           [upsert_assoc_field] is [(k,v) :: List.remove_assoc k ...] — so it
-           scanned the whole diagnostic list and allocated a fresh list prefix
-           once per extra field. Here we filter [existing] once, dropping any
-           key present in [extra_fields], then prepend the extras in reverse.
-           The resulting ordering matches the prior fold exactly:
-           [(k_n,v_n); ...; (k_1,v_1); existing-minus-extras], preserving the
-           relative order of unchanged entries. *)
-        let extra_keys = List.map fst extra_fields in
-        let kept =
-          List.filter (fun (k, _) -> not (List.mem k extra_keys)) existing
-        in
-        List.rev_append (List.rev extra_fields) kept
+        List.fold_left
+          (fun fields (key, value) -> upsert_assoc_field key value fields)
+          existing extra_fields
       in
       `Assoc
         (upsert_assoc_field "projection_diagnostics" (`Assoc merged)
-           (List.remove_assoc "projection_diagnostics" fields))
+           fields)
   | other -> other
 
-let surface_snapshot_json surface =
-  let now_ts = Unix.gettimeofday () in
+let surface_snapshot_json ~now surface =
   let iso_json timestamp =
     Json_util.string_opt_to_json
       (Option.map Masc_domain.iso8601_of_unix_seconds timestamp)
@@ -124,7 +115,7 @@ let surface_snapshot_json surface =
     | Some success_ts, Some error_ts when error_ts > success_ts ->
         ( "stale",
           surface.last_error,
-          Some (int_of_float ((now_ts -. success_ts) *. 1000.0)) )
+          Some (int_of_float ((now -. success_ts) *. 1000.0)) )
     | Some _, _ -> ("fresh", None, None)
   in
   extend_projection_diagnostics surface.json
@@ -138,27 +129,30 @@ let surface_snapshot_json surface =
     ]
 
 let cached_surface_json cache =
-  surface_snapshot_json (snapshot cache)
+  surface_snapshot_json ~now:(Unix.gettimeofday ()) (snapshot cache)
 
 let cached_surface_has_success cache =
   Option.is_some (snapshot cache).last_success_unix
 
 let cached_surface_payload cache =
-  let surface = snapshot cache in
+  let publication = Atomic.get cache in
+  let surface = publication.current in
   let is_stale =
     match surface.last_success_unix, surface.last_error_unix with
     | Some success_ts, Some error_ts -> error_ts > success_ts
     | _ -> false
   in
-  match cache.memoized_payload with
-  | Some (prev_surface, payload) when prev_surface == surface && not is_stale ->
+  match publication.memoized_payload with
+  | Some payload when not is_stale ->
       payload
   | _ ->
-      let json = surface_snapshot_json surface in
+      let json = surface_snapshot_json ~now:(Unix.gettimeofday ()) surface in
       let raw_json = Yojson.Safe.to_string json in
       let etag = Http_server_eio.Response.weak_etag_value raw_json in
       let payload = { json; raw_json; etag } in
-      if not is_stale then cache.memoized_payload <- Some (surface, payload);
+      if not is_stale then
+        ignore (Atomic.compare_and_set cache publication
+          { publication with memoized_payload = Some payload });
       payload
 
 let cached_surface_or_first_success_payload surface ~cache_key ~ttl ~clock

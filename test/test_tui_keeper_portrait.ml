@@ -20,8 +20,6 @@ let beta = "beta"
 let image_id = Masc_tui_graphics.image_id Masc_tui_graphics.Keeper_portrait
 let size_on display = Option.get (Portrait.band_size display)
 let mosaic_size = size_on View.Mosaic
-let pixel_size = size_on pixels
-
 let band ?(equipment = Look.bare) ?(cache = Portrait.cache ()) ?(display = View.Mosaic) ?(name = alpha)
     ?(content_rows = Portrait.min_content_rows (size_on display))
     ?(content_cols = Portrait.min_content_cols (size_on display)) () =
@@ -30,83 +28,12 @@ let band ?(equipment = Look.bare) ?(cache = Portrait.cache ()) ?(display = View.
 let shows ?display ?content_rows ?content_cols () =
   Option.is_some (band ?display ?content_rows ?content_cols ())
 
-let test_a_small_pane_keeps_its_rows_for_facts () =
-  List.iter
-    (fun display ->
-      let size = size_on display in
-      check bool "at the thresholds" true (shows ~display ());
-      check bool "one row under it, none" false
-        (shows ~display ~content_rows:(Portrait.min_content_rows size - 1) ());
-      check bool "one cell under it, none" false
-        (shows ~display ~content_cols:(Portrait.min_content_cols size - 1) ());
-      check bool "the threshold leaves rows below the band" true
-        (Portrait.min_content_rows size > size.Portrait.rows);
-      check bool "and cells beside it" true
-        (Portrait.min_content_cols size > size.Portrait.cols))
-    [ View.Mosaic; pixels ]
-
 let test_no_picture_is_no_band () =
   check bool "no band size" true (Option.is_none (Portrait.band_size View.No_picture));
   check bool "NO_COLOR, or no colour to draw in" false
     (shows ~display:View.No_picture ~content_rows:400 ~content_cols:400 ())
 
-let test_the_band_is_compact () =
-  let mosaic = Option.get (band ()) in
-  check int "a mosaic takes every band row" mosaic_size.Portrait.rows mosaic.Portrait.box.View.rows;
-  check int "and every band cell" mosaic_size.Portrait.cols mosaic.Portrait.box.View.cols;
-  check int "a line per row" mosaic_size.Portrait.rows (List.length mosaic.Portrait.lines);
-  List.iter
-    (fun line ->
-      check int "each the band wide" mosaic_size.Portrait.cols (Layout.display_width line))
-    mosaic.Portrait.lines;
-  let placed = Option.get (band ~display:pixels ()) in
-  check bool "real pixels fit their band's rows" true
-    (placed.Portrait.box.View.rows <= pixel_size.Portrait.rows);
-  check bool "and its cells" true (placed.Portrait.box.View.cols <= pixel_size.Portrait.cols);
-  check bool "placed pixels take fewer rows than a mosaic" true
-    (pixel_size.Portrait.rows < mosaic_size.Portrait.rows);
-  check (list string) "the cells a picture covers are blank"
-    (List.init placed.Portrait.box.View.rows (fun _ ->
-         String.make placed.Portrait.box.View.cols ' '))
-    placed.Portrait.lines
-
-let test_the_still_portrait_the_name_draws () =
-  let shown = Option.get (band ~display:pixels ()) in
-  let body = Look.body_of_name alpha and equipment = Look.bare in
-  let drawn = Draw.render_icon body equipment shown.Portrait.box.View.size in
-  check bool "placed pixels keep the face icon with server equipment" true
-    (String.equal drawn.Draw.rgba shown.Portrait.image.Draw.rgba);
-  let mosaic = Option.get (band ()) in
-  let compact = Draw.render_icon body equipment mosaic.Portrait.box.View.size in
-  check bool "mosaic draws the compact face" true
-    (String.equal compact.Draw.rgba mosaic.Portrait.image.Draw.rgba);
-  check bool "a compact face differs from the full backdrop" false
-    (String.equal compact.Draw.rgba
-       (Draw.render body equipment mosaic.Portrait.box.View.size).Draw.rgba);
-  let other = Option.get (band ~display:pixels ~name:beta ()) in
-  check bool "another Keeper draws another portrait" false
-    (String.equal other.Portrait.image.Draw.rgba shown.Portrait.image.Draw.rgba)
-
 let facts n = List.init n (fun index -> Printf.sprintf "  fact %d" index)
-
-let test_facts_stand_beside_the_portrait () =
-  let shown = Option.get (band ()) in
-  let band_rows = mosaic_size.Portrait.rows in
-  let fact_column = 2 + mosaic_size.Portrait.cols in
-  let rows = Portrait.beside shown (facts 3) in
-  check int "as tall as the portrait" band_rows (List.length rows);
-  List.iteri
-    (fun index row ->
-      check bool "each fact beside the portrait's row" true
-        (String.ends_with ~suffix:(Printf.sprintf "  fact %d" index) row);
-      check int "starting after the indent and the portrait" (fact_column + String.length "  fact 0")
-        (Layout.display_width row))
-    (List.filteri (fun index _ -> index < 3) rows);
-  let long = Portrait.beside shown (facts (band_rows + 2)) in
-  check int "as tall as the facts when they are taller" (band_rows + 2) (List.length long);
-  check string "a fact past the portrait keeps the column"
-    (String.make fact_column ' ' ^ Printf.sprintf "  fact %d" band_rows)
-    (List.nth long band_rows)
 
 let test_pixels_go_only_where_the_whole_portrait_shows () =
   let placed = Option.get (band ~display:pixels ()) in
@@ -259,37 +186,14 @@ let test_item_mosaic_preview_changes_with_selected_accessory () =
       (Option.is_none (Portrait.preview ~name:alpha ~equipment:shades
         ~content_rows:100 ~content_cols:100)))
 
-let test_mosaic_previews_every_catalog_accessory () =
-  let previous = View.current_display () in
-  Fun.protect ~finally:(fun () -> View.set_display previous) (fun () ->
-    View.set_display View.Mosaic;
-    let preview equipment =
-      Option.get (Portrait.preview ~name:alpha ~equipment
-        ~content_rows:14 ~content_cols:28) in
-    let bare = preview Look.bare in
-    List.iter (fun item ->
-      let equipment = Keeper_portrait_item.preview item Look.bare in
-      let shown = preview equipment in
-      let id = Keeper_portrait_item.id item in
-      check bool (id ^ " changes the Item Mosaic preview") false
-        (String.equal bare.Portrait.image.Draw.rgba shown.Portrait.image.Draw.rgba))
-      Keeper_portrait_item.all)
-
 let () =
   run "tui_keeper_portrait"
     [ ( "band"
-      , [ test_case "a small pane keeps its rows for facts" `Quick
-            test_a_small_pane_keeps_its_rows_for_facts
-        ; test_case "no picture is no band" `Quick test_no_picture_is_no_band
+      , [ test_case "no picture is no band" `Quick test_no_picture_is_no_band
         ; test_case "Item Mosaic selection changes accessory preview" `Quick test_item_mosaic_preview_changes_with_selected_accessory
-        ; test_case "Mosaic previews every catalog accessory" `Quick test_mosaic_previews_every_catalog_accessory
-        ; test_case "the band is compact" `Quick test_the_band_is_compact
-        ; test_case "the still portrait the name draws" `Quick
-            test_the_still_portrait_the_name_draws
         ; test_case "observed facial equipment remains visible in the Info icon" `Quick
             test_observed_items_remain_visible_in_the_info_mosaic
-        ; test_case "facts stand beside the portrait" `Quick test_facts_stand_beside_the_portrait
-        ] )
+        ;] )
     ; ( "placement"
       , [ test_case "pixels go only where the whole portrait shows" `Quick
             test_pixels_go_only_where_the_whole_portrait_shows

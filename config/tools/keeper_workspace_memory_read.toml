@@ -2,7 +2,7 @@ name = "keeper_workspace_memory_read"
 description = """
 Read the current shared workspace memory ledger from its curator.
 
-Without id, list claim and conflict summaries with member references. With a claim or conflict id, resolve only that entry's member facts against current Keeper memory. An unavailable current claim is a read gap, not proof that the fact vanished. These are model classifications, not verified truths. This read does not promote claims or modify Keeper memory."""
+With no selector, read only counts and freshness. Use query to find up to five relevant claim/conflict texts, then id to resolve an entry's member facts against current Keeper memory. Use view=briefing only for a broad workspace synthesis, or view=index for explicit full-index inspection. Query matching is lexical, not a relevance or truth verdict. Keep project, task branch, chronology and uncertainty distinct when applying results. An unavailable current claim is a read gap, not proof that the fact vanished. This read does not promote claims or modify Keeper memory."""
 additional_properties = false
 
 defer_loading = true
@@ -10,4 +10,15 @@ defer_loading = true
 [[params]]
 name = "id"
 type = "string"
-description = "Claim or conflict id from the summary. Omit to list bounded summaries."
+description = "Claim or conflict id from search or index. Mutually exclusive with query and view."
+
+[[params]]
+name = "query"
+type = "string"
+description = "Search terms relevant to the current task or concern. Mutually exclusive with id and view."
+
+[[params]]
+name = "view"
+type = "string"
+enum = ["index", "briefing"]
+description = "Explicit broad retrieval. Mutually exclusive with id and query. Omit all selectors for counts only."

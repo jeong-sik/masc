@@ -215,6 +215,198 @@ printf '\211PNG\r\n\032\n' > "$destination.png"
         | Error error -> fail (Pdf.error_to_string error)
         | Ok _ -> fail "each Poppler command received a fresh budget"))
 
+(* [extract_text] is the text half of [inspect]. These cases run it against
+   fake Poppler tools so they do not depend on an installed Poppler. *)
+let with_fake_poppler ~pdftotext ~pdftoppm f =
+  with_base_path (fun base_path ->
+    let bin = Filename.concat base_path "fake-poppler" in
+    Unix.mkdir bin 0o700;
+    let write name body =
+      let path = Filename.concat bin name in
+      let channel = open_out_bin path in
+      output_string channel ("#!/bin/sh\nset -eu\n" ^ body);
+      close_out channel;
+      Unix.chmod path 0o700 in
+    let text_started = Filename.concat base_path "pdftotext-started" in
+    let render_started = Filename.concat base_path "pdftoppm-started" in
+    write "pdftotext" (Printf.sprintf "printf started > %s\n%s" (Filename.quote text_started) pdftotext);
+    write "pdftoppm" (Printf.sprintf "printf started > %s\n%s" (Filename.quote render_started) pdftoppm);
+    let original_path = Sys.getenv_opt "PATH" in
+    Fun.protect ~finally:(fun () -> Unix.putenv "PATH" (Option.value ~default:"" original_path))
+      (fun () ->
+        Unix.putenv "PATH" (bin ^ ":" ^ Option.value ~default:"" original_path);
+        f ~base_path ~text_started ~render_started))
+
+let leftover_capture_dirs base_path =
+  let capture = Masc.Keeper_execute_output_files.capture_directory ~base_path in
+  if not (Sys.file_exists capture) then []
+  else
+    Sys.readdir capture |> Array.to_list
+    |> List.filter (fun name -> String.length name >= 4 && String.sub name 0 4 = "pdf-")
+
+let two_page_xhtml = {|for destination do :; done
+printf '%s' '<doc><page width="200" height="200"><line><word>Page</word><word>One</word></line></page><page width="200" height="200"><line><word>Page</word><word>Two</word></line></page></doc>' > "$destination"
+|}
+
+let test_extract_text_returns_pages_without_rendering () =
+  with_fake_poppler ~pdftotext:two_page_xhtml ~pdftoppm:"exit 1\n"
+    (fun ~base_path ~text_started:_ ~render_started ->
+      match
+        Pdf.extract_text ~deadline:(Monotonic_deadline.after ~seconds:30.) ~budget_sec:30.
+          ~base_path ~bytes:two_page_pdf ()
+      with
+      | Error error -> failf "extract_text must succeed: %s" (Pdf.error_to_string error)
+      | Ok pages ->
+        check (list string) "one text per page" [ "Page One"; "Page Two" ] pages;
+        check bool "the renderer was never started" false (Sys.file_exists render_started);
+        check (list string) "the capture directory was removed" [] (leftover_capture_dirs base_path))
+
+let test_extract_text_does_not_start_after_the_deadline () =
+  with_fake_poppler ~pdftotext:two_page_xhtml ~pdftoppm:"exit 1\n"
+    (fun ~base_path ~text_started ~render_started:_ ->
+      match
+        Pdf.extract_text ~deadline:(Monotonic_deadline.after ~seconds:0.) ~budget_sec:7.
+          ~base_path ~bytes:two_page_pdf ()
+      with
+      | Error (Pdf.Poppler_budget_spent { program; budget_sec }) ->
+        check string "the first tool is the one refused" "pdftotext" program;
+        check (float 0.) "the budget reported is the one the caller gave" 7. budget_sec;
+        check bool "no process was started" false (Sys.file_exists text_started);
+        check (list string) "the capture directory was removed" [] (leftover_capture_dirs base_path)
+      | Error error -> fail (Pdf.error_to_string error)
+      | Ok _ -> fail "a spent deadline must not extract")
+
+let test_extract_text_stops_a_slow_tool_at_the_callers_deadline () =
+  with_fake_poppler ~pdftotext:("/bin/sleep 5\n" ^ two_page_xhtml) ~pdftoppm:"exit 1\n"
+    (fun ~base_path ~text_started:_ ~render_started:_ ->
+      let started = Unix.gettimeofday () in
+      (match
+         Pdf.extract_text ~deadline:(Monotonic_deadline.after ~seconds:0.5) ~budget_sec:0.5
+           ~base_path ~bytes:two_page_pdf ()
+       with
+       | Error (Pdf.Poppler_budget_spent { program; _ }) ->
+         check string "the slow tool is named" "pdftotext" program
+       | Error error -> fail (Pdf.error_to_string error)
+       | Ok _ -> fail "a tool that outlives the deadline must not answer");
+      check bool "it returned well before the tool would have" true
+        (Unix.gettimeofday () -. started < 4.);
+      check (list string) "the capture directory was removed" [] (leftover_capture_dirs base_path))
+
+(* H5-S2 through the production document reader: a PDF-only fact reaches the
+   projection by way of [extract_text]. Poppler is faked, so this proves the
+   wiring and the failure mapping, not extraction of a real PDF. *)
+let h5_pdf_block () =
+  Agent_core.Types.document_block
+    ~media_type:"application/pdf"
+    ~data:(Base64.encode_string two_page_pdf)
+    ~source_type:Agent_core.Types.Base64
+    ()
+
+let project_pdf ~base_path ~budget_sec =
+  Masc.Keeper_media_reading.project_blocks
+    ~base_path ~keeper_name:"h5-pdf" ~needs_projection:(fun _ -> true)
+    ~deadline:(Monotonic_deadline.after ~seconds:budget_sec)
+    ~read:(Masc.Keeper_media_reading.production_reader ~base_path ~budget_sec)
+    [ h5_pdf_block () ]
+
+let text_of = function
+  | [ Agent_core.Types.Text text ], _ -> text
+  | _ -> fail "expected one projected text block"
+
+let contains ~needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec loop i = i + n <= h && (String.sub haystack i n = needle || loop (i + 1)) in
+  n = 0 || loop 0
+
+let test_h5_production_pdf_reader_projects_the_document_text () =
+  with_fake_poppler ~pdftotext:two_page_xhtml ~pdftoppm:"exit 1\n"
+    (fun ~base_path ~text_started:_ ~render_started ->
+      let text = text_of (project_pdf ~base_path ~budget_sec:30.) in
+      check bool "the page text reached the projection" true (contains ~needle:"Page One" text);
+      check bool "status is read" true (contains ~needle:"status=read" text);
+      check bool "nothing was rendered" false (Sys.file_exists render_started))
+
+let test_h5_production_pdf_reader_marks_a_spent_budget_unavailable () =
+  with_fake_poppler ~pdftotext:("/bin/sleep 5\n" ^ two_page_xhtml) ~pdftoppm:"exit 1\n"
+    (fun ~base_path ~text_started:_ ~render_started:_ ->
+      let text = text_of (project_pdf ~base_path ~budget_sec:0.5) in
+      check bool "marked unavailable" true (contains ~needle:"status=unavailable" text);
+      check bool "with the budget reason" true (contains ~needle:"budget_spent" text);
+      check bool "no extracted text invented" false (contains ~needle:"Page One" text))
+
+(* H5-S2, real Poppler. One page, one fact that exists only in the PDF text:
+   "The ledger year is 1987." Runs for real wherever pdftotext/pdftoppm are
+   installed (the Test workflow installs poppler-utils); otherwise it says it was
+   skipped, as the other Poppler cases here do. A skip is not a pass. *)
+let h5_ledger_pdf = {hpdf|%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 67 >>
+stream
+BT /F1 12 Tf 20 100 Td (H5 fixture. The ledger year is 1987.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000358 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+428
+%%EOF
+|hpdf}
+
+let test_h5_real_poppler_extracts_the_pdf_only_fact () =
+  if not poppler_available then skipped "H5 real extraction"
+  else
+    with_base_path (fun base_path ->
+      match
+        Pdf.extract_text ~deadline:(Monotonic_deadline.after ~seconds:60.) ~budget_sec:60.
+          ~base_path ~bytes:h5_ledger_pdf ()
+      with
+      | Error error -> failf "the fixture must extract: %s" (Pdf.error_to_string error)
+      | Ok pages ->
+        check int "one page" 1 (List.length pages);
+        check bool "the PDF-only fact came back" true
+          (contains ~needle:"ledger year is 1987" (List.hd pages));
+        check (list string) "the capture directory was removed" [] (leftover_capture_dirs base_path))
+
+let test_h5_real_poppler_reaches_the_projection () =
+  if not poppler_available then skipped "H5 real projection"
+  else
+    with_base_path (fun base_path ->
+      let blocks =
+        Masc.Keeper_media_reading.project_blocks
+          ~base_path ~keeper_name:"h5-real-pdf" ~needs_projection:(fun _ -> true)
+          ~deadline:(Monotonic_deadline.after ~seconds:60.)
+          ~read:(Masc.Keeper_media_reading.production_reader ~base_path ~budget_sec:60.)
+          [ Agent_core.Types.document_block ~media_type:"application/pdf"
+              ~data:(Base64.encode_string h5_ledger_pdf)
+              ~source_type:Agent_core.Types.Base64 () ]
+      in
+      let text = text_of blocks in
+      check bool "status is read" true (contains ~needle:"status=read" text);
+      check bool "the fact is in the projection" true
+        (contains ~needle:"ledger year is 1987" text);
+      check bool "bound to the source bytes" true
+        (contains ~needle:("sha256:" ^ Masc.Keeper_media_reading.source_sha256 h5_ledger_pdf) text))
+
 let () =
   run "verification pdf inspection budgets"
     [ ( "budgets"
@@ -234,5 +426,19 @@ let () =
             test_source_budget_precedes_dependency_or_process_lookup
         ; test_case "the two refusals do not read alike" `Quick
             test_the_two_refusals_do_not_read_alike
+        ; test_case "extract_text returns pages without rendering" `Quick
+            test_extract_text_returns_pages_without_rendering
+        ; test_case "extract_text does not start after the deadline" `Quick
+            test_extract_text_does_not_start_after_the_deadline
+        ; test_case "extract_text stops a slow tool at the caller's deadline" `Quick
+            test_extract_text_stops_a_slow_tool_at_the_callers_deadline
+        ; test_case "H5 production PDF reader projects the document text" `Quick
+            test_h5_production_pdf_reader_projects_the_document_text
+        ; test_case "H5 production PDF reader marks a spent budget unavailable" `Quick
+            test_h5_production_pdf_reader_marks_a_spent_budget_unavailable
+        ; test_case "H5 real Poppler extracts the PDF-only fact" `Quick
+            test_h5_real_poppler_extracts_the_pdf_only_fact
+        ; test_case "H5 real Poppler reaches the projection" `Quick
+            test_h5_real_poppler_reaches_the_projection
         ] )
     ]

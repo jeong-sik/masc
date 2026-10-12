@@ -364,7 +364,7 @@ let live_transport_setup transport =
     | Web_extension ->
       "the operator loads the browser-lane extension and its native host in that browser"
     | Webdriver_bidi ->
-      "the operator attaches that browser's Remote Agent with masc-browser-host --bidi-url" in
+      "the operator attaches that browser's Remote Agent with a BiDi browser host" in
   Printf.sprintf "%s (%s)" steps (live_transport_setup_doc transport)
 ;;
 
@@ -373,6 +373,7 @@ type client_info = { client_id : client_id; browser : browser; version : string;
 type client = { info : client_info; commands : issued Eio.Stream.t;
   mutex : Eio.Mutex.t;
   waiters : (string, Yojson.Safe.t Eio.Promise.u) Hashtbl.t;
+  mutable last_delivered_result : (string * Yojson.Safe.t) option;
   mutable connected_until : Monotonic_deadline.t; mutable closed : bool }
 type target = Automation | Live_client of client | Stagehand
 let clients : (string, client) Hashtbl.t = Hashtbl.create 4
@@ -553,20 +554,34 @@ let resolve_target ~verb route =
             (List.map (fun client -> client.info.client_id) several
              |> List.sort (fun left right ->
                   String.compare (client_id_to_string left) (client_id_to_string right)))))
+(* Why the lane turns a poll's client away. [Client_retired]: the lane ended
+   this connection, after [lane_connected_window_sec] without a poll or on the
+   client's own disconnect, and its ID is never served again; a client that
+   is still there registers under a new one. [Client_identity_changed]: the
+   ID is connected as another browser or transport, and asking again gets
+   the same answer. *)
+type registration_refusal = Client_retired | Client_identity_changed
+let registration_refusal_to_wire = function
+  | Client_retired -> "client_disconnected"
+  | Client_identity_changed -> "client_identity_changed"
+let registration_refusal_of_wire = function
+  | "client_disconnected" -> Some Client_retired
+  | "client_identity_changed" -> Some Client_identity_changed
+  | _ -> None
 let register info =
   Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
     prune_unlocked ();
     let key = client_id_to_string info.client_id in
-    if Hashtbl.mem retired_clients key then Error "client_disconnected"
+    if Hashtbl.mem retired_clients key then Error Client_retired
     else match Hashtbl.find_opt clients key with
-    | Some client when client.closed -> Error "client_disconnected"
-    | Some client when not (same_info client.info info) -> Error "client_identity_changed"
+    | Some client when client.closed -> Error Client_retired
+    | Some client when not (same_info client.info info) -> Error Client_identity_changed
     | Some client ->
       client.connected_until <- Monotonic_deadline.after ~seconds:lane_connected_window_sec;
       Ok client
     | None ->
       let client = {info; commands=Eio.Stream.create 16; mutex=Eio.Mutex.create ();
-        waiters=Hashtbl.create 8; closed=false;
+        waiters=Hashtbl.create 8; last_delivered_result=None; closed=false;
         connected_until=Monotonic_deadline.after ~seconds:lane_connected_window_sec} in
       Hashtbl.add clients key client; Ok client)
 let take_command ~client_info ~window_sec =
@@ -589,12 +604,18 @@ let deliver_result ~client_id ~id ~payload =
   | None -> Error "unknown_client"
   | Some client when not (connected client) -> Error "client_not_connected"
   | Some client ->
-    let waiter = Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
-      let found = Hashtbl.find_opt client.waiters id in
-      Hashtbl.remove client.waiters id; found) in
-    match waiter with
-    | None -> Error "request_not_owned_by_client"
-    | Some resolver -> Eio.Promise.resolve resolver payload; Ok ()
+    Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
+      match Hashtbl.find_opt client.waiters id with
+      | Some resolver ->
+        Hashtbl.remove client.waiters id;
+        client.last_delivered_result <- Some (id, payload);
+        Eio.Promise.resolve resolver payload;
+        Ok ()
+      | None ->
+        (match client.last_delivered_result with
+         | Some (last_id, last_payload) when String.equal id last_id && payload = last_payload -> Ok ()
+         | Some (last_id, _) when String.equal id last_id -> Error "result_id_reused_with_different_payload"
+         | None | Some _ -> Error "request_not_owned_by_client"))
 let disconnect_client ~client_id =
   Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
     let key = client_id_to_string client_id in

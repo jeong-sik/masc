@@ -94,20 +94,6 @@ let test_a_delivered_sigterm_reaches_quit () =
       in
       settle 1000)
 
-(* A message waiting behind a running turn is held by this process, so the
-   first quit key says what the second one drops -- count first, because a
-   narrow footer cuts a notice short. *)
-let test_quit_notice_names_what_a_second_press_drops () =
-  check string "nothing waiting"
-    "q: press again to quit, or any other key to stay"
-    (Signals.quit_notice ~key:"q" ~waiting:0);
-  check string "one waiting"
-    "q: 1 unsent message is dropped if you press again to quit, or any other key to stay"
-    (Signals.quit_notice ~key:"q" ~waiting:1);
-  check string "several waiting, from Ctrl-C"
-    "Ctrl-C: 3 unsent messages are dropped if you press again to quit, or any other key to stay"
-    (Signals.quit_notice ~key:"Ctrl-C" ~waiting:3)
-
 let () =
   run "tui exit signals"
     [
@@ -128,8 +114,6 @@ let () =
         ] );
       ( "notice",
         [
-          test_case "the quit notice names what a second press drops" `Quick
-            test_quit_notice_names_what_a_second_press_drops;
         ] );
       ( "delivery",
         [

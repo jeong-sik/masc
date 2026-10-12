@@ -8,6 +8,7 @@ let load_list_text ~config_path =
 
 module Runtime_manifest = Masc.Keeper_runtime_manifest
 module Driver = Masc.Keeper_turn_driver
+module Attempt_checkpoint = Masc.Keeper_attempt_checkpoint
 module Try_provider = Masc.Keeper_turn_driver_try_provider
 module Deferred_store = Masc.Keeper_deferred_runtime_lane_store
 module Agent_run_receipt = Masc.Keeper_agent_run_receipt.For_testing
@@ -1046,6 +1047,407 @@ let image_count_in_messages (messages : Agent_core.Types.message list) =
     0
     messages
 
+(* H5 (task-2187): audio and document carried by the turn must reach a
+   text-only fallback as an attachment-bound reading, not only as an
+   "omitted" count. Expected shape is documented in
+   docs/KEEPER-MEDIA-FALLBACK-H5.md. These fixtures are red on main: the
+   projection keeps only the degrade note. *)
+let h5_fact_audio = "h5-audio-only-fact::the vault code is 4172"
+let h5_fact_document = "h5-document-only-fact::the ledger year is 1987"
+
+let h5_source_sha256_prefix bytes =
+  String.sub (Digestif.SHA256.to_hex (Digestif.SHA256.digest_string bytes)) 0 16
+
+let h5_text_of_blocks blocks =
+  blocks
+  |> List.filter_map (function Agent_core.Types.Text t -> Some t | _ -> None)
+  |> String.concat "\n"
+
+(* One projector is one lane walk; a test that wants two walks builds two. *)
+let h5_projector ?base_path ~read () =
+  Masc.Keeper_media_reading.project
+    (Masc.Keeper_media_reading.projector
+       ?base_path
+       ~keeper_name:"h5-media-fallback"
+       ~start_deadline:(fun () -> Monotonic_deadline.after ~seconds:30.)
+       ~read
+       ())
+
+let h5_project_for_text_only ?project_media ~goal_blocks () =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    let runtime =
+      match Runtime.get_runtime_by_id "primary.text_model" with
+      | Some runtime -> runtime
+      | None -> Alcotest.fail "missing runtime primary.text_model"
+    in
+    let projected =
+      Driver.For_testing.project_input_for_attempt
+        ?project_media
+        ~project_images:
+          (Masc.Keeper_vision_ingest.fallback_projector
+             ~keeper_name:"h5-media-fallback" ())
+        ~keeper_name:"h5-media-fallback"
+        ~emit_runtime_manifest:(emit_manifest_collector (ref []))
+        ~goal_blocks:(Some goal_blocks)
+        ~goal_metadata:[]
+        ~initial_messages:[]
+        ~agent_core_checkpoint:None
+        ~runtime_id:"primary.text_model"
+        runtime
+    in
+    match projected.Driver.attempt_goal_blocks with
+    | Some blocks -> h5_text_of_blocks blocks
+    | None -> Alcotest.fail "the degraded goal must stay present")
+
+let h5_audio_block () =
+  Agent_core.Types.audio_block
+    ~media_type:"audio/wav"
+    ~data:(Base64.encode_string h5_fact_audio)
+    ~source_type:Agent_core.Types.Base64
+    ()
+
+let h5_document_block () =
+  Agent_core.Types.document_block
+    ~media_type:"application/pdf"
+    ~data:(Base64.encode_string h5_fact_document)
+    ~source_type:Agent_core.Types.Base64
+    ()
+
+let h5_fresh_dir () =
+  let dir = Filename.temp_file "h5-media-readings-" "" in
+  Sys.remove dir;
+  Sys.mkdir dir 0o755;
+  dir
+
+let h5_reader_counting calls ~answer ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ =
+  incr calls;
+  answer
+
+let h5_reader_forbidden ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ =
+  Alcotest.fail "a stored reading must be reused without calling the reader"
+
+(* H5-S1: a fact only the audio holds. The text-only candidate's input names the
+   attachment by the identity of its payload and carries the reading; a second
+   projection that shares only the store (a restart) reuses it without reading
+   again. *)
+let test_h5_s1_audio_fact_reaches_text_only_fallback () =
+  let dir = h5_fresh_dir () in
+  let calls = ref 0 in
+  let reader = h5_reader_counting calls ~answer:(Ok ("transcript: " ^ h5_fact_audio)) in
+  let goal = [ Agent_core.Types.Text "what is the vault code?"; h5_audio_block () ] in
+  let text =
+    h5_project_for_text_only
+      ~project_media:(h5_projector ~base_path:dir ~read:reader ())
+      ~goal_blocks:goal
+      ()
+  in
+  Alcotest.(check bool)
+    "projection binds the audio by source sha256"
+    true
+    (contains ~needle:("sha256:" ^ Masc.Keeper_media_reading.source_sha256 h5_fact_audio) text);
+  Alcotest.(check bool) "projection carries the audio-only fact" true
+    (contains ~needle:"the vault code is 4172" text);
+  Alcotest.(check int) "the reader ran once" 1 !calls;
+  let restarted =
+    h5_project_for_text_only
+      ~project_media:(h5_projector ~base_path:dir ~read:h5_reader_forbidden ())
+      ~goal_blocks:goal
+      ()
+  in
+  Alcotest.(check bool) "a restart reuses the stored reading" true
+    (contains ~needle:"the vault code is 4172" restarted)
+
+(* H5-S2: the same for a document-only fact. *)
+let test_h5_s2_document_fact_reaches_text_only_fallback () =
+  let dir = h5_fresh_dir () in
+  let calls = ref 0 in
+  let reader = h5_reader_counting calls ~answer:(Ok ("extracted: " ^ h5_fact_document)) in
+  let goal = [ Agent_core.Types.Text "what is the ledger year?"; h5_document_block () ] in
+  let text =
+    h5_project_for_text_only
+      ~project_media:(h5_projector ~base_path:dir ~read:reader ())
+      ~goal_blocks:goal
+      ()
+  in
+  Alcotest.(check bool)
+    "projection binds the document by source sha256"
+    true
+    (contains ~needle:("sha256:" ^ Masc.Keeper_media_reading.source_sha256 h5_fact_document) text);
+  Alcotest.(check bool) "projection carries the document-only fact" true
+    (contains ~needle:"the ledger year is 1987" text);
+  let restarted =
+    h5_project_for_text_only
+      ~project_media:(h5_projector ~base_path:dir ~read:h5_reader_forbidden ())
+      ~goal_blocks:goal
+      ()
+  in
+  Alcotest.(check bool) "a restart reuses the stored reading" true
+    (contains ~needle:"the ledger year is 1987" restarted)
+
+(* H5-S3 (negative, never a substitute for S1/S2): when the reader cannot read
+   the attachment the projection says so, keeps the original identity, and
+   carries nothing derived from the media; a later success replaces it. *)
+let test_h5_s3_unreadable_attachment_is_marked_unavailable () =
+  let dir = h5_fresh_dir () in
+  let goal = [ Agent_core.Types.Text "what is the vault code?"; h5_audio_block () ] in
+  let failing = h5_reader_counting (ref 0) ~answer:(Error "stt_failed: endpoint down") in
+  let text =
+    h5_project_for_text_only
+      ~project_media:(h5_projector ~base_path:dir ~read:failing ())
+      ~goal_blocks:goal
+      ()
+  in
+  Alcotest.(check bool) "projection says the attachment is unavailable" true
+    (contains ~needle:"status=unavailable" text);
+  Alcotest.(check bool) "projection says the original is kept" true
+    (contains ~needle:"original is kept" text);
+  Alcotest.(check bool) "projection keeps the original identity" true
+    (contains ~needle:("sha256:" ^ Masc.Keeper_media_reading.source_sha256 h5_fact_audio) text);
+  Alcotest.(check bool) "projection invents no media-derived content" false
+    (contains ~needle:"4172" text);
+  let recovered =
+    h5_project_for_text_only
+      ~project_media:
+        (h5_projector ~base_path:dir
+           ~read:(h5_reader_counting (ref 0) ~answer:(Ok ("transcript: " ^ h5_fact_audio)))
+           ())
+      ~goal_blocks:goal
+      ()
+  in
+  Alcotest.(check bool) "an unavailable result is retried, not remembered" true
+    (contains ~needle:"the vault code is 4172" recovered)
+
+(* H5 time budget: a stored reading needs no budget; a missing one is not read
+   once the shared deadline is spent; and the deadline is one clock for every
+   attachment of a projection. *)
+let h5_project_direct ?base_path ~deadline ~read blocks =
+  Masc.Keeper_media_reading.project_blocks
+    ?base_path ~keeper_name:"h5-media-fallback"
+    ~needs_projection:(fun _ -> true) ~deadline ~read blocks
+
+let h5_texts blocks =
+  List.filter_map (function Agent_core.Types.Text t -> Some t | _ -> None) blocks
+
+let test_h5_spent_deadline_does_not_call_the_reader () =
+  let blocks, replaced =
+    h5_project_direct
+      ~deadline:(Monotonic_deadline.after ~seconds:0.)
+      ~read:h5_reader_forbidden
+      [ h5_audio_block () ]
+  in
+  Alcotest.(check int) "the block was projected" 1 (List.length replaced);
+  let text = String.concat "\n" (h5_texts blocks) in
+  Alcotest.(check bool) "marked unavailable" true (contains ~needle:"status=unavailable" text);
+  Alcotest.(check bool) "with the budget reason" true (contains ~needle:"budget_spent" text)
+
+let test_h5_stored_reading_is_used_after_the_deadline_is_spent () =
+  let dir = h5_fresh_dir () in
+  let live = Monotonic_deadline.after ~seconds:30. in
+  ignore
+    (h5_project_direct ~base_path:dir ~deadline:live
+       ~read:(h5_reader_counting (ref 0) ~answer:(Ok ("transcript: " ^ h5_fact_audio)))
+       [ h5_audio_block () ]);
+  let blocks, _ =
+    h5_project_direct ~base_path:dir
+      ~deadline:(Monotonic_deadline.after ~seconds:0.)
+      ~read:h5_reader_forbidden [ h5_audio_block () ]
+  in
+  Alcotest.(check bool) "the stored reading answers without a budget" true
+    (contains ~needle:"the vault code is 4172" (String.concat "\n" (h5_texts blocks)))
+
+let test_h5_attachments_share_one_deadline () =
+  let calls = ref 0 in
+  let slow_then_forbidden ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ =
+    incr calls;
+    if !calls > 1 then Alcotest.fail "the second attachment must not start a fresh budget";
+    Unix.sleepf 0.2;
+    Ok "first reading"
+  in
+  let blocks, _ =
+    h5_project_direct
+      ~deadline:(Monotonic_deadline.after ~seconds:0.05)
+      ~read:slow_then_forbidden
+      [ h5_audio_block (); h5_document_block () ]
+  in
+  let texts = h5_texts blocks in
+  Alcotest.(check int) "two attachments, two blocks" 2 (List.length texts);
+  Alcotest.(check bool) "the first was read" true
+    (contains ~needle:"first reading" (List.nth texts 0));
+  Alcotest.(check bool) "the second ran out of the shared budget" true
+    (contains ~needle:"budget_spent" (List.nth texts 1));
+  Alcotest.(check int) "the reader ran once" 1 !calls
+
+(* Review finding (context-reviewer, #41983 75feda36): reuse is keyed by the
+   media type as well, in memory and on disk. The same bytes presented as
+   another type are another attachment. *)
+let h5_doc_block ~media_type =
+  Agent_core.Types.document_block
+    ~media_type
+    ~data:(Base64.encode_string h5_fact_document)
+    ~source_type:Agent_core.Types.Base64
+    ()
+
+let h5_reader_only_pdf calls ~deadline:_ ~kind:_ ~media_type ~bytes:_ =
+  incr calls;
+  if media_type = "application/pdf" then Ok ("pdf-reading: " ^ h5_fact_document)
+  else Error "no_document_reader"
+
+let h5_same_bytes_two_types ?base_path ~first ~second () =
+  let calls = ref 0 in
+  let blocks, _ =
+    h5_project_direct ?base_path
+      ~deadline:(Monotonic_deadline.after ~seconds:30.)
+      ~read:(h5_reader_only_pdf calls)
+      [ h5_doc_block ~media_type:first; h5_doc_block ~media_type:second ]
+  in
+  h5_texts blocks, !calls
+
+let test_h5_same_bytes_other_type_is_not_a_memo_hit () =
+  let texts, calls = h5_same_bytes_two_types ~first:"application/pdf" ~second:"text/plain" () in
+  Alcotest.(check int) "the reader ran for each type" 2 calls;
+  Alcotest.(check bool) "the pdf was read" true
+    (contains ~needle:"status=read" (List.nth texts 0));
+  Alcotest.(check bool) "the other type is unavailable, not a copy of the pdf reading" true
+    (contains ~needle:"status=unavailable" (List.nth texts 1)
+     && not (contains ~needle:"pdf-reading" (List.nth texts 1))
+     && not (contains ~needle:"application/pdf" (List.nth texts 1)))
+
+let test_h5_same_bytes_other_type_reverse_order () =
+  let texts, calls = h5_same_bytes_two_types ~first:"text/plain" ~second:"application/pdf" () in
+  Alcotest.(check int) "the reader ran for each type" 2 calls;
+  Alcotest.(check bool) "the first stays unavailable" true
+    (contains ~needle:"status=unavailable" (List.nth texts 0));
+  Alcotest.(check bool) "the pdf is still read, not a copy of the failure" true
+    (contains ~needle:"pdf-reading" (List.nth texts 1))
+
+let test_h5_durable_reading_is_keyed_by_media_type () =
+  let dir = h5_fresh_dir () in
+  ignore (h5_same_bytes_two_types ~base_path:dir ~first:"application/pdf" ~second:"text/plain" ());
+  let calls = ref 0 in
+  let blocks, _ =
+    h5_project_direct ~base_path:dir
+      ~deadline:(Monotonic_deadline.after ~seconds:30.)
+      ~read:(h5_reader_only_pdf calls)
+      [ h5_doc_block ~media_type:"text/plain"; h5_doc_block ~media_type:"application/pdf" ]
+  in
+  let texts = h5_texts blocks in
+  Alcotest.(check int) "only the type with no stored reading is read again" 1 !calls;
+  Alcotest.(check bool) "the stored pdf reading is reused after a restart" true
+    (contains ~needle:"pdf-reading" (List.nth texts 1));
+  Alcotest.(check bool) "the other type was not served the pdf reading" false
+    (contains ~needle:"pdf-reading" (List.nth texts 0))
+
+(* H5 store location: readings live under the [.masc] directory of the base
+   path, beside the other runtime state, and leave no folder in the workspace
+   root. *)
+let test_h5_store_lives_under_masc_dir () =
+  let dir = h5_fresh_dir () in
+  let calls = ref 0 in
+  let _ =
+    h5_project_direct ~base_path:dir
+      ~deadline:(Monotonic_deadline.after ~seconds:30.)
+      ~read:(h5_reader_counting calls ~answer:(Ok "stored-reading"))
+      [ h5_doc_block ~media_type:"application/pdf" ]
+  in
+  Alcotest.(check int) "the reader ran once" 1 !calls;
+  Alcotest.(check bool) "the store is under .masc" true
+    (Sys.file_exists (Filename.concat (Filename.concat dir ".masc") "media-readings"));
+  Alcotest.(check bool) "no media-readings folder in the workspace root" false
+    (Sys.file_exists (Filename.concat dir "media-readings"))
+
+(* One lane walk reads a failing attachment once. Before the walk owned the
+   projector, every text-only candidate, and every message of one candidate,
+   ran the reader again on its own deadline. The next turn is a new walk and
+   retries the failure. *)
+let test_h5_walk_reads_a_failing_attachment_once () =
+  let dir = h5_fresh_dir () in
+  let calls = ref 0 in
+  let failing = h5_reader_counting calls ~answer:(Error "stt_failed") in
+  let goal =
+    [ Agent_core.Types.Text "what is the vault code?"; h5_audio_block (); h5_audio_block () ]
+  in
+  let walk = h5_projector ~base_path:dir ~read:failing () in
+  let first = h5_project_for_text_only ~project_media:walk ~goal_blocks:goal () in
+  let second = h5_project_for_text_only ~project_media:walk ~goal_blocks:goal () in
+  Alcotest.(check int) "two candidates and two occurrences read once" 1 !calls;
+  Alcotest.(check bool) "the first candidate is told the attachment is unavailable" true
+    (contains ~needle:"status=unavailable" first);
+  Alcotest.(check bool) "the second candidate gets the same answer" true
+    (String.equal first second);
+  let _ =
+    h5_project_for_text_only
+      ~project_media:(h5_projector ~base_path:dir ~read:failing ())
+      ~goal_blocks:goal
+      ()
+  in
+  Alcotest.(check int) "the next turn retries the unavailable attachment" 2 !calls
+
+let test_h5_reading_deadline_starts_at_the_first_read () =
+  let dir = h5_fresh_dir () in
+  let stored = h5_doc_block ~media_type:"application/pdf" in
+  let _ =
+    h5_project_direct ~base_path:dir
+      ~deadline:(Monotonic_deadline.after ~seconds:30.)
+      ~read:(h5_reader_counting (ref 0) ~answer:(Ok "stored-reading"))
+      [ stored ]
+  in
+  let starts = ref 0 in
+  let walk =
+    Masc.Keeper_media_reading.projector
+      ~base_path:dir
+      ~keeper_name:"h5-media-fallback"
+      ~start_deadline:(fun () ->
+        incr starts;
+        Monotonic_deadline.after ~seconds:30.)
+      ~read:(h5_reader_counting (ref 0) ~answer:(Ok "fresh-reading"))
+      ()
+  in
+  let project blocks =
+    ignore (Masc.Keeper_media_reading.project walk ~needs_projection:(fun _ -> true) blocks)
+  in
+  project [ stored ];
+  Alcotest.(check int) "a stored reading starts no deadline" 0 !starts;
+  project [ h5_audio_block () ];
+  project [ h5_doc_block ~media_type:"application/x-other" ];
+  Alcotest.(check int) "the walk's reads share one deadline" 1 !starts
+
+let test_h5_stored_record_keeps_the_payload_probe () =
+  let dir = h5_fresh_dir () in
+  let long_payload = String.init 300 (fun index -> Char.chr (Char.code 'a' + (index mod 26))) in
+  let data = Base64.encode_string long_payload in
+  let block =
+    Agent_core.Types.audio_block
+      ~media_type:"audio/wav"
+      ~data
+      ~source_type:Agent_core.Types.Base64
+      ()
+  in
+  let _ =
+    h5_project_direct ~base_path:dir
+      ~deadline:(Monotonic_deadline.after ~seconds:30.)
+      ~read:(h5_reader_counting (ref 0) ~answer:(Ok "long-reading"))
+      [ block ]
+  in
+  let keeper_dir =
+    Filename.concat
+      (Filename.concat (Filename.concat dir ".masc") Masc.Keeper_media_reading.store_dirname)
+      "h5-media-fallback"
+  in
+  let record =
+    match Array.to_list (Sys.readdir keeper_dir) with
+    | [ name ] -> Yojson.Safe.from_file (Filename.concat keeper_dir name)
+    | names -> Alcotest.failf "expected one record, got %d" (List.length names)
+  in
+  let probe = Masc.Keeper_media_reading.source_probe data in
+  Alcotest.(check (option string)) "the record keeps the probe" (Some probe)
+    Yojson.Safe.Util.(record |> member "source_probe" |> to_string_option);
+  Alcotest.(check int) "a long payload keeps a fixed-length slice"
+    Masc.Keeper_media_reading.source_probe_length (String.length probe);
+  Alcotest.(check bool) "the slice is taken from the payload text" true
+    (contains ~needle:probe data);
+  Alcotest.(check string) "a short payload is its own probe" "QUJD"
+    (Masc.Keeper_media_reading.source_probe "QUJD")
+
 let synthetic_image () =
   Agent_core.Types.image_block
     ~media_type:"image/png"
@@ -1325,26 +1727,26 @@ let test_current_image_checkpoint_survives_text_fallback () =
       { (completed_run_result ()) with checkpoint = Some provider_checkpoint } in
     let projection = text_view.Driver.attempt_replay_prefix_projection in
     let restored =
-      match Driver.For_testing.project_provider_attempt_result
-              ~replay_prefix_projection:projection (Ok provider_result)
-            |> Driver.For_testing.turn_result with
+      match Attempt_checkpoint.project
+              ~projection (Ok provider_result)
+            |> fun outcomes -> outcomes.Attempt_checkpoint.turn_result with
       | Ok { Runtime_agent.checkpoint = Some checkpoint; _ } -> checkpoint
       | Ok _ -> Alcotest.fail "successful text fallback lost its checkpoint"
       | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
     Alcotest.(check bool) "successful text fallback retains current-goal pixels and exact suffix"
       true (restored.messages = history @ [ canonical_input ] @ suffix);
     let sidecar = `Assoc ["original_task",`String "image-fallback-task"] in
-    let failed = Driver.For_testing.project_provider_attempt_result
+    let failed = Attempt_checkpoint.project
       ~checkpoint_after:{provider_checkpoint with working_context=Some sidecar}
-      ~replay_prefix_projection:projection (Error (retryable_network_error "checkpoint persistence failed")) in
-    let failed_checkpoint = Driver.For_testing.produced_checkpoint failed |> Option.get in
+      ~projection (Error (retryable_network_error "checkpoint persistence failed")) in
+    let failed_checkpoint = failed.Attempt_checkpoint.checkpoint_after |> Option.get in
     Alcotest.(check bool) "failed producer keeps canonical pixels and exact suffix"
       true (failed_checkpoint.messages=restored.messages);
     Alcotest.(check bool) "failed producer keeps its working context"
       true (failed_checkpoint.working_context=Some sidecar);
     let persisted = ref [] in
-    let sink = Driver.For_testing.canonical_checkpoint_sink
-        ~replay_prefix_projection:projection
+    let sink = Attempt_checkpoint.canonical_sink
+        ~projection
         (fun (snapshot : Agent_core.Agent.checkpoint_snapshot) ->
           persisted := snapshot.checkpoint :: !persisted; Ok ()) in
     let snapshot checkpoint =
@@ -6298,6 +6700,58 @@ let () =
             "attempt input is projected per runtime"
             `Quick
             test_attempt_input_is_projected_per_runtime;
+          Alcotest.test_case
+            "H5-S1 audio fact reaches text-only fallback"
+            `Quick
+            test_h5_s1_audio_fact_reaches_text_only_fallback;
+          Alcotest.test_case
+            "H5-S2 document fact reaches text-only fallback"
+            `Quick
+            test_h5_s2_document_fact_reaches_text_only_fallback;
+          Alcotest.test_case
+            "H5-S3 unreadable attachment is marked unavailable"
+            `Quick
+            test_h5_s3_unreadable_attachment_is_marked_unavailable;
+          Alcotest.test_case
+            "H5 spent deadline does not call the reader"
+            `Quick
+            test_h5_spent_deadline_does_not_call_the_reader;
+          Alcotest.test_case
+            "H5 stored reading is used after the deadline is spent"
+            `Quick
+            test_h5_stored_reading_is_used_after_the_deadline_is_spent;
+          Alcotest.test_case
+            "H5 attachments share one deadline"
+            `Quick
+            test_h5_attachments_share_one_deadline;
+          Alcotest.test_case
+            "H5 same bytes under another media type is not a memo hit"
+            `Quick
+            test_h5_same_bytes_other_type_is_not_a_memo_hit;
+          Alcotest.test_case
+            "H5 same bytes under another media type, reverse order"
+            `Quick
+            test_h5_same_bytes_other_type_reverse_order;
+          Alcotest.test_case
+            "H5 durable reading is keyed by media type"
+            `Quick
+            test_h5_durable_reading_is_keyed_by_media_type;
+          Alcotest.test_case
+            "H5 store lives under the .masc directory"
+            `Quick
+            test_h5_store_lives_under_masc_dir;
+          Alcotest.test_case
+            "H5 one walk reads a failing attachment once"
+            `Quick
+            test_h5_walk_reads_a_failing_attachment_once;
+          Alcotest.test_case
+            "H5 reading deadline starts at the first read"
+            `Quick
+            test_h5_reading_deadline_starts_at_the_first_read;
+          Alcotest.test_case
+            "H5 stored record keeps the payload probe"
+            `Quick
+            test_h5_stored_record_keeps_the_payload_probe;
           Alcotest.test_case
             "media rows keep their fields in the public view"
             `Quick

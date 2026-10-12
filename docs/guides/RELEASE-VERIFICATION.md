@@ -24,8 +24,8 @@ separate reviewed change for the next release.
 
 Existing suites are evidence inputs, not a complete selection manifest. Examples
 include `test_tui_keeper_chat_live.ml`, `test_keeper_chat_delivery_identity.ml`,
-`test_keeper_chat_operation_http.ml`, `test_keeper_turn_driver_failover.ml` and
-`test_tui_memory_recall_state_pty.py`. Inspect their actual assertions before
+`test_keeper_chat_operation_http.ml` and `test_keeper_turn_driver_failover.ml`.
+Inspect their actual assertions before
 selecting them; names and a green status cannot establish missing coverage.
 
 ## Publication integrity after verification
@@ -59,13 +59,11 @@ in the release does not become untested merely because its tests are expensive.
 | --- | --- |
 | Source wording, occurrence counts or ordering of source fragments | Remove or replace with actual behavior/protocol evidence; do not use as release behavior proof. |
 | Log-analysis script and benchmark-tool implementation tests | Run when those tools change, separately from product readiness. Example: `test_tool_call_sequence_miner.py`. |
-| Exhaustive screenshots, width sweeps and accessory combinations | Rendering/feature validation when relevant. Keep representative interaction and boundary checks in the selected release scope. |
+| TUI screen text, layout, width sweeps and row order | Not tested. Check what the TUI sends, stores and decides instead. |
 | Quantitative Keeper fleet, performance SLO and generic Agent Core boundary review | Dedicated production-readiness lanes; all remain mandatory for a production-ready claim. The artifact gate separately requires full Agent Core compilation/types and affected runtime protocol behavior. |
 | Extended live-provider/model comparisons | Dedicated measurement when the changed contract or explicit runtime claim depends on them; representative supported-route behavior remains required on each candidate. |
 
-For example, `test_tui_region_baseline_pty.py` includes click targeting and pane
-boundaries, not just pictures. Preserve that functional coverage before
-separating its broad visual sweep. Do not exclude a suite by filename alone.
+Do not exclude a suite by filename alone.
 
 ## Selection and evidence
 

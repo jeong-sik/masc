@@ -224,7 +224,7 @@ let await_devtools_endpoint ~clock ~profile ~process =
 
 let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headless ~model ~log =
   let clock = Eio.Stdenv.clock env in
-  let lane = Filename.concat masc_root "browser-lane" in
+  let lane = Filename.concat masc_root Common.browser_lane_dirname in
   let record_path = Process.owner_record_path ~masc_root in
   let* extension_dir =
     match Unix.realpath config.extension with

@@ -649,7 +649,9 @@ def completed_memory_output(output: dict[str, Json], current_fact_count: int) ->
     if status == "skipped":
         text(gate.get("reason"), "skipped absorb gate reason")
     elif status == "judged":
-        number(gate.get("conveyed_boundary"), "conveyed_boundary")
+        if gate.get("judgment_unit") != "contextual_source_memory":
+            raise ValueError("unknown absorb judgment unit")
+        number(gate.get("reverse_copy_boundary"), "reverse_copy_boundary")
         count(gate.get("requests"), "absorb gate requests")
         for key in ("unjudged", "unjudgeable"):
             absorptions(gate.get(key), "absorbed")
@@ -658,8 +660,13 @@ def completed_memory_output(output: dict[str, Json], current_fact_count: int) ->
                 verdict = obj(item, "source verdict")
                 for field in ("memory_id", "into"):
                     text(verdict.get(field), field)
-                for field in ("statements", "not_conveyed"):
-                    count(verdict.get(field), field)
+                allowed = (
+                    ("mergeable",)
+                    if key == "conveyed"
+                    else ("different_context", "loses_knowledge", "uncertain")
+                )
+                if verdict.get("decision") not in allowed:
+                    raise ValueError("source decision disagrees with absorption verdict")
         for item in array(gate.get("copy_checks"), "copy_checks"):
             check = obj(item, "copy check")
             text(check.get("claim_id"), "copy claim_id")

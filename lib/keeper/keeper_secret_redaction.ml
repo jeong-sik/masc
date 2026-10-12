@@ -9,6 +9,12 @@ type stream_state =
   { redaction : t
   ; pending_line : Buffer.t
   ; mutable next_bounded_flush_at : int
+  ; mutable consumed : int
+  }
+
+type stream_release =
+  { pieces : Secret_patterns.source_piece list
+  ; consumed : int
   }
 
 let empty =
@@ -329,17 +335,23 @@ let snapshot ~base_path ~keeper_name =
    [any_exact_value] does not match leaves the passes with nothing to do. The
    passes keep their longest-value-first order when something matches: a value
    that contains another must be replaced before the shorter one splits it. *)
-let redact_text t text =
-  let text =
+let redact_text_mapped t text =
+  let pieces =
+    if String.equal text "" then []
+    else [ Secret_patterns.Copied
+             { source = { first_byte = 0; past_byte = String.length text }; text } ] in
+  let pieces =
     match t.any_exact_value with
     | Some any_exact_value when Re.execp any_exact_value text ->
       List.fold_left
-        (fun acc pattern -> Re.replace_string pattern ~by:"[REDACTED]" acc)
-        text
+        (fun pieces pattern -> Secret_patterns.mask_matches pattern pieces)
+        pieces
         t.patterns
-    | Some _ | None -> text
+    | Some _ | None -> pieces
   in
-  Observability_redact.redact_text text
+  Secret_patterns.redact_pieces pieces
+
+let redact_text t text = Secret_patterns.render_pieces (redact_text_mapped t text)
 
 let stream_overlap_bytes redaction =
   max structural_pattern_overlap_bytes (max 0 (redaction.max_exact_value_len - 1))
@@ -353,6 +365,7 @@ let create_stream_state redaction =
   { redaction
   ; pending_line = Buffer.create 256
   ; next_bounded_flush_at = stream_flush_threshold redaction
+  ; consumed = 0
   }
 ;;
 
@@ -371,6 +384,19 @@ let exact_value_at redaction text index =
   List.find_opt (exact_value_starts_at text ~index) redaction.exact_values
 ;;
 
+let shift_piece offset = function
+  | Secret_patterns.Copied { source; text } ->
+      Secret_patterns.Copied
+        { source = { first_byte = source.first_byte + offset; past_byte = source.past_byte + offset }; text }
+  | Secret_patterns.Masked { source; replacement } ->
+      Secret_patterns.Masked
+        { source = { first_byte = source.first_byte + offset; past_byte = source.past_byte + offset }; replacement }
+
+let emit_mapped (state : stream_state) emitted ~source_length pieces =
+  let pieces = List.map (shift_piece state.consumed) pieces in
+  emitted := List.rev_append pieces !emitted;
+  state.consumed <- state.consumed + source_length
+
 let emit_bounded_prefix state emitted stop =
   let pending = Buffer.contents state.pending_line in
   (* Each emitted piece reaches its reader as a separate string (a dashboard
@@ -384,20 +410,29 @@ let emit_bounded_prefix state emitted stop =
     | 0 -> stop
     | boundary -> boundary
   in
-  let safely_redacted = Buffer.create stop in
+  let pieces = ref [] in
   let cursor = ref 0 in
+  let copied_from = ref 0 in
+  let copy_until past_byte =
+    if past_byte > !copied_from then
+      pieces := Secret_patterns.Copied
+        { source = { first_byte = !copied_from; past_byte };
+          text = String.sub pending !copied_from (past_byte - !copied_from) } :: !pieces
+  in
   while !cursor < stop do
     match exact_value_at state.redaction pending !cursor with
     | Some value ->
-      Buffer.add_string safely_redacted "[REDACTED]";
-      cursor := !cursor + String.length value
-    | None ->
-      Buffer.add_char safely_redacted pending.[!cursor];
-      incr cursor
+      copy_until !cursor;
+      let past_byte = !cursor + String.length value in
+      pieces := Secret_patterns.Masked
+        { source = { first_byte = !cursor; past_byte }; replacement = "[REDACTED]" } :: !pieces;
+      cursor := past_byte;
+      copied_from := past_byte
+    | None -> incr cursor
   done;
-  Buffer.add_string
-    emitted
-    (Observability_redact.redact_text (Buffer.contents safely_redacted));
+  copy_until !cursor;
+  emit_mapped state emitted ~source_length:!cursor
+    (Secret_patterns.redact_pieces (List.rev !pieces));
   Buffer.clear state.pending_line;
   Buffer.add_substring
     state.pending_line
@@ -407,7 +442,9 @@ let emit_bounded_prefix state emitted stop =
 ;;
 
 let flush_complete_record state emitted =
-  Buffer.add_string emitted (redact_text state.redaction (Buffer.contents state.pending_line));
+  let pending = Buffer.contents state.pending_line in
+  emit_mapped state emitted ~source_length:(String.length pending)
+    (redact_text_mapped state.redaction pending);
   Buffer.clear state.pending_line;
   state.next_bounded_flush_at <- stream_flush_threshold state.redaction
 ;;
@@ -422,8 +459,8 @@ let flush_bounded_prefix_if_needed state emitted =
     state.next_bounded_flush_at <- stream_flush_threshold state.redaction)
 ;;
 
-let redact_stream_chunk state chunk =
-  let emitted = Buffer.create (String.length chunk) in
+let redact_stream_chunk_mapped state chunk =
+  let emitted = ref [] in
   String.iter
     (fun char ->
        Buffer.add_char state.pending_line char;
@@ -431,15 +468,20 @@ let redact_stream_chunk state chunk =
        then flush_complete_record state emitted
        else flush_bounded_prefix_if_needed state emitted)
     chunk;
-  Buffer.contents emitted
+  { pieces = List.rev !emitted; consumed = state.consumed }
 ;;
 
-let redact_stream_finish state =
-  let trailing = redact_text state.redaction (Buffer.contents state.pending_line) in
-  Buffer.clear state.pending_line;
-  state.next_bounded_flush_at <- stream_flush_threshold state.redaction;
-  trailing
+let redact_stream_finish_mapped state =
+  let emitted = ref [] in
+  flush_complete_record state emitted;
+  { pieces = List.rev !emitted; consumed = state.consumed }
 ;;
+
+let redact_stream_chunk state chunk =
+  Secret_patterns.render_pieces (redact_stream_chunk_mapped state chunk).pieces
+
+let redact_stream_finish state =
+  Secret_patterns.render_pieces (redact_stream_finish_mapped state).pieces
 
 (* Keys as well as values. A secret can be the key -- a header name, a
    parameter used as a dict key, {"<secret>": "x"} straight from a tool

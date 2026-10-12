@@ -95,7 +95,7 @@ let test_missing_and_malformed_payloads_do_not_open_labels () =
   List.iter (fun data ->
     let image = Preview.persisted_attachment ~name:"image-1.png" ~mime:"image/png" ~data in
     match Preview.in_message ~text:"older.png" ~attachments:[image] with
-    | Preview.Unavailable_attachment "image-1.png" -> ()
+    | Preview.Unavailable_image { name = "image-1.png"; _ } -> ()
     | _ -> fail "unavailable sent image must not turn its label into a path")
     [None; Some "masc://attachment/att/hash"; Some "[masc:blob sha256=../../other]"]
 

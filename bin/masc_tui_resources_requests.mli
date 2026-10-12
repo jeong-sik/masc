@@ -16,7 +16,10 @@ val launch_list
 
 (** Mark the pending URI before launching. Changing resources clears the old
     content, error and scroll; re-reading the same resource keeps its content.
-    Resource_read failure attribution is applied exactly once. *)
+    Selection is retained while authority is unconfirmed, without invoking
+    [launch] or [check]. Same-workspace recovery resumes the pending URI;
+    foreign-workspace reconciliation clears it. Resource_read failure
+    attribution is applied exactly once. *)
 val launch_read
   :  Masc_tui_types.state
   -> host:string

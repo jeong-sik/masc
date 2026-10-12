@@ -167,6 +167,17 @@ Anthropic 요청에서는 `tool_choice.disable_parallel_tool_use`, OpenAI 요청
 | `openai` | `OPENAI_API_KEY` | 2026-09-10 기준 키에 크레딧이 없어 요청 생성 이후는 확인하지 못했다 |
 | `claude_code` | `CLAUDE_CODE_OAUTH_TOKEN` | 아래 구독 레인 |
 
+Ollama Cloud의 uncontrolled 바인딩은 `reasoning-uncontrolled = true`와
+`thinking-control-format = "none"`을 선언하고, `thinking-support`와
+`reasoning-effort`는 생략한다. 모델의 기본 동작을 따르는 선언이며,
+`qwen3-coder-next` 같은 비추론 모델에도 추론 활성화를 강제하지 않는다.
+`deepseek-v4.1-flash`의 모델별 `low`와 controlled provider의 effort 설정은
+명시적 활성화 요청을 유지한다.
+
+렌더된 TOML의 요청 정책만 확인하려면
+`python3 -m unittest discover -s benchmarks/terminal_bench/configs -p test_render_configs.py`를 실행한다.
+이 검사는 서버 기동이나 실제 provider 호출을 하지 않는다.
+
 ## arm L — 후보 순서 (Runtime Candidate Order)
 
 다른 arm 은 모델 하나만 렌더한다. 그래서 `repeated_reasoning_cycle` 처럼 "다음 후보는

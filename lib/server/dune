@@ -5,6 +5,8 @@
  (public_name masc.server)
  (wrapped false)
  (private_modules
+  server_dashboard_keeper_state_projection
+  server_dashboard_runtime_declaration_projection
   keeper_grpc_heartbeat
   server_grpc_tool_dispatch
   server_dashboard_fusion_run_projection
@@ -15,6 +17,9 @@
  (flags :standard -open Masc -w +33)
  (libraries
   mcp_protocol
+  masc.lane_addon_call_context
+  masc.machine_pad_layout
+  masc.machine_controller_contract
   masc.workspace_connection
   ;; The server start logs whether Candle is on (RFC-goal-candle-ledger 3.9), and
   ;; POST /api/v1/goals/confirmation writes the confirmed pass's PayoutOwed row
@@ -24,6 +29,8 @@
   ;; variants; this library is not re-exported through masc_candle_runtime.
   masc.masc_candle_config
   masc.masc_candle_runtime
+  masc.keeper_operation_identity
+  masc.machine_checkpoint
   masc.keeper_tool_name
   masc.owner_process_identity
   masc
@@ -35,11 +42,7 @@
   masc.machine_configuration
   masc.browser_lane
   masc.slack_lane
-  masc.msx_lane
   masc.machine_live_publication
-  ;; GET /api/v1/lane-addons/live reads the DOS machine's change mark and frame.
-  masc.dos_lane
-  ;; The same route's activity feed: Dos_lane.recent_activity's entry type.
   masc.machine_action_feed
   ;; The LSP client the IDE proxy drives. Extracted out of this library so a
   ;; Keeper tool in [masc] can reach a language server too (RFC

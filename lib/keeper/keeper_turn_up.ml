@@ -61,12 +61,18 @@ let handle_keeper_up ctx args : tool_result =
   match create_only with
   | Error detail -> tool_result_error ~class_:Tool_result.Workflow_rejection detail
   | Ok create_only ->
+  (* This control belongs to admission below; the argument parser accepts
+     only fields that it returns in the parsed Keeper configuration. *)
+  let configuration_args = match args with
+    | `Assoc fields -> `Assoc (List.remove_assoc "create_only" fields)
+    | value -> value
+  in
   match Runtime_startup_state.get () with
   | Setup_required reason ->
     tool_result_error ~class_:Tool_result.Runtime_failure
       (Runtime_startup_state.message reason)
   | Not_initialized | Available ->
-  match Keeper_turn_up_args.parse ctx args with
+  match Keeper_turn_up_args.parse ctx configuration_args with
   | Error result -> result
   | Ok p ->
     (match

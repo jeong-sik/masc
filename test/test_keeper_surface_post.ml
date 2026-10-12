@@ -509,7 +509,6 @@ let roster_message ~surface ~speaker_id : Store.chat_message =
   ; audio = None
   ; blocks = None
   ; mentions = []
-  ; kind = Store.Row_kind.Utterance
   ; turn_ref = None
   ; stream_lifecycle = None
   ; approval_lifecycle = None

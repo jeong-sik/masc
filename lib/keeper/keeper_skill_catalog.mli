@@ -163,7 +163,7 @@ val composition_info_near_misses : string -> string list
     an advisory {!Composition_info_near_miss} without touching the projection,
     the way {!of_snapshot} does. *)
 
-val parse_skill : directory:string -> string -> (skill, error) result
+val parse_skill : ?descriptors:Keeper_tool_descriptor.t list -> directory:string -> string -> (skill, error) result
 (** Parse one SKILL.md document. [directory] is the skill's directory name;
     {!Agent_core.Skill_document.decode} enforces the frontmatter contract. A
     composition block must declare exactly one composition and its [name]
@@ -176,9 +176,11 @@ type authored_source_error =
   | Invalid_document of error
 
 val validate_authored_source :
+  descriptors:Keeper_tool_descriptor.t list ->
   directory:string -> string -> (skill, authored_source_error) result
 (** Apply the editor's source-size limit and {!parse_skill} to proposed document
-    bytes. This neither publishes a Skill nor proves its execution succeeds. *)
+    bytes against the caller-authorized descriptor snapshot. This neither publishes
+    a Skill nor proves its execution succeeds. *)
 
 val partition_documents :
   (string * string) list -> t * rejected_document list
@@ -188,7 +190,7 @@ val partition_documents :
     stop unrelated Keeper turns or disappear silently. *)
 
 val of_snapshot :
-  Skill_catalog_snapshot.t -> t * projection_diagnostic list
+  ?descriptors:Keeper_tool_descriptor.t list -> Skill_catalog_snapshot.t -> t * projection_diagnostic list
 (** Project effective snapshot entries into the temporary composition-tool
     catalog. Snapshot order and exact source provenance are preserved. A
     composition projection failure keeps the frozen document as an instruction
@@ -197,21 +199,22 @@ val of_snapshot :
     turn. An instruction skill whose body carries a fence info near-miss also
     returns an advisory {!Composition_info_near_miss} diagnostic while staying
     projected. The entries of the snapshot last projected are not projected
-    again; see {!project_entry_or_fallback}. *)
+    again under the same exact descriptor objects; see {!project_entry_or_fallback}. *)
 
 val all_entries_of_snapshot :
-  Skill_catalog_snapshot.t -> t * projection_diagnostic list
+  ?descriptors:Keeper_tool_descriptor.t list -> Skill_catalog_snapshot.t -> t * projection_diagnostic list
 (** Project every exact snapshot entry, including shadowed identities. This is
     the operator-surface projection. Executable turn catalogs start with
     {!of_snapshot}, then {!project_turn} merges exact Task-selected shadows.
     It shares the entry projections {!of_snapshot} uses. *)
 
 val project_entry_or_fallback :
-  Skill_catalog_snapshot.t -> Skill_catalog_snapshot.entry -> entry_projection
+  ?descriptors:Keeper_tool_descriptor.t list -> Skill_catalog_snapshot.t -> Skill_catalog_snapshot.entry -> entry_projection
 (** Canonical projection for global, Task-selected, and shadowed entries.
     Malformed composition declarations remain available as their frozen
     instruction body with a typed diagnostic. Other rejected declarations are
-    explicitly unavailable. The entries of one snapshot are projected once:
+    explicitly unavailable. Cache reuse requires the same snapshot and physically
+    identical descriptor objects (defaults to the static catalog):
     asked about an entry of the snapshot it last projected, it returns that
     entry's kept projection, the one {!of_snapshot} and
     {!all_entries_of_snapshot} use. *)

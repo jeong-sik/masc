@@ -1,0 +1,5 @@
+(include_subdirs no)
+(library
+ (name dos_pad)
+ (public_name masc.dos_pad)
+ (libraries masc.machine_pad_layout masc.dos_lane masc.masc_core masc.embedded_config otoml unix))

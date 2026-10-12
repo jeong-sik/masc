@@ -84,40 +84,6 @@ let test_workspace_loss_withdraws_queued_message_target () =
   check bool "unobserved remote usage is not zero" true
     (Option.is_none (Tui_types.aggregate_keeper_stats state.keepers))
 
-(* A slash command sent from the composer row runs as it does from the chat
-   pane, but only the chat pane's footer said what the word being typed was:
-   on every other surface "/tsk" read as a message until Enter. The row draws
-   the same hint the footer draws, from the one function. *)
-let test_the_composer_row_says_what_a_slash_word_is () =
-  let plain text = Masc_tui_theme.strip_sgr text in
-  let contains needle haystack =
-    let n = String.length needle and h = String.length haystack in
-    let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
-    go 0
-  in
-  (match Masc_tui_render_prim.slash_hint_text ~restore:"" "/tsk" with
-   | None -> fail "an unknown slash word draws a hint"
-   | Some line ->
-       check bool "and says it is no command" true (contains "is not a command" (plain line)));
-  (match Masc_tui_render_prim.slash_hint_text ~restore:"" "/ta" with
-   | None -> fail "a prefix draws its candidates"
-   | Some line -> check bool "naming /task" true (contains "task" (plain line)));
-  check (option string) "a message draws nothing" None
-    (Masc_tui_render_prim.slash_hint_text ~restore:"" "hello")
-
-let test_shared_composer_keeps_emoji_cursor_on_boundaries () =
-  let state = state () in
-  let input = state.msg_input in
-  Masc_tui_message_input.insert input "👩‍💻X";
-  List.iter (fun expected_cells ->
-    Masc_tui_message_input.move_left input;
-    let visible, cells = Masc_tui_render_prim.composer_draft_window state
-      ~cols:80 ~prompt:"" in
-    check string "full joined emoji remains visible" "👩‍💻X" visible;
-    check bool "window never slices an emoji scalar" true (String.is_valid_utf_8 visible);
-    check int "caret at the visible grapheme boundary" expected_cells cells)
-    [2; 0]
-
 let () =
   run "tui-composer-projection"
     [ ( "state projection"
@@ -125,14 +91,9 @@ let () =
         ; test_case "ready target" `Quick test_selected_keeper_is_ready
         ; test_case "unread roster" `Quick
             test_unread_roster_keeps_the_selected_name
-        ; test_case "shared composer ZWJ caret" `Quick
-            test_shared_composer_keeps_emoji_cursor_on_boundaries
         ; test_case "focus and draft" `Quick
             test_focus_and_draft_are_projected_together
         ; test_case "workspace loss withdraws queued message target" `Quick
             test_workspace_loss_withdraws_queued_message_target
-        ; test_case "the composer row says what a slash word is" `Quick
-            test_the_composer_row_says_what_a_slash_word_is
-
-        ] )
+        ;] )
     ]

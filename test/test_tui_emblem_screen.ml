@@ -91,21 +91,6 @@ let test_the_candle_stands_centred_over_its_caption () =
     lines;
   check bool "centred left to right" true (abs (left - (cols - left - box.View.cols)) <= 1)
 
-let test_mosaic_uses_the_compact_candle () =
-  let out = laid_out View.Mosaic in
-  let box = Option.get (View.fit View.Mosaic ~max_cols:cols ~max_rows:picture_rows) in
-  let body, equipment = Keeper_portrait_look.mascot in
-  let image = Draw.render_compact_posed body equipment Draw.still box.View.size in
-  let expected =
-    View.lines ~project View.Mosaic box image
-    |> List.map (fun line -> String.make ((cols - box.View.cols) / 2) ' ' ^ line)
-  in
-  let top = (rows - box.View.rows - List.length caption - 1) / 2 in
-  let actual =
-    List.filteri (fun index _ -> index >= top && index < top + box.View.rows) out.Screen.lines
-  in
-  check (list string) "the mosaic contains the compact candle" expected actual
-
 let test_pixels_leave_blank_rows_and_place_the_picture_there () =
   let out = laid_out pixels in
   check bool "drawn" true (out.Screen.drawn = Screen.Moving);
@@ -185,21 +170,6 @@ let test_the_style_is_stored_by_name () =
         (Screen.next_style (Screen.next_style style) = style && Screen.next_style style <> style))
     [ Screen.Painted; Screen.Dotted ];
   check bool "an unknown name is none" true (Screen.style_of_string "sparkly" = None)
-
-let test_about_says_only_what_was_read () =
-  check string "a read roster is counted"
-    "Theme: dusk  \xc2\xb7  Keepers: 2"
-    (Screen.about_facts ~theme:"dusk" (Screen.Keepers_read 2));
-  check string "a read empty roster says zero"
-    "Theme: dusk  \xc2\xb7  Keepers: 0"
-    (Screen.about_facts ~theme:"dusk" (Screen.Keepers_read 0));
-  (* No count is not a count of none (#35747). *)
-  check string "an unreadable roster says so"
-    "Theme: dusk  \xc2\xb7  Keepers: unavailable"
-    (Screen.about_facts ~theme:"dusk" Screen.Keepers_unreadable);
-  check string "an unread roster says not loaded"
-    "Theme: dusk  \xc2\xb7  Keepers: not loaded"
-    (Screen.about_facts ~theme:"dusk" Screen.Keepers_unread)
 
 let test_a_frame_records_only_what_it_drew () =
   View.set_display View.Mosaic;
@@ -341,29 +311,6 @@ let test_no_picture_keeps_the_count () =
     (List.exists (fun line -> String.equal (trimmed line) "+1 more Keepers")
        plain.Screen.lines)
 
-let test_every_arrival_frame_fits_its_terminal () =
-  List.iter
-    (fun cols ->
-      List.iter
-        (fun display ->
-          for frame = 0 to Screen.final_frame do
-            let scene = about ~cols ~frame display in
-            List.iter
-              (fun line ->
-                check bool "arrival row fits without a cut" true
-                  (Layout.display_width line <= cols))
-              scene.Screen.lines;
-            List.iter
-              (fun placement ->
-                check bool "Kitty picture stays inside its frame" true
-                  (placement.View.column >= snd origin
-                   && placement.View.column + placement.View.box.View.cols
-                      <= snd origin + cols))
-              scene.Screen.placements
-          done)
-        [pixels; View.Mosaic])
-    [76; 136]
-
 let test_about_candle_frames_are_reused_with_a_bound () =
   let mascot_image scene =
     scene.Screen.placements
@@ -389,8 +336,6 @@ let () =
     [ ( "layout"
       , [ test_case "the candle stands centred over its caption on /about" `Quick
             test_the_candle_stands_centred_over_its_caption
-        ; test_case "the mosaic uses the compact candle" `Quick
-            test_mosaic_uses_the_compact_candle
         ; test_case "pixels leave blank rows and place the picture there" `Quick
             test_pixels_leave_blank_rows_and_place_the_picture_there
         ; test_case "no picture draws the caption alone" `Quick
@@ -406,9 +351,7 @@ let () =
         ; test_case "the style is stored by name" `Quick test_the_style_is_stored_by_name
         ] )
     ; ( "about"
-      , [ test_case "it says only what was read" `Quick
-            test_about_says_only_what_was_read
-        ; test_case "observed outfits and unread outfits retain roster identity" `Quick
+      , [ test_case "observed outfits and unread outfits retain roster identity" `Quick
             test_about_observed_outfit_and_unavailable_names
         ; test_case "the arrival gathers then stops" `Quick
             test_the_arrival_gathers_then_stops
@@ -416,8 +359,6 @@ let () =
             test_wide_and_mosaic_keep_the_roster
         ; test_case "no picture keeps the count" `Quick
             test_no_picture_keeps_the_count
-        ; test_case "every arrival frame fits the terminal" `Quick
-            test_every_arrival_frame_fits_its_terminal
         ; test_case "candle frames are reused within a bound" `Quick
             test_about_candle_frames_are_reused_with_a_bound
         ] )

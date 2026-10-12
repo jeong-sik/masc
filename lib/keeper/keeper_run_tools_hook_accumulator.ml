@@ -12,17 +12,20 @@ open Keeper_types_profile
 open Keeper_agent_tool_surface
 open Keeper_agent_result
 
+type historical_order = Ordered | Unordered
+
 type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
   ; historical_tool_calls : tool_call_detail list
+  ; historical_order : historical_order
   ; history_pairs_at_setup : int option
     (* How many matched tool-call pairs the checkpoint history held when this
        run was set up, on the autonomous lane -- the lane whose seed is read
        from that history. [None] on a lane whose seed is scope-bound, which
        has no history count to move a boundary to. Read by
-       [Keeper_repetition_judged.pairs_judged_by] when a repetition yield
-       records where the next seed stops. *)
+       the repetition boundary when an official-client yield advances only
+       the ledger. Agent Core yields count their actual checkpoint pairs. *)
   ; mutable current_turn : int
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
@@ -41,10 +44,10 @@ type hook_accumulator =
   ; mutable prompt_blocks : Turn_record.prompt_block list
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
-  ; mutable extra_system_context_blocks : (Prompt_block_id.t * string) list option
-    (** The typed blocks the last assembly joined into [extra_system_context],
-        in order, when they are all it holds; [None] when an earlier hook's
-        text leads the assembly or nothing was assembled. *)
+  ; mutable extra_system_context_assembly : Keeper_context_assembly.t option
+    (** The renderer-issued proof from the latest assembly. [None] means the
+        assembly hook has not produced a value yet. Prefix coverage and empty
+        carrier presence are preserved inside the immutable proof. *)
   ; mutable assistant_turn_texts : string list
     (* One entry per completed provider turn, newest first, written by the
        after_turn hook and read by the cooperative-yield probe's
@@ -70,10 +73,11 @@ type hook_outputs =
       Keeper_contract_classifier.actionable_signal option
   }
 
-let create ~meta ~tool_surface ~historical_tool_calls ~history_pairs_at_setup =
+let create ~meta ~tool_surface ~historical_tool_calls ~historical_order ~history_pairs_at_setup =
   { meta
   ; tool_calls = []
   ; historical_tool_calls
+  ; historical_order
   ; history_pairs_at_setup
   ; current_turn = 0
   ; tool_surface
@@ -84,7 +88,7 @@ let create ~meta ~tool_surface ~historical_tool_calls ~history_pairs_at_setup =
   ; prompt_blocks = []
   ; extra_system_context_digest = None
   ; extra_system_context_size = None
-  ; extra_system_context_blocks = None
+  ; extra_system_context_assembly = None
   ; assistant_turn_texts = []
   ; wire_prompt_tokens = None
   }
@@ -92,6 +96,12 @@ let create ~meta ~tool_surface ~historical_tool_calls ~history_pairs_at_setup =
 
 let tool_calls_for_repetition (acc : hook_accumulator) =
   acc.tool_calls @ acc.historical_tool_calls
+;;
+
+let tool_calls_for_input_repetition (acc : hook_accumulator) =
+  match acc.historical_order with
+  | Ordered -> tool_calls_for_repetition acc
+  | Unordered -> acc.tool_calls
 ;;
 
 let freeze (acc : hook_accumulator) : hook_outputs =

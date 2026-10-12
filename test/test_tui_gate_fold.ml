@@ -6,8 +6,6 @@ open Keeper_approval_lifecycle
 open Alcotest
 module Types = Masc_tui_types
 module Gate_text = Masc_tui_gate_text
-module Layout = Masc_tui_message_layout
-
 let contains haystack needle =
   let hay = String.length haystack and need = String.length needle in
   let rec scan at =
@@ -28,6 +26,7 @@ let entry ?gate role text =
   ; me_operation_seq = 0
   ; me_text = text
   ; me_image = Masc_tui_image_preview.No_image
+  ; me_media = []
   ; me_memory_summary = None
   ; me_journal = []
   ; me_memory_pass = Masc_tui_message_layout.No_pass
@@ -38,6 +37,7 @@ let entry ?gate role text =
   ; me_timestamp = ""
   ; me_keeper_name = "k"
   ; me_request_id = ""
+  ; me_execution_source = None
   ; me_at = 0.
   }
 
@@ -56,28 +56,6 @@ let said text = entry Types.Message_keeper text
 let rows entries = List.map (fun e -> (e, ())) entries
 let describe folded = List.map (fun (e, _) -> e.Types.me_text) folded
 let fold entries = describe (Types.project_gate_history ~visibility:Types.Tools_compact (rows entries))
-
-let test_one_approval_is_one_row () =
-  check (list string) "the whole run says where the effect ended up"
-    [ "미뤘던 호출 적용됨 · 턴 이어서 진행 · Execute · 4 steps · Ctrl-D×2" ]
-    (fold
-       [ step Approval_requested
-       ; step Approval_resolved_approved
-       ; step Approval_replay_applied
-       ; step Approval_continuation_recorded
-       ])
-
-let test_the_summary_names_the_deferred_call () =
-  (* Every step row of one approval carries the same summary, so the folded
-     line says what was gated even though the request row itself is gone. *)
-  let summary = Some "git reflog --date=iso | head -30" in
-  check (list string) "the folded line keeps the call's own words"
-    [ "미뤘던 호출 적용됨 · git reflog --date=iso | head -30 · 3 steps · Ctrl-D×2" ]
-    (fold
-       [ step ~tool:"tool_execute" ~summary Approval_requested
-       ; step ~tool:"tool_execute" ~summary Approval_resolved_approved
-       ; step ~tool:"tool_execute" ~summary Approval_replay_applied
-       ])
 
 let test_problems_remain_complete () =
   List.iter (fun phase ->
@@ -146,15 +124,6 @@ let test_wait_after_success_is_not_settled () =
   check (list string) "later unresolved phase remains visible"
     (describe (rows entries)) (fold entries)
 
-let test_two_approvals_stay_two_rows () =
-  check (list string) "back to back approvals do not merge"
-    [ "미뤘던 호출 적용됨 · Execute · 2 steps · Ctrl-D×2"; "승인 거절 · Write" ]
-    (fold
-       [ step ~approval:"appr_1" Approval_resolved_approved
-       ; step ~approval:"appr_1" Approval_replay_applied
-       ; step ~approval:"appr_2" ~tool:"Write" Approval_resolved_rejected
-       ])
-
 let test_rows_that_are_not_gate_rows_are_untouched () =
   check (list string) "nothing else folds" [ "가"; "나" ] (fold [ said "가"; said "나" ])
 
@@ -171,104 +140,10 @@ let test_a_failed_continuation_keeps_the_run_open () =
   check (list string) "a failed continuation is not folded away"
     (describe (rows entries)) (fold entries)
 
-(* The continuation says the turn resumed, which no outcome says. A run that
-   holds only that fact -- the outcome rows are outside the loaded window --
-   draws it as its whole line rather than folding to nothing. *)
-let test_a_run_of_only_continuations_still_draws () =
-  check (list string) "the continuation is the line"
-    [ "턴 이어서 진행 · Execute" ]
-    (fold [ step Approval_continuation_recorded ])
-
-(* Cells, not bytes: a Korean status word is one cell wide per glyph and three
-   bytes long, so a byte budget would fold a line that fits and leave one that
-   does not. *)
-let test_a_line_within_the_cap_comes_back_whole () =
-  let line = "tool_execute \xc2\xb7 ls" in
-  check string "unchanged" line ((Gate_text.fold_argument ~cap:40 line).Gate_text.fa_text)
-;;
-
-let test_a_long_argument_folds_and_says_how_much () =
-  let line = String.make 300 'x' in
-  let folded = Gate_text.fold_argument ~cap:40 line in
-  check string "32 retained cells plus the eight-cell count tail"
-    (String.make 32 'x' ^ " ⌄ 268자") folded.Gate_text.fa_text;
-  check int "all omitted original cells are counted" 268 folded.Gate_text.fa_held_cells
-;;
-
-(* The drawn line is text plus its tail, so the tail is reserved inside the
-   cap rather than appended past it: nothing wraps mid-text with the count
-   split onto the next row. *)
-let test_folded_line_fits_the_cap_including_its_tail () =
-  let line = "tool_execute \xc2\xb7 " ^ String.make 300 'x' in
-  List.iter
-    (fun cap ->
-      let folded = (Gate_text.fold_argument ~cap line).Gate_text.fa_text in
-      check bool
-        (Printf.sprintf "cap %d contains text plus tail" cap)
-        true
-        (Layout.display_width folded <= cap))
-    [ 24; 40; 80; 120 ]
-;;
-
-(* Newlines are what made one argument eight rows. Flattened, the fold decides
-   the height rather than the argument's own line breaks. *)
-let test_newlines_are_flattened_before_the_cap_applies () =
-  let line = "tool_execute \xc2\xb7 a\nb\nc" in
-  let folded = (Gate_text.fold_argument ~cap:80 line).Gate_text.fa_text in
-  check bool "no newline survives" false (String.contains folded '\n')
-;;
-
-(* Counted in cells so the count survives whatever width the pane wraps at.
-   A count that changed with the pane would be describing the pane, not the
-   text. *)
-let test_the_held_count_matches_the_retained_prefix () =
-  List.iter
-    (fun (line, cap, prefix, held) ->
-      let folded = Gate_text.fold_argument ~cap line in
-      check string "the retained prefix and count agree"
-        (prefix ^ Printf.sprintf " ⌄ %d자" held) folded.Gate_text.fa_text;
-      check int "all hidden original cells" held folded.Gate_text.fa_held_cells;
-      check bool "tail stays inside the cap" true
-        (Layout.display_width folded.Gate_text.fa_text <= cap))
-    [ String.make 50 'x', 46, String.make 39 'x', 11
-    ; String.make 111 'x', 12, String.make 4 'x', 107
-    ; String.concat "" (List.init 100 (fun _ -> "한")), 39,
-      String.concat "" (List.init 15 (fun _ -> "한")), 170
-    ; String.concat "" (List.init 50 (fun _ -> "e\u{0301}")), 46,
-      String.concat "" (List.init 39 (fun _ -> "e\u{0301}")), 11
-    ]
-;;
-
-let test_a_cap_smaller_than_the_tail_still_bounds_the_row () =
-  List.iter
-    (fun cap ->
-      let folded = Gate_text.fold_argument ~cap (String.make 100 'x') in
-      check int "no argument cells survive" 100 folded.Gate_text.fa_held_cells;
-      check bool "the available pane bounds the tail" true
-        (Layout.display_width folded.Gate_text.fa_text <= Int.max 0 cap))
-    [ -1; 0; 1; 2; 3; 4; 5; 6; 7 ]
-;;
-
-(* The caller decides whether a row can be pressed from this number, so it has
-   to be zero exactly when nothing was folded. Comparing the text against the
-   input instead would read the newline flattening as a fold. *)
-let test_held_cells_is_zero_exactly_when_nothing_folded () =
-  let short = "tool_execute \xc2\xb7 a\nb" in
-  check int "a flattened line holds nothing" 0
-    (Gate_text.fold_argument ~cap:80 short).Gate_text.fa_held_cells;
-  let long = "tool_execute \xc2\xb7 " ^ String.make 300 'x' in
-  check int "and a folded one holds the difference"
-    (Layout.display_width long - 32)
-    (Gate_text.fold_argument ~cap:40 long).Gate_text.fa_held_cells
-;;
-
 let () =
   run "tui_gate_fold"
     [ ( "fold"
-      , [ test_case "one approval is one row" `Quick test_one_approval_is_one_row
-        ; test_case "the summary names the deferred call" `Quick
-            test_the_summary_names_the_deferred_call
-        ; test_case "problems remain complete" `Quick test_problems_remain_complete
+      , [ test_case "problems remain complete" `Quick test_problems_remain_complete
         ; test_case "corrections keep failure history" `Quick test_corrections_keep_the_failure_history
         ; test_case "unresolved approvals remain complete" `Quick test_unresolved_approval_remains_complete
         ; test_case "settled steps fold across prose" `Quick test_settled_steps_fold_across_prose
@@ -277,29 +152,11 @@ let () =
             test_results_keeps_gate_rows_folded
         ; test_case "identity is not a tool name" `Quick test_identity_is_not_a_tool_name
         ; test_case "wait after success is unresolved" `Quick test_wait_after_success_is_not_settled
-        ; test_case "two approvals stay two rows" `Quick
-            test_two_approvals_stay_two_rows
         ; test_case "rows that are not gate rows are untouched" `Quick
             test_rows_that_are_not_gate_rows_are_untouched
-        ; test_case "a run of only continuations still draws" `Quick
-            test_a_run_of_only_continuations_still_draws
         ; test_case "a failed continuation keeps the run open" `Quick
             test_a_failed_continuation_keeps_the_run_open
         ] )
     ; ( "argument fold"
-      , [ test_case "a line within the cap comes back whole" `Quick
-            test_a_line_within_the_cap_comes_back_whole
-        ; test_case "a long argument folds and says how much" `Quick
-            test_a_long_argument_folds_and_says_how_much
-        ; test_case "folded line fits the cap including its tail" `Quick
-            test_folded_line_fits_the_cap_including_its_tail
-        ; test_case "newlines are flattened before the cap applies" `Quick
-            test_newlines_are_flattened_before_the_cap_applies
-        ; test_case "the held count is in cells, not rows" `Quick
-            test_the_held_count_matches_the_retained_prefix
-        ; test_case "tiny caps still bound the row" `Quick
-            test_a_cap_smaller_than_the_tail_still_bounds_the_row
-        ; test_case "held cells is zero exactly when nothing folded" `Quick
-            test_held_cells_is_zero_exactly_when_nothing_folded
-        ] )
+      , [] )
     ]

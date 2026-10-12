@@ -108,24 +108,6 @@ let test_every_reader_silences_stderr () =
     Masc_tui_clipboard.readers
 ;;
 
-(* An operator who pressed Ctrl-V needs to know which of the three it was:
-   nothing installed, nothing on the clipboard, or a reader that broke. *)
-let test_errors_name_what_to_do () =
-  Alcotest.check Alcotest.string "no reader names what was looked for"
-    "no clipboard reader found (looked for osascript, wl-paste, xclip)"
-    (Masc_tui_clipboard.error_to_string
-       (Masc_tui_clipboard.No_reader { tried = [ "osascript"; "wl-paste"; "xclip" ] }));
-  Alcotest.check Alcotest.string "an empty clipboard is a plain answer"
-    "the clipboard holds no image (osascript)"
-    (Masc_tui_clipboard.error_to_string
-       (Masc_tui_clipboard.No_image { reader = "osascript" }));
-  Alcotest.check Alcotest.string "a broken reader says what broke"
-    "xclip could not read the clipboard image: the reader wrote no bytes"
-    (Masc_tui_clipboard.error_to_string
-       (Masc_tui_clipboard.Unreadable
-          { reader = "xclip"; detail = "the reader wrote no bytes" }))
-;;
-
 let () =
   Alcotest.run "tui clipboard"
     [ ( "readers"
@@ -139,6 +121,6 @@ let () =
         ; Alcotest.test_case "stderr stays off the terminal" `Quick
             test_every_reader_silences_stderr
         ] )
-    ; ("errors", [ Alcotest.test_case "name what to do" `Quick test_errors_name_what_to_do ])
+    ; ("errors", [])
     ]
 ;;

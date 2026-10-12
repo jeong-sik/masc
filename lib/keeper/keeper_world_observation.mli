@@ -28,7 +28,17 @@ type pending_board_event_kind =
           fact the row states, and [post_id] is the post the vote belongs to
           (the parent post for a comment vote). *)
   | Fusion_completed
-  | Delegate_completed
+  | Delegate_completed of Keeper_event_queue.delegate_terminal
+      (** The outcome the delegated turn ended with, kept typed. The row's
+          flat [title] and [preview] fields are a bounded rendering of the
+          reply, not its only copy: past [delegate_reply_preview_max_len] the
+          tail is where exact export objects and code fences live, and the
+          asker's turn consumes this row's one delivery. So the original
+          terminal rides in the event, and {!Keeper_unified_prompt}'s
+          [board_event_note_fields] restates it in full exactly when the
+          preview cut. Carrying the payload mirrors {!Task_outcome}'s
+          payload-carrying shape and the {!Ask_answered_row} rule that the
+          row carries the answer itself. *)
   | Ask_answered_row of { answered_by : Keeper_input_speaker.person }
       (** A human answered a question this Keeper asked. [answered_by] is
           fixed from the answer's responder when the row is made, so the
@@ -65,6 +75,11 @@ type pending_board_event_kind =
           author's only account of why the work it asked for stopped, and the
           flat [title]/[preview] fields are a rendering of it, not its only
           copy. *)
+
+val delegate_reply_preview_max_len : int
+(** The byte ceiling the delegate-completed row's [preview] is cut at. The
+    ceiling stays fixed; the full reply rides in {!Delegate_completed} and is
+    restated in the event's note fields only when the preview cut. *)
 
 type pending_board_event = {
   event_kind : pending_board_event_kind;

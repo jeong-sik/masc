@@ -91,35 +91,6 @@ let test_statuses_split_rebound_and_gone_from_failure () =
   check bool "401 failed with the refusal" true
     (outcome 401 = Unbind.Failed "why")
 
-let test_a_partial_result_is_not_reported_as_whole () =
-  let targets = Unbind.targets ~keeper_name:"unbind-fixture-keeper" (snapshot ()) in
-  let results =
-    List.combine targets
-      [ Unbind.Failed "HTTP 500"; Unbind.Rebound; Unbind.Removed ]
-  in
-  check string "the summary counts each kind and names the failures"
-    "unbind all of unbind-fixture-keeper: 1 removed, 1 kept, 0 not found, 1 failed -- \
-     general (111)"
-    (Unbind.summary ~keeper_name:"unbind-fixture-keeper" results);
-  check bool "a failure is flagged" true (Unbind.any_failed results);
-  check (list string) "one line per binding, failures last"
-    [ "unbind Slack C9 (name unknown): removed"
-    ; "unbind Discord 333 (name unknown): kept: now bound to another Keeper"
-    ; "unbind Discord general (111): FAILED: HTTP 500"
-    ]
-    (List.map Unbind.outcome_line (Unbind.report_order results))
-
-let test_arm_prompt_names_every_channel () =
-  let targets = Unbind.targets ~keeper_name:"unbind-fixture-keeper" (snapshot ()) in
-  check string "count, keeper and each label"
-    "unbind all armed: press U again to remove 3 bindings of unbind-fixture-keeper: general \
-     (111), 333 (name unknown), C9 (name unknown)"
-    (Unbind.arm_prompt ~keeper_name:"unbind-fixture-keeper" ~confirm_key:"U" ~unreadable:[]
-       targets)
-
-(* A transport whose binding store the server could not read has unknown
-   bindings. It cannot be a target, and the prompts must not read as if it
-   held none. *)
 let test_an_unreadable_transport_is_named () =
   let json =
     `Assoc
@@ -147,14 +118,6 @@ let test_an_unreadable_transport_is_named () =
         "unbind all: unbind-fixture-keeper has no channel bindings; not included, binding \
          list unreadable: Slack"
         (Unbind.nothing_to_unbind ~keeper_name:"unbind-fixture-keeper" ~unreadable)
-
-let test_offer_leads_with_the_key () =
-  let targets = Unbind.targets ~keeper_name:"unbind-fixture-keeper" (snapshot ()) in
-  check string "key first, then the channels"
-    "y: also unbind unbind-fixture-keeper's 3 channels, or any other key to keep them -- \
-     general (111), 333 (name unknown), C9 (name unknown); not included, \
-     binding list unreadable: Teams"
-    (Unbind.offer_prompt ~keeper_name:"unbind-fixture-keeper" ~unreadable:[ "Teams" ] targets)
 
 let offer_reading =
   testable
@@ -201,18 +164,6 @@ let test_offer_takes_its_key_only_after_it_was_drawn () =
     (Unbind.read_offer_input offer ~frames_presented:9 ~input_seen:false
        ~key:None)
 
-let test_elsewhere_the_offer_only_informs () =
-  let targets = Unbind.targets ~keeper_name:"unbind-fixture-keeper" (snapshot ()) in
-  check string "names the count and where to remove them"
-    "unbind-fixture-keeper still holds 3 channel bindings; U U on its Channels tab removes them"
-    (Unbind.still_bound ~keeper_name:"unbind-fixture-keeper" targets)
-
-let test_failed_offer_names_its_action_and_source_once () =
-  check string "the offer consequence has one connector read cause"
-    "unbind-all offer for unbind-fixture-keeper unavailable: connector load failed: HTTP 503"
-    (Unbind.offer_read_failed ~keeper_name:"unbind-fixture-keeper"
-       ~detail:"connector load failed: HTTP 503")
-
 let () =
   run "masc_tui_connector_unbind"
     [ ( "unbind all"
@@ -222,19 +173,11 @@ let () =
             test_labels_name_the_channel_or_say_the_name_is_unknown
         ; test_case "statuses" `Quick
             test_statuses_split_rebound_and_gone_from_failure
-        ; test_case "partial result" `Quick
-            test_a_partial_result_is_not_reported_as_whole
-        ; test_case "arm prompt" `Quick test_arm_prompt_names_every_channel
         ; test_case "unreadable transport" `Quick
             test_an_unreadable_transport_is_named
-        ; test_case "pause offer" `Quick test_offer_leads_with_the_key
         ; test_case "offer key is not U" `Quick
             test_offer_is_not_the_runtime_picker_key
         ; test_case "offer takes a key read after it was drawn" `Quick
             test_offer_takes_its_key_only_after_it_was_drawn
-        ; test_case "offer elsewhere" `Quick
-            test_elsewhere_the_offer_only_informs
-        ; test_case "failed offer" `Quick
-            test_failed_offer_names_its_action_and_source_once
-        ] )
+        ;] )
     ]

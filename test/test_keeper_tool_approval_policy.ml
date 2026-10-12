@@ -4,13 +4,13 @@ module Policy = Masc.Keeper_tool_approval_policy
 module Descriptor = Masc.Keeper_tool_descriptor
 
 let asks ~composition_plan_index ~tool_name ~input =
-  match Policy.verdict_for ~composition_plan_index ~tool_name ~input with
+  match Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index ~tool_name ~input with
   | Policy.Ask _ -> true
   | Policy.Run _ -> false
 
 let because ~composition_plan_index ~tool_name ~input =
   Policy.verdict_because
-    (Policy.verdict_for ~composition_plan_index ~tool_name ~input)
+    (Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index ~tool_name ~input)
 
 let no_input = `Assoc []
 
@@ -210,7 +210,7 @@ let test_an_in_process_write_runs () =
   List.iter
     (fun tool_name ->
        match
-         Policy.verdict_for
+         Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty
            ~composition_plan_index:None
            ~tool_name
            ~input:no_input
@@ -222,7 +222,7 @@ let test_an_in_process_write_runs () =
 ;;
 
 let test_internal_filesystem_name_delegates () =
-  match Policy.verdict_for ~composition_plan_index:None
+  match Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index:None
           ~tool_name:"tool_edit_file"
           ~input:(`Assoc [ "file_path", `String "lib/a.ml" ])
   with
@@ -230,6 +230,28 @@ let test_internal_filesystem_name_delegates () =
   | Policy.Ask { because } ->
     failf "tool_edit_file must reach its producer, got Ask: %s" because
 ;;
+
+let test_addon_approval_uses_frozen_turn_descriptor () =
+  let module Index = Masc.Keeper_tool_composition_plan_index in
+  let index = Index.create () in
+  let tool = match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc [
+      "name", `String "machine_press"; "inputSchema", `Assoc ["type", `String "object"];
+      "annotations", `Assoc ["readOnlyHint", `Bool true]]) with
+    | Ok tool -> tool | Error detail -> fail detail in
+  let descriptor = Masc.Keeper_lane_addon_descriptor.create
+    (Masc.Lane_addon_tool_export.create ~instance_id:"first" ~tool) in
+  Index.bind_descriptors index [descriptor];
+  check bool "export is classified by its frozen descriptor" true
+    (Policy.classifies ~identity_tool_index:Masc.Keeper_identity_tool_index.empty
+       ~composition_plan_index:(Some index) ~tool_name:"machine_press");
+  check bool "worker readOnlyHint grants no approval bypass" true
+    (asks ~composition_plan_index:(Some index) ~tool_name:"machine_press" ~input:no_input);
+  let empty = Index.create () in
+  Index.bind_descriptors empty [];
+  check bool "frozen empty turn does not regain static Read" true
+    (asks ~composition_plan_index:(Some empty) ~tool_name:"Read" ~input:no_input);
+  let rejected = try Index.bind_descriptors index []; false with Invalid_argument _ -> true in
+  check bool "a later surface cannot replace this turn's authority" true rejected
 
 let () =
   run "keeper_tool_approval_policy"
@@ -275,6 +297,9 @@ let () =
         ; test_case "the control names are the catalogue's" `Quick
             test_the_control_names_are_the_catalogue_s
         ] )
+    ; ( "Lane Add-ons"
+      , [test_case "approval uses the frozen descriptor" `Quick
+           test_addon_approval_uses_frozen_turn_descriptor] )
     ; ( "the question"
       , [ test_case "names the call" `Quick test_the_question_names_the_call ] )
     ]

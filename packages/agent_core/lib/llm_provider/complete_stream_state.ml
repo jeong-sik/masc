@@ -55,6 +55,7 @@ type usage =
   ; output_tokens : int
   ; cache_creation : int
   ; cache_read : int
+  ; cost_usd : float option
   }
 
 type completion =
@@ -89,7 +90,7 @@ type receipt =
   | Failed of Types.stream_error
 
 let empty_usage =
-  { input_tokens = 0; output_tokens = 0; cache_creation = 0; cache_read = 0 }
+  { input_tokens = 0; output_tokens = 0; cache_creation = 0; cache_read = 0; cost_usd = None }
 ;;
 
 let empty =
@@ -258,6 +259,7 @@ let usage_from_message_start (wire : Types.api_usage) =
   ; output_tokens = wire.output_tokens
   ; cache_creation = wire.cache_creation_input_tokens
   ; cache_read = wire.cache_read_input_tokens
+  ; cost_usd = wire.cost_usd
   }
 ;;
 
@@ -272,6 +274,7 @@ let overlay_delta_usage current (delta : Types.delta_usage) =
       Option.value delta.cache_creation_input_tokens ~default:current.cache_creation
   ; cache_read =
       Option.value delta.cache_read_input_tokens ~default:current.cache_read
+  ; cost_usd = (match delta.cost_usd with Some _ as cost -> cost | None -> current.cost_usd)
   }
 ;;
 
@@ -1167,7 +1170,7 @@ let finalize_completed state stop_reason =
           ; output_tokens = state.usage.output_tokens
           ; cache_creation_input_tokens = state.usage.cache_creation
           ; cache_read_input_tokens = state.usage.cache_read
-          ; cost_usd = None
+          ; cost_usd = state.usage.cost_usd
           }
     ; telemetry = None
     }

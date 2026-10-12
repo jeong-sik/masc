@@ -58,7 +58,9 @@ let unknown_deny_tools = function
       |> List.concat_map Keeper_tool_descriptor.keeper_model_names
     in
     List.filter
-      (fun name -> not (List.mem name model_visible_tool_names))
+      (fun name -> match Keeper_tool_deny.parse name with
+        | Lane_addon _ -> false
+        | Builtin name -> not (List.mem name model_visible_tool_names))
       tool_deny
 ;;
 

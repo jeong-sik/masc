@@ -1,0 +1,4 @@
+File "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schema-api-fst_nhzx/raw_decoder.ml", line 1, characters 13-60:
+1 | let decode = Llm_provider.Types.tool_schema_of_yojson_fields
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Unbound value Llm_provider.Types.tool_schema_of_yojson_fields

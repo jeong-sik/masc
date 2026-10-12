@@ -84,7 +84,8 @@ let purge_error_text = function
       "purge produced an invalid structure — this is a bug in \
        keeper_checkpoint_purge, nothing was written: %s"
       (structural_error_text structural)
-  | ( Purge.Atom_count_changed _
+  | ( Purge.Repetition_boundary_invalid _
+    | Purge.Atom_count_changed _
     | Purge.Kept_atom_rewritten _
     | Purge.Continuity_no_longer_fits _
     | Purge.Recovery_end_unwitnessed _ ) as purge_error ->

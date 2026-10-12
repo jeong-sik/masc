@@ -427,3 +427,7 @@ val lift_is_enabled : unit -> bool
     and #31227 and #31228 each restored the declaration. If it looks dead
     again, the thing that broke is the theme screen's last column, not this
     line. *)
+
+val strip_sgr_with_positions : string -> string * int array
+(** The same SGR stripping grammar as {!strip_sgr}, retaining each copied
+    byte's original input offset for semantic source-map composition. *)

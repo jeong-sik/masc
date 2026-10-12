@@ -120,7 +120,7 @@ let cached_assoc_body_or_self cached fields =
   | None -> cached
 ;;
 
-type state_diagram_runtime_projection =
+type state_diagram_runtime_projection = Server_dashboard_keeper_state_projection.state_diagram_runtime_projection =
   { runtime_models : string list
   ; last_provider_result : string option
   ; runtime_models_source : string
@@ -128,90 +128,48 @@ type state_diagram_runtime_projection =
   ; effective_runtime_reason : string option
   }
 
-let public_runtime_model_label =
-  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
+let state_diagram_runtime_projection (meta : Keeper_meta_contract.keeper_meta option) =
+  let evidence =
+    match meta with
+    | None -> Server_dashboard_keeper_state_projection.Missing_meta
+    | Some m ->
+      let last_runtime_attempt =
+        match m.runtime.last_runtime_attempt with
+        | Some attempt
+          when String.trim attempt.Keeper_meta_contract.provider_id <> "" ->
+          Some attempt
+        | Some _ | None -> None
+      in
+      let runtime_projection_evidence, runtime_projection_source =
+        try
+          let runtime_id = Keeper_meta_contract.runtime_id_of_meta m in
+          let has_evidence =
+            Provider_runtime_projection.default_execution_model_strings runtime_id
+            |> List.exists (fun label -> String.trim label <> "")
+          in
+          ( has_evidence
+          , if has_evidence
+            then "provider_runtime_projection.default_execution_model_strings"
+            else "provider_runtime_projection.empty" )
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | _ -> false, "provider_runtime_projection.unavailable"
+      in
+      Server_dashboard_keeper_state_projection.Present_meta
+        { has_last_attempt = Option.is_some last_runtime_attempt
+        ; runtime_projection_evidence
+        ; runtime_projection_source
+        }
+  in
+  Server_dashboard_keeper_state_projection.of_evidence evidence
 ;;
 
-let state_diagram_runtime_projection
-    (meta : Keeper_meta_contract.keeper_meta option)
-  =
-  match meta with
-  | None ->
-    { runtime_models = []
-    ; last_provider_result = None
-    ; runtime_models_source = "missing_keeper_meta"
-    ; last_provider_result_source = "missing_keeper_meta"
-    ; effective_runtime_reason = None
-    }
-  | Some m ->
-    let last_runtime_attempt =
-      match m.runtime.last_runtime_attempt with
-      | Some attempt
-        when String.trim attempt.Keeper_meta_contract.provider_id <> "" ->
-        Some attempt
-      | Some _ | None -> None
-    in
-    let runtime_projection_evidence, runtime_projection_source =
-      try
-        let runtime_id = Keeper_meta_contract.runtime_id_of_meta m in
-        let has_evidence =
-          Provider_runtime_projection.default_execution_model_strings runtime_id
-          |> List.exists (fun label -> String.trim label <> "")
-        in
-        ( has_evidence
-        , if has_evidence
-          then "provider_runtime_projection.default_execution_model_strings"
-          else "provider_runtime_projection.empty" )
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | _ -> false, "provider_runtime_projection.unavailable"
-    in
-    let runtime_model_evidence =
-      Option.is_some last_runtime_attempt || runtime_projection_evidence
-    in
-    let runtime_models =
-      if runtime_model_evidence then [ public_runtime_model_label ] else []
-    in
-    let last_provider_result, last_provider_result_source =
-      match last_runtime_attempt, runtime_models with
-      | Some _, _ :: _ ->
-        Some public_runtime_model_label, "keeper_meta.runtime.last_runtime_attempt"
-      | Some _, [] ->
-        None, "keeper_meta.runtime.last_runtime_attempt_without_model_evidence"
-      | None, _ -> None, "missing_keeper_meta.runtime.last_runtime_attempt"
-    in
-    { runtime_models
-    ; last_provider_result
-    ; runtime_models_source =
-        (match last_runtime_attempt with
-         | Some _ -> "keeper_meta.runtime.last_runtime_attempt"
-         | None -> runtime_projection_source)
-    ; last_provider_result_source
-    ; effective_runtime_reason =
-        (if runtime_model_evidence then Some "keeper_meta.runtime_evidence" else None)
-    }
+let state_diagram_runtime_projection_json =
+  Server_dashboard_keeper_state_projection.state_diagram_runtime_projection_json
 ;;
 
-let state_diagram_runtime_projection_json
-    (projection : state_diagram_runtime_projection)
-  =
-  `Assoc
-    [ "runtime_models", Json_util.json_string_list projection.runtime_models
-    ; "last_provider_result", Json_util.string_opt_to_json projection.last_provider_result
-    ; "runtime_models_source", `String projection.runtime_models_source
-    ; "last_provider_result_source", `String projection.last_provider_result_source
-    ]
-;;
-
-let state_diagram_runtime_fsm_mermaid
-    (projection : state_diagram_runtime_projection)
-  =
-  Keeper_decision_audit.runtime_fsm_to_mermaid
-    ~provider_health:[]
-    ?effective_runtime_reason:projection.effective_runtime_reason
-    ~models:projection.runtime_models
-    ~last_provider_result:projection.last_provider_result
-    ()
+let state_diagram_runtime_fsm_mermaid =
+  Server_dashboard_keeper_state_projection.state_diagram_runtime_fsm_mermaid
 ;;
 
 let keeper_chat_allowed_trace_ids (m : Keeper_meta_contract.keeper_meta) =
@@ -678,10 +636,10 @@ let keeper_chat_history_json config name =
    Uncached: pages are user-initiated and [load_page] is already bounded I/O
    (binary-search probes plus one window slice). A cache keyed by cursor would
    add entries per click without a measured hot path asking for it. *)
-let keeper_chat_history_page_json config name ~before =
+let keeper_chat_history_page_json ?max_total config name ~before =
   let base_dir = (config : Workspace.config).base_path in
   let { Keeper_chat_store.messages; has_more } =
-    Keeper_chat_store.load_page ~base_dir ~keeper_name:name ?before ()
+    Keeper_chat_store.load_page ~base_dir ~keeper_name:name ?before ?max_total ()
   in
   let trace_block_by_turn_ref = keeper_chat_trace_blocks config name in
   let next_before =
@@ -930,20 +888,28 @@ let handle_keeper_get_subroutes state req request reqd =
          serves, minus the autonomous turns. Present but unparseable is a client
          bug, not a request for the newest page, so it is rejected rather than
          silently treated as absent. *)
-      match Server_utils.query_param req "before" with
-      | Some raw when float_of_string_opt (String.trim raw) = None ->
+      match Server_utils.query_param req "before", Server_utils.query_param req "limit" with
+      | Some raw, _ when float_of_string_opt (String.trim raw) = None ->
         Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
           (error_json "before must be a unix-seconds float")
-      | before_raw ->
+      | _, Some raw when int_of_string_opt (String.trim raw) = None ->
+        (* The same rule as [before]: a limit that does not parse is a client
+           bug, not a request for the default window. *)
+        Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+          (error_json "limit must be an integer")
+      | before_raw, limit_raw ->
         let before =
           Option.bind before_raw (fun raw -> float_of_string_opt (String.trim raw))
+        in
+        let max_total =
+          Option.bind limit_raw (fun raw -> int_of_string_opt (String.trim raw))
         in
         let config = Mcp_server.workspace_config state in
         (* The window read, its parse and the page's JSON are one job on the
            domain pool, as the cached whole-history read below already is. *)
         let page =
           Domain_pool_ref.submit_io_or_inline (fun () ->
-            keeper_chat_history_page_json config name ~before)
+            keeper_chat_history_page_json ?max_total config name ~before)
         in
         Server_auth.respond_json_value_with_cors ~status:`OK request reqd page)
   else if ends_with "/chat/history" then

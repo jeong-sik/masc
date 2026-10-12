@@ -75,8 +75,9 @@ footer prefix, `reviewed base`/`diff sha256` tail, a stale diff hash, or the
 makes the admission decision and the reasons come from the same code, so the
 guard and the explanation cannot disagree.
 
-Offline checks: `python3 -I scripts/review/test_review_refusal.py` and
-`python3 -I scripts/review/test_approve_guard_refusal.py`.
+Offline checks: `python3 -I scripts/review/test_review_refusal.py`,
+`python3 -I scripts/review/test_approve_guard_refusal.py` and
+`python3 -I scripts/review/test_stack_scope.py`.
 
 ## Preparing an approved candidate
 

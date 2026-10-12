@@ -8,9 +8,9 @@ module Runtime = struct
     | None -> Lane_addon_sources.Operator_configuration
     | Some keeper -> Lane_addon_sources.Keeper keeper)
   let read_declaration ?caller ?access ~config args =
-    Lane_addon_runtime.read_declaration ?caller ~access:(fixture_access caller access) ~config args
+    Lane_addon_runtime.read_declaration ~access:(fixture_access caller access) ~config args
   let save_declaration ?caller ?access ~config args =
-    Lane_addon_runtime.save_declaration ?caller ~access:(fixture_access caller access) ~config args
+    Lane_addon_runtime.save_declaration ~access:(fixture_access caller access) ~config args
   let dispatch ?caller ?access ~config ~operation args =
     let access = Option.value ~default:(match caller with
       | None -> Lane_addon_sources.Operator_configuration
@@ -91,15 +91,17 @@ let with_fixture f =
                 Runtime.For_testing.reset ();
                 let started = ref [] in
                 let backend : Runtime.For_testing.backend = {
-                  start=(fun ~sw:_ ~instance_id ~package:_ ~binding:_ ~on_created ->
+                  start=(fun ~sw:_ ~state_owner:_ ~instance_id ~package:_ ~binding:_ ~on_created ->
                     started := instance_id :: !started;
                     let connection : Runtime.For_testing.connection = {
                       observe=(fun ~binding:_ ~sources:_ -> Ok output);
+                      exported_tools = (fun () -> []);
+                      call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));
                       action_schema=(fun () -> None);act=(fun ~arguments:_ -> Error "read-only");
                       stop=(fun () -> Ok ());container_id=instance_id} in on_created connection;Ok connection);
                   image_ready=(fun ~package:_ -> Ok ());
-                  acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
-                  recover_stop=(fun ~instance_id:_ ~container_id:_ -> Ok ())} in
+                  acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+                  recover_stop=(fun ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ())} in
                 let config = Workspace.default_config root in
                 Runtime.For_testing.with_backend backend (fun () ->
                   f clock config directory root started;

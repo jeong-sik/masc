@@ -463,8 +463,20 @@ let require_expected_revision reference actual =
   else Error (Revision_conflict { actual })
 ;;
 
-let validate_source ~directory source_text =
-  Keeper_skill_catalog.validate_authored_source ~directory source_text
+let authoring_descriptors ~config ~access =
+  let static = Keeper_tool_descriptor.all_descriptors () in
+  let reserved =
+    List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas
+    @ List.concat_map Keeper_tool_descriptor.registered_names static
+    |> List.sort_uniq String.compare
+  in
+  Lane_addon_runtime.tool_exports ~config ~access ~reserved
+  |> Result.map (fun exports -> static @ List.map Keeper_lane_addon_descriptor.create exports)
+;;
+
+let validate_source ~descriptors ~directory source_text =
+  let* descriptors = Result.map_error (fun detail -> Validation_failed detail) descriptors in
+  Keeper_skill_catalog.validate_authored_source ~descriptors ~directory source_text
   |> Result.map_error (function
     | Keeper_skill_catalog.Source_too_large { bytes; max_bytes } ->
       Source_too_large { bytes; max_bytes }
@@ -485,8 +497,8 @@ let near_miss_diagnostics skill =
     (Keeper_skill_catalog.composition_info_near_misses skill.Keeper_skill_catalog.body)
 ;;
 
-let validate_candidate target reference source_text =
-  let* skill = validate_source ~directory:target.entry.directory source_text in
+let validate_candidate ~descriptors target reference source_text =
+  let* skill = validate_source ~descriptors ~directory:target.entry.directory source_text in
   let candidate_reference =
     Skill_reference.make
       ~identity:reference.Skill_reference.identity
@@ -511,11 +523,11 @@ let load ~base_path reference =
     }
 ;;
 
-let preview ~base_path reference ~source_text =
+let preview ~descriptors ~base_path reference ~source_text =
   let* target = resolve_target ~base_path reference in
   let* _, actual = read_current target in
   let* () = require_expected_revision reference actual in
-  validate_candidate target reference source_text
+  validate_candidate ~descriptors target reference source_text
 ;;
 
 let with_path_lock path f =
@@ -546,7 +558,7 @@ let shadow_winner snapshot identity =
     (Skill_catalog_snapshot.shadows snapshot)
 ;;
 
-let save ~base_path ~reference ~source_text ~refresh =
+let save ~descriptors ~base_path ~reference ~source_text ~refresh =
   let* initial_target = resolve_target ~base_path reference in
   if initial_target.access = Read_only
   then Error Source_read_only
@@ -558,7 +570,7 @@ let save ~base_path ~reference ~source_text ~refresh =
       else
         let* current_source, actual = read_current target in
         let* () = require_expected_revision reference actual in
-        let* preview = validate_candidate target reference source_text in
+        let* preview = validate_candidate ~descriptors target reference source_text in
         if String.equal current_source source_text
         then
           Ok
@@ -637,13 +649,13 @@ let find_writable_source snapshot source_id =
        Ok source_root)
 ;;
 
-let preview_new ~source_id ~package_id source_text =
+let preview_new ~descriptors ~source_id ~package_id source_text =
   let* parsed_package_id =
     Skill_reference.package_id_of_directory package_id
     |> Result.map_error (fun error ->
       Invalid_package_id (Skill_reference.package_id_error_to_string error))
   in
-  let* skill = validate_source ~directory:package_id source_text in
+  let* skill = validate_source ~descriptors ~directory:package_id source_text in
   let identity =
     Skill_reference.make_identity
       ~source_id
@@ -727,11 +739,11 @@ let with_missing_source_root_created ~base_path ~refresh snapshot source_id =
         | Ok (_ : Skill_catalog_snapshot_service.publication) -> current_snapshot ~base_path))
 ;;
 
-let create ~base_path ~source_id ~package_id ~source_text ~refresh =
+let create ~descriptors ~base_path ~source_id ~package_id ~source_text ~refresh =
   let* snapshot = current_snapshot ~base_path in
+  let* preview = preview_new ~descriptors ~source_id ~package_id source_text in
   let* snapshot = with_missing_source_root_created ~base_path ~refresh snapshot source_id in
   let* source_root = find_writable_source snapshot source_id in
-  let* preview = preview_new ~source_id ~package_id source_text in
   let package_dir = Filename.concat source_root package_id in
   let path = Filename.concat package_dir "SKILL.md" in
   with_path_lock path (fun () ->

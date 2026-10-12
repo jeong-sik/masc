@@ -265,6 +265,37 @@ let test_parse_stream_chunk_does_not_invent_missing_dialect () =
     -> fail "expected stream chunk"
 ;;
 
+let test_stream_reports_wire_metadata_before_reasoning () =
+  let state = S.create_openai_stream_state ~provider:"glm" ~model:"requested-alias" () in
+  let acc = Llm_provider.Complete_stream_acc.create_stream_acc () in
+  let frames =
+    [ {|{"id":"glm-wire-id","model":"glm-reported","choices":[{"index":0,"delta":{"reasoning_content":"thinking","content":"answer"},"finish_reason":null}]}|}
+    ; {|{"id":"glm-wire-id","model":"glm-reported","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":3}}|}
+    ; "[DONE]"
+    ] in
+  let events = List.concat_map (fun data ->
+      let parsed = K.parse_stream_chunk ~streaming_reasoning:(RD.Delta_field "reasoning_content") data in
+      fst (S.openai_sse_parse_result_to_events state parsed)) frames in
+  (match events with
+   | T.MessageStart {id="glm-wire-id";model="glm-reported";usage=None}
+       :: T.ContentBlockStart {index=0;content_type="thinking";_} :: _ -> ()
+   | _ -> fail "GLM must publish reported metadata before its first reasoning block");
+  check int "one GLM response start" 1
+    (List.length (List.filter (function T.MessageStart _ -> true | _ -> false) events));
+  List.iter (Llm_provider.Complete_stream_acc.accumulate_event acc) events;
+  match Llm_provider.Complete_stream_acc.finalize_stream_acc acc with
+  | Ok response ->
+      check string "GLM response id" "glm-wire-id" response.id;
+      check string "GLM response model comes from the wire" "glm-reported" response.model;
+      check bool "reasoning and text remain separate" true
+        (response.content=[T.Thinking {content="thinking";signature=None}; T.Text "answer"]);
+      (match response.usage with
+       | Some usage -> check int "input usage" 7 usage.input_tokens;
+           check int "output usage" 3 usage.output_tokens
+       | None -> fail "GLM terminal usage missing")
+  | Error _ -> fail "GLM parser and shared projection should finalize successfully"
+;;
+
 let () =
   run
     "backend_glm_coverage"
@@ -283,7 +314,8 @@ let () =
             test_build_request_thinking_modes_and_tool_stream
         ] )
     ; ( "response"
-      , [ test_case
+      , [ test_case "stream reports wire metadata before reasoning" `Quick test_stream_reports_wire_metadata_before_reasoning
+        ; test_case
             "reasoning content and usage"
             `Quick
             test_parse_response_extracts_reasoning_and_usage

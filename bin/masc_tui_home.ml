@@ -21,9 +21,9 @@ let home_decision_rows (state : state) =
         | Keeper_tool_row held ->
             list_is_read reading.held_calls, held.kta_keeper, held.kta_question, "Held call", held.kta_tool_call_id
         | Gate_row pending ->
-            list_is_read reading.gate_queue, pending.gp_keeper, pending.gp_display_tool, "Approval", pending.gp_id
+            list_is_read reading.gate_queue, pending.gp_keeper, pending.gp_display_tool, "Gate approval", pending.gp_id
         | Operator_row item ->
-            list_is_read reading.confirm_queue, item.ap_actor, item.ap_summary, "Approval", item.ap_token
+            list_is_read reading.confirm_queue, item.ap_actor, item.ap_summary, "Confirm", item.ap_token
       in
       if current && approval_item_needs_person row then
         Some (Home_request (home_request_of_approval row),
@@ -52,7 +52,15 @@ let home_decision_rows (state : state) =
         | List_not_read _ -> Some name)
   in
   let approvals =
-    let unread = match source_notes with
+    (* Rows a match read stay while the identity is unconfirmed; deciding on
+       them waits for a read that matches again. *)
+    let identity = match state.workspace_identity with
+      | Workspace_identity_match_unconfirmed _ ->
+          ["workspace identity unconfirmed · decisions wait"]
+      | Workspace_identity_unread | Workspace_identity_match
+      | Workspace_identity_mismatch _ -> []
+    in
+    let unread = identity @ match source_notes with
       | [] -> []
       | names -> ["not fully read · " ^ String.concat ", " names]
     in
@@ -205,9 +213,13 @@ let home_continue_rows (state : state) =
                     "Conversation history unavailable · choose a Keeper"
                 | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
                     "Last conversation " ^ Masc_tui_ansi.Terminal_text.single_line name
-                    ^ (if state.workspace_identity = Workspace_identity_unread
-                       then " unavailable · workspace identity not read · choose a Keeper"
-                       else " unavailable · choose a Keeper")
+                    ^ (match state.workspace_identity with
+                       | Workspace_identity_unread ->
+                           " unavailable · workspace identity not read · choose a Keeper"
+                       | Workspace_identity_match_unconfirmed _ ->
+                           " unavailable · workspace identity unconfirmed · choose a Keeper"
+                       | Workspace_identity_match | Workspace_identity_mismatch _ ->
+                           " unavailable · choose a Keeper")
                 | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
                     "Choose a Keeper  · start a conversation")
            | _ :: _ -> "New work  · choose a Keeper") ]
@@ -237,6 +249,15 @@ let home_initial_reading_ready state selected =
       && (match state.goals_to_confirm with Masc_tui_agenda.Read _ -> true | _ -> false)
   | Some Home_agenda | None -> false
 
+let home_notice_lines state =
+  let clean = Masc_tui_ansi.Terminal_text.single_line in
+  (match state.opening_notice with
+   | None -> []
+   | Some notice -> [" " ^ clean notice])
+  @ (match state.home_decision_receipt with
+     | None -> []
+     | Some (_, receipt) -> [" Last decision receipt · " ^ clean receipt])
+
 let home_decision_window state ~budget =
   let decisions = home_decision_rows state in
   let continuation = home_continue_rows state in
@@ -244,7 +265,8 @@ let home_decision_window state ~budget =
   let warning_rows =
     if Option.is_some state.home_selected && Option.is_none selected then 1 else 0
   in
-  let capacity = max 0 (budget - List.length continuation - 2 - warning_rows) in
+  let capacity = max 0 (budget - List.length (home_notice_lines state)
+      - List.length continuation - 2 - warning_rows) in
   let first = max 0 (min state.home_decision_scroll (List.length decisions - capacity)) in
   let first = match List.find_index (fun (action, _) -> Some action = selected) decisions with
     | Some index when index < first -> index

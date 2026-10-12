@@ -14,6 +14,8 @@ type 'a start_result =
 val initial : 'a t
 val start : 'a t -> post_id:string -> 'a start_result
 val clear : 'a t -> 'a t
+val suspend : 'a t -> 'a t
+(** Retire an in-flight read without discarding the detail already shown. *)
 val is_ready : 'a t -> post_id:string -> bool
 val request_post_id : request -> string
 val same_request : request -> request -> bool

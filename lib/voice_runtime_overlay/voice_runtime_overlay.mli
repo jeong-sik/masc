@@ -9,6 +9,7 @@ type transport =
   | Elevenlabs_direct
   | Voice_mcp
   | Macos_say
+  | Espeak_ng
   | Whisper_cli
 
 type auth_mode =

@@ -1500,7 +1500,7 @@ class QuickSetup(unittest.TestCase):
             self.assertIsNone(SETUP.quick_connection('masc', {}, 10, None, 'claude-sonnet-5'))
         with patch.object(SETUP, 'connection_sources', return_value=[claude]), \
                 patch.object(SETUP, 'prepare_connection', side_effect=lambda _binary, source, _: source), \
-                patch.object(SETUP, 'source_models', return_value=([dict(id='claude-opus-5')], 'catalog')), \
+                patch.object(SETUP, 'source_models', return_value=([dict(id='claude-opus-5-5')], 'catalog')), \
                 contextlib.redirect_stderr(io.StringIO()):
             self.assertIsNone(SETUP.quick_connection('masc', {}, 10, None, 'claude-sonnet-5'))
         with patch.object(SETUP, 'connection_sources', return_value=[claude]), \

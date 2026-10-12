@@ -56,16 +56,49 @@ fi
 # 4) CHANGELOG: fold the per-PR fragments (changelog.d/<PR>.md) into
 # [Unreleased], then add the version stub if missing. The release author moves
 # the [Unreleased] entries into the version section before tagging.
-# Before folding, list the pull requests merged since the last tag whose
+# Before folding, list the pull requests merged since the last release whose
 # changes carry no fragment (#39079, #39095: nine entries had to be backfilled
 # after their releases). It reports; it does not refuse. A broken report
 # (bad base, crash) announces itself instead of passing as an empty list.
-last_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+# The base cannot come from `git describe --tags --abbrev=0`, which only sees
+# tags that are ancestors of HEAD: release branches land back on main as
+# squash commits (#42169), so the latest tags v0.49.0 and v0.50.0 are not
+# ancestors of main and describe either picks v0.48.0 — making the report
+# rescan everything v0.49.0/v0.50.0 already folded — or, on a shallow
+# checkout, fails and silently skips the report. Pick the newest v*.*.* tag
+# by version instead, and use that release's main-reflection commit as the
+# base so the scan covers only main commits after the release.
+last_tag="$(git for-each-ref refs/tags --format='%(refname:short)' --sort=-v:refname 2>/dev/null \
+  | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
+base_ref=""
 if [ -n "$last_tag" ]; then
+  # The release branch is folded back onto main by a single squash whose
+  # subject names the tag; on the first-parent chain the newest match is
+  # that release's reflection commit.
+  base_ref="$(git log --first-parent -F -1 --format=%H \
+    --grep="chore(release): merge $last_tag back into main" 2>/dev/null || true)"
+  if [ -z "$base_ref" ] && git merge-base --is-ancestor "$last_tag" HEAD 2>/dev/null; then
+    # No squash reflection found; fall back to the tag itself when the repo
+    # still tags directly on main, which is what describe used to do.
+    base_ref="$last_tag"
+  fi
+  if [ -z "$base_ref" ]; then
+    # Between tagging and folding the branch back onto main the reflection
+    # commit does not exist yet and the tag is not an ancestor of HEAD, so
+    # no base can be found. Say so instead of silently skipping the report
+    # ("A broken report announces itself" — an empty report must not look
+    # like one).
+    echo "warning: cannot determine missing-fragment base for $last_tag:" \
+      "no 'chore(release): merge $last_tag back into main' commit on main" \
+      "first-parent and $last_tag is not an ancestor of HEAD;" \
+      "skipping the missing-fragment report" >&2
+  fi
+fi
+if [ -n "$base_ref" ]; then
   missing_err="$(mktemp)"
   missing_status=0
   python3 "$ROOT_DIR/scripts/changelog-fragments.py" missing \
-    --base "$last_tag" --dir "$ROOT_DIR/changelog.d" \
+    --base "$base_ref" --dir "$ROOT_DIR/changelog.d" \
     2>"$missing_err" || missing_status=$?
   if [ "$missing_status" -ne 0 ]; then
     # An empty list means "nothing missing"; a crash must not look like one.

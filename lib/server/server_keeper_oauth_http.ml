@@ -40,7 +40,10 @@ let handle_callback ~clock request reqd =
      (* The provider says the operator declined, or it refused the request.
         Its own words, because ours would be a guess at what happened on a
         screen we never saw. *)
-     | Some provider_error, _, _ ->
+     | Some provider_error, _, state_value ->
+       Option.iter (fun state_value ->
+         Server_keeper_oauth.reject_callback ~base_path:config.Workspace.base_path
+           ~state:state_value ~now:(Time_compat.now ())) state_value;
        respond_page ~status:`Bad_request reqd ~title:"masc"
          ~heading:"The provider did not grant this"
          ~detail:
@@ -137,6 +140,20 @@ let handle_attached_tools request reqd =
    writes is what redeems a code: an id that is not theirs would send the
    consent somewhere else. Not scoped to a Keeper -- the client belongs to
    the install, the same as one this server registered. *)
+let handle_attempt_status request reqd =
+  Server_auth.with_token_permission_auth ~permission:Masc_domain.CanAdmin
+    (fun state _agent_name req reqd ->
+      let field = Server_utils.query_param req in
+      let json = match field "keeper", field "provider", field "attempt_id" with
+        | Some keeper, Some provider_id, Some attempt_id ->
+            Server_keeper_oauth.attempt_status_json
+              ~base_path:(Mcp_server.workspace_config state).Workspace.base_path
+              ~now:(Time_compat.now ()) ~keeper ~provider_id ~attempt_id
+        | _ -> `Assoc ["error", `String "keeper, provider and attempt_id are required"] in
+      Http.Response.json_value ~compress:true ~request:req json reqd)
+    request reqd
+;;
+
 let handle_set_client request reqd =
   (* The same authority as starting a login, and for the same reason the
      login route gives: what this writes is what redeems a code. A stricter
@@ -181,5 +198,6 @@ let add_routes ~clock router =
   |> Http.Router.get Server_keeper_oauth.callback_path (handle_callback ~clock)
   |> Http.Router.get "/api/v1/keepers/oauth/providers" handle_providers
   |> Http.Router.get "/api/v1/keepers/oauth/attached-tools" handle_attached_tools
+  |> Http.Router.get "/api/v1/keepers/oauth/attempt-status" handle_attempt_status
   |> Http.Router.post "/api/v1/keepers/oauth/client" handle_set_client
 ;;

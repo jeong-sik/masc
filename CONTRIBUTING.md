@@ -110,7 +110,7 @@ dashboard/                       TypeScript + Preact SPA
 config/                          seeds embedded into the binary: runtime.toml, prompts, tools/*.toml
 docs/                            manuals, runbooks, docs/spec, docs/rfc
 scripts/                         build, install, local operations; scripts/ci/ holds the lint suite
-test/                            Alcotest suites, PTY scenarios and fixtures
+test/                            Alcotest suites, Python checks and fixtures
 ```
 
 ## Code style

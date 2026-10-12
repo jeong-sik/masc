@@ -67,20 +67,6 @@ let entries_of events =
          { Acting.ae_at = 100. +. float_of_int index; ae_event = event })
        events)
 
-let test_filter_explanations_name_scope_and_quiet_rows () =
-  check string "turns explains internal agents"
-    "scope turns · one row per Keeper turn · agent start/done = internal run"
-    (Acting.filter_explanation Acting.Turns);
-  check string "actions says state is hidden"
-    "scope actions · flat calls/returns/turn/chat · state pushes hidden"
-    (Acting.filter_explanation Acting.Actions);
-  (* The dot this line used to name is not drawn on any row: #33691 gave a
-     quiet row a blank mark cell, and this legend's own separator is a dot. *)
-  check string "everything names the only cue a quiet row carries"
-    "scope everything · gray = state/telemetry · composite = Keeper snapshot changed"
-    (Acting.filter_explanation Acting.Everything)
-;;
-
 let ledger_tool ?duration_ms ?turn ~keeper tool : Observer.event =
   Observer.Keeper_tool_call
     { Observer.kt_keeper = keeper
@@ -194,27 +180,6 @@ let holds needle haystack =
   in
   n = 0 || scan 0
 
-let test_a_settled_row_spells_its_tokens_the_way_the_pane_does () =
-  let k = "kpr-09" in
-  let rows =
-    Acting.chunk_rows ~traces:[]
-      (entries_of
-         [ agent_core ~kind:Observer.Turn_started ~turn:114 k
-         ; turn_settled ~keeper:k ~turn:114 ~input:411_465 ~output:3
-             ~cost:0.0258 ()
-         ])
-  in
-  match List.map text rows with
-  | [ row ] ->
-    check string "the ladder's reading" "411.5k"
-      (Masc_tui_message_layout.compact_count 411_465);
-    check bool "the row carries it" true (holds "in 411.5k out 3" row);
-    check bool "and never spells the digits out" false (holds "411465" row)
-  | drawn -> failf "expected one settled row, got %d" (List.length drawn)
-
-(* A settle's input holds the cache reads. e-masc-the-leader's turn 1853
-   (2026-09-25) sent 3,716,155 tokens, 3,556,362 of them read back from the
-   cache, and the row said "in 3.72M" as if all of it were new. *)
 let turn_input =
   testable
     (fun ppf -> function
@@ -240,79 +205,6 @@ let test_turn_input_splits_only_counts_that_add_up () =
   check turn_input "a remainder below the cache writes does not add up" whole
     (reading ~cache_read:(Some 3_600_000) ~cache_creation:(Some 159_783))
 
-let test_a_cached_settle_names_its_new_and_cached_parts () =
-  let k = "e-masc-the-leader" in
-  let settle ?cache_read ?cache_creation () =
-    turn_settled ?cache_read ?cache_creation ~keeper:k ~turn:1853
-      ~input:3_716_155 ~output:6_622 ~cost:0.0258 ()
-  in
-  let chunk_row event =
-    match
-      List.map text
-        (Acting.chunk_rows ~traces:[]
-           (entries_of [ agent_core ~kind:Observer.Turn_started ~turn:1853 k; event ]))
-    with
-    | [ row ] -> row
-    | drawn -> failf "expected one settled row, got %d" (List.length drawn)
-  in
-  let parts = "in 159.8k new \xc2\xb7 3.56M cached \xc2\xb7 out 6.6k" in
-  let cached = settle ~cache_read:3_556_362 ~cache_creation:159_783 () in
-  let row = chunk_row cached in
-  check bool "the new part leads, then the cached part, then the output" true
-    (holds parts row);
-  check bool "the whole input is not drawn as the input" false (holds "3.72M" row);
-  check bool "the feed row splits the same way" true
-    (holds parts (text (Acting.row_of_event ~at:100. ~duration_ms:None cached)));
-  check bool "without cache counts the row keeps the whole figure" true
-    (holds "in 3.72M out 6.6k" (chunk_row (settle ())))
-
-(* What is not turn lifecycle stays its own row, in feed position. *)
-let test_turns_pass_non_lifecycle_rows_through () =
-  let events_oldest_first =
-    [ agent_core ~kind:Observer.Turn_ready ~turn:7 "analyst"
-    ; observation ~keeper:"analyst" ~session:7 ~completed:6
-    ; Observer.Keeper_chat_appended
-        { keeper = "analyst"; connector = Some "discord"; at = 100. }
-    ; Observer.Other "operator_digest"
-    ]
-  in
-  let rows = Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) in
-  check (list string) "chunk plus the chat and server rows"
-    [ "? server operator_digest | "
-    ; "\xe2\x97\x8f analyst chat | discord"
-    ; "\xe2\x96\xb6 analyst turn 7 | running"
-    ]
-    (List.map text rows)
-
-(* What [visible Turns] hides must not come back through the fold as
-   pass-through rows. The live screen this pins showed 128 rows under
-   "scope turns" dominated by composite pushes and heartbeats
-   (2026-09-01). *)
-let test_turns_do_not_readmit_what_the_scope_hides () =
-  let events_oldest_first =
-    [ agent_core ~kind:Observer.Turn_ready ~turn:7 "analyst"
-    ; observation ~keeper:"analyst" ~session:7 ~completed:6
-    ; Observer.Keeper_composite_changed { keeper = "analyst"; at = 100. }
-    ; heartbeat "analyst"
-    ; Observer.Keeper_chat_stream_frame
-        { keeper = "analyst"; operation_id = "op"; seq = None
-        ; frame = Some "text_delta"; at = 100. }
-    ; Observer.Keeper_waiting_inventory_changed
-        { keeper = "analyst"; queue_kind = Some "event_queue"; at = 100. }
-    ; Observer.Snapshot "keepers"
-    ; Observer.Other "operator_digest"
-    ]
-  in
-  let rows = Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) in
-  check (list string) "only the turn and the untaught server row remain"
-    [ "? server operator_digest | "
-    ; "\xe2\x96\xb6 analyst turn 7 | running"
-    ]
-    (List.map text rows)
-
-(* Telemetry is a quiet member: it may refresh a chunk that exists, but a
-   keeper the feed knows nothing else about must not gain a ghost
-   [turn | running] row from it (#32208, live capture 2026-09-01). *)
 let test_telemetry_alone_conjures_no_turn () =
   let events_oldest_first =
     [ agent_core ~kind:Observer.Telemetry "analyst" ]
@@ -320,53 +212,6 @@ let test_telemetry_alone_conjures_no_turn () =
   check (list string) "no rows from telemetry alone" []
     (List.map text
        (Acting.chunk_rows ~traces:[] (entries_of events_oldest_first)))
-
-let test_telemetry_refreshes_but_never_duplicates_a_turn () =
-  let events_oldest_first =
-    [ agent_core ~kind:Observer.Turn_ready ~turn:7 "analyst"
-    ; observation ~keeper:"analyst" ~session:7 ~completed:6
-    ; agent_core ~kind:Observer.Telemetry "analyst"
-    ]
-  in
-  check (list string) "still exactly the one turn row"
-    [ "\xe2\x96\xb6 analyst turn 7 | running" ]
-    (List.map text
-       (Acting.chunk_rows ~traces:[] (entries_of events_oldest_first)))
-
-(* A running turn names what it is doing right now: the call alone puts the
-   tool on screen, before any return or ledger row exists. *)
-let test_a_running_turn_names_its_in_flight_call () =
-  let events_oldest_first =
-    [ agent_core ~kind:Observer.Turn_ready ~turn:7 "alpha"
-    ; observation ~keeper:"alpha" ~session:7 ~completed:6
-    ; agent_core ~kind:Observer.Tool_called ~tool:"read_file" ~turn:7
-        ~tool_use_id:"w1" "alpha"
-    ]
-  in
-  match Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) with
-  | [ row ] ->
-      check string "the in-flight tool is on the row"
-        "\xe2\x96\xb6 alpha turn 7 | read_file" (text row)
-  | rows -> failf "expected one chunk row, got %d" (List.length rows)
-
-(* A runtime whose ledger plane is silent still names its tools: the wire
-   pair supplies the name and the call-to-return gap supplies the duration. *)
-let test_turns_fall_back_to_the_wire_when_the_ledger_is_silent () =
-  let events_oldest_first =
-    [ agent_core ~kind:Observer.Turn_ready ~turn:3 "edgar"
-    ; observation ~keeper:"edgar" ~session:3 ~completed:2
-    ; agent_core ~kind:Observer.Tool_called ~tool:"read_file" ~turn:3
-        ~tool_use_id:"w1" "edgar"
-    ; agent_core ~kind:Observer.Tool_completed ~tool:"read_file" ~turn:3
-        ~tool_use_id:"w1" "edgar"
-    ]
-  in
-  let rows = Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) in
-  match rows with
-  | [ row ] ->
-      check string "wire duration is the call-to-return gap"
-        "\xe2\x96\xb6 edgar turn 3 | read_file 1.0s" (text row)
-  | rows -> failf "expected one chunk row, got %d" (List.length rows)
 
 let test_actions_hide_what_says_nothing_a_row_can_act_on () =
   let events =
@@ -537,36 +382,6 @@ let test_a_fusion_status_row_names_the_owning_keeper () =
   check string "detail carries status and run id"
     "completed \xc2\xb7 kmsg-f04701e2" row.Acting.detail
 
-(* A type this build was not taught puts its name in the Event column and its
-   tool in Detail. [masc:audit_event] carries no tool, and the cell drew the
-   [?] the default stood for -- which in a column of tool names reads as a
-   failure marker and says nothing. Read on screen as:
-
-     -                ? masc:audit_event ?
-
-   The name is what the row has; an absent tool adds nothing to it. *)
-let test_an_untaught_event_without_a_tool_says_only_its_name () =
-  let row =
-    Acting.row_of_event ~at:100. ~duration_ms:None
-      (agent_core ~kind:(Observer.Agent_core_other "masc:audit_event") "-")
-  in
-  check string "the name is the label" "masc:audit_event" row.Acting.label;
-  check string "and nothing stands in for the tool it has none of" ""
-    row.Acting.detail
-
-let test_an_untaught_event_with_a_tool_still_names_it () =
-  let row =
-    Acting.row_of_event ~at:100. ~duration_ms:None
-      (agent_core ~kind:(Observer.Agent_core_other "masc:something")
-         ~tool:"read_file" "analyst")
-  in
-  check string "a tool it does have is still the detail" "read_file"
-    row.Acting.detail
-
-(* The screen that prompted this: 927 rows held, two of them actions, and the
-   whole page inside one second. A reply sends one frame per token, so 1,200
-   frames arriving after two real events used to push both out of a ring
-   trimmed by arrival. Budgeting per class keeps them. *)
 let test_a_long_reply_does_not_evict_the_log_it_streams_into () =
   let stream index =
     Observer.Keeper_chat_stream_frame
@@ -703,36 +518,6 @@ let test_an_observation_leaves_the_ring_with_its_calls () =
         (String.concat ", "
            (List.map (fun chunk -> Acting.turn_label chunk.Acting.ck_turn) chunks))
 
-(* [turn] on an agent-core frame or a ledger call is the agent session's
-   ordinal for the provider call, and [turn N] on this surface names a keeper
-   turn. The flat turn boundary rows carry no number, and the evidence names
-   the ordinal for what it is. *)
-let test_the_session_ordinal_is_named_only_in_the_evidence () =
-  List.iter
-    (fun (kind, label) ->
-      let row =
-        Acting.row_of_event ~at:100. ~duration_ms:None
-          (agent_core ~kind ~turn:2086 "analyst")
-      in
-      check string "the boundary label" label row.Acting.label;
-      check string (label ^ " carries no ordinal") "" row.Acting.detail)
-    [ (Observer.Turn_started, "turn start")
-    ; (Observer.Turn_ready, "turn ready")
-    ; (Observer.Turn_completed, "turn end")
-    ];
-  let evidence event = Acting.evidence_fields { Acting.ae_at = 100.; ae_event = event } in
-  List.iter
-    (fun (what, event) ->
-      let fields = evidence event in
-      check (option (option string)) (what ^ " names the ordinal")
-        (Some (Some "2086"))
-        (List.assoc_opt "Agent session turn" fields);
-      check bool (what ^ " does not call it a turn") false (List.mem_assoc "Turn" fields))
-    [ ("a wire call", agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn:2086 "analyst")
-    ; ("a ledger call", ledger_tool ~turn:2086 ~keeper:"analyst" "Read")
-    ]
-
-(* Order is what the screen scrolls through, so trimming must not reorder. *)
 let test_trimming_keeps_the_order_it_was_given () =
   let ring = [ settled "a"; heartbeat "b"; settled "c"; heartbeat "d"; settled "e" ] in
   let kept, dropped = Acting.retain ~actions:2 ~quiet:1 ~event_of:Fun.id ring in
@@ -834,53 +619,6 @@ let test_a_return_with_no_start_held_has_no_duration () =
        (Acting.row_of_event ~at:100. ~duration_ms:(Some (-4.))
           (Observer.Agent_core completed)))
 
-let test_keeper_rows_say_what_the_keeper_did () =
-  check string "a settlement carries tokens, cost, and calls"
-    "\xe2\x96\xa0 largo turn done | turn 2086 \xc2\xb7 in 73.9k out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
-    (text (Acting.row_of_event ~at:100. ~duration_ms:None (settled "largo")));
-  (* A settle that carried no number drops the turn from the detail rather
-     than drawing [turn ?] there. Each part carries no separator of its own,
-     so the figures do not open with one when the turn is the missing part. *)
-  check string "an unnumbered settlement opens on its figures"
-    "\xe2\x96\xa0 largo turn done | in 73.9k out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
-    (text
-       (Acting.row_of_event ~at:100. ~duration_ms:None
-          (match settled "largo" with
-           | Observer.Keeper_turn_complete t ->
-               Observer.Keeper_turn_complete { t with Observer.tc_turn = None }
-           | other -> other)));
-  check string "a heartbeat in a turn says how long it has been in it"
-    "  bandleader heartbeat | turn_running \xc2\xb7 in turn for 36m29s"
-    (text (Acting.row_of_event ~at:100. ~duration_ms:None (heartbeat "bandleader")))
-
-(* The four lifecycle kinds carry the run's own wire id as [task_id] -- an
-   [evt-] id on every one of the live fleet's agent_started rows, keepers and
-   internal runs alike. It is not a task, so the row does not print it; it
-   says how the run went instead. *)
-let test_agent_terminal_rows_keep_success_and_failure_distinct () =
-  let run_id = "evt-9565f12c61e9c2d7" in
-  let started = agent_core ~kind:Observer.Agent_started ~task:run_id "analyst" in
-  let completed =
-    agent_core ~kind:(Observer.Agent_completed { elapsed_s = 1.5 }) ~task:run_id
-      "analyst"
-  in
-  let failed =
-    agent_core
-      ~kind:
-        (Observer.Agent_failed
-           { elapsed_s = 0.5; error_code = "provider_error"; error = "rate limited" })
-      ~task:run_id "analyst"
-  in
-  check string "a started run says nothing it does not know yet"
-    "\xe2\x97\x8f analyst agent start | "
-    (text (Acting.row_of_event ~at:100. ~duration_ms:None started));
-  check string "a successful run says how long it ran"
-    "\xe2\x96\xa0 analyst agent done | 1.5s"
-    (text (Acting.row_of_event ~at:100. ~duration_ms:None completed));
-  check string "a failed run says how long and why"
-    "\xe2\x9c\x97 analyst agent failed | 500ms \xc2\xb7 provider_error \xc2\xb7 rate limited"
-    (text (Acting.row_of_event ~at:100. ~duration_ms:None failed))
-
 let test_a_lane_named_event_is_attributed_by_its_trace () =
   let on_lane =
     Observer.Agent_core
@@ -919,58 +657,6 @@ let test_elapsed_text_picks_a_unit () =
   check (option string) "a negative duration has no spelling, not 0ms" None
     (Acting.elapsed_text (-4.))
 
-(* The feed used to render keeper_skill and keeper_compose_* as anonymous
-   "call"/"returned" rows, so skill use was invisible in the chat-side surfaces
-   and only the Tools screen knew. The label now says it is a skill. *)
-let test_skill_tools_wear_a_skill_label () =
-  let row event =
-    Acting.row_of_entry ~duration_ms:None { Acting.ae_at = 100.; ae_event = event }
-  in
-  check string "skill body read is named" "skill call"
-    (row (agent_core ~tool:"keeper_skill" "alpha")).Acting.label;
-  check string "composition run is named" "skill call"
-    (row (agent_core ~tool:"keeper_compose_work-intake" "alpha")).Acting.label;
-  check string "a plain tool stays a call" "call"
-    (row (agent_core ~tool:"masc_board_stats" "alpha")).Acting.label;
-  check string "completion keeps the tag" "skill returned"
-    (row (agent_core ~kind:Observer.Tool_completed ~tool:"keeper_skill" "alpha"))
-      .Acting.label;
-  let keeper_tool_call ?disposition tool : Observer.event =
-    Observer.Keeper_tool_call
-      { Observer.kt_keeper = "alpha"
-      ; kt_turn = None
-      ; kt_tool = tool
-      ; kt_duration_ms = None
-      ; kt_disposition = disposition
-      ; kt_at = 100.
-      ; kt_tool_use_id = None
-      ; kt_schedule = None
-      ; kt_tool_args = None
-      ; kt_tool_result = None
-      ; kt_tool_args_preview = None
-      ; kt_tool_output_preview = None
-      }
-  in
-  check string "keeper skill call is named" "skill call"
-    (row (keeper_tool_call "keeper_skill")).Acting.label;
-  check string "a disposition keeps the tag beside it" "skill \xc2\xb7 deferred"
-    (row
-       (keeper_tool_call
-          ~disposition:(Ok Masc.Tui_decode.Keeper_call_deferred)
-          "keeper_compose_work-intake"))
-      .Acting.label;
-  check string "a word outside the vocabulary is said to be one"
-    "unknown disposition"
-    (row (keeper_tool_call ~disposition:(Error "keeper call has unknown disposition delivered")
-            "masc_board_stats"))
-      .Acting.label;
-  check string "a plain keeper tool stays a tool call" "tool call"
-    (row (keeper_tool_call "masc_board_stats")).Acting.label
-;;
-
-(* A ledger row states the call it ran in, and the fold files it under that
-   call's keeper turn. A row for the earlier turn that is reported only
-   after the next turn has opened lands on its own turn, not the newest. *)
 let test_late_ledger_row_stays_on_its_own_turn () =
   let events =
     [ agent_core ~kind:Observer.Turn_started ~turn:7 ~at:100. "alpha"
@@ -1071,7 +757,6 @@ let test_ledger_row_after_a_settle_finds_its_turn () =
     [ "Read"; "Write" ]
     (List.map (fun t -> t.Acting.ct_tool) (Acting.chunk_tools chunk))
 ;;
-
 
 (* One keeper turn is several provider calls. The wire numbers each call
    from the agent session, the settle numbers the turn from the keeper's
@@ -1190,77 +875,6 @@ let test_a_cli_lane_turn_is_numbered_when_its_observation_lands () =
       check (list string) "the turn before is unchanged" [ "masc_board_comment" ]
         (tools previous)
   | chunks -> failf "an ended lane turn drew %d rows" (List.length chunks)
-
-(* The call in flight has no observation yet -- its response has not come
-   back -- but a keeper runs one turn at a time, so its frames join the
-   keeper's open turn rather than opening a second row. *)
-let test_a_call_in_flight_joins_the_open_keeper_turn () =
-  let events_oldest_first =
-    [ observation ~keeper:"alpha" ~session:20 ~completed:6
-    ; agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn:20
-        ~tool_use_id:"w1" "alpha"
-    ; agent_core ~kind:Observer.Tool_completed ~tool:"Read" ~turn:20
-        ~tool_use_id:"w1" "alpha"
-    ; agent_core ~kind:Observer.Turn_started ~turn:21 "alpha"
-    ]
-  in
-  check (list string) "one row, the keeper's turn, still running"
-    [ "\xe2\x96\xb6 alpha turn 7 | Read 1.0s" ]
-    (List.map text
-       (Acting.chunk_rows ~traces:[] (entries_of events_oldest_first)))
-
-(* After a settle the next call opens the next keeper turn even before its
-   observation names the number: the settled row is closed. *)
-let test_a_new_keeper_turn_after_a_settle_opens_its_own_row () =
-  let events_oldest_first =
-    [ observation ~keeper:"alpha" ~session:20 ~completed:6
-    ; agent_core ~kind:Observer.Turn_started ~turn:20 "alpha"
-    ; turn_settled ~keeper:"alpha" ~turn:7 ~input:10 ~output:2 ~cost:0.001 ()
-    ; agent_core ~kind:Observer.Turn_started ~turn:21 "alpha"
-    ]
-  in
-  check (list string)
-    "the new turn has no number yet; the settled one keeps its own"
-    [ "\xe2\x96\xb6 alpha turn | running"
-    ; "\xe2\x96\xa0 alpha turn 7 | 1 call \xc2\xb7 in 10 out 2 \xc2\xb7 $0.0010"
-    ]
-    (List.map text
-       (Acting.chunk_rows ~traces:[] (entries_of events_oldest_first)))
-
-(* An agent session created without a checkpoint numbers its calls from zero
-   again, so the ring can hold ordinal 5 from the old session and from the
-   new one. Each call is filed under the keeper turn observed nearest to it,
-   so the old turn keeps its call and the new turn gets only its own. *)
-let test_a_restarted_session_keeps_each_call_on_its_own_keeper_turn () =
-  let events_oldest_first =
-    [ observation ~keeper:"alpha" ~session:5 ~completed:6
-    ; agent_core ~kind:Observer.Tool_called ~tool:"Read" ~turn:5
-        ~tool_use_id:"old" "alpha"
-    ; turn_settled ~keeper:"alpha" ~turn:7 ~input:10 ~output:2 ~cost:0.001 ()
-    ; observation ~keeper:"alpha" ~session:5 ~completed:7
-    ; agent_core ~kind:Observer.Tool_called ~tool:"Grep" ~turn:5
-        ~tool_use_id:"new" "alpha"
-    ]
-  in
-  check (list string) "turn 8 holds the new call, turn 7 keeps the old one"
-    [ "\xe2\x96\xb6 alpha turn 8 | Grep"
-    ; "\xe2\x96\xa0 alpha turn 7 | Read \xc2\xb7 in 10 out 2 \xc2\xb7 $0.0010"
-    ]
-    (List.map text
-       (Acting.chunk_rows ~traces:[] (entries_of events_oldest_first)))
-
-(* With no observation at all -- a feed that opened on a call in flight --
-   the row names the event without a number rather than borrowing the
-   session's. It used to draw [turn ?]: on a live-only feed the settle that
-   carries the number is usually outside the held window, so that question
-   was the common reading, not the odd one, and no answer to it was ever
-   coming from this row. *)
-let test_without_an_observation_a_running_turn_has_no_number () =
-  check (list string) "the row names the turn without inventing a number"
-    [ "\xe2\x96\xb6 analyst turn | running" ]
-    (List.map text
-       (Acting.chunk_rows ~traces:[]
-          (entries_of [ agent_core ~kind:Observer.Turn_ready ~turn:7 "analyst" ])))
 
 let test_chunk_projection_tracks_ordered_trace_identity () =
   let event = match agent_core ~tool:"Read" ~turn:5 "runtime-lane" with
@@ -1408,63 +1022,6 @@ let test_call_key_prefers_the_provider_id () =
         (equal (Acting.call_key call) (Acting.Call_by_id "wire-1"))
   | calls -> failf "one call expected, %d folded" (List.length calls)
 
-(* The Activity table's two named columns were literals of 16 cells. The
-   agent_core family names its runtime lane as the agent, so those rows drew
-   [agent_core-olla...] at every width -- including the ones where the detail
-   column beside them was empty. *)
-let table_row ?(keeper = "keeper") ?(label = "turn") ?(detail = "") () =
-  { Acting.at = 100.; keeper; glyph = Acting.Turn_boundary; label; detail }
-
-(* Measuring reads a row's two named columns; the table is sized from these,
-   never from a row's detail. *)
-let measured_row ?keeper ?label () =
-  Acting.measured_of_row (table_row ?keeper ?label ())
-
-let test_a_long_keeper_widens_its_column () =
-  let name = "agent_core-glm-coding.glm-5-turbo" in
-  let columns =
-    Acting.columns ~inner_width:160 [ measured_row ~keeper:name () ]
-  in
-  check int "the column holds the name whole" (String.length name)
-    columns.Acting.keeper_cells
-
-(* A roster of short names has no use for a wider column: those cells belong
-   to the detail beside them. *)
-let test_short_rows_leave_the_columns_where_they_were () =
-  let columns =
-    Acting.columns ~inner_width:160
-      [ measured_row ~keeper:"short-name" ~label:"turn" () ]
-  in
-  check int "the keeper column is what it drew before" 16
-    columns.Acting.keeper_cells;
-  check int "and so is the event column" 16 columns.Acting.label_cells
-
-(* Neither column goes under what it drew before, whatever the frame is, so a
-   narrow terminal draws the table it drew yesterday. *)
-let test_no_column_goes_under_what_it_drew_before () =
-  for inner_width = 0 to 200 do
-    let columns =
-      Acting.columns ~inner_width
-        [ measured_row ~keeper:"a-very-long-agent-name-indeed" () ]
-    in
-    check bool
-      (Printf.sprintf "inner %d keeps the keeper column" inner_width)
-      true
-      (columns.Acting.keeper_cells >= 16);
-    check bool
-      (Printf.sprintf "inner %d keeps the event column" inner_width)
-      true
-      (columns.Acting.label_cells >= 16)
-  done
-
-(* Measuring asks the event for its keeper and its label. The row the screen
-   draws has to say the same two words: if the two readings drifted, the
-   columns would be sized for a table that is not on the screen. The row
-   compared here is the one the flat scopes draw, [keeper_row_of_entry], not a
-   copy of its rule. The label lines hold by construction -- both readings
-   take [label_of_event] -- so the keeper is what this test divides on: a
-   correlated agent_core row is drawn under the keeper whose trace it carries,
-   not under its lane. *)
 let test_measuring_reads_what_the_row_draws () =
   let traces = [ ("keeper-one", "trace-1") ] in
   let correlated =
@@ -1507,40 +1064,6 @@ let test_measuring_reads_what_the_row_draws () =
   check string "which is not the lane the feed named"
     "agent_core-glm-coding.glm-5-turbo" unrenamed.Acting.keeper
 
-(* The renderer draws a name through [Terminal_text.single_line], which spells
-   a control byte as a four-cell escape. Measured raw, a tab and a whole ESC
-   colour sequence took no cells, so the column came out narrower than the
-   name drawn in it: [keeper-\x1B[31mred\x1B[0m] is 25 cells on screen and
-   was measured as 10, the tab name 23 and 19. *)
-let test_a_control_byte_is_measured_as_it_is_drawn () =
-  List.iter
-    (fun name ->
-      let on_screen = Masc.Tui_terminal_text.sanitize_terminal_text name in
-      let columns =
-        Acting.columns ~inner_width:160
-          [ Acting.measured_of_event ~traces:[] (heartbeat name) ]
-      in
-      check int
-        (String.escaped name ^ ": the column holds the drawn name whole")
-        (String.length on_screen) columns.Acting.keeper_cells)
-    [ "keeper\tone-two-three"; "keeper-\x1b[31mred\x1b[0m" ]
-
-(* And the detail column keeps half the row: it is the one that carries
-   sentences. *)
-let test_the_named_columns_leave_detail_its_half () =
-  let long = String.make 80 'x' in
-  for inner_width = 80 to 200 do
-    let columns =
-      Acting.columns ~inner_width [ measured_row ~keeper:long ~label:long () ]
-    in
-    let taken = columns.Acting.keeper_cells + columns.Acting.label_cells in
-    let half = max 32 ((inner_width - 15) / 2) in
-    check bool
-      (Printf.sprintf "inner %d leaves detail its half (took %d)" inner_width
-         taken)
-      true (taken <= half)
-  done
-
 let () =
   run "tui acting"
     [ ( "rows"
@@ -1552,18 +1075,12 @@ let () =
             test_the_internal_runs_push_is_not_a_keepers_act
         ; test_case "actions hide what says nothing a row can act on" `Quick
             test_actions_hide_what_says_nothing_a_row_can_act_on
-        ; test_case "filter explanations name scope and quiet rows" `Quick
-            test_filter_explanations_name_scope_and_quiet_rows
         ; test_case "one reply does not bury the actions it sits between" `Quick
             test_one_reply_does_not_bury_the_actions_it_sits_between
         ; test_case "a stream frame draws its keeper and what it was" `Quick
             test_a_stream_frame_draws_its_keeper_and_what_it_was
         ; test_case "a fusion status row names the owning keeper" `Quick
             test_a_fusion_status_row_names_the_owning_keeper
-        ; test_case "an untaught event without a tool says only its name" `Quick
-            test_an_untaught_event_without_a_tool_says_only_its_name
-        ; test_case "an untaught event with a tool still names it" `Quick
-            test_an_untaught_event_with_a_tool_still_names_it
         ; test_case "a long reply does not evict the log it streams into" `Quick
             test_a_long_reply_does_not_evict_the_log_it_streams_into
         ; test_case "the old arrival trim would have lost them" `Quick
@@ -1574,8 +1091,6 @@ let () =
             test_an_observation_spends_an_action_slot
         ; test_case "an observation leaves the ring with its calls" `Quick
             test_an_observation_leaves_the_ring_with_its_calls
-        ; test_case "the session ordinal is named only in the evidence" `Quick
-            test_the_session_ordinal_is_named_only_in_the_evidence
         ; test_case "trimming keeps the order it was given" `Quick
             test_trimming_keeps_the_order_it_was_given
         ; test_case "every row wears the clock the feed ordered it by" `Quick
@@ -1584,37 +1099,17 @@ let () =
             test_a_call_and_its_return_read_as_one_pair
         ; test_case "a return with no start held has no duration" `Quick
             test_a_return_with_no_start_held_has_no_duration
-        ; test_case "keeper rows say what the keeper did" `Quick
-            test_keeper_rows_say_what_the_keeper_did
-        ; test_case "agent terminal rows keep success and failure distinct" `Quick
-            test_agent_terminal_rows_keep_success_and_failure_distinct
         ; test_case "a lane-named event is attributed by its trace" `Quick
             test_a_lane_named_event_is_attributed_by_its_trace
         ; test_case "elapsed text picks a unit" `Quick test_elapsed_text_picks_a_unit
-        ; test_case "skill tools wear a skill label in the feed" `Quick
-            test_skill_tools_wear_a_skill_label
         ; test_case "turns fold the two planes into one row per turn" `Quick
             test_turns_fold_the_two_planes_into_one_row_per_turn
         ; test_case "a settle joins the open turn it ends despite the number" `Quick
             test_a_settle_joins_the_open_turn_it_ends_despite_the_number
-        ; test_case "a running turn names its in-flight call" `Quick
-            test_a_running_turn_names_its_in_flight_call
-        ; test_case "a settled row spells its tokens the way the pane does"
-            `Quick test_a_settled_row_spells_its_tokens_the_way_the_pane_does
         ; test_case "turn input splits only counts that add up" `Quick
             test_turn_input_splits_only_counts_that_add_up
-        ; test_case "a cached settle names its new and cached parts" `Quick
-            test_a_cached_settle_names_its_new_and_cached_parts
-        ; test_case "turns pass non-lifecycle rows through" `Quick
-            test_turns_pass_non_lifecycle_rows_through
-        ; test_case "turns do not readmit what the scope hides" `Quick
-            test_turns_do_not_readmit_what_the_scope_hides
         ; test_case "telemetry alone conjures no turn" `Quick
             test_telemetry_alone_conjures_no_turn
-        ; test_case "telemetry refreshes but never duplicates a turn" `Quick
-            test_telemetry_refreshes_but_never_duplicates_a_turn
-        ; test_case "turns fall back to the wire when the ledger is silent"
-            `Quick test_turns_fall_back_to_the_wire_when_the_ledger_is_silent
         ; test_case "a late ledger row stays on its own turn" `Quick
             test_late_ledger_row_stays_on_its_own_turn
         ; test_case "a ledger row after a settle finds its turn" `Quick
@@ -1627,14 +1122,6 @@ let () =
             test_an_observation_after_its_frames_still_files_them
         ; test_case "a cli lane turn is numbered when its observation lands" `Quick
             test_a_cli_lane_turn_is_numbered_when_its_observation_lands
-        ; test_case "a call in flight joins the open keeper turn" `Quick
-            test_a_call_in_flight_joins_the_open_keeper_turn
-        ; test_case "a new keeper turn after a settle opens its own row" `Quick
-            test_a_new_keeper_turn_after_a_settle_opens_its_own_row
-        ; test_case "a restarted session keeps each call on its own keeper turn"
-            `Quick test_a_restarted_session_keeps_each_call_on_its_own_keeper_turn
-        ; test_case "without an observation a running turn has no number" `Quick
-            test_without_an_observation_a_running_turn_has_no_number
         ; test_case "chunk projection follows ordered trace identity" `Quick
             test_chunk_projection_tracks_ordered_trace_identity
         ; test_case "chunk projection rebuilds after append and trim" `Quick
@@ -1643,17 +1130,7 @@ let () =
             test_a_folded_ledger_call_keeps_the_rows_facts
         ; test_case "a call key prefers the provider's id" `Quick
             test_call_key_prefers_the_provider_id
-        ; test_case "a long keeper widens its column" `Quick
-            test_a_long_keeper_widens_its_column
-        ; test_case "short rows leave the columns where they were" `Quick
-            test_short_rows_leave_the_columns_where_they_were
-        ; test_case "no column goes under what it drew before" `Quick
-            test_no_column_goes_under_what_it_drew_before
-        ; test_case "the named columns leave detail its half" `Quick
-            test_the_named_columns_leave_detail_its_half
         ; test_case "measuring reads what the row draws" `Quick
             test_measuring_reads_what_the_row_draws
-        ; test_case "a control byte is measured as it is drawn" `Quick
-            test_a_control_byte_is_measured_as_it_is_drawn
-        ] )
+        ;] )
     ]

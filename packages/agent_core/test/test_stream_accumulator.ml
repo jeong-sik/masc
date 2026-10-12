@@ -481,6 +481,7 @@ let test_accumulate_message_delta () =
              ; output_tokens = Some 75
              ; cache_creation_input_tokens = None
              ; cache_read_input_tokens = None
+             ; cost_usd = None
              }
        });
   match Streaming.finalize_stream_acc acc with
@@ -512,6 +513,7 @@ let test_accumulate_message_delta_cache_update () =
              ; output_tokens = Some 50
              ; cache_creation_input_tokens = Some 25
              ; cache_read_input_tokens = Some 10
+             ; cost_usd = None
              }
        });
   match Streaming.finalize_stream_acc acc with
@@ -592,6 +594,7 @@ let test_finalize_text_response () =
               ; output_tokens = Some 50
               ; cache_creation_input_tokens = None
               ; cache_read_input_tokens = None
+              ; cost_usd = None
               }
         }
     ];

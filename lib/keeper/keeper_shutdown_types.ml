@@ -52,6 +52,7 @@ type dashboard_purge_artifact =
   | Keeper_runtime_directory_artifact
   | Keeper_memory_current_artifact
   | Keeper_librarian_range_receipt_artifact
+  | Keeper_memory_admission_queue_artifact
   | Keeper_memory_retraction_plan_artifact
   | Keeper_memory_source_current_artifact
   | Keeper_working_context_recall_artifact
@@ -62,6 +63,7 @@ type dashboard_purge_artifact =
   | Keeper_memory_events_artifact
   | Keeper_turn_boundaries_artifact
   | Keeper_librarian_progress_artifact
+  | Keeper_external_read_cursor_artifact
   | Keeper_librarian_official_progress_artifact
   | Keeper_playground_bundles_artifact
   | Keeper_runtime_configuration_artifact
@@ -70,6 +72,9 @@ type dashboard_purge_artifact =
   | Keeper_board_attention_candidates_artifact
   | Keeper_board_attention_partitions_artifact
   | Agent_artifact_bundle of string list
+  | Keeper_antigravity_home_artifact of string
+  | Keeper_antigravity_prepare_lock_artifact of string
+  | Keeper_muse_home_artifact of string
 
 type completion_receipt =
   | Completion_not_requested
@@ -609,6 +614,7 @@ let dashboard_purge_artifact_plan ~keeper_name context =
        inherits them. *)
   ; Keeper_memory_current_artifact
   ; Keeper_librarian_range_receipt_artifact
+  ; Keeper_memory_admission_queue_artifact
   ; Keeper_memory_retraction_plan_artifact
   ; Keeper_memory_source_current_artifact
   ; Keeper_working_context_recall_artifact
@@ -643,6 +649,7 @@ let dashboard_purge_artifact_plan ~keeper_name context =
        log (RFC librarian-lifecycle §10-3). Left behind with the log gone, it
        would point past lines a same-name successor has not written yet, and
        that keeper's first official turns would be passed unread. *)
+  ; Keeper_external_read_cursor_artifact
   ; Keeper_librarian_official_progress_artifact
     (* A Keeper can change sandbox profiles across lifetimes. Remove every
        backend-scoped root for the exact name so a same-name successor cannot
@@ -664,6 +671,13 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ; Keeper_board_attention_candidates_artifact
   ; Keeper_board_attention_partitions_artifact
   ; Agent_artifact_bundle agent_aliases
+    (* The official-client owner homes (Antigravity keeper HOME plus its
+       prepare lock, and the Muse managed workspace identity directory) are
+       not listed here: their paths hash the Keeper name with an OAuth
+       source or account home that lives in runtime.toml, which the
+       quiesced purge itself removes the keeper assignment from. The
+       consumer derives and appends them before the removal loop, and
+       omits an entry it can no longer derive. *)
   ]
 ;;
 

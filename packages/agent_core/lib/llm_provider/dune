@@ -4,6 +4,7 @@
  (name llm_provider)
  (public_name masc.agent_core.llm_provider)
  (private_modules
+  tool_schema_contract
   tcp_address_race
   complete_stream_error
   complete_stream_state

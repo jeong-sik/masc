@@ -277,7 +277,7 @@ let no_journal_for_settled_operation_message ~operation_id =
   "no journal exists for Keeper chat operation " ^ operation_id ^ ", which has ended"
 ;;
 
-let journal_events_page ~schema ~identity ~since_seq ~redact_json (page : Keeper_chat_event_log.page) =
+let journal_events_page ~schema ~identity ~since_seq ~redact_text (page : Keeper_chat_event_log.page) =
   (* The position to feed back: after the last event served, or the caller's
      own position when the page is empty — [null] when that was the whole
      journal, since a response field cannot be absent the way a request field
@@ -294,7 +294,9 @@ let journal_events_page ~schema ~identity ~since_seq ~redact_json (page : Keeper
     ; ( "events"
       , `List
           (List.map
-             (fun entry -> redact_json (Keeper_chat_event_log.journaled_event_to_json entry))
+             (fun (entry : Keeper_chat_event_log.journaled_event) ->
+               let event = Keeper_chat_events.redact_content ~redact_text entry.event in
+               Keeper_chat_event_log.journaled_event_to_json {entry with event})
              page.events) )
     ; "has_more", `Bool page.has_more
     ; "next_since_seq", Keeper_chat_event_log.replay_position_to_yojson next_since_seq
@@ -302,14 +304,14 @@ let journal_events_page ~schema ~identity ~since_seq ~redact_json (page : Keeper
     ]
 ;;
 
-let chat_events_page ~operation_id ~since_seq ~redact_json page =
+let chat_events_page ~operation_id ~since_seq ~redact_text page =
   journal_events_page ~schema:"masc.keeper_chat_events.v2"
-    ~identity:("operation_id", `String operation_id) ~since_seq ~redact_json page
+    ~identity:("operation_id", `String operation_id) ~since_seq ~redact_text page
 ;;
 
-let turn_events_page ~turn_ref ~since_seq ~redact_json page =
+let turn_events_page ~turn_ref ~since_seq ~redact_text page =
   journal_events_page ~schema:"masc.keeper_turn_events.v1"
-    ~identity:("turn_ref", `String (Ids.Turn_ref.to_string turn_ref)) ~since_seq ~redact_json page
+    ~identity:("turn_ref", `String (Ids.Turn_ref.to_string turn_ref)) ~since_seq ~redact_text page
 ;;
 
 (* Everything the events route reads off the query, parsed once. The handler
@@ -334,7 +336,7 @@ let parse_events_request request =
 (* The page the request asks for, as the body to send and how many events it
    served, or the error the request earns. Pure over the rows: the caller runs
    it in a pool job. *)
-let events_page_of_rows ~path ~redact_json query rows =
+let events_page_of_rows ~path ~redact_text query rows =
   Keeper_chat_event_log.page_of_rows
     ~path
     ~since_seq:query.er_since_seq
@@ -346,7 +348,7 @@ let events_page_of_rows ~path ~redact_json query rows =
     , chat_events_page
         ~operation_id:(Operation_id.to_string query.er_operation_id)
         ~since_seq:query.er_since_seq
-        ~redact_json
+        ~redact_text
         page ))
   |> Result.map_error page_failure_error
 ;;
@@ -385,7 +387,7 @@ let handle_get state request reqd = function
           let page = Domain_pool_ref.submit_cpu_or_inline (fun () ->
             Keeper_chat_event_log.page_of_rows ~path ~since_seq ~start ~limit rows
             |> Result.map (turn_events_page ~turn_ref ~since_seq
-                 ~redact_json:(Keeper_secret_redaction.redact_json redaction))
+                 ~redact_text:(Keeper_secret_redaction.redact_text redaction))
             |> Result.map_error page_failure_error) in
           (match page with
            | Ok body -> Server_auth.respond_json_value_with_cors request reqd body
@@ -413,15 +415,16 @@ let handle_get state request reqd = function
            served;
          Server_auth.respond_json_value_with_cors request reqd body
        in
-       let respond_rows ~redact_json rows =
-         match events_page_of_rows ~path ~redact_json query rows with
+       let respond_rows ~redact_text rows =
+         match events_page_of_rows ~path ~redact_text query rows with
          | Ok (served, body) -> respond_page ~served body
          | Error error -> respond_error request reqd error
        in
        (match Keeper_chat_event_log.read_journal_rows_path path with
         | Ok rows ->
-          (* Same second redaction layer the SSE projection and the reconnect
-             replay apply: the journal is redacted at publish, this covers
+          (* Same typed content redaction layer the SSE projection and reconnect
+             replay apply: preserve envelope identities and protocol fields.
+             The journal is redacted at publish; this also covers
              lines written before that held. The snapshot is taken here, where
              its secret files are statted; its compiled patterns guard their
              own automaton with a mutex (Re 1.14), and the chat store already
@@ -433,7 +436,7 @@ let handle_get state request reqd = function
              Domain_pool_ref.submit_cpu_or_inline (fun () ->
                events_page_of_rows
                  ~path
-                 ~redact_json:(Keeper_secret_redaction.redact_json redaction)
+                 ~redact_text:(Keeper_secret_redaction.redact_text redaction)
                  query
                  rows)
            with
@@ -452,7 +455,7 @@ let handle_get state request reqd = function
                  rows: a client holding an offset into a journal that does not
                  exist is told so by the same cursor check every page uses,
                  not handed its own offset back. *)
-              | Nothing_journaled_yet -> respond_rows ~redact_json:Fun.id ""
+              | Nothing_journaled_yet -> respond_rows ~redact_text:Fun.id ""
               | No_journal_for_settled_operation ->
                 (* The [journal_pruned] code is the client's contract for
                    "nothing to reload, now or later"; the message states only
@@ -622,7 +625,7 @@ module For_testing = struct
     match parse_events_request request with
     | Error error -> Error (error.status, error.code)
     | Ok query ->
-      (match events_page_of_rows ~path ~redact_json:Fun.id query rows with
+      (match events_page_of_rows ~path ~redact_text:Fun.id query rows with
        | Ok (_served, body) -> Ok body
        | Error error -> Error (error.status, error.code))
   ;;

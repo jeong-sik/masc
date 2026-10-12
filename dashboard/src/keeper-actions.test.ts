@@ -606,7 +606,7 @@ describe('sendKeeperThreadMessage operation stream', () => {
         ts: 1_780_000_001,
         delivery_provenance: {
           delivery_key: { kind: 'operation', operation_id: submittedOperationId },
-          transcript_slot: { kind: 'terminal_assistant' },
+          transcript_slot: { kind: 'terminal_result' },
         },
         delivery_provenance_status: 'valid',
       },

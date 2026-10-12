@@ -1,13 +1,10 @@
 (** Server_dashboard_http_cache — cached_surface type and dashboard
     cache lifecycle helpers.
 
-    A {!cached_surface} is a mutable record carrying the most recent
-    successful JSON snapshot for a dashboard endpoint plus the three
-    event timestamps (success / attempt / error) used to render
-    cache-state diagnostics in the response payload.  All accessors
-    mutate the record in place — there is no implicit thread-safety;
-    callers serialise access through a per-cache mutex when they
-    need it.
+    A {!cached_surface} atomically publishes an immutable snapshot and its
+    derived payload. Readers retain a consistent observation while later
+    updates replace the cell. Rendering takes an explicit observation time;
+    the HTTP accessors sample the clock at their boundary.
 
     The module also provides
     {!cached_surface_or_first_success_json} — a "compute on first
@@ -33,15 +30,18 @@ type cached_surface_payload = {
 }
 (** Pre-rendered JSON AST, pre-serialized raw JSON string, and weak ETag for a surface. *)
 
-type cached_surface = {
-  mutable current : surface_snapshot;
-  mutable memoized_payload : (surface_snapshot * cached_surface_payload) option;
-}
-(** The cell that holds the current {!surface_snapshot} and an optional memoized
-    payload. Concrete because dashboard tests construct and read surfaces directly
-    ({!Test_dashboard_namespace_truth}, {!Test_dashboard_http_core}).
-    Every mutator replaces the whole snapshot in one write, so a reader can
-    never observe a half-applied update. *)
+type cached_surface
+(** An atomic publication cell. The snapshot is authoritative; serialized JSON
+    and ETag are memoized only for that exact snapshot. *)
+
+val update_cached_surface :
+  cached_surface -> (surface_snapshot -> surface_snapshot) -> unit
+(** Atomically replace the snapshot and invalidate its derived payload.
+    The transform must be pure: contention may cause it to run again.
+    Sample clocks and perform effects before calling this function. *)
+
+val surface_snapshot_json : now:float -> surface_snapshot -> Yojson.Safe.t
+(** Pure diagnostic projection of one snapshot at an explicit observation time. *)
 
 val snapshot : cached_surface -> surface_snapshot
 (** [snapshot s] reads the current view. Bind it once and read fields off the
@@ -77,10 +77,11 @@ val mark_cached_surface_error_message : cached_surface -> string -> unit
 (** Store an already-rendered boundary failure without recreating an exception
     solely to transport its text. *)
 
-val invalidate_cached_surface : cached_surface -> unit
+val invalidate_cached_surface : ?json:Yojson.Safe.t -> cached_surface -> unit
 (** [invalidate_cached_surface s] clears all three timestamps but
-    leaves [s.json] intact.  Used by tests to reset surface state
-    between scenarios while preserving the seeded JSON envelope. *)
+    preserves the JSON unless a replacement [json] is supplied. Both changes
+    publish together, so an invalidation cannot expose the retired payload as
+    a new initializing observation. *)
 
 val cached_surface_has_success : cached_surface -> bool
 (** [cached_surface_has_success s] returns [true] iff

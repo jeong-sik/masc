@@ -29,7 +29,7 @@ let payload_file path ~run_id kind =
 ;;
 
 let mark_completed_exn t ~run_id ~outcome ~elapsed_s ~output =
-  match R.mark_completed t ~run_id ~outcome ~elapsed_s ~selected_slot:None ~output with
+  match R.mark_completed t ~run_id ~outcome ~elapsed_s ~selected_slot:None ~output () with
   | Ok () -> ()
   | Error error ->
     failf
@@ -53,6 +53,7 @@ let mark_completed_with_selected_slot_exn
       ~elapsed_s
       ~selected_slot
       ~output
+      ()
   with
   | Ok () -> ()
   | Error error ->
@@ -155,6 +156,174 @@ let test_completion_without_slot_receipt_writes_explicit_null () =
           (List.assoc_opt "selected_slot" completion_fields = Some `Null)
       | _ -> fail "completion event must carry an object payload")
    | _ -> fail "completion event must be an object");
+  remove_if_exists path
+;;
+
+let sample_usage =
+  { R.input_tokens = 1200
+  ; output_tokens = 340
+  ; cache_creation_input_tokens = 0
+  ; cache_read_input_tokens = 900
+  ; cost_usd = Some 0.0042
+  }
+
+let test_usage_is_recorded_and_survives_replay () =
+  let path = fresh_log_path "exact-lane-usage-" in
+  remove_if_exists path;
+  let registry = R.create ~path () in
+  R.register_running
+    registry
+    ~run_id:"run-usage"
+    ~lane:R.Librarian
+    ~actor:"keeper-a"
+    ~started_at:10.0
+    ~input:(R.Exact_input `Null);
+  (match
+     R.mark_completed
+       registry
+       ~run_id:"run-usage"
+       ~outcome:R.Succeeded
+       ~elapsed_s:0.5
+       ~selected_slot:(Some "librarian-primary")
+       ~usage:sample_usage
+       ~output:`Null
+       ()
+   with
+   | Ok () -> ()
+   | Error error ->
+     failf "usage completion failed: %s" (R.completion_error_to_string error));
+  (match R.get registry ~run_id:"run-usage" with
+   | Some { status = R.Completed { usage = Some usage; _ }; _ } ->
+     check int "input tokens" 1200 usage.R.input_tokens;
+     check int "cache read tokens" 900 usage.cache_read_input_tokens;
+     check bool "provider charge" true (usage.cost_usd = Some 0.0042)
+   | _ -> fail "usage did not reach the completed status");
+  let summary =
+    R.get registry ~run_id:"run-usage" |> Option.get |> R.run_summary_to_yojson
+  in
+  check bool "summary carries usage for cost measurement" true
+    Yojson.Safe.Util.(member "usage" summary <> `Null);
+  let replayed = R.replay path in
+  (match R.get replayed ~run_id:"run-usage" with
+   | Some
+       { status =
+           R.Completed { usage = Some usage; selected_slot = Some slot; _ }
+       ; _
+       } ->
+     check string "selected slot survives" "librarian-primary" slot;
+     check int "usage survives durable replay" 340 usage.output_tokens
+   | _ -> fail "usage did not survive durable replay");
+  remove_if_exists path
+;;
+
+(* Two ways a run ends up with no usage: the producer passed none (the row
+   carries an explicit null), and a completion row written before the field
+   existed at all (the field is absent). Both replay as [usage = None] so
+   pre-change stores stay readable without a store version bump. *)
+let test_completion_without_usage_replays_as_none () =
+  let path = fresh_log_path "exact-lane-no-usage-" in
+  remove_if_exists path;
+  let registry = R.create ~path () in
+  R.register_running
+    registry
+    ~run_id:"run-none"
+    ~lane:R.Board_attention
+    ~actor:"keeper-a"
+    ~started_at:10.0
+    ~input:(R.Exact_input `Null);
+  mark_completed_exn
+    registry
+    ~run_id:"run-none"
+    ~outcome:R.Succeeded
+    ~elapsed_s:0.5
+    ~output:`Null;
+  let lines = Fs_compat.load_file path |> String.split_on_char '\n' in
+  let completion_event =
+    match Yojson.Safe.from_string (List.nth lines 1) with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "completion"
+              then (
+                match value with
+                | `Assoc completion_fields ->
+                  name, `Assoc (List.remove_assoc "usage" completion_fields)
+                | _ -> fail "completion event must carry an object payload")
+              else name, value)
+           fields)
+    | _ -> fail "completion event must be an object"
+  in
+  Fs_compat.save_file
+    path
+    (String.concat
+       "\n"
+       [ List.nth lines 0; Yojson.Safe.to_string completion_event; "" ]);
+  let replayed = R.replay path in
+  (match R.get replayed ~run_id:"run-none" with
+   | Some { status = R.Completed { outcome = R.Succeeded; usage = None; _ }; _ } -> ()
+   | _ -> fail "usage-less completion must replay as a successful None");
+  remove_if_exists path
+;;
+
+(* A usage report is provider evidence, not a free-form bag: a negative token
+   count is refused, and the refusal takes the run down rather than being
+   silently read as zero. *)
+let test_malformed_usage_is_rejected_not_read () =
+  let path = fresh_log_path "exact-lane-bad-usage-" in
+  remove_if_exists path;
+  let registry = R.create ~path () in
+  R.register_running
+    registry
+    ~run_id:"run-bad-usage"
+    ~lane:R.Librarian
+    ~actor:"keeper-a"
+    ~started_at:10.0
+    ~input:(R.Exact_input `Null);
+  mark_completed_exn
+    registry
+    ~run_id:"run-bad-usage"
+    ~outcome:R.Succeeded
+    ~elapsed_s:0.5
+    ~output:`Null;
+  let lines = Fs_compat.load_file path |> String.split_on_char '\n' in
+  let completion_event =
+    match Yojson.Safe.from_string (List.nth lines 1) with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "completion"
+              then (
+                match value with
+                | `Assoc completion_fields ->
+                  name
+                  , `Assoc
+                      (("usage"
+                        , `Assoc
+                            [ "input_tokens", `Int (-1)
+                            ; "output_tokens", `Int 1
+                            ; "cache_creation_input_tokens", `Int 0
+                            ; "cache_read_input_tokens", `Int 0
+                            ])
+                       :: completion_fields)
+                | _ -> fail "completion event must carry an object payload")
+              else name, value)
+           fields)
+    | _ -> fail "completion event must be an object"
+  in
+  Fs_compat.save_file
+    path
+    (String.concat
+       "\n"
+       [ List.nth lines 0; Yojson.Safe.to_string completion_event; "" ]);
+  let replayed = R.replay path in
+  check
+    (option string)
+    "negative token count is refused and the run restart-fails"
+    (Some "failed")
+    (R.get replayed ~run_id:"run-bad-usage"
+     |> Option.map (fun run -> R.status_label run.R.status));
   remove_if_exists path
 ;;
 
@@ -349,6 +518,7 @@ let test_blank_selected_slot_is_rejected_before_write () =
       ~elapsed_s:0.5
       ~selected_slot:(Some " \t")
       ~output:`Null
+      ()
   in
   check bool "blank selected slot is a typed writer error" true
     (match result with
@@ -716,6 +886,7 @@ let test_failed_durable_completion_is_explicitly_visible () =
       ~elapsed_s:0.1
       ~selected_slot:None
       ~output:(`String "must-not-publish")
+      ()
   in
   (match completion with
    | Error (R.Persistence_failed failure) ->
@@ -1233,6 +1404,12 @@ let () =
             test_replay_selects_latest_payloads_across_blank_rows
         ; test_case "missing receipt is explicit null" `Quick
             test_completion_without_slot_receipt_writes_explicit_null
+        ; test_case "usage is recorded and survives replay" `Quick
+            test_usage_is_recorded_and_survives_replay
+        ; test_case "completion without usage replays as None" `Quick
+            test_completion_without_usage_replays_as_none
+        ; test_case "malformed usage is rejected, not read" `Quick
+            test_malformed_usage_is_rejected_not_read
         ; test_case "pre-v4 completion is not replayed as success" `Quick
             test_missing_selected_slot_completion_is_not_replayed_as_success
         ; test_case "blank selected slot is rejected before write" `Quick

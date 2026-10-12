@@ -41,7 +41,7 @@ let removed_cap_and_empty_snapshot () = fixture (fun config scope day ->
   let rows = points config (day +. 21.) in
   check int "prior day plus current uncapped report" 2 (List.length rows);
   check bool "spent cap is absent from current day" false
-    (List.exists (fun row -> observed row >= day && kind row = "provider:credit limit") rows);
+    (List.exists (fun row -> observed row >= day && kind row = "provider:API key credit limit") rows);
   let current = List.find (fun row -> observed row >= day) rows in
   check string "uncapped USD survives the history boundary" "usd"
     Yojson.Safe.Util.(current |> member "unit" |> to_string);
@@ -119,7 +119,50 @@ let overlapping_sources () = fixture (fun config scope day ->
   check int "another surviving source prevents a false empty day" 0
     (List.length (empty_reports config (day +. 31.))))
 
+let legacy_openrouter_label ~old_kind ~current_kind ~report ~unit ~value ~extra () = fixture (fun config scope day ->
+  let journal = Dated_jsonl.create
+    ~base_dir:(Filename.concat (Workspace_utils.masc_dir config) "provider_usage_history") () in
+  let legacy ~source ~observed_at = `Assoc ([
+    "scope_id", `String (History.scope_id scope); "source", `String source;
+    "kind", `String old_kind; "limit_id", `Null;
+    "observed_at", `Float observed_at; "resets_at", `Null;
+    "unit", `String unit; "value", `Float value] @ extra) in
+  Dated_jsonl.append journal (`List [
+    legacy ~source:(Usage.source_to_string Openrouter_key_read) ~observed_at:(day -. 1.);
+    legacy ~source:(Usage.source_to_string Openrouter_key_read) ~observed_at:(day +. 1.);
+    legacy ~source:(Usage.source_to_string Codex_account_rate_limits_updated)
+      ~observed_at:(day -. 86401.)]);
+  Usage.record ~scope ~observed_at:(day +. 10.)
+    (decode Usage.decode_openrouter_key report);
+  let rows = points config (day +. 11.) in
+  let openrouter = List.filter (fun row ->
+    Yojson.Safe.Util.(row |> member "source" |> to_string)
+      = Usage.source_to_string Openrouter_key_read) rows in
+  check int "one old day and one current day" 2 (List.length openrouter);
+  check (list string) "old and new days share the current series identity"
+    [current_kind; current_kind]
+    (List.map kind openrouter);
+  let old = List.find (fun row -> observed row < day) openrouter in
+  check string "historical measurement unit is preserved" unit
+    Yojson.Safe.Util.(old |> member "unit" |> to_string);
+  check (float 0.) "historical measured value retained" value
+    Yojson.Safe.Util.(old |> member "value" |> to_float);
+  let other = List.find (fun row ->
+    Yojson.Safe.Util.(row |> member "source" |> to_string)
+      = Usage.source_to_string Codex_account_rate_limits_updated) rows in
+  check string "other source's same label is not renamed" old_kind (kind other))
+
 let () = run "provider usage durable snapshots" ["history", [
+  test_case "legacy OpenRouter credit label retains history identity" `Quick
+    (legacy_openrouter_label ~old_kind:"provider:credit limit"
+      ~current_kind:"provider:API key credit limit"
+      ~report:{|{"data":{"limit":20,"limit_remaining":5}}|}
+      ~unit:"fraction" ~value:0.5 ~extra:[]);
+  test_case "uncapped OpenRouter usage retains history identity" `Quick
+    (legacy_openrouter_label ~old_kind:"provider:credit usage (all time)"
+      ~current_kind:"provider:API key usage (all time)"
+      ~report:{|{"data":{"limit":null,"usage":21.5}}|}
+      ~unit:"usd" ~value:12.5 ~extra:["limit", `Null]);
   test_case "overlapping source windows survive another source's empty report" `Quick overlapping_sources;
   test_case "empty-only day, recovery and another reporting source" `Quick empty_day_and_recovery;
   test_case "removed cap, empty report, prior day and delayed journal" `Quick removed_cap_and_empty_snapshot;

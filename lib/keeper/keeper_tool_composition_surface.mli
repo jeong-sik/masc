@@ -175,6 +175,13 @@ end
     without an enclosing Keeper turn. *)
 
 module For_testing : sig
+  val result_of_execution :
+    tool_name:string ->
+    tool_kind:Keeper_tool_descriptor.tool_kind ->
+    start_time:Tool_timing.started ->
+    (Keeper_tool_plan_executor.node_result list, Keeper_tool_plan_executor.failure) result ->
+    Tool_result.result
+
   val observe_node_result :
     ?on_receipt_committed:(Ids.Execution_id.t -> unit) ->
     composition_tool:string ->

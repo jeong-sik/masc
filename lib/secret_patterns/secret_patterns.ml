@@ -164,7 +164,102 @@ let pem_private_key_re =
        ])
 ;;
 
-let redact_pem_blocks s = Re.replace_string pem_private_key_re ~by:"[REDACTED]" s
+type source_span = { first_byte : int; past_byte : int }
+
+type source_piece =
+  | Copied of { source : source_span; text : string }
+  | Masked of { source : source_span; replacement : string }
+
+let source_of_piece = function
+  | Copied { source; _ } | Masked { source; _ } -> source
+
+let text_of_piece = function
+  | Copied { text; _ } -> text
+  | Masked { replacement; _ } -> replacement
+
+let render_pieces pieces = String.concat "" (List.map text_of_piece pieces)
+
+let copied_text text =
+  if String.equal text "" then []
+  else [ Copied { source = { first_byte = 0; past_byte = String.length text }; text } ]
+
+(* Slice by the current output coordinates, retaining the original input
+   coordinates. A later masking pass may match part of an earlier replacement;
+   every such part still belongs to that replacement's entire source range. *)
+let split_piece piece length =
+  match piece with
+  | Copied { source; text } ->
+      let middle = source.first_byte + length in
+      ( Copied { source = { source with past_byte = middle }; text = String.sub text 0 length }
+      , Copied { source = { source with first_byte = middle };
+                 text = String.sub text length (String.length text - length) } )
+  | Masked { source; replacement } ->
+      ( Masked { source; replacement = String.sub replacement 0 length }
+      , Masked { source; replacement = String.sub replacement length (String.length replacement - length) } )
+
+let take_output length pieces =
+  let rec take reversed remaining pieces =
+    if remaining = 0 then List.rev reversed, pieces
+    else match pieces with
+      | [] -> invalid_arg "Secret_patterns.take_output: invalid mapped range"
+      | piece :: rest ->
+          let size = String.length (text_of_piece piece) in
+          if size <= remaining then take (piece :: reversed) (remaining - size) rest
+          else let first, last = split_piece piece remaining in
+            List.rev (first :: reversed), last :: rest
+  in
+  take [] length pieces
+
+(* Splitting an earlier replacement can leave adjacent output pieces that own
+   overlapping source ranges. Coalesce those into one actual replacement,
+   preserving its final output verbatim and giving each source byte one owner. *)
+let normalize_pieces pieces =
+  List.fold_left
+    (fun reversed piece -> match reversed with
+       | previous :: rest
+         when (source_of_piece previous).past_byte > (source_of_piece piece).first_byte ->
+           let left = source_of_piece previous and right = source_of_piece piece in
+           Masked
+             { source = { first_byte = min left.first_byte right.first_byte;
+                          past_byte = max left.past_byte right.past_byte }
+             ; replacement = text_of_piece previous ^ text_of_piece piece
+             } :: rest
+       | _ -> piece :: reversed)
+    [] pieces
+  |> List.rev
+
+let replace_matches ?prefix_group pattern pieces =
+  let text = render_pieces pieces in
+  let matches = Re.all pattern text in
+  match matches with
+  | [] -> pieces
+  | _ :: _ ->
+  let reversed, remaining, _ =
+    List.fold_left
+      (fun (reversed, remaining, position) group ->
+         let first, past = Re.Group.offset group 0 in
+         let first = match prefix_group with
+           | None -> first
+           | Some index -> Re.Group.stop group index in
+         if first = past then reversed, remaining, position
+         else
+           let copied, remaining = take_output (first - position) remaining in
+           let matched, remaining = take_output (past - first) remaining in
+           match matched with
+           | [] -> invalid_arg "Secret_patterns.replace_matches: empty match range"
+           | first_piece :: rest ->
+               let source = List.fold_left (fun source piece ->
+                 let next = source_of_piece piece in
+                 { first_byte = min source.first_byte next.first_byte;
+                   past_byte = max source.past_byte next.past_byte })
+                   (source_of_piece first_piece) rest in
+               let masked = Masked { source; replacement = "[REDACTED]" } in
+               masked :: List.rev_append copied reversed, remaining, past)
+      ([], pieces, 0) matches
+  in
+  normalize_pieces (List.rev_append reversed remaining)
+
+let mask_matches pattern pieces = replace_matches pattern pieces
 
 (** Common secret-bearing value patterns. Specific prefixes are listed before
     any generic matcher so short, well-known tokens are not missed when they
@@ -236,18 +331,17 @@ let sensitive_assignment_re =
        ; Re.alt [ quoted '\''; quoted '"'; Re.rep1 (Re.compl [ Re.set " \t\r\n" ]) ] ])
 ;;
 
-let redact_named_credentials s =
-  List.fold_left
-    (fun text pattern ->
-       Re.replace pattern text ~f:(fun group -> Re.Group.get group 1 ^ "[REDACTED]"))
-    s [ authorization_header_re; sensitive_assignment_re ]
-;;
+let redact_pieces pieces =
+  let pieces = mask_matches pem_private_key_re pieces in
+  let pieces = List.fold_left (fun pieces pattern ->
+      replace_matches ~prefix_group:1 pattern pieces)
+      pieces [ authorization_header_re; sensitive_assignment_re ] in
+  if Re.execp any_secret_re (render_pieces pieces)
+  then List.fold_left (fun pieces pattern -> mask_matches pattern pieces) pieces secret_res
+  else pieces
 
-let redact_text (s : string) : string =
-  let s = redact_named_credentials (redact_pem_blocks s) in
-  if Re.execp any_secret_re s
-  then List.fold_left (fun acc re -> Re.replace_string re ~by:"[REDACTED]" acc) s secret_res
-  else s
+let redact_text_mapped text = redact_pieces (copied_text text)
+let redact_text text = render_pieces (redact_text_mapped text)
 
 (* A key is text too: a map keyed by URL (registry [auths], remote lists)
    carries credentials in its keys, so the key's text is redacted like any

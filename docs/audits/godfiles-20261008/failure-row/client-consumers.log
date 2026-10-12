@@ -1,0 +1,16 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/keeper-actions.test.ts src/keeper-delivery-provenance.test.ts src/keeper-thread-continuation.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/dashboard
+
+
+ Test Files  2 passed (2)
+      Tests  81 passed (81)
+   Start at  20:06:48
+   Duration  2.51s (environment 28%, tests 27%, setup 19%, import 13%, transform 12%)
+
+    Isolate  2 workers spawned · ~468ms startup each (spawn + environment, per file)
+             at least ~468ms faster with isolate: false — reuses workers across files instead of one per file
+

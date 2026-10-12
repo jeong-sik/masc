@@ -1087,6 +1087,52 @@ let test_a_refused_boundary_resend_ends_the_turn () =
 ;;
 
 (* The pair table sits behind an Eio mutex. *)
+let test_memory_feedback_precedes_history_recovery () =
+  List.iter (fun error ->
+    let calls = ref 0 and reductions = ref 0 in
+    let attempt () = incr calls; if !calls=1 then Error error else Ok "reduced evidence" in
+    let result = Try_provider.memory_capacity_retry_sequence
+      ~same_run_retry_authorized:(fun () -> true)
+      ~on_memory_capacity_refusal:(fun ~refusal ->
+        check bool "the exact typed refusal reaches the memory producer" true (refusal=error);
+        incr reductions; Ok Masc.Keeper_memory_delivery_reprojection.Reprojected)
+      ~on_projection_failure:(fun () -> fail "successful receipt reported failure")
+      ~attempt () in
+    check bool "smaller memory completes without range eviction" true (result=Ok "reduced evidence");
+    check int "only refused and reduced requests are attempted" 2 !calls;
+    check int "one provider-refused memory projection" 1 !reductions)
+    [overflow;body_refused_by_provider];
+  List.iter (fun (authorized,error) ->
+    let calls = ref 0 in
+    let result = Try_provider.memory_capacity_retry_sequence
+      ~same_run_retry_authorized:(fun () -> authorized)
+      ~on_memory_capacity_refusal:(fun ~refusal:_ -> fail "unauthorized memory retry")
+      ~on_projection_failure:(fun () -> fail "no projection was attempted")
+      ~attempt:(fun () -> incr calls; Error error) () in
+    check bool "original refusal preserved" true (result=Error error);
+    check int "no retry after effects or an unclassified failure" 1 !calls)
+    [false,overflow;false,body_refused_by_provider;true,unattributed_refusal]
+;;
+
+let test_memory_receipt_failure_fences_enclosing_recovery () =
+  let projection_failed = ref false in
+  let authorized () = not !projection_failed in
+  let attempt () = Try_provider.memory_capacity_retry_sequence
+    ~same_run_retry_authorized:authorized
+    ~on_memory_capacity_refusal:(fun ~refusal:_ -> Error "receipt unavailable")
+    ~on_projection_failure:(fun () -> projection_failed := true)
+    ~attempt:(fun () -> Error overflow) () in
+  let result = Try_provider.carried_range_eviction_sequence
+    ~same_run_retry_authorized:authorized ~ledger:(fun () -> None)
+    ~last_request:(fun () -> fail "receipt failure reached history eviction") ~marks:None
+    ~evict:(fun _ -> fail "unexpected eviction")
+    ~hold_front:(fun _ -> fail "unexpected front mutation")
+    ~halve:(fun ~first_atom:_ ~atom_count:_ ~retry:_ -> fail "unexpected halving")
+    ~on_retry:(fun ~retry:_ _ -> fail "unexpected retry") ~attempt () in
+  check bool "receipt failure returns the original provider error" true (result=Error overflow);
+  check bool "enclosing recovery loses retry admission" false (authorized ())
+;;
+
 let () =
   Eio_main.run
   @@ fun _ ->
@@ -1116,6 +1162,10 @@ let () =
             test_a_halving_that_cannot_name_its_front_ends_the_sequence
         ; test_case "single atom ends" `Quick test_a_single_atom_ends_the_sequence_with_the_refusal
         ; test_case "nothing to move ends" `Quick test_no_ledger_and_no_request_ends_the_sequence
+        ; test_case "memory feedback preserves effect and refusal authority" `Quick
+            test_memory_feedback_precedes_history_recovery
+        ; test_case "memory receipt failure fences outer range recovery" `Quick
+            test_memory_receipt_failure_fences_enclosing_recovery
         ; test_case "gate" `Quick test_the_gate_blocks_a_retry_after_a_durable_checkpoint
         ; test_case "refusal past the newest block" `Quick
             test_a_refusal_that_survives_the_newest_block_is_returned

@@ -51,6 +51,7 @@ type entry =
         in {!Capabilities.apply_manifest_entry}. *)
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
+  ; supports_assistant_prefill : bool option
   ; supports_prompt_caching : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
@@ -354,6 +355,7 @@ let known_entry_keys =
   ; "modality_priority"
   ; "supports_native_streaming"
   ; "supports_system_prompt"
+  ; "supports_assistant_prefill"
   ; "supports_prompt_caching"
   ; "supports_top_k"
   ; "supports_min_p"
@@ -528,6 +530,7 @@ let parse_entry json =
   let* supports_document_input = member_bool "supports_document_input" json in
   let* supports_native_streaming = member_bool "supports_native_streaming" json in
   let* supports_system_prompt = member_bool "supports_system_prompt" json in
+  let* supports_assistant_prefill = member_bool "supports_assistant_prefill" json in
   let* supports_prompt_caching = member_bool "supports_prompt_caching" json in
   let* supports_top_k = member_bool "supports_top_k" json in
   let* supports_min_p = member_bool "supports_min_p" json in
@@ -565,6 +568,7 @@ let parse_entry json =
     ; modality_priority
     ; supports_native_streaming
     ; supports_system_prompt
+    ; supports_assistant_prefill
     ; supports_prompt_caching
     ; supports_top_k
     ; supports_min_p

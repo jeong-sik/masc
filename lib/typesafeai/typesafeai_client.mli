@@ -90,6 +90,12 @@ val failure_to_string : failure -> string
 
 val failure_to_yojson : failure -> Yojson.Safe.t
 
+type failure_kind = Capacity_refused | Other_refusal
+val failure_kind : failure -> failure_kind
+(** Capacity requires every attempted destination to return HTTP 400 with the
+    exact System One detail.error_type=max_tokens_exceeded protocol code.
+    Transport, malformed, mixed and other refusals are not capacity evidence. *)
+
 val evaluate :
   ?timeout_sec:float ->
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->

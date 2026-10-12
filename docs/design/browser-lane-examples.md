@@ -55,6 +55,19 @@ extension = "/absolute/path/to/stagehand-extension"
 # profile = "/absolute/path/to/profile"
 ```
 
+Live lane 의 BiDi 연결(hover·drag)을 쓰려면 `[browser.live.bidi]` 를 더한다.
+서버가 시작할 때 그 프로필로 Firefox 를 `--remote-debugging-port` 로 띄우고,
+설치된 launcher 로 BiDi host 를 붙인다. 이미 떠 있는 것은 다시 띄우지 않는다.
+`[browser.live] enabled = false` 이면 아무것도 띄우지 않는다.
+자세한 것은 [BiDi host](browser-bidi-live-host.md)에 있다.
+
+```toml
+[browser.live.bidi]
+firefox = "/Applications/Firefox.app/Contents/MacOS/firefox"
+profile = "/absolute/path/to/keeper-profile"
+# port = 9222
+```
+
 Off는 탭 목록·페이지 읽기·스크린샷을 포함한 **새 요청**을 거절한다.
 이미 접수한 요청은 완료할 수 있고 기존 연결·세션·경로는 유지된다.
 서버 backend의 `status`와 `close`, 정리 동작은 계속 가능하다.

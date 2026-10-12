@@ -95,7 +95,6 @@ type config =
   runtime_id : string option;
   initial_messages : Agent_core.Types.message list;
   model_input_projection : Agent_core.Agent.model_input_projection option;
-  recovery_view : Runtime_recovery_projection.t option;
   serialization_executor : Agent_core.Agent.serialization_executor option;
   pre_dispatch_serialization_observer :
     Agent_core.Agent.pre_dispatch_serialization_observer option;
@@ -797,7 +796,6 @@ let media_walk ~(candidates : Runtime_instance.t list)
 
 let validate_content_blocks_for_config
     ?agent_core_checkpoint
-    ?(input_metadata = [])
     ~(config : config)
     (goal_blocks : Agent_core.Types.content_block list) =
   let validate ~checkpoint_messages ~initial_messages ~goal_blocks =
@@ -805,20 +803,8 @@ let validate_content_blocks_for_config
       ~provider_label:(provider_label config.provider_cfg)
       (input_capabilities_for_config config)
       ~checkpoint_messages ~initial_messages ~goal_blocks in
-  match config.recovery_view with
-  | None -> validate ~checkpoint_messages:(checkpoint_messages agent_core_checkpoint)
-      ~initial_messages:config.initial_messages ~goal_blocks
-  | Some view ->
-    let ( let* ) = Result.bind in
-    let canonical = match agent_core_checkpoint with
-      | Some checkpoint -> checkpoint.Agent_core.Checkpoint.messages
-      | None -> config.initial_messages in
-    let incoming = match goal_blocks with
-      | [] -> canonical
-      | _ -> canonical @ [Agent_core.Types.{role=User;content=goal_blocks;
-          name=None;tool_call_id=None;metadata=input_metadata}] in
-    let* projected = view.Runtime_recovery_projection.project incoming in
-    validate ~checkpoint_messages:[] ~initial_messages:projected ~goal_blocks:[]
+  validate ~checkpoint_messages:(checkpoint_messages agent_core_checkpoint)
+    ~initial_messages:config.initial_messages ~goal_blocks
 
 (* RFC-0265: capability-driven proactive runtime reroute. A pure decision from
    the turn's required input modalities and the candidate runtimes' declared
@@ -1197,15 +1183,9 @@ let run_blocks_internal
     ~(run_input : run_input)
     (goal_blocks : Agent_core.Types.content_block list)
   : (run_result, Agent_core.Error.t) result =
-  let input_metadata =
-    match run_input with
-    | New_input { metadata; _ } -> metadata
-    | Continue_from_checkpoint -> []
-  in
   match
     validate_content_blocks_for_config
       ?agent_core_checkpoint
-      ~input_metadata
       ~config
       goal_blocks
   with
@@ -1217,10 +1197,6 @@ let run_blocks_internal
     then on_event
     else None
   in
-  let config = match config.recovery_view with
-    | None -> config
-    | Some view -> {config with model_input_projection=Some
-        (view.Runtime_recovery_projection.compose config.model_input_projection)} in
   let boundary_response = ref None in
   let config =
     match cooperative_yield_probe with

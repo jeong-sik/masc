@@ -1,104 +1,56 @@
-# Standalone verifier Skills
+# Standalone Skill tooling and historical verifier evidence
 
-Task and Goal verifiers do NOT receive the `keeper_skill` tool. Both verifiers
-take their tools only from `Verification_authority_tools` (`tool_read_file`,
-`tool_search_files`, `masc_web_fetch`, `masc_board_post_get`,
-`masc_fusion_status`), which has no Skill entry. `Standalone_skill_tools`
-advertises a workspace instruction catalog as `keeper_skill` for standalone
-tool-using agents and is covered by `test_standalone_skill_tools`, but no
-production verifier calls it. The bundled `skills/evidence-review/SKILL.md`
-and the acceptance record below describe that standalone tooling, not
-verifier behavior.
+Current Task and Goal verifiers do not receive `keeper_skill`. They receive the
+`report_review_verdict` report tool separately from the lookup tools provided by
+`Verification_authority_tools`:
 
-How the standalone Skill tooling connects (not wired into the verifiers):
+| Verifier surface | Lookup tools |
+| --- | --- |
+| Task, Keeper producer | `tool_read_file`, `tool_search_files`, `masc_web_fetch`, `masc_board_post_get`, `masc_fusion_status` |
+| Task, workspace producer | `tool_read_file`, `masc_web_fetch`, `masc_board_post_get`, `masc_fusion_status` |
+| Goal proof | `tool_read_file`, `masc_web_fetch`, `masc_board_post_get`, `masc_fusion_status` |
 
-1. The caller reads the published workspace snapshot (`for_workspace` /
-   `of_snapshot`; currently only tests call these).
-2. `Standalone_skill_tools` projects instruction entries using the same helper as
-   Keeper's executable and advertised tool surfaces.
-3. `run_named_with_masc_tools` preserves these native Agent-Core tools alongside
-   the existing lookup and report tools. Invocation identity is not fabricated.
-4. The original Skill reader serves the exact body or resource and sends every
-   result to the existing verification observation callback.
-5. The model uses its actual lookup tools and reports its verdict. The first
-   real-model measurement is recorded in [20260909](20260909/README.md): all
-   expected verdicts were correct, while strict tool-completion order passed 2/3.
+The lookup surfaces are constructed by `Verification_authority_tools.create`
+and `create_goal_proof`. Task verification passes its lookups through
+`Completion_authority_agent` to `Task.Anti_rationalization`; Goal verification
+uses `Goal_verification_agent`. The shared reviewer supplies the report tool.
+Lookup availability does not grant access outside the reader's evidence and
+ownership boundaries.
 
-A Skill supplies a procedure, not evidence, permission or new tools. Composition
-execution is excluded. Task Read/Grep/Web and Goal Read/Web capabilities retain
-their existing scope. No snapshot or no readable instruction entries means no
-Skill tool is advertised. Workspace-resolution failures are logged; missing
-optional Skills do not suppress verification.
+`Standalone_skill_tools` separately advertises a workspace instruction catalog
+as `keeper_skill` for standalone tool-using agents. Its `for_workspace` and
+`of_snapshot` callers are currently tests; production verifiers do not call it.
+`test_standalone_skill_tools` covers catalog publication, instruction body and
+resource reads, frozen bodies, workspace isolation and composition exclusion.
+These handler tests do not measure production verifier behavior or model quality.
 
-The catalog and SKILL.md bodies freeze at the start of the run. Resource files
-are read live through the existing owned-file reader; they are not part of the
-SKILL.md content revision. The catalog includes all workspace instruction Skills,
-not a role-filtered or per-Keeper selection. New observations retain the exact
-reference and returned metadata through the existing tool-result path.
+A Skill supplies instructions, not evidence, permission or new tools. The
+catalog and SKILL.md bodies freeze at the start of a run; resource files are read
+live through the owned-file reader. The bundled
+`skills/evidence-review/SKILL.md` remains an instruction fixture for this tooling.
 
-## Verification
+## Historical Goal-verifier measurement
 
-`test_standalone_skill_tools` uses the real published snapshot, native tool
-handler, filesystem reference reader and observation callback. It exercises body
-and reference reads, frozen bodies across refresh, stale-reference rejection,
-path traversal refusal, unpublished catalog behavior, workspace isolation and
-composition exclusion. The merged PR CI ran these cases in a nonblocking step and four failed because
-the fixture directory did not match its declared Skill name. The follow-up
-corrects the fixture and exposes catalog rejection diagnostics. Execution of
-the corrected suite still needs CI evidence. It does not measure model quality.
+The [20260909 record](20260909/README.md) measured three synthetic Goal proofs
+through the shared Task/Goal reviewer at installed binary commit
+`05cf7d67be8ae46d2bde0c257a6af6be12404008`. That historical verifier wiring
+offered `keeper_skill`: its recorded calls are historical verifier behavior,
+not a measurement of a separate standalone-tooling caller.
 
-Targeted CI should run this suite and `test_keeper_task_skill_turn_exact`, which
-covers the shared exact-reference/resource reader. The PR workflow builds
-`@check` and also attempts the edited suites in a nonblocking step. A green PR
-check alone therefore does not prove these tests passed; use the targeted Test
-run's actual suite results. No local Dune build was run. `ocamldep -modules` was
-used only to check syntax.
+All three expected verdicts matched, but strict tool-completion order passed
+only 2/3, so the reassessed receipt's overall result is false. The original
+receipt is retained alongside the reassessment. This is not a Task submission
+measurement, a quality-improvement baseline, or evidence for current production
+verifier wiring. Completion timestamps also cannot establish model consumption
+order for calls in one batch, and observations lack model-attempt identity.
 
-This change does not add tools to Librarian, Board-attention or Effect exact-output
-calls. Those calls remain bounded selection/judgment operations over supplied
-inputs. Fusion's separate web-tool path is unchanged. Extending those roles needs
-its own output-protocol and capability tests; a Skill instruction cannot invent
-that execution surface. Production Task submission and the other roles remain unmeasured. The isolated
-Goal run below establishes actual Skill use, not a quality improvement baseline.
-
-## Real-model acceptance runner
-
-`scripts/harness/workload/standalone_verifier_skill_acceptance.py` takes an
-already-built binary and an explicit runtime config. It creates and tears down
-its own temporary workspace and server, then submits three synthetic Goal proofs:
-matching evidence, the wrong revision, and a missing artifact. Provider credentials
-come from the environment variables declared by the supplied config and model
-overlay. Production storage and scheduler environment settings are not inherited.
-
-```sh
-python3 scripts/harness/workload/standalone_verifier_skill_acceptance.py \
-  --binary /path/to/ci/masc-macos-arm64 \
-  --runtime-config /path/to/runtime.toml \
-  --models-overlay /path/to/agent-core-models-overlay.toml \
-  --output-dir /tmp/standalone-verifier-evidence
-```
-
-The output directory must be new. The receipt records the binary/config/installed
-Skill hashes, final Goal state, exact committed run, evaluator runtime, and observed
-tool calls. Acceptance requires a successful `evidence-review` body read, a read of
-the fixture path, and one expected verdict in that completion order. Existing-file reads must
-return the exact complete fixture content and path, with no truncation. A correct verdict without
-Skill use does not pass this workflow probe. This tests Goal proof through the
-shared reviewer, not Task submission, every standalone role, or production quality.
-
-Receipt validation for this workflow was exercised by
-`test/test_standalone_verifier_skill_acceptance.py`, which no longer exists in
-the tree; no current test covers the acceptance receipt checker. The first
-real-model receipt is still [recorded here](20260909/README.md).
-
-The first release build also found a stale `report_review_verdict` parameter
-golden from the preceding role-prompt change. The one changed line in
-`test/golden/tool_parity_params.txt` was copied from the release CI generator's
-actual diff (run 34233401328), not regenerated by a local build. The next release
-build must confirm the generator comparison is clean.
-
-Tool completion timestamps do not prove that the model consumed the Skill before
-choosing its evidence lookup: both requests can occur in one batch. Also, a Goal
-run can aggregate tools across failed model attempts. Tool observations currently
-lack attempt identity, so review the full server log for failover before making
-one-model workflow claims. The runner does not establish attempt-level causality.
+`scripts/harness/workload/standalone_verifier_skill_acceptance.py` is retained
+only as the historical measurement runner. It creates Goal proofs and requires
+an `evidence-review` Skill body read before the evidence read and verdict.
+Consequently, it is obsolete as a current acceptance check: current verifiers
+do not offer the mandatory Skill tool, so a correct verdict cannot satisfy it.
+There is no current production acceptance command for this Skill workflow.
+The old receipt-checker test has been removed; no current test validates that
+runner's receipt checker. Reproducing the historical experiment requires the
+recorded binary and its matching runtime configuration, rather than a current
+build. The runner never builds its supplied binary.

@@ -30,7 +30,9 @@ val install : unit -> unit
 
 val submit_durable : base_path:string -> keeper_name:string -> unit
 (** Submit disk-selected catch-up for this Keeper on the server-owned
-    Librarian lane. Each stored progress advance continues to the next unread
+    Librarian lane. Pending explicit candidates are recovered and judged
+    independently of current Memory limits before conversation catch-up.
+    Each stored progress advance continues to the next unread
     range while no other unit waits. A waiting unit, empty backlog, failure,
     or disabled/invalid setting ends this wake. A launch submits its own
     Keeper's catch-up;
@@ -83,6 +85,9 @@ val submit_durable_for_unlaunched
     would have, and returns the names it submitted for. A Keeper that boots
     later on retry submits its own; the lane runs the two in order and the
     second finds nothing unread. *)
+(** Pending candidate files also contribute names to the scan. The combined
+    names are deduplicated and sorted. A queue without metadata is retained;
+    discovery does not create a Keeper. Enumeration errors are logged. *)
 
 module For_testing : sig
   val limited_width :

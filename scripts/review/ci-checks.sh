@@ -22,8 +22,33 @@ read_current_pr() {
   case "$pr_branch" in release/v*) review_policy=release;; esac
 }
 
+# A leader-selected CI run in flight pins the member heads it verifies.
+# The status lives on the member PR head commit, so it moves with the head
+# and disappears from stale heads on its own. Missing status means no
+# leader-selected run is currently pinning this head.
+check_leader_selected_ci() {
+  local rows status context target_url
+  rows=$(ci_gh_json "repos/$repo/commits/$head/status" '[.statuses[] | select(.context == "leader-selected-ci") | [.state, .target_url, .description] | @tsv] | last // empty') || return 1
+  [ -n "$rows" ] || return 0
+  IFS=$'\t' read -r status context target_url <<<"$rows"
+  case "$status" in
+    pending)
+      echo "MERGE ON HOLD #$pr: leader-selected CI is in progress ($target_url) — wait for it to finish before merging" >&2
+      return 2;;
+    failure|error)
+      echo "REFUSED #$pr: leader-selected CI failed ($target_url)" >&2
+      return 2;;
+    success)
+      return 0;;
+    *)
+      echo "REFUSED #$pr: leader-selected CI has unknown state '$status'" >&2
+      return 2;;
+  esac
+}
+
 check_current_ci() {
   read_current_pr || return $?
+  check_leader_selected_ci || return $?
   release_run=""
   [ "$review_policy" = release ] || return 0
   local rows selected status conclusion sha branch path jobs required

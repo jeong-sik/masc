@@ -29,9 +29,3 @@ bounds and description. Friendly values preserve the existing on/off vocabulary.
 Inline editors retain their own keys and compact layout. Decoded values are
 sanitized before drawing.
 
-`test_tui_surface_studio_pty` drives keyboard navigation, selected repository,
-small viewports, edit/cancel and NO_COLOR under controlled HTTP fixtures. The
-manual targeted Test workflow captures original ANSI, compares all nonempty
-xterm text, exact cell geometry and full pixel bounds, then publishes PNGs with
-source SHA, binary SHA-256 and producing run. Fixture evidence does not prove
-production behavior.

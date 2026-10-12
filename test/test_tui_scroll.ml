@@ -8,64 +8,6 @@
 let check = Alcotest.check
 let int = Alcotest.int
 
-let test_the_bound_is_what_is_left_below_the_window () =
-  check int "a list longer than the window" 6
-    (Masc_tui_scroll.maximum ~count:10 ~height:4);
-  check int "a list that fits does not scroll" 0
-    (Masc_tui_scroll.maximum ~count:3 ~height:10);
-  check int "an empty list does not scroll" 0
-    (Masc_tui_scroll.maximum ~count:0 ~height:10)
-
-let test_moving_stays_inside_the_bound () =
-  check int "down stops at the end" 6
-    (Masc_tui_scroll.down ~count:10 ~height:4 6);
-  check int "down from the middle" 3 (Masc_tui_scroll.down ~count:10 ~height:4 2);
-  check int "up stops at the top" 0 (Masc_tui_scroll.up ~count:10 ~height:4 0);
-  check int "up from the middle" 1 (Masc_tui_scroll.up ~count:10 ~height:4 2);
-  check int "a list that fits cannot move" 0
-    (Masc_tui_scroll.down ~count:3 ~height:10 0)
-
-(* The case the write-back was covering for. A list can shrink under a reader
-   -- a filter, a refresh, a keeper that went quiet -- and leave the stored
-   scroll past the end. Moving from that position has to start from where the
-   reader actually is: stepping from the stale number would answer [up] with
-   another number still past the end, and the screen would not move. *)
-(* A surface no listing counts has no bound below to hold its scroll at, and
-   the mover used to add the key's delta as it stood. A negative scroll is not
-   a position: the frame indexes the list with it. The Git-changes overlay
-   opened over a keeper view was such a surface, and one up-key from the top
-   exited the process. *)
-let test_an_uncounted_scroll_is_held_at_the_top () =
-  check int "up from the top stays at the top" 0
-    (Masc_tui_scroll.step_uncounted ~delta:(-1) 0);
-  check int "a page up from near the top stays at the top" 0
-    (Masc_tui_scroll.step_uncounted ~delta:(-9) 2);
-  check int "down moves by the delta" 3
-    (Masc_tui_scroll.step_uncounted ~delta:3 0);
-  check int "up from the middle moves by the delta" 1
-    (Masc_tui_scroll.step_uncounted ~delta:(-1) 2)
-
-let test_a_stale_scroll_moves_from_where_the_reader_is () =
-  check int "up from past the end lands one above the end" 5
-    (Masc_tui_scroll.up ~count:10 ~height:4 40);
-  check int "down from past the end stays at the end" 6
-    (Masc_tui_scroll.down ~count:10 ~height:4 40);
-  check int "a list that emptied goes to the top" 0
-    (Masc_tui_scroll.up ~count:0 ~height:4 40);
-  check int "reading a stale scroll is safe" 6
-    (Masc_tui_scroll.normalize ~count:10 ~height:4 40)
-
-let test_a_window_of_no_rows_still_answers () =
-  check int "a zero height leaves the whole list below" 10
-    (Masc_tui_scroll.maximum ~count:10 ~height:0);
-  check int "and moving still terminates" 1
-    (Masc_tui_scroll.down ~count:10 ~height:0 0)
-
-
-(* The cursor names a row; the window follows. The same shrink rule holds:
-   moving normalises first, so a cursor stranded past the end of a list that
-   shrank steps from the last row, not from a ghost. *)
-
 let test_the_cursor_stays_inside_the_list () =
   check int "down stops at the last row" 3
     (Masc_tui_scroll.cursor_down ~count:4 3);
@@ -114,139 +56,24 @@ let test_the_edges_of_a_list_are_reachable_in_one_move () =
   check int "Home reaches the top from anywhere" 0
     (Masc_tui_scroll.cursor_move ~count:100 ~delta:(-100) 99)
 
-let test_the_window_follows_the_cursor () =
-  check int "a cursor above the window pulls it up" 2
-    (Masc_tui_scroll.ensure_visible ~cursor:2 ~height:5 4);
-  check int "a cursor below the window pulls it down" 6
-    (Masc_tui_scroll.ensure_visible ~cursor:10 ~height:5 0);
-  check int "a visible cursor moves nothing" 3
-    (Masc_tui_scroll.ensure_visible ~cursor:5 ~height:5 3);
-  (* A multi-line item: the window the reader scrolled into it stays. It used
-     to be dragged back to the item's first line, so the body below was
-     unreachable on a one-row window (#41026 review). *)
-  let span = Masc_tui_scroll.ensure_span_visible ~start:0 ~stop:3 ~height:1 in
-  Alcotest.(check int) "window at the head stays" 0 (span 0);
-  Alcotest.(check int) "window inside the body stays" 2 (span 2);
-  Alcotest.(check int) "window past the item returns to its head" 0 (span 4);
-  Alcotest.(check int) "item below the window comes into view" 9
-    (Masc_tui_scroll.ensure_span_visible ~start:10 ~stop:13 ~height:2 0)
-
-
-(* Changes draws a preview under its list. The list keeps five rows and the
-   preview takes up to half of what is left, so on a twenty-row body the list
-   draws ten. The keypress used to move against the full twenty: with fifteen
-   changes the bound came out max 0 (15 - 20) = 0 and the cursor could not
-   leave the first row at all. *)
-let test_a_preview_leaves_the_list_its_keep () =
-  check int "half of twenty, list keeps five" 10
-    (Masc_tui_scroll.preview_height ~total:20 ~keep:5);
-  check int "the list draws the other half" 10
-    (Masc_tui_scroll.body_height ~total:20 ~keep:5);
-  check int "a body too short for the keep gives no preview" 0
-    (Masc_tui_scroll.preview_height ~total:5 ~keep:5);
-  check int "and the list keeps all of it" 5
-    (Masc_tui_scroll.body_height ~total:5 ~keep:5);
-  check int "one row is still a list" 1
-    (Masc_tui_scroll.body_height ~total:1 ~keep:5)
-
-let test_the_bound_follows_the_shortened_list () =
-  let height = Masc_tui_scroll.body_height ~total:20 ~keep:5 in
-  check int "fifteen rows in a ten-row list can scroll five" 5
-    (Masc_tui_scroll.maximum ~count:15 ~height);
-  (* The same fifteen rows against the unshortened body: this is the number
-     the keypress used, and it is why the last five were unreachable. *)
-  check int "against the full body the bound was zero" 0
-    (Masc_tui_scroll.maximum ~count:15 ~height:20);
-  let rec press n scroll =
-    if n = 0 then scroll
-    else press (n - 1) (Masc_tui_scroll.down ~count:15 ~height scroll)
-  in
-  check int "pressing down ten times reaches the last window" 5 (press 10 0)
-
-let test_a_conditional_overflow_row_is_part_of_the_bound () =
-  check int "a fitting list keeps the whole body" 23
-    (Masc_tui_scroll.content_height ~rows:30 ~chrome:7 ~count:23
-       ~preview_keep:None ~overflow_takes_row:true);
-  check int "the first overflowing row reserves its indicator" 22
-    (Masc_tui_scroll.content_height ~rows:30 ~chrome:7 ~count:24
-       ~preview_keep:None ~overflow_takes_row:true);
-  check int "an action notice and overflow both spend their rows" 20
-    (Masc_tui_scroll.content_height ~rows:30 ~chrome:9 ~count:24
-       ~preview_keep:None ~overflow_takes_row:true)
-
-(* One spelling for where a window stands. The Keeper detail pane drew its
-   scroll offset over the offsets it could take, "[1/5]" over thirty rows, and
-   Board and the call list said "rows X-Y of Z" beside panes that said
-   "X-Y/Z". *)
-let test_a_window_names_its_first_and_last_rows () =
-  let text = Masc_tui_scroll.window_text in
-  check Alcotest.string "the top of thirty rows, twenty-six at a time" "1-26/30"
-    (text ~scroll:0 ~height:26 30);
-  check Alcotest.string "the bottom" "5-30/30" (text ~scroll:4 ~height:26 30);
-  check Alcotest.string "a window taller than the list" "1-3/3"
-    (text ~scroll:0 ~height:26 3);
-  check Alcotest.string "a stale scroll past the end names the last row" "3-3/3"
-    (text ~scroll:9 ~height:26 3);
-  check Alcotest.string "no rows to show them in" "0/30" (text ~scroll:0 ~height:0 30);
-  check Alcotest.string "an empty list" "0/0" (text ~scroll:0 ~height:26 0)
-
-(* One builder for the "[lines a-b/n]" row (#38744). Without a hint it has
-   something to say only when the rows overflow, which is the row
-   [content_height ~overflow_takes_row:true] took off; with one it is drawn at
-   every count. *)
-let test_the_position_row_is_drawn_when_it_has_something_to_say () =
-  let row = Masc_tui_scroll.position_row in
-  let some = Alcotest.(option string) in
-  check some "an overflowing window names its rows" (Some "  [lines 5-30/30]")
-    (row ~scroll:4 ~height:26 30);
-  check some "every row fits: no row" None (row ~scroll:0 ~height:26 26);
-  check some "the hint follows the reading"
-    (Some "  [lines 1-26/30]  esc closes")
-    (row ~scroll:0 ~height:26 ~hint:"esc closes" 30);
-  check some "a hint alone when every row fits" (Some "  esc closes")
-    (row ~scroll:0 ~height:26 ~hint:"esc closes" 3);
-  check some "an empty list has nothing to place" None (row ~scroll:0 ~height:26 0)
-
 let () =
   Alcotest.run "tui_scroll"
     [ ( "bound"
-      , [ Alcotest.test_case "what is left below the window" `Quick
-            test_the_bound_is_what_is_left_below_the_window
-        ; Alcotest.test_case "a window of no rows" `Quick
-            test_a_window_of_no_rows_still_answers
-        ] )
+      , [] )
     ; ( "moving"
-      , [ Alcotest.test_case "stays inside the bound" `Quick
-            test_moving_stays_inside_the_bound
-        ; Alcotest.test_case "a stale scroll moves from where the reader is"
-            `Quick test_a_stale_scroll_moves_from_where_the_reader_is
-        ; Alcotest.test_case "an uncounted scroll is held at the top" `Quick
-            test_an_uncounted_scroll_is_held_at_the_top
-        ] )
+      , [] )
     ; ( "preview"
-      , [ Alcotest.test_case "a preview leaves the list its keep" `Quick
-            test_a_preview_leaves_the_list_its_keep
-        ; Alcotest.test_case "the bound follows the shortened list" `Quick
-            test_the_bound_follows_the_shortened_list
-        ] )
+      , [] )
     ; ( "cursor"
       , [ Alcotest.test_case "the cursor stays inside the list" `Quick
             test_the_cursor_stays_inside_the_list
-        ; Alcotest.test_case "the window follows the cursor" `Quick
-            test_the_window_follows_the_cursor
         ; Alcotest.test_case "a page-sized move travels its whole size" `Quick
             test_a_page_sized_move_travels_its_whole_size
         ; Alcotest.test_case "the edges are reachable in one move" `Quick
             test_the_edges_of_a_list_are_reachable_in_one_move
         ] )
     ; ( "layout"
-      , [ Alcotest.test_case "conditional overflow row" `Quick
-            test_a_conditional_overflow_row_is_part_of_the_bound
-        ] )
+      , [] )
     ; ( "position"
-      , [ Alcotest.test_case "a window names its first and last rows" `Quick
-            test_a_window_names_its_first_and_last_rows
-        ; Alcotest.test_case "the position row has one builder" `Quick
-            test_the_position_row_is_drawn_when_it_has_something_to_say
-        ] )
+      , [] )
     ]

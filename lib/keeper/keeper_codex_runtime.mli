@@ -17,6 +17,7 @@ type attempt_outcome =
     support accepting a tool-only terminal. *)
 
 val run :
+  ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?official_task_reference:Keeper_official_task_reference.t ->
   ?composed_context:(unit -> Keeper_official_client_host.composed_context option) ->
   accepts_image_input:bool ->
@@ -53,6 +54,10 @@ val run :
     (block_index:int -> tool_call_id:string -> execution_id:Ids.Execution_id.t -> unit) ->
   ?on_official_client_result_handoff:
     (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
+  ?on_native_tool_progress:
+    (block_index:int -> tool_call_id:string option -> Runtime_native_tools.progress -> unit) ->
+  ?on_native_tool_completion:
+    (block_index:int -> tool_call_id:string option -> Runtime_native_tools.completion -> unit) ->
   ?on_native_action:(official_turn:int ->
     identity:Runtime_native_tools.action_identity -> tool_name:string -> unit) ->
   ?on_usage_report:(Keeper_client_usage_report.t -> unit) ->

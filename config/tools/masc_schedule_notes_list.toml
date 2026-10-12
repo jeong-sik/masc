@@ -2,8 +2,8 @@ name = "masc_schedule_notes_list"
 description = """List the durable notes of one scheduled request, oldest first. Notes are
 keyed by the stable schedule_id and survive definition replacements
 (masc_schedule_update) and terminal schedule states. Use them to read why a
-schedule exists, what changed and when, and the context a Keeper needs when
-it wakes."""
+schedule exists and what changed and when. A wake does not carry the notes, so a
+woken Keeper reads them here when it needs them."""
 additional_properties = false
 defer_loading = true
 

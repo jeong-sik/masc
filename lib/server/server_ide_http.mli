@@ -1,6 +1,7 @@
 (** Server IDE HTTP — REST endpoints for the IDE plane.
 
     Routes:
+    - GET  /api/v1/ide/repository-activity
     - GET  /api/v1/ide/file-activity
     - GET  /api/v1/ide/events
     - GET  /api/v1/ide/presence

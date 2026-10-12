@@ -1,0 +1,169 @@
+[
+  {
+    "date_kst": "2026-09-30",
+    "from": "e126a20e72319032d2136064562bca1524a87572",
+    "through": "ae82a3b855cc5cb8c37a134ef01eebff35368bc3",
+    "first_parent_commits": 130,
+    "changed_paths_without_rename_detection": 1037,
+    "areas": {
+      "test": 235,
+      "docs": 130,
+      "scripts": 121,
+      "changelog.d": 81,
+      "bin": 68,
+      "lib/keeper": 51,
+      "packages": 50,
+      "lib/server": 47,
+      "dashboard": 37,
+      ".github": 21,
+      "lib/candle_runtime": 17,
+      "evidence": 16
+    }
+  },
+  {
+    "date_kst": "2026-10-01",
+    "from": "ae82a3b855cc5cb8c37a134ef01eebff35368bc3",
+    "through": "a66db1a44deb2faa420046065e867d5c7b2c3c91",
+    "first_parent_commits": 197,
+    "changed_paths_without_rename_detection": 1506,
+    "areas": {
+      "docs": 431,
+      "test": 320,
+      "changelog.d": 166,
+      "lib/keeper": 129,
+      "dashboard": 88,
+      "bin": 83,
+      "lib/runtime": 33,
+      "lib/server": 32,
+      "scripts": 25,
+      "lib/candle": 17,
+      "lib/dashboard": 16,
+      "lib/auth": 13
+    }
+  },
+  {
+    "date_kst": "2026-10-02",
+    "from": "a66db1a44deb2faa420046065e867d5c7b2c3c91",
+    "through": "83d23c96c01f2505fe0bad39c699b330a3f9df93",
+    "first_parent_commits": 164,
+    "changed_paths_without_rename_detection": 1301,
+    "areas": {
+      "docs": 476,
+      "test": 253,
+      "changelog.d": 140,
+      "bin": 98,
+      "lib/keeper": 85,
+      "dashboard": 60,
+      "lib/server": 29,
+      "scripts": 26,
+      "lib/runtime": 15,
+      "addons": 14,
+      "benchmarks": 11,
+      "lib/candle_runtime": 11
+    }
+  },
+  {
+    "date_kst": "2026-10-03",
+    "from": "83d23c96c01f2505fe0bad39c699b330a3f9df93",
+    "through": "0ec18301d0b686ae3fbf631e88856ffebc36a6a7",
+    "first_parent_commits": 58,
+    "changed_paths_without_rename_detection": 807,
+    "areas": {
+      "docs": 505,
+      "test": 103,
+      "changelog.d": 40,
+      "bin": 23,
+      "addons": 22,
+      "lib/lane_addon": 17,
+      "scripts": 16,
+      "lib/server": 14,
+      "lib/keeper": 13,
+      "packages": 11,
+      ".github": 7,
+      "config": 5
+    }
+  },
+  {
+    "date_kst": "2026-10-04",
+    "from": "0ec18301d0b686ae3fbf631e88856ffebc36a6a7",
+    "through": "87123f7df94a27ded447b5b05d01c2f5178de029",
+    "first_parent_commits": 118,
+    "changed_paths_without_rename_detection": 1439,
+    "areas": {
+      "test": 553,
+      "docs": 236,
+      "scripts": 120,
+      "dashboard": 111,
+      "changelog.d": 105,
+      "lib/keeper": 47,
+      "bin": 43,
+      "benchmarks": 25,
+      "lib/server": 21,
+      "lib/runtime": 20,
+      "addons": 17,
+      "lib/workspace": 12
+    }
+  },
+  {
+    "date_kst": "2026-10-05",
+    "from": "87123f7df94a27ded447b5b05d01c2f5178de029",
+    "through": "6a9b9ac462159cf49603ff772582145ea4a569ec",
+    "first_parent_commits": 14,
+    "changed_paths_without_rename_detection": 127,
+    "areas": {
+      "docs": 54,
+      "test": 27,
+      "bin": 15,
+      "changelog.d": 11,
+      "dashboard": 11,
+      "lib/server": 3,
+      "lib/runtime": 2,
+      ".github": 1,
+      "lib/tui_decode.ml": 1,
+      "lib/tui_decode.mli": 1,
+      "scripts": 1
+    }
+  },
+  {
+    "date_kst": "2026-10-06",
+    "from": "6a9b9ac462159cf49603ff772582145ea4a569ec",
+    "through": "8ae4ea43926f4b24f8607857322e0ad4e5e22529",
+    "first_parent_commits": 186,
+    "changed_paths_without_rename_detection": 2626,
+    "areas": {
+      "docs": 1309,
+      "dashboard": 516,
+      "test": 269,
+      "changelog.d": 169,
+      "bin": 71,
+      "lib/keeper": 44,
+      "lib/server": 39,
+      "lib/runtime": 33,
+      "packages": 31,
+      "lib/lane_addon": 22,
+      "lib/candle_runtime": 10,
+      "config": 9
+    }
+  },
+  {
+    "date_kst": "2026-10-07",
+    "from": "8ae4ea43926f4b24f8607857322e0ad4e5e22529",
+    "through": "b99c9d77b503fe53c1635712fae24d5e744bb180",
+    "first_parent_commits": 72,
+    "changed_paths_without_rename_detection": 321,
+    "areas": {
+      "test": 105,
+      "lib/keeper": 55,
+      "changelog.d": 35,
+      "bin": 20,
+      "docs": 18,
+      "packages": 12,
+      "lib/runtime": 10,
+      "lib/server": 7,
+      "lib/candle_runtime": 6,
+      "config": 5,
+      "lib/candle": 5,
+      "lib/board": 4
+    }
+  }
+]

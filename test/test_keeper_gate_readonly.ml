@@ -1041,7 +1041,7 @@ let test_interactive_execute_keeps_durable_mode_authority () =
   let config = Workspace.default_config base_path in
   let invoke argv =
     let input = `Assoc [ "argv", `List (List.map (fun arg -> `String arg) argv) ] in
-    (match Keeper_tool_approval_policy.verdict_for
+    (match Keeper_tool_approval_policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty
        ~composition_plan_index:None ~tool_name:"Execute" ~input with
      | Keeper_tool_approval_policy.Run _ -> ()
      | Keeper_tool_approval_policy.Ask _ -> fail "duplicate interactive authority held Execute");

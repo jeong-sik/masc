@@ -48,16 +48,18 @@ val classify_missing_journal : Keeper_owner.Chat_operation.state option -> missi
 val chat_events_page :
   operation_id:string ->
   since_seq:Keeper_chat_event_log.replay_position ->
-  redact_json:(Yojson.Safe.t -> Yojson.Safe.t) ->
+  redact_text:(string -> string) ->
   Keeper_chat_event_log.page ->
   Yojson.Safe.t
 (** Body of the v2 events response: [{schema; operation_id; events; has_more;
     next_since_seq; next_since_offset}] for a page
     {!Keeper_chat_event_log.page_of_rows} served. [events] are the page's
     journal lines in journal order (which is seq order: one publisher fiber
-    writes them), each encoded as journaled
-    ({!Keeper_chat_event_log.journaled_event_to_json}) and passed through
-    [redact_json] -- the same second layer the SSE projection applies.
+    writes them). Each typed event first passes through
+    {!Keeper_chat_events.redact_content} with [redact_text], then is encoded
+    by {!Keeper_chat_event_log.journaled_event_to_json}. Protocol keys, enum
+    values, correlation identities, sequence and timestamp remain unchanged;
+    content leaves receive the same second layer as live SSE projection.
     [next_since_seq] is the position to feed back, in its response spelling
     ({!Keeper_chat_event_log.replay_position_to_yojson}): the seq of the last
     event returned, or [since_seq] itself when the page is empty — [null]
@@ -84,7 +86,7 @@ val chat_events_page :
 val turn_events_page :
   turn_ref:Ids.Turn_ref.t ->
   since_seq:Keeper_chat_event_log.replay_position ->
-  redact_json:(Yojson.Safe.t -> Yojson.Safe.t) ->
+  redact_text:(string -> string) ->
   Keeper_chat_event_log.page -> Yojson.Safe.t
 (** [masc.keeper_turn_events.v1], with [turn_ref] instead of [operation_id]. *)
 

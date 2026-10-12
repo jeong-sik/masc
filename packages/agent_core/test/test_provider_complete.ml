@@ -1912,6 +1912,7 @@ let test_stream_acc_text () =
               ; output_tokens = Some 5
               ; cache_creation_input_tokens = None
               ; cache_read_input_tokens = None
+              ; cost_usd = None
               }
         }
     ; MessageStop

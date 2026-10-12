@@ -1059,7 +1059,7 @@ let test_model_without_reasoning_uncontrolled_stays_silent () =
    entirely (claude-code, codex-app-server, both fixed at 300s in the adapter).
    A max-effort binding could therefore not be given more wall clock than a
    low-effort one sharing its provider. Live evidence, 2026-08-10: keeper
-   delta on claude_code.claude-opus-5-max failed every turn with "timed out
+   delta on a max-effort claude_code binding failed every turn with "timed out
    after 300.000s" at 5,884 bytes of system+user input.
 
    The rejection case is the load-bearing one, but only for values that state
@@ -1182,7 +1182,7 @@ let test_exact_output_lane_cli_slots_parse_in_order () =
   let config =
     "[runtime.exact_output_lanes.hitl_auto_judge]\n\
      slots = [\"slot-a\"]\n\
-     cli_slots = [\"antigravity_subscription.gemini-3-7-flash-high\", \"claude_subscription.claude-opus-5\"]\n"
+     cli_slots = [\"antigravity_subscription.gemini-3-7-flash-high\", \"claude_subscription.claude-opus-5-5\"]\n"
   in
   (match Runtime_toml.parse_string config with
    | Error _ -> fail "cli_slots must parse"
@@ -1191,7 +1191,7 @@ let test_exact_output_lane_cli_slots_parse_in_order () =
       | [ lane ] ->
         check (list string) "cli declaration order is preserved"
           [ "antigravity_subscription.gemini-3-7-flash-high"
-          ; "claude_subscription.claude-opus-5"
+          ; "claude_subscription.claude-opus-5-5"
           ]
           lane.cli_slot_ids
       | _ -> fail "exactly one exact-output lane must parse"));
@@ -1546,7 +1546,7 @@ let test_official_client_declarations_load () =
          if not (List.exists (String.equal expected) ids)
          then failf "the official-client declarations did not produce %s" expected)
       [ "claude_code.claude-code-sonnet"
-      ; "claude_code.claude-code-opus-high"
+      ; "claude_code.claude-code-opus-5-5-high"
       ; "codex_subscription.codex-gpt-5-6"
       ; "antigravity_subscription.antigravity-gemini-3-7-flash-high"
       ]
@@ -1602,6 +1602,7 @@ let catalog_decided_capability_pairs
       ; supports_response_format_json
       ; supports_structured_output
       ; supports_system_prompt
+      ; supports_assistant_prefill
       ; supports_prompt_caching
       ; supports_top_k
       ; supports_min_p
@@ -1628,6 +1629,7 @@ let catalog_decided_capability_pairs
     , supports_structured_output
     , resolved.supports_structured_output )
   ; "supports-system-prompt", supports_system_prompt, resolved.supports_system_prompt
+  ; "supports-assistant-prefill", supports_assistant_prefill, resolved.supports_assistant_prefill
   ; "supports-prompt-caching", supports_prompt_caching, resolved.supports_prompt_caching
   ; "supports-top-k", supports_top_k, resolved.supports_top_k
   ; "supports-min-p", supports_min_p, resolved.supports_min_p
@@ -6288,7 +6290,7 @@ let typesafeai_table =
    \  { endpoint = \"http://127.0.0.1:9/reserve\", model = \"~typesafe/jev-latest\", api_key_env = \"OPENROUTER_API_KEY\" },\n\
    ]\n\
    board_attention = false\nboard_attention_confidence_floor = 0.45\n\
-   absorb_gate = true\ncontext_review = true\nskill_applicability = true\nlibrarian_preflight = true\n\
+   absorb_gate = true\ncontext_review = true\nskill_applicability = true\nlibrarian_preflight = true\nworkspace_memory_selection_enabled = true\n\
    excluded_keepers = [\"kidsnote-slack-context-collector\", \"other\"]\n"
 ;;
 
@@ -6308,6 +6310,7 @@ let test_typesafeai_absent_is_the_default () =
     check bool "Context review is off" false t.Runtime_schema.context_review;
     check bool "Skill applicability is off" false t.Runtime_schema.skill_applicability;
     check bool "Librarian preflight is off" false t.Runtime_schema.librarian_preflight;
+    check bool "Shared memory selection is off" false t.Runtime_schema.workspace_memory_selection_enabled;
     check (list string) "nobody is excluded" [] t.Runtime_schema.excluded_keepers
 ;;
 
@@ -6334,6 +6337,7 @@ let test_typesafeai_reads_the_whole_table () =
     check bool "Context review enabled" true t.Runtime_schema.context_review;
     check bool "Skill applicability enabled" true t.Runtime_schema.skill_applicability;
     check bool "Librarian preflight enabled" true t.Runtime_schema.librarian_preflight;
+    check bool "Shared memory selection enabled" true t.Runtime_schema.workspace_memory_selection_enabled;
     check (list string) "excluded keepers, in order"
       [ "kidsnote-slack-context-collector"; "other" ]
       t.Runtime_schema.excluded_keepers
@@ -6374,7 +6378,10 @@ let test_typesafeai_refuses_a_stray_key () =
   typesafeai_rejects ~what:"a stray [typesafeai] key"
     "[typesafeai]\nabsorb = true\n" "unknown [typesafeai] key \"absorb\"";
   typesafeai_rejects ~what:"a sub-table where a switch is expected"
-    "[typesafeai.absorb_gate]\nenabled = true\n" "absorb_gate must be a boolean"
+    "[typesafeai.absorb_gate]\nenabled = true\n" "absorb_gate must be a boolean";
+  typesafeai_rejects ~what:"nonboolean shared-memory selection opt-in"
+    "[typesafeai]\nworkspace_memory_selection_enabled = \"true\"\n"
+    "workspace_memory_selection_enabled must be a boolean"
 ;;
 
 (* otoml's strict float getter still reads a TOML integer, so the two

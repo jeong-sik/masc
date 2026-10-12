@@ -23,7 +23,10 @@ let test_the_kind_is_what_decides_who_is_asked () =
   Alcotest.(check bool) "say" true (endpoint.Voice_config.kind = Voice_config.Macos_say);
   let endpoint = endpoint_of {|{"kind": "elevenlabs_direct"}|} in
   Alcotest.(check bool) "elevenlabs" true
-    (endpoint.Voice_config.kind = Voice_config.Elevenlabs_direct)
+    (endpoint.Voice_config.kind = Voice_config.Elevenlabs_direct);
+  let endpoint = endpoint_of {|{"kind": "espeak_ng"}|} in
+  Alcotest.(check bool) "espeak-ng" true
+    (endpoint.Voice_config.kind = Voice_config.Espeak_ng)
 
 (* The name of the variable, never the value. runtime.toml is committed, and
    the same rule the wizard and the setup routes follow applies to a read. *)

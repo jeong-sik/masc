@@ -22,7 +22,7 @@ def load_profile(path: Path = MANIFEST) -> Profile:
     value = json.loads(raw)
     if not isinstance(value, dict) or set(value) != {"profile", "suites"}:
         raise ValueError("Release behavior requires a profile and explicit suites")
-    if value["profile"] != "release-essential-v1":
+    if value["profile"] != "release-essential-v2":
         raise ValueError("Unknown release behavior profile")
     suites = value["suites"]
     if not isinstance(suites, list) or not suites or any(

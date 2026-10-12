@@ -1,0 +1,9 @@
+{
+  "base_sha": "727c56a8759f71c747d3107667a468e13199869e",
+  "moved_cleanup_block_sha256": "d76678f8195e884578c7e511a5a4f52915f831edb5bf7fb2bfe2c706d207f930",
+  "only_cleanup_block_change": "is_atomic_orphan_name name -> Atomic_temp_name.is_name name",
+  "atomic_write_lines_before": 3327,
+  "atomic_write_lines_after": 2773,
+  "ownership": "Atomic_write handles publication; Atomic_orphan_cleanup handles blocking orphan inventory and preservation; Atomic_temp_name owns the pure shared grammar",
+  "scope": "This extraction does not strengthen the existing stable-path lifecycle requirement or validate live recovery."
+}

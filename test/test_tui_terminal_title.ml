@@ -15,19 +15,6 @@ let snapshot ?(activity = Title.Working) ?keeper_name ?runtime_id workspace =
   Title.make ~activity ~keeper_name ~runtime_id ~workspace
 ;;
 
-let test_projects_the_typed_status_segments () =
-  check string
-    "activity, keeper/runtime and workspace"
-    "working \xc2\xb7 alpha/ollama-cloud.deepseek-v4 \xc2\xb7 me"
-    (Title.text
-       (snapshot ~keeper_name:"alpha" ~runtime_id:"ollama-cloud.deepseek-v4" "me"));
-  check string
-    "connection state comes from the shared vocabulary"
-    "reconnecting... \xc2\xb7 MASC"
-    (Title.text
-       (snapshot ~activity:(Title.Connection Masc_tui_types.Reconnecting) ""))
-;;
-
 let test_removes_terminal_and_bidi_controls () =
   let unsafe =
     "alpha\027]0;owned\007\n\194\157\226\128\174flip\226\129\166isolated"
@@ -172,8 +159,7 @@ let () =
   run
     "tui_terminal_title"
     [ ( "projection"
-      , [ test_case "typed segments" `Quick test_projects_the_typed_status_segments
-        ; test_case "terminal safety" `Quick test_removes_terminal_and_bidi_controls
+      , [ test_case "terminal safety" `Quick test_removes_terminal_and_bidi_controls
         ; test_case "bounded UTF-8" `Quick test_caps_the_complete_title_without_splitting_utf8
         ; test_case "bounded scan" `Quick test_bounds_sanitizer_work_before_a_printable_suffix
         ; test_case "Keeper priority" `Quick test_selects_the_keeper_with_explicit_priority

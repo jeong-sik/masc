@@ -1,6 +1,6 @@
 # Lane Add-on packages
 
-A package adds observations, relationships, metrics, optional Skills or actions to
+A package adds observations, relationships, metrics, optional Skills, tools or actions to
 an existing MASC run. Its manifest, scripts and execution image supply the domain
 behavior; the host supplies installation, source connections, lifecycle, retained
 evidence and the common Dashboard. A package can borrow an existing resource or
@@ -10,7 +10,9 @@ step in other Keeper activity.
 | Package | Contribution | Resource and state ownership |
 | --- | --- | --- |
 | [web-project](web-project/) | Relates build expectations, deployment receipts, captured documents and feature probes. | Reads supplied observations; does not create or navigate a browser. |
-| [msx-observer](msx-observer/) | Projects captures with the existing MSX frame clock and machine incarnation. | Borrows the native machine through host snapshots; does not send input or own the machine. |
+| [msx-machine](msx-machine/) | Owns MSX tools, screen context and play instructions. | Worker-owned emulator and persistent state volume; source candidate, image unverified. |
+| [dos-machine](dos-machine/) | Owns DOS tools, screen context and play instructions. | Worker-owned emulator and persistent state volume; source candidate, image unverified. |
+| [msx-observer](msx-observer/) | Projects captures with the existing MSX frame clock and machine incarnation. | Borrows the attached MSX worker through retained host snapshots; does not send input or own the machine. |
 | [output-statistics](output-statistics/README.md) | Counts rows and row kinds in each supplied completed output. | Owns its worker; no cumulative event count or machine state. |
 | [frame-progress](frame-progress/README.md) | Measures frame differences between supplied MSX captures. | Keeps a baseline in worker memory; restart or missing input requires a fresh baseline. |
 | [value-difference](value-difference/README.md) | Measures signed changes and directions between supplied numeric values, including DOS counters. | Keeps independent source baselines in worker memory; owns no upstream machine. |

@@ -466,6 +466,7 @@ let deliver_addressed_board_signal
    same answer. *)
 let wakeup_relevant_keeper_for_board_signal
       ?dispatch_attention
+      ?dispatch_discoverable_post
       ~(config : Workspace.config)
       (addressed : Board_dispatch.addressed_board_signal)
   =
@@ -522,6 +523,9 @@ let wakeup_relevant_keeper_for_board_signal
     (match audience with
      | Keeper_board_audience.Discoverable
        when signal.kind = Board_dispatch.Board_post_created ->
+       (match dispatch_discoverable_post with
+        | Some dispatch -> dispatch signal
+        | None ->
        (* An unaddressed post has no immediate wake target. The Keeper owner
           already scans the durable Board with its per-lane cursor and owns
           candidate creation. Repeating that fleet-wide scan in the HTTP
@@ -603,7 +607,7 @@ let wakeup_relevant_keeper_for_board_signal
                     (Keeper_world_observation_board_signal.unavailable_to_string
                        unavailable)));
             Eio_guard.yield_step board_ym)
-         uninitialized_entries
+         uninitialized_entries)
      | ( Keeper_board_audience.Targets _
        | Keeper_board_audience.Broadcast
        | Keeper_board_audience.Thread_participants

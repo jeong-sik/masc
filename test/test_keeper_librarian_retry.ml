@@ -1576,7 +1576,8 @@ let test_counterpart_observations_keep_direct_and_attention_fallback () =
          ; metadata = []
          }
        in
-       (match Keeper_external_attention.record ~base_path:base_dir item with
+       (match Keeper_external_attention.For_testing.record_with_clock
+         ~now:(fun () -> item.Keeper_external_attention.received_at) ~base_path:base_dir item with
         | `Recorded -> ()
         | `Duplicate _ -> fail "unexpected duplicate attention fixture"
         | `Error detail -> fail detail);

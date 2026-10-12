@@ -47,9 +47,15 @@ type waiter =
 type t =
   { mutable waiters : waiter list
   ; mutex : Stdlib.Mutex.t
+  ; mutable answered_total : int
+  ; mutable timed_out_total : int
   }
 
-let create () = { waiters = []; mutex = Stdlib.Mutex.create () }
+let create () =
+  { waiters = []
+  ; mutex = Stdlib.Mutex.create ()
+  ; answered_total = 0
+  ; timed_out_total = 0 }
 
 (* Created at load, so there is no moment where a wait or an answer arrives
    before the registry exists. *)
@@ -112,20 +118,43 @@ let await t ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question ~becaus
      operator was told it applied, and the call must run under it rather
      than be reported as timed out. *)
   Fun.protect ~finally:remove_self (fun () ->
-      Watched_work.run
-        (fun () -> Eio.Promise.await promise)
-        ~watcher:(fun () ->
-          Eio.Time.sleep clock timeout_sec;
-          Timed_out))
+      match
+        Watched_work.run
+          (fun () -> Eio.Promise.await promise)
+          ~watcher:(fun () ->
+            Eio.Time.sleep clock timeout_sec;
+            Timed_out)
+      with
+      | Timed_out ->
+        (* The timer, not a decision, ended this wait: the one outcome the
+           timeout measurement counts as a timeout. *)
+        t.timed_out_total <- t.timed_out_total + 1;
+        Timed_out
+      | outcome -> outcome)
 
 let settle t ~keeper_name ~tool_call_id decision =
   let key = { key_keeper_name = keeper_name; key_tool_call_id = tool_call_id } in
   match Stdlib.Mutex.protect t.mutex (fun () -> take_locked t key) with
   | None -> false
   | Some waiter ->
-      Eio.Promise.resolve waiter.resolve (Answered decision);
-      true
+    (* Counted on the resolved answer, not on [settle]'s return value: the
+       wait this resolves is an answer reaching an operator's call either
+       way. *)
+    t.answered_total <- t.answered_total + 1;
+    Eio.Promise.resolve waiter.resolve (Answered decision);
+    true
 
 let pending t =
   Stdlib.Mutex.protect t.mutex (fun () ->
       List.map (fun waiter -> waiter.entry) t.waiters)
+
+type outcome_totals =
+  { answered_total : int
+  ; timed_out_total : int
+  }
+
+let outcome_totals t =
+  Stdlib.Mutex.protect t.mutex (fun () ->
+      { answered_total = t.answered_total
+      ; timed_out_total = t.timed_out_total
+      })

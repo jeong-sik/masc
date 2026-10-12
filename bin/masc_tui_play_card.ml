@@ -111,6 +111,20 @@ let advice =
   ]
 ;;
 
+let address_advice card =
+  let host = Uri.host (Uri.of_string card.link) in
+  let local = Option.fold ~none:false ~some:Masc_network_defaults.is_loopback_host host in
+  let unspecified = Option.fold ~none:false ~some:Masc_network_defaults.is_unspecified_host host in
+  if unspecified then
+    [ Note "This link names a wildcard bind address, not a reachable destination."
+    ; Note "Set MASC_HTTP_BASE_URL to the server's reachable address before issuing a guest link."
+    ]
+  else if local then
+    [ Note "This link works on this computer only; a phone's QR scan cannot reach it."
+    ; Note "For guests, set the server's MASC_HTTP_BASE_URL to its reachable address before issuing a link."
+    ]
+  else []
+
 (* [make] only lets a link of printable ASCII through, so a byte is a cell and
    a cut never lands inside a character. *)
 let cut_to_width ~width text =
@@ -130,6 +144,7 @@ let cut_to_width ~width text =
 let text_rows card ~width =
   let heading = Heading (Printf.sprintf "%s · expires %s" card.name card.expires_at) in
   (heading :: Blank :: List.map (fun line -> Advice line) advice)
+  @ address_advice card
   @ (Blank :: List.map (fun piece -> Link_row piece) (cut_to_width ~width card.link))
 ;;
 

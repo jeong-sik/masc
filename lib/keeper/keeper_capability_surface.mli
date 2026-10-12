@@ -82,6 +82,22 @@ val create
     refuses a start for it, their rows read [Refused_by_sandbox], and a
     composition that runs one is then withheld. *)
 
+val create_with_descriptors
+  :  tool_descriptors:Keeper_tool_descriptor.t list
+  -> tool_deny:string list
+  -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
+  -> skill_names:string list option
+  -> global_skill_catalog:Keeper_skill_catalog.t
+  -> skill_inventory:Keeper_skill_inventory.t
+  -> task_skills:Keeper_skill_catalog.skill list
+  -> t
+(** Use the same frozen descriptor objects that projected the Skill catalog,
+    inventory and Task selection. Profile denial is applied here. *)
+
+val find_descriptor_by_id : t -> string -> Keeper_tool_descriptor.t option
+val find_descriptor_by_name : t -> string -> Keeper_tool_descriptor.t option
+(** Lookups return only exact descriptors admitted by this frozen surface. *)
+
 val descriptors : t -> Keeper_tool_descriptor.t list
 
 val admits : t -> Keeper_tool_descriptor.t -> bool

@@ -74,6 +74,7 @@ let describe = function
 type ticket = { generation : int; identity : unit ref }
 type 'a reading = { in_flight : ticket option; received : ('a, string) result option }
 let empty = {in_flight=None;received=None}
+let suspend reading = {reading with in_flight=None}
 let start ~generation reading =
   match reading.in_flight with
   | Some ticket when ticket.generation = generation -> None

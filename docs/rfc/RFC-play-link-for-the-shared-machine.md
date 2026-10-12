@@ -171,15 +171,43 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 
 - 주소: `<base>/play`. HTML 과 스크립트는 공개 읽기 경로로 둔다(`Server_auth.is_public_read_path`
   에 `/play` 를 더한다). 데이터는 전부 `Authorization: Bearer` 로 부른다. 쿠키를 쓰지 않는다.
-- 페이지는 외부 스크립트를 불러오지 않는다. token 을 메모리에 쥐고 있는 페이지라서다.
+- 페이지는 외부 스크립트를 불러오지 않는다. token 을 다루는 페이지라서다.
 - 페이지가 열리면 `location.hash` 에서 token 을 읽고 바로 주소창에서 지운다
-  (`history.replaceState`). token 은 메모리에만 둔다.
+  (`history.replaceState`). 같은 탭의 새로고침은 `sessionStorage` 로 재접속한다.
+  연결 끊기는 진행 중인 입력을 기다린 뒤 `POST /api/v1/play/session`에
+  `{connected:false}`를 보낸다. 서버는 credential 세대별 참여 상태를 기록하고
+  같은 자격 정보 트랜잭션 안에서 조종권을 반납한다. 동시에 들어오는 양도는
+  종료 전에 완료되어 반납되거나 종료 뒤 거절된다. 초대 토큰 자체는 유지된다.
+  성공 응답을 받은 뒤 탭 저장소를 지운다. 삭제가 실패하면 입력을 막은 채
+  기존 초대를 유지하고 연결 끊기 재시도를 안내한다. 입력 결과가 불확실하면
+  작업 표식과 초대를 유지하며 자동 재전송이나 잊기를 금지한다.
+  새 문서에서 유효한 원래 링크를 열면 첫 정상 자리 조회의 `connected:false`를
+  확인하고 `{connected:true}`로 명시적으로 참여를 복구한다. 일반 폴링은
+  종료 상태를 되돌리지 않는다. 오래된 문서는 탭의 문서 식별자와 작업 표식을
+  확인해야 하므로 뒤늦은 자리 응답으로 다른 문서의 종료를 취소하지 못한다.
+  저장소를 허용하지 않는 브라우저에서는 원래 fragment로 관전만 가능하다.
+  게임 입력과 명시적 연결 종료는 거절되며, 새로고침에는 원래 링크가 필요하다.
+  다른 탭과 공유하는 `localStorage`나 쿠키에는 쓰지 않는다.
+  같은 탭에서 원래 링크를 다시 열면 fragment 변화도 인증 초기화를 다시 실행한다.
+  연결 중 다른 초대를 열면 현재 연결을 먼저 끊도록 안내하고 기존 초대를 유지한다.
+  조종권을 반납하지 않은 채 다른 이름으로 바꾸지 않는다.
 - 하는 일:
   - live 를 주기적으로 읽어 canvas 에 그린다. `since`·`incarnation` 을 넘겨 바뀔 때만 받는다.
   - 지금 조종자와 최근 활동을 보여 준다. 조종권이 내 이름으로 오면 "내 차례" 를 알린다.
     지금 `pass` 는 Board @mention 으로만 알리므로, 바깥 사람에게는 이 표시가 알림이다.
   - 입력: masc 패드(§2.9), 글자 입력 칸, 데스크톱 키보드. 모두 §2.5 라우트로 보낸다.
+    살아 있는 다른 조종자의 차례에는 관전만 한다. 자리 응답의
+    `controller_recoverable`은 서버가 만료·회수된 credential 또는 정지한 Keeper임을
+    확인했을 때만 참이다. 화면 변화가 없어도 관전자는 이 상태를 다시 읽고,
+    실제 다음 입력은 떠남을 재검증한 뒤 조종권을 회수한다. 자리 GET은 조종권을 바꾸지 않는다.
+    글자 입력은 서버의 적용 확인 뒤에만 지우고,
+    응답을 기다리는 같은 입력은 두 번 보내지 않는다.
   - "넘기기": 초대된 이름과 keeper 목록에서 골라 `pass` 한다.
+- 공용 게임 room(`/api/v1/play/room`)을 함께 보여 준다. TUI 관전자, 초대된
+  참여자, Keeper가 `masc_play_room`으로 명시적으로 보낸 메시지만 저장하며,
+  MSX와 DOS가 같은 대화를 쓴다. Keeper의 사적인 대화·지시·초대 토큰은
+  room으로 복사하지 않는다. room 읽기·쓰기 역시 `CanPlayMachine` 인증을
+  요구하고, 불확실한 전송은 같은 `client_id`·`message_id`·본문으로 재시도한다.
 - 프레임은 v1 에서 `rgb8` 그대로 받는다. 320x200 이면 원본 192,000바이트, base64 로 약 256KB 이고
   압축을 거친다. 턴제라 바뀔 때만 오므로 v1 은 이대로 간다. PNG 형식은 실제 크기를 잰 뒤 따로 정한다.
 
@@ -200,7 +228,7 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
   읽는 에이전트도 이 줄은 본다.
   - 안내문은 공개다. 토큰도 워크스페이스 상태도 담지 않는다. `#` 뒤가 bearer 토큰이라고 알려 줄 뿐이다.
   - 글은 프롬프트 `play.agent_guide`(`config/prompts/play.agent_guide.md`)에 둔다. 운영자가 override 로 고칠 수 있다.
-  - 주소와 스키마는 서버가 채운다: `MASC_HTTP_BASE_URL` 뒤에 `/mcp/play`, seat, `screen.png`, §2.5 이동
+  - 주소와 스키마는 서버가 채운다: `MASC_HTTP_BASE_URL` 뒤에 `/mcp/play`, seat, `screen.png`, room, §2.5 이동
     라우트 네 개. 이동마다 그 라우트가 본문을 검사하는 도구 스키마를 그대로 싣는다
     (`Server_routes_http_routes_dos.moves`). 복사본이 아니라서 스키마가 바뀌면 안내문도 같이 바뀐다.
   - `MASC_HTTP_BASE_URL` 이 없으면 들어올 주소가 없으므로 `409 not_ready` 다. 초대 발급 조건과 같다.
@@ -274,15 +302,17 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
 
 ## 3. 범위
 
-- v1 은 DOS 다. MSX 는 Lane 호출 몇 개가 아직 `~who` 를 받지 않는다
+- v1 의 조종 입력은 DOS 다. MSX 는 Lane 호출 몇 개가 아직 `~who` 를 받지 않는다
   (`server_routes_http_routes_lane_addons.ml` `with_activity` 주석). 누가 눌렀는지 남고
-  차례를 가를 수 있게 된 뒤에 같은 역할·라우트·페이지로 붙인다.
+  차례를 가를 수 있게 된 뒤에 같은 역할·라우트·페이지로 붙인다. 관전과
+  공용 room은 DOS와 MSX를 모두 지원한다.
 - 첫 배치는 삼국지3 하나다.
 
 ## 4. 하지 않는 것
 
 - 방 키로 봉인하는 릴레이. 서버가 곧 호스트이고 공개 주소로 닿는다.
-- keeper 대화 공유와 게스트 프롬프트. 공동 플레이에 필요하지 않다.
+- Keeper의 사적인 대화와 게스트 프롬프트. 공용 room에는 의도적으로 보낸
+  게임 대화만 들어간다.
 - 화면 OCR 로 차례를 판단하는 일.
 - 기계 아래의 공통 입력 이벤트.
 

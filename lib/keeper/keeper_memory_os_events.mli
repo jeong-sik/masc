@@ -7,7 +7,8 @@
 
     The sidecar is separate from the memory journal on purpose: the journal
     holds one line per librarian pass and is not read on the turn path, while
-    [Retrieved] is written on the turn path by [keeper_memory_search]. Events
+    [Retrieved] is written on the turn path by [keeper_memory_search] and
+    [keeper_memory_select]. Events
     outlive the fact they name; a dropped fact keeps its events and a reader
     attaches them only to facts that still exist. *)
 
@@ -15,8 +16,9 @@
     constructor, and the compiler names every consumer that has to learn it. *)
 type event_kind =
   | Retrieved of { query : string }
-  (** The fact was among the results [keeper_memory_search] returned for
-      [query]. *)
+  (** The fact was among the results [keeper_memory_search] or
+      [keeper_memory_select] returned for [query]. Assessment without delivery
+      does not create a retrieval event. *)
   | Retracted
   (** [keeper_memory_retract] successfully removed the fact identified by its
       [memory_id]. This records removal, not a judgment of the fact's quality. *)

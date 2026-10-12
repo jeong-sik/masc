@@ -1,0 +1,17 @@
+[2026-10-09 18:51:21] [INFO] [MCP] Tag registry initialized: 195 tools registered
+Testing `keeper Skill activation projection'.
+This run has ID `FSC5GEU2'.
+
+  [OK]          projection          0   missing Keeper is no_session.
+  [OK]          projection          1   dashboard attachment bypasses invento...
+  [OK]          projection          2   absent keeper is not found, not warming.
+  [OK]          projection          3   corrupt ledger is unavailable.
+  [OK]          projection          4   exact trace uses typed ledger.
+  [OK]          projection          5   chat history attaches exact Skill evi...
+  [OK]          projection          6   chat history does not borrow another ...
+  [OK]          projection          7   missing exact trace is not recorded.
+  [OK]          projection          8   invalid exact trace is rejected.
+  [OK]          projection          9   corrupt exact trace is unavailable.
+
+Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/keeper Skill activation projection'.
+Test Successful in 0.174s. 10 tests run.

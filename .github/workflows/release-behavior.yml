@@ -38,5 +38,4 @@ jobs:
           name: release-behavior-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/release-behavior.log
-            ${{ runner.temp }}/tui-remote-workspace-history/
           if-no-files-found: warn

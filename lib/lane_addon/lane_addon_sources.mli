@@ -59,6 +59,13 @@ type lane_output = {
   output : Lane_addon_types.output;
   status : Lane_addon_types.coverage;
 }
+type machine_output = {
+  worker_instance : string;
+  worker_seq : int;
+  worker_max_bytes : int;
+  worker_output : Lane_addon_types.output;
+}
+(** A completed observation from the attached shared machine worker. *)
 val dependencies : Yojson.Safe.t -> (string list, string) result
 type access = Operator_configuration | Keeper of string | Unauthenticated
 (** Native Fusion reads require the installation's authenticated Keeper owner,
@@ -73,6 +80,7 @@ val authorize : access:access -> Yojson.Safe.t -> (unit, string) result
 (** Reject unowned native Fusion bindings before attaching. Acquisition repeats
     the check before capturing any evidence. *)
 val acquire : access:access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
+  resolve_machine_output:(Machine_lane.t -> (machine_output, string) result) ->
   resolve_lane_output:(installation_id:string -> (lane_output, string) result) ->
   binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result
 (** The complete returned source array fits the package's ingress envelope.

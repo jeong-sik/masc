@@ -236,9 +236,9 @@ let deferred_names_absent_from ~declared_names ~actual_names =
    resume; the checkpoint preserves the AGENT_CORE message history, so the
    identical pairs of the previous run were invisible to it and a repeat
    split 2+2 across two runs escaped at threshold 3. *)
-let seed_tool_calls_from_history
+let seed_tool_calls_from_history ?base_path
     ~(history_memo : Keeper_tool_progress_identity.History_memo.t)
-    ~(history_messages : Agent_core.Types.message list)
+    ~(history_messages : Agent_core.Types.message list) ()
   : Keeper_agent_result.tool_call_detail list
   =
   let result_by_id = Hashtbl.create 16 in
@@ -292,7 +292,7 @@ let seed_tool_calls_from_history
            }
        | None -> None)
     pairs
-    (Keeper_tool_progress_identity.digest_history_pairs history_memo pairs)
+    (Keeper_tool_progress_identity.digest_history_pairs ?base_path history_memo pairs)
   |> List.filter_map Fun.id
 ;;
 
@@ -300,18 +300,14 @@ let seed_tool_calls_from_history
    starts from, given the checkpoint-resumed history. Production acc creation
    and the regression test both go through this function, so reverting its
    body to [] is exactly the pre-fix behavior. *)
-let initial_tool_calls
+let initial_tool_calls ?base_path
     ~(history_memo : Keeper_tool_progress_identity.History_memo.t)
-    ~(history_messages : Agent_core.Types.message list) :
+    ~(history_messages : Agent_core.Types.message list) () :
     Keeper_agent_result.tool_call_detail list =
-  (* Serialising and hashing every tool call in the history is pure, so the
-     pool does it. The walk is over the whole history, which measured
-     1,278,158 B above, and it runs once per turn between the raw-trace
-     append and [Keeper_identity_tools.for_turn]: the 2026-09-06 20:29 KST
-     trace shows that stretch as the longest run left on the main domain,
-     55-222 ms across five Keepers. *)
-  Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    seed_tool_calls_from_history ~history_memo ~history_messages)
+  (* Stored answer identity rechecks the owned blob bytes on every walk;
+     keep this filesystem work off the main domain. *)
+  Domain_pool_ref.submit_io_or_inline (fun () ->
+    seed_tool_calls_from_history ?base_path ~history_memo ~history_messages ())
 ;;
 
 (* The ToolUse ids the checkpoint history already holds. *)
@@ -327,76 +323,111 @@ let history_tool_use_ids (history_messages : Agent_core.Types.message list) =
     history_messages
 ;;
 
-let ledger_seed_row_limit = 200
+(* The positions of checkpoint history and call-ledger evidence cannot be
+   compared. Exact input/output counts may share evidence; consecutive-input
+   detection must not treat the join as an observed chronology. *)
+let combine_repetition_seeds ~history ~ledger =
+  let order = match history, ledger with
+    | [], _ | _, [] -> Keeper_run_tools_hook_accumulator.Ordered
+    | _ :: _, _ :: _ -> Keeper_run_tools_hook_accumulator.Unordered in
+  history @ ledger, order
+;;
 
-(* task-627 / #26088: the official-client autonomous lane persists no AGENT_CORE
-   checkpoint, so [history_messages] arrives empty there and the history seed
-   above sees nothing — the loop guard started every cycle from zero, and a
-   poll repeated across cycles never reached the threshold. The keeper's own
-   call ledger is the durable record those cycles left: every executed call is
-   a row carrying the I/O fingerprints the judge compares, computed from the
-   raw input and output at write time (the row's own input/output fields are
-   redacted and truncated, so recomputing from them would answer a different
-   identity). Rows the history already represents (same tool_use_id) are
-   dropped, so a checkpoint-resumed lane counts each call once. Rows without
-   fingerprints — written before the fields existed, or by a caller that could
-   not fingerprint — cannot match a live call and are skipped rather than
-   counted. *)
+module Ledger_index = Keeper_tool_call_index
+
+module History_memo = Keeper_tool_progress_identity.History_memo
+
+let flush_ledger () =
+  try
+    (match Keeper_tool_call_log.flush_committed () with
+     | All_committed -> ()
+     | All_committed_with_post_commit_failures (first, rest) ->
+       List.iter (fun exn ->
+         Log.Keeper.warn "repetition ledger flush committed before maintenance failure: %s"
+           (Printexc.to_string exn)) (first :: rest));
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+
+(* Capture policy activation before this run can issue a call. Existing
+   history and ledger rows stay intact, but are outside the new comparison
+   interval. An explicitly empty boundary is already active and must not be
+   advanced on every later turn. *)
+let activate_repetition_boundary ~context ~keeper_name ~history_pairs =
+  let ( let* ) = Result.bind in
+  let* existing = Keeper_repetition_judged.read_opt context
+    |> Result.map_error Keeper_repetition_judged.error_to_string in
+  match existing with
+  | Some boundary -> Ok boundary
+  | None ->
+    let* () = flush_ledger () in
+    let* ledger_frontier = Keeper_tool_call_log.current_frontier ~keeper_name
+      |> Result.map_error (function Keeper_tool_call_log.Index_unavailable detail -> detail) in
+    let boundary : Keeper_repetition_judged.t =
+      { history_generation = Initial; history_pairs; ledger_frontier } in
+    Keeper_repetition_judged.record context boundary;
+    Ok boundary
+
+(* The index hands each row here and drops its body, so a first read over a
+   large ledger keeps only these few fields per row. *)
+let ledger_fields_of_row row =
+  match Safe_ops.json_string_opt "tool" row,
+    Safe_ops.json_string_opt "input_fingerprint" row,
+    Safe_ops.json_string_opt "output_fingerprint" row with
+  | Some tool_name, Some input_fingerprint, Some output_fingerprint ->
+    Some
+      ( Safe_ops.json_string_opt "tool_use_id" row
+      , tool_name
+      , { Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } )
+  | _ -> None
+
+let ledger_call_of_positioned
+    (positioned : (string option * string * Keeper_tool_progress_identity.io_fingerprints) Ledger_index.positioned) =
+  let tool_use_id, tool_name, fingerprints = positioned.value in
+  { History_memo.position = positioned.position; tool_use_id; tool_name; fingerprints }
+
 let seed_tool_calls_from_ledger
+    ?(history_memo = History_memo.create ())
+    ?(judged = Ledger_index.empty_frontier)
     ~(history_tool_use_ids : string list)
     ~(keeper_name : string)
     () : Keeper_agent_result.tool_call_detail list =
-  (* Rows enqueued by the async appender are the previous cycle's own calls —
-     exactly the newest evidence, and the ones a cycle started right after
-     another would otherwise miss. Draining here is what the 0.5s flush daemon
-     would do moments later anyway. The write bridge can raise on a store
-     failure ([drain_queued_appends] re-raises after requeueing the entry), so
-     a seed that cannot be written degrades like one that cannot be read
-     instead of failing the turn. *)
-  match (try Ok (Keeper_tool_call_log.flush_now ()) with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn -> Error (Printexc.to_string exn)) with
-  | Error detail ->
-    Log.Keeper.warn
-      "keeper %s repetition ledger seed flush unavailable: %s" keeper_name detail;
-    []
+  let history_ids = Set_util.StringSet.of_list history_tool_use_ids in
+  let unavailable stage detail =
+    Log.Keeper.warn "keeper %s repetition ledger %s unavailable: %s" keeper_name stage detail;
+    [] in
+  match flush_ledger () with
+  | Error detail -> unavailable "flush" detail
   | Ok () ->
-    (match Keeper_tool_call_log.read_recent ~keeper_name ~n:ledger_seed_row_limit () with
-     | Error (Keeper_tool_call_log.Index_unavailable detail) ->
-       (* The run-local counter still applies; an unreadable seed must not fail
-          the turn. Say why on the record instead of failing open silently. *)
-       Log.Keeper.warn
-         "keeper %s repetition ledger seed unavailable: %s" keeper_name detail;
-       []
-     | Ok rows ->
-       List.filter_map
-         (fun row ->
-            match
-              ( Safe_ops.json_string_opt "tool" row
-              , Safe_ops.json_string_opt "input_fingerprint" row
-              , Safe_ops.json_string_opt "output_fingerprint" row )
-            with
-            | Some tool_name, Some input_fingerprint, Some output_fingerprint ->
-              let represented =
-                match Safe_ops.json_string_opt "tool_use_id" row with
-                | Some tool_use_id -> List.mem tool_use_id history_tool_use_ids
-                | None -> false
-              in
-              if represented then None
-              else
-                Some
-                  { Keeper_agent_result.tool_name
-                  ; provider = "call_ledger"
-                  ; execution_outcome = Tool_result.Unknown
-                  ; typed_outcome = None
-                  ; latency_ms = 0.
-                  ; task_id = None
-                  ; route_evidence = None
-                  ; input_fingerprint = Some input_fingerprint
-                  ; output_fingerprint = Some output_fingerprint
-                  }
-            | _ -> None)
-         rows)
+    (match Keeper_tool_call_log.store_dir () with
+     | None -> unavailable "seed" "tool-call ledger is not initialized"
+     | Some ledger_dir ->
+       let previous = match History_memo.ledger_seed history_memo with
+         | Some previous when String.equal previous.ledger_dir ledger_dir
+             && Ledger_index.equal_frontiers previous.judged judged -> Some previous
+         | Some _ | None -> None in
+       let after = match previous with Some previous -> previous.through | None -> judged in
+       match Keeper_tool_call_log.read_after ~keeper_name ~after ~project:ledger_fields_of_row with
+       | Error (Keeper_tool_call_log.Index_unavailable detail) -> unavailable "seed" detail
+       | Ok batch ->
+         let retained = match previous with
+           | None -> []
+           | Some previous -> List.filter (fun (call : History_memo.ledger_call) -> Ledger_index.covers batch.retained call.position)
+               previous.calls in
+         let calls = List.map ledger_call_of_positioned batch.rows @ retained in
+         History_memo.hold_ledger_seed history_memo {ledger_dir; judged; through = batch.frontier; calls};
+         List.filter_map (fun (call : History_memo.ledger_call) ->
+           let represented = match call.tool_use_id with
+             | Some id -> Set_util.StringSet.mem id history_ids
+             | None -> false in
+           if represented then None else Some
+             { Keeper_agent_result.tool_name = call.tool_name
+             ; provider = "call_ledger"
+             ; execution_outcome = Tool_result.Unknown
+             ; typed_outcome = None; latency_ms = 0.; task_id = None; route_evidence = None
+             ; input_fingerprint = Some call.fingerprints.input_fingerprint
+             ; output_fingerprint = Some call.fingerprints.output_fingerprint }) calls)
 ;;
 
 let prepare_agent_setup
@@ -509,8 +540,17 @@ let prepare_agent_setup
            ~dynamic_context)
   in
   let agent_name = meta.name in
+  let* tool_descriptors = match Keeper_task_skill_turn.descriptors task_skill_selection with
+    | Some descriptors -> Ok descriptors
+    | None ->
+        let snapshot = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:meta.name in
+        Ok (Keeper_tool_descriptor.all_descriptors ()
+          @ List.map Keeper_lane_addon_descriptor.create snapshot.exports) in
+  let* task_skill_selection = Keeper_task_skill_turn.with_descriptors
+      ~descriptors:tool_descriptors ~snapshot:skill_snapshot task_skill_selection
+    |> Result.map_error Keeper_task_skill_turn.core_error in
   let global_skill_catalog, skill_projection_diagnostics =
-    Keeper_skill_catalog.of_snapshot skill_snapshot
+    Keeper_skill_catalog.of_snapshot ~descriptors:tool_descriptors skill_snapshot
   in
   let snapshot_rev =
     Skill_catalog_snapshot.snapshot_revision_to_string
@@ -549,12 +589,13 @@ let prepare_agent_setup
          (Keeper_skill_catalog.error_to_string row.error))
     task_skill_selection.unprojectable;
   let capability_surface =
-    Keeper_capability_surface.create
+    Keeper_capability_surface.create_with_descriptors
+      ~tool_descriptors
       ~tool_deny:profile_defaults.Keeper_types_profile.tool_deny
       ~sandbox_profile:meta.sandbox_profile
       ~skill_names
       ~global_skill_catalog
-      ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
+      ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors:tool_descriptors skill_snapshot)
       ~task_skills:(Keeper_task_skill_turn.skills task_skill_selection)
   in
   (* A deny entry that names nothing is refused where the profile is loaded
@@ -619,14 +660,14 @@ let prepare_agent_setup
      on its own context and persists it whole, so a key only the
      autonomous lane carried would leave the checkpoint at the first
      operator message. *)
-  let* judged =
+  let* _judged =
     Keeper_repetition_judged.restore
       ~source:(Keeper_context_core.agent_core_context_of_context ctx_work)
       ~target:shared_context
     |> Result.map_error (fun error ->
          Agent_core.Error.Internal (Keeper_repetition_judged.error_to_string error))
   in
-  let* historical_tool_calls, history_pairs_at_setup =
+  let* historical_tool_calls, historical_order, history_pairs_at_setup =
     match repetition_execution with
     | None ->
       (* The autonomous lane, seeded from the checkpoint history past what
@@ -637,33 +678,37 @@ let prepare_agent_setup
          own call ledger instead (task-627); rows the history already
          represents are dropped, so a checkpoint-resumed lane counts each
          call once. *)
-      let history_pairs =
-        initial_tool_calls
-          ~history_memo:
-            (Keeper_tool_progress_identity.history_memo
-               ~base_path:config.base_path
-               ~keeper_name:meta.name)
-          ~history_messages
-      in
+      let history_memo = Keeper_tool_progress_identity.history_memo
+        ~base_path:config.base_path ~keeper_name:meta.name in
+      let history_pairs = initial_tool_calls ~base_path:config.base_path ~history_memo ~history_messages () in
+      let* judged = activate_repetition_boundary ~context:shared_context
+        ~keeper_name:meta.name ~history_pairs:(List.length history_pairs)
+        |> Result.map_error (fun detail -> Agent_core.Error.Internal detail) in
       let ledger_pairs =
-        seed_tool_calls_from_ledger
+        seed_tool_calls_from_ledger ~history_memo
+          ~judged:judged.ledger_frontier
           ~history_tool_use_ids:(history_tool_use_ids history_messages)
           ~keeper_name:meta.name
           ()
       in
-      let pairs = history_pairs @ ledger_pairs in
-      Ok (Keeper_repetition_judged.seed_beyond ~judged pairs, Some (List.length pairs))
+      let unjudged_history = Keeper_repetition_judged.seed_beyond
+        ~judged:judged.history_pairs history_pairs in
+      let calls, order = combine_repetition_seeds
+        ~history:unjudged_history ~ledger:ledger_pairs in
+      Ok (calls, order, Some (List.length history_pairs))
     | Some execution ->
       Keeper_repetition_scope.Execution.prepare execution
         ~source:(Keeper_context_core.agent_core_context_of_context ctx_work)
         ~target:shared_context
-      |> Result.map (fun calls -> calls, None)
+      |> Result.map (fun calls ->
+           calls, Keeper_run_tools_hook_accumulator.Ordered, None)
       |> Result.map_error (fun error ->
            Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
   in
   let acc =
     Keeper_run_tools_hook_accumulator.create ~meta
       ~historical_tool_calls
+      ~historical_order
       ~history_pairs_at_setup
       ~tool_surface:
         { turn_lane = Keeper_agent_tool_surface.Lane_text_only
@@ -1016,13 +1061,13 @@ let prepare_agent_setup
        tools were built. The attached-service listing widens the callable set
        mid-turn, so from the round after a load the built list is short by
        exactly the tools the model just asked for -- and this is the record an
-       operator reads to find out what the model was offered. Before the agent
-       exists the built list is the whole truth. *)
+       operator reads to find out what the model was offered. Official-client
+       attempts use their complete built set even if a prior Agent Core
+       attempt left its agent in the shared cell. *)
     let schema_filter =
-      match !agent_cell with
-      | Some agent -> Agent_core.Tool_set.names (Agent_core.Agent.tools agent)
-      | None -> all_tool_names
-    in
+      (Keeper_agent_tool_surface.for_attempt
+         ~checkpoint_owner:!active_checkpoint_owner ~agent_cell ~built:keeper_tools).tools
+      |> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) in
     let lane : Keeper_agent_tool_surface.turn_lane =
       if schema_filter <> []
       then Lane_tool_optional
@@ -1035,7 +1080,9 @@ let prepare_agent_setup
   in
 
   let ctx : Keeper_run_tools_hooks.ctx =
-    { acc
+    { identity_tool_index = Keeper_identity_tool_index.of_tools
+        identity_allow.Keeper_identity_tool_allow.kept
+    ; acc
     ; agent_cell
     ; agent_name
     ; all_tool_names

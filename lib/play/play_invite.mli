@@ -77,6 +77,18 @@ val is_keeper_name : keepers:string list -> Name.t -> bool
 (** Whether a keeper among [keepers] would own [name]'s credential file:
     [Common.safe_filename] lowercases, so the keeper "Minsu" owns "minsu". *)
 
+val is_keeper_name_string : keepers:string list -> string -> bool
+(** The same file-name membership over a raw string, for callers whose names
+    are not invite names. *)
+
+val resolve_keeper_name : keepers:string list -> string -> string option
+(** The roster spelling for a gift target: the single roster name equal to
+    the input up to case, which is the wallet key the Candle balance fold
+    reads. [None] when no roster name matches (an unknown target) or when
+    several do (the case-fold is ambiguous, so refuse rather than pick one).
+    Unlike {!is_keeper_name_string}, which compares credential file names,
+    this compares wallet names: exact apart from case. *)
+
 type invite =
   { invite_name : string
   ; expires_at : string option

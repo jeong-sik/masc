@@ -1,9 +1,5 @@
 open Result.Syntax
 
-let config_error ~field detail =
-  Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })
-;;
-
 let internal_error detail = Agent_core.Error.Internal detail
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -25,319 +21,34 @@ type host_stop = Runtime_official_client_tool.host_stop =
       ; outcome : terminal_boundary_outcome
       }
 
-type image_block =
+type image_block = Keeper_official_client_context_projection.image_block =
   { media_type : string
   ; base64_data : string
   }
 
-(* Split a goal into the text the CLI receives and the images that ride with it.
-   [text_of_blocks] rejects every non-text block; this admits [Image] for the
-   transports that carry one, and keeps rejecting the rest so a block nobody
-   projects cannot slip through as silence. Only [Base64] images are carried:
-   a [Url] or [File_id] source names bytes this process never read, and the CLI
-   has no way to fetch them. *)
-let text_and_images_of_blocks ~runtime_label ~field blocks =
-  let rec loop texts images = function
-    | [] -> Ok (String.concat "\n" (List.rev texts), List.rev images)
-    | Agent_core.Types.Text text :: rest -> loop (text :: texts) images rest
-    | Agent_core.Types.Image { media_type; data; source_type } :: rest ->
-      (match source_type with
-       | Agent_core.Types.Base64 ->
-         loop texts ({ media_type; base64_data = data } :: images) rest
-       | Agent_core.Types.Url | Agent_core.Types.File_id ->
-         Error
-           (config_error
-              ~field
-              (runtime_label ^ " image projection admits base64 sources only")))
-    | _ :: _ ->
-      Error
-        (config_error
-           ~field
-           (runtime_label ^ " projection admits text and image blocks only"))
-  in
-  loop [] [] blocks
-;;
+type composed_context = Keeper_official_client_context_projection.composed_context
 
-let text_of_blocks ~runtime_label ~field blocks =
-  let rec loop texts = function
-    | [] -> Ok (String.concat "\n" (List.rev texts))
-    | Agent_core.Types.Text text :: rest -> loop (text :: texts) rest
-    | _ :: _ ->
-      Error
-        (config_error
-           ~field
-           (runtime_label ^ " official-client projection admits text blocks only"))
-  in
-  loop [] blocks
-;;
-
-let encode_history_message = Keeper_official_client_context_codec.encode
-
-let user_message text : Agent_core.Types.message =
-  { role = User
-  ; content = [ Text text ]
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
-;;
-
-(* Official-client adapters own their provider instruction projection. Keep
-   dynamic context on that System path rather than copying Agent Core's
-   synthetic User-message encoding, while retaining the shared typed identity
-   used by prompt attribution and input-window projection.
-
-   The Librarian's working state rides the same System path, so it reaches
-   the client the way each adapter delivers System text: Claude Code joins it
-   into [--system-prompt] on every turn, a resume included
-   ([Keeper_claude_code_runtime]); Antigravity renders it as a [SYSTEM:]
-   section ahead of the history ([Keeper_antigravity_runtime]). The Agent
-   Core lane sends the same text as a [User] message, which only that lane's
-   wire has. The text names itself a summary to use as context, not as new
-   instructions ([Keeper_turn_driver_try_provider.working_state_text]).
-
-   The two carry different tags. The composition check over a request expects
-   exactly one per-turn carrier; a working state stamped with the carrier's
-   tag made every request that carried both fail it as a repeated carrier.
-   The working state carries {!Runtime_model_input_tail_window.working_state_metadata},
-   as on the Agent Core lane, and the adapters select both through
-   [is_composed_system_context]. *)
-let system_context_message ~metadata text : Agent_core.Types.message =
-  { role = System
-  ; content = [ Text text ]
-  ; name = None
-  ; tool_call_id = None
-  ; metadata
-  }
-;;
-
-let extra_system_context_message text =
-  system_context_message
-    ~metadata:Agent_core.Types.Extra_system_context_provenance.metadata
-    text
-;;
-
-let working_state_message text =
-  system_context_message
-    ~metadata:Runtime_model_input_tail_window.working_state_metadata
-    text
-;;
-
-let is_composed_system_context (message : Agent_core.Types.message) =
-  (match Agent_core.Types.Extra_system_context_provenance.classify message.metadata with
-   | Agent_core.Types.Extra_system_context_provenance.Present -> true
-   | Agent_core.Types.Extra_system_context_provenance.Absent
-   | Agent_core.Types.Extra_system_context_provenance.Invalid
-   | Agent_core.Types.Extra_system_context_provenance.Duplicate -> false)
-  || Runtime_model_input_tail_window.is_working_state message
-;;
-
-let history_role_label = function
-  | Agent_core.Types.System -> "SYSTEM:\n"
-  | Agent_core.Types.User -> "USER:\n"
-  | Agent_core.Types.Assistant -> "ASSISTANT:\n"
-  | Agent_core.Types.Tool -> "TOOL:\n"
-;;
-
-(* A blank line between rendered messages and before the goal. *)
-let resume_section_separator = "\n\n"
-
-let is_carried_on_resume message =
-  is_composed_system_context message || Keeper_official_task_reference.is_reference message
-;;
-
-module Session_store = Keeper_official_client_session_store
-
-type composed_context =
-  { carrier_sha256 : string
-  ; blocks : (Prompt_block_id.t * string) list
-  }
-
-type resume_delivery =
+type resume_delivery = Keeper_official_client_context_projection.resume_delivery =
   { prompt : string
-  ; held_context : Session_store.held_context list
+  ; context_projection : Keeper_context_submission_link.t
+  ; held_context : Keeper_official_client_session_store.held_context list
   }
 
-let sha256_hex text = Digestif.SHA256.(digest_string text |> to_hex)
-
-(* One carried context a turn composes: its name and digest, whether a resume
-   sends it again when the session holds the same bytes, and the message a
-   resume renders for it. *)
-type carried =
-  { held : Session_store.held_context
-  ; resent_when_held : bool
-  ; message : Agent_core.Types.message
-  }
-
-let carried_message context message =
-  { held = { Session_store.context; sha256 = sha256_hex (encode_history_message message) }
-  ; resent_when_held = false
-  ; message
-  }
-;;
-
-(* The context carrier splits into its typed blocks only when it is the exact
-   assembly [composed_context] names: the digest of its text equals the one
-   the assembly recorded. Otherwise the whole carrier is one carried context.
-   A block's digest is the one its turn record keeps, the sha256 of its raw
-   text. *)
-let carried_of_message ~composed_context (message : Agent_core.Types.message) =
-  if Keeper_official_task_reference.is_reference message
-  then [ carried_message Session_store.Historical_task_reference message ]
-  else if Runtime_model_input_tail_window.is_working_state message
-  then [ carried_message Session_store.Librarian_working_state message ]
-  else if is_composed_system_context message
-  then (
-    match composed_context, message.content with
-    | Some { carrier_sha256; blocks }, [ Agent_core.Types.Text text ]
-      when String.equal (sha256_hex text) carrier_sha256 ->
-      List.map
-        (fun (block, text) ->
-           { held =
-               { Session_store.context = Session_store.Context_block block
-               ; sha256 = sha256_hex text
-               }
-           ; resent_when_held = Prompt_block_id.resent_when_held block
-           ; message = extra_system_context_message text
-           })
-        blocks
-    | Some _, _ | None, _ -> [ carried_message Session_store.Context_carrier message ])
-  else []
-;;
-
-let carried_context ~composed_context messages =
-  List.concat_map (carried_of_message ~composed_context) messages
-;;
-
-let held_of_carried carried =
-  carried
-  |> List.filter (fun item -> not item.resent_when_held)
-  |> List.map (fun item -> item.held)
-;;
-
-type carried_summary =
+type carried_summary = Keeper_official_client_context_projection.carried_summary =
   { label : string
   ; bytes : int
   ; sha256_prefix : string
   ; resent_every_resume : bool
   }
 
-let carried_label = function
-  | Session_store.Context_block block -> "block:" ^ Prompt_block_id.to_string block
-  | Session_store.Context_carrier -> "carrier"
-  | Session_store.Librarian_working_state -> "librarian_working_state"
-  | Session_store.Historical_task_reference -> "historical_task_reference"
-;;
-
-let carried_sha256_prefix_length = 12
-
-let carried_summaries ?composed_context messages =
-  carried_context ~composed_context messages
-  |> List.map (fun item ->
-    { label = carried_label item.held.Session_store.context
-    ; bytes = String.length (encode_history_message item.message)
-    ; sha256_prefix =
-        String.sub item.held.Session_store.sha256 0 carried_sha256_prefix_length
-    ; resent_every_resume = item.resent_when_held
-    })
-;;
-
-let start_held_context ?composed_context messages =
-  held_of_carried (carried_context ~composed_context messages)
-;;
-
-(* Blocks sent together read as one carrier, as they do on a start. *)
-let is_block item =
-  match item.held.Session_store.context with
-  | Session_store.Context_block _ -> true
-  | Session_store.Context_carrier
-  | Session_store.Librarian_working_state
-  | Session_store.Historical_task_reference -> false
-;;
-
-let block_text item =
-  match item.message.Agent_core.Types.content with
-  | [ Agent_core.Types.Text text ] -> Some text
-  | _ -> None
-;;
-
-let rec rendered_messages = function
-  | [] -> []
-  | item :: rest when is_block item ->
-    let rec take_blocks texts = function
-      | next :: rest when is_block next ->
-        (match block_text next with
-         | Some text -> take_blocks (text :: texts) rest
-         | None -> List.rev texts, next :: rest)
-      | rest -> List.rev texts, rest
-    in
-    (match block_text item with
-     | Some text ->
-       let texts, rest = take_blocks [ text ] rest in
-       extra_system_context_message (String.concat resume_section_separator texts)
-       :: rendered_messages rest
-     | None -> item.message :: rendered_messages rest)
-  | item :: rest -> item.message :: rendered_messages rest
-;;
-
-let resume_prompt ~goal ~held ?composed_context messages =
-  let carried = carried_context ~composed_context messages in
-  let already_held item =
-    (not item.resent_when_held) && List.mem item.held held
-  in
-  let context =
-    carried
-    |> List.filter (fun item -> not (already_held item))
-    |> rendered_messages
-    |> List.map (fun (message : Agent_core.Types.message) ->
-      history_role_label message.role ^ encode_history_message message)
-    |> String.concat resume_section_separator
-  in
-  let composed = held_of_carried carried in
-  (* A context composed this turn supersedes what the session held under the
-     same name. A whole carrier and the typed blocks name the same text, so
-     each supersedes the other: after a turn that sent the whole carrier, the
-     session's latest copy of every block is inside that carrier, not in an
-     earlier block digest. *)
-  let supersedes (current : Session_store.held_context)
-      (previous : Session_store.held_context) =
-    match current.context, previous.context with
-    | Session_store.Context_carrier, Session_store.Context_block _
-    | Session_store.Context_block _, Session_store.Context_carrier ->
-      true
-    | current_context, previous_context -> current_context = previous_context
-  in
-  let held_context =
-    composed
-    @ List.filter
-        (fun previous ->
-           not (List.exists (fun current -> supersedes current previous) composed))
-        held
-  in
-  let prompt =
-    match String_util.trim_nonempty context with
-    | None -> goal
-    | Some context -> context ^ resume_section_separator ^ goal
-  in
-  { prompt; held_context }
-;;
-
-let last_tool_results messages =
-  messages
-  |> List.rev
-  |> List.find_map (fun (message : Agent_core.Types.message) ->
-    match message.role with
-    | Tool ->
-      Some
-        (List.filter_map
-           (function
-             | Agent_core.Types.ToolResult { content; content_blocks; outcome; _ } ->
-               Some (Agent_core.Types.tool_result_of_outcome ?content_blocks ~content outcome)
-             | _ -> None)
-           message.content)
-    | System | User | Assistant -> None)
-  |> Option.value ~default:[]
-;;
+include
+  (Keeper_official_client_context_projection :
+    module type of Keeper_official_client_context_projection
+      with type image_block := image_block
+       and type composed_context := composed_context
+       and type resume_delivery := resume_delivery
+       and type carried_summary := carried_summary
+)
 
 let hook_error ~runtime_label ~hook_name ~stage detail =
   internal_error
@@ -673,15 +384,15 @@ let continuity_observation_input ~trace_id ~continuity front =
    starts without a ledger too (RFC keeper-context-window-in-tokens §13.4).
 
    [own_first_atom] is the front the calling lane already chose for its own
-   reason — Antigravity cuts its start seed to the ceiling derived from its
-   window. A seed at or past that cut decides, even when it is
-   older than [turn_start]: the range the last answered request carried is
-   this lane's continuity, and the turn start is only where a lane with no
-   seed begins. Without a seed the range starts at the later of the lane's
-   cut and [turn_start]. A lane with no cut of its own passes 0; a history
-   with no completed turn has [turn_start] 0. The first request after a new
-   keeper or a purge therefore starts at the turn start, and its record seeds
-   the requests after it from that same atom.
+   reason — Claude Code and Codex cut their start seed to the capacity a typed
+   overflow narrowed the turn to. A seed at or past that cut decides, even
+   when it is older than [turn_start]: the range the last answered request
+   carried is this lane's continuity, and the turn start is only where a lane
+   with no seed begins. Without a seed the range starts at the later of the
+   lane's cut and [turn_start]. A lane with no cut of its own passes 0; a
+   history with no completed turn has [turn_start] 0. The first request after
+   a new keeper or a purge therefore starts at the turn start, and its record
+   seeds the requests after it from that same atom.
 
    Runs on the calling fiber: reading the seed opens the keeper's turn-record
    store, which takes an [Eio.Mutex], so it cannot run on a CPU-pool domain.
@@ -900,7 +611,7 @@ let carried_atoms (carried : carried_start) =
   - carried.projection.Runtime_model_input_tail_window.dropped_atoms
 ;;
 
-(* A carried range windowed at a declared ceiling.
+(* A carried range windowed at a capacity.
    [Runtime_model_input_tail_window.project_with_drop] charges the omission
    preamble up front, as the message it puts back whenever a cut lands on a
    non-[User] head. A range that already opens with one would pay for it
@@ -908,27 +619,18 @@ let carried_atoms (carried : carried_start) =
    fail at no drop and lose a whole quantum of atoms. So the preamble comes
    off before the window and goes back when the window dropped nothing: a
    range that fit goes exactly as it was cut, and a cut that did land puts
-   back its own. [source_projection] runs on the range as composed, preamble
-   and all, so what it records is what goes out; it appends after the range,
-   so a drop from the front reaches what it added only after every durable
-   atom went. *)
+   back its own. *)
 let window_carried_range
       ~measure_message_bytes
       ~capacity_bytes
       ~reserved_bytes
-      ?source_projection
       (carried : carried_start)
   =
-  let* projected =
-    match source_projection with
-    | None -> Ok carried.messages
-    | Some project -> project carried.messages
-  in
   let opened_with, input =
-    match projected with
+    match carried.messages with
     | head :: rest when Runtime_model_input_tail_window.is_synthetic_preamble head ->
       Some head, rest
-    | _ :: _ | [] -> None, projected
+    | _ :: _ | [] -> None, carried.messages
   in
   let* projection =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->
@@ -1110,13 +812,12 @@ let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
         | Error error -> leave_out (Does_not_fit error)))
 ;;
 
-(* Claude Code and a fresh Codex thread apply their declared ceiling before
-   choosing a carried front. The zero-history floor must survive that choice:
-   a seed would otherwise restore an atom the provider just refused. A
-   resumed Codex thread sends no history and never enters this function.
-   Antigravity composes its source projection before its single range window,
-   so it uses [window_carried_range] directly instead of this capacity-first
-   policy. *)
+(* Claude Code and a fresh Codex thread apply their capacity before choosing
+   a carried front. The zero-history floor must survive that choice: a seed
+   would otherwise restore an atom the provider just refused. A resumed Codex
+   thread sends no history and never enters this function. Antigravity and
+   Muse Code cut nothing, so they compose with [carried_start_range] and
+   [compose_librarian_range] directly. *)
 let start_range_projection
     ~measure_message_bytes ~capacity_bytes ~unbounded_capacity_bytes
     ~reserved_bytes ?on_model_input_window_observation ?carried_front_seed
@@ -1463,19 +1164,30 @@ let repeated_call_abort_threshold = 3
    a receipt that stamps a revision or a clock on every identical call
    ({!Keeper_tool_answer}). The shape tag keeps a text-only result, an answer
    and a block result from colliding on the same bytes. *)
-let dynamic_tool_fingerprint ~tool_name ~input result =
+let dynamic_tool_fingerprint ?base_path ~tool_name ~input result =
   let open Digestif.SHA256 in
   let context = feed_string empty tool_name in
   let context = feed_string context (input |> Yojson.Safe.sort |> Yojson.Safe.to_string) in
   let context = feed_string context (if result.success then "success" else "failure") in
   let context = match result.content_blocks with
     | None ->
-      (match Keeper_tool_answer.answer ~tool_name ~output_text:result.content with
+      (match Tool_output.decode_from_agent_core result.content with
+       | Tool_output.Decoded _ ->
+         (match Option.bind base_path (fun base_path ->
+            Keeper_tool_answer.verified_stored_answer ~base_path ~tool_name
+              ~output_text:result.content) with
+          | Some answer ->
+            feed_string
+              (feed_string context "answer")
+              (answer |> Yojson.Safe.sort |> Yojson.Safe.to_string |> digest_string |> to_hex)
+          | None -> feed_string (feed_string context "text-only") result.content)
+       | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+        (match Keeper_tool_answer.answer ~tool_name ~output_text:result.content with
        | Some answer ->
          feed_string
            (feed_string context "answer")
-           (answer |> Yojson.Safe.sort |> Yojson.Safe.to_string)
-       | None -> feed_string (feed_string context "text-only") result.content)
+           (answer |> Yojson.Safe.sort |> Yojson.Safe.to_string |> digest_string |> to_hex)
+       | None -> feed_string (feed_string context "text-only") result.content))
     | Some blocks ->
       feed_string
         (feed_string context "content-blocks")
@@ -1501,6 +1213,7 @@ let rec observe_repeated_call state fingerprint =
 type raw_trace_stage =
   | Run_start
   | Reasoning_effort
+  | Context_submission
   | Assistant_block
   | Tool_start
   | Tool_finish
@@ -1511,6 +1224,7 @@ type raw_trace_stage =
 let raw_trace_stage_label = function
   | Run_start -> "run_start"
   | Reasoning_effort -> "reasoning_effort"
+  | Context_submission -> "context_submission"
   | Assistant_block -> "assistant_block"
   | Tool_start -> "tool_start"
   | Tool_finish -> "tool_finish"
@@ -1522,6 +1236,8 @@ let raw_trace_stage_label = function
 let observe_raw_trace ~keeper_name ~stage observe =
   match
     try observe () with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+    | Eio.Time.Timeout as exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | (Out_of_memory | Stack_overflow | Sys.Break) as exn -> raise exn
     | exn -> Error (Agent_core.Error.Internal (Printexc.to_string exn))
@@ -1763,7 +1479,7 @@ let boundary_observation_cause error =
     }
 ;;
 
-let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_approval
+let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_input ~tool_approval
     ~runtime_label ~keeper_name
     ~turn_count ~context ~tools ~loading_plan
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
@@ -2022,7 +1738,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
             | Some _, _ | None, Some _ -> result
             | None, None ->
               let fingerprint =
-                dynamic_tool_fingerprint ~tool_name:tool.schema.name ~input result
+                dynamic_tool_fingerprint ?base_path ~tool_name:tool.schema.name ~input result
               in
               let repeated_count = observe_repeated_call repeated_call_state fingerprint in
               if repeated_count < repeated_call_abort_threshold then result
@@ -2092,7 +1808,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
   }
 ;;
 
-let dynamic_tools ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
+let dynamic_tools ?base_path ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
     ~keeper_name ~turn_count ~tools ~loading_plan
     ~hooks ~event_bus ~context_injector ~context ~terminal_effect_state
     ~terminal_error ~pre_tool_rejects
@@ -2111,6 +1827,7 @@ let dynamic_tools ~content_transport ~accepts_image_input ~tool_approval ~runtim
     Ok
       (List.map
          (dynamic_tool_of_agent_core
+            ~base_path
             ~content_transport
             ~accepts_image_input
             ~tool_approval

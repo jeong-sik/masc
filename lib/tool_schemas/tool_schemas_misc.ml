@@ -29,43 +29,6 @@ let web_fetch_schema : tool_schema = Tool_schemas_misc_toml.web_fetch
 
 let web_schemas = [ web_search_schema; web_fetch_schema ]
 
-(* MSX lane (RFC-0439 §3.5): one machine per workspace, keys from the TUI and
-   from keepers. Deferred in their TOML so the schemas ride a request only
-   once a model names one. *)
-let msx_schemas : tool_schema list =
-  [ Tool_schemas_misc_toml.msx_load
-  ; Tool_schemas_misc_toml.msx_eject
-  ; Tool_schemas_misc_toml.msx_save
-  ; Tool_schemas_misc_toml.msx_restore
-  ; Tool_schemas_misc_toml.msx_change_disk
-  ; Tool_schemas_misc_toml.msx_screen
-  ; Tool_schemas_misc_toml.msx_meta
-  ; Tool_schemas_misc_toml.msx_checkpoint_info
-  ; Tool_schemas_misc_toml.msx_press
-  ; Tool_schemas_misc_toml.msx_step
-  ; Tool_schemas_misc_toml.msx_step_until_change
-  ; Tool_schemas_misc_toml.msx_peek
-  ; Tool_schemas_misc_toml.msx_ram_diff
-  ]
-
-(* DOS lane: the same shape for a second machine. Time is instructions rather
-   than frames, and the machine says when it wants a key instead of the lane
-   guessing a settled screen. *)
-let dos_schemas : tool_schema list =
-  [ Tool_schemas_misc_toml.dos_load
-  ; Tool_schemas_misc_toml.dos_meta
-  ; Tool_schemas_misc_toml.dos_inventory
-  ; Tool_schemas_misc_toml.dos_eject
-  ; Tool_schemas_misc_toml.dos_screen
-  ; Tool_schemas_misc_toml.dos_step
-  ; Tool_schemas_misc_toml.dos_press
-  ; Tool_schemas_misc_toml.dos_click
-  ; Tool_schemas_misc_toml.dos_type
-  ; Tool_schemas_misc_toml.dos_peek
-  ; Tool_schemas_misc_toml.dos_pass
-  ; Tool_schemas_misc_toml.dos_save
-  ; Tool_schemas_misc_toml.dos_restore
-  ]
 let browser_tabs_schema : tool_schema = Tool_schemas_misc_toml.browser_tabs
 let browser_read_schema : tool_schema = Tool_schemas_misc_toml.browser_read
 
@@ -103,8 +66,9 @@ let lane_addon_schemas : tool_schema list =
   ]
 
 let schemas : tool_schema list =
-  lane_addon_schemas @ msx_schemas @ dos_schemas
-  @ [ Tool_schemas_misc_toml.portrait_read
+  lane_addon_schemas
+  @ [ Tool_schemas_misc_toml.play_room
+    ; Tool_schemas_misc_toml.portrait_read
     ; Tool_schemas_misc_toml.candle_balance
     ; Tool_schemas_misc_toml.candle_catalog
     ; Tool_schemas_misc_toml.candle_purchase
@@ -191,6 +155,7 @@ type misc_operation =
   | Misc_browser_instruct
   | Misc_msx_load
   | Misc_msx_eject
+  | Misc_msx_export_disk
   | Misc_msx_save
   | Misc_msx_restore
   | Misc_msx_change_disk
@@ -218,6 +183,7 @@ type misc_operation =
   | Misc_dos_click
   | Misc_dos_type
   | Misc_dos_peek
+  | Misc_play_room
   | Misc_dos_pass
   | Misc_dos_save
   | Misc_dos_restore
@@ -238,6 +204,7 @@ let dos_controller_need = function
   | Misc_dos_type | Misc_dos_restore ->
     Takes_controller
   | Misc_dos_pass -> Hands_controller
+  | Misc_play_room
   | Misc_lane_declaration_read | Misc_lane_declaration_save | Misc_lane_updates
   | Misc_lane_attach | Misc_lane_inspect | Misc_lane_observe | Misc_lane_slice
   | Misc_lane_detach | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status
@@ -245,7 +212,7 @@ let dos_controller_need = function
   | Misc_gc | Misc_keeper_waiting_inventory | Misc_tool_help | Misc_web_fetch
   | Misc_web_search | Misc_browser_tabs | Misc_browser_read | Misc_browser_session
   | Misc_browser_goto | Misc_browser_act | Misc_browser_interact
-  | Misc_browser_instruct | Misc_msx_load | Misc_msx_eject | Misc_msx_save
+  | Misc_browser_instruct | Misc_msx_load | Misc_msx_eject | Misc_msx_export_disk | Misc_msx_save
   | Misc_msx_restore | Misc_msx_change_disk | Misc_msx_screen | Misc_msx_meta
   | Misc_msx_checkpoint_info | Misc_msx_press
   | Misc_msx_step | Misc_msx_step_until_change | Misc_msx_peek | Misc_msx_ram_diff
@@ -284,6 +251,7 @@ let misc_tool_name = function
   | Misc_browser_instruct -> "masc_browser_instruct"
   | Misc_msx_load -> "masc_msx_load"
   | Misc_msx_eject -> "masc_msx_eject"
+  | Misc_msx_export_disk -> "masc_msx_export_disk"
   | Misc_msx_save -> "masc_msx_save"
   | Misc_msx_restore -> "masc_msx_restore"
   | Misc_msx_change_disk -> "masc_msx_change_disk"
@@ -311,6 +279,7 @@ let misc_tool_name = function
   | Misc_dos_click -> "masc_dos_click"
   | Misc_dos_type -> "masc_dos_type"
   | Misc_dos_peek -> "masc_dos_peek"
+  | Misc_play_room -> "masc_play_room"
   | Misc_dos_pass -> "masc_dos_pass"
   | Misc_dos_save -> "masc_dos_save"
   | Misc_dos_restore -> "masc_dos_restore"
@@ -328,6 +297,34 @@ let misc_operation_of_tool_name value =
    missing refuses the boot rather than registering a partial surface. *)
 let misc_registered_schema operation : tool_schema option =
   match operation with
+  | Misc_msx_load
+  | Misc_msx_eject
+  | Misc_msx_export_disk
+  | Misc_msx_save
+  | Misc_msx_restore
+  | Misc_msx_change_disk
+  | Misc_msx_screen
+  | Misc_msx_meta
+  | Misc_msx_checkpoint_info
+  | Misc_msx_press
+  | Misc_msx_step
+  | Misc_msx_step_until_change
+  | Misc_msx_peek
+  | Misc_msx_ram_diff
+  | Misc_dos_load
+  | Misc_dos_meta
+  | Misc_dos_inventory
+  | Misc_dos_eject
+  | Misc_dos_screen
+  | Misc_dos_step
+  | Misc_dos_press
+  | Misc_dos_click
+  | Misc_dos_type
+  | Misc_dos_peek
+  | Misc_play_room
+  | Misc_dos_pass
+  | Misc_dos_save
+  | Misc_dos_restore
   | Misc_web_fetch
   | Misc_web_search
   | Misc_browser_tabs
@@ -345,38 +342,12 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_lane_evidence
   | Misc_lane_act
   | Misc_lane_action_status
-  | Misc_msx_load
-  | Misc_msx_eject
-  | Misc_msx_save
-  | Misc_msx_restore
-  | Misc_msx_change_disk
-  | Misc_msx_screen
-  | Misc_msx_meta
-  | Misc_msx_checkpoint_info
-  | Misc_msx_press
-  | Misc_msx_step
-  | Misc_msx_step_until_change
-  | Misc_msx_peek
-  | Misc_msx_ram_diff
   | Misc_portrait_read
   | Misc_candle_balance
   | Misc_candle_catalog
   | Misc_candle_purchase
   | Misc_candle_equip
   | Misc_candle_gift
-  | Misc_dos_load
-  | Misc_dos_meta
-  | Misc_dos_inventory
-  | Misc_dos_eject
-  | Misc_dos_screen
-  | Misc_dos_step
-  | Misc_dos_press
-  | Misc_dos_click
-  | Misc_dos_type
-  | Misc_dos_peek
-  | Misc_dos_pass
-  | Misc_dos_save
-  | Misc_dos_restore
   | Misc_ask
   | Misc_ask_status
   | Misc_ask_withdraw

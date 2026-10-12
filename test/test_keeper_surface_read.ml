@@ -33,7 +33,6 @@ let msg ~ts ?lane ?speaker ~role content : Store.chat_message =
     audio = None;
     blocks = None;
     mentions = [];
-    kind = Store.Row_kind.Utterance;
     turn_ref = None;
     stream_lifecycle = None;
     approval_lifecycle = None;

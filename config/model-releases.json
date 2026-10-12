@@ -14,17 +14,6 @@
     },
     {
       "publisher": "anthropic",
-      "model_id": "claude-opus-5",
-      "release": {
-        "status": "official_release",
-        "released_on": "2026-07-24",
-        "kind": "general_availability",
-        "source_url": "https://www.anthropic.com/news/claude-opus-5",
-        "checked_on": "2026-09-10"
-      }
-    },
-    {
-      "publisher": "anthropic",
       "model_id": "claude-opus-5-5",
       "release": {
         "status": "official_release",
@@ -43,6 +32,17 @@
         "kind": "general_availability",
         "source_url": "https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
         "checked_on": "2026-09-29"
+      }
+    },
+    {
+      "publisher": "anthropic",
+      "model_id": "claude-haiku-5-5",
+      "release": {
+        "status": "official_release",
+        "released_on": "2026-10-07",
+        "kind": "general_availability",
+        "source_url": "https://platform.claude.com/docs/en/models/haiku-5-5/overview",
+        "checked_on": "2026-10-08"
       }
     },
     {

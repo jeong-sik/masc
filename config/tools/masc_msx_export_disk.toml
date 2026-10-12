@@ -1,0 +1,10 @@
+name = "masc_msx_export_disk"
+description = """Export the currently mounted floppy, including in-game saves, to a NEW .dsk in the MSX carts catalog. Never overwrites existing media, advances time, or changes the mounted disk. Use after the game finishes writing its data disk and before swapping it out. Returns filename, byte_length, SHA-256, source disk and frame. A checkpoint preserves CPU state; this export preserves disk bytes for loading after a fresh boot. Requires an existing real catalog directory."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "filename"
+type = "string"
+required = true
+description = "New catalog filename: 1..64 ASCII letters, digits, underscores or hyphens, followed by .dsk. No paths and no overwrite."

@@ -4,6 +4,7 @@
 type read_error =
   | Chat_store_unreadable of string
   | External_attention_unreadable of Keeper_external_attention.read_error
+  | External_cursor_failed of string
 
 val read_error_to_string : read_error -> string
 
@@ -36,3 +37,10 @@ val goal_context_for_task
   :  config:Workspace.config
   -> Keeper_id.Task_id.t option
   -> Keeper_librarian.goal_context
+
+val counterpart_observations_from : external_after:int -> base_dir:string -> keeper_name:string ->
+  after:float option -> before:float -> (Keeper_counterpart_observation.t list * int, read_error) result
+(** External rows follow durable append order from [external_after] and stop
+    at the first row admitted after [before]; chat rows retain their existing
+    turn-time interval. Both are interleaved by time without reordering the
+    external rows. The returned count is the external snapshot boundary. *)

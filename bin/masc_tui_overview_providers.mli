@@ -1,6 +1,9 @@
 (** The Usage surface's Plan usage section: one card per provider account.
-    Each card labels the reported used percentage and the window's role,
+    Each card labels the reported percentage or USD amount and the window's role,
     says when it resets, and shows the last report time beside every window.
+
+    USD amounts describe the named window and its cap, not an inferred account
+    balance.
 
     A summary separates full last-reported limits from catalogue-observed
     blocking. Shaded meter cells show the unused part of the reported limit.

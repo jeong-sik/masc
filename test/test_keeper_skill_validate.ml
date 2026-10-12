@@ -97,7 +97,7 @@ let model_sees_verdict ~base_path (result : Keeper_tool_execution.t) data =
     check bool "model reads the rejection code" true (contains message code)
 ;;
 
-let with_fixture f =
+let with_fixture ?(tool_deny = []) f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = Filename.temp_dir "keeper-skill-validate-" "" in
@@ -121,6 +121,12 @@ let with_fixture f =
       Masc_test_deps.init_unified_tool_registry ();
       let meta = Masc_test_deps.meta_of_json_fixture
           (`Assoc [ "name", `String "skill-author" ]) |> require "Keeper fixture" in
+      let skill_snapshot = Skill_catalog_snapshot.config_unreadable ~detail:"fixture" in
+      let surface = Keeper_capability_surface.create
+        ~tool_deny ~sandbox_profile:meta.sandbox_profile ~skill_names:None
+        ~global_skill_catalog:Keeper_skill_catalog.empty
+        ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
+        ~task_skills:[] in
       let context : Keeper_tool_runtime.context =
         { config; meta
         ; publication_recovery =
@@ -131,7 +137,7 @@ let with_fixture f =
         ; net = None; mcp_session_id = None; continuation_channel = None
         ; gate_context = None; turn_ref = None; gate_grant = None; tool_use_id = None; trace_id = None
         ; result_projection = None
-        ; capability_authority = Keeper_tool_runtime.Compatibility_meta }
+        ; capability_authority = Keeper_tool_runtime.Frozen_surface surface }
       in
       let descriptor =
         match Keeper_tool_runtime.descriptor_for_internal "keeper_skill_validate" with
@@ -216,6 +222,11 @@ let test_composition () = with_fixture @@ fun artifact call ->
   artifact (composition "nonexistent_tool") |> args |> call |> failed "composition_rejected"
 ;;
 
+let test_denied_node () =
+  with_fixture ~tool_deny:["keeper_lane_status"] @@ fun artifact call ->
+  artifact (composition "keeper_lane_status") |> args |> call |> failed "composition_rejected"
+;;
+
 let test_invalid_document () = with_fixture @@ fun artifact call ->
   artifact "---\ndescription: Name is required.\n---\nBody\n" |> args |> call
   |> failed "definition_rejected";
@@ -258,6 +269,7 @@ let () =
     [ "public artifact validation",
       [ test_case "instruction without publication" `Quick test_instruction
       ; test_case "composition uses the canonical plan validator" `Quick test_composition
+      ; test_case "denied node cannot validate" `Quick test_denied_node
       ; test_case "invalid document and package mismatch" `Quick test_invalid_document
       ; test_case "invalid request" `Quick test_invalid_request
       ; test_case "shared authoring size limit" `Quick test_size_limit

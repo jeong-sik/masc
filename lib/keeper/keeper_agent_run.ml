@@ -51,7 +51,7 @@ let response_policy_for_turn ~turn_kind ~input_speaker
       | Schedule_due wake -> Option.is_none wake.result_delivery
       | Board_post_created | Board_post_updated | Board_comment_added _
       | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
-      | Delegate_completed | Ask_answered_row _ | Composition_completed
+      | Delegate_completed _ | Ask_answered_row _ | Composition_completed
       | External_attention _ | Completion_authority_rejected _
       | Task_outcome _ | Task_cancelled _ -> false in
     if observation.pending_messages = []
@@ -61,28 +61,17 @@ let response_policy_for_turn ~turn_kind ~input_speaker
   | (Direct | Autonomous), _, _, _ -> Require_progress
 ;;
 
-let normalize_response_text_for_finalization
-      ?(response_policy = Keeper_tooling.Response.Require_progress)
-      ~runtime_id
-      ~initial_messages:_
-      ~(run_result : Runtime_agent.run_result)
-      ~text
-      ~tool_names
-      ()
-  =
-  match run_result.stop_reason with
-  | Runtime_agent.Yielded_to_operation_queued _
-  | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Yielded_after_repeated_tool_call _
-  | Runtime_agent.Yielded_after_repeated_assistant_text _
-  | Runtime_agent.Completed
-  | Runtime_agent.InputRequired _ ->
-  if
-    Keeper_agent_run_response_text.stop_reason_suppresses_visible_response
-      run_result.stop_reason
-  then Ok ""
-  else
-    match Keeper_tooling.Response.normalize_response_text ~text ~tool_names () with
+(* Accept lets a quiet final through; finalization must agree or the turn
+   settles a typed no-progress error after the runtime already accepted the
+   response. The quiet fallback below is the one place a blank final becomes
+   the settlement, and it is also where the quiet-final gauge fires, so the
+   metric counts accepted-and-settled quiet turns exactly once. *)
+let normalize_final_response_text ~response_policy ~keeper_name ~runtime_id
+    ~(run_result : Runtime_agent.run_result) ~text ~tool_names () =
+  match
+    Keeper_turn_response_contract.normalize_response_text_for_finalization
+      ~runtime_id ~run_result ~text ~tool_names ()
+  with
   | Ok response_text -> Ok response_text
   | Error _ when
       (match run_result.stop_reason with
@@ -91,15 +80,13 @@ let normalize_response_text_for_finalization
            ~policy:response_policy run_result.response
        | InputRequired _ | Yielded_to_operation_queued _
        | Yielded_to_durable_stimulus _ | Yielded_after_repeated_tool_call _
-       | Yielded_after_repeated_assistant_text _ -> false) -> Ok ""
-  | Error _ ->
-    (* Finalization exposes the typed accept-rejected response itself. Tool
-       execution history stays in the AGENT_CORE checkpoint; it is not projected into
-       a read/mutating behavioral classification. *)
-    Error
-      (Keeper_turn_driver_try_provider.accept_rejected_error
-         ~runtime_id
-         ~response:run_result.response)
+       | Yielded_after_repeated_assistant_text _ -> false) ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string QuietFinals)
+      ~labels:[ "keeper", keeper_name; "runtime", runtime_id ]
+      ();
+    Ok ""
+  | Error error -> Error error
 ;;
 
 (* AGENT_CORE raw-trace sink for keeper turns: parsed Run_started / Assistant_block /
@@ -381,7 +368,7 @@ let repeated_tool_call_input ~threshold tool_calls =
    scope contributes only its latched observation failure; it is not what
    makes the boundary exist (#34083). *)
 let official_client_tool_boundary
-      ~repetition_execution ~tool_calls () =
+      ~repetition_execution ~tool_calls ~input_tool_calls () =
   match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
   | Some error ->
     Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
@@ -393,7 +380,7 @@ let official_client_tool_boundary
         | Some _ as repeated -> repeated
         | None ->
           repeated_tool_call_input
-            ~threshold:repeated_tool_call_input_yield_threshold tool_calls
+            ~threshold:repeated_tool_call_input_yield_threshold input_tool_calls
       in
       Ok (Option.map (fun (tool_name, repeated_count) ->
         Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
@@ -678,6 +665,7 @@ let native_tool_boundary
       ~repetition_execution
       ~terminal_effect_state
       ~tool_calls
+      ~input_tool_calls
       ~assistant_turn_texts
       ~yield_requested
   =
@@ -715,7 +703,7 @@ let native_tool_boundary
                  repeated_tool_call_input
                    ~threshold:
                      repeated_tool_call_input_yield_threshold
-                   tool_calls
+                   input_tool_calls
                with
                | Some (tool_name, repeated_count) ->
                  Log.Keeper.warn
@@ -797,9 +785,8 @@ module For_testing = struct
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
   let progress_keeper_tool_names_for_contract =
     Contract_helpers.progress_keeper_tool_names_for_contract
-  let normalize_response_text_for_finalization =
-    normalize_response_text_for_finalization
   let response_policy_for_turn = response_policy_for_turn
+  let normalize_final_response_text = normalize_final_response_text
   let keeper_raw_trace_sink = keeper_raw_trace_sink
   let raw_trace_for_dispatch = raw_trace_for_dispatch
   let prune_raw_traces_after_turn_record = prune_raw_traces_after_turn_record
@@ -1244,6 +1231,10 @@ let run_turn
   | Error e ->
     Keeper_agent_result.not_dispatched e
   | Ok s ->
+    let approval_gate = Option.map
+      (fun (gate : Keeper_tool_approval_gate.t) ->
+        { gate with identity_tool_index = s.Keeper_run_tools.identity_tool_index })
+      approval_gate in
     let original_gate_message = user_message in
     let prepared_gate_input = s.Keeper_run_tools.model_message in
     let user_message = prepared_gate_input.text in
@@ -1618,23 +1609,57 @@ let run_turn
           how the error path below knows the turn ran on an official client. *)
        let last_dispatched_checkpoint_owner = ref None in
        let turn_result =
-         (* A repetition yield is the judgment on the calls it saw. On the
-            lane seeded from the checkpoint history, record where those
-            calls end so the next seed starts past them; the checkpoint
-            AGENT_CORE takes after this probe carries the record. A
-            scope-bound lane has no history count and records nothing. *)
+         (* A repetition yield advances the two source positions independently.
+            The current Agent Core checkpoint owns the history coordinate;
+            committed ledger appends own the other. Direct scopes record their
+            own observations and do not move this autonomous boundary. *)
          let record_repetition_judged () =
            match s.acc.history_pairs_at_setup with
-           | Some history_pairs_at_setup ->
-             Keeper_repetition_judged.record shared_context
-               (Keeper_repetition_judged.pairs_judged_by ~history_pairs_at_setup
-                  s.acc.tool_calls)
            | None -> ()
+           | Some history_pairs_at_setup ->
+             (match Keeper_repetition_judged.read shared_context with
+              | Error error -> Log.Keeper.warn ~keeper_name:meta.name "%s"
+                  (Keeper_repetition_judged.error_to_string error)
+              | Ok previous ->
+                let history_pairs = match !agent_ref, !last_dispatched_checkpoint_owner with
+                  | Some agent, _ ->
+                    (* The Agent Core checkpoint is the persisted history, and
+                       an Agent Core attempt that ran tools before failing over
+                       to an official client still left its pairs there. The
+                       run accumulator also holds the official-client attempts,
+                       so only the checkpoint's own pairs move the boundary. *)
+                    let checkpoint = Agent_core.Agent.checkpoint agent in
+                    Keeper_run_tools_setup.initial_tool_calls
+                      ~base_path:config.base_path
+                      ~history_memo:(Keeper_tool_progress_identity.history_memo
+                        ~base_path:config.base_path ~keeper_name:meta.name)
+                      ~history_messages:checkpoint.messages ()
+                    |> List.length
+                  | None, Some Runtime_execution.Masc_agent_core ->
+                    Log.Keeper.warn ~keeper_name:meta.name
+                      "repetition history judgment retained: dispatched agent is unavailable";
+                    history_pairs_at_setup
+                  | None, (Some Runtime_execution.Official_client | None) ->
+                    history_pairs_at_setup in
+                let frontier =
+                  match Keeper_run_tools_setup.flush_ledger () with
+                  | Error detail -> Error detail
+                  | Ok () -> Keeper_tool_call_log.current_frontier ~keeper_name:meta.name
+                      |> Result.map_error (function Keeper_tool_call_log.Index_unavailable detail -> detail) in
+                let ledger_frontier = match frontier with
+                  | Ok frontier -> frontier
+                  | Error detail ->
+                    Log.Keeper.warn ~keeper_name:meta.name
+                      "repetition ledger judgment was not advanced: %s" detail;
+                    previous.ledger_frontier in
+                Keeper_repetition_judged.record shared_context
+                  { previous with history_pairs = max previous.history_pairs history_pairs; ledger_frontier })
          in
          let on_official_client_tool_boundary () =
            match
              official_client_tool_boundary ~repetition_execution
                ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
+               ~input_tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_input_repetition s.acc)
                ()
            with
            | Ok (Some (Keeper_official_client_host.Repeated_tool_call _)) as stop ->
@@ -1656,6 +1681,7 @@ let run_turn
                        ~repetition_execution
                        ~terminal_effect_state:(s.terminal_effect_state ())
                        ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
+                       ~input_tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_input_repetition s.acc)
                        ~assistant_turn_texts:s.acc.assistant_turn_texts
                        ~yield_requested
                    with
@@ -1781,6 +1807,7 @@ let run_turn
                 dispatch_input
                   ~dispatch:(fun ~checkpoint initial_messages ->
                     Keeper_turn_driver.run_named
+                      ~on_memory_capacity_refusal:s.Keeper_run_tools.on_memory_capacity_refusal
                       ~input_policy:meta.input_policy
                       ~runtime_id:(match native_resume with
                         | None -> runtime_id_string
@@ -1823,7 +1850,8 @@ let run_turn
                       ?on_deferred_runtime_consumed
                       ~temperature
                       ~accept:
-                        (Keeper_tooling.Response.accepts_response ~policy:response_policy)
+                        (Keeper_tooling.Response.accepts_response
+                           ~policy:response_policy)
                       ?on_event
                       ~on_yield
                       ~on_resume
@@ -1917,16 +1945,7 @@ let run_turn
                           ~keeper_name:meta.name
                           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id))
                       ~official_client_composed_context:(fun () ->
-                        match
-                          acc.Keeper_run_tools.extra_system_context_digest,
-                          acc.Keeper_run_tools.extra_system_context_blocks
-                        with
-                        | Some carrier_sha256, Some blocks ->
-                          Some
-                            { Keeper_official_client_host.carrier_sha256
-                            ; blocks
-                            }
-                        | None, _ | Some _, None -> None)
+                        acc.Keeper_run_tools.extra_system_context_assembly)
                       ~on_request_attribution:
                         (fun ~runtime_id ~tools ~transmitted ->
                            (* Official-client lanes send their requests
@@ -2015,6 +2034,30 @@ let run_turn
                                      ~messages:provider_content
                                  | Some (Error _) | None ->
                                    Keeper_projection_change.Request_not_digested))
+                      ?on_child_content_observation:
+                        (Option.map
+                           (fun observe ~attempt observation ->
+                              observe (Keeper_hooks_agent_core.Child_content_observed
+                                {attempt; observation}))
+                           on_tool_stream_observation)
+                      ?on_native_task_observation:
+                        (Option.map
+                           (fun observe ~attempt bound ->
+                              observe (Keeper_hooks_agent_core.Native_task_observed
+                                {attempt; bound}))
+                           on_tool_stream_observation)
+                      ?on_native_tool_progress:
+                        (Option.map
+                           (fun observe ~block_index ~tool_call_id progress ->
+                              observe (Keeper_hooks_agent_core.Native_tool_progress
+                                {block_index; tool_call_id; progress}))
+                           on_tool_stream_observation)
+                      ?on_native_tool_completion:
+                        (Option.map
+                           (fun observe ~block_index ~tool_call_id completion ->
+                              observe (Keeper_hooks_agent_core.Native_tool_completion
+                                {block_index; tool_call_id; completion}))
+                           on_tool_stream_observation)
                       ?on_tool_execution:
                         (Option.map
                            (fun observe ~block_index ~tool_call_id ~execution_id ->
@@ -2157,10 +2200,10 @@ let run_turn
                          (Keeper_contract_classifier.of_keeper_world_observation obs))
                      world_observation;
                      (match
-                        normalize_response_text_for_finalization
+                        normalize_final_response_text
                           ~response_policy
+                          ~keeper_name:meta.name
                           ~runtime_id:selected_runtime_id
-                          ~initial_messages:history_messages
                           ~run_result:result
                           ~text
                           ~tool_names:actual_keeper_tool_names

@@ -1276,10 +1276,7 @@ export type TurnTranscriptLine = {
   role: string
   content: string
   ts?: number
-  // Writer-declared row kind; present (e.g. 'transport_failure') only on
-  // non-utterance assistant rows so the inspector can mark a failed reply
-  // distinctly rather than quoting it as the keeper's own words.
-  kind?: string
+
 }
 
 export type TurnTranscript = {
@@ -1299,7 +1296,6 @@ function decodeTurnTranscriptLine(raw: unknown): TurnTranscriptLine | null {
     role,
     content: asString(raw.content) ?? '',
     ts: asNumber(raw.ts),
-    kind: asString(raw.kind),
   }
 }
 

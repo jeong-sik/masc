@@ -4,6 +4,7 @@
  (name dos_lane)
  (public_name masc.dos_lane)
  (libraries
+  unix
   ocaml-dos.dosmachine
   ocaml-dos.cpu86core
   ocaml-dos.core-identity

@@ -829,6 +829,8 @@ let forget_recall (state : state) =
   state.msg_recall_draft <- ("", [], [], None)
 
 let clear_keeper_history_projection state =
+  retire_keeper_message_search state;
+  state.msg_find_at <- None;
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_history_inflight <- None;
   state.msg_copy_generation <- state.msg_copy_generation + 1;
@@ -848,6 +850,7 @@ let clear_keeper_history_projection state =
 let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
     ?(remember_home_chat = true) state
     keeper_name ~drain_queue =
+  retire_keeper_message_search state;
   state.keeper_navigation_open <- false;
   (* The paste goes back into the draft before the draft is put away. A spill
      lives with the composer; a saved draft has to stand on its own, and a
@@ -927,26 +930,6 @@ let clear_current_message_draft state =
   Masc_tui_message_input.clear state.msg_input;
   discard_recovered_paste_lock state;
   save_message_draft state
-
-let consume_dispatched_message_draft state request =
-  state.msg_drafts <-
-    List.filter
-      (fun ((workspace, keeper_name), draft) ->
-        not
-          (workspace = workspace_input_identity_of_server state.server_identity
-           && String.equal keeper_name request.Keeper_chat.keeper_name
-           && String.equal draft.kcd_text request.message
-           && draft.kcd_attachments = request.attachments
-           && draft.kcd_references = request.references))
-      state.msg_drafts;
-  match state.msg_target_keeper_name with
-  | Some keeper_name
-    when String.equal keeper_name request.Keeper_chat.keeper_name
-         && String.equal (Masc_tui_message_input.contents state.msg_input) request.message
-         && state.msg_attachments = [] && state.msg_references = []
-         && not (recovered_paste_send_locked state) ->
-      clear_current_message_draft state
-  | Some _ | None -> save_message_draft state
 
 (** Handle local editing keys for message mode. Network submission is injected
     so the input path never owns a blocking HTTP effect. *)
@@ -1221,6 +1204,12 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Masc_tui_message_input.insert state.msg_input completed;
     state.msg_command_menu <- Masc_tui_command.Menu_dismissed completed;
     true in
+  let move_recall move =
+    let was_editing = Option.is_some state.msg_recall_replaces in
+    move state;
+    if was_editing && Option.is_none state.msg_recall_replaces
+    then drain_queue ()
+  in
   match key with
   (* Esc cancels the innermost thing, and a running capture is inside
      everything else here: the operator is mid-utterance, not mid-turn. ^Y
@@ -1316,13 +1305,10 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   | "down" when slash_navigable () -> apply_autocomplete Masc_tui_command.Next
   | "up" when slash_navigable () -> apply_autocomplete Masc_tui_command.Prev
   | "up" ->
-    recall_older state;
+    move_recall recall_older;
     true
   | "down" ->
-    let was_editing = Option.is_some state.msg_recall_replaces in
-    recall_newer state;
-    if was_editing && Option.is_none state.msg_recall_replaces
-    then drain_queue ();
+    move_recall recall_newer;
     true
   | "wheel-up" ->
     (* A notch is worth more than a row. The wheel used to arrive as the arrow
@@ -1465,7 +1451,8 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          forget_queued_history state request;
          report_action state "info"
            (Printf.sprintf "Cancelled queued message to %s"
-              (Keeper_chat.terminal_safe_text request.Keeper_chat.keeper_name)));
+              (Keeper_chat.terminal_safe_text request.Keeper_chat.keeper_name));
+         drain_queue ());
       true
     end else if c = Some 16 then begin
       (* Ctrl-P: pull the newest waiting line back into the composer. That is
@@ -1551,6 +1538,76 @@ type msx_poll_state = Poll_ready of Masc_tui_msx_tick.poll_policy
   | Poll_observing of msx_poll_request * Masc_tui_msx_tick.refusal
 let msx_pending_poll = ref (Poll_ready Advancing)
 let invalidate_msx_poll () = msx_poll_view := ref ()
+type pending_msx_checkpoint = {
+  checkpoint_operation_id : string;
+  checkpoint_restore : bool;
+  checkpoint_slot : string;
+  checkpoint_workspace : Tui_decode.server_identity;
+}
+module Checkpoint_pending = Masc_tui_msx_checkpoint_pending
+let pending_msx_checkpoints : pending_msx_checkpoint list ref = ref []
+let checkpoint_storage_errors : (string, string) Hashtbl.t = Hashtbl.create 4
+let checkpoint_root workspace = Masc_tui_types.canonical_path workspace.Tui_decode.sid_masc_root
+let checkpoint_binding pending =
+  Result.map (fun operation_id ->
+    {Checkpoint_pending.operation_id; restore=pending.checkpoint_restore; slot=pending.checkpoint_slot;
+     base_path=Masc_tui_types.canonical_path pending.checkpoint_workspace.sid_base_path;
+     masc_root=checkpoint_root pending.checkpoint_workspace})
+    (Keeper_operation_id.of_string pending.checkpoint_operation_id)
+let recover_checkpoints state workspace =
+  let root = checkpoint_root workspace in
+  let base_path = Masc_tui_types.canonical_path workspace.Tui_decode.sid_base_path in
+  (* Other TUI processes can publish an unresolved intent after our first read.
+     Read the shared inventory on every write-admission check. *)
+  if Result.is_ok (Masc_tui_types.workspace_change_origin state) then
+    match Checkpoint_pending.load ~masc_root:root with
+    | Error detail ->
+        Hashtbl.replace checkpoint_storage_errors root detail;
+        state.msx_notice <- Some ("Checkpoint intent storage unavailable; machine changes blocked: " ^ detail)
+    | Ok bindings ->
+        let recovered = List.map (fun (binding : Checkpoint_pending.binding) ->
+          {checkpoint_operation_id=Keeper_operation_id.to_string binding.operation_id;
+           checkpoint_restore=binding.restore; checkpoint_slot=binding.slot;
+           checkpoint_workspace={workspace with sid_base_path=binding.base_path; sid_masc_root=binding.masc_root}})
+          (List.filter (fun (binding : Checkpoint_pending.binding) -> binding.base_path=base_path) bindings) in
+        pending_msx_checkpoints := recovered @ List.filter (fun pending ->
+          Masc_tui_types.canonical_path pending.checkpoint_workspace.sid_base_path <> base_path
+          || checkpoint_root pending.checkpoint_workspace <> root) !pending_msx_checkpoints;
+        Hashtbl.remove checkpoint_storage_errors root;
+        if recovered <> [] then
+          state.msx_notice <- Some "Unresolved checkpoint recovered; F5 inspects its original receipt before machine control resumes."
+let checkpoint_for_workspace state =
+  match state.server_identity with
+  | None -> None
+  | Some workspace ->
+      recover_checkpoints state workspace;
+      List.find_opt (fun pending ->
+        Masc_tui_types.canonical_path pending.checkpoint_workspace.sid_base_path =
+          Masc_tui_types.canonical_path workspace.sid_base_path
+        && checkpoint_root pending.checkpoint_workspace = checkpoint_root workspace)
+        !pending_msx_checkpoints
+let remember_checkpoint pending =
+  let root = checkpoint_root pending.checkpoint_workspace in
+  match checkpoint_binding pending with
+  | Error detail -> Error detail
+  | Ok binding ->
+      (match Checkpoint_pending.remember ~masc_root:root binding with
+       | Error detail -> Error detail
+       | Ok () -> pending_msx_checkpoints := pending :: !pending_msx_checkpoints; Ok ())
+let forget_checkpoint pending =
+  let root = checkpoint_root pending.checkpoint_workspace in
+  match Result.bind (checkpoint_binding pending) (Checkpoint_pending.forget ~masc_root:root) with
+  | Error detail -> Hashtbl.replace checkpoint_storage_errors root detail
+  | Ok () ->
+      Hashtbl.remove checkpoint_storage_errors root;
+      pending_msx_checkpoints := List.filter (fun held ->
+        held.checkpoint_operation_id <> pending.checkpoint_operation_id
+        || checkpoint_root held.checkpoint_workspace <> root) !pending_msx_checkpoints
+let machine_changes_allowed state =
+  Result.is_ok (Masc_tui_types.workspace_change_origin state)
+  && Option.is_none (checkpoint_for_workspace state)
+  && not (Option.exists (fun workspace -> Hashtbl.mem checkpoint_storage_errors (checkpoint_root workspace)) state.server_identity)
+let machine_change_refusal = "MSX control requires a verified server matching this TUI's local workspace."
 type lane_addons_slice_source = Cached_snapshot | Fresh_inventory
 let decode_play_mutation decode = function
   | Masc_tui_http.Post_answered json -> Play_answered (decode json)
@@ -1591,22 +1648,36 @@ let same_workspace_identity expected current =
    reply after the server changed workspace, including A -> B -> A. *)
 let workspace_enqueue state =
   let authority = state.workspace_authority in
-  fun mailbox message -> enqueue_async mailbox (Workspace_scoped (authority, message))
+  let reading = if server_authority_ready state then Some state.workspace_read_authority else None in
+  fun mailbox message -> enqueue_async mailbox (Workspace_scoped (authority, reading, message))
 
-let check_workspace_request ?schedule_form_action state ~mailbox ~authority ~identity ~host ~port () =
+let check_workspace_request ?schedule_form_action ?refresh_ticket
+    ?(prior_contact = Masc_tui_server_lifecycle.Nothing_answered) state ~mailbox ~authority ~identity ~host ~port () =
+  let refresh_ticket = Option.value refresh_ticket ~default:state.http_refresh_order in
   if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+  else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
   else
+    let reading_authority = state.workspace_read_authority in
     let reading = Masc_tui_loader.load_server_identity ~host ~port in
     if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+    else if reading_authority != state.workspace_read_authority || not (server_authority_ready state)
+    then Error "Workspace identity is unconfirmed"
     else if Masc_tui_types.server_workspace_matches ~expected:identity reading then Ok ()
     else begin
       let detail = "Workspace identity changed or is unavailable; request withdrawn" in
-      let withdrawal = match schedule_form_action with
-        | None -> Workspace_identity_unconfirmed detail
-        | Some action ->
-          Schedule_form_authority_refused
-            {action; detail; workspace = workspace_input_identity_of_server identity} in
-      enqueue_async mailbox (Workspace_scoped (authority, withdrawal));
+      (* The form refusal is a receipt; the observed identity is a separately
+         stamped read. A newer refresh can retire the latter alone. *)
+      Option.iter (fun action ->
+        enqueue_async mailbox
+          (Workspace_scoped (authority, None,
+            Schedule_form_authority_refused
+              { action; detail; workspace = workspace_input_identity_of_server identity })))
+        schedule_form_action;
+      if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then
+        enqueue_async mailbox
+          (Workspace_scoped (authority, Some reading_authority,
+            Workspace_identity_unconfirmed
+              { detail; latest = reading; prior_contact; refresh_ticket }));
       Error detail
     end
 
@@ -1628,18 +1699,101 @@ let check_workspace_request ?schedule_form_action state ~mailbox ~authority ~ide
    one of them gone there is nothing left to disagree. *)
 let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
 
+(* One request chain retains the fact that an earlier identity probe reached
+   its endpoint. A later probe failure does not erase that contact. *)
+let workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port =
+  let prior_contact = ref Masc_tui_server_lifecycle.Nothing_answered in
+  fun () ->
+    let result = check_workspace_request ~prior_contact:!prior_contact
+        state ~mailbox ~authority ~identity ~host ~port () in
+    (match result with
+     | Ok () -> prior_contact := Masc_tui_server_lifecycle.Server_reached
+     | Error _ -> ());
+    result
+
 (* Capture the endpoint authority before an extracted request can suspend. *)
 let capture_workspace_check state ~mailbox =
+  workspace_check_sequence state ~mailbox ~authority:state.workspace_authority
+    ~identity:state.server_identity ~host:server_peer_host ~port:state.port
+
+(* The cached identity only describes the last read. A machine mutation
+   revalidates its captured endpoint immediately before dispatch, and its
+   completion owns only the view and authority that requested it. *)
+let run_machine_change ?(checkpoint_boundary=false) state ~mailbox ~refused ~unknown ~deliver write =
   let authority = state.workspace_authority in
-  let identity = state.server_identity in
-  let host = server_peer_host in
+  let view = ref !msx_poll_view in
   let port = state.port in
-  check_workspace_request state ~mailbox ~authority ~identity ~host ~port
+  let identity = state.server_identity in
+  let check = capture_workspace_check state ~mailbox in
+  let current () =
+    authority = state.workspace_authority && !view == !msx_poll_view && port = state.port
+  in
+  (* The identity the check confirmed is the one the request carries, so the
+     server compares it again at the moment it applies the change. *)
+  let admission =
+    try
+      if not (machine_changes_allowed state) then Error machine_change_refusal
+      else match identity, check () with
+      | _, Error detail -> Error detail
+      | None, Ok () -> Error "Workspace identity unavailable; MSX change withdrawn"
+      | Some expected, Ok () when current () && machine_changes_allowed state -> Ok expected
+      | Some _, Ok () -> Error "MSX control view or workspace authority withdrawn"
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  in
+  match admission with
+  | Error detail when current () ->
+      state.machine_interaction <- Observe_machine;
+      deliver None (Error (refused detail))
+  | Error _ -> ()
+  | Ok expected_workspace ->
+      let result =
+        try
+            let unsettled_tick = match !msx_pending_poll with
+              | Poll_pending _ | Poll_ready Outcome_unknown -> true
+              | Poll_ready (Advancing | Observing _) | Poll_observing _ -> false in
+            if checkpoint_boundary && unsettled_tick then
+              Error (refused "An MSX tick is still unsettled; no checkpoint was sent.")
+            else begin
+              if checkpoint_boundary then begin
+                invalidate_msx_poll ();
+                view := !msx_poll_view;
+                state.msx_live_in_flight <- None;
+                (match !msx_pending_poll with
+                 | Poll_observing (_,refusal) -> msx_pending_poll := Poll_ready (Observing refusal)
+                 | Poll_pending _ | Poll_ready _ -> ())
+              end;
+              (* No yield separates retirement from the checkpoint callback,
+                 which records its pending identity before sending HTTP. *)
+              write ~port ~expected_workspace
+            end
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (unknown (Printexc.to_string exn))
+      in
+      if current () then begin
+        (* Only an explicit, freshly admitted successful control action can
+           retire a workspace refusal. Retire any old observation token too;
+           an activity answer alone cannot grant control. *)
+        if Result.is_ok result then begin
+          match !msx_pending_poll with
+          | Poll_ready (Observing Workspace_changed)
+          | Poll_observing (_, Workspace_changed) ->
+              msx_pending_poll := Poll_ready Advancing;
+              state.msx_notice <- None
+          | Poll_ready (Advancing | Observing (Off | Activity_unobserved) | Outcome_unknown)
+          | Poll_pending _ | Poll_observing (_, (Off | Activity_unobserved)) -> ()
+        end;
+        deliver (Some expected_workspace) result
+      end
+
+;;
 
 (* Retire the cancellation context synchronously at the authority boundary,
    including while a request is connecting. Completion stamps also reject a
    reply already queued before withdrawal; admitted server effects remain. *)
-let fork_workspace_job state ~sw run =
+let fork_workspace_job ?(observation = false) state ~sw run =
   let exception Workspace_withdrawn in
   let authority = state.workspace_authority in
   let context = ref None in
@@ -1650,12 +1804,17 @@ let fork_workspace_job state ~sw run =
     Option.iter (fun context -> Eio.Cancel.cancel context Workspace_withdrawn) !context
   in
   state.workspace_cancellations <- (token, cancel) :: state.workspace_cancellations;
+  if observation then
+    state.workspace_observation_cancellations <-
+      (token, cancel) :: state.workspace_observation_cancellations;
   match Eio.Fiber.fork_daemon ~sw (fun () ->
     Fun.protect
       ~finally:(fun () ->
         context := None;
         state.workspace_cancellations <-
-          List.filter (fun (held, _) -> held != token) state.workspace_cancellations)
+          List.filter (fun (held, _) -> held != token) state.workspace_cancellations;
+        state.workspace_observation_cancellations <-
+          List.filter (fun (held, _) -> held != token) state.workspace_observation_cancellations)
       (fun () ->
         try
           Eio.Cancel.sub (fun cancellation ->
@@ -1668,17 +1827,23 @@ let fork_workspace_job state ~sw run =
     let backtrace = Printexc.get_raw_backtrace () in
     state.workspace_cancellations <-
       List.filter (fun (held, _) -> held != token) state.workspace_cancellations;
+    state.workspace_observation_cancellations <-
+      List.filter (fun (held, _) -> held != token) state.workspace_observation_cancellations;
     Printexc.raise_with_backtrace exn backtrace
 
 
 (* A request owns both its cancellation context and its completion. Recheck the
    endpoint before dispatch: an unchanged port can now serve another root. *)
-let launch_workspace_request state ~mailbox ~boundary_error ~deliver read =
+let launch_workspace_request ?(operation = false) state ~mailbox ~boundary_error ~deliver read =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   let identity = state.server_identity in
   let host = server_peer_host in
   let port = state.port in
+  let deliver_result result =
+    let message = deliver result in
+    enqueue_async mailbox (if operation then Workspace_operation message else message)
+  in
   let run () =
     let result =
       try
@@ -1689,7 +1854,7 @@ let launch_workspace_request state ~mailbox ~boundary_error ~deliver read =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (boundary_error (Printexc.to_string exn))
     in
-    enqueue_async mailbox (deliver result)
+    deliver_result result
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -1697,8 +1862,8 @@ let launch_workspace_request state ~mailbox ~boundary_error ~deliver read =
        | () -> ()
        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
        | exception exn ->
-           enqueue_async mailbox (deliver (Error (boundary_error (Printexc.to_string exn)))))
-  | None -> enqueue_async mailbox (deliver (Error (boundary_error "Eio switch is unavailable")))
+           deliver_result (Error (boundary_error (Printexc.to_string exn))))
+  | None -> deliver_result (Error (boundary_error "Eio switch is unavailable"))
 
 (* Wire the web-link-preview background fetcher. On the first cache miss for a
    URL, Masc_tui_link_preview renders the synthesized card immediately and calls
@@ -1778,6 +1943,7 @@ let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
             ~attachments:(match role with
               | Message_user _ -> List.map (fun a -> Masc_tui_image_preview.Staged a) request.Keeper_chat.attachments
               | _ -> []);
+          me_media = [];
           me_memory_summary = None;
           me_memory_pass = Masc_tui_message_layout.No_pass;
           me_journal = [];
@@ -1791,6 +1957,7 @@ let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
           me_timestamp = clock_text_of_unix at;
           me_keeper_name = request.Keeper_chat.keeper_name;
           me_request_id = request.request_id;
+          me_execution_source = Some (Keeper_chat_log.Operation request.request_id);
           me_at = at;
         } ]
 
@@ -2162,6 +2329,7 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
    same reason every loader runs on one: a slow server costs the refresh, not
    the keypress. *)
 let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+  if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   if state.workspace_identity <> Workspace_identity_match then ()
   else match state.server_identity with
@@ -2200,19 +2368,31 @@ let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mail
    session opened against, so a session left open while something else wrote is
    told its read went stale rather than overwriting that writer. *)
 
+  end
+
 (* Writing a configuration is not the same as it working. After the save, every
    configured endpoint is asked to say one sentence, and each answer is shown --
    including the ones that refused, which is the part a chain hides by stopping
    at the first endpoint that answers. *)
+
 let launch_voice_wizard_probe state ~mailbox ~request message =
+  if not (server_authority_ready state) then
+    state.voice_wizard <- Option.map (fun session ->
+      Option.value ~default:session
+        (Masc_tui_voice_wizard_session.voice_wizard_after_probe session ~request
+           (Error "Configuration saved; endpoint probe awaits confirmed workspace identity.")))
+      state.voice_wizard
+  else begin
+  let enqueue_async = workspace_enqueue state in
+  let check = capture_workspace_check state ~mailbox in
   let host = server_peer_host in
   let port = state.port in
   let payload = Yojson.Safe.to_string (`Assoc [ "message", `String message ]) in
   let run () =
     let result =
-      Masc_tui_http.post_json_with_timeout
+      Result.bind (check ()) (fun () -> Masc_tui_http.post_json_with_timeout
         ~timeout_sec:Masc_tui_http.voice_probe_timeout_sec
-        ~host ~port ~path:"/api/v1/voice/probe/tts" ~body:payload
+        ~host ~port ~path:"/api/v1/voice/probe/tts" ~body:payload)
     in
     enqueue_async mailbox (Voice_wizard_probed (request, result))
   in
@@ -2221,6 +2401,7 @@ let launch_voice_wizard_probe state ~mailbox ~request message =
   | None ->
     enqueue_async mailbox
       (Voice_wizard_probed (request, Error "Eio switch is unavailable"))
+  end
 ;;
 
 (* The admin setup read, which names each endpoint and the runtime.toml
@@ -2250,6 +2431,8 @@ let voice_setup_revision = function
    went out answers the revision from before it, and taken as this read it
    would say nothing was written when something was. *)
 let launch_voice_wizard_reread state ~mailbox ~request =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -2268,6 +2451,7 @@ let launch_voice_wizard_reread state ~mailbox ~request =
   | None ->
     enqueue_async mailbox
       (Voice_wizard_reread (request, Error "Eio switch is unavailable"))
+  end else suspend_voice_wizard_read state
 ;;
 
 (* The sentence the endpoints are asked to say. In Korean because that is what
@@ -2373,6 +2557,12 @@ let voice_setup_section_kinds state (section : Voice_setup.section) =
 
 let launch_voice_wizard_save state ~mailbox
     (session : Masc_tui_voice_wizard_session.voice_wizard_session) =
+  match write_authority_refusal state state.workspace_authority with
+  | Some detail ->
+    state.voice_wizard <- Some { session with vws_status = Some detail }
+  | None ->
+  let enqueue_async = workspace_enqueue state in
+  let check = capture_workspace_check state ~mailbox in
   let alongside =
     voice_setup_section_kinds state session.vws_draft.Voice_wizard.section
   in
@@ -2402,8 +2592,10 @@ let launch_voice_wizard_save state ~mailbox
     let run () =
       let reply =
         match
-          Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/voice/setup"
-            ~body:payload
+          (match check () with
+           | Error detail -> Masc_tui_http.Post_refused detail
+           | Ok () -> Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/voice/setup"
+               ~body:payload)
         with
         | Masc_tui_http.Post_answered json ->
           (match voice_setup_revision json with
@@ -2488,6 +2680,10 @@ let voice_agent_voice_rows json =
 ;;
 
 let launch_voice_agent_voices state ~mailbox ~kind ~api_key_env =
+  state.voice_agent_voices <- Option.map (fun session ->
+    {session with vas_lookup = Some (kind, api_key_env)}) state.voice_agent_voices;
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   let payload =
@@ -2515,10 +2711,17 @@ let launch_voice_agent_voices state ~mailbox ~kind ~api_key_env =
   | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
   | None ->
     enqueue_async mailbox (Voice_agent_voices_loaded (Error "Eio switch is unavailable"))
+  end
 ;;
 
 let launch_voice_agent_voice_save state ~mailbox
       (session : Masc_tui_types.voice_agent_session) =
+  match write_authority_refusal state state.workspace_authority with
+  | Some detail ->
+    state.voice_agent_voices <- Some { session with vas_status = Some detail }
+  | None ->
+  let enqueue_async = workspace_enqueue state in
+  let check = capture_workspace_check state ~mailbox in
   match Masc_tui_types.voice_agent_selected session with
   | None ->
     state.voice_agent_voices
@@ -2545,8 +2748,10 @@ let launch_voice_agent_voice_save state ~mailbox
     let run () =
       let result =
         match
-          Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/voice/setup"
-            ~body:payload
+          (match check () with
+           | Error detail -> Masc_tui_http.Post_refused detail
+           | Ok () -> Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/voice/setup"
+               ~body:payload)
         with
         | Masc_tui_http.Post_answered json -> Ok json
         | Masc_tui_http.Post_refused message -> Error message
@@ -2561,6 +2766,8 @@ let launch_voice_agent_voice_save state ~mailbox
 ;;
 
 let launch_voice_config_load state ~mailbox =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -2608,30 +2815,49 @@ let launch_voice_config_load state ~mailbox =
          ( Error "Eio switch is unavailable"
          , Error "Eio switch is unavailable"
          , None ))
+  end
 ;;
 
 let launch_msx_live_read (state : Masc_tui_types.state) ~mailbox =
-  let request = { live_view = !msx_poll_view; live_port = state.port } in
-  state.msx_live_in_flight <- Some request;
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Msx_live_loaded (request, result))
-    (fun () -> Masc_tui_http.fetch_machine_live ~host:server_peer_host
-      ~port:request.live_port Masc.Machine_lane.Msx ~since:None)
+  if not (server_authority_ready state) || Option.is_some (checkpoint_for_workspace state) then () else
+  let current_view = !msx_poll_view in
+  match state.msx_live_in_flight with
+  | Some pending when pending.live_view == current_view && pending.live_port = state.port -> ()
+  | Some _ | None ->
+    (* An abandoned view's slow read does not own the reopened screen. Its
+       reply still has to match this exact slot before it can settle it. *)
+    let request = { live_view = current_view; live_port = state.port } in
+    let since = Masc_tui_machine_live.since state.msx_live in
+    let expected_workspace = state.server_identity in
+    state.msx_live_in_flight <- Some request;
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Msx_live_loaded (request, result))
+      (fun () -> Masc_tui_http.fetch_machine_live ?expected_workspace ~host:server_peer_host
+        ~port:request.live_port Masc.Machine_lane.Msx ~since)
 ;;
 
 let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
+  if not (server_authority_ready state) || Option.is_some (checkpoint_for_workspace state) then () else
   match state.msx_live, state.msx_live_in_flight with
-  | _, Some _ | Masc_tui_machine_live.Unread, None -> ()
-  | Failed _, None -> launch_msx_live_read state ~mailbox
-  | (Not_loaded | Showing _), None ->
+  | _, Some pending
+    when pending.live_view == !msx_poll_view && pending.live_port = state.port -> ()
+  (* F5 can replace the view while its first observation is still pending.
+     Obtain a frame for the new owner without waiting for the old read before
+     enabling its clock; Unread must not become a permanent idle state. *)
+  | (Masc_tui_machine_live.Unread | Failed _), (Some _ | None) -> launch_msx_live_read state ~mailbox
+  | (Not_loaded | Showing _), (Some _ | None) ->
   match !msx_pending_poll with
   | Poll_observing (request,refusal) when request.poll_view != !msx_poll_view
       || request.poll_port <> state.port || request.poll_authority <> state.workspace_authority ->
       msx_pending_poll := Poll_ready (Observing refusal);
       launch_msx_poll state ~mailbox
   | Poll_pending _ | Poll_observing _ | Poll_ready Outcome_unknown -> ()
+  | Poll_ready (Observing Workspace_changed) ->
+      (* The typed refusal already proved this endpoint is another workspace.
+         Do not read its screen while a health refresh is still in flight. *)
+      state.msx_notice <- Some (Masc_tui_msx_tick.refusal_notice Workspace_changed)
   | Poll_ready (Observing refusal) ->
-      let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority } in
+      let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority; poll_reading = state.workspace_read_authority } in
       let since = Masc_tui_machine_live.since state.msx_live in
       msx_pending_poll := Poll_observing (request,refusal);
       launch_workspace_request state ~mailbox ~boundary_error:Fun.id
@@ -2640,30 +2866,57 @@ let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
           Result.map (fun activity -> activity,
             Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:request.poll_port Masc.Machine_lane.Msx ~since)
             (Masc_tui_http.fetch_msx_activity ~host:server_peer_host ~port:request.poll_port))
+  | Poll_ready Advancing when not (machine_changes_allowed state) ->
+      state.machine_interaction <- Observe_machine;
+      state.msx_notice <- Some machine_change_refusal;
+      launch_msx_live_read state ~mailbox
   | Poll_ready Advancing ->
-      let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority } in
+      let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority; poll_reading = state.workspace_read_authority } in
       msx_pending_poll := Poll_pending request;
+      let check = capture_workspace_check state ~mailbox in
+      let identity = state.server_identity in
       let run () =
-        let frame =
-          try Masc_tui_http.tick_msx ~host:server_peer_host ~port:request.poll_port with
+        let admission =
+          try match identity, check () with
+          | _, Error detail -> Error detail
+          | None, Ok () -> Error "Workspace identity unavailable; MSX tick withdrawn"
+          | Some expected, Ok () ->
+            if request.poll_authority <> state.workspace_authority
+               || request.poll_view != !msx_poll_view || request.poll_port <> state.port
+               || not (machine_changes_allowed state)
+               || not state.msx_open || state.msx_menu_open
+               || state.machine_source <> Masc.Machine_lane.Msx
+               || state.machine_interaction <> Control_machine
+            then Error "MSX control view or workspace authority withdrawn"
+            else Ok expected
+
+          with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn ->
-              Error (Printexc.to_string exn)
+          | exn -> Error (Printexc.to_string exn)
         in
-        enqueue_async mailbox (Msx_frame_loaded (request, frame))
+        match admission with
+        | Error detail -> enqueue_async mailbox (Msx_tick_withdrawn (request, detail))
+        | Ok expected_workspace ->
+          let frame =
+            try Masc_tui_http.tick_msx ~expected_workspace ~host:server_peer_host ~port:request.poll_port with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> Error (Printexc.to_string exn)
+          in
+          enqueue_async mailbox (Msx_frame_loaded (request, frame))
       in
       (try
          match Eio_context.get_switch_opt () with
          | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-         | None -> enqueue_async mailbox (Msx_frame_loaded (request, Error "Eio switch is unavailable"))
+         | None -> enqueue_async mailbox (Msx_tick_withdrawn (request, "Eio switch is unavailable"))
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn -> enqueue_async mailbox
-           (Msx_frame_loaded (request, Error (Printexc.to_string exn))))
+           (Msx_tick_withdrawn (request, Printexc.to_string exn)))
+
 ;;
 
-
 let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
+  if server_authority_ready state then begin
   let current_view = !msx_poll_view in
   match state.dos_live_in_flight with
   | Some pending when pending.live_view == current_view && pending.live_port = state.port -> ()
@@ -2675,9 +2928,11 @@ let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
       ~deliver:(fun result -> Dos_live_loaded (request, result))
       (fun () -> Masc_tui_http.fetch_machine_live ~host:server_peer_host
         ~port:request.live_port Masc.Machine_lane.Dos ~since)
+  end
 ;;
 
 let launch_keeper_turns_load state ~mailbox =
+  if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   if state.keeper_turns_inflight then ()
   else begin
@@ -2692,8 +2947,18 @@ let launch_keeper_turns_load state ~mailbox =
         enqueue_async mailbox (Keeper_turns_loaded (generation, result)))
       (fun () -> Masc_tui_loader.load_keeper_turns ~host ~port)
   end
+  end
+
+(* Mutation receipts belong to the last confirmed workspace even while its
+   health cannot be read. A named replacement never inherits those receipts. *)
+let retains_receipt_workspace state expected_workspace =
+  match state.workspace_identity with
+  | Workspace_identity_match | Workspace_identity_match_unconfirmed _ ->
+      Option.exists (same_server_workspace expected_workspace) state.server_identity
+  | Workspace_identity_unread | Workspace_identity_mismatch _ -> false
 
 let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+  if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   if state.workspace_identity <> Workspace_identity_match then ()
   else match state.server_identity with
@@ -2706,6 +2971,9 @@ let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   | Some request ->
   let host = server_peer_host in
   let port = state.port in
+  Log.Transport.debug "started Gate snapshot request=%d intent=%s"
+    (Snapshot_read.request_id request)
+    (match intent with Snapshot_read.Poll -> "poll" | Snapshot_read.Refresh -> "refresh");
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
       enqueue_async mailbox (Gate_snapshot_loaded (request, expected_workspace, result)))
@@ -2716,9 +2984,12 @@ let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
       let* () = probe_expected_workspace ~host ~port expected_workspace in
       Ok snapshot)
 
+  end
+
 (* [reason] mirrors [Masc_tui_http.post_dashboard_gate_resolve]: required
    labeled option, because a trailing [?reason] here is unerasable
    (warning 16). *)
+
 let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
@@ -2817,13 +3088,17 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
 let launch_gate_mode_set state ~mailbox ~lane ~mode =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
+  match write_authority_refusal state authority with
+  | Some detail -> report_action state "error" detail
+  | None ->
   let host = server_peer_host in
   let port = state.port in
   let run () =
     let result =
       try
-        if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-        else (match lane with
+        match write_authority_refusal state authority with
+        | Some detail -> Error detail
+        | None -> (match lane with
          | Masc_tui_palette.Workspace_gate -> Masc_tui_http.post_dashboard_gate_workspace_mode ~host ~port ~mode
          | Masc_tui_palette.External_gate -> Masc_tui_http.post_dashboard_gate_external_mode ~host ~port ~mode)
       with
@@ -2840,6 +3115,7 @@ let launch_gate_mode_set state ~mailbox ~lane ~mode =
         (Gate_mode_set (lane, mode, Error "Eio switch is unavailable"))
 
 let launch_keeper_tool_modes_load state ~mailbox =
+  if server_authority_ready state then
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   (* Declines while the operator's own press is still in flight: the answer
@@ -2862,8 +3138,9 @@ let launch_keeper_tool_modes_load state ~mailbox =
     let run () =
       let result =
         try
-          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-          else Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port with
+          match write_authority_refusal state authority with
+          | Some detail -> Error detail
+          | None -> Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
@@ -2874,8 +3151,9 @@ let launch_keeper_tool_modes_load state ~mailbox =
          listing has no operator press to be superseded by. *)
       let settings =
         try
-          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-          else Masc_tui_loader.load_keeper_gate_settings ~host ~port with
+          match write_authority_refusal state authority with
+          | Some detail -> Error detail
+          | None -> Masc_tui_loader.load_keeper_gate_settings ~host ~port with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
@@ -2891,6 +3169,9 @@ let launch_keeper_tool_modes_load state ~mailbox =
 let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
+  match write_authority_refusal state authority with
+  | Some detail -> report_action state "error" detail
+  | None ->
   (* [begin_action] takes the newest generation, so a stance listing already
      on the wire stops being current and cannot put the old answer back on
      top of this press. It also refuses a second press while one is open. *)
@@ -2906,8 +3187,9 @@ let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
       let run () =
         let result =
           try
-            if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-            else Masc_tui_http.post_keeper_tool_approval_mode ~host ~port
+            match write_authority_refusal state authority with
+            | Some detail -> Error detail
+            | None -> Masc_tui_http.post_keeper_tool_approval_mode ~host ~port
               ~keeper_name ~mode
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -2966,6 +3248,7 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
 (* Automatic polling shares a pending reading for the same Keeper. Explicit
    refresh and selection changes supersede it, retaining the generation guard. *)
 let launch_tools_load ?(force = true) state ~mailbox =
+  if server_authority_ready state then begin
   let authority = state.workspace_authority in
   let keeper =
     Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state)
@@ -3008,6 +3291,7 @@ let launch_tools_load ?(force = true) state ~mailbox =
         Tools_loaded (generation, keeper, result))
       (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ())
   end
+  end
 
 let settle_tools_read state ~generation part =
   match state.tools_read_inflight with
@@ -3049,6 +3333,7 @@ let cycle_tools_keeper state ~mailbox ~delta =
 ;;
 
 let launch_schedule_wake_history_load state ~mailbox ~schedule_id =
+  if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   match state.schedule_wake_history_inflight with
   | Some inflight when String.equal inflight schedule_id -> ()
@@ -3073,6 +3358,7 @@ let launch_schedule_wake_history_load state ~mailbox ~schedule_id =
            enqueue_async mailbox
              (Schedule_wake_history_loaded
                 (schedule_id, Error "Eio switch is unavailable")))
+  end
 
 let launch_keeper_schedules_load state ~mailbox ~keeper_name =
   if server_authority_ready state then
@@ -3092,6 +3378,7 @@ let launch_keeper_schedules_load state ~mailbox ~keeper_name =
       Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target)
 
 let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+  if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   let read, request = Snapshot_read.start ~intent state.schedules_read in
   state.schedules_read <- read;
@@ -3105,10 +3392,14 @@ let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
       enqueue_async mailbox (Schedules_loaded (request, result)))
     (fun () -> Masc_tui_loader.load_schedules ~host ~port)
 
+  end
+
 (* The durable call log of one keeper, over HTTP. The row the answer is
    applied to is named in the message so a load that returns after the
    operator moved to another keeper is discarded, not drawn under it. *)
+
 let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
+  if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   let same_scope =
     Option.equal String.equal state.keeper_calls_keeper (Some keeper_name)
@@ -3148,22 +3439,30 @@ let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
              (generation, keeper_name, Error "Eio switch is unavailable"))
   end
 
+  end
+
 (* The two detail-pane histories, over HTTP. Same discipline as the call
    log: the answer names the row it is for, so a load that returns after the
    operator moved on is discarded, not drawn under another item. *)
+
 let launch_goal_timeline_load state ~mailbox goal_id =
+  if server_authority_ready state then begin
   let host = server_peer_host in
   let port = state.port in
   launch_workspace_request state ~mailbox ~boundary_error:Fun.id
     ~deliver:(fun result -> Goal_timeline_loaded (goal_id, result))
     (fun () -> Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id)
+  end
 
 let launch_task_history_load state ~mailbox task_id =
+  if server_authority_ready state then begin
   let host = server_peer_host in
   let port = state.port in
   launch_workspace_request state ~mailbox ~boundary_error:Fun.id
     ~deliver:(fun result -> Task_history_loaded (task_id, result))
     (fun () -> Masc_tui_http.fetch_task_history ~host ~port ~task_id)
+
+  end
 
 (* Cancel one task through the same MCP tool the keepers use
    (masc_transition action=cancel). Cancel is an exit-class action, so the
@@ -3172,6 +3471,7 @@ let launch_task_history_load state ~mailbox task_id =
    like the resource browser: a human-cadence action does not earn a held
    connection. The server's task FSM stays the judge of whether this task
    can still be cancelled. *)
+
 let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
   if state.workspace_identity <> Workspace_identity_match
      || authority <> state.workspace_authority then
@@ -3190,7 +3490,7 @@ let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
       let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
       let* session_id = Masc_tui_http.open_mcp_session ~host ~port
           ~client_version:Runtime_build_version.current in
-      let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+      let* () = check_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity ~host ~port () in
       let arguments = Masc_tui_mcp.task_cancel_arguments ~task_id ~reason ~expected_workspace in
       let* outcome = Masc_tui_http.call_mcp_tool ~host ~port ~session_id ~request_id
           ~tool:"masc_transition" ~arguments in
@@ -3217,6 +3517,7 @@ let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
    Keyed by task id so a stale answer for a request the operator already
    left is discarded, not drawn under another one. *)
 let launch_verification_evidence_load state ~mailbox task_id =
+  if server_authority_ready state then begin
   let host = server_peer_host in
   let port = state.port in
   launch_workspace_request state ~mailbox
@@ -3228,32 +3529,34 @@ let launch_verification_evidence_load state ~mailbox task_id =
 (* The detail pane's two non-Info tabs. Same discipline as the call log:
    the answer names the keeper it is for, so a stale load cannot be drawn
    under another keeper's heading. *)
+  end
+
 (* The MCP resource inventory, and one resource's text. Each operation
    opens its own session: a human-cadence browser does not earn a held
    connection, and a stale session id would be a second failure mode. *)
+
 let launch_keeper_deletions state ~mailbox ?retry () =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
-  if not state.keeper_deletions_loading then (
-    state.keeper_deletions_loading <- true;
-    state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
-    let generation = state.keeper_deletions_generation in
+  let identity = state.server_identity in
+  match begin_keeper_deletions_read state with
+  | None -> ()
+  | Some generation ->
     let host, port = server_peer_host, state.port in
     let run () =
       let result =
         try
           let ( let* ) = Result.bind in
           let check_authority () =
-            if authority = state.workspace_authority then Ok ()
-            else Error "Workspace authority withdrawn" in
+            if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+            else if generation <> state.keeper_deletions_generation then Error "Deletion inventory request superseded"
+            else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
+            else Ok () in
           let* () = check_authority () in
+          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
           let* () = match retry with
             | None -> Ok ()
             | Some (row : Keeper_control.deletion_row) ->
-              let* () = match state.workspace_identity with
-                | Workspace_identity_unread ->
-                  Error "Workspace identity has not been read; deletion retry unavailable"
-                | Workspace_identity_match | Workspace_identity_mismatch _ -> Ok () in
               let keeper_name = Keeper_control.deletion_keeper_name row in
               let operation_id = Masc.Keeper_shutdown_types.Operation_id.to_string (Keeper_control.deletion_operation_id row) in
               let body = Yojson.Safe.to_string (`Assoc ["keeper_name", `String keeper_name;
@@ -3262,17 +3565,29 @@ let launch_keeper_deletions state ~mailbox ?retry () =
                 | Keeper_control.Runtime_shutdown _ -> "/api/v1/dashboard/keepers/deletions/retry"
                 | Configuration_removal _ -> "/api/v1/dashboard/keepers/configuration-deletions/retry" in
               let* () = check_authority () in
-              let* status, body = Masc_tui_http.http_post ~headers:(Masc_tui_http.auth_headers ())
-                ~host ~port ~path ~body in
-              (match Keeper_control.classify_purge_response ~keeper_name ~status ~body with
-               | Purge_accepted { operation_id = returned } when String.equal returned operation_id -> Ok ()
-               | Rejected { detail; _ } | Paused_owner_conflict detail -> Error detail
-               | _ -> Error "deletion retry response did not identify the requested operation")
+              let receipt =
+                try
+                  let* status, body = Masc_tui_http.http_post ~headers:(Masc_tui_http.auth_headers ())
+                    ~host ~port ~path ~body in
+                  (match Keeper_control.classify_purge_response ~keeper_name ~status ~body with
+                   | Purge_accepted { operation_id = returned } when String.equal returned operation_id -> Ok ()
+                   | Rejected { detail; _ } | Paused_owner_conflict detail -> Error detail
+                   | _ -> Error "deletion retry response did not identify the requested operation")
+                with Eio.Cancel.Cancelled _ as exn -> raise exn
+                   | exn -> Error (Printexc.to_string exn)
+              in
+              (* The admitted POST result has operation authority. The GET
+                 below retains its separate, revocable observation stamp. *)
+              enqueue_async mailbox (Keeper_deletion_retry_done (operation_id, receipt));
+              receipt
           in
           let* () = check_authority () in
           let* json = Masc_tui_http.get_json ~host ~port
             ~path:"/api/v1/dashboard/keepers/deletions" in
-          Keeper_control.decode_deletion_inventory json
+          let* inventory = Keeper_control.decode_deletion_inventory json in
+          let* () = check_authority () in
+          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          Ok inventory
         with Eio.Cancel.Cancelled _ as exn -> raise exn
            | exn -> Error (Printexc.to_string exn)
       in
@@ -3281,7 +3596,7 @@ let launch_keeper_deletions state ~mailbox ?retry () =
     match Eio_context.get_switch_opt () with
     | Some sw -> fork_workspace_job state ~sw run
     | None -> enqueue_async mailbox (Keeper_deletions_loaded
-        (generation, Error "Eio switch is unavailable")))
+        (generation, Error "Eio switch is unavailable"))
 
 let tree_diff_base_ref = "HEAD"
 
@@ -3343,6 +3658,29 @@ let restore_account_login state (view : Masc_tui_account_login.t) =
 
 let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t) action =
   let module Login = Masc_tui_account_login in
+  let needs_identity = match action with Login.Nothing | Close | Cancel -> false | _ -> true in
+  if action = Login.Nothing then ()
+  else if needs_identity && not (server_authority_ready state) then begin
+    if account_login_action_is_read action then begin
+      state.account_login_readings <- List.filter (fun (reading, _, _) -> reading != view)
+        state.account_login_readings;
+      state.account_login_read_resume <- (view, view.generation, action)
+        :: List.filter (fun (pending, _, _) -> pending != view) state.account_login_read_resume;
+      suspend_account_login_read view
+    end
+    else begin
+      view.input_pending <- false;
+      (match action with
+       | Login.Activate_saved saved ->
+           (* This follow-up has not entered start_job or issued a POST. *)
+           state.account_login_activation_resume <- (view, view.generation, saved)
+             :: List.filter (fun (pending, _, _) -> pending != view)
+                  state.account_login_activation_resume;
+           view.notice <- "Saved configuration is waiting for workspace reconfirmation before activation."
+       | _ -> view.notice <- "Workspace identity is unconfirmed; account action was not sent.")
+    end
+  end
+  else begin
   let host = server_peer_host and port = state.port in
   let check_workspace = capture_workspace_check state ~mailbox in
   let enqueue_async = workspace_enqueue state in
@@ -3355,8 +3693,17 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
      Option.iter (fun stop -> stop ()) view.cancel_stream;
      view.cancel_stream <- None);
   let generation = view.generation in
-  let post path body = Masc_tui_http.post_json ~host ~port ~path ~body:(Yojson.Safe.to_string body) in
-  let post_setup path body = Masc_tui_http.post_setup_json ~host ~port ~path ~body:(Yojson.Safe.to_string body) in
+  state.account_login_readings <- List.filter (fun (reading, _, _) -> reading != view) state.account_login_readings;
+  state.account_login_read_resume <- List.filter (fun (pending, _, _) -> pending != view) state.account_login_read_resume;
+  if not (action = Login.Close && Login.activation_incomplete view) then
+    state.account_login_activation_resume <- List.filter
+      (fun (pending, _, _) -> pending != view) state.account_login_activation_resume;
+  if account_login_action_is_read action then
+    state.account_login_readings <- (view, generation, action) :: state.account_login_readings;
+  let post path body = Result.bind (check_workspace ()) (fun () ->
+    Masc_tui_http.post_json ~host ~port ~path ~body:(Yojson.Safe.to_string body)) in
+  let post_setup path body = Result.bind (check_workspace ()) (fun () ->
+    Masc_tui_http.post_setup_json ~host ~port ~path ~body:(Yojson.Safe.to_string body)) in
   let login_path id = "/api/v1/setup/accounts/login/" ^ id in
   let enqueue result = enqueue_async mailbox (Account_login_json (view, generation, action, result)) in
   let start_job f = match Eio_context.get_switch_opt () with
@@ -3369,7 +3716,8 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
            | _ -> view.cancel_stream <- Some (fun () -> Eio.Cancel.cancel cancellation (Failure "login panel superseded")));
           Fun.protect ~finally:(fun () ->
             if generation = view.generation then
-              match action with Login.Input _ -> () | _ -> view.cancel_stream <- None) f)
+              match action with Login.Input _ -> () | _ -> view.cancel_stream <- None)
+            (fun () -> match check_workspace () with Error detail -> enqueue (Error detail) | Ok () -> f ()))
         with
         | Eio.Cancel.Cancelled _ as exn -> if generation = view.generation then raise exn
         | Unix.Unix_error _ | Sys_error _ | Eio.Io _ | Yojson.Json_error _ ->
@@ -3405,7 +3753,8 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
            let on_chunk, complete = Login.decoder ~integration_id:provider.id (fun event ->
                enqueue_async mailbox (Account_login_event (view,generation,event))) in
              let body=`Assoc (["integration_id",`String provider.id] @ (match reference with Some r->["account_ref",`String r] | None->[])) |> Yojson.Safe.to_string in
-             let result = Masc_tui_http.post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk in
+             let result = Result.bind (check_workspace ()) (fun () ->
+               Masc_tui_http.post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk) in
              match result with
              | Ok () when complete () -> ()
              | Ok () | Error _ -> enqueue (Error "로그인 결과를 받지 못했습니다. r로 상태를 다시 확인하세요.")))
@@ -3449,12 +3798,16 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   | Refresh_removed _ ->
     view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
 
+  end
+
 (* The device-flow login, streamed. gh prints the one-time code on its
    own output, which the server forwards redacted; every data line lands
    in the GitHub tab as it arrives so the operator can read the code and
    finish in the browser. When the stream ends the tab re-reads the
    identity observation, which is the fact the login was for. *)
+
 let launch_runtime_config_load ?(force=false) state ~mailbox =
+  if server_authority_ready state then begin
   match state.runtime_config_read with
   | `Loading pending ->
       state.runtime_config_read <- `Loading (pending || force)
@@ -3470,34 +3823,39 @@ let launch_runtime_config_load ?(force=false) state ~mailbox =
       launch_workspace_request state ~mailbox ~boundary_error:Fun.id
         ~deliver:(fun result -> Runtime_config_view_loaded (generation, requested_model, result))
         (fun () -> Masc_tui_loader.load_runtime_config_view ~host ~port)
+  end
 
-let save_runtime_config_text state ~mailbox ~authority ~identity ~expected_source_path ~expected_source_revision edited =
+let save_runtime_config_text ?prior_contact state ~mailbox ~authority ~identity ~expected_source_path ~expected_source_revision edited =
   let host = server_peer_host in
   let port = state.port in
   let ( let* ) = Result.bind in
   let refused result = Result.map_error (fun detail -> Masc_tui_http.Runtime_config_save_refused detail) result in
-  let* () = refused (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ()) in
+  let* () = refused (check_workspace_request ?prior_contact state ~mailbox ~authority ~identity ~host ~port ()) in
   let* preview = refused (Masc_tui_http.post_runtime_config_preview ~host ~port ~source_text:edited) in
   let* preview = refused (Masc_tui_runtime_config_receipt.decode_preview preview) in
   match preview with
   | Masc_tui_runtime_config_receipt.Cannot_save reason ->
     Error (Masc_tui_http.Runtime_config_save_refused ("Preview rejected the edit: " ^ reason))
   | Masc_tui_runtime_config_receipt.Can_save ->
-    let* () = refused (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ()) in
+    let* () = refused (check_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity ~host ~port ()) in
     let* receipt = Masc_tui_http.post_runtime_config_raw ~host ~port
       ~source_text:edited ~expected_source_path ~expected_source_revision in
     launch_runtime_config_load ~force:true state ~mailbox;
     Ok receipt
 
 let launch_runtime_params_load state ~mailbox =
+  if server_authority_ready state then begin
   state.runtime_params_loading <- true;
   let host = server_peer_host in
   let port = state.port in
   launch_workspace_request state ~mailbox ~boundary_error:Fun.id
     ~deliver:(fun result -> Runtime_params_loaded result)
     (fun () -> Masc_tui_loader.load_runtime_params ~host ~port)
+  end
 
 let launch_prompts_load state ~mailbox =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   match Masc_tui_fetched.start ~equal:Unit.equal state.prompts ~key:() with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
@@ -3509,14 +3867,34 @@ let launch_prompts_load state ~mailbox =
       enqueue_async mailbox (Prompts_loaded (request, result)))
     (fun () -> Masc_tui_loader.load_prompts ~host ~port)
 
+  end
+
 (* A /preset call runs off the input loop like the prompt catalog load; its
    answer comes back as a chat notice for the pane that asked, so [wrap]
    carries that pane's keeper. *)
+
 let launch_preset_call state ~mailbox ~call ~wrap =
   let host = server_peer_host in
   let port = state.port in
   launch_workspace_request state ~mailbox ~boundary_error:Fun.id
     ~deliver:wrap (fun () -> call ~host ~port)
+
+let launch_chat_command_read state ~mailbox ~label ~call ~wrap =
+  if not (server_authority_ready state) then
+    report_action state "error" (label ^ " waits for confirmed workspace identity; retry after reconnecting")
+  else begin
+    let ticket = ref () in
+    state.chat_command_reads <- (ticket, state.workspace_read_authority, label) :: state.chat_command_reads;
+    launch_preset_call state ~mailbox ~call
+      ~wrap:(fun result -> Chat_command_read_completed (ticket, wrap result))
+  end
+
+let settle_retired_chat_command_reads state =
+  let retired, current = List.partition
+      (fun (_, reading, _) -> reading != state.workspace_read_authority) state.chat_command_reads in
+  state.chat_command_reads <- current;
+  List.iter (fun (_, _, label) -> report_action state "error"
+    (label ^ " was interrupted by workspace reconnection; retry after reconnecting")) retired
 
 (* A revoked invite's link opens nothing, so its card goes, whether or not it
    is the one on screen. The card carries the name the server sent, made safe
@@ -3527,10 +3905,12 @@ let forget_play_invite state ~name =
       (Masc.Tui_terminal_text.sanitize_terminal_text name)
 
 let launch_presets_load state ~mailbox =
+  if server_authority_ready state then begin
   state.presets_error <- None;
   launch_preset_call state ~mailbox
     ~call:(fun ~host ~port -> Masc_tui_loader.load_presets ~host ~port)
     ~wrap:(fun result -> Presets_listed (Preset_to_pane, result))
+  end
 
 let preset_rows_for_state state =
   match state.presets_snapshot with
@@ -3551,12 +3931,9 @@ let ensure_preset_detail state ~mailbox =
   | None -> ()
   | Some (m : Tui_decode.preset_manifest) ->
     let name = m.Tui_decode.pm_name in
-    (match
-       Masc_tui_fetched.start ~equal:String.equal state.preset_detail ~key:name
-     with
-     | Masc_tui_fetched.Already_loading -> ()
-     | Masc_tui_fetched.Started (next, request) ->
-       state.preset_detail <- next;
+    (match begin_preset_detail_read state ~name with
+     | None -> ()
+     | Some request ->
        launch_preset_call state ~mailbox
          ~call:(fun ~host ~port -> Masc_tui_loader.load_preset_detail ~host ~port ~name)
          ~wrap:(fun result -> Preset_detail_loaded (request, result)))
@@ -3596,6 +3973,8 @@ let selected_prompt_for_state state =
 ;;
 
 let launch_librarian_input_load state ~mailbox ~prompt_key =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   let same_prompt =
@@ -3608,10 +3987,13 @@ let launch_librarian_input_load state ~mailbox ~prompt_key =
     state.prompts_librarian_input_error <- None
   end;
   state.prompts_librarian_input_loading <- true;
+  state.prompts_librarian_input_requested <- Some prompt_key;
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
       enqueue_async mailbox (Librarian_input_loaded (prompt_key, result)))
     (fun () -> Masc_tui_http.fetch_latest_librarian_input ~host ~port)
+
+  end
 
 (* Each detail read stamps its own start, so the pane can say how long it has
    been waiting. Here rather than at the key that triggered it: the same read
@@ -3623,6 +4005,7 @@ let launch_librarian_input_load state ~mailbox ~prompt_key =
 
    Monotonic, because the only question asked of the stamp is how long the read
    has been pending. *)
+
 let mark_detail_read_started state ~tab ~keeper =
   Masc_tui_types.mark_detail_read_started state ~tab ~keeper
     ~now_ns:(Mtime_clock.elapsed_ns ())
@@ -3638,14 +4021,6 @@ let launch_keeper_config_view state ~mailbox keeper_name =
       enqueue_async mailbox (Keeper_config_view_loaded (request, result)))
     (fun () -> Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name)
 
-let item_authority_ready state =
-  match state.server_identity with
-  | Some identity ->
-      identity.Tui_decode.sid_state_ready <> Some false
-      && not (String.equal identity.sid_base_path "")
-      && not (String.equal identity.sid_masc_root "")
-  | None -> false
-
 let withdraw_keeper_items state =
   state.item_account <- None;
   state.item_account_error <- None;
@@ -3660,6 +4035,7 @@ let keeper_item_revision state keeper_name =
   | Unobserved | Invalid _ | Absent -> Error "Keeper account revision is not observed in the current roster"
 
 let launch_keeper_items ?(keep_observed_account = false) state ~mailbox keeper_name =
+  if server_authority_ready state then begin
   let observed_account =
     match state.item_account with
     | Some (name, _) as account when keep_observed_account
@@ -3668,10 +4044,11 @@ let launch_keeper_items ?(keep_observed_account = false) state ~mailbox keeper_n
   in
   withdraw_keeper_items state;
   match state.workspace_identity, state.server_identity with
-  | (Workspace_identity_unread | Workspace_identity_mismatch _), _
+  | ( Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+    | Workspace_identity_mismatch _ ), _
   | Workspace_identity_match, None ->
     state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
-  | Workspace_identity_match, Some _ when not (item_authority_ready state) ->
+  | Workspace_identity_match, Some _ when not (server_authority_ready state) ->
     state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
   | Workspace_identity_match, Some _
     when state.keeper_roster = Keeper_control.Roster_unobserved ->
@@ -3707,6 +4084,7 @@ let launch_keeper_items ?(keep_observed_account = false) state ~mailbox keeper_n
       let ( let* ) = Result.bind in
       let* json = Masc_tui_http.get_json ~host ~port ~path in
       Masc_tui_keeper_items.decode ~keeper_name json)
+  end
 
 let visible_item_revision state =
   match state.view, state.detail_tab, selected_keeper state with
@@ -3760,12 +4138,11 @@ let launch_keeper_sandbox_view state ~mailbox keeper_name =
     (fun () -> Masc_tui_loader.load_keeper_sandbox_view ~host ~port ~keeper_name)
 
 let launch_keeper_sandbox_logs state ~mailbox keeper_name =
+  retain_sandbox_log_read state ~keeper_name;
   if server_authority_ready state then
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
-  state.keeper_sandbox_logs_requested <- Some keeper_name;
-  state.keeper_sandbox_logs_origin <- state.server_identity;
   state.keeper_sandbox_logs_generation <- state.keeper_sandbox_logs_generation + 1;
   let generation = state.keeper_sandbox_logs_generation in
   state.keeper_sandbox_logs_inflight <-
@@ -3844,8 +4221,9 @@ let launch_board_quarantine_requeue state ~mailbox ~keeper_name
   let run () =
     let outcome =
       try
-        if authority <> state.workspace_authority then Masc_tui_http.Post_unanswered "Workspace authority withdrawn"
-        else Masc_tui_http.post_board_quarantine_requeue ~host ~port ~keeper_name
+        match write_authority_refusal state authority with
+        | Some reason -> Masc_tui_http.Post_unanswered reason
+        | None -> Masc_tui_http.post_board_quarantine_requeue ~host ~port ~keeper_name
           ~partition_id ~request
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -3883,9 +4261,9 @@ let launch_board_quarantines_bulk_requeue state ~mailbox ~keeper_name items =
       Masc_tui_board_quarantine.requeue_all
         ~send:(fun ~partition_id ~request ->
           try
-            if authority <> state.workspace_authority then
-              Masc_tui_http.Post_unanswered "Workspace authority withdrawn"
-            else Masc_tui_http.post_board_quarantine_requeue
+            match write_authority_refusal state authority with
+            | Some reason -> Masc_tui_http.Post_unanswered reason
+            | None -> Masc_tui_http.post_board_quarantine_requeue
               ~host ~port ~keeper_name ~partition_id ~request
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -3940,7 +4318,7 @@ let launch_connectors_load state ~mailbox =
         let ( let* ) = Result.bind in
         let* () = check_workspace_request state ~mailbox ~authority:workspace_authority ~identity ~host ~port () in
         let* snapshot = Masc_tui_loader.load_connectors ~host ~port in
-        let* () = check_workspace_request state ~mailbox ~authority:workspace_authority ~identity ~host ~port () in
+        let* () = check_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority:workspace_authority ~identity ~host ~port () in
         Ok snapshot)
   end
 
@@ -3965,13 +4343,14 @@ let launch_connector_unbind_all state ~mailbox ~keeper_name targets =
     state.connector_unbind_all_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
+    let check_request = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
     let run () =
       let results =
         List.map
           (fun target ->
              let outcome =
                try
-                 match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+                 match check_request () with
                  | Error detail -> Masc_tui_connector_unbind.Failed detail
                  | Ok () -> Masc_tui_http.post_connector_unbind_owned ~host ~port target
                with
@@ -4014,6 +4393,7 @@ let lane_addons_detail_failure detail =
   Some (Masc_tui_lane_addons.Detail_read_failure detail)
 
 let launch_lane_application state ~mailbox =
+  if server_authority_ready state then begin
   let module Addons = Masc_tui_lane_addons in
   match state.lane_addons with
   | None -> ()
@@ -4028,6 +4408,7 @@ let launch_lane_application state ~mailbox =
              (fun () -> Result.bind
                (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/lane-addons")
                Addons.decode_configuration))
+  end
 
 let lane_addons_request_failure detail =
   Some (Masc_tui_lane_addons.Request_failure detail)
@@ -4047,10 +4428,12 @@ let lane_addons_failure_for_request request detail : lane_addons_failure =
   | `Request -> `Request detail
 
 let launch_lane_package_catalog state ~mailbox directory =
+  if server_authority_ready state then begin
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
   if view.loading then () else (
     state.lane_addons_generation <- state.lane_addons_generation + 1;
     let generation = state.lane_addons_generation in
+    state.lane_addons_reading <- Some generation;
     let pending = Result.bind (Option.to_result ~none:"No installation wizard" view.installer)
       (Masc_tui_lane_installer.begin_catalog ~request_id:generation ~directory) in
     match pending with
@@ -4063,12 +4446,15 @@ let launch_lane_package_catalog state ~mailbox directory =
       launch_workspace_request state ~mailbox ~boundary_error:Fun.id
         ~deliver:(fun result -> Lane_package_catalog_loaded (generation,directory,result))
         (fun () -> Masc_tui_http.get_json ~host ~port ~path:("/api/v1/lane-addons/package-catalog" ^ query)))
+  end
 
 let launch_lane_package_preview state ~mailbox path =
+  if server_authority_ready state then begin
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
   if view.loading then () else (
     state.lane_addons_generation <- state.lane_addons_generation + 1;
     let generation = state.lane_addons_generation in
+    state.lane_addons_reading <- Some generation;
     let pending = Result.bind (Option.to_result ~none:"No installation wizard" view.installer)
       (Masc_tui_lane_installer.begin_preview ~request_id:generation ~path) in
     match pending with
@@ -4080,6 +4466,7 @@ let launch_lane_package_preview state ~mailbox path =
       ~deliver:(fun result -> Lane_package_preview_loaded (generation,path,result))
       (fun () -> Masc_tui_http.get_json ~host ~port
         ~path:("/api/v1/lane-addons/package-preview?manifest_path=" ^ Masc_tui_http.percent_encode_query_value path)))
+  end
 
 let lane_draft_directory (view : Masc_tui_lane_addons.t) =
   Option.bind view.snapshot (fun snapshot ->
@@ -4087,6 +4474,7 @@ let lane_draft_directory (view : Masc_tui_lane_addons.t) =
       snapshot.configuration)
 
 let launch_lane_declaration state ~mailbox ~edit request =
+  if server_authority_ready state then begin
   let module Document = Masc_tui_lane_declaration in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
   let create_directory = lane_draft_directory view in
@@ -4100,6 +4488,10 @@ let launch_lane_declaration state ~mailbox ~edit request =
   | Ok () -> (
     state.lane_addons_generation <- state.lane_addons_generation + 1;
     let generation = state.lane_addons_generation in
+    state.lane_addons_reading <- (match request with Document.Read _ -> Some generation | Save _ -> None);
+    state.lane_nested_read_resume <- (match request with
+      | Document.Read path -> Some (generation, Lane_declaration_read {path; edit})
+      | Document.Save _ -> None);
     let document_key = Some (match request with Document.Read path -> Filename.basename path | Document.Save session -> session.file_name) in
     state.lane_addons <- Some {view with generation;loading=true;error=None;editor_ready=false;document_key;
       application_reading=Masc_tui_lane_application.empty};
@@ -4116,8 +4508,10 @@ let launch_lane_declaration state ~mailbox ~edit request =
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
       ~deliver:(fun result -> Lane_declaration_loaded (generation, request, edit, create_directory, result))
       perform)
+  end
 
 let launch_lane_subscriptions state ~mailbox request =
+  if server_authority_ready state then begin
   let module Subs = Masc_tui_lane_subscriptions in
   match state.lane_addons with
   | None -> ()
@@ -4125,15 +4519,25 @@ let launch_lane_subscriptions state ~mailbox request =
   | Some view ->
       state.lane_addons_generation <- state.lane_addons_generation + 1;
       let generation=state.lane_addons_generation in
+      state.lane_addons_reading <- (match request with Subs.Inspect -> Some generation | Save _ -> None);
+      state.lane_nested_read_resume <- (match request with
+        | Subs.Inspect -> Some (generation, Lane_subscriptions_read)
+        | Subs.Save _ -> None);
       state.lane_addons <- Some {view with generation;loading=true;error=None};
       let host=server_peer_host and port=state.port in
-      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      launch_workspace_request
+        ~operation:(match request with Subs.Inspect -> false | Subs.Save _ -> true)
+        state ~mailbox ~boundary_error:Fun.id
         ~deliver:(fun result -> Lane_subscriptions_loaded (generation,result))
         (fun () -> Result.bind (Masc_tui_http.post_json ~host ~port
           ~path:"/api/v1/lane-addons/subscriptions"
           ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode)
+  end
 
 let launch_lane_addons ?initial_detail state ~mailbox request =
+  if not (server_authority_ready state) then
+    report_action state "error" "Lane request was not sent while workspace identity is unconfirmed; retry after reconnecting"
+  else begin
   let module Addons = Masc_tui_lane_addons in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
   if view.loading then
@@ -4144,6 +4548,9 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
   else (
   state.lane_addons_generation <- state.lane_addons_generation + 1;
   let generation = state.lane_addons_generation in
+  state.lane_addons_reading <- (match request with
+    | Addons.Inspect | Slice _ | Action_status _ -> Some generation
+    | Attach _ | Observe _ | Detach _ | Evidence _ | Act _ | Subscriptions _ -> None);
   let last_action, action_receipt = match request with
     | Addons.Act action -> Some action, None
     | Addons.Action_status action -> Some action, view.action_receipt
@@ -4163,11 +4570,12 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
   let broadcast_workspace_verified=state.workspace_identity=Masc_tui_types.Workspace_identity_match in
   let authority = state.workspace_authority in
   let identity = state.server_identity in
+  let check_request = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
   let get_json ~path =
-    Result.bind (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ())
+    Result.bind (check_request ())
       (fun () -> Masc_tui_http.get_json ~host ~port ~path) in
   let post_json ~path ~body =
-    Result.bind (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ())
+    Result.bind (check_request ())
       (fun () -> Masc_tui_http.post_json ~host ~port ~path ~body) in
   let perform () =
     let ( let* ) = Result.bind in
@@ -4257,7 +4665,7 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
         let* principal = match scope with
           | None -> Ok None
           | Some _ -> (request_result (Result.bind
-              (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ())
+              (check_request ())
               (fun () -> Masc_tui_http.lane_broadcast_principal_bound ~credential ~host ~port))
               |> Result.map Option.some) in
         let* body = match principal,scope with
@@ -4266,7 +4674,7 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
               ~path:broadcast_path ~scope ~credential:principal body)
           | Some _,None -> Error (`Request "Broadcast workspace scope is unavailable") in
         let post ~path ~body = if broadcast then
-            Result.bind (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ())
+            Result.bind (check_request ())
               (fun () -> Masc_tui_http.post_json_bound ~credential ~host ~port ~path ~body)
           else post_json ~path ~body in
         let* receipt = request_result (post
@@ -4285,17 +4693,28 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
          | Ok snapshot -> Ok (reply ~snapshot ~receipt ?diagnostic ~inventory_read:`Read ())
          | Error detail -> Ok (reply ~receipt ?diagnostic ~inventory_read:(`Failed detail) ()))
   in
-  launch_workspace_request state ~mailbox
+  launch_workspace_request
+    ~operation:(match request with
+      | Addons.Inspect | Slice _ | Action_status _ -> false
+      | Attach _ | Observe _ | Detach _ | Evidence _ | Act _ | Subscriptions _ -> true)
+    state ~mailbox
     ~boundary_error:(lane_addons_failure_for_request request)
     ~deliver:(fun result -> Lane_addons_loaded (generation, initial_detail, result))
     perform)
+  end
 
 let launch_browser_history state ~mailbox ~reload =
+  let enqueue_async = workspace_enqueue state in
+  if server_authority_ready state then begin
   match state.browser_history with
   | None -> ()
   | Some history ->
       state.browser_history_generation <- state.browser_history_generation + 1;
       let generation = state.browser_history_generation in
+      (* A recovered read owns Loading again. A second identity outage must
+         retire and resume this request just like the first one. *)
+      let history = Browser_history.start_read ~reload history in
+      state.browser_history <- Some history;
       let host = server_peer_host and port = state.port in
       let fetch () =
         if reload then Browser_history_list_loaded (generation,
@@ -4313,9 +4732,18 @@ let launch_browser_history state ~mailbox ~reload =
        | None -> state.browser_history <- Some {history with content=List_failed "Eio switch is unavailable"}
        | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
            enqueue_async mailbox (perform ()); `Stop_daemon))
+  end else begin
+    (* Opening or changing history can own a loading state after the last
+       identity failure already retired reads. Keep this unsent selection
+       eligible for recovery too. *)
+    state.browser_history_generation <- state.browser_history_generation + 1;
+    state.browser_history <- Option.map Browser_history.suspend state.browser_history
+  end
 
 let launch_browser_lane state ~mailbox operation =
   let open Browser_lane_view in
+  let enqueue_async = workspace_enqueue state in
+  if server_authority_ready state then begin
   match state.browser_lane with
   | Some view when Option.is_some state.browser_history ->
       (match operation with
@@ -4355,11 +4783,18 @@ let launch_browser_lane state ~mailbox operation =
       state.browser_lane_generation <- state.browser_lane_generation + 1;
       let generation = state.browser_lane_generation in
       let image_generation = state.image_request_generation in
-      state.browser_lane <- Some { view with load = Loading (generation, operation);
+      let launched = { view with load = Loading (generation, operation);
         read_continuation = (match operation with Read -> No_read_continuation | _ -> view.read_continuation);
         read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
-        refresh_pending = (match operation with Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> Some generation | _ -> view.refresh_pending);
-        clients = (match operation with Discover Choose_client -> None | _ -> view.clients) };
+        refresh_pending = (match operation with Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> Some generation | _ -> view.refresh_pending) } in
+      (* The picker that asks for the list again shows nothing of the read
+         before it. Every other request leaves what the last discovery said. *)
+      state.browser_lane <- Some (match operation with
+        | Discover Choose_client -> Browser_lane_view.withdraw_discovery launched
+        | Discover Read_after_discovery | Read | Read_refresh | Open_session | Close_session | Goto _
+        | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _
+        | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _
+        | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> launched);
       let host = server_peer_host and port = state.port in
       let perform () =
         (* The mailbox is the effect boundary. Cancellation still belongs to
@@ -4433,9 +4868,11 @@ let launch_browser_lane state ~mailbox operation =
       in
       (match Eio_context.get_switch_opt () with
        | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
-           enqueue_async mailbox (perform ()); `Stop_daemon)
+           let message = perform () in
+           enqueue_async mailbox (if operation_is_read operation then message else Workspace_operation message); `Stop_daemon)
        | None ->
            state.browser_lane <- Some { view with load = Failed "Eio switch is unavailable" })
+  end
 
 let refresh_browser_lane state ~mailbox =
   match state.browser_lane with
@@ -4451,6 +4888,7 @@ let open_browser_lane state ~mailbox =
   refresh_browser_lane state ~mailbox
 
 let launch_runtime_surface_load state ~mailbox ~force =
+  if server_authority_ready state then begin
   match state.runtime_surface_inflight with
   | Some _ -> if force then state.runtime_surface_force_pending <- true
   | None ->
@@ -4462,8 +4900,11 @@ let launch_runtime_surface_load state ~mailbox ~force =
       launch_workspace_request state ~mailbox ~boundary_error:Fun.id
         ~deliver:(fun result -> Runtime_surface_loaded (generation, result))
         (fun () -> Masc_tui_loader.load_runtime_surface ~host ~port ~force)
+  end
 
 let launch_repositories_load state ~mailbox =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   if state.repositories_inflight then ()
   else begin
     state.repositories_inflight <- true;
@@ -4475,8 +4916,10 @@ let launch_repositories_load state ~mailbox =
         enqueue_async mailbox (Repositories_loaded result))
       (fun () -> Masc_tui_loader.load_repositories ~host ~port)
   end
+  end
 
 let launch_memory_input_load state ~mailbox ~refresh =
+  if server_authority_ready state then begin
   if state.view = Memory && Option.is_none state.memory_facts_keeper
      && same_workspace_identity state.server_identity state.server_identity then
     match selected_memory_keeper state with
@@ -4493,8 +4936,10 @@ let launch_memory_input_load state ~mailbox ~refresh =
           launch_workspace_request state ~mailbox ~boundary_error:Fun.id
             ~deliver:(fun result -> Memory_input_loaded (request, result))
             (fun () -> Masc_tui_http.fetch_keeper_memory_input ~host ~port ~keeper_name:key)
+  end
 
 let launch_memory_health_load state ~mailbox =
+  if server_authority_ready state then begin
   if state.memory_health_inflight
      || not (same_workspace_identity state.server_identity state.server_identity) then ()
   else begin
@@ -4506,9 +4951,13 @@ let launch_memory_health_load state ~mailbox =
       (fun () -> Masc_tui_loader.load_memory_health ~host ~port)
   end
 
+  end
+
 (* Ask for [key]'s facts and run [read] for them, unless that read is already
    in flight. *)
+
 let launch_memory_facts_read state ~mailbox ~key read =
+  if server_authority_ready state then begin
   match Masc_tui_fetched.start ~equal:String.equal state.memory_facts ~key with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (memory_facts, request) ->
@@ -4523,6 +4972,7 @@ let launch_memory_facts_read state ~mailbox ~key read =
         ~deliver:(fun result ->
           enqueue_scoped mailbox (Memory_facts_loaded (request, result)))
         read
+  end
 
 let launch_memory_facts_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
@@ -4577,6 +5027,8 @@ let repository_change_scope_equal left right =
       false
 
 let launch_repository_changes_load state ~mailbox ~scope =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
@@ -4588,8 +5040,11 @@ let launch_repository_changes_load state ~mailbox ~scope =
           Masc_tui_loader.load_project_changes ~host ~port
       | Tui_decode.Repository_change_repository repository_id ->
           Masc_tui_loader.load_repository_changes ~host ~port ~repository_id)
+  end
 
 let launch_repository_changes_diff_load state ~mailbox ~reader ~scope ~path =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   let generation =
     match reader with
     | Repository_diff_reader ->
@@ -4615,6 +5070,7 @@ let launch_repository_changes_diff_load state ~mailbox ~reader ~scope ~path =
     (fun () ->
       Masc_tui_loader.load_git_diff ~host ~port ?repo ~keeper:None ~path
         ~base_ref:tree_diff_base_ref ())
+  end
 
 let diff_text_max_width text =
   String.split_on_char '\n' text
@@ -4675,21 +5131,6 @@ let open_repository_changes state ~mailbox ~scope =
   state.repository_changes_diff_scroll <- 0;
   launch_repository_changes_load state ~mailbox ~scope
 
-let close_repository_changes state =
-  state.repository_changes_open <- false;
-  state.repository_changes_return_chat <- false;
-  state.repository_changes_scope <- None;
-  state.repository_changes <- None;
-  state.repository_changes_error <- None;
-  state.repository_changes_cursor <- 0;
-  state.repository_changes_scroll <- 0;
-  state.repository_changes_diff <- None;
-  state.repository_changes_diff_error <- None;
-  state.repository_changes_diff_path <- None;
-  state.repository_changes_diff_hscroll <- 0;
-  state.repository_changes_diff_max_width <- 0;
-  state.repository_changes_diff_scroll <- 0
-
 let refresh_repository_changes state ~mailbox =
   match state.repository_changes_scope with
   | None -> ()
@@ -4713,6 +5154,7 @@ let open_repository_change_in_code state ~mailbox ~scope
   state.code_cursor <- 0;
   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
   state.code_file <- Masc_tui_fetched.clear state.code_file;
+  state.code_file_resume_intent <- Refresh_code_file;
   state.code_focus_file <- Left_pane;
   close_repository_changes state;
   state.view <- Code;
@@ -4759,46 +5201,30 @@ let change_bundle_relative_path (change : Masc.Tui_decode.file_change) =
 let changes_window_hours = 24.0
 
 let launch_workspace_activity state ~mailbox ~repo_id =
+  if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   match Masc_tui_fetched.start ~equal:String.equal state.workspace_activity ~key:repo_id with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
       state.workspace_activity <- next;
-      let assigned_keepers =
-        match state.repositories with
-        | None -> []
-        | Some snap ->
-            match List.find_opt (fun (r : Tui_decode.repository) -> String.equal r.rp_id repo_id) snap.rs_repositories with
-            | None -> []
-            | Some r -> r.rp_keepers
-      in
-      let fleet_keepers =
-        List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers
-        |> List.sort_uniq String.compare
-      in
-      let keepers =
-        match assigned_keepers with
-        | [] -> fleet_keepers
-        | ks ->
-            let active = List.filter (fun name -> List.mem name fleet_keepers) ks in
-            if active = [] then fleet_keepers
-            else List.sort_uniq String.compare active
-      in
+      let host = server_peer_host and port = state.port in
       let run () =
-        let reads = Eio.Fiber.List.map ~max_fibers:4 (fun keeper_name ->
-          let result = try Masc_tui_loader.load_keeper_file_changes
-              ~host:server_peer_host ~port:state.port ~keeper_name ~window_hours:changes_window_hours
-            with Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn -> Error (Printexc.to_string exn) in
-          (keeper_name, result)) keepers in
-        enqueue_async mailbox (Workspace_activity_loaded (request,
-          Ok {war_at = Unix.gettimeofday (); war_hours = changes_window_hours; war_keepers = reads}))
+        let result = try Masc_tui_http.fetch_repository_activity ~host ~port
+            ~repo_id ~window_hours:changes_window_hours
+          with Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn -> Error (Printexc.to_string exn) in
+        let result = Result.bind result (fun snapshot ->
+          if String.equal snapshot.Tui_decode.ras_repo_id repo_id then Ok snapshot
+          else Error "repository activity response names another repository") in
+        enqueue_async mailbox (Workspace_activity_loaded (request, result))
       in
       match Eio_context.get_switch_opt () with
       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
       | None -> enqueue_async mailbox (Workspace_activity_loaded (request, Error "Eio switch is unavailable"))
+  end
 
 let launch_file_changes_load state ~mailbox ~keeper_name =
+  if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
@@ -4809,10 +5235,14 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
       Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
         ~window_hours:changes_window_hours)
 
+  end
+
 (* The pane's Changes tab asks for the selected keeper's changes through
    the fetch helper, so a request already in flight is not repeated and an
    answer for another keeper is dropped on arrival. *)
+
 let launch_acting_pane_changes_load state ~mailbox ~keeper_name =
+  if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   match
     Masc_tui_fetched.start ~equal:String.equal state.acting_pane_changes
@@ -4830,10 +5260,13 @@ let launch_acting_pane_changes_load state ~mailbox ~keeper_name =
           Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
             ~window_hours:changes_window_hours))
 
+  end
+
 (* The Changes tab is live only while it is on screen: the pane drawn, the
    tab up, a keeper under the cursor. [refresh] asks again whatever is
    known; [ensure] asks only for a keeper never asked about, so the loop
    can call it after every input without repeating a settled fetch. *)
+
 let acting_pane_changes_keeper (state : state) =
   if Masc_tui_render.acting_pane_drawn_cols () <= 0 then None
   else
@@ -4863,6 +5296,7 @@ let ensure_acting_pane_changes state ~mailbox =
 
 let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
     ~keeper_name =
+  if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   if state.msg_tool_visibility <> Tools_full then ()
   else begin
@@ -4910,19 +5344,24 @@ let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
                , Error "Eio switch is unavailable" ))
     end
   end
+  end
 
 let launch_keeper_chat_tool_details_load ?(force = false) state ~mailbox
     ~keeper_name =
+  if server_authority_ready state then begin
   if state.msg_tool_visibility = Tools_compact then ()
   else begin
     launch_keeper_chat_file_changes_load ~force state ~mailbox ~keeper_name;
     launch_keeper_calls_load ~force state ~mailbox keeper_name
   end
 
+  end
+
 (* Changes follows the selected Keeper, but the surface is useful precisely
    when comparing more than one Keeper. Brackets move that shared selection
    and invalidate every row whose identity belonged to the previous Keeper;
    the stamped async response below already rejects a late answer. *)
+
 let cycle_changes_keeper state ~mailbox ~delta =
   let count = List.length state.keepers in
   if count > 0 then begin
@@ -4961,6 +5400,7 @@ let cycle_changes_keeper state ~mailbox ~delta =
    than a branch point: the question the surface answers is "did this survive
    into the tree", and a merge base would answer a different one. *)
 let launch_git_diff_load state ~mailbox ~keeper ~path =
+  if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
@@ -4970,8 +5410,11 @@ let launch_git_diff_load state ~mailbox ~keeper ~path =
     (fun () ->
       Masc_tui_loader.load_git_diff ~host ~port ~keeper ~path
         ~base_ref:tree_diff_base_ref ())
+  end
 
 let launch_harness_load state ~mailbox =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   if state.harness_inflight then ()
   else begin
     state.harness_inflight <- true;
@@ -4983,8 +5426,10 @@ let launch_harness_load state ~mailbox =
         enqueue_async mailbox (Harness_loaded result))
       (fun () -> Masc_tui_loader.load_harness ~host ~port)
   end
+  end
 
 let launch_fusion_runs_load state ~mailbox =
+  let enqueue_async = workspace_enqueue state in
   if server_authority_ready state then
   match Masc_tui_fetched.start ~equal:Unit.equal state.fusion_runs ~key:() with
   | Masc_tui_fetched.Already_loading -> ()
@@ -5011,6 +5456,8 @@ let launch_fusion_runs_load state ~mailbox =
                 (request, Error "Eio switch is unavailable")))
 
 let launch_fusion_detail_load state ~mailbox ~run_id =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   let already_loading =
     match state.fusion_detail_inflight with
     | Some (generation, loading_run_id) ->
@@ -5029,8 +5476,11 @@ let launch_fusion_detail_load state ~mailbox ~run_id =
         enqueue_async mailbox (Fusion_detail_loaded (generation, run_id, result)))
       (fun () -> Masc_tui_loader.load_fusion_detail ~host ~port ~run_id)
   end
+  end
 
 let launch_fusion_historical_detail_load state ~mailbox ~reference =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   let already_loading =
     match state.fusion_historical_inflight with
     | Some (generation, loading_reference) ->
@@ -5050,10 +5500,15 @@ let launch_fusion_historical_detail_load state ~mailbox ~reference =
       (fun () -> Masc_tui_loader.load_fusion_historical_detail ~host ~port ~reference)
   end
 
+  end
+
 (* The two requests behind the launch form. Neither is inflight-guarded by
    a field of its own: the form's state says which request it waits on, and
    the generation in the answer says whether it is still that one. *)
+
 let launch_fusion_launch_options_load state ~mailbox =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   state.fusion_launch_generation <- state.fusion_launch_generation + 1;
   let generation = state.fusion_launch_generation in
   state.fusion_launch <- Some (Fusion_launch_reading_presets generation);
@@ -5065,9 +5520,12 @@ let launch_fusion_launch_options_load state ~mailbox =
       enqueue_async mailbox (Fusion_launch_options_loaded (generation, result)))
     (fun () -> Masc_tui_loader.load_fusion_launch_options ~host ~port)
 
+  end
+
 (* Named apart from [Masc_tui_loader.launch_fusion_run], which it calls: one
    name for both is a shadow that turns a missing qualifier into unbounded
    recursion rather than a compile error. *)
+
 let start_fusion_run state ~mailbox ~(request : Masc_tui_fusion_launch.request) =
   state.fusion_launch_generation <- state.fusion_launch_generation + 1;
   let generation = state.fusion_launch_generation in
@@ -5084,6 +5542,7 @@ let launch_keeper_lanes_load state ~mailbox =
   if state.keeper_lanes_inflight then ()
   else begin
     state.keeper_lanes_inflight <- true;
+    state.keeper_lanes_resume <- false;
     let host = server_peer_host in
     let port = state.port in
     Masc_tui_async_read.launch
@@ -5093,7 +5552,13 @@ let launch_keeper_lanes_load state ~mailbox =
       (fun () -> Masc_tui_loader.load_keeper_lanes ~host ~port)
   end
 
+let launch_keeper_lanes_reread state ~mailbox =
+  if state.keeper_lanes_inflight
+  then state.keeper_lanes_reread_pending <- true
+  else launch_keeper_lanes_load state ~mailbox
+
 let launch_lanes_load state ~mailbox =
+  if server_authority_ready state then begin
   if state.standalone_lanes_inflight then ()
   else begin
     state.standalone_lanes_inflight <- true;
@@ -5107,15 +5572,19 @@ let launch_lanes_load state ~mailbox =
       (fun () -> Masc_tui_loader.load_lane_inventory ~host ~port)
   end
 
+  end
+
 (* A re-read that has to happen: a write's read-back, or the operator's [r].
    A load already out may have left before the change it has to show, so
    one more is queued behind it instead of the request being dropped. *)
+
 let launch_lanes_reread state ~mailbox =
   if state.standalone_lanes_inflight
   then state.standalone_lanes_reread_pending <- true
   else launch_lanes_load state ~mailbox
 
 let launch_machine_activity_read state ~mailbox owner =
+  if server_authority_ready state then begin
   match Masc_tui_types.machine_activity_session state owner with
   | None -> ()
   | Some session ->
@@ -5145,6 +5614,7 @@ let launch_machine_activity_read state ~mailbox owner =
                | None | Some _ -> Error "The selected machine is absent from the server reading.") in
            Result.map (fun () -> Masc_tui_machine_activity.{document;activity})
              (check ()))))
+  end
 
 let launch_machine_activity_save state ~mailbox session =
   let module Activity = Masc_tui_machine_activity in
@@ -5163,7 +5633,7 @@ let launch_machine_activity_save state ~mailbox session =
           | Error (Masc_tui_http.Runtime_config_save_refused detail) -> Activity.Refused detail
           | Error (Masc_tui_http.Runtime_config_save_unconfirmed detail) -> Activity.Unconfirmed detail in
         Machine_activity_saved (request,result))
-      (fun () -> save_runtime_config_text state ~mailbox ~authority ~identity
+      (fun () -> save_runtime_config_text ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity
         ~expected_source_path:write.expected_source_path ~expected_source_revision:write.expected_source_revision write.source_text)
 
 let open_machine_activity state ~mailbox machine =
@@ -5180,6 +5650,7 @@ let open_machine_activity state ~mailbox machine =
     launch_machine_activity_read state ~mailbox owner
 
 let launch_browser_activity_read state ~mailbox owner =
+  if server_authority_ready state then begin
   match Masc_tui_types.browser_activity_session state owner with
   | None -> ()
   | Some session ->
@@ -5195,6 +5666,7 @@ let launch_browser_activity_read state ~mailbox owner =
            |> Result.map (fun (reading : Masc_tui_runtime_config_view.reading) ->
              {Masc_tui_runtime_config_edit.path=reading.path;source_text=reading.source_text;
               source_revision=reading.metadata.source_revision})))
+  end
 
 let launch_browser_activity_save state ~mailbox session =
   let module Activity = Masc_tui_browser_activity in
@@ -5213,7 +5685,7 @@ let launch_browser_activity_save state ~mailbox session =
           | Error (Masc_tui_http.Runtime_config_save_refused detail) -> Activity.Refused detail
           | Error (Masc_tui_http.Runtime_config_save_unconfirmed detail) -> Activity.Unconfirmed detail in
         Browser_activity_saved (request,result))
-      (fun () -> save_runtime_config_text state ~mailbox ~authority ~identity
+      (fun () -> save_runtime_config_text ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity
         ~expected_source_path:write.expected_source_path ~expected_source_revision:write.expected_source_revision write.source_text)
 
 let open_browser_activity state ~mailbox lane =
@@ -5230,6 +5702,7 @@ let open_browser_activity state ~mailbox lane =
     launch_browser_activity_read state ~mailbox owner
 
 let launch_exact_activity_read state ~mailbox owner =
+  if server_authority_ready state then begin
   match Masc_tui_types.exact_activity_session state owner with
   | None -> ()
   | Some session ->
@@ -5245,6 +5718,7 @@ let launch_exact_activity_read state ~mailbox owner =
            |> Result.map (fun (reading : Masc_tui_runtime_config_view.reading) ->
              {Masc_tui_runtime_config_edit.path=reading.path;source_text=reading.source_text;
               source_revision=reading.metadata.source_revision})))
+  end
 
 let launch_exact_activity_save state ~mailbox session =
   let module Activity = Masc_tui_exact_activity in
@@ -5263,7 +5737,7 @@ let launch_exact_activity_save state ~mailbox session =
           | Error (Masc_tui_http.Runtime_config_save_refused detail) -> Activity.Refused detail
           | Error (Masc_tui_http.Runtime_config_save_unconfirmed detail) -> Activity.Unconfirmed detail in
         Exact_activity_saved (request,result))
-      (fun () -> save_runtime_config_text state ~mailbox ~authority ~identity
+      (fun () -> save_runtime_config_text ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity
         ~expected_source_path:write.expected_source_path ~expected_source_revision:write.expected_source_revision write.source_text)
 
 let open_exact_activity state ~mailbox lane =
@@ -5280,6 +5754,8 @@ let open_exact_activity state ~mailbox lane =
     launch_exact_activity_read state ~mailbox owner
 
 let launch_clients_load state ~mailbox =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   if state.clients_surface_inflight then ()
   else begin
     state.clients_surface_inflight <- true;
@@ -5293,8 +5769,11 @@ let launch_clients_load state ~mailbox =
         enqueue_async mailbox (Clients_loaded (generation, result)))
       (fun () -> Masc_tui_loader.load_clients ~host ~port)
   end
+  end
 
 let launch_lane_runs_load ?before state ~mailbox ~(lane : Standalone_lane.t) =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   state.lane_runs_generation <- state.lane_runs_generation + 1;
   let generation = state.lane_runs_generation in
   state.lane_runs_loading <- true;
@@ -5304,8 +5783,11 @@ let launch_lane_runs_load ?before state ~mailbox ~(lane : Standalone_lane.t) =
     ~deliver:(fun result ->
       enqueue_async mailbox (Lane_runs_loaded (lane, generation, before, result)))
     (fun () -> Masc_tui_http.fetch_lane_runs ?before ~host ~port ~lane ())
+  end
 
 let launch_lane_run_detail_load state ~mailbox ~run_id =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   state.lane_run_detail_generation <- state.lane_run_detail_generation + 1;
   let generation = state.lane_run_detail_generation in
   let host = server_peer_host in
@@ -5315,8 +5797,11 @@ let launch_lane_run_detail_load state ~mailbox ~run_id =
       enqueue_async mailbox (Lane_run_detail_loaded (run_id, generation, result)))
     (fun () -> Masc_tui_http.fetch_lane_run_detail ~host ~port ~run_id)
 
+  end
+
 (* Opening a standalone lane's runs drops the previous lane's list so a stale
    answer can never draw under the new heading. *)
+
 let open_lane_run_list state ~mailbox (lane : Tui_decode.standalone_lane) =
   state.lanes_mode <- Lanes_run_list lane.sl_lane;
   state.lane_runs <- None;
@@ -5337,6 +5822,8 @@ let open_lane_run_detail state ~mailbox ~(lane : Standalone_lane.t) ~run_id =
   launch_lane_run_detail_load state ~mailbox ~run_id
 
 let launch_measurement_artifact_load state ~mailbox ~sha256 =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   state.lane_run_detail_generation <- state.lane_run_detail_generation + 1;
   let generation = state.lane_run_detail_generation in
   let host = server_peer_host in
@@ -5345,6 +5832,7 @@ let launch_measurement_artifact_load state ~mailbox ~sha256 =
     ~deliver:(fun result ->
       enqueue_async mailbox (Measurement_artifact_loaded (sha256, generation, result)))
     (fun () -> Masc_tui_http.fetch_measurement_artifact ~host ~port ~sha256)
+  end
 
 let open_measurement_artifact state ~mailbox ~sha256 =
   state.lanes_mode <- Lanes_measurement_detail sha256;
@@ -5369,6 +5857,7 @@ let reset_verification_rows state =
   state.verification_verdict_error <- None
 
 let launch_verification_load state ~mailbox =
+  if server_authority_ready state then begin
   if state.verification_inflight then ()
   else begin
     state.verification_inflight <- true;
@@ -5382,6 +5871,7 @@ let launch_verification_load state ~mailbox =
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
       ~deliver:(fun result -> Verification_loaded result)
       (fun () -> Masc_tui_loader.load_verification ~host ~port ~limit:200 ~view ~offset)
+  end
   end
 
 (* One surface's row list: how many rows it has, which one the cursor is on,
@@ -6015,10 +6505,13 @@ let enter_theme_filter state filter =
    Surfaces whose data ride the refresh bundle ([surface_needs]) read
    nothing here. *)
 let launch_surface_reads state ~mailbox (surface : surface) =
+  if server_authority_ready state then
   match surface with
   | Lanes -> launch_lanes_load state ~mailbox
   | Clients -> launch_clients_load state ~mailbox
-  | Keepers Keeper_list -> launch_keeper_lanes_load state ~mailbox
+  (* The list draws nothing from the Keeper composite; Info and Secrets read
+     it on entry and on their own cadence. *)
+  | Keepers Keeper_list -> ()
   | Approvals ->
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
@@ -6128,7 +6621,10 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
            state.changes_cursor <- 0;
            state.changes_scroll <- 0;
            state.changes_diff_row <- None;
-           state.changes_diff_scroll <- 0
+           state.changes_diff_scroll <- 0;
+           state.changes_tree_diff <- None;
+           state.changes_tree_diff_error <- None;
+           state.changes_tree_diff_path <- None
        | Some _ | None -> ())
    | Connectors -> (
        match browser_lane_on_screen state with
@@ -6170,6 +6666,7 @@ let cycle_surface state ~mailbox ~backwards =
   end
 
 let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
+  if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
@@ -6196,9 +6693,46 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
       enqueue_async mailbox
         (Keeper_chat_older_loaded
            (generation, keeper_name, before, Error "Eio switch is unavailable"))
+  end
+
+let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~mailbox ~keeper_name =
+  let eligible = server_authority_ready state
+     && state.workspace_identity = Workspace_identity_match
+     && keeper_available_for_new_message state keeper_name in
+  if eligible && mode=Masc_tui_native_tasks.Audit
+     && List.mem keeper_name state.msg_native_tasks_inflight
+     && not (List.mem keeper_name state.msg_native_tasks_audit_pending) then
+    state.msg_native_tasks_audit_pending <- keeper_name :: state.msg_native_tasks_audit_pending;
+  if eligible && not (List.mem keeper_name state.msg_native_tasks_inflight) then begin
+    let mode = if List.mem keeper_name state.msg_native_tasks_audit_pending
+      then Masc_tui_native_tasks.Audit else mode in
+    state.msg_native_tasks_audit_pending <-
+      List.filter ((<>) keeper_name) state.msg_native_tasks_audit_pending;
+    let enqueue_async = workspace_enqueue state in
+    let authority = state.workspace_authority in
+    let identity = state.server_identity in
+    let host = server_peer_host and port = state.port in
+    let previous = Option.value ~default:Masc_tui_native_tasks.empty
+        (List.assoc_opt keeper_name state.msg_native_tasks) in
+    state.msg_native_tasks_inflight <- keeper_name :: state.msg_native_tasks_inflight;
+    Masc_tui_async_read.launch_with
+      ~boundary_error:(fun detail -> Masc_tui_native_tasks.Transport detail)
+      ~deliver:(fun result -> enqueue_async mailbox (Keeper_native_tasks_loaded (keeper_name,result)))
+      (fun () -> Masc_tui_native_tasks.read ~mode ~keeper_name ~previous
+        ~fetch:(fun path ->
+          let ( let* ) = Result.bind in
+          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          let result = Masc_tui_http.http_get ~host ~port ~path in
+          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          result))
+  end
 
 let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) state ~mailbox
     ~keeper_name =
+  if server_authority_ready state then begin
+  launch_keeper_native_tasks_load
+    ~mode:(if force then Masc_tui_native_tasks.Audit else Masc_tui_native_tasks.Poll)
+    state ~mailbox ~keeper_name;
   let identity = state.server_identity in
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
@@ -6212,6 +6746,7 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
   else begin
     let host = server_peer_host in
     let port = state.port in
+    let check_request = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
     state.msg_history_load_generation <- state.msg_history_load_generation + 1;
     state.msg_older_loading <- false;
     let generation = state.msg_history_load_generation in
@@ -6220,9 +6755,9 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
       let history_result =
         try
           let ( let* ) = Result.bind in
-          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          let* () = check_request () in
           let* reading = Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name in
-          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          let* () = check_request () in
           Ok reading
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -6233,9 +6768,9 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
            failures of this read already do. *)
         try
           let ( let* ) = Result.bind in
-          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          let* () = check_request () in
           let* reading = Masc_tui_http.fetch_keeper_memory_journal ~host ~port ~keeper_name in
-          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          let* () = check_request () in
           Ok reading
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -6265,7 +6800,7 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
       launch_keeper_chat_tool_details_load state ~mailbox ~keeper_name
   end
   end
-
+  end
 
 let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
     ~mailbox ~keeper_name ~drain_queue =
@@ -6280,24 +6815,39 @@ let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
 (* Copy reads the stored reply again, before the display layer scrubs control
    bytes or wraps lines. A separate read leaves the visible history cache and
    its pagination untouched. *)
+let settle_retired_chat_copy state =
+  match state.msg_copy_pending with
+  | Some (generation, keeper_name, reading) when reading != state.workspace_read_authority ->
+      state.msg_copy_pending <- None;
+      if generation = state.msg_copy_generation
+         && state.msg_target_keeper_name = Some keeper_name then
+        report_action state "error"
+          "/copy was interrupted by workspace reconnection; retry after reconnecting"
+  | Some _ | None -> ()
+
 let launch_keeper_chat_copy state ~mailbox ~keeper_name =
+  if not (server_authority_ready state) then
+    report_action state "error"
+      "/copy cannot read chat history while workspace identity is unconfirmed; retry after reconnecting"
+  else begin
   let enqueue_async = workspace_enqueue state in
   state.msg_copy_generation <- state.msg_copy_generation + 1;
   let generation = state.msg_copy_generation in
+  state.msg_copy_pending <- Some (generation, keeper_name, state.workspace_read_authority);
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
       enqueue_async mailbox (Keeper_chat_copy_loaded (generation, keeper_name, result)))
     (fun () -> Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name)
+  end
 ;;
 
-let read_keeper_chat_operation state ~mailbox ~authority ~identity
+let read_keeper_chat_operation ~check_request ~host ~port
     ~keeper_name ~operation_id =
-  let host = server_peer_host and port = state.port in
   try
     let ( let* ) = Result.bind in
-    let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+    let* () = check_request () in
     let path = Printf.sprintf "/api/v1/keepers/%s/chat/operations/%s"
       (Masc_tui_http.percent_encode_path_segment keeper_name)
       (Masc_tui_http.percent_encode_path_segment operation_id) in
@@ -6327,11 +6877,13 @@ let launch_unavailable_journal_operations state ~mailbox ~keeper_name =
   | [], (Some _ | None) | _ :: _, None -> ()
   | _ :: _, Some sw ->
       let enqueue_async = workspace_enqueue state in
-      let authority = state.workspace_authority and identity = state.server_identity in
-      List.iter (journal_read_started state) targets;
+      let host = server_peer_host and port = state.port in
+      let check_request = capture_workspace_check state ~mailbox in
+      List.iter (fun operation_id ->
+        journal_read_started state (keeper_name, Keeper_chat_log.Operation operation_id)) targets;
       fork_workspace_job state ~sw (fun () ->
         List.iter (fun operation_id ->
-          let operation_state = read_keeper_chat_operation state ~mailbox ~authority ~identity
+          let operation_state = read_keeper_chat_operation ~check_request ~host ~port
             ~keeper_name ~operation_id in
           enqueue_async mailbox
             (Keeper_chat_operation_loaded {keeper_name; operation_id; operation_state})) targets)
@@ -6352,11 +6904,13 @@ let launch_unavailable_journal_operations state ~mailbox ~keeper_name =
    meanwhile added. Failures are typed by the fetch and decided in the
    handler, not here. *)
 let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
+  if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   let identity = state.server_identity in
   let host = server_peer_host in
   let port = state.port in
+  let check_request = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
   let run (source, started_at, since_seq) =
     (* The journal can lack its final event after interruption or an append
        failure. Its cursor remains the journal's; the exact operation is a
@@ -6367,7 +6921,7 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
       match source with
       | Keeper_chat_log.Autonomous_turn _ -> Ok None
       | Keeper_chat_log.Operation operation_id ->
-          read_keeper_chat_operation state ~mailbox ~authority ~identity
+          read_keeper_chat_operation ~check_request ~host ~port
             ~keeper_name ~operation_id |> Result.map Option.some
     in
     let read_journal () =
@@ -6377,7 +6931,7 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
             (* Pages at the journal's own ceiling: one definition, the
                server's and this client's, so the ask can never exceed
                what the endpoint admits. *)
-            match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+            match check_request () with
             | Error detail -> Error (Keeper_chat_log.Events_transport detail)
             | Ok () -> Masc_tui_http.fetch_keeper_chat_events ~host ~port ~keeper_name
                 ~source ~since_seq ~since_offset
@@ -6386,27 +6940,28 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Keeper_chat_log.Events_transport (Printexc.to_string exn))
     in
-    let operation_state, journal = Keeper_chat_log.read_with_operation_state
+    let operation_state, journal, terminal_replay = Keeper_chat_log.read_with_operation_state
       ~read_operation ~read_journal in
     enqueue_async mailbox
-      (Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state })
+      (Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state; terminal_replay })
   in
   match targets, Eio_context.get_switch_opt () with
   | [], Some _ | [], None -> ()
   | _ :: _, Some sw ->
       List.iter
-        (fun (source, _, _) -> journal_read_started state (Keeper_chat_log.source_key source))
+        (fun (source, _, _) -> journal_read_started state (keeper_name, source))
         targets;
       fork_workspace_job state ~sw (fun () -> List.iter run targets)
   | _ :: _, None ->
       (* No switch, no fetch: the v1 rows stay, and nothing is
          remembered, so a later load with a switch asks. *)
       ()
+  end
 
 let launch_current_autonomous_journals state ~mailbox ~keeper_name =
   autonomous_journal_candidates ~keeper_name state.keeper_turns
   |> List.iter (fun (source, at) ->
-      let key = Keeper_chat_log.source_key source in
+      let key = keeper_name, source in
       match journal_follow_for_source state ~keeper_name ~source ~seq:None ~at with
       | Follow_nothing -> ()
       | Follow_read_after_inflight -> journal_read_wanted state key None
@@ -6414,6 +6969,7 @@ let launch_current_autonomous_journals state ~mailbox ~keeper_name =
           launch_keeper_chat_journal_loads state ~mailbox ~keeper_name [source, started_at, since_seq])
 
 let launch_runtime_catalog_load state ~mailbox =
+  if server_authority_ready state then begin
   state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
   let generation = state.runtime_catalog_generation in
   state.runtime_catalog_reading <- Masc_tui_types.Runtime_catalog_loading;
@@ -6424,8 +6980,10 @@ let launch_runtime_catalog_load state ~mailbox =
     ~deliver:(fun result ->
       enqueue_async mailbox (Runtime_catalog_loaded (generation, result)))
     (fun () -> Masc_tui_loader.load_runtime_resolved ~host ~port)
+  end
 
 let launch_context_inspector_load state ~mailbox ~keeper_name =
+  if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
@@ -6468,6 +7026,7 @@ let launch_context_inspector_load state ~mailbox ~keeper_name =
            , keeper_name
            , Masc_tui_context_inspector.Request_failed
                "Eio switch is unavailable" ))
+  end
 
 let open_context_inspector state ~mailbox ~keeper_name =
   launch_runtime_catalog_load state ~mailbox;
@@ -6745,7 +7304,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
      The typed preview below is derived from the original text and refs. *)
   let text =
     Keeper_chat_history.text_with_attachments
-      ~format_bytes:Masc_tui_context_inspector.format_bytes ~text
+      ~format_bytes:Masc_tui_context_inspector.format_bytes
+      ~text:(Masc_tui_chat_media.append_text ~text row.Keeper_chat_history.media)
       ~notes:row.Keeper_chat_history.attachments
   in
   { me_role = role
@@ -6761,8 +7321,12 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
   ; me_turn_sequence = row.Keeper_chat_history.turn_sequence
   ; me_operation_seq = operation_seq
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
-  ; me_image = Masc_tui_image_preview.in_message ~text:row.Keeper_chat_history.text
-      ~attachments:(List.map (fun note -> note.Keeper_chat_history.att_image) row.attachments)
+  ; me_image =
+      (match Masc_tui_chat_media.newest_image row.Keeper_chat_history.media with
+       | Some preview -> preview
+       | None -> Masc_tui_image_preview.in_message ~text:row.Keeper_chat_history.text
+           ~attachments:(List.map (fun note -> note.Keeper_chat_history.att_image) row.attachments))
+  ; me_media = row.Keeper_chat_history.media
   ; me_memory_summary =
       Option.map
         (Keeper_chat.terminal_safe_text ~preserve_newlines:false)
@@ -6822,6 +7386,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
        persisted turn_ref. Old rows and Memory journal entries carry neither,
        so the empty value continues to mean "no grouping authority". *)
     me_request_id = Option.value ~default:"" row.Keeper_chat_history.turn_id
+  ; me_execution_source = row.Keeper_chat_history.execution_source
   ; me_at = row.Keeper_chat_history.at
   }
 
@@ -6856,6 +7421,7 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
     let result =
       try
         if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+        else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
         else Masc_tui_http.post_keeper_turn_interrupt ~expected_control_token ~on_control_token ~host ~port ~keeper_name
           ~request_id
       with
@@ -6888,6 +7454,7 @@ let launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~in
       let result =
         try
           if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
           else Masc_tui_http.post_keeper_observed_turn_interrupt ~on_control_token ~host:server_peer_host
             ~port:state.port ~keeper_name ~interrupt_token
         with
@@ -6994,6 +7561,7 @@ let launch_keeper_run_next ?(automatic = false) state ~mailbox request =
       let result =
         try
           if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
           else Masc_tui_http.post_keeper_run_next ?priority_predecessors ~host:server_peer_host
             ~port:state.port ~keeper_name ~request_id ()
         with
@@ -7252,9 +7820,10 @@ let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
              Masc_tui_keeper_config.expected_runtime_assignment_revision json
            with
            | Ok expected_assignment_revision ->
-             if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-             else Masc_tui_http.post_runtime_assignment ~host ~port ~keeper_name
-               ~runtime_id ~expected_assignment_revision
+             (match write_authority_refusal state authority with
+              | Some reason -> Error reason
+              | None -> Masc_tui_http.post_runtime_assignment ~host ~port ~keeper_name
+                ~runtime_id ~expected_assignment_revision)
            | Error detail -> Error detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -7335,17 +7904,11 @@ let drop_inflight state request =
    cannot produce a second turn. The client used to hold its own five-phase
    fence to prevent exactly that, and the price was one un-acknowledged POST
    per workspace — talking to one keeper stopped every other. *)
-(* Staged images belong to the message being composed, so the send that consumes
-   the draft consumes them too. Returning and clearing in one step keeps a failed
-   send from silently re-attaching the same image to the next one. *)
-(* Staged references follow the same rule as staged images: the send that
-   consumes the draft consumes them. Returned together so every request
-   builder carries both or neither. *)
-let take_pending_attachments state =
-  let staged = state.msg_attachments in
-  let references = state.msg_references in
-  clear_staged_attachments state;
-  (staged, references)
+(* Request construction only borrows the composer payload. Transfer ownership
+   after queue admission succeeds: a full queue, duplicate steer, or refused
+   edit must leave text, attachment bytes, references, and staging time intact. *)
+let pending_attachments state =
+  (state.msg_attachments, state.msg_references)
 ;;
 
 let launch_keeper_request ~(promoted : Chat_queue.item) ?(admission_intent = Keeper_chat.Queue_only) state ~mailbox request =
@@ -7354,8 +7917,8 @@ let launch_keeper_request ~(promoted : Chat_queue.item) ?(admission_intent = Kee
   let identity = state.server_identity in
   let host = server_peer_host in
   let port = state.port in
-  let check_request () =
-    check_workspace_request state ~mailbox ~authority ~identity ~host ~port ()
+  let check_request =
+    workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port
   in
   match state.workspace_identity, state.server_identity with
   | Workspace_identity_match, Some expected_workspace ->
@@ -7578,7 +8141,7 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
             place_spilled_paste state ~base_path ~keeper_name text
           in
           let request =
-            let attachments, references = take_pending_attachments state in
+            let attachments, references = pending_attachments state in
             Keeper_chat.create_request ~attachments ~references
               ~keeper_name ~message:text ()
           in
@@ -7645,7 +8208,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                target ->
           let original = editing.Chat_queue.request in
           let request =
-            let attachments, references = take_pending_attachments state in
+            let attachments, references = pending_attachments state in
             { original with
               message = text
             ; attachments
@@ -7658,6 +8221,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
            with
            | Error detail -> report_action state "error" detail
            | Ok queue ->
+               clear_staged_attachments state;
                state.msg_queued <- queue;
                state.msg_recall_replaces <- None;
                let safe_text =
@@ -7707,7 +8271,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
             "Queued edit belongs to another Keeper; switch back or press Ctrl-U"
       | None ->
         let request =
-          let attachments, references = take_pending_attachments state in
+          let attachments, references = pending_attachments state in
           Keeper_chat.create_request ~attachments ~references ~keeper_name:target
             ~message:text () in
         (* Enter admits the line in queue order and interrupts nothing: the
@@ -7727,6 +8291,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
         (match queue_keeper_message state request with
          | Error detail -> report_action state "error" detail
          | Ok _ ->
+           clear_staged_attachments state;
            let queued = match Chat_queue.find state.msg_queued ~request_id:request.request_id with
              | Some _ as item -> item
              | None -> Chat_queue.join_target state.msg_queued ~keeper_name:target in
@@ -7773,13 +8338,7 @@ let drain_queued_message state ~base_path ~mailbox =
         && not (List.exists (fun (name, _, _) -> String.equal name keeper_name)
           state.keeper_interactive_waiting)
         && not (composing_for_keeper state keeper_name)
-        &&
-        match state.msg_recall_replaces with
-        | Some editing ->
-            not
-              (String.equal editing.Chat_queue.request.Keeper_chat.keeper_name
-                 keeper_name)
-        | None -> true)
+        && not (recalling_for_keeper state keeper_name))
     with
     | None -> ()
     | Some (item, rest) ->
@@ -7823,7 +8382,17 @@ let drain_queued_message state ~base_path ~mailbox =
           next ())
   in
   if state.workspace_identity = Workspace_identity_match
-     && Option.is_none state.keepers_error then next ()
+     && Option.is_none state.keepers_error then begin
+    (* Releasing a recalled edit may be the only event after its predecessor
+       was accepted. Revisit explicit Enter admission as well as unmarked
+       input; the admission path still owns control and transport checks. *)
+    let waiting_keepers = Chat_queue.waiting state.msg_queued
+      |> List.map (fun (item : Chat_queue.item) -> item.request.keeper_name)
+      |> List.sort_uniq String.compare in
+    List.iter (fun keeper_name ->
+      launch_waiting_keeper_input state ~mailbox ~keeper_name) waiting_keepers;
+    next ()
+  end
 ;;
 
 (* /task in the composer or the chat pane: create the task first, then hand
@@ -7862,7 +8431,7 @@ let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
         match session_result with
         | Error detail -> Error detail
         | Ok session_id -> (
-            let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+            let* () = check_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity ~host ~port () in
             let arguments =
               ("expected_workspace", `Assoc
                 [ "base_path", `String expected_workspace.sid_base_path
@@ -7950,6 +8519,7 @@ let chat_notice state ~keeper_name ~kind text =
               me_operation_seq = next_chat_operation_seq state "";
               me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
               me_image = Masc_tui_image_preview.No_image;
+              me_media = [];
               me_memory_summary = None;
               me_memory_pass = Masc_tui_message_layout.No_pass;
               me_journal = [];
@@ -7960,14 +8530,128 @@ let chat_notice state ~keeper_name ~kind text =
               me_timestamp = current_clock_text ();
               me_keeper_name = keeper;
               me_request_id = "";
+              me_execution_source = None;
               me_at = Unix.gettimeofday ();
             } ]
 
+let update_collab state owner update =
+  match state.collab with
+  | Some view when Masc_tui_collab.owner view == owner -> state.collab <- Some (update view)
+  | Some _ | None -> ()
+
+let collab_notice state owner ~kind text =
+  update_collab state owner (fun view -> Masc_tui_collab.notice view text);
+  report_action state (match kind with Notice_reply -> "play" | Notice_failure -> "error")
+    (Terminal_text.single_line text)
+
+let play_notice state ~sink ~kind text =
+  match sink with
+  | Play_chat keeper_name -> chat_notice state ~keeper_name ~kind text
+  | Play_collab {owner; _} -> collab_notice state owner ~kind text
+
+let settle_play_mutation state = function
+  | Play_chat _ -> ()
+  | Play_collab {owner; mutation} ->
+      update_collab state owner (fun view -> Masc_tui_collab.settled view mutation)
+
+let sync_collab_access state =
+  state.collab <- Option.map (fun view ->
+    Masc_tui_collab.write_access view (Masc_tui_types.play_change_access state)) state.collab
+
+let refresh_collab state ~mailbox owner =
+  match state.collab with
+  | Some view when Masc_tui_collab.owner view == owner ->
+      let view, read = Masc_tui_collab.loading view in
+      state.collab <- Some view;
+      let expected_workspace = state.server_identity in
+      launch_preset_call state ~mailbox
+        ~call:(Masc_tui_http.list_play_invites ~expected_workspace)
+        ~wrap:(fun result -> Play_invites_listed (Play_collab_list read,
+          Result.bind result Tui_decode.decode_play_invites))
+  | Some _ | None -> ()
+
+let refresh_current_collab state ~mailbox =
+  Option.iter (fun view -> refresh_collab state ~mailbox (Masc_tui_collab.owner view)) state.collab
+
+let open_collab state ~mailbox =
+  let view = Masc_tui_collab.write_access (Masc_tui_collab.create ())
+    (Masc_tui_types.play_change_access state) in
+  state.collab <- Some view;
+  refresh_collab state ~mailbox (Masc_tui_collab.owner view)
+
+let play_request_failure state request detail =
+  if Masc_tui_types.play_change_dispatched state request then Play_unanswered detail
+  else Play_not_dispatched detail
+
+let launch_play_issue state ~mailbox ~sink ~name ~hours =
+  match Masc_tui_types.begin_play_change state (Issue_invite name) with
+  | Error detail ->
+      settle_play_mutation state sink;
+      play_notice state ~sink ~kind:Notice_failure detail;
+      false
+  | Ok request ->
+      sync_collab_access state;
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port ->
+          match Masc_tui_types.workspace_change_origin state with
+          | Ok origin when origin = request.change_workspace
+              && Masc_tui_types.dispatch_play_change state request ->
+              Ok (Masc_tui_http.issue_play_invite
+                ~expected_base_path:request.change_workspace.wi_base_path
+                ~expected_masc_root:request.change_workspace.wi_masc_root ~host ~port ~name ~hours)
+          | Ok _ | Error _ -> Ok (Masc_tui_http.Post_refused "Local workspace authority changed before dispatch"))
+        ~wrap:(fun result -> Play_invite_issued (request, sink,
+          match result with
+          | Ok outcome -> decode_play_mutation Tui_decode.decode_play_invite_issued outcome
+          | Error detail -> play_request_failure state request detail));
+      true
+
+let launch_play_revoke state ~mailbox ~sink ~name =
+  match Masc_tui_types.begin_play_change state (Revoke_invite name) with
+  | Error detail ->
+      settle_play_mutation state sink;
+      play_notice state ~sink ~kind:Notice_failure detail;
+      false
+  | Ok request ->
+      sync_collab_access state;
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port ->
+          match Masc_tui_types.workspace_change_origin state with
+          | Ok origin when origin = request.change_workspace
+              && Masc_tui_types.dispatch_play_change state request ->
+              Ok (Masc_tui_http.revoke_play_invite
+                ~expected_base_path:request.change_workspace.wi_base_path
+                ~expected_masc_root:request.change_workspace.wi_masc_root ~host ~port ~name)
+          | Ok _ | Error _ -> Ok (Masc_tui_http.Revoke_other
+              (Masc_tui_http.Post_refused "Local workspace authority changed before dispatch")))
+        ~wrap:(fun result -> Play_invite_revoked (request, sink, name,
+          match result with
+          | Ok Masc_tui_http.Revoke_absent -> Play_revoke_absent
+          | Ok (Masc_tui_http.Revoke_release_failed detail) -> Play_revoke_release_failed detail
+          | Ok (Masc_tui_http.Revoke_other outcome) ->
+              Play_revoke_result (decode_play_mutation Tui_decode.decode_play_invite_revoked outcome)
+          | Error detail -> Play_revoke_result (play_request_failure state request detail)));
+      true
+
+let settle_retired_queue_inspections state =
+  let retired, current = List.partition
+      (fun (_, reading) -> reading != state.workspace_read_authority)
+      state.keeper_queue_inspections in
+  state.keeper_queue_inspections <- current;
+  List.iter (fun (keeper_name, _) ->
+    chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_failure
+      (Printf.sprintf "/queue for %s was interrupted by workspace reconnection; retry after reconnecting"
+         keeper_name)) retired
+
 let launch_keeper_queue state ~mailbox ~keeper_name action =
+  if not (server_authority_ready state) then
+    chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_failure
+      "/queue request was not sent while workspace identity is unconfirmed; retry after reconnecting"
+  else begin
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   let check_authority () =
-    if authority = state.workspace_authority then Ok ()
+    if authority = state.workspace_authority && server_authority_ready state then Ok ()
     else Error "Workspace changed; the remaining queue requests were not sent" in
   let get_json ~host ~port ~path =
     Result.bind (check_authority ()) (fun () -> Masc_tui_http.get_json ~host ~port ~path) in
@@ -7984,6 +8668,12 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
     && can_resume_preflight_keeper_input state keeper_name in
   let expected_workspace = state.server_identity in
   state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
+  if action = Inbox.Inspect then begin
+    state.keeper_queue_readings <- keeper_name :: state.keeper_queue_readings;
+    state.keeper_queue_inspections <-
+      (keeper_name, state.workspace_read_authority)
+      :: List.filter (fun (keeper, _) -> keeper <> keeper_name) state.keeper_queue_inspections
+  end;
   let control_generation = match action with
     | Inbox.Pause | Inbox.Resume ->
         Some (begin_keeper_chat_control ~preserve_input_holds:local_resume
@@ -8091,7 +8781,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
         Inbox.operation_lines (`Assoc ["operations", `List operations]) in
     let operations = read_messages None [] in
     let lines = function Ok lines -> lines | Error detail -> ["Read unavailable: " ^ detail] in
-    Ok (receipt @ lines waiting @ lines operations) in
+    Ok (receipt, Ok (lines waiting @ lines operations)) in
   let run () =
     let result = try perform () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -8102,6 +8792,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   match Eio_context.get_switch_opt () with
   | Some sw -> fork_workspace_job state ~sw run
   | None -> enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, action, Error "Eio switch is unavailable"))
+  end
   end
 ;;
 
@@ -8221,15 +8912,69 @@ let msx_surface_current () =
 ;;
 
 let render_spectator (state : Masc_tui_types.state) =
-  match state.machine_source with
+  (* Layout is pure; publish its navigation bounds only after the complete
+     spectator frame is written. A hidden room has no scrollable rows. *)
+  let next_room = ref (Option.map (fun room ->
+    fst (Masc_tui_play_room.layout room ~width:0 ~height:0)) state.play_room) in
+  let room = Option.map (fun room ~width ~height ->
+    let next, lines = Masc_tui_play_room.layout room ~width ~height in
+    next_room := Some next;
+    lines) state.play_room in
+  let room_footer = Option.map Masc_tui_play_room.footer state.play_room in
+  (match state.machine_source with
   | Masc.Machine_lane.Msx ->
       Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
+        ?room ?room_footer
+        ~interaction:state.machine_interaction
         ~connection:state.connection_status ~live:state.msx_live state.msx_frame
         (msx_surface_current ())
   | Masc.Machine_lane.Dos ->
       Masc_tui_msx.render_live ~write:write_to_terminal ~connection:state.connection_status
-        ~activity:state.dos_activity Masc.Machine_lane.Dos state.dos_live
+        ?room ?room_footer
+        ~activity:state.dos_activity Masc.Machine_lane.Dos state.dos_live);
+  state.play_room <- !next_room
 ;;
+
+let room_workspace_ready state =
+  match state.workspace_identity, workspace_input_identity_of_server state.server_identity with
+  | Workspace_identity_match, Some _ -> true
+  | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _), _
+  | Workspace_identity_match, None -> false
+
+let launch_play_room state ~mailbox request =
+  if room_workspace_ready state then begin
+  let credential = Masc_tui_http.bind_credential () in
+  Option.iter (fun expected_workspace ->
+  launch_preset_call state ~mailbox
+    ~call:(fun ~host ~port ->
+      let fields = match Masc_tui_play_room.request_json request with
+        | `Assoc fields -> fields | _ -> assert false in
+      let body = `Assoc (Masc_tui_http.expected_workspace_field expected_workspace :: fields) in
+      Masc_tui_http.post_json_bound ~credential ~host ~port ~path:"/api/v1/play/room"
+        ~body:(Yojson.Safe.to_string body)
+      |> fun result -> Result.bind result Masc.Play_room.view_of_json)
+    ~wrap:(fun result -> Play_room_received (request, result))) state.server_identity
+  end
+
+let poll_play_room state ~mailbox =
+  if room_workspace_ready state then begin
+  let watching = state.msx_open && not state.msx_menu_open in
+  if watching && Option.is_some (workspace_input_identity_of_server state.server_identity)
+    && Option.is_none state.play_room
+  then state.play_room <- Some (Masc_tui_play_room.create ());
+  Option.iter (fun room ->
+    let room = Masc_tui_play_room.active room watching in
+    let room, request = Masc_tui_play_room.poll room ~now:(Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9) ~machine:state.machine_source in
+    state.play_room <- Some room;
+    Option.iter (launch_play_room state ~mailbox) request) state.play_room
+  end
+
+let send_play_room state ~mailbox =
+  if room_workspace_ready state then
+  Option.iter (fun room ->
+    let room, request = Masc_tui_play_room.send room ~machine:state.machine_source in
+    state.play_room <- Some room;
+    Option.iter (launch_play_room state ~mailbox) request) state.play_room
 
 (* A live read names no mode, media or players. Keep the last tick metadata
    only within the same incarnation, so a keypress does not briefly erase the
@@ -8255,14 +9000,39 @@ let msx_frame_of_live ~previous_live ~previous_frame
 (* A read of the MSX screen through the live route, asked with the counter
    of the picture drawn from the last one. An unchanged answer leaves the
    frame alone. *)
-let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
-  let result =
+let with_msx_observation state ~mailbox read apply =
+  let check = capture_workspace_check state ~mailbox in
+  match check () with
+  | Error detail -> state.msx_notice <- Some detail
+  | Ok () ->
+      let result = read () in
+      (match check () with
+       | Error detail -> state.msx_notice <- Some detail
+       | Ok () -> apply result)
+
+let observe_msx_carts state ~mailbox =
+  with_msx_observation state ~mailbox
+    (fun () -> Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port)
+    (fun carts -> state.msx_carts <- carts)
+
+let observe_msx_frame ?(clear_notice = false) ?expected_workspace
+    ?(current = fun () -> true) (state : Masc_tui_types.state) ~mailbox =
+  if Option.is_some (checkpoint_for_workspace state) then () else
+  let captured_view = !msx_poll_view in
+  (* The read that follows a change the server admitted for [expected_workspace]
+     carries that workspace, and the server that answers it compares it with
+     its own. A server swapped in at any point, including A -> B -> A, answers
+     409 and its picture never reaches this view. *)
+  with_msx_observation state ~mailbox (fun () ->
     (* The decoder has checked that MSX has no activity feed. Only its
        picture answer is needed by the MSX view. *)
     Result.map fst
-      (Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
-         Masc.Machine_lane.Msx ~since:(Masc_tui_machine_live.since state.msx_live))
-  in
+      (Masc_tui_http.fetch_machine_live ?expected_workspace ~host:server_peer_host
+         ~port:state.port Masc.Machine_lane.Msx
+         ~since:(Masc_tui_machine_live.since state.msx_live)))
+    (fun result ->
+  if current () && captured_view == !msx_poll_view
+     && Option.is_none (checkpoint_for_workspace state) then begin
   (match Masc_tui_machine_live.advance state.msx_live result with
    | None -> ()
    | Some view ->
@@ -8280,6 +9050,47 @@ let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
       msx_pending_poll := Poll_ready Advancing;
       if clear_notice then state.msx_notice <- None
   | Poll_ready _ | Poll_pending _ | Poll_observing _ -> ()
+  end)
+;;
+
+(* The response binds workspace and operation together; health samples around
+   an unrelated live read cannot establish either completion or pixel identity. *)
+let inspect_pending_msx_checkpoint (state : Masc_tui_types.state) pending =
+  let authority = state.workspace_authority and view = !msx_poll_view and port = state.port in
+  let current () = authority=state.workspace_authority && view == !msx_poll_view && port=state.port in
+  let result = Masc_tui_http.inspect_msx_checkpoint
+    ~expected_workspace:pending.checkpoint_workspace
+    ~operation_id:pending.checkpoint_operation_id ~host:server_peer_host ~port
+    ~restore:pending.checkpoint_restore ~slot:pending.checkpoint_slot in
+  if current () then
+    match result with
+    | Error detail -> state.msx_notice <- Some ("Checkpoint inspection failed; retained screen: " ^ detail)
+    | Ok Tui_decode.Checkpoint_pending -> state.msx_notice <- Some "Checkpoint is still pending; F5 inspects its receipt."
+    | Ok (Checkpoint_unknown detail) -> state.msx_notice <- Some ("Checkpoint remains unknown: " ^ detail)
+    | Ok (Checkpoint_refused detail) ->
+        forget_checkpoint pending;
+        state.msx_notice <- Some ("Checkpoint refused: " ^ detail)
+    | Ok (Checkpoint_committed _) when not pending.checkpoint_restore ->
+        forget_checkpoint pending;
+        state.msx_notice <- Some "Saved quick checkpoint; operation receipt verified."
+    | Ok (Checkpoint_committed None) ->
+        state.msx_notice <- Some "Restore completed; awaiting its workspace-bound current screen."
+    | Ok (Checkpoint_committed (Some json)) ->
+        let decoded = Eio_guard.run_in_systhread ~label:"tui-checkpoint-live-decode"
+          (fun () -> Masc_tui_machine_live.decode Masc.Machine_lane.Msx json) in
+        if current () then (match decoded with
+         | Error detail -> state.msx_notice <- Some ("Restore completed; retained screen because inspection failed: " ^ detail)
+         | Ok (Unchanged _, _) -> state.msx_notice <- Some "Restore completed; inspection omitted the requested current pixels."
+         | Ok ((No_machine | Picture _) as answer, _) ->
+             (* Only valid receipt-bound pixels replace cached pixels. No old
+                tick token can survive admission across this checkpoint. *)
+             Option.iter (fun live ->
+               let live,frame = msx_frame_of_live ~previous_live:state.msx_live
+                 ~previous_frame:state.msx_frame live in
+               state.msx_live <- live; state.msx_frame <- frame; msx_surface_frame := frame)
+               (Masc_tui_machine_live.advance state.msx_live (Ok answer));
+             forget_checkpoint pending;
+             state.msx_notice <- Some "Restore completed; showing workspace state observed afterwards.")
 ;;
 
 (* The MSX door opens on the load menu (RFC-0439 3.7): the human picks a game
@@ -8288,11 +9099,11 @@ let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
    Both are bounded loopback calls; the overlay then owns the terminal until a
    game is chosen or [esc].
 
-   The menu, not the spectator, is what this opens. The [&] key and the
-   palette's "go MSX" both land here, so the two doors stay one door -- which
-   is why the menu goes in the function rather than at the key. *)
+   Collab's [g] action and the palette's "go MSX" both open this media picker.
+   [&] opens Collab, whose watch actions go directly to observation. *)
 let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
   invalidate_msx_poll ();
+  state.machine_interaction <- Observe_machine;
   (* The spectator takes ownership from any image preview. A pending async
      preview must not keep its old surface alive underneath the game. *)
   state.image_request_generation <- state.image_request_generation + 1;
@@ -8302,9 +9113,8 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false
   end;
-  observe_msx_frame ~clear_notice:true state;
-  state.msx_carts <-
-    Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
+  observe_msx_frame ~clear_notice:true state ~mailbox;
+  observe_msx_carts state ~mailbox;
   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
   Masc_tui_msx.open_menu ~write:write_to_terminal state;
   (* A first DOS read may carry a full screen. Let the menu accept keys while
@@ -8312,9 +9122,10 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
   launch_dos_live_poll state ~mailbox
 
 (* An inventory row names the shared machine itself. Opening it observes the
-   current screen; the separate [&] door keeps the media selection menu. *)
+   current screen; Collab's [g] action opens the separate media selection menu. *)
 let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
   invalidate_msx_poll ();
+  state.machine_interaction <- Observe_machine;
   state.image_request_generation <- state.image_request_generation + 1;
   state.browser_viewport <- None;
   if state.image_open then begin
@@ -8352,6 +9163,35 @@ let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
   state.msx_last_poll_ns <- 0L;
   render_spectator state;
   launch_dos_live_poll state ~mailbox
+
+let handle_collab_action state ~mailbox view action =
+  let owner = Masc_tui_collab.owner view in
+  match action with
+  | Masc_tui_collab.Stay -> ()
+  | Close -> state.collab <- None; state.quit_armed <- false
+  | Watch Masc.Machine_lane.Msx -> open_msx_spectator state ~mailbox
+  | Watch Masc.Machine_lane.Dos -> open_dos_screen state ~mailbox
+  | Game_menu -> open_msx_screen state ~mailbox
+  | Refresh -> refresh_collab state ~mailbox (Masc_tui_collab.owner view)
+  | Resolve_unknown request_id ->
+      (match Masc_tui_types.resolve_play_change state ~request_id with
+       | Ok () ->
+           collab_notice state owner ~kind:Notice_reply
+             "Operator confirmed the original request finished; refreshing current invite status.";
+           sync_collab_access state;
+           refresh_current_collab state ~mailbox
+       | Error detail -> collab_notice state owner ~kind:Notice_failure detail)
+  | Open_link name ->
+      (match Masc_tui_types.play_invite_find state name with
+       | Some _ -> state.play_invite <- {state.play_invite with shown_name = Some name}; state.play_invite_scroll <- 0
+       | None -> collab_notice state owner ~kind:Notice_reply
+           "The one-time link is not retained in this session. Revoke this invite and issue a new one to obtain a link.")
+  | Issue (mutation, name, hours) ->
+      let sink = Play_collab {owner; mutation} in
+      ignore (launch_play_issue state ~mailbox ~sink ~name ~hours)
+  | Revoke (mutation, name) ->
+      let sink = Play_collab {owner; mutation} in
+      ignore (launch_play_revoke state ~mailbox ~sink ~name)
 
 (* Where a reference lands, and what it opens when it gets there.
 
@@ -8750,7 +9590,7 @@ let prepare_remote_image_bytes url =
    so the domain keeps rendering; the loading line is shown at once so the
    keypress is not silent. terminal_draws_images = false skips the download and
    opens the page in a browser instead. *)
-let launch_image_render ~mailbox ~notice ~title ~caption ~page_url image_url =
+let launch_image_render _state ~mailbox ~notice ~title ~caption ~page_url image_url =
   if !terminal_draws_images = Some false then
     let url =
       Masc_tui_browser.browser_url { Masc_tui_browser.title; page_url; image_url }
@@ -8842,38 +9682,44 @@ let conversation_image state =
       | Some image -> image, Masc_tui_image_preview.Staged_is_newer
       | None -> Masc_tui_image_preview.No_image, Masc_tui_image_preview.Unordered
 
-(* Fetch retained wire bytes through the authenticated artifact endpoint. No
-   local filename or reference-supplied URL is ever opened. The render fiber
-   receives only the decoded image after network work completes. *)
-let open_stored_image state ~mailbox ~notice ~name reference =
+(* Settle the exact interrupted preview without replacing a newer selection. *)
+let settle_retired_sent_image state =
+  match state.sent_image_read with
+  | Some pending when pending.sir_authority != state.workspace_read_authority ->
+      state.sent_image_read <- None;
+      if not state.msx_open && pending.sir_generation = state.image_request_generation
+         && pending.sir_view = state.view && pending.sir_keeper = state.msg_target_keeper_name then
+        chat_notice state ~keeper_name:pending.sir_keeper ~kind:Notice_failure
+          (Printf.sprintf "sent image %s: preview interrupted by workspace reconnection; reopen the image after reconnecting"
+             pending.sir_name)
+  | Some _ | None -> ()
+
+(* Image acquisition has no terminal effects. Capture the endpoint and UI
+   generation before forking; the mailbox consumer owns stale-result rejection. *)
+let open_message_image state ~mailbox ~notice ~name source =
+  if server_authority_ready state then begin
+  let enqueue_async = workspace_enqueue state in
   if !terminal_draws_images = Some false then
     notice ~kind:Notice_failure terminal_draws_no_images
   else begin
-    notice ~kind:Notice_reply (Printf.sprintf "Loading sent image (any key cancels): %s" name);
+    notice ~kind:Notice_reply (Printf.sprintf "Loading image (any key cancels): %s" name);
     let port = state.port in
     let keeper_name = state.msg_target_keeper_name in
     let generation = state.image_request_generation in
     let view = state.view in
+    state.sent_image_read <- Some {sir_generation=generation; sir_view=view;
+      sir_keeper=keeper_name; sir_name=name; sir_authority=state.workspace_read_authority};
     let run () =
-      let result =
-        (* The authenticated HTTP client needs the fiber's Eio handlers.
-           Only JSON/base64 decoding belongs on a system thread. *)
-        match Masc_tui_http.http_get ~host:server_peer_host ~port
-            ~path:("/api/v1/artifacts/" ^ reference.Tool_output.sha256) with
-        | Error _ as error -> error
-        | Ok (status_code, body) when not (Tui_decode.is_success_http_status status_code) ->
-            (* Refusal wording reads the shared credential refresh state. *)
-            Error (Masc_tui_http.refusal ~status_code ~body)
-        | Ok (status_code, body) ->
-            Eio_guard.run_in_systhread ~label:"tui-sent-image-decode" (fun () ->
-              let response = Masc_tui_http.decode_json ~allow_empty:false ~status_code ~body in
-              Result.bind response (Masc_tui_image_preview.decode_artifact reference))
-      in
+      let result = Masc_tui_image_requests.load ~host:server_peer_host ~port
+        ~cache_dir:ensure_img_cache_dir source in
       enqueue_async mailbox (Sent_image_ready { generation; view; keeper_name; name; result })
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-    | None -> notice ~kind:Notice_failure "sent image preview requires an active connection"
+    | None ->
+        state.sent_image_read <- None;
+        notice ~kind:Notice_failure "image preview requires an active connection"
+  end
   end
 
 let open_named_image state ~mailbox =
@@ -8885,10 +9731,12 @@ let open_named_image state ~mailbox =
   | Masc_tui_image_preview.Named_path path -> open_image state ~notice path
   | Masc_tui_image_preview.Staged attachment -> open_staged_image state ~notice attachment
   | Masc_tui_image_preview.Stored_attachment { name; reference } ->
-      open_stored_image state ~mailbox ~notice ~name reference
-  | Masc_tui_image_preview.Unavailable_attachment name ->
+      open_message_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Retained reference)
+  | Masc_tui_image_preview.Output_image { name; source } ->
+      open_message_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Generated source)
+  | Masc_tui_image_preview.Unavailable_image { name; reason } ->
       notice ~kind:Notice_failure
-        (Printf.sprintf "Ctrl-O %s: this attachment has no retained image payload; attach it again to preview it" name)
+        (Printf.sprintf "Ctrl-O %s: %s" name reason)
   | Masc_tui_image_preview.No_image ->
       notice ~kind:Notice_reply "Ctrl-O: no image in this conversation or the composer"
 
@@ -8933,41 +9781,32 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
 
 (* [/find] and its arg-less repeat, which differ only in where the walk starts.
 
-   The pane is moved by [set_msg_scroll], the one seam that also pins the row
-   the scroll counts back from -- a search that wrote [msg_scroll] directly
-   would leave the pin unset and the position would drift under the next
-   message that arrived.
+   Search returns the projected body-row pin together with its scroll. The
+   frame and search use the same feedback seam, so arrivals between the command
+   and the next frame cannot move the matched row out of view.
 
    Every outcome says something. A search that silently did nothing and a key
    that did nothing look the same, which is the failure this surface keeps
    having; and running out of older matches is a different fact from having
    none at all, because only one of the two is fixed by starting over. *)
-let seek_in_chat state ~target ~restart =
-  let notice = chat_notice state ~keeper_name:target in
-  match target with
-  | None ->
-      notice ~kind:Notice_failure "/find needs a Keeper selected on the roster"
-  | Some keeper_name -> (
-      let older_than = if restart then None else state.msg_find_at in
-      (* Normalised here, at the door the operator's text comes through.
-         [msg_find] keeps what they typed, because that is what the pane
-         echoes back to them. *)
-      match
-        keeper_message_find_scroll state ~keeper_name
-          ~needle:(String.trim state.msg_find)
-          ~older_than
-      with
-      | Some (scroll, anchor) ->
+let apply_chat_search_result state ~target ~restart ~needle result =
+  let notice=chat_notice state ~keeper_name:target in
+      let partial=if result.unavailable_entries=0 then "" else
+        Printf.sprintf " — search unavailable for %d entry(s); results may be incomplete" result.unavailable_entries in
+      match result.match_result with
+      | Some (position, anchor) ->
           state.msg_find_at <- Some anchor;
-          set_msg_scroll state scroll;
+          apply_clamped_scroll state (Message_scroll position);
           notice ~kind:Notice_reply
             (Printf.sprintf "/find %s \xe2\x80\x94 %d row(s) back (/find repeats)"
-               state.msg_find scroll)
+               needle position.scroll ^ partial)
+      | None when result.unavailable_entries>0 ->
+          notice ~kind:Notice_failure ("/find" ^ partial)
       | None ->
           if restart then
             notice ~kind:Notice_reply
               (Printf.sprintf "/find %s \xe2\x80\x94 nothing in this conversation"
-                 state.msg_find)
+                 needle)
           else
             (* The walk is over, not empty. Said apart from the case above
                because starting again is what fixes this one and not that
@@ -8975,7 +9814,29 @@ let seek_in_chat state ~target ~restart =
             notice ~kind:Notice_reply
               (Printf.sprintf
                  "/find %s \xe2\x80\x94 no older match; /find %s starts again"
-                 state.msg_find state.msg_find))
+                 needle needle)
+
+
+let seek_in_chat state ~mailbox ~target ~restart =
+  let notice=chat_notice state ~keeper_name:target in
+  match target with
+  | None -> notice ~kind:Notice_failure "/find needs a Keeper selected on the roster"
+  | Some keeper_name ->
+      let needle=String.trim state.msg_find in
+      let older_than=if restart then None else state.msg_find_at in
+      retire_keeper_message_search state;
+      let generation=Atomic.get state.msg_search_generation in
+      (* The plan only reads state. Candidates are rendered after this
+         handler returns, so the notice is drawn before that work starts. It
+         goes to the action footer, not into [msg_history]: a row appended
+         there after the plan froze its projection would make an empty
+         search look like a changed conversation, and a later search could
+         match the row itself. *)
+      let plan=plan_keeper_message_search state ~keeper_name ~needle ~older_than in
+      report_action state "system"
+        (Terminal_text.single_line ("/find " ^ needle ^ " — searching conversation"));
+      launch_keeper_message_search state plan ~deliver:(fun result ->
+        enqueue_async mailbox (Chat_search_finished (generation,restart,plan,result)))
 
 (* The Activity pane's cycle, narrow to wide to hidden, shared by Ctrl-L
    and [/activity]. Measured
@@ -9591,7 +10452,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                     | Some editing when editing.Chat_queue.request.request_id = id ->
                       state.msg_recall_replaces <- None; clear_staged_attachments state
                     | Some _ | None -> ());
-                   notice ~kind:Notice_reply ("Cancelled unsent message " ^ id)
+                   notice ~kind:Notice_reply ("Cancelled unsent message " ^ id);
+                   drain_queued_message state ~base_path ~mailbox
                | None -> notice ~kind:Notice_failure "Local queue changed; inspect /queue again")
             | Edit (id, message) ->
               let request = {item.request with Keeper_chat.message = message} in
@@ -9746,13 +10608,13 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Masc_tui_message_input.clear state.msg_input;
       state.msg_find <- String.trim query;
       state.msg_find_at <- None;
-      seek_in_chat state ~target ~restart:true
+      seek_in_chat state ~mailbox ~target ~restart:true
   | Masc_tui_command.Find_next ->
       Masc_tui_message_input.clear state.msg_input;
       if String.equal state.msg_find "" then
         notice ~kind:Notice_failure
           "/find needs text the first time; /find on its own repeats it"
-      else seek_in_chat state ~target ~restart:false
+      else seek_in_chat state ~mailbox ~target ~restart:false
   | Masc_tui_command.Copy_latest_reply ->
       Masc_tui_message_input.clear state.msg_input;
       (match target with
@@ -9768,7 +10630,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
              "/context needs a Keeper selected on the roster")
   | Masc_tui_command.Preset_list ->
       Masc_tui_message_input.clear state.msg_input;
-      launch_preset_call state ~mailbox
+      launch_chat_command_read state ~mailbox ~label:"/preset"
         ~call:(fun ~host ~port -> Masc_tui_loader.load_presets ~host ~port)
         ~wrap:(fun result -> Presets_listed (Preset_to_chat target, result))
   | Masc_tui_command.Preset_save_missing_name ->
@@ -9787,7 +10649,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       (* [/preset] alone lists names and counts; a count cannot be read, so
          this asks the server what that one preset actually holds. *)
       Masc_tui_message_input.clear state.msg_input;
-      launch_preset_call state ~mailbox
+      launch_chat_command_read state ~mailbox ~label:"/preset show"
         ~call:(fun ~host ~port -> Masc_tui_loader.load_preset_detail ~host ~port ~name)
         ~wrap:(fun result -> Preset_contents_shown (Preset_to_chat target, result))
   | Masc_tui_command.Preset_restore name ->
@@ -9810,10 +10672,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       notice ~kind:Notice_failure reason
   | Masc_tui_command.Play_invites ->
       Masc_tui_message_input.clear state.msg_input;
-      launch_preset_call state ~mailbox
-        ~call:Masc_tui_http.list_play_invites
+      let expected_workspace = state.server_identity in
+      launch_chat_command_read state ~mailbox ~label:"/play invites"
+        ~call:(Masc_tui_http.list_play_invites ~expected_workspace)
         ~wrap:(fun result ->
-          Play_invites_listed (target, Result.bind result Tui_decode.decode_play_invites))
+          Play_invites_listed (Play_chat_list target, Result.bind result Tui_decode.decode_play_invites))
   | Masc_tui_command.Play_link requested_name ->
       Masc_tui_message_input.clear state.msg_input;
       (* The cards carry names made safe to draw, so the name typed is
@@ -9837,35 +10700,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
              { state.play_invite with shown_name = Some (Masc_tui_play_card.name card) };
            state.play_invite_scroll <- 0)
   | Masc_tui_command.Play_invite { name; hours } ->
-      if state.play_invite_inflight then
-        notice ~kind:Notice_failure
-          "An invite request is still waiting for the server; wait for its card"
-      else begin
-        Masc_tui_message_input.clear state.msg_input;
-        state.play_invite_inflight <- true;
-        launch_preset_call state ~mailbox
-          ~call:(fun ~host ~port ->
-            Ok (Masc_tui_http.issue_play_invite ~host ~port ~name ~hours))
-          ~wrap:(fun result ->
-            Play_invite_issued (target,
-              decode_play_mutation Tui_decode.decode_play_invite_issued
-                (match result with
-                 | Ok outcome -> outcome
-                 | Error detail -> Masc_tui_http.Post_unanswered detail)))
-      end
+      if launch_play_issue state ~mailbox ~sink:(Play_chat target) ~name ~hours then
+        Masc_tui_message_input.clear state.msg_input
   | Masc_tui_command.Play_revoke name ->
-      Masc_tui_message_input.clear state.msg_input;
-      launch_preset_call state ~mailbox
-        ~call:(fun ~host ~port ->
-          Ok (Masc_tui_http.revoke_play_invite ~host ~port ~name))
-        ~wrap:(fun result ->
-          Play_invite_revoked (target, name,
-            match result with
-            | Ok Masc_tui_http.Revoke_absent -> Play_revoke_absent
-            | Ok (Masc_tui_http.Revoke_other outcome) ->
-                Play_revoke_result
-                  (decode_play_mutation Tui_decode.decode_play_invite_revoked outcome)
-            | Error detail -> Play_revoke_result (Play_unanswered detail)))
+      if launch_play_revoke state ~mailbox ~sink:(Play_chat target) ~name then
+        Masc_tui_message_input.clear state.msg_input
   | Masc_tui_command.Unknown word ->
       report_action state "error"
         (Printf.sprintf
@@ -10015,7 +10854,12 @@ let apply_overview_load state result =
         ~set_error:(fun value -> state.overview_error <- value)
         err
 
-let apply_approvals_load state = function
+let apply_approvals_load state result =
+  (* Recovery and refresh publications already share Listing_order tickets.
+     An admitted older refresh must not retire a newer recovery request;
+     late older answers are refused by apply_approval_observation instead.
+     Workspace withdrawal still invalidates the recovery's ownership. *)
+  match result with
   | Ok snapshot ->
       (* The cursor indexes the merged list; the operator rows sit after the
          keeper tool rows, so reconciliation by token happens in operator
@@ -10171,6 +11015,7 @@ let apply_system_logs_load state = function
    what the server sends, so the page cannot be re-trimmed locally. Same
    fiber-and-mailbox shape as the other one-surface loads. *)
 let launch_system_logs_load state ~mailbox =
+  if server_authority_ready state then begin
   let host = server_peer_host in
   let port = state.port in
   let level =
@@ -10180,6 +11025,7 @@ let launch_system_logs_load state ~mailbox =
   launch_workspace_request state ~mailbox ~boundary_error:Fun.id
     ~deliver:(fun result -> System_logs_loaded result)
     (fun () -> load_system_logs ~host ~port ?level ~limit:system_log_page ())
+  end
 
 let apply_fleet_safety_load state = function
   | Ok reading ->
@@ -10240,7 +11086,8 @@ let apply_overview_goals_load state = function
 
 let apply_remote_keeper_rows state =
   match state.workspace_identity with
-  | Workspace_identity_match | Workspace_identity_unread -> ()
+  | Workspace_identity_match | Workspace_identity_match_unconfirmed _
+  | Workspace_identity_unread -> ()
   | Workspace_identity_mismatch _ ->
     let keepers, error = match state.keeper_roster with
       | Keeper_control.Roster_unobserved -> [],
@@ -10275,7 +11122,8 @@ let apply_keeper_roster_load state result =
            Some { Tui_decode.sid_state_ready = Some true | None; _ } -> Some candle
          | Workspace_identity_match,
            (None | Some { Tui_decode.sid_state_ready = Some false; _ })
-         | (Workspace_identity_mismatch _ | Workspace_identity_unread), _ -> None);
+         | ( Workspace_identity_mismatch _ | Workspace_identity_unread
+           | Workspace_identity_match_unconfirmed _ ), _ -> None);
       state.keeper_roster <- roster;
       state.keeper_roster_error <- None;
       (match state.item_account with
@@ -10369,6 +11217,7 @@ let refresh_status results =
    the count is already drawn. Its Listing_order ticket binds the recovery
    read to the current action flow and sequence. *)
 let launch_approvals_summary_load state ~mailbox =
+  let refresh_ticket = state.http_refresh_order in
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if Masc_tui_approvals_model.confirm_queue_reading state = List_read then ()
@@ -10398,15 +11247,17 @@ let launch_approvals_summary_load state ~mailbox =
                          (request, listing_ticket, expected_workspace, result)))
                   (fun () ->
                     let ( let* ) = Result.bind in
-                    let* () =
-                      probe_expected_workspace ~host ~port expected_workspace
+                    let check_identity ?prior_contact () =
+                      check_workspace_request ?prior_contact ~refresh_ticket state ~mailbox ~authority
+                        ~identity:(Some expected_workspace) ~host ~port ()
                     in
-                    let* () =
-                      if authority <> state.workspace_authority
-                      then Error "Workspace authority withdrawn"
-                      else Ok ()
-                    in
-                    Masc_tui_loader.load_approvals ~host ~port)
+                    let* () = check_identity () in
+                    let snapshot = Masc_tui_loader.load_approvals ~host ~port in
+                    (* The first successful identity check already reached the
+                       server. A failed GET still needs the trailing check. *)
+                    let* () = check_identity
+                      ~prior_contact:Masc_tui_server_lifecycle.Server_reached () in
+                    snapshot)
 
 let load_http_scoped_surfaces ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~provider_history_days
@@ -10562,7 +11413,8 @@ let load_http_surfaces ~refresh_ticket ~host ~port ~approval_ticket ~board_sort
       Refresh_surfaces
         { http_overview; http_approvals; http_scoped; http_server_identity = identity_after }
     else Refresh_workspace_unconfirmed
-        { refresh_ticket; detail = "Workspace identity changed or unavailable during surface collection; bundle discarded";
+        { refresh_ticket; latest_identity = identity_after;
+          detail = "Workspace identity changed or unavailable during surface collection; bundle discarded";
           unreachable = Result.is_error http_server_identity && Result.is_error identity_after
             && Result.is_error http_overview;
           approval_ticket }
@@ -10604,6 +11456,8 @@ let revoke_detail_readings state =
   state.keeper_sandbox_logs <- None;
   state.keeper_sandbox_logs_error <- None;
   state.keeper_lanes_inflight <- false;
+  state.keeper_lanes_reread_pending <- false;
+  state.keeper_lanes_resume <- false;
   state.lanes <- None;
   state.keeper_secrets <- [];
   state.lanes_error <- None;
@@ -10642,6 +11496,19 @@ let withdraw_currency_authority state =
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigation =
   withdraw_voice_capture state;
+  (* Retire action authority immediately. A missing identity quarantines its
+     cards; only a confirmed different workspace discards them. Old replies
+     are independently rejected by Workspace_scoped. *)
+  state.collab <- None;
+  invalidate_msx_poll ();
+  Masc_tui_msx.close ~write:write_to_terminal state;
+  msx_surface_frame := None;
+  Masc_tui_types.withdraw_machine_control state;
+  let current = workspace_input_identity_of_server state.server_identity in
+  Masc_tui_types.withdraw_play_room_workspace state ~previous ~current;
+  Masc_tui_types.withdraw_play_invite_workspace state ~previous ~current;
+  state.play_invite_scroll <- 0;
+  Masc_tui_types.withdraw_play_changes state;
   (* A decision receipt states what one workspace's Keeper answered; the
      next workspace's screens must not carry it. *)
   state.home_decision_receipt <- None;
@@ -10754,6 +11621,10 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.lane_addons_generation <- state.lane_addons_generation + 1;
   state.lane_addons <- None;
   state.lane_addons_cached <- Masc_tui_lane_addons.initial;
+  state.lane_nested_read_resume <- None;
+  state.sent_image_read <- None;
+  state.msg_copy_pending <- None;
+  state.chat_command_reads <- [];
   reset_verification_rows state;
   state.verification <- None;
   state.verification_error <- None;
@@ -10772,12 +11643,17 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.tools_async_observation <- None;
   state.tools_async_observation_error <- None;
   state.tools_skill_evidence <- None;
+  state.tools_evidence_reference <- None;
+  state.browser_lane_read_resume <- None;
   state.tools_skill_cursor <- 0;
   state.tools_scroll <- 0;
   state.msg_loaded_pages <- [];
   state.item_account <- None;
   state.item_account_error <- None;
   state.msg_journal_inflight <- [];
+  state.msg_native_tasks <- [];
+  state.msg_native_tasks_inflight <- [];
+  state.msg_native_tasks_audit_pending <- [];
   state.msg_journal_wanted <- [];
   state.msg_journal_unavailable <- [];
   state.msg_journal_reads_refused <- false;
@@ -10818,10 +11694,13 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_turns_observed_at <- None;
   state.keeper_observed_interrupts <- [];
   state.keeper_lanes_inflight <- false;
+  state.keeper_lanes_reread_pending <- false;
+  state.keeper_lanes_resume <- false;
   state.lanes <- None;
   state.lanes_error <- None;
   state.keeper_secrets <- [];
   state.keeper_deletions_loading <- false;
+  state.keeper_deletions_retry_receipt <- None;
   state.keeper_deletions_open <- false;
   state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
   state.keeper_deletions <- None;
@@ -10829,6 +11708,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_tool_approvals <- [];
   state.keeper_tool_approvals_error <- None;
   state.keeper_tool_approvals_observed <- false;
+  state.gate_receipt_refresh_pending <- false;
   state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
   state.gate_pending <- [];
   state.gate_modes <- None;
@@ -10970,6 +11850,9 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
     Option.iter (fun stop -> stop ()) view.cancel_stream;
     view.cancel_stream <- None) state.account_login_detached;
   state.account_login_detached <- [];
+  state.account_login_activation_resume <- [];
+  state.account_login_readings <- [];
+  state.account_login_read_resume <- [];
   state.identity_view <- None;
   state.identity_view_error <- None;
   state.identity_logins <- [];
@@ -10992,12 +11875,14 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.changes_tree_diff_path <- None;
   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
   state.code_file <- Masc_tui_fetched.clear state.code_file;
+  state.code_file_resume_intent <- Refresh_code_file;
   state.code_history <- Masc_tui_fetched.clear state.code_history;
   state.code_diff <- Masc_tui_fetched.clear state.code_diff;
   state.code_blame <- Masc_tui_fetched.clear state.code_blame;
   state.code_memos <- [];
   state.code_jump_back <- [];
   state.code_history_open <- false;
+  state.code_history_expanded <- None;
   state.code_diff_open <- false;
   state.code_notes_open <- false;
   state.keeper_action_serial <- state.keeper_action_serial + 1;
@@ -11012,7 +11897,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
      set_msg_scroll state 0
    | _ -> ())
 
-let apply_server_identity_reading state reading =
+let apply_confirmed_server_identity_reading state reading =
   let previous_server = state.server_identity in
   let previous_input_workspace = workspace_input_identity_of_server previous_server in
   (* A withdrawal invalidates outstanding roster reads even if the same
@@ -11080,7 +11965,8 @@ let apply_server_identity_reading state reading =
   let same_workspace =
     Masc_tui_types.server_workspace_matches ~expected:previous_server reading
     && match previous, state.workspace_identity with
-    | Workspace_identity_match, Workspace_identity_match -> true
+    | (Workspace_identity_match | Workspace_identity_match_unconfirmed _)
+    , Workspace_identity_match -> true
     | Workspace_identity_mismatch prior, Workspace_identity_mismatch current ->
       String.equal prior.server_base_path current.server_base_path
     | _ -> false
@@ -11108,7 +11994,7 @@ let apply_server_identity_reading state reading =
       state.view = Keepers Keeper_message
       && Option.is_some state.msg_target_keeper_name
       && match chat_workspace, state.workspace_identity with
-         | Some _, Workspace_identity_unread -> true
+         | Some _, (Workspace_identity_unread | Workspace_identity_match_unconfirmed _) -> true
          | Some origin, Workspace_identity_match ->
              Some origin = workspace_input_identity_of_server state.server_identity
          | None, _ | Some _, Workspace_identity_mismatch _ -> false
@@ -11152,7 +12038,7 @@ let apply_server_identity_reading state reading =
         state.suspended_keeper_inputs;
       state.msg_unconfirmed_workspace <-
         (match state.workspace_identity with
-         | Workspace_identity_unread -> chat_workspace
+         | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ -> chat_workspace
          | Workspace_identity_match | Workspace_identity_mismatch _ -> None)
     end else state.msg_unconfirmed_workspace <- None
   end;
@@ -11167,7 +12053,18 @@ let apply_server_identity_reading state reading =
       state.keeper_roster_error <- None
     end
   | Masc_tui_types.Workspace_identity_match ->
-    load_from_masc_dir state state.local_base_path;
+    (* The same workspace read as a match again leaves the keeper rows and
+       tasks as the cadence tick last loaded them, a refresh ago. A reload
+       here ran the whole directory read on the UI thread a second time for
+       the same answer. A workspace that just changed, or one that was not
+       a match a moment ago, has had its rows put away above and needs it. *)
+    (match previous with
+     | Masc_tui_types.Workspace_identity_match when same_workspace -> ()
+     | Masc_tui_types.Workspace_identity_match
+     | Masc_tui_types.Workspace_identity_unread
+     | Masc_tui_types.Workspace_identity_match_unconfirmed _
+     | Masc_tui_types.Workspace_identity_mismatch _ ->
+         load_from_masc_dir state state.local_base_path);
     let input_workspace = workspace_input_identity_of_server state.server_identity in
     (match List.assoc_opt input_workspace state.suspended_keeper_inputs with
      | None -> ()
@@ -11186,6 +12083,52 @@ let apply_server_identity_reading state reading =
     state.keeper_roster <- Keeper_control.Roster_unobserved;
     apply_keeper_log_snapshot state
       { entries = []; error = Some Metrics_tail.Workspace_unconfirmed }
+  | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
+    (* [workspace_identity_of_refresh] answers only the three confirmed
+       readings; [apply_server_identity_reading] keeps an unconfirmed match
+       before this function runs. *)
+    ()
+
+(* A read that cannot say which workspace the server serves keeps the last
+   match unconfirmed ([Masc_tui_types.next_workspace_identity]). The confirmed
+   identity and everything it authorized stay; the state is no longer
+   [Workspace_identity_match], so decisions and new reads wait for a read that
+   matches again. Only a read that names a workspace goes on to compare it. *)
+let apply_server_identity_reading state reading =
+  match
+    Masc_tui_types.next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path reading
+  with
+  | Workspace_identity_match_unconfirmed _ as unconfirmed ->
+    state.workspace_identity <- unconfirmed;
+    suspend_workspace_readings state;
+    settle_retired_sent_image state;
+    settle_retired_chat_copy state;
+    settle_retired_queue_inspections state;
+    settle_retired_chat_command_reads state;
+    (match !msx_pending_poll with
+     | Poll_observing (_, refusal) -> msx_pending_poll := Poll_ready (Observing refusal)
+     | Poll_ready _ | Poll_pending _ -> ())
+  | Workspace_identity_unread | Workspace_identity_match
+  | Workspace_identity_mismatch _ as next ->
+    (match state.workspace_identity, next with
+     | Workspace_identity_match_unconfirmed _, Workspace_identity_match ->
+       (* A detail read answered while the identity was unconfirmed was
+          dropped. Retiring the receipts still in flight makes the move back
+          visible to [resume_reads_after_authority_change], which reads the
+          open detail again; the screen keeps what it shows meanwhile. *)
+       state.detail_reads <- [];
+       state.detail_read_authority <- ref ()
+     | ( Workspace_identity_unread | Workspace_identity_match
+       | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _ ), _ -> ());
+    apply_confirmed_server_identity_reading state reading
+
+let apply_refused_workspace_identity state ~detail latest =
+  let reading = retire_refused_workspace_readings state ~detail latest in
+  (match !msx_pending_poll with
+   | Poll_observing (_, refusal) -> msx_pending_poll := Poll_ready (Observing refusal)
+   | Poll_ready _ | Poll_pending _ -> ());
+  apply_server_identity_reading state reading
 
 (* Scoped navigation reads carry the identity observed before their datasets.
    A successful older full refresh cannot authorize a same-port replacement. *)
@@ -11218,9 +12161,9 @@ let resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mai
     drain_queued_message state ~base_path ~mailbox
   end
 
-let apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket err =
+let apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket ~latest err =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
-    apply_server_identity_reading state (Error err);
+    apply_refused_workspace_identity state ~detail:err latest;
     Option.iter
       (fun ao_ticket ->
          apply_approval_observation state { ao_ticket; ao_result = Error err })
@@ -11276,8 +12219,8 @@ let apply_server_booting state ~refresh_ticket ~identity ~approval_ticket =
   state.connection_status <- Masc_tui_types.Booting
   end
 
-let apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket =
-  apply_server_identity_reading state (Error detail);
+let apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket ~latest_identity =
+  apply_refused_workspace_identity state ~detail (Some latest_identity);
   (* The Candle surface says why it has no reading rather than looking
      unread. *)
   state.candle_observation <- Some (Error detail);
@@ -11288,9 +12231,10 @@ let apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket =
   add_event state "error" detail
 
 let apply_http_refresh_outcome state ~mailbox = function
-  | Refresh_workspace_unconfirmed { refresh_ticket; detail; unreachable; approval_ticket } ->
+  | Refresh_workspace_unconfirmed
+      { refresh_ticket; detail; unreachable; approval_ticket; latest_identity } ->
     if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then
-      apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket
+      apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket ~latest_identity
   | Refresh_surfaces results -> apply_http_surfaces state ~mailbox results
   | Refresh_server_booting { refresh_ticket; identity; approval_ticket } ->
     apply_server_booting state ~refresh_ticket ~identity ~approval_ticket
@@ -11299,14 +12243,56 @@ let load_local_workspace_if_safe state base_path =
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_match -> load_from_masc_dir state base_path
   | Masc_tui_types.Workspace_identity_unread
+  | Masc_tui_types.Workspace_identity_match_unconfirmed _
   | Masc_tui_types.Workspace_identity_mismatch _ -> ()
 ;;
+
+(* One read of the .masc directory in flight at a time. The cadence tick asks
+   again two seconds later, so a read that is still running is simply not
+   duplicated. *)
+let local_workspace_read_inflight = ref false
+
+(* The cadence tick's reload. The directory read (the backlog, goal links,
+   archive, keeper metadata) takes about 20ms and used to run on the UI thread
+   every tick, which is 20ms that a keypress could not be answered in. It runs
+   on the shared domain pool now and the result comes back as a mailbox
+   message; the apply that changes state stays on the UI thread. A system
+   thread would not do: the stores under the read take guarded mutexes, which
+   raise [Non_eio_mutex_context] anywhere but an Eio fiber. *)
+let launch_local_workspace_read state ~mailbox base_path =
+  match state.workspace_identity with
+  | Masc_tui_types.Workspace_identity_match ->
+      if not !local_workspace_read_inflight then begin
+        match Eio_context.get_switch_opt () with
+        | None -> load_from_masc_dir state base_path
+        | Some sw ->
+            local_workspace_read_inflight := true;
+            Eio.Fiber.fork_daemon ~sw (fun () ->
+              (match
+                 Domain_pool_ref.submit_io_or_inline
+                   (fun () -> Masc_tui_loader.read_local_workspace base_path)
+               with
+               | reading ->
+                   enqueue_async mailbox (Local_workspace_read (base_path, reading))
+               | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+               | exception exn ->
+                   local_workspace_read_inflight := false;
+                   Log.Transport.info "local workspace read failed: %s"
+                     (Printexc.to_string exn));
+              `Stop_daemon)
+      end
+  | Masc_tui_types.Workspace_identity_unread
+  | Masc_tui_types.Workspace_identity_match_unconfirmed _
+  | Masc_tui_types.Workspace_identity_mismatch _ -> ()
+;;
+
 
 let load_live_context_if_safe state base_path keeper =
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_match ->
     load_live_context state base_path keeper
   | Masc_tui_types.Workspace_identity_unread
+  | Masc_tui_types.Workspace_identity_match_unconfirmed _
   | Masc_tui_types.Workspace_identity_mismatch _ -> ()
 ;;
 
@@ -11314,6 +12300,9 @@ let load_keeper_logs_if_safe state base_path limit keeper =
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_match ->
     load_selected_keeper_logs state base_path limit keeper
+  | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
+    (* The logs the last match read stay until a read matches again. *)
+    ()
   | Masc_tui_types.Workspace_identity_unread ->
     apply_keeper_log_snapshot state
       { entries = []; error = Some Metrics_tail.Workspace_unconfirmed }
@@ -11330,7 +12319,12 @@ let load_keeper_logs_if_safe state base_path limit keeper =
    fetched nothing in all three. One table, called from all three. *)
 let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
   match state.detail_tab with
-  | Detail_info -> launch_keeper_board_quarantines state ~mailbox keeper.k_name
+  | Detail_info ->
+      (* Runtime Stats reads the composite snapshot. Entry and explicit [r]
+         both request a current reading, including after a failed refresh;
+         the shared launcher retains its single-flight and authority guards. *)
+      launch_keeper_lanes_reread state ~mailbox;
+      launch_keeper_board_quarantines state ~mailbox keeper.k_name
   | Detail_items ->
       launch_keeper_items state ~mailbox keeper.k_name
   | Detail_sandbox ->
@@ -11352,10 +12346,10 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       launch_keeper_config_view state ~mailbox keeper.k_name
   | Detail_secrets ->
       (* The projection arrives with the composite body the Keeper lanes read
-         carries. Ask for it when none has answered: the roster opens with
-         that read, but a read that failed leaves nothing behind, and the tab
-         drew that as "no projection reported". *)
-      if Option.is_none state.lanes then launch_keeper_lanes_load state ~mailbox
+         carries. The list no longer refreshes that body, so a reading cached
+         before the operator went back to the list can be arbitrarily old:
+         entry and [r] ask for a current one, as Info does. *)
+      launch_keeper_lanes_reread state ~mailbox
   | Detail_github ->
       state.github_identity_view <- None;
       state.github_identity_view_error <- None;
@@ -11414,6 +12408,12 @@ let current_surface_needs state =
    authority withdraws them; [resume_reads_after_authority_change] sends
    them again from this same list. *)
 let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs) =
+  if server_authority_ready state then begin
+  (* Independent task observations continue while reading older chat rows.
+     Root-turn settlement and history scroll do not own their lifecycle. *)
+  (if needs.Masc_tui_types.needs_keeper_chat then
+     Option.iter (fun keeper_name -> launch_keeper_native_tasks_load state ~mailbox ~keeper_name)
+       state.msg_target_keeper_name);
   (* The chat pane's history comes down its own generation-guarded path, not
      in the surface bundle, so the tick asks for it here. Without this the
      pane read once on open and a message that arrived after that waited for
@@ -11439,9 +12439,10 @@ let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs
      somebody is waiting for it. Same shape as the chat reload above, and for
      the same reason: a pane that read once on open showed a fact that had
      since changed. *)
-  Masc_tui_types.identity_login_pending_keepers state
+  let login_now = Unix.gettimeofday () in
+  Masc_tui_types.identity_login_pending_keepers state ~now:login_now
   |> List.iter (fun keeper_name ->
-       if identity_login_recovery_poll_ready state keeper_name then
+       if identity_login_recovery_poll_ready state ~now:login_now keeper_name then
          Masc_tui_identity_requests.launch_view state ~host:server_peer_host
            ~deliver:(workspace_enqueue state mailbox) keeper_name);
   (* The "answering now" badge rides every tick for the same reason as the
@@ -11458,6 +12459,7 @@ let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs
      rows ahead of the settled ones and cuts at twenty, so the earliest wake
      is in the payload whether or not the tail is. *)
   launch_schedules_load state ~mailbox
+  end
 ;;
 
 
@@ -11485,6 +12487,7 @@ let enter_config_pane state ~mailbox pane =
   state.runtime_params_cursor <- 0;
   state.runtime_param_edit <- None;
   state.runtime_params_notice <- None;
+  state.prompts_librarian_input_requested <- None;
   state.prompts_librarian_input <- None;
   state.prompts_librarian_input_error <- None;
   state.prompts_librarian_input_loading <- false;
@@ -11788,7 +12791,7 @@ let launch_observer state ~host ~port ~mailbox =
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-      fork_workspace_job state ~sw run
+      fork_workspace_job ~observation:true state ~sw run
   | None -> enqueue_async mailbox
       (Observer_closed (Error (Masc_tui_http.Transport_failed "Eio switch is unavailable")))
 
@@ -11807,7 +12810,7 @@ let launch_observer state ~host ~port ~mailbox =
    filled the eleven-entry event panel with its own refusals. *)
 let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
   match state.workspace_identity with
-  | Workspace_identity_unread -> ()
+  | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ -> ()
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   match (state.connection_status, state.observer) with
   | (Connected | Degraded), Observer_off ->
@@ -11909,6 +12912,112 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
                 ~needs))
   end
 
+(* The task receipt and its dependent work have different authority. A
+   temporary loss of identity holds the latter without replaying the POST. *)
+let resume_task_followups state ~mailbox ~refresh_inflight
+    ~scoped_refresh_inflight ~scoped_refresh_followup =
+  let ready = function
+    | Task_handoff _ -> Option.is_none state.keepers_error
+    | Task_cancel_refresh _ -> true in
+  let run, withdrawn = take_task_followups state ~ready in
+  List.iter (function
+    | Task_handoff {task_id; _} -> report_action state "task"
+        (Printf.sprintf "%s created in the previous workspace; Keeper handoff withdrawn" task_id)
+    | Task_cancel_refresh task_id -> report_action state "system"
+        (Printf.sprintf "task %s cancelled in the previous workspace; current workspace unchanged" task_id)) withdrawn;
+  List.iter (function
+    | Task_handoff {keeper; task_id; _}
+      when not (keeper_available_for_new_message state keeper) ->
+        report_action state "error"
+          (Printf.sprintf "%s created; Keeper %s is no longer registered, handoff not sent" task_id keeper)
+    | (Task_handoff {keeper; task_id; title; body} as action) ->
+        (* This is an already accepted task, not the operator's current
+           composer. Keep any newer draft, attachment or recalled edit intact. *)
+        let request = Keeper_chat.create_request ~keeper_name:keeper
+            ~message:(Masc_tui_command.task_message ~task_id ~title ~body) () in
+        let submitted_at = Unix.gettimeofday () in
+        (match Chat_queue.push state.msg_queued ~submitted_at request with
+         | Error detail ->
+             Option.iter (fun expected_workspace ->
+               remember_task_followup state ~expected_workspace action) state.server_identity;
+             report_action state "error"
+               (Printf.sprintf "%s created; Keeper handoff waiting: %s" task_id detail)
+         | Ok (queue, _) ->
+             state.msg_queued <- queue;
+             append_user_history_once ~submitted_at state request;
+             state.keeper_interactive_waiting <-
+               (keeper, request.request_id,
+                Awaiting_control {generation = keeper_chat_control_generation state keeper; target = None})
+               :: state.keeper_interactive_waiting;
+             (* A handoff can complete after the operator starts editing a
+                different Keeper. Deliver to its own queue without switching
+                that editor (which would retire its recalled draft). *)
+             if state.msg_target_keeper_name = None
+                || state.msg_target_keeper_name = Some keeper then begin
+               close_key_modals state;
+               state.palette_open <- false;
+               state.palette_mode <- Masc_tui_types.Palette_jump;
+               state.palette_query <- "";
+               state.palette_cursor <- 0;
+               state.search <- None;
+               set_msg_scroll state 0;
+               state.view <- Keepers Keeper_message;
+               if state.msg_target_keeper_name = None then
+                 open_message_for_keeper state keeper ~drain_queue:(fun () -> ())
+             end;
+             launch_waiting_keeper_input state ~mailbox ~keeper_name:keeper)
+    | Task_cancel_refresh task_id ->
+        (* Only the detail that is still selected owns this follow-up read. *)
+        if state.task_detail_id = Some task_id then begin
+          state.task_history <- None;
+          launch_task_history_load state ~mailbox task_id
+        end;
+        start_http_refresh state ~host:server_peer_host ~port:state.port
+          ~intent:Revalidate ~refresh_inflight ~scoped_refresh_inflight
+          ~scoped_refresh_followup ~mailbox) run
+
+(* A proof read is separate from the confirmation key: recovery must never
+   replay the key's second-press mutation. *)
+let launch_goal_confirmation_read state ~mailbox ~goal_id =
+  if server_authority_ready state then
+    match state.goal_confirmation with
+    | Goal_confirmation.Submitting _ -> ()
+    | Goal_confirmation.Inspecting read ->
+        (match Goal_confirmation_read.start ~equal:String.equal read ~key:goal_id with
+         | Already_loading -> ()
+         | Started (loading, request) ->
+             state.goal_confirmation <- Goal_confirmation.Inspecting loading;
+             state.goal_confirmation_presented <- None;
+             state.goal_action_error <- None;
+             let host = server_peer_host and port = state.port in
+             launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+               ~deliver:(fun result -> Goal_confirmation_loaded (request, result))
+               (fun () ->
+                 let ( let* ) = Result.bind in
+                 let* json = Masc_tui_http.fetch_goal_confirmation ~host ~port ~goal_id in
+                 let* confirmation = Goal_confirmation.decode_confirmation ~goal_id json in
+                 match confirmation.phase with
+                 | Goal_phase.Awaiting_confirmation -> Ok confirmation
+                 | _ -> Error "goal is not awaiting confirmation"))
+
+let launch_skill_evidence_read state ~mailbox reference =
+  if server_authority_ready state then begin
+    let key = Skill_reference.to_yojson reference |> Yojson.Safe.to_string in
+    let request = ref () in
+    state.tools_evidence_request <- Some request;
+    state.tools_evidence_reference <- Some reference;
+    let check = capture_workspace_check state ~mailbox in
+    let host = server_peer_host and port = state.port in
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Skill_evidence_loaded (request, key, result))
+      (fun () ->
+        let ( let* ) = Result.bind in
+        let* () = check () in
+        let* json = Masc_tui_http.post_skill_evidence ~host ~port reference in
+        let* () = check () in
+        Ok json)
+  end
+
 (* The two tokens a read is admitted under. Applying a server identity
    reading moves the workspace one when the workspace changes (the first
    reading at boot is one) and cancels every read it admitted; it revokes
@@ -11932,6 +13041,12 @@ let read_authority state =
    that refresh brought. *)
 let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup ~(before : read_authority) =
+  settle_retired_sent_image state;
+  settle_retired_chat_copy state;
+  settle_retired_queue_inspections state;
+  settle_retired_chat_command_reads state;
+  resume_task_followups state ~mailbox ~refresh_inflight
+    ~scoped_refresh_inflight ~scoped_refresh_followup;
   let workspace_moved = before.read_workspace <> state.workspace_authority in
   let moved = workspace_moved || before.read_detail != state.detail_read_authority in
   (* The detail goes first: it restores the remembered Keeper focus and
@@ -11943,10 +13058,201 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
+    let activations = state.account_login_activation_resume in
+    state.account_login_activation_resume <- [];
+    List.iter (fun ((view : Masc_tui_account_login.t), generation, saved) ->
+      if view.generation = generation
+         && List.exists (fun current -> current == view)
+              (Option.to_list state.account_login @ state.account_login_detached) then
+        launch_account_login_action state ~mailbox view (Masc_tui_account_login.Activate_saved saved))
+      activations;
+    let account_reads = state.account_login_read_resume in
+    state.account_login_read_resume <- [];
+    List.iter (fun ((view : Masc_tui_account_login.t), generation, action) ->
+      if view.generation = generation && account_login_action_is_read action
+         && List.exists (fun current -> current == view)
+              (Option.to_list state.account_login @ state.account_login_detached) then
+        launch_account_login_action state ~mailbox view action) account_reads;
+    if state.msx_open && state.machine_source = Masc.Machine_lane.Msx
+       && state.msx_live = Masc_tui_machine_live.Unread
+       && Option.is_none state.msx_live_in_flight then
+      launch_msx_live_read state ~mailbox;
+    if state.msx_open && state.msx_menu_open then
+      launch_dos_live_poll state ~mailbox;
     (* The surface on view asks again from the list it reads on arrival.
        Its request went out under the old authority, and a surface outside
        the bundle has no tick of its own to recover it. *)
+    (* Restore a nested Browser request before a surface's generic refresh
+       can replace its scene/screenshot selection with the tab inventory. *)
+    let browser_resume = state.browser_lane_read_resume in
+    state.browser_lane_read_resume <- None;
+    (match browser_resume, state.browser_lane with
+     | Some (generation, prior, operation), Some current
+       when generation = state.browser_lane_generation
+         && prior.source = current.source
+         && prior.selected_client = current.selected_client
+         && prior.selected_tab = current.selected_tab ->
+           launch_browser_lane state ~mailbox operation
+     | _ -> ());
     launch_surface_reads state ~mailbox state.view;
+    refresh_acting_pane_changes state ~mailbox;
+    if state.gate_receipt_refresh_pending then
+      launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox;
+    (* Retained nested readers own their selection independently of the list
+       underneath. Reissue their observations without resetting navigation. *)
+    (match state.view with
+     | Changes ->
+         Option.iter (fun path ->
+           launch_git_diff_load state ~mailbox ~keeper:state.changes_keeper ~path)
+           state.changes_tree_diff_path
+     | Fusion ->
+         (match state.fusion_launch with
+          | Some (Fusion_launch_reading_presets _) ->
+              launch_fusion_launch_options_load state ~mailbox
+          | Some (Fusion_launch_open _ | Fusion_launch_started _) | None -> ())
+     | Board ->
+         (match state.board_mode with
+          | Board_read post_id ->
+              Masc_tui_board_requests.start_board_post_refresh state
+                ~host:server_peer_host ~port:state.port ~post_id
+                ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
+          | Board_list | Board_compose -> ())
+     | Keepers Keeper_message ->
+         Option.iter (fun keeper_name ->
+           launch_keeper_chat_file_changes_load ~force:true state ~mailbox ~keeper_name;
+           if state.msg_tool_visibility <> Tools_compact then
+             launch_keeper_calls_load ~force:true state ~mailbox keeper_name)
+           state.msg_target_keeper_name;
+         let pending = state.msg_older_resume in
+         state.msg_older_resume <- None;
+         (match pending with
+          | Some (keeper_name, before)
+            when state.msg_target_keeper_name = Some keeper_name
+                 && state.msg_older_cursor = Some before ->
+              launch_keeper_older_page state ~mailbox ~keeper_name ~before
+          | _ -> ())
+     | Planning ->
+         (match state.planning_mode with
+          | Planning_detail goal_id ->
+              launch_goal_timeline_load state ~mailbox goal_id;
+              (match state.goal_confirmation with
+               | Goal_confirmation.Inspecting read
+                 when Goal_confirmation_read.current_key read = Some goal_id ->
+                   launch_goal_confirmation_read state ~mailbox ~goal_id
+               | Goal_confirmation.Inspecting _ | Goal_confirmation.Submitting _ -> ())
+          | _ -> ())
+     | Tools ->
+         (match state.tools_evidence_reference, selected_tools_skill_profile state with
+          | Some reference, Some profile when Skill_reference.equal reference profile.esp_reference ->
+              launch_skill_evidence_read state ~mailbox reference
+          | _ -> state.tools_evidence_reference <- None)
+     | Code ->
+         let deliver = workspace_enqueue state mailbox in
+         let host = server_peer_host in
+         let lsp = Masc_tui_fetched.current_key state.code_lsp_query in
+         let intent = state.code_file_resume_intent in
+         Option.iter (fun path -> Masc_tui_code_requests.launch_file_load ~intent
+           state ~host ~deliver ~path) (Masc_tui_fetched.current_key state.code_file);
+         if intent = Refresh_code_file then begin
+         (* An overlay can be opened while identity is unread, before its
+            first fetch has a key. Its intent belongs to the selected file,
+            not the last completed or dispatched overlay request. *)
+         let selected_file = Masc_tui_fetched.current_key state.code_file in
+         if state.code_history_open then Option.iter (fun path ->
+           Masc_tui_code_requests.launch_history_load state ~host ~deliver ~path)
+           selected_file;
+         if state.code_diff_open then Option.iter (fun path ->
+           Masc_tui_code_requests.launch_diff_load state ~host ~deliver ~base_ref:tree_diff_base_ref ~path)
+           selected_file;
+         Option.iter (fun path -> Masc_tui_code_requests.launch_blame_load state ~host ~deliver ~path)
+           (Masc_tui_fetched.current_key state.code_blame);
+         Option.iter (fun query ->
+           if query.clq_scope = state.code_scope then
+             Masc_tui_code_requests.start_lsp_question ~line:query.clq_line state ~host ~deliver
+               ~report:(report_action state) ~question:query.clq_question ~symbol:query.clq_symbol) lsp
+         end
+     | Keepers Keeper_runtime_pick -> launch_runtime_catalog_load state ~mailbox
+     | Keepers Keeper_calls -> Option.iter (fun keeper ->
+         launch_keeper_calls_load ~force:true state ~mailbox keeper.Tui_decode.k_name) (selected_keeper state)
+     | Verification ->
+         (match state.verification, state.verification_detail_request_id with
+          | Some snapshot, Some request_id ->
+              List.find_opt (fun row -> String.equal row.Tui_decode.vr_request_id request_id)
+                snapshot.Tui_decode.vs_requests
+              |> Option.iter (fun row -> launch_verification_evidence_load state ~mailbox row.Tui_decode.vr_task_id)
+          | _ -> ())
+     | Schedules -> Option.iter (fun schedule_id ->
+         launch_schedule_wake_history_load state ~mailbox ~schedule_id) state.schedule_detail_id
+     | Lanes ->
+         (match state.lanes_mode with
+          | Lanes_run_list lane -> launch_lane_runs_load state ~mailbox ~lane
+          | Lanes_run_detail (_, run_id) -> launch_lane_run_detail_load state ~mailbox ~run_id
+          | Lanes_measurement_detail sha256 -> launch_measurement_artifact_load state ~mailbox ~sha256
+          | Lanes_overview | Lanes_inventory_detail _ -> ())
+     | Memory ->
+         (match state.memory_facts_keeper with
+          | Some "*" -> launch_all_memory_facts_load state ~mailbox
+          | Some keeper_name -> launch_memory_facts_load state ~mailbox ~keeper_name
+          | None -> ())
+     | _ -> ());
+    (match state.view with
+     | Resources -> Option.iter (fun uri ->
+         Masc_tui_resources_requests.launch_read state ~host:server_peer_host
+           ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
+           ~check:(capture_workspace_check state ~mailbox) ~uri) state.resource_pending_uri
+     | Config when state.config_pane = Config_prompts ->
+         (match state.prompts_librarian_input_requested, selected_prompt_for_state state with
+          | Some prompt_key, Some row when String.equal row.Tui_decode.pr_key prompt_key ->
+              launch_librarian_input_load state ~mailbox ~prompt_key
+          | _ -> ())
+     | _ -> ());
+    Option.iter (launch_task_history_load state ~mailbox) state.task_detail_id;
+    Option.iter (fun repo_id -> launch_workspace_activity state ~mailbox ~repo_id)
+      state.workspace_activity_repo;
+    Option.iter (launch_exact_activity_read state ~mailbox) state.exact_activity_open;
+    Option.iter (launch_browser_activity_read state ~mailbox) state.browser_activity_open;
+    Option.iter (launch_machine_activity_read state ~mailbox) state.machine_activity_open;
+    Option.iter (fun session -> Option.iter (fun (kind,api_key_env) ->
+      launch_voice_agent_voices state ~mailbox ~kind ~api_key_env) session.vas_lookup)
+      state.voice_agent_voices;
+    (match state.lane_addons with
+     | None ->
+         state.lane_installer_read_resume <- None;
+         state.lane_nested_read_resume <- None
+     | Some view ->
+         let nested = state.lane_nested_read_resume in
+         state.lane_nested_read_resume <- None;
+         let pending = state.lane_installer_read_resume in
+         state.lane_installer_read_resume <- None;
+         (match nested, pending with
+          | Some (generation, Lane_subscriptions_read), _
+            when generation = view.generation && Option.is_some view.subscription_panel ->
+              launch_lane_subscriptions state ~mailbox Masc_tui_lane_subscriptions.Inspect
+          | Some (generation, Lane_declaration_read {path; edit}), _
+            when generation = view.generation && view.document_key = Some (Filename.basename path) ->
+              launch_lane_declaration state ~mailbox ~edit (Masc_tui_lane_declaration.Read path)
+          | _, Some (generation, read) when generation = view.generation ->
+              (match read with
+               | Masc_tui_lane_installer.Read_catalog directory -> launch_lane_package_catalog state ~mailbox directory
+               | Read_preview path -> launch_lane_package_preview state ~mailbox path)
+          | _ when not view.loading -> launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
+          | _ -> ()));
+    if state.context_inspector_open then Option.iter (fun keeper_name ->
+      launch_context_inspector_load state ~mailbox ~keeper_name) state.context_inspector_keeper;
+    if state.repository_changes_open then
+      (match state.repository_changes_scope, state.repository_changes_diff_path with
+       | Some scope, Some path ->
+           launch_repository_changes_diff_load state ~mailbox ~reader:Repository_diff_reader ~scope ~path
+       | Some scope, None -> launch_repository_changes_load state ~mailbox ~scope
+       | None, _ -> ());
+    if state.patch_modal_open then Option.iter (fun path ->
+      launch_repository_changes_diff_load state ~mailbox ~reader:Patch_diff_reader
+        ~scope:Tui_decode.Repository_change_project ~path) state.patch_modal_path;
+    if state.keeper_deletions_open then launch_keeper_deletions state ~mailbox ();
+    (match state.browser_history with
+     | Some {resume=Some resume; _} -> launch_browser_history state ~mailbox
+         ~reload:(match resume with Browser_history.Reload_list -> true | Reload_selection -> false)
+     | Some _ | None -> ());
     (* The bundle was cut under the old authority too: its approval listing
        carries the approval_flow generation the move replaced, so the
        listing and the Home operator summary are refused when it lands. Read
@@ -12002,6 +13308,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
       car_generation = state.candle_authority_generation;
       car_identity = state.server_identity;
     } in
+    let latest_identity = ref None in
     let read_refresh () =
       try
         let ( let* ) = Result.bind in
@@ -12012,6 +13319,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
           if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
           else
             let reading = load_server_identity ~host ~port in
+            latest_identity := Some reading;
             if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
             else if Masc_tui_types.server_workspace_matches ~expected:identity reading
             then reading
@@ -12040,7 +13348,9 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
       enqueue_async mailbox
         (match read_refresh () with
          | Ok results -> Http_scoped_refresh_done (authority, currency_authority, results)
-         | Error err -> Http_scoped_refresh_failed (authority, err, approval_ticket, refresh_ticket))
+         | Error err ->
+           Http_scoped_refresh_failed
+             (authority, err, approval_ticket, refresh_ticket, !latest_identity))
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork ~sw run_refresh
@@ -12056,8 +13366,13 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
                    ~scoped_refresh_inflight:refresh_inflight ~scoped_refresh_followup
                    results
              | Error err when authority = state.workspace_authority ->
+                 let before = read_authority state in
                  apply_http_scoped_refresh_failure state
-                   ~refresh_ticket ~approval_ticket err
+                   ~refresh_ticket ~approval_ticket ~latest:!latest_identity err;
+                 resume_reads_after_authority_change state ~mailbox
+                   ~refresh_inflight:full_refresh_inflight
+                   ~scoped_refresh_inflight:refresh_inflight ~scoped_refresh_followup
+                   ~before
              | Ok _ | Error _ -> ())
   end
 
@@ -12168,6 +13483,8 @@ let apply_approval_decision_completion state generation approval decision result
 let start_approval_decision state approval decision ~mailbox =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
+  let identity = state.server_identity in
+  let reading = Some state.workspace_read_authority in
   if state.workspace_identity <> Workspace_identity_match then
     report_action state "error" "Cannot decide: workspace identity is unverified"
   else
@@ -12182,19 +13499,27 @@ let start_approval_decision state approval decision ~mailbox =
     state.home_decision_inflight <- state.home_opened_request;
     let host = server_peer_host in
     let port = state.port in
+    let confirm () =
+      Result.bind (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ())
+        (fun () -> Masc_tui_http.post_operator_confirm ~host ~port
+          ~token:approval.ap_token ~decision)
+    in
+    let reload () =
+      if workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation
+      then load_approvals ~host ~port
+      else Error "Approval result retained; workspace identity is unconfirmed"
+    in
     let run_action () =
       let result =
         try
-          Masc_tui_http.post_operator_confirm ~host ~port
-            ~token:approval.ap_token ~decision
+          confirm ()
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
       let approvals =
         try
-          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-          else load_approvals ~host ~port with
+          reload () with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error ("approvals reload failed: " ^ Printexc.to_string exn)
       in
@@ -12206,16 +13531,15 @@ let start_approval_decision state approval decision ~mailbox =
     | None ->
         let result =
           try
-            Masc_tui_http.post_operator_confirm ~host ~port
-              ~token:approval.ap_token ~decision
+            confirm ()
           with exn -> Error (Printexc.to_string exn)
         in
         let approvals =
           try
-          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-          else load_approvals ~host ~port with
+          reload () with
           | exn -> Error ("approvals reload failed: " ^ Printexc.to_string exn)
         in
+        let result, approvals = workspace_operation_reply state ~authority ~reading (result, approvals) in
         apply_approval_decision_completion state generation approval decision
           result approvals
 
@@ -12435,7 +13759,7 @@ let start_ask_answer state ~keeper_name ~ask_id ~answered_label ~answers ~mailbo
   state.ask_submit_inflight <- true;
   let host = server_peer_host in
   let port = state.port in
-  let check () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+  let check = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
   let run_action () =
     let result =
       try
@@ -12618,15 +13942,15 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   state.keeper_action_serial <- serial;
   state.keeper_action_inflight <- Some (keeper_name, action);
   state.keeper_action_pending <- None;
-  report_action state "system"
+  report_action ~show_in_footer:false state "system"
     (Printf.sprintf "%s %s" (Keeper_control.action_gerund action) keeper_name);
   let host = server_peer_host in
   let port = state.port in
   let operator_operation_id =
     Keeper_control.mint_operation_id ~keeper:keeper_name ~serial
   in
-  let check_request () =
-    check_workspace_request state ~mailbox ~authority ~identity ~host ~port ()
+  let check_request =
+    workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port
   in
   let run_action () =
     let result =
@@ -12685,7 +14009,8 @@ let start_goal_transition ?note state ~mailbox ~(goal_id : string)
           with
           | Error err -> Error err
           | Ok json -> Masc.Tui_decode.tool_envelope_outcome json)
-  | (Workspace_identity_match | Workspace_identity_mismatch _ | Workspace_identity_unread), _ ->
+  | ( Workspace_identity_match | Workspace_identity_mismatch _
+    | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ ), _ ->
       report_action state "error" "Cannot change goal: workspace identity is unverified"
 
 (* Confirmation uses the operator route and the exact proof read here, never
@@ -12727,24 +14052,8 @@ let handle_goal_confirmation_key state ~mailbox =
           current state; confirming it would act on what the server no longer
           answered. Ask again. *)
        | Absent | Stale _ | Failed _ ->
-           (match Goal_confirmation_read.start ~equal:String.equal
-                    read ~key:goal_id with
-            | Already_loading -> ()
-            | Started (loading, request) ->
-                state.goal_confirmation <- Goal_confirmation.Inspecting loading;
-                state.goal_confirmation_presented <- None;
-                state.goal_action_error <- None;
-                state.planning_scroll <- 0;
-                launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-                  ~deliver:(fun result -> Goal_confirmation_loaded (request, result))
-                  (fun () ->
-                    let ( let* ) = Result.bind in
-                    let* json = Masc_tui_http.fetch_goal_confirmation ~host ~port ~goal_id in
-                    let* confirmation = Goal_confirmation.decode_confirmation ~goal_id json in
-                    match confirmation.phase with
-                    | Goal_phase.Awaiting_confirmation -> Ok confirmation
-                    | _ -> Error "goal is not awaiting confirmation"
-                  )))
+           state.planning_scroll <- 0;
+           launch_goal_confirmation_read state ~mailbox ~goal_id)
 
 (* The lifecycle keys on a goal detail. The first press names the action, the
    same press again submits it, and any other key disarms. A drop opens its
@@ -12814,8 +14123,11 @@ let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
   match state.workspace_identity with
   | Workspace_identity_unread ->
       report_action state "error" "Workspace identity has not been read; action unavailable"
+  | Workspace_identity_match_unconfirmed _ ->
+      report_action state "error" "Workspace identity is unconfirmed; action unavailable"
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   let enqueue_async = workspace_enqueue state in
+  let check = capture_workspace_check state ~mailbox in
   state.schedule_cancel_error <- None;
   report_action state "system"
     (Printf.sprintf "cancelling schedule %s" schedule_id);
@@ -12823,7 +14135,8 @@ let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
   let port = state.port in
   let run_cancel () =
     let result =
-      match Masc_tui_http.post_schedule_cancel ~host ~port ~schedule_id with
+      match Result.bind (check ())
+        (fun () -> Masc_tui_http.post_schedule_cancel ~host ~port ~schedule_id) with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
     in
@@ -13207,6 +14520,8 @@ let handle_keeper_action state ~base_path ~mailbox action =
   match state.workspace_identity with
   | Workspace_identity_unread ->
       report_action state "error" "Workspace identity has not been read; action unavailable"
+  | Workspace_identity_match_unconfirmed _ ->
+      report_action state "error" "Workspace identity is unconfirmed; action unavailable"
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   match selected_keeper state with
   | None ->
@@ -13240,7 +14555,7 @@ let handle_keeper_action state ~base_path ~mailbox action =
             report_action state "system" "A keeper action is already in progress"
         | Keeper_control.Gate_arm pending ->
             state.keeper_action_pending <- Some pending;
-            report_action state "system"
+            report_action ~show_in_footer:false state "system"
               (Printf.sprintf "Press %s again to %s %s"
                  (Keeper_control.action_key action)
                  (Keeper_control.action_label action) keeper.k_name);
@@ -13736,24 +15051,66 @@ let present_identity_notice state ~keeper_name (kind, text) =
 let rec apply_async_message state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
-  | Workspace_scoped (authority, message) ->
-      if authority = state.workspace_authority then
+  | Workspace_scoped (authority, reading, message) ->
+      if workspace_message_admitted state ~authority ~reading message then begin
+        let retry = retired_operation_observation state ~authority ~reading message in
+        let message = project_workspace_operation_reply state ~authority ~reading message in
         apply_async_message state ~base_path ~http_refresh_inflight
-          ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
-      else (match message with
+          ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message;
+        (match retry with
+         | Some retry when retain_operation_observation state retry
+             && server_authority_ready state ->
+             (match retry with
+              | Browser_scene_observation (_, _, operation) ->
+                  state.browser_lane_read_resume <- None;
+                  launch_browser_lane state ~mailbox operation
+              | Lane_subscriptions_observation _ ->
+                  state.lane_nested_read_resume <- None;
+                  launch_lane_subscriptions state ~mailbox Masc_tui_lane_subscriptions.Inspect)
+         | Some _ | None -> ())
+      end else (match message with
+        | Gate_snapshot_loaded (request, _, _) ->
+          Log.Transport.debug "discarded Gate snapshot request=%d: workspace authority superseded"
+            (Snapshot_read.request_id request)
         | Keeper_chat_dispatch_started (_, _, acknowledge) ->
           ignore (Eio.Promise.try_resolve acknowledge false)
         | Keeper_chat_done (_, _, _, acknowledge) ->
           ignore (Eio.Promise.try_resolve acknowledge ())
+        | Play_invite_issued (request, _, Play_answered (Ok invite)) ->
+          (match
+             Masc_tui_play_card.make
+               ~project:Masc_tui_play_card.project_for_terminal
+               ~name:invite.Tui_decode.pii_name
+               ~expires_at:invite.pii_expires_at ~link:invite.pii_link
+           with
+           | Ok card -> Masc_tui_types.retain_withdrawn_play_invite state request card
+           | Error _ -> ())
         | _ -> ())
-  | Workspace_identity_unconfirmed detail ->
-      apply_server_identity_reading state (Error detail);
+  | Chat_command_read_completed (ticket, message) ->
+      if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
+        state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
+        apply_async_message state ~base_path ~http_refresh_inflight
+          ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
+      end
+  | Workspace_operation message ->
+      apply_async_message state ~base_path ~http_refresh_inflight
+        ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
+  | Workspace_identity_unconfirmed { detail; latest; prior_contact; refresh_ticket } ->
+      if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
+      let authority = read_authority state in
+      apply_refused_workspace_identity state ~detail (Some latest);
+      state.connection_status <-
+        (match latest, prior_contact with
+         | Ok _, _ | Error _, Masc_tui_server_lifecycle.Server_reached -> Masc_tui_types.Degraded
+         | Error _, (Masc_tui_server_lifecycle.Nothing_answered | Undecided) -> Masc_tui_types.Disconnected);
+      resume_reads_after_authority_change state ~mailbox
+        ~refresh_inflight:http_refresh_inflight
+        ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
+        ~before:authority;
       report_action state "error" detail
+      end
   | Schedule_form_authority_refused {action; detail; workspace} ->
-      (* This receipt belongs to the guard's withdrawal, and is presented
-         only after that withdrawal retires the former workspace readings.
-         Its Workspace_scoped envelope rejects delivery to a successor. *)
-      apply_server_identity_reading state (Error detail);
+      (* Identity observation is delivered separately under its read epoch. *)
       state.schedule_form_refusal <- Some
         { sfr_action = action; sfr_detail = detail; sfr_at = Unix.gettimeofday ()
         ; sfr_workspace = workspace };
@@ -13799,10 +15156,17 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ignore (finish_keeper_chat_control state keeper_name ~generation : bool))
         control_generation;
       state.keeper_queue_inflight <- List.filter ((<>) keeper_name) state.keeper_queue_inflight;
+      state.keeper_queue_readings <- List.filter ((<>) keeper_name) state.keeper_queue_readings;
+      state.keeper_queue_inspections <- List.filter
+        (fun (keeper, _) -> keeper <> keeper_name) state.keeper_queue_inspections;
       launch_keeper_turns_load state ~mailbox;
       let kind, lines = match result with
         | Error detail -> Notice_failure, [detail]
-        | Ok lines -> Notice_reply,
+        | Ok (receipt, observation) ->
+            let lines = match observation with
+              | Ok lines -> receipt @ lines
+              | Error detail -> receipt @ ["Read unavailable: " ^ detail] in
+            Notice_reply,
             ("Queue snapshot (refresh with /queue)" :: lines @
              ["/queue pause · /queue resume · /queue cancel ID · /queue edit ID message · /queue last ID";
               "Events: /queue cancel-event REF INCARNATION reason · /queue priority-event REF INCARNATION immediate|normal|low";
@@ -13814,6 +15178,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       map_lane_addons state (fun view ->
         Masc_tui_lane_addons.finish_application_read view ticket result)
   | Lane_subscriptions_loaded (generation,result) ->
+      (match state.lane_nested_read_resume with
+       | Some (pending, _) when pending = generation -> state.lane_nested_read_resume <- None
+       | Some _ | None -> ());
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
         {view with loading=false;subscription_panel=Option.map
@@ -13868,6 +15235,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
        | _ -> ())
   | Lane_declaration_loaded (generation, request, edit, create_directory, result) ->
+      (match state.lane_nested_read_resume with
+       | Some (pending, _) when pending = generation -> state.lane_nested_read_resume <- None
+       | Some _ | None -> ());
       let module Addons = Masc_tui_lane_addons in
       let module Document = Masc_tui_lane_declaration in
       let visible = Option.is_some state.lane_addons in
@@ -14107,11 +15477,18 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         state.voice_floor <- None;
         chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_failure
           ("voice failed: " ^ error))
-  | Http_refresh_done (Refresh_workspace_unconfirmed { refresh_ticket; detail; unreachable; approval_ticket }) ->
+  | Http_refresh_done
+      (Refresh_workspace_unconfirmed
+         { refresh_ticket; detail; unreachable; approval_ticket; latest_identity }) ->
       http_refresh_inflight := false;
       state.http_refresh_started_ns <- None;
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
-        apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket;
+        let authority = read_authority state in
+        apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket ~latest_identity;
+        resume_reads_after_authority_change state ~mailbox
+          ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
+          ~before:authority;
       react_to_server_contact state ~base_path ~host:server_peer_host
         ~port:state.port ~http_refresh_inflight ~http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
@@ -14418,7 +15795,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Some keeper_name ->
            List.iter
              (fun (source, (seq, at)) ->
-               let key = Keeper_chat_log.source_key source in
+               let key = keeper_name, source in
                match
                  journal_follow_for_source state ~keeper_name ~source ~seq ~at
                with
@@ -14451,26 +15828,12 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            | Repositories | Code | Changes | Connectors | Runtime | Config
            | Resources | Tools | System_logs ->
                ()))
-  | Task_dispatched { expected_workspace; keeper; task_id; title; body }
-      when state.workspace_identity = Workspace_identity_match
-           && same_workspace_identity (Some expected_workspace) state.server_identity ->
+  | Task_dispatched { expected_workspace; keeper; task_id; title; body } ->
       report_action state "task" (Printf.sprintf "%s created for %s" task_id keeper);
-      (* The jump lands on a clean screen: a modal or roster search opened
-         while the dispatch was in flight would otherwise sit over (or
-         zombie under) a surface it was not opened on. *)
-      close_key_modals state;
-      state.palette_open <- false;
-      state.palette_mode <- Masc_tui_types.Palette_jump;
-      state.palette_query <- "";
-      state.palette_cursor <- 0;
-      state.search <- None;
-      set_msg_scroll state 0;
-      state.view <- Keepers Keeper_message;
-      start_keeper_message ~keeper_name:keeper state ~base_path ~mailbox
-        (Masc_tui_command.task_message ~task_id ~title ~body)
-  | Task_dispatched { task_id; _ } ->
-      report_action state "task"
-        (Printf.sprintf "%s created in the previous workspace; Keeper handoff withdrawn" task_id)
+      remember_task_followup state ~expected_workspace
+        (Task_handoff {keeper; task_id; title; body});
+      resume_task_followups state ~mailbox ~refresh_inflight:http_refresh_inflight
+        ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
   | Task_dispatch_failed { keeper; detail; original } ->
       (* The operator's words come back to the input so nothing typed is
          lost with the failure. *)
@@ -14509,6 +15872,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              { ao_ticket; ao_result = Error err })
       approval_ticket;
       apply_server_identity_reading state (Error err);
+      withdraw_currency_authority state;
+      state.candle_observation <- Some (Error err);
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err;
       react_to_server_contact state ~base_path ~host:server_peer_host
@@ -14519,6 +15884,20 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
+  | Chat_search_finished (generation,restart,plan,result) ->
+      if generation=Atomic.get state.msg_search_generation then begin
+        let authority,keeper,needle=keeper_message_search_identity plan in
+        if authority=state.workspace_authority && keeper_message_search_owned state plan
+           && String.trim state.msg_find=needle then
+          let notice=chat_notice state ~keeper_name:(Some keeper) in
+          match result with
+          | Error detail -> notice ~kind:Notice_failure detail
+          | Ok (work,matched) ->
+              (match admit_keeper_message_search state work matched with
+               | Some result -> apply_chat_search_result state ~target:(Some keeper) ~restart ~needle result
+               | None -> notice ~kind:Notice_reply
+                   "/find source changed while searching; repeat /find to search the current conversation")
+      end
   | Surface_composer_released ->
       drain_queued_message state ~base_path ~mailbox
   | Http_scoped_refresh_done (authority, currency_authority, results) ->
@@ -14538,34 +15917,34 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-  | Http_scoped_refresh_failed (authority, err, approval_ticket, refresh_ticket) ->
+  | Http_scoped_refresh_failed (authority, err, approval_ticket, refresh_ticket, latest) ->
       http_scoped_refresh_inflight := false;
-      if authority = state.workspace_authority then
-      apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket err;
+      if authority = state.workspace_authority then begin
+        let before = read_authority state in
+        apply_http_scoped_refresh_failure state ~refresh_ticket ~approval_ticket ~latest err;
+        resume_reads_after_authority_change state ~mailbox
+          ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
+          ~before
+      end else
+        Log.Transport.debug "discarded scoped refresh completion: workspace authority superseded";
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
   | Board_post_refresh_done (request, result) ->
       Masc_tui_board_updates.apply_board_post_load state ~report_error:(add_event state "error") request result
+  | Keeper_deletion_retry_done (operation_id, result) ->
+      let message = match result with
+        | Ok () -> Printf.sprintf "Deletion retry %s accepted; refreshing inventory." operation_id
+        | Error detail -> Printf.sprintf "Deletion retry %s not confirmed: %s. Refresh inventory before retrying." operation_id detail in
+      state.keeper_deletions_retry_receipt <- Some (state.keeper_deletions_generation, message);
+      report_action state (if Result.is_ok result then "system" else "error") message
   | Keeper_deletions_loaded (generation, result) ->
-      if generation = state.keeper_deletions_generation then (
-        state.keeper_deletions_loading <- false;
-        let selected = match state.keeper_deletions with
-          | Some (Ok inventory) -> List.nth_opt inventory.operations state.keeper_deletions_cursor
-          | _ -> None in
-        state.keeper_deletions <- Some result;
-        match result with
-        | Error _ -> ()
-        | Ok inventory ->
-          let same_operation row = match selected with
-            | None -> false
-            | Some previous -> Masc.Keeper_shutdown_types.Operation_id.equal
-                (Keeper_control.deletion_operation_id row) (Keeper_control.deletion_operation_id previous) in
-          let rec find i = function
-            | [] -> None | row :: rest -> if same_operation row then Some i else find (i + 1) rest in
-          state.keeper_deletions_cursor <- (match find 0 inventory.operations with
-            | Some i -> i | None -> 0))
+      apply_keeper_deletions_read state ~generation result;
+      if generation = state.keeper_deletions_generation && Result.is_ok result
+         && Option.is_some state.keeper_deletions_retry_receipt then
+        launch_keeper_deletions state ~mailbox ()
   | Keeper_action_done (origin, keeper_name, action, result) ->
       let origin_matches =
         Option.for_all
@@ -14681,22 +16060,11 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | _ -> ())
   | Task_cancel_done (task_id, expected_workspace, result) ->
       (match result with
-       | Ok _ when state.workspace_identity = Workspace_identity_match
-                   && Option.exists (same_server_workspace expected_workspace) state.server_identity ->
-           report_action state "system"
-             (Printf.sprintf "task %s cancelled" task_id);
-           (* The backlog row and the detail's history both changed; refresh
-              re-reads the backlog, and the history reload draws the cancel
-              the operator just performed. *)
-           state.task_history <- None;
-           launch_task_history_load state ~mailbox task_id;
-           start_http_refresh state ~host:server_peer_host ~port:state.port
-             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
-             ~scoped_refresh_inflight:http_scoped_refresh_inflight
-             ~scoped_refresh_followup ~mailbox
        | Ok _ ->
-           report_action state "system"
-             (Printf.sprintf "task %s cancelled in the previous workspace; current workspace unchanged" task_id)
+           report_action state "system" (Printf.sprintf "task %s cancelled" task_id);
+           remember_task_followup state ~expected_workspace (Task_cancel_refresh task_id);
+           resume_task_followups state ~mailbox ~refresh_inflight:http_refresh_inflight
+             ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
        | Error err -> report_action state "error" ("task cancel failed: " ^ err))
   | Goal_timeline_loaded (goal_id, result) ->
       (* Drawn only while the operator still has this goal open; a stale
@@ -14770,7 +16138,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       in
       if current && still_selected
          && state.workspace_identity = Masc_tui_types.Workspace_identity_match
-         && item_authority_ready state
+         && server_authority_ready state
          && state.keeper_roster <> Keeper_control.Roster_unobserved
          (* The same reading the dispatch guard makes: a partial roster's
             silence is not absence, so a read this TUI legitimately launched
@@ -15009,13 +16377,25 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            state.preset_busy <- false;
            report_action state "error" ("preset delete: " ^ detail);
            launch_presets_load state ~mailbox)
+  | Play_room_received (request, result) ->
+      state.play_room <- Option.map (fun room ->
+        let viewer, result = match result with
+          | Ok (viewer, snapshot) -> Some viewer, Ok snapshot
+          | Error detail -> None, Error detail in
+        Masc_tui_play_room.receive ?viewer room request ~now:(Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9) result) state.play_room;
+      if state.msx_open && not state.msx_menu_open then render_spectator state
   | Play_invites_listed (target, result) ->
-      (match result with
+      (match target with
+       | Play_collab_list read ->
+           state.collab <- Option.map (fun view -> Masc_tui_collab.listed view read result) state.collab
+       | Play_chat_list keeper ->
+         let target = Play_chat keeper in
+         (match result with
        | Error detail ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
+           play_notice state ~sink:target ~kind:Notice_failure
              ("play invites: " ^ detail)
        | Ok [] ->
-           chat_notice state ~keeper_name:target ~kind:Notice_reply
+           play_notice state ~sink:target ~kind:Notice_reply
              "No shared DOS play invites"
        | Ok invites ->
            let row invite =
@@ -15028,10 +16408,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              ^ (if invite.pi_expired then " · expired" else "")
              ^ (if invite.pi_holds_controller then " · controlling" else "")
            in
-           chat_notice state ~keeper_name:target ~kind:Notice_reply
-             ("Shared DOS play invites:\n" ^ String.concat "\n" (List.map row invites)))
-  | Play_invite_issued (target, result) ->
-      state.play_invite_inflight <- false;
+           play_notice state ~sink:target ~kind:Notice_reply
+             ("Shared DOS play invites:\n" ^ String.concat "\n" (List.map row invites))))
+  | Play_invite_issued (request, target, result) ->
+      let outcome = match result with
+        | Play_answered (Ok _) | Play_refused _ | Play_not_dispatched _ -> Change_confirmed
+        | Play_answered (Error _) | Play_unanswered _ -> Change_unknown in
+      if Masc_tui_types.finish_play_change state request outcome then begin
+      settle_play_mutation state target;
       (match result with
        | Play_answered (Ok invite) ->
            (* The link is a credential the server will not show again. It goes
@@ -15047,39 +16431,55 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                 let stored = Masc_tui_types.play_invite_store state.play_invite card in
                 state.play_invite <- stored;
                 state.play_invite_scroll <- 0;
-                chat_notice state ~keeper_name:target ~kind:Notice_reply
+                play_notice state ~sink:target ~kind:Notice_reply
                   (Masc_tui_play_card.issued_notice card
                      ~retained:(Masc_tui_types.play_invite_holds_earlier stored))
             | Error reason ->
                 (* The link is the server's public base URL and a hex token,
                    so a link the card refuses names the base URL. The reason is
                    the card's own sentence and carries no part of the link. *)
-                chat_notice state ~keeper_name:target ~kind:Notice_failure
+                play_notice state ~sink:target ~kind:Notice_failure
                   ("play invite may exist, but its link cannot be shown: " ^ reason
                    ^ "; check MASC_HTTP_BASE_URL, then list and revoke it before retrying"))
        | Play_answered (Error _) ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
-             "play invite may exist, but its one-time link was unreadable; list and revoke it before retrying"
+           play_notice state ~sink:target ~kind:Notice_failure
+             ("Play invite response unreadable. " ^ Masc_tui_types.play_change_unknown_notice request)
        | Play_refused detail ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
+           play_notice state ~sink:target ~kind:Notice_failure
              ("play invite refused: " ^ detail)
+       | Play_not_dispatched detail ->
+           play_notice state ~sink:target ~kind:Notice_failure
+             ("play invite was not sent: " ^ detail)
        | Play_unanswered detail ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
-             ("play invite outcome unknown (" ^ detail ^ "); list and revoke before retrying"))
-  | Play_invite_revoked (target, requested_name, result) ->
+           play_notice state ~sink:target ~kind:Notice_failure
+             (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request));
+      sync_collab_access state;
+      refresh_current_collab state ~mailbox
+      end
+  | Play_invite_revoked (request, target, requested_name, result) ->
+      let outcome = match result with
+        | Play_revoke_absent | Play_revoke_release_failed _
+        | Play_revoke_result (Play_answered (Ok _) | Play_refused _ | Play_not_dispatched _) -> Change_confirmed
+        | Play_revoke_result (Play_answered (Error _) | Play_unanswered _) -> Change_unknown in
+      if Masc_tui_types.finish_play_change state request outcome then begin
+      settle_play_mutation state target;
       let retry reason =
         Printf.sprintf "retry /play revoke %s — %s" requested_name reason
       in
       (match result with
        | Play_revoke_absent ->
            forget_play_invite state ~name:requested_name;
-           chat_notice state ~keeper_name:target ~kind:Notice_reply
+           play_notice state ~sink:target ~kind:Notice_reply
              ("Play invite " ^ requested_name ^ " is absent (no invite has that name)")
+       | Play_revoke_release_failed detail ->
+           forget_play_invite state ~name:requested_name;
+           play_notice state ~sink:target ~kind:Notice_failure
+             (retry (detail ^ " (invite already absent; controller release failed)"))
        | Play_revoke_result (Play_answered (Ok revoked)) ->
            forget_play_invite state ~name:revoked.Tui_decode.pir_name;
            (match revoked.pir_release_error with
             | Some detail ->
-                chat_notice state ~keeper_name:target ~kind:Notice_failure
+                play_notice state ~sink:target ~kind:Notice_failure
                   (retry
                      (detail
                       ^ (if revoked.pir_revoked then
@@ -15087,21 +16487,29 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                          else
                            " (invite already absent; controller release failed)")))
             | None ->
-                chat_notice state ~keeper_name:target ~kind:Notice_reply
+                play_notice state ~sink:target ~kind:Notice_reply
                   (Printf.sprintf "Play invite %s: %s%s"
                      revoked.pir_name
                      (if revoked.pir_revoked then "revoked" else "already absent")
                      (if revoked.pir_released_controller then "; controller released" else "")))
        | Play_revoke_result (Play_answered (Error detail)) ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
-             (retry (detail ^ " (play revoke response unreadable)"))
+           play_notice state ~sink:target ~kind:Notice_failure
+             (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request)
        | Play_revoke_result (Play_refused detail) ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
+           play_notice state ~sink:target ~kind:Notice_failure
              ("play revoke refused: " ^ detail)
+       | Play_revoke_result (Play_not_dispatched detail) ->
+           play_notice state ~sink:target ~kind:Notice_failure
+             ("play revoke was not sent: " ^ detail)
        | Play_revoke_result (Play_unanswered detail) ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
-             (retry (detail ^ " (play revoke outcome unknown)")))
+           play_notice state ~sink:target ~kind:Notice_failure
+             (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request));
+      sync_collab_access state;
+      refresh_current_collab state ~mailbox
+      end
   | Librarian_input_loaded (prompt_key, result) ->
+      if state.prompts_librarian_input_requested = Some prompt_key then
+        state.prompts_librarian_input_requested <- None;
       let still_selected =
         match selected_prompt_for_state state with
         | Some row -> String.equal row.Tui_decode.pr_key prompt_key
@@ -15230,12 +16638,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                       (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))
           in
           state.runtime_config_view <- Some
-             { rcv_path = path; rcv_source_text = reading.source_text; rcv_rows = rows; rcv_metadata = metadata };
+             { rcv_path = path; rcv_source_text = reading.source_text; rcv_rows = rows; rcv_metadata = metadata;
+               rcv_account_emails = reading.account_emails };
           state.runtime_config_view_error <- None;
           (* Parsed here, with the lex, so the pane and the scroll bound read
              one list. Parsing per frame would put the count a frame behind
              the keys on a reload. *)
-          (match Masc_tui_model_runtime_table.parse lines with
+          (match Result.bind reading.account_groups (fun account_groups ->
+             Masc_tui_model_runtime_table.parse ~account_groups lines) with
            | Ok rows ->
              state.config_models_rows <- rows;
              state.config_models_cursor <- min state.config_models_cursor (max 0 (List.length rows - 1));
@@ -15290,8 +16700,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           state.runtime_config_view_error <- Some detail)
   | Code_entries_loaded (request, result) ->
       Code_results.apply_entries state request result
-  | Code_file_loaded (request, result) ->
-      Code_results.apply_file state request result
+  | Code_file_loaded (intent, request, result) ->
+      Code_results.apply_file ~intent state request result
   | Code_blame_loaded (request, result) ->
       Code_results.apply_blame state request result
   | Code_lsp_answered (request, result) ->
@@ -15318,10 +16728,11 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~report:(report_action state) ~notice:(present_identity_notice state)
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_view state
           ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
-  | Identity_providers_loaded (request, result) ->
-      Masc_tui_identity_updates.providers_loaded state request result
+  | Identity_providers_loaded (request, result, attempts) ->
+      Masc_tui_identity_updates.providers_loaded state request
+        ~report:(report_action state "error") ~attempts result
   | Identity_login_started (request, result) ->
-      Masc_tui_identity_updates.login_started state request
+      Masc_tui_identity_updates.login_started state request ~now:(Unix.gettimeofday ())
         ~report:(report_action state) ~notice:(present_identity_notice state) result
   | Identity_app_saved (keeper_name, provider_id, result) ->
       Masc_tui_identity_updates.app_saved ~keeper_name ~provider_id
@@ -15339,6 +16750,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
          launch_account_login_action state ~mailbox view action
        | Some _ | None -> ())
   | Account_login_json (view, generation, action, result) ->
+      state.account_login_readings <- List.filter
+        (fun (held, gen, _) -> held != view || gen <> generation) state.account_login_readings;
       (* A closed model save or activation still owns its receipt and refresh. Workspace
          withdrawal cancels and drops both the open and detached views. *)
       (match List.find_opt (fun current -> current == view)
@@ -15532,13 +16945,16 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             inflight_entry_by_request_id state request.Keeper_chat.request_id
           with
           | Some entry
-            when Keeper_chat.same_request_identity entry.sent_request request ->
+            when server_authority_ready state
+                 && Keeper_chat.same_request_identity entry.sent_request request ->
               (* The first POST may happen once this acknowledgement leaves.
                  A later checkpoint/reconnect must never restore a draft. *)
               entry.phase <- Turn_streaming;
               append_user_history_once ~submitted_at:entry.submitted_at state
                 request;
-              consume_dispatched_message_draft state request;
+              (* Staging already consumed this request's composer. A late
+                 dispatch owns only its promoted request, never a newer draft,
+                 even when the operator types the same words again. *)
               add_event state "message"
                 (Printf.sprintf "%s Keeper request: %s"
                    (if was_replay then "Replaying exact" else "Dispatching")
@@ -15620,19 +17036,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            List.iter (fun (item : Keeper_chat_live.observed_delta) -> match item.delta with
              | Keeper_chat_live.Accepted {interactive=None;_} ->
                launch_keeper_turns_load state ~mailbox
-             | Keeper_chat_live.Accepted {interactive=Some receipt;_} ->
-               let notice = match receipt.outcome with
-                 | Keeper_chat.Applied ->
-                   (match receipt.interrupt_error with
-                    | Some detail -> Some ("Message accepted; interruption unavailable: " ^ detail)
-                    | None when receipt.signalled -> Some "Update accepted; stopping the observed turn before continuing"
-                    | None when receipt.resumed -> Some "Update accepted; chat interruption pause released"
-                    | None -> None)
-                 | Keeper_chat.Stale_control ->
-                   Some "Message queued: chat controls changed after this input; the newer stop or resume remains in effect"
-                 | Keeper_chat.Paused -> Some "Message queued: Keeper remains paused; inspect with /queue"
-                 | Keeper_chat.Replayed -> None in
-               Option.iter (append_chat_history state request Message_status) notice
+             | Keeper_chat_live.Accepted {interactive=Some _;_} -> ()
              | _ -> ()) deltas;
            if List.exists (Keeper_chat.same_request_identity request)
                 state.keeper_run_next_pending then begin
@@ -15682,7 +17086,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                      not (String.equal name request.keeper_name
                           && String.equal id request.request_id))
                    state.keeper_auto_priority_pending;
-                 append_chat_history state request Message_status "Submitted message already started or settled; no other turn was interrupted"
+                 turn_log_note_priority_unavailable entry.log
                | None -> ())
            end;
            if List.exists (fun (item : Keeper_chat_live.observed_delta) -> match item.delta with
@@ -15768,6 +17172,11 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
   | Sent_image_ready { generation; view; keeper_name; name; result } ->
+      (match state.sent_image_read with
+       | Some pending when pending.sir_generation = generation
+           && pending.sir_view = view && pending.sir_keeper = keeper_name
+           && pending.sir_name = name -> state.sent_image_read <- None
+       | Some _ | None -> ());
       if not state.msx_open && generation = state.image_request_generation
          && view = state.view && keeper_name = state.msg_target_keeper_name then begin
         let notice = chat_notice state ~keeper_name in
@@ -15800,15 +17209,35 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                notice ~kind:Notice_failure
                  (Printf.sprintf "image %s: %s; browser: %s" title e opener_err)))
       end
+  | Msx_tick_withdrawn (request, detail) ->
+      (match !msx_pending_poll with
+       | Poll_pending pending when pending == request ->
+           (* No POST was attempted, so this receipt releases the pending
+              token without inventing an unknown server outcome. A later
+              control view still needs its own fresh identity admission. *)
+           msx_pending_poll := Poll_ready Advancing;
+           if request.poll_authority = state.workspace_authority
+              && request.poll_view == !msx_poll_view && request.poll_port = state.port
+              && state.msx_open && not state.msx_menu_open then begin
+             state.machine_interaction <- Observe_machine;
+             state.msx_notice <- Some ("No MSX tick sent: " ^ detail);
+             render_spectator state
+           end
+       | Poll_pending _ | Poll_ready _ | Poll_observing _ -> ())
   | Msx_frame_loaded (request, result) ->
       (match !msx_pending_poll with
        | Poll_pending pending when pending == request ->
            (* A scope change invalidates presentation, not knowledge of an
               in-flight mutation. A lost reply remains unknown until an
               explicit current-scope frame read succeeds. *)
-           msx_pending_poll := Poll_ready (Masc_tui_msx_tick.policy_after_tick result);
+           let observation_current = request.poll_port = state.port
+             && workspace_reply_admitted state ~authority:request.poll_authority
+                  ~reading:(Some request.poll_reading) ~kind:Workspace_observation in
+           msx_pending_poll := Poll_ready
+             (if observation_current then Masc_tui_msx_tick.policy_after_tick result
+              else Outcome_unknown);
            (match result with
-            | _ when request.poll_port <> state.port || request.poll_authority <> state.workspace_authority ->
+            | _ when not observation_current ->
                 ()
             | Error detail ->
                 (* A lost HTTP response does not prove the server stopped its
@@ -16019,6 +17448,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        state.gate_snapshot_read <- read;
        if state.workspace_identity = Workspace_identity_match
           && Option.exists (same_server_workspace expected_workspace) state.server_identity then
+       begin
+       state.gate_receipt_refresh_pending <- false;
        match result with
        | Ok snapshot ->
            state.gate_pending <- snapshot.Tui_decode.gs_pending;
@@ -16034,7 +17465,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Error detail ->
            state.gate_pending <- [];
            state.gate_snapshot_observed <- false;
-           state.gate_error <- Some detail)
+           state.gate_error <- Some detail
+       end)
   | Gate_approval_resolved (approval_id, approve, expected_workspace, result, generation) ->
       (* Release the single-action slot [launch_gate_resolve] took, whatever the
          outcome, so the header stops drawing [submitting] and the next decision
@@ -16045,8 +17477,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       in
       state.approval_flow <- flow;
       if owns_action then (match result with
-       | Ok () when state.workspace_identity = Workspace_identity_match
-                    && Option.exists (same_server_workspace expected_workspace) state.server_identity ->
+       | Ok () when retains_receipt_workspace state expected_workspace ->
            report_action state "system"
              (Printf.sprintf "Gate %s %s"
                 (if approve then "approved" else "rejected")
@@ -16061,6 +17492,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            let count = List.length (Masc_tui_approvals_model.approval_items state) in
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1);
+           state.gate_receipt_refresh_pending <- true;
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Ok () -> ()
        | Error detail ->
@@ -16073,10 +17505,10 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       in
       state.approval_flow <- flow;
       if owns_action then (match result with
-       | Ok () when state.workspace_identity = Workspace_identity_match
-                    && Option.exists (same_server_workspace expected_workspace) state.server_identity ->
+       | Ok () when retains_receipt_workspace state expected_workspace ->
            report_action state "system"
              (Printf.sprintf "Auto Judge retry started for %s" approval_id);
+           state.gate_receipt_refresh_pending <- true;
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Ok () -> ()
        | Error detail ->
@@ -16290,6 +17722,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       end
   | Keeper_chat_copy_loaded (generation, _, _) when generation <> state.msg_copy_generation -> ()
   | Keeper_chat_copy_loaded (_, keeper_name, result) ->
+      state.msg_copy_pending <- None;
       let notice = chat_notice state ~keeper_name:(Some keeper_name) in
       (match result with
        | Error detail ->
@@ -16393,8 +17826,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                 content-withheld by design. *)
              if not state.msg_journal_reads_refused then
                journal_targets :=
-                 journal_source_fetch_targets
-                   ~held:(journal_held_request_ids state keeper_name)
+                 journal_source_fetch_targets ~keeper_name
+                   ~held:(journal_held_keys state keeper_name)
                    ~unavailable:state.msg_journal_unavailable
                    (List.filter_map
                       (fun (row : Keeper_chat_history.row) ->
@@ -16405,7 +17838,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                  |> List.map (fun (source, at) ->
                         ( source
                         , at
-                        , journal_resume_position state ~keeper_name (Keeper_chat_log.source_key source) ));
+                        , journal_resume_position state ~keeper_name source ));
              let fresh = msg_entries_of_history_rows state keeper_name rows in
              (* The durable outcome and duration of a held turn's calls reach
                 its block through its log's transcript, not through the rows
@@ -16447,22 +17880,31 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         launch_current_autonomous_journals state ~mailbox ~keeper_name;
         launch_unavailable_journal_operations state ~mailbox ~keeper_name
   | Keeper_chat_operation_loaded {keeper_name; operation_id; operation_state} ->
-      journal_read_finished state operation_id;
+      journal_read_finished state (keeper_name, Keeper_chat_log.Operation operation_id);
       Option.iter (fun log ->
         apply_keeper_chat_operation_state state ~journal_id:operation_id log
           (Result.map Option.some operation_state))
         (settled_log_for_request state ~keeper_name operation_id)
-  | Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state } -> (
+  | Keeper_native_tasks_loaded (keeper_name,result) ->
+      state.msg_native_tasks_inflight <- List.filter ((<>) keeper_name) state.msg_native_tasks_inflight;
+      let previous = Option.value ~default:Masc_tui_native_tasks.empty
+          (List.assoc_opt keeper_name state.msg_native_tasks) in
+      let tasks = match result with
+        | Ok tasks -> tasks
+        | Error error -> Masc_tui_native_tasks.failed previous error in
+      state.msg_native_tasks <- (keeper_name,tasks) :: List.remove_assoc keeper_name state.msg_native_tasks;
+      if List.mem keeper_name state.msg_native_tasks_audit_pending then
+        launch_keeper_native_tasks_load ~mode:Masc_tui_native_tasks.Audit state ~mailbox ~keeper_name
+  | Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state; terminal_replay } -> (
       let journal_id = Keeper_chat_log.source_key source in
       (* Not generation-guarded: a journal is the turn's record whichever
          keeper the pane shows now, and the log is kept per keeper. *)
-      journal_read_finished state journal_id;
       (* A stream frame arrived while this read was in flight: the read may
          have stopped short of the line it announced. Decided after the
          result below is folded, so the next read starts past it and a turn
          that just ended asks for nothing. *)
       let read_again () =
-        match take_journal_wanted state journal_id with
+        match take_journal_wanted state (keeper_name, source) with
         | Not_wanted -> ()
         | Wanted { highest_seq } -> (
             (* Against the highest seq the frames named: a read that reached
@@ -16486,22 +17928,11 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       (match journal with
        | Ok _ -> ()
        | Error _ -> Option.iter reconcile_operation
-           (settled_log_for_request state ~keeper_name journal_id));
-      (match journal with
-      | Ok lines ->
-          (* The lines join the session's record of the turn when it has one
-             -- a cut live stream's partial log, an earlier read of a turn
-             then still running -- else a fresh log. The same fold, the same
-             seq dedup. *)
-          let log =
-            match settled_log_for_request state ~keeper_name journal_id with
-            | Some held when not (turn_log_holds_the_turn held) -> held
-            | Some _ | None ->
-                turn_log_create_for_source ~keeper_name ~source
-                  ~started_at:(journal_log_started_at ~fallback:started_at lines)
-          in
-          let accepted = turn_log_add_journaled log lines in
+           (settled_log_for_source state ~keeper_name source));
+      (match receive_journal_result state ~keeper_name ~source ~started_at journal with
+      | Ok (log, accepted) ->
           reconcile_operation log;
+          record_terminal_replay state log terminal_replay;
           (* An observer-followed turn has no pane-owned delta delivery.
              Refresh its durable results after the journal accepts them;
              replayed seqs and text-only reads do not request another load. *)
@@ -16514,35 +17945,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                     | _ -> false)
                   accepted
           then launch_keeper_calls_load ~force:true state ~mailbox keeper_name;
-          Keeper_chat_log.commit log.tl_log;
-          if Keeper_chat_log.entries log.tl_log <> [] then hold_settled_log state log;
           (match state.msg_loaded_keeper with
             | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
-                enrich_held_logs_from_rows state ~keeper_name state.msg_loaded
-            | Some _ | None -> ());
-          if not (turn_log_holds_the_turn log) &&
-            (* A journal read whole that still cannot stand for the turn has
-               nothing more to say when the loaded transcript says the turn is
-               over: a cancelled turn (finished without a recorded reply), or
-               a failure the server never journaled (#33108). A turn still
-               running is asked again on the next load, from where this read
-               stopped. *)
-            ((match Keeper_chat_transcript.phase log.tl_transcript with
-             | Keeper_chat_transcript.Stream_ended
-             | Keeper_chat_transcript.Stream_failed _ ->
-                 true
-             | Keeper_chat_transcript.Waiting | Keeper_chat_transcript.Working ->
-                 false)
-            || (match source with
-                | Keeper_chat_log.Operation _ -> loaded_turn_has_ended state ~keeper_name journal_id
-                | Keeper_chat_log.Autonomous_turn _ -> false))
-          then remember_journal_unavailable state journal_id
+                enrich_held_logs_from_rows ~only:log state ~keeper_name state.msg_loaded
+            | Some _ | None -> ())
       | Error (Keeper_chat_log.Unknown_operation | Keeper_chat_log.Journal_pruned | Keeper_chat_log.Journal_missing) ->
           (* Nothing to reload, now or later this session: the v1 rows are
              the turn. *)
-          remember_journal_unavailable state journal_id
+          ()
       | Error (Keeper_chat_log.Journal_unavailable detail) ->
-          remember_journal_unavailable state journal_id;
           add_event state "error"
             (Printf.sprintf "journal for %s unavailable: %s"
                (Keeper_chat.compact_request_id journal_id)
@@ -16550,7 +17961,6 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       | Error (Keeper_chat_log.Events_denied detail) ->
           (* The server refused this operation's journal and said why; asking
              again this session gets the same answer. *)
-          remember_journal_unavailable state journal_id;
           add_event state "error"
             (Printf.sprintf "journal for %s refused: %s"
                (Keeper_chat.compact_request_id journal_id)
@@ -16558,7 +17968,6 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       | Error (Keeper_chat_log.Events_undecodable detail) ->
           (* A body this build cannot read will not read differently next
              time; the v1 rows stay and this operation is not asked again. *)
-          remember_journal_unavailable state journal_id;
           add_event state "error"
             (Printf.sprintf "journal for %s not readable: %s"
                (Keeper_chat.compact_request_id journal_id)
@@ -16600,6 +18009,13 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           state.tools_error <- None;
           normalize_tools_skill_cursor state
       | Error detail -> state.tools_error <- Some detail)
+  | Skill_evidence_loaded (request, key, result) ->
+      if Option.exists (fun held -> held == request) state.tools_evidence_request then (
+        state.tools_evidence_request <- None;
+        state.tools_evidence_reference <- None;
+        match result with
+        | Error detail -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
+        | Ok json -> state.tools_skill_evidence <- Some (key, json))
   | Skills_catalog_loaded (generation, result) ->
       settle_tools_read state ~generation Tools_catalog_read;
       if generation = state.tools_request_generation then (
@@ -17075,13 +18491,13 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              | None ->
                  state.changes_cursor <- 0;
                  state.changes_scroll <- 0;
-                 state.changes_diff_scroll <- 0);
+                 if Option.is_none state.changes_tree_diff_path then
+                   state.changes_diff_scroll <- 0);
             state.changes_diff_row <- kept_row;
-            refresh_recorded_diff_bounds state
-              ~reset:(Option.is_some state.changes_tree_diff_path || Option.is_none kept_row);
-            state.changes_tree_diff <- None;
-            state.changes_tree_diff_error <- None;
-            state.changes_tree_diff_path <- None
+            (* The tree diff owns its path independently of recorded rows.
+               A refreshed list cannot close or reset that retained reader. *)
+            if Option.is_none state.changes_tree_diff_path then
+              refresh_recorded_diff_bounds state ~reset:(Option.is_none kept_row)
         | Error detail -> state.changes_error <- Some detail)
   | Git_diff_loaded (path, result) ->
       (* An answer for a file the view has since left is not this view's
@@ -17108,7 +18524,11 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             (* Keep the previous rows visible. The error says that they are
                stale; clearing them would turn a failed refresh into an empty
                reading. *)
-            state.lanes_error <- Some detail)
+            state.lanes_error <- Some detail);
+        if state.keeper_lanes_reread_pending then begin
+          state.keeper_lanes_reread_pending <- false;
+          launch_keeper_lanes_load state ~mailbox
+        end
       end
   | Lane_inventory_loaded (generation, result) ->
       state.standalone_lanes_inflight <- false;
@@ -17285,6 +18705,18 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           (* The previous list stays: a failed reload must not make the queue
              look empty, which reads as "nothing is waiting". *)
           state.verification_error <- Some detail)
+  | Local_workspace_read (base_path, reading) ->
+      local_workspace_read_inflight := false;
+      (* A reading that left before the identity moved off Match, or for
+         another base path, describes a directory this pane no longer shows. *)
+      (match state.workspace_identity with
+       | Masc_tui_types.Workspace_identity_match
+         when String.equal base_path state.local_base_path ->
+           Masc_tui_loader.apply_local_workspace state base_path reading
+       | Masc_tui_types.Workspace_identity_match
+       | Masc_tui_types.Workspace_identity_unread
+       | Masc_tui_types.Workspace_identity_match_unconfirmed _
+       | Masc_tui_types.Workspace_identity_mismatch _ -> ())
   | Keeper_chat_older_loaded (generation, keeper_name, before, result) ->
       (* A page that arrived for a keeper the pane has since left, or after a
          reload moved the cursor, is dropped: prepending it would put rows
@@ -17302,14 +18734,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         | Ok page ->
             let journal_targets =
               if state.msg_journal_reads_refused then []
-              else journal_source_fetch_targets
-                ~held:(journal_held_request_ids state keeper_name)
+              else journal_source_fetch_targets ~keeper_name
+                ~held:(journal_held_keys state keeper_name)
                 ~unavailable:state.msg_journal_unavailable
                 (List.filter_map (fun (row : Keeper_chat_history.row) ->
                   Option.map (fun source -> source, row.at) (journal_source_of_history row))
                   page.Keeper_chat_history.decoded.rows)
                 |> List.map (fun (source, at) -> source, at,
-                    journal_resume_position state ~keeper_name (Keeper_chat_log.source_key source))
+                    journal_resume_position state ~keeper_name source)
             in
             let rows =
               msg_entries_of_history_rows state keeper_name
@@ -17361,12 +18793,14 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
             "async result waited %.0f ms in the mailbox before the loop applied it"
             (Masc_tui_http.ms_of_ns waited_ns);
         let image_was_open = state.image_open in
+        let machine_was_open = state.msx_open in
         apply_async_message state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox msg;
         (* The image renderer cleared the text screen outside the presenter.
            If an async failure dismisses it, cached unchanged rows must also
            be restored, just as they are after a keyboard dismissal. *)
-        if image_was_open && not state.image_open then (
+        if (image_was_open && not state.image_open)
+           || (machine_was_open && not state.msx_open) then (
           Frame_presenter.invalidate frame_presenter;
           Render_schedule.request render_schedule Render_schedule.Force);
         loop true
@@ -17878,6 +19312,11 @@ let main
   let http_scoped_refresh_inflight = ref false in
   let scoped_refresh_followup = ref No_scoped_followup in
   let async_messages = Eio.Stream.create 32 in
+  let workspace_write_ready action =
+    match write_authority_refusal state state.workspace_authority with
+    | None -> true
+    | Some detail -> report_action state "error" (action ^ ": " ^ detail); false
+  in
   let last_loop_at_ns = ref (Mtime_clock.elapsed_ns ()) in
   let presented_surface_reference () =
     match state.view with
@@ -18411,13 +19850,17 @@ let main
   in
   let start_harness_label ~notes_hash ~(verdict : [ `Approve | `Reject ])
       ~reason ~described =
+    if workspace_write_ready "Harness label" then
+    let check = capture_workspace_check state ~mailbox:async_messages in
+    let enqueue_async = workspace_enqueue state in
     let host = server_peer_host in
     let port = state.port in
     let run () =
       let result =
         match
-          Masc_tui_http.post_harness_label ~host ~port ~notes_hash ~verdict
-            ~reason
+          Result.bind (check ()) (fun () ->
+            Masc_tui_http.post_harness_label ~host ~port ~notes_hash ~verdict
+              ~reason)
         with
         | Error err -> Error err
         | Ok _json -> Ok described
@@ -18425,7 +19868,7 @@ let main
       enqueue_async async_messages (Harness_label_done result)
     in
     with_async_switch state ~action:"Harness label" (fun sw ->
-      Eio.Fiber.fork ~sw run)
+      fork_workspace_job state ~sw run)
   in
   let handle_harness_agree () =
     match harness_cursor_verdict () with
@@ -18445,6 +19888,7 @@ let main
                    (if approved then "approve" else "reject")))
   in
   let handle_harness_overrule () =
+    if workspace_write_ready "Harness label" then
     match harness_cursor_verdict () with
     | None -> ()
     | Some row -> (
@@ -18652,8 +20096,8 @@ let main
   in
   (* The raw editor and account form share preview and guarded commit. Each
      caller keeps the revision from the same read as the text it edits. *)
-  let save_runtime_config_text ~authority ~identity ~expected_source_path ~expected_source_revision edited =
-    match save_runtime_config_text state ~mailbox:async_messages
+  let save_runtime_config_text ?prior_contact ~authority ~identity ~expected_source_path ~expected_source_revision edited =
+    match save_runtime_config_text ?prior_contact state ~mailbox:async_messages
       ~authority ~identity ~expected_source_path ~expected_source_revision edited with
     | Ok receipt -> Ok receipt
     | Error error ->
@@ -18889,9 +20333,11 @@ and is loaded on demand through keeper_skill.
 |} skill_template_placeholder_name
   in
   let handle_skill_create ~composition () =
+    let check = capture_workspace_check state ~mailbox:async_messages in
     let host = server_peer_host in
     let port = state.port in
-    match Masc_tui_http.fetch_skill_editor_sources ~host ~port with
+    match Result.bind (check ()) (fun () ->
+      Masc_tui_http.fetch_skill_editor_sources ~host ~port) with
     | Error detail -> report_action state "error" ("Skill sources failed: " ^ detail)
     | Ok [] -> report_action state "error" "no ready read-write Skill source"
     | Ok (source_id :: _) ->
@@ -18920,24 +20366,12 @@ and is loaded on demand through keeper_skill.
                     skill_template_placeholder_name)
              | Agent_core.Skill_document.Loaded document ->
                let package_id = document.name in
-               (* No directory exists yet, so its name is compared with itself.
-                  Catalog validation also checks composition names in the body. *)
-               (match Masc.Keeper_skill_catalog.validate_authored_source
-                        ~directory:package_id source_text with
-                | Error (Masc.Keeper_skill_catalog.Source_too_large { bytes; max_bytes }) ->
-                  report_action state "error"
-                    (Printf.sprintf "SKILL.md is too large: %d bytes (maximum %d)"
-                       bytes max_bytes)
-                | Error (Masc.Keeper_skill_catalog.Invalid_document error) ->
-                  report_action state "error" (Masc.Keeper_skill_catalog.error_to_string error)
-                | Ok _ ->
+               (* The server validates composition nodes against its current
+                  attached Add-ons and enforces source size before writing. *)
                (match
-                  Masc_tui_http.post_skill_editor_create
-                    ~host
-                    ~port
-                    ~source_id
-                    ~package_id
-                    ~source_text
+                  Result.bind (check ()) (fun () ->
+                    Masc_tui_http.post_skill_editor_create
+                      ~host ~port ~source_id ~package_id ~source_text)
                 with
                 | Error detail -> report_action state "error" ("Skill create failed: " ^ detail)
                 | Ok json ->
@@ -19023,25 +20457,18 @@ and is loaded on demand through keeper_skill.
                           "%s/%s: create receipt carried no status"
                           source_id
                           package_id));
-                  launch_tools_load state ~mailbox:async_messages)))))
+                  launch_tools_load state ~mailbox:async_messages))))
   in
   let handle_skill_evidence () =
-    match selected_tools_skill_profile state with
+    if not (server_authority_ready state) then
+      report_action state "error" "Workspace identity is unconfirmed; Skill evidence unavailable"
+    else match selected_tools_skill_profile state with
     | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
-      let key =
-        Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string
-      in
-      (match
-         Masc_tui_http.post_skill_evidence
-           ~host:server_peer_host
-           ~port:state.port
-           profile.esp_reference
-       with
-       | Error detail -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
-       | Ok json -> state.tools_skill_evidence <- Some (key, json))
+        launch_skill_evidence_read state ~mailbox:async_messages profile.esp_reference
   in
   let handle_skill_edit () =
+    let check = capture_workspace_check state ~mailbox:async_messages in
     match selected_tools_skill_profile state with
     | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
@@ -19049,15 +20476,13 @@ and is loaded on demand through keeper_skill.
       let host = server_peer_host in
       let port = state.port in
       (match
-         Masc_tui_http.post_skill_editor_read
-           ~host
-           ~port
-           profile.esp_reference
+         Result.bind (check ()) (fun () ->
+           Masc_tui_http.post_skill_editor_read ~host ~port profile.esp_reference)
        with
        | Error detail -> report_action state "error" ("Skill read failed: " ^ detail)
-       | Ok loaded when not (String.equal loaded.sel_access "read_write") ->
+       | Ok { Masc_tui_http.sel_access = Skill_source_config.Read_only; _ } ->
          report_action state "error" (name ^ " belongs to a read-only Skill source")
-       | Ok loaded ->
+       | Ok ({ Masc_tui_http.sel_access = Skill_source_config.Read_write; _ } as loaded) ->
          (match Masc_tui_editor.editor_command () with
           | None ->
             report_action state "error" "no $EDITOR set; export EDITOR to edit Skills"
@@ -19075,21 +20500,17 @@ and is loaded on demand through keeper_skill.
                report_action state "system" (name ^ " unchanged")
              | Ok edited ->
                (match
-                  Masc_tui_http.post_skill_editor_preview
-                    ~host
-                    ~port
-                    ~reference:loaded.sel_reference
-                    ~source_text:edited
+                  Result.bind (check ()) (fun () ->
+                    Masc_tui_http.post_skill_editor_preview ~host ~port
+                      ~reference:loaded.sel_reference ~source_text:edited)
                 with
                 | Error detail ->
                   report_action state "error" ("Skill preview rejected: " ^ detail)
                 | Ok _ ->
                   (match
-                     Masc_tui_http.post_skill_editor_save
-                       ~host
-                       ~port
-                       ~reference:loaded.sel_reference
-                       ~source_text:edited
+                     Result.bind (check ()) (fun () ->
+                       Masc_tui_http.post_skill_editor_save ~host ~port
+                         ~reference:loaded.sel_reference ~source_text:edited)
                    with
                    | Error detail ->
                      report_action state "error" ("Skill save failed: " ^ detail)
@@ -19138,6 +20559,8 @@ and is loaded on demand through keeper_skill.
           ~prompt_key:row.Tui_decode.pr_key
   in
   let handle_prompt_edit () =
+    if workspace_write_ready "Prompt edit" then
+    let check = capture_workspace_check state ~mailbox:async_messages in
     match selected_prompt () with
     | None -> report_action state "error" "prompts not loaded yet; r to reload"
     | Some row -> (
@@ -19157,8 +20580,9 @@ and is loaded on demand through keeper_skill.
             abort
         | Ok edited ->
           (match
-             Masc_tui_http.post_prompt_override ~host:server_peer_host
-               ~port:state.port ~key:row.Tui_decode.pr_key ~value:edited
+             Result.bind (check ()) (fun () ->
+               Masc_tui_http.post_prompt_override ~host:server_peer_host
+                 ~port:state.port ~key:row.Tui_decode.pr_key ~value:edited)
            with
            | Ok _ ->
              report_action state "system" (row.Tui_decode.pr_key ^ ": prompt saved");
@@ -19170,6 +20594,8 @@ and is loaded on demand through keeper_skill.
   (* Clearing is not editing to empty: it returns the prompt to the file's
      words, which is a different outcome from an override holding "". *)
   let handle_prompt_clear () =
+    if workspace_write_ready "Prompt clear" then
+    let check = capture_workspace_check state ~mailbox:async_messages in
     match selected_prompt () with
     | None -> report_action state "error" "prompts not loaded yet; r to reload"
     | Some row -> (
@@ -19179,8 +20605,9 @@ and is loaded on demand through keeper_skill.
           (row.Tui_decode.pr_key ^ ": no override to clear")
       | Tui_decode.Prompt_override -> (
         match
-          Masc_tui_http.post_prompt_clear ~host:server_peer_host
-            ~port:state.port ~key:row.Tui_decode.pr_key
+          Result.bind (check ()) (fun () ->
+            Masc_tui_http.post_prompt_clear ~host:server_peer_host
+              ~port:state.port ~key:row.Tui_decode.pr_key)
         with
         | Ok _ ->
           report_action state "system"
@@ -19193,7 +20620,7 @@ and is loaded on demand through keeper_skill.
   let handle_keeper_settings_edit () =
     let authority = state.workspace_authority in
     let identity = state.server_identity in
-    let check () = check_workspace_request state ~mailbox:async_messages ~authority ~identity ~host ~port () in
+    let check = workspace_check_sequence state ~mailbox:async_messages ~authority ~identity ~host ~port in
     match selected_keeper state with
     | None ->
       (* Every other outcome of this handler reports: no $EDITOR, a load
@@ -19308,7 +20735,10 @@ and is loaded on demand through keeper_skill.
      and the reply is surfaced. Reuses the same config POST the Settings edit
      uses, then refreshes the Sandbox view so the new backend shows. *)
   let set_sandbox_backend ~profile =
-    match selected_keeper state with
+    let check = capture_workspace_check state ~mailbox:async_messages in
+    match check () with
+    | Error detail -> report_action state "error" detail
+    | Ok () -> match selected_keeper state with
     | None -> report_action state "system" no_keeper_under_cursor
     | Some keeper -> (
       let patch = `Assoc [ ("sandbox_profile", `String profile) ] in
@@ -19447,6 +20877,8 @@ and is loaded on demand through keeper_skill.
      names every field the route reads, with the two that have no sensible
      default left empty. *)
   let handle_repository_add () =
+    if workspace_write_ready "Repository add" then
+    let check = capture_workspace_check state ~mailbox:async_messages in
     match Masc_tui_editor.editor_command () with
     | None ->
       report_action state "error"
@@ -19484,8 +20916,9 @@ and is loaded on demand through keeper_skill.
             "declaration needs non-empty \"name\" and \"url\" strings; nothing was added"
         else
           match
-            Masc_tui_http.post_repository_add ~host ~port
-              ~declaration_json:declaration
+            Result.bind (check ()) (fun () ->
+              Masc_tui_http.post_repository_add ~host ~port
+                ~declaration_json:declaration)
           with
           | Ok _ ->
             report_action state "system" (name ^ ": repository added");
@@ -19710,6 +21143,7 @@ and is loaded on demand through keeper_skill.
           else
             render_spectator state
       end;
+      poll_play_room state ~mailbox:async_messages;
       if state.msx_open && not state.msx_menu_open then begin
         let now_ns = Mtime_clock.elapsed_ns () in
         if
@@ -19718,12 +21152,13 @@ and is loaded on demand through keeper_skill.
           >= 0
         then begin
           state.msx_last_poll_ns <- now_ns;
-          (* The MSX poll advances the machine a step and reads the frame it
-             lands on (RFC-0439 §3.2): a game flows while it is watched, even
-             when no keeper is pressing. The DOS screen is only read, with the
-             counter of the picture already drawn. *)
+          (* Observation must not advance the shared machine. Only an explicit
+             controlling view owns the MSX clock and input. *)
           match state.machine_source with
-          | Masc.Machine_lane.Msx -> launch_msx_poll state ~mailbox:async_messages
+          | Masc.Machine_lane.Msx ->
+              (match state.machine_interaction with
+               | Observe_machine -> launch_msx_live_read state ~mailbox:async_messages
+               | Control_machine -> launch_msx_poll state ~mailbox:async_messages)
           | Masc.Machine_lane.Dos -> launch_dos_live_poll state ~mailbox:async_messages
         end
       end;
@@ -19929,8 +21364,8 @@ and is loaded on demand through keeper_skill.
             | Key "r" -> launch_browser_lane state ~mailbox:async_messages (Viewport_refresh {tab_id=shot.tab_id; expected_url=shot.url})
             | Key ("j" | "down") -> scroll_at {x=0.5;y=0.5} 120
             | Key ("k" | "up") -> scroll_at {x=0.5;y=0.5} (-120)
-            | Mouse_wheel (Masc.Tui_decode.Wheel_down,row,column) -> wheel row column 120
-            | Mouse_wheel (Masc.Tui_decode.Wheel_up,row,column) -> wheel row column (-120)
+            | Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_down,row,column) -> wheel row column 120
+            | Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_up,row,column) -> wheel row column (-120)
             | _ -> ())
        | _ -> ());
       let input = if viewport_owned_input then None else input in
@@ -19955,6 +21390,10 @@ and is loaded on demand through keeper_skill.
           | None -> None
         else None
       in
+      let room_focused = not state.msx_menu_open
+        && Option.fold ~none:false ~some:Masc_tui_play_room.focused state.play_room in
+      let room_visible =
+        let rows, cols = Masc_tui_ansi.get_terminal_size () in rows >= 8 && cols >= 20 in
       (* Menu decisions, game input and closing own a new view. Pure size or
          non-game input keeps the snapshot current; completion renders using
          the geometry the UI owns at that later instant. *)
@@ -19962,17 +21401,46 @@ and is loaded on demand through keeper_skill.
          repaint, and disowning the DOS read in flight there would drop its
          answer, so keys typed steadily would freeze the picture. *)
       (match msx_key, state.machine_source with
+       | Some _, _ when room_focused -> ()
        | Some _, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos)
          when state.msx_menu_open -> invalidate_msx_poll ()
        | Some "esc", (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) ->
            invalidate_msx_poll ()
-       | Some ("f6" | "f7" | "f8"), Masc.Machine_lane.Msx -> invalidate_msx_poll ()
-       | Some name, Masc.Machine_lane.Msx when Option.is_some (Masc_tui_msx.server_key name) ->
+       | Some "f5", Masc.Machine_lane.Msx -> invalidate_msx_poll ()
+       | Some ("f6" | "f7" | "f8"), Masc.Machine_lane.Msx
+         when state.machine_interaction = Control_machine -> invalidate_msx_poll ()
+       | Some name, Masc.Machine_lane.Msx
+         when state.machine_interaction = Control_machine
+              && Option.is_some (Masc_tui_msx.server_key name) ->
            invalidate_msx_poll ()
        | Some _, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos)
        | None, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) -> ());
       (match msx_key with
       | None -> ()
+      | Some ("f5" | "f6" | "f7") when state.machine_source = Masc.Machine_lane.Msx
+          && Option.is_some (checkpoint_for_workspace state) ->
+          Option.iter (inspect_pending_msx_checkpoint state) (checkpoint_for_workspace state);
+          state.machine_interaction <- Observe_machine;
+          render_spectator state
+      (* Switching the observed machine belongs to the whole spectator,
+         including its focused conversation. The room keeps its draft/focus. *)
+      | Some "f4" when not state.msx_menu_open ->
+          (match state.machine_source with
+           | Masc.Machine_lane.Msx -> open_dos_screen state ~mailbox:async_messages
+           | Masc.Machine_lane.Dos -> open_msx_spectator state ~mailbox:async_messages)
+      | Some name when room_focused ->
+          Option.iter (fun room ->
+            let room, intent =
+              if not room_visible && not (List.mem name ["esc"; "tab"; "\t"]) then room, Masc_tui_play_room.Repaint
+              else match input with
+                | Some (Pasted paste) -> Masc_tui_play_room.paste room paste.Masc_tui_paste.text, Masc_tui_play_room.Repaint
+                | _ -> Masc_tui_play_room.key room name in
+            state.play_room <- Some room;
+            (match intent with Repaint -> () | Send -> send_play_room state ~mailbox:async_messages)) state.play_room;
+          render_spectator state
+      | Some ("tab" | "\t") when not state.msx_menu_open ->
+          if room_visible then state.play_room <- Option.map (fun room -> Masc_tui_play_room.focus room true) state.play_room;
+          render_spectator state
       | Some name when state.msx_menu_open -> (
           (* The load menu owns the keyboard: the lib navigates the picker and
              names the choice, and the I/O it cannot reach -- the load POST, the
@@ -20002,51 +21470,119 @@ and is loaded on demand through keeper_skill.
               end
           | Watch source ->
               state.msx_menu_open <- false;
+              state.machine_interaction <- Observe_machine;
               state.machine_source <- source;
               (* Poll at once so the spectator opens on a fresh frame. *)
               state.msx_last_poll_ns <- 0L;
               render_spectator state
-          | (Load cart | Swap_disk cart) as choice -> (
-              state.msx_notice <- None;
-              match
-                (match choice with
-                 | Swap_disk _ -> Masc_tui_http.post_msx_change_disk
-                     ~host:server_peer_host ~port:state.port ~disk:cart
-                 | _ -> Masc_tui_http.post_msx_load ~host:server_peer_host ~port:state.port ~cart)
-              with
-              | Ok () ->
-                  (match choice with Swap_disk _ -> state.msx_notice <- Some "Disk changed; backup: before-disk-change" | _ -> ());
-                  state.msx_menu_open <- false;
-                  state.machine_source <- Masc.Machine_lane.Msx;
-                  observe_msx_frame state;
-                  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-                  render_spectator state
-              | Error message ->
-                  (* Stay in the menu and say why, so the human can pick again. *)
-                  Masc_tui_msx.render_menu ~write:write_to_terminal
-                    ~status:((match choice with Swap_disk _ -> "disk change failed: " | _ -> "load failed: ") ^ message) state))
+          | (Load cart | Swap_disk cart) as choice ->
+              let swapping = match choice with
+                | Swap_disk _ -> true
+                | Load _ | Stay | Closed | Watch _ -> false
+              in
+              run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
+                ~deliver:(fun expected_workspace -> function
+                  | Ok () ->
+                      state.msx_notice <- (if swapping
+                        then Some "Disk changed; backup: before-disk-change" else None);
+                      state.machine_interaction <- Control_machine;
+                      state.msx_menu_open <- false;
+                      state.machine_source <- Masc.Machine_lane.Msx;
+                      observe_msx_frame ?expected_workspace state ~mailbox:async_messages;
+                      state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+                      render_spectator state
+                  | Error message ->
+                      Masc_tui_msx.render_menu ~write:write_to_terminal
+                        ~status:((if swapping then "disk change failed: " else "load failed: ")
+                          ^ message) state)
+                (fun ~port ~expected_workspace ->
+                  if swapping then Masc_tui_http.post_msx_change_disk
+                    ~expected_workspace ~host:server_peer_host ~port ~disk:cart
+                  else Masc_tui_http.post_msx_load ~expected_workspace
+                    ~host:server_peer_host ~port ~cart))
+      | Some name when state.machine_source = Masc.Machine_lane.Msx
+          && not (machine_changes_allowed state)
+          && (List.mem name ["f5"; "f6"; "f7"; "f8"]
+              || (state.machine_interaction = Control_machine
+                  && Option.is_some (Masc_tui_msx.server_key name))) ->
+          state.machine_interaction <- Observe_machine;
+          state.msx_notice <- Some machine_change_refusal;
+          render_spectator state
       | Some name
         when (match state.machine_source with
               | Masc.Machine_lane.Dos -> true
-              | Masc.Machine_lane.Msx -> false)
+              | Masc.Machine_lane.Msx ->
+                  state.machine_interaction = Observe_machine && name <> "f5")
              && not (List.mem name [ "esc"; "+"; "="; "-"; "_" ]) ->
           (* The DOS screen is watched, not driven: a key that is not the
              spectator's own (leave, size) repaints and never reaches the MSX
              machine -- not as a game key, a checkpoint or a disk change. *)
           render_spectator state
+      | Some "f5" ->
+          (match state.machine_interaction with
+           | Control_machine ->
+               state.machine_interaction <- Observe_machine;
+               state.msx_last_poll_ns <- 0L;
+               render_spectator state
+           | Observe_machine ->
+               run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
+                 ~deliver:(fun _expected_workspace result ->
+                   (match result with
+                    | Ok () -> state.machine_interaction <- Control_machine
+                    | Error detail -> state.msx_notice <- Some detail);
+                   state.msx_last_poll_ns <- 0L;
+                   render_spectator state)
+                 (fun ~port:_ ~expected_workspace:_ -> Ok ()))
       | Some "f8" ->
-          state.msx_carts <- Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
+          observe_msx_carts state ~mailbox:async_messages;
           Masc_tui_msx.open_menu ~write:write_to_terminal ~mode:Masc_tui_types.Change_disk state
       | Some (("f6" | "f7") as name) ->
-          let restore = name = "f7" in
-          let result = Masc_tui_http.post_msx_checkpoint
-              ~host:server_peer_host ~port:state.port ~restore ~slot:"quick" in
-          state.msx_notice <- Some (match result with
-            | Ok () -> if restore then "Restored quick checkpoint" else "Saved quick checkpoint"
-            | Error message -> "Checkpoint failed: " ^ message);
-          observe_msx_frame state;
-          state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-          render_spectator state
+          (* A presentation token is not a mutation barrier. Never start a
+             checkpoint while our earlier tick may still be running. *)
+          (match !msx_pending_poll with
+           | Poll_pending _ | Poll_ready Outcome_unknown ->
+               state.msx_notice <- Some "Wait for the outstanding MSX tick to settle before checkpointing.";
+               render_spectator state
+           | Poll_ready (Advancing | Observing _) | Poll_observing _ ->
+               let restore = name="f7" in
+               let requested = ref None in
+               run_machine_change ~checkpoint_boundary:true state ~mailbox:async_messages
+                 ~refused:(fun detail -> Masc_tui_http.Checkpoint_refused detail)
+                 ~unknown:(fun detail -> Masc_tui_http.Checkpoint_outcome_unknown detail)
+                 ~deliver:(fun _expected_workspace result ->
+                   state.msx_notice <- Some (match result with
+                     | Ok () -> if restore then "Restore completed; inspecting current workspace screen." else "Saved quick checkpoint."
+                     | Error (Masc_tui_http.Checkpoint_refused detail) -> "Checkpoint refused: " ^ detail
+                     | Error (Masc_tui_http.Checkpoint_outcome_unknown detail) -> "Checkpoint outcome unknown: " ^ detail);
+                   (match !requested with
+                    | None -> ()
+                    | Some pending ->
+                        (match result with
+                         | Error (Checkpoint_refused _) -> forget_checkpoint pending
+                         | Ok () when not restore -> forget_checkpoint pending
+                         | Ok () | Error (Checkpoint_outcome_unknown _) ->
+                             state.machine_interaction <- Observe_machine;
+                             inspect_pending_msx_checkpoint state pending));
+                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+                   render_spectator state)
+                 (fun ~port ~expected_workspace ->
+                   let pending = {checkpoint_operation_id=Random_id.uuid_v7 ();
+                     checkpoint_restore=restore;checkpoint_slot="quick";
+                     checkpoint_workspace=expected_workspace} in
+                   match remember_checkpoint pending with
+                   | Error detail -> Error (Masc_tui_http.Checkpoint_refused
+                       ("Cannot durably retain checkpoint intent: " ^ detail))
+                   | Ok () ->
+                   requested := Some pending;
+                   let result = Masc_tui_http.post_msx_checkpoint ~expected_workspace
+                     ~operation_id:pending.checkpoint_operation_id ~host:server_peer_host ~port ~restore ~slot:"quick" in
+                   (* Knowledge of this operation survives a presentation scope
+                      change; never strand a proven refusal behind an old view. *)
+                   (match result with
+                    | Error (Checkpoint_refused _) -> forget_checkpoint pending
+                    | Ok () when not restore -> forget_checkpoint pending
+                    | Ok () | Error (Checkpoint_outcome_unknown _) -> ());
+                   result))
       | Some "esc" ->
           (* esc closes the spectator; consume returns false and owes a repaint. *)
           if not (Masc_tui_msx.consume ~write:write_to_terminal state "esc")
@@ -20066,16 +21602,16 @@ and is loaded on demand through keeper_skill.
              (e.g. deliberate non-key input) just repaints the cache. *)
           match Masc_tui_msx.server_key name with
           | Some server_key ->
-              (match
-                 Masc_tui_http.post_msx_press ~host:server_peer_host
-                   ~port:state.port ~keys:[ server_key ]
-               with
-               | Ok _ -> observe_msx_frame ~clear_notice:true state
-               | Error detail -> state.msx_notice <- Some detail);
-              state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-              render_spectator state
-          (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
-          | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name)));
+              run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
+                ~deliver:(fun expected_workspace result ->
+                  (match result with
+                   | Ok _ -> observe_msx_frame ~clear_notice:true ?expected_workspace state ~mailbox:async_messages
+                   | Error detail -> state.msx_notice <- Some detail);
+                  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+                  render_spectator state)
+                (fun ~port ~expected_workspace -> Masc_tui_http.post_msx_press
+                  ~expected_workspace ~host:server_peer_host ~port ~keys:[ server_key ])
+          | None -> render_spectator state));
       (* Async agenda state can change the usable row budget after the last
          paint. Read the compact marker from that paint, not from the newer
          state. An invalidated or not-yet-painted frame stays compact until
@@ -20113,7 +21649,7 @@ and is loaded on demand through keeper_skill.
               | Pane_row _ -> None
               | Pane_miss ->
                   if Option.is_some wheel_reader then None
-                  else Some (Masc.Tui_decode.wheel_key direction))
+                  else Some (Masc.Tui_mouse_protocol.wheel_key direction))
           | Some (Pasted _) | Some (Graphics_reply _)
           | Some (Mouse_left_press _) | Some (Mouse_left_release _) | None -> None
       in
@@ -20171,7 +21707,17 @@ and is loaded on demand through keeper_skill.
           the composer under the card would put the link [y] just copied into a
           draft that goes to a Keeper on the next Enter. It is first, above the
           overlays the card is drawn over. *)
+       | Some (Pasted _) when state.msx_open -> ()
        | Some (Pasted _) when Option.is_some (Masc_tui_types.play_card_shown state) -> ()
+       | Some (Pasted paste) when Option.is_some state.collab ->
+           (* The whole Collab overlay owns paste. Only its visible form may
+              receive text; browsing, confirmation and compact frames never
+              forward it to a draft or attachment handler underneath. *)
+           if text_target = Some Text_collab_form then
+             state.collab <- Option.map (fun view ->
+               Masc_tui_collab.paste view
+                 (Masc_tui_identity_model.identity_field_paste paste.Masc_tui_paste.text))
+               state.collab
        | Some (Pasted _) when exact_activity_on_screen () || browser_activity_on_screen () || machine_activity_on_screen () -> ()
        | Some (Pasted paste) when Option.is_some state.lane_addons && not state.palette_open ->
            (match state.lane_addons with
@@ -20209,7 +21755,7 @@ and is loaded on demand through keeper_skill.
            in
            (match text_target with
             | None -> ()
-            | Some Text_account_login -> ()
+            | Some Text_collab_form | Some Text_account_login -> ()
             | Some Text_ask_answer ->
                 edit_ask_text state (fun draft ->
                   draft ^ Keeper_chat.terminal_safe_text ~preserve_newlines:true
@@ -20365,8 +21911,8 @@ and is loaded on demand through keeper_skill.
            scroll_acting_pane state
              ~delta:
                (match direction with
-                | Masc.Tui_decode.Wheel_up -> -wheel_notch_rows
-                | Masc.Tui_decode.Wheel_down -> wheel_notch_rows)
+                | Masc.Tui_mouse_protocol.Wheel_up -> -wheel_notch_rows
+                | Masc.Tui_mouse_protocol.Wheel_down -> wheel_notch_rows)
        (* A left press on the Activity pane picks the keeper under it. Same
           modal guards as the Lanes press below, for the same reason. *)
        | Some (Mouse_left_press (row, column))
@@ -20434,6 +21980,7 @@ and is loaded on demand through keeper_skill.
                yielding there would leave the operator on a terminal they
                cannot read with no way out but Ctrl-C. *)
             (not state.about_open)
+            && Option.is_none state.collab
             && (compact_viewport
                || quit_key_allowed_for (text_input_target state ~compact_viewport))
             && Render_schedule.Input_shortcut.is_quit ~message_mode k
@@ -20581,6 +22128,33 @@ and is loaded on demand through keeper_skill.
         | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
         | None -> false
       in
+      (* What [r] refreshes on every surface, the Git-changes overlay
+         included. The overlay's arm and the surface arm below both start
+         here; only the reload that follows differs. *)
+      let refresh_shared_sources () =
+        state.pending_approval_action <- None;
+        Masc_tui_theme_choice.invalidate_cache ();
+        load_local_workspace_if_safe state base_path;
+        let host = server_peer_host in
+        let port = state.port in
+        (* Each source owns its read even while the whole-surface refresh
+           is busy. Cadence reads share these requests rather than
+           superseding them before their responses can arrive. *)
+        (match state.connection_status with
+         | Booting -> ()
+         | Disconnected | Connecting | Reconnecting | Degraded | Connected ->
+           launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh
+             state ~mailbox:async_messages;
+           launch_gate_snapshot_load ~intent:Snapshot_read.Refresh
+             state ~mailbox:async_messages;
+           launch_schedules_load ~intent:Snapshot_read.Refresh
+             state ~mailbox:async_messages);
+        start_http_refresh state ~host ~port ~intent:Revalidate
+          ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight
+          ~scoped_refresh_followup
+          ~mailbox:async_messages
+      in
       (match key, browser_lane_on_screen state with
        | Some _, Some view ->
            state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
@@ -20613,6 +22187,14 @@ and is loaded on demand through keeper_skill.
             | "g", Some _ -> state.play_invite_scroll <- 0
             | "G", Some _ -> state.play_invite_scroll <- Masc_tui_types.clamped_scroll_end
             | _, _ -> ())
+       | Some key when Option.is_some state.collab ->
+           (match state.collab with
+            | Some view when not compact_viewport || key = "esc" ->
+                let view = Masc_tui_collab.write_access view (Masc_tui_types.play_change_access state) in
+                let view, action = Masc_tui_collab.key view key in
+                state.collab <- Some view;
+                handle_collab_action state ~mailbox:async_messages view action
+            | Some _ | None -> ())
        | Some key when Option.is_some state.account_login ->
            (match state.account_login with
             | Some view ->
@@ -21127,7 +22709,7 @@ and is loaded on demand through keeper_skill.
                   let* () = check_runtime_config_edit_revision
                     (Masc_tui_model_form.source_revision form) reading.metadata.source_revision in
                   let* draft = Masc_tui_model_form.apply form reading.source_text in
-                  save_runtime_config_text ~authority ~identity
+                  save_runtime_config_text ~prior_contact:Masc_tui_server_lifecycle.Server_reached ~authority ~identity
                     ~expected_source_path:reading.path ~expected_source_revision:reading.metadata.source_revision draft
                   |> Result.map Masc_tui_runtime_config_receipt.lane_summary
                   |> Result.map_error Masc_tui_http.runtime_config_save_error_message in
@@ -21189,7 +22771,7 @@ and is loaded on demand through keeper_skill.
                    match declared with
                    | Error form -> state.runtime_account_form <- Some form
                    | Ok ({ Masc_tui_runtime_account_form.id; text; sign_in }, expected_source_revision, expected_source_path) -> (
-                       match save_runtime_config_text ~authority ~identity ~expected_source_path ~expected_source_revision text with
+                       match save_runtime_config_text ~prior_contact:Masc_tui_server_lifecycle.Server_reached ~authority ~identity ~expected_source_path ~expected_source_revision text with
                        | Ok receipt ->
                          let summary = Masc_tui_http.runtime_config_commit_receipt_summary receipt in
                          (* A sign-in keeps the form open on its command;
@@ -21840,7 +23422,8 @@ and is loaded on demand through keeper_skill.
               (match state.keeper_deletions with
                | Some (Ok inventory) ->
                  (match List.nth_opt inventory.operations state.keeper_deletions_cursor with
-                  | Some row when row.can_retry -> launch_keeper_deletions state ~mailbox:async_messages ~retry:row ()
+                  | Some row when row.can_retry && Option.is_none state.keeper_deletions_retry_receipt ->
+                      launch_keeper_deletions state ~mailbox:async_messages ~retry:row ()
                   | _ -> ())
                | _ -> ())
             | _ -> ())
@@ -22169,7 +23752,7 @@ and is loaded on demand through keeper_skill.
                        (match p.description with Some d -> [ "  " ^ d ] | None -> [])
                        @ [ "  " ^ Masc_tui_link_preview.site_label p ^ " \xc2\xb7 " ^ url ]
                      in
-                     launch_image_render ~mailbox:async_messages ~notice ~title
+                     launch_image_render state ~mailbox:async_messages ~notice ~title
                        ~caption ~page_url:url img_url
                  | None -> ())
             | _ -> ())
@@ -22246,6 +23829,311 @@ and is loaded on demand through keeper_skill.
                          report_action state "system"
                            (Printf.sprintf "closed %s" path))
             | _ -> ())
+       (* The Git-changes overlay is a modal like the agenda sheet: while
+          it is open it owns every key, answering its own and swallowing
+          the rest, so a surface binding under it -- a scroll, a refresh,
+          a destructive letter -- cannot act on the wrong pane. Its arms
+          used to live below beside their unguarded twins, and every new
+          surface key had to remember to stand aside for it; the guard
+          now lives here once, the way [modal_owns_keys] names it. *)
+       | Some k when state.repository_changes_open ->
+           (match k with
+            | ("shift-left" | "shift-right") as key
+              when Option.is_some state.repository_changes_diff_path ->
+              let direction = if String.equal key "shift-left" then -1 else 1 in
+              state.repository_changes_diff_hscroll <-
+                max 0 (min (max 0 (state.repository_changes_diff_max_width - 1))
+                  (state.repository_changes_diff_hscroll + direction))
+
+            | "esc" ->
+              if Option.is_some state.repository_changes_diff_path then
+                close_repository_changes_diff state
+              else begin
+                let return_chat = state.repository_changes_return_chat in
+                close_repository_changes state;
+                if return_chat then begin
+                  state.view <- Keepers Keeper_message
+                end
+              end
+
+            | "left" ->
+              if Option.is_some state.repository_changes_diff_path then
+                close_repository_changes_diff state
+              else begin
+                let return_chat = state.repository_changes_return_chat in
+                close_repository_changes state;
+                if return_chat then begin
+                  state.view <- Keepers Keeper_message
+                end
+              end
+
+            | ("j" | "down" | "wheel-down") ->
+              (match state.repository_changes_diff_path with
+               | Some _ ->
+                   state.repository_changes_diff_scroll <-
+                     Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:1
+               | None ->
+                   let cursor, scroll =
+                     move_row_cursor state ~delta:1
+                       ~cursor:state.repository_changes_cursor
+                       ~scroll:state.repository_changes_scroll
+                   in
+                   state.repository_changes_cursor <- cursor;
+                   state.repository_changes_scroll <- scroll)
+
+            | ("k" | "up" | "wheel-up") ->
+              (match state.repository_changes_diff_path with
+               | Some _ ->
+                   state.repository_changes_diff_scroll <-
+                     max 0 (state.repository_changes_diff_scroll - 1)
+               | None ->
+                   let cursor, scroll =
+                     move_row_cursor state ~delta:(-1)
+                       ~cursor:state.repository_changes_cursor
+                       ~scroll:state.repository_changes_scroll
+                   in
+                   state.repository_changes_cursor <- cursor;
+                   state.repository_changes_scroll <- scroll)
+
+            | ("\r" | "\n" | "right") -> (
+              match state.repository_changes_diff_path with
+              | Some _ -> ()
+              | None -> (
+                  match state.repository_changes, state.repository_changes_scope with
+                  | Some snapshot, Some scope -> (
+                      match
+                        List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                          state.repository_changes_cursor
+                      with
+                      | None -> ()
+                      | Some change ->
+                          open_repository_change_diff state
+                            ~mailbox:async_messages ~scope change)
+                  | _ -> ()))
+
+            | "g" | "G" ->
+              let path_opt =
+                match state.repository_changes_diff_path with
+                | Some path -> Some path
+                | None -> (
+                    match state.repository_changes with
+                    | Some snapshot ->
+                        Option.map
+                          (fun (c : Tui_decode.repository_change) -> c.rc_path)
+                          (List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                             state.repository_changes_cursor)
+                    | None -> None)
+              in
+              let change_ctx =
+                Masc_tui_render_prim.resolve_change_context state ~path_opt
+              in
+              goto_surface state ~mailbox:async_messages Planning;
+              state.planning_mode <- Planning_list;
+              (match change_ctx.Masc_tui_render_prim.ctx_goal_id with
+               | Some gid ->
+                   (match state.planning with
+                    | Some snap ->
+                        (* The cursor indexes the rows the pane draws, which
+                           [clamp_planning_cursor] also bounds by that list. The
+                           raw goal list is in the order the server sent; the
+                           filter hides goals and the sort reorders them, so an
+                           index found in it lands on a different row than the
+                           goal it was found for. *)
+                        let rec find_idx i = function
+                          | [] -> ()
+                          | (g : planning_goal) :: rest ->
+                              if String.equal g.pg_id gid then
+                                state.planning_cursor <- i
+                              else find_idx (i + 1) rest
+                        in
+                        find_idx 0
+                          (planning_visible_goals ~filter:state.planning_filter
+                             ~sort:state.planning_sort snap.pl_goals)
+                    | None -> ());
+                   clamp_planning_cursor state
+               | None ->
+                   state.planning_cursor <- 0)
+
+            | "d" -> (
+              match state.repository_changes_diff_path with
+              | Some _ -> ()
+              | None -> (
+                  match state.repository_changes, state.repository_changes_scope with
+                  | Some snapshot, Some scope -> (
+                      match
+                        List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                          state.repository_changes_cursor
+                      with
+                      | None -> ()
+                      | Some change ->
+                          open_repository_change_diff state
+                            ~mailbox:async_messages ~scope change)
+                  | _ -> ()))
+
+            | "t" | "T" ->
+              let path_opt =
+                match state.repository_changes_diff_path with
+                | Some path -> Some path
+                | None -> (
+                    match state.repository_changes with
+                    | Some snapshot ->
+                        Option.map
+                          (fun (c : Tui_decode.repository_change) -> c.rc_path)
+                          (List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                             state.repository_changes_cursor)
+                    | None -> None)
+              in
+              let change_ctx =
+                Masc_tui_render_prim.resolve_change_context state ~path_opt
+              in
+              goto_surface state ~mailbox:async_messages Planning;
+              state.planning_mode <- Planning_list;
+              (match change_ctx.Masc_tui_render_prim.ctx_task_id with
+               | Some tid ->
+                   state.task_detail_id <- Some tid;
+                   state.task_detail_scroll <- 0;
+                   state.task_history <- None;
+                   launch_task_history_load state ~mailbox:async_messages tid;
+                   state.task_focus <-
+                     Masc_tui_overview_tasks.land_on state.tasks ~task_id:tid
+               | None ->
+                   state.task_detail_id <- None;
+                   state.task_detail_scroll <- 0;
+                   state.task_focus <-
+                     Masc_tui_overview_tasks.focus_list state.tasks)
+
+            | "v" -> (
+              match state.repository_changes, state.repository_changes_scope with
+              | Some snapshot, Some scope -> (
+                  let change_opt =
+                    match state.repository_changes_diff_path with
+                    | Some diff_path ->
+                        List.find_opt
+                          (fun (c : Tui_decode.repository_change) ->
+                            String.equal c.rc_path diff_path)
+                          snapshot.Masc.Tui_decode.rcs_changes
+                    | None ->
+                        List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                          state.repository_changes_cursor
+                  in
+                  match change_opt with
+                  | None -> report_action state "error" "no change under the cursor"
+                  | Some change ->
+                      open_repository_change_in_code state
+                        ~mailbox:async_messages ~scope change)
+              | _ -> ())
+
+            | "p" | "P" ->
+              let path_opt =
+                match state.repository_changes_diff_path with
+                | Some path -> Some path
+                | None -> (
+                    match state.repository_changes with
+                    | Some snapshot ->
+                        Option.map
+                          (fun (c : Tui_decode.repository_change) -> c.rc_path)
+                          (List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                             state.repository_changes_cursor)
+                    | None -> None)
+              in
+              let change_ctx =
+                Masc_tui_render_prim.resolve_change_context state ~path_opt
+              in
+              (* Only the scope's own repository names a remote. A project-wide
+                 scope spans every registered repository, and picking the first
+                 one opened a PR-N token in whichever repo happened to be
+                 registered first. *)
+              let scope_remote =
+                match state.repository_changes_scope with
+                | Some (Tui_decode.Repository_change_repository repo_id) -> (
+                    match state.repositories with
+                    | Some snapshot ->
+                        Option.map
+                          (fun (r : Masc.Tui_decode.repository) -> r.rp_url)
+                          (List.find_opt
+                             (fun (r : Masc.Tui_decode.repository) ->
+                               String.equal r.rp_id repo_id)
+                             snapshot.rs_repositories)
+                    | None -> None)
+                | Some Tui_decode.Repository_change_project | None -> None
+              in
+              (match change_ctx.Masc_tui_render_prim.ctx_pr with
+               | None ->
+                   report_action state "git"
+                     "no PR to open: this change names no github.com/…/pull/N link or PR-N token"
+               | Some reference -> (
+                   let number = Masc_tui_pr_ref.number reference in
+                   (* A pull link says which repository; a token leaves that to
+                      the scope. *)
+                   let slug =
+                     match reference with
+                     | Masc_tui_pr_ref.Pull_url { slug; _ } -> Some slug
+                     | Masc_tui_pr_ref.Pr_token _ ->
+                         Option.bind scope_remote Masc_tui_pr_ref.github_slug_of_remote
+                   in
+                   match slug with
+                   | None ->
+                       report_action state "error"
+                         (Printf.sprintf
+                            "PR-%d: the scope has no GitHub remote to open it in"
+                            number)
+                   | Some slug -> (
+                       match
+                         Masc_tui_browser.open_url
+                           (Masc_tui_pr_ref.pull_url ~slug ~number)
+                       with
+                       | Ok opener ->
+                           report_action state "git"
+                             (Printf.sprintf "opened %s#%d with %s" slug number opener)
+                       | Error _ ->
+                           (* No opener on this machine; gh may still have one
+                              configured. Named repository, waited on, reported
+                              after the fact: run in the TUI's cwd and detached,
+                              it opened the wrong checkout's PR and the pane
+                              said "opening" whether or not it did. *)
+                           let status, _stdout, stderr =
+                             Process_eio.run_argv_with_status_split
+                               ~timeout_sec:gh_open_timeout_sec
+                               [ "gh"; "pr"; "view"; string_of_int number; "--web"
+                               ; "-R"; slug ]
+                           in
+                           (match status with
+                            | Unix.WEXITED 0 ->
+                                report_action state "git"
+                                  (Printf.sprintf "opened %s#%d with gh" slug number)
+                            | Unix.WEXITED code ->
+                                report_action state "error"
+                                  (Printf.sprintf "gh pr view %d -R %s exited %d: %s"
+                                     number slug code (String.trim stderr))
+                            | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+                                report_action state "error"
+                                  (Printf.sprintf "gh pr view %d -R %s stopped by signal %d"
+                                     number slug signal)))))
+
+            | ("pageup" | "pagedown") as page_key ->
+              (* A surface page at a time, as the shared page arm moved the
+                 overlay before its keys were gathered here. *)
+              let page = surface_page_rows state in
+              let direction = if String.equal page_key "pagedown" then 1 else -1 in
+              (match state.repository_changes_diff_path with
+               | Some _ ->
+                   state.repository_changes_diff_scroll <-
+                     (if direction > 0 then
+                        Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:page
+                      else max 0 (state.repository_changes_diff_scroll + (direction * page)))
+               | None ->
+                   let cursor, scroll =
+                     move_row_cursor state ~delta:(direction * page)
+                       ~cursor:state.repository_changes_cursor
+                       ~scroll:state.repository_changes_scroll
+                   in
+                   state.repository_changes_cursor <- cursor;
+                   state.repository_changes_scroll <- scroll)
+            | "r" | "R" ->
+              refresh_shared_sources ();
+              refresh_repository_changes state ~mailbox:async_messages;
+              add_event state "system" "Manual refresh"
+            | _ -> ())
        (* The palette is the same kind of modal, but typed: printable keys
           build the query, arrows move the cursor, Enter runs the highlighted
           jump through the exact goto/chat paths the bound keys use. *)
@@ -22317,6 +24205,8 @@ and is loaded on demand through keeper_skill.
                 (match chosen with
                  | Some (_, Masc_tui_palette.Palette_hide_browser_lane) ->
                      hide_browser_lane state
+                 | Some (_, Masc_tui_palette.Palette_collab) ->
+                     open_collab state ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_msx) ->
                      open_msx_screen state ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_dos) ->
@@ -22516,6 +24406,13 @@ and is loaded on demand through keeper_skill.
            state.runtime_detail_scroll <-
              (if String.equal edge "home" then 0
               else Masc_tui_types.clamped_scroll_end)
+       | Some "h"
+         when state.view = Runtime
+              && Option.is_none state.runtime_detail_target
+              && Option.is_none state.runtime_lane_pick
+              && Option.is_none state.slot_editor
+              && Option.is_none (Masc_tui_types.runtime_lane_prompt state) ->
+           Masc_tui_types.toggle_runtime_dim_refusals state
        | Some "v"
          when state.view = Runtime
               && Option.is_none state.runtime_detail_target
@@ -23007,6 +24904,14 @@ and is loaded on demand through keeper_skill.
                      scroll (if key = "pagedown" then delta else -delta)
                  | "home" -> state.browser_lane <- Some { view with scroll = 0 }
                  | _ -> ()))
+       | Some "R" when Option.is_some (browser_history_on_screen state) ->
+           (* History's [r] reloads observations. [R] rechecks workspace
+              authority even when retained rows cannot authorize that read.
+              Do not refresh the live browser hidden underneath history. *)
+           start_http_refresh state ~host:server_peer_host ~port:state.port
+             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+             ~scoped_refresh_inflight:http_scoped_refresh_inflight
+             ~scoped_refresh_followup ~mailbox:async_messages
        | Some key
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
               && not (List.mem key ["q"; "tab"; "shift-tab"; "\t"; "?"; ":"]) ->
@@ -23118,7 +25023,7 @@ and is loaded on demand through keeper_skill.
                      Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host ~port:state.port
                        ~post_id:evidence.fe_post_id ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id))
             | _ -> report_action state "system" "Open a Fusion run to follow its Board evidence")
-       | Some ("h" | "H") when state.view = Repositories && not state.repository_changes_open && Option.is_none state.workspace_activity_repo ->
+       | Some ("h" | "H") when state.view = Repositories && Option.is_none state.workspace_activity_repo ->
            (match state.repositories with
             | None -> ()
             | Some snapshot ->
@@ -23128,13 +25033,13 @@ and is loaded on demand through keeper_skill.
                   state.workspace_activity_context_scroll <- None;
                   launch_workspace_activity state ~mailbox:async_messages ~repo_id:repo.rp_id)
                   (List.nth_opt snapshot.rs_repositories state.repositories_cursor))
-       | Some ("v" | "V") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo && Option.is_none state.workspace_activity_context_scroll ->
+       | Some ("v" | "V") when state.view = Repositories && Option.is_some state.workspace_activity_repo && Option.is_none state.workspace_activity_context_scroll ->
            let _, _, selected = workspace_activity_selection state in
            if Option.is_some selected then state.workspace_activity_context_scroll <- Some 0
-       | Some ("esc" | "left") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_context_scroll ->
+       | Some ("esc" | "left") when state.view = Repositories && Option.is_some state.workspace_activity_context_scroll ->
            state.workspace_activity_context_scroll <- None
        | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" | "home" | "end" | "g" | "G" as move)
-         when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo
+         when state.view = Repositories && Option.is_some state.workspace_activity_repo
               && Option.is_some state.workspace_activity_context_scroll ->
            let terminal_rows, cols = get_terminal_size () in
            let count = List.length (workspace_activity_context_lines state ~cols) in
@@ -23147,14 +25052,14 @@ and is loaded on demand through keeper_skill.
              | "pageup" -> old - Masc_tui_scroll.page_step ~height
              | _ -> old + Masc_tui_scroll.page_step ~height in
            state.workspace_activity_context_scroll <- Some (max 0 (min maximum next))
-       | Some ("esc" | "left") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
+       | Some ("esc" | "left") when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
            state.workspace_activity_repo <- None;
            state.workspace_activity_context_scroll <- None
-       | Some ("r" | "R") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
+       | Some ("r" | "R") when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
            Option.iter (fun repo_id -> launch_workspace_activity state ~mailbox:async_messages ~repo_id)
              state.workspace_activity_repo
        | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
-         when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
+         when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
            let terminal_rows, _ = get_terminal_size () in
            let page = workspace_activity_page_rows ~surface_rows:(surface_body_rows state ~terminal_rows) in
            let delta = match move with "j" | "down" -> 1 | "k" | "up" -> -1 | "pageup" -> -page | _ -> page in
@@ -23162,7 +25067,7 @@ and is loaded on demand through keeper_skill.
              (state.workspace_activity_cursor + delta));
            state.workspace_activity_context_scroll <- None
        | Some ("\r" | "\n" | "right")
-         when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
+         when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
            let _, _, selected = workspace_activity_selection state in
            (match state.workspace_activity_repo, selected with
             | Some repo_id, Some (change, relative_path) ->
@@ -23171,7 +25076,7 @@ and is loaded on demand through keeper_skill.
                 Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages);
                 Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path
             | None, _ | _, None -> ())
-       | Some key when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo
+       | Some key when state.view = Repositories && Option.is_some state.workspace_activity_repo
            && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
        | Some (("S" | "C" | "u" | "U" | "X") as key)
          when state.view = Config && state.config_pane = Config_runtime
@@ -23644,7 +25549,7 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages System_logs
        | Some key when state.keeper_navigation_open ->
            (match key with
-            | "right" | "esc" | "\t" ->
+            | "right" | "esc" | "\t" | "tab" ->
                 state.keeper_navigation_open <- false;
                 state.keeper_message_focus <- Right_pane
             | "down" | "j" ->
@@ -23668,7 +25573,7 @@ and is loaded on demand through keeper_skill.
                      state.view <- Keepers Keeper_message)
             | _ -> ())
        | Some "left"
-         when (state.view = Overview && not state.repository_changes_open)
+         when state.view = Overview
               || (message_mode
                   && state.keeper_message_focus = Right_pane
                   && Option.is_none state.voice_capture
@@ -23824,16 +25729,19 @@ and is loaded on demand through keeper_skill.
              || scroll_recovery_key
            then
              if switch_key then begin
-               if Option.is_some state.msg_recall_replaces then begin
+               let released_recall = Option.is_some state.msg_recall_replaces in
+               if released_recall then begin
                  state.msg_recall_replaces <- None;
-                 clear_staged_attachments state;
-                 drain_queued_message state ~base_path
-                   ~mailbox:async_messages
+                 clear_staged_attachments state
                end;
                switch_to_next_keeper_message state ~mailbox:async_messages
                  ~drain_queue:(fun () ->
                    drain_queued_message state ~base_path
-                     ~mailbox:async_messages)
+                     ~mailbox:async_messages);
+               (* Select the explicit target before released input can create
+                  an inflight owner and pin the previous conversation. *)
+               if released_recall then
+                 drain_queued_message state ~base_path ~mailbox:async_messages
              end else
                let (_handled : bool) =
                  handle_message_key state
@@ -23966,7 +25874,7 @@ and is loaded on demand through keeper_skill.
        | Some "?" ->
            state.help_open <- true;
            state.help_scroll <- 0
-      | Some "&" -> open_msx_screen state ~mailbox:async_messages
+      | Some "&" -> open_collab state ~mailbox:async_messages
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0;
@@ -24096,13 +26004,6 @@ and is loaded on demand through keeper_skill.
                if not (acting_pane_drawn state && focus_acting_pane state)
                then state.resource_focus <- Left_pane)
        | Some ("shift-left" | "shift-right") as key
-         when state.repository_changes_open
-              && Option.is_some state.repository_changes_diff_path ->
-           let direction = if key = Some "shift-left" then -1 else 1 in
-           state.repository_changes_diff_hscroll <-
-             max 0 (min (max 0 (state.repository_changes_diff_max_width - 1))
-               (state.repository_changes_diff_hscroll + direction))
-       | Some ("shift-left" | "shift-right") as key
          when state.view = Changes && Option.is_some (opened_file_change state) ->
            let direction = if key = Some "shift-left" then -1 else 1 in
            state.changes_diff_hscroll <-
@@ -24134,6 +26035,7 @@ and is loaded on demand through keeper_skill.
                 (match file with
                  | None ->
                      state.code_file <- Masc_tui_fetched.clear state.code_file;
+                     state.code_file_resume_intent <- Refresh_code_file;
                      state.code_focus_file <- Left_pane
                  | Some path -> (
                      match Masc_tui_fetched.current state.code_file with
@@ -24202,7 +26104,7 @@ and is loaded on demand through keeper_skill.
                 else Masc_tui_code_requests.launch_blame_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path)
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Code && state.code_focus_file = Right_pane
-              && state.code_notes_open && not state.repository_changes_open ->
+              && state.code_notes_open ->
            let count, height = Masc_tui_render_code.code_notes_viewport state in
            let maximum = max 0 (count - height) in
            let current = max 0 (min state.code_notes_scroll maximum) in
@@ -24213,6 +26115,43 @@ and is loaded on demand through keeper_skill.
               | "pageup" -> max 0 (current - page)
               | "pagedown" -> min maximum (current + page)
               | _ -> current)
+       | Some "t" when state.view = Code && state.code_focus_file = Right_pane
+                       && state.code_history_open ->
+           (match Masc_tui_render_code.code_history_selected state with
+            | None | Some (Hist_commit _) ->
+                report_action state "system" "Select a Keeper record with a Task to inspect"
+            | Some (Hist_keeper_change change) ->
+                (match change.Masc.Tui_decode.fc_task_id with
+                 | None -> report_action state "system" "No Task link on this record"
+                 | Some task_id ->
+                     (* The current domain read owns the destination. An absent
+                        row must not turn into an unrelated Tasks list, and an
+                        unavailable read must not be called a missing Task. *)
+                     if state.workspace_identity <> Workspace_identity_match then
+                       report_action state "error" "Task workspace has not been confirmed"
+                     else
+                       match state.task_reading with
+                       | Masc_tui_overview_tasks.Rows_unread ->
+                           report_action state "system" "Tasks have not been read; refresh to retry"
+                       | Masc_tui_overview_tasks.Rows_unavailable detail ->
+                           report_action state "error" ("Tasks unavailable: " ^ detail)
+                       | Masc_tui_overview_tasks.Rows_read _ ->
+                           match Masc_tui_task_selection.detail_row
+                             ~detail_id:(Some task_id) ~tasks:state.tasks_domain with
+                           | None -> report_action state "system"
+                               ("Task not in backlog: " ^ task_id)
+                           | Some _ ->
+                               state.followed_from <- Some (Code, None);
+                               goto_surface ~from_reference:true state
+                                 ~mailbox:async_messages Planning;
+                               state.planning_mode <- Planning_list;
+                               state.task_detail_id <- Some task_id;
+                               state.task_detail_scroll <- 0;
+                               state.task_history <- None;
+                               state.task_focus <-
+                                 Masc_tui_overview_tasks.land_on state.tasks ~task_id;
+                               launch_task_history_load state
+                                 ~mailbox:async_messages task_id))
        | Some "m" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some (Masc_tui_fetched.current_key state.code_file) ->
            (* The memos in the open file: comments in the file's own syntax
@@ -24226,6 +26165,10 @@ and is loaded on demand through keeper_skill.
              state.code_diff_open <- false;
              state.code_history_open <- false
            end
+       | Some "d" when state.view = Code && state.code_focus_file = Right_pane
+                       && state.code_history_open ->
+           if not (Masc_tui_render_code.toggle_history_change state) then
+             report_action state "error" "Select a Keeper record to expand its recorded change"
        | Some "d" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some (Masc_tui_fetched.current_key state.code_file) ->
            (* The working tree against HEAD, over the open file. One overlay
@@ -24249,7 +26192,7 @@ and is loaded on demand through keeper_skill.
                 end)
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Code && state.code_focus_file = Right_pane
-              && state.code_history_open && not state.repository_changes_open ->
+              && state.code_history_open ->
            let count, height = Masc_tui_render_code.code_history_viewport state in
            let current = Masc_tui_scroll.normalize ~count ~height:1 state.code_history_scroll in
            let maximum = Masc_tui_scroll.maximum ~count ~height:1 in
@@ -24383,7 +26326,7 @@ and is loaded on demand through keeper_skill.
             | Resources -> state.resource_focus <- focus
             | Code
               when Option.is_some (Masc_tui_fetched.current_key state.code_file)
-                   && not state.repository_changes_open ->
+                   ->
                 state.code_focus_file <- focus
             | Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Approvals
             | Planning | Schedules
@@ -24551,7 +26494,7 @@ and is loaded on demand through keeper_skill.
              ~delta:(target - state.board_cursor)
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Config && state.config_pane = Config_prompts
-              && not state.repository_changes_open ->
+              ->
            let count, height = Masc_tui_render.prompts_detail_viewport state in
            state.config_scroll <-
              (match move with
@@ -24582,7 +26525,7 @@ and is loaded on demand through keeper_skill.
            move_list_to_edge state ~to_bottom:(key = Some "end")
        | Some ("pageup" | "pagedown") ->
            let page =
-             if state.view = Repositories && not state.repository_changes_open then
+             if state.view = Repositories then
                let _, cols = get_terminal_size () in
                Masc_tui_render.repository_studio_content_height state ~cols
                  ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
@@ -24631,21 +26574,6 @@ and is loaded on demand through keeper_skill.
                   Masc_tui_scroll.cursor_move
                     ~count:(List.length state.config_models_rows)
                     ~delta:(direction * page) state.config_models_cursor
-            | _ when state.repository_changes_open ->
-                (match state.repository_changes_diff_path with
-                 | Some _ ->
-                     state.repository_changes_diff_scroll <-
-                       (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:page
-                   else max 0 (state.repository_changes_diff_scroll + (direction * page)))
-                 | None ->
-                     let cursor, scroll =
-                       move_row_cursor state ~delta:(direction * page)
-                         ~cursor:state.repository_changes_cursor
-                         ~scroll:state.repository_changes_scroll
-                     in
-                     state.repository_changes_cursor <- cursor;
-                     state.repository_changes_scroll <- scroll)
             | Planning when Option.is_some (goal_detail_on_screen state) ->
                 let count, height = Masc_tui_render.planning_detail_viewport state in
                 state.planning_scroll <-
@@ -24957,36 +26885,24 @@ and is loaded on demand through keeper_skill.
              (fun action -> handle_goal_action_key state ~mailbox:async_messages ~action)
              (planning_action_of_key key)
        | Some "r" | Some "R" ->
-           state.pending_approval_action <- None;
-           Masc_tui_theme_choice.invalidate_cache ();
-           load_local_workspace_if_safe state base_path;
+           refresh_shared_sources ();
            let host = server_peer_host in
            let port = state.port in
-           (* Each source owns its read even while the whole-surface refresh
-              is busy. Cadence reads share these requests rather than
-              superseding them before their responses can arrive. *)
-           (match state.connection_status with
-            | Booting -> ()
-            | Disconnected | Connecting | Reconnecting | Degraded | Connected ->
-              launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh
-                state ~mailbox:async_messages;
-              launch_gate_snapshot_load ~intent:Snapshot_read.Refresh
-                state ~mailbox:async_messages;
-              launch_schedules_load ~intent:Snapshot_read.Refresh
-                state ~mailbox:async_messages);
-           start_http_refresh state ~host ~port ~intent:Revalidate
-             ~refresh_inflight:http_refresh_inflight
-             ~scoped_refresh_inflight:http_scoped_refresh_inflight
-             ~scoped_refresh_followup
-             ~mailbox:async_messages;
            (* Also reload logs / Board detail if viewing them. *)
-           if state.repository_changes_open then
-             refresh_repository_changes state ~mailbox:async_messages
-           else
            (match state.view with
-            | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
-            | Keepers Keeper_list ->
-                launch_keeper_lanes_load state ~mailbox:async_messages
+            | Code ->
+                if state.code_history_open then
+                  (match Masc_tui_fetched.current_key state.code_file with
+                   | None -> ()
+                   | Some path ->
+                       Masc_tui_code_requests.launch_history_load state
+                         ~host:server_peer_host
+                         ~deliver:(workspace_enqueue state async_messages) ~path)
+                else
+                  Masc_tui_code_requests.launch_entries_load state
+                    ~host:server_peer_host
+                    ~deliver:(workspace_enqueue state async_messages)
+            | Keepers Keeper_list -> ()
             | Keepers Keeper_logs ->
                 load_keeper_logs_if_safe state base_path 200
                   (List.nth_opt state.keepers state.keeper_cursor)
@@ -25009,7 +26925,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_message ->
                 (match state.msg_target_keeper_name with
                  | Some keeper_name ->
-                     launch_keeper_history_load ~load_file_changes:false state
+                     launch_keeper_history_load ~force:true ~load_file_changes:false state
                        ~mailbox:async_messages ~keeper_name;
                      launch_keeper_chat_tool_details_load ~force:true state
                        ~mailbox:async_messages ~keeper_name
@@ -25110,16 +27026,6 @@ and is loaded on demand through keeper_skill.
                 (* A Home return must retain the decision's receipt or
                    failure notice; navigation is not its replacement. *)
                 if origin <> Overview then report_action state "system" "back")
-       | Some "esc" when state.repository_changes_open ->
-           if Option.is_some state.repository_changes_diff_path then
-             close_repository_changes_diff state
-           else begin
-             let return_chat = state.repository_changes_return_chat in
-             close_repository_changes state;
-             if return_chat then begin
-               state.view <- Keepers Keeper_message
-             end
-           end
        | Some "esc" ->
            (* Esc goes back *)
            (* A running preview is the innermost thing Esc can go back from:
@@ -25132,9 +27038,7 @@ and is loaded on demand through keeper_skill.
                    && state.theme_before_preview <> None ->
                 cancel_theme_preview state
             | Code ->
-                if state.repository_changes_open then
-                  close_repository_changes state
-                else if state.code_notes_open then state.code_notes_open <- false
+                if state.code_notes_open then state.code_notes_open <- false
                 else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
@@ -25309,10 +27213,7 @@ and is loaded on demand through keeper_skill.
                      | Changes_return_detail, None
                      | Changes_return_list, (Some _ | None) ->
                          Keepers Keeper_list)
-            | Repositories ->
-                if state.repository_changes_open then
-                  close_repository_changes state
-                else state.view <- Overview
+            | Repositories -> state.view <- Overview
             | Runtime ->
                 if Option.is_some state.runtime_detail_target then begin
                   state.runtime_detail_target <- None;
@@ -25337,25 +27238,13 @@ and is loaded on demand through keeper_skill.
                 (* Off-ring child: back to the parent that opened it. *)
                 goto_surface state ~mailbox:async_messages Config
             | Config -> state.runtime_model_jump <- None; state.view <- Overview)
-       | Some "left" when state.repository_changes_open ->
-           if Option.is_some state.repository_changes_diff_path then
-             close_repository_changes_diff state
-           else begin
-             let return_chat = state.repository_changes_return_chat in
-             close_repository_changes state;
-             if return_chat then begin
-               state.view <- Keepers Keeper_message
-             end
-           end
        | Some "left" ->
            (* Left is the non-destructive structural back key. Unlike Esc it
               never interrupts a live chat turn; it only closes a detail the
               matching Right key can open. *)
            (match state.view with
             | Code ->
-                if state.repository_changes_open then
-                  close_repository_changes state
-                else if state.code_notes_open then state.code_notes_open <- false
+                if state.code_notes_open then state.code_notes_open <- false
                 else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
@@ -25416,8 +27305,6 @@ and is loaded on demand through keeper_skill.
                 state.harness_detail <- None;
                 state.harness_detail_scroll <- 0
             | Resources -> state.resource_focus <- Left_pane
-            | Repositories when state.repository_changes_open ->
-                close_repository_changes state
             | Changes ->
                 state.changes_diff_row <- None;
                 state.changes_diff_scroll <- 0;
@@ -25454,31 +27341,10 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
             | Keepers Keeper_list | Acting | Metrics | Approvals
              | Memory | Repositories | Connectors | Config | Tools | Clients -> ())
-       | Some ("j" | "down" | "wheel-down") when state.repository_changes_open ->
-           (match state.repository_changes_diff_path with
-            | Some _ ->
-                state.repository_changes_diff_scroll <-
-                  Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:1
-            | None ->
-                let cursor, scroll =
-                  move_row_cursor state ~delta:1
-                    ~cursor:state.repository_changes_cursor
-                    ~scroll:state.repository_changes_scroll
-                in
-                state.repository_changes_cursor <- cursor;
-                state.repository_changes_scroll <- scroll)
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
             | Code ->
-                if state.repository_changes_open then
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:1
-                      ~cursor:state.repository_changes_cursor
-                      ~scroll:state.repository_changes_scroll
-                  in
-                  state.repository_changes_cursor <- cursor;
-                  state.repository_changes_scroll <- scroll
-                else if state.code_focus_file = Right_pane then (
+                if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
                     let count, height = Masc_tui_render_code.code_notes_viewport state in
                     state.code_notes_scroll <-
@@ -25729,22 +27595,13 @@ and is loaded on demand through keeper_skill.
                   state.memory_health_scroll <- scroll
                 end
             | Repositories ->
-                if state.repository_changes_open then
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:1
-                      ~cursor:state.repository_changes_cursor
-                      ~scroll:state.repository_changes_scroll
-                  in
-                  state.repository_changes_cursor <- cursor;
-                  state.repository_changes_scroll <- scroll
-                else
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:1
-                      ~cursor:state.repositories_cursor
-                      ~scroll:state.repositories_scroll
-                  in
-                  state.repositories_cursor <- cursor;
-                  state.repositories_scroll <- scroll
+                let cursor, scroll =
+                  move_row_cursor state ~delta:1
+                    ~cursor:state.repositories_cursor
+                    ~scroll:state.repositories_scroll
+                in
+                state.repositories_cursor <- cursor;
+                state.repositories_scroll <- scroll
             | Changes -> (
                 (* An open diff owns the scroll keys: the list is behind it and
                    moving both would put the cursor somewhere the operator
@@ -25831,31 +27688,10 @@ and is loaded on demand through keeper_skill.
             (* The picker's own arm takes these keys. *)
             | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())
-       | Some ("k" | "up" | "wheel-up") when state.repository_changes_open ->
-           (match state.repository_changes_diff_path with
-            | Some _ ->
-                state.repository_changes_diff_scroll <-
-                  max 0 (state.repository_changes_diff_scroll - 1)
-            | None ->
-                let cursor, scroll =
-                  move_row_cursor state ~delta:(-1)
-                    ~cursor:state.repository_changes_cursor
-                    ~scroll:state.repository_changes_scroll
-                in
-                state.repository_changes_cursor <- cursor;
-                state.repository_changes_scroll <- scroll)
        | Some "k" | Some "up" | Some "wheel-up" ->
            (match state.view with
             | Code ->
-                if state.repository_changes_open then
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:(-1)
-                      ~cursor:state.repository_changes_cursor
-                      ~scroll:state.repository_changes_scroll
-                  in
-                  state.repository_changes_cursor <- cursor;
-                  state.repository_changes_scroll <- scroll
-                else if state.code_focus_file = Right_pane then (
+                if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
                     let count, height = Masc_tui_render_code.code_notes_viewport state in
                     state.code_notes_scroll <-
@@ -26078,22 +27914,13 @@ and is loaded on demand through keeper_skill.
                   state.memory_health_scroll <- scroll
                 end
             | Repositories ->
-                if state.repository_changes_open then
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:(-1)
-                      ~cursor:state.repository_changes_cursor
-                      ~scroll:state.repository_changes_scroll
-                  in
-                  state.repository_changes_cursor <- cursor;
-                  state.repository_changes_scroll <- scroll
-                else
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:(-1)
-                      ~cursor:state.repositories_cursor
-                      ~scroll:state.repositories_scroll
-                  in
-                  state.repositories_cursor <- cursor;
-                  state.repositories_scroll <- scroll
+                let cursor, scroll =
+                  move_row_cursor state ~delta:(-1)
+                    ~cursor:state.repositories_cursor
+                    ~scroll:state.repositories_scroll
+                in
+                state.repositories_cursor <- cursor;
+                state.repositories_scroll <- scroll
             | Changes -> (
                 match state.changes_diff_row with
                 | Some _ ->
@@ -26184,39 +28011,12 @@ and is loaded on demand through keeper_skill.
               && state.detail_tab = Detail_identity ->
            Masc_tui_identity_input.start_cursor state
              ~login:(fun ~keeper_name ~provider_id ~label -> Masc_tui_identity_requests.launch_login state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state) ~keeper_name ~provider_id ~label)
-       | Some ("\r" | "\n" | "right") when state.repository_changes_open -> (
-           match state.repository_changes_diff_path with
-           | Some _ -> ()
-           | None -> (
-               match state.repository_changes, state.repository_changes_scope with
-               | Some snapshot, Some scope -> (
-                   match
-                     List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                       state.repository_changes_cursor
-                   with
-                   | None -> ()
-                   | Some change ->
-                       open_repository_change_diff state
-                         ~mailbox:async_messages ~scope change)
-               | _ -> ()))
        | Some "\r" | Some "\n" | Some "right" ->
            (* Enter remains compatible; Right makes list -> detail and Left
               makes detail -> list consistent across the TUI. *)
            (match state.view with
             | Code -> (
-                if state.repository_changes_open then
-                  (match state.repository_changes, state.repository_changes_scope with
-                   | Some snapshot, Some scope ->
-                       (match
-                          List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                            state.repository_changes_cursor
-                        with
-                        | None -> ()
-                        | Some change ->
-                            open_repository_change_in_code state
-                              ~mailbox:async_messages ~scope change)
-                   | _ -> ())
-                else if state.code_history_open && state.code_focus_file = Right_pane then (
+                if state.code_history_open && state.code_focus_file = Right_pane then (
                   (* The top visible row is the selected one, the way the
                      Changes list treats its scroll. A commit answers with
                      its PR; a durable Keeper change jumps to its
@@ -26419,18 +28219,6 @@ and is loaded on demand through keeper_skill.
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
                         state.changes_tree_diff_path <- None))
-            | Repositories when state.repository_changes_open -> (
-                match state.repository_changes, state.repository_changes_scope with
-                | Some snapshot, Some scope ->
-                    (match
-                       List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                         state.repository_changes_cursor
-                     with
-                     | None -> ()
-                     | Some change ->
-                         open_repository_change_in_code state
-                           ~mailbox:async_messages ~scope change)
-                | _ -> ())
             | Memory -> (
                 match state.memory_facts_keeper with
                 | Some _ ->
@@ -26478,6 +28266,7 @@ and is loaded on demand through keeper_skill.
                         state.code_cursor <- 0;
                         state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                         state.code_file <- Masc_tui_fetched.clear state.code_file;
+                        state.code_file_resume_intent <- Refresh_code_file;
                         state.code_focus_file <- Left_pane;
                         state.view <- Code;
                         Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)))
@@ -26536,48 +28325,6 @@ and is loaded on demand through keeper_skill.
             (* Client-side over the loaded goals: no refetch. *)
             state.planning_filter <- next_planning_filter state.planning_filter;
             clamp_planning_cursor state
-        | Some "g" | Some "G" when state.repository_changes_open ->
-            let path_opt =
-              match state.repository_changes_diff_path with
-              | Some path -> Some path
-              | None -> (
-                  match state.repository_changes with
-                  | Some snapshot ->
-                      Option.map
-                        (fun (c : Tui_decode.repository_change) -> c.rc_path)
-                        (List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                           state.repository_changes_cursor)
-                  | None -> None)
-            in
-            let change_ctx =
-              Masc_tui_render_prim.resolve_change_context state ~path_opt
-            in
-            goto_surface state ~mailbox:async_messages Planning;
-            state.planning_mode <- Planning_list;
-            (match change_ctx.Masc_tui_render_prim.ctx_goal_id with
-             | Some gid ->
-                 (match state.planning with
-                  | Some snap ->
-                      (* The cursor indexes the rows the pane draws, which
-                         [clamp_planning_cursor] also bounds by that list. The
-                         raw goal list is in the order the server sent; the
-                         filter hides goals and the sort reorders them, so an
-                         index found in it lands on a different row than the
-                         goal it was found for. *)
-                      let rec find_idx i = function
-                        | [] -> ()
-                        | (g : planning_goal) :: rest ->
-                            if String.equal g.pg_id gid then
-                              state.planning_cursor <- i
-                            else find_idx (i + 1) rest
-                      in
-                      find_idx 0
-                        (planning_visible_goals ~filter:state.planning_filter
-                           ~sort:state.planning_sort snap.pl_goals)
-                  | None -> ());
-                 clamp_planning_cursor state
-             | None ->
-                 state.planning_cursor <- 0)
         | Some "g" when state.view = Acting ->
            state.acting_cursor <- 0;
            state.acting_scroll <- 0;
@@ -26625,21 +28372,6 @@ and is loaded on demand through keeper_skill.
                   ~keeper_name ~runtime_id:None;
                 close_keeper_runtime_pick state
             | None -> close_keeper_runtime_pick state)
-       | Some "d" when state.repository_changes_open -> (
-           match state.repository_changes_diff_path with
-           | Some _ -> ()
-           | None -> (
-               match state.repository_changes, state.repository_changes_scope with
-               | Some snapshot, Some scope -> (
-                   match
-                     List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                       state.repository_changes_cursor
-                   with
-                   | None -> ()
-                   | Some change ->
-                       open_repository_change_diff state
-                         ~mailbox:async_messages ~scope change)
-               | _ -> ()))
        | Some "D" when (match state.view with
            | Keepers (Keeper_list | Keeper_detail) -> true | _ -> false) ->
            state.keeper_deletions_open <- true;
@@ -26685,37 +28417,6 @@ and is loaded on demand through keeper_skill.
                before that frame adds one to it. *)
             state.acting_scroll <- List.length state.acting;
             state.acting_cursor <- max 0 (List.length (acting_flat_entries state) - 1)
-        | Some "t" | Some "T" when state.repository_changes_open ->
-            let path_opt =
-              match state.repository_changes_diff_path with
-              | Some path -> Some path
-              | None -> (
-                  match state.repository_changes with
-                  | Some snapshot ->
-                      Option.map
-                        (fun (c : Tui_decode.repository_change) -> c.rc_path)
-                        (List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                           state.repository_changes_cursor)
-                  | None -> None)
-            in
-            let change_ctx =
-              Masc_tui_render_prim.resolve_change_context state ~path_opt
-            in
-            goto_surface state ~mailbox:async_messages Planning;
-            state.planning_mode <- Planning_list;
-            (match change_ctx.Masc_tui_render_prim.ctx_task_id with
-             | Some tid ->
-                 state.task_detail_id <- Some tid;
-                 state.task_detail_scroll <- 0;
-                 state.task_history <- None;
-                 launch_task_history_load state ~mailbox:async_messages tid;
-                 state.task_focus <-
-                   Masc_tui_overview_tasks.land_on state.tasks ~task_id:tid
-             | None ->
-                 state.task_detail_id <- None;
-                 state.task_detail_scroll <- 0;
-                 state.task_focus <-
-                   Masc_tui_overview_tasks.focus_list state.tasks)
         | Some ("p" | "P") when state.view = Planning ->
             goto_surface state ~mailbox:async_messages Approvals
         | Some "t" | Some "T" ->
@@ -26790,26 +28491,6 @@ and is loaded on demand through keeper_skill.
               | Planning -> Verification
               | Verification -> Harness
               | Harness | _ -> Planning)
-       | Some "v" when state.repository_changes_open -> (
-           match state.repository_changes, state.repository_changes_scope with
-           | Some snapshot, Some scope -> (
-               let change_opt =
-                 match state.repository_changes_diff_path with
-                 | Some diff_path ->
-                     List.find_opt
-                       (fun (c : Tui_decode.repository_change) ->
-                         String.equal c.rc_path diff_path)
-                       snapshot.Masc.Tui_decode.rcs_changes
-                 | None ->
-                     List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                       state.repository_changes_cursor
-               in
-               match change_opt with
-               | None -> report_action state "error" "no change under the cursor"
-               | Some change ->
-                   open_repository_change_in_code state
-                     ~mailbox:async_messages ~scope change)
-           | _ -> ())
        | Some "v" when state.view = Changes ->
            (* View the selected change on the Code surface. The clone-relative
               address resolves through the same ?keeper= axis the git-diff
@@ -26839,6 +28520,7 @@ and is loaded on demand through keeper_skill.
                         state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                         state.code_cursor <- 0;
                         state.code_file <- Masc_tui_fetched.clear state.code_file;
+                        state.code_file_resume_intent <- Refresh_code_file;
                         state.code_focus_file <- Left_pane;
                         state.code_target_line <-
                           Some (Masc.Tui_decode.file_change_target_line change);
@@ -27127,92 +28809,6 @@ and is loaded on demand through keeper_skill.
            if state.prompts_show_runtime_assets
            then report_action state "system" "런타임 프롬프트 자산에는 기록된 모델 입력이 없습니다"
            else handle_librarian_input_read ()
-       | Some "p" | Some "P" when state.repository_changes_open ->
-           let path_opt =
-             match state.repository_changes_diff_path with
-             | Some path -> Some path
-             | None -> (
-                 match state.repository_changes with
-                 | Some snapshot ->
-                     Option.map
-                       (fun (c : Tui_decode.repository_change) -> c.rc_path)
-                       (List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                          state.repository_changes_cursor)
-                 | None -> None)
-           in
-           let change_ctx =
-             Masc_tui_render_prim.resolve_change_context state ~path_opt
-           in
-           (* Only the scope's own repository names a remote. A project-wide
-              scope spans every registered repository, and picking the first
-              one opened a PR-N token in whichever repo happened to be
-              registered first. *)
-           let scope_remote =
-             match state.repository_changes_scope with
-             | Some (Tui_decode.Repository_change_repository repo_id) -> (
-                 match state.repositories with
-                 | Some snapshot ->
-                     Option.map
-                       (fun (r : Masc.Tui_decode.repository) -> r.rp_url)
-                       (List.find_opt
-                          (fun (r : Masc.Tui_decode.repository) ->
-                            String.equal r.rp_id repo_id)
-                          snapshot.rs_repositories)
-                 | None -> None)
-             | Some Tui_decode.Repository_change_project | None -> None
-           in
-           (match change_ctx.Masc_tui_render_prim.ctx_pr with
-            | None ->
-                report_action state "git"
-                  "no PR to open: this change names no github.com/…/pull/N link or PR-N token"
-            | Some reference -> (
-                let number = Masc_tui_pr_ref.number reference in
-                (* A pull link says which repository; a token leaves that to
-                   the scope. *)
-                let slug =
-                  match reference with
-                  | Masc_tui_pr_ref.Pull_url { slug; _ } -> Some slug
-                  | Masc_tui_pr_ref.Pr_token _ ->
-                      Option.bind scope_remote Masc_tui_pr_ref.github_slug_of_remote
-                in
-                match slug with
-                | None ->
-                    report_action state "error"
-                      (Printf.sprintf
-                         "PR-%d: the scope has no GitHub remote to open it in"
-                         number)
-                | Some slug -> (
-                    match
-                      Masc_tui_browser.open_url
-                        (Masc_tui_pr_ref.pull_url ~slug ~number)
-                    with
-                    | Ok opener ->
-                        report_action state "git"
-                          (Printf.sprintf "opened %s#%d with %s" slug number opener)
-                    | Error _ ->
-                        (* No opener on this machine; gh may still have one
-                           configured. Named repository, waited on, reported
-                           after the fact: run in the TUI's cwd and detached,
-                           it opened the wrong checkout's PR and the pane
-                           said "opening" whether or not it did. *)
-                        let status, _stdout, stderr =
-                          Process_eio.run_argv_with_status_split
-                            ~timeout_sec:gh_open_timeout_sec
-                            [ "gh"; "pr"; "view"; string_of_int number; "--web"
-                            ; "-R"; slug ]
-                        in
-                        (match status with
-                         | Unix.WEXITED 0 ->
-                             report_action state "git"
-                               (Printf.sprintf "opened %s#%d with gh" slug number)
-                         | Unix.WEXITED code ->
-                             report_action state "error"
-                               (Printf.sprintf "gh pr view %d -R %s exited %d: %s"
-                                  number slug code (String.trim stderr))
-                         | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
-                             report_action state "error"
-                               (Printf.sprintf "gh pr view %d -R %s stopped by signal %d"
-                                  number slug signal)))))
        | Some "p" | Some "P"
          when state.view = Runtime
               && Option.is_none state.runtime_detail_target ->
@@ -27742,10 +29338,14 @@ and is loaded on demand through keeper_skill.
       if
         Int64.compare (Int64.sub now_ns !last_check_ns) refresh_interval_ns >= 0
       then begin
+        (* Consent expires even while authority is unread or a refresh is
+           still in flight. The server's deadline owns this local wait. *)
+        if expire_identity_logins state ~now:(Unix.gettimeofday ()) then
+          Render_schedule.request render_schedule Render_schedule.Background;
         (* The armed approval survives the tick: the snapshot apply already
            disarms it when its token leaves the list, so clearing here only
            made the second press race a two-second clock. *)
-        load_local_workspace_if_safe state base_path;
+        launch_local_workspace_read state ~mailbox:async_messages base_path;
         let host = server_peer_host in
         let port = state.port in
         (* The retry a closed feed waits for. *)
@@ -27785,17 +29385,22 @@ and is loaded on demand through keeper_skill.
         (match state.view with
          | Code -> ()
          | Keepers Keeper_runtime_pick -> ()
-         | Keepers Keeper_list ->
-             launch_keeper_lanes_load state ~mailbox:async_messages
+         (* Nothing on the list reads the composite; the detail arm below
+            keeps Info and Secrets current while they are on screen. *)
+         | Keepers Keeper_list -> ()
          | Keepers (Keeper_logs | Keeper_detail) ->
              load_keeper_logs_if_safe state base_path 200
                (List.nth_opt state.keepers state.keeper_cursor);
-             (* The Secrets tab reads through the Keeper lanes body, which
-                only the list refreshed; r on the tab had no way to retry a
-                failed read. *)
-             if state.view = Keepers Keeper_detail
-                && state.detail_tab = Detail_secrets
-             then launch_keeper_lanes_load state ~mailbox:async_messages
+             (* Info's execution facts and Secrets share the composite
+                reading. Keep a visible pane current without leaving it,
+                and let the next cadence retry a failed request. *)
+             if state.view = Keepers Keeper_detail then
+               (match state.detail_tab with
+                | Detail_info | Detail_secrets ->
+                    launch_keeper_lanes_load state ~mailbox:async_messages
+                | Detail_items | Detail_sandbox | Detail_instructions
+                | Detail_github | Detail_identity | Detail_channels
+                | Detail_automation | Detail_runs -> ())
          | Keepers Keeper_calls ->
              (match selected_keeper state with
               | Some keeper ->
@@ -27944,6 +29549,12 @@ and is loaded on demand through keeper_skill.
   run_loop ()
 
 let run_with_eio_context f =
+  (* The server's minor heap, for the same reason: every frame allocates the
+     rows it draws, and at the runtime's default size a held key meets a
+     collection every few frames. Measured on a live chat with PageUp/PageDown
+     held, the median key-to-output time fell about a quarter. A larger
+     OCAMLRUNPARAM setting is left alone. *)
+  Domain_pool.tune_minor_heap ();
   try
     Eio_main.run (fun env ->
         Eio.Switch.run (fun sw ->
@@ -27962,6 +29573,8 @@ let run_with_eio_context f =
               ~cwd_default:(Eio.Stdenv.cwd env)
               ~proc_mgr:(Eio.Stdenv.process_mgr env)
               ~clock:(Eio.Stdenv.clock env);
+            let cpu_pool=Domain_pool.create ~sw (Eio.Stdenv.domain_mgr env) in
+            Domain_pool_ref.set cpu_pool;
             Eio_context.set_env env;
             Eio_context.set_switch sw;
             Eio_context.set_net (Eio.Stdenv.net env);

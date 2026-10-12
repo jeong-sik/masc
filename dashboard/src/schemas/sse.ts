@@ -219,7 +219,7 @@ const KEEPER_CHAT_AG_UI_FIELDS_BY_TYPE = new Map<string, ReadonlySet<string>>([
   ['RUN_FINISHED', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId'])],
   ['RUN_ERROR', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'message', 'code'])],
   ['TEXT_MESSAGE_START', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'role'])],
-  ['TEXT_MESSAGE_CONTENT', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'delta'])],
+  ['TEXT_MESSAGE_CONTENT', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'delta', 'textStreamScope'])],
   ['TEXT_MESSAGE_END', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId'])],
   ['TOOL_CALL_START', new Set([
     ...KEEPER_CHAT_AG_UI_BASE_FIELDS,
@@ -392,7 +392,8 @@ function validateUsage(value: unknown): SafeParseResult<true> {
 
 // KEEPER_STREAM_MESSAGE_DELTA usage carries cumulative counters and emits
 // only the ones the wire actually reported, so every field is optional and
-// there is no total_tokens or cost_usd. Requiring the full set here silently
+// there is no total_tokens. Provider-reported cost_usd is optional too.
+// Requiring the full set here silently
 // dropped every classic (output-only) delta once the producer stopped
 // zero-filling unreported counters.
 function validateDeltaUsage(value: unknown): SafeParseResult<true> {
@@ -401,6 +402,7 @@ function validateDeltaUsage(value: unknown): SafeParseResult<true> {
     'output_tokens',
     'cache_creation_input_tokens',
     'cache_read_input_tokens',
+    'cost_usd',
   ])
   if (!result.success) return result
   for (const field of [
@@ -413,7 +415,138 @@ function validateDeltaUsage(value: unknown): SafeParseResult<true> {
     const valid = requiredInteger(result.data, field)
     if (!valid.success) return valid
   }
+  return result.data.cost_usd === undefined
+    || (typeof result.data.cost_usd === 'number' && Number.isFinite(result.data.cost_usd)
+      && result.data.cost_usd >= 0)
+    ? ok(true)
+    : fail('ag_ui_event.value.usage.cost_usd', 'Expected finite nonnegative cost_usd')
+}
+
+function validateNativeToolObservation(value: Record<string, unknown>): SafeParseResult<true> {
+  const occurrence = validateToolStreamOccurrence(value, 'ag_ui_event.value')
+  if (!occurrence.success) return occurrence
+  for (const field of ['providerMessageId', 'toolCallId', 'toolCallName']) {
+    if (!Object.prototype.hasOwnProperty.call(value, field)) continue
+    const valid = requiredString(value, field)
+    if (!valid.success) return valid
+  }
   return ok(true)
+}
+
+function validateNativeToolCompletion(payload: unknown): SafeParseResult<true> {
+  const path = 'ag_ui_event.value.completion'
+  if (!isRecord(payload)) return fail(path, 'Expected native completion object')
+  let fields: readonly string[]
+  switch (payload.kind) {
+    case 'end_observed':
+    case 'completion_reported':
+    case 'error_reported':
+    case 'decline_reported':
+      fields = ['kind', 'exit_code']
+      break
+    case 'result_received':
+      fields = ['kind', 'exit_code', 'is_error']
+      if (payload.is_error !== null && typeof payload.is_error !== 'boolean') {
+        return fail(`${path}.is_error`, 'Expected reported native error boolean or null')
+      }
+      break
+    case 'unrecognized_status':
+      fields = ['kind', 'exit_code', 'status']
+      if (typeof payload.status !== 'string') {
+        return fail(`${path}.status`, 'Expected original native status string')
+      }
+      break
+    case 'completion_unrecorded':
+      // An end whose record kept no completion: nothing is known of the
+      // provider's status, so there is no exit code either.
+      fields = ['kind', 'exit_code']
+      if (payload.exit_code !== null) {
+        return fail(`${path}.exit_code`, 'Expected no exit code for an unrecorded native completion')
+      }
+      break
+    default:
+      return fail(`${path}.kind`, 'Expected typed native completion kind')
+  }
+  const object = exactCustomObject(payload, 'native completion', fields, path)
+  if (!object.success) return object
+  // Unlike byte counts, a process exit status may be negative. Preserve the
+  // provider fact without interpreting zero, completion, or missing as success.
+  return payload.exit_code === null
+    || (typeof payload.exit_code === 'number' && Number.isSafeInteger(payload.exit_code))
+    ? ok(true)
+    : fail(`${path}.exit_code`, 'Expected native exit code integer or null')
+}
+
+function isNonblankNativeRetryString(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  // Runtime_native_tools owns this predicate: OCaml String.trim removes these
+  // ASCII characters. ECMAScript trim removes additional Unicode content and
+  // would discard metadata already emitted by the canonical server codec.
+  for (const character of value) {
+    switch (character) {
+      case ' ': case '\t': case '\n': case '\r': case '\f': break
+      default: return true
+    }
+  }
+  return false
+}
+
+function validateNativeToolProgress(payload: unknown): SafeParseResult<true> {
+  const path = 'ag_ui_event.value.progress'
+  if (!isRecord(payload)) return fail(path, 'Expected native progress object')
+  switch (payload.kind) {
+    case 'retry_reported':
+    case 'retry_cleared': {
+      const fields = ['kind', 'agent_id', 'subagent_type']
+      if (payload.kind === 'retry_reported') fields.push('attempt', 'max_retries', 'retry_delay_ms', 'error_status', 'error_category')
+      const object = exactCustomObject(payload, 'native retry observation', fields, path)
+      if (!object.success) return object
+      for (const field of ['agent_id', 'subagent_type']) {
+        const value = payload[field]
+        if (!isNonblankNativeRetryString(value))
+          return fail(`${path}.${field}`, 'Expected nonblank native retry identity')
+      }
+      if (payload.kind === 'retry_reported') {
+        for (const field of ['attempt', 'max_retries', 'retry_delay_ms']) {
+          const value = payload[field]
+          if (typeof value !== 'number' || !Number.isSafeInteger(value))
+            return fail(`${path}.${field}`, 'Expected native retry safe integer')
+        }
+        if (payload.error_status !== null
+          && (typeof payload.error_status !== 'number' || !Number.isSafeInteger(payload.error_status)))
+          return fail(`${path}.error_status`, 'Expected native retry status integer or null')
+        if (!isNonblankNativeRetryString(payload.error_category))
+          return fail(`${path}.error_category`, 'Expected native retry error category')
+      }
+      return ok(true)
+    }
+    case 'output_observed': {
+      const object = exactCustomObject(payload, 'native output observation', ['kind', 'byte_count'], path)
+      if (!object.success) return object
+      return typeof payload.byte_count === 'number'
+        && Number.isSafeInteger(payload.byte_count) && payload.byte_count > 0
+        ? ok(true)
+        : fail(`${path}.byte_count`, 'Expected positive native output byte count')
+    }
+    case 'heartbeat_reported': {
+      const object = exactCustomObject(payload, 'native heartbeat', ['kind', 'elapsed_seconds'], path)
+      if (!object.success) return object
+      return typeof payload.elapsed_seconds === 'number'
+        && Number.isSafeInteger(payload.elapsed_seconds) && payload.elapsed_seconds >= 0
+        ? ok(true)
+        : fail(`${path}.elapsed_seconds`, 'Expected nonnegative provider elapsed seconds')
+    }
+    case 'message_reported': {
+      const object = exactCustomObject(payload, 'native progress message', ['kind', 'message'], path)
+      if (!object.success) return object
+      // Empty messages are valid observations under the OCaml codec too.
+      return typeof payload.message === 'string'
+        ? ok(true)
+        : fail(`${path}.message`, 'Expected native progress message string')
+    }
+    default:
+      return fail(`${path}.kind`, 'Expected typed native progress kind')
+  }
 }
 
 function validateKeeperCustomPayload(
@@ -481,10 +614,22 @@ function validateKeeperCustomPayload(
       'because',
     ],
     KEEPER_TOOL_APPROVAL_SETTLED: ['tool_call_id', 'outcome'],
-    KEEPER_STREAM_MESSAGE_START: ['provider_message_id', 'model', 'usage'],
-    KEEPER_STREAM_MESSAGE_DELTA: ['stop_reason', 'usage'],
+    KEEPER_STREAM_MESSAGE_START: ['stream_scope', 'provider_message_id', 'model', 'usage'],
+    KEEPER_STREAM_MESSAGE_DELTA: ['stream_scope', 'stop_reason', 'usage'],
     KEEPER_CONTENT_BLOCK_START: ['index', 'content_type', 'tool_call_id', 'tool_call_name'],
     KEEPER_CONTENT_BLOCK_STOP: ['index'],
+    KEEPER_NATIVE_TOOL_START: [
+      'toolStreamScope', 'toolCallBlockIndex', 'providerMessageId', 'toolCallId', 'toolCallName',
+    ],
+    KEEPER_NATIVE_TOOL_END: [
+      'toolStreamScope', 'toolCallBlockIndex', 'providerMessageId', 'toolCallId', 'toolCallName', 'completion',
+    ],
+    KEEPER_NATIVE_TOOL_PROGRESS: [
+      'toolStreamScope', 'toolCallBlockIndex', 'providerMessageId', 'toolCallId', 'toolCallName', 'progress',
+    ],
+    KEEPER_MODEL_CONTENT_ACTIVITY: [
+      'generation', 'stream_scope', 'block_index', 'provider_message_id', 'channel', 'state',
+    ],
     KEEPER_THINKING_DELTA: ['index', 'delta'],
     KEEPER_THINKING_SIGNATURE_DELTA: ['index', 'signature_bytes'],
     KEEPER_MEDIA_DELTA: ['index', 'media_type', 'source_type', 'media_ref'],
@@ -498,7 +643,7 @@ function validateKeeperCustomPayload(
       'quarantined_occurrence',
     ],
     KEEPER_CONTINUATION_CHECKPOINT: ['message', 'request_id'],
-    KEEPER_REPLY_DETAILS: ['reply', 'turn_outcome', 'turn_ref'],
+    KEEPER_REPLY_DETAILS: ['reply', 'turn_outcome', 'turn_ref', 'terminal_stream_scope'],
     KEEPER_TOOL_RESULT_READY: [
       'toolStreamScope',
       'toolCallBlockIndex',
@@ -512,7 +657,22 @@ function validateKeeperCustomPayload(
   const value = object.data
 
   switch (name) {
+    case 'KEEPER_NATIVE_TOOL_START':
+      return validateNativeToolObservation(value)
+    case 'KEEPER_NATIVE_TOOL_END': {
+      const observation = validateNativeToolObservation(value)
+      if (!observation.success) return observation
+      return Object.prototype.hasOwnProperty.call(value, 'completion')
+        ? validateNativeToolCompletion(value.completion)
+        : ok(true)
+    }
+    case 'KEEPER_NATIVE_TOOL_PROGRESS': {
+      const observation = validateNativeToolObservation(value)
+      return observation.success ? validateNativeToolProgress(value.progress) : observation
+    }
     case 'KEEPER_STREAM_MESSAGE_START': {
+      const scope = requiredInteger(value, 'stream_scope')
+      if (!scope.success) return scope
       const provider = requiredString(value, 'provider_message_id')
       if (!provider.success) return provider
       const model = requiredString(value, 'model')
@@ -520,6 +680,8 @@ function validateKeeperCustomPayload(
       return value.usage === undefined ? ok(true) : validateUsage(value.usage)
     }
     case 'KEEPER_STREAM_MESSAGE_DELTA': {
+      const scope = requiredInteger(value, 'stream_scope')
+      if (!scope.success) return scope
       const stopReason = optionalString(value, 'stop_reason')
       if (!stopReason.success) return stopReason
       return value.usage === undefined ? ok(true) : validateDeltaUsage(value.usage)
@@ -534,6 +696,22 @@ function validateKeeperCustomPayload(
     }
     case 'KEEPER_CONTENT_BLOCK_STOP':
       return requiredInteger(value, 'index')
+    case 'KEEPER_MODEL_CONTENT_ACTIVITY': {
+      for (const field of ['generation', 'stream_scope', 'block_index']) {
+        const valid = requiredInteger(value, field)
+        if (!valid.success) return valid
+      }
+      if (Object.prototype.hasOwnProperty.call(value, 'provider_message_id')) {
+        const provider = requiredString(value, 'provider_message_id')
+        if (!provider.success) return provider
+      }
+      if (value.channel !== 'text' && value.channel !== 'thinking') {
+        return fail('ag_ui_event.value.channel', 'Expected text or thinking content channel')
+      }
+      return value.state === 'observed' || value.state === 'ended'
+        ? ok(true)
+        : fail('ag_ui_event.value.state', 'Expected observed or ended content state')
+    }
     case 'KEEPER_TOOL_RESULT_READY': {
       const occurrence = validateToolStreamOccurrence(value, 'ag_ui_event.value')
       return occurrence.success ? requiredString(value, 'executionId') : occurrence
@@ -646,9 +824,23 @@ function validateKeeperCustomPayload(
       }
       const turnRef = requiredString(value, 'turn_ref')
       if (!turnRef.success) return turnRef
-      return typeof value.turn_outcome === 'string' && KEEPER_TURN_OUTCOMES.has(value.turn_outcome)
+      const turnOutcome =
+        typeof value.turn_outcome === 'string' && KEEPER_TURN_OUTCOMES.has(value.turn_outcome)
+      if (!turnOutcome) {
+        return fail('ag_ui_event.value.turn_outcome', 'Expected typed Keeper turn outcome')
+      }
+      // Optional and key-omitted when absent: the server projector appends it
+      // with json_opt (None -> []). Same contract as the OCaml decoder's
+      // optional_stream_scope: absent ok, nonnegative integer ok, everything
+      // else (including null and negative) rejected.
+      const scope = value.terminal_stream_scope
+      if (scope === undefined) return ok(true)
+      return typeof scope === 'number' && Number.isSafeInteger(scope) && scope >= 0
         ? ok(true)
-        : fail('ag_ui_event.value.turn_outcome', 'Expected typed Keeper turn outcome')
+        : fail(
+            'ag_ui_event.value.terminal_stream_scope',
+            'Expected terminal_stream_scope integer >= 0',
+          )
     }
   }
   // The name reached here from the contract list, so a missing branch is a gap
@@ -708,6 +900,13 @@ function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseR
         ? ok(true)
         : fail('ag_ui_event.role', 'Expected assistant or user AG-UI role')
     case 'TEXT_MESSAGE_CONTENT':
+      if ('textStreamScope' in value && (
+        typeof value.textStreamScope !== 'number'
+        || !Number.isSafeInteger(value.textStreamScope)
+        || value.textStreamScope < 0
+      )) {
+        return fail('ag_ui_event.textStreamScope', 'Expected textStreamScope non-negative integer')
+      }
       return typeof value.delta === 'string'
         ? ok(true)
         : fail('ag_ui_event.delta', 'Expected AG-UI text delta')

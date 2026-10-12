@@ -21,11 +21,14 @@ val switch_set
   -> (unit, string) result
   -> unit
 
-(** Retire landed logins for the read's Keeper, even offscreen; present only
-    current responses for the selected Keeper. *)
+(** Apply catalog and attempt facts under one read admission. Published
+    credentials retire only with the paired current successful catalog read;
+    immutable failure/expiry facts need no catalog. Present only the selected Keeper. *)
 val providers_loaded
   :  Masc_tui_types.state
   -> Masc_tui_types.detail_read_request
+  -> report:(string -> unit)
+  -> attempts:(Masc_tui_types.identity_login_expectation * (Masc_tui_identity_model.identity_login_status, string) result) list
   -> (Masc_tui_identity_model.identity_provider list, string) result
   -> unit
 
@@ -34,6 +37,7 @@ val providers_loaded
 val login_started
   :  Masc_tui_types.state
   -> Masc_tui_types.identity_login_request
+  -> now:float
   -> report:(string -> string -> unit)
   -> notice:
        (keeper_name:string option

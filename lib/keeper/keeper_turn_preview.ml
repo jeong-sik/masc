@@ -4,8 +4,11 @@
 
 type activity = Preparing | Awaiting_response | Receiving_response | Tool_observed | Failed
 
+type source_position = { generation : int; start_byte : int }
+
 type t =
-  { text_tail : string
+  { text_position : source_position
+  ; text_tail : string
   ; last_tool : string option
   ; updated_at : float
   ; runtime_id : string option
@@ -29,6 +32,7 @@ module Tool_indexes = Map.Make (Int)
 type entry =
   { preview : t
   ; text_intake : text_intake
+  ; released_bytes : int
   ; tools : string Tool_indexes.t
   }
 type writer = entry ref
@@ -44,7 +48,7 @@ let with_lock f =
   Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
 
 let empty now =
-  { text_tail = ""; last_tool = None; updated_at = now
+  { text_position = {generation=0; start_byte=0}; text_tail = ""; last_tool = None; updated_at = now
   ; runtime_id = None; activity = Preparing; last_failure = None }
 
 let current ~keeper_name =
@@ -69,19 +73,21 @@ let redacting redaction =
   { redaction; stream = Keeper_stream_text_redaction.create redaction }
 
 let reset ~keeper_name ~now ~redaction =
-  let writer = ref { preview = empty now; text_intake = redacting redaction; tools = Tool_indexes.empty } in
+  let writer = ref { preview = empty now; text_intake = redacting redaction; released_bytes = 0; tools = Tool_indexes.empty } in
   with_lock (fun () -> Hashtbl.replace table keeper_name writer);
   writer
 
 let note_attempt ~writer ~now ~runtime_id =
-  change_entry ~writer ~now (fun { preview; text_intake; tools = _ } ->
+  change_entry ~writer ~now (fun { preview; text_intake; _ } ->
     Some
       { preview =
           { preview with runtime_id = Some runtime_id; activity = Awaiting_response
-          ; last_tool = None; text_tail = "" }
+          ; last_tool = None; text_tail = ""
+          ; text_position = {generation=preview.text_position.generation + 1; start_byte=0} }
         (* A new attempt is a new provider stream. Text the previous stream
            still held belongs to the tail this clears. *)
       ; tools = Tool_indexes.empty
+      ; released_bytes = 0
       ; text_intake =
           redacting text_intake.redaction
       })
@@ -97,16 +103,15 @@ let note_failure ~writer ~now ~runtime_id detail =
 let note_text ~writer ~now text =
   let text = String.trim text in
   if not (String.equal text "") then
-    change_entry ~writer ~now (fun ({ preview; text_intake; tools = _ } as entry) ->
-      let preview =
-        let redaction = text_intake.redaction in
-          { preview with
-            text_tail =
-              String_util.utf8_suffix ~max_bytes:tail_bytes
-                (Keeper_secret_redaction.redact_text redaction text)
-          ; activity = Receiving_response }
-      in
-      Some { entry with preview })
+    change_entry ~writer ~now (fun ({ preview; text_intake; _ } as entry) ->
+      let text = Keeper_secret_redaction.redact_text text_intake.redaction text in
+      let text_tail = String_util.utf8_suffix ~max_bytes:tail_bytes text in
+      let released_bytes = String.length text in
+      let text_position = {generation=preview.text_position.generation + 1;
+        start_byte=released_bytes - String.length text_tail} in
+      Some { entry with released_bytes; text_intake=redacting text_intake.redaction;
+        preview={preview with text_tail; text_position; activity=Receiving_response} })
+
 
 let note_tool ~writer ~now tool_name =
   update ~writer ~now (fun old ->
@@ -128,35 +133,35 @@ let activity_of_event preview (event : Agent_core.Types.sse_event) =
     Some { preview with activity = Receiving_response }
   | _ -> None
 
-(* The tail after one event the redactor released, or [None] when that
-   event carries no response text. *)
-let text_tail_after tail (event : Agent_core.Types.sse_event) =
-  match event with
-  | Agent_core.Types.ContentBlockDelta { delta = TextDelta text; _ } ->
-    Some (String_util.utf8_suffix ~max_bytes:tail_bytes (tail ^ text))
-  | ContentBlockDelta { delta = TextSnapshot text; _ } ->
-    let text = String.trim text in
-    if String.equal text "" then None else Some (String_util.utf8_suffix ~max_bytes:tail_bytes text)
-  | _ -> None
-
-let released_text_tail tail events =
-  let released, changed =
-    List.fold_left
-      (fun (tail, changed) event ->
-         match text_tail_after tail event with
-         | Some tail -> tail, true
-         | None -> tail, changed)
-      (tail, false) events
-  in
-  if changed then Some released else None
+(* Positions count only bytes actually emitted by this writer's redactor.
+   A replacement starts a new source generation, even if its text repeats. *)
+let released_text entry events =
+  List.fold_left (fun (entry, changed) (event : Agent_core.Types.sse_event) ->
+    let replace, text = match event with
+      | ContentBlockDelta {delta=TextDelta text; _} -> false, Some text
+      | ContentBlockDelta {delta=TextSnapshot text; _} ->
+          true, Some (String.trim text)
+      | _ -> false, None in
+    match text with
+    | None -> entry, changed
+    | Some text ->
+        let preview = entry.preview in
+        let released_bytes = if replace then String.length text
+          else entry.released_bytes + String.length text in
+        let generation = preview.text_position.generation + (if replace then 1 else 0) in
+        let text_tail = String_util.utf8_suffix ~max_bytes:tail_bytes
+          (if replace then text else preview.text_tail ^ text) in
+        let text_position = {generation; start_byte=released_bytes - String.length text_tail} in
+        {entry with released_bytes; preview={preview with text_tail; text_position}}, true)
+    (entry, false) events
 
 (* Deltas pass through the turn's stream redactor, which releases a line once
    it is complete, so a secret split between two deltas is replaced before any
    part of it reaches the tail. *)
 let note_stream ~writer ~now event =
-  change_entry ~writer ~now (fun ({ preview; text_intake; tools = _ } as entry) ->
-    let text_tail =
-      released_text_tail preview.text_tail
+  change_entry ~writer ~now (fun ({ preview; text_intake; _ } as entry) ->
+    let released_entry, text_changed =
+      released_text entry
         (Keeper_stream_text_redaction.on_event text_intake.stream event)
     in
     let tools, activity =
@@ -170,13 +175,12 @@ let note_stream ~writer ~now event =
           (Tool_indexes.find_opt index entry.tools)
       | _ -> entry.tools, activity_of_event preview event
     in
-    let entry = { entry with tools } in
-    match activity, text_tail with
-    | None, None -> None
-    | Some preview, None -> Some { entry with preview }
-    | None, Some text_tail -> Some { entry with preview = { preview with text_tail } }
-    | Some preview, Some text_tail ->
-      Some { entry with preview = { preview with text_tail } })
+    let entry = { released_entry with tools } in
+    match activity, text_changed with
+    | None, false -> None
+    | Some activity_preview, _ -> Some {entry with preview={activity_preview with
+        text_tail=entry.preview.text_tail; text_position=entry.preview.text_position}}
+    | None, true -> Some entry)
 
 let status_text preview =
   let activity =
@@ -192,3 +196,11 @@ let status_text preview =
        [ preview.runtime_id; Some activity
        ; Option.map (fun name -> "last observed tool: " ^ name) preview.last_tool
        ; Option.map (fun detail -> "last failure: " ^ detail) preview.last_failure ])
+
+let to_json preview =
+  `Assoc ["status_text", `String (status_text preview);
+    "text_tail", `String preview.text_tail;
+    "text_position", `Assoc ["generation", `Int preview.text_position.generation;
+      "start_byte", `Int preview.text_position.start_byte];
+    "last_tool", (match preview.last_tool with None -> `Null | Some name -> `String name);
+    "updated_at_unix", `Float preview.updated_at]

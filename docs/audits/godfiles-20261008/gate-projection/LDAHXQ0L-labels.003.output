@@ -1,0 +1,10 @@
+ASSERT completion_rejected:not_found starts with completion_rejected:
+ASSERT completion_rejected:key_mismatch starts with completion_rejected:
+ASSERT completion_rejected:invalid_identity starts with completion_rejected:
+ASSERT completion_rejected:summary_not_pending starts with completion_rejected:
+ASSERT completion_rejected:unbound_state starts with completion_rejected:
+ASSERT completion_rejected:disposition_conflict starts with completion_rejected:
+ASSERT completion_rejected:identity_conflict starts with completion_rejected:
+ASSERT completion_rejected:status_conflict starts with completion_rejected:
+ASSERT completion_rejected:provenance_mismatch starts with completion_rejected:
+ASSERT completion_rejected:content_conflict starts with completion_rejected:

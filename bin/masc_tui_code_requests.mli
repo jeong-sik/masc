@@ -12,14 +12,16 @@ val launch_entries_load
 
 (** Start the path request and deliver its whole-file response with its request key. *)
 val launch_file_load
-  :  Masc_tui_types.state
+  :  ?intent:Masc_tui_types.code_file_load_intent
+  -> Masc_tui_types.state
   -> host:string
   -> deliver:(Masc_tui_async_protocol.async_msg -> unit)
   -> path:string
   -> unit
 
 (** Capture the workspace scope and activity address, then combine stable git and
-    Keeper history with the existing durable coverage note. *)
+    Keeper history. A failed source leaves the other source visible, with its
+    failure reported in the listing. *)
 val launch_history_load
   :  Masc_tui_types.state
   -> host:string
@@ -49,7 +51,8 @@ val launch_blame_load
     Cancellation propagates; a missing switch delivers
     the existing error response instead of blocking on the request. *)
 val start_lsp_question
-  :  Masc_tui_types.state
+  :  ?line:int
+  -> Masc_tui_types.state
   -> host:string
   -> deliver:(Masc_tui_async_protocol.async_msg -> unit)
   -> report:(string -> string -> unit)

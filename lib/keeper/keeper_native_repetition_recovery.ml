@@ -20,7 +20,7 @@ let error_to_string = function
 
 let repetition result = Result.map_error (fun error -> Repetition_error error) result
 
-let observation (settled : Projection.settled_tool_invocation) =
+let observation ?base_path (settled : Projection.settled_tool_invocation) =
   match settled.result with
   | Agent_core.Types.ToolResult {tool_use_id; content; outcome; _} ->
     let* () = if String.equal tool_use_id
@@ -36,8 +36,8 @@ let observation (settled : Projection.settled_tool_invocation) =
           Error Unsupported_result_provenance in
     if not executed then Ok None
     else
-      let fingerprints = Keeper_tool_progress_identity.digest_tool_io
-          ~tool_name:settled.tool_name ~input:settled.input ~output_text:content in
+      let fingerprints = Keeper_tool_progress_identity.digest_tool_io ?base_path
+          ~tool_name:settled.tool_name ~input:settled.input ~output_text:content () in
       let* observation = Snapshot.observation ~tool_name:settled.tool_name
           ~input_fingerprint:(Option.map
             (fun (io : Keeper_tool_progress_identity.io_fingerprints) -> io.input_fingerprint)
@@ -57,7 +57,7 @@ let remove_once expected observations =
   in
   remove [] observations
 
-let reconcile ~scope ~seed ~checkpoint ~settled =
+let reconcile ?base_path ~scope ~seed ~checkpoint ~settled () =
   let owns state = match Snapshot.active state with
     | Some actual -> Keeper_execution_scope_id.equal actual scope
     | None -> false in
@@ -72,7 +72,7 @@ let reconcile ~scope ~seed ~checkpoint ~settled =
     else Ok (List.take current_count checkpoint_observations) in
   let* canonical_reversed = List.fold_left (fun acc settled ->
     let* acc = acc in
-    let* observed = observation settled in
+    let* observed = observation ?base_path settled in
     Ok (match observed with None -> acc | Some observed -> observed :: acc))
       (Ok []) settled in
   let* missing = List.fold_left (fun remaining recorded ->

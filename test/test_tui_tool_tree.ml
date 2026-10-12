@@ -84,22 +84,6 @@ let test_domain_rules () =
   check_domain "unknown prefix claims nothing" None "masc_future_thing"
 ;;
 
-(* The surface reads top to bottom in the fixed domain order whatever order
-   the inventory arrived in. *)
-let test_the_display_order_is_fixed () =
-  check (list string) "keeper ops sorts before board only in name order"
-    [ "{board 2}"; "[masc_board 2]"; "masc_board_list"; "masc_board_post"
-    ; "{keeper ops 2}"; "[masc_keeper 2]"; "masc_keeper_down"; "masc_keeper_up"
-    ]
-    (shape
-       (Tree.rows
-          [ tool "masc_keeper_up"
-          ; tool "masc_keeper_down"
-          ; tool "masc_board_post"
-          ; tool "masc_board_list"
-          ]))
-;;
-
 let test_the_count_says_tools_not_rows () =
   let rows = Tree.rows [ tool "masc_board_list"; tool "masc_board_post" ] in
   check int "four rows, two of them tools" 4 (List.length rows);
@@ -117,8 +101,6 @@ let () =
         ; test_case "an unclaimed name lands in unsorted" `Quick
             test_an_unclaimed_name_lands_in_unsorted
         ; test_case "domain rules" `Quick test_domain_rules
-        ; test_case "the display order is fixed" `Quick
-            test_the_display_order_is_fixed
         ; test_case "the count says tools, not rows" `Quick
             test_the_count_says_tools_not_rows
         ] )

@@ -63,8 +63,8 @@ let offered section =
    The whole list is pinned rather than its length, so the order is pinned too:
    what a side offers first is what most people take. *)
 let test_each_side_is_offered_what_can_do_its_half () =
-  Alcotest.(check (list string)) "speech out, the command kind first"
-    [ "macos_say"; "elevenlabs"; "openai_compatible"; "mcp_tool" ]
+  Alcotest.(check (list string)) "speech out, the command kinds first"
+    [ "macos_say"; "espeak_ng"; "elevenlabs"; "openai_compatible"; "mcp_tool" ]
     (offered Voice_setup.Tts);
   Alcotest.(check (list string)) "speech in, the same"
     [ "whisper_cli"; "elevenlabs"; "openai_compatible" ]
@@ -77,6 +77,9 @@ let test_a_command_is_asked_for_neither_an_address_nor_a_key () =
   Alcotest.(check (list string)) "say is asked for a name and a voice"
     [ "section"; "provider"; "name"; "voice"; "review" ]
     (steps (Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Macos_say));
+  Alcotest.(check (list string)) "espeak-ng is asked for the same"
+    [ "section"; "provider"; "name"; "voice"; "review" ]
+    (steps (Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Espeak_ng));
   Alcotest.(check (list string)) "whisper-cli is asked for the file it loads"
     [ "section"; "provider"; "name"; "model"; "review" ]
     (steps
@@ -261,7 +264,7 @@ let speaking ~provider ~voice =
     }
   in
   match provider with
-  | Voice_wizard.Macos_say -> draft
+  | Voice_wizard.Macos_say | Voice_wizard.Espeak_ng -> draft
   | Voice_wizard.Whisper_cli | Voice_wizard.Elevenlabs | Voice_wizard.Openai_compatible
   | Voice_wizard.Mcp_tool -> { draft with Voice_wizard.model = "a-model" }
 

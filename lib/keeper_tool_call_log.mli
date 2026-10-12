@@ -183,9 +183,21 @@ val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
     starts a background drain fiber. Callers that only invoke [init] keep the
     legacy synchronous append behavior, which is useful for CLI and tests. *)
 
+type flush_completion =
+  | All_committed
+  | All_committed_with_post_commit_failures of exn * exn list
+
+val flush_committed : unit -> flush_completion
+(** Drain under the shared append lock. Post-commit failures are retained in
+    the receipt while draining continues; an uncommitted failure requeues its
+    row and raises. Cancellation always propagates. A returned receipt means
+    the drain reached an empty queue with every taken row committed. *)
+
 val flush_now : unit -> unit
 (** Drain queued asynchronous appends immediately. Intended for shutdown and
-    focused tests. *)
+    focused tests. An uncommitted failure requeues the row and raises. Post-commit failures
+    are raised after draining the remaining rows; returning
+    normally means every row taken by this drain committed. *)
 
 val store_dir : unit -> string option
 (** [store_dir ()] returns the initialized durable store directory, if any. *)
@@ -333,6 +345,16 @@ type index_error = Index_unavailable of string
     back; the string is the index's own detail. Every reader below returns it
     rather than an empty list, so a caller can tell a ledger with no rows from
     a ledger it could not read. *)
+
+val read_after :
+  keeper_name:string -> after:Keeper_tool_call_index.frontier ->
+  project:(Yojson.Safe.t -> 'a option) ->
+  ('a Keeper_tool_call_index.batch, index_error) result
+(** Read authoritative tool-call rows after the per-file append frontier. *)
+
+val current_frontier :
+  keeper_name:string -> (Keeper_tool_call_index.frontier, index_error) result
+(** Capture committed append positions. This does not flush queued rows. *)
 
 val read_recent :
   ?keeper_name:string ->

@@ -30,6 +30,28 @@ describe('Browser activity TOML boundaries', () => {
     expect(readBrowserActivity(changed, 'stagehand').enabled).toBe(true)
     expect(changed).toContain('# note')
   })
+  // RFC-browser-keeper-firefox: the Keeper Firefox table under [browser.live].
+  it.each([
+    '[browser.live.bidi]\nfirefox = "/firefox"\nprofile = "/profile"\nport = 9333\n',
+    '[browser.live]\nenabled = true\n\n[browser.live.bidi]\nfirefox = "/firefox"\nprofile = "/profile"\n',
+    '[browser]\nlive.bidi = { firefox = "/firefox", profile = "/profile" }\n',
+  ])('keeps the Keeper Firefox table while each lane is edited: %s', source => {
+    for (const lane of ['live', 'automation', 'stagehand'] as const) {
+      expect(readBrowserActivity(source, lane)).toEqual({ enabled: true })
+      const changed = writeBrowserActivity(source, lane, false)
+      expect(readBrowserActivity(changed, lane)).toEqual({ enabled: false })
+      expect(changed).toContain('"/firefox"')
+      expect(changed).toContain('"/profile"')
+    }
+  })
+  it.each([
+    '[browser.live.bidi]\nheadless = true\n',
+    '[browser.live.bidi]\nport = "9222"\n',
+    '[browser.live.bidi]\nfirefox = 1\n',
+    '[browser.live]\nbidi = 1\n',
+  ])('refuses what the Keeper Firefox table does not take: %s', source => {
+    expect(() => readBrowserActivity(source, 'live')).toThrow()
+  })
   it('keeps flat driver paths intact when editing Live and moves them only for Automation', () => {
     const source = '[browser]\ngeckodriver="/driver"\nbinary="/firefox"\n[browser.stagehand]\nenabled=false\nchrome="/chrome"\nextension="/extension"\nprofile="/profile"\n[providers.extra]\nlabel="keep"\n'
     const live = writeBrowserActivity(source, 'live', false)

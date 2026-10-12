@@ -331,7 +331,7 @@ type success =
   ; provenance : plan_provenance
   ; raw_response : raw_response
   ; usage : Types.api_usage option
-      (** The token usage of this one attempt, as the wire's own response
+      (** The usage of this one attempt, as the wire's own response
           parser read it in the same parse of the body that [output] comes
           from. Its meaning is {!Types.api_usage}'s: [input_tokens] is the
           inclusive prompt total on every wire, the Anthropic exclusive count
@@ -346,9 +346,10 @@ type success =
           or, on Ollama, it reported zero for both the prompt and the output
           count.
 
-          [cost_usd] is [None] for all current HTTP wire parsers, including
-          OpenAI-compatible responses that report a provider cost. This field
-          carries token counts only; [None] does not establish zero cost.
+          [cost_usd] preserves a finite, nonnegative provider-reported charge
+          on OpenAI-compatible responses, including an explicit zero charge.
+          An absent or invalid charge remains [None]; [None] does not establish
+          zero cost. This is a reported charge, not a catalog-price estimate.
 
           It is not the flow's cost. An earlier candidate the caller rejected
           semantically keeps its own [success], and so its own usage, in

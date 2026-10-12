@@ -1,7 +1,7 @@
 
 (** Tool_registry — in-memory call counters and usage statistics.
 
-    Zero-allocation atomic counters for hot-path performance.
+    Immutable per-tool observations published atomically.
     Complements Telemetry_eio's JSONL persistence. Data resets on server restart.
 
     @since 0.1.0 *)
@@ -13,15 +13,15 @@ type call_source =
   | Agent_internal
 
 type call_stats = {
-  call_count : int Atomic.t;
-  success_count : int Atomic.t;
-  deferred_count : int Atomic.t;
-  failure_count : int Atomic.t;
-  last_called_at : float Atomic.t;
-  total_duration_ms : int Atomic.t;
-  external_mcp_count : int Atomic.t;
-  agent_internal_count : int Atomic.t;
-  last_assignment_id : string option Atomic.t;
+  call_count : int;
+  success_count : int;
+  deferred_count : int;
+  failure_count : int;
+  last_called_at : float;
+  total_duration_ms : int;
+  external_mcp_count : int;
+  agent_internal_count : int;
+  last_assignment_id : string option;
 }
 
 (** {1 Recording} *)
@@ -38,6 +38,8 @@ val record_call_if_known :
 
 (** {1 Queries} *)
 
+(** Returns retained immutable per-tool observations. Later recording or reset
+    does not change returned values. Different tools are sampled separately. *)
 val get_stats : unit -> (string * call_stats) list
 val get_top_n : int -> (string * call_stats) list
 val get_never_called : string list -> string list

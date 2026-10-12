@@ -33,7 +33,7 @@ type instance = {
 }
 type browser_activity = Browser_enabled | Browser_disabled | Browser_unobserved
 type machine_activity = Machine_enabled | Machine_disabled | Machine_unobserved
-type machine_publication = No_screen | Stable | Running
+type machine_publication = No_screen | Stable | Running | Publication_unavailable
 type state =
   | Exact_state of configuration
   | Browser_clients of browser_activity * int
@@ -176,7 +176,7 @@ let state json =
       Result.map (fun value -> Browser_executor (activity,value)) (get bool "registered" f)
   | "machine" -> let* f = fields ["kind";"activity";"publication"] json in
       let* activity = get machine_activity "activity" f in
-      let* value = get (function `String "no_screen" -> Ok No_screen | `String "stable" -> Ok Stable | `String "running" -> Ok Running | _ -> error "unknown machine publication") "publication" f in
+      let* value = get (function `String "no_screen" -> Ok No_screen | `String "stable" -> Ok Stable | `String "running" -> Ok Running | `String "unavailable" -> Ok Publication_unavailable | _ -> error "unknown machine publication") "publication" f in
       Ok (Machine_state (activity,value))
   | "package" -> let* f = fields ["kind";"declaration";"instances"] json in
       let* declaration = get (nullable declaration) "declaration" f in let* instances = get (list instance) "instances" f in

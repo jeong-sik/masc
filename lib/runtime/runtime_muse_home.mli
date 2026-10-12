@@ -74,6 +74,15 @@ val prepare_native_workspace :
 (** Private durable native-client workspace for endpoint-owned Keepers. This
     is independent of both guest filesystem coordinates and config storage. *)
 
+val keeper_identity : keeper_name:string -> account_home:string -> string
+(** Stable identity directory name for a Keeper's managed Muse workspace:
+    SHA-256 over the Keeper name and account home. Pure; creates nothing. *)
+
+val keeper_identity_dir :
+  runtime_root:string -> keeper_name:string -> account_home:string -> string
+(** [keeper_identity] below [<runtime_root>/official-clients/muse/]. Pure path
+    composition; creates nothing. *)
+
 module For_testing : sig
   val prepare_with_store_sync : sync_store:(string -> unit) -> account_home:string -> (t, error) result
   val check_directory_stat : private_:bool -> Unix.stats -> (unit, error) result

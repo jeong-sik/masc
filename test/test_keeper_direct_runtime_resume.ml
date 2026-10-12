@@ -672,8 +672,7 @@ let test_server_transcript_deferral_preserves_final_slot ~native () =
     check bool "runtime checkpoint does not consume terminal assistant slot" false
       (List.exists (fun (row : Keeper_chat_store.chat_message) ->
         Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.Assistant) pending);
-    let terminal = Server_keeper_operation_transcript.Terminal
-      {content="Final answer after alternate runtime"; kind=Keeper_chat_store.Row_kind.Utterance} in
+    let terminal = Server_keeper_operation_transcript.Reply "Final answer after alternate runtime" in
     persist (Some resumed_checkpoint) terminal [tool "exec-after-retry"];
     persist (Some resumed_checkpoint) terminal [tool "exec-after-retry"];
     let rows = Keeper_chat_store.load_all ~base_dir ~keeper_name in

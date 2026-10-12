@@ -40,7 +40,7 @@ let connect ~sw ~clock browser =
   (match Eio.Promise.await_exn registered with
    | Ok None -> ()
    | Ok (Some _) -> fail "a fresh client was handed a command nobody issued"
-   | Error error -> fail error);
+   | Error refusal -> fail (Lane.registration_refusal_to_wire refusal));
   Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:client.client_id));
   client
 ;;
@@ -73,7 +73,7 @@ let test_an_answer_delivered_as_the_timeout_passed_is_the_answer () =
     match Lane.take_command ~client_info:client ~window_sec:window_s with
     | Ok (Some command) -> command
     | Ok None -> fail "the issued command was not handed to its client"
-    | Error error -> fail error
+    | Error refusal -> fail (Lane.registration_refusal_to_wire refusal)
   in
   (* The timeout passes first: the timer's wake-up is queued. The answer
      then arrives, queuing the issuer's wake-up behind it. *)
@@ -107,7 +107,7 @@ let test_a_command_taken_as_the_window_passed_is_delivered () =
     match Eio.Promise.await_exn taken with
     | Ok (Some command) -> command
     | Ok None -> fail "the command issued as the window passed was consumed and dropped"
-    | Error error -> fail error
+    | Error refusal -> fail (Lane.registration_refusal_to_wire refusal)
   in
   (match Lane.deliver_result ~client_id:client.client_id ~id:command.id ~payload with
    | Ok () -> ()

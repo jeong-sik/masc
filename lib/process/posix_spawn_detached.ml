@@ -1,0 +1,168 @@
+external posix_spawn
+  :  string
+  -> string array
+  -> string array
+  -> (string option * bool)
+  -> (int * Unix.file_descr) list
+  -> int
+  = "masc_posix_spawn"
+
+type t = { pid : int; started : string option; exited : Unix.process_status option Eio.Promise.t }
+
+external darwin_start : int -> string option = "masc_process_start_time"
+
+(* /proc/<pid>/stat field 22, counted after the command in parentheses,
+   which may itself hold spaces and parentheses. starttime counts from boot,
+   so the boot names it too. *)
+let linux_start pid =
+  let read path = In_channel.with_open_bin path In_channel.input_all in
+  match read (Printf.sprintf "/proc/%d/stat" pid), read "/proc/sys/kernel/random/boot_id" with
+  | exception Sys_error _ -> None
+  | stat, boot ->
+    (match String.rindex_opt stat ')' with
+     | None -> None
+     | Some close ->
+       let after = String.sub stat (close + 1) (String.length stat - close - 1) in
+       (match List.filter (fun field -> field <> "") (String.split_on_char ' ' (String.trim after)) with
+        | fields when List.length fields > 19 ->
+          Some (Printf.sprintf "proc:%s:%s" (String.trim boot) (List.nth fields 19))
+        | _ :: _ | [] -> None))
+
+let process_start pid =
+  match darwin_start pid with
+  | Some _ as started -> started
+  | None -> linux_start pid
+
+let rec reaped pid =
+  match Unix.waitpid [ Unix.WNOHANG ] pid with
+  | 0, _ -> None
+  | _, status -> Some (Some status)
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> reaped pid
+  | exception Unix.Unix_error (Unix.ECHILD, _, _) -> Some None
+
+let standard fd = fd = Unix.stdin || fd = Unix.stdout || fd = Unix.stderr
+
+(* posix_spawn applies the descriptor actions in order, so a source that is
+   itself 0, 1 or 2 would be overwritten by an earlier action before it is
+   copied. A process whose standard descriptors are closed gets one of those
+   numbers for the next file it opens. Every descriptor this opens or copies
+   goes into [opened], which the caller closes once. *)
+let above_standard ~opened fd =
+  let rec lift fd =
+    if standard fd then begin
+      let copy = Unix.dup ~cloexec:true fd in
+      opened := copy :: !opened;
+      lift copy
+    end
+    else fd
+  in
+  lift fd
+
+let spawn_with ~opened ~executable ~argv ~env ~output =
+  let devnull = Unix.openfile "/dev/null" [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+  opened := devnull :: !opened;
+  let devnull = above_standard ~opened devnull in
+  let output = above_standard ~opened output in
+  posix_spawn executable (Array.of_list argv) env (None, true) [ 0, devnull; 1, output; 2, output ]
+
+let spawn ~sw ~argv ~env ~output =
+  match argv with
+  | [] -> Error "posix_spawn: empty argv"
+  | executable :: _ ->
+    (* Only a backend that installs a SIGCHLD handler broadcasts the
+       condition [reaped] waits on (see Posix_spawn_process_mgr). *)
+    Eio_unix.Process.install_sigchld_handler ();
+    let opened = ref [] in
+    let started =
+      Fun.protect
+        ~finally:(fun () ->
+          List.iter (fun fd -> try Unix.close fd with Unix.Unix_error _ -> ()) !opened)
+        (fun () ->
+          match spawn_with ~opened ~executable ~argv ~env ~output with
+          | pid -> Ok pid
+          | exception Unix.Unix_error (code, call, target) ->
+            (* [target] is what [call] failed on: "/dev/null" for openfile,
+               the executable for posix_spawn, nothing for dup. *)
+            let call = if String.equal target "" then call else Printf.sprintf "%s %s" call target in
+            Error (Printf.sprintf "%s: %s" call (Unix.error_message code)))
+    in
+    Result.map
+      (fun pid ->
+        (* Read before the reaper below can reap it: until then the number is
+           this child's, even if it has already exited. *)
+        let start = process_start pid in
+        let exited, set_exited = Eio.Promise.create () in
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+          Eio.Promise.resolve set_exited
+            (Eio.Condition.loop_no_mutex Eio_unix.Process.sigchld (fun () -> reaped pid));
+          `Stop_daemon);
+        { pid; started = start; exited })
+      started
+
+(* kill(2) reads 0 as the caller's own group and -1 as every process the
+   caller may signal, so neither is a group here. EPERM is either a group of
+   another account's processes or, on Darwin, one whose members are all
+   exiting or zombies (Process_group_members); the kernel's member snapshot
+   tells them apart, and without one the group is taken to be there. *)
+let group_id_has_members group =
+  group > 1
+  &&
+  match Unix.kill (-group) 0 with
+  | () -> true
+  | exception Unix.Unix_error (Unix.ESRCH, _, _) -> false
+  | exception Unix.Unix_error (Unix.EPERM, _, _) ->
+    Option.value ~default:true (Process_group_members.live_member_left group)
+
+let group_has_members t = group_id_has_members t.pid
+
+let signal_group_id group signal =
+  if group_id_has_members group then
+    match Unix.kill (-group) signal with
+    | () -> ()
+    (* It emptied between the two calls, or its processes are not this
+       account's to signal. *)
+    | exception Unix.Unix_error ((Unix.ESRCH | Unix.EPERM), _, _) -> ()
+
+type stopped = Ended_on_term | Killed_after_grace | Left_alone
+
+let group_poll_s = 0.1
+
+(* SIGKILL ends a process once it returns to user space; one in an
+   uninterruptible wait ends later. *)
+let kill_settle_s = 1.
+
+let await_empty ~clock ~seconds group =
+  let deadline = Monotonic_deadline.after ~seconds in
+  let rec wait () =
+    if group_id_has_members group && not (Monotonic_deadline.passed deadline) then (
+      Eio.Time.sleep clock group_poll_s;
+      wait ())
+  in
+  wait ()
+
+(* A group that empties gives its number up, and a later process may lead a
+   group with it, so the number is checked again before each signal. *)
+let stop_group ~clock ~grace_s ~same_group group =
+  if not (same_group ()) then Left_alone
+  else (
+    signal_group_id group Sys.sigterm;
+    let deadline = Monotonic_deadline.after ~seconds:grace_s in
+    let rec wait () =
+      if not (group_id_has_members group) then Ended_on_term
+      else if not (Monotonic_deadline.passed deadline) then (
+        Eio.Time.sleep clock group_poll_s;
+        wait ())
+      else if same_group () then (
+        signal_group_id group Sys.sigkill;
+        await_empty ~clock ~seconds:kill_settle_s group;
+        Killed_after_grace)
+      else Left_alone
+    in
+    wait ())
+
+external process_group_of : int -> int = "masc_process_group_of"
+
+let group_of_pid pid =
+  match process_group_of pid with
+  | group -> Ok group
+  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)

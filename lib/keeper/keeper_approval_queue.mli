@@ -113,6 +113,7 @@ val continuation_settled_chat_projection_present :
     resolution is delivered again. *)
 
 type continuation_projection_result =
+  Keeper_approval_queue_result.continuation_projection_result =
   | Continuation_projection_recorded
   | Continuation_projection_not_ready
 

@@ -647,6 +647,7 @@ let parse_capabilities provider_json =
   let* supports_document_input = member_bool "supports_document_input" cap_json in
   let* supports_native_streaming = member_bool "supports_native_streaming" cap_json in
   let* supports_system_prompt = member_bool "supports_system_prompt" cap_json in
+  let* supports_assistant_prefill = member_bool "supports_assistant_prefill" cap_json in
   let* supports_prompt_caching = member_bool "supports_prompt_caching" cap_json in
   let* supports_top_k = member_bool "supports_top_k" cap_json in
   let* supports_min_p = member_bool "supports_min_p" cap_json in
@@ -723,6 +724,9 @@ let parse_capabilities provider_json =
     |> fun caps ->
     override supports_system_prompt caps (fun caps value ->
       { caps with Capabilities.supports_system_prompt = value })
+    |> fun caps ->
+    override supports_assistant_prefill caps (fun caps value ->
+      { caps with Capabilities.supports_assistant_prefill = value })
     |> fun caps ->
     override supports_prompt_caching caps (fun caps value ->
       { caps with Capabilities.supports_prompt_caching = value })

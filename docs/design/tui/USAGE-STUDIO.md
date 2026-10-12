@@ -10,4 +10,4 @@ Trend gives each scope a heading, window label and readable sparkline. Keepers g
 
 References: [Lip Gloss](https://github.com/charmbracelet/lipgloss) for bordered composition, [btop](https://github.com/aristocratos/btop) for aligned meters, and [Textual layouts](https://textual.textualize.io/guide/layout/) for responsive composition. These inform presentation, not quota semantics.
 
-Verification uses `test_tui_overview_providers`, `test_tui_keys`, `test_tui_keyboard_input-dashboard-usage` and `test_tui_usage_studio_pty`. The focused PTY suite emits original ANSI frames, dimensions, binary hash and rendered text. Targeted Test CI replays those frames through ttyd/xterm in Chromium and checks observed terminal rows before saving screenshots. Artifacts are CI fixture evidence; they do not prove the installed or production screen.
+Verification uses `test_tui_overview_providers` and `test_tui_keys`.

@@ -32,6 +32,3 @@ val lanes_of_decls :
 val validate_runtime_max_context : Runtime_instance.t list -> (unit, Runtime_config_error.load_failure) result
 val validate_runtime_context_marks : Runtime_instance.t list -> (unit, Runtime_config_error.load_failure) result
 (** Refuse a high-water mark above the materialized context window. *)
-
-val validate_muse_prompt_ceilings : Runtime_instance.t list -> (unit, Runtime_config_error.load_failure) result
-(** Refuse a Muse window below its host overhead. *)

@@ -1,0 +1,17 @@
+Testing `fs_atomic_orphan_sweep_10130'.
+This run has ID `2Q67SZYC'.
+
+  [OK]          name-matcher            0   strict prefix+suffix match.
+  [OK]          sweep-behavior          0   zero-byte at base: deleted.
+  [OK]          sweep-behavior          1   non-zero: preserved in .recovered/.
+  [OK]          sweep-behavior          2   non-orphan files untouched.
+  [OK]          sweep-behavior          3   idempotent: second call is noop.
+  [OK]          sweep-behavior          4   mixed batch (prod-shaped).
+  [OK]          sweep-behavior          5   symlink ancestor is rejected.
+  [OK]          sweep-behavior          6   symlink recovery directory rejected.
+  [OK]          sweep-behavior          7   non-regular orphan rejected.
+  [OK]          sweep-behavior          8   preservation never overwrites.
+  [OK]          sweep-behavior          9   recovery creation failure surfaced.
+
+Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/fs_atomic_orphan_sweep_10130'.
+Test Successful in 0.011s. 11 tests run.

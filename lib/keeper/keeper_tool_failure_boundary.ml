@@ -12,6 +12,7 @@ let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
   (* A spawn that started leaves a process running with no
      handle in the caller's hands if the call then fails, which
      is the same shape of loss Execute has. *)
+  | Keeper_tool_descriptor.Tool_lane_addon _
   | Keeper_tool_descriptor.Tool_execute
   | Keeper_tool_descriptor.Tool_browser_act
   | Keeper_tool_descriptor.Tool_browser_instruct
@@ -54,6 +55,7 @@ let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
     | Keeper_tool_descriptor.Tool_skill_validate
     | Keeper_tool_descriptor.Tool_workspace_memory_read
     | Keeper_tool_descriptor.Tool_memory_search
+    | Keeper_tool_descriptor.Tool_memory_select
     | Keeper_tool_descriptor.Tool_constitution_write
     | Keeper_tool_descriptor.Tool_constitution_read
     | Keeper_tool_descriptor.Tool_constitution_remove

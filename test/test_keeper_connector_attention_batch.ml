@@ -1418,7 +1418,7 @@ let test_official_turn_keeps_tool_result_until_completion () =
                !handed_off;
              Keeper_agent_run.For_testing.official_client_tool_boundary
                ~repetition_execution:None
-               ~tool_calls:[] ())
+               ~tool_calls:[] ~input_tool_calls:[] ())
            ~raw_trace_run:None ()
        in
        let tool =
@@ -1443,7 +1443,7 @@ let test_official_turn_keeps_tool_result_until_completion () =
           Keeper_agent_run.For_testing.native_tool_boundary
             ~keeper_name ~repetition_execution:None
             ~terminal_effect_state:Keeper_tools_agent_core.Terminal_effect_open
-            ~tool_calls:[] ~assistant_turn_texts:[]
+            ~tool_calls:[] ~input_tool_calls:[] ~assistant_turn_texts:[]
             ~yield_requested:(Some (fun () ->
               Keeper_unified_turn.autonomous_yield_request
                 ~base_path ~keeper_name))

@@ -95,6 +95,8 @@ type dashboard_auth_state =
 
 type ws_session = {
   id : string;
+  runtime_authority : Sse.runtime_authority;
+      (** Bound by the HTTP upgrade; dashboard authentication cannot switch it. *)
   wsd : Ws_direct_core.Endpoint.Wsd.t;
   closed : bool Atomic.t;
   write_mutex : Stdlib.Mutex.t;
@@ -186,7 +188,7 @@ val session_count : unit -> int
     hook, the bootstrap loops, and the read-model
     transport probe. *)
 
-val new_session : id:string -> wsd:Ws_direct_core.Endpoint.Wsd.t -> ws_session
+val new_session : runtime_authority:Sse.runtime_authority -> id:string -> wsd:Ws_direct_core.Endpoint.Wsd.t -> ws_session
 (** Builds a fresh {!ws_session} with [closed = false]
     and the dashboard handshake state cleared.  Caller
     inserts the result into {!sessions} under
@@ -273,6 +275,7 @@ val respond_and_drive_upgrade :
     drop-in for the former Httpun_ws.Server_connection.  RFC-0287 §4.1. *)
 
 val upgrade_connection :
+  runtime_authority:Sse.runtime_authority ->
   ?sw:Eio.Switch.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?on_message:(string -> string -> unit) ->
@@ -285,7 +288,8 @@ val upgrade_connection :
     threaded from the route via {!Http_server_eio.Router.ws_get}.  When [sw]
     and [clock] are provided, forks the protocol-level heartbeat on a
     per-connection switch (a child of [sw]) and closes the session after a
-    configurable number of missed pongs. *)
+    configurable number of missed pongs. [runtime_authority] is the canonical
+    root used to authorize this HTTP upgrade and scopes its observer events. *)
 
 (** {1 Outbound delivery} *)
 

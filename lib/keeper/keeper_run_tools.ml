@@ -20,6 +20,7 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
   ; historical_tool_calls : tool_call_detail list
+  ; historical_order : Keeper_run_tools_hook_accumulator.historical_order
   ; history_pairs_at_setup : int option
   ; mutable current_turn : int
   ; mutable tool_surface : tool_surface_metrics
@@ -31,7 +32,7 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   ; mutable prompt_blocks : Turn_record.prompt_block list
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
-  ; mutable extra_system_context_blocks : (Prompt_block_id.t * string) list option
+  ; mutable extra_system_context_assembly : Keeper_context_assembly.t option
   ; mutable assistant_turn_texts : string list
   ; mutable wire_prompt_tokens : Keeper_agent_result.wire_prompt_tokens option
   }
@@ -50,6 +51,7 @@ type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =
 type agent_setup = Keeper_run_tools_hooks.agent_setup =
   { tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
+  ; identity_tool_index : Keeper_identity_tool_index.t
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
   ; agent_cell : Agent_core.Agent.t option ref
@@ -58,6 +60,7 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; model_message : Keeper_gate_replay.model_message
   ; hooks : Agent_core.Hooks.hooks
   ; on_runtime_attempt : Keeper_turn_driver.runtime_attempt -> unit
+  ; on_memory_capacity_refusal : Keeper_memory_delivery_reprojection.t
   ; model_input_projection : Agent_core.Agent.model_input_projection
   ; stage_skill_delivery_on_wire :
       runtime_id:string -> agent_core_turn:int -> Agent_core.Types.message list -> unit

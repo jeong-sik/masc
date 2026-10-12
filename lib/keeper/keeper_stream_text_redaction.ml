@@ -16,16 +16,38 @@ type held =
   { index : int
   ; channel : channel
   ; stream : Keeper_secret_redaction.stream_state
+  ; mutable next_byte : int
+  ; mutable consumed : int
+  ; awaiting : chunk Queue.t
   }
 
-(* At most one block is held: a content event of any other block releases it
-   first (see the .mli), so the next held block starts empty. *)
+and chunk =
+  { owner : held
+  ; first_byte : int
+  ; past_byte : int
+  ; output : Buffer.t
+  }
+
+type pending =
+  | Content of chunk
+  | Boundary of Agent_core.Types.sse_event
+
+module Indexes = Set.Make (Int)
+
+(* Buffers belong to a channel, while authored chunks retain their arrival
+   positions across channels. Redaction may consume a secret spanning several
+   chunks; it may not move the surrounding speech across Thinking. *)
 type t =
   { redaction : Keeper_secret_redaction.t
-  ; mutable held : held option
+  ; mutable held : held list
+  ; pending : pending Queue.t
+  ; mutable authored_indexes : Indexes.t
+  ; mutable announced_indexes : Indexes.t
   }
 
-let create redaction = { redaction; held = None }
+let create redaction =
+  { redaction; held = []; pending = Queue.create (); authored_indexes = Indexes.empty;
+    announced_indexes = Indexes.empty }
 
 let delta_event ~index channel text =
   let delta =
@@ -43,29 +65,148 @@ let emitted ~index channel text =
   if String.equal text "" then [] else [ delta_event ~index channel text ]
 ;;
 
-let flush t =
-  match t.held with
-  | None -> []
-  | Some { index; channel; stream } ->
-    t.held <- None;
-    emitted ~index channel (Keeper_secret_redaction.redact_stream_finish stream)
+let drain t =
+  let rec loop reversed =
+    match Queue.peek_opt t.pending with
+    | None -> List.rev reversed
+    | Some (Boundary event) ->
+      ignore (Queue.take t.pending);
+      loop (event :: reversed)
+    | Some (Content slot) ->
+      let released = emitted ~index:slot.owner.index slot.owner.channel
+        (Buffer.contents slot.output) in
+      Buffer.clear slot.output;
+      let reversed = List.rev_append released reversed in
+      if slot.owner.consumed >= slot.past_byte then begin
+        ignore (Queue.take t.pending);
+        loop reversed
+      end else List.rev reversed
+  in
+  loop []
 ;;
 
+(* A codepoint split between provider chunks belongs to the chunk containing
+   its first byte. Never serialize the continuation bytes as another string. *)
+let following_char_boundary text offset =
+  let before = String_util.utf8_char_boundary text offset in
+  if before = offset then offset
+  else before + Uchar.utf_decode_length (String.get_utf_8_uchar text before)
+
+let accept_release owner (release : Keeper_secret_redaction.stream_release) =
+  owner.consumed <- release.consumed;
+  match owner.channel with
+  | Tool_arguments ->
+    emitted ~index:owner.index Tool_arguments (Secret_patterns.render_pieces release.pieces)
+  | Text | Thinking ->
+    List.iter (fun piece ->
+      let source = match piece with
+        | Secret_patterns.Copied {source; _} | Masked {source; _} -> source in
+      (* Mapped ranges are contiguous and monotone. Retire each attributed
+         chunk once; completed chunks waiting behind a different channel are
+         never scanned again. The global queue controls publication only. *)
+      let rec distribute () =
+        match Queue.peek_opt owner.awaiting with
+        | None -> ()
+        | Some slot when slot.first_byte >= source.past_byte -> ()
+        | Some slot ->
+          (match piece with
+           | Secret_patterns.Copied {source; text} ->
+             let first = max source.first_byte slot.first_byte in
+             let past = min source.past_byte slot.past_byte in
+             if first < past then begin
+               let first = following_char_boundary text (first - source.first_byte) in
+               let past = following_char_boundary text (past - source.first_byte) in
+               Buffer.add_substring slot.output text first (past - first)
+             end
+           | Secret_patterns.Masked {source; replacement} ->
+             if slot.first_byte <= source.first_byte && source.first_byte < slot.past_byte
+             then Buffer.add_string slot.output replacement);
+          if slot.past_byte <= source.past_byte then begin
+            ignore (Queue.take owner.awaiting);
+            distribute ()
+          end
+      in
+      distribute ()) release.pieces;
+    []
+
+let flush_where t owns =
+  let released, kept = List.partition owns t.held in
+  t.held <- kept;
+  let arguments = List.concat_map (fun held ->
+    accept_release held (Keeper_secret_redaction.redact_stream_finish_mapped held.stream)) released in
+  drain t @ arguments
+
+let flush t =
+  let released = flush_where t (fun _ -> true) in
+  t.authored_indexes <- Indexes.empty;
+  t.announced_indexes <- Indexes.empty;
+  released
+
+let announce_content t ~index channel =
+  let content_type = match channel with
+    | Text -> Some "text" | Thinking -> Some "thinking" | Tool_arguments -> None in
+  match content_type with
+  | None -> []
+  | Some content_type ->
+    t.authored_indexes <- Indexes.add index t.authored_indexes;
+    if Indexes.mem index t.announced_indexes then []
+    else begin
+      t.announced_indexes <- Indexes.add index t.announced_indexes;
+      [ Agent_core.Types.ContentBlockStart
+          {index; content_type; tool_id=None; tool_name=None} ]
+    end
+
+let owns_channel ~index channel held =
+  Int.equal held.index index && channel_equal held.channel channel
+
 let feed t ~index channel text =
-  let released, stream =
-    match t.held with
-    | Some held when Int.equal held.index index && channel_equal held.channel channel ->
-      [], held.stream
-    | Some _ | None ->
-      let released = flush t in
+  (* The typed delta establishes index occupancy even while its text is held.
+     A later malformed tool header cannot acquire this model-content index. *)
+  let header = announce_content t ~index channel in
+  let owner =
+    match List.find_opt (owns_channel ~index channel) t.held with
+    | Some held -> held
+    | None ->
       let stream = Keeper_secret_redaction.create_stream_state t.redaction in
-      t.held <- Some { index; channel; stream };
-      released, stream
+      let held = {index; channel; stream; next_byte=0; consumed=0; awaiting=Queue.create ()} in
+      t.held <- t.held @ [ held ];
+      held
   in
-  released @ emitted ~index channel (Keeper_secret_redaction.redact_stream_chunk stream text)
+  let first_byte = owner.next_byte in
+  owner.next_byte <- first_byte + String.length text;
+  (match channel with
+   | Tool_arguments -> ()
+   | Text | Thinking ->
+     if not (String.equal text "") then begin
+       let slot = {owner; first_byte; past_byte=owner.next_byte;
+         output=Buffer.create (String.length text)} in
+       Queue.add slot owner.awaiting;
+       Queue.add (Content slot) t.pending
+     end);
+  let arguments = accept_release owner
+    (Keeper_secret_redaction.redact_stream_chunk_mapped owner.stream text) in
+  header @ drain t @ arguments
 ;;
 
 let whole t text = Keeper_secret_redaction.redact_text t.redaction text
+
+let replace_snapshot t ~index channel event =
+  (* Snapshot values replace their channel, rather than appending to its
+     unpublished partial value. Never publish the superseded tail. *)
+  let header = announce_content t ~index channel in
+  let discarded, kept = List.partition (owns_channel ~index channel) t.held in
+  t.held <- kept;
+  List.iter (fun owner ->
+    owner.consumed <- owner.next_byte;
+    Queue.clear owner.awaiting;
+    Queue.iter (function
+      | Content slot when slot.owner == owner -> Buffer.clear slot.output
+      | Content _ | Boundary _ -> ()) t.pending) discarded;
+  match channel with
+  | Tool_arguments -> drain t @ [ event ]
+  | Text | Thinking ->
+    Queue.add (Boundary event) t.pending;
+    header @ drain t
 
 let on_event t (event : Agent_core.Types.sse_event) =
   let open Agent_core.Types in
@@ -78,14 +219,20 @@ let on_event t (event : Agent_core.Types.sse_event) =
   | ContentBlockDelta { index; delta = InputJsonDelta text } ->
     feed t ~index Tool_arguments text
   | ContentBlockDelta { index; delta = TextSnapshot text } ->
-    flush t @ [ ContentBlockDelta { index; delta = TextSnapshot (whole t text) } ]
+    replace_snapshot t ~index Text
+      (ContentBlockDelta { index; delta = TextSnapshot (whole t text) })
   | ContentBlockDelta { index; delta = InputJsonSnapshot text } ->
-    flush t @ [ ContentBlockDelta { index; delta = InputJsonSnapshot (whole t text) } ]
-  | ContentBlockDelta
-      { delta = ThinkingSignatureDelta _ | RedactedThinkingSnapshot _ | MediaDelta _; _ }
-  | ContentBlockStart _
-  | ContentBlockStop _
-  | MessageStart _
+    replace_snapshot t ~index Tool_arguments
+      (ContentBlockDelta { index; delta = InputJsonSnapshot (whole t text) })
+  | ContentBlockStop { index } ->
+    let released = flush_where t (fun held -> Int.equal held.index index) in
+    if Indexes.mem index t.authored_indexes then begin
+      Queue.add (Boundary event) t.pending;
+      released @ drain t
+    end else released @ [event]
+  | ContentBlockStart {index; _} ->
+    t.announced_indexes <- Indexes.add index t.announced_indexes;
+    [event]
   | MessageDelta { stop_reason = Some _; _ }
   | MessageStop
   | SSEError _
@@ -98,6 +245,9 @@ let on_event t (event : Agent_core.Types.sse_event) =
   | Timeout _
   | StreamIncomplete _
   | StreamRepeating _ -> flush t @ [ event ]
+  | ContentBlockDelta
+      { delta = ThinkingSignatureDelta _ | RedactedThinkingSnapshot _ | MediaDelta _; _ }
+  | MessageStart _
   | Ping | Connected | MessageDelta { stop_reason = None; _ } -> [ event ]
 ;;
 

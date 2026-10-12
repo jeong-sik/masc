@@ -1,0 +1,5 @@
+(include_subdirs no)
+(library
+ (name machine_pad_layout)
+ (public_name masc.machine_pad_layout)
+ (libraries yojson))

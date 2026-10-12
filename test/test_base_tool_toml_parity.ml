@@ -16,6 +16,7 @@ let expected =
   ; "keeper_lane_status"
   ; "keeper_workspace_memory_read"
   ; "keeper_memory_search"
+  ; "keeper_memory_select"
   ; "keeper_memory_retract"
   ; "keeper_memory_write"
   ; "keeper_constitution_write"

@@ -7,6 +7,7 @@ type error =
   | Invalid_package of string
   | Docker_failed of { operation : string; detail : string }
   | Protocol_failed of string
+  | Host_refusal of Lane_addon_call_context.host_refusal
   | Invalid_observation of string
   | Stopped
 
@@ -28,6 +29,7 @@ val start :
   mgr:_ Eio.Process.mgr ->
   instance_id:string ->
   package:Lane_addon_types.package ->
+  ?state_owner:Lane_addon_worker_state.owner ->
   ?mounts:mount list ->
   ?docker_command:string ->
   ?on_created:(t -> unit) ->
@@ -54,7 +56,18 @@ val recover_stop :
   clock:_ Eio.Time.clock -> control_timeout_sec:float ->
   mgr:_ Eio.Process.mgr ->
   instance_id:string -> container_id:string option ->
+  ?state_owner:Lane_addon_worker_state.owner ->
   ?docker_command:string -> unit -> (unit, error) result
+
+(** Only manifest-declared tools, resolved against the initialized worker's
+    MCP inventory. Empty before initialization and once shutdown begins. *)
+val exported_tools : t -> Mcp_protocol.Mcp_types.tool list
+
+val call_exported_tool : ?on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> ?authorize:Lane_addon_call_context.mediation -> ?principal:Lane_addon_call_context.principal -> t -> name:string -> arguments:Yojson.Safe.t ->
+  (Mcp_protocol.Mcp_types.tool_result, error) result
+(** Calls only a declared, initialized export. A stop revokes admission before
+    resource cleanup. After dispatch, transport failure does not prove absence
+    of effects and must not trigger automatic replay. *)
 
 val action_schema : t -> Yojson.Safe.t option
 val act : t -> arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, error) result

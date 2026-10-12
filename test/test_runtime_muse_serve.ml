@@ -1096,11 +1096,22 @@ let test_absent_durability_admits_the_v1_durable_host () =
        | Error error -> fail (Serve.error_to_string error))
 ;;
 
+let test_completed_message_presence () =
+  let blank = {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"v:8","item":{"itemId":"m-1","kind":"agentMessage","turnId":"t-1","revision":2,"status":"completed","text":""}}}|} in
+  List.iter (fun (frames, expected) ->
+    run_scripted (handshake_and_session ~granted:[] @ frames @ [Write turn_completed])
+      (fun result _ -> match result with
+       | Ok turn -> check (option string) "completed message presence" expected turn.text
+       | Error error -> fail (Serve.error_to_string error)))
+    [[], None; [Write blank], Some ""]
+;;
+
 let () =
   run
     "runtime_muse_serve"
     [ ( "turn"
-      , [ test_case "turn with tool and approval" `Quick test_turn_with_tool_and_approval
+      , [ test_case "completed message presence" `Quick test_completed_message_presence
+        ; test_case "turn with tool and approval" `Quick test_turn_with_tool_and_approval
         ; test_case "auth required" `Quick test_auth_required
         ; test_case "compaction reaches the stream" `Quick test_compaction_reaches_the_stream
         ; test_case "exit code is typed" `Quick test_exit_code_is_typed

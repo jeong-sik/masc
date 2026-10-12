@@ -15,6 +15,17 @@ val pending_log : base_path:string -> string
     entry or delivery that changed. The snapshot is rewritten, and this log
     emptied, only when the rows outnumber the entries they describe (see
     [Keeper_approval_queue]). *)
+
+val late_approval_log : base_path:string -> string
+(** Append-only decision journal for late approvals (task-1665, design D2).
+    One journal per gate root, not one per workspace: a boot restores every
+    remembered late approval with a single file read, matching the
+    [Keeper_late_approval] singleton it feeds. Every record binds the
+    caller's authenticated workspace [base_path], so workspaces that share
+    this root cannot have their decisions distributed to each other — the
+    record, not the file, carries the workspace boundary. Append-only with
+    fsync per record: a crash can leave a tail, never lose an acknowledged
+    write, and the file is never rewritten in place. *)
 val replay_results : base_path:string -> string
 (** Derived host-replay result references live beside [pending.json].
     Source: one consumed approval plus its exact effect result. Purpose: recover

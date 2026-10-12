@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-09",
+  "parent": "c4517f39133cd0c23baae70306db5ebdc719f618",
+  "builds": [
+    {
+      "command": "opam exec -- dune build --root . -j 4 test/test_keeper_approval_queue.exe test/test_keeper_hitl_replay_delivery.exe test/keeper_chat_operations/test_keeper_direct_gate_wait.exe",
+      "exit_code": 0,
+      "log": "build.log"
+    },
+    {
+      "command": "opam exec -- dune build --root . -j 4 test/test_keeper_native_continuation_projection.exe",
+      "exit_code": 0,
+      "log": "native-build.log"
+    }
+  ],
+  "tests": [
+    {
+      "command": "opam exec -- dune exec --root . --no-build ./test/test_keeper_approval_queue.exe -- test 'nonhierarchical queue' '5,12,18,23-26,50-51,53,55-57,61' --color=never",
+      "exit_code": 0,
+      "executed_cases": 14,
+      "log": "queue.log"
+    },
+    {
+      "command": "_build/default/test/test_keeper_approval_queue.exe test 'call summary' --color=never",
+      "exit_code": 0,
+      "executed_cases": 1,
+      "log": "call-summary.log"
+    },
+    {
+      "command": "_build/default/test/test_keeper_hitl_replay_delivery.exe --color=never",
+      "exit_code": 0,
+      "executed_cases": 16,
+      "log": "delivery.log"
+    },
+    {
+      "command": "_build/default/test/keeper_chat_operations/test_keeper_direct_gate_wait.exe --color=never",
+      "exit_code": 0,
+      "executed_cases": 13,
+      "log": "gate-wait.log"
+    },
+    {
+      "command": "_build/default/test/test_keeper_native_continuation_projection.exe --color=never",
+      "exit_code": 0,
+      "executed_cases": 1,
+      "log": "native.log"
+    }
+  ],
+  "unique_cases": 45,
+  "initial_failure": {
+    "command": "_build/default/test/test_keeper_approval_queue.exe test 'nonhierarchical queue' '5,12,18,23-26,50-51,53,55-57,61' --color=never",
+    "exit_code": 1,
+    "executed_cases": 14,
+    "failed_cases": [
+      12
+    ],
+    "log": "queue-direct-before.log",
+    "reason": "Direct invocation omits DUNE_SOURCEROOT, so the managed Gate replay prompt is absent. Dune exec --no-build supplies the intended test context; same binary and assertions then pass."
+  },
+  "scope": "Focused macOS compilation and isolated durable-store/chat/intake scenarios only. No live Keeper, provider execution, CI, installation, deployment, or visible UI evidence."
+}

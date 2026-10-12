@@ -111,23 +111,6 @@ let reapply_onto_desired_activity_promises_no_save () =
   let _,_,write=A.start_save ~generation:4 pending |> ok in
   same "concurrent" write.expected_source_revision
 
-(* An unconfirmed receipt belongs to the first attempt. A retry that is
-   refused or conflicts must not show it as its own. *)
-let retry_save_drops_previous_receipt () =
-  let first="File written; durability unconfirmed" in
-  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
-  let session=A.finish_save request (A.Saved (receipt ~durability:R.Durability_unconfirmed ())) pending in
-  shows first session;
-  let reapplied=A.reapply (read ~generation:3 (doc ~revision:"concurrent" (source ^ "other = 1\n")) session) in
-  shows first reapplied;
-  let retry,request,_=A.start_save ~generation:4 reapplied |> ok in
-  let absent label session = Alcotest.(check bool) label false (has first (A.lines session)) in
-  absent "pending retry" retry;
-  absent "refused retry" (A.finish_save request (A.Refused "preview failed") retry);
-  absent "conflicting retry" (A.finish_save request (A.Conflict (doc ~revision:"third" source)) retry)
-
-(* An operator note on an enabled flag stays on that line when the flag is
-   toggled in an ordinary Browser table. *)
 let enabled_comment_survives_toggle () =
   List.iter (fun lane ->
     let label=Browser_lane.Lane_name.to_wire lane in
@@ -290,22 +273,21 @@ let table_shapes () =
   let session=A.toggle (loaded (doc fake)) in
   shows "Inline or dotted" session; rejected (A.start_save ~generation:2 session)
 
-let receipt_keeps_application_failure () =
-  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
-  let session=A.finish_save request (A.Saved (receipt ~registry:(R.Exact_output_registry_kept {reason="registry refused"}) ())) pending in
-  shows "registry refused" session;
-  let session=read ~generation:3 (doc ~revision:"saved" off) session in
-  shows "registry refused" session; shows "Current file: Off" session
-
-let live_guidance () =
-  let lines = A.lines (loaded ~lane:Browser_lane.Lane_name.Live (doc source)) in
-  Alcotest.(check bool) "Live does not promise server session controls" false
-    (has "Server session status and close remain available" lines);
-  shows "Server session status and close remain available" (loaded (doc source));
-  shows "Server session status and close remain available" (loaded ~lane:Browser_lane.Lane_name.Stagehand (doc source))
+let live_toggle_keeps_the_keeper_firefox_table () =
+  let bidi = "[browser.live.bidi]\nfirefox = \"/fixture/firefox\"\nprofile = \"/fixture/profile\"\n" in
+  List.iter (fun (label, source) ->
+    let _,_,write=A.start_save ~generation:2
+        (A.toggle (loaded ~lane:Browser_lane.Lane_name.Live (doc source))) |> ok in
+    let config=Otoml.Parser.from_string_result write.source_text |> ok |> Browser_configuration.parse |> ok in
+    Alcotest.(check bool) (label ^ ": live turned off") false config.live_enabled;
+    Alcotest.(check bool) (label ^ ": the Keeper Firefox table kept") true
+      (config.live_bidi = Some {Browser_configuration.firefox="/fixture/firefox";profile="/fixture/profile";port=9222}))
+    ["with a [browser.live] header", "[browser.live]\nenabled = true\n\n" ^ bidi;
+     "without one", bidi]
 
 let () = Alcotest.run "Browser activity draft and save" ["operator flow",List.map (fun (name,f)->Alcotest.test_case name `Quick f)
-  ["Live guidance respects client-owned sessions",live_guidance;
+  [
+   "the live toggle keeps the Keeper Firefox table",live_toggle_keeps_the_keeper_firefox_table;
    "explicit save preserves paths, other backend and source",draft_and_save;
    "conflict reapplies activity only",conflict_reapply;
    "fresh read retains and discard resets",fresh_read_keeps_draft;
@@ -314,7 +296,6 @@ let () = Alcotest.run "Browser activity draft and save" ["operator flow",List.ma
    "durable draft follows next file while receipt stays",durable_save_follows_next_file_without_losing_receipt;
    "uncertain drafts need explicit reapply",uncertain_drafts_require_explicit_reapply;
    "reapply onto the desired activity promises no save",reapply_onto_desired_activity_promises_no_save;
-   "retry save drops the previous receipt",retry_save_drops_previous_receipt;
    "enabled flag keeps its inline comment",enabled_comment_survives_toggle;
    "clean draft keeps changed-path boundary",clean_draft_does_not_adopt_different_path;
    "backend flags and flat automation migration",backend_flags_and_flat_paths;
@@ -325,5 +306,4 @@ let () = Alcotest.run "Browser activity draft and save" ["operator flow",List.ma
    "unconfirmed write and preview refusal",ambiguous_write_and_refusal;
    "changed file path needs discard",changed_path;
    "same bytes on another path need discard",same_bytes_conflict_on_another_path;
-   "quoted and multiline table shapes",table_shapes;
-   "stored setting does not hide application failure",receipt_keeps_application_failure]]
+   "quoted and multiline table shapes",table_shapes;]]

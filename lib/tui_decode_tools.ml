@@ -116,7 +116,6 @@ type effective_tool_surface =
       ets_tool_surface_bytes : int option;
       ets_skill_tool_surface_bytes : int option;
       ets_skill_discovery_bytes : int;
-      ets_skill_eager_body_bytes : int;
       ets_skill_body_bytes : int option;
       ets_tools : effective_tool list;
       ets_tool_surface_sha256 : string option;
@@ -372,9 +371,6 @@ let decode_effective_tool_surface json =
       let* ets_skill_discovery_bytes =
         required_int_field json "skill_discovery_bytes"
       in
-      let* ets_skill_eager_body_bytes =
-        required_int_field json "skill_eager_body_bytes"
-      in
       let* ets_skill_body_bytes =
         optional_int_field json "skill_body_bytes"
       in
@@ -403,7 +399,6 @@ let decode_effective_tool_surface json =
              ets_tool_surface_bytes;
              ets_skill_tool_surface_bytes;
              ets_skill_discovery_bytes;
-             ets_skill_eager_body_bytes;
              ets_skill_body_bytes;
              ets_tools;
              ets_tool_surface_sha256;

@@ -13,7 +13,10 @@ only for query-matching candidates; unrelated claims remain stored and \
 unverified. source_verification.status='incomplete' means matching claims \
 were withheld because their sources could not be verified; it is not proof \
 of no relevant memory. total_candidates counts stored claims, not verified results. \
-Fact results name their store and \
+Current results are paged: when truncated=true, pass next_cursor as cursor \
+with the same query and source=current to read the rest. A changed current \
+corpus or query rejects the cursor; restart without it. Historical scopes \
+do not accept cursors. Fact results name their store and \
 original basis; current facts include exact memory_id, category and origin \
 (authored is yours to supersede). Use a memory_id as a derived \
 conclusion's premise_id only for store='current_memory_snapshot'. \
@@ -46,3 +49,11 @@ description = """
 Search scope: current (default, ordinary and source-bound current facts), \
 absorbed (facts \
 merged into a newer claim), dropped (historical removed claims), history (raw messages), or all"""
+
+[[params]]
+name = "cursor"
+type = "string"
+description = """
+Opaque next_cursor from a truncated source=current response. Continue with \
+the same query. If current memory changed, restart without cursor. \
+Historical scopes do not accept cursors."""

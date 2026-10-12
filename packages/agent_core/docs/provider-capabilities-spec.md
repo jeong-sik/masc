@@ -244,3 +244,21 @@ reference from the March 2026 survey unless otherwise noted.
 
 Structured output section revalidated: 2026-05-05.
 Full matrix baseline: 2026-03-20.
+
+`supports_assistant_prefill` declares whether the Anthropic Messages wire accepts
+a final assistant continuation. Haiku 5.5 declares `false`, including when
+thinking is disabled. The common payload boundary rejects it before ordinary,
+streaming, exact generation or count-token serialization; it preserves the
+caller's messages. Counting such a request is refused because its completion
+cannot be admitted. Kimi uses its own Messages contract and is unaffected.
+Other models retain their declared/provider-default behavior.
+
+Source: [Haiku 5.5 migration guide](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide#replace-assistant-prefill).
+
+This declaration repairs the Haiku row, not every Claude model. Server-tool
+`pause_turn` replay is a distinct protocol: it must replay the provider's
+assistant content and preserve the same tools. The current closed content-block
+type cannot carry `server_tool_use` or server-tool result blocks and its decoder
+refuses them; this change adds no guessed exemption or continuation conversion.
+Typed server-tool continuation and other Claude rows remain tracked by #41852.
+See [server-tool continuation](https://platform.claude.com/docs/en/agents-and-tools/tool-use/server-tools).

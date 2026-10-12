@@ -137,7 +137,7 @@ export function contextLabel(surface: SkillSurface | null, bodyBytes: number): s
     ? surface.profile.context
     : null
   if (!context) return `${formatBytes(bodyBytes)} body`
-  return `${formatBytes(context.discovery_bytes)} discovery · ${formatBytes(context.eager_body_bytes)} eager · ${formatBytes(context.body_bytes)} body`
+  return `${formatBytes(context.discovery_bytes)} discovery · ${formatBytes(context.body_bytes)} body`
 }
 
 export function usageLabel(surface: SkillSurface | null): string {

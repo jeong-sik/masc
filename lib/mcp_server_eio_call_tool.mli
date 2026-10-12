@@ -138,6 +138,7 @@ val handle_call_tool_eio :
   maybe_emit_resource_notifications:
     (success:bool -> tool_name:string -> 'notify) ->
   broadcast_tools_list_changed:(unit -> unit) ->
+  ?wire_result:(unit -> Mcp_protocol.Mcp_types.tool_result option) ->
   sw:'sw ->
   clock:'clk Eio.Resource.t ->
   ?profile:Mcp_server_eio_types.tool_profile ->

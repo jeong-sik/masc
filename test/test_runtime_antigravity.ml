@@ -347,6 +347,7 @@ let test_answer_pieces_reach_the_reader_and_the_result_adds_nothing () =
                { conversation_id = "conversation-1"; model = "gemini-fixture" }
            ; Text_delta { step_index = Some 1; text = "PO" }
            ; Text_delta { step_index = Some 1; text = "NG\n" }
+           ; Text_completed {step_index=1; ending=Response_done}
            ; Usage_reported
                { model = "gemini-fixture"
                ; usage = { input_tokens = 100; output_tokens = 7; _ }
@@ -417,7 +418,7 @@ let test_answer_pieces_name_their_step () =
         List.filter_map
           (function
             | Runtime_antigravity.Text_delta { step_index; text } -> Some (step_index, text)
-            | Turn_started _ | Native_tool_started _ | Native_tool_finished _
+            | Turn_started _ | Text_completed _ | Native_tool_started _ | Native_tool_finished _
             | Usage_reported _ | Turn_finished _ -> None)
           (List.rev !events)
       in
@@ -434,17 +435,23 @@ let test_answer_pieces_name_their_step () =
    step: agy already ended the first with "\n", so one more. Nothing repeats,
    and the result adds nothing because the steps carried the text. *)
 let test_keeper_preserves_final_suffix_after_partial_steps () =
-  let events = ref [] in
-  with_fixture [init (); step ~state:"ACTIVE" ~text_delta:"PO" ();
-      result ~response:"PONG\n" ()] (fun path ->
-    match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
-    | Error error -> fail (Runtime_antigravity.error_to_string error)
-    | Ok _ ->
-      let texts = Keeper_antigravity_runtime.For_testing.project_stream (List.rev !events)
-        |> List.filter_map (function
-          | Agent_core.Types.ContentBlockDelta {index=0; delta=TextDelta text} -> Some text
-          | _ -> None) in
-      check (list string) "final reply contributes only its unstreamed suffix" ["PO"; "NG\n"] texts)
+  List.iter (fun (state, expected) ->
+    let events = ref [] in
+    with_fixture [init (); step ~state ~text_delta:"PO" ();
+        step ~index:2 ~state:"ACTIVE" ~step_type:"tool" ~tool_name:"run_command" ();
+        step ~index:2 ~state:"DONE" ~step_type:"tool" ~tool_name:"run_command" ();
+        result ~response:"PONG\n" ()] (fun path ->
+      match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_antigravity.error_to_string error)
+      | Ok _ ->
+        let content = Keeper_antigravity_runtime.For_testing.project_stream (List.rev !events)
+          |> List.filter_map (function
+            | Agent_core.Types.ContentBlockDelta {index; delta=TextDelta text} -> Some (`Text (index,text))
+            | ContentBlockStop {index} -> Some (`Stop index)
+            | _ -> None) in
+        check bool "final suffix continues only content that is still open" true (content=expected)))
+    ["ACTIVE", [`Text (0,"PO"); `Stop 1; `Text (0,"NG\n"); `Stop 0];
+     "DONE", [`Text (0,"PO"); `Stop 0; `Stop 1; `Text (2,"NG\n"); `Stop 2]]
 ;;
 
 let test_keeper_reconciles_four_response_steps_and_new_final () =
@@ -459,7 +466,7 @@ let test_keeper_reconciles_four_response_steps_and_new_final () =
         | Ok _ ->
             let pieces = Keeper_antigravity_runtime.For_testing.project_stream (List.rev !events)
               |> List.filter_map (function
-                | Agent_core.Types.ContentBlockDelta {index=0; delta=TextDelta text} -> Some text
+                | Agent_core.Types.ContentBlockDelta {delta=TextDelta text; _} -> Some text
                 | _ -> None) in
             let tail = List.hd (List.rev pieces) in
             let expected = if response = "ZERO\nONE\nTWO\nTHREE\n" then "REE\n"
@@ -482,7 +489,7 @@ let test_keeper_streams_two_response_steps_apart () =
         Keeper_antigravity_runtime.For_testing.project_stream (List.rev !events)
         |> List.filter_map (function
           | Agent_core.Types.ContentBlockDelta
-              { index = 0; delta = Agent_core.Types.TextDelta text } -> Some text
+              { delta = Agent_core.Types.TextDelta text; _ } -> Some text
           | _ -> None)
       in
       check (list string) "pieces with the break" [ "CHECKING"; "\n"; "\nDONE"; "\n" ] texts;
@@ -528,6 +535,96 @@ let antigravity_turn_started =
 let antigravity_turn_finished =
   Keeper_antigravity_runtime.For_testing.Cli_event
     (Runtime_antigravity.Turn_finished { text = "" })
+;;
+
+let test_response_step_ends_preserve_content_identity () =
+  List.iter (fun (terminal_state, expected_ending) ->
+    let events = ref [] in
+    let first_end = step ~index:1 ~state:terminal_state ~text_delta:"" () in
+    with_fixture [init ();
+        step ~index:1 ~state:"ACTIVE" ~text_delta:"first" ();
+        step ~index:7 ~state:"ACTIVE" ~step_type:"tool" ~tool_name:"run_command" ();
+        step ~index:2 ~state:"ACTIVE" ~text_delta:"second" ();
+        first_end; first_end;
+        (* Ending the background tool cannot end response step 2. *)
+        step ~index:7 ~state:"DONE" ~step_type:"tool" ~tool_name:"run_command" ();
+        step ~index:2 ~state:"DONE" ~text_delta:" tail" ();
+        result ~response:"firstsecond tail" ()]
+      (fun path -> match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+        | Error error -> fail (Runtime_antigravity.error_to_string error)
+        | Ok _ ->
+            let events = List.rev !events in
+            let ends = List.filter_map (function
+              | Runtime_antigravity.Text_completed {step_index; ending} -> Some (step_index,ending)
+              | _ -> None) events in
+            check bool "only response steps provide one typed content ending" true
+              (ends=[1,expected_ending; 2,Runtime_antigravity.Response_done]);
+            let projected = Keeper_antigravity_runtime.For_testing.project_stream events in
+            let relevant = List.filter_map (function
+              | Agent_core.Types.ContentBlockDelta {index; delta=TextDelta text} -> Some (`Text (index,text))
+              | ContentBlockStart {index; content_type="native_tool_use"; _} -> Some (`Tool index)
+              | ContentBlockStop {index} -> Some (`Stop index)
+              | MessageStop -> Some `Turn_stop
+              | ContentBlockDelta {delta=ThinkingDelta _; _} -> fail "provider supplied no thinking text"
+              | _ -> None) projected in
+            check bool "model and native closures never alias another open response" true
+              (relevant=[`Text (0,"first"); `Tool 1; `Text (2,"\n\nsecond");
+                `Stop 0; `Stop 1; `Text (2," tail"); `Stop 2; `Turn_stop])))
+    ["DONE",Runtime_antigravity.Response_done; "ERROR",Runtime_antigravity.Response_error]
+;;
+
+let test_done_only_response_closes_before_next_tool () =
+  let events = ref [] in
+  let done_frame = step ~index:1 ~state:"DONE" ~text_delta:"before" () in
+  with_fixture [init (); done_frame; done_frame;
+      step ~index:2 ~state:"ACTIVE" ~step_type:"tool" ~tool_name:"run_command" ();
+      step ~index:2 ~state:"DONE" ~step_type:"tool" ~tool_name:"run_command" ();
+      result ~response:"before" ()]
+    (fun path -> match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_antigravity.error_to_string error)
+      | Ok _ ->
+          let projected = Keeper_antigravity_runtime.For_testing.project_stream (List.rev !events) in
+          match projected with
+          | Agent_core.Types.MessageStart _ ::
+            ContentBlockDelta {index=0; delta=TextDelta "before"} ::
+            ContentBlockStop {index=0} ::
+            ContentBlockStart {index=1; content_type="native_tool_use"; _} :: _ -> ()
+          | _ -> fail "a complete unnewline response stayed open until a tool event")
+;;
+
+let test_late_or_conflicting_response_update_is_rejected () =
+  List.iter (fun late ->
+    with_fixture [init (); step ~index:1 ~text_delta:"done" (); late; result ()]
+      (fun path -> match run_fixture path with
+        | Error (Runtime_antigravity.Protocol_error _) -> ()
+        | Error error -> fail (Runtime_antigravity.error_to_string error)
+        | Ok _ -> fail "a completed response admitted changed or reopened content"))
+    [step ~index:1 ~state:"ACTIVE" ~text_delta:"late" ();
+     step ~index:1 ~state:"DONE" ~text_delta:"changed" ();
+     step ~index:1 ~state:"ERROR" ~text_delta:"done" ()]
+;;
+
+let test_unassigned_ends_cannot_close_named_content () =
+  let without_index frame = match Yojson.Safe.from_string frame with
+    | `Assoc [("event",event); ("step_update",`Assoc fields)] ->
+        Yojson.Safe.to_string (`Assoc ["event",event; "step_update",`Assoc (List.remove_assoc "step_index" fields)])
+    | _ -> fail "invalid step fixture" in
+  let events = ref [] in
+  with_fixture [init (); step ~index:1 ~state:"ACTIVE" ~text_delta:"named" ();
+      without_index (step ~state:"DONE" ());
+      step ~index:99 ~state:"DONE" ();
+      step ~index:1 ~state:"DONE" ~text_delta:" tail" ();
+      result ~response:"named tail" ()]
+    (fun path -> match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_antigravity.error_to_string error)
+      | Ok _ ->
+          let projected = Keeper_antigravity_runtime.For_testing.project_stream (List.rev !events) in
+          let content = List.filter_map (function
+            | Agent_core.Types.ContentBlockDelta {index; delta=TextDelta text} -> Some (`Text (index,text))
+            | ContentBlockStop {index} -> Some (`Stop index)
+            | _ -> None) projected in
+          check bool "only the matching identified DONE releases named content" true
+            (content=[`Text (0,"named"); `Text (0," tail"); `Stop 0]))
 ;;
 
 (* #37118: agy prints init before it calls a MASC tool, but the MCP server
@@ -620,13 +717,13 @@ let test_stream_events_preserve_exact_native_tool_steps () =
                ; origin = Runtime_native_tools.Built_in
                }
            ; Native_tool_finished
-               { identity =
+               { observation = { identity =
                    Some
                      (Runtime_native_tools.Provider_step
                         { conversation_id = "conversation-1"; step_index = 7 })
                ; tool_name = Some "run_command"
                ; origin = Runtime_native_tools.Built_in
-               }
+               }; completion = _ }
            ; Text_delta { step_index = None; text = "MASC_ANTIGRAVITY_OK\n" }
            ; Usage_reported
                { model = "gemini-fixture"
@@ -652,16 +749,18 @@ let test_repeated_active_native_step_keeps_one_chat_occurrence () =
         match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
         | Error error -> fail (Runtime_antigravity.error_to_string error)
         | Ok _ ->
-            let stream = Keeper_antigravity_runtime.For_testing.project_stream (List.rev !events) in
-            let module Bridge = Keeper_chat_agent_core_stream_bridge in
-            let _, chat = List.fold_left (fun (state, all) event ->
-              let translated = Bridge.translate ~redact_text:Fun.id
-                  ~base_dir:(Filename.dirname path) ~stream_scope:0 state event in
-              translated.bridge_state, all @ translated.chat_events)
-              (Bridge.empty_state (), []) stream in
+            let fixture = Native_tool_outcome_fixture.create () in
+            ignore (Keeper_antigravity_runtime.For_testing.project_stream
+              ~on_event:(Native_tool_outcome_fixture.on_event fixture)
+              ~on_native_tool_completion:(Native_tool_outcome_fixture.on_completion fixture)
+              (List.rev !events));
+            let outcome = if terminal_state = "DONE" then Runtime_native_tools.Completion_reported
+              else Runtime_native_tools.Error_reported in
+            Native_tool_outcome_fixture.check fixture ~expected:[{outcome; exit_code=None}];
+            let chat = Native_tool_outcome_fixture.events fixture in
             let native = List.filter_map (function
               | Keeper_chat_events.Native_tool_start tool -> Some (true, tool.occurrence.block_index)
-              | Native_tool_end tool -> Some (false, tool.occurrence.block_index)
+              | Native_tool_end (tool, _) -> Some (false, tool.occurrence.block_index)
               | _ -> None) chat in
             check (list (pair bool int)) "repeated active frames open one row and terminal step closes it"
               [true, 1; false, 1] native;
@@ -781,7 +880,7 @@ let test_refused_result_still_reports_usage () =
   let on_stream_event = function
     | Runtime_antigravity.Usage_reported { model; usage; _ } ->
       reported := (model, usage.input_tokens, usage.cache_read_tokens) :: !reported
-    | Turn_started _ | Text_delta _ | Native_tool_started _ | Native_tool_finished _
+    | Turn_started _ | Text_delta _ | Text_completed _ | Native_tool_started _ | Native_tool_finished _
     | Turn_finished _ -> ()
   in
   with_fixture [ init (); result ~status:"ERROR" ~response:"" ~error:"fixture rejected" () ]
@@ -1622,7 +1721,11 @@ let () =
   run
     "runtime_antigravity"
     [ ( "stream-json"
-      , [ test_case "four response steps reconcile final text" `Quick
+      , [ test_case "response content identity and native completion" `Quick test_response_step_ends_preserve_content_identity
+        ; test_case "complete response closes before tool" `Quick test_done_only_response_closes_before_next_tool
+        ; test_case "late response update rejected" `Quick test_late_or_conflicting_response_update_is_rejected
+        ; test_case "unassigned ending cannot close named response" `Quick test_unassigned_ends_cannot_close_named_content
+        ; test_case "four response steps reconcile final text" `Quick
             test_keeper_reconciles_four_response_steps_and_new_final
         ; test_case "partial steps retain final reply suffix" `Quick
             test_keeper_preserves_final_suffix_after_partial_steps

@@ -161,7 +161,8 @@ val apply : now:float -> action -> t -> (t, error) result
 val update_native_call : now:float -> expected:Keeper_native_call.state ->
   replacement:Keeper_native_call.state -> t -> (t, error) result
 (** Direct-operation-only CAS. A terminal call remains evidence until the
-    Owner acknowledges retirement. Unknown effects cannot be acknowledged. *)
+    Owner's settlement transaction resolves retirement. Unknown effects keep
+    their receipt. *)
 val same_admission : t -> t -> bool
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, error) result

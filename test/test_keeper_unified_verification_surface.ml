@@ -3,12 +3,28 @@ open Alcotest
 module WO = Masc.Keeper_world_observation
 module UM = Masc.Keeper_unified_metrics
 
-(* The keeper.world frame and event-row prose this suite asserts moved out
-   of the .ml sources into config/prompts/keeper.md as world.* keys,
-   rendered through the prompt registry at observation/assembly time.
-   Loading them into the registry is what [Prompt_defaults.init] does below;
-   the registry locates config/prompts itself under Dune. *)
+(* Use the same embedded prompt assets as runtime bootstrap, in an isolated
+   directory. Catalog initialization resolves a registered directory or the
+   Dune source-root fallback; direct execution registers these assets explicitly. *)
 let () =
+  let prompts_dir = Filename.temp_dir "verification_surface_prompts_" "" in
+  at_exit (fun () -> Fs_compat.remove_tree prompts_dir);
+  let sync =
+    Masc.Managed_asset_sync.sync
+      ~domain:Masc.Managed_asset_sync.Prompts
+      ~edit_layer:Masc.Managed_asset_sync.No_edit_layer
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+      ~dest_dir:prompts_dir
+      ()
+  in
+  (match sync.Masc.Managed_asset_sync.failed with
+   | [] -> ()
+   | failures ->
+     failf "embedded prompt fixture could not be installed: %s"
+       (String.concat "; "
+          (List.map (fun (path, detail) -> path ^ ": " ^ detail) failures)));
+  Prompt_registry.set_markdown_dir prompts_dir;
   Masc.Prompt_defaults.init ()
 ;;
 
@@ -758,7 +774,7 @@ let test_untitled_wake_keeps_pointer_out_of_prose () =
   | WO.Completion_authority_rejected _
   | WO.Task_outcome _
   | WO.Task_cancelled _
-  | WO.Delegate_completed
+  | WO.Delegate_completed _
   | WO.Ask_answered_row _
   | WO.Composition_completed ->
     fail "scheduled wake must project to Schedule_due"

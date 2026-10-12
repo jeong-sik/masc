@@ -523,7 +523,6 @@ describe('RuntimeLensSection', () => {
           stop_requested: false,
           restart_requested: false,
           drain_complete: false,
-          credential_archived: false,
         },
         determining_condition: 'running_fiber_alive',
         rows: [],

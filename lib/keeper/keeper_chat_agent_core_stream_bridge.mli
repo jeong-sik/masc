@@ -10,6 +10,12 @@
     [TextDelta] values always append. This adapter projects each accepted delta
     exactly once and never reinterprets it.
 
+    A published [Agent_core_stream_message_start] opens a new provider response.
+    The bridge suppresses an exact prelude replay within the current open
+    stream scope, and emits only protocol errors for conflicting starts.
+    Provider ids may be reused in a subsequent sealed scope; identity equality
+    is not a response-boundary test for downstream consumers.
+
     Exact tool quarantine is write-once per stream occurrence. The bridge keeps
     the first typed quarantine kind for freeze checks; later content events at
     that scope/index are suppressed and cannot overwrite the first failure. *)
@@ -23,7 +29,9 @@ type translated_event = {
 }
 (** Result of translating one typed AGENT_CORE stream event. *)
 
-val empty_state : unit -> state
+(** [generation] is the seq of this run's Run_started, assigned by its single
+    journal publisher. The default 0 is for an isolated standalone stream. *)
+val empty_state : ?generation:int -> unit -> state
 
 val start_runtime_attempt
   :  ?runtime_id:string
@@ -40,6 +48,19 @@ val start_runtime_attempt
 val record_tool_result : state -> Keeper_chat_events.tool_stream_occurrence -> state
 (** Preserve this committed result against outer cancellation/fallback, without
     exempting it from actual block/delta protocol conflicts. *)
+
+val progress_native_tool :
+  redact_text:(string -> string) -> stream_scope:int -> block_index:int ->
+  tool_call_id:string option -> Runtime_native_tools.progress -> state -> translated_event
+(** Attach only to the exact active native occurrence. Late/wrong-scope/MASC
+    progress is diagnosed and cannot reopen, close or commit a tool. *)
+
+val finish_native_tool :
+  redact_text:(string -> string) -> stream_scope:int -> block_index:int ->
+  tool_call_id:string option -> Runtime_native_tools.completion -> state -> translated_event
+(** Finish only the native occurrence already opened at this exact scope and
+    index. The following AGENT_CORE block stop cannot emit a second end.
+    A native report never commits or updates a MASC execution receipt. *)
 
 val fail_stream : state -> reason:string -> translated_event
 (** Quarantine every tool occurrence in the current provider scope when the
@@ -65,3 +86,8 @@ val translate :
   translated_event
 (** [base_dir] is the workspace base path used to persist RFC-0301 model-generated
     media (via {!Keeper_chat_media_store}) when a media block completes. *)
+
+val terminal_text_scope : state -> int option
+(** The accumulator-owned stream scope whose terminal provider message
+    actually emitted text. Missing text or a newer uncompleted scope leaves
+    this unknown; provider message IDs are not used as round identities. *)

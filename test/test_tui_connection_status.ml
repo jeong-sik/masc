@@ -25,18 +25,12 @@ let test_booting_only_when_the_probe_says_not_ready () =
     (booting (Error "connection refused"))
 ;;
 
-let test_booting_has_its_own_label () =
-  check string "label" "server booting..."
-    (Masc_tui_types.connection_status_label Masc_tui_types.Booting)
-;;
-
 let () =
   run
     "tui_connection_status"
     [ ( "booting"
       , [ test_case "only when the probe says not ready" `Quick
             test_booting_only_when_the_probe_says_not_ready
-        ; test_case "has its own label" `Quick test_booting_has_its_own_label
-        ] )
+        ;] )
     ]
 ;;

@@ -16,6 +16,8 @@ const browserActivityText = { on: 'New requests enabled', off: 'Off · configura
   unobserved: 'Activity configuration unavailable' }
 const machineActivityText = { on: 'New execution and input enabled', off: 'Off · machine state retained',
   unobserved: 'Activity configuration unavailable' }
+const machinePublicationText = { no_screen: 'No screen observed', stable: 'Stable screen published',
+  running: 'Machine running', unavailable: 'Worker observation unavailable' } as const
 function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
   const state = row.state
   switch (state.kind) {
@@ -35,7 +37,7 @@ function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
       state.registered ? 'Executor registered · session activity unverified' : 'Executor not registered',
       'Status and close remain available while off. Executable and profile paths apply at server startup.']
     case 'machine': return [machineActivityText[state.activity],
-      { no_screen: 'No screen observed', stable: 'Stable screen published', running: 'Machine running' }[state.publication]]
+      machinePublicationText[state.publication]]
     case 'package': {
       const declared = state.declaration
       const desired = declared === null ? 'Manual attachment'

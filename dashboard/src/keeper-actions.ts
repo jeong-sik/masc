@@ -488,7 +488,7 @@ function hasCanonicalOperationTurn(
   operationId: string,
 ): boolean {
   const expectedUser = operationDeliveryProvenance(operationId, 'accepted_user')
-  const expectedAssistant = operationDeliveryProvenance(operationId, 'terminal_assistant')
+  const expectedAssistant = operationDeliveryProvenance(operationId, 'terminal_result')
   const hasUser = entries.some(entry => (
     entry.deliveryProvenance != null
     && sameDeliveryProvenance(entry.deliveryProvenance, expectedUser)
@@ -570,7 +570,7 @@ function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation
       timestamp: assistantDraft?.timestamp ?? null,
       delivery: assistantDraft?.delivery ?? 'queued',
       streamState: assistantDraft ? assistantDraft.streamState : 'opening',
-      deliveryProvenance: operationDeliveryProvenance(request.operationId, 'terminal_assistant'),
+      deliveryProvenance: operationDeliveryProvenance(request.operationId, 'terminal_result'),
       streamContract: keeperStreamContract('client_operation_store', 'client_placeholder', {
         requestId: request.operationId,
         reason: 'awaiting durable operation terminal state',
@@ -1022,7 +1022,7 @@ export async function sendKeeperThreadMessage(
   appendThreadEntry(keeperName, {
     id: assistantId,
     role: 'assistant',
-    deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_assistant'),
+    deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'),
     source: 'direct_assistant',
     label: keeperName,
     text: '',

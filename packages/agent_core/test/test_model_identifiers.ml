@@ -31,20 +31,20 @@ let check_error
 
 let test_starts_with_exact () =
   Alcotest.(check bool) "claude- matches exactly" true
-    (starts_with ~prefix:"claude-" "claude-opus-5");
+    (starts_with ~prefix:"claude-" "claude-opus-5-5");
   Alcotest.(check bool) "gpt- matches exactly" true
     (starts_with ~prefix:"gpt-" "gpt-5.6-sol");
   Alcotest.(check bool) "unrelated prefix" false
-    (starts_with ~prefix:"gpt-" "claude-opus-5")
+    (starts_with ~prefix:"gpt-" "claude-opus-5-5")
 ;;
 
 let test_starts_with_normalization () =
   Alcotest.(check bool) "case-different prefix now matches" true
-    (starts_with ~prefix:"CLAUDE-" "claude-opus-5");
+    (starts_with ~prefix:"CLAUDE-" "claude-opus-5-5");
   Alcotest.(check bool) "case-different value matches" true
-    (starts_with ~prefix:"claude-" "CLAUDE-opus-5");
+    (starts_with ~prefix:"claude-" "CLAUDE-opus-5-5");
   Alcotest.(check bool) "catalog prefix matches a typed model id" true
-    (matches_model_id ~prefix:"CLAUDE-" "claude-opus-5");
+    (matches_model_id ~prefix:"CLAUDE-" "claude-opus-5-5");
   Alcotest.(check string) "of_string preserves the original spelling"
     "GLM-5.3"
     (Llm_provider.Model_identifiers.Id_prefix.to_string (prefix_of "GLM-5.3"))
@@ -52,7 +52,7 @@ let test_starts_with_normalization () =
 
 let test_starts_with_not_suffix () =
   Alcotest.(check bool) "suffix is not a prefix" false
-    (starts_with ~prefix:"opus-5" "claude-opus-5")
+    (starts_with ~prefix:"opus-5-5" "claude-opus-5-5")
 ;;
 
 (* Construction-time validation: the TOML loaders' invariants and their
@@ -64,10 +64,10 @@ let test_of_string_rejects_padded_and_empty () =
     ~expected:"model entry field \"id_prefix\" must not be empty" "";
   check_error ~of_string ~show
     ~expected:"model entry field \"id_prefix\" must not have leading or trailing whitespace"
-    " claude-opus-5";
+    " claude-opus-5-5";
   check_error ~of_string ~show
     ~expected:"model entry field \"id_prefix\" must not have leading or trailing whitespace"
-    "claude-opus-5\t"
+    "claude-opus-5-5\t"
 ;;
 
 (* One rule across the three modules: same rejection, same case folding,
@@ -109,10 +109,10 @@ let test_lookup_folds_case_and_rejects_padding () =
     Model_catalog_test_support.load_repo_model_catalog
       ~suite:"model_identifiers lookup case properties"
   in
-  match Model_catalog.lookup catalog "CLAUDE-OPUS-5" with
+  match Model_catalog.lookup catalog "CLAUDE-OPUS-5-5" with
   | None -> Alcotest.fail "case-different query must still find its row"
   | Some (entry : Model_catalog.model_entry) ->
-    Alcotest.(check string) "row bytes come back as declared" "claude-opus-5"
+    Alcotest.(check string) "row bytes come back as declared" "claude-opus-5-5"
       (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix);
   Alcotest.(check bool) "padded query is rejected" true
     (Option.is_none (Model_catalog.lookup catalog "  gpt-5.6-sol\t"));
@@ -155,8 +155,8 @@ let test_lookup_misses_stay_misses () =
       ~suite:"model_identifiers lookup misses"
   in
   Alcotest.(check bool) "query no row prefixes" true
-    (Option.is_none (Model_catalog.lookup catalog "xclaude-opus-5"));
-  (match Model_catalog.lookup_result catalog "xclaude-opus-5" with
+    (Option.is_none (Model_catalog.lookup catalog "xclaude-opus-5-5"));
+  (match Model_catalog.lookup_result catalog "xclaude-opus-5-5" with
    | Error Model_catalog.No_such_row -> ()
    | Error (Model_catalog.Malformed_model_id detail) ->
      Alcotest.failf "valid miss was called malformed: %s" detail
@@ -212,7 +212,7 @@ let test_ollama_cloud_deepseek_cloud_suffix_resolves () =
    folded bytes. *)
 let test_equality_key_folds_ascii_case_only () =
   let cases =
-    [ "claude-opus-5"; "CLAUDE-OPUS-5"; "Claude-Opus-5"; "gpt-5.6-terra"
+    [ "claude-opus-5-5"; "CLAUDE-OPUS-5-5"; "Claude-Opus-5-5"; "gpt-5.6-terra"
     ; "GPT-5.6-TERRA"; "Qwen/Qwen3-Coder-480B"; "qwen/qwen3-coder-480b"
     ; "deepseek-v4.1-flash:cloud"; "\xc3\x84bc"; "\xc3\xa4bc" ]
   in

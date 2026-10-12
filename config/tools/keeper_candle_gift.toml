@@ -7,7 +7,7 @@ defer_loading = false
 name = "to"
 type = "string"
 required = true
-description = "The receiving Keeper's name. Must differ from yours."
+description = "The receiving Keeper's name. Must differ from yours and name a registered Keeper; an unknown name is refused before any Candle moves."
 
 [[params]]
 name = "amount_milli"

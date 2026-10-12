@@ -7,9 +7,11 @@
     a callback cannot substitute a second render (#38354). *)
 type turn_prompt =
   { dynamic_context : string
-  ; dynamic_context_for_tools : (Agent_core.Tool.t list -> string) option
-      (** Optional transmission view, evaluated only after the actual offered
-          tool surface is known. [dynamic_context] remains the full source. *)
+  ; dynamic_context_for_tools : (Keeper_request_tool_access.t -> string) option
+      (** Optional transmission view, evaluated after the current attempt's
+          offered tools and obtainable deferred tools are known.
+          [dynamic_context] is the provisional view before that projection;
+          it must not be used as evidence of the final request capability. *)
   }
 
 (** Prompt segment metrics for effective keeper input attribution.

@@ -271,6 +271,7 @@ let kind_of_row ~(handler : Keeper_tool_descriptor.runtime_handler) row =
   | Keeper_tool_descriptor.Tool_skill_publish
   | Keeper_tool_descriptor.Tool_workspace_memory_read
   | Keeper_tool_descriptor.Tool_memory_search
+  | Keeper_tool_descriptor.Tool_memory_select
   | Keeper_tool_descriptor.Tool_memory_retract
   | Keeper_tool_descriptor.Tool_memory_write
   | Keeper_tool_descriptor.Tool_constitution_write
@@ -312,6 +313,7 @@ let kind_of_row ~(handler : Keeper_tool_descriptor.runtime_handler) row =
   | Keeper_tool_descriptor.Tool_browser_act
   | Keeper_tool_descriptor.Tool_browser_instruct
   | Keeper_tool_descriptor.Tool_browser_interact
+  | Keeper_tool_descriptor.Tool_lane_addon _
   | Keeper_tool_descriptor.Tool_analyze_image -> Ok None
 
 (* The call's own outcome, read by the rule every tool-call log reader shares.

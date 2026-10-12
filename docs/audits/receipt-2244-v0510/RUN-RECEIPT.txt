@@ -1,0 +1,8 @@
+head=a7d35658596d19b8512b10f60de1993469dee02e captured=2026-10-11T16:29:53Z task=2244 real-release-run
+source=gh release view v0.51.0 --json body (실발행 노트, Latest, published 2026-10-11T02:37:00Z)
+{
+  "tag": "v0.51.0",
+  "added_total": 2,
+  "guideless_total": 0,
+  "guideless_items": []
+}

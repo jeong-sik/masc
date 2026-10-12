@@ -279,3 +279,16 @@ References were checked on 2026-05-12:
 - https://openai.github.io/openai-agents-js/guides/models/
 - https://code.claude.com/docs/en/agent-sdk
 - https://adk.dev/agents/models/litellm/
+
+OpenAI-compatible usage decoding preserves a finite, nonnegative numeric
+`usage.cost` as the provider-reported account charge, including authoritative
+zero. Ordinary responses and final usage-only SSE chunks use the same parser;
+the typed stream delta and final accumulator retain that charge. Missing,
+negative or nonnumeric costs stay unknown. Catalog pricing only estimates an
+unreported cost and cannot overwrite a reported charge.
+
+[OpenRouter usage accounting](https://openrouter.ai/docs/cookbook/administration/usage-accounting)
+reports this field in full responses and the last SSE message; its upstream
+inference-cost detail is a separate amount and is not substituted here. This
+per-call accounting does not establish the state of a live account balance or
+the amount drawn by an installed TUI.

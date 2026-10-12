@@ -151,6 +151,7 @@ val build_prompt :
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
   ?active_goal_summaries:(goal_summary list, Goal_store.unavailable) result ->
   ?workspace_memory:Workspace_memory_ledger.observation ->
+  ?workspace_memory_access:Keeper_request_tool_access.t ->
   ?lane_updates:(Yojson.Safe.t, string) result ->
   ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   ?recent_work:Keeper_recent_work.transmission ->
@@ -187,6 +188,7 @@ val build_prompt_preview :
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
   ?active_goal_summaries:(goal_summary list, Goal_store.unavailable) result ->
   ?workspace_memory:Workspace_memory_ledger.observation ->
+  ?workspace_memory_access:Keeper_request_tool_access.t ->
   ?lane_updates:(Yojson.Safe.t, string) result ->
   ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   ?recent_work:Keeper_recent_work.transmission ->
@@ -222,6 +224,9 @@ val autonomous_input_speaker :
     naming who answered each quoted Ask row in the order the rows appear. *)
 
 val format_workspace_memory_observation :
+  ?access:Keeper_request_tool_access.t ->
   Workspace_memory_ledger.observation -> string option
-(** Discovery metadata only. Captured proposal facts are not injected or
-    compared with current memory. Read failures carry no model-facing IO text. *)
+(** Discovery metadata and the actual request's retrieval route only.
+    Without [access], render an operator preview with no callable-route claim.
+    Captured proposal facts are not injected or compared with current memory.
+    Read failures carry no model-facing IO text. *)

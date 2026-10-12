@@ -49,6 +49,17 @@ val keeper_owner_leaf : keeper_name:string -> oauth_source:string -> string
 (** Stable account boundary for a Keeper. Identity uses the configured source
     path, never token bytes, so refresh preserves the account's managed state. *)
 
+val keeper_home_dir : runtime_root:string -> owner_leaf:string -> string
+(** The owner HOME root below
+    [<runtime_root>/official-clients/antigravity/<owner_leaf>]. Pure path
+    composition; does not create anything. *)
+
+val keeper_prepare_lock_path : runtime_root:string -> owner_leaf:string -> string
+(** The sibling preparation lock
+    [<runtime_root>/antigravity-<owner_leaf>.prepare.lock] that
+    [with_prepared_account] holds across account generation. Pure path
+    composition; does not create anything. *)
+
 val prepare
   :  runtime_root:string
   -> owner_leaf:string

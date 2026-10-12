@@ -28,10 +28,15 @@ let check_resources r =
   else Ok ()
 type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling
+type state_storage = Ephemeral | Persistent
+type tool_invocation = Direct | Host_context
 type package = {
   id : string; revision : string; title : string; contributions : contribution list;
   image : string; command : string list; directory : string;
   action_tool : string option;
+  state_storage : state_storage;
+  tool_invocation : tool_invocation;
+  exported_tools : string list;
   outputs : output_ports;
   refresh_policy : refresh_policy;
   model_access : model_access;
@@ -39,6 +44,19 @@ type package = {
   presentation : Lane_addon_presentation.t;
   skills_directory : Skill_resource_path.t option; resources : resources;
 }
+let validate_exported_tools ~action_tool names =
+  if List.exists (fun name -> String.trim name = "" || String.trim name <> name) names then
+    Error "exported tools require non-blank names without surrounding whitespace"
+  else
+    let sorted = List.sort_uniq String.compare names in
+    if List.length sorted <> List.length names then Error "duplicate exported tool name"
+    else if List.exists (fun name -> name = "lane_observe" || name = Lane_addon_call_context.tool_name
+      || name = Machine_input_history.tool_name
+      || name = Machine_controller_contract.snapshot_tool || name = Machine_controller_contract.release_tool
+      || Some name = action_tool) sorted then
+      Error "worker control tools cannot be exported"
+    else Ok sorted
+
 type phase = Attached | Observing | Failed of string | Detaching | Detached
 
 let ( let* ) = Result.bind
@@ -165,6 +183,9 @@ let package_to_json (p : package) =
     "contributions", strings (List.map (function Observe -> "observe" | Derive -> "derive" | Act -> "act") p.contributions);
     "image", string p.image; "command", strings p.command; "directory", string p.directory;
     "action_tool", optional string p.action_tool;
+    "state_storage", `String (match p.state_storage with Ephemeral -> "ephemeral" | Persistent -> "persistent");
+    "tool_invocation", `String (match p.tool_invocation with Direct -> "direct" | Host_context -> "host_context");
+    "exported_tools", strings p.exported_tools;
     "outputs", output_ports_to_json p.outputs;
     "refresh_policy", `String (match p.refresh_policy with Every_hint -> "every_hint" | Source_changes -> "source_changes");
     "model_access", `String (match p.model_access with Model_disabled -> "disabled" | Host_sampling -> "host_sampling");

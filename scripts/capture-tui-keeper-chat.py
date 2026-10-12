@@ -490,7 +490,7 @@ class Fixture:
                     "content": f"reply-{request['message']}",
                     "ts": submitted_at,
                     "delivery_key": delivery_key,
-                    "transcript_slot": {"kind": "terminal_assistant"},
+                    "transcript_slot": {"kind": "terminal_result"},
                     "turn_ref": turn_ref,
                 }
             )

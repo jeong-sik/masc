@@ -19,6 +19,37 @@ let with_dir prefix f =
   let dir = Filename.temp_dir prefix "" in
   Fun.protect ~finally:(fun () -> remove_tree dir) (fun () -> f dir)
 
+(* Only process/container creation is replaced; HTTP effects use the attached
+   worker's SDK transport and host controller admission. *)
+let with_worker ~base_path f =
+  Eio_main.run (fun env ->
+    let previous_runtime = Runtime.For_testing.snapshot () in
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Fun.protect ~finally:(fun () ->
+      Runtime.For_testing.restore previous_runtime;
+      Server_auth.clear_server_state ();
+      Fs_compat.clear_fs ()) (fun () ->
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
+        Eio.Switch.run (fun sw ->
+          Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+            let runtime_path = Filename.concat base_path "runtime.toml" in
+            Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+|});
+            (match Runtime.init_default ~config_path:runtime_path with
+             | Ok () -> () | Error detail -> fail detail);
+            Masc.Lane_addon_runtime.For_testing.reset ();
+            Machine_worker_fixture.with_dos ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
+              (fun ~invoke:_ ~detach -> f ~detach))))))
+
 let loopback_request_authority () =
   match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
   | Ok authority -> authority
@@ -114,8 +145,7 @@ let test_the_screen_png () =
     let player = token_for base_path ~agent_name:"minsu" ~role:Masc_domain.Player in
     let worker = token_for base_path ~agent_name:"codex" ~role:Masc_domain.Worker in
     let state = Masc.Mcp_server.For_testing.create_state ~base_path in
-    Eio_main.run (fun env ->
-      Masc_test_deps.init_eio_clock env;
+    with_worker ~base_path (fun ~detach ->
       let get token = dispatch_get ~state ~token in
       (match Dos_lane.eject ~who:"operator" ~announce:ignore () with Ok () | Error _ -> ());
       check int "the screen needs a bearer" 401 (status_of (get None));
@@ -149,7 +179,14 @@ let test_the_screen_png () =
           check string "with the PNG signature" png_signature (String.sub png 0 (String.length png_signature));
           check (pair int int) "at the frame's size" (frame_width, frame_height) (ihdr_size png);
           check int "reading it did not move the machine" before (change_count ());
-          check int "a worker reads it too" 200 (status_of (get (Some worker))))))
+          check int "a worker reads it too" 200 (status_of (get (Some worker)));
+          detach ();
+          let unavailable = get (Some player) in
+          check int "detached screen is unavailable" 503 (status_of unavailable);
+          let head, _ = split_response unavailable in
+          check bool "detached route cannot replay the previous PNG" false
+            (header "content-type" head = Some "image/png");
+          check int "detached read leaves the fixture machine unchanged" before (change_count ()))))
 
 let () =
   run "play-screen"

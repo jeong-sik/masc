@@ -1,0 +1,5 @@
+(include_subdirs no)
+(library
+ (name machine_observation_packet)
+ (public_name masc.machine_observation_packet)
+ (libraries yojson base64 digestif))

@@ -13,8 +13,9 @@
    - The console is a convenience MIRROR. The JSONL file sink
      ([Log.Persist.write_to_sink]) and the in-memory ring stay
      authoritative and lossless.
-   - Before [start] (tests, CLI one-shots, pre-boot), [write] stays
-     synchronous — identical to the historical behavior.
+   - Before [start] (tests, CLI one-shots, pre-boot), [write] attempts the
+     mirror synchronously. Channel I/O failures ([Sys_error]) do not stop the
+     log caller; other writer exceptions propagate unchanged.
    - After [start], [write] enqueues into a bounded queue drained by a
      dedicated OS thread; the thread alone performs the possibly-blocking
      fd write. When the writer is blocked long enough to fill the queue,
@@ -112,14 +113,68 @@ let queue_depth () =
   Mutex.unlock mu;
   n
 
+(* A console line is read on a terminal, and in production from the file
+   stderr goes to (masc-server.log, a browser host's host.log). Messages carry
+   text from outside, such as the error a Firefox answers with, so the sink
+   and not each caller decides which bytes a line holds. Printable ASCII and
+   valid UTF-8 are written as they came. A C0 control, DEL, and each byte that
+   does not start valid UTF-8 are written as [\xNN]; a C1 control
+   (U+0080..U+009F, which some terminals obey as a control) as [\u00NN]. These
+   are the forms [Tui_terminal_text] draws. A newline in a message is [\x0A]
+   too: one entry is one line, so text from outside cannot start a line that
+   reads as another entry. The ring and the JSONL file keep the newline. *)
+let kept_as_is byte = byte >= 0x20 && byte < 0x7F
+
+let printable line =
+  if String.for_all (fun ch -> kept_as_is (Char.code ch)) line then line
+  else begin
+    let output = Buffer.create (String.length line + 16) in
+    let rec append index =
+      if index < String.length line then begin
+        let byte = Char.code line.[index] in
+        if kept_as_is byte then begin
+          Buffer.add_char output line.[index];
+          append (index + 1)
+        end
+        else if byte < 0x80 then begin
+          Buffer.add_string output (Printf.sprintf "\\x%02X" byte);
+          append (index + 1)
+        end
+        else begin
+          let decoded = String.get_utf_8_uchar line index in
+          if not (Uchar.utf_decode_is_valid decoded) then begin
+            Buffer.add_string output (Printf.sprintf "\\x%02X" byte);
+            append (index + 1)
+          end
+          else begin
+            let length = Uchar.utf_decode_length decoded in
+            let code = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
+            if code <= 0x9F then Buffer.add_string output (Printf.sprintf "\\u%04X" code)
+            else Buffer.add_string output (String.sub line index length);
+            append (index + length)
+          end
+        end
+      end
+    in
+    append 0;
+    Buffer.contents output
+  end
+
 let write line =
   (* Sink-level structural secret masking (#28925 gap 3). The console mirror
      is redirected to a file in production (nohup > masc-server.log), so it
      is a recording path too and must mask independently of the ring —
-     [Log] hands it the raw pre-[Ring.push] line. *)
-  let line = Secret_patterns.redact_text line in
+     [Log] hands it the raw pre-[Ring.push] line. Masking reads the line as
+     it came; [printable] runs after it. *)
+  let line = printable (Secret_patterns.redact_text line) in
   if not (Atomic.get enqueue_active)
-  then write_line line
+  then begin
+    try write_line line with
+    | Sys_error _ ->
+      (* A channel I/O failure only loses the mirror; the caller records the
+         entry in the ring and file sink after this returns. *)
+      ()
+  end
   else begin
     Mutex.lock mu;
     let full = Queue.length queue >= capacity in

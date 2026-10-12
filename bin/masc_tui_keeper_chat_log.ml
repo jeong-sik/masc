@@ -15,12 +15,21 @@ type entry =
   ; delta : Live.delta
   }
 
+type terminal_replay = Replay_pending | Replayed_after_terminal
+
 type t =
   { keeper_name : string
   ; request_id : string
   ; source : journal_source
   ; started_at : float
   ; mutable reversed_entries : entry list
+  ; mutable first_acceptance : entry option
+  ; mutable latest_acceptance : entry option
+  ; mutable priority_unavailable : bool
+  ; mutable run_started : bool
+        (* Whether an entry holds [Run_started]: asked for every held log on
+           every frame, so it is kept rather than found by walking the
+           entries. *)
   ; held_seqs : (int, unit) Hashtbl.t
   ; mutable resume_position : Journal.replay_position
         (* After the highest seq held; the whole turn while none is. *)
@@ -28,6 +37,7 @@ type t =
   ; mutable committed : bool
   ; mutable revision : int
   ; mutable operation_state : Keeper_chat_operation.state option
+  ; mutable terminal_replay : terminal_replay
   }
 
 let create_for_source ~keeper_name ~source ~started_at =
@@ -36,12 +46,17 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; source
   ; started_at
   ; reversed_entries = []
+  ; first_acceptance = None
+  ; latest_acceptance = None
+  ; priority_unavailable = false
+  ; run_started = false
   ; held_seqs = Hashtbl.create 64
   ; resume_position = Journal.Whole_turn
   ; attempt = 0
   ; committed = false
   ; revision = 0
   ; operation_state = None
+  ; terminal_replay = Replay_pending
   }
 
 let create ~keeper_name ~request_id ~started_at =
@@ -52,6 +67,11 @@ let keeper_name t = t.keeper_name
 let request_id t = t.request_id
 let started_at t = t.started_at
 let entries t = List.rev t.reversed_entries
+let first_acceptance t = t.first_acceptance
+let latest_acceptance t = t.latest_acceptance
+let priority_unavailable t = t.priority_unavailable
+let has_entries t = match t.reversed_entries with [] -> false | _ :: _ -> true
+let run_started t = t.run_started
 let resume_position t = t.resume_position
 let attempt t = t.attempt
 let committed t = t.committed
@@ -60,6 +80,15 @@ let revision t = t.revision
 let bump t = t.revision <- t.revision + 1
 
 let operation_state t = t.operation_state
+let terminal_replay t = t.terminal_replay
+let observe_terminal_replay t replay =
+  match replay, t.terminal_replay with
+  | Replayed_after_terminal, Replay_pending
+    when Option.exists Keeper_chat_operation.is_terminal t.operation_state ->
+      t.terminal_replay <- Replayed_after_terminal;
+      bump t
+  | _ -> ()
+
 
 let observe_operation_state t state =
   match t.source, t.operation_state with
@@ -117,7 +146,21 @@ let decode_operation_state ~operation_id (json : Yojson.Safe.t) =
   | _ -> Error "operation is not an object"
 ;;
 
+let note_priority_unavailable t =
+  if not t.priority_unavailable then begin
+    t.priority_unavailable <- true;
+    bump t
+  end
+
 let add ?at t ~seq (delta : Live.delta) =
+  match delta with
+  | Live.Accepted _ ->
+      let entry = { seq = None; at; attempt = 0; delta } in
+      if t.first_acceptance = None then t.first_acceptance <- Some entry;
+      t.latest_acceptance <- Some entry;
+      bump t;
+      true
+  | _ ->
   let duplicate =
     match seq with
     | Some seq -> Hashtbl.mem t.held_seqs seq
@@ -129,8 +172,9 @@ let add ?at t ~seq (delta : Live.delta) =
     (match delta with
      | Live.Runtime_attempt_started _ -> t.attempt <- t.attempt + 1
      | Live.Run_started | Live.Batch_bound _ | Live.Text _ | Live.Thinking _ | Live.Stream_model_started _
-     | Live.Stream_details _
-     | Live.Native_tool_started _ | Live.Native_tool_ended _
+     | Live.Model_content_activity _
+     | Live.Stream_details _ | Live.Stream_model_stopped
+     | Live.Native_tool_started _ | Live.Native_tool_ended _ | Live.Native_tool_progress _
      | Live.Tool_started _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
      | Live.Stream_protocol_error _ | Live.Approval_requested _
      | Live.Approval_settled _ | Live.Accepted _ | Live.Checkpoint
@@ -142,6 +186,7 @@ let add ?at t ~seq (delta : Live.delta) =
        t.resume_position <- Journal.replay_position_advance t.resume_position seq
      | None -> ());
     t.reversed_entries <- { seq; at; attempt = t.attempt; delta } :: t.reversed_entries;
+    (match delta with Live.Run_started -> t.run_started <- true | _ -> ());
     bump t;
     true
   end
@@ -181,21 +226,24 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
        execution_id = Keeper_chat_operation.Operation_id.to_string execution_id})
   | E.Run_started _ -> Some Live.Run_started
   | E.Text_message_start _ | E.Text_message_end -> None
-  | E.Text_delta text -> Some (Live.Text text)
+  | E.Text_delta {text; stream_scope} -> Some (Live.Text {text; stream_scope})
   | E.External_effect_completed _ -> Some Live.External_effect_completed
   | E.Run_finished _ -> Some Live.Run_finished
   | E.Event_error { message } -> Some (Live.Run_failed { message })
-  | E.Reply_details { reply; turn_outcome; turn_ref } ->
+  | E.Reply_details { reply; turn_outcome; turn_ref; terminal_stream_scope } ->
     Some
       (Live.Reply_details
-         { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref })
+         { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref; terminal_stream_scope })
   | E.Continuation_checkpoint _ -> Some Live.Checkpoint
   | E.Agent_core_stream_connected -> None
   | E.Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
     Some (Live.Runtime_attempt_started { runtime_id; attempt_index })
-  | E.Agent_core_stream_message_start { model; _ } ->
-    Some (Live.Stream_model_started { model })
-  | E.Agent_core_stream_message_delta { stop_reason; usage } ->
+  | E.Agent_core_stream_message_start { provider_message_id; model; usage; stream_scope } ->
+    Some (Live.Stream_model_started
+      { message_id = (if String.trim provider_message_id = "" then None else Some provider_message_id); model; stream_scope = Some stream_scope
+      ; usage = Option.bind usage (fun usage ->
+          Live.stream_usage_of_usage_json (E.api_usage_to_json usage)) })
+  | E.Agent_core_stream_message_delta { stream_scope; stop_reason; usage } ->
     (* Through the same readers as the live arm, over the same bytes the
        producer writes ([E.delta_usage_to_json], [E.stop_reason_to_string]), so
        a reloaded turn and a watched one report this identically. A delta that
@@ -213,12 +261,13 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
       Option.bind stop_reason (fun reason ->
         match String.trim (E.stop_reason_to_string reason) with
         | "" -> None
-        | reason -> Some reason)
+        | _ -> Some reason)
     in
     if usage = None && stop_reason = None
     then None
-    else Some (Live.Stream_details { usage; stop_reason })
-  | E.Agent_core_stream_message_stop
+    else Some (Live.Stream_details { usage; stop_reason; stream_scope = Some stream_scope })
+  | E.Model_content_activity activity -> Some (Live.Model_content_activity activity)
+  | E.Agent_core_stream_message_stop -> Some Live.Stream_model_stopped
   | E.Agent_core_stream_ping
   | E.Agent_core_content_block_start _
   | E.Agent_core_content_block_stop _ -> None
@@ -237,9 +286,12 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
     Some (Live.Native_tool_started
       { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id
       ; tool_name = native.tool_call_name })
-  | E.Native_tool_end native ->
+  | E.Native_tool_progress (native, progress) ->
+    Some (Live.Native_tool_progress
+      { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id; progress })
+  | E.Native_tool_end (native, completion) ->
     Some (Live.Native_tool_ended
-      { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id })
+      { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id; completion })
   | E.Tool_call_start { occurrence = o; tool_call_id; tool_call_name } ->
     Some
       (Live.Tool_started
@@ -557,14 +609,21 @@ let read_whole_journal ~fetch ~since_seq =
 ;;
 
 let read_with_operation_state ~read_operation ~read_journal =
+  let completion operation journal =
+    match operation, journal with
+    | Ok (Some state), Ok _ when Keeper_chat_operation.is_terminal state ->
+        Replayed_after_terminal
+    | _ -> Replay_pending in
   let operation = read_operation () in
   let journal = read_journal () in
   let reread refreshed =
-    let latest = match read_journal (), journal with
+    let latest = read_journal () in
+    let replay = completion refreshed latest in
+    let retained = match latest, journal with
       | Ok _ as latest, _ -> latest
       | Error _, (Ok _ as first) -> first
       | (Error _ as latest), Error _ -> latest in
-    refreshed, latest in
+    refreshed, retained, replay in
   match operation with
   | Ok (Some (Keeper_chat_operation.Queued | Running _)) ->
       let refreshed = read_operation () in
@@ -572,8 +631,8 @@ let read_with_operation_state ~read_operation ~read_journal =
        | _, Ok (Some (Keeper_chat_operation.Succeeded _ | Failed _ | Cancelled _)) ->
            reread refreshed
        | Ok (Some Queued), Ok (Some (Running _)) -> reread refreshed
-       | _, Ok (Some (Queued | Running _)) -> refreshed, journal
-       | _, (Ok None | Error _) -> operation, journal)
+       | _, Ok (Some (Queued | Running _)) -> refreshed, journal, Replay_pending
+       | _, (Ok None | Error _) -> operation, journal, Replay_pending)
   | Ok (Some (Succeeded _ | Failed _ | Cancelled _)) | Ok None | Error _ ->
-      operation, journal
+      operation, journal, completion operation journal
 ;;

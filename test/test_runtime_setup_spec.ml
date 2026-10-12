@@ -341,7 +341,21 @@ max-context = 500000
       ["/fixture/account-one";"/fixture/account-two"])
     (List.map (fun group -> group |> member "id" |> to_string) groups);
   Alcotest.check Alcotest.bool "public quota scope IDs expose no account home" false
-    (String_util.contains_substring (Yojson.Safe.to_string (`List groups)) "/fixture/")
+    (String_util.contains_substring (Yojson.Safe.to_string (`List groups)) "/fixture/");
+  let previous = Sys.getenv_opt "CODEX_HOME" in
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some value -> Unix.putenv "CODEX_HOME" value | None -> Unix.unsetenv "CODEX_HOME") (fun () ->
+    Unix.putenv "CODEX_HOME" "/fixture/account-one";
+    let provider = List.hd config.Runtime_schema.providers in
+    let inherited = {provider with id="inherited"; account_home=None} in
+    let inherited_again = {inherited with id="inherited_again"} in
+    let claude = {provider with id="claude";api_format=Runtime_schema.Claude_code_runtime} in
+    let grouped = Runtime_wizard_inventory.account_groups_json
+      {config with providers=[provider;inherited;inherited_again;claude]} |> to_list in
+    Alcotest.check (Alcotest.list (Alcotest.list Alcotest.string))
+      "inherited homes join explicit scope but another client stays separate"
+      [["first";"inherited";"inherited_again"];["claude"]]
+      (List.map (fun group -> ids group "integration_ids") grouped))
 
 let test_cli_reuse_requires_non_interactive () =
   List.iter (fun (choice, fields) ->

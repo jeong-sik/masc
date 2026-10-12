@@ -15,9 +15,18 @@ type session_kind = Transport_metrics.sse_session_kind =
   | Presence
 [@@deriving tla]
 
+type runtime_authority
+(** Canonical workspace base path identity, constructed with the same
+    Config_dir_resolver authority used by Keeper runtime registries. *)
+
+val runtime_authority_exn : base_path:string -> runtime_authority
+(** Rejects invalid server configuration with [Invalid_argument]. *)
+val equal_runtime_authority : runtime_authority -> runtime_authority -> bool
+
 type broadcast_target =
   | All
   | Observers
+  | Runtime_observers of runtime_authority
   | Presence_only
 
 type delivery_audience =
@@ -39,6 +48,7 @@ type delivery =
 type client = {
   id : int;
   kind : session_kind;
+  runtime_authority : runtime_authority;
   event_stream : delivery Eio.Stream.t;
   last_event_id : int Atomic.t;
   created_at : float;
@@ -174,11 +184,14 @@ type external_event = {
 }
 
 val subscribe_external :
+  ?runtime_authority:runtime_authority ->
   id:string
   -> callback:(external_event -> unit)
   -> ?is_alive:(unit -> bool)
   -> unit
   -> unit
+(** An absent authority receives only unscoped broadcasts. Runtime-scoped
+    broadcasts are delivered only to an exact matching authority. *)
 val unsubscribe_external : string -> unit
 val external_subscriber_count : unit -> int
 val external_subscriber_count_with_prefix : string -> int
@@ -197,11 +210,12 @@ type replay_continuity =
 type replay = { deliveries : delivery list; continuity : replay_continuity }
 
 val replay_after_for_session :
+  ?runtime_authority:runtime_authority ->
   session_id:string -> kind:session_kind -> int -> replay
 (** Replay-buffer lookup for one exact session, read from one snapshot.
     Targeted deliveries are visible only to their named agent-stream session;
     broadcasts use the same target and JSON-RPC filtering rules as live
-    fan-out. *)
+    fan-out. Without a runtime authority, scoped events are excluded. *)
 
 type replay_handoff
 

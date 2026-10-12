@@ -1,0 +1,13 @@
+ASSERT same owner cannot enter while Domain owns it
+ASSERT BasePath aliases preserve both serialized updates exactly once
+ASSERT different keeper persisted independently
+ASSERT different BasePath persisted independently
+ASSERT cancelled waiter never entered persistence transform
+ASSERT cancelled waiter committed no durable stimulus
+ASSERT peer owner persisted during cancellation
+ASSERT same owner durable state after exception
+ASSERT peer owner durable state after exception
+ASSERT summary blocks while the owner transaction is in progress
+ASSERT summary count projection is complete
+ASSERT summary pending count comes from completed snapshot
+test_keeper_event_queue_owner_lock: OK

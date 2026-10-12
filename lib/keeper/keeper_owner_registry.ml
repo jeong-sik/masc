@@ -243,12 +243,11 @@ let record_restart_interruptions pool ~keeper_name owner =
            detail
        | Ok request_id ->
          (match
-            Keeper_chat_store.append_assistant_message_once
+            Keeper_chat_store.append_request_failure_once
               ~base_dir
               ~keeper_name
               ~delivery_key:(Keeper_chat_delivery_identity.Operation request_id)
               ~content:restart_interrupted_reply
-              ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
               ?surface
               ?conversation_id
               ()
@@ -770,10 +769,6 @@ let checkpoint_direct_native_call ~base_path ~keeper_name ~operation_id ~executi
 let terminal_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~call_id ~disposition =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.terminal_direct_native_call owner ~operation_id ~execution_digest ~call_id ~disposition)
-let acknowledge_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~call_id =
-  with_owner_command ~base_path ~keeper_name (fun owner ->
-    Keeper_owner.acknowledge_direct_native_call owner ~operation_id ~execution_digest ~call_id)
-;;
 let resume_direct_checkpoint ~base_path ~keeper_name ~operation_id ~observed =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.resume_direct_checkpoint owner ~operation_id ~observed)

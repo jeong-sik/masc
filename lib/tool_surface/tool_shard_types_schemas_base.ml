@@ -12,6 +12,7 @@ let base_tools : Masc_domain.tool_schema list =
   ; Tool_shard_types_schemas_base_toml.workspace_memory_read
   ; (* Memory *)
     Tool_shard_types_schemas_base_toml.memory_search
+  ; Tool_shard_types_schemas_base_toml.memory_select
   ; (* Exact ordinary-current memory retraction with durable reason evidence. *)
     Tool_shard_types_schemas_base_toml.memory_retract
   ; (* Explicit memory write surface (docs/spec/05-keeper-agent.md 6 Memory Subsystem).

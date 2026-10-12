@@ -617,20 +617,20 @@ let refused decode body =
 
 let test_openrouter_key () =
   check (list string) "windows"
-    [ "limit=- label \"credit limit\" usd 100 limit=100 resets=- role=gates"
+    [ "limit=- label \"API key credit limit\" usd 100 limit=100 resets=- role=gates"
     ; "limit=- label \"free model requests, daily\" fraction 0 resets=- role=other"
     ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        openrouter_key_response);
   check (list string) "a stated reset period is not part of the label, which keys the row"
-    [ "limit=- label \"credit limit\" usd 5 limit=20 resets=- role=gates" ]
+    [ "limit=- label \"API key credit limit\" usd 5 limit=20 resets=- role=gates" ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        {|{"data":{"limit":20,"limit_reset":"monthly","limit_remaining":15}}|});
   check (list string) "a null limit has no credit window" []
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        {|{"data":{"limit":null,"limit_remaining":null}}|});
   check (list string) "uncapped all-time USD usage is retained"
-    [ "limit=- label \"credit usage (all time)\" usd 12.3456 limit=none resets=- role=other" ]
+    [ "limit=- label \"API key usage (all time)\" usd 12.3456 limit=none resets=- role=other" ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        {|{"data":{"limit":null,"limit_remaining":null,"usage":12.3456}}|});
   check string "invalid USD totals do not become zero"
@@ -1052,7 +1052,7 @@ let test_only_gating_windows_explain_a_refusal () =
     "no window spent"
     (refusal_read Usage.decode_ollama_balance
        {|{"included":{"session":{"remaining_percent":0,"resets_at":"2026-10-07T08:00:00Z"},"weekly":{"remaining_percent":0,"resets_at":"2026-10-12T00:00:00Z"}},"purchased":{"balance_usd":4.5}}|});
-  check string "a spent OpenRouter credit limit states no reset"
+  check string "a spent OpenRouter API key credit limit states no reset"
     "spent without reset"
     (refusal_read Usage.decode_openrouter_key
        {|{"data":{"limit":100,"limit_remaining":0}}|});
@@ -1401,7 +1401,7 @@ let () =
         ; test_case "version" `Quick test_antigravity_version
         ] )
     ; ( "reading scopes"
-      , [ test_case "empty HTTP report removes old credit limits" `Quick
+      , [ test_case "empty HTTP report removes old API key credit limits" `Quick
             test_http_empty_report_replaces_old_limit
         ; test_case "a raising scope does not stop the rest" `Quick
             test_a_raising_scope_does_not_stop_the_rest

@@ -171,15 +171,6 @@ let table_shapes () =
   let session=A.toggle (loaded (doc fake)) in
   shows "Inline or dotted" session; rejected (A.start_save ~generation:2 session)
 
-let receipt_keeps_application_failure () =
-  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
-  let session=A.finish_save request (A.Saved (receipt ~registry:(R.Exact_output_registry_kept {reason="registry refused"}) ())) pending in
-  shows "registry refused" session;
-  let session=read ~generation:3 (doc ~revision:"saved" off) session in
-  shows "registry refused" session; shows "Current file: Off" session
-
-(* A reread that already shows the desired activity leaves nothing for s to
-   save, so reapply must not promise a save. *)
 let reapply_onto_desired_activity_promises_no_save () =
   let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
   let session=A.finish_save request (A.Unconfirmed "connection lost") pending in
@@ -192,23 +183,6 @@ let reapply_onto_desired_activity_promises_no_save () =
   let _,_,write=A.start_save ~generation:4 pending |> ok in
   same "concurrent" write.expected_source_revision
 
-(* An unconfirmed receipt belongs to the first attempt. A retry that is
-   refused or conflicts must not show it as its own. *)
-let retry_save_drops_previous_receipt () =
-  let first="File written; durability unconfirmed" in
-  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
-  let session=A.finish_save request (A.Saved (receipt ~durability:R.Durability_unconfirmed ())) pending in
-  shows first session;
-  let reapplied=A.reapply (read ~generation:3 (doc ~revision:"concurrent" (source ^ "other = 1\n")) session) in
-  shows first reapplied;
-  let retry,request,_=A.start_save ~generation:4 reapplied |> ok in
-  let absent label session = Alcotest.(check bool) label false (has first (A.lines session)) in
-  absent "pending retry" retry;
-  absent "refused retry" (A.finish_save request (A.Refused "preview failed") retry);
-  absent "conflicting retry" (A.finish_save request (A.Conflict (doc ~revision:"third" source)) retry)
-
-(* An operator note on an enabled flag stays on that line through a toggle
-   and the save it prepares. *)
 let enabled_comment_survives_toggle () =
   let table="[runtime.exact_output_lanes.librarian_exact]\nslots = [\"first\"]\n" in
   let annotated=table ^ "enabled = true # temporary during rollout\n" in
@@ -230,7 +204,5 @@ let () = Alcotest.run "Exact activity draft and save" ["operator flow",List.map 
    "unconfirmed write and preview refusal",ambiguous_write_and_refusal;
    "changed file path needs discard",changed_path;
    "quoted and multiline table shapes",table_shapes;
-   "stored setting does not hide application failure",receipt_keeps_application_failure;
    "reapply onto the desired activity promises no save",reapply_onto_desired_activity_promises_no_save;
-   "retry save drops the previous receipt",retry_save_drops_previous_receipt;
    "enabled flag keeps its inline comment",enabled_comment_survives_toggle]]

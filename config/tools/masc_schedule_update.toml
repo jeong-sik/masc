@@ -47,8 +47,13 @@ name = "message"
 type = "string"
 required = true
 description = """
-What the Keeper is being woken to do. Write the work itself, not a reminder
-that work exists."""
+What the Keeper is being woken to do. Write the work itself. A recurring
+wake sends this text unchanged: ask the Keeper to read current state each time,
+rather than rely on a copied status or an unintentionally fixed current head.
+Keep immutable run IDs, commit SHAs, or other exact identifiers when they
+deliberately define the recurring target or baseline. Notes are not included
+in the wake. If execution depends on notes, include an instruction here to
+call masc_schedule_notes_list with the schedule ID before acting."""
 
 [[params]]
 name = "title"

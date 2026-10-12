@@ -67,9 +67,8 @@ let require_activity () = match activity () with
   | Disabled -> Error Activity_disabled
   | Unobserved -> Error Activity_unobserved
 
-(* The core runs about 24 million instructions a second on this hardware
-   (measured booting ZZT: 6M steps in 0.25 s). 4M is roughly 170 ms, the same
-   order as the MSX lane's 300-frame cap. *)
+(* A call consumes at most this many machine execution steps, including
+   idle waits. Actual guest instruction counts are reported separately. *)
 let max_steps_per_call = 4_000_000
 
 (* A DOS program reaches its title screen in its own time. This is the budget
@@ -102,7 +101,7 @@ type core = {
    one, so a SHA bumped alone turns that test red with the new digest in its
    message. Read the digest of a commit from its build:
    _build/default/lib/identity/dos_core_identity.ml. *)
-let pinned_core_source_digest = "57ee37daab1a4cd93e6fa9480918286a"
+let pinned_core_source_digest = "dcc7a239c2cacba739a9819be3e46b2e"
 
 let core =
   { source_digest = Dos_core_identity.source_digest
@@ -120,6 +119,8 @@ type autosave =
 
 type ran = {
   steps_run : int;
+  instructions_run : int;
+  elapsed_cycles : int;
   settled : bool;
   input_requests : int;
   keys_pressed : int;
@@ -394,11 +395,10 @@ let clamp_steps steps =
   else Ok steps
 ;;
 
-(* [run_until] calls [stop] once per completed instruction, but an exception
-   escapes before it can return that count. Keep [st.steps] aligned with the
-   instructions that actually ran so tool responses and ledger positions are
-   accurate even when the guest faults. Preserve the original exception and
-   backtrace for the caller. *)
+(* [run_until] calls [stop] once per completed machine step, including idle
+   wait clocks. Preserve that execution clock for the input ledger and its
+   deterministic timing. The report separately counts guest instructions.
+   Keep the clock aligned after a fault, before returning its original trace. *)
 let run_counted st ~max_steps =
   let completed = ref 0 in
   match
@@ -406,9 +406,9 @@ let run_counted st ~max_steps =
       incr completed;
       false)
   with
-  | n ->
-    st.steps <- st.steps + n;
-    n
+  | report ->
+    st.steps <- st.steps + report.Dos_machine.machine_steps;
+    report
   | exception fault ->
     let backtrace = Printexc.get_raw_backtrace () in
     st.steps <- st.steps + !completed;
@@ -418,8 +418,10 @@ let run_counted st ~max_steps =
 (* Runs the budget straight through, with nothing watching. *)
 let advance_blind st ~budget =
   let before = Dos_machine.input_requests st.m in
-  let n = run_counted st ~max_steps:budget in
-  { steps_run = n
+  let report = run_counted st ~max_steps:budget in
+  { steps_run = report.Dos_machine.machine_steps
+  ; instructions_run = report.Dos_machine.instructions
+  ; elapsed_cycles = report.Dos_machine.elapsed_cycles
   ; settled = false
   ; input_requests = Dos_machine.input_requests st.m - before
   ; keys_pressed = 0
@@ -428,34 +430,40 @@ let advance_blind st ~budget =
   }
 ;;
 
-(* Runs until the machine is ready for input, in chunks.
-   Ready is two facts overlapped, and neither is a guess about the picture:
+(* Runs until an empty keyboard poll overlaps unchanged screen memory.
+   This observation is not proof that a game reached its next prompt:
 
    - the guest asked the BIOS for a key inside this chunk and the ring was
      empty, and
    - the screen memory is the same as it was one chunk ago.
 
-   The first alone is not enough. A program in its own loop takes a key and
+   The first alone can stop mid-repaint. A program in its own loop takes a key and
    asks for the next one 631 instructions later (measured on ZZT) while the
    repaint it started is still half-written; stopping there hands the caller
    the picture from before their key, and the press looks like it did
-   nothing. A menu that is genuinely blocked matches on the first chunk, so
-   waiting costs it nothing. *)
+   nothing. Both facts can also hold during a transition: 삼국지3 returned
+   settled before its command menu appeared with no additional key. Callers
+   can instead run an explicit machine-step allowance with [until_ready=false]. *)
 let advance_until_ready st ~budget =
   let m = st.m in
   let requests_before = Dos_machine.input_requests m in
   let previous = ref (Dos_machine.screen_digest m) in
-  let ran = ref 0 and settled = ref false in
+  let ran = ref 0 and instructions = ref 0 and cycles = ref 0 in
+  let settled = ref false in
   while (not !settled) && !ran < budget && not (Dos_machine.exited m) do
     let asked_before = Dos_machine.input_requests m in
-    let n = run_counted st ~max_steps:(min settle_chunk (budget - !ran)) in
-    ran := !ran + n;
+    let report = run_counted st ~max_steps:(min settle_chunk (budget - !ran)) in
+    ran := !ran + report.Dos_machine.machine_steps;
+    instructions := !instructions + report.Dos_machine.instructions;
+    cycles := !cycles + report.Dos_machine.elapsed_cycles;
     let asked = Dos_machine.input_requests m > asked_before in
     let now = Dos_machine.screen_digest m in
     if asked && now = !previous then settled := true;
     previous := now
   done;
   { steps_run = !ran
+  ; instructions_run = !instructions
+  ; elapsed_cycles = !cycles
   ; settled = !settled
   ; input_requests = Dos_machine.input_requests m - requests_before
   ; keys_pressed = 0
@@ -571,6 +579,19 @@ let checkpoint_meta st ~who : Yojson.Safe.t =
     ]
 ;;
 
+(* How many times this lane replaced each checkpoint file, keyed by its path,
+   written only while holding [lock]. A restore reads its slot outside the
+   lock; it records this count first and commit refuses when a lane save
+   replaced the slot in between, so the restored machine is never older than
+   the checkpoint the slot now holds. A path this lane never wrote counts 0. *)
+let checkpoint_writes : (string, int) Hashtbl.t = Hashtbl.create 8
+
+let checkpoint_write_count path =
+  Option.value ~default:0 (Hashtbl.find_opt checkpoint_writes path)
+
+let mark_checkpoint_write path =
+  Hashtbl.replace checkpoint_writes path (checkpoint_write_count path + 1)
+
 (* Writes the machine to [slot] under the lock the caller already holds. [save]
    and the autosave at the end of every run both go through here, so the two
    cannot disagree on what a checkpoint holds. *)
@@ -588,7 +609,9 @@ let write_checkpoint st ~who ~dir ~slot =
        Machine_checkpoint.write ~dir slot header ~meta:(checkpoint_meta st ~who)
          ~machine_bytes
      with
-     | Ok () -> Ok ()
+     | Ok () ->
+       mark_checkpoint_write (Machine_checkpoint.path ~dir slot);
+       Ok ()
      | Error message -> Error (Unreadable message))
 ;;
 
@@ -603,7 +626,11 @@ let preserve_previous_autosave ~dir =
   let source = Machine_checkpoint.path ~dir autosave_slot in
   if Sys.file_exists source then (
     let target = Machine_checkpoint.path ~dir autosave_prev_slot in
-    try Sys.rename source target with
+    try
+      Sys.rename source target;
+      mark_checkpoint_write source;
+      mark_checkpoint_write target
+    with
     | Sys_error _ -> ())
 ;;
 
@@ -648,9 +675,8 @@ let ran_then_kept st ~who ran =
   Ok (observe st, { ran with unsaved; autosave })
 ;;
 
-(* The saves over the inventory, matched the way DOS matches names. Read
-   under the machine's lock by [load], so a save the running machine writes
-   cannot land between this read and the new machine's first record of it. *)
+(* The saves over inventory, matched the way DOS matches names. Preparation
+   snapshots the lane counter first; commit rejects a concurrent guest run. *)
 let with_saves ~saves_dir files =
   match
     if Sys.file_exists saves_dir && Sys.is_directory saves_dir then
@@ -694,62 +720,73 @@ let is_mz image =
   String.length image >= 2 && Char.equal image.[0] 'M' && Char.equal image.[1] 'Z'
 ;;
 
-let load ~who ~ledger_dir ~saves_dir ~checkpoint_dir ~program_name ~program_bytes ~files ~announce =
+type prepared_load = {
+  load_machine : (Dos_machine.t * (string, string) Hashtbl.t) option ref;
+  load_program : string;
+  load_ledger_dir : string;
+  load_saves_dir : string;
+  load_checkpoint_dir : string;
+  load_change_count : int;
+}
+
+let prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~program_name ~program_bytes ~files =
   let* () = require_activity () in
+  (* Guest writes raise this counter. A load must not install a save overlay
+     read across a concurrent run of the old machine. *)
+  let load_change_count = locked (fun () -> !change_count) in
+  let* files = with_saves ~saves_dir files in
+  if String.length program_bytes = 0 then
+    Error (Invalid_request (Printf.sprintf "%s is empty" program_name))
+  else match dos_name_collision files with
+  | Some (earlier, later) ->
+      Error (Invalid_request (Printf.sprintf
+        "%s and %s are one name to DOS; the guest can only see one" earlier later))
+  | None ->
+      let m = Dos_machine.create () in
+      List.iter (fun (name, contents) -> Dos_machine.mount_file m name contents) files;
+      if is_mz program_bytes then Dos_machine.load_exe m program_bytes
+      else Dos_machine.load_com m program_bytes;
+      let kept = Hashtbl.create (List.length files) in
+      List.iter (fun (name, contents) -> Hashtbl.replace kept (String.uppercase_ascii name) contents) files;
+      Ok {load_machine=ref (Some (m, kept)); load_program=program_name;
+          load_ledger_dir=ledger_dir; load_saves_dir=saves_dir;
+          load_checkpoint_dir=checkpoint_dir; load_change_count}
+;;
+
+let commit_load ~who prepared ~announce =
   locked (fun () ->
-    match Option.map (refuse_other ~who) !state with
-    | Some (Error e) -> Error e
-    | Some (Ok ()) | None ->
-    match with_saves ~saves_dir files with
-    | Error e -> Error e
-    | Ok files ->
-    if String.length program_bytes = 0 then
-      Error (Invalid_request (Printf.sprintf "%s is empty" program_name))
-    else
-      match dos_name_collision files with
-      | Some (earlier, later) ->
-        Error
-          (Invalid_request
-             (Printf.sprintf "%s and %s are one name to DOS; the guest can only see one"
-                earlier later))
-      | None ->
-        (* A new machine starts a new ledger. *)
-        let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
-        match
-          mkdir_p ledger_dir;
-          Out_channel.with_open_bin ledger_path (fun _ -> ())
-        with
-        | exception Sys_error message -> Error (Unreadable message)
-        | () -> begin
-        let m = Dos_machine.create () in
-        List.iter (fun (name, contents) -> Dos_machine.mount_file m name contents) files;
-        (* The image's own bytes choose the loader, not its name: an MZ header is
-           a relocatable EXE, anything else is a flat COM at 0x100. A misnamed
-           file still boots the way DOS would boot it. *)
-        if is_mz program_bytes then Dos_machine.load_exe m program_bytes
-        else Dos_machine.load_com m program_bytes;
-        let kept = Hashtbl.create (List.length files) in
-        List.iter
-          (fun (name, contents) -> Hashtbl.replace kept (String.uppercase_ascii name) contents)
-          files;
-        let st =
-          { m; steps = 0; program = program_name; ledger_path; entries = []; saves_dir; checkpoint_dir; kept
-          ; controller = Some who; incarnation = Random_id.uuid_v7 (); autosaved_once = false }
-        in
+    let* () = require_activity () in
+    let* () = match !state with None -> Ok () | Some st -> refuse_other st ~who in
+    if !change_count <> prepared.load_change_count then
+      Error (Invalid_request "DOS machine changed during load preparation; request the load again")
+    else match !(prepared.load_machine) with
+    | None -> Error (Invalid_request "DOS load preparation was already consumed")
+    | Some (m, kept) ->
+      prepared.load_machine := None;
+      let ledger_path = Filename.concat prepared.load_ledger_dir "ledger.jsonl" in
+      match
+        mkdir_p prepared.load_ledger_dir;
+        Out_channel.with_open_bin ledger_path (fun _ -> ())
+      with
+      | exception Sys_error message -> Error (Unreadable message)
+      | () ->
+        let st = {m; steps=0; program=prepared.load_program; ledger_path; entries=[];
+          saves_dir=prepared.load_saves_dir; checkpoint_dir=prepared.load_checkpoint_dir; kept;
+          controller=Some who; incarnation=Random_id.uuid_v7 (); autosaved_once=false} in
         state := Some st;
         mark_change ();
-        note_activity ~who (Printf.sprintf "load %s" program_name);
-        let booted =
-          running (fun () ->
-            let ran = advance st ~budget:boot_steps ~until_ready:true in
-            ran_then_kept st ~who ran)
-        in
-        (* Announced once the machine is the workspace's and has booted as far
-           as it will, still under the lock so announcements keep machine
-           order. *)
+        note_activity ~who (Printf.sprintf "load %s" prepared.load_program);
+        let booted = running (fun () ->
+          let ran = advance st ~budget:boot_steps ~until_ready:true in
+          ran_then_kept st ~who ran) in
         announce ();
-        booted
-      end)
+        booted)
+;;
+
+let load ~who ~ledger_dir ~saves_dir ~checkpoint_dir ~program_name ~program_bytes ~files ~announce =
+  let* prepared = prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir
+      ~program_name ~program_bytes ~files in
+  commit_load ~who prepared ~announce
 ;;
 
 let eject ~who ~announce () =
@@ -879,36 +916,37 @@ let resolve_keys names =
    key may take -- a menu that repaints slowly needs room -- but the call as a
    whole stops at [max_steps_per_call], the same ceiling one masc_dos_step
    runs under. Per-key budgets multiply: sixty-four keys at four million each
-   is a quarter of a billion instructions held under the machine's mutex,
+   is a quarter of a billion machine steps held under the machine's mutex,
    with every other keeper queued behind it. A sequence that runs out comes
    back with [keys_pressed] below what was asked, and the caller sends the
    rest; the keys not pressed are not in the ledger and never reached the
    ring. *)
-let press_resolved st ~who ~keys ~budget =
+let press_resolved st ~who ~keys ~budget ~until_ready =
   let total = ref 0 and requests = ref 0 and pressed = ref 0 in
+  let instructions = ref 0 and cycles = ref 0 in
   let last_settled = ref false in
   List.iter
     (fun (name, word) ->
       let left = max_steps_per_call - !total in
-      (* A key goes in only when the machine is ready for it. If the previous
-         key left the program busy -- a fade, a load, an AI turn -- the next
-         one would land in whatever loop is running, and a "press any key"
-         wait or a skip check eats it. On 삼국지3 that turned a copy-protection
-         code typed during the fade into a wrong code, and the game exited.
-         The rest of the sequence is not sent; keys_pressed says where it
-         stopped. *)
-      let ready = !pressed = 0 || !last_settled in
+      (* The default mode continues only after its settling observation.
+         Full-allowance mode deliberately sends one key: it does not infer
+         permission to inject the remaining suffix from keyboard polling. *)
+      let ready = !pressed = 0 || (until_ready && !last_settled) in
       if left > 0 && ready then begin
         append_entry st { at_step = st.steps; who; key_name = name };
         Dos_machine.push_key st.m word;
-        let ran = advance_until_ready st ~budget:(min budget left) in
+        let ran = advance st ~budget:(min budget left) ~until_ready in
         total := !total + ran.steps_run;
+        instructions := !instructions + ran.instructions_run;
+        cycles := !cycles + ran.elapsed_cycles;
         requests := !requests + ran.input_requests;
         last_settled := ran.settled;
         incr pressed
       end)
     keys;
   { steps_run = !total
+  ; instructions_run = !instructions
+  ; elapsed_cycles = !cycles
   ; settled = !last_settled
   ; input_requests = !requests
   ; keys_pressed = !pressed
@@ -917,7 +955,7 @@ let press_resolved st ~who ~keys ~budget =
   }
 ;;
 
-let press_on st ~who ~keys ~steps =
+let press_on st ~who ~keys ~steps ~until_ready =
   if keys = [] then Error (Invalid_request "keys must name at least one key")
   else if List.length keys > max_keys_per_call then
     Error
@@ -933,17 +971,19 @@ let press_on st ~who ~keys ~steps =
       (match resolve_keys keys with
        | Error e -> Error e
        | Ok resolved ->
-         let ran = press_resolved st ~who ~keys:resolved ~budget in
-         note_activity ~who ("press " ^ String.concat "," (List.map fst resolved));
+         let ran = press_resolved st ~who ~keys:resolved ~budget ~until_ready in
+         note_activity ~who ("press " ^ String.concat ","
+           (List.map fst (List.take ran.keys_pressed resolved)));
          ran_then_kept st ~who ran)
 ;;
 
-let press ~who ~keys ~steps = with_control ~who (fun st -> press_on st ~who ~keys ~steps)
+let press ~who ~keys ~steps ~until_ready =
+  with_control ~who (fun st -> press_on st ~who ~keys ~steps ~until_ready)
 
-let press_into ~saves_name ~who ~keys ~steps =
+let press_into ~saves_name ~who ~keys ~steps ~until_ready =
   with_control ~who (fun st ->
     let loaded = saves_name_of st in
-    if String.equal loaded saves_name then press_on st ~who ~keys ~steps
+    if String.equal loaded saves_name then press_on st ~who ~keys ~steps ~until_ready
     else Error (Other_program { expected = saves_name; loaded }))
 ;;
 
@@ -985,6 +1025,8 @@ let click ~who ~x ~y ~buttons ~steps =
           let up = advance st ~budget:(budget - down.steps_run) ~until_ready:true in
           ran_then_kept st ~who
             { steps_run = down.steps_run + up.steps_run
+              ; instructions_run = down.instructions_run + up.instructions_run
+              ; elapsed_cycles = down.elapsed_cycles + up.elapsed_cycles
               ; settled = down.settled && up.settled
               ; input_requests = down.input_requests + up.input_requests
               ; keys_pressed = 0
@@ -994,7 +1036,7 @@ let click ~who ~x ~y ~buttons ~steps =
         end)
 ;;
 
-let type_text ~who ~text ~steps =
+let type_text ~who ~text ~steps ~until_ready =
   with_control ~who (fun st ->
     if String.length text = 0 then Error (Invalid_request "text must not be empty")
     else if String.length text > max_text_length then
@@ -1010,8 +1052,8 @@ let type_text ~who ~text ~steps =
         (match resolve_keys names with
          | Error e -> Error e
          | Ok resolved ->
-           let ran = press_resolved st ~who ~keys:resolved ~budget in
-           note_activity ~who (Printf.sprintf "type %d chars" (String.length text));
+           let ran = press_resolved st ~who ~keys:resolved ~budget ~until_ready in
+           note_activity ~who (Printf.sprintf "type %d chars" ran.keys_pressed);
            ran_then_kept st ~who ran))
 ;;
 
@@ -1073,75 +1115,117 @@ let meta_of_json json =
   | _ -> corrupt "the lane's fields are missing"
 ;;
 
-let restore ~who ~dir ~slot ~ledger_dir ~saves_dir_of ~announce =
+type restore_payload = {
+  restore_machine : Dos_machine.t;
+  restore_kept : (string, string) Hashtbl.t;
+  restore_meta : restored_meta;
+  restore_entries : entry list;
+  restore_staged_ledger : string;
+  restore_ledger_path : string;
+  restore_saves_dir : string;
+  restore_checkpoint_dir : string;
+  restore_slot : Machine_checkpoint.slot;
+  restore_slot_writes : int;
+}
+
+type prepared_restore = restore_payload option Atomic.t
+
+let remove_restore_stage path =
+  try Unix.unlink path with Unix.Unix_error (Unix.ENOENT,_,_) -> ()
+
+let discard_prepared_restore prepared =
+  match Atomic.exchange prepared None with
+  | None -> ()
+  | Some owned -> remove_restore_stage owned.restore_staged_ledger
+;;
+
+let prepare_restore ~dir ~slot ~ledger_dir ~saves_dir_of =
   let* () = require_activity () in
+  let restore_slot_writes =
+    locked (fun () -> checkpoint_write_count (Machine_checkpoint.path ~dir slot)) in
+  let* checkpoint = match Machine_checkpoint.read ~dir slot ~machine:Machine_checkpoint.Dos
+      ~format:checkpoint_format with
+    | Ok checkpoint -> Ok checkpoint
+    | Error (Machine_checkpoint.Unreadable message) -> Error (Unreadable message)
+    | Error e -> Error (Checkpoint_refused e) in
+  let* meta = meta_of_json checkpoint.Machine_checkpoint.meta in
+  let* m = match Dos_snapshot.restore checkpoint.machine_bytes with
+    | Ok m -> Ok m
+    | Error (Dos_snapshot.Wrong_format {saved; supported}) ->
+        Error (Checkpoint_refused (Machine_checkpoint.Other_format {saved; expected=supported}))
+    | Error ((Dos_snapshot.Not_a_snapshot | Dos_snapshot.Corrupt _) as e) ->
+        Error (Checkpoint_refused (Machine_checkpoint.Corrupt (Dos_snapshot.error_to_string e))) in
+  let kept = Hashtbl.create 16 in
+  List.iter (fun name ->
+    Option.iter (Hashtbl.replace kept name) (Dos_machine.read_mounted m name))
+    (Dos_machine.mounted_names m);
+  let lines = String.concat ""
+      (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") meta.saved_ledger) in
+  let entries = List.rev meta.saved_ledger in
+  let saves_dir = saves_dir_of meta.saved_saves in
+  try
+    mkdir_p ledger_dir;
+    let temporary,channel = Filename.open_temp_file ~temp_dir:ledger_dir ".restore-ledger-" ".tmp" in
+    let transferred = ref false in
+    Fun.protect ~finally:(fun () ->
+      close_out_noerr channel;
+      if not !transferred then remove_restore_stage temporary)
+      (fun () ->
+        output_string channel lines;
+        close_out channel;
+        let prepared = Atomic.make (Some {
+          restore_machine=m;restore_kept=kept;restore_meta=meta;restore_entries=entries;
+          restore_staged_ledger=temporary;restore_ledger_path=Filename.concat ledger_dir "ledger.jsonl";
+          restore_saves_dir=saves_dir;restore_checkpoint_dir=dir;restore_slot=slot;
+          restore_slot_writes}) in
+        transferred := true;
+        Ok prepared)
+  with
+  | Sys_error message -> Error (Unreadable message)
+  | Unix.Unix_error (error,operation,path) ->
+      Error (Unreadable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error))
+;;
+
+let commit_restore ~who prepared ~announce =
+  (* After admission the lock covers revalidation and publication only. The
+     caller's cleanup and this commit atomically compete for the one payload;
+     cleanup can never unlink a staged file already owned by this commit. *)
   locked (fun () ->
-    match Option.map (refuse_other ~who) !state with
-    | Some (Error e) -> Error e
-    | Some (Ok ()) | None ->
-      (* Everything is read and checked before anything changes: a refused
-         restore leaves the machine, its ledger and its controller as they
-         were. *)
-      match
-        Machine_checkpoint.read ~dir slot ~machine:Machine_checkpoint.Dos
-          ~format:checkpoint_format
-      with
-      | Error (Machine_checkpoint.Unreadable message) -> Error (Unreadable message)
-      | Error e -> Error (Checkpoint_refused e)
-      | Ok { Machine_checkpoint.meta; machine_bytes; header = _ } ->
-        match meta_of_json meta with
-        | Error e -> Error e
-        | Ok meta ->
-          match Dos_snapshot.restore machine_bytes with
-          | Error (Dos_snapshot.Wrong_format { saved; supported }) ->
-            Error
-              (Checkpoint_refused
-                 (Machine_checkpoint.Other_format { saved; expected = supported }))
-          | Error ((Dos_snapshot.Not_a_snapshot | Dos_snapshot.Corrupt _) as e) ->
-            Error
-              (Checkpoint_refused
-                 (Machine_checkpoint.Corrupt (Dos_snapshot.error_to_string e)))
-          | Ok m ->
-            let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
-            let lines =
-              String.concat ""
-                (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") meta.saved_ledger)
-            in
-            match
-              mkdir_p ledger_dir;
-              write_atomically ~dir:ledger_dir "ledger.jsonl" lines
-            with
-            | exception Sys_error message -> Error (Unreadable message)
-            | () ->
-              (* The saves directory keeps what is on disk. The restored
-                 machine's files are taken as already kept, so nothing is
-                 written back until the guest writes again: an older
-                 checkpoint never overwrites a newer save a game made after
-                 it. *)
-              let kept = Hashtbl.create 16 in
-              List.iter
-                (fun name ->
-                  Option.iter (Hashtbl.replace kept name) (Dos_machine.read_mounted m name))
-                (Dos_machine.mounted_names m);
-              let st =
-                { m
-                ; steps = meta.saved_steps
-                ; program = meta.saved_program
-                ; ledger_path
-                ; entries = List.rev meta.saved_ledger
-                ; saves_dir = saves_dir_of meta.saved_saves
-                ; checkpoint_dir = dir
-                ; kept
-                ; controller = Some who
-                ; incarnation = Random_id.uuid_v7 ()
-                ; autosaved_once = false
-                }
-              in
-              state := Some st;
-              mark_change ();
-              note_activity ~who ("restore " ^ Machine_checkpoint.slot_to_string slot);
-              announce ();
-              Ok (observe st))
+    let* () = require_activity () in
+    let* () = match !state with None -> Ok () | Some st -> refuse_other st ~who in
+    match Atomic.exchange prepared None with
+    | None -> Error (Invalid_request "DOS restore preparation was already consumed or discarded")
+    | Some owned ->
+      Fun.protect ~finally:(fun () -> remove_restore_stage owned.restore_staged_ledger)
+        (fun () ->
+          if checkpoint_write_count
+              (Machine_checkpoint.path ~dir:owned.restore_checkpoint_dir owned.restore_slot)
+             <> owned.restore_slot_writes
+          then
+            Error (Invalid_request (Printf.sprintf
+              "DOS checkpoint %s was saved again during restore preparation; request the restore again"
+              (Machine_checkpoint.slot_to_string owned.restore_slot)))
+          else
+          let meta = owned.restore_meta in
+          let st = {m=owned.restore_machine; steps=meta.saved_steps; program=meta.saved_program;
+            ledger_path=owned.restore_ledger_path; entries=owned.restore_entries;
+            saves_dir=owned.restore_saves_dir;checkpoint_dir=owned.restore_checkpoint_dir;
+            kept=owned.restore_kept;controller=Some who;
+            incarnation=Random_id.uuid_v7 ();autosaved_once=false} in
+          match Sys.rename owned.restore_staged_ledger owned.restore_ledger_path with
+          | exception Sys_error message -> Error (Unreadable message)
+          | () ->
+            state := Some st;
+            mark_change ();
+            note_activity ~who ("restore " ^ Machine_checkpoint.slot_to_string owned.restore_slot);
+            announce ();
+            Ok (observe st)))
+;;
+
+let restore ~who ~dir ~slot ~ledger_dir ~saves_dir_of ~announce =
+  let* prepared = prepare_restore ~dir ~slot ~ledger_dir ~saves_dir_of in
+  Fun.protect ~finally:(fun () -> discard_prepared_restore prepared)
+    (fun () -> commit_restore ~who prepared ~announce)
 ;;
 
 let checkpoints ~dir =

@@ -551,6 +551,17 @@ let keeper_owner_leaf ~keeper_name ~oauth_source =
   "keeper-" ^ (Digestif.SHA256.digest_string identity |> Digestif.SHA256.to_hex)
 ;;
 
+let keeper_home_dir ~runtime_root ~owner_leaf =
+  List.fold_left
+    Filename.concat
+    runtime_root
+    [ "official-clients"; "antigravity"; owner_leaf ]
+;;
+
+let keeper_prepare_lock_path ~runtime_root ~owner_leaf =
+  Filename.concat runtime_root ("antigravity-" ^ owner_leaf ^ ".prepare.lock")
+;;
+
 let prepare_owner_directory ~runtime_root ~owner_leaf =
   if not (Fs_compat.is_capability_leaf owner_leaf)
   then Error (Invalid_owner_leaf owner_leaf)
@@ -558,7 +569,8 @@ let prepare_owner_directory ~runtime_root ~owner_leaf =
     let* () = verify_runtime_root runtime_root in
     let* official_clients = ensure_private_child runtime_root "official-clients" in
     let* antigravity_root = ensure_private_child official_clients "antigravity" in
-    ensure_private_child antigravity_root owner_leaf
+    let* _created = ensure_private_child antigravity_root owner_leaf in
+    Ok (keeper_home_dir ~runtime_root ~owner_leaf)
 ;;
 
 let prepare_home_storage ~home_dir ~oauth_seed =
@@ -858,7 +870,7 @@ let with_prepared_account_using_sync ~sync_store ~publish_pointer ~read_keychain
     if not (Fs_compat.is_capability_leaf owner_leaf)
     then Error (Invalid_owner_leaf owner_leaf)
     else verify_runtime_root runtime_root) in
-  let lock_path = Filename.concat runtime_root ("antigravity-" ^ owner_leaf ^ ".prepare.lock") in
+  let lock_path = keeper_prepare_lock_path ~runtime_root ~owner_leaf in
   match File_lock_eio.with_durable_lock ~lock_path (fun () ->
     let* paths = Eio_guard.run_in_systhread ~label:"antigravity-account-generation" (fun () ->
       try select_generation ~sync_store ~publish_pointer ~read_keychain ~runtime_root ~owner_leaf ~oauth_source with

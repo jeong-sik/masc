@@ -123,10 +123,10 @@ let operation_event_to_json ~keeper_name ~operation_id ~seq ~event =
      @ seq_fields)
 ;;
 
-let operation_event ~keeper_name ~operation_id ~seq ~event =
+let operation_event ~base_path ~keeper_name ~operation_id ~seq ~event =
   try
     Sse.broadcast_to
-      Sse.Observers
+      (Sse.Runtime_observers (Sse.runtime_authority_exn ~base_path))
       (operation_event_to_json ~keeper_name ~operation_id ~seq ~event)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

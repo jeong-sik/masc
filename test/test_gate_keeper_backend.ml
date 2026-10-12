@@ -1114,6 +1114,8 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
   in
   match events with
   | [ Keeper_chat_events.Agent_core_thinking_delta { index = first_index; delta = first };
+      Keeper_chat_events.Model_content_activity
+        {content_index=0; channel=Model_thinking; state=Content_observed; _};
       Keeper_chat_events.Agent_core_content_block_start
         { index = tool_index;
           content_type;
@@ -1125,7 +1127,9 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
         { tool_call_id = snapshot_id; snapshot; _ };
       Keeper_chat_events.Agent_core_content_block_stop { index = stop_index };
       Keeper_chat_events.Tool_call_end { tool_call_id = end_id; _ };
-      Keeper_chat_events.Agent_core_thinking_delta { index = last_index; delta = last } ] ->
+      Keeper_chat_events.Agent_core_thinking_delta { index = last_index; delta = last };
+      Keeper_chat_events.Model_content_activity
+        {content_index=2; channel=Model_thinking; state=Content_observed; _} ] ->
       check int "first thinking index" 0 first_index;
       check string "first thinking" "think A" first;
       check int "tool block index" 1 tool_index;
@@ -1180,7 +1184,9 @@ let test_keeper_stream_bridge_projects_reasoning_details_delta () =
       ]
   in
   match events with
-  | [ Keeper_chat_events.Agent_core_thinking_delta { index; delta } ] ->
+  | [ Keeper_chat_events.Agent_core_thinking_delta { index; delta };
+      Keeper_chat_events.Model_content_activity
+        {content_index=0; channel=Model_thinking; state=Content_observed; _} ] ->
       check int "reasoning details index" 0 index;
       check string "reasoning details thinking" "detail thinking" delta
   | _ ->
@@ -1215,6 +1221,8 @@ let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
   in
   match events with
   | [ Keeper_chat_events.Agent_core_thinking_delta { index = first_index; delta = first };
+      Keeper_chat_events.Model_content_activity
+        {content_index=0; channel=Model_thinking; state=Content_observed; _};
       Keeper_chat_events.Agent_core_content_block_start
         { index = tool_index;
           content_type;
@@ -1227,7 +1235,9 @@ let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
         { tool_call_id = snapshot_id_b; snapshot = snapshot_b; _ };
       Keeper_chat_events.Agent_core_content_block_stop { index = stop_index };
       Keeper_chat_events.Tool_call_end { tool_call_id = end_id; _ };
-      Keeper_chat_events.Agent_core_thinking_delta { index = last_index; delta = last } ] ->
+      Keeper_chat_events.Agent_core_thinking_delta { index = last_index; delta = last };
+      Keeper_chat_events.Model_content_activity
+        {content_index=2; channel=Model_thinking; state=Content_observed; _} ] ->
       check int "first thinking index" 0 first_index;
       check string "first thinking" "think A" first;
       check int "tool block index" 1 tool_index;
@@ -2211,7 +2221,7 @@ let test_keeper_stream_bridge_isolates_tool_blocks_across_messages () =
 
 let stream_text_deltas events =
   List.filter_map
-    (function Keeper_chat_events.Text_delta text -> Some text | _ -> None)
+    (function Keeper_chat_events.Text_delta {text=text; _} -> Some text | _ -> None)
     events
 
 let resolve_canonical_agent_core_stream_events events =
@@ -2249,7 +2259,11 @@ let test_keeper_stream_bridge_text_delta_passthrough_incremental () =
   in
   check (list string) "incremental deltas pass through in order"
     [ "Hello"; ""; " world"; "second block" ]
-    (stream_text_deltas events)
+    (stream_text_deltas events);
+  check (list (option int)) "bridge stamps its allocated scope on every text chunk"
+    [Some 0; Some 0; Some 0; Some 0]
+    (List.filter_map (function Keeper_chat_events.Text_delta {stream_scope; _} ->
+       Some stream_scope | _ -> None) events)
 
 let test_keeper_stream_pipeline_reconciles_cumulative_snapshot_once () =
   let open Agent_core.Types in
@@ -2447,9 +2461,9 @@ let test_keeper_stream_bridge_surfaces_agent_core_message_metadata () =
   in
   match events with
   | [ Keeper_chat_events.Agent_core_stream_message_start
-        { provider_message_id; model; usage = Some start_usage };
+        { stream_scope = 0; provider_message_id; model; usage = Some start_usage };
       Keeper_chat_events.Agent_core_stream_message_delta
-        { stop_reason = Some stop_reason; usage = Some delta_usage };
+        { stream_scope = 0; stop_reason = Some stop_reason; usage = Some delta_usage };
       Keeper_chat_events.Agent_core_stream_message_stop;
       Keeper_chat_events.Agent_core_stream_ping ] ->
       check string "provider message id" "msg-agent_core-1" provider_message_id;
@@ -2502,6 +2516,8 @@ let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =
   in
   check bool "intermediate narration is not terminal text" false
     (Keeper_chat_agent_core_stream_bridge.terminal_message_had_text no_final_text);
+  check (option int) "no terminal text has no identified scope" None
+    (Keeper_chat_agent_core_stream_bridge.terminal_text_scope no_final_text);
   let _, open_final_text =
     translate_agent_core_stream
       [ message_start "terminal-open"
@@ -2511,6 +2527,8 @@ let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =
   in
   check bool "open terminal message text is observable" true
     (Keeper_chat_agent_core_stream_bridge.terminal_message_had_text open_final_text);
+  check (option int) "the open terminal text carries its scope" (Some 0)
+    (Keeper_chat_agent_core_stream_bridge.terminal_text_scope open_final_text);
   let open_final_without_text =
     translate_scoped
       [ 0, message_start "intermediate"
@@ -2526,12 +2544,12 @@ let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =
        open_final_without_text);
   let final_text =
     translate_scoped
-      [ 0, message_start "intermediate"
+      [ 0, message_start "reused-provider-id"
       ; 0, text_start
       ; 0, ContentBlockDelta { index = 0; delta = TextDelta "working" }
       ; 0, terminal
       ; 0, MessageStop
-      ; 1, message_start "terminal"
+      ; 1, message_start "reused-provider-id"
       ; 1, text_start
       ; 1, ContentBlockDelta { index = 0; delta = TextDelta "approved" }
       ; 1, terminal
@@ -2539,7 +2557,9 @@ let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =
       ]
   in
   check bool "terminal message text suppresses terminal resend" true
-    (Keeper_chat_agent_core_stream_bridge.terminal_message_had_text final_text)
+    (Keeper_chat_agent_core_stream_bridge.terminal_message_had_text final_text);
+  check (option int) "a reused provider ID does not reuse the terminal stream scope" (Some 1)
+    (Keeper_chat_agent_core_stream_bridge.terminal_text_scope final_text)
 
 let test_keeper_stream_bridge_preserves_typed_media_source () =
   let open Agent_core.Types in
@@ -2950,12 +2970,16 @@ let test_keeper_stream_bridge_preserves_native_tool_origin () =
         }
     ; Native_tool_start native_start
     ; Agent_core_content_block_stop { index = 7 }
-    ; Native_tool_end native_end
+    ; Native_tool_end (native_end, completion)
     ] ->
     check string
       "typed native content origin"
       Runtime_native_tools.stream_content_type
       content_type;
+    check bool
+      "a block stop reports only that the end was observed"
+      true
+      (completion = Runtime_native_tools.end_observed);
     List.iter
       (fun (label, (tool : Keeper_chat_events.native_tool)) ->
         check int (label ^ " stream scope") 0 tool.occurrence.stream_scope;
@@ -3053,7 +3077,7 @@ let test_keeper_stream_bridge_rejects_reasoning_as_public_text () =
       ContentBlockStart {index=1; content_type="text"; tool_id=None; tool_name=None};
       ContentBlockDelta {index=1; delta=TextDelta "PUBLIC_ANSWER"} ] in
   check (list string) "valid signature preserves separate answer" ["PUBLIC_ANSWER"]
-    (List.filter_map (function Keeper_chat_events.Text_delta text -> Some text | _ -> None) valid);
+    (List.filter_map (function Keeper_chat_events.Text_delta {text=text; _} -> Some text | _ -> None) valid);
   check bool "valid reasoning has no protocol error" false
     (List.exists (function Keeper_chat_events.Agent_core_stream_protocol_error _ -> true | _ -> false) valid)
 

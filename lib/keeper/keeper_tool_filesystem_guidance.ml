@@ -13,6 +13,9 @@
 type t =
   | Offset_not_1_based of { offset : int }
   | Limit_not_positive of { limit : int }
+  | Invalid_read_integer of
+      { coordinate : Keeper_tool_read_window.coordinate; value : Yojson.Safe.t }
+  | Invalid_read_arguments of { value : Yojson.Safe.t }
   | Available_cwds_partial of
       { limit : string
       ; cwds : string
@@ -40,6 +43,8 @@ type t =
 let key = function
   | Offset_not_1_based _ -> Prompt_names.keeper_tool_filesystem_offset_not_1_based
   | Limit_not_positive _ -> Prompt_names.keeper_tool_filesystem_limit_not_positive
+  | Invalid_read_integer _ -> Prompt_names.keeper_tool_filesystem_invalid_read_integer
+  | Invalid_read_arguments _ -> Prompt_names.keeper_tool_filesystem_invalid_read_arguments
   | Available_cwds_partial _ -> Prompt_names.keeper_tool_filesystem_available_cwds_partial
   | Checkout_scan_failed _ -> Prompt_names.keeper_tool_filesystem_checkout_scan_failed
   | Offset_beyond_window _ -> Prompt_names.keeper_tool_filesystem_offset_beyond_window
@@ -66,9 +71,28 @@ let key = function
   | Patch_target_missing -> Prompt_names.keeper_tool_filesystem_patch_target_missing
 ;;
 
+let coordinate_name = function
+  | Keeper_tool_read_window.Offset -> "offset"
+  | Keeper_tool_read_window.Limit -> "limit"
+;;
+
+(* Rejected values may not be serializable JSON (for example a nonfinite
+   number). Their type remains useful diagnostic data; encoding failure must
+   not turn an argument rejection into an exception. *)
+let diagnostic_value value =
+  match Yojson.Safe.to_string value with
+  | rendered -> rendered
+  | exception Yojson.Json_error _ -> Json_util.kind_name value
+;;
+
 let vars = function
   | Offset_not_1_based { offset } -> [ "offset", string_of_int offset ]
   | Limit_not_positive { limit } -> [ "limit", string_of_int limit ]
+  | Invalid_read_integer { coordinate; value } ->
+    [ "coordinate", coordinate_name coordinate
+    ; "value", diagnostic_value value
+    ; "maximum", string_of_int max_int ]
+  | Invalid_read_arguments { value } -> [ "value", diagnostic_value value ]
   | Available_cwds_partial { limit; cwds } -> [ "limit", limit; "cwds", cwds ]
   | Checkout_scan_failed { detail } -> [ "detail", detail ]
   | Offset_beyond_window { offset; window_bytes } ->
@@ -96,6 +120,9 @@ let fallback guidance =
   match guidance with
   | Offset_not_1_based { offset } -> Printf.sprintf "offset=%d" offset
   | Limit_not_positive { limit } -> Printf.sprintf "limit=%d" limit
+  | Invalid_read_integer { coordinate; value } ->
+    Printf.sprintf "%s=%s" (coordinate_name coordinate) (diagnostic_value value)
+  | Invalid_read_arguments { value } -> diagnostic_value value
   | Available_cwds_partial { limit; cwds } -> Printf.sprintf "limit=%s cwds=%s" limit cwds
   | Checkout_scan_failed { detail } -> detail
   | Offset_beyond_window { offset; window_bytes } ->

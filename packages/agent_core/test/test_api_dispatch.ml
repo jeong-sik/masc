@@ -81,8 +81,8 @@ let test_openai_parse_response () =
 (* ── Pricing ─────────────────────────────────────────────────── *)
 
 let test_pricing_known_models () =
-  let p_opus = declared_pricing "claude-opus-5" in
-  check (float 0.01) "opus input" 5.0 p_opus.input_per_million;
+  let p_opus = declared_pricing "claude-opus-5-5" in
+  check (float 0.01) "opus input" 4.0 p_opus.input_per_million;
   let p_gpt4o = declared_pricing "gpt" in
   check (float 0.01) "gpt4o input" 2.5 p_gpt4o.input_per_million;
   let p_mini = declared_pricing "gpt-mini" in

@@ -37,7 +37,6 @@ type profile = private
   ; activation_tool : string
   ; execution : string
   ; body_bytes : int
-  ; eager_body_bytes : int
   ; discovery_bytes : int
   ; tool_schema_bytes : int option
   ; node_count : int

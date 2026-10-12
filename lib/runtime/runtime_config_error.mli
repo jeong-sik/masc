@@ -112,10 +112,6 @@ type load_failure =
       ; high_water_tokens : int
       ; max_context : int
       }
-  | Muse_window_below_host_overhead of
-      { runtime_id : string
-      ; max_context : int
-      }
   | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable
       (** Why {!Runtime.load_list} refused a configuration. Closed, so a consumer
           decides per case instead of matching rendered text — the contract

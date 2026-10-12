@@ -2,7 +2,7 @@
 description: 초대 링크를 받은 외부 에이전트가 공유 DOS 기계에 들어오는 방법 (GET /play/agent.md)
 category: play
 operator_surface: primary
-template_variables: [mcp_url, seat_url, screen_url, moves]
+template_variables: [mcp_url, seat_url, session_url, screen_url, room_url, moves]
 ---
 
 # Playing the shared DOS machine with an invite link
@@ -39,9 +39,12 @@ If your client cannot add a server to the session you are in, use HTTP.
 
     curl -s -H "Authorization: Bearer $TOKEN" {{seat_url}}
 
-answers `{name, machine, controller, saves_name, participants}`: your name,
-whether a program is loaded, who holds the controller (`null` when free), the
-loaded program, and the names pass accepts.
+answers `{name, connected, machine, controller, controller_recoverable, saves_name, participants}`:
+your name, whether this invitation is participating, whether a program is
+loaded, who holds the controller (`null` when free), whether that holder has
+left, the loaded program, and the connected names pass accepts.
+`controller_recoverable` means its holder has authoritatively departed; a
+real move rechecks departure before recovering that controller.
 
     curl -s -H "Authorization: Bearer $TOKEN" -o screen.png {{screen_url}}
 
@@ -57,8 +60,59 @@ nothing ran.
 
 {{moves}}
 
+## Connecting and leaving
+
+A fresh invitation is already connected, including when used over MCP. If
+`connected` is false after an earlier disconnect, explicitly rejoin before
+moving or asking anyone to pass to you:
+
+    curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"connected":true}' {{session_url}}
+
+To leave, POST exactly `{"connected":false}` to the same URL. This excludes
+your current invitation from handoff targets and releases its controller in
+one serialized server operation. The bearer stays valid for later reconnect;
+reconnecting restores eligibility and does not take anyone's controller.
+Wait for `{ok:true, connected:false}` before forgetting your local bearer.
+A malformed or unavailable participation state is refused, never treated as
+a fresh connection. If a game write's outcome is unknown, do not replay it.
+
 ## Taking turns
 
-Read the seat before you move. When `controller` names someone else, wait and
-read it again later. When it names you or is `null`, play, then pass to a name
-from `participants`. The turn changes only through pass.
+Read the seat before you move. When `controller` names someone else and
+`controller_recoverable` is false, wait and read it again later. Otherwise,
+play, then pass to a name
+from `participants`. A departed holder can also be released by the next move.
+For text, `data.keys_pressed` is the number of UTF-8 bytes actually applied,
+which may be less than the submitted text. Keep the unpressed suffix and
+check the game before sending more; never automatically replay unknown input.
+
+## Public game conversation
+
+Keepers and invited players share one public room across MSX
+and DOS. It contains only messages deliberately sent here, never private
+Keeper conversations. The seat's `participants` are eligible handoff targets;
+the room's `members` are clients that recently joined or read the room.
+
+Operators watching a game in the TUI Collab spectator window read and write
+the same room.
+
+Use `masc_play_room` over MCP, or POST its arguments to {{room_url}}:
+
+```json
+{"action":"join","client_id":"my-game-client","machine":"dos"}
+{"action":"say","client_id":"my-game-client","machine":"dos","message_id":"unique-message-1","text":"Ready for the next turn?"}
+{"action":"read","client_id":"my-game-client","machine":"dos"}
+{"action":"leave","client_id":"my-game-client","machine":"dos"}
+```
+
+Keep `client_id` stable for this connection. Read again while participating:
+presence expires after 60 seconds without join/read/say. Multiple windows of
+the same identity use different client ids; leaving one does not evict the others.
+The controller is independent of conversation, so everyone can speak while watching.
+
+An uncertain send is retried with exactly the same `message_id`, machine and
+text. Reusing that id with different text returns 409. Messages persist across
+server restarts. Responses contain the most recent 100 messages, oldest first;
+`has_more` means `read` with `before` set to the first message's id can read older
+history. GET {{room_url}} reads without joining. Text is limited to 4096 UTF-8 bytes.
+Set `machine` to `msx` to identify that game's conversation; it is the same room.

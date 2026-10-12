@@ -43,13 +43,13 @@ type t =
   ; tool_surface_bytes : int
   ; skill_tool_surface_bytes : int
   ; skill_discovery_bytes : int
-  ; skill_eager_body_bytes : int
   ; skill_body_bytes : int
         (* Documents the catalog could not read, by the directory they were
            found in. They are here because this is the surface that answers
            "what can this Keeper call": a skill that was left out is absent
            from that answer, and absence with no reason beside it reads as a
            skill that was never written. *)
+  ; lane_addon_conflicts : Lane_addon_tool_export.conflict list
   ; skills_left_out : string list
   ; tools : tool list
   ; tool_surface_sha256 : string option
@@ -113,6 +113,8 @@ let composition_rows skill_catalog =
 ;;
 
 let project
+      ~lane_addon_conflicts
+      ~lane_addon_exports
       ~keeper_name
       ~runtime_id
       ~skills_left_out
@@ -127,8 +129,12 @@ let project
       ~(task_selection : Keeper_task_skill_turn.t option)
       ~skill_snapshot
   =
-  let global_skill_catalog, _projection_diagnostics =
-    Keeper_skill_catalog.of_snapshot skill_snapshot
+  let tool_descriptors = match Option.bind task_selection Keeper_task_skill_turn.descriptors with
+    | Some descriptors -> descriptors
+    | None -> Keeper_tool_descriptor.all_descriptors ()
+        @ List.map Keeper_lane_addon_descriptor.create lane_addon_exports in
+  let global_skill_catalog, projection_diagnostics =
+    Keeper_skill_catalog.of_snapshot ~descriptors:tool_descriptors skill_snapshot
   in
   let skill_resource_read_max_bytes =
     match Skill_catalog_snapshot.config_state skill_snapshot with
@@ -144,16 +150,19 @@ let project
     | None ->
       Keeper_task_skill_turn.resolve ~snapshot:skill_snapshot task_skill_references
   in
+  let task_selection = Result.bind task_selection
+    (Keeper_task_skill_turn.with_descriptors ~descriptors:tool_descriptors ~snapshot:skill_snapshot) in
   match task_selection with
   | Error _ as error -> error
   | Ok task_selection ->
     let capability_surface =
-      Keeper_capability_surface.create
+      Keeper_capability_surface.create_with_descriptors
+        ~tool_descriptors
         ~tool_deny
         ~sandbox_profile
         ~skill_names
         ~global_skill_catalog
-        ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
+        ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors:tool_descriptors skill_snapshot)
         ~task_skills:(Keeper_task_skill_turn.skills task_selection)
     in
     let descriptors = Keeper_capability_surface.descriptors capability_surface in
@@ -264,13 +273,6 @@ let project
         0
         skill_profiles
     in
-    let skill_eager_body_bytes =
-      List.fold_left
-        (fun total (profile : Keeper_skill_observability.profile) ->
-           total + profile.eager_body_bytes)
-        0
-        skill_profiles
-    in
     let tool_surface_sha256 =
       Option.map
         (fun native_posture ->
@@ -302,14 +304,21 @@ let project
       ; tool_surface_bytes
       ; skill_tool_surface_bytes
       ; skill_discovery_bytes
-      ; skill_eager_body_bytes
       ; skill_body_bytes
         (* Both sides added to this record and neither replaced the other:
            main (#31092) brought the profile and byte fields above, and this
            branch made [skills_left_out] also name what the turn could not
            reach. Keeping one would drop the other's answer. *)
+      ; lane_addon_conflicts
       ; skills_left_out =
           skills_left_out
+          @ List.map
+              (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
+                 Printf.sprintf "%s: %s"
+                   (Skill_catalog_snapshot.identity_to_yojson diagnostic.identity
+                    |> Yojson.Safe.to_string)
+                   (Keeper_skill_catalog.error_to_string diagnostic.error))
+              projection_diagnostics
           @ List.map
               Keeper_skill_catalog.turn_unavailable_to_string
               turn_skill_projection.unavailable
@@ -421,19 +430,7 @@ let published_skill_snapshot ~base_path =
     (match Skill_catalog_snapshot_service.current ~workspace with
      | None ->
        Error ("skill_snapshot_uninitialized", "Skill snapshot is not published")
-     | Some snapshot ->
-       let _catalog, diagnostics = Keeper_skill_catalog.of_snapshot snapshot in
-       let skills_left_out =
-         List.map
-           (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
-              Printf.sprintf
-                "%s: %s"
-                (Skill_catalog_snapshot.identity_to_yojson diagnostic.identity
-                 |> Yojson.Safe.to_string)
-                (Keeper_skill_catalog.error_to_string diagnostic.error))
-           diagnostics
-       in
-       Ok (snapshot, skills_left_out))
+     | Some snapshot -> Ok snapshot)
 ;;
 
 let resolve ~config ~keeper_name =
@@ -458,7 +455,7 @@ let resolve ~config ~keeper_name =
      | Ok profile_defaults ->
     (match published_skill_snapshot ~base_path:config.base_path with
      | Error error -> unavailable keeper_name error
-     | Ok (skill_snapshot, skills_left_out) ->
+     | Ok skill_snapshot ->
        (match
           Keeper_task_skill_turn.resolve_observations
             ~snapshot:skill_snapshot
@@ -487,8 +484,11 @@ let resolve ~config ~keeper_name =
                   keeper_name
                   ("native_posture_rejected", Agent_core.Error.to_string error)
               | Ok native_posture ->
+                (let snapshot = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name in
                 (match
                    project
+                     ~lane_addon_conflicts:snapshot.conflicts
+                     ~lane_addon_exports:snapshot.exports
                      ~keeper_name
                      ~runtime_id
                      ~official_client_kind:(client_kind runtime)
@@ -498,7 +498,7 @@ let resolve ~config ~keeper_name =
                      ~sandbox_profile:meta.sandbox_profile
                      ~skill_names:profile_defaults.skill_names
                      ~current_task_id
-                     ~skills_left_out
+                     ~skills_left_out:[]
                      ~task_skill_references:[]
                      ~task_selection:(Some task_selection)
                      ~skill_snapshot
@@ -508,7 +508,7 @@ let resolve ~config ~keeper_name =
                    unavailable
                      keeper_name
                      ( Keeper_task_skill_turn.error_code error
-                     , Keeper_task_skill_turn.error_to_string error )))))))
+                     , Keeper_task_skill_turn.error_to_string error ))))))))
 ;;
 
 let string_list values = `List (List.map (fun value -> `String value) values)
@@ -625,8 +625,12 @@ let to_yojson = function
       ; "tool_surface_bytes", `Int surface.tool_surface_bytes
       ; "skill_tool_surface_bytes", `Int surface.skill_tool_surface_bytes
       ; "skill_discovery_bytes", `Int surface.skill_discovery_bytes
-      ; "skill_eager_body_bytes", `Int surface.skill_eager_body_bytes
       ; "skill_body_bytes", `Int surface.skill_body_bytes
+      ; "lane_addon_conflicts", `List (List.map (fun (conflict : Lane_addon_tool_export.conflict) ->
+          `Assoc ["name",`String conflict.name; "instances",string_list conflict.instances;
+            "reason",`String (match conflict.reason with
+              | Reserved_host_name -> "reserved_host_name"
+              | Multiple_installations -> "multiple_installations")]) surface.lane_addon_conflicts)
       ; "skills_left_out", string_list surface.skills_left_out
       ; "count", `Int (List.length surface.tools)
       ; ( "tools"
@@ -646,5 +650,5 @@ let to_yojson = function
 ;;
 
 module For_testing = struct
-  let project = project
+  let project = project ~lane_addon_conflicts:[] ~lane_addon_exports:[]
 end

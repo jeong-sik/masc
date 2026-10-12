@@ -25,6 +25,9 @@ val uuid_v7 : unit -> string
     one process are monotonic within the same millisecond. This is an opaque
     correlation identifier, not an authentication secret. *)
 
+val uuid_v7_value : unit -> Uuidm.t
+(** The identifier {!uuid_v7} writes, for a caller that keeps it as a value. *)
+
 val parse_uuid_v7 : string -> (string, string) result
 (** [parse_uuid_v7 value] validates the complete canonical UUID shape,
     RFC 9562 variant, and version 7, then returns lowercase canonical text. *)

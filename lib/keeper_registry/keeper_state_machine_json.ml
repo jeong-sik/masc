@@ -24,7 +24,6 @@ let conditions_to_json (c : conditions) =
     ; "stop_requested", `Bool c.stop_requested
     ; "restart_requested", `Bool c.restart_requested
     ; "drain_complete", `Bool c.drain_complete
-    ; "credential_archived", `Bool c.credential_archived
     ]
 ;;
 

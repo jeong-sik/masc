@@ -135,20 +135,61 @@ val run :
 val settle_completed_snapshot :
   base_path:string ->
   keeper_name:string ->
+  ?on_captured:(base_path:string ->
+                keeper_name:string ->
+                completed:Keeper_board_attention_partition.t list -> unit) ->
+  ?yield:(unit -> unit) ->
+  unit ->
   (settlement, string) result
 (** Owner-admission boundary. Capture the ordered completed partitions once,
     then durably settle that finite snapshot, cooperatively yielding between
-    records. Newly completed judgments remain for a continuation wake. Stop at
-    the first failed transition and leave later members untouched. A delivery
-    failure retains its evidence without consuming the candidate; if delivery
-    committed before partition settlement failed, replay preserves that effect.
-    The returned candidate id is the last settled member. A sync-unconfirmed
-    completion must pass explicit confirmation before delivery. This function never invokes
-    AGENT_CORE. *)
+    records — the between-members point runs [?yield], [Eio_guard.fair_yield]
+    by default, so other fibers remain runnable while the walk holds the
+    owner turn. Newly completed judgments remain for a continuation wake.
+    Stop at the first failed transition and leave later members untouched. A
+    delivery failure retains its evidence without consuming the candidate; if
+    delivery committed before partition settlement failed, replay preserves
+    that effect. The returned candidate id is the last settled member. A
+    sync-unconfirmed completion must pass explicit confirmation before
+    delivery. This function never invokes AGENT_CORE.
+    [?on_captured] fires exactly once, immediately after the capture and
+    before any member is settled, so a test can land a new completion or
+    observe the walk in that gap deterministically. [?yield] is the test seam
+    for the between-members cooperative point: a test passes a counting
+    substitute so the walk's fairness contract is observable without timing.
+    Production passes no hooks. *)
 
 module For_testing : sig
   type rearm_scheduler
   type deferred_rearm_scheduler
+
+  val deliver_and_settle_completed :
+    base_path:string ->
+    keeper_name:string ->
+    Keeper_board_attention_partition.t ->
+    (Keeper_board_attention_partition.t, string) result
+  (** The settlement half of [signal_completion]: durably delivers the
+      completed judgment to the candidate and settles the partition. Exposed
+      so a test can reproduce the owner settlement's exact write path without
+      standing up the full worker lifecycle. *)
+
+  val prunes_and_read :
+    base_path:string ->
+    keeper_name:string ->
+    ?hook:(unit -> unit) ->
+    ?before_receipt_prune:(unit -> unit) ->
+    unit ->
+    (Keeper_board_attention_candidate.candidate list, string) result
+  (** The wake's two prunes followed by the candidate-list read, as one
+      seam. [?hook] fires immediately before the first prune, so a test can
+      land an owner settlement (which runs without the worker lock) in
+      exactly the gap the read position defines — the prune/settlement
+      overlap of #41506. [?before_receipt_prune] fires immediately before
+      the settled-receipt prune, covering a candidate read that sits between
+      the two prunes: a settlement landed there consumed X while the read
+      between the prunes already ran, so the stale list names X as Judged
+      and minting roots over it raises a fresh Ready root over the settled
+      partition. Production passes no hooks. *)
 
   val reconcile_quarantines :
     now:float ->

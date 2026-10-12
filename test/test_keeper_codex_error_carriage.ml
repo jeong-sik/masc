@@ -13,6 +13,10 @@ let class_of (err : Agent_core.Error.t) =
     "config:" ^ field
   | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _) ->
     "api:context_overflow"
+  | Agent_core.Error.Api
+      (Agent_core.Retry.InvalidRequest
+        { reason = Agent_core.Retry.Request_body_refused_by_provider _; _ }) ->
+    "api:invalid_request:request_body_refused"
   | Agent_core.Error.Api (Agent_core.Retry.Timeout _) -> "api:timeout"
   | Agent_core.Error.Provider (Llm_provider.Error.AuthError _) -> "provider:auth"
   | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) -> "provider:hard_quota"
@@ -81,6 +85,30 @@ let test_every_variant_lands_in_its_class () =
     "provider:parse_error";
   check "rpc_error"
     (Codex.Rpc_error { method_ = "thread/start"; code = Some 3; message = "no"; data = None })
+    "provider:reported:rpc_error";
+  (* Typed oversize refusal of turn/start: lowered to the body refusal the
+     shrink ladder answers; a generic invalid-params stays a reported error. *)
+  check "turn/start input_too_large"
+    (Codex.Rpc_error
+       { method_ = "turn/start"
+       ; code = Some (-32602)
+       ; message = "Input exceeds the maximum length"
+       ; data =
+           Some
+             (`Assoc
+               [ "input_error_code", `String "input_too_large"
+               ; "actual_chars", `Int 2000000
+               ; "max_chars", `Int 1048576
+               ])
+       })
+    "api:invalid_request:request_body_refused";
+  check "turn/start generic invalid params"
+    (Codex.Rpc_error
+       { method_ = "turn/start"
+       ; code = Some (-32602)
+       ; message = "bad"
+       ; data = None
+       })
     "provider:reported:rpc_error";
   check "unsupported_server_request"
     (Codex.Unsupported_server_request "applyPatch")

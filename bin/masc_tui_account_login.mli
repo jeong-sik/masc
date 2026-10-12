@@ -115,6 +115,9 @@ val requested_matches : t -> provider -> bool
 (** Whether a pending login for this row belongs to what [/login] asked for:
     any row for a bare [/login], that row for [/login <id>], the client's rows
     for [/login <client>]. *)
+val account_emails_of_document : Yojson.Safe.t -> account_emails
+(** Preserve each provider's typed email result, including known read failures.
+    An absent or malformed list is [Email_list_unrecognized]. *)
 val emails_of_document : Yojson.Safe.t -> ((string * string) list * int, string) result
 (** The [account_emails] of [GET /api/v1/setup/account-emails], for a surface
     that draws only emails: the [(integration id, email)] rows that were read,

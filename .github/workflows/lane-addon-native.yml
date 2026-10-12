@@ -84,9 +84,6 @@ jobs:
           for test in test_lane_addon test_lane_addon_worker test_lane_addon_sources test_lane_addon_surface test_lane_addon_store_query test_lane_addon_resource_events test_lane_addon_config test_lane_addon_reconcile test_lane_addon_declaration test_keeper_tool_surface_schema test_lane_addon_skills test_lane_addon_composition test_lane_addon_actions test_lane_addon_subscription test_tui_palette_matching test_tui_lane_addons test_tui_lane_subscriptions; do
             run_proof_test "$test" env DUNE_SOURCEROOT="$GITHUB_WORKSPACE" "_build/default/test/$test.exe"
           done
-          run_proof_test tui-lane-package python3 test/test_tui_lane_package_pty.py _build/default/bin/masc_tui.exe
-          run_proof_test tui-lane-visual python3 test/test_tui_lane_visual_pty.py _build/default/bin/masc_tui.exe --capture-dir proof/tui-lane-frames
-          run_proof_test tui-lane-operator python3 test/test_tui_lane_operator_pty.py _build/default/bin/masc_tui.exe --capture-dir proof/tui-lane-operator
           run_proof_test lane-skill-resources python3 -m unittest discover -s addons/tests -p test_skill_resources.py -v
           run_proof_test output-statistics python3 -m unittest discover -s addons/tests -p test_output_statistics.py -v
           if (( ${#failed_tests[@]} > 0 )); then

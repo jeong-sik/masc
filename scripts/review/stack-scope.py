@@ -2,7 +2,9 @@
 """Read the native merge scope and freeze identities; never mutate GitHub.
 
 The REST stack order, not branch names, defines downstack membership. Already
-merged members remain in the snapshot; closed unmerged prerequisites block it.
+merged members remain in the snapshot; closed unmerged prerequisites block it,
+and so does an open member above the selected PR: only the top open PR is
+merged, taking the whole stack with it.
 """
 import json
 import os
@@ -52,6 +54,17 @@ def snapshot(repo, selected, expected_head):
             live['base']['ref'] == stack['base']['ref'] and
             len(members) == stack['size'] and members.index(selected) + 1 == stack['position'],
             'stack membership changed or inconsistent')
+    # A native stack lands whole through its top open PR. Selecting a lower
+    # one lands only the layers up to it, main moves, and every layer left
+    # above it has to be restacked again.
+    above = live['pull_requests'][members.index(selected) + 1:]
+    require(all(member['state'] in ('open', 'closed') for member in above), 'unknown member state')
+    open_above = [member['number'] for member in above if member['state'] == 'open']
+    if open_above:
+        raise ValueError(
+            f"#{selected} is not the top of native stack #{number}: "
+            f"{', '.join(f'#{n}' for n in open_above)} above it are open; "
+            f"the stack lands whole through #{open_above[-1]}")
     scope = []
     for position, member in enumerate(live['pull_requests'][:members.index(selected) + 1], 1):
         require(member['state'] in ('open', 'closed'), 'unknown member state')

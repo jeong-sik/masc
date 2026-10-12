@@ -172,6 +172,7 @@ let[@warning "-32"] test_catalog_entry
   ; supported_models = None
   ; supports_native_streaming = None
   ; supports_system_prompt = None
+  ; supports_assistant_prefill = None
   ; supports_prompt_caching = None
   ; supports_top_k = None
   ; supports_min_p = None

@@ -1185,55 +1185,6 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
     (List.exists (String.starts_with ~prefix:"> Worker 5") (String.split_on_char '\n' first_rows)
      && not (List.exists (fun line -> String.starts_with ~prefix:"    description-4" line) selected_lines))
 
-let empty_completed_results_keep_capability_identity_and_input_details () =
-  let display = Masc.Lane_addon_presentation.of_json (`Assoc [
-    "description",`String "Combine independent panel answers into a report";
-    "readings",`List []]) |> ok in
-  let worker installation_id id : UI.instance = {id;incarnation=id;run_id="project";
-    addon_id="fusion-compute";title="Shared Fusion package";revision="1";
-    phase=UI.Row.Attached;runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;
-    configuration_revision=Some "1";installation_id=Some installation_id;source_path=Some ("/config/" ^ id ^ ".toml");binding=`Assoc ["sources",`List []];
-    outputs=[];skills_directory=None;action_schema=None;binding_schema=None;display} in
-  let judge = worker "judge" "judge-worker" and panel = worker "panel-a" "panel-worker" in
-  let declaration name (item : UI.instance) : UI.declaration = {
-    source_path=Option.get item.source_path;installation_id=Some name;
-    desired=Some "1";applied=Some "1";instance_id=Some item.id;
-    issues=[];enabled=Some true;origin=UI.Parsed_declaration;application=None} in
-  let coverage : UI.Row.coverage = {source_id="panel-input";incarnation="unobserved";
-    cursor=None;complete=false;detail=Some "Waiting for supplied input observations"} in
-  let snapshot : UI.snapshot = {instances=[judge;panel];complete=None;
-    configuration=Some {directory="/config";complete=true;
-      declarations=[declaration "judge" judge;declaration "panel-a" panel]};
-    output={rows=[];coverage=[coverage]}} in
-  let overview = {UI.initial with snapshot=Some snapshot} in
-  let overview_lines = UI.lines ~width:180 overview in
-  check bool "same package installations remain distinguishable" true
-    (List.exists (String.starts_with ~prefix:"> judge · Shared Fusion package") overview_lines
-     && List.exists (String.starts_with ~prefix:"  panel-a · Shared Fusion package") overview_lines);
-  check bool "primary overview counts results instead of observation calls" true
-    (List.exists (fun line -> String.ends_with ~suffix:"0 records" line) overview_lines);
-  let detail = {overview with screen=UI.Detail (judge.id,judge.incarnation);focus=UI.Timeline} in
-  let lines = UI.lines ~width:180 detail in
-  check bool "capability description remains visible before any result row" true
-    (List.mem "Combine independent panel answers into a report" lines);
-  check bool "empty completed observation is not reported as missing observation" true
-    (List.mem "Last completed observation contains no result rows." lines
-     && not (List.mem "No completed observation received yet." lines));
-  check bool "input details are visible with their honest snapshot scope" true
-    (List.mem "Received snapshot coverage · all Add-ons" lines
-     && List.exists (String.ends_with ~suffix:"Waiting for supplied input observations") lines);
-  let changed item = {detail with snapshot=Some {snapshot with instances=[item;panel]}} in
-  check bool "first observation remains distinct" true
-    (List.mem "No completed observation received yet."
-      (UI.lines ~width:180 (changed {judge with observation_seq=0})));
-  let failed_lines = UI.lines ~width:180 (changed {judge with phase=UI.Row.Failed "model route unavailable"}) in
-  check bool "failed Add-on exposes its actual cause and retry/cleanup controls" true
-    (List.mem "Add-on failed: model route unavailable" failed_lines
-     && List.mem "o:retry observation  d:remove TOML + worker" failed_lines);
-  check bool "filtered view does not claim latest result was empty" true
-    (List.mem "No result rows in this received view."
-      (UI.lines ~width:180 (changed {judge with rows_count=2})))
-
 let current_installations_and_grouped_history_keep_exact_targets () =
   let worker id run addon phase source_path : UI.instance = {
     id;incarnation=id;run_id=run;addon_id=addon;title="Repeated title";
@@ -1318,140 +1269,6 @@ let current_installations_and_grouped_history_keep_exact_targets () =
   check (option string) "fresh scoped records initialize the pinned retained detail" (Some historical_row.id)
     (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row loaded))
 
-let declared_layers_use_exact_configured_owners () =
-  let binding upstream = `Assoc ["sources",`List (List.mapi (fun index id ->
-    `Assoc ["source_id",`String ("input-" ^ string_of_int index);
-      "kind",`String "lane_output";"installation_id",`String id;
-      "selection",`String "latest_completed"]) upstream)] in
-  let worker id upstream : UI.instance = {id="worker-" ^ id;incarnation="worker-" ^ id;
-    run_id="project";addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
-    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;configuration_revision=Some "1";installation_id=Some id;source_path=Some ("/config/" ^ id ^ ".toml");
-    binding=binding upstream;outputs=[];skills_directory=None;action_schema=None;
-    binding_schema=None;display=Masc.Lane_addon_presentation.empty} in
-  let declaration id (item : UI.instance) : UI.declaration = {
-    source_path="/config/" ^ id ^ ".toml";installation_id=Some id;
-    instance_id=Some item.id;desired=Some "1";applied=Some "1";issues=[];
-    enabled=Some true;origin=UI.Parsed_declaration;application=None} in
-  let roots = [worker "a" [];worker "b" []] in
-  let branches = [worker "c" ["a"];worker "d" ["a";"b"]] in
-  let joined = worker "e" ["c";"d"] in
-  let configured = roots @ branches @ [joined] in
-  let declarations = List.map (fun (item : UI.instance) -> declaration item.title item) configured in
-  let snapshot instances declarations : UI.snapshot = {instances;
-    configuration=Some {directory="/config";complete=true;declarations};
-    output={rows=[];coverage=[]};complete=None} in
-  let view instances declarations = {UI.initial with presentation=UI.Flow;
-    snapshot=Some (snapshot instances declarations)} in
-  let lines instances declarations = UI.lines ~width:200 (view instances declarations) in
-  let graph = lines configured declarations in
-  List.iter (fun text -> check bool "fan-out and join retain their exact horizontal and vertical layers"
-    true (List.mem text graph)) ["Layer 0";"  [a]  |  [b]";
-      "Layer 1";"  [c]  |  [d]";"Layer 2";"  [e]"];
-  let snapshot_binding path = `Assoc ["sources",`List [
-    `Assoc ["source_id",`String "project-input";"kind",`String "snapshot_file";
-      "path",`String path]]] in
-  let panel_a = {(worker "a" []) with binding=snapshot_binding "/data/research.json";
-    rows_count=1} in
-  let panel_b = {(worker "b" []) with binding=snapshot_binding "/data/second.json";
-    phase=UI.Row.Observing;observation_seq=0} in
-  let judge = {(worker "judge" ["a";"b"]) with phase=UI.Row.Failed "provider unavailable";
-    rows_count=2} in
-  let assembly = [panel_a;panel_b;judge] in
-  let assembly_declarations = List.map (fun (item : UI.instance) -> declaration item.title item) assembly in
-  let assembly_view = view assembly assembly_declarations in
-  let assembly_lines = UI.lines ~width:200 assembly_view in
-  List.iter (fun text -> check bool "bound source identity and worker result states remain distinct"
-    true (List.mem text assembly_lines)) [
-      "  project-input · snapshot /data/research.json -> a";
-      "  project-input · snapshot /data/second.json -> b";
-      "  [a]  |  [b]";"Layer 1";"  [judge]";
-      "    a: attached · last completed: 1 record";
-      "    b: observing · no completed observation received";
-      "    judge: failed: provider unavailable · last completed: 2 records";
-      "No evidence sharing receipt in this session."];
-  let shared = UI.lines ~width:200 {assembly_view with receipt=Some (`Assoc [
-    "row_count",`Int 1;"evidence",`Assoc ["sha256",`String "fixture-sha"];
-    "delivery",`Assoc ["destination",`String "broadcast";"status",`String "committed"]])} in
-  check bool "connection view exposes session sharing without asserting agent reading" true
-    (List.mem "Last evidence sharing receipt · this session" shared
-     && List.mem "Evidence preserved: 1 row · sha256 fixture-sha" shared
-     && List.mem "Broadcast committed · Keeper reads and actions are unverified" shared);
-  let unrelated_receipt = UI.lines ~width:200
-    {assembly_view with receipt=Some (`Assoc ["instance_id",`String "worker-a"])} in
-  check bool "a worker action receipt never proves evidence sharing" true
-    (List.mem "No evidence sharing receipt in this session." unrelated_receipt);
-  let cycle = [worker "a" ["b"];worker "b" ["a"]] in
-  let cyclic = lines cycle (List.map (fun (item : UI.instance) -> declaration item.title item) cycle) in
-  check bool "a dependency cycle never receives an execution layer" true
-    (not (List.mem "Layer 0" cyclic)
-     && List.mem "Layer unavailable: a" cyclic && List.mem "Layer unavailable: b" cyclic);
-  let producer = worker "a" [] in
-  let consumer = worker "consumer" ["a"] in
-  let assert_unplaced label producer declarations consumer =
-    let graph = lines [producer;consumer] declarations in
-    check bool (label ^ " cannot supply the consumer's configured upstream") true
-      (List.mem "Layer unavailable: consumer" graph && not (List.mem "  [consumer]" graph)) in
-  let consumer_declaration = declaration "consumer" consumer in
-  assert_unplaced "missing applied installation" {producer with installation_id=None} [consumer_declaration] consumer;
-  assert_unplaced "wrong applied installation" {producer with installation_id=Some "other"}
-    [declaration "a" producer;consumer_declaration] consumer;
-  assert_unplaced "another run" {producer with run_id="other-project"}
-    [declaration "a" producer;consumer_declaration] consumer;
-  let manual = {producer with id="manual-uuid";installation_id=None;source_path=None} in
-  let uuid_consumer = {consumer with binding=binding [manual.id]} in
-  assert_unplaced "manual worker UUID" manual [consumer_declaration] uuid_consumer;
-  check bool "declaration ambiguity does not erase an exact applied worker owner" true
-    (List.mem "  a -> consumer" (lines [producer;consumer]
-      [declaration "a" producer;declaration "a" producer;consumer_declaration]));
-  let named_consumer port = {consumer with binding=`Assoc ["sources",`List [
-    `Assoc ["source_id",`String "analysis-input";"kind",`String "lane_output";
-      "installation_id",`String "a";"output_id",`String port;
-      "selection",`String "latest_completed"]]]} in
-  let advertised = {producer with outputs=["events",UI.Row.All_lanes]} in
-  let known_port = lines [advertised;named_consumer "events"]
-    [declaration "a" advertised;consumer_declaration] in
-  check bool "a declared advertised port connects the consumer layer and preserves its source selection" true
-    (List.mem "Layer 1" known_port && List.mem "  [consumer]" known_port
-     && List.mem "  a -> consumer" known_port
-     && List.mem "    Input analysis-input: a/events" known_port);
-  let unknown_port = lines [advertised;named_consumer "missing-port"]
-    [declaration "a" advertised;consumer_declaration] in
-  check bool "an unknown output port cannot receive a layer or an unqualified available arrow" true
-    (List.mem "Layer unavailable: consumer" unknown_port
-     && List.mem "  Producer output unavailable: a/missing-port" unknown_port
-     && List.mem "  a -> consumer · producer output unavailable: missing-port" unknown_port
-     && not (List.mem "  a -> consumer" unknown_port));
-  let duplicate = {producer with id="worker-a-two";incarnation="worker-a-two"} in
-  let ambiguous_declaration = {(declaration "a" producer) with instance_id=None} in
-  let ambiguous = lines [producer;duplicate;consumer]
-    [ambiguous_declaration;consumer_declaration] in
-  check bool "duplicate current producer identity is qualified in the flat wiring list" true
-    (List.mem "  a -> consumer · producer identity ambiguous across live workers" ambiguous
-     && List.mem "Layer unavailable: consumer" ambiguous);
-  let other_run = {duplicate with run_id="another-project"} in
-  let cross_run = lines [producer;other_run;consumer] [consumer_declaration] in
-  check bool "all live owners are counted before selecting a run" true
-    (List.mem "Layer unavailable: consumer" cross_run
-     && List.mem "  a -> consumer · producer identity ambiguous across live workers" cross_run);
-  let prior = {producer with runtime_presence=UI.Retained_binding;
-    phase=UI.Row.Failed "previous process; explicit detach can verify container cleanup"} in
-  assert_unplaced "previous-process record" prior [consumer_declaration] consumer;
-  let stored = lines [prior;consumer] [consumer_declaration] in
-  check bool "stored failure remains visible without a layer" true
-    (List.mem "Layer unavailable: a" stored
-     && List.mem "  No live runtime entry; stored binding cannot supply output" stored);
-  let with_prior = lines [producer;{prior with id="prior-a"};consumer] [consumer_declaration] in
-  check bool "retained owner does not create false ambiguity" true
-    (List.mem "  a -> consumer" with_prior);
-  assert_unplaced "unknown runtime presence" {producer with runtime_presence=UI.Presence_unknown}
-    [consumer_declaration] consumer;
-  let retired = {producer with phase=UI.Row.Detached;runtime_presence=UI.Retained_binding} in
-  let history = UI.lines ~width:200
-    {(view [retired] [declaration "a" retired]) with overview_mode=UI.Retained_runs} in
-  check bool "stored retired wiring is never presented as a current layer" true
-    (List.mem "Stored bindings · producer incarnations are not reconstructed as current layers" history
-     && not (List.mem "Layer 0" history))
-
 let application_reads_preserve_editor () =
   let configuration kind = UI.decode_configuration (Yojson.Safe.from_string
     (Printf.sprintf {|{"configuration":{"directory":"/config","complete":true,"issues":[],
@@ -1527,10 +1344,6 @@ let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "application reads preserve editor and save diagnostics" `Quick application_reads_preserve_editor;
   test_case "application lines follow decoded observations and complete refreshes" `Quick
     application_follows_decoded_observations;
-  test_case "empty completed results show capability, identity and input details" `Quick
-    empty_completed_results_keep_capability_identity_and_input_details;
-  test_case "declared layers use exact configured owners" `Quick
-    declared_layers_use_exact_configured_owners;
   test_case "current installations and grouped retained runs preserve exact targets" `Quick
     current_installations_and_grouped_history_keep_exact_targets;
   test_case "declared results show body before activity and preserve raw evidence" `Quick

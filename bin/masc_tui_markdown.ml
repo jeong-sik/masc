@@ -146,20 +146,25 @@ let find_char text ~from char =
   | Some index -> Some index
   | None -> None
 
-let inline_segments_lexed text =
+let inline_segments_lexed ?on_segment text =
   let limit = String.length text in
   let out = ref [] in
   let pending = Buffer.create (String.length text) in
+  let pending_positions = ref [] in
   let flush_pending () =
     if Buffer.length pending > 0 then begin
-      out := (Buffer.contents pending, kind_plain) :: !out;
+      let text = Buffer.contents pending in
+      out := (text, kind_plain) :: !out;
+      Option.iter (fun emit -> emit (Array.of_list (List.rev !pending_positions))) on_segment;
+      pending_positions := [];
       Buffer.clear pending
     end
   in
-  let emit body kind =
+  let emit ~positions body kind =
     if String.length body > 0 then begin
       flush_pending ();
-      out := (body, kind) :: !out
+      out := (body, kind) :: !out;
+      Option.iter (fun emit -> emit (positions ())) on_segment
     end
   in
   let rec walk index =
@@ -167,6 +172,7 @@ let inline_segments_lexed text =
     else
       let literal () =
         Buffer.add_char pending text.[index];
+        Option.iter (fun _ -> pending_positions := Some index :: !pending_positions) on_segment;
         walk (index + 1)
       in
       let styled ?(closes = fun _ -> true) marker kind =
@@ -184,7 +190,7 @@ let inline_segments_lexed text =
             let body = String.sub text opening (closing - opening) in
             if String.trim body = "" then literal ()
             else begin
-              emit body kind;
+              emit ~positions:(fun () -> Array.init (String.length body) (fun i -> Some (opening + i))) body kind;
               walk (closing + String.length marker)
             end
       in
@@ -225,8 +231,11 @@ let inline_segments_lexed text =
                     String.sub text (close_label + 2)
                       (close_target - close_label - 2)
                   in
-                  emit label kind_link_text;
-                  emit (" (" ^ target ^ ")") kind_link_target;
+                  emit ~positions:(fun () -> Array.init (String.length label)
+                    (fun i -> Some (index + 1 + i))) label kind_link_text;
+                  emit ~positions:(fun () -> Array.init (String.length target + 3)
+                    (fun i -> if i = 0 then None else Some (close_label + i)))
+                    (" (" ^ target ^ ")") kind_link_target;
                   walk (close_target + 1))
           | Some _ | None -> literal ())
       | _ -> literal ()
@@ -235,15 +244,19 @@ let inline_segments_lexed text =
   flush_pending ();
   List.rev !out
 
-let inline_segments text =
+let inline_segments_traced ?on_segment text =
   (* Plain comments need one segment, without a byte-by-byte lexer walk. *)
   if text = "" then []
   else if
     String.exists
       (function '`' | '*' | '_' | '~' | '[' -> true | _ -> false)
       text
-  then inline_segments_lexed text
-  else [ (text, kind_plain) ]
+  then inline_segments_lexed ?on_segment text
+  else (
+    Option.iter (fun emit -> emit (Array.init (String.length text) (fun i -> Some i))) on_segment;
+    [ (text, kind_plain) ])
+
+let inline_segments text = inline_segments_traced text
 
 (* {1 Wrapping styled segments} *)
 
@@ -289,54 +302,104 @@ let render_token palette token =
   let opening, closing = span_of_palette palette token.kind in
   if String.equal token.word "" then "" else opening ^ token.word ^ closing
 
-let wrap_tokens palette ~width tokens =
+type source_range = {
+  start_byte : int;
+  end_byte : int;
+}
+
+type mapped_row = {
+  text : string;
+  source_ranges : source_range list;
+}
+
+type inline_render = {
+  semantic_text : string;
+  source_positions : int option array;
+  mapped_rows : mapped_row list;
+}
+
+(* Ranges refer to the inline semantic stream, before wrapping and styling.
+   A separator dropped at a wrap retains its byte in that stream. Generated
+   prefixes and ANSI styling never acquire a source range. *)
+let wrap_tokens ?on_row palette ~width tokens =
   let width = max 1 width in
   let rows = ref [] in
   let current = Buffer.create 128 in
   let current_cells = ref 0 in
   let current_has_word = ref false in
+  let source_byte = ref 0 in
+  let ranges = ref [] in
+  let record start_byte length =
+    match on_row with
+    | None -> ()
+    | Some _ when length = 0 -> ()
+    | Some _ -> ranges := {start_byte; end_byte=start_byte + length} :: !ranges
+  in
   let flush () =
-    rows := Buffer.contents current :: !rows;
+    let text = Buffer.contents current in
+    rows := text :: !rows;
+    Option.iter (fun emit -> emit {text; source_ranges=List.rev !ranges}) on_row;
+    ranges := [];
     Buffer.clear current;
     current_cells := 0;
     current_has_word := false
   in
-  let append token ~word_cells word =
+  let append token ~start_byte ~word_cells word =
     Buffer.add_string current (render_token palette { token with word });
+    record start_byte (String.length word);
     current_cells := !current_cells + word_cells;
     if word <> "" then current_has_word := true
   in
-  let append_word token ~word_cells =
+  let append_word token ~start_byte ~word_cells =
     let remaining = width - !current_cells in
-    if word_cells <= remaining then append token ~word_cells token.word
+    if word_cells <= remaining then append token ~start_byte ~word_cells token.word
     else begin
       let prefix, tail = Layout.split_at_cells token.word remaining in
       if prefix <> "" then
-        append token ~word_cells:(Layout.display_width prefix) prefix;
+        append token ~start_byte ~word_cells:(Layout.display_width prefix) prefix;
       (* Split the remaining word once at the full row width, preserving
-         graphemes and styling without repeatedly measuring its suffix. *)
+         graphemes, source bytes and styling. *)
+      let next_byte = ref (start_byte + String.length prefix) in
       List.iter (fun word ->
         if Buffer.length current > 0 then flush ();
-        append token ~word_cells:(Layout.display_width word) word)
+        append token ~start_byte:!next_byte ~word_cells:(Layout.display_width word) word;
+        next_byte := !next_byte + String.length word)
         (Layout.split_cells ~max_cells:width tail)
     end
   in
   List.iter (fun token ->
     let separator_cells = if token.space_before then 1 else 0 in
+    let start_byte = !source_byte + separator_cells in
     let word_cells = Layout.display_width token.word in
-    (* Wrap whole words after text. At the start, source indentation consumes
-       the same body budget as the word, so split the word into the space
-       that remains instead of overflowing or emitting indentation alone. *)
     let wrapped = !current_has_word
       && !current_cells + separator_cells + word_cells > width in
     if wrapped then flush ();
     if token.space_before && not wrapped then (
       if !current_cells = width then flush ();
       Buffer.add_char current ' ';
+      record !source_byte 1;
       incr current_cells);
-    append_word token ~word_cells) tokens;
+    append_word token ~start_byte ~word_cells;
+    source_byte := start_byte + String.length token.word) tokens;
   if Buffer.length current > 0 || !rows = [] then flush ();
   List.rev !rows
+
+let render_inline_with_spans ~palette ~width ~prefix ~continuation text =
+  let source_positions = ref [] in
+  let segments = inline_segments_traced ~on_segment:(fun positions -> source_positions := positions :: !source_positions) text in
+  let tokens = tokens_of_segments segments in
+  let semantic = Buffer.create (String.length text) in
+  List.iter (fun token ->
+    if token.space_before then Buffer.add_char semantic ' ';
+    Buffer.add_string semantic token.word) tokens;
+  let mapped = ref [] in
+  let body_width = max 1 (width - Layout.display_width prefix) in
+  let (_ : string list) = wrap_tokens ~on_row:(fun row -> mapped := row :: !mapped)
+    palette ~width:body_width tokens in
+  let mapped_rows = List.rev !mapped |> List.mapi (fun index row ->
+    {row with text=(if index = 0 then prefix else continuation) ^ row.text}) in
+  {semantic_text=Buffer.contents semantic;
+   source_positions=Array.concat (List.rev !source_positions); mapped_rows}
 
 let wrap_inline palette ~width ~prefix ~continuation text =
   let prefix_cells = Layout.display_width prefix in
@@ -373,6 +436,13 @@ let is_rule line =
   in
   distinct '-' || distinct '*' || distinct '_'
 
+let trim_source_bounds text start stop =
+  let whitespace = function ' ' | '\t' | '\n' | '\r' | '\012' -> true | _ -> false in
+  let rec left at = if at < stop && whitespace text.[at] then left (at + 1) else at in
+  let start = left start in
+  let rec right at = if at > start && whitespace text.[at - 1] then right (at - 1) else at in
+  start, right stop
+
 let heading_level line =
   let rec count index =
     if index < String.length line && line.[index] = '#' then count (index + 1)
@@ -381,7 +451,9 @@ let heading_level line =
   let level = count 0 in
   if level >= 1 && level <= 6 && level < String.length line
      && line.[level] = ' '
-  then Some (level, String.trim (String.sub line level (String.length line - level)))
+  then
+    let start, stop = trim_source_bounds line level (String.length line) in
+    Some (level, String.sub line start (stop - start), start)
   else None
 
 let bullet_item line =
@@ -397,7 +469,7 @@ let bullet_item line =
   if String.length rest >= 2
      && (rest.[0] = '-' || rest.[0] = '*' || rest.[0] = '+')
      && rest.[1] = ' '
-  then Some (indent, String.sub rest 2 (String.length rest - 2))
+  then Some (indent, String.sub rest 2 (String.length rest - 2), indent + 2)
   else None
 
 let ordered_item line =
@@ -421,13 +493,15 @@ let ordered_item line =
     Some
       ( indent
       , String.sub line indent (after_digits - indent + 1)
-      , String.sub line (after_digits + 2) (limit - after_digits - 2) )
+      , String.sub line (after_digits + 2) (limit - after_digits - 2)
+      , after_digits + 2 )
   else None
 
 let quote_body line =
-  let trimmed = String.trim line in
-  if String.length trimmed >= 1 && trimmed.[0] = '>' then
-    Some (String.trim (String.sub trimmed 1 (String.length trimmed - 1)))
+  let start, stop = trim_source_bounds line 0 (String.length line) in
+  if start < stop && line.[start] = '>' then
+    let body_start, body_stop = trim_source_bounds line (start + 1) stop in
+    Some (String.sub line body_start (body_stop - body_start), body_start)
   else None
 
 (* The fenced-code lexers moved to Masc_tui_code_lexer so the Code surface
@@ -589,10 +663,11 @@ let diff_mixed_kind pieces =
    attributes. Wrapped tails refill the same way so a narrow pane cannot turn
    them back into ordinary code. Cell widths measure the plain text; escapes
    are added after the cut, as in [wrap_pieces]. *)
-let styled_diff_mixed_rows palette ~width kind pieces =
+let styled_diff_mixed_rows ?on_row palette ~width kind pieces =
   let gutter = palette.code_gutter in
   let body_width = max 1 (width - Layout.display_width gutter) in
   let opening, closing = span_of_palette palette kind in
+  let source_byte = ref 0 in
   wrap_pieces ~max_cells:body_width pieces
   |> List.map (fun row ->
          let plain = gutter ^ String.concat "" (List.map fst row) in
@@ -610,7 +685,12 @@ let styled_diff_mixed_rows palette ~width kind pieces =
                   row)
          in
          let remaining = max 0 (width - Layout.display_width plain) in
-         opening ^ styled ^ String.make remaining ' ' ^ closing)
+         let text = opening ^ styled ^ String.make remaining ' ' ^ closing in
+         let length = List.fold_left (fun total (text, _) -> total + String.length text) 0 row in
+         Option.iter (fun emit -> emit {text;
+           source_ranges=[{start_byte= !source_byte; end_byte= !source_byte + length}]}) on_row;
+         source_byte := !source_byte + length;
+         text)
 
 (* One lexed row. Three regimes, and the diff checks come first.
 
@@ -626,26 +706,43 @@ let styled_diff_mixed_rows palette ~width kind pieces =
    Every other row wraps as pieces ([wrap_pieces]), so a long code line keeps
    its per-token colours across the wrap instead of falling back to a
    single-span cell split. *)
-let styled_code_rows palette ~width pieces =
+let styled_code_rows ?on_row palette ~width pieces =
   let gutter = palette.code_gutter in
   let body_width = max 1 (width - Layout.display_width gutter) in
   let plain = String.concat "" (List.map fst pieces) in
   let cells = Layout.display_width plain in
+  let source_byte = ref 0 in
+  let mapped plain text =
+    let length = String.length plain in
+    Option.iter (fun emit -> emit {text;
+      source_ranges=[{start_byte= !source_byte; end_byte= !source_byte + length}]}) on_row;
+    source_byte := !source_byte + length;
+    text
+  in
   match diff_row_span palette pieces with
   | Some span ->
       let chunks =
         if cells <= body_width then [ plain ]
         else Layout.split_cells ~max_cells:body_width plain
       in
-      List.map (fun chunk -> fill_styled_row ~width span (gutter ^ chunk)) chunks
+      List.map (fun chunk -> mapped chunk (fill_styled_row ~width span (gutter ^ chunk))) chunks
   | None -> (
       match diff_mixed_kind pieces with
-      | Some kind -> styled_diff_mixed_rows palette ~width kind pieces
+      | Some kind -> styled_diff_mixed_rows ?on_row palette ~width kind pieces
       | None ->
           wrap_pieces ~max_cells:body_width pieces
           |> List.map (fun row ->
-               gutter ^ String.concat "" (List.map (styled_piece palette) row))
+               mapped (String.concat "" (List.map fst row))
+                 (gutter ^ String.concat "" (List.map (styled_piece palette) row)))
       )
+
+let render_lexed_line_with_spans ~palette ~width pieces =
+  let mapped_rows = ref [] in
+  let (_ : string list) = styled_code_rows ~on_row:(fun row -> mapped_rows := row :: !mapped_rows)
+    palette ~width:(max 1 width) pieces in
+  let semantic_text = String.concat "" (List.map fst pieces) in
+  {semantic_text; source_positions=Array.init (String.length semantic_text) (fun i -> Some i);
+   mapped_rows=List.rev !mapped_rows}
 
 let horizontal cells =
   String.concat "" (List.init (max 0 cells) (fun _ -> "\xe2\x94\x80"))
@@ -656,8 +753,9 @@ let styled_span (opening, closing) text = opening ^ text ^ closing
    untagged fence looked identical. Fill the row so reverse video can provide a
    terminal-theme-safe background without choosing a light- or dark-only
    colour. A very long tag is clipped as one row; it cannot push the frame. *)
-let code_header palette ~width language =
-  let stem = "\xe2\x94\x8c\xe2\x94\x80 " ^ language ^ " " in
+let code_header ?on_language palette ~width language =
+  let prefix = "\xe2\x94\x8c\xe2\x94\x80 " in
+  let stem = prefix ^ language ^ " " in
   let stem =
     if Layout.display_width stem <= width then stem
     else
@@ -665,6 +763,8 @@ let code_header palette ~width language =
       | first :: _ -> first
       | [] -> ""
   in
+  Option.iter (fun emit -> emit (max 0 (min (String.length language)
+    (String.length stem - String.length prefix)))) on_language;
   let remaining = max 0 (width - Layout.display_width stem) in
   styled_span palette.code_header (stem ^ horizontal remaining)
 
@@ -674,14 +774,19 @@ let code_footer palette ~width =
 
 (* Fenced code is not wrapped at spaces: the alignment is the reason it was
    fenced. A line wider than the row is split where the row ends. *)
-let code_rows palette ~width line =
+let code_rows ?on_row palette ~width line =
   let gutter = palette.code_gutter in
   let body_width = max 1 (width - Layout.display_width gutter) in
   let opening, closing = palette.code in
-  if String.length line = 0 then [ opening ^ gutter ^ closing ]
-  else
-    Layout.split_cells ~max_cells:body_width line
-    |> List.map (fun chunk -> opening ^ gutter ^ chunk ^ closing)
+  let source_byte = ref 0 in
+  let mapped chunk =
+    let text = opening ^ gutter ^ chunk ^ closing in
+    let end_byte = !source_byte + String.length chunk in
+    Option.iter (fun emit -> emit {text; source_ranges=[{start_byte= !source_byte; end_byte}]}) on_row;
+    source_byte := end_byte;
+    text in
+  if String.length line = 0 then [mapped ""]
+  else Layout.split_cells ~max_cells:body_width line |> List.map mapped
 
 (* {1 Tables} *)
 
@@ -696,20 +801,28 @@ type alignment =
   | Centre
   | Right
 
-let table_cells line =
-  let trimmed = String.trim line in
+let table_cells_with_offsets line =
+  let start, stop = trim_source_bounds line 0 (String.length line) in
+  let trimmed = String.sub line start (stop - start) in
   if not (String.contains trimmed '|') then None
   else
-    let parts = String.split_on_char '|' trimmed in
-    (* The outer pipes are optional in the source and carry nothing, so the
-       empty cells they leave are dropped rather than drawn. *)
-    let parts = match parts with "" :: rest -> rest | other -> other in
-    let parts =
-      match List.rev parts with "" :: rest -> List.rev rest | _ -> parts
-    in
+    let offset = ref start in
+    let parts = String.split_on_char '|' trimmed |> List.map (fun raw ->
+      let at = !offset in
+      offset := at + String.length raw + 1;
+      raw, at) in
+    (* Outer pipes are optional; only the empty pieces before trimming are
+       dropped, exactly as in the original cell grammar. *)
+    let parts = match parts with ("", _) :: rest -> rest | other -> other in
+    let parts = match List.rev parts with ("", _) :: rest -> List.rev rest | _ -> parts in
     match parts with
     | [] -> None
-    | cells -> Some (List.map String.trim cells)
+    | cells -> Some (List.map (fun (raw, at) ->
+        let start, stop = trim_source_bounds raw 0 (String.length raw) in
+        String.sub raw start (stop - start), at + start) cells)
+
+let table_cells line =
+  Option.map (List.map fst) (table_cells_with_offsets line)
 
 let delimiter_alignment cell =
   let length = String.length cell in
@@ -746,15 +859,29 @@ let table_alignments line =
    declared: a short row is padded and a long one keeps its overflow in the
    last column rather than being cut, because a cell the source wrote is worth
    more than a straight right edge. *)
-let normalise_row ~columns cells =
+let normalise_cells ~empty ~join ~columns cells =
   let rec take taken remaining = function
     | _ when remaining = 0 -> List.rev taken
-    | [] -> List.rev taken @ List.init remaining (fun _ -> "")
+    | [] -> List.rev taken @ List.init remaining (fun _ -> empty)
     | [ last ] when remaining = 1 -> List.rev (last :: taken)
-    | rest when remaining = 1 -> List.rev (String.concat " " rest :: taken)
+    | rest when remaining = 1 -> List.rev (join rest :: taken)
     | cell :: rest -> take (cell :: taken) (remaining - 1) rest
   in
   take [] columns cells
+
+let normalise_row ~columns cells =
+  normalise_cells ~empty:"" ~join:(String.concat " ") ~columns cells
+
+let table_row_positions ~columns ~source_start line =
+  let cells = Option.value (table_cells_with_offsets line) ~default:[] in
+  let positions = List.map (fun (text, start) ->
+    Array.init (String.length text) (fun byte -> Some (source_start + start + byte))) cells in
+  let join parts =
+    let rec intersperse = function
+      | [] -> [] | [part] -> [part]
+      | part :: rest -> part :: [|None|] :: intersperse rest in
+    Array.concat (intersperse parts) in
+  normalise_cells ~empty:[||] ~join ~columns positions
 
 let pad ~alignment ~cells text =
   let missing = max 0 (cells - Layout.display_width text) in
@@ -793,13 +920,32 @@ let column_widths ~width ~gutter_cells ~columns rows =
   shrink ();
   Array.to_list widths
 
-let table_block palette ~width ~alignments ~header ~body =
+type table_cell_source = {
+  table_row : int;
+  table_column : int;
+  rendered_row : int;
+  cell_text : string;
+  source_positions : int option array;
+  rendered_start_cell : int;
+  visible_range : source_range;
+}
+
+let table_block ?on_cell ?source_rows palette ~width ~alignments ~header ~body =
   let columns = List.length alignments in
   let gutter = palette.table_gutter in
   let gutter_cells = Layout.display_width gutter in
-  let styled cells =
-    List.map
-      (fun cell ->
+  let cell_mapping = Option.map (fun emit -> emit, Hashtbl.create 16) on_cell in
+  let styled row_index cells =
+    List.mapi
+      (fun column cell ->
+        Option.iter (fun (_, semantic_cells) ->
+          let mapped = render_inline_with_spans ~palette ~width:max_int ~prefix:"" ~continuation:"" cell in
+          let source_positions = match source_rows with
+            | None -> invalid_arg "Masc_tui_markdown.table_block: missing table source positions"
+            | Some rows ->
+                let raw_positions=List.nth (List.nth rows row_index) column in
+                Array.map (fun position -> Option.bind position (fun at -> raw_positions.(at))) mapped.source_positions in
+          Hashtbl.replace semantic_cells (row_index, column) (mapped.semantic_text, source_positions)) cell_mapping;
         match
           wrap_inline palette ~width:max_int ~prefix:"" ~continuation:"" cell
         with
@@ -807,8 +953,8 @@ let table_block palette ~width ~alignments ~header ~body =
         | row :: _ -> row)
       (normalise_row ~columns cells)
   in
-  let header = styled header in
-  let body = List.map styled body in
+  let header = styled 0 header in
+  let body = List.mapi (fun row -> styled (row + 1)) body in
   (* The frame is paid for out of the columns, not out of the pane: a table
      that drew its own width plus a border would run past the frame it sits
      in, the way the origin margin would have. *)
@@ -817,7 +963,8 @@ let table_block palette ~width ~alignments ~header ~body =
     column_widths ~width:(max 1 (width - frame_cells)) ~gutter_cells ~columns
       (header :: body)
   in
-  let draw row =
+  let draw row_index row =
+    let cell_start = ref (if palette.table_frame then 2 else 0) in
     List.mapi
       (fun index cell ->
         let cells = List.nth widths index in
@@ -829,6 +976,16 @@ let table_block palette ~width ~alignments ~header ~body =
           if Layout.display_width cell > cells then Layout.fit_width cell cells
           else cell
         in
+        Option.iter (fun (emit, semantic_cells) ->
+          let cell_text, source_positions = Hashtbl.find semantic_cells (row_index, index) in
+          let rendered_row = if row_index = 0 then (if palette.table_frame then 1 else 0)
+            else row_index + (if palette.table_frame then 2 else 1) in
+          let missing = max 0 (cells - Layout.display_width fitted) in
+          let padding = match alignment with Left -> 0 | Right -> missing | Centre -> missing / 2 in
+          emit {table_row=row_index; table_column=index; rendered_row; cell_text; source_positions;
+            rendered_start_cell= !cell_start + padding;
+            visible_range={start_byte=0; end_byte=Layout.fitted_source_bytes cell_text cells}}) cell_mapping;
+        cell_start := !cell_start + cells + gutter_cells;
         pad ~alignment ~cells fitted)
       row
     |> String.concat gutter
@@ -840,9 +997,9 @@ let table_block palette ~width ~alignments ~header ~body =
     List.map dashes widths |> String.concat palette.table_rule_gutter
   in
   if not palette.table_frame then
-    (opening ^ draw header ^ closing)
+    (opening ^ draw 0 header ^ closing)
     :: (rule_opening ^ rule ^ rule_closing)
-    :: List.map draw body
+    :: List.mapi (fun index -> draw (index + 1)) body
   else
     (* The box. Each segment spans its column plus the space on either side,
        so a junction lands exactly where the gutter's bar does and the border
@@ -857,9 +1014,9 @@ let table_block palette ~width ~alignments ~header ~body =
     let edged row = rule_opening ^ "\xe2\x94\x82" ^ rule_closing ^ " " ^ row
       ^ " " ^ rule_opening ^ "\xe2\x94\x82" ^ rule_closing in
     border ~left:"\xe2\x94\x8c" ~joint:"\xe2\x94\xac" ~right:"\xe2\x94\x90"
-    :: edged (opening ^ draw header ^ closing)
+    :: edged (opening ^ draw 0 header ^ closing)
     :: border ~left:"\xe2\x94\x9c" ~joint:"\xe2\x94\xbc" ~right:"\xe2\x94\xa4"
-    :: (List.map (fun row -> edged (draw row)) body
+    :: (List.mapi (fun index row -> edged (draw (index + 1) row)) body
        @ [ border ~left:"\xe2\x94\x94" ~joint:"\xe2\x94\xb4"
              ~right:"\xe2\x94\x98" ])
 
@@ -889,42 +1046,52 @@ let source_lines text =
       })
     lines
 
-let table_at line rest =
+let table_at ?on_row line rest =
   match (table_cells line.source_text, rest) with
   | Some header, delimiter :: after -> (
       match table_alignments delimiter.source_text with
       | None -> None
       | Some alignments ->
-          let rec body taken = function
+          Option.iter (fun emit -> emit 0 line) on_row;
+          let rec body row_index taken = function
             | next :: more -> (
                 match table_cells next.source_text with
                 | Some cells when table_alignments next.source_text = None ->
-                    body (cells :: taken) more
+                    Option.iter (fun emit -> emit row_index next) on_row;
+                    body (row_index + 1) (cells :: taken) more
                 | Some _ | None -> (List.rev taken, next :: more))
             | [] -> (List.rev taken, [])
           in
-          let rows, remaining = body [] after in
+          let rows, remaining = body 1 [] after in
           Some (header, alignments, rows, remaining))
   | Some _, [] | None, _ -> None
 
 (* One source line outside a fence, as the rows it becomes. Flat rather than
    nested so each block form is readable next to the others. *)
-let block_rows palette ~width line =
-  let heading_rows level body =
+let block_rows ?on_inline palette ~width line =
+  let inline ~source_start ~prefix ~continuation body =
+    match on_inline with
+    | None -> wrap_inline palette ~width ~prefix ~continuation body
+    | Some emit ->
+        let mapped = render_inline_with_spans ~palette ~width ~prefix ~continuation body in
+        emit {mapped with source_positions=Array.map (Option.map ((+) source_start)) mapped.source_positions};
+        List.map (fun (row : mapped_row) -> row.text) mapped.mapped_rows
+  in
+  let heading_rows level body source_start =
     let opening, closing = palette.heading level in
-    wrap_inline palette ~width ~prefix:"" ~continuation:"" body
+    inline ~source_start ~prefix:"" ~continuation:"" body
     |> List.map (fun row -> opening ^ row ^ closing)
   in
-  let quote_rows body =
+  let quote_rows body source_start =
     let opening, closing = palette.quote in
-    wrap_inline palette ~width ~prefix:palette.quote_gutter
+    inline ~source_start ~prefix:palette.quote_gutter
       ~continuation:palette.quote_gutter body
     |> List.map (fun row -> opening ^ row ^ closing)
   in
-  let item_rows ~indent ~marker body =
+  let item_rows ~indent ~marker body source_start =
     let prefix = String.make indent ' ' ^ marker ^ " " in
     let continuation = String.make (Layout.display_width prefix) ' ' in
-    wrap_inline palette ~width ~prefix ~continuation body
+    inline ~source_start ~prefix ~continuation body
   in
   if String.trim line = "" then [ "" ]
   else if is_rule line then
@@ -935,19 +1102,53 @@ let block_rows palette ~width line =
     ]
   else
     match heading_level line with
-    | Some (level, body) -> heading_rows level body
+    | Some (level, body, source_start) -> heading_rows level body source_start
     | None -> (
         match quote_body line with
-        | Some body -> quote_rows body
+        | Some (body, source_start) -> quote_rows body source_start
         | None -> (
             match bullet_item line with
-            | Some (indent, body) ->
-                item_rows ~indent ~marker:palette.bullet body
+            | Some (indent, body, source_start) ->
+                item_rows ~indent ~marker:palette.bullet body source_start
             | None -> (
                 match ordered_item line with
-                | Some (indent, marker, body) -> item_rows ~indent ~marker body
+                | Some (indent, marker, body, source_start) -> item_rows ~indent ~marker body source_start
                 | None ->
-                    wrap_inline palette ~width ~prefix:"" ~continuation:"" line)))
+                    inline ~source_start:0 ~prefix:"" ~continuation:"" line)))
+
+type block_render = {
+  block_rows : string list;
+  inline_source : inline_render option;
+}
+
+let render_block_with_spans ~palette ~width line =
+  let inline_source = ref None in
+  let block_rows = block_rows ~on_inline:(fun source -> inline_source := Some source)
+    palette ~width:(max 1 width) line in
+  {block_rows; inline_source= !inline_source}
+
+type table_render = {
+  table_rows : string list;
+  cell_sources : table_cell_source list;
+}
+
+let render_table_with_spans ~palette ~width text =
+  match source_lines text with
+  | [] -> None
+  | first :: rest ->
+      let source_lines = ref [] in
+      match table_at ~on_row:(fun _ line -> source_lines := line :: !source_lines) first rest with
+      | None -> None
+      | Some (header, alignments, body, remaining)
+        when List.for_all (fun line -> line.synthetic_terminal) remaining ->
+          let cell_sources = ref [] in
+          let source_rows = List.rev !source_lines |> List.map (fun line ->
+            table_row_positions ~columns:(List.length alignments) ~source_start:line.source_start line.source_text) in
+          let table_rows = table_block ~source_rows ~on_cell:(fun cell -> cell_sources := cell :: !cell_sources)
+            palette ~width:(max 1 width) ~alignments ~header ~body in
+          Some {table_rows; cell_sources=List.sort (fun a b ->
+            compare (a.table_row, a.table_column) (b.table_row, b.table_column)) !cell_sources}
+      | Some _ -> None
 
 let closes_fence line ~opened =
   match (fence_marker line, opened) with
@@ -955,7 +1156,38 @@ let closes_fence line ~opened =
   | Some _, None -> true
   | None, _ -> false
 
-let render_streaming ~palette ~width text =
+type generated_field = Fence_language | Mermaid_diagnostic
+
+type semantic_origin =
+  | Original of source_range
+  | Generated of { block_start : int; field : generated_field; byte : int }
+
+type reading_order =
+  | Source_order
+  | Drawn_diagram of { block_start : int }
+
+type semantic_run = {
+  joins_previous : bool;
+  semantic_text : string;
+  origins : semantic_origin option array;
+  visible_rows : (int * source_range list) list;
+  reading : reading_order;
+}
+
+type document_mapping =
+  | Complete_document
+  | Incomplete_document of (int * Masc_tui_mermaid.missing_label list) list
+
+type document_render = {
+  document_rows : string list;
+  semantic_runs : semantic_run list;
+  mapping : document_mapping;
+}
+
+let original_positions base positions =
+  Array.map (Option.map (fun byte -> Original {start_byte=base + byte; end_byte=base + byte + 1})) positions
+
+let render_streaming_internal ?on_semantic ?on_unmapped ~palette ~width text =
   let width = max 1 width in
   let rows = ref [] in
   let rendered_rows = ref 0 in
@@ -973,6 +1205,38 @@ let render_streaming ~palette ~width text =
         rows := row :: !rows;
         incr rendered_rows)
       list
+  in
+  let emit_run run = Option.iter (fun emit -> emit run) on_semantic in
+  let emit_inline ?(joins_previous=false) ~base (mapped : inline_render) =
+    let row_start = !rendered_rows in
+    emit_run {joins_previous;semantic_text=mapped.semantic_text;
+      origins=original_positions base mapped.source_positions;
+      visible_rows=List.mapi (fun i row -> row_start+i, row.source_ranges) mapped.mapped_rows;
+      reading=Source_order};
+    emit_all (List.map (fun row -> row.text) mapped.mapped_rows)
+  in
+  let emit_code ?(joins_previous=false) ~base line =
+    match on_semantic with
+    | None -> emit_all (code_rows palette ~width line)
+    | Some _ ->
+        let mapped=ref [] in
+        let (_ : string list)=code_rows ~on_row:(fun row -> mapped:=row :: !mapped) palette ~width line in
+        emit_inline ~joins_previous ~base {semantic_text=line;
+          source_positions=Array.init (String.length line) (fun byte -> Some byte);
+          mapped_rows=List.rev !mapped}
+  in
+  let emit_generated ~block_start ~field value =
+    match on_semantic with
+    | None -> emit_all (code_rows palette ~width value)
+    | Some _ ->
+        let row_start= !rendered_rows in
+        let mapped=ref [] in
+        let rows=code_rows ~on_row:(fun row -> mapped:=row :: !mapped) palette ~width value in
+        emit_run {joins_previous=false;semantic_text=value;
+          origins=Array.init (String.length value) (fun byte -> Some (Generated {block_start;field;byte}));
+          visible_rows=List.rev !mapped |> List.mapi (fun i row -> row_start+i,row.source_ranges);
+          reading=Source_order};
+        emit_all rows
   in
   (* A source ending in a newline produces one synthetic empty line from
      [String.split_on_char]. It is still rendered -- [render] has always kept
@@ -994,67 +1258,128 @@ let render_streaming ~palette ~width text =
      an unclosed fence still renders what it holds -- because the lexer reads
      the body whole; its state, a comment opened rows ago, decides the colour
      of rows it has not reached yet. *)
-  let emit_fence ~closed language lexer rev_body =
+  let emit_fence ~closed ~block_start language lexer rev_body =
     let body = List.rev rev_body in
+    let body_text () = String.concat "\n" (List.map (fun line -> line.source_text) body) in
+    let body_base = match body with first :: _ -> first.source_start | [] -> block_start in
     Option.iter
-      (fun language -> emit_all [ code_header palette ~width language ])
-      language;
+      (fun language ->
+        let on_language = Option.map (fun _ visible ->
+          emit_run {joins_previous=false;semantic_text=language;
+            origins=Array.init (String.length language) (fun byte -> Some (Generated {block_start;field=Fence_language;byte}));
+            visible_rows=[!rendered_rows, [{start_byte=0;end_byte=visible}]];
+            reading=Source_order}) on_semantic in
+        emit_all [code_header ?on_language palette ~width language]) language;
     (match language, lexer with
-     | Some "mermaid", _ -> (
-         (* Drawn, not lexed: the rows come back the width the code rows
-            have inside the gutter. A diagram this module cannot draw shows
-            its source under one row that says why (RFC-0429 §3.3). *)
+     | Some "mermaid", _ ->
          let body_width = max 1 (width - Layout.display_width palette.code_gutter) in
-         match Masc_tui_mermaid.render ~cols:body_width (String.concat "\n" body) with
-         | Ok rows -> List.iter (fun row -> emit_all (code_rows palette ~width row)) rows
-         | Error failure ->
-             emit_all (code_rows palette ~width (mermaid_failure_text failure));
-             List.iter (fun line -> emit_all (code_rows palette ~width line)) body)
+         (match on_semantic with
+          | None -> (match Masc_tui_mermaid.render ~cols:body_width (body_text ()) with
+              | Ok rows -> List.iter (fun row -> emit_all (code_rows palette ~width row)) rows
+              | Error failure ->
+                  emit_all (code_rows palette ~width (mermaid_failure_text failure));
+                  List.iter (fun line -> emit_all (code_rows palette ~width line.source_text)) body)
+          | Some _ -> (match Masc_tui_mermaid.render_with_source_labels ~cols:body_width (body_text ()) with
+              | Error failure ->
+                  emit_generated ~block_start ~field:Mermaid_diagnostic (mermaid_failure_text failure);
+                  List.iteri (fun i line -> emit_code ~joins_previous:(i>0) ~base:line.source_start line.source_text) body
+              | Ok mapped ->
+                  let labels = match mapped.labels with
+                    | Complete labels -> labels
+                    | Incomplete {mapped;missing} ->
+                        Option.iter (fun emit -> emit (block_start,missing)) on_unmapped;
+                        mapped in
+                  let visible=Hashtbl.create 16 in
+                  List.iteri (fun canvas_row row ->
+                    let on_row (row : mapped_row) =
+                      let ranges=Hashtbl.create 8 in
+                      List.iter (fun range ->
+                        for byte=range.start_byte to range.end_byte-1 do
+                          match mapped.rendered_positions.(canvas_row).(byte) with
+                          | None -> ()
+                          | Some position ->
+                              let previous=Option.value (Hashtbl.find_opt ranges position.identity) ~default:[] in
+                              Hashtbl.replace ranges position.identity ({start_byte=position.byte;end_byte=position.byte+1}::previous)
+                        done) row.source_ranges;
+                      Hashtbl.iter (fun identity ranges ->
+                        let previous=Option.value (Hashtbl.find_opt visible identity) ~default:[] in
+                        Hashtbl.replace visible identity ((!rendered_rows,List.rev ranges)::previous)) ranges;
+                      emit_all [row.text] in
+                    let (_ : string list)=code_rows ~on_row palette ~width row in ()) mapped.rendered_rows;
+                  List.iter (fun (label : Masc_tui_mermaid.sourced_label) ->
+                    emit_run {joins_previous=false;semantic_text=label.text;
+                      origins=Array.map (fun (range : Masc_tui_mermaid.label_source_range) ->
+                        Some (Original {start_byte=body_base+range.start_byte;end_byte=body_base+range.end_byte})) label.ranges;
+                      visible_rows=Option.value (Hashtbl.find_opt visible label.identity) ~default:[] |> List.rev;
+                      reading=Drawn_diagram {block_start}}) labels))
      | _, Some lexer ->
-         fence_rows_of_segments (lexer (String.concat "\n" body))
-         |> List.iter
-              (fun pieces -> emit_all (styled_code_rows palette ~width pieces))
-     | _, None ->
-         List.iter (fun line -> emit_all (code_rows palette ~width line)) body);
-    if closed && Option.is_some language then
-      emit_all [ code_footer palette ~width ]
+         let lines=fence_rows_of_segments (lexer (body_text ())) in
+         let source_byte=ref body_base in
+         List.iteri (fun i pieces ->
+           (match on_semantic with
+            | None -> emit_all (styled_code_rows palette ~width pieces)
+            | Some _ -> emit_inline ~joins_previous:(i>0) ~base:!source_byte (render_lexed_line_with_spans ~palette ~width pieces));
+           source_byte := !source_byte + String.length (String.concat "" (List.map fst pieces)) + 1) lines
+     | _, None -> List.iteri (fun i line -> emit_code ~joins_previous:(i>0) ~base:line.source_start line.source_text) body);
+    if closed && Option.is_some language then emit_all [code_footer palette ~width]
   in
+  let previous_inline=ref false in
   let rec walk fence rev_body = function
     | [] -> (
         match fence with
-        | Some (_, language, lexer) ->
-            emit_fence ~closed:false language lexer rev_body
+        | Some (_, language, lexer, block_start) ->
+            emit_fence ~closed:false ~block_start language lexer rev_body
         | None -> ())
     | line :: rest -> (
         match fence with
-        | Some (marker, language, lexer)
+        | Some (marker, language, lexer, block_start)
           when closes_fence line.source_text ~opened:(Some marker) ->
-            emit_fence ~closed:true language lexer rev_body;
+            emit_fence ~closed:true ~block_start language lexer rev_body;
             mutable_can_absorb_terminal := false;
             walk None [] rest
-        | Some _ -> walk fence (line.source_text :: rev_body) rest
+        | Some _ -> walk fence (line :: rev_body) rest
         | None -> (
             match fence_marker line.source_text with
             | Some marker ->
+                previous_inline:=false;
                 begin_block ~can_absorb_terminal:true line;
                 let language = fence_language line.source_text in
                 let lexer =
                   Option.bind language lexer_of_language
                 in
-                walk (Some (marker, language, lexer)) [] rest
+                walk (Some (marker, language, lexer, line.source_start)) [] rest
             | None -> (
-                match table_at line rest with
+                let table_lines=ref [] in
+                let on_row=Option.map (fun _ _ line -> table_lines:=line :: !table_lines) on_semantic in
+                match table_at ?on_row line rest with
                 | Some (header, alignments, body, remaining) ->
+                    previous_inline:=false;
                     begin_block ~can_absorb_terminal:true line;
-                    emit_all
-                      (table_block palette ~width ~alignments ~header ~body);
+                    let row_start= !rendered_rows in
+                    let source_rows=Option.map (fun _ -> List.rev !table_lines |> List.map (fun line ->
+                      table_row_positions ~columns:(List.length alignments) ~source_start:line.source_start line.source_text)) on_semantic in
+                    let on_cell=Option.map (fun _ (cell : table_cell_source) ->
+                      emit_run {joins_previous=false;semantic_text=cell.cell_text; origins=original_positions 0 cell.source_positions;
+                        visible_rows=[row_start+cell.rendered_row,[cell.visible_range]];
+                        reading=Source_order}) on_semantic in
+                    emit_all (table_block ?source_rows ?on_cell palette ~width ~alignments ~header ~body);
                     walk None [] remaining
                 | None ->
-                    begin_block
-                      ~can_absorb_terminal:
-                        (Option.is_some (table_cells line.source_text))
-                      line;
-                    emit_all (block_rows palette ~width line.source_text);
+                    begin_block ~can_absorb_terminal:(Option.is_some (table_cells line.source_text)) line;
+                    (match on_semantic with
+                     | None -> emit_all (block_rows palette ~width line.source_text)
+                     | Some _ ->
+                         let mapped=render_block_with_spans ~palette ~width line.source_text in
+                         Option.iter (fun (inline : inline_render) ->
+                           emit_run {joins_previous= !previous_inline;semantic_text=inline.semantic_text;
+                             origins=original_positions line.source_start inline.source_positions;
+                             visible_rows=List.mapi (fun i row -> !rendered_rows+i,row.source_ranges) inline.mapped_rows;
+                             reading=Source_order}) mapped.inline_source;
+                         let blank=String.trim line.source_text="" in
+                         if blank then emit_run {joins_previous= !previous_inline;semantic_text="";
+                           origins=[||];visible_rows=[];reading=Source_order};
+                         previous_inline:=Option.is_some mapped.inline_source || blank;
+                         emit_all mapped.block_rows);
                     walk None [] rest)))
   in
   walk None [] (source_lines text);
@@ -1077,6 +1402,18 @@ let render_streaming ~palette ~width text =
     mutable_source_start;
     mutable_row_start;
   }
+
+let render_streaming ~palette ~width text =
+  render_streaming_internal ~palette ~width text
+
+let render_document_with_spans ~palette ~width text =
+  let runs=ref [] and unmapped=ref [] in
+  let rendered=render_streaming_internal
+    ~on_semantic:(fun run -> runs:=run :: !runs)
+    ~on_unmapped:(fun missing -> unmapped:=missing :: !unmapped)
+    ~palette ~width text in
+  {document_rows=rendered.rows; semantic_runs=List.rev !runs;
+   mapping=(match !unmapped with [] -> Complete_document | missing -> Incomplete_document (List.rev missing))}
 
 let render ~palette ~width text =
   (* A single non-fence line is one block; streaming adds no context to it. *)

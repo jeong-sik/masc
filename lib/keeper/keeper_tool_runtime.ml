@@ -115,6 +115,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
+  | Tool_memory_select
   | Tool_memory_retract
   | Tool_memory_write
   | Tool_constitution_write
@@ -156,6 +157,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_file_dispatch
   | Tool_masc_library_dispatch
   | Tool_masc_local_runtime_dispatch
+  | Tool_lane_addon _
   | Tool_analyze_image -> None
 ;;
 
@@ -200,6 +202,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
+  | Tool_memory_select
   | Tool_memory_retract
   | Tool_memory_write
   | Tool_constitution_write
@@ -242,12 +245,22 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_masc_file_dispatch
   | Tool_masc_library_dispatch
   | Tool_masc_local_runtime_dispatch
+  | Tool_lane_addon _
   | Tool_analyze_image -> None
 ;;
 
 let handle_in_process ctx descriptor args =
   let name = descriptor.Keeper_tool_descriptor.internal_name in
   match descriptor.Keeper_tool_descriptor.runtime_handler with
+  | Tool_lane_addon export ->
+    Some (match ctx.capability_authority with
+      | Frozen_surface surface when Keeper_capability_surface.admits surface descriptor ->
+          Keeper_lane_addon_runtime.call ~config:ctx.config ~keeper_name:ctx.meta.name
+            ~export ~arguments:args
+      | Frozen_surface _ | Compatibility_meta ->
+          Keeper_tool_execution.failure ~class_:Tool_result.Policy_rejection
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            "Lane Add-on invocation requires frozen installation authority")
   | Tool_lane_status ->
     Some
       (Keeper_tool_execution.success_data
@@ -299,19 +312,35 @@ let handle_in_process ctx descriptor args =
          ~base_path:ctx.config.base_path
          ~args)
   | Tool_skill_validate ->
-    Some (Keeper_skill_validate.handle ~config:ctx.config ~args)
+    Some
+      (match ctx.capability_authority with
+       | Frozen_surface surface ->
+           Keeper_skill_validate.handle
+             ~descriptors:(Keeper_capability_surface.descriptors surface)
+             ~config:ctx.config ~args
+       | Compatibility_meta ->
+           Keeper_skill_validate.handle
+             ~descriptors:(Keeper_tool_descriptor.all_descriptors ())
+             ~config:ctx.config ~args)
   | Tool_skill_publish ->
     Some
       (Keeper_skill_publish.handle
+         ~descriptors:(match ctx.capability_authority with
+           | Frozen_surface surface -> Keeper_capability_surface.descriptors surface
+           | Compatibility_meta -> Keeper_tool_descriptor.all_descriptors ())
          ~config:ctx.config
          ~keeper_name:ctx.meta.name
          ~args)
   | Tool_workspace_memory_read ->
     Some (Keeper_workspace_memory_read.handle ~base_path:ctx.config.base_path ~args)
+  | Tool_memory_select ->
+    Some (Keeper_memory_select.handle ?turn_ref:ctx.turn_ref ~clock:ctx.clock
+      ~config:ctx.config ~meta:ctx.meta ~args ())
   | Tool_memory_search ->
     Some
       (Keeper_tool_memory_runtime.keeper_memory_search_with_outcome
          ?turn_ref:ctx.turn_ref
+         ?clock:ctx.clock
          ~config:ctx.config
          ~meta:ctx.meta
          ~ctx_work:ctx.ctx_work

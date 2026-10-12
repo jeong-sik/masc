@@ -10,7 +10,7 @@ let served_slot =
        | Runtime.Cli_slot id -> Format.fprintf fmt "Cli_slot %s" id)
     ( = )
 
-let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
+let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = env#net and clock = env#clock in
@@ -64,7 +64,7 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ~base_path ~reg
     cli_calls := !cli_calls @ [runtime_id];
     Error (List.assoc runtime_id cli_errors) in
   let refused = ref 0 and committed = ref false and observed_limit = ref None in
-  let verdict = ref None in
+  let verdict = ref None and same = ref None in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   Runtime.run_best_effort ~cli_runner
     ~on_cli_input_limit:(fun limit ->
@@ -74,7 +74,9 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ~base_path ~reg
       (* Folded as the continuity pass folds it: any report's size verdict
          stands. *)
       let shows_size = outcome.Runtime.walk_shows_size in
-      verdict := Some (match !verdict with None -> shows_size | Some earlier -> earlier || shows_size))
+      verdict := Some (match !verdict with None -> shows_size | Some earlier -> earlier || shows_size);
+      let met = outcome.Runtime.smaller_range_meets_same_failure in
+      same := Some (match !same with None -> met | Some earlier -> earlier || met))
     ~on_memory_committed:(fun () -> committed := true)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
   Alcotest.(check int) "only a CLI slot reports an input limit" expected !refused;
@@ -88,6 +90,13 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ~base_path ~reg
        Alcotest.(check (option bool))
          "the walk's size verdict" (Some shows_size) !verdict)
     shows_size;
+  (* What a recursive splitter reads as a veto: the walk also met a failure a
+     smaller range meets the same way. *)
+  Option.iter
+    (fun met ->
+       Alcotest.(check (option bool))
+         "the walk also met a size-independent failure" (Some met) !same)
+    same_failure;
   Alcotest.(check (list string)) "CLI candidates ran in order"
     (List.map fst cli_errors) !cli_calls;
   Alcotest.(check int) "terminal provider really received the request" 1 !posts;
@@ -100,6 +109,71 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ~base_path ~reg
   | [run] -> Alcotest.(check string) "terminal failure remains observable" "failed"
       (Runs.status_label run.status)
   | _ -> Alcotest.fail "expected one recorded Librarian run"
+
+let test_absorb_evidence_capacity_recovers ~base_path () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = env#net and clock = env#clock in
+  Eio_context.with_test_env ~net ~clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let keeper_id = "absorb-evidence-capacity" in
+  let module Current = Keeper_memory_os_current in
+  let module L = Keeper_librarian in
+  let module M = Keeper_memory_os_types in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let fact = M.observed ~claim:"A17 is under investigation." ~category:M.Fact
+    ~now:100. ~origin:{kind=M.Authored; trace_id=keeper_id} in
+  let seeded = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+    ~now:100. ~source:{kind=Current.Librarian; trace_id=keeper_id} ~facts:[fact] ()
+    |> function Ok state -> state | Error detail -> Alcotest.fail detail in
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let before = Fs_compat.load_file path in
+  let output = `Assoc ["new_claims", `List [`Assoc [
+      "claim", `String "A17 was investigated and then resolved.";
+      "category", `String "fact"; "absorbs", `List [`String "m1"]]];
+      "dropped", `List []; "working_contexts", `List []] in
+  let librarian = Fixture.start_server ~sw ~net ~clock
+    (Fixture.Reply (Fixture.openai_response output)) in
+  let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply
+    {|{"model":"fixture","answers":{"s0_0":{"type":"choice","choice":"mergeable","confidence":1.0,"probabilities":{"mergeable":1.0,"different_context":0.0,"loses_knowledge":0.0,"uncertain":0.0}}}}|}) in
+  let resolver = Fixture.resolver_snapshot ~source:"absorb-capacity"
+    [{Fixture.id="absorb-capacity-librarian"; base_url=librarian.base_url}] in
+  (match Runtime_exact_output_registry.publish
+    ~lanes:[{Runtime_schema.id="librarian_exact"; enabled=true;
+      slot_ids=["absorb-capacity-librarian"]; cli_slot_ids=[];
+      max_output_tokens=Some 4096; thinking=None}] resolver with
+   | Ok _ -> () | Error error ->
+     Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-capacity-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with absorb_gate=true;
+     destinations=({Runtime_schema.endpoint=jev.base_url; model="fixture";
+                    api_key_env="TYPESAFEAI_API_KEY"},[])} @@ fun () ->
+  let observation = Agent_core.Types.user_msg "A17 recovery was verified after the investigation." in
+  let input : L.input =
+    {turn_ref=Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1000;
+     historical_task_contexts=[]; goal_context=L.No_task;
+     keeper_id=Masc_test_deps.keeper_id_fixture keeper_id;
+     keeper_instructions="Preserve the event history.";
+     current=Some {facts=seeded.facts}; working_context=Keeper_librarian_context.empty;
+     messages=List.init 1000 (fun _ -> observation);
+     tool_observations=[]; counterpart_observations=[]} in
+  let size = ref None and commits = ref 0 in
+  let run input = Runtime.run_best_effort
+    ~on_not_committed:(fun outcome -> size := Some outcome.Runtime.walk_shows_size)
+    ~on_memory_committed:(fun () -> incr commits)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in
+  run input;
+  Alcotest.(check (option bool)) "real runtime reports capacity to source narrowing" (Some true) !size;
+  Alcotest.(check int) "capacity failure cannot commit candidate" 0 !commits;
+  Alcotest.(check string) "source snapshot unchanged" before (Fs_compat.load_file path);
+  Alcotest.(check int) "oversized evidence never dispatched" 0 (Fixture.post_count jev);
+  (* The caller can retry a smaller selected range against the unchanged snapshot. *)
+  run {input with messages=[observation]};
+  Alcotest.(check int) "smaller range commits once" 1 !commits;
+  Alcotest.(check int) "smaller evidence reaches the judge" 1 (Fixture.post_count jev);
+  Alcotest.(check bool) "actual memory snapshot advances" true (before <> Fs_compat.load_file path)
+;;
 
 let test_prefit_real_continuity ~base_path () =
   let module P = Keeper_librarian_continuity in
@@ -211,12 +285,16 @@ let test_prefit_real_continuity ~base_path () =
     Ok (Yojson.Safe.to_string
       (if runtime_id = Fixture.cli_primary_runtime then null_state else missing_state)) in
   let invalid_committed = ref false in
+  let invalid_size_verdict = ref None in
   Runtime.run_best_effort ~continuity:half
     ~durable_range_id:(P.memory_range_id ~config ~keeper_name:keeper_id half |> get)
     ~cli_runner:invalid_runner ~on_memory_committed:(fun () -> invalid_committed := true)
+    ~on_not_committed:(fun reason -> invalid_size_verdict := Some reason.Runtime.walk_shows_size)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None (input half);
   Alcotest.(check (list string)) "missing working states advance through declared slots once"
     [Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] !invalid_calls;
+  Alcotest.(check (option bool)) "schema failure stops partition traversal" (Some false)
+    !invalid_size_verdict;
   Alcotest.(check bool) "missing working state never publishes Memory" false !invalid_committed;
   Alcotest.(check bool) "missing working state leaves no Memory snapshot" true
     (Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get |> Option.is_none);
@@ -458,7 +536,7 @@ let test_size_verdict_table () =
     ; "missing output", E.Missing_output, true
     ; "ambiguous output", E.Ambiguous_output 2, true
     ; "unexpected output content", E.Unexpected_output_content, true
-    ; "invalid json output", E.Invalid_json_output, true
+    ; "invalid json output", E.Invalid_json_output, false
     ; "response body deadline exceeded", E.Response_body_deadline_exceeded, true
     ]
 
@@ -470,8 +548,8 @@ let test_cli_size_verdict_table () =
   List.iter
     (fun (name, failure, expected) ->
        Alcotest.(check bool) name expected (Runtime.For_testing.cli_failure_shows_size failure))
-    [ "an answer that is not JSON", L.Invalid_json_output { runtime_id; detail = "truncated" }, true
-    ; "an answer the domain refused", L.Invalid_domain_output { runtime_id; detail = "schema" }, true
+    [ "an answer that is not JSON", L.Invalid_json_output { runtime_id; detail = "truncated" }, false
+    ; "an answer the domain refused", L.Invalid_domain_output { runtime_id; detail = "schema" }, false
     ; "an id this module cannot run", L.Not_an_official_client { runtime_id }, false
     ; "an id this module cannot find", L.Unknown_runtime { runtime_id }, false
     ; "a client that failed without saying why",
@@ -582,9 +660,9 @@ let () =
   let root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
   Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
   Prompt_defaults.init ();
-  let case name first_overflow status expected shows_size =
+  let case ?same_failure name first_overflow status expected shows_size =
     Alcotest.test_case name `Quick
-      (test_callback ~shows_size ~base_path ~registry ~keeper_id:name ~first_overflow ~status
+      (test_callback ~shows_size ?same_failure ~base_path ~registry ~keeper_id:name ~first_overflow ~status
          ~expected) in
   let codex_error data = Fusion_official_client.Codex_failure
     (Runtime_codex_app_server.Rpc_error
@@ -616,6 +694,8 @@ let () =
        Alcotest.test_case "a continuity-only run whose snapshot is refused is failed" `Quick
          (test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~registry)];
      "actual HTTP outcomes", [
+      Alcotest.test_case "absorb evidence capacity preserves and recovers memory" `Quick
+        (test_absorb_evidence_capacity_recovers ~base_path);
       (* An API slot states its limit in provider prose, which this process
          cannot read back into a number, so it reports none. The pass does
          not need one: a size refusal is evidence enough to read less. *)
@@ -623,10 +703,14 @@ let () =
          first or last; a quota or an authorization refusal never does. The
          four together are the order matrix: a verdict taken from the walk's
          last cause alone would answer rows two and three differently. *)
-      case "capacity-final" false `Request_entity_too_large 0 true;
-      case "quota-final" false `Too_many_requests 0 false;
-      case "capacity-then-quota" true `Too_many_requests 0 true;
-      case "capacity-then-auth" true `Unauthorized 0 true;
+      (* The second verdict is what the admission worker reads before it
+         splits: size with a quota or an operator refusal in the same walk is
+         deferred whole, so the refusing provider is not asked once per part. *)
+      case ~same_failure:false "capacity-final" false `Request_entity_too_large 0 true;
+      case ~same_failure:true "quota-final" false `Too_many_requests 0 false;
+      case ~same_failure:true "capacity-then-quota" true `Too_many_requests 0 true;
+      case ~same_failure:true "capacity-then-auth" true `Unauthorized 0 true;
+      case ~same_failure:false "capacity-then-capacity" true `Request_entity_too_large 0 true;
       (* An empty answer that ended its turn says nothing about size: a
          smaller range meets the same provider (#37899). *)
       case "empty-completion-final" false `OK 0 false];

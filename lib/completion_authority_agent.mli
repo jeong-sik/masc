@@ -98,6 +98,7 @@ module For_testing : sig
         ; detail : string
         ; evaluator_runtime : string
         ; retryable_runtimes : string list
+        ; model_absent_runtimes : string list
         ; retry : retry_request
         }
     | Raised of { detail : string }

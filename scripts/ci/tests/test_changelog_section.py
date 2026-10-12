@@ -117,6 +117,41 @@ Every entry is in [CHANGELOG.md](https://example.test/blob/v1.2.0/CHANGELOG.md) 
 Every entry is in CHANGELOG.md under `## [1.2.0] - 2026-10-07`.
 """)
 
+    def test_repeated_categories_are_counted_once(self):
+        repeated = CHANGELOG.replace("## [1.1.0]", "### Fixed\n\n- Another fix.\n\n## [1.1.0]")
+        code, body = self.run_script(repeated)
+        self.assertEqual(code, 0)
+        self.assertEqual(body.count("- Fixed:"), 1)
+        self.assertIn("- Fixed: 3 entries", body)
+
+    def test_complete_record_counts_replace_summary_counts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            details = Path(directory) / "complete.md"
+            details.write_text(CHANGELOG.replace("- First fix. (#11)",
+                "- Detailed fix one.\n- Detailed fix two.").replace("### Internal",
+                "### Documentation\n\n- New manual.\n\n### Internal"))
+            code, body = self.run_script(CHANGELOG, "--counts-changelog", str(details),
+                "--counts-changelog-url", URL.replace("CHANGELOG.md", "complete.md"))
+            self.assertEqual(code, 0)
+            self.assertIn("- Fixed: 3 entries", body)
+            self.assertIn("- Documentation: 1 entry", body)
+            self.assertIn("[complete changelog](https://example.test/blob/v1.2.0/complete.md)", body)
+            self.assertNotIn("Detailed fix", body)
+            self.assertIn("Stop the server before installing.", body)
+
+    def test_complete_record_must_match_the_selected_version_and_date(self):
+        for details_text in [CHANGELOG.replace("1.2.0", "1.3.0"),
+                             CHANGELOG.replace("2026-10-07", "2026-10-06"),
+                             CHANGELOG + "\n## [1.2.0] - 2026-10-07\n- Duplicate\n"]:
+            with self.subTest(details=details_text), tempfile.TemporaryDirectory() as directory:
+                details = Path(directory) / "complete.md"
+                details.write_text(details_text)
+                self.assertEqual(self.run_script(CHANGELOG,
+                    "--counts-changelog", str(details), "--counts-changelog-url", URL), (1, ""))
+
+    def test_complete_record_requires_its_own_published_link(self):
+        self.assertEqual(self.run_script(CHANGELOG, "--counts-changelog", "complete.md"), (1, ""))
+
 
 if __name__ == "__main__":
     unittest.main()

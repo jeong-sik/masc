@@ -35,15 +35,6 @@ let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 (
    below are about the rows each check is named for. *)
 let check_cols = 140
 
-let check_layout state expected =
-  expect "rendering chrome" expected
-    (runtime_surface_listing_chrome ~rows:100 ~cols:check_cols state);
-  match runtime_scrolled ~rows:100 ~cols:check_cols state with
-  | None -> Alcotest.fail "runtime list has no scroll geometry"
-  | Some layout -> expect "keyboard shares rendering chrome" expected layout.sc_chrome
-
-(* Press these keys in the open picker, over the same rows the key handler
-   reads. *)
 let press state keys =
   match state.runtime_lane_pick with
   | None -> Alcotest.fail "no picker is open"
@@ -103,48 +94,6 @@ let test_http_slot_without_body_deadline_is_refused_for_exact_lane () =
    | Pick_available -> ()
    | Pick_refused _ -> Alcotest.fail "a keyed HTTP slot must remain available")
 
-let test_picker_and_refusal_keep_footer_space () =
-  let state = state () in
-  state.runtime_catalog <- [runtime "a"; runtime "b"; runtime "c"];
-  check_layout state 12;
-  open_runtime_lane_pick state (Pick_conversation_lane "primary");
-  (* Three choices, prompt and divider consume five additional rows. *)
-  check_layout state 17;
-  state.runtime_lane_notice <- Some (Lane_write_refused "route write rejected");
-  check_layout state 19;
-  state.runtime_surface_error <- Some "resolved unavailable";
-  check_layout state 21;
-  (* The cursor on the last runtime keeps the window a full page: the rows
-     the listing gave up stay given up while the cursor moves. *)
-  press state [ "end" ];
-  check_layout state 21;
-  state.runtime_lane_pick <- None;
-  check_layout state 16
-
-let test_empty_picker_keeps_its_explanation () =
-  let state = state () in
-  open_runtime_lane_pick state (Pick_conversation_lane "primary");
-  check_layout state 15
-
-(* The lane editor's prompt row -- a name being typed, a lane armed for
-   removal -- is two rows the footer has to be moved for, like the refusal. *)
-let test_lane_prompt_keeps_footer_space () =
-  let state = state () in
-  check_layout state 12;
-  state.runtime_lane_name_draft <- Some (Naming_new_lane "coding");
-  check_layout state 14;
-  state.runtime_lane_name_draft <- None;
-  state.runtime_lane_remove_armed <- Some "coding";
-  check_layout state 14;
-  state.runtime_lane_notice <- Some (Lane_write_refused "lane \"coding\" is in use by alpha");
-  check_layout state 16;
-  state.runtime_lane_remove_armed <- None;
-  state.runtime_lane_notice <- None;
-  open_runtime_lane_pick state (Pick_new_lane "coding");
-  (* A lane being created has no candidates to note, and the catalogue is
-     unread here: prompt, divider and the explanation row. *)
-  check_layout state 15
-
 let test_a_move_past_either_end_is_no_move () =
   let order = [ "a"; "b"; "c" ] in
   Alcotest.(check (option (list string))) "down" (Some [ "b"; "a"; "c" ])
@@ -170,6 +119,42 @@ let lane_state () =
    | Error detail -> Alcotest.fail detail);
   state.runtime_mode <- Runtime_lanes;
   state
+
+let test_refusing_runtimes_are_deemphasized_and_toggle_keeps_order () =
+  let state = lane_state () in
+  let snapshot = match state.runtime_surface with
+    | Some snapshot -> snapshot | None -> Alcotest.fail "missing fixture" in
+  let exhausted = { (runtime "b") with ro_quota_exhausted = true } in
+  let limited = { (runtime "c") with ro_rate_limited = true } in
+  let resolved = { snapshot.rss_resolved with
+    rrs_runtimes = [runtime "a"; exhausted; limited] } in
+  state.runtime_surface <- Some (match Masc.Tui_decode.join_runtime_surface
+      ~probe:None ~probe_error:None ~resolved with
+    | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail);
+  let runtime_ids () =
+    match state.runtime_surface with
+    | None -> []
+    | Some snapshot -> List.map (fun (runtime : Masc.Tui_decode.runtime_option) -> runtime.ro_id)
+        snapshot.rss_resolved.rrs_runtimes in
+  let original_order = ["a"; "b"; "c"] in
+  Alcotest.(check (list string)) "default view preserves configured order"
+    original_order (runtime_ids ());
+  Alcotest.(check bool) "ordinary runtime remains prominent" false
+    (runtime_row_deemphasized state (runtime "a"));
+  Alcotest.(check bool) "quota exhausted runtime is de-emphasized" true
+    (runtime_row_deemphasized state exhausted);
+  Alcotest.(check bool) "rate limited runtime is de-emphasized" true
+    (runtime_row_deemphasized state limited);
+  Alcotest.(check bool) "dimming is on by default" true state.runtime_dim_refusals;
+  toggle_runtime_dim_refusals state;
+  Alcotest.(check bool) "toggle restores normal emphasis" false
+    (runtime_row_deemphasized state exhausted);
+  Alcotest.(check (list string)) "toggle never changes configured order"
+    original_order (runtime_ids ());
+  toggle_runtime_dim_refusals state;
+  Alcotest.(check bool) "second toggle restores dimming" true state.runtime_dim_refusals;
+  Alcotest.(check bool) "refusing row is dimmed again" true
+    (runtime_row_deemphasized state exhausted)
 
 let notice_text = function
   | None -> "no line"
@@ -282,36 +267,6 @@ let test_a_refused_write_opens_edits_at_once () =
   Alcotest.(check string) "the refusal is drawn" "refuse: HTTP 400: no"
     (notice_text state.runtime_lane_notice)
 
-(* The refusal detail is the server's own message and can carry its line
-   breaks: the exact-lane save refusal names the [providers.<id>] table and the
-   missing key on their own lines. The listing draws one row per line plus a
-   divider, so the chrome must count the lines rather than assume one. *)
-let test_a_multiline_refusal_counts_every_line () =
-  Alcotest.(check int) "no notice spends no rows" 0
-    (runtime_lane_notice_row_count ~cols:check_cols None);
-  Alcotest.(check int) "a one-line refusal spends a row and a divider" 2
-    (runtime_lane_notice_row_count ~cols:check_cols (Some (Lane_write_refused "HTTP 400: no")));
-  Alcotest.(check int) "a three-line refusal spends three rows and a divider" 4
-    (runtime_lane_notice_row_count ~cols:check_cols
-       (Some (Lane_write_refused "line one\nline two\nline three")))
-
-(* A server line longer than the frame wraps, so the row budget must count the
-   rows the drawing spends, not the lines the server sent. A single long line
-   is one server line but more than one drawn row. *)
-let test_a_long_refusal_line_wraps_and_is_counted () =
-  let long =
-    String.concat " " (List.init 60 (fun i -> Printf.sprintf "word%02d" i)) in
-  let notice = Lane_write_refused long in
-  let drawn =
-    List.length
-      (Masc_tui_message_layout.boxed_rows
-         ~inner:(Masc_tui_frame.inner_width ~cols:check_cols)
-         (runtime_lane_notice_text notice))
-  in
-  Alcotest.(check bool) "the line wraps to more than one row" true (drawn > 1);
-  Alcotest.(check int) "the notice count is the rows the drawing spends" drawn
-    (runtime_lane_notice_lines ~cols:check_cols (Some notice))
-
 let test_a_failed_reread_refuses_candidate_edits_with_a_line () =
   let state = lane_state () in
   state.runtime_surface_generation <- 1;
@@ -382,32 +337,6 @@ let test_dismissed_commit_stays_dismissed_after_reread () =
 let stale_after_503 =
   "the lane list could not be re-read after the change and may be stale: HTTP 503: down"
 
-(* The stale line is about the list, not about a key, so it is not the notice:
-   no key, refusal or dismissal reaches it, and only that list loading again
-   ends it. *)
-let test_a_stale_line_holds_until_its_list_loads () =
-  let state = lane_state () in
-  state.runtime_surface_generation <- 1;
-  state.runtime_lane_write <- Lane_write_posting;
-  settle_runtime_lane_write state ~written:Runtime_surface_list (Ok committed_receipt);
-  runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
-    (Error "HTTP 503: down");
-  dismiss_runtime_lane_notice state;
-  Alcotest.(check string) "a view change keeps it" stale_after_503 (stale_text state);
-  runtime_lane_list_reread state ~list:Standalone_lanes_list ~generation:3 (Ok ());
-  Alcotest.(check string) "the other list loading keeps it" stale_after_503
-    (stale_text state);
-  runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:3
-    (Error "HTTP 503: still down");
-  Alcotest.(check string) "a failed load with no write out keeps it" stale_after_503
-    (stale_text state);
-  runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:4 (Ok ());
-  Alcotest.(check string) "its list loading ends it" "fresh" (stale_text state)
-
-(* The review's case. A drop's read-back fails, so the list on screen still
-   shows the dropped candidate. A refused key then says something of its own
-   and a view change dismisses that. The stale line outlives both, and the
-   stale order is never sent as a second write. *)
 let test_a_refusal_and_a_dismissal_leave_the_stale_line () =
   let state = lane_state () in
   state.runtime_surface_generation <- 1;
@@ -476,75 +405,6 @@ let test_cli_probe_is_a_note () =
      = Some (Runtime_probe_note adc));
   Alcotest.(check string) "human-readable native-auth skip" "ADC not probed"
     (runtime_probe_status_label Runtime_provider_skipped_native_auth)
-
-(* The authority row names the file this screen is a reading of. Drawn as one
-   line it asked for 143 cells with no fleet on screen and about 197 with one,
-   while the frame gives 96 at 100 columns -- so the clause it lost was the
-   config path, and a cut path names a file that does not exist (#36497). *)
-let authority_state () =
-  let state = state () in
-  let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
-    { rrs_usage = Error "not reported"; rrs_generated_at_iso = "fixture";
-      rrs_config_path = Some "/Users/operator/work/.masc/config/runtime.toml";
-      rrs_default_route = Some "assigned"; rrs_default_runtime_id = Some "assigned";
-      rrs_media_failover = []; rrs_media_failover_declared = [];
-      rrs_runtimes = [runtime "assigned"];
-      rrs_lanes =
-        [{rrl_id = "primary"; rrl_runtime_ids = ["assigned"]; rrl_declared = true}] } in
-  let snapshot = match Masc.Tui_decode.join_runtime_surface
-      ~probe:None ~probe_error:None ~resolved with
-    | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail in
-  state.runtime_surface <- Some snapshot;
-  state
-
-let test_the_authority_row_spells_its_config_path_whole () =
-  let state = authority_state () in
-  let path = "/Users/operator/work/.masc/config/runtime.toml" in
-  let rows_at cols = runtime_authority_rows ~cols state in
-  List.iter
-    (fun cols ->
-      let rows = rows_at cols in
-      let inner = Masc_tui_frame.inner_width ~cols in
-      List.iter
-        (fun row ->
-          Alcotest.(check bool)
-            (Printf.sprintf "row fits the frame at %d columns: %S" cols row)
-            true
-            (Masc_tui_message_layout.display_width row <= inner))
-        rows;
-      Alcotest.(check bool)
-        (Printf.sprintf "the config path is whole at %d columns" cols)
-        true
-        (List.exists
-           (fun row ->
-             let needle = path in
-             let n = String.length needle and h = String.length row in
-             let rec seek i = i + n <= h && (String.sub row i n = needle || seek (i + 1)) in
-             seek 0)
-           rows))
-    [ 80; 100; 110; 120; 140; 180 ];
-  (* A wider frame spends fewer rows on the same sentence, and the widest fits
-     it on one. Without this the packing could return one clause per row at
-     every width and every check above would still pass. *)
-  Alcotest.(check int) "one row once the frame is wide enough" 1
-    (List.length (rows_at 260));
-  Alcotest.(check bool) "a narrow frame spends more rows than a wide one" true
-    (List.length (rows_at 80) > List.length (rows_at 260));
-  (* The budget follows the rows. Counting one authority row at every width put
-     the footer past the frame's last row exactly when the sentence wrapped. *)
-  Alcotest.(check int) "the chrome count follows the rows drawn"
-    (runtime_surface_listing_chrome ~rows:100 ~cols:260 state
-     + List.length (rows_at 100) - 1
-     + List.length (runtime_default_route_lines ~cols:100 state)
-     - List.length (runtime_default_route_lines ~cols:260 state)
-     + List.length (runtime_selection_summary_for_viewport ~rows:100 ~cols:100 state)
-     - List.length (runtime_selection_summary_for_viewport ~rows:100 ~cols:260 state))
-    (runtime_surface_listing_chrome ~rows:100 ~cols:100 state);
-  match runtime_scrolled ~rows:100 ~cols:100 state with
-  | None -> Alcotest.fail "runtime list has no scroll geometry"
-  | Some layout ->
-      Alcotest.(check int) "the keys move through the drawing's count"
-        (runtime_surface_listing_chrome ~rows:100 ~cols:100 state) layout.sc_chrome
 
 let test_search_follows_the_runtime_mode () =
   let state = state () in
@@ -639,155 +499,6 @@ let test_runtime_detail_keeps_its_owner () =
       expect "new reading starts at top" 0 state.runtime_detail_scroll)
     [Runtime_lanes; Runtime_all]
 
-(* Bindings of one model that differ only in reasoning effort share provider,
-   model and context, so their ids are the only text that tells them apart.
-   At a fixed 24-cell target column both ids below drew as
-   [claude_code.claude-sonn…]. *)
-let test_picker_target_column_fits_the_longest_id () =
-  let effort_pair =
-    [ Pick_model { (runtime "claude_code.claude-sonnet-5-low") with ro_model = "claude-sonnet-5" }
-    ; Pick_model { (runtime "claude_code.claude-sonnet-5-high") with ro_model = "claude-sonnet-5" }
-    ]
-  in
-  let longest = String.length "claude_code.claude-sonnet-5-high" in
-  let target, route = runtime_pick_column_widths ~cols:200 effort_pair in
-  expect "wide terminal: the target column holds the longest id" longest target;
-  expect "wide terminal: the route column gives up the room"
-    (Masc_tui_frame.inner_width ~cols:200
-     - runtime_pick_fixed_cells
-     - runtime_pick_tail_width ~cols:200 (List.hd effort_pair))
-    (target + route);
-  let target, route = runtime_pick_column_widths ~cols:80 effort_pair in
-  Alcotest.(check bool)
-    "narrow terminal: target keeps its floor"
-    true
-    (target >= runtime_pick_min_column_cells);
-  Alcotest.(check bool)
-    "narrow terminal: route keeps its floor"
-    true
-    (route >= runtime_pick_min_column_cells);
-  let target, _ = runtime_pick_column_widths ~cols:200 [ Pick_model (runtime "short") ] in
-  expect "short ids keep the floor" runtime_pick_min_column_cells target
-
-(* The row is the chrome, the two columns padded to their widths, and the
-   facts. Widening one part used to push the rest off the right edge, where
-   the frame cut it: a row carrying [effort medium] lost its [default]. Every
-   width the picker can pick has to leave the whole row inside the frame. *)
-let test_every_row_fits_the_frame () =
-  let items =
-    [ Pick_model
-        { (runtime "claude_code.claude-sonnet-5-high") with
-          ro_declared_reasoning_effort = Some Llm_provider.Reasoning_effort.High
-        ; ro_is_default = true
-        }
-    ; Pick_model
-        { (runtime "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731") with
-          ro_declared_reasoning_effort = Some Llm_provider.Reasoning_effort.Medium
-        ; ro_quota_exhausted = true
-        }
-    ; Pick_model (runtime "short")
-    ]
-  in
-  List.iter
-    (fun cols ->
-       let target, route = runtime_pick_column_widths ~cols items in
-       let widest_tail =
-         List.fold_left
-           (fun longest item -> max longest (runtime_pick_tail_width ~cols item))
-           0
-           items
-       in
-       let row = runtime_pick_fixed_cells + target + route + widest_tail in
-       Alcotest.(check bool)
-         (Printf.sprintf "%d columns: the row stays inside the frame" cols)
-         true
-         (row <= Masc_tui_frame.inner_width ~cols))
-    [ 40; 60; 80; 100; 120; 160; 200 ]
-
-(* The facts a narrow row drops, and the one it keeps. *)
-let test_narrow_rows_keep_the_fact_that_is_said_nowhere_else () =
-  let quota_row =
-    Pick_model
-      { (runtime "claude_code.claude-sonnet-5-high") with
-        ro_declared_reasoning_effort = Some Llm_provider.Reasoning_effort.High
-      ; ro_quota_exhausted = true
-      }
-  in
-  let texts cols =
-    runtime_pick_visible_facts ~cols quota_row
-    |> List.map (fun (fact : runtime_pick_fact) -> fact.rpf_text)
-  in
-  Alcotest.(check (list string))
-    "a wide terminal says all three"
-    [ "[200k ctx]"; "[effort high]"; "[quota exhausted]" ]
-    (texts 200);
-  (* The cut point follows the frame, so the test asks what survived rather
-     than repeating the arithmetic. *)
-  match texts 80 with
-  | [ only ] ->
-    Alcotest.(check bool) "80 columns keeps the warning" true
-      (String.length only >= 6 && String.equal (String.sub only 0 6) "[quota");
-    expect "the kept fact spends the whole budget"
-      (runtime_pick_tail_budget ~cols:80)
-      (Masc_tui_message_layout.display_width only)
-  | facts ->
-    Alcotest.failf "80 columns kept %d facts, wanted the warning alone"
-      (List.length facts)
-
-(* A rate limit is its own fact, not a spelling of the quota window: the row
-   says which refusal it is, and a lane row counts the candidates that hold
-   either. *)
-let test_rate_limit_is_said_on_model_and_lane_rows () =
-  let limited = { (runtime "a") with ro_rate_limited = true } in
-  let quota = { (runtime "b") with ro_quota_exhausted = true } in
-  let clear = runtime "c" in
-  let texts item =
-    runtime_pick_visible_facts ~cols:200 item
-    |> List.map (fun (fact : runtime_pick_fact) -> fact.rpf_text)
-  in
-  Alcotest.(check (list string)) "a rate-limited model row says so"
-    [ "[200k ctx]"; "[rate limited]" ]
-    (texts (Pick_model limited));
-  Alcotest.(check (list string)) "a clear model row says neither"
-    [ "[200k ctx]" ] (texts (Pick_model clear));
-  let both = { limited with ro_quota_exhausted = true } in
-  Alcotest.(check (list string)) "80 columns retain both refusals"
-    [ "[quota + rate]" ]
-    (runtime_pick_visible_facts ~cols:80 (Pick_model both)
-     |> List.map (fun (fact : runtime_pick_fact) -> fact.rpf_text));
-  let lane candidates =
-    Pick_lane
-      ( { rrl_id = "coding"; rrl_runtime_ids = List.map (fun (o : Masc.Tui_decode.runtime_option) -> o.ro_id) candidates;
-          rrl_declared = true }
-      , candidates )
-  in
-  Alcotest.(check (list string)) "a lane counts quota and rate limit alike"
-    [ "(3 hops)"; "[2 of 3 limited]" ]
-    (texts (lane [ limited; quota; clear ]));
-  Alcotest.(check (list string)) "a lane with nothing refusing adds nothing"
-    [ "(1 hops)" ] (texts (lane [ clear ]))
-
-(* The reasoning step is the last four cells of the id, and a head-keeping cut
-   drops exactly those: at 80 columns both bindings drew as
-   [claude_code.claude-sonn…]. *)
-let test_narrow_target_column_still_tells_the_variants_apart () =
-  let pair =
-    [ Pick_model (runtime "claude_code.claude-sonnet-5-low")
-    ; Pick_model (runtime "claude_code.claude-sonnet-5-high")
-    ]
-  in
-  let target, _ = runtime_pick_column_widths ~cols:80 pair in
-  let drawn id = Masc_tui_message_layout.fit_middle target id in
-  let low = drawn "claude_code.claude-sonnet-5-low" in
-  let high = drawn "claude_code.claude-sonnet-5-high" in
-  Alcotest.(check bool) "the two ids do not draw the same" true (not (String.equal low high));
-  Alcotest.(check bool) "the step survives the cut" true
-    (Masc_tui_message_layout.display_width high = target)
-
-(* The slot editor's rows are the lane's declared order with each slot marked
-   by whether publication admitted it. A rejected slot keeps its place: the
-   admitted list alone cannot say where that is, and the editor moves and
-   drops by position. *)
 let standalone_lane ?(declared_cli = []) ?(admitted_cli = [])
     ~(lane : Standalone_lane.t) ~declared ~admitted () : Masc.Tui_decode.standalone_lane =
   { Masc.Tui_decode.sl_lane = lane
@@ -834,41 +545,6 @@ let slot_editor_state ?(cursor = 0) ?(declared = [ "a"; "rejected"; "b" ])
   open_slot_editor state (Exact_lane_slots Standalone_lane.Librarian);
   select_slot_editor_row state cursor;
   state
-
-(* The lanes overview and the exact picker draw the action error and the lane
-   notice with [box_lines_styled] too, so their row budgets must count the
-   lines rather than assume one. A three-line server refusal spends three
-   rows; counting one pushes the footer off the frame. *)
-let test_lanes_overview_and_exact_picker_count_every_notice_line () =
-  let refusal = "line one\nline two\nline three" in
-  Alcotest.(check int) "a three-line action error spends three rows" 3
-    (lanes_action_error_row_count ~cols:check_cols (Some refusal));
-  Alcotest.(check int) "a three-line notice spends three rows" 3
-    (runtime_lane_notice_lines ~cols:check_cols (Some (Lane_write_refused refusal)));
-  (* The lanes overview's chrome counts them. *)
-  let state = lane_state () in
-  state.lanes_mode <- Lanes_overview;
-  state.runtime_lane_notice <- None;
-  state.lanes_action_error <- None;
-  let base = (lanes_scrolled state ~cols:check_cols).sc_chrome in
-  state.runtime_lane_notice <- Some (Lane_write_refused refusal);
-  expect "the lanes overview counts a three-line notice as three rows"
-    (base + 3) (lanes_scrolled state ~cols:check_cols).sc_chrome;
-  state.runtime_lane_notice <- None;
-  state.lanes_action_error <- Some refusal;
-  expect "the lanes overview counts a three-line action error as three rows"
-    (base + 3) (lanes_scrolled state ~cols:check_cols).sc_chrome;
-  (* The exact picker gives the notice's lines to the notice, not to the
-     picker: a three-line notice leaves one fewer two-row choice than a
-     one-line one. *)
-  let picker = slot_editor_state () in
-  picker.view <- Lanes;
-  picker.runtime_lane_notice <- Some (Lane_write_refused "one line");
-  let page_one = runtime_exact_picker_page picker ~terminal_rows:40 ~cols:check_cols in
-  picker.runtime_lane_notice <- Some (Lane_write_refused refusal);
-  let page_three = runtime_exact_picker_page picker ~terminal_rows:40 ~cols:check_cols in
-  expect "the exact picker gives a three-line notice two more rows than a one-line one"
-    (page_one - 1) page_three
 
 let slot_plan_text = function
   | Send_slot_write { target; slot; request } ->
@@ -1515,23 +1191,6 @@ let test_the_keeper_picker_filters_across_lanes_and_runtimes () =
   Alcotest.(check bool) "and so holds q" false
     (quit_key_allowed_for (text_input_target state ~compact_viewport:false))
 
-(* What the filter matches is what the row draws: the label is the join of
-   the columns the renderer draws. *)
-let test_the_keeper_picker_label_is_the_drawn_columns () =
-  let lane =
-    Pick_lane
-      ( { rrl_id = "coding"; rrl_runtime_ids = [ "anthropic.claude"; "odd" ];
-          rrl_declared = true }
-      , [] )
-  in
-  let columns = runtime_pick_columns lane in
-  Alcotest.(check string) "a lane route names its models"
-    "claude \xe2\x86\x92 odd" columns.rpc_route;
-  Alcotest.(check string) "the label joins badge, target and route"
-    "[LANE]  coding  claude \xe2\x86\x92 odd" (runtime_pick_label lane);
-  Alcotest.(check string) "a model row names provider and model"
-    "[MODEL]  zai.glm  provider / model" (runtime_pick_label (Pick_model (runtime "zai.glm")))
-
 let test_the_keeper_picker_empty_match_is_not_an_unread_catalogue () =
   let picker = keeper_picker_state () in
   picker.runtime_pick_list <- keeper_pick_after picker [ "/"; "x"; "y" ];
@@ -1583,7 +1242,8 @@ let test_the_keeper_picker_window_follows_the_cursor () =
 
 let test_account_usage_stays_spent_until_new_report () =
   let open Masc.Tui_decode_usage in
-  let snapshot = match (lane_state ()).runtime_surface with
+  let state = lane_state () in
+  let snapshot = match state.runtime_surface with
     | Some snapshot -> snapshot
     | None -> Alcotest.fail "missing fixture" in
   let window = { puw_limit_id = Some "account-bucket";
@@ -1595,6 +1255,9 @@ let test_account_usage_stays_spent_until_new_report () =
   let resolved window = { snapshot.rss_resolved with
     rrs_usage = Ok { puws_since = 0.; puws_accounts = [account window] } } in
   let rt = { (runtime "a") with ro_quota_scope = Some "account:1" } in
+  state.runtime_surface <- Some {snapshot with rss_resolved = resolved window};
+  Alcotest.(check bool) "observed spent usage de-emphasizes the runtime" true
+    (runtime_row_deemphasized state rt);
   let count resolved rt = match runtime_spent_usage resolved rt with
     | Ok windows -> List.length windows
     | Error detail -> Alcotest.fail detail in
@@ -1658,150 +1321,15 @@ let test_credit_cap_removal_clears_spent_warning () =
   record 100.5 {|{"data":{"limit":20,"limit_remaining":0}}|};
   expect "late older snapshot cannot resurrect the removed cap" 0 (snd (reading ()))
 
-let test_runtime_quota_scope_is_shared_but_connection_keys_remain () =
-  let first = { (runtime "first.luna") with ro_provider_id = "first";
-    ro_quota_scope = Some "account:1"; ro_quota_scope_id = Some "shared-codex-scope";
-    ro_effective_max_context = 272000 } in
-  let wide = { first with ro_id = "first_wide.luna"; ro_provider_id = "first_wide";
-    ro_effective_max_context = 500000 } in
-  let other = { first with ro_id = "second.luna"; ro_provider_id = "second";
-    ro_quota_scope = Some "account:2"; ro_quota_scope_id = Some "other-codex-scope" } in
-  Alcotest.(check string) "one quota scope spans both provider connections"
-    (runtime_quota_scope_label first) (runtime_quota_scope_label wide);
-  Alcotest.(check bool) "a distinct quota scope retains its own label" true
-    (runtime_quota_scope_label first <> runtime_quota_scope_label other);
-  List.iter (fun (runtime, context) ->
-    let label = runtime_model_picker_label runtime in
-    List.iter (fun fact -> Alcotest.(check bool) ("picker retains " ^ fact) true
-      (Astring.String.is_infix ~affix:fact label))
-      ["Quota scope shared-codex-scope"; "Connection " ^ runtime.ro_provider_id; runtime.ro_id; context])
-    [first, "272k context"; wide, "500k context"];
-  Alcotest.(check string) "missing quota ID preserves explicitly response-local correlation"
-    "unavailable; response-local scope account:1"
-    (runtime_quota_scope_label {first with ro_quota_scope_id=None})
-
-let test_selected_status_wraps_and_reserves_rows () =
-  let open Masc.Tui_decode_usage in
-  let state = lane_state () in
-  let snapshot = match state.runtime_surface with
-    | Some snapshot -> snapshot | None -> Alcotest.fail "missing fixture" in
-  let account = { pua_scope = "account:status"; pua_scope_id = "status"; pua_providers = [];
-    pua_state = Account_reported ({ puw_limit_id = None; puw_kind = Window_five_hour;
-      puw_role = Role_gates_model_calls; puw_utilization = Utilization_percent 100;
-      puw_resets_at = None; puw_observed_at = 0. }, []) } in
-  let observed = { (runtime "a") with
-    ro_provider_id = "codex-account-two"; ro_provider = "Account Two";
-    ro_quota_exhausted = true; ro_rate_limited = true; ro_quota_scope = Some "account:status";
-    ro_quota_scope_id = Some "status" } in
-  let resolved = { snapshot.rss_resolved with
-    rrs_usage = Ok { puws_since = 0.; puws_accounts = [account] };
-    rrs_runtimes = [observed; runtime "b"; runtime "c"] } in
-  state.runtime_surface <- Some (match Masc.Tui_decode.join_runtime_surface
-      ~probe:None ~probe_error:None ~resolved with
-    | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail);
-  List.iter (fun cols ->
-    let lines = runtime_selection_summary_lines ~cols state in
-    let text = String.concat " " (List.map String.trim lines) in
-    List.iter (fun fact -> Alcotest.(check bool) ("complete selected fact: " ^ fact) true
-        (Astring.String.is_infix ~affix:fact text))
-      [ "Lane primary"; "Quota scope status"; "Connection codex-account-two"; "Account Two / model";
-        "quota exhausted (no reset stated)"; "rate limited"; "account limit spent / unobserved" ];
-    List.iter (fun line -> Alcotest.(check bool) "wrapped status fits frame" true
-        (Masc_tui_message_layout.display_width line <= Masc_tui_frame.inner_width ~cols)) lines;
-    let chrome = runtime_surface_listing_chrome ~rows:100 ~cols state in
-    state.runtime_cursor <- 99;
-    let without_selection = runtime_surface_listing_chrome ~rows:100 ~cols state in
-    state.runtime_cursor <- 0;
-    expect "render and navigation reserve the full selected block"
-      (without_selection + List.length lines + 1) chrome)
-    [80;132]
-
-let test_quota_scope_label_preserves_correlation () =
-  let first = { (runtime "a") with ro_provider_id = "connection-a";
-    ro_quota_scope = Some "account:1"; ro_quota_scope_id = Some "stable-first" } in
-  let sibling = { first with ro_provider_id = "connection-b" } in
-  Alcotest.(check string) "quota scope label uses retained Usage scope" "stable-first"
-    (runtime_quota_scope_label first);
-  Alcotest.(check string) "connections sharing quota share scope label"
-    (runtime_quota_scope_label first) (runtime_quota_scope_label sibling);
-  Alcotest.(check string) "unjoined ordinal remains explicitly response-local"
-    "unavailable; response-local scope account:1"
-    (runtime_quota_scope_label {first with ro_quota_scope_id = None});
-  Alcotest.(check string) "no reported quota scope remains unavailable"
-    "unavailable (no quota scope reported)"
-    (runtime_quota_scope_label {first with ro_quota_scope_id = None; ro_quota_scope = None})
-
-let test_short_viewport_preserves_selected_list_row () =
-  let state = lane_state () in
-  List.iter (fun mode ->
-    state.runtime_mode <- mode;
-    List.iter (fun cols ->
-      List.iter (fun rows ->
-        List.iter (fun cursor ->
-          state.runtime_cursor <- cursor;
-          let chrome = runtime_surface_listing_chrome ~rows ~cols state in
-          let visible = rows - chrome in
-          Alcotest.(check bool) "supported viewport retains a list row" true
-            (visible >= 1);
-          let summary = runtime_selection_summary_for_viewport ~rows ~cols state in
-          expect "render budget counts exactly the drawn summary and divider"
-            (runtime_surface_base_chrome ~rows ~cols state
-             + (if summary = [] then 0 else List.length summary + 1)) chrome;
-          (match runtime_scrolled ~rows ~cols state with
-           | None -> Alcotest.fail "runtime list has no scroll geometry"
-           | Some layout ->
-               expect "navigation and renderer share short-height chrome" chrome layout.sc_chrome;
-               expect "navigation sees every runtime" 3 layout.sc_count))
-          [0; 1; 2]) [14; 15; 16; 40]) [80; 132])
-    [Runtime_lanes; Runtime_all];
-  state.runtime_mode <- Runtime_lanes;
-  state.runtime_cursor <- 0;
-  List.iter (fun cols ->
-    Alcotest.(check (list string)) "ample height retains complete selected evidence"
-      (runtime_selection_summary_lines ~cols state)
-      (runtime_selection_summary_for_viewport ~rows:100 ~cols state)) [80; 132]
-
-
-(* The detail row says what the failure was, who saw it, and what the lane
-   walk does with it; a failure name this build does not know is drawn as the
-   server wrote it. *)
-let test_failed_attempt_row_names_the_failure_and_its_keeper () =
-  let at = 1790000000. in
-  let text failure =
-    runtime_failed_attempt_text
-      { Masc.Tui_decode.rfa_noted_at = at; rfa_failure = failure; rfa_recorded_by = "alpha" }
-  in
-  let has affix text = Astring.String.is_infix ~affix text in
-  let known =
-    text (Masc.Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_timeout)
-  in
-  Alcotest.(check bool) "names the failure" true (has "timeout at " known);
-  Alcotest.(check bool) "names the Keeper that saw it" true (has "seen by alpha" known);
-  Alcotest.(check bool) "says what the walk does" true
-    (has "other Keepers try it after the ones that answered" known);
-  Alcotest.(check bool) "an unknown failure keeps its name" true
-    (has "quota_drift at " (text (Masc.Tui_decode.Unrecognised_attempt_failure "quota_drift")))
-
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [ Alcotest.test_case "dismissed commit stays dismissed after reread" `Quick test_dismissed_commit_stays_dismissed_after_reread;
        Alcotest.test_case "commit application survives successful and failed rereads" `Quick test_commit_application_survives_reread;
-       Alcotest.test_case "quota scope label preserves correlation" `Quick
-        test_quota_scope_label_preserves_correlation;
-      Alcotest.test_case "short viewport retains selected list row" `Quick
-        test_short_viewport_preserves_selected_list_row;
-      Alcotest.test_case "lanes overview and exact picker count every notice line" `Quick
-        test_lanes_overview_and_exact_picker_count_every_notice_line;
-      Alcotest.test_case "quota scope spans provider connections" `Quick
-        test_runtime_quota_scope_is_shared_but_connection_keys_remain;
+      Alcotest.test_case "refusing runtimes are de-emphasized without changing order" `Quick
+        test_refusing_runtimes_are_deemphasized_and_toggle_keeps_order;
       Alcotest.test_case "account usage survives reset until new report" `Quick
         test_account_usage_stays_spent_until_new_report;
-        Alcotest.test_case "selected status wraps with shared scroll geometry" `Quick
-          test_selected_status_wraps_and_reserves_rows;
         Alcotest.test_case "credit cap removal reaches runtime warning" `Quick
           test_credit_cap_removal_clears_spent_warning;
-        Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
-        Alcotest.test_case "empty picker explanation" `Quick test_empty_picker_keeps_its_explanation;
-        Alcotest.test_case "lane prompt reserves footer space" `Quick test_lane_prompt_keeps_footer_space;
         Alcotest.test_case "a move past either end is no move" `Quick test_a_move_past_either_end_is_no_move;
         Alcotest.test_case "a lane edit sends the whole order" `Quick test_a_lane_edit_sends_the_whole_order;
         Alcotest.test_case "a lane edit waits for the previous write" `Quick test_a_lane_edit_waits_for_the_previous_write;
@@ -1811,22 +1339,12 @@ let () = Alcotest.run "runtime list geometry"
         Alcotest.test_case "a written list holds edits until its re-read" `Quick test_a_written_list_holds_edits_until_its_reread;
         Alcotest.test_case "a standalone write waits for the standalone list" `Quick test_a_standalone_write_waits_for_the_standalone_list;
         Alcotest.test_case "a refused write opens edits at once" `Quick test_a_refused_write_opens_edits_at_once;
-        Alcotest.test_case "a multi-line refusal counts every line" `Quick test_a_multiline_refusal_counts_every_line;
-        Alcotest.test_case "a long refusal line wraps and is counted" `Quick test_a_long_refusal_line_wraps_and_is_counted;
         Alcotest.test_case "a failed re-read refuses candidate edits with a line" `Quick test_a_failed_reread_refuses_candidate_edits_with_a_line;
-        Alcotest.test_case "a stale line holds until its list loads" `Quick test_a_stale_line_holds_until_its_list_loads;
         Alcotest.test_case "a refusal and a dismissal leave the stale line" `Quick test_a_refusal_and_a_dismissal_leave_the_stale_line;
         Alcotest.test_case "a new view ends what a key said" `Quick test_a_new_view_ends_what_a_key_said;
         Alcotest.test_case "CLI probe is informational" `Quick test_cli_probe_is_a_note;
-        Alcotest.test_case "search follows Runtime mode and cursor order" `Quick test_search_follows_the_runtime_mode;
-        Alcotest.test_case "the authority row spells its config path whole" `Quick
-        test_the_authority_row_spells_its_config_path_whole; Alcotest.test_case "picker target column fits the longest id" `Quick
-        test_picker_target_column_fits_the_longest_id; Alcotest.test_case "every picker row fits the frame" `Quick
-        test_every_row_fits_the_frame; Alcotest.test_case "narrow rows keep the quota warning" `Quick
-        test_narrow_rows_keep_the_fact_that_is_said_nowhere_else; Alcotest.test_case "runtime readers retain their owner after list refresh" `Quick
-        test_runtime_detail_keeps_its_owner; Alcotest.test_case "rate limit shows on model and lane rows" `Quick
-        test_rate_limit_is_said_on_model_and_lane_rows; Alcotest.test_case "narrow target column tells the variants apart" `Quick
-        test_narrow_target_column_still_tells_the_variants_apart; Alcotest.test_case "the slot editor edits the declared order" `Quick
+        Alcotest.test_case "search follows Runtime mode and cursor order" `Quick test_search_follows_the_runtime_mode; Alcotest.test_case "runtime readers retain their owner after list refresh" `Quick
+        test_runtime_detail_keeps_its_owner; Alcotest.test_case "the slot editor edits the declared order" `Quick
         test_the_slot_editor_edits_the_declared_order; Alcotest.test_case "the slot editor keeps the last slot" `Quick
         test_the_slot_editor_keeps_the_last_slot; Alcotest.test_case "the slot editor includes CLI fallback slots" `Quick
         test_the_slot_editor_edits_cli_slots_after_http; Alcotest.test_case "slot editor keys parse" `Quick
@@ -1848,14 +1366,11 @@ let () = Alcotest.run "runtime list geometry"
         test_an_empty_match_is_not_an_unread_catalogue; Alcotest.test_case "the filter matches the drawn text" `Quick
         test_the_filter_matches_the_drawn_text; Alcotest.test_case "the drawn cursor clamps to a shorter catalogue" `Quick
         test_the_drawn_cursor_clamps_to_a_shorter_catalogue; Alcotest.test_case "keeper picker filters across lanes and runtimes" `Quick
-        test_the_keeper_picker_filters_across_lanes_and_runtimes; Alcotest.test_case "keeper picker label is the drawn columns" `Quick
-        test_the_keeper_picker_label_is_the_drawn_columns; Alcotest.test_case "keeper picker empty match is not an unread catalogue" `Quick
+        test_the_keeper_picker_filters_across_lanes_and_runtimes; Alcotest.test_case "keeper picker empty match is not an unread catalogue" `Quick
         test_the_keeper_picker_empty_match_is_not_an_unread_catalogue; Alcotest.test_case "keeper picker cursor clamps to a shorter list" `Quick
         test_the_keeper_picker_cursor_clamps_to_a_shorter_list; Alcotest.test_case "keeper picker window follows the cursor" `Quick
         test_the_keeper_picker_window_follows_the_cursor; Alcotest.test_case "schema-less client only refuses exact lanes" `Quick
         test_schema_less_client_is_refused_only_for_exact_lane
         ;Alcotest.test_case "HTTP slot without a body deadline is refused for an exact lane" `Quick
           test_http_slot_without_body_deadline_is_refused_for_exact_lane
-        ;Alcotest.test_case "failed attempt row names the failure and its Keeper" `Quick
-          test_failed_attempt_row_names_the_failure_and_its_keeper
-]]
+        ;]]

@@ -128,13 +128,10 @@ origin/main 기준이다. 설정 검증, 최종 전송 바이트 검사, 로그�
 - 결론: 안전장치는 유지할 가치가 있다. 먼저 오류 두 종류를 타입으로 나누고, 토큰 초과는 토큰 창으로 대응해야 한다.
 
 **4·5·6. 공식 클라이언트 경로**
-- `max-prompt-bytes` 는 공식 클라이언트에 넘길 때의 실제 전송 한도일 때만 판정 근거가 된다. Antigravity 는 typed overflow를 보내지 않는다. 2,078,915 바이트가 끝까지 간 실측만으로 상한을 없앤 뒤, 세 장기 Keeper가 매번 21.9~48.5MB를 fresh session에 실어 첫 턴 전에 실패했다(#37123, 2026-09-19). 따라서 이 레인은 성공이 확인된 전송 크기를 명시하고, 그 안에서 이력을 자른다. 선언이 없으면 추측하지 않고 admission에서 거절한다.
+- Antigravity 와 Muse Code 는 typed overflow 를 보내지 않는다. 두 레인은 이어 보낼 범위를 만든 그대로 시작 프롬프트에 싣고, 바이트 수로 자르거나 거절하지 않는다. 기준은 레인 모델의 창 하나이고, 그 창을 세고 대화를 압축하는 것은 클라이언트가 한다(운영자 결정, 2026-10-06).
 - **Codex (2026-09-25, #38822·#38882).** Codex 도 Claude Code·Antigravity 와 같은 이어 보낼 범위(carried range)만 보낸다. 새 스레드를 여는 Start 는 그 범위를 `thread/inject_items` 로 넣는다. 이어 하는 Resume 은 이력을 싣지 않는다(thread 가 쥔다). Resume 은 턴 맥락만 resume 프롬프트 앞에 싣고, 범위의 앞머리(carried front)를 보고하지 않는다. 그래서 선언이 없어도 이력 전체를 보내지 않는다. 범위는 지난 요청이 보낸 자리(씨앗)에서 시작하고, Librarian 이 더 뒤까지 읽었으면 그 자리에서, 둘 다 없으면 §13.4 의 턴 경계에서 시작한다. 턴 경계를 모르는 턴(세션 trace 가 없는 턴)은 가장 새 atom 하나에서 시작한다(`keeper_codex_runtime.ml` `carried_model_input_projection`). 첫 시도에는 범위 말고 바이트 상한을 두지 않는다. 이력은 `thread/inject_items` 로 따로 가고, `developerInstructions` 에는 시스템 프롬프트와 턴 맥락만 들어간다(#37353 후속 실측 53,190 바이트). 범위가 창을 넘으면 Codex 가 typed overflow 로 알리고, 보낸 범위에서부터 절반씩 줄여 다시 시도한다. 압축(auto compaction)은 Codex 가 자기 thread 안에서 한다.
-- 2026-09-20부터 Antigravity와 Claude Code의 fresh-session 이력은 먼저 §10.4의 검증된 씨앗 앞머리에서 시작한다. 각 레인의 선언 창이 더 깊게 자르면 그 뒤쪽 자리가 이기며, 씨앗이 없거나 현재 이력이 같은 atom을 열지 않으면 §13.4의 턴 경계(`Turn_start`)에서 시작해 레인 창을 적용한다. 턴 경계를 모르면(`Turn_boundary_unknown`) 가장 새 atom 하나에서 시작한다.
-- Antigravity 합성 순서는 durable 이력에서 씨앗 앞머리 승인 → Gate replay reference 추가 → 선언 바이트 창 적용 → durable 이력 좌표로 관측 기록이다. Gate reference는 실제 전송 한도에는 포함하지만 다음 checkpoint 이력의 앞머리 atom으로 기록하지 않는다.
-- 부당한 부분:
-  - 그 한도를 창 크기 결정에 쓴다.
-  - Claude Code 에는 HTTP 본문이 없는데 C 가 섞인다.
+- 2026-09-20부터 Antigravity와 Claude Code의 fresh-session 이력은 먼저 §10.4의 검증된 씨앗 앞머리에서 시작한다. Claude Code 에서 typed overflow 로 좁혀진 창이 더 깊게 자르면 그 뒤쪽 자리가 이기며, 씨앗이 없거나 현재 이력이 같은 atom을 열지 않으면 §13.4의 턴 경계(`Turn_start`)에서 시작한다. 턴 경계를 모르면(`Turn_boundary_unknown`) 가장 새 atom 하나에서 시작한다.
+- Antigravity 와 Muse Code 의 합성 순서는 durable 이력에서 씨앗 앞머리 승인 → Gate replay reference 추가 → durable 이력 좌표로 관측 기록이다. Gate reference는 실제로 전송되지만 다음 checkpoint 이력의 앞머리 atom으로 기록하지 않는다.
 
 **8. librarian 입력**
 - 1판의 "타깃 바이트 상한까지 채운다"는 틀렸다. 실제로는 메시지 수 상한에서 시작해 바이트로만 줄인다.

@@ -445,6 +445,78 @@ let test_completion_codec_is_current_only () =
   | Ok _ | Error _ -> Alcotest.fail "current terminal completion did not round-trip"
 ;;
 
+let test_wire_schema_cache_returns_same_value () =
+  let schema =
+    Types.tool_schema_of_params
+      ~name:"cached_calc"
+      ~description:"Calculate"
+      ~parameters:
+        [ { Types.name = "expr"
+          ; description = "Expression"
+          ; param_type = Types.String
+          ; required = true
+          }
+        ]
+      ()
+  in
+  let first = Tool.wire_json_of_schema schema in
+  let second = Tool.wire_json_of_schema schema in
+  check bool "same schema serializes identically" true (first = second);
+  check bool "second call is a cache hit" true (first == second)
+;;
+
+let test_wire_schema_cache_keyed_on_identity_not_name () =
+  (* Two physically distinct schemas that share a name must not collide in
+     the cache; each serializes its own body. *)
+  let named description =
+    Types.tool_schema_of_params
+      ~name:"cache_boundary"
+      ~description
+      ~parameters:
+        [ { Types.name = "input"
+          ; description = "Input"
+          ; param_type = Types.String
+          ; required = true
+          }
+        ]
+      ()
+  in
+  let first_schema = named "first body" in
+  let second_schema = named "second body" in
+  check bool "schemas are physically distinct" true (first_schema != second_schema);
+  let first = Tool.wire_json_of_schema first_schema in
+  let second = Tool.wire_json_of_schema second_schema in
+  check bool "distinct schemas do not share a cache entry" true (first != second);
+  let open Yojson.Safe.Util in
+  check
+    string
+    "first body survives its own lookup"
+    "first body"
+    (first |> member "description" |> to_string);
+  check
+    string
+    "second body survives its own lookup"
+    "second body"
+    (second |> member "description" |> to_string)
+;;
+
+let test_wire_schema_cache_shared_with_tool_schema_to_json () =
+  let schema =
+    Types.tool_schema_of_params ~name:"shared_cache" ~description:"" ~parameters:[] ()
+  in
+  let tool = Tool.of_schema schema (fun _execution_env _input ->
+    Ok { Types.content = ""; content_blocks = None; _meta = None })
+  in
+  let via_schema = Tool.wire_json_of_schema schema in
+  let via_tool = Tool.schema_to_json tool in
+  check bool "tool and schema entry points share the memo" true (via_schema == via_tool);
+  check
+    int
+    "byte measurement sees the same cached tree"
+    (String.length (Yojson.Safe.to_string via_schema))
+    (Tool.wire_bytes_of_schema schema)
+;;
+
 let () =
   run
     "Tool"
@@ -498,6 +570,20 @@ let () =
             "completion codec is current-only"
             `Quick
             test_completion_codec_is_current_only
+        ] )
+    ; ( "wire_schema_cache"
+      , [ test_case
+            "same schema returns the same value"
+            `Quick
+            test_wire_schema_cache_returns_same_value
+        ; test_case
+            "cache is keyed on schema identity, not name"
+            `Quick
+            test_wire_schema_cache_keyed_on_identity_not_name
+        ; test_case
+            "tool and schema entry points share the memo"
+            `Quick
+            test_wire_schema_cache_shared_with_tool_schema_to_json
         ] )
     ; ( "with_defaults"
       , [ test_case "injects missing args" `Quick (fun () ->

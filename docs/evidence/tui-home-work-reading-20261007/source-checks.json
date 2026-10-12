@@ -1,0 +1,20 @@
+{
+  "scope": "Parser checks rerun on 2026-10-10 against this commit's files for the recorded source hashes only; a file whose current hash differs from its entry is not covered. Syntax only: native regressions and geometry were not rerun.",
+  "checks": {
+    "bin/masc_tui_render.ml": {
+      "sha256": "28b47c74d48560c7950470e92c8d1c9beec2ee3d261fdd0ec04a3b1bbfb1d31a",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    },
+    "bin/masc_tui_home.ml": {
+      "sha256": "dd1195d8468dc3a4a80d3908feb545cb5b07e79fd8519aeb2d4cdd5e18f8389d",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    },
+    "bin/masc_tui_home.mli": {
+      "sha256": "559ae491cf3ca38add80755e3e6fd6131f5c789ac98037fcec32ff0420281724",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    }
+  }
+}

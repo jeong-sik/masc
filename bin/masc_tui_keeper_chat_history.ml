@@ -112,9 +112,11 @@ type row =
   ; turn_sequence : int option
   ; turn_id : string option
   ; operation_id : string option
+  ; execution_source : Masc_tui_keeper_chat_log.journal_source option
   ; kind : kind
   ; text : string
   ; attachments : attachment_note list
+  ; media : Masc_tui_chat_media.t list
   }
 
 type decoded =
@@ -122,8 +124,19 @@ type decoded =
   ; dropped : int
   }
 
+(* The first value under [key], like [List.assoc_opt] but comparing the keys
+   as strings: this runs for every field of every row of a history page, and
+   the polymorphic comparison it replaces was the largest single cost of
+   decoding one. *)
+let assoc_opt (key : string) (fields : (string * 'a) list) =
+  let rec find = function
+    | [] -> None
+    | (name, value) :: rest -> if String.equal name key then Some value else find rest
+  in
+  find fields
+
 let string_field fields name =
-  match List.assoc_opt name fields with
+  match assoc_opt name fields with
   | Some (`String value) -> Some value
   | Some _ | None -> None
 
@@ -278,7 +291,7 @@ let present_delivery_failure ?recovered_at text =
 ;;
 
 let float_field fields name =
-  match List.assoc_opt name fields with
+  match assoc_opt name fields with
   | Some (`Float value) -> Some value
   | Some (`Int value) -> Some (float_of_int value)
   | Some _ | None -> None
@@ -395,6 +408,7 @@ type parsed =
       ; turn_sequence : int option
       ; turn_id : string option
       ; operation_id : string option
+      ; execution_source : Masc_tui_keeper_chat_log.journal_source option
       ; call_id : string option
       ; execution_id : string option
       ; tool_name : string
@@ -402,17 +416,17 @@ type parsed =
       }
 
 let int_field fields name =
-  match List.assoc_opt name fields with
+  match assoc_opt name fields with
   | Some (`Int value) -> Some value
   | Some _ | None -> None
 
 let bool_field fields name =
-  match List.assoc_opt name fields with
+  match assoc_opt name fields with
   | Some (`Bool value) -> value
   | Some _ | None -> false
 
 let bool_field_opt fields name =
-  match List.assoc_opt name fields with
+  match assoc_opt name fields with
   | Some (`Bool value) -> Some value
   | Some _ | None -> None
 
@@ -428,34 +442,33 @@ let bool_field_opt fields name =
    turns apart. 108 of those rows carried a trace, which is where the tool
    calls are. *)
 let autonomous_turn_id_of_fields fields =
-  match List.assoc_opt "autonomous_turn" fields with
+  match assoc_opt "autonomous_turn" fields with
   | Some (`Assoc marker) -> string_field marker "turn_id"
   | Some _ | None -> None
 
 let turn_id_of_fields fields =
+  let explicit_turn () = match string_field fields "turn_ref" with
+    | Some _ as turn_ref -> turn_ref
+    | None -> autonomous_turn_id_of_fields fields in
   match Delivery_identity.delivery_provenance_of_fields fields with
   | Ok (Some provenance) ->
-      let request_id =
-        match provenance.Delivery_identity.delivery_key with
-        | Delivery_identity.Operation_native {operation_id=request_id; _}
-        | Delivery_identity.Operation_checkpoint {operation_id=request_id; _}
-        | Delivery_identity.Operation request_id
-        | Delivery_identity.Fusion_run request_id
-        | Delivery_identity.Workspace_message request_id
-        | Delivery_identity.Approval_lifecycle request_id ->
-            request_id
-      in
-      Some (Delivery_identity.Request_id.to_string request_id)
-  | Ok None | Error _ -> (
-      match string_field fields "turn_ref" with
-      | Some _ as turn_ref -> turn_ref
-      | None -> autonomous_turn_id_of_fields fields)
+      (match provenance.Delivery_identity.delivery_key with
+       | Delivery_identity.Operation_native {operation_id=request_id; _}
+       | Delivery_identity.Operation_checkpoint {operation_id=request_id; _}
+       | Delivery_identity.Operation request_id ->
+           Some (Delivery_identity.Request_id.to_string request_id)
+       | Delivery_identity.Fusion_run _
+       | Delivery_identity.Workspace_message _
+       | Delivery_identity.Approval_lifecycle _ ->
+           (* A delivery key proves append identity, not which turn read it.
+              Passive broadcasts have no turn. Approval-continuation tools
+              carry an explicit turn_ref distinct from their approval key. *)
+           explicit_turn ())
+  | Ok None | Error _ -> explicit_turn ()
 
-(* The operation a direct turn ran as, and nothing else: an autonomous turn's
-   [turn_ref] and the other delivery keys are turn identity ([turn_id]) but
-   not an operation, and the journal endpoint is keyed by operation. Typed
-   here so a reader does not have to guess which of [turn_id]'s shapes it is
-   looking at. *)
+(* Only an Operation key owns the operation journal endpoint. Autonomous
+   rows use their explicit turn_ref; other delivery keys retain append
+   identity without acquiring an operation or inventing turn ownership. *)
 let operation_id_of_fields fields =
   match Delivery_identity.delivery_provenance_of_fields fields with
   | Ok
@@ -476,6 +489,21 @@ let operation_id_of_fields fields =
          }) ->
       None
   | Ok None | Error _ -> None
+
+let execution_source_of_fields fields =
+  match operation_id_of_fields fields with
+  | Some operation_id -> Some (Masc_tui_keeper_chat_log.Operation operation_id)
+  | None ->
+      (match Delivery_identity.delivery_provenance_of_fields fields with
+       | Ok None ->
+           let raw = match string_field fields "turn_ref" with
+             | Some _ as reference -> reference
+             | None -> autonomous_turn_id_of_fields fields in
+           Option.bind raw (fun raw ->
+             Option.map (fun reference -> Masc_tui_keeper_chat_log.Autonomous_turn reference)
+               (Ids.Turn_ref.of_string raw))
+       | Ok (Some _) | Error _ -> None)
+;;
 
 let turn_sequence_of_fields fields =
   Option.bind (string_field fields "turn_ref") (fun raw ->
@@ -529,7 +557,7 @@ let text_with_attachments ~format_bytes ~text ~notes =
       text ^ separator ^ files
 
 let attachment_notes_of fields =
-  match List.assoc_opt "attachments" fields with
+  match assoc_opt "attachments" fields with
   | Some (`List items) ->
       List.filter_map
         (function
@@ -557,7 +585,7 @@ let attachment_notes_of fields =
   | Some _ | None -> []
 
 let list_field (fields : (string * Yojson.Safe.t) list) name =
-  match List.assoc_opt name fields with
+  match assoc_opt name fields with
   | Some (`List values) -> Some values
   | Some _ | None -> None
 
@@ -599,7 +627,7 @@ let journal_line_text = function
       Printf.sprintf "drop %s \xe2\x80\x94 %s" memory_id reason
 
 let memory_source_label (fields : (string * Yojson.Safe.t) list) =
-  match List.assoc_opt "source" fields with
+  match assoc_opt "source" fields with
   | Some (`Assoc source) ->
       (match string_field source "kind" with
        | Some "librarian" -> "Librarian"
@@ -637,7 +665,7 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
   match
     float_field fields "recorded_at",
     int_field fields "revision",
-    List.assoc_opt "change" fields
+    assoc_opt "change" fields
   with
   | Some at, Some revision, Some (`Assoc change) ->
       (match
@@ -691,12 +719,14 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
                   ; turn_sequence = None
                   ; turn_id = None
                   ; operation_id = None
+                  ; execution_source = None
                   ; kind =
                       Memory_activity
                         { summary = Some summary
                         ; journal
                         ; pass = Masc_tui_message_layout.Pass_committed
                         }
+                  ; media = []
                   ; attachments = []
                   ; text =
                       String.concat "\n"
@@ -728,12 +758,14 @@ let memory_failed_row (fields : (string * Yojson.Safe.t) list) =
         ; turn_sequence = None
         ; turn_id = None
         ; operation_id = None
+        ; execution_source = None
         ; kind =
             Memory_activity
               { summary = Some summary
               ; journal = []
               ; pass = Masc_tui_message_layout.Pass_failed { kind }
               }
+        ; media = []
         ; attachments = []
         ; text =
             Printf.sprintf "%s\n%s\nsnapshot present: %s"
@@ -760,6 +792,7 @@ let memory_row_of_json = function
                 ; turn_sequence = None
                 ; turn_id = None
                 ; operation_id = None
+                ; execution_source = None
                 ; kind =
                     Memory_activity
                       { summary = Some summary
@@ -767,6 +800,7 @@ let memory_row_of_json = function
                       ; pass = Masc_tui_message_layout.No_pass
                       }
                 ; text = summary
+                ; media = []
                 ; attachments = []
                 }
             | Some _, None | None, Some _ | None, None -> None)
@@ -780,7 +814,7 @@ let memory_row_of_json = function
 
 let memory_rows_of_json = function
   | `Assoc fields ->
-      (match List.assoc_opt "entries" fields with
+      (match assoc_opt "entries" fields with
        | Some (`List entries) ->
            let rows = List.map memory_row_of_json entries in
            Ok
@@ -850,7 +884,7 @@ let add_trace_step summary (step : Yojson.Safe.t) =
           | None -> { summary with omitted = summary.omitted + 1 }
           | Some tool_name ->
               let args =
-                match List.assoc_opt "args" fields with
+                match assoc_opt "args" fields with
                 | None | Some `Null -> ""
                 | Some json -> Yojson.Safe.to_string json
               in
@@ -873,7 +907,7 @@ let add_trace_block summary (block : Yojson.Safe.t) =
       match string_field fields "t" with
       | Some "trace" ->
           let steps =
-            match List.assoc_opt "trace" fields with
+            match assoc_opt "trace" fields with
             | Some (`List steps) -> steps
             | Some _ | None -> []
           in
@@ -899,7 +933,7 @@ let add_trace_block summary (block : Yojson.Safe.t) =
       summary
 
 let trace_summary_of fields =
-  match List.assoc_opt "blocks" fields with
+  match assoc_opt "blocks" fields with
   | Some (`List blocks) ->
       let summary = List.fold_left add_trace_block empty_trace blocks in
       { summary with
@@ -915,7 +949,7 @@ let trace_summary_of fields =
    the same way the dashboard's block normalizer requires it -- without it the
    pointer has nothing to point at. *)
 let fusion_conclusions_of fields =
-  match List.assoc_opt "blocks" fields with
+  match assoc_opt "blocks" fields with
   | Some (`List blocks) ->
       List.filter_map
         (fun block ->
@@ -968,7 +1002,7 @@ let decode_skill_activation = function
   | `Assoc fields ->
       let ( let* ) = Result.bind in
       let* identity =
-        match List.assoc_opt "identity" fields with
+        match assoc_opt "identity" fields with
         | Some (`Assoc identity) -> Ok identity
         | Some _ | None -> Error "Skill activation identity is not an object"
       in
@@ -978,7 +1012,7 @@ let decode_skill_activation = function
       let* content_revision = required_string fields "content_revision" in
       let* runtime_id = required_string fields "runtime_id" in
       let* actions =
-        match List.assoc_opt "actions" fields with
+        match assoc_opt "actions" fields with
         | Some (`List actions) ->
             List.fold_left
               (fun result action ->
@@ -990,7 +1024,7 @@ let decode_skill_activation = function
         | Some _ | None -> Error "Skill activation actions is not a list"
       in
       let* delivered =
-        match List.assoc_opt "delivery" fields with
+        match assoc_opt "delivery" fields with
         | Some `Null -> Ok false
         | Some (`Assoc _) -> Ok true
         | Some _ | None -> Error "Skill activation delivery is invalid"
@@ -999,7 +1033,7 @@ let decode_skill_activation = function
          invocation_to_yojson]): a kind it does not write is a row this
          build cannot read, not a read. *)
       let* invocation =
-        match List.assoc_opt "invocation" fields with
+        match assoc_opt "invocation" fields with
         | Some (`Assoc invocation) -> (
             match string_field invocation "kind" with
             | Some "instruction" -> Ok Transcript.Instruction_read
@@ -1023,7 +1057,7 @@ let decode_skill_activation = function
       Error "Skill activation is not an object"
 
 let skill_projection_of_fields fields =
-  match List.assoc_opt "skill_activations" fields with
+  match assoc_opt "skill_activations" fields with
   | None | Some `Null -> no_skill_projection
   | Some (`Assoc projection) ->
       let schema = string_field projection "schema" in
@@ -1037,7 +1071,7 @@ let skill_projection_of_fields fields =
       else
         (match status with
          | Some "available" ->
-             (match List.assoc_opt "activations" projection with
+             (match assoc_opt "activations" projection with
               | Some (`List activations) ->
                   let decoded = List.map decode_skill_activation activations in
                   let activities =
@@ -1130,7 +1164,7 @@ let reconcile_skill_projection_with_trace summary projection =
 (* One row for the turn's skill work, as the trace's tool steps are one
    block: the pane counts the invocations on the row and unfolds them under
    the tool toggle. *)
-let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id ~operation_id at
+let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_source at
     projection =
   match projection.activities with
   | [] -> []
@@ -1141,8 +1175,10 @@ let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id ~operation_id at
           ; turn_sequence
           ; turn_id
           ; operation_id
+          ; execution_source
           ; kind = Skill_activity activities
           ; text = ""
+          ; media = []
           ; attachments = []
           }
       ]
@@ -1154,7 +1190,7 @@ let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id ~operation_id at
    rides the reasoning block and an omitted count the tool block -- omitted
    steps are steps the turn took, so a block that has nothing but that count
    is still a block of steps. *)
-let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
+let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_source at summary =
   let identity projection =
     Option.map (fun id -> id ^ ":" ^ projection) source_id
   in
@@ -1193,8 +1229,10 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
           ; turn_sequence
           ; turn_id
           ; operation_id
+          ; execution_source
           ; kind = Tool_calls tool_block
           ; text = ""
+          ; media = []
           ; attachments = []
           }
       ]
@@ -1205,8 +1243,10 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
           ; turn_sequence
           ; turn_id
           ; operation_id
+          ; execution_source
           ; kind = Reasoning (reasoning @ omitted_note)
           ; text = ""
+          ; media = []
           ; attachments = []
           }
       ]
@@ -1217,8 +1257,10 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
           ; turn_sequence
           ; turn_id
           ; operation_id
+          ; execution_source
           ; kind = Tool_calls tool_block
           ; text = ""
+          ; media = []
           ; attachments = []
           }
       ]
@@ -1229,8 +1271,10 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
           ; turn_sequence
           ; turn_id
           ; operation_id
+          ; execution_source
           ; kind = Reasoning reasoning
           ; text = ""
+          ; media = []
           ; attachments = []
           }
       ; Utterance
@@ -1239,8 +1283,10 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
           ; turn_sequence
           ; turn_id
           ; operation_id
+          ; execution_source
           ; kind = Tool_calls tool_block
           ; text = ""
+          ; media = []
           ; attachments = []
           }
       ]
@@ -1262,6 +1308,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
       let content = Option.value ~default:"" (string_field fields "content") in
       let turn_id = turn_id_of_fields fields in
       let operation_id = operation_id_of_fields fields in
+      let execution_source = execution_source_of_fields fields in
       let turn_sequence = turn_sequence_of_fields fields in
       let source_id = string_field fields "id" in
       match string_field fields "role" with
@@ -1288,13 +1335,13 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                    Absent or unrecognised authority stays unresolved rather
                    than defaulting to the reader: calling someone else "you"
                    is the one wrong answer with no way back. *)
-                (match List.assoc_opt "speaker_authority" fields with
+                (match assoc_opt "speaker_authority" fields with
                  | Some (`String "owner") -> Operator
                  | Some (`String _) | Some _ | None ->
                      Unresolved { id = speaker_id })
           in
           let surface =
-            match List.assoc_opt "surface" fields with
+            match assoc_opt "surface" fields with
             | None | Some `Null -> None
             | Some json -> surface_of_json json
           in
@@ -1305,143 +1352,156 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                 ; turn_sequence
                 ; turn_id
                 ; operation_id
+                ; execution_source
                 ; kind = Addressed_to_keeper { speaker; surface }
                 ; text = content
+                ; media = []
                 ; attachments = attachment_notes_of fields
                 }
             ]
+      | Some "request_failure" ->
+          (* The server already sends the append-once identity it stored
+             the row under. Only an operation key names a turn this client
+             dispatched; the other producers get [None] rather than a
+             borrowed id. *)
+          let origin_request_id =
+            match assoc_opt "delivery_key" fields with
+            | Some (`Assoc key_fields) -> (
+                match string_field key_fields "kind" with
+                | Some "operation" -> string_field key_fields "operation_id"
+                | Some _ | None -> None)
+            | Some _ | None -> None
+          in
+          Some
+            [ Utterance
+              { at
+              ; structural_id = structural_id_of_fields fields "failure"
+              ; turn_sequence
+              ; turn_id =
+                  (match turn_id with
+                   | Some _ -> turn_id
+                   | None -> origin_request_id)
+              ; (* The failure is the operation's: the key it was stored
+                   under names it even when the row carries no transcript
+                   slot for the provenance reader. *)
+                operation_id =
+                  (match operation_id with
+                   | Some _ -> operation_id
+                   | None -> origin_request_id)
+              ; execution_source =
+                  (match execution_source with
+                   | Some _ -> execution_source
+                   | None -> Option.map (fun id -> Masc_tui_keeper_chat_log.Operation id) origin_request_id)
+              ; kind = Delivery_failed { origin_request_id; recovered_at = None }
+              ; text = content
+              ; media = (match assoc_opt "blocks" fields with
+                  | Some blocks -> Masc_tui_chat_media.of_json blocks | None -> [])
+              ; attachments = attachment_notes_of fields
+              }
+          ]
       | Some "assistant" -> (
-          match string_field fields "kind" with
-          | Some "transport_failure" ->
-              (* The server already sends the append-once identity it stored
-                 the row under. Only an operation key names a turn this client
-                 dispatched; the other producers get [None] rather than a
-                 borrowed id. *)
-              let origin_request_id =
-                match List.assoc_opt "delivery_key" fields with
-                | Some (`Assoc key_fields) -> (
-                    match string_field key_fields "kind" with
-                    | Some "operation" -> string_field key_fields "operation_id"
-                    | Some _ | None -> None)
-                | Some _ | None -> None
+          (* An autonomous turn persists what it did as a trace block and
+             often says nothing in [content]: on one live keeper 32 of
+             183 assistant rows were blank that way, and each drew as a
+             timestamp over an empty line. Exact Skill evidence leads the
+             turn as its own card; reasoning and ordinary calls follow as
+             the trace carried them, then the text, when there is any, is
+             what the turn said afterwards. A row with neither keeps its
+             empty line -- that is what the server holds for it.
+
+             Only a row the server marks [autonomous_turn] is read this
+             way. A direct-conversation turn can carry a trace block too
+             -- the server joins the raw trace onto rows with a turn ref
+             -- but its calls are already in the transcript as
+             [role: "tool"] rows, and reading both drew every call twice. *)
+          let autonomous =
+            match assoc_opt "autonomous_turn" fields with
+            | Some (`Assoc _) -> true
+            | Some _ | None -> false
+          in
+          let skill_projection = skill_projection_of_fields fields in
+          let fusion_rows =
+            List.map
+              (fun fusion ->
+                 Utterance
+                   { at
+                   ; structural_id =
+                       Option.map (fun id -> id ^ ":fusion") source_id
+                   ; turn_sequence
+                   ; turn_id
+                   ; operation_id
+                   ; execution_source
+                   ; kind = Fusion_conclusion fusion
+                   ; text = ""
+                   ; media = []
+                   ; attachments = []
+                   })
+              (fusion_conclusions_of fields)
+          in
+          let skill_rows, trace_rows =
+            if autonomous then
+              let summary = trace_summary_of fields in
+              let skill_projection =
+                reconcile_skill_projection_with_trace summary skill_projection
               in
-              Some
-                [ Utterance
+              let summary =
+                if skill_projection.replaces_raw_skill_tools then
+                  without_raw_skill_tools summary
+                else summary
+              in
+              ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
+                  ~operation_id ~execution_source at skill_projection
+              , rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_source at
+                  summary )
+            else
+              ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
+                  ~operation_id ~execution_source at skill_projection
+              , [] )
+          in
+          let media = match assoc_opt "blocks" fields with
+            | Some blocks -> Masc_tui_chat_media.of_json blocks | None -> [] in
+          let said =
+            (* An autonomous turn that wrote nothing has nothing to say.
+               With a trace the calls are the turn; without one the wake
+               produced neither, and as a row it was a speaker label over
+               an empty line -- which a later change filled with a middle
+               dot so the line would not look broken. Eleven of the
+               fourteen Keeper rows on one live screen were that dot.
+
+               A direct turn keeps its blank row: someone asked, and an
+               empty answer is part of that exchange. Nobody asked for an
+               autonomous one.
+
+               Trimmed rather than compared against "": a reply of a
+               single newline is as blank as no reply, and an exact
+               comparison let it through to be drawn as the dot.
+
+               Skill rows count as the turn's visible content too: when
+               the projection replaces the raw skill tool, trace_rows is
+               empty and an older guard let an empty utterance row through
+               under the Skill row. *)
+            if
+              String.trim content = ""
+              && media = []
+              && (autonomous || skill_rows <> [] || trace_rows <> [])
+            then []
+            else
+              [ Utterance
                   { at
-                  ; structural_id = structural_id_of_fields fields "failure"
+                  ; structural_id =
+                      structural_id_of_fields fields "utterance"
                   ; turn_sequence
-                  ; turn_id =
-                      (match turn_id with
-                       | Some _ -> turn_id
-                       | None -> origin_request_id)
-                  ; (* The failure is the operation's: the key it was stored
-                       under names it even when the row carries no transcript
-                       slot for the provenance reader. *)
-                    operation_id =
-                      (match operation_id with
-                       | Some _ -> operation_id
-                       | None -> origin_request_id)
-                  ; kind = Delivery_failed { origin_request_id; recovered_at = None }
+                  ; turn_id
+                  ; operation_id
+                  ; execution_source
+                  ; kind = if autonomous then Autonomous_reply else Said_by_keeper
                   ; text = content
+                  ; media
                   ; attachments = []
                   }
               ]
-          | Some _ | None ->
-              (* An autonomous turn persists what it did as a trace block and
-                 often says nothing in [content]: on one live keeper 32 of
-                 183 assistant rows were blank that way, and each drew as a
-                 timestamp over an empty line. Exact Skill evidence leads the
-                 turn as its own card; reasoning and ordinary calls follow as
-                 the trace carried them, then the text, when there is any, is
-                 what the turn said afterwards. A row with neither keeps its
-                 empty line -- that is what the server holds for it.
-
-                 Only a row the server marks [autonomous_turn] is read this
-                 way. A direct-conversation turn can carry a trace block too
-                 -- the server joins the raw trace onto rows with a turn ref
-                 -- but its calls are already in the transcript as
-                 [role: "tool"] rows, and reading both drew every call twice. *)
-              let autonomous =
-                match List.assoc_opt "autonomous_turn" fields with
-                | Some (`Assoc _) -> true
-                | Some _ | None -> false
-              in
-              let skill_projection = skill_projection_of_fields fields in
-              let fusion_rows =
-                List.map
-                  (fun fusion ->
-                     Utterance
-                       { at
-                       ; structural_id =
-                           Option.map (fun id -> id ^ ":fusion") source_id
-                       ; turn_sequence
-                       ; turn_id
-                       ; operation_id
-                       ; kind = Fusion_conclusion fusion
-                       ; text = ""
-                       ; attachments = []
-                       })
-                  (fusion_conclusions_of fields)
-              in
-              let skill_rows, trace_rows =
-                if autonomous then
-                  let summary = trace_summary_of fields in
-                  let skill_projection =
-                    reconcile_skill_projection_with_trace summary skill_projection
-                  in
-                  let summary =
-                    if skill_projection.replaces_raw_skill_tools then
-                      without_raw_skill_tools summary
-                    else summary
-                  in
-                  ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
-                      ~operation_id at skill_projection
-                  , rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at
-                      summary )
-                else
-                  ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
-                      ~operation_id at skill_projection
-                  , [] )
-              in
-              let said =
-                (* An autonomous turn that wrote nothing has nothing to say.
-                   With a trace the calls are the turn; without one the wake
-                   produced neither, and as a row it was a speaker label over
-                   an empty line -- which a later change filled with a middle
-                   dot so the line would not look broken. Eleven of the
-                   fourteen Keeper rows on one live screen were that dot.
-
-                   A direct turn keeps its blank row: someone asked, and an
-                   empty answer is part of that exchange. Nobody asked for an
-                   autonomous one.
-
-                   Trimmed rather than compared against "": a reply of a
-                   single newline is as blank as no reply, and an exact
-                   comparison let it through to be drawn as the dot.
-
-                   Skill rows count as the turn's visible content too: when
-                   the projection replaces the raw skill tool, trace_rows is
-                   empty and an older guard let an empty utterance row through
-                   under the Skill row. *)
-                if
-                  String.trim content = ""
-                  && (autonomous || skill_rows <> [] || trace_rows <> [])
-                then []
-                else
-                  [ Utterance
-                      { at
-                      ; structural_id =
-                          structural_id_of_fields fields "utterance"
-                      ; turn_sequence
-                      ; turn_id
-                      ; operation_id
-                      ; kind = if autonomous then Autonomous_reply else Said_by_keeper
-                      ; text = content
-                      ; attachments = []
-                      }
-                  ]
-              in
-              Some (fusion_rows @ skill_rows @ trace_rows @ said))
+          in
+          Some (fusion_rows @ skill_rows @ trace_rows @ said))
       | Some "system" ->
           (* Durable approval lifecycle rows are server-owned status, never
              Keeper speech. A row that carries the typed lifecycle is read as
@@ -1458,7 +1518,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
              -- is an undecodable row and is dropped and counted like any
              other, never filed under Memory where it would hide. *)
           let kind =
-            match List.assoc_opt "approval_lifecycle" fields with
+            match assoc_opt "approval_lifecycle" fields with
             | None ->
                 Some
                   (Memory_activity
@@ -1503,8 +1563,10 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                  ; turn_sequence
                  ; turn_id
                  ; operation_id
+                 ; execution_source
                  ; kind
                  ; text = content
+                 ; media = []
                  ; attachments = []
                  }
              ])
@@ -1521,6 +1583,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                   ; turn_sequence
                   ; turn_id
                   ; operation_id
+                  ; execution_source
                   ; call_id = string_field fields "tool_call_id"
                   ; execution_id = string_field fields "execution_id"
                   ; tool_name
@@ -1539,11 +1602,11 @@ let fold_tool_blocks parsed_rows =
   let flush pending acc =
     match List.rev pending with
     | [] -> acc
-    | (at, _, turn_sequence, turn_id, operation_id, _, _, _, _) :: _ as calls ->
+    | (at, _, turn_sequence, turn_id, operation_id, execution_source, _, _, _, _) :: _ as calls ->
         let structural_id =
           let ids =
             List.filter_map
-              (fun (_, structural_id, _, _, _, _, _, _, _) -> structural_id)
+              (fun (_, structural_id, _, _, _, _, _, _, _, _) -> structural_id)
               calls
           in
           match ids with
@@ -1552,7 +1615,7 @@ let fold_tool_blocks parsed_rows =
         in
         let activities =
           List.map
-            (fun (_, _, _, _, _, call_id, execution_id, tool_name, args) ->
+            (fun (_, _, _, _, _, _, call_id, execution_id, tool_name, args) ->
               let outcome =
                 match execution_id with
                 | Some _ -> Transcript.Returned
@@ -1567,8 +1630,10 @@ let fold_tool_blocks parsed_rows =
         ; turn_sequence
         ; turn_id
         ; operation_id
+        ; execution_source
         ; kind = Tool_calls (Transcript.tool_block activities)
         ; text = ""
+        ; media = []
         ; attachments = []
         }
         :: acc
@@ -1581,6 +1646,7 @@ let fold_tool_blocks parsed_rows =
         ; turn_sequence
         ; turn_id
         ; operation_id
+        ; execution_source
         ; call_id
         ; execution_id
         ; tool_name
@@ -1593,13 +1659,15 @@ let fold_tool_blocks parsed_rows =
           , turn_sequence
           , turn_id
           , operation_id
+          , execution_source
           , call_id
           , execution_id
           , tool_name
           , args )
         in
         (match pending with
-         | (_, _, _, pending_turn, _, _, _, _, _) :: _ when pending_turn <> turn_id ->
+         | (_, _, _, pending_turn, _, pending_source, _, _, _, _) :: _
+           when pending_turn <> turn_id || pending_source <> execution_source ->
              loop [ next ] (flush pending acc) rest
          | _ -> loop (next :: pending) acc rest)
     | Utterance row :: rest -> loop [] (row :: flush pending acc) rest
@@ -1665,7 +1733,7 @@ type page =
 let page_of_json (payload : Yojson.Safe.t) =
   match payload with
   | `Assoc fields -> (
-      match List.assoc_opt "messages" fields with
+      match assoc_opt "messages" fields with
       | Some (`List _ as messages) -> (
           match rows_of_json messages with
           | Error _ as error -> error
@@ -1676,11 +1744,11 @@ let page_of_json (payload : Yojson.Safe.t) =
                      leave the pane offering a page the server never promised,
                      and every request for it would come back empty. *)
                   has_more =
-                    (match List.assoc_opt "has_more" fields with
+                    (match assoc_opt "has_more" fields with
                      | Some (`Bool value) -> value
                      | Some _ | None -> false)
                 ; next_before =
-                    (match List.assoc_opt "next_before" fields with
+                    (match assoc_opt "next_before" fields with
                      | Some (`Float value) -> Some value
                      | Some (`Int value) -> Some (float_of_int value)
                      | Some _ | None -> None)

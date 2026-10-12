@@ -113,6 +113,13 @@ val prepare_png :
   (string, string) result
 (** Fetch, convert if needed, and read PNG bytes for the [v] path. *)
 
+val prepare_payload :
+  run:(string -> Unix.process_status) -> cache_dir:string -> string ->
+  (string, string) result
+(** Prepare already fetched or decoded image bytes. PNG passes through;
+    other formats use the same converters as remote images. Cache publication
+    is atomic and addressed by the payload, not its display label. *)
+
 val invalidate_download : cache_dir:string -> string -> unit
 (** Explicit user refresh only: remove this URL's input and derived PNG so
     a previously refused body can be fetched again. *)

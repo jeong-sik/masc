@@ -31,12 +31,18 @@ val render :
   write:(string -> unit)
   -> connection:Masc_tui_types.connection_status
   -> live:Masc_tui_machine_live.view
+  -> ?interaction:Masc_tui_types.machine_interaction
   -> ?notice:string
+  -> ?room:(width:int -> height:int -> string list)
+  -> ?room_footer:string
   -> Masc_tui_types.msx_frame option
   -> Masc_tui_interactive.frame option
   -> unit
 (** Retain Kitty pixels across polls, repainting only changed pixels. Other
     terminals use the truecolor mosaic. Layout changes repaint the whole terminal.
+    [room] renders public conversation in its allocated cell rectangle, beside
+    the picture when wide and beneath it when narrow. [room_footer] overrides
+    the game hints while its composer owns input; an empty string preserves them.
 
     The first frame carries the observation meta (title line); the second is
     the surface contract's picture this renderer draws (RFC
@@ -54,6 +60,8 @@ val render_live :
   write:(string -> unit)
   -> connection:Masc_tui_types.connection_status
   -> ?activity:Masc_tui_machine_live.activity_entry list
+  -> ?room:(width:int -> height:int -> string list)
+  -> ?room_footer:string
   -> Masc.Machine_lane.t
   -> Masc_tui_machine_live.view
   -> unit
@@ -62,10 +70,14 @@ val render_live :
     why there is no picture, and a footer with the keys this screen answers
     for it ([esc] and the size keys).
 
-    [activity] is recent Keeper activity on the machine, newest first: drawn
-    as a fixed-width column on the right when the terminal is wide enough
-    and there is at least one entry ({!shows_sidebar}), otherwise the
-    picture keeps the whole width, same as before this parameter existed. *)
+    [activity] is recent Keeper activity on the machine, newest first. Without
+    [room], it occupies the existing fixed-width sidebar when {!shows_sidebar}
+    permits. With [room], actual activity entries occupy up to half of that
+    region's rows beneath the conversation, after reserving its heading,
+    one message row and composer, clipped to its allocated width:
+    the room column at 80+ columns, or the room strip beneath the picture at
+    narrower widths. No room rows are reserved for an empty feed, and activity
+    never reduces the picture's existing room-aware width. *)
 
 val sidebar_cols : int
 val min_picture_cols : int
@@ -102,6 +114,11 @@ val consume : write:(string -> unit) -> Masc_tui_types.state -> string -> bool
     cached frame and returns [true]; keys are not sent to the machine in this
     increment. *)
 
+val close : write:(string -> unit) -> Masc_tui_types.state -> unit
+(** Delete any terminal image placement and retire the renderer when its
+    workspace is withdrawn or the operator closes it. The caller must also
+    invalidate the ordinary frame presenter. *)
+
 (** {1 The load menu (RFC-0439 §3.7)}
 
     The human picks a game from the cartridge inventory. It is an overlay on the
@@ -132,5 +149,7 @@ val menu_consume :
   write:(string -> unit) -> Masc_tui_types.state -> string -> menu_action
 (** One key while the menu is up. Up/down (or [k]/[j]) move the highlight and
     repaint, returning [Stay]; enter/space pick the highlighted row ([Watch] or
-    [Load name]); [esc] returns [Closed]. It never flips the open flags, so the
+    [Load name]) only after it was successfully drawn in the current viewport.
+    Hidden rows, a resized viewport and failed output require a repaint first.
+    [esc] returns [Closed]. It never flips the open flags, so the
     caller decides what a choice or a close does. *)

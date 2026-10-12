@@ -45,7 +45,6 @@ val run :
   ?required_native_posture:Runtime_native_tools.posture ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
-  prompt_capacity:(int, Runtime_muse_prompt_capacity.error) result ->
   configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
   turn_timeout_s:float option ->
   quota_scope:Runtime_quota_window.scope ->
@@ -109,12 +108,10 @@ val run :
     a managed read profile. Only exact attached MCP requests are approved.
     Native none is unsupported. This is not an MASC-only execution claim.
 
-    Start carries canonical history; Resume reports the history held by the
-    vendor session and sends the current goal and context. [prompt_capacity]
-    is the runtime's {!Runtime_instance.muse_prompt_capacity}: it bounds the prepared
-    input, and an [Error] refuses the turn with its cause, because the host
-    rewrites an oversized input instead of refusing it. No top-level runtime routing is
-    exposed here. *)
+    Start carries canonical history as composed, and the host compacts its
+    own input. Resume reports the history held by the
+    vendor session and sends the current goal and context. No top-level
+    runtime routing is exposed here. *)
 
 module For_testing : sig
   val usage_reports
@@ -165,14 +162,6 @@ module For_testing : sig
     Agent_core.Types.message list ->
     (string, string) result
   (** The prompt a start turn sends, rendered by the production formatter. *)
-
-  val reserved_prompt_bytes : system_prompt:string -> goal:string -> int
-  (** What the fixed sections of a start prompt charge against the prompt
-      ceiling ({!Runtime_instance.muse_prompt_capacity}) before any history
-      message. *)
-
-  val measure_model_input_message_bytes : Agent_core.Types.message -> int
-  (** What the window charges one history message, framing included. *)
 
   val native_posture_note : Runtime_native_tools.posture -> string list
   (** What a start prompt's system section adds after the system prompt to

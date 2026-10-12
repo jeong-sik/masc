@@ -60,6 +60,7 @@ type dashboard_auth_state =
 (** Active WebSocket session state. *)
 type ws_session = {
   id: string;
+  runtime_authority: Sse.runtime_authority;
   wsd: Ws_wsd.t;
   closed: bool Atomic.t;
   (** All writes to [wsd] (text frames, pings, pongs, close) are serialized
@@ -237,12 +238,13 @@ let next_id =
 let log_ws_delivery_dropped ~context session_id =
   Log.Transport.warn "WS %s not delivered for session=%s" context session_id
 
-let new_session ~id ~wsd =
+let new_session ~runtime_authority ~id ~wsd =
   (* NDT-OK: session creation stamps wall-clock liveness/ACK metadata only;
      message ordering and protocol output still come from explicit sequence IDs. *)
   let now = Unix.gettimeofday () in
   {
     id;
+    runtime_authority;
     wsd;
     closed = Atomic.make false;
     write_mutex = Stdlib.Mutex.create ();
@@ -468,6 +470,9 @@ let dashboard_hello ~base_path ~session_id ?token () =
   let result =
     match find_session session_id with
     | None -> Error "WebSocket session not found"
+    | Some session when not (Sse.equal_runtime_authority session.runtime_authority
+        (Sse.runtime_authority_exn ~base_path)) ->
+        Error "dashboard/hello belongs to a different runtime"
     | Some session -> (
         match verify_dashboard_token ~base_path token with
         | Error msg -> Error msg
@@ -1057,6 +1062,7 @@ let start_upgrade_heartbeat ?sw ?clock session_id session =
     payload and ignore the eof error.  Cleanup runs regardless of the
     hook. *)
 let mcp_websocket_handler
+    ~runtime_authority
     ?sw
     ?clock
     ?(on_close_log = fun ~session_id:_ ~code:_ ~reason:_ -> ())
@@ -1066,12 +1072,12 @@ let mcp_websocket_handler
     (wsd : Ws_wsd.t)
   : Ws_endpoint.handlers =
   let session_id = next_id () in
-  let session = new_session ~id:session_id ~wsd in
+  let session = new_session ~runtime_authority ~id:session_id ~wsd in
   with_sessions_rw (fun () -> Hashtbl.replace sessions session_id session);
   Transport_metrics.set_ws_sessions
     (with_sessions_rw (fun () -> Hashtbl.length sessions));
   (* Register as SSE external subscriber for broadcast events. *)
-  Sse.subscribe_external ~id:session_id
+  Sse.subscribe_external ~runtime_authority ~id:session_id
     ~is_alive:(fun () -> not (is_session_closed session))
     ~callback:(fun sse_event ->
       if not (is_session_closed session)
@@ -1176,6 +1182,7 @@ let respond_and_drive_upgrade
     @param on_message Callback for incoming text messages.
       Default: ignore. *)
 let upgrade_connection
+    ~runtime_authority
     ?sw
     ?clock
     ?(on_message = fun _session_id _text -> ())
@@ -1186,7 +1193,7 @@ let upgrade_connection
     ~max_message:(max_inbound_message_bytes ())
     ~max_frame:(max_inbound_frame_bytes ())
     ~handler:
-      (mcp_websocket_handler ?sw ?clock ~on_message ~origin_label:"same-origin /ws")
+      (mcp_websocket_handler ~runtime_authority ?sw ?clock ~on_message ~origin_label:"same-origin /ws")
 
 (** Outcome of {!send_to_session_result}.  [Sent] is the happy path;
     [Session_gone] is the expected case where the session has already

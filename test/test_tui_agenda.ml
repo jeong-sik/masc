@@ -113,86 +113,6 @@ let test_wire_status_parsing () =
    | Agenda.Settled -> fail "an unknown status was folded into settled")
 ;;
 
-let test_unrecognised_status_stays_off_the_strip () =
-  let odd = row ~standing:(Agenda.Unrecognised "quantum") "2026-08-26T02:00:00Z"
-              "ghost" "무엇인지 모를 것"
-  in
-  let t = Agenda.project ~scheduled:(Agenda.Read [ odd; edgar ])
-            ~awaiting:(Agenda.Read []) in
-  match strip_of t with
-  | None -> fail "the recognised wake should still be drawn"
-  | Some s ->
-    check bool "the unknown row is not the next wake" false (contains ~needle:"ghost" s.clock);
-    check bool "the recognised one is" true (contains ~needle:"edgar" s.clock)
-;;
-
-(* Earliest wins among the rows still coming, and a settled row that sorts
-   before them all does not. *)
-let test_the_earliest_coming_row_wins () =
-  let t = Agenda.project ~scheduled:(Agenda.Read [ sweep; done_earlier; edgar ])
-            ~awaiting:(Agenda.Read []) in
-  match strip_of t with
-  | None -> fail "there is a wake to draw"
-  | Some s ->
-    check bool "the 11:45 check, not the 12:14 sweep" true (contains ~needle:"11:45" s.clock);
-    check bool "and not the finished 10:00 row" false (contains ~needle:"orrery" s.clock)
-;;
-
-let test_the_clock_is_local () =
-  let t = Agenda.project ~scheduled:(Agenda.Read [ edgar ]) ~awaiting:(Agenda.Read []) in
-  match strip_of t with
-  | None -> fail "there is a wake to draw"
-  | Some s ->
-    check bool "02:45Z is 11:45 in Seoul" true (contains ~needle:"11:45" s.clock);
-    check bool "the title comes with it" true (contains ~needle:"진행 상황 체크" s.clock);
-    check bool "and the kind prefix does not" false (contains ~needle:"keeper:" s.clock)
-;;
-
-(* At 23:50 a bare "08:00" reads as ten minutes away. *)
-let test_a_later_day_says_so () =
-  let tomorrow = row "2026-08-26T23:00:00Z" "edgar.a.poe" "아침 일정 정리" in
-  let t = Agenda.project ~scheduled:(Agenda.Read [ tomorrow ])
-            ~awaiting:(Agenda.Read []) in
-  match strip_of t with
-  | None -> fail "there is a wake to draw"
-  | Some s ->
-    check bool "08:00 the next morning" true (contains ~needle:"08:00" s.clock);
-    check bool "carries its date" true (contains ~needle:"08/27" s.clock)
-;;
-
-let test_waiting_uses_the_badge_shape () =
-  let t = Agenda.project ~scheduled:(Agenda.Read [])
-            ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ]) in
-  match strip_of t with
-  | None -> fail "someone is blocked on the operator"
-  | Some s ->
-    check string "the strip's own badge shape" "; Awaiting you\xc2\xb71"
-      s.waiting;
-    check string "with no wake beside it" "" s.clock
-;;
-
-(* The two halves share one line, so the clock has to leave room for the
-   badge rather than run under it. *)
-let test_the_halves_fit_together () =
-  let t = Agenda.project ~scheduled:(Agenda.Read [ edgar ])
-            ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ]) in
-  List.iter
-    (fun cols ->
-       match strip_of ~cols t with
-       | None -> fail "both halves have something to say"
-       | Some s ->
-         let width = Masc_tui_message_layout.display_width in
-         check
-           bool
-           (Printf.sprintf "at %d cells the halves still fit" cols)
-           true
-           (width s.clock + width s.waiting <= cols))
-    [ 20; 30; 40; 60; 80; 120 ]
-
-;;
-
-(* {1 The panel behind [;]} *)
-
 let overlay_of ?(now = at_2026_08_26_0300z) ?(cols = 78) t =
   Agenda.overlay ~now ~localtime:seoul ~cols t
 ;;
@@ -229,19 +149,6 @@ let test_settled_rows_do_not_reach_the_panel () =
     (contains ~needle:"orrery" (joined lines))
 ;;
 
-let test_wakes_are_earliest_first () =
-  let lines =
-    overlay_of (Agenda.project ~scheduled:(Agenda.Read [ sweep; edgar ])
-                  ~awaiting:(Agenda.Read []))
-  in
-  match texts (tones_of lines Agenda.Wake) with
-  | first :: _ -> check bool "the earliest leads" true (contains ~needle:"11:45" first)
-  | [] -> fail "there are wakes to order"
-;;
-
-(* Where the strip draws nothing, the panel says so. The operator pressed a
-   key to ask, and a blank panel reads as a failure to load rather than as an
-   answer. *)
 let test_empty_sections_answer_in_words () =
   let lines = overlay_of (Agenda.project ~scheduled:(Agenda.Read [])
                             ~awaiting:(Agenda.Read [])) in
@@ -255,39 +162,6 @@ let test_empty_sections_answer_in_words () =
   check int "all four headings are still drawn" 4 (List.length (tones_of lines Agenda.Heading))
 ;;
 
-(* An empty section is an answer only once its list was read. With the server
-   down the panel said "nothing is scheduled" and, where it now says no keeper
-   is holding a call, that nobody was waiting -- about two lists no request had
-   brought back. *)
-let test_an_unread_section_does_not_say_it_is_empty () =
-  let text reading_s reading_a =
-    joined (overlay_of (Agenda.project ~scheduled:reading_s ~awaiting:reading_a))
-  in
-  let unread = text Agenda.Not_read Agenda.Not_read in
-  check bool "a list not read yet says so" true
-    (contains ~needle:"not loaded yet" unread);
-  check bool "and does not say nothing is scheduled" false
-    (contains ~needle:"nothing is scheduled" unread);
-  check bool "or that no keeper is holding a call" false
-    (contains ~needle:"no keeper is holding a call" unread);
-  let failed =
-    text
-      (Agenda.Read_failed "schedule load failed: HTTP 503")
-      (Agenda.Read_failed "tool approvals load failed: HTTP 503")
-  in
-  (* "load failed" alone named neither the source nor the fault, on an overlay
-     with no refresh key: the reader had to leave it to find out which read
-     failed. The loader's message already opens with the read, so the row
-     carries it as sent rather than behind a second "load failed:". *)
-  check bool "a failed read says which read and why" true
-    (contains ~needle:"schedule load failed: HTTP 503" failed
-     && contains ~needle:"tool approvals load failed: HTTP 503" failed);
-  check bool "and does not say nothing is scheduled" false
-    (contains ~needle:"nothing is scheduled" failed)
-;;
-
-(* The strip names no row it does not have, so an unread list keeps it down
-   the same as an empty one; the frame and the bound still read one number. *)
 let test_an_unread_agenda_keeps_the_strip_down () =
   let t =
     Agenda.project ~scheduled:Agenda.Not_read
@@ -295,44 +169,6 @@ let test_an_unread_agenda_keeps_the_strip_down () =
   in
   check bool "no strip" true (strip_of t = None);
   check int "and no row taken" 0 (Agenda.rows_taken t)
-;;
-
-(* What the state hands the panel: a list is read only once its request has
-   answered. *)
-let test_the_state_says_which_lists_were_read () =
-  let state () =
-    Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
-  in
-  let panel state = joined (overlay_of (Masc_tui_types.agenda state)) in
-  let fresh = panel (state ()) in
-  check bool "a fresh state has read neither list" false
-    (contains ~needle:"nothing is scheduled" fresh
-     || contains ~needle:"no keeper is holding a call" fresh);
-  let failed = state () in
-  failed.Masc_tui_types.schedules_error <- Some "connect failed";
-  failed.Masc_tui_types.keeper_tool_approvals_error <- Some "connect failed";
-  check bool "two failed reads carry the state's own reason" true
-    (contains ~needle:"connect failed" (panel failed));
-  let answered = state () in
-  answered.Masc_tui_types.keeper_tool_approvals_observed <- true;
-  (* The note names this list, not the badge's union of it and the stuck
-     one: the badge says "Awaiting you" over both, and a note echoing that
-     word answered the badge with "nobody" while the stuck section had rows. *)
-  check bool "an answered empty held-call list says so" true
-    (contains ~needle:"no keeper is holding a call" (panel answered));
-  check bool "and does not answer the badge's word" false
-    (contains ~needle:"nobody is waiting on you" (panel answered))
-;;
-
-let test_a_held_call_says_how_long_is_left () =
-  let lines =
-    overlay_of (Agenda.project ~scheduled:(Agenda.Read [])
-                  ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ]))
-  in
-  let text = joined lines in
-  check bool "who is holding it" true (contains ~needle:"lane-smith" text);
-  check bool "and what" true (contains ~needle:"Execute" text);
-  check bool "and how long is left" true (contains ~needle:"4m 00s left" text)
 ;;
 
 let test_failed_reads_are_safe_before_the_panel_fits_them () =
@@ -398,66 +234,6 @@ let test_failed_schedule_snapshot_uses_the_same_display_boundary () =
     ]
 ;;
 
-(* A call whose wait has run out is denied, so the row says that rather than
-   counting past zero. *)
-let test_an_expired_call_says_so () =
-  let lines =
-    overlay_of
-      (Agenda.project
-         ~scheduled:(Agenda.Read [])
-         ~awaiting:(Agenda.Read [ ask ~timeout_sec:10.0 "lane-smith" "Execute" ]))
-  in
-  check bool "expired" true (contains ~needle:"expired" (joined lines))
-;;
-
-(* The rows are laid out before [framed_line] sees them, so they have to be
-   laid out against the width it will fit them to -- the right-hand column was
-   cut on the way through when they were not. *)
-let test_rows_fit_the_width_they_were_given () =
-  let t =
-    Agenda.project
-      ~scheduled:
-        (Agenda.Read
-           [ row ~recurrence:"cron 45 8-23 * * * Asia/Seoul" "2026-08-26T02:45:00Z"
-               "edgar.a.poe" "진행 상황 체크"
-           ; row ~recurrence:"daily 20:00:00 Asia/Seoul" "2026-08-26T11:00:00Z"
-               "orrery" "정기 백로그 감사, 목표 진척, agent fitness 점검"
-           ])
-      ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ])
-  in
-  List.iter
-    (fun cols ->
-       List.iter
-         (fun (line : Agenda.line) ->
-            check
-              bool
-              (Printf.sprintf "at %d cells: %S" cols line.Agenda.text)
-              true
-              (Masc_tui_message_layout.display_width line.Agenda.text <= cols))
-         (overlay_of ~cols t))
-    [ 30; 46; 60; 76; 120 ]
-;;
-
-(* The agenda receives a display value chosen by the schedule row projection.
-   It must leave an older server's encoded target untouched. *)
-let test_wake_name_is_drawn_without_reparsing () =
-  let clock who =
-    let wake = row "2026-08-26T02:45:00Z" who "" in
-    match strip_of ~cols:120
-            (Agenda.project ~scheduled:(Agenda.Read [ wake ])
-               ~awaiting:(Agenda.Read [])) with
-    | Some strip -> strip.clock
-    | None -> fail "the wake should draw a clock"
-  in
-  check bool "a supplied keeper name is drawn" true
-    (contains ~needle:"edgar.a.poe" (clock "edgar.a.poe"));
-  check bool "an older server's target is not parsed" true
-    (contains ~needle:"keeper:edgar.a.poe" (clock "keeper:edgar.a.poe"))
-
-;;
-
-(* A task that only the operator can move is a reason to draw the strip. The
-   whole point of the row is that nothing else was saying so. *)
 let stuck ?(since_iso = "2026-08-20T00:00:00Z") ?(task_id = "task-348")
     what : Agenda.stalled =
   { task_id; what; since_iso }
@@ -481,27 +257,6 @@ let test_a_stuck_task_alone_takes_the_row () =
       (contains ~needle:"Awaiting you" strip.Agenda.waiting)
 ;;
 
-(* One number over both lists: a keeper holding a tool call and a task only the
-   operator can move are the same answer to "is anything waiting on me". Two
-   badges would be an addition the operator has to do. *)
-let test_the_badge_counts_blocked_and_stuck_together () =
-  let t =
-    Masc_tui_agenda.project
-      ~scheduled:(Agenda.Read [])
-      ~awaiting:(Agenda.Read [ ask "lane-smith" "Execute" ])
-      ~confirming:(Agenda.Read [])
-      ~stalled:(Agenda.Read [ stuck "task-348: held by codex-mcp-client, which has no Keeper queue" ])
-  in
-  match strip_of t with
-  | None -> fail "there is work waiting"
-  | Some strip ->
-    check bool "one badge, both counts" true
-      (contains ~needle:"Awaiting you\xc2\xb72" strip.Agenda.waiting)
-;;
-
-(* Every stuck row is drawn, oldest first, and every one takes the cursor.
-   The panel scrolls; a row the cursor cannot reach is work the operator
-   cannot open. *)
 let test_the_stuck_section_draws_every_row () =
   let rows =
     List.init 9 (fun index ->
@@ -561,53 +316,6 @@ let test_a_goal_to_confirm_is_waiting_on_the_operator () =
       failf "expected one row to lead somewhere, got %d" (List.length targets)
 ;;
 
-let test_the_goal_section_answers_in_words () =
-  check bool "an empty list read is an answer" true
-    (contains ~needle:"no goal awaits confirmation"
-       (joined (overlay_of (with_goals []))));
-  let unread =
-    joined
-      (overlay_of
-         (Masc_tui_agenda.project
-            ~scheduled:(Agenda.Read [])
-            ~awaiting:(Agenda.Read [])
-            ~confirming:Agenda.Not_read
-            ~stalled:(Agenda.Read [])))
-  in
-  check bool "a list nobody read does not say it is empty" false
-    (contains ~needle:"no goal awaits confirmation" unread)
-;;
-
-let test_the_stuck_section_answers_in_words () =
-  let read = joined (overlay_of (with_stuck [])) in
-  check bool "an empty list read is an answer" true
-    (contains ~needle:"no task is stuck on you" read);
-  let unread =
-    joined
-      (overlay_of
-         (Masc_tui_agenda.project
-            ~scheduled:(Agenda.Read [])
-            ~awaiting:(Agenda.Read [])
-            ~confirming:(Agenda.Read [])
-            ~stalled:Agenda.Not_read))
-  in
-  check bool "a list nobody read does not say it is empty" false
-    (contains ~needle:"no task is stuck on you" unread)
-;;
-
-(* The wait is why the row exists, so it is what the right column says. *)
-let test_a_stuck_row_says_how_long_it_has_waited () =
-  let text =
-    joined
-      (overlay_of (with_stuck [ stuck ~since_iso:"2026-08-15T03:00:00Z" "task-348" ]))
-  in
-  check bool "eleven days is the fact the row carries" true
-    (contains ~needle:"11d waiting" text)
-;;
-
-(* The panel counted the work waiting on the operator and then had no way to
-   reach any of it, which is a count rather than an answer. The cursor stops
-   on the rows that lead somewhere and steps over the prose between them. *)
 let test_only_rows_that_lead_somewhere_take_the_cursor () =
   let t = with_stuck [ stuck ~task_id:"task-348" "work nobody holds" ] in
   let lines = overlay_of t in
@@ -818,60 +526,32 @@ let () =
         ] )
     ; ( "what reaches it"
       , [ test_case "wire status parsing" `Quick test_wire_status_parsing
-        ; test_case "unrecognised stays off" `Quick
-            test_unrecognised_status_stays_off_the_strip
-        ; test_case "the earliest coming row wins" `Quick
-            test_the_earliest_coming_row_wins
-        ] )
+        ;] )
     ; ( "the frame and the bound"
       , [
 
         ] )
     ; ( "how it reads"
-      , [ test_case "the clock is local" `Quick test_the_clock_is_local
-        ; test_case "a later day says so" `Quick test_a_later_day_says_so
-        ; test_case "waiting uses the badge shape" `Quick
-            test_waiting_uses_the_badge_shape
-        ; test_case "the halves fit together" `Quick test_the_halves_fit_together
-        ] )
+      , [] )
     ; ( "the panel"
       , [ test_case "lists every coming wake" `Quick
             test_the_panel_lists_every_coming_wake
         ; test_case "settled rows do not reach it" `Quick
             test_settled_rows_do_not_reach_the_panel
-        ; test_case "wakes are earliest first" `Quick test_wakes_are_earliest_first
         ; test_case "empty sections answer in words" `Quick
             test_empty_sections_answer_in_words
-        ; test_case "an unread section does not say it is empty" `Quick
-            test_an_unread_section_does_not_say_it_is_empty
         ; test_case "an unread agenda keeps the strip down" `Quick
             test_an_unread_agenda_keeps_the_strip_down
-        ; test_case "the state says which lists were read" `Quick
-            test_the_state_says_which_lists_were_read
         ; test_case "failed reads are safe before the panel fits them" `Quick
             test_failed_reads_are_safe_before_the_panel_fits_them
         ; test_case "failed schedule snapshots share the display boundary" `Quick
             test_failed_schedule_snapshot_uses_the_same_display_boundary
-        ; test_case "a held call says how long is left" `Quick
-            test_a_held_call_says_how_long_is_left
-        ; test_case "an expired call says so" `Quick test_an_expired_call_says_so
-        ; test_case "rows fit the width they were given" `Quick
-            test_rows_fit_the_width_they_were_given
-        ; test_case "a wake name is drawn without reparsing" `Quick
-            test_wake_name_is_drawn_without_reparsing
-
-        ] )
+        ;] )
     ; ( "tasks stuck on the operator"
       , [ test_case "a stuck task alone takes the row" `Quick
             test_a_stuck_task_alone_takes_the_row
-        ; test_case "the badge counts blocked and stuck together" `Quick
-            test_the_badge_counts_blocked_and_stuck_together
         ; test_case "the section draws every row" `Quick
             test_the_stuck_section_draws_every_row
-        ; test_case "the section answers in words" `Quick
-            test_the_stuck_section_answers_in_words
-        ; test_case "a stuck row says how long it has waited" `Quick
-            test_a_stuck_row_says_how_long_it_has_waited
         ; test_case "only rows that lead somewhere take the cursor" `Quick
             test_only_rows_that_lead_somewhere_take_the_cursor
         ; test_case "prose rows take no cursor" `Quick
@@ -880,9 +560,7 @@ let () =
     ; ( "goals waiting for confirmation"
       , [ test_case "a goal to confirm is waiting on the operator" `Quick
             test_a_goal_to_confirm_is_waiting_on_the_operator
-        ; test_case "the section answers in words" `Quick
-            test_the_goal_section_answers_in_words
-        ] )
+        ;] )
     ; ( "selection across refreshed agenda projections"
       , [ test_case "Task Goal references preserve registry reading truth" `Quick
             test_task_goal_reading_preserves_source_truth

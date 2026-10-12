@@ -21,7 +21,7 @@ const EXPECTED: Record<KeeperConversationDelivery, 'in-flight' | 'failed' | 'oth
   timeout: 'failed',
   cancelled: 'other',
   error: 'failed',
-  transport_failure: 'failed',
+  request_failure: 'failed',
   interrupted: 'failed',
 }
 
@@ -56,8 +56,8 @@ describe('keeper-delivery classifiers', () => {
     expect([...FAILED_DELIVERY].sort()).toEqual([
       'error',
       'interrupted',
+      'request_failure',
       'timeout',
-      'transport_failure',
     ])
   })
 })

@@ -115,37 +115,38 @@ let lifecycle_ends_run_error row =
   | _ -> false
 ;;
 
-let is_terminal_assistant_slot (row : Store.chat_message) =
+let is_terminal_result_slot (row : Store.chat_message) =
   match row.delivery_provenance with
-  | Some { Delivery.transcript_slot = Delivery.Terminal_assistant; _ } -> true
+  | Some { Delivery.transcript_slot = Delivery.Terminal_result; _ } -> true
   | _ -> false
 ;;
 
-let is_assistant_row (row : Store.chat_message) =
+let is_terminal_row (row : Store.chat_message) =
   Store.Role.equal row.role Store.Role.Assistant
+  || Store.Role.equal row.role Store.Role.Request_failure
 ;;
 
-(* The store half of a turn: the exact [Terminal_assistant] slot when the
-   append-once path persisted it, otherwise the last joined assistant row
-   (utterance or typed transport-failure marker). *)
-let terminal_assistant_row rows =
-  let assistant_rows = List.filter is_assistant_row rows in
-  match List.rev (List.filter is_terminal_assistant_slot assistant_rows) with
+(* The store half of a turn: the exact [Terminal_result] slot when the
+   append-once path persisted it, otherwise the last joined terminal row
+   (Keeper speech or server-owned failed request). *)
+let terminal_result_row rows =
+  let terminal_rows = List.filter is_terminal_row rows in
+  match List.rev (List.filter is_terminal_result_slot terminal_rows) with
   | row :: _ -> Some row
   | [] ->
-    (match List.rev assistant_rows with
+    (match List.rev terminal_rows with
      | row :: _ -> Some row
      | [] -> None)
 ;;
 
 (* Rule 2: the journal's terminal event and the terminal row's durable
-   lifecycle/kind must agree on how the turn ended. *)
+   lifecycle and row type must agree on how the turn ended. *)
 let terminal_outcome_mismatch ~terminal_event rows =
   match terminal_event with
   | Events.Run_finished _ ->
-    (match terminal_assistant_row rows with
+    (match terminal_result_row rows with
      | Some row ->
-       Store.Row_kind.equal row.kind Store.Row_kind.Transport_failure
+       Store.Role.equal row.role Store.Role.Request_failure
        || lifecycle_ends_run_error row
      (* No assistant row: visible-reply absence is the Assistant_text check's
         call; a tool-calls-only continuation legitimately persists none. *)
@@ -154,8 +155,8 @@ let terminal_outcome_mismatch ~terminal_event rows =
     let failure_recorded =
       List.exists
         (fun (row : Store.chat_message) ->
-           is_assistant_row row
-           && (Store.Row_kind.equal row.kind Store.Row_kind.Transport_failure
+           is_terminal_row row
+           && (Store.Role.equal row.role Store.Role.Request_failure
                || lifecycle_ends_run_error row))
         rows
     in
@@ -170,7 +171,7 @@ let assistant_text_mismatch ~reply_details rows =
   match reply_details with
   | None -> false
   | Some (details : Events.reply_details) ->
-    (match terminal_assistant_row rows with
+    (match terminal_result_row rows with
      | Some row -> not (String.equal row.content details.reply)
      | None -> String.equal (String.trim details.reply) "" |> not)
 ;;

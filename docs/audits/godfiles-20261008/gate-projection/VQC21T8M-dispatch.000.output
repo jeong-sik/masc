@@ -1,0 +1,6 @@
+ASSERT an approved filesystem_write is replayed
+ASSERT an approved tool_execute is replayed
+ASSERT an approved WebSearch/WebFetch network_read is replayed
+ASSERT an approved connector_post is host-replayed
+ASSERT memory_write is internal and never approval-replayed
+ASSERT an approved identity_call is host-replayed

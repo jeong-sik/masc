@@ -144,6 +144,7 @@ type report =
   }
 
 type purge_error =
+  | Repetition_boundary_invalid of string
   | Invalid_config of string
   | Invalid_input_structure of Keeper_transcript_unit.structural_error
   | Invalid_output_structure of Keeper_transcript_unit.structural_error
@@ -156,6 +157,7 @@ type purge_error =
   | Recovery_end_unwitnessed of { boundary_lines_seen : int }
 
 let purge_error_to_string = function
+  | Repetition_boundary_invalid detail -> "repetition boundary invalid: " ^ detail
   | Invalid_config detail -> "invalid config: " ^ detail
   | Invalid_input_structure structural ->
     Keeper_transcript_unit.show_structural_error structural
@@ -614,5 +616,12 @@ let purge
   with
   | Error error -> Error error
   | Ok (messages, report) ->
-    Ok ({ ckpt with Agent_core.Checkpoint.messages }, report)
+    if report.messages_dropped_at_structural_break = 0 then
+      Ok ({ ckpt with Agent_core.Checkpoint.messages }, report)
+    else
+      Result.map_error
+        (fun error -> Repetition_boundary_invalid (Keeper_repetition_judged.error_to_string error))
+        (Keeper_repetition_judged.reset_history ckpt.context)
+      |> Result.map (fun context ->
+           { ckpt with Agent_core.Checkpoint.messages; context }, report)
 ;;

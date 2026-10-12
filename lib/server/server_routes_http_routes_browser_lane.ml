@@ -20,7 +20,8 @@ module Http = Http_server_eio
 
 let lane_token_path () =
   Env_config_core.resolve_against_base_path
-    (Filename.concat Common.masc_dirname "browser-lane/token")
+    (List.fold_left Filename.concat Common.masc_dirname
+       [ Common.browser_lane_dirname; Common.browser_lane_token_name ])
 ;;
 
 let lane_token () =
@@ -117,8 +118,11 @@ let add_routes router =
            respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
          | Ok client_info -> (
            match Browser_lane.take_command ~client_info ~window_sec:25. with
-           | Error message ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
+           | Error refusal ->
+             (* The host reads this code to tell a connection the lane ended,
+                which it replaces, from a refusal it would only meet again. *)
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (error_json (Browser_lane.registration_refusal_to_wire refusal))
            | Ok None ->
              respond_json_value_with_cors request reqd (`Assoc [ ("ok", `Bool true); ("empty", `Bool true) ])
            | Ok (Some issued) ->

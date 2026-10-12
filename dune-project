@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.49.0)
+(version 0.50.0)
 
 ; Local-sandbox-only: vendor/ocaml-msx carries a copy of the pinned
 ; ocaml-msx package so sandboxes whose opam switch lacks the pin can still
@@ -13,7 +13,13 @@
 ; findlib names, so nothing changes for CI; the vendored directory stays
 ; uncommitted.
 (package
- (name ocaml-msx))
+ (name ocaml-msx)
+ ; vendor/ is gitignored, so in every committed tree this package owns no
+ ; stanzas. Without (allow_empty) the <pkg>.install validation that the
+ ; default alias demands fails and plain `dune build` stops repo-wide,
+ ; taking every public library and executable (browser_host included)
+ ; out of the default build.
+ (allow_empty))
 
 ; Format OCaml, and only OCaml. Nothing enforces formatting today:
 ; ocamlformat is disabled repo-wide (.ocamlformat, RFC-0010) and the

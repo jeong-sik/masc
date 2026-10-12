@@ -818,10 +818,10 @@ let completed_delegate_reply ~base_dir ~keeper_name ~delivery_key ~outcome_ref =
        let replies =
          List.filter_map
            (fun (message : Keeper_chat_store.chat_message) ->
-             match message.kind, message.delivery_provenance with
-             | Keeper_chat_store.Row_kind.Utterance,
+             match message.role, message.delivery_provenance with
+             | Keeper_chat_store.Role.Assistant,
                Some { Keeper_chat_delivery_identity.transcript_slot =
-                        Keeper_chat_delivery_identity.Terminal_assistant; delivery_key = observed_key }
+                        Keeper_chat_delivery_identity.Terminal_result; delivery_key = observed_key }
                when Keeper_chat_delivery_identity.delivery_key_equal delivery_key observed_key ->
                Some (`Assoc [ "message_id", `String message.id
                             ; "text", `String message.content

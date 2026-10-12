@@ -4,8 +4,13 @@
 
 type activity = Preparing | Awaiting_response | Receiving_response | Tool_observed | Failed
 
+type source_position = { generation : int; start_byte : int }
+(** Byte offsets in the text this writer's redactor actually released.
+    Attempts and full-text replacements create a new generation. *)
+
 type t =
-  { text_tail : string
+  { text_position : source_position
+  ; text_tail : string
         (** Last {!tail_bytes} of the newest response text, cut on a UTF-8
             boundary. [""] when the turn has produced no text yet. *)
   ; last_tool : string option
@@ -42,3 +47,6 @@ val note_attempt : writer:writer option -> now:float -> runtime_id:string -> uni
 val note_failure : writer:writer option -> now:float -> runtime_id:string -> string -> unit
 val note_stream : writer:writer option -> now:float -> Agent_core.Types.sse_event -> unit
 val status_text : t -> string
+
+val to_json : t -> Yojson.Safe.t
+(** The actual turns-route preview payload, including released-source position. *)

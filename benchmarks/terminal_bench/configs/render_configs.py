@@ -229,7 +229,7 @@ enabled = {fusion}
 # The lane declares no capabilities of its own: the catalog gate
 # (runtime.ml decide_capability_gate) resolves official-client models by
 # api-name against the embedded catalog, which already carries bare
-# claude-sonnet-5 / claude-opus-5 rows and the claude_code prefix row.
+# claude-sonnet-5 / claude-opus-5-5 rows and the claude_code prefix row.
 OFFICIAL_CLIENT_RUNTIME_TOML = """\
 [runtime]
 default = "{runtime_id}"
@@ -395,12 +395,12 @@ PROVIDERS = {
     # the provider catalog row carries the key env while the model rows carry
     # tools/reasoning (e.g. deepseek-v4-pro, kimi-k2.7-code). The default
     # binding rides the provider default out loud (reasoning-uncontrolled in
-    # the shipped bindings); without that line the first turn is refused as
-    # Reasoning_undeclared_on_auto_enabling_wire. thinking-control-format
-    # "none" is the request axis the shipped deepseek binding carries: without
-    # it the resolved reasoning_effort dialect cannot encode enable_thinking
-    # on this path and the turn is refused again. Models in effort_by_model
-    # instead take a categorical effort, mirroring the shipped binding that
+    # the shipped bindings); reasoning-capable models otherwise refuse the
+    # turn as Reasoning_undeclared_on_auto_enabling_wire. This stance sends no
+    # explicit thinking toggle: non-reasoning models cannot honor an enable.
+    # thinking-control-format "none" keeps the request axis uncontrolled.
+    # Models in effort_by_model instead take a categorical effort, mirroring
+    # the shipped binding that
     # carries it: deepseek-v4.1-flash runs effort low there, and on the bench
     # the uncontrolled default collapsed in reasoning on 6 of 6 trials while
     # low passed the same task (react-lead-form, reward 1.0). Extend only with
@@ -768,7 +768,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
                 f'reasoning-effort = "{effort}"\nthinking-support = true\n'
                 if pcfg.get("carries_effort") else ""
             ) + (
-                "reasoning-uncontrolled = true\nthinking-support = true\n"
+                "reasoning-uncontrolled = true\n"
                 if pcfg.get("reasoning_uncontrolled") else "")
             thinking_control_block = thinking_control
         return RUNTIME_MODEL_TOML.format(

@@ -10,7 +10,7 @@
 type turn_prompt_context =
   { turn_system_prompt : string
   ; dynamic_context : string
-  ; dynamic_context_for_tools : (Agent_core.Tool.t list -> string) option
+  ; dynamic_context_for_tools : (Keeper_request_tool_access.t -> string) option
   ; temporal_context : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; history_messages : Agent_core.Types.message list
@@ -27,10 +27,7 @@ type user_turn_record =
     checkpoint that already contains the exact current input, so replay does
     not append a duplicate. The distinction is typed, not inferred from text. *)
 
-type extra_system_context_assembly =
-  { extra_system_context : string option
-  ; blocks : (Prompt_block_id.t * string) list
-  }
+type extra_system_context_assembly = Keeper_context_assembly.t
 
 val sanitize_user_message : string -> string
 (** Normalize malformed UTF-8 before appending the complete user message to

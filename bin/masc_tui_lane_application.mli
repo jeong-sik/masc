@@ -18,6 +18,8 @@ val describe : tracking -> string
 
 type ticket
 type 'a reading
+val suspend : 'a reading -> 'a reading
+(** Retire a pending observation while preserving its last value. *)
 val empty : 'a reading
 val start : generation:int -> 'a reading -> ('a reading * ticket) option
 (** One read per explicit-action generation; starting does not clear a reading. *)

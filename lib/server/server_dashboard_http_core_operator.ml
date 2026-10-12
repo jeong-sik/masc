@@ -87,11 +87,8 @@ let operator_snapshot_publication_ref =
 ;;
 
 let install_operator_snapshot_invalidation generation =
-  invalidate_cached_surface operator_snapshot_cache;
-  operator_snapshot_cache.current <-
-    { (snapshot operator_snapshot_cache) with
-      json = invalidated_operator_snapshot_json ()
-    };
+  let json = invalidated_operator_snapshot_json () in
+  invalidate_cached_surface ~json operator_snapshot_cache;
   let publication =
     make_operator_snapshot_publication
       ~generation
@@ -244,12 +241,12 @@ let mark_operator_snapshot_error_if_current ~compute exn =
         if Int.equal publication.generation compute.generation
            && compute.sequence > publication.terminal_sequence
         then (
-          mark_cached_surface_error operator_snapshot_cache exn;
-          operator_snapshot_cache.current <-
-            { (snapshot operator_snapshot_cache) with
-              json = unavailable_operator_snapshot_json ()
-            ; last_success_unix = None
-            };
+          let json = unavailable_operator_snapshot_json () in
+          let last_error = Some (Printexc.to_string exn) in
+          let last_error_unix = Some (Unix.gettimeofday ()) in
+          update_cached_surface operator_snapshot_cache (fun current ->
+            { current with json; last_success_unix = None;
+              last_error; last_error_unix });
           let terminal =
             make_operator_snapshot_publication
               ~generation:compute.generation

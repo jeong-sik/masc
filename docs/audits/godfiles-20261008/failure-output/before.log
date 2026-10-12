@@ -1,0 +1,39 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/chat/primitives.test.ts -t 'keeps completed media visible'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/dashboard
+
+ ❯ src/components/chat/primitives.test.ts (169 tests | 1 failed | 168 skipped) 63ms
+   ❯ ChatTranscript (46)
+     × keeps completed media visible when failed history is reloaded 60ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/chat/primitives.test.ts > ChatTranscript > keeps completed media visible when failed history is reloaded
+AssertionError: expected undefined to be '/api/v1/media/retained-image' // Object.is equality
+
+- Expected:
+"/api/v1/media/retained-image"
+
++ Received:
+undefined
+
+ ❯ src/components/chat/primitives.test.ts:905:89
+    903|     expect(failure.getAttribute('data-chat-delivery-state')).toBe('tra…
+    904|     expect(failure.querySelector('[data-chat-failure-card]')).not.toBe…
+    905|     expect(failure.querySelector('[data-chat-block="image"] img')?.get…
+       |                                                                                         ^
+    906|     expect(failure.querySelector('[data-chat-block="voice"] audio')?.g…
+    907|     expect(failure.textContent).toContain('completed image');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 168 skipped (169)
+   Start at  19:32:51
+   Duration  6.17s (transform 32%, import 31%, environment 25%, setup 10%, tests 1%)
+
+ ELIFECYCLE  Test failed. See above for more details.

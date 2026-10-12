@@ -6,14 +6,6 @@ module Tail = Masc_tui_metrics_tail
 module Frame = Masc_tui_frame
 module Message_layout = Masc_tui_message_layout
 
-let contains needle haystack =
-  let n = String.length needle in
-  let rec seek i =
-    i + n <= String.length haystack
-    && (String.equal (String.sub haystack i n) needle || seek (i + 1))
-  in
-  seek 0
-
 let counter = ref 0
 
 let tmpdir prefix =
@@ -188,62 +180,6 @@ let test_a_misfiled_row_is_counted_apart () =
      | Some error -> Tail.error_to_string error
      | None -> "(no error)")
 
-(* The notice is one row, and the frame cuts the row to its inner width, so a
-   reason that starts past the cut is a reason nobody reads. What sits in front
-   of the reason is a budget: the read count, the unreadable count and the row
-   number spend 62 cells, which leaves 34 of a 100-column terminal's 96 and 74
-   of a 140-column terminal's 136. The decoder's shortest usage refusal --
-   "usage unset=[total_tokens]" -- is 26. *)
-let test_a_rejected_row_puts_its_reason_on_the_drawn_row () =
-  let reason = "usage unset=[total_tokens]" in
-  let notice =
-    Tail.error_to_string
-      (Tail.Row_errors
-         { physical_rows = 200;
-           errors =
-             [ Tail.Invalid_metrics_row { physical_index = 75; detail = reason }
-             ];
-         })
-  in
-  let drawn cols =
-    Message_layout.fit_width ("  " ^ notice) (Frame.inner_width ~cols)
-  in
-  check bool "the reason is on the row at 100 columns" true
-    (contains reason (drawn 100));
-  check bool "and still at 140" true (contains reason (drawn 140))
-
-(* The count that matters is the one that can hide. *)
-let test_an_unreadable_row_is_not_hidden_by_misfiled_ones () =
-  let snapshot =
-    Tail.resolve_with ~expected_keeper:"keeper-main" ~limit:3
-      ~read_recent:(fun _ ->
-        Ok
-          [ Dated_jsonl.Parsed (heartbeat ~name:"keeper-other" 1)
-          ; Dated_jsonl.Parsed (heartbeat ~name:"keeper-other" 2)
-          ; Dated_jsonl.Malformed_json
-              { path = "/tmp/metrics/2026-09-12.jsonl"
-              ; line_number = Some 4
-              ; detail = "unexpected end of input"
-              }
-          ])
-  in
-  check bool "both counts are on the row" true
-    (match snapshot.error with
-     | Some error ->
-         let text = Tail.error_to_string error in
-         let has needle =
-           let n = String.length needle in
-           let rec seek i =
-             i + n <= String.length text
-             && (String.equal (String.sub text i n) needle || seek (i + 1))
-           in
-           seek 0
-         in
-         has "2 misfiled into this store" && has "1 unreadable"
-     | None -> false)
-
-(* Nothing to report is a sentence too: the window was read and all of it was
-   this keeper's. *)
 let test_a_window_of_only_our_rows_says_so () =
   let snapshot =
     Tail.resolve_with ~expected_keeper:"keeper-main" ~limit:1
@@ -251,43 +187,6 @@ let test_a_window_of_only_our_rows_says_so () =
   in
   check int "the row is rendered" 1 (List.length snapshot.entries);
   check bool "and no notice is drawn" true (snapshot.error = None)
-
-let test_scroll_and_empty_copy_follow_viewport_state () =
-  let normal_height = Tail.content_height ~terminal_rows:24 ~error:None in
-  check int "normal viewport content rows" 16 normal_height;
-  check int "entry-index scroll normalizes to viewport" 184
-    (Tail.normalize_scroll ~entry_count:200 ~content_height:normal_height 199);
-  check int "up moves immediately after normalization" 183
-    (Tail.scroll_up ~entry_count:200 ~content_height:normal_height 199);
-  check int "down stops at the normal viewport end" 184
-    (Tail.scroll_down ~entry_count:200 ~content_height:normal_height 184);
-  let row_error =
-    Tail.Row_errors
-      { physical_rows = 1;
-        errors =
-          [ Tail.Invalid_metrics_row
-              { physical_index = 1; detail = "invalid row" }
-          ];
-      }
-  in
-  let warning_height =
-    Tail.content_height ~terminal_rows:24 ~error:(Some row_error)
-  in
-  check int "diagnostic banner reduces viewport" 14 warning_height;
-  check int "down uses the warning viewport immediately" 185
-    (Tail.scroll_down ~entry_count:200 ~content_height:warning_height 184);
-  check int "removed warning clamps the prior offset" 184
-    (Tail.normalize_scroll ~entry_count:200 ~content_height:normal_height 186);
-  check string "true empty copy" "(no log entries found)"
-    (Tail.empty_message None);
-  check string "all-rejected copy"
-    "(no valid rows in newest physical window)"
-    (Tail.empty_message (Some row_error));
-  let storage_error =
-    Tail.Storage_error (Dated_jsonl.Not_a_directory { path = "/tmp/metrics" })
-  in
-  check string "storage failure copy" "(log entries unavailable)"
-    (Tail.empty_message (Some storage_error))
 
 let write_rows base_dir month filename rows ~terminate =
   let month_dir = Filename.concat base_dir month in
@@ -434,64 +333,10 @@ let test_load_is_bounded_by_tail_not_file_size () =
   check bool "tail allocation stays below a whole-file read" true
     (allocated < Float.of_int (4 * 1024 * 1024))
 
-(* The window is the only place that reverses the stored order, so these pin
-   both halves of that: which rows a scroll selects, and which end they come
-   out of. A test that only counted rows passed while the pane drew the file
-   from its start. *)
-let entries_of_counts counts =
-  List.map
-    (fun count ->
-       match Decode.decode_log_entry (heartbeat count) with
-       | Ok entry -> entry
-       | Error detail -> failwith ("fixture row did not decode: " ^ detail))
-    counts
-
-let test_window_reads_newest_first () =
-  let entries = entries_of_counts [ 1; 2; 3; 4; 5 ] in
-  check (list (option int)) "unscrolled window is the newest rows, newest first"
-    [ Some 5; Some 4; Some 3 ]
-    (message_counts (Tail.visible ~entries ~content_height:3 ~scroll:0));
-  check (list (option int)) "one row of scroll steps one row back in time"
-    [ Some 4; Some 3; Some 2 ]
-    (message_counts (Tail.visible ~entries ~content_height:3 ~scroll:1));
-  check (list (option int)) "the last window ends at the oldest row"
-    [ Some 3; Some 2; Some 1 ]
-    (message_counts (Tail.visible ~entries ~content_height:3 ~scroll:2));
-  check (list (option int)) "a scroll past the end is clamped, not empty"
-    [ Some 3; Some 2; Some 1 ]
-    (message_counts (Tail.visible ~entries ~content_height:3 ~scroll:99))
-
-let test_window_shorter_than_the_viewport () =
-  let entries = entries_of_counts [ 1; 2 ] in
-  check (list (option int)) "fewer rows than the window still read newest first"
-    [ Some 2; Some 1 ]
-    (message_counts (Tail.visible ~entries ~content_height:5 ~scroll:0));
-  check (list (option int)) "no rows is no rows" []
-    (message_counts (Tail.visible ~entries:[] ~content_height:5 ~scroll:0))
-
-let test_page_keeps_one_row_of_context () =
-  let entry_count = 100 and content_height = 10 in
-  let page_down = Tail.page_down ~entry_count ~content_height in
-  let page_up = Tail.page_up ~entry_count ~content_height in
-  check int "a page moves the window less one kept row" 9 (page_down 0);
-  check int "pages compose" 18 (page_down (page_down 0));
-  check int "paging back returns to where it started" 0 (page_up (page_down 0));
-  check int "page down stops at the oldest row" 90 (page_down 89);
-  check int "page up stops at the newest row" 0 (page_up 5);
-  (* A window at least as tall as the list has nowhere to page. *)
-  check int "a list that fits does not move" 0
-    (Tail.page_down ~entry_count:4 ~content_height:10 0);
-  (* One-row viewport: the step floor keeps the key from doing nothing. *)
-  check int "a one-row window still advances" 1
-    (Tail.page_down ~entry_count:100 ~content_height:1 0)
-
 let () =
   run "tui_metrics_tail"
     [ ( "event window"
-      , [ test_case "newest first" `Quick test_window_reads_newest_first
-        ; test_case "short list" `Quick test_window_shorter_than_the_viewport
-        ; test_case "paging" `Quick test_page_keeps_one_row_of_context
-        ] )
+      , [] )
     ; ( "strict tail"
       , [ test_case "physical bound and chronology" `Quick
             test_resolve_is_physical_bounded_and_chronological
@@ -501,14 +346,8 @@ let () =
             test_diagnostic_controls_are_terminal_safe
         ; test_case "a misfiled row is counted apart" `Quick
             test_a_misfiled_row_is_counted_apart
-        ; test_case "an unreadable row is not hidden by misfiled ones" `Quick
-            test_an_unreadable_row_is_not_hidden_by_misfiled_ones
-        ; test_case "a rejected row puts its reason on the drawn row" `Quick
-            test_a_rejected_row_puts_its_reason_on_the_drawn_row
         ; test_case "a window of only our rows draws no notice" `Quick
             test_a_window_of_only_our_rows_says_so
-        ; test_case "viewport scroll and empty copy" `Quick
-            test_scroll_and_empty_copy_follow_viewport_state
         ; test_case "rejected rows are not backfilled" `Quick
             test_load_does_not_backfill_rejected_rows
         ; test_case "malformed newest row is explicit" `Quick

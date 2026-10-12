@@ -126,6 +126,22 @@ type approved_resolution_delivery =
   ; replay_outcome : resolution_replay_outcome option
   }
 
+type continuation_readiness =
+  | Continuation_waiting_for_replay
+  | Continuation_ready of string option
+(** [Continuation_ready None] is a rejection, which needs no replay or tool
+    name. An approved replay is ready with its tool name only after its grant
+    is consumed and its outcome is durable. Native instruction delivery has
+    a separate admission authority and may construct readiness without replay. *)
+
+val continuation_readiness_of_delivery :
+  approved_resolution_delivery -> continuation_readiness
+(** Pure projection of an already acquired approved delivery. *)
+
+type continuation_projection_result =
+  | Continuation_projection_recorded
+  | Continuation_projection_not_ready
+
 type grant_consumption =
   | Consumption_committed of Keeper_approval.Audit.receipt
   | Consumption_already_committed

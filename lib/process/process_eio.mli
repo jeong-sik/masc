@@ -60,19 +60,17 @@ val child_exit_grace_seconds : float
     it, whether because its call timed out, its caller raised, or the switch
     it runs under was cancelled.
 
-    On the cancellation path the wait is for the child to close the pipes
-    this side holds, since its exit status cannot be awaited there; a child
-    that hands a pipe to a grandchild is waited on until the grandchild lets
-    go too, or the grace runs out. A child given no pipe at all -- both
-    streams redirected to files -- gets no wait on that path.
+    When the owning switch is cancelled, cleanup preserves the full grace
+    even if the child closes its output pipes early or both outputs are
+    redirected to files. Pipe EOF alone does not establish child exit. The
+    switch's foreground process-group owner performs the final kill/reap.
 
     On the other path, once the grace has run out and the [SIGKILL] is sent,
     the wait for the exit status is bounded by the same number, and only
     happens while the owning switch is still on; a switch that was cancelled
     during the grace gets no wait, its release hook reaps the child. Every
-    way out of a stopped spawn is therefore bounded by two of these per
-    child; a pipeline stops its stages one after another, so its bound is
-    two per stage. *)
+    explicit await in this helper is bounded by this grace; a pipeline
+    requests cleanup for its stages in order. *)
 
 (** {1 Observability hook (#9632)} *)
 
@@ -196,7 +194,8 @@ val cwd_path : string option -> (Eio.Fs.dir_ty Eio.Path.t, string) result
            pass [Eio.Stdenv.fs] and reach anywhere, while a test harness
            passing [Eio.Stdenv.cwd] gets "Capabilities insufficient" outside
            its own root.
-           Ignored when falling back to Unix process execution.
+           Unix fallback applies the same initialized default when available;
+           without initialization, relative paths use the parent's directory.
     @since 2.45.0 *)
 val run_argv_with_status : ?timeout_sec:float -> ?env:string array -> ?cwd:string -> string list -> (Unix.process_status * string)
 
@@ -221,6 +220,12 @@ val run_argv_with_status_split :
 (** Everything either spawn path can fail with before a child process exists.
     The set is read from eio 1.3 and OCaml 5.5 sources; the implementation
     cites the lines. *)
+type cwd_error =
+  | Native_cwd_error of Unix.error
+  | Eio_cwd_error of Eio.Exn.err
+(** The backend's original directory error, without guessing an executable
+    failure from a directory that could not be opened. *)
+
 type spawn_refusal =
   | Empty_argv  (** No program to run. *)
   | Executable_not_found of string
@@ -247,11 +252,10 @@ type spawn_refusal =
           text. [detail] is that text, carried, not parsed. *)
   | Cwd_unavailable of
       { cwd : string
-      ; error : Eio.Fs.error
+      ; error : cwd_error
       }
-      (** Eio path only: the working directory the caller asked for could
-          not be opened before the fork ([Not_found], [Permission_denied]).
-          The Unix fallback ignores [?cwd], so it never reports this. *)
+      (** The requested directory could not be opened before spawn. Both
+          execution paths preserve the backend's directory error here. *)
 
 val spawn_refusal_to_string : spawn_refusal -> string
 

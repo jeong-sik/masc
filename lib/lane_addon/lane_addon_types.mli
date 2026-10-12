@@ -47,6 +47,8 @@ type resources = {
 val check_resources : resources -> (unit, string) result
 type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling
+type state_storage = Ephemeral | Persistent
+type tool_invocation = Direct | Host_context
 type package = {
   id : string;
   revision : string;
@@ -56,6 +58,11 @@ type package = {
   command : string list;
   directory : string;
   action_tool : string option;
+  state_storage : state_storage;
+  tool_invocation : tool_invocation;
+  exported_tools : string list;
+  (** Worker MCP tools explicitly published for this installation. Schemas come
+      from the connected worker; a manifest alone does not make a tool callable. *)
   outputs : output_ports;
   refresh_policy : refresh_policy;
   model_access : model_access;
@@ -64,6 +71,9 @@ type package = {
   skills_directory : Skill_resource_path.t option;
   resources : resources;
 }
+val validate_exported_tools : action_tool:string option -> string list -> (string list, string) result
+(** Validate exact names, exclude worker control ports, and canonicalize order. *)
+
 type phase = Attached | Observing | Failed of string | Detaching | Detached
 val evidence_to_json : evidence -> Yojson.Safe.t
 val evidence_of_json : Yojson.Safe.t -> (evidence, string) result

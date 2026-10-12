@@ -1,0 +1,99 @@
+{
+  "keeper_id": "synthetic-water-event-genealogy",
+  "trace_id": "authored-water-event-genealogy",
+  "absolute_turn": 0,
+  "keeper_instructions": "Select useful memory for the user's current request. Keep current-event evidence distinct from comparison material, and expose uncertainty without inventing missing facts.",
+  "experiment_provenance": {
+    "transition_origin": "authored_synthetic_production_api_transitions",
+    "model_discovered_lineage": false,
+    "scenario": "water_pump_event_genealogy",
+    "event_times": "Synthetic 2026-10-12 UTC; TRAIN9 on previous day",
+    "protocol_sha256": "823f15bfcc8064b4169cf9935132b038c3b4fd131384d80ef80b1782532138c4",
+    "lineage_representation": "A rename/replacement: typed journal edges. B branch and E notification: authored fact relationships, not typed revision edges."
+  },
+  "facts": [
+    {
+      "alias": "A",
+      "claim": "Synthetic record dated 2026-10-12 UTC. Incident W31, now work order NORTH-REPAIR, North plant production pump P4. At 10:00 owner Mina replaced the 08:00 restart instruction: keep P4 isolated until two pressure measurements 15 minutes apart pass. Reason: seal replacement exposed a second leak."
+    },
+    {
+      "alias": "B",
+      "claim": "Synthetic record dated 2026-10-12 UTC. W31 laboratory test branch, North test rig P4-L, owner Jun, 09:30. One visual inspection permits the test rig to run. The 10:00 production change explicitly leaves this test branch unchanged. The lab branch was opened to reproduce W31's leak without running production equipment. It shares W31 root, but has its own target and restart condition."
+    },
+    {
+      "alias": "C",
+      "claim": "Synthetic record dated 2026-10-12 UTC. Separate incident W32, North production pump P5, Mina, 10:05. Two pressure measurements 15 minutes apart are required before restart after a seal replacement. W32 opening record explicitly says this is a new incident, not continuation of W31."
+    },
+    {
+      "alias": "D",
+      "claim": "Synthetic record dated 2026-10-11 UTC. Completed drill TRAIN9, South training rig T2, Jun, previous day. Drill restart followed a visual inspection. It was a training procedure with no operational authority at North plant. Independent training event; not a W31 ancestor. Current retained record describes what the completed drill did, not a present restart order."
+    },
+    {
+      "alias": "E",
+      "claim": "Synthetic record dated 2026-10-12 UTC. W31 notification task, North plant, coordinator Ivo, 10:10. Notify the night shift after the second pressure measurement passes. This extends W31 without replacing its restart requirement. Explicit child of W31's 10:00 repair update; documents who must be notified and when."
+    },
+    {
+      "alias": "F",
+      "claim": "Synthetic record dated 2026-10-12 UTC. Separate invoice event BILL8, West office, Ivo, 10:10. Obtain two finance signatures before paying the pump supplier. No W31/W32 operational relationship; shared participant and supplier topic only."
+    }
+  ],
+  "old_a": "2026-10-12 08:00 UTC: Mina opens incident W31 under historical alias OLD-P4-STOP at North plant production pump P4 after a seal leak. Restart is allowed after one visual inspection. This is the original W31 production instruction.",
+  "renamed_a": "2026-10-12 09:00 UTC: Work order W31 is renamed NORTH-REPAIR. Mina confirms it is the same incident at North plant production pump P4; restart remains allowed after one visual inspection.",
+  "queries": [
+    {
+      "query_id": "Q1",
+      "query": "What restart condition governs OLD-P4-STOP now? Give only that condition."
+    },
+    {
+      "query_id": "Q2",
+      "query": "What permits W31's laboratory rig P4-L to run now? Give only its run condition."
+    },
+    {
+      "query_id": "Q3",
+      "query": "For W31 production, state the current restart condition and who must be notified afterward."
+    },
+    {
+      "query_id": "Q4",
+      "query": "What condition governs W32's pump P5 restart? Give only that condition."
+    },
+    {
+      "query_id": "Q5",
+      "query": "A teammate proposes using TRAIN9's visual-inspection procedure to restart W31 production P4. Evaluate that proposed transfer and identify W31's governing restart condition."
+    },
+    {
+      "query_id": "Q6",
+      "query": "W99 has no established restart procedure in this evidence. Draft owner questions using only W31 production and TRAIN9 as contrasting examples; do not apply either to W99."
+    },
+    {
+      "query_id": "Q7",
+      "query": "What restart rule is established here for W99? No supplied record links W99 to W31, W32 or TRAIN9."
+    },
+    {
+      "query_id": "Q8",
+      "query": "Prepare a handoff covering both W31 production P4 and its laboratory rig P4-L. State each restart condition separately, and discuss no other tasks."
+    },
+    {
+      "query_id": "Q9",
+      "query": "What about the North production pump repair?"
+    },
+    {
+      "query_id": "Q10",
+      "query": "By North production pump repair I mean W32/P5, not W31/P4. What permits restart? Give only that condition."
+    },
+    {
+      "query_id": "Q11",
+      "query": "A teammate claims every W31 restart procedure documented here requires two pressure measurements. Assess that claim against the supplied evidence."
+    }
+  ],
+  "experimental_spans": [
+    {
+      "before": "Useful contrast or analogy informs the current purpose, but belongs to another event, environment or scope. It must remain labeled as comparison, not current-event evidence.",
+      "after": "A specific contrast, analogy or counterexample helps answer the stated question, distinguish its alternatives or correct a stated assumption, while belonging to another event, environment or scope. Identify that contribution from the supplied purpose and evidence; shared topic or different scope alone is insufficient. It remains comparison, not evidence of the current event's state."
+    },
+    {
+      "before": "Distinguish retrieval value from authority to apply: another incident or environment can be useful comparison without establishing the state of this one.",
+      "after": "Distinguish retrieval value from authority to apply. Select comparison only when the supplied purpose and evidence establish a concrete contribution to answering this question; different scope alone does not make a candidate useful. Useful analogy or contradiction need not be explicitly requested, but do not invent a question or assumption to justify it. If no such contribution is established, choose not_needed; if missing source evidence could change that judgment, choose inspect_source. When the supplied purpose leaves the target event or branch unresolved, do not silently assume one referent or treat its alternatives as irrelevant. Keep the unresolved alternatives distinct; use inspect_source when missing evidence prevents a usefulness judgment. Shared wording or a shared event root does not establish authority across branches, and an explicitly documented continuation or replacement does not become a separate event merely because its name or wording changed."
+    }
+  ],
+  "planned_repetitions": 3
+}

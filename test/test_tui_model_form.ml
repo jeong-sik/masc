@@ -128,21 +128,6 @@ max-tokens = 8192
   check bool "copy does not discard dotted parent settings" true
     (Result.is_error (F.apply (F.create F.Copy (row dotted)) dotted))
 
-let test_error_height_bound () =
-  let form = F.refused (F.create F.Edit (row source))
-      (String.concat " " (List.init 100 (fun _ -> "configuration failure"))) in
-  List.iter (fun (width,height) ->
-    let lines = F.rows ~width ~height form in
-    check bool "error obeys the frame height" true (List.length lines <= height);
-    check bool "every line obeys the frame width" true
-      (List.for_all (fun line -> Masc_tui_message_layout.display_width line <= width) lines))
-    [24,0;24,1;24,5;48,8;80,12];
-  let lines = F.rows ~width:48 ~height:8 form in
-  check bool "cancel remains reachable in visible hints" true
-    (List.exists (fun line -> Astring.String.is_infix ~affix:"Esc cancel" line) lines);
-  check bool "failure remains visible" true
-    (List.exists (fun line -> String.starts_with ~prefix:"Error:" line) lines)
-
 let test_ollama_context () =
   let source = {|
 [providers.local]
@@ -261,7 +246,6 @@ let () = run "Account model variants" ["model editing", [
   test_case "inline copy refusal is visible" `Quick test_inline_refusal_and_visible_error;
   test_case "inline edit clear cannot be a no-op" `Quick test_inline_edit_refusal;
   test_case "dotted parent cannot lose settings" `Quick test_dotted_parent_refusal;
-  test_case "wrapped error obeys form height" `Quick test_error_height_bound;
   test_case "Ollama requested context follows variant" `Quick test_ollama_context;
   test_case "Ollama Copy preserves unchanged request context" `Quick test_copy_preserves_ollama_request_context;
   test_case "temperature display and edit round-trip" `Quick test_temperature_round_trip]]

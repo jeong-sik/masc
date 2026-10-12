@@ -252,6 +252,7 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_candle_gift", mutating_tool);
     ("masc_msx_load", mutating_tool);
     ("masc_msx_eject", mutating_tool);
+    ("masc_msx_export_disk", mutating_tool);
     ("masc_msx_save", mutating_tool);
     ("masc_msx_restore", mutating_tool);
     ("masc_msx_change_disk", mutating_tool);
@@ -266,6 +267,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_dos_peek", read_state_tool);
     ("masc_dos_load", mutating_tool);
     ("masc_dos_pass", play_machine_tool);
+    ("masc_play_room", play_machine_tool);
     ("masc_dos_save", mutating_tool);
     ("masc_dos_restore", mutating_tool);
     ("masc_dos_eject", mutating_tool);
@@ -548,6 +550,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_file_delete", keeper_shard_write);
     ("keeper_workspace_memory_read", keeper_shard_read);
     ("keeper_memory_search", keeper_shard_read);
+    ("keeper_memory_select", keeper_shard_read);
     ("keeper_memory_retract", keeper_shard_write);
     ("keeper_memory_write", keeper_shard_write);
     ("keeper_constitution_write", keeper_shard_write);

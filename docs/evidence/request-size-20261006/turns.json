@@ -1,0 +1,97 @@
+{
+ "turns": 1291,
+ "calls_per_turn": {
+  "p50": 1,
+  "p90": 23,
+  "p99": 80,
+  "max": 123
+ },
+ "turns_with_at_least_50_calls": 35,
+ "turns_with_at_least_100_calls": 3,
+ "longest": [
+  {
+   "keeper": "code-reviewer",
+   "turn": "3150#11",
+   "calls": 123,
+   "minutes": 31,
+   "last_call_tokens": 269658
+  },
+  {
+   "keeper": "indie-geek-blue",
+   "turn": "1677#8",
+   "calls": 122,
+   "minutes": 37,
+   "last_call_tokens": 159608
+  },
+  {
+   "keeper": "you-never-change",
+   "turn": "612#7",
+   "calls": 117,
+   "minutes": 64,
+   "last_call_tokens": 323573
+  },
+  {
+   "keeper": "tui-developer",
+   "turn": "1597#4",
+   "calls": 94,
+   "minutes": 69,
+   "last_call_tokens": 82624
+  },
+  {
+   "keeper": "code-reviewer",
+   "turn": "3141#8",
+   "calls": 93,
+   "minutes": 29,
+   "last_call_tokens": 188430
+  },
+  {
+   "keeper": "indie-geek-blue",
+   "turn": "1692#11",
+   "calls": 91,
+   "minutes": 20,
+   "last_call_tokens": 140232
+  },
+  {
+   "keeper": "indie-geek-blue",
+   "turn": "1678#8",
+   "calls": 90,
+   "minutes": 19,
+   "last_call_tokens": 176549
+  },
+  {
+   "keeper": "polisher",
+   "turn": "6236#2",
+   "calls": 87,
+   "minutes": 133,
+   "last_call_tokens": 77130
+  },
+  {
+   "keeper": "glossary-maniac",
+   "turn": "1876#6",
+   "calls": 85,
+   "minutes": 24,
+   "last_call_tokens": 162374
+  },
+  {
+   "keeper": "code-reviewer",
+   "turn": "3139#7",
+   "calls": 82,
+   "minutes": 52,
+   "last_call_tokens": 0
+  },
+  {
+   "keeper": "glossary-maniac",
+   "turn": "1881#9",
+   "calls": 82,
+   "minutes": 17,
+   "last_call_tokens": 137016
+  },
+  {
+   "keeper": "glossary-maniac",
+   "turn": "1877#7",
+   "calls": 81,
+   "minutes": 32,
+   "last_call_tokens": 135625
+  }
+ ]
+}

@@ -179,6 +179,56 @@ type failure =
           better, and always [None] for a sequence diagram, which has one
           shape. Nothing is redrawn: which way a graph reads is the author's. *)
 
+type label_source_range = {
+  start_byte : int;
+  end_byte : int;
+}
+
+type mapped_label = {
+  label_text : string;
+  source_ranges : label_source_range array;
+}
+
+val label_with_source_ranges : string -> mapped_label
+(** The parser's own label normalization with one original-input byte range per
+    resulting UTF-8 byte. Trimming and quote delimiters are excluded; the space
+    replacing a Mermaid [<br>] label break maps to the entire break tag.
+    A parser caller adds the raw label's statement/source offset. This primitive
+    does not yet attach label identities to a complete parsed diagram. *)
+
+type label_identity =
+  | Node_label of node_id
+  | Edge_label of int
+  | Group_label of int
+  | Participant_label of string
+  | Event_label of int
+  | Event_kind of int
+
+type sourced_label = {
+  identity : label_identity;
+  text : string;
+  ranges : label_source_range array;
+}
+
+type missing_label = { identity : label_identity; text : string }
+
+type source_mapping =
+  | Complete of sourced_label list
+  | Incomplete of { mapped : sourced_label list; missing : missing_label list }
+
+type parsed_with_sources = { diagram : diagram; source_mapping : source_mapping }
+
+val parse_with_source_labels : string -> (parsed_with_sources, failure) result
+(** Parse with parser-owned semantic label identities and absolute source byte
+    ranges. Edge/group/event indices are parsed occurrence indices, not canvas rows.
+    Ranges track source positions through normalization; canonical command
+    casing and aliases such as [and] to [else] need not have identical bytes.
+    The original [parse] result is unchanged. Consumers must handle [Incomplete]
+    explicitly: a missing map is not generated decoration or an absent label.
+    Tracing covers flowchart, sequence and state semantic labels. [Incomplete]
+    remains an explicit integrity boundary if an added or changed parser path
+    has not supplied a matching source map. *)
+
 val direction_word : direction -> string
 (** The header word for a direction, so a message can name one as the source
     writes it. [TD] for {!Top_down}, which a header may also spell [TB]. *)
@@ -190,3 +240,20 @@ val parse : string -> (diagram, failure) result
 val render : cols:int -> string -> (string list, failure) result
 (** {!parse}, then lay out and draw. Each row is at most [cols] cells and
     carries no trailing spaces; rows are not padded. *)
+
+
+type semantic_position = { identity : label_identity; byte : int }
+
+type rendered_with_sources = {
+  rendered_rows : string list;
+  rendered_positions : semantic_position option array array;
+  labels : source_mapping;
+}
+
+val render_with_source_labels : cols:int -> string -> (rendered_with_sources, failure) result
+(** The same drawing and refusal as {!render}, with a semantic label identity
+    and byte offset for every surviving label byte in each row. Generated
+    borders, padding and arrow heads carry [None]. Overwrites, nested drawing
+    placement and trailing-space removal apply to both glyphs and positions.
+    Compose positions through [labels] to recover original input ranges;
+    [Incomplete] must be handled explicitly, never as generated decoration. *)

@@ -50,6 +50,20 @@ val core_error_is_hard_quota : Agent_core.Error.t -> bool
 (** True only for the typed [PaymentRequired] and provider [HardQuota]
     constructors. Free-form messages and numeric status codes are ignored. *)
 
+val core_error_is_model_absent : Agent_core.Error.t -> bool
+(** [true] only for the typed model-absence constructors — an API-side
+    [Retry.NotFound] and a provider [Error.NotFound] — the same facts the
+    route already rotates as {!rotate_class}[ Model_unavailable].
+
+    Deliberately not classified here: a retirement announced only inside a
+    400 refusal body ([Api (InvalidRequest { reason = Unknown_invalid_request })] —
+    the live ollama-cloud shape "model was retired at ...", 2026-10-07 audit
+    F-02). That fact exists only in free-form provider prose; no
+    machine-readable signal names it, and prose is never matched. Such a
+    refusal is still permanent for the unchanged request — it stays out of
+    retry candidacy through [Agent_core.Error.is_retryable] — but it cannot be
+    typed as model-absent at this boundary. *)
+
 (** Why a different runtime is tried in the same turn. *)
 type rotate_class =
   | Auth_failed

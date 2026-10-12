@@ -60,7 +60,7 @@ let uuid_v7_mutex = Mutex.create ()
 
 let rec generate_uuid_v7_locked () =
   match uuid_v7_generator () with
-  | Some uuid -> Uuidm.to_string uuid
+  | Some uuid -> uuid
   | None ->
     (* RFC 9562 permits advancing the logical timestamp after exhausting the
        12-bit monotonic counter. This also prevents a backwards wall-clock
@@ -68,8 +68,10 @@ let rec generate_uuid_v7_locked () =
     uuid_v7_clock.advance ();
     generate_uuid_v7_locked ()
 
-let uuid_v7 () =
+let uuid_v7_value () =
   Mutex.protect uuid_v7_mutex generate_uuid_v7_locked
+
+let uuid_v7 () = Uuidm.to_string (uuid_v7_value ())
 
 let parse_uuid_v7 value =
   if String.length value <> 36

@@ -118,22 +118,26 @@ let valid_named name inventory =
 ;;
 
 let capability_surface
+      ?(lane_addon_exports = [])
       ?(tool_deny = [])
       ?(sandbox_profile = Masc.Keeper_types_profile.Docker)
       ?(skill_names = None)
       frozen
   =
   ignore (Masc_test_deps.init_unified_tool_registry ());
+  let tool_descriptors = Tool_descriptor.all_descriptors ()
+    @ List.map Masc.Keeper_lane_addon_descriptor.create lane_addon_exports in
   let global_skill_catalog, diagnostics =
-    Masc.Keeper_skill_catalog.of_snapshot frozen
+    Masc.Keeper_skill_catalog.of_snapshot ~descriptors:tool_descriptors frozen
   in
   check int "catalog diagnostics" 0 (List.length diagnostics);
-  Masc.Keeper_capability_surface.create
+  Masc.Keeper_capability_surface.create_with_descriptors
+    ~tool_descriptors
     ~tool_deny
     ~sandbox_profile
     ~skill_names
     ~global_skill_catalog
-    ~skill_inventory:(Inventory.of_snapshot frozen)
+    ~skill_inventory:(Inventory.of_snapshot ~descriptors:tool_descriptors frozen)
     ~task_skills:[]
 ;;
 
@@ -391,6 +395,111 @@ let active_capability_descriptor_ids surface =
     | Missing_configured_skill -> None)
 ;;
 
+
+let test_lane_addon_surface_binds_incarnation_and_deny () =
+  let module Surface = Masc.Keeper_capability_surface in
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen = snapshot config [ [] ] in
+  let tool = match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc [
+      "name", `String "machine_screen"; "description", `String "Read machine screen";
+      "inputSchema", `Assoc ["type", `String "object"; "properties", `Assoc []]]) with
+    | Ok tool -> tool | Error detail -> fail detail in
+  let export instance_id = Masc.Lane_addon_tool_export.create ~instance_id ~tool in
+  let first = export "first" in
+  let surface = capability_surface ~lane_addon_exports:[first] frozen in
+  let descriptor = match Surface.find_descriptor_by_name surface "machine_screen" with
+    | Some descriptor -> descriptor | None -> fail "attached export missing" in
+  check bool "exact descriptor is admitted" true (Surface.admits surface descriptor);
+  let forged = { descriptor with description = "forged" } in
+  check bool "same identity does not admit a forged descriptor" false (Surface.admits surface forged);
+  let denied = capability_surface ~lane_addon_exports:[first] ~tool_deny:["addon:machine_screen"] frozen in
+  check bool "denied export is not callable" true
+    (Surface.find_descriptor_by_name denied "machine_screen" = None);
+  check bool "denied export retains reason" true
+    (Surface.tool_row_availability_for_name denied "machine_screen" = Some Surface.Denied_by_profile);
+  let replacement = capability_surface ~lane_addon_exports:[export "replacement"] frozen in
+  check bool "replacement changes frozen surface digest" false
+    (String.equal (Surface.digest surface) (Surface.digest replacement));
+  check bool "replacement rejects previous descriptor" false (Surface.admits replacement descriptor);
+  check bool "no attachment leaves no callable name" true
+    (Surface.find_descriptor_by_name (capability_surface frozen) "machine_screen" = None)
+;;
+
+let test_composition_tracks_frozen_addon_authority () =
+  let module Catalog = Masc.Keeper_skill_catalog in
+  let module Surface = Masc.Keeper_capability_surface in
+  let module Selection = Masc.Keeper_task_skill_turn in
+  let module Plan = Masc.Keeper_tool_plan in
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let document = {|---
+name: machine-plan
+description: Read the attached machine.
+---
+```toml composition
+[[compositions]]
+name = "machine-plan"
+execution = "inline"
+[[compositions.nodes]]
+id = "screen"
+tool = "machine_screen"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+```
+|} in
+  let frozen = snapshot config [[candidate ~directory:"machine-plan" document]] in
+  let entry = List.hd (Snapshot.entries frozen) in
+  let reference = Snapshot.entry_reference entry in
+  let tool = match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc [
+    "name",`String "machine_screen"; "inputSchema",`Assoc ["type",`String "object"]]) with
+    | Ok tool -> tool | Error detail -> fail detail in
+  let descriptors instance = Tool_descriptor.all_descriptors () @
+    List.map (fun instance_id -> Masc.Keeper_lane_addon_descriptor.create
+      (Masc.Lane_addon_tool_export.create ~instance_id ~tool)) instance in
+  let unwrap = function Ok value -> value | Error error -> fail (Selection.error_to_string error) in
+  let selected = unwrap (Selection.resolve_for_task ~snapshot:frozen ~task_id:"task-1" [reference]) in
+  let project tool_descriptors tool_deny =
+    let catalog,_ = Catalog.of_snapshot ~descriptors:tool_descriptors frozen in
+    let selection = unwrap (Selection.with_descriptors ~descriptors:tool_descriptors ~snapshot:frozen selected) in
+    let surface = Surface.create_with_descriptors ~tool_descriptors ~tool_deny
+      ~sandbox_profile:Masc.Keeper_types_profile.Docker ~skill_names:None
+      ~global_skill_catalog:catalog ~skill_inventory:(Inventory.of_snapshot ~descriptors:tool_descriptors frozen)
+      ~task_skills:(Selection.skills selection) in
+    selection,surface in
+  let composition surface = match Catalog.composition_entries (Surface.skill_catalog surface) with
+    | [entry] -> entry | _ -> fail "attached composition missing" in
+  let no_tools = descriptors [] in
+  let _,absent = project no_tools [] in
+  check int "unattached composition is not executable" 0
+    (List.length (Catalog.composition_entries (Surface.skill_catalog absent)));
+  let first_descriptors = descriptors ["first"] in
+  let selection,first = project first_descriptors [] in
+  let first_plan = (composition first).plan in
+  let node = List.hd (Plan.nodes first_plan) in
+  let first_descriptor = match Plan.descriptor first_plan node.id with
+    | Some value -> value | None -> fail "plan lost its descriptor" in
+  check bool "composition uses admitted descriptor object" true (Surface.admits first first_descriptor);
+  check (list string) "exact Task provenance survives reprojection" ["task-1"]
+    (Selection.task_ids_for_reference selection reference);
+  let cached,_ = Catalog.of_snapshot ~descriptors:first_descriptors frozen in
+  let repeated = List.hd (Catalog.composition_entries cached) in
+  check bool "same frozen authority reuses its cached plan" true (repeated.plan == first_plan);
+  let _,denied = project first_descriptors ["addon:machine_screen"] in
+  check int "denied node withholds composition" 0
+    (List.length (Catalog.composition_entries (Surface.skill_catalog denied)));
+  let _,detached = project no_tools [] in
+  check int "same skill snapshot cannot retain detached composition" 0
+    (List.length (Catalog.composition_entries (Surface.skill_catalog detached)));
+  let _,replacement = project (descriptors ["replacement"]) [] in
+  let replacement_plan = (composition replacement).plan in
+  check bool "replacement plan cannot retain old descriptor" false
+    (Surface.admits replacement first_descriptor);
+  check bool "replacement has a new plan" false (replacement_plan == first_plan);
+  let _,first_again = project first_descriptors [] in
+  check bool "older frozen turn retains its original authority" true
+    (Surface.admits first_again first_descriptor)
+;;
 
 let test_operator_only_tool_is_in_inventory_and_search () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
@@ -1167,6 +1276,10 @@ let () =
             test_surface_digest_binds_exact_tool_input_schema
         ; test_case "surface digest binds exact Tool reference" `Quick
             test_surface_digest_binds_exact_tool_reference
+        ; test_case "Lane Add-on surface binds installation and deny" `Quick
+            test_lane_addon_surface_binds_incarnation_and_deny
+        ; test_case "composition follows frozen Add-on authority" `Quick
+            test_composition_tracks_frozen_addon_authority
         ; test_case "tool deny removes descriptors from surface" `Quick
             test_tool_deny_removes_descriptors_from_surface
         ; test_case "composition follows node tool admission" `Quick

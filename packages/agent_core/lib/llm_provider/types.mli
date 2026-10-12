@@ -515,6 +515,8 @@ type delta_usage =
   ; output_tokens : int option
   ; cache_creation_input_tokens : int option
   ; cache_read_input_tokens : int option
+  ; cost_usd : float option [@default None]
+    (** Optional provider-reported cumulative charge; zero is authoritative. *)
   }
 [@@deriving show, yojson]
 

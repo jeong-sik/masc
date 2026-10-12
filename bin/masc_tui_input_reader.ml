@@ -347,7 +347,7 @@ type input_event =
           terminal reported it. Only surfaces that map frame rows to their own
           rows consume one; everywhere else it is inert, like a wheel notch on
           a surface with nothing to scroll. *)
-  | Mouse_wheel of Masc.Tui_decode.wheel_direction * int * int
+  | Mouse_wheel of Masc.Tui_mouse_protocol.wheel_direction * int * int
       (** A wheel notch and the [(row, column)] it happened at. The loop
           gives a notch over the Activity pane to the pane and turns every
           other one into the [wheel-up] / [wheel-down] key the surfaces bind,

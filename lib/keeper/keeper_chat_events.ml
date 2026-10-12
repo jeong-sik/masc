@@ -37,6 +37,19 @@ type tool_stream_occurrence =
   ; block_index : int
   }
 
+type model_content_channel = Model_text | Model_thinking
+
+type model_content_state = Content_observed | Content_ended
+
+type model_content_activity =
+  { content_generation : int
+  ; content_scope : int
+  ; content_index : int
+  ; content_provider_message_id : string option
+  ; channel : model_content_channel
+  ; state : model_content_state
+  }
+
 type stream_protocol_error = {
   kind : stream_protocol_error_kind;
   quarantined_occurrence : tool_stream_occurrence option;
@@ -51,6 +64,7 @@ type reply_details =
   { reply : string
   ; turn_outcome : Keeper_turn_outcome.t
   ; turn_ref : Ids.Turn_ref.t
+  ; terminal_stream_scope : int option
   }
 
 type continuation_checkpoint =
@@ -68,7 +82,7 @@ type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
   | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
   | Text_message_start of { message_id : string; role : role }
-  | Text_delta of string
+  | Text_delta of { text : string; stream_scope : int option }
   | Text_message_end
   | External_effect_completed of
       { target : Keeper_surface_post.delivery_target }
@@ -82,12 +96,14 @@ type keeper_chat_event =
       ; attempt_index : int option
       }
   | Agent_core_stream_message_start of
-      { provider_message_id : string
+      { stream_scope : int
+      ; provider_message_id : string
       ; model : string
       ; usage : Agent_core.Types.api_usage option
       }
   | Agent_core_stream_message_delta of
-      { stop_reason : Agent_core.Types.stop_reason option
+      { stream_scope : int
+      ; stop_reason : Agent_core.Types.stop_reason option
       ; usage : Agent_core.Types.delta_usage option
       }
   | Agent_core_stream_message_stop
@@ -99,6 +115,7 @@ type keeper_chat_event =
       ; tool_call_name : string option
       }
   | Agent_core_content_block_stop of { index : int }
+  | Model_content_activity of model_content_activity
   | Agent_core_thinking_delta of { index : int; delta : string }
   | Agent_core_thinking_signature_delta of { index : int; signature_bytes : int }
   | Agent_core_media_delta of
@@ -132,7 +149,8 @@ type keeper_chat_event =
       ; tool_call_id : string option
       }
   | Native_tool_start of native_tool
-  | Native_tool_end of native_tool
+  | Native_tool_end of native_tool * Runtime_native_tools.completion
+  | Native_tool_progress of native_tool * Runtime_native_tools.progress
   | Tool_approval_requested of
       { tool_call_id : string
       ; tool_call_name : string
@@ -169,6 +187,46 @@ type keeper_chat_event =
       ; args_summary : string
       ; result_summary : string option
       }
+
+let redact_content ~redact_text = function
+  | Text_delta delta -> Text_delta {delta with text = redact_text delta.text}
+  | Event_error event -> Event_error {message=redact_text event.message}
+  | Reply_details event -> Reply_details {event with reply=redact_text event.reply}
+  | Continuation_checkpoint event ->
+      Continuation_checkpoint {event with message=redact_text event.message}
+  | Agent_core_thinking_delta event ->
+      Agent_core_thinking_delta {event with delta=redact_text event.delta}
+  | Agent_core_media_delta event ->
+      Agent_core_media_delta {event with media_ref=redact_text event.media_ref}
+  | Agent_core_stream_protocol_error event ->
+      Agent_core_stream_protocol_error {event with reason=Option.map redact_text event.reason;
+        event_type=Option.map redact_text event.event_type}
+  | Tool_call_args event -> Tool_call_args {event with delta=redact_text event.delta}
+  | Tool_call_args_snapshot event ->
+      Tool_call_args_snapshot {event with snapshot=redact_text event.snapshot}
+  | Native_tool_end (tool, completion) ->
+      Native_tool_end (tool, Runtime_native_tools.redact_completion redact_text completion)
+  | Native_tool_progress (tool, progress) ->
+      Native_tool_progress (tool, Runtime_native_tools.redact_progress redact_text progress)
+  | Tool_approval_requested event ->
+      Tool_approval_requested {event with args=redact_text event.args;
+        question=redact_text event.question; because=redact_text event.because}
+  | Link_block event -> Link_block {url=redact_text event.url; title=redact_text event.title;
+      description=Option.map redact_text event.description; image=Option.map redact_text event.image}
+  | Image_block event ->
+      Image_block {url=redact_text event.url; caption=Option.map redact_text event.caption}
+  | Audio_block event -> Audio_block {event with message_text=redact_text event.message_text}
+  | Tool_context_block event -> Tool_context_block {event with
+      args_summary=redact_text event.args_summary; result_summary=Option.map redact_text event.result_summary}
+  | (Run_started _ | Batch_bound _ | Text_message_start _ | Text_message_end
+    | External_effect_completed _ | Run_finished _ | Agent_core_stream_connected
+    | Agent_core_runtime_attempt_started _ | Agent_core_stream_message_start _
+    | Agent_core_stream_message_delta _ | Agent_core_stream_message_stop
+    | Agent_core_stream_ping | Agent_core_content_block_start _
+    | Agent_core_content_block_stop _ | Model_content_activity _
+    | Agent_core_thinking_signature_delta _ | Tool_call_start _ | Tool_call_end _
+    | Native_tool_start _ | Tool_approval_settled _ | Tool_result_ready _ | Status_block _) as event -> event
+;;
 
 type published =
   { seq : int
@@ -239,7 +297,7 @@ let create ?(first_seq = 0) ?(now = Time_compat.now) ?on_publish () =
    (Eio_unix.run_in_systhread when called from an Eio fiber), which suspends
    only the calling fiber — that keeps sibling fibers responsive but is not
    what makes the ordering safe. *)
-let publish t event =
+let publish_with_sequence t event =
   if t.closed
   then invalid_arg "Keeper_chat_events.publish: the turn's event bus is closed";
   let seq = t.next_seq in
@@ -263,11 +321,15 @@ let publish t event =
           "keeper_chat_events: on_publish hook failed seq=%d: %s"
           seq
           (Printexc.to_string exn)));
-  match t.reader with
+  (match t.reader with
   (* The hook above already recorded this event and the bus is only the live
      projection, so a departed reader costs the turn nothing from here. *)
   | Ended | Gone -> ()
-  | Reading -> Eio.Stream.add t.stream (Item { seq; ts; event })
+  | Reading -> Eio.Stream.add t.stream (Item { seq; ts; event }));
+  seq
+;;
+
+let publish t event = ignore (publish_with_sequence t event : int)
 ;;
 
 let close t =
@@ -354,8 +416,9 @@ let api_usage_to_json (usage : Agent_core.Types.api_usage) =
      @ json_opt "cost_usd"
          (Option.map (fun value -> `Float value) usage.cost_usd))
 
-(* Cumulative mid-stream counters: only the fields the delta actually
-   reported appear, so a reader can tell "not reported" from 0. *)
+(* Cumulative mid-stream counters and provider-reported charge: only fields
+   the delta actually reported appear, so "not reported" remains distinct from 0.
+   Non-finite charges are unavailable on live projections; never emit invalid JSON. *)
 let delta_usage_to_json (usage : Agent_core.Types.delta_usage) =
   `Assoc
     (json_opt "input_tokens" (Option.map (fun v -> `Int v) usage.input_tokens)
@@ -363,7 +426,10 @@ let delta_usage_to_json (usage : Agent_core.Types.delta_usage) =
     @ json_opt "cache_creation_input_tokens"
         (Option.map (fun v -> `Int v) usage.cache_creation_input_tokens)
     @ json_opt "cache_read_input_tokens"
-        (Option.map (fun v -> `Int v) usage.cache_read_input_tokens))
+        (Option.map (fun v -> `Int v) usage.cache_read_input_tokens)
+    @ json_opt "cost_usd"
+        (Option.bind usage.cost_usd (fun amount ->
+             if Float.is_finite amount then Some (`Float amount) else None)))
 
 (* One owner for the stop-reason word. The journal and the AGUI projection
    both write [Agent_core.Types.stop_reason_to_string]; re-exporting it here
@@ -474,3 +540,52 @@ let stream_protocol_error_to_json error =
     @ json_opt "raw_bytes" (Option.map (fun value -> `Int value) error.raw_bytes)
   in
   `Assoc fields
+
+let model_content_activity_to_json (activity : model_content_activity) =
+  `Assoc
+    ([ "generation", `Int activity.content_generation
+     ; "stream_scope", `Int activity.content_scope
+     ; "block_index", `Int activity.content_index
+     ; "channel", `String (match activity.channel with Model_text -> "text" | Model_thinking -> "thinking")
+     ; "state", `String (match activity.state with Content_observed -> "observed" | Content_ended -> "ended")
+     ] @ match activity.content_provider_message_id with
+       | None -> []
+       | Some id -> ["provider_message_id", `String id])
+;;
+
+let model_content_activity_of_json json =
+  let error detail = Error ("model content activity: " ^ detail) in
+  match json with
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    let allowed = ["generation"; "stream_scope"; "block_index"; "provider_message_id"; "channel"; "state"] in
+    if List.length (List.sort_uniq String.compare keys) <> List.length keys then
+      error "duplicate field"
+    else if List.exists (fun key -> not (List.mem key allowed)) keys then
+      error "unknown field"
+    else
+      let ( let* ) = Result.bind in
+      let index key = match List.assoc_opt key fields with
+        | Some json ->
+            (match Runtime_json_integer.of_json json with
+             | Ok value when value >= 0 -> Ok value
+             | Ok _ | Error _ -> error (key ^ " must be a nonnegative safe integer"))
+        | None -> error (key ^ " must be a nonnegative safe integer") in
+      let* content_generation = index "generation" in
+      let* stream_scope = index "stream_scope" in
+      let* block_index = index "block_index" in
+      let* provider_message_id = match List.assoc_opt "provider_message_id" fields with
+        | None -> Ok None
+        | Some (`String id) when String.trim id <> "" -> Ok (Some id)
+        | _ -> error "provider_message_id must be a nonblank string when present" in
+      let* channel = match List.assoc_opt "channel" fields with
+        | Some (`String "text") -> Ok Model_text
+        | Some (`String "thinking") -> Ok Model_thinking
+        | _ -> error "unknown channel" in
+      let* state = match List.assoc_opt "state" fields with
+        | Some (`String "observed") -> Ok Content_observed
+        | Some (`String "ended") -> Ok Content_ended
+        | _ -> error "unknown state" in
+      Ok {content_generation; content_scope=stream_scope; content_index=block_index; content_provider_message_id=provider_message_id; channel; state}
+  | _ -> error "expected object"
+;;

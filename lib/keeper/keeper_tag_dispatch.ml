@@ -130,23 +130,19 @@ let dispatch
         ~args
     | Mod_misc ->
       let candle operation = Some (Keeper_candle_tools.handle ~operation
-        ~base_path:config.base_path ~keeper_name ~tool_name:name ~start_time ~args) in
+        ~base_path:config.base_path ~keeper_name ~keeper_names:(Play_seat.keeper_names config)
+        ~tool_name:name ~start_time ~args) in
       (match
          Option.bind (Tool_schemas_misc.misc_operation_of_tool_name name)
            Keeper_candle_tools.operation_of_misc
        with
        | Some operation -> candle operation
        | None ->
-         let run () = Tool_misc.dispatch
+         Tool_misc.dispatch
            ~lane_access:(Lane_addon_sources.Keeper keeper_name)
-           { Tool_misc.config
-           ; agent_name
-           ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()
-           }
-           ~name ~args in
-         (match Keeper_dos_controller.execute ~config ~who:agent_name ~name ~args ~run with
-          | Ok result -> result
-          | Error refusal -> Some (Keeper_dos_controller.refusal_result ~tool_name:name refusal)))
+           { Tool_misc.config; agent_name;
+             help_schemas = Keeper_tool_descriptor.model_visible_schemas () }
+           ~name ~args)
     | Mod_library ->
       Tool_library.dispatch
         { Tool_library.base_path = config.base_path; agent_name }

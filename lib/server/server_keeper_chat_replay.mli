@@ -3,7 +3,6 @@
 
 val replay :
   redact_text:(string -> string) ->
-  redact_json:(Yojson.Safe.t -> Yojson.Safe.t) ->
   since_seq:Keeper_chat_event_log.replay_position ->
   Keeper_chat_event_log.journaled_event list ->
   (int * Ag_ui.event) list

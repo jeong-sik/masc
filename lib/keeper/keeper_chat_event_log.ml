@@ -50,32 +50,49 @@ let occurrence_to_json (o : tool_stream_occurrence) =
          (Option.map (fun value -> `String value) o.provider_message_id))
 ;;
 
-let occurrence_of_json json =
-  let open Yojson.Safe.Util in
-  try
-    Ok
-      { stream_scope = json |> member "stream_scope" |> to_int
-      ; provider_message_id = json |> member "provider_message_id" |> to_string_option
-      ; block_index = json |> member "block_index" |> to_int
-      }
-  with
-  | Type_error (message, _) -> Error ("tool_stream_occurrence: " ^ message)
+let object_fields ~label ?allowed = function
+  | `Assoc fields ->
+      let names = List.map fst fields in
+      if List.length names <> List.length (List.sort_uniq String.compare names)
+      then Error (label ^ ": duplicate field")
+      else (match allowed with
+        | Some names when List.exists (fun (name, _) -> not (List.mem name names)) fields ->
+            Error (label ^ ": unknown field")
+        | None | Some _ -> Ok fields)
+  | _ -> Error (label ^ ": expected object")
 ;;
 
-(* Decode-side companion for the occurrence nested inside
-   [stream_protocol_error_to_json], whose shape is the AG-UI wire shape
-   (camelCase) — the encoder is reused verbatim, so this decoder must match
-   it. *)
-let occurrence_of_wire_json json =
-  let open Yojson.Safe.Util in
-  try
-    Ok
-      { stream_scope = json |> member "toolStreamScope" |> to_int
-      ; provider_message_id = json |> member "providerMessageId" |> to_string_option
-      ; block_index = json |> member "toolCallBlockIndex" |> to_int
-      }
-  with
-  | Type_error (message, _) -> Error ("tool_stream_occurrence(wire): " ^ message)
+let optional_identity ~label name fields =
+  match List.assoc_opt name fields with
+  | None -> Ok None
+  | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+  | Some _ -> Error (label ^ ": " ^ name ^ " must be a non-empty string")
+;;
+
+let occurrence_of_fields ~scope ~index ~provider json =
+  let ( let* ) = Result.bind in
+  let label = "tool_stream_occurrence" in
+  let* fields = object_fields ~label ~allowed:[scope; index; provider] json in
+  let nonnegative name =
+    match List.assoc_opt name fields with
+    | None -> Error (label ^ ": missing " ^ name)
+    | Some json ->
+        let* value = Runtime_json_integer.of_json json in
+        if value >= 0 then Ok value else Error (label ^ ": negative " ^ name)
+  in
+  let* stream_scope = nonnegative scope in
+  let* block_index = nonnegative index in
+  let* provider_message_id = optional_identity ~label provider fields in
+  Ok { stream_scope; block_index; provider_message_id }
+;;
+
+let occurrence_of_json =
+  occurrence_of_fields ~scope:"stream_scope" ~index:"block_index" ~provider:"provider_message_id"
+;;
+
+(* Protocol errors use the wire occurrence encoder. Decode its exact names. *)
+let occurrence_of_wire_json =
+  occurrence_of_fields ~scope:"toolStreamScope" ~index:"toolCallBlockIndex" ~provider:"providerMessageId"
 ;;
 
 (* [api_usage_to_json] writes a derived [total_tokens]; decoding recomputes it
@@ -95,7 +112,7 @@ let api_usage_of_json json =
   | Type_error (message, _) -> Error ("api_usage: " ^ message)
 ;;
 
-let delta_usage_of_json json =
+let delta_usage_of_json json : (Agent_core.Types.delta_usage, string) result =
   let open Yojson.Safe.Util in
   try
     Ok
@@ -105,6 +122,7 @@ let delta_usage_of_json json =
           json |> member "cache_creation_input_tokens" |> to_int_option
       ; cache_read_input_tokens =
           json |> member "cache_read_input_tokens" |> to_int_option
+      ; cost_usd = json |> member "cost_usd" |> to_float_option
       }
   with
   | Type_error (message, _) -> Error ("delta_usage: " ^ message)
@@ -114,6 +132,21 @@ let opt_member json key decode =
   match Yojson.Safe.Util.member key json with
   | `Null -> Ok None
   | value -> Result.map (fun decoded -> Some decoded) (decode value)
+;;
+
+let stream_scope_of_json = function
+  | `Int scope when scope >= 0 -> Ok scope
+  | _ -> Error "stream scope must be a nonnegative integer"
+;;
+
+let optional_stream_scope json field =
+  match json with
+  | `Assoc fields ->
+      (match List.filter (fun (key, _) -> key = field) fields with
+       | [] -> Ok None
+       | [(_, value)] -> Result.map Option.some (stream_scope_of_json value)
+       | _ -> Error ("duplicate " ^ field))
+  | _ -> Error "stream scope requires an event object"
 ;;
 
 let stream_protocol_error_of_json json =
@@ -158,7 +191,8 @@ let keeper_chat_event_to_json event =
     type_tag
       "text_message_start"
       [ "message_id", `String message_id; "role", role_to_json role ]
-  | Text_delta delta -> type_tag "text_delta" [ "delta", `String delta ]
+  | Text_delta {text; stream_scope} -> type_tag "text_delta"
+      (["delta", `String text] @ json_opt "stream_scope" (Option.map (fun scope -> `Int scope) stream_scope))
   | Text_message_end -> type_tag "text_message_end" []
   | External_effect_completed { target } ->
     type_tag
@@ -166,13 +200,13 @@ let keeper_chat_event_to_json event =
       [ "target", Keeper_surface_post.delivery_target_to_yojson target ]
   | Run_finished { run_id } -> type_tag "run_finished" [ "run_id", `String run_id ]
   | Event_error { message } -> type_tag "event_error" [ "message", `String message ]
-  | Reply_details { reply; turn_outcome; turn_ref } ->
+  | Reply_details { reply; turn_outcome; turn_ref; terminal_stream_scope } ->
     type_tag
       "reply_details"
-      [ "reply", `String reply
+      ([ "reply", `String reply
       ; "turn_outcome", `String (Keeper_turn_outcome.to_label turn_outcome)
       ; "turn_ref", `String (Ids.Turn_ref.to_string turn_ref)
-      ]
+      ] @ json_opt "terminal_stream_scope" (Option.map (fun scope -> `Int scope) terminal_stream_scope))
   | Continuation_checkpoint { message; request_id } ->
     type_tag
       "continuation_checkpoint"
@@ -185,15 +219,16 @@ let keeper_chat_event_to_json event =
       (json_opt "runtime_id" (Option.map (fun value -> `String value) runtime_id)
        @ json_opt "attempt_index"
            (Option.map (fun value -> `Int value) attempt_index))
-  | Agent_core_stream_message_start { provider_message_id; model; usage } ->
+  | Agent_core_stream_message_start { stream_scope; provider_message_id; model; usage } ->
     type_tag
       "agent_core_stream_message_start"
-      ([ "provider_message_id", `String provider_message_id; "model", `String model ]
+      ([ "stream_scope", `Int stream_scope; "provider_message_id", `String provider_message_id; "model", `String model ]
        @ json_opt "usage" (Option.map api_usage_to_json usage))
-  | Agent_core_stream_message_delta { stop_reason; usage } ->
+  | Agent_core_stream_message_delta { stream_scope; stop_reason; usage } ->
     type_tag
       "agent_core_stream_message_delta"
-      (json_opt
+      (["stream_scope", `Int stream_scope]
+       @ json_opt
          "stop_reason"
          (Option.map
             (fun reason -> `String (Agent_core.Types.stop_reason_to_string reason))
@@ -210,6 +245,8 @@ let keeper_chat_event_to_json event =
        @ json_opt
            "tool_call_name"
            (Option.map (fun value -> `String value) tool_call_name))
+  | Model_content_activity activity ->
+    type_tag "model_content_activity" ["activity", model_content_activity_to_json activity]
   | Agent_core_content_block_stop { index } ->
     type_tag "agent_core_content_block_stop" [ "index", `Int index ]
   | Agent_core_thinking_delta { index; delta } ->
@@ -258,9 +295,16 @@ let keeper_chat_event_to_json event =
       ([ "occurrence", occurrence_to_json tool.occurrence ]
        @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
        @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
-  | Native_tool_end tool ->
+  | Native_tool_progress (tool, progress) ->
+    type_tag "native_tool_progress"
+      ([ "occurrence", occurrence_to_json tool.occurrence;
+         "progress", Runtime_native_tools.progress_to_json progress ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
+       @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
+  | Native_tool_end (tool, completion) ->
     type_tag "native_tool_end"
-      ([ "occurrence", occurrence_to_json tool.occurrence ]
+      ([ "occurrence", occurrence_to_json tool.occurrence;
+         "completion", Runtime_native_tools.completion_to_json completion ]
        @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
        @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
   | Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
@@ -322,6 +366,7 @@ let keeper_chat_event_of_json json =
   let open Yojson.Safe.Util in
   let ( let* ) = Result.bind in
   try
+    let* _ = object_fields ~label:"keeper_chat_event" json in
     let tag = json |> member "type" |> to_string in
     match tag with
     | "run_started" ->
@@ -335,7 +380,15 @@ let keeper_chat_event_of_json json =
       Ok
         (Text_message_start
            { message_id = json |> member "message_id" |> to_string; role })
-    | "text_delta" -> Ok (Text_delta (json |> member "delta" |> to_string))
+    | "text_delta" ->
+        let* stream_scope = match json with
+          | `Assoc fields ->
+              (match List.filter (fun (key, _) -> key = "stream_scope") fields with
+               | [] -> Ok None
+               | [_, `Int scope] when scope >= 0 -> Ok (Some scope)
+               | _ -> Error "text_delta.stream_scope must be one nonnegative integer")
+          | _ -> Error "text_delta must be an object" in
+        Ok (Text_delta {text=json |> member "delta" |> to_string; stream_scope})
     | "text_message_end" -> Ok Text_message_end
     | "external_effect_completed" ->
       let* target =
@@ -361,9 +414,10 @@ let keeper_chat_event_of_json json =
         | None ->
           Error (Printf.sprintf "reply_details: malformed turn_ref %S" turn_ref_raw)
       in
+      let* terminal_stream_scope = optional_stream_scope json "terminal_stream_scope" in
       Ok
         (Reply_details
-           { reply = json |> member "reply" |> to_string; turn_outcome; turn_ref })
+           { reply = json |> member "reply" |> to_string; turn_outcome; turn_ref; terminal_stream_scope })
     | "batch_bound" ->
       let* operation_id = Keeper_chat_operation.Operation_id.of_string (json |> member "operation_id" |> to_string) in
       let* execution_id = Keeper_chat_operation.Operation_id.of_string (json |> member "execution_id" |> to_string) in
@@ -383,7 +437,8 @@ let keeper_chat_event_of_json json =
       let* usage = opt_member json "usage" api_usage_of_json in
       Ok
         (Agent_core_stream_message_start
-           { provider_message_id = json |> member "provider_message_id" |> to_string
+           { stream_scope = json |> member "stream_scope" |> to_int
+           ; provider_message_id = json |> member "provider_message_id" |> to_string
            ; model = json |> member "model" |> to_string
            ; usage
            })
@@ -392,7 +447,8 @@ let keeper_chat_event_of_json json =
       let* usage = opt_member json "usage" delta_usage_of_json in
       Ok
         (Agent_core_stream_message_delta
-           { stop_reason =
+           { stream_scope = json |> member "stream_scope" |> to_int
+           ; stop_reason =
                Option.map Agent_core.Types.stop_reason_of_string stop_reason_raw
            ; usage
            })
@@ -406,6 +462,9 @@ let keeper_chat_event_of_json json =
            ; tool_call_id = json |> member "tool_call_id" |> to_string_option
            ; tool_call_name = json |> member "tool_call_name" |> to_string_option
            })
+    | "model_content_activity" ->
+      let* activity = model_content_activity_of_json (json |> member "activity") in
+      Ok (Model_content_activity activity)
     | "agent_core_content_block_stop" ->
       Ok (Agent_core_content_block_stop { index = json |> member "index" |> to_int })
     | "agent_core_thinking_delta" ->
@@ -470,15 +529,32 @@ let keeper_chat_event_of_json json =
            { occurrence
            ; tool_call_id = json |> member "tool_call_id" |> to_string_option
            })
-    | ("native_tool_start" | "native_tool_end") as tag ->
+    | ("native_tool_start" | "native_tool_end" | "native_tool_progress") as tag ->
+      let extra = match tag with
+        | "native_tool_start" -> []
+        | "native_tool_progress" -> ["progress"]
+        | _ -> ["completion"] in
+      let* fields = object_fields ~label:"native_tool"
+          ~allowed:(["type"; "occurrence"; "tool_call_id"; "tool_call_name"] @ extra) json in
       let* occurrence = occurrence_of_json (json |> member "occurrence") in
-      let tool =
-        { occurrence
-        ; tool_call_id = json |> member "tool_call_id" |> to_string_option
-        ; tool_call_name = json |> member "tool_call_name" |> to_string_option
-        }
-      in
-      Ok (if String.equal tag "native_tool_start" then Native_tool_start tool else Native_tool_end tool)
+      let* tool_call_id = optional_identity ~label:"native_tool" "tool_call_id" fields in
+      let* tool_call_name = optional_identity ~label:"native_tool" "tool_call_name" fields in
+      let tool = { occurrence; tool_call_id; tool_call_name } in
+      (match tag with
+      | "native_tool_start" -> Ok (Native_tool_start tool)
+      | "native_tool_progress" ->
+          let* progress = Runtime_native_tools.progress_of_json (json |> member "progress") in
+          Ok (Native_tool_progress (tool, progress))
+      | _ ->
+          (* Rows written before the writer kept a completion have none.
+             Whether the provider reported a status for them is not known, so
+             they read as completion_unrecorded, not as an end seen with no
+             status. object_fields above already rejects a duplicate member;
+             a malformed present completion is unreadable. *)
+          let* completion = match List.assoc_opt "completion" fields with
+            | None -> Ok Runtime_native_tools.completion_unrecorded
+            | Some value -> Runtime_native_tools.completion_of_json value in
+          Ok (Native_tool_end (tool, completion)))
     | "tool_approval_requested" ->
       Ok
         (Tool_approval_requested
@@ -589,7 +665,13 @@ let journaled_event_to_json { seq; ts; event } =
 
 let journaled_event_payload_of_json json =
   let open Yojson.Safe.Util in
+  let ( let* ) = Result.bind in
   try
+    let* _ = object_fields ~label:"journaled_event" ~allowed:["v"; "seq"; "ts"; "event"; "restart_settlement"] json in
+    let* seq = Runtime_json_integer.of_json (json |> member "seq") in
+    let* () = if seq >= 0 then Ok () else Error "journaled_event: negative seq" in
+    let ts = json |> member "ts" |> to_float in
+    let* () = if Float.is_finite ts then Ok () else Error "journaled_event: non-finite ts" in
     let version = json |> member "v" |> to_int in
     if version <> codec_version
     then
@@ -601,8 +683,8 @@ let journaled_event_payload_of_json json =
     else
       Result.map
         (fun event ->
-           { seq = json |> member "seq" |> to_int
-           ; ts = json |> member "ts" |> to_float
+           { seq
+           ; ts
            ; event
            })
         (keeper_chat_event_of_json (json |> member "event"))
@@ -701,6 +783,9 @@ let float_is_finite value =
 
 let event_floats_are_finite = function
   | Agent_core_stream_message_start
+      { usage = Some { Agent_core.Types.cost_usd = Some cost_usd; _ }; _ } ->
+    float_is_finite cost_usd
+  | Agent_core_stream_message_delta
       { usage = Some { Agent_core.Types.cost_usd = Some cost_usd; _ }; _ } ->
     float_is_finite cost_usd
   | Audio_block { duration_sec = Some duration_sec; _ } ->

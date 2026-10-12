@@ -14,6 +14,7 @@ type t =
   { retained_artifacts : Tool_output.artifact_ref list
   ; raw_output : string
   ; data : Yojson.Safe.t option
+  ; content_blocks : Llm_provider.Types.content_block list option
   ; metadata : Yojson.Safe.t option
   ; failure_effect_disposition : Tool_result.failure_effect_disposition
   ; disposition :
@@ -37,6 +38,7 @@ let success raw_output =
   { retained_artifacts = []
   ; raw_output
   ; data = None
+  ; content_blocks = None
   ; metadata = None
   ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
   ; disposition = Tool_result.Completed ()
@@ -51,6 +53,7 @@ let success_data ?metadata data =
   { retained_artifacts = []
   ; raw_output = Yojson.Safe.to_string data
   ; data = Some data
+  ; content_blocks = None
   ; metadata
   ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
   ; disposition = Tool_result.Completed ()
@@ -65,6 +68,7 @@ let deferred_data ?(effect_disposition = Tool_result.Effect_outcome_unknown) ?me
   { retained_artifacts = []
   ; raw_output = Yojson.Safe.to_string data
   ; data = Some data
+  ; content_blocks = None
   ; metadata
   ; failure_effect_disposition = effect_disposition
   ; disposition = Tool_result.Deferred ()
@@ -79,6 +83,7 @@ let deferred_external_effect_data ?approval_id ?(effect_disposition = Tool_resul
   { retained_artifacts = []
   ; raw_output = Yojson.Safe.to_string data
   ; data = Some data
+  ; content_blocks = None
   ; metadata
   ; failure_effect_disposition = effect_disposition
   ; disposition = Tool_result.Deferred ()
@@ -96,6 +101,7 @@ let failure
   { retained_artifacts = []
   ; raw_output
   ; data = None
+  ; content_blocks = None
   ; metadata = None
   ; failure_effect_disposition = effect_disposition
   ; disposition = Tool_result.Failed class_
@@ -116,6 +122,7 @@ let failure_data
   { retained_artifacts = []
   ; raw_output = message
   ; data = Some data
+  ; content_blocks = None
   ; metadata
   ; failure_effect_disposition = effect_disposition
   ; disposition = Tool_result.Failed class_
@@ -168,10 +175,11 @@ let of_tool_result
   let raw_output = Tool_result.message result in
   let data = Some (Tool_result.data result) in
   match result with
-  | Tool_result.Completed { metadata; _ } ->
+  | Tool_result.Completed { metadata; content_blocks; _ } ->
     { retained_artifacts = Tool_result.retained_artifacts result
     ; raw_output
     ; data
+    ; content_blocks
     ; metadata
     ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
     ; disposition = Tool_result.Completed ()
@@ -179,10 +187,11 @@ let of_tool_result
     ; terminal_effect_receipt = None
     ; file_change_evidence = None
     }
-  | Tool_result.Deferred { metadata; _ } ->
+  | Tool_result.Deferred { metadata; content_blocks; _ } ->
     { retained_artifacts = Tool_result.retained_artifacts result
     ; raw_output
     ; data
+    ; content_blocks
     ; metadata
     ; failure_effect_disposition
     ; disposition = Tool_result.Deferred ()
@@ -194,6 +203,7 @@ let of_tool_result
     { retained_artifacts = Tool_result.retained_artifacts result
     ; raw_output
     ; data
+    ; content_blocks = None
     ; metadata = Tool_result.metadata result
     ; failure_effect_disposition
     ; disposition = Tool_result.Failed class_

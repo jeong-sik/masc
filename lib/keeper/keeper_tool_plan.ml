@@ -1012,7 +1012,25 @@ let canonicalize_descriptors descriptors =
     | [] -> Ok (List.rev resolved)
     | (descriptor : Keeper_tool_descriptor.t) :: rest ->
       (match Hashtbl.find_opt registered_by_id descriptor.id with
-       | None -> Error (Unknown_descriptor_id descriptor.id)
+       | None ->
+         if not (Keeper_lane_addon_descriptor.is_canonical descriptor)
+         then Error (Unknown_descriptor_id descriptor.id)
+         else
+           let names = Keeper_tool_descriptor.registered_names descriptor in
+           let collision = Hashtbl.fold
+             (fun _ registered collision -> match collision with
+                | Some _ -> collision
+                | None -> List.find_opt
+                    (fun name -> List.mem name
+                       (Keeper_tool_descriptor.registered_names registered.descriptor))
+                    names)
+             registered_by_id None in
+           (match collision with
+            | Some name -> Error (Duplicate_tool_name name)
+            | None -> canonicalize
+                ({ descriptor
+                 ; model_names = Keeper_tool_descriptor.keeper_model_names descriptor
+                 } :: resolved) rest)
        | Some registered -> canonicalize (registered :: resolved) rest)
   in
   canonicalize [] descriptors

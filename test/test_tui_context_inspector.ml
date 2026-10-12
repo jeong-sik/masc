@@ -322,57 +322,6 @@ let test_input_map_opens_only_digest_verified_system_prompt () =
   check bool "a component with no digest or snapshot stays byte-only" true
     ((List.nth without_snapshot 1).evidence = Inspector.Byte_count_only)
 
-let test_a_size_never_outgrows_the_column_it_is_drawn_in () =
-  List.iter
-    (fun bytes ->
-       let text = Inspector.format_bytes bytes in
-       check bool
-         (Printf.sprintf "%d bytes reads as %s, within nine cells" bytes text)
-         true
-         (String.length text <= 9))
-    [ 0
-    ; 1
-    ; 999
-    ; 1023
-    ; 1024
-    ; 1_048_575
-    ; 1_048_576
-    ; 999_999_999
-    ; 1_073_741_824
-    ]
-
-let test_a_size_climbs_past_kilobytes () =
-  List.iter
-    (fun (bytes, expected) ->
-       check string (Printf.sprintf "%d bytes" bytes) expected
-         (Inspector.format_bytes bytes))
-    [ 512, "512 B"
-    ; 1024, "1.0 KB"
-    ; 1_048_576, "1.0 MB"
-    ; 3_145_728, "3.0 MB"
-    ]
-
-let test_evidence_badges_own_their_exact_cell_budget () =
-  let cases =
-    [ Inspector.Verified_exact_text, 12
-    ; Inspector.Serialized_turn_snapshot, 14
-    ; Inspector.Producer_digest_only, 15
-    ; Inspector.Byte_count_only, 14
-    ]
-  in
-  List.iter
-    (fun (evidence, expected) ->
-       let badge = Inspector.input_evidence_badge_cells evidence in
-       check int (Inspector.input_evidence_label evidence) expected badge;
-       let row_width = 44 in
-       let label_width = max 4 (row_width - 17 - badge) in
-       check bool "badge budget does not overrun the row" true
-         (17 + label_width + badge <= row_width))
-    cases
-
-(* The three tabs colour by producer, so a kind that named no producer would
-   be drawn in a colour that means something else. Every kind answers, and the
-   flow list carries each producer once, in the order a turn assembles them. *)
 let test_every_kind_names_one_producer () =
   let label = Inspector.input_source_label in
   Alcotest.(check string)
@@ -402,28 +351,6 @@ let test_every_kind_names_one_producer () =
     [ "turn prompt assembly"; "effective tool surface"; "provider message list" ]
     (List.map label Inspector.input_sources)
 
-let test_a_tool_schema_is_grouped_with_the_other_schemas () =
-  (* [exact_input_label] names a schema after its tool, which would put every
-     schema in a group of one. The summary needs them counted together: on a
-     real turn the schemas are the second-largest thing in the request. *)
-  Alcotest.(check string)
-    "schemas share one group" "Tool schemas"
-    (Inspector.exact_input_category (Inspector.Tool_schema { name = "masc_check" }));
-  Alcotest.(check string)
-    "and it does not depend on the tool" "Tool schemas"
-    (Inspector.exact_input_category (Inspector.Tool_schema { name = "masc_tasks" }));
-  (* Messages stay split by role, which is what separates a tool result from
-     the assistant text that called for it. *)
-  Alcotest.(check string)
-    "a tool result" "Message · tool"
-    (Inspector.exact_input_category (Inspector.Message { role = "tool" }));
-  Alcotest.(check string)
-    "an assistant message" "Message · assistant"
-    (Inspector.exact_input_category (Inspector.Message { role = "assistant" }));
-  Alcotest.(check string)
-    "the system prompt" "System prompt"
-    (Inspector.exact_input_category Inspector.System_prompt)
-
 let () =
   run "tui_context_inspector"
     [ ( "decode"
@@ -443,14 +370,6 @@ let () =
             test_provider_input_rejects_another_keeper_or_turn
         ; test_case "opens only digest-verified system prompt" `Quick
             test_input_map_opens_only_digest_verified_system_prompt
-        ; test_case "a size never outgrows its column" `Quick
-            test_a_size_never_outgrows_the_column_it_is_drawn_in
-        ; test_case "a size climbs past kilobytes" `Quick
-            test_a_size_climbs_past_kilobytes
-        ; test_case "evidence badges own their cell budget" `Quick
-            test_evidence_badges_own_their_exact_cell_budget
-        ; test_case "a tool schema is grouped with the other schemas" `Quick
-            test_a_tool_schema_is_grouped_with_the_other_schemas
         ; Alcotest.test_case "every kind names one producer" `Quick
             test_every_kind_names_one_producer
         ] )

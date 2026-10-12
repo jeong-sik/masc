@@ -498,13 +498,21 @@ let tool_help_index_header = "tool_help.index.header"
    the data. *)
 
 (* keeper.tool_filesystem.* — Keeper filesystem tool-result wording
-   (keeper_tool_filesystem_runtime.fs_guidance). *)
+   (Keeper_tool_filesystem_guidance.t). *)
 let keeper_tool_filesystem_offset_not_1_based =
   "keeper.tool_filesystem.offset_not_1_based"
 ;;
 
 let keeper_tool_filesystem_limit_not_positive =
   "keeper.tool_filesystem.limit_not_positive"
+;;
+
+let keeper_tool_filesystem_invalid_read_integer =
+  "keeper.tool_filesystem.invalid_read_integer"
+;;
+
+let keeper_tool_filesystem_invalid_read_arguments =
+  "keeper.tool_filesystem.invalid_read_arguments"
 ;;
 
 let keeper_tool_filesystem_available_cwds_partial =
@@ -685,6 +693,11 @@ let agent_core_agent_tool_prompt_param_description =
   "agent_core.agent_tool.prompt_param_description"
 ;;
 let keeper_context_workspace_memory_available = "keeper.context.workspace_memory.available"
+let keeper_context_workspace_memory_retrieval_direct = "keeper.context.workspace_memory.retrieval_direct"
+let keeper_context_workspace_memory_retrieval_discoverable = "keeper.context.workspace_memory.retrieval_discoverable"
+let keeper_context_workspace_memory_retrieval_unavailable = "keeper.context.workspace_memory.retrieval_unavailable"
+let keeper_context_workspace_memory_retrieval_preview = "keeper.context.workspace_memory.retrieval_preview"
+let keeper_context_workspace_memory_host_selected = "keeper.context.workspace_memory.host_selected"
 let keeper_context_workspace_memory_unavailable = "keeper.context.workspace_memory.unavailable"
 let keeper_context_workspace_memory_briefing_current = "keeper.context.workspace_memory.briefing_current"
 let keeper_context_workspace_memory_briefing_stale = "keeper.context.workspace_memory.briefing_stale"

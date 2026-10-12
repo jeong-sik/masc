@@ -1,0 +1,13 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/chat/primitives.test.ts -t 'keeps completed media visible'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/dashboard
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 168 skipped (169)
+   Start at  19:43:45
+   Duration  3.59s (transform 39%, environment 23%, setup 18%, import 18%, worker 1%, tests 1%)
+

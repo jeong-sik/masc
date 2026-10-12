@@ -20,6 +20,13 @@ val escape_invisible : string -> string
     reader would see of them. {!sanitize_terminal_text} and the Keeper chat
     boundary both route through here, so the rule lives in one place. *)
 
+val is_plain_scalar : int -> bool
+(** Printable ASCII and the Hangul syllables U+AC00-U+D7A3: scalars that
+    {!escape_invisible} copies without consulting Unicode properties because
+    none of them is default-ignorable, a variation selector, extended
+    pictographic or an emoji modifier. Exposed so a test can hold the set to
+    those four properties. *)
+
 val sanitize_terminal_text : string -> string
 (** Escape C0, DEL, raw C1 bytes, UTF-8 encoded C1 code points, malformed
     UTF-8 bytes, and the invisible code points {!escape_invisible} names, so
@@ -33,6 +40,22 @@ val sanitize_terminal_lines : string -> string
     other control byte -- a tab, a carriage return, an ESC -- is drawn as its
     visible escape rather than sent to the terminal or folded into a space.
     For a text read whole, where a reader must see what the bytes are. *)
+
+type mapped_text
+(** Immutable sanitized text with provenance for each emitted byte. *)
+
+val sanitize_terminal_lines_with_source : string -> mapped_text
+(** The same two-pass policy as {!sanitize_terminal_lines}. Copied bytes keep
+    exact original byte offsets; every byte in a visible escape maps to the
+    original byte/scalar start. LF keeps its original offset. *)
+
+val mapped_text : mapped_text -> string
+val source_byte_at : mapped_text -> int -> int option
+(** Original byte for an emitted byte. Out-of-range positions are absent. *)
+val output_byte_at_source : mapped_text -> int -> int option
+(** First emitted byte for this exact original position, or absent when the
+    position has no separate output byte (for example an escaped scalar's
+    continuation). No text matching or guessed neighbouring position. *)
 
 val preview_line : string -> string
 (** One row of a multi-line text for a list cell: each line break (LF, CR LF,

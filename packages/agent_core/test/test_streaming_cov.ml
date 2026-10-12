@@ -350,6 +350,7 @@ let test_finalize_with_usage () =
              ; output_tokens = Some 50
              ; cache_creation_input_tokens = None
              ; cache_read_input_tokens = None
+             ; cost_usd = None
              }
        });
   let resp = finalize_ok acc in

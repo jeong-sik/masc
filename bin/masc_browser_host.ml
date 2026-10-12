@@ -31,10 +31,12 @@ let leave_terminal () =
 let () =
   Log.init_from_env ();
   let base_path = ref None and server = ref None and token_file = ref None and bidi_url = ref None in
+  let firefox_profile = ref None in
   let positional = ref [] in
   let set target value = target := Some value in
   let options =
-    [ "--bidi-url", Arg.String (set bidi_url), "URL Attach to an explicitly enabled loopback Firefox BiDi endpoint"
+    [ Masc.Browser_bidi_host_status.bidi_url_flag, Arg.String (set bidi_url), "URL Attach to an explicitly enabled loopback Firefox BiDi endpoint"
+    ; Masc.Browser_bidi_host_status.firefox_profile_flag, Arg.String (set firefox_profile), "PATH With --bidi-url: end the session unless that Firefox runs this profile"
     ; "--base-path", Arg.String (set base_path), "PATH Workspace containing .masc (or MASC_BASE_PATH)"
     ; "--server", Arg.String (set server), "URL Fixed MASC HTTP server; without it the port comes from the workspace connection.toml, followed after a failed request only to an address that answers the lane"
     ; "--token-file", Arg.String (set token_file), "PATH Lane token (default: <base-path>/.masc/browser-lane/token)"
@@ -50,6 +52,12 @@ let () =
   in
   let result =
     if not arguments_valid then Error "unexpected native host arguments"
+    (* The profile is what a BiDi host checks its Firefox against; an
+       extension host given it would drop that check without a word. *)
+    else if Option.is_some !firefox_profile && Option.is_none !bidi_url then
+      Error
+        (Masc.Browser_bidi_host_status.firefox_profile_flag ^ " needs "
+         ^ Masc.Browser_bidi_host_status.bidi_url_flag)
     else if Sys.big_endian then Error "native host requires a little-endian platform"
     else
       let* config = Browser_host.resolve_config ~base_path:!base_path ~server:!server ~token_file:!token_file in
@@ -82,8 +90,10 @@ let () =
                   terminal may send its hangup twice, once from the kernel
                   and once from the shell, so a second one changes nothing. *)
                | Hangup -> if stderr_is_terminal then leave_terminal ()
-               (* Whoever sends SIGTERM again is not at a keyboard. *)
-               | Terminate -> ());
+               (* A second SIGTERM forces exit if graceful shutdown is stuck. *)
+               | Terminate ->
+                 if Atomic.get asked = None then Sys.set_signal number Sys.Signal_default
+                 else Unix._exit (128 + Sys.signal_to_int number));
               ignore (Atomic.compare_and_set asked None (Some signal) : bool);
               Eio.Condition.broadcast wake)) with
             (* Whoever started the host ignoring a signal decided that: nohup
@@ -92,7 +102,7 @@ let () =
             | Sys.Signal_ignore -> Sys.set_signal number Sys.Signal_ignore
             | Sys.Signal_default | Sys.Signal_handle _ -> ())
             [ Interrupt; Terminate; Hangup ];
-          Browser_host.run_bidi env config url
+          Browser_host.run_bidi env config url ~firefox_profile:!firefox_profile
             ~stop:(fun () ->
               let signal = Eio.Condition.loop_no_mutex wake (fun () -> Atomic.get asked) in
               Log.Transport.info "browser-host: %s received; %s" (signal_name signal)

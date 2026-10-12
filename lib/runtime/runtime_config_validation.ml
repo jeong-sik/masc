@@ -193,27 +193,3 @@ let validate_runtime_context_marks (runtimes : t list) : (unit, load_failure) re
   | Some failure -> Error failure
 ;;
 
-(* A Muse window too small for the host's own overhead leaves no start-prompt
-   ceiling ([muse_prompt_capacity]) and is
-   refused here rather than at its first turn. *)
-let validate_muse_prompt_ceilings (runtimes : t list) : (unit, load_failure) result =
-  match
-    List.find_map
-      (fun (r : t) ->
-         match r.provider.api_format with
-         | Muse_serve_runtime ->
-           (match muse_prompt_capacity r with
-            | Ok _ -> None
-            | Error (Runtime_muse_prompt_capacity.Window_below_host_overhead { max_context }) ->
-              Some (Muse_window_below_host_overhead { runtime_id = r.id; max_context })
-            (* A runtime with no resolved window fails
-               [validate_runtime_max_context] instead. *)
-            | Error Runtime_muse_prompt_capacity.No_window_declared -> None)
-         | Messages_api | Chat_completions_api | Ollama_api | Gemini_api
-         | Vertex_gemini_api | Codex_app_server_runtime | Antigravity_cli_runtime
-         | Claude_code_runtime -> None)
-      runtimes
-  with
-  | None -> Ok ()
-  | Some failure -> Error failure
-;;

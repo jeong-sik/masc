@@ -120,6 +120,14 @@ type review_result =
   ; retryable_runtimes : string list
         (** Actual candidates that reported a typed retryable error, in attempt
             order. The final diagnostic runtime does not own their retry time. *)
+  ; model_absent_runtimes : string list
+        (** Actual candidates whose typed refusal was model-absence
+            ({!Keeper_runtime_failure_route.core_error_is_model_absent}: a
+            typed [NotFound]), in attempt order. A retired or unknown model is
+            a permanent failure for the unchanged request: these candidates
+            are kept out of [retryable_runtimes] and named here so the
+            deferral records per-candidate outcomes, not only the last
+            candidate's error (2026-10-07 audit F-02). *)
   ; evaluator_error_retryable : bool option
   }
 
@@ -555,6 +563,7 @@ let run
       ; gate = Evaluator_unavailable
       ; fallback_reason = Some reason
       ; retryable_runtimes = []
+      ; model_absent_runtimes = []
       ; evaluator_error_retryable = None
       }
   | Ok [] ->
@@ -572,6 +581,7 @@ let run
       ; gate = Evaluator_unavailable
       ; fallback_reason = Some reason
       ; retryable_runtimes = []
+      ; model_absent_runtimes = []
       ; evaluator_error_retryable = None
       }
   | Ok (((first_slot, _) as first_candidate) :: rest_slots) ->
@@ -591,6 +601,7 @@ let run
          ; gate = Evaluator_unavailable
          ; fallback_reason = Some detail
          ; retryable_runtimes = []
+         ; model_absent_runtimes = []
          ; evaluator_error_retryable = None
          }
      | Ok prompt ->
@@ -620,9 +631,13 @@ let run
           fallback. The same aggregation includes typed failures from the
           runtime candidates inside each slot, while the slot's terminal error
           remains the operator-facing reason. A single-slot lane still reports
-          exactly what the pre-lane path reported. *)
+          exactly what the pre-lane path reported. Model-absence is classified
+          by the Domain A route, not by message text: a retired or unknown
+          model is permanent for the unchanged request, so it names the
+          deferral's permanent set and can never arm its retry. *)
        let run_attempt (slot, candidate_kind) =
          let retryable_runtimes = ref [] in
+         let model_absent_runtimes = ref [] in
          let attempt_observed = ref false in
          try
            let result =
@@ -639,12 +654,16 @@ let run
                ~on_runtime_attempt_error:
                  (fun ~runtime_id ~attempt:_ ~dispatch:_ error ->
                     attempt_observed := true;
+                    if Keeper_runtime_failure_route.core_error_is_model_absent error
+                       && not (List.mem runtime_id !model_absent_runtimes)
+                    then model_absent_runtimes := !model_absent_runtimes @ [ runtime_id ];
                     if Agent_core.Error.is_retryable error
+                       && not (Keeper_runtime_failure_route.core_error_is_model_absent error)
                        && not (List.mem runtime_id !retryable_runtimes)
-                    then retryable_runtimes := !retryable_runtimes @ [runtime_id])
+                    then retryable_runtimes := !retryable_runtimes @ [ runtime_id ])
                ()
            in
-           result, !retryable_runtimes, !attempt_observed
+           result, !retryable_runtimes, !model_absent_runtimes, !attempt_observed
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
@@ -653,14 +672,14 @@ let run
                   (Printf.sprintf
                      "review evaluator raised unexpectedly: %s"
                      (Printexc.to_string exn)))
-           , !retryable_runtimes, !attempt_observed )
+           , !retryable_runtimes, !model_absent_runtimes, !attempt_observed )
        in
        let append_unique left right =
          List.fold_left (fun ids id -> if List.mem id ids then ids else ids @ [id]) left right
        in
-       let rec attempt ~retryable_runtimes ((slot, _) as candidate) remaining =
+       let rec attempt ~retryable_runtimes ~model_absent_runtimes ((slot, _) as candidate) remaining =
          match run_attempt candidate with
-         | Ok {verdict=Some verdict;selected_runtime_id=slot}, _nested_retryable_runtimes, _ ->
+         | Ok {verdict=Some verdict;selected_runtime_id=slot}, _nested_retryable_runtimes, _, _ ->
            (match verdict with
             | Approve reason ->
               task_info
@@ -679,10 +698,12 @@ let run
              ; gate = Structured_tool
              ; fallback_reason = None
              ; retryable_runtimes = []
+             ; model_absent_runtimes = []
          ; evaluator_error_retryable = None
              }
-         | Ok {verdict=None;selected_runtime_id=slot}, nested_retryable_runtimes, _ ->
+         | Ok {verdict=None;selected_runtime_id=slot}, nested_retryable_runtimes, nested_model_absent, _ ->
            let retryable_runtimes = append_unique retryable_runtimes nested_retryable_runtimes in
+           let model_absent_runtimes = append_unique model_absent_runtimes nested_model_absent in
            let detail =
              "evaluator did not call report_review_verdict exactly once"
            in
@@ -696,7 +717,7 @@ let run
                 detail
                 slot
                 (fst next);
-              attempt ~retryable_runtimes next rest
+              attempt ~retryable_runtimes ~model_absent_runtimes next rest
             | [] ->
               task_warn "%s" detail;
               emit
@@ -706,19 +727,30 @@ let run
                 ; gate = Invalid_verdict
                 ; fallback_reason = Some detail
                 ; retryable_runtimes
+                ; model_absent_runtimes
                 ; evaluator_error_retryable =
                     (if retryable_runtimes <> []
                      then Some true
                      else None)
                 })
-         | Error error, nested_retryable_runtimes, attempt_observed ->
+         | Error error, nested_retryable_runtimes, nested_model_absent, attempt_observed ->
            let detail = Agent_core.Error.to_string error in
+           let slot_model_absent =
+             if Keeper_runtime_failure_route.core_error_is_model_absent error then [ slot ] else []
+           in
            let candidate_retries =
              append_unique nested_retryable_runtimes
-               (if not attempt_observed && Agent_core.Error.is_retryable error then [slot] else [])
+               (if not attempt_observed
+                   && Agent_core.Error.is_retryable error
+                   && slot_model_absent = []
+                then [ slot ]
+                else [])
            in
            let retryable = candidate_retries <> [] in
            let retryable_runtimes = append_unique retryable_runtimes candidate_retries in
+           let model_absent_runtimes =
+             append_unique model_absent_runtimes (append_unique nested_model_absent slot_model_absent)
+           in
            (Atomic.get outcome_observer_fn)
              ~outcome:"unavailable"
              ~runtime:slot;
@@ -732,6 +764,7 @@ let run
                 detail;
               attempt
                 ~retryable_runtimes
+                ~model_absent_runtimes
                 next
                 rest
             | [] ->
@@ -748,11 +781,12 @@ let run
                 ; gate = Evaluator_unavailable
                 ; fallback_reason = Some detail
                 ; retryable_runtimes
+                ; model_absent_runtimes
                 ; evaluator_error_retryable =
                     Some exhausted_retryable
                 })
        in
-       attempt ~retryable_runtimes:[] first_candidate rest_slots)
+       attempt ~retryable_runtimes:[] ~model_absent_runtimes:[] first_candidate rest_slots)
 ;;
 
 (* The Task lane: its own prompt variables, its own log subject. Everything

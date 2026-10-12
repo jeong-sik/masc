@@ -1,5 +1,9 @@
 module A = Masc.Keeper_external_attention
 
+let record ~base_path item =
+  A.For_testing.record_with_clock ~now:(fun () -> item.A.received_at) ~base_path item
+
+
 let rec remove_tree path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -105,7 +109,7 @@ let test_record_dedup_window_bounded () =
       ()
   in
   let record_exn it =
-    match A.record ~base_path it with
+    match record ~base_path it with
     | `Recorded -> ()
     | `Duplicate _ -> Alcotest.fail "unexpected duplicate while filling"
     | `Error d -> Alcotest.failf "record failed: %s" d
@@ -139,13 +143,13 @@ let test_record_dedup_window_bounded () =
        evidence_events);
   (* The oldest event has scrolled past the window: re-recording it is a
      fresh append, not a duplicate. *)
-  (match A.record ~base_path first with
+  (match record ~base_path first with
    | `Recorded -> ()
    | `Duplicate _ ->
        Alcotest.fail "event older than the dedup window was treated as duplicate"
    | `Error d -> Alcotest.failf "record failed: %s" d);
   (* A recent event is still inside the window and is deduped. *)
-  match A.record ~base_path !last_filler with
+  match record ~base_path !last_filler with
   | `Duplicate dup ->
       Alcotest.(check string) "recent duplicate still caught"
         !last_filler.A.event_id dup.A.event_id
@@ -155,11 +159,11 @@ let test_record_dedup_window_bounded () =
 let test_record_dedupes_and_reads_pending () =
   with_temp_base "keeper-external-attention-record" @@ fun base_path ->
   let att = item () in
-  (match A.record ~base_path att with
+  (match record ~base_path att with
   | `Recorded -> ()
   | `Duplicate _ -> Alcotest.fail "first record was duplicate"
   | `Error detail -> Alcotest.failf "record failed: %s" detail);
-  (match A.record ~base_path att with
+  (match record ~base_path att with
   | `Duplicate duplicate ->
       Alcotest.(check string) "duplicate event id" att.A.event_id
         duplicate.A.event_id
@@ -236,6 +240,257 @@ let test_discord_channel_and_thread_conversation_ids_stay_distinct () =
   Alcotest.(check bool) "distinct lane ids" true
     (channel.A.conversation_id <> thread.A.conversation_id)
 
+let test_admission_time_replaces_delayed_ingress () =
+  with_temp_base "keeper-external-admission" @@ fun base_path ->
+  let incoming = item ~received_at:10.0 () in
+  let admitted = A.For_testing.record_with_clock
+      ~now:(fun () -> 20.0) ~base_path incoming in
+  (match admitted with
+   | `Recorded -> ()
+   | `Duplicate _ -> Alcotest.fail "unexpected initial duplicate"
+   | `Error detail -> Alcotest.fail detail);
+  (match A.load_events_result ~base_path ~keeper_name:incoming.keeper_name with
+   | Ok [A.Recorded stored] ->
+     Alcotest.(check (float 0.0)) "persisted admission time" 20.0 stored.received_at
+   | Ok _ -> Alcotest.fail "expected one admitted row"
+   | Error error -> Alcotest.fail (A.read_error_to_string error));
+  (match Masc.Keeper_librarian_input_sources.counterpart_observations_between
+           ~base_dir:base_path ~keeper_name:incoming.keeper_name
+           ~after:(Some 15.0) ~before:25.0 with
+   | Ok observations ->
+     Alcotest.(check int) "delayed ingress belongs to the later unread interval"
+       1 (List.length observations)
+   | Error _ -> Alcotest.fail "counterpart read failed");
+  match A.For_testing.record_with_clock
+          ~now:(fun () -> Alcotest.fail "duplicate sampled a new admission time")
+          ~base_path incoming with
+  | `Duplicate existing ->
+    Alcotest.(check (float 0.0)) "duplicate keeps original admission" 20.0 existing.received_at
+  | `Recorded -> Alcotest.fail "redelivery appended a second row"
+  | `Error detail -> Alcotest.fail detail
+;;
+
+let test_admission_refuses_an_incomplete_log () =
+  with_temp_base "keeper-external-admission-torn" @@ fun base_path ->
+  let incoming = item () in
+  let path = A.attention_path ~base_path ~keeper_name:incoming.keeper_name in
+  write_file path "{\"event\":";
+  match A.For_testing.record_with_clock
+          ~now:(fun () -> Alcotest.fail "torn log sampled admission time")
+          ~base_path incoming with
+  | `Error _ ->
+    Alcotest.(check string) "torn log is unchanged" "{\"event\":"
+      (Fs_compat.load_file path)
+  | `Recorded | `Duplicate _ -> Alcotest.fail "torn log accepted admission"
+;;
+
+(* The production strict reader must wait across admission's timestamp-to-
+   append interval. Pipes pause the writer exactly inside its clock callback;
+   the reader uses another process, exercising the descriptor lock too. *)
+let test_strict_reader_waits_for_admission () =
+  with_temp_base "keeper-external-admission-lock" @@ fun base_path ->
+  let incoming = item ~received_at:10.0 () in
+  let ready_read, ready_write = Unix.pipe ~cloexec:true () in
+  let release_read, release_write = Unix.pipe ~cloexec:true () in
+  let signal fd = ignore (Unix.write_substring fd "x" 0 1 : int) in
+  let receive fd =
+    let byte = Bytes.create 1 in
+    if Unix.read fd byte 0 1 <> 1 then Alcotest.fail "child closed before signal"
+  in
+  let writer = match Unix.fork () with
+    | 0 ->
+      Unix.close ready_read;
+      Unix.close release_write;
+      (try
+         let now () =
+           signal ready_write;
+           receive release_read;
+           20.0
+         in
+         (match A.For_testing.record_with_clock ~now ~base_path incoming with
+          | `Recorded -> Unix._exit 0
+          | `Duplicate _ | `Error _ -> Unix._exit 3)
+       with _ -> Unix._exit 2)
+    | pid -> pid
+  in
+  Unix.close ready_write;
+  Unix.close release_read;
+  receive ready_read;
+  Unix.close ready_read;
+  let started_read, started_write = Unix.pipe ~cloexec:true () in
+  let result_read, result_write = Unix.pipe ~cloexec:true () in
+  let reader = match Unix.fork () with
+    | 0 ->
+      Unix.close release_write;
+      Unix.close started_read;
+      Unix.close result_read;
+      (try
+         signal started_write;
+         (match A.load_events_result ~base_path ~keeper_name:incoming.keeper_name with
+          | Ok [A.Recorded stored] when stored.received_at = 20.0 -> signal result_write
+          | Ok _ | Error _ -> Unix._exit 3);
+         Unix._exit 0
+       with _ -> Unix._exit 2)
+    | pid -> pid
+  in
+  Unix.close started_write;
+  Unix.close result_write;
+  let released = ref false in
+  let release () = if not !released then (released := true; signal release_write) in
+  Fun.protect
+    ~finally:(fun () ->
+      release ();
+      Unix.close release_write;
+      Unix.close started_read;
+      Unix.close result_read;
+      List.iter (fun pid ->
+        match Unix.waitpid [] pid with
+        | _, Unix.WEXITED 0 -> ()
+        | _ -> Alcotest.fail "admission lock fixture child failed") [writer; reader])
+    (fun () ->
+      receive started_read;
+      (* Like the existing private-JSONL writer/reader scenario, this short
+         interval observes exclusion; it is no production delay or deadline. *)
+      let readable, _, _ = Unix.select [result_read] [] [] 0.05 in
+      Alcotest.(check int) "no snapshot between admission time and append"
+        0 (List.length readable);
+      release ();
+      receive result_read)
+;;
+
+let test_tail_boundary_keeps_complete_row () =
+  with_temp_base "keeper-external-tail-boundary" @@ fun base_path ->
+  let path = Filename.concat base_path "tail.jsonl" in
+  let source = "old\nkept\nlast\n" in
+  write_file path source;
+  let read max_bytes expected =
+    match Fs_compat.update_private_file_tail_durable_locked_result path ~max_bytes
+      (fun rows -> None, rows) with
+    | Fs_compat.Private_file_succeeded rows ->
+      Alcotest.(check string) "tail contains exactly complete boundary rows" expected rows
+    | _ -> Alcotest.fail "tail transaction failed" in
+  read 10 "kept\nlast\n";
+  read 9 "last\n";
+  Alcotest.(check string) "read-only decision preserves log" source (Fs_compat.load_file path)
+;;
+
+let test_counterpart_cursor_survives_clock_rollback () =
+  with_temp_base "keeper-external-rollback" @@ fun base_path ->
+  let first = item ~dedupe_key:"first" ~received_at:50.0 () in
+  let second = item ~dedupe_key:"second" ~received_at:10.0 () in
+  let third = item ~dedupe_key:"third" ~received_at:10.0 () in
+  let append incoming = match record ~base_path incoming with
+    | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected duplicate"
+    | `Error detail -> Alcotest.fail detail in
+  let snapshot cursor after before =
+    match Masc.Keeper_librarian_input_sources.counterpart_observations_from
+      ~external_after:cursor ~base_dir:base_path ~keeper_name:first.keeper_name
+      ~after:(Some after) ~before with
+    | Ok answer -> answer
+    | Error error -> Alcotest.fail (Masc.Keeper_librarian_input_sources.read_error_to_string error) in
+  append first;
+  let observed, boundary = snapshot 0 0.0 50.0 in
+  Alcotest.(check int) "initial snapshot reads first row" 1 (List.length observed);
+  append second;
+  append third;
+  let later, through = snapshot boundary 50.0 10.0 in
+  Alcotest.(check int) "rollback and same-time admissions remain visible" 2 (List.length later);
+  let retried, _ = snapshot boundary 50.0 10.0 in
+  Alcotest.(check int) "unacknowledged failure replays the same rows" 2 (List.length retried);
+  let consumed, _ = snapshot through 50.0 10.0 in
+  Alcotest.(check int) "acknowledged admission cursor excludes old rows" 0 (List.length consumed)
+;;
+
+let external_previews observations =
+  List.map
+    (fun (observation : Masc.Keeper_counterpart_observation.t) -> observation.content)
+    observations
+
+let test_counterpart_cursor_keeps_admission_order () =
+  with_temp_base "keeper-external-admission-order" @@ fun base_path ->
+  let first = item ~dedupe_key:"first" ~preview:"first" ~received_at:40.0 () in
+  let second = item ~dedupe_key:"second" ~preview:"second" ~received_at:30.0 () in
+  List.iter (fun incoming -> match record ~base_path incoming with
+    | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected duplicate"
+    | `Error detail -> Alcotest.fail detail) [ first; second ];
+  match Masc.Keeper_librarian_input_sources.counterpart_observations_from
+    ~external_after:0 ~base_dir:base_path ~keeper_name:first.keeper_name
+    ~after:(Some 0.0) ~before:50.0 with
+  | Error error -> Alcotest.fail (Masc.Keeper_librarian_input_sources.read_error_to_string error)
+  | Ok (observed, through) ->
+    Alcotest.(check (list string)) "a clock rollback does not reorder admissions"
+      [ "first"; "second" ] (external_previews observed);
+    Alcotest.(check int) "both admissions are in the snapshot" 2 through
+;;
+
+let test_counterpart_cursor_stops_at_range_end () =
+  with_temp_base "keeper-external-range-end" @@ fun base_path ->
+  let earlier = item ~dedupe_key:"earlier" ~preview:"earlier" ~received_at:10.0 () in
+  let later = item ~dedupe_key:"later" ~preview:"later" ~received_at:30.0 () in
+  let rolled_back = item ~dedupe_key:"rolled-back" ~preview:"rolled-back" ~received_at:15.0 () in
+  List.iter (fun incoming -> match record ~base_path incoming with
+    | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected duplicate"
+    | `Error detail -> Alcotest.fail detail) [ earlier; later; rolled_back ];
+  let snapshot cursor after before =
+    match Masc.Keeper_librarian_input_sources.counterpart_observations_from
+      ~external_after:cursor ~base_dir:base_path ~keeper_name:earlier.keeper_name
+      ~after ~before with
+    | Ok (observed, through) -> external_previews observed, through
+    | Error error -> Alcotest.fail (Masc.Keeper_librarian_input_sources.read_error_to_string error) in
+  let first_range, first_through = snapshot 0 None 20.0 in
+  Alcotest.(check (list string)) "the first range keeps only its own admissions"
+    [ "earlier" ] first_range;
+  Alcotest.(check int) "the cursor stops before the later turn's admission" 1 first_through;
+  let second_range, second_through = snapshot first_through (Some 20.0) 40.0 in
+  Alcotest.(check (list string)) "the next range takes the held rows in admission order"
+    [ "later"; "rolled-back" ] second_range;
+  Alcotest.(check int) "the next range reaches the end of the log" 3 second_through
+;;
+
+let test_external_cursor_recovers_memory_receipt () =
+  with_temp_base "keeper-external-cursor-recovery" @@ fun base_path ->
+  let module Cursor = Masc.Keeper_external_read_cursor in
+  let module Current = Masc.Keeper_memory_os_current in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let runtime_keepers_dir = Filename.concat base_path "runtime" in
+  let memory_keepers_dir = Filename.concat base_path "memory" in
+  let keeper_name = "cursor-owner" in
+  let read () = Cursor.read ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name |> get in
+  let initial = read () in
+  Alcotest.(check int) "missing cursor replays rather than skips" 0 (Cursor.offset initial);
+  let range : Current.durable_range_id =
+    {receipt_scope=Filename.concat runtime_keepers_dir "continuity";
+     trace_id="cursor-trace";history_start_boundary_line=1;start_atom=0;end_atom=1;
+     last_atom_digest=String.make 64 'a';end_boundary_line=2;boundary_lines_seen=2} in
+  Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name initial ~through:2
+    ~atom:(Some range) ~official:None |> get;
+  Alcotest.(check int) "preparation without Memory commit does not consume" 0 (Cursor.offset (read ()));
+  ignore (Current.apply_disposition ~revisions:[] ~durable_range_id:range
+    ~absorbed:[] ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name ~now:1.
+    ~source:{kind=Current.Librarian;trace_id="cursor-trace"} ~new_claims:[] () |> get);
+  (* No acknowledge call: simulate interruption after the real Memory WAL
+     committed but before the external cursor and ordinary progress wrote. *)
+  Alcotest.(check int) "continuity-scoped Memory receipt recovers exact cursor" 2
+    (Cursor.offset (read ()));
+  (match Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name (read ())
+     ~through:3 ~atom:(Some range) ~official:None with
+   | Error _ -> ()
+   | Ok () -> Alcotest.fail "old committed range admitted a new external snapshot");
+  Alcotest.(check int) "reused receipt did not consume new rows" 2 (Cursor.offset (read ()));
+  let next = {range with end_atom=2;end_boundary_line=3;boundary_lines_seen=3} in
+  Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name (read ()) ~through:3
+    ~atom:(Some next) ~official:None |> get;
+  Alcotest.(check int) "older receipt cannot acknowledge newer source" 2 (Cursor.offset (read ()));
+  let path = Cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
+  let before = Fs_compat.load_file path in
+  Alcotest.(check bool) "preflight observes prepared cursor without consuming it" true
+    (Cursor.inspect ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name |> get);
+  Alcotest.(check string) "preflight never writes or acknowledges pending evidence" before (Fs_compat.load_file path);
+  Fs_compat.save_file path {|{"after":0}|};
+  (match Cursor.inspect ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name with
+   | Error _ -> () | Ok _ -> Alcotest.fail "malformed cursor passed deployment preflight")
+;;
+
 let () =
   Alcotest.run "keeper_external_attention"
     [
@@ -244,6 +499,22 @@ let () =
       );
       ( "store",
         [
+          Alcotest.test_case "external cursor recovers only its committed Memory receipt" `Quick
+            test_external_cursor_recovers_memory_receipt;
+          Alcotest.test_case "counterpart cursor keeps admission order" `Quick
+            test_counterpart_cursor_keeps_admission_order;
+          Alcotest.test_case "counterpart cursor stops at the range end" `Quick
+            test_counterpart_cursor_stops_at_range_end;
+          Alcotest.test_case "counterpart cursor survives clock rollback and equal timestamps" `Quick
+            test_counterpart_cursor_survives_clock_rollback;
+          Alcotest.test_case "tail boundary preserves a complete first row" `Quick
+            test_tail_boundary_keeps_complete_row;
+          Alcotest.test_case "strict reader waits for timestamped admission" `Quick
+            test_strict_reader_waits_for_admission;
+          Alcotest.test_case "admission resamples delayed ingress and preserves duplicates" `Quick
+            test_admission_time_replaces_delayed_ingress;
+          Alcotest.test_case "admission refuses a torn log" `Quick
+            test_admission_refuses_an_incomplete_log;
           Alcotest.test_case "record dedupes and reads pending" `Quick
             test_record_dedupes_and_reads_pending;
           Alcotest.test_case "record dedup window is bounded (F943)" `Quick

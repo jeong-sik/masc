@@ -100,3 +100,20 @@ type pending =
 
 val pending : t -> pending list
 (** Every wait currently open, oldest first. *)
+
+type outcome_totals =
+  { answered_total : int
+  ; timed_out_total : int
+  }
+(** Process-lifetime counts of how waits ended, for the health section's
+    timeout measurement (design D3). [answered] counts every wait an
+    operator decision released, including one settled as its timeout
+    passed; [timed_out] counts only waits the timer ended. Displacements
+    and cancellations are in neither — one is the registry refusing to
+    guess, the other is the owner leaving. *)
+
+val outcome_totals : t -> outcome_totals
+(** The running totals under the registry lock. Every [create] starts at
+    zero, so test registries measure only their own waits; per-process
+    counters restart with the process and are labelled as such where they
+    are surfaced. *)

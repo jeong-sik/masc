@@ -2039,6 +2039,15 @@ let reconcile_retraction_plan_receipt ~keepers_dir ~keeper_id ~snapshot =
                "retraction plan target snapshot has another source target_revision=%d"
                receipt.target_revision)
       in
+      (* The target bytes are about to become journal evidence. Confirm
+         their durability first, like the durable-range gate: finalizing
+         the journal and clearing the receipt must not precede the sync. *)
+      let* () =
+        Fs_compat.sync_file_and_parent_strict
+          (path_for_keepers_dir ~keepers_dir ~keeper_id)
+        |> Result.map_error (fun detail ->
+          "retraction target Memory snapshot durability is unconfirmed; stores preserved: " ^ detail)
+      in
       let journal_entry =
         Journal_committed
           { recorded_at = current.updated_at

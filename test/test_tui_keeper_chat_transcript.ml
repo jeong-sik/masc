@@ -1568,6 +1568,43 @@ let test_scoped_reasoning_retires_previous_response_metadata () =
   check bool "intermediate delayed content cannot erase newer usage" true
     ((Transcript.response_metadata t).usage=Some usage)
 
+let test_delayed_start_after_scoped_content_keeps_reasoning () =
+  let t = fresh () in
+  let activity scope = Live.Model_content_activity {
+    Masc.Keeper_chat_events.content_generation=0; content_scope=scope;
+    content_index=1; content_provider_message_id=None;
+    channel=Masc.Keeper_chat_events.Model_thinking;
+    state=Masc.Keeper_chat_events.Content_observed } in
+  feed t [Live.Run_started;
+    Live.Stream_model_started {stream_scope=Some 1;message_id=None;model="first";usage=None};
+    activity 1;
+    Live.Thinking "weighing";
+    activity 2;
+    Live.Stream_model_started {stream_scope=Some 2;message_id=None;model="second";usage=None}];
+  check (option string) "delayed start supplies its model" (Some "second")
+    (Transcript.response_metadata t).model;
+  check bool "adopted content keeps reasoning activity" true
+    (Transcript.model_activity t = Some Transcript.Activity_reasoning)
+
+let test_reset_worker_content_cannot_retire_newer_metadata () =
+  let t = fresh () in
+  let activity generation scope = Live.Model_content_activity {
+    Masc.Keeper_chat_events.content_generation=generation; content_scope=scope;
+    content_index=1; content_provider_message_id=None;
+    channel=Masc.Keeper_chat_events.Model_thinking;
+    state=Masc.Keeper_chat_events.Content_observed } in
+  let usage : Live.stream_usage = {input_tokens=Some 7; output_tokens=Some 9;
+    cache_read_input_tokens=None; cache_creation_input_tokens=None} in
+  feed t [Live.Run_started;
+    Live.Stream_model_started {stream_scope=Some 1;message_id=None;model="old";usage=None};
+    activity 1 1;
+    Live.Stream_model_started {stream_scope=Some 0;message_id=None;model="new";usage=Some usage};
+    activity 1 2];
+  check (option string) "older generation content keeps newer model" (Some "new")
+    (Transcript.response_metadata t).model;
+  check bool "older generation content keeps newer usage" true
+    ((Transcript.response_metadata t).usage=Some usage)
+
 let test_current_attempt_metadata_keeps_observed_activity () =
   let t = fresh () in
   feed t [Live.Run_started;
@@ -2553,6 +2590,10 @@ let () =
             test_runtime_attempt_restarts_the_per_attempt_totals
         ; test_case "scoped reasoning retires previous response metadata" `Quick
             test_scoped_reasoning_retires_previous_response_metadata
+        ; test_case "delayed start after scoped content keeps reasoning" `Quick
+            test_delayed_start_after_scoped_content_keeps_reasoning
+        ; test_case "reset worker content cannot retire newer metadata" `Quick
+            test_reset_worker_content_cannot_retire_newer_metadata
         ; test_case "runtime attempt keeps the earlier attempt superseded" `Quick
             test_runtime_attempt_keeps_the_earlier_attempt_superseded
         ; test_case "reply details is recorded, not drawn" `Quick

@@ -1404,15 +1404,28 @@ let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content
       if scope_order > 0 then begin
         (* A surviving scoped reasoning/content event can prove that prior
            response metadata no longer applies even if MessageStart and text
-           deltas were lost. It does not invent the missing model or usage. *)
-        let response_changed = match t.response_scope with
+           deltas were lost. It does not invent the missing model or usage.
+           The observed scope becomes the response boundary, so a delayed
+           start for it only fills metadata instead of splitting the
+           response. A boundary behind the content frontier belongs to a
+           worker that reset scope numbering: content from the older
+           generation must neither retire its metadata nor move it back. *)
+        let boundary_behind_content = match t.response_scope, t.content_scope with
+          | Some scope, Some (_, content_scope) -> scope < content_scope
+          | Some _, None | None, _ -> false in
+        let response_advanced = match t.response_scope with
           | Some scope -> activity.content_scope > scope
           | None -> false in
+        let response_changed = (not boundary_behind_content) && response_advanced in
         if response_changed then begin
           t.observed_model <- None;
           t.observed_usage <- None;
           t.observed_stop_reason <- None;
           t.stop_scope <- None
+        end;
+        if (not boundary_behind_content) && (response_changed || t.response_scope = None) then begin
+          t.response_scope <- Some activity.content_scope;
+          t.current_stream_scope <- Some activity.content_scope
         end;
         t.content_scope <- Some (activity.content_generation, activity.content_scope);
         t.content_scope_closed <- false;

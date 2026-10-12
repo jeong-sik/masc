@@ -918,6 +918,7 @@ type sent_request =
    whether demoting them would shorten the last request. *)
 type attempt_state =
   { last_request : sent_request option ref
+  ; request_range : Keeper_continuity_request.range option ref
   ; ledger : Keeper_model_input_ledger.t option ref
   ; current_turn_results : current_turn_results ref
         (* Read by every composition, so every request of a resent attempt
@@ -943,6 +944,7 @@ let ledger_session (ctx : try_provider_ctx) =
    table; its observation also replaces this candidate's working value. *)
 let new_attempt_state (ctx : try_provider_ctx) =
   { last_request = ref None
+  ; request_range = ref None
   ; ledger =
       ref
         (Keeper_model_input_ledger.Table.lookup
@@ -1460,6 +1462,7 @@ let bounded_model_input_projection
      answers; every response updates the working ledger even without usage. *)
   let cold_seed = lazy (ctx.carried_front_seed ()) in
   fun messages ->
+    state.request_range := None;
     let ( let* ) = Result.bind in
     let* () = match ctx.continuity with
       | None -> Ok ()
@@ -1779,9 +1782,23 @@ let bounded_model_input_projection
           ; digest_at = history_digest_at
           ; origin = view.composed.origin
           });
-    match ctx.model_input_projection with
-    | None -> Ok windowed
-    | Some inner -> inner windowed
+    let result = match ctx.model_input_projection with
+      | None -> Ok windowed
+      | Some inner -> inner windowed in
+    (match view.wire, result with
+     | Ok _, Ok projected ->
+       let changed = match ctx.model_input_projection with
+         | None -> false
+         | Some _ -> offload_model_input_cpu (fun () ->
+             not (List.equal Agent_core.Types.Message_value.equal windowed projected)) in
+       state.request_range := Some
+         { Keeper_continuity_request.origin = composed.origin
+         ; first_atom = composed.projection.Runtime_model_input_tail_window.dropped_atoms
+         ; total_atoms = history_atom_count
+         ; custom_projection_changed = changed
+         }
+     | Error _, (Ok _ | Error _) | Ok _, Error _ -> ());
+    result
 ;;
 
 let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (ctx : try_provider_ctx) candidate =
@@ -2004,6 +2021,20 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           ; pre_dispatch_serialization_observer =
               Some
                 (fun observation ->
+                   let range = !(state.request_range) in
+                   state.request_range := None;
+                   Option.iter (fun range ->
+                     let selection = match ctx.continuity with
+                       | Some (Summarized { snapshot; _ }) ->
+                         Keeper_continuity_request.Summarized snapshot
+                       | Some (Absorbed { trace_id; end_atom; _ }) ->
+                         Keeper_continuity_request.Absorbed { trace_id; end_atom }
+                       | Some Without_snapshot -> Keeper_continuity_request.Without_snapshot
+                       | None -> Keeper_continuity_request.Not_applied in
+                     Keeper_continuity_request.record_best_effort
+                       ~config:(Workspace.default_config ctx.base_path)
+                       ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
+                       ~selection ~range ~wire:observation) range;
                    let input = match ctx.continuity with
                      | Some (Summarized {snapshot; _}) ->
                        Keeper_continuity_observation.Summarized

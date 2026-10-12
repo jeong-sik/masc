@@ -245,8 +245,26 @@ let prune_shared_jsonl_stores ~prune_dir ~days ~masc_root =
 
 let startup_prune_jsonl (state : Mcp_server.server_state) =
   (try
-     let days =
-       Env_config_core.jsonl_retention_days ()
+     let base_path = (Mcp_server.workspace_config state).base_path in
+     let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
+     let config_path =
+       Filename.concat
+         resolution.Config_dir_resolver.config_root.Config_dir_resolver.path
+         Config_dir_resolver.runtime_toml_filename
+     in
+     let days, source, diagnostics =
+       Server_maintenance_toml_config.resolve_retention_days ~config_path
+     in
+     List.iter
+       (fun diagnostic ->
+          Log.Misc.warn "startup prune: ignoring runtime.toml [maintenance]: %s"
+            (Server_maintenance_toml_config.diagnostic_to_string diagnostic))
+       diagnostics;
+     let source_label =
+       match source with
+       | Server_maintenance_toml_config.Env -> "env"
+       | Server_maintenance_toml_config.Toml -> "runtime.toml"
+       | Server_maintenance_toml_config.Default -> "default"
      in
      let masc = Workspace.masc_dir (Mcp_server.workspace_config state) in
      let prune_dir dir =
@@ -258,8 +276,8 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
        prune_shared_jsonl_stores ~prune_dir ~days ~masc_root:masc
      in
      if total > 0 then
-         Log.Misc.info "startup prune: pruned %d old JSONL day-files (retention=%dd)"
-         total days
+         Log.Misc.info "startup prune: pruned %d old JSONL day-files (retention=%dd from %s)"
+         total days source_label
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn -> Log.Misc.warn "startup prune failed: %s (next boot retries; disk impact bounded by retention)" (Printexc.to_string exn))

@@ -9,6 +9,7 @@ type event_kind =
   | Pre_dispatch_blocked
   | Provider_lane_resolved
   | Context_injected
+  | History_projection_observed
   | Event_bus_correlated
   | Checkpoint_loaded
   | Checkpoint_saved

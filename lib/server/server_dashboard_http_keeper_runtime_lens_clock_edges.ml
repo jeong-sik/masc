@@ -75,6 +75,7 @@ let event_started_at (row : manifest_row) =
   | Keeper_runtime_manifest.Runtime_execution_built
   | Keeper_runtime_manifest.Provider_lane_resolved
   | Keeper_runtime_manifest.Context_injected
+  | Keeper_runtime_manifest.History_projection_observed
   | Keeper_runtime_manifest.Event_bus_correlated
   | Keeper_runtime_manifest.Checkpoint_loaded ->
     Some row.Keeper_runtime_manifest.ts
@@ -101,6 +102,7 @@ let event_finished_at (row : manifest_row) =
   | Keeper_runtime_manifest.Runtime_execution_built
   | Keeper_runtime_manifest.Provider_lane_resolved
   | Keeper_runtime_manifest.Context_injected
+  | Keeper_runtime_manifest.History_projection_observed
   | Keeper_runtime_manifest.Event_bus_correlated
   | Keeper_runtime_manifest.Checkpoint_loaded ->
     None

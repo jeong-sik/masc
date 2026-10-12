@@ -648,10 +648,11 @@ def acknowledge(disposition="started"):
     if disposition == "started":
         notify("turn/started", {"sessionId": SESSION, "turnId": turn_id,
                                 "commandId": turn_id})
-        if mode == "start" and "start_compaction" in FIXTURE:
+        if mode == "start" and ("start_compaction" in FIXTURE or "compaction_metadata" in FIXTURE):
+            metadata = FIXTURE.get("compaction_metadata", {
+                "trigger": "auto", "outcome": FIXTURE.get("start_compaction")})
             item("item/completed", {"itemId": "compact-1", "kind": "compaction",
-                 "turnId": turn_id, "status": "completed", "revision": 1,
-                 "trigger": "auto", "outcome": FIXTURE["start_compaction"]})
+                 "turnId": turn_id, "status": "completed", "revision": 1, **metadata})
         if "subscription_usage" in FIXTURE and not FIXTURE.get("suppress_turn_usage_notification"):
             notify("usage/changed", FIXTURE["subscription_usage"])
         # One session/tokenUsage per model call; null names no model.
@@ -849,7 +850,7 @@ type observed_run =
 
 (* [on_stream_event] sees each Keeper stream event as it is emitted;
    [on_transmitted] sees the transmission report after it is recorded. *)
-let run_turn_with ?composed_context ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary ?on_tool_execution
+let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary ?on_tool_execution
     ?(admission_timeout_s = 20.) ?(idle_timeout_s = 20.)
     ?(on_stream_event = fun (_ : Agent_core.Types.sse_event) -> ())
     ?(on_transmitted = fun (_ : Keeper_official_client_host.transmitted_model_input) -> ())
@@ -903,7 +904,7 @@ let run_turn_with ?composed_context ?goal_blocks ?(accepts_image_input = false) 
       ~on_usage_report:(fun report -> reports := report :: !reports; on_usage report)
       ?on_tool_execution
       ~event_bus:None
-      ~raw_trace:None
+      ~raw_trace
       ~on_event:
         (Some
            (fun event ->
@@ -2024,6 +2025,87 @@ let test_hook_nudges_bind_the_session_but_carried_context_does_not () =
        |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
 ;;
 
+let test_native_compaction_metadata_reaches_request_trace () =
+  List.iter (fun (name, metadata, trigger, outcome, before, after) ->
+    with_scripted_host ~fixture:["compaction_metadata", `Assoc
+      (("reason", `String "PRIVATE_COMPACTION_REASON") :: metadata)] (fun ~base_path ->
+      let path = Filename.concat base_path "compaction-trace.jsonl" in
+      let raw_trace = match Agent_core.Raw_trace.create ~path ~session_id:"compaction-fixture" () with
+        | Ok sink -> sink | Error error -> fail (Agent_core.Error.to_string error) in
+      let run = run_turn_with ~raw_trace ~base_path ~tool:(masc_probe_tool (ref `Null)) () in
+      (match run.outcome.result with
+       | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+      let records = match Agent_core.Raw_trace.read_all ~path () with
+        | Ok rows -> rows | Error error -> fail (Agent_core.Error.to_string error) in
+      let compacted = List.filter (fun (row : Agent_core.Raw_trace.record) ->
+        row.hook_name = Some "muse_compaction") records in
+      check int (name ^ " is recorded once") 1 (List.length compacted);
+      let row = List.hd compacted in
+      check bool "compaction shares the completed request run" true
+        (List.exists (fun (other : Agent_core.Raw_trace.record) ->
+          other.worker_run_id = row.worker_run_id
+          && other.record_type = Agent_core.Raw_trace.Run_finished) records);
+      let detail = Yojson.Safe.from_string (Option.get row.hook_detail) in
+      let open Yojson.Safe.Util in
+      check (list string) "closed metadata fields exclude free-form bodies"
+        (List.sort String.compare ["schema";"source";"runtime_id";"phase";"evidence";
+          "trigger";"outcome";"tokens_before";"tokens_after"])
+        (detail |> to_assoc |> List.map fst |> List.sort String.compare);
+      check string "typed event source" "runtime_muse_serve.compaction_observed"
+        (member "source" detail |> to_string);
+      check string "versioned metadata schema" "masc.muse-compaction-observation.v1"
+        (member "schema" detail |> to_string);
+      check string "actual runtime identity" runtime_id (member "runtime_id" detail |> to_string);
+      check string "native item completion is the observation phase" "native_item_completed"
+        (member "phase" detail |> to_string);
+      check string "provider report is not independently measured tokens" "provider_reported_metadata"
+        (member "evidence" detail |> to_string);
+      List.iter (fun (key, expected) -> check bool (name ^ " " ^ key) true (member key detail = expected))
+        ["trigger",trigger;"outcome",outcome;"tokens_before",before;"tokens_after",after];
+      check bool "free-form reason never enters raw trace" false
+        (String_util.contains_substring (read_text path) "PRIVATE_COMPACTION_REASON")))
+    ["compacted", ["trigger",`String "auto";"outcome",`String "compacted";
+       "tokensBefore",`Int 1274652;"tokensAfter",`Int 4200],
+       `Assoc ["kind",`String "auto"], `Assoc ["kind",`String "compacted"], `Int 1274652, `Int 4200;
+     "noop", ["trigger",`String "manual";"outcome",`String "noop";
+       "tokensBefore",`Int 800;"tokensAfter",`Int 800],
+       `Assoc ["kind",`String "manual"], `Assoc ["kind",`String "noop"], `Int 800, `Int 800;
+     "missing", [], `Null, `Null, `Null, `Null;
+     "unrecognized", ["trigger",`String "future-trigger";"outcome",`String "future-outcome"],
+       `Assoc ["kind",`String "unrecognized";"value",`String "future-trigger"],
+       `Assoc ["kind",`String "unrecognized";"value",`String "future-outcome"], `Null, `Null]
+;;
+
+let test_compaction_trace_failure_preserves_provider_result () =
+  List.iter (fun tracing ->
+    with_scripted_host ~fixture:["start_compaction", `String "compacted"] (fun ~base_path ->
+      let path = Filename.concat base_path "unavailable-compaction-trace.jsonl" in
+      let raw_trace = if not tracing then None else
+        match Agent_core.Raw_trace.create ~path () with
+        | Ok sink -> Some sink | Error error -> fail (Agent_core.Error.to_string error) in
+      let labels = ["keeper",keeper_name;"source","official_client_raw";"stage","context_compaction"] in
+      let failures () = Otel_metric_store.metric_value_or_zero
+        Keeper_metrics.(to_string TraceEmitFailures) ~labels () in
+      let before = failures () in
+      let broken = ref false in
+      let run = run_turn_with ?raw_trace ~base_path ~tool:(masc_probe_tool (ref `Null))
+        ~on_transmitted:(fun _ -> if tracing && not !broken then (
+          broken := true; Sys.remove path; Unix.mkdir path 0o700)) () in
+      (match run.outcome.result with
+       | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+      check (float 0.) "only the unavailable trace records a compaction observation failure"
+        (before +. if tracing then 1. else 0.) (failures ());
+      check string "trace absence/failure does not cause another provider turn" "start\n"
+        (read_text (Filename.concat base_path "sessions.log")))) [false;true];
+  let cancellation = Eio.Cancel.Cancelled (Failure "compaction observer cancelled") in
+  (try
+     ignore (Keeper_official_client_host.observe_raw_trace ~keeper_name
+       ~stage:Keeper_official_client_host.Context_compaction (fun () -> raise cancellation));
+     fail "reserved observer cancellation was swallowed"
+   with Eio.Cancel.Cancelled _ as observed ->
+     check bool "same reserved cancellation propagates" true (observed == cancellation))
+;;
+
 let check_resume_recall_blocks ~compaction ~resend_after_start () =
   let fixture = match compaction with
     | None -> []
@@ -2631,6 +2713,8 @@ let () =
       , [ test_case "account switch starts fresh" `Quick test_account_selection_starts_a_fresh_vendor_session
         ; test_case "source relogin starts fresh, refresh survives" `Quick test_source_relogin_starts_fresh_and_preserves_vendor_refresh
         ; test_case "recall blocks deduplicated on native resume" `Quick test_resume_deduplicates_recall_blocks
+        ; test_case "native compaction metadata joins request trace" `Quick test_native_compaction_metadata_reaches_request_trace
+        ; test_case "compaction trace failure preserves provider result" `Quick test_compaction_trace_failure_preserves_provider_result
         ; test_case "recall restored after host compaction" `Quick test_resume_restores_recall_after_compaction
         ; test_case "noop compaction preserves held recall" `Quick test_resume_keeps_recall_after_noop_compaction
         ; test_case "hook nudge identity and carried context" `Quick test_hook_nudges_bind_the_session_but_carried_context_does_not

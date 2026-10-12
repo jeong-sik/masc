@@ -1219,6 +1219,7 @@ type raw_trace_stage =
   | Tool_finish
   | Native_tool_start
   | Native_tool_finish
+  | Context_compaction
   | Run_finish
 
 let raw_trace_stage_label = function
@@ -1230,6 +1231,7 @@ let raw_trace_stage_label = function
   | Tool_finish -> "tool_finish"
   | Native_tool_start -> "native_tool_start"
   | Native_tool_finish -> "native_tool_finish"
+  | Context_compaction -> "context_compaction"
   | Run_finish -> "run_finish"
 ;;
 

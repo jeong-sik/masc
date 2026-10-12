@@ -23,6 +23,84 @@ let commit keepers_dir range new_claims =
     ~keepers_dir ~keeper_id:"keeper" ~now:200.
     ~source:{kind = Current.Librarian; trace_id = "admission-judge"} ~new_claims () |> require
 
+let test_concurrent_acknowledgement_preserves_deferred_input () = with_store (fun keepers_dir ->
+  ignore (append keepers_dir "a" "deferred A");
+  ignore (append keepers_dir "b" "settled B");
+  let selected = List.filter (fun (id : Current.explicit_candidate_id) ->
+    id.request_id = "b") (Queue.candidate_ids (batch keepers_dir)) in
+  let interleaved = ref false in
+  Queue.For_testing.acknowledge_with ~keepers_dir ~keeper_id:"keeper"
+    ~read_receipts:(fun ~queue_generation ->
+      let earlier = Current.committed_explicit_candidates ~keepers_dir
+        ~keeper_id:"keeper" ~queue_generation |> require in
+      if not !interleaved then (
+        interleaved := true;
+        ignore (commit keepers_dir selected [fact "settled B"]);
+        acknowledge keepers_dir);
+      Ok earlier) |> require;
+  check (list string) "another acknowledgement removes only committed B" ["a"]
+    (List.map (fun (row : Queue.candidate) -> row.request_id)
+      (Queue.candidates (batch keepers_dir))))
+
+let test_concurrent_acknowledgement_detects_receipt_loss () =
+  List.iter (fun reuse_request_id -> with_store (fun keepers_dir ->
+  ignore (append keepers_dir "a" "deferred A");
+  ignore (append keepers_dir "b" "settled B");
+  let selected = List.filter (fun (id : Current.explicit_candidate_id) ->
+    id.request_id = "b") (Queue.candidate_ids (batch keepers_dir)) in
+  let interleaved = ref false in
+  let queue_path = Queue.path ~keepers_dir ~keeper_id:"keeper" in
+  let after_other_ack = ref "" in
+  let result = Queue.For_testing.acknowledge_with ~keepers_dir ~keeper_id:"keeper"
+    ~read_receipts:(fun ~queue_generation ->
+      let earlier = Current.committed_explicit_candidates ~keepers_dir
+        ~keeper_id:"keeper" ~queue_generation |> require in
+      if not !interleaved then (
+        interleaved := true;
+        ignore (commit keepers_dir selected [fact "settled B"]);
+        acknowledge keepers_dir;
+        if reuse_request_id then ignore (append keepers_dir "b" "new B occurrence");
+        after_other_ack := Fs_compat.load_file queue_path;
+        Sys.remove (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper"));
+      Ok earlier) in
+  (match result with Error _ -> () | Ok () -> fail "concurrent receipt loss accepted");
+  check string "receipt loss preserves queue bytes" !after_other_ack
+    (Fs_compat.load_file queue_path);
+  check (list string) "another acknowledgement removes only committed B" (if reuse_request_id then ["a";"b"] else ["a"])
+    (List.map (fun (row : Queue.candidate) -> row.request_id)
+      (Queue.candidates (batch keepers_dir))))) [false; true]
+
+let test_concurrently_added_tail_requires_receipt_authority () =
+  List.iter (fun lose_receipt -> with_store (fun keepers_dir ->
+    ignore (append keepers_dir "a" "deferred A");
+    let interleaved = ref false in
+    let observations = ref 0 in
+    let queue_path = Queue.path ~keepers_dir ~keeper_id:"keeper" in
+    let after_other_ack = ref "" in
+    let result = Queue.For_testing.acknowledge_with ~keepers_dir ~keeper_id:"keeper"
+      ~read_receipts:(fun ~queue_generation ->
+        incr observations;
+        let earlier = Current.committed_explicit_candidates ~keepers_dir
+          ~keeper_id:"keeper" ~queue_generation |> require in
+        if not !interleaved then (
+          interleaved := true;
+          ignore (append keepers_dir "b" "settled B");
+          let selected = List.filter (fun (id : Current.explicit_candidate_id) ->
+            id.request_id = "b") (Queue.candidate_ids (batch keepers_dir)) in
+          ignore (commit keepers_dir selected [fact "settled B"]);
+          acknowledge keepers_dir;
+          after_other_ack := Fs_compat.load_file queue_path;
+          if lose_receipt then
+            Sys.remove (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper"));
+        Ok earlier) in
+    (match result, lose_receipt with
+     | Ok (), false | Error _, true -> ()
+     | Ok (), true -> fail "consumed new tail without receipt authority accepted"
+     | Error detail, false -> fail detail);
+    check int "new tail authority is reobserved" 2 !observations;
+    check string "outer acknowledgement preserves queue bytes" !after_other_ack
+      (Fs_compat.load_file queue_path))) [false; true]
+
 let test_pending_is_not_current () = with_store (fun keepers_dir ->
   let first = append keepers_dir "one" "first rule" in
   let repeated = append keepers_dir "one" "first rule" in
@@ -290,6 +368,7 @@ let test_bulk_append_preserves_length_and_order () = with_store (fun keepers_dir
     (List.map (fun (row : Queue.candidate) -> row.sequence) rows);
   let retried = append keepers_dir "bulk-1" "rule 1" in
   check int "retry keeps its original sequence" 1 retried.sequence;
+  acknowledge keepers_dir;
   check int "retry adds no row" count
     (List.length (Queue.candidates (batch keepers_dir))))
 
@@ -506,6 +585,9 @@ let test_size_with_a_same_failure_is_deferred_whole () =
 
 let () = run "durable explicit admission queue"
   ["storage boundaries", [
+    test_case "concurrently added tail requires receipt authority" `Quick test_concurrently_added_tail_requires_receipt_authority;
+    test_case "concurrent acknowledgement detects receipt loss" `Quick test_concurrent_acknowledgement_detects_receipt_loss;
+    test_case "concurrent acknowledgement preserves deferred input" `Quick test_concurrent_acknowledgement_preserves_deferred_input;
     test_case "missing receipt before acknowledgement remains explicit scope limitation" `Quick test_missing_receipt_before_acknowledgement_is_unresolved_authority;
     test_case "contiguous pending recovers without sparse authority" `Quick test_contiguous_pending_recovers_without_sparse_authority;
     test_case "lost sparse authority refuses judgment without retiring evidence" `Quick test_sparse_authority_loss_refuses_judgment;

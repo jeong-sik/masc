@@ -57,3 +57,10 @@ val acknowledge_committed :
 
 val path : keepers_dir:string -> keeper_id:string -> string
 val list_keeper_ids : keepers_dir:string -> (string list, string) result
+
+module For_testing : sig
+  val acknowledge_with :
+    read_receipts:(queue_generation:string ->
+      (Keeper_memory_os_current.explicit_candidate_id list, string) result) ->
+    keepers_dir:string -> keeper_id:string -> (unit, string) result
+end

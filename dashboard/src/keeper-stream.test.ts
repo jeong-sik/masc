@@ -330,6 +330,34 @@ describe('Keeper operation stream projection', () => {
     expect(entry().streamState).toBe(terminal)
   })
 
+  it.each(['closure', 'channel conflict'] as const)('keeps a content %s published during metadata reasoning flush', boundary => {
+    assistantEntry('same-operation')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'earlier reasoning', response: { content_generation: 1, stream_scope: 0 } } })
+    let armed = true
+    const release = effect(() => {
+      const current = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+      if (armed && current?.traceSteps?.some(step => step.kind === 'think')) {
+        armed = false
+        untracked(() => { keeperThreads.value = { sangsu: [{ ...current,
+          modelContentActivity: Object.freeze([Object.freeze({ generation: 1, stream_scope: 0, block_index: 0,
+            channel: boundary === 'closure' ? 'thinking' as const : 'text' as const,
+            state: boundary === 'closure' ? 'ended' as const : 'observed' as const })]),
+          streamState: boundary === 'closure' ? 'waiting' : 'streaming',
+        }] } })
+      }
+    })
+    try {
+      applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_MODEL_CONTENT_ACTIVITY',
+        value: { generation: 1, stream_scope: 0, block_index: 0, channel: 'thinking', state: 'observed' } })
+      const after = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+      expect(after.modelContentActivity).toMatchObject([{ state: boundary === 'closure' ? 'ended' : 'observed',
+        channel: boundary === 'closure' ? 'thinking' : 'text' }])
+      expect(after.streamState).toBe(boundary === 'closure' ? 'waiting' : 'streaming')
+      expect(after.traceSteps).toMatchObject([{ kind: 'think', text: 'earlier reasoning' }])
+    } finally { release() }
+  })
+
   it('deduplicates sequenced reasoning across transport replay and restores its prefix', () => {
     assistantEntry()
     const owner = { content_generation: 4, stream_scope: 2 }

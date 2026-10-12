@@ -1146,6 +1146,9 @@ export function applyKeeperStreamEvent(
               || !ownsThinkingPublication(publicationOwner, entry, currentStoredTokenRevision())) return entry
           const activities = entry.modelContentActivity ?? []
           const index = activities.findIndex(sameOccurrence)
+          const current = index < 0 ? undefined : activities[index]
+          if (current && (current.channel !== activity.channel
+              || current.state === 'ended' || current.state === activity.state)) return entry
           const updated = Object.freeze(index < 0 ? [...activities, activity]
             : activities.map((previous, position) => position === index ? activity : previous))
           const open = updated.filter(previous => previous.state === 'observed').at(-1)

@@ -1,1 +1,0 @@
-Document observed Sangokushi II ruler succession, marriage-event progression, and inspection of a surviving officer after defeat.

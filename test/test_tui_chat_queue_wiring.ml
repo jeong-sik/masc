@@ -2607,6 +2607,13 @@ let test_pending_input_enters_transcript_only_when_execution_is_observed () =
   Tui_types.turn_log_add ~now:44. log ~seq:None
     (Live.Accepted {admission=Live.Queued; queue_length=1; interactive=None});
   assert_pending "accepted into server queue";
+  state.msg_loaded_keeper <- Some "alpha";
+  state.msg_loaded <- [{user with me_identity = Tui_types.Persisted_row "queued-user"}];
+  check (list string) "persisted queue input still awaits execution evidence"
+    [request.request_id]
+    (waiting () |> List.map (fun (request, _) -> request.Keeper_chat.request_id));
+  state.msg_loaded <- [];
+
   entry.phase <- Tui_types.Turn_reconciling;
   assert_pending "unconfirmed delivery while reconnecting";
   entry.phase <- Tui_types.Turn_streaming;

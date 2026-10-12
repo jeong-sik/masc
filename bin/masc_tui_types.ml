@@ -11371,20 +11371,11 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
       remember_started ids entry.log) started state.msg_inflight in
   let local = Masc_tui_keeper_chat_queue.waiting_for_keeper
       state.msg_queued ~keeper_name in
-  let persisted_user request_id =
-    state.msg_loaded_keeper = Some keeper_name
-    && List.exists (fun (row : msg_entry) ->
-        row.me_keeper_name = keeper_name && row.me_request_id = request_id
-        && is_user_row row
-        && match row.me_identity with
-           | Persisted_row _ -> true
-           | Persisted_legacy_row _ | Session_row _ -> false) state.msg_loaded in
   let submitted =
     List.rev state.msg_inflight
     |> List.filter_map (fun (entry : inflight) ->
       if not (String.equal entry.sent_request.keeper_name keeper_name)
          || Executions.mem (turn_log_execution_id entry.log) started
-         || persisted_user entry.sent_request.request_id
          || List.exists (fun (item : Masc_tui_keeper_chat_queue.item) ->
               Masc_tui_keeper_chat_projection.same_request_identity
                 item.request entry.sent_request) local

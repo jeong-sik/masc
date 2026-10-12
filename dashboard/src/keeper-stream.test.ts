@@ -1,3 +1,4 @@
+import { effect, untracked } from '@preact/signals'
 import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
@@ -206,6 +207,41 @@ describe('Keeper operation stream projection', () => {
       _resetKeeperStreamBuffersForTests()
       vi.useRealTimers()
     }
+  })
+
+  it('does not publish retry onto a same-runtime operation replaced during thinking flush', () => {
+    assistantEntry('original-operation')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: { runtime_id: 'claude', attempt_index: 0 },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: {
+        index: 0, delta: 'exposed reasoning',
+      },
+    })
+    let armed = true
+    const release = effect(() => {
+      const current = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+      if (armed && current?.traceSteps?.some(step => step.kind === 'think')) {
+        armed = false
+        untracked(() => { keeperThreads.value = { sangsu: [{ ...current,
+          deliveryProvenance: operationDeliveryProvenance('replacement-operation', 'terminal_result'),
+          delivery: 'streaming', streamState: 'opening', text: 'replacement', rawText: 'replacement', traceSteps: [],
+        }] } })
+      }
+    })
+    try {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_PROVIDER_RETRY', value: {
+          attempt: { routing_run_id: 'routing-run', runtime_id: 'claude', lane_attempt_index: 0 },
+          retry: { observation_id: 'retry-id', attempt: 1, max_retries: 10, retry_delay_ms: 1234, error_status: null },
+        },
+      })
+      const after = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+      expect(after.deliveryProvenance).toEqual(operationDeliveryProvenance('replacement-operation', 'terminal_result'))
+      expect(after.streamState).toBe('opening')
+      expect(after.text).toBe('replacement')
+    } finally { release() }
   })
 
   it.each(['observed', 'ended'] as const)('keeps content %s metadata outside model progress and body state', state => {

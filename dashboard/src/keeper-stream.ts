@@ -658,14 +658,14 @@ export function applyKeeperStreamEvent(
 ): string | null {
   const existing = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
   if (!existing) return null
+  const frameKey = streamEntryKey(keeperName, assistantEntryId)
+  if (applyingStreamFrames.has(frameKey)) return 'Reentrant Keeper stream frame'
   const beforeSequence = existing.responseState ?? initialKeeperResponseState
   const sequenced = acknowledgeKeeperResponseSequence(beforeSequence, source.kind === 'operation' ? source.sequence : undefined)
   if (!sequenced) return null
   if (sequenced !== beforeSequence) updateThreadEntry(keeperName, assistantEntryId, entry => ({
     ...entry, responseState: sequenced,
   }))
-  const frameKey = streamEntryKey(keeperName, assistantEntryId)
-  if (applyingStreamFrames.has(frameKey)) return 'Reentrant Keeper stream frame'
   applyingStreamFrames.add(frameKey)
   let failed = false
   const applyTextDelta = (payload: unknown, authoritative: boolean): void => {

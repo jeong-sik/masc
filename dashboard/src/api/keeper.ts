@@ -337,7 +337,12 @@ function parseSseEvent(frame: string, onDecodeError?: (reason: string) => void):
   try {
     const ids = frame.split('\n').filter(line => line.startsWith('id:')).map(line => line.slice(3).trim())
     if (ids.length > 1) { onDecodeError?.('Keeper stream frame has duplicate event identity.'); return null }
-    const sequence: unknown = ids.length ? JSON.parse(ids[0]!) : undefined
+    let sequence: unknown
+    try {
+      sequence = ids.length ? JSON.parse(ids[0]!) : undefined
+    } catch {
+      onDecodeError?.('Keeper stream frame has invalid event identity.'); return null
+    }
     if (sequence !== undefined && (typeof sequence !== 'number' || !Number.isSafeInteger(sequence) || sequence < 0)) {
       onDecodeError?.('Keeper stream frame has invalid event identity.'); return null
     }

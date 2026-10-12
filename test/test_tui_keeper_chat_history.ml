@@ -361,7 +361,7 @@ let test_a_failed_turn_names_the_request_it_came_from () =
   check (list (option string)) "an operation key is the request, anything else is not"
     [ Some "tui-28e58beb"; None; None ]
     (List.map (fun r -> origin_request_id r.History.kind) decoded.History.rows);
-  check (list (option string)) "failure grouping retains the operation with canonical provenance"
+  check (list (option string)) "canonical terminal failure retains its operation"
     [ Some "tui-28e58beb"; None; None ]
     (List.map (fun r -> r.History.turn_id) decoded.History.rows)
 ;;

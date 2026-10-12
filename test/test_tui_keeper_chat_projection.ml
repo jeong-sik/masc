@@ -515,6 +515,13 @@ let test_current_nonterminal_event_set () =
           ; "toolCallId", `String "tool-1"
           ; "executionId", `String "exec-1"
           ]
+      else if String.equal name "KEEPER_TOOL_TRANSCRIPT_COMMITTED"
+      then
+        `Assoc
+          [ "deliveryKey", `Assoc [ "kind", `String "operation"; "operation_id", `String "kmsg-1" ]
+          ; "executionId", `String "exec-1"
+          ; "ordinal", `Int 0
+          ]
       else if String.equal name "KEEPER_NATIVE_TOOL_START" then
         `Assoc
           [ "toolStreamScope", `Int 0

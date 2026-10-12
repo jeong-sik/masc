@@ -801,6 +801,7 @@ let current_custom_names =
   ; "KEEPER_CHAT_BATCH_BOUND"; "KEEPER_EXTERNAL_EFFECT_COMPLETED"; "KEEPER_TOOL_RESULT_READY"
   ; "KEEPER_TOOL_APPROVAL_REQUESTED"; "KEEPER_TOOL_APPROVAL_SETTLED"
   ; "KEEPER_NATIVE_TOOL_START"; "KEEPER_NATIVE_TOOL_END"; "KEEPER_NATIVE_TOOL_PROGRESS"
+  ; "KEEPER_TOOL_TRANSCRIPT_COMMITTED"
   ]
 
 let known_custom_names =
@@ -843,6 +844,33 @@ let validate_custom_value ~name value =
      | json -> Masc.Keeper_chat_events.response_identity_of_json json
        |> Result.map (fun _ -> ())
        |> Result.map_error (fun detail -> Malformed_event detail))
+  else if String.equal name "KEEPER_TOOL_TRANSCRIPT_COMMITTED" then
+    (* The server tells a stream which storage slot an executed tool received.
+       The transcript draws nothing for it, but the frame must read as the
+       exact shape the projection writes rather than as an unknown event. *)
+    (match value with
+     | `Assoc fields ->
+       let surface = "KEEPER_TOOL_TRANSCRIPT_COMMITTED.value" in
+       if List.exists
+            (fun (key, _) -> not (List.mem key [ "deliveryKey"; "executionId"; "ordinal" ]))
+            fields
+       then Error (Malformed_event (surface ^ " has unexpected fields"))
+       else
+         (match
+            List.assoc_opt "deliveryKey" fields,
+            List.assoc_opt "executionId" fields,
+            List.assoc_opt "ordinal" fields
+          with
+          | Some key, Some (`String execution_id), Some (`Int ordinal)
+            when String.trim execution_id <> "" && ordinal >= 0 ->
+            Keeper_chat_delivery_identity.delivery_key_of_yojson key
+            |> Result.map (fun _ -> ())
+            |> Result.map_error (fun detail -> Malformed_event (surface ^ ": " ^ detail))
+          | _ ->
+            Error
+              (Malformed_event
+                 (surface ^ " needs deliveryKey, a nonblank executionId and a nonnegative ordinal")))
+     | _ -> Error (Malformed_event "KEEPER_TOOL_TRANSCRIPT_COMMITTED.value must be an object"))
   else if String.equal name "KEEPER_RUNTIME_ATTEMPT_STARTED" then
     match value with
     | `Null -> Ok ()

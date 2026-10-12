@@ -1207,10 +1207,14 @@ function writeAssistantThinkingText(
               responseOwner,
             }),
           ]
+    const contentAllowsActivity = responseOwner === undefined || agentCoreBlockIndex === undefined
+      || !entry.modelContentActivity?.some(activity => activity.generation === responseOwner.content_generation
+        && activity.stream_scope === responseOwner.stream_scope && activity.block_index === agentCoreBlockIndex
+        && (activity.channel !== 'thinking' || activity.state === 'ended'))
     return {
       ...entry,
       traceSteps,
-      ...(meta.activity !== 'observation' && keeperResponseIsRunning(entry.responseState) ? {
+      ...(meta.activity !== 'observation' && contentAllowsActivity && keeperResponseIsRunning(entry.responseState) ? {
         streamState: 'thinking' as const,
         delivery: 'streaming' as const,
         streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {

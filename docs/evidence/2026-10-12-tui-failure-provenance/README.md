@@ -25,3 +25,8 @@ registered state fixture covers original body retention and absent ownership.
 Fixtures are unexecuted. Two changed OCaml files passed syntax-only parsing and
 diff whitespace checking. Full typecheck/build, runtime, UI/screenshots, CI,
 formal approval and merge are unverified.
+
+Independent review found an additional inherited positive fixture asserting
+Operation ownership without a terminal slot. Corrected that fixture to the
+actual producer contract; the explicit missing-slot refusal fixture remains.
+Original source HOLD is preserved; fixtures still have not executed.

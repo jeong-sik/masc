@@ -147,9 +147,8 @@ let fetch_error_to_string = function
         expected
         actual
 
-(* Exported (see the .mli): a caller bounding a marker it has not stored yet
-   builds a saturating preview from this, so a copy of the number at that call
-   site would silently become an underestimate if this changed. *)
+(* Shared preview byte ceiling. Planning and storage both call [make_preview]
+   so reference size estimates use the same sanitized prefix. *)
 let preview_max = 200
 
 (* Preview metadata travels inside JSON strings, even when the stored bytes

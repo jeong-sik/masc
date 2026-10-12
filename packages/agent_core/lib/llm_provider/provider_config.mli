@@ -271,14 +271,6 @@ val string_of_provider_kind : provider_kind -> string
     @since 0.166.0 *)
 val all_provider_kinds : provider_kind list
 
-(** Conventional API key env var name per kind. Re-export of
-    {!Provider_kind.default_api_key_env}. Returns [None] for kinds
-    that do not have a universally-agreed env var (local / transport-
-    mediated / OpenAI-compatible spaces where the env name is
-    consumer-specified).
-    @since 0.166.0 *)
-val default_api_key_env : provider_kind -> string option
-
 (** Canonical inverse of {!string_of_provider_kind}.
 
     Accepts every lowercase form produced by {!string_of_provider_kind}.

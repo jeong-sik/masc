@@ -55,8 +55,8 @@ let binding_base_url_is_loopback binding =
 let binding_auth_is_no_auth (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true
-  | Runtime_binding.Api_key_env _
-  | Runtime_binding.Setup_token_env _ -> false
+  | Runtime_binding.Api_key
+  | Runtime_binding.Setup_token -> false
 ;;
 
 let runtime_kind_of_binding (binding : Runtime_binding.t) =
@@ -153,7 +153,6 @@ let split_csv_nonempty raw =
 
 let nonempty_env name = env_value_opt name
 
-let env_present name = Option.is_some (nonempty_env name)
 
 let configured_default_model_label_result () =
   match Env_config.Model_defaults.default_runtime_opt () with
@@ -187,8 +186,7 @@ let default_local_fallback_label () =
 let binding_auth_available (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true
-  | Runtime_binding.Api_key_env env_name | Runtime_binding.Setup_token_env env_name ->
-    env_present env_name
+  | Runtime_binding.Api_key | Runtime_binding.Setup_token -> false
 ;;
 
 let default_model_label_for_binding (binding : Runtime_binding.t) =

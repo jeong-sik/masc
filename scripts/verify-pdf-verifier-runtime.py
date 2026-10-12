@@ -76,7 +76,9 @@ def main():
     upstream_model = model_config['api-name']
     upstream_url = upstream_provider['base_url'].rstrip('/') + upstream_provider['request_path']
     assert upstream_url == 'https://api.kimi.com/coding/v1/chat/completions'
-    upstream_key = os.environ[upstream_provider['api_key_env']]
+    upstream_key = os.environ[
+        source_runtime['providers']['kimi_coding']['credentials']['key']
+    ]
     assert upstream_key
     upstream_opener = build_opener(ProxyHandler({}), NoRedirect)
     token = secrets.token_hex(32)

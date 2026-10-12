@@ -43,8 +43,8 @@ let provider_and_binding config =
 let auth_scheme_of_binding (binding : Provider_runtime_binding.t) =
   match binding.auth with
   | Provider_runtime_binding.No_auth -> No_auth
-  | Provider_runtime_binding.Api_key_env _ -> Api_key
-  | Provider_runtime_binding.Setup_token_env _ -> Setup_token
+  | Provider_runtime_binding.Api_key -> Api_key
+  | Provider_runtime_binding.Setup_token -> Setup_token
 ;;
 
 let transport_for_call ~injected = if injected then Injected else Http

@@ -83,7 +83,7 @@ let validate_dispatch_credential
          would report the same thing in two vocabularies. What changed is that
          the two absences are no longer one value, so this arm now says which
          one it is letting through. *)
-      | Unknown_provider -> Ok ()
+      | Unknown_provider | Missing_declared_credential _ -> Ok ()
       | Reference (Env env_key) ->
         Error
           (Required_env_credential_missing

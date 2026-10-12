@@ -73,11 +73,12 @@ let make_custom_config
 ;;
 
 (** Resolve the effective API-key env var: per-provider override, then
-    wildcard ["*"], then registry default. Empty entries fall through. *)
+    wildcard ["*"]. The registry no longer carries a default name. Empty
+    entries fall through to no credential. *)
 let resolve_effective_api_key_env
   ~(api_key_env_overrides : (string * string) list)
   ~(provider_name : string)
-  ~(registry_default : string)
+  ()
   =
   let find_non_empty key =
     match List.assoc_opt key api_key_env_overrides with
@@ -86,10 +87,10 @@ let resolve_effective_api_key_env
   in
   match find_non_empty provider_name with
   | Some env -> env
-  | None ->
-    (match find_non_empty "*" with
-     | Some env -> env
-     | None -> registry_default)
+  | None -> (
+    match find_non_empty "*" with
+    | Some env -> env
+    | None -> "")
 ;;
 
 (** Build a {!Llm_provider.Provider_config.t} from a resolved registry entry. *)
@@ -106,10 +107,7 @@ let make_registry_config
   =
   let defaults = entry.defaults in
   let effective_api_key_env =
-    resolve_effective_api_key_env
-      ~api_key_env_overrides
-      ~provider_name
-      ~registry_default:defaults.api_key_env
+    resolve_effective_api_key_env ~api_key_env_overrides ~provider_name ()
   in
   let api_key =
     if effective_api_key_env = ""

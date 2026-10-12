@@ -10,8 +10,8 @@ type capabilities = Llm_provider.Capabilities.capabilities
 
 type auth =
   | No_auth
-  | Api_key_env of string
-  | Setup_token_env of string
+  | Api_key
+  | Setup_token
 
 type t =
   { id : string
@@ -19,7 +19,7 @@ type t =
   ; kind : provider_kind
   ; base_url : string
   ; request_path : string
-  ; api_key_env : string
+  ; requires_api_key : bool
   ; auth : auth
   ; default_model : string option
   ; max_context : int option
@@ -37,14 +37,12 @@ let trim_non_empty value =
 
 let auth_of_catalog = function
   | PC.No_auth -> No_auth
-  | PC.Api_key_env env -> Api_key_env env
-  | PC.Setup_token_env env -> Setup_token_env env
+  | PC.Api_key_env _ -> Api_key
+  | PC.Setup_token_env _ -> Setup_token
 ;;
 
 let auth_of_defaults (defaults : PR.provider_defaults) =
-  match trim_non_empty defaults.api_key_env with
-  | Some env -> Api_key_env env
-  | None -> No_auth
+  if defaults.requires_api_key then Api_key else No_auth
 ;;
 
 let registry_lookup_available registry id =
@@ -65,7 +63,10 @@ let binding_of_catalog_entry registry (entry : PC.entry) =
   ; kind = entry.kind
   ; base_url = entry.base_url
   ; request_path = entry.request_path
-  ; api_key_env = entry.api_key_env
+  ; requires_api_key =
+      (match entry.auth with
+       | PC.Api_key_env _ | PC.Setup_token_env _ -> true
+       | PC.No_auth -> false)
   ; auth = auth_of_catalog entry.auth
   ; default_model = entry.default_model
   ; max_context = registry_lookup_max_context registry entry.id entry.max_context
@@ -81,7 +82,7 @@ let binding_of_registry_entry (entry : PR.entry) =
   ; kind = entry.defaults.kind
   ; base_url = entry.defaults.base_url
   ; request_path = entry.defaults.request_path
-  ; api_key_env = entry.defaults.api_key_env
+  ; requires_api_key = entry.defaults.requires_api_key
   ; auth = auth_of_defaults entry.defaults
   ; default_model = None
   ; max_context = entry.max_context
@@ -109,11 +110,8 @@ let binding_of_embedded_entry registry (entry : MC.provider_entry) =
   ; kind = entry.kind
   ; base_url = Llm_provider.Model_provider_catalog.resolved_base_url entry
   ; request_path = entry.request_path
-  ; api_key_env = entry.api_key_env
-  ; auth =
-      (match trim_non_empty entry.api_key_env with
-       | Some env -> Api_key_env env
-       | None -> No_auth)
+  ; requires_api_key = entry.requires_api_key
+  ; auth = if entry.requires_api_key then Api_key else No_auth
   ; default_model = entry.default_model
   ; max_context = registry_lookup_max_context registry entry.id None
   ; capabilities

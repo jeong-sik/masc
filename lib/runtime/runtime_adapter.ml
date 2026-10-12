@@ -151,6 +151,9 @@ let selected_credential_env key =
 type credential_requirement =
   | Reference of Runtime_schema.credential
   | Not_required
+  | Missing_declared_credential of { provider_id : string }
+      (** The catalog row says the endpoint takes an API key and the runtime
+          row declares no credential; the deployment must name one. *)
   | Unknown_provider
 
 let explicit_credential_requirement = function
@@ -169,11 +172,13 @@ let credential_requirement
   | None ->
     (match find_registry_entry provider_id with
      | Some entry ->
-       let env = entry.Llm_provider.Provider_registry.defaults.api_key_env in
-       (* An empty [api_key_env] is how the catalog declares a provider that
-          takes no key; the schema requires the field and allows it to be
-          empty. Two of the shipped rows use it. *)
-       if String.trim env = "" then Not_required else explicit_credential_requirement (Runtime_schema.Env env)
+       (* The catalog states whether the endpoint takes a key
+          ([requires_api_key]); which environment variable holds it is
+          deployment config, so a key-needing provider with no declared
+          credential is a refusal, not a silent empty key. *)
+       if entry.Llm_provider.Provider_registry.defaults.requires_api_key
+       then Missing_declared_credential { provider_id }
+       else Not_required
      | None -> Unknown_provider)
 ;;
 
@@ -183,7 +188,7 @@ let credential_requirement
 let effective_credential_reference ~provider_id credential =
   match credential_requirement ~provider_id credential with
   | Reference reference -> Some reference
-  | Not_required | Unknown_provider -> None
+  | Not_required | Missing_declared_credential _ | Unknown_provider -> None
 ;;
 
 let api_key_from_env key =
@@ -224,18 +229,12 @@ let api_key_from_file path =
         else Ok value
 ;;
 
-let api_key_of_credential ?registry_entry (credential : Runtime_schema.credential option) =
+let api_key_of_credential ?registry_entry:_ (credential : Runtime_schema.credential option) =
   match credential with
   | Some (Env key) -> Ok (api_key_from_env key)
   | Some (Inline value) -> Ok value
   | Some (File path) -> api_key_from_file path
-  | None ->
-    Ok
-      (match registry_entry with
-       | Some entry ->
-         let env = entry.Llm_provider.Provider_registry.defaults.api_key_env in
-         if env = "" then "" else api_key_from_env env
-       | None -> "")
+  | None -> Ok ""
 ;;
 
 (* --- Provider kind resolution --- *)
@@ -247,6 +246,11 @@ let resolve_credential_requirement = function
        is a guess, and it used to be a silent one: discovery resolved [Ok ""]
        and reported success without a credential. *)
     Error "No provider credential is configured and the provider has no catalog entry"
+  | Missing_declared_credential { provider_id } ->
+    Error
+      (Printf.sprintf
+         "provider %S requires an API key and declares no credential: add           [providers.%s.credentials] with the environment variable that holds it"
+         provider_id provider_id)
   | Not_required -> Ok (Llm_provider.Secret.of_string "")
   | Reference reference ->
     (match api_key_of_credential (Some reference) with

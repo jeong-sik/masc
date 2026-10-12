@@ -493,9 +493,8 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
            |> List.map PC.string_of_provider_kind
            |> List.sort_uniq String.compare)
       ; provider.base_url
-      ; option_string provider.base_url_env
       ; provider.request_path
-      ; provider.api_key_env
+      ; if provider.requires_api_key then "api-key" else "none"
       ; option_string provider.default_model
       ; option_string provider.capabilities_base
       ; String.concat "," (List.sort_uniq String.compare provider.identity_hosts)
@@ -737,19 +736,11 @@ let load_resolver_snapshot
         ( (target : target_declaration)
         , (provider : Model_catalog.provider_entry)
         , (_ : Model_catalog.model_entry) ) ->
-         (* A binding carries its own endpoint and its own credential, so the
-            row's environment names answer nothing this target reads. *)
+         (* A binding carries its own endpoint and its own credential, and the
+            catalog rows no longer name environment variables, so no target
+            contributes an environment observation here. *)
          match target.wire with
-         | Binding_wire _ -> names
-         | Catalog_provider_wire ->
-           let names =
-             match provider.base_url_env with
-             | Some name when name <> "" -> String_set.add name names
-             | Some _ | None -> names
-           in
-           if provider.api_key_env = ""
-           then names
-           else String_set.add provider.api_key_env names)
+         | Binding_wire _ | Catalog_provider_wire -> names)
       String_set.empty
       structural
   in
@@ -774,15 +765,7 @@ let load_resolver_snapshot
          let anthropic_thinking_control =
            Binding.anthropic_thinking_control_of_model model
          in
-         let* () =
-           match target.wire, provider.base_url_env with
-           | Catalog_provider_wire, Some name when name <> "" ->
-             (match observed_environment name with
-              | Ok _ -> Ok ()
-              | Error () ->
-                Error (Environment_read_failed { environment_variable = name }))
-           | (Catalog_provider_wire | Binding_wire _), (Some _ | None) -> Ok ()
-         in
+         let* () = Ok () in
          (* The wire, and with it the capabilities a request on that wire can
             express and the reasoning stance it has to state. A binding answers
             with the config its ordinary requests already run on: its own
@@ -860,7 +843,8 @@ let load_resolver_snapshot
               ; base_url
               ; request_path
               ; (match target.wire with
-                 | Catalog_provider_wire -> provider.api_key_env
+                 | Catalog_provider_wire ->
+                   if provider.requires_api_key then "api-key" else "none"
                  | Binding_wire { credential = Credential_not_declared; _ } ->
                    "credential=none"
                  | Binding_wire { credential = Credential_resolved _; _ } ->
@@ -895,18 +879,12 @@ let load_resolver_snapshot
            | Binding_wire { credential = Credential_unresolved { environment_variable }; _ }
              -> Credential_missing environment_variable
            | Catalog_provider_wire ->
-             if provider.api_key_env = ""
-             then Credential_not_required
-             else (
-               match observed_environment provider.api_key_env with
-               | Error () -> Credential_read_failed provider.api_key_env
-               | Ok (Some value) when Binding.has_control value ->
-                 Credential_invalid provider.api_key_env
-               | Ok (Some value) ->
-                 (match Cli_common_env.trim_non_empty value with
-                  | Some credential -> Credential_available (Secret.of_string credential)
-                  | None -> Credential_missing provider.api_key_env)
-               | Ok None -> Credential_missing provider.api_key_env)
+             (* Catalog rows state whether a key is needed, not where it
+                lives; a catalog-wire target on a keyed provider has no
+                credential source, so admission names the provider. *)
+             if provider.requires_api_key
+             then Credential_missing provider.id
+             else Credential_not_required
          in
          let target_id = target_ref_id target.target_ref in
          Ok

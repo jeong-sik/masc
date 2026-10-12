@@ -35,17 +35,20 @@ val resolve_api_key : provider_id:string -> credential:Runtime_schema.credential
 
     A provider with no reference and no catalog row is an error rather than an
     empty secret: nothing has said a key is unnecessary, so answering with one
-    would report success without a credential. A catalog row that declares an
-    empty [api_key_env] still resolves to the empty secret, which is what a
-    keyless provider is. *)
+    would report success without a credential. A catalog row that declares
+    [auth = "none"] resolves to the empty secret, which is what a keyless
+    provider is; a row that requires a key resolves to an error naming the
+    provider until the deployment declares a credential. *)
 
 type credential_requirement =
   | Reference of Runtime_schema.credential
-      (** A credential to materialize: the runtime row's own, or the catalog's
-          declared default environment reference. *)
+      (** A credential to materialize: the runtime row's own declaration. *)
   | Not_required
-      (** The catalog row declares an empty [api_key_env], which is how a
-          provider says it takes no key. *)
+      (** The catalog row declares [auth = "none"], which is how a provider
+          says it takes no key. *)
+  | Missing_declared_credential of { provider_id : string }
+      (** The catalog row requires an API key and the runtime row declares no
+          credential; the deployment must name one. *)
   | Unknown_provider
       (** The runtime row names no credential and the catalog has no row for
           this provider, so nothing says whether a key is needed. *)

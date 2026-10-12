@@ -769,7 +769,7 @@ id = "vllm-qwen3-mtp"
 kind = "openai_compat"
 base_url = "https://vllm.example.test/v1"
 request_path = "/v1/chat/completions"
-api_key_env = "VLLM_API_KEY"
+auth = "api-key"
 
 [[models]]
 id_prefix = "qwen36-35b-a3b-mtp"
@@ -2353,33 +2353,7 @@ let test_all_drives_parse_roundtrip () =
     Provider_config.all_provider_kinds
 ;;
 
-let test_default_api_key_env_known () =
-  Alcotest.(check (option string))
-    "anthropic"
-    (Some "ANTHROPIC_API_KEY")
-    (Provider_config.default_api_key_env Anthropic);
-  Alcotest.(check (option string))
-    "gemini"
-    (Some "GEMINI_API_KEY")
-    (Provider_config.default_api_key_env Gemini);
-  Alcotest.(check (option string))
-    "glm"
-    (Some "ZAI_API_KEY")
-    (Provider_config.default_api_key_env Glm);
-  Alcotest.(check (option string))
-    "kimi"
-    (Some "KIMI_API_KEY")
-    (Provider_config.default_api_key_env Kimi)
-;;
 
-let test_default_api_key_env_none_for_others () =
-  (* Local / transport-mediated / OpenAI-compatible share: AGENT_CORE does not
-     dictate a single env var; callers supply their own. *)
-  List.iter
-    (fun (label, k) ->
-       Alcotest.(check (option string)) label None (Provider_config.default_api_key_env k))
-    [ "openai_compat", Provider_config.OpenAI_compat; "ollama", Provider_config.Ollama ]
-;;
 
 let test_wire_kind_roundtrip_via_yojson () =
   (* End-to-end: record -> JSON string -> JSON tree -> record; the
@@ -2898,14 +2872,6 @@ let () =
             "all drives parse roundtrip"
             `Quick
             test_all_drives_parse_roundtrip
-        ; Alcotest.test_case
-            "default_api_key_env known"
-            `Quick
-            test_default_api_key_env_known
-        ; Alcotest.test_case
-            "default_api_key_env None for others"
-            `Quick
-            test_default_api_key_env_none_for_others
         ] )
     ; ( "telemetry_wire_format"
       , [ Alcotest.test_case

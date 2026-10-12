@@ -5,8 +5,8 @@
 type provider_defaults = Provider_registry_state.provider_defaults =
   { kind : Provider_config.provider_kind
   ; base_url : string
-  ; api_key_env : string
   ; request_path : string
+  ; requires_api_key : bool
   }
 
 type entry = Provider_registry_state.entry =
@@ -94,8 +94,11 @@ let register_catalog_entry t (entry : Provider_catalog.entry) =
   let defaults : provider_defaults =
     { kind = entry.kind
     ; base_url = entry.base_url
-    ; api_key_env = entry.api_key_env
     ; request_path = entry.request_path
+    ; requires_api_key =
+        (match entry.auth with
+         | Provider_catalog.Api_key_env _ | Provider_catalog.Setup_token_env _ -> true
+         | Provider_catalog.No_auth -> false)
     }
   in
   if String.trim entry.id = ""
@@ -207,8 +210,8 @@ let default () =
     let defaults : provider_defaults =
       { kind = entry.kind
       ; base_url = Model_provider_catalog.resolved_base_url entry
-      ; api_key_env = entry.api_key_env
       ; request_path = entry.request_path
+      ; requires_api_key = entry.requires_api_key
       }
     in
     register
@@ -217,7 +220,12 @@ let default () =
       ; defaults
       ; max_context = caps.Capabilities.max_context_tokens
       ; capabilities = caps
-      ; is_available = (fun () -> has_api_key defaults.api_key_env)
+      ; is_available =
+          (fun () ->
+            (* Availability by environment presence died with the catalog's
+               env names: whether a keyed provider is usable is a deployment
+               credential question, answered where credentials are declared. *)
+            true)
       }
   in
   (match Model_catalog.global () with

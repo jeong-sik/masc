@@ -203,7 +203,6 @@ let string_of_provider_kind = Provider_kind.to_string
 
 let provider_kind_of_string = Provider_kind.of_string
 let all_provider_kinds = Provider_kind.all
-let default_api_key_env = Provider_kind.default_api_key_env
 let pp_provider_kind = Provider_kind.pp
 let show_provider_kind = Provider_kind.show
 let provider_kind_to_yojson = Provider_kind.to_yojson

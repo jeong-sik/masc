@@ -12,8 +12,8 @@ type capabilities = Llm_provider.Capabilities.capabilities
 
 type auth =
   | No_auth
-  | Api_key_env of string
-  | Setup_token_env of string
+  | Api_key
+  | Setup_token
 
 type t =
   { id : string
@@ -21,7 +21,7 @@ type t =
   ; kind : provider_kind
   ; base_url : string
   ; request_path : string
-  ; api_key_env : string
+  ; requires_api_key : bool
   ; auth : auth
   ; default_model : string option
   ; max_context : int option

@@ -66,9 +66,8 @@ type provider_entry = Model_provider_catalog.entry =
   ; kind : Provider_kind.t
   ; identity_kinds : Provider_kind.t list
   ; base_url : string
-  ; base_url_env : string option
   ; request_path : string
-  ; api_key_env : string
+  ; requires_api_key : bool
   ; default_model : string option
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list

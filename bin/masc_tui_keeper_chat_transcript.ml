@@ -307,6 +307,7 @@ type t =
   ; mutable unreadable_count : int
   ; mutable last_unreadable : string
   ; mutable awaiting : awaiting_approval option
+  ; mutable settled_approvals : (Masc.Keeper_tool_approval_id.t * string) list
   ; mutable last_approval_settlement : approval_settlement option
   ; (* What the server said when it took the request, and how long its chat
        queue was at that moment. [None] until the acceptance arrives, which is
@@ -432,6 +433,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; unreadable_count = 0
   ; last_unreadable = ""
   ; awaiting = None
+  ; settled_approvals = []
   ; last_approval_settlement = None
   ; admission = None
   ; initial_receipt = None
@@ -1922,6 +1924,12 @@ let apply_delta ~now t (delta : Live.delta) =
                  "stream protocol quarantine provider correlation conflicts for occurrence %s: %s"
                  (occurrence_label occurrence) detail)))
   | Live.Approval_requested { approval_id; call_id; tool_name; args; question; because } ->
+      (match List.find_opt (fun (settled_id, _) ->
+         Masc.Keeper_tool_approval_id.equal settled_id approval_id) t.settled_approvals with
+       | Some (_, settled_call) ->
+           if not (String.equal settled_call call_id) then
+             note_unreadable t "settled approval replay conflicts with its admitted call"
+       | None ->
       (* The arguments go on the call's own row, which the pane already draws;
          the prompt carries the question. *)
       (match args with
@@ -1936,7 +1944,7 @@ let apply_delta ~now t (delta : Live.delta) =
           with
           | Call_updated | Call_missing | Call_ambiguous | Call_conflicting -> ()));
       t.last_approval_settlement <- None;
-      t.awaiting <- Some { approval_id; call_id; tool_name; question; because }
+      t.awaiting <- Some { approval_id; call_id; tool_name; question; because })
   | Live.Approval_settled { approval_id; call_id; outcome } ->
       (* Cleared whatever the answer was, including none: the prompt is over
          either way, and leaving it up would ask again for a call that has
@@ -1948,6 +1956,7 @@ let apply_delta ~now t (delta : Live.delta) =
            note_unreadable t "approval settlement call identity conflicts with its admission"
        | Some awaiting when Masc.Keeper_tool_approval_id.equal awaiting.approval_id approval_id ->
            t.awaiting <- None;
+           t.settled_approvals <- (approval_id, call_id) :: t.settled_approvals;
            t.last_approval_settlement <-
              Some
                { settled_tool_name = awaiting.tool_name

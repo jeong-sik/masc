@@ -1211,6 +1211,28 @@ let test_approval_arguments_cannot_update_native_call () =
   | _ -> fail "expected one native observation"
 ;;
 
+let test_settled_approval_request_cannot_reopen_or_displace () =
+  let t = fresh () in
+  let old_request = requested ~approval_id:approval_fixture_id ~call_id:"old"
+    ~tool_name:"Write" ~question:"old question" in
+  feed t [old_request;
+    Live.Approval_settled {approval_id=approval_fixture_id;call_id="old";outcome="approve"};
+    old_request];
+  check bool "settled replay cannot reopen" true (Option.is_none (Transcript.awaiting_approval t));
+  feed t [requested ~approval_id:approval_other_id ~call_id:"new"
+    ~tool_name:"Read" ~question:"new question"; old_request];
+  (match Transcript.awaiting_approval t with
+   | Some awaiting -> check bool "settled replay cannot displace newer admission" true
+       (Masc.Keeper_tool_approval_id.equal awaiting.Transcript.approval_id approval_other_id)
+   | None -> fail "new admission disappeared");
+  feed t [requested ~approval_id:approval_fixture_id ~call_id:"conflicting"
+    ~tool_name:"Write" ~question:"wrong correlation"];
+  check bool "conflicting settled replay is reported" true (Option.is_some (Transcript.unreadable t));
+  match Transcript.awaiting_approval t with
+  | Some awaiting -> check string "conflict preserves newer call" "new" awaiting.Transcript.call_id
+  | None -> fail "conflict cleared newer admission"
+;;
+
 let test_the_whole_reasoning_trail_is_kept () =
   let t = fresh () in
   feed t
@@ -2853,6 +2875,7 @@ let () =
         test_case "error body and runtime context remain independent" `Quick test_failure_body_and_runtime_are_independent])
     ; ( "event timeline"
       , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
+         test_case "settled approval replay stays settled" `Quick test_settled_approval_request_cannot_reopen_or_displace;
          test_case "approval correlation matches admission" `Quick test_approval_settlement_requires_admitted_call_correlation;
          test_case "approval args retain native authority" `Quick test_approval_arguments_cannot_update_native_call;
          test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts;

@@ -5,364 +5,438 @@
 | Status | Draft |
 | Author | vincent (with Claude analysis) |
 | Created | 2026-10-13 |
-| Target | `agent_core` — `lib/agent/agent_turn.ml`, `lib/llm_provider/{retry,reasoning_dialect,reasoning_history_projection,backend_anthropic,types}.ml`, 카탈로그(`models.toml`). masc — `lib/keeper/keeper_turn_driver_try_provider.ml`, `lib/runtime/runtime_model_input_tail_window.ml`, `lib/keeper/keeper_carried_front.mli` |
-| Related | #42636, #42632, RFC-AC-029 §S3, RFC-AC-040, `docs/rfc/RFC-keeper-context-window-in-tokens.md` §1·§13.4, `docs/rfc/RFC-librarian-lifecycle.md` §4.10 |
-| 측정 기준 | `origin/main` `c7fa2a0cec` (2026-10-13). `파일:줄` 은 이 커밋 기준이고 부록 A 의 명령으로 다시 확인한다 |
+| Updated | 2026-10-13 (독립 검토 반영) |
+| Target | `agent_core` — `lib/agent/agent_turn.ml`, `lib/llm_provider/{retry,reasoning_dialect,reasoning_history_projection,backend_anthropic,types}.ml`, 카탈로그(`models.toml`). masc — `lib/keeper/keeper_turn_driver_try_provider.ml`, `lib/runtime/runtime_model_input_tail_window.ml`, `lib/keeper/keeper_model_input_demotion.mli`, `lib/keeper/keeper_run_tools_hooks.ml` |
+| Related | #42636, #42632, RFC-AC-029 §S3, RFC-AC-040, `docs/rfc/RFC-keeper-context-window-in-tokens.md` §1·§13.4, `docs/rfc/RFC-librarian-lifecycle.md` §4.10, `docs/rfc/RFC-0363-historical-tool-result-demotion.md` |
+| 측정 기준 | `origin/main` `361883ee64`. `파일:줄` 은 이 커밋 기준이다. 측정 수치는 2026-10-12T16:04Z(2026-10-13 01:04 KST)에 `~/.masc` 에서 잰 값이고, 센 방법을 각 곳에 적었다 |
 | 디렉터리 | `packages/agent_core/docs/rfc/`. 이유는 부록 B |
 
 ## 0. 요약
 
-- 2026-10-12 06:36Z~15:26Z 에 `claude_vincent.*` 런타임의 Keeper 4개가 같은 400 으로 60번 실패했다. 문구는 `Invalid signature in thinking block. The block is bound to a different conversation.` 이다.
-- Anthropic 은 서명이 붙은 thinking 블록을 다시 보낼 때 system, tools, 앞선 messages 가 만들 때와 같아야 받는다. masc 는 요청마다 이 앞부분을 바꾼다.
-- 바꾸는 곳은 코드로 확인한 것이 셋이다. (1) 턴별 문맥을 요청 끝에 붙였다가 다음 요청에서 뺀다. (2) 보내는 이력 창의 시작점이 움직인다. (3) 앞부분이 달라졌는데도 이력의 모든 서명 블록을 그대로 다시 보낸다. system·tools 가 턴 사이에 바뀐다는 기록(wire-capture)도 있으나 바꾸는 코드는 아직 못 찾았다(§1.3).
-- 같은 400 이 `Unknown_invalid_request` 로 읽히고, `boundary_resend_on` 이 이 값에 true 를 돌려준다. 크기와 상관없는 400 에도 짧은 창으로 한 번 더 보낸다.
-- 이 RFC 는 다섯 가지를 정한다. (a) Anthropic 요청의 앞부분은 이어 붙이기만 한다. (b) 턴별 문맥은 턴당 한 번 만들어 이력에 남긴다. (c) system·tools 는 세션 동안 고정하고, 바꿔야 하면 바뀌었다고 기록한다. (d) 서명 블록은 앞부분 지문이 같을 때만 다시 보내고, 아니면 뺀다. (e) 크기 때문이라는 증거가 있는 400 에만 짧은 창으로 다시 보낸다.
-- 쓰지 않는 길: `drop_block`, 오류 문구 매칭, 재시도 횟수 제한.
-- 작업은 여섯 층의 스택으로 나눈다(§4.3). 층마다 결과 하나다.
+- 2026-10-12 06:36Z~15:38Z 에 `claude_vincent.*` 런타임의 Keeper 4개가 같은 400 으로 61번 실패했다. 문구는 ``Invalid `signature` in `thinking` block. The block is bound to a different conversation.`` 이다.
+- Anthropic 은 서명이 붙은 thinking 블록을 다시 보낼 때, 그 블록을 만든 요청과 system, tools, 앞선 messages 가 같아야 받는다. masc 는 요청을 만들 때마다 이 앞부분을 바꾼다.
+- 바꾸는 곳은 코드로 확인한 것이 넷이다. (1) 턴별 문맥을 요청 끝에 붙였다가 다음 라운드에서 뺀다. (2) 보내는 이력 창의 시작점이 움직인다. (3) 오래된 도구 결과를 마커로 줄이는 경계(강등)가 턴마다 움직인다. (4) 앞부분이 달라졌는데도 이력의 모든 서명 블록을 그대로 다시 보낸다. system·tools 가 라운드 사이에 바뀌는 경로도 코드에서 둘 찾았다(§1.3).
+- 같은 400 이 `Unknown_invalid_request` 로 읽히고 `boundary_resend_on` 이 이 값에 true 를 돌려준다. 크기와 상관없는 400 에도 짧은 창으로 한 번 더 보낸다.
+- 이 RFC 는 다섯 가지를 정한다. (a) Anthropic 요청은 앞부분을 이어 붙이기만 한다. (b) 턴별 문맥은 만든 뒤 바꾸지 않는 메시지로 이력에 남긴다. (c) 서명 블록은 앞부분 지문이 맞을 때만 다시 보내고, 아니면 빼며 이유를 타입으로 남긴다. (d) system·tools 는 고정하지 않고 바뀐 것을 지문으로 알아낸다. (e) 크기 때문이라는 증거가 있는 400 에만 짧은 창으로 다시 보낸다.
+- 이 RFC 가 해 주지 못하는 것: 강등과 창 이동은 그대로 두므로, 턴 사이의 thinking 이어짐은 그 둘이 일어나는 턴 경계에서 끊긴다. 턴 안(도구 라운드 사이)의 이어짐만 지킨다(§3.5).
+- 범위는 Anthropic 요청 경로다. 다른 공급자의 요청과 재전송 규칙은 지금 그대로 둔다(§2).
+- 작업은 여덟 층의 스택이다(§4.3). 400 을 없애는 층(지문과 재생 판정)을 가장 먼저 둔다.
 
 ## 1. 문제와 근거
 
-### 1.1 증상 (이슈 #42636 본문 기준)
+용어: 이 문서의 "턴" 은 Keeper 가 입력 하나를 처리하는 한 번이고, "라운드" 는 그 안에서 공급자를 부르는 한 번이다. 한 턴에 라운드가 여러 번 있을 수 있다(도구 호출 때문이다).
 
-| 사실 | 값 | 확인 방법 |
+### 1.1 증상
+
+| 사실 | 값 | 센 방법 (2026-10-12T16:04Z) |
 |---|---|---|
-| 실패한 서명 400 | 60건 (polisher 17, ocaml-agent-ic 19, you-never-change 13, e-masc-the-leader 11) | 이슈가 인용한 실패 영수증. 이 RFC 작성 중에는 영수증 원본을 다시 세지 않았다 |
-| 시간 범위 | 2026-10-12 06:36Z~15:26Z | 같음 |
-| `claude.*` 런타임 | 같은 코드로 thinking 과 도구를 섞은 실행 약 300회, 서명 오류 0 | 같음 |
-| vincent 키 | 한 실행의 첫 호출은 통과하고 두 번째 호출에서 거절된다 | 같음 |
-| 한 번 실패한 Keeper | 이후 매 턴 첫 요청에서 계속 실패(13연속, 17연속) | 같음 |
+| 서명 400 | 61건. ocaml-agent-ic 19, polisher 18, you-never-change 13, e-masc-the-leader 11 | `~/.masc/keepers/*/execution-receipts/2026-10/12.jsonl` 에서 ``Invalid `signature` in `thinking` block`` 를 담은 줄을 센다 |
+| 시간 범위 | 06:36:18Z ~ 15:38:56Z | 그 줄들의 `recorded_at` 의 최소·최대 |
+| "rewritten since it was created" | 17줄 | 같은 파일에서 그 문장을 담은 줄 |
+| "missing from this request" | 43줄 | 같음 |
+| 사용 한도 400 | 585줄 (10-11 이 502, 10-12 가 83. 10-12 의 줄은 문장이 두 번씩 들어 있어 문장 수로는 166) | 10월 전체 receipts 에서 `reached your specified API usage limits` 를 담은 줄 |
+| temperature 400 | 5줄 | 10월 전체 receipts 에서 `` `temperature` may only be set to 1 `` 를 담은 줄 |
+| `claude.*` 런타임 | 같은 코드로 thinking·도구 혼합 실행 약 300회, 서명 오류 0 | 이슈 #42636 인용. 다시 세지 않았다 |
+| vincent 키의 두 번째 호출 | 첫 호출은 통과하고 두 번째가 거절된다 | 이슈 인용. 다시 확인하지 않았다 |
+
+61건 중 두 문구의 합은 60이다. 나머지 1줄의 문구는 확인하지 않았다. 이슈가 든 "크기 초과 3건" 은 다시 세지 않았다.
+
+사용 한도 400 의 실제 문장은 "You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC." 이다. 이 Keeper 들은 11월 1일까지 어떤 코드로도 성공할 수 없으므로 이 400 에 짧은 창으로 다시 보내는 것은 요청만 늘린다.
 
 확인하지 못한 것:
 
 - 요청 본문이 로그에 없다. 라운드 N 과 N+1 의 실제 바이트를 대조하지 못했다. 아래 원인은 코드 읽기와 오류 문구에서 나온 추정이다.
-- vincent 키 계정이 2026-08-31 이후 생성인지 모른다. 공식 문서는 그날 이후 만든 계정에 검사를 기본으로 켠다(§1.2). vincent 만 실패하는 이유가 계정 나이라는 설명은 맞을 수 있으나 확인하지 않았다.
-- 같은 코드가 `claude.*` 에서 통과한 이유도 같은 이유로 추정이다. 그쪽 계정이 2026-08-31 이전이면 설명되는데 이것도 확인하지 않았다.
+- vincent 키 계정이 2026-08-31 이후 생성인지 모른다. 공식 문서는 그날 이후 만든 계정에 검사를 기본으로 켠다. vincent 만 실패하고 `claude.*` 는 통과하는 이유가 계정 나이라는 설명이 맞을 수 있으나 확인하지 않았다.
 
 ### 1.2 Anthropic 규칙 (공식 문서, 2026-10-13 조회)
 
 읽은 곳은 네 페이지다. 조회 도구가 페이지를 요약해 돌려주는 방식이라, 아래 인용은 그 결과에 들어 있던 원문 인용이다.
 
-- `https://platform.claude.com/docs/build-with-claude/preserved-thinking` (전체 121,909자를 두 번에 나눠 읽었다)
+- `https://platform.claude.com/docs/build-with-claude/preserved-thinking` (121,909자 전체)
 - `https://platform.claude.com/docs/en/build-with-claude/thinking-troubleshooting` (전체)
 - `https://platform.claude.com/docs/en/api/errors` (전체)
-- `https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages` (105,261자 중 앞 100,000자. "Limitations" 절은 읽지 못했다)
+- `https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages` (105,261자 전체. "Limitations" 절은 처음 읽을 때 잘려서 같은 날 뒷부분을 다시 읽었다)
 
-규칙과 위치:
-
-1. 검사 대상 모델은 Claude Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5 이다. 검사하는 앞부분은 세 가지다. top-level `system`, `tools` 의 집합, 블록 앞의 모든 `message` (preserved-thinking, "Keeping the prefix unchanged"). `effort`, `max_tokens`, `output_config`, `tool_choice`, `metadata`, `cache_control` 은 앞부분이 아니다.
+1. 검사 대상 모델은 Claude Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5 이다. 검사하는 앞부분은 top-level `system`, `tools` 의 집합, 블록 앞의 모든 `message` 다. `effort`, `max_tokens`, `output_config`, `tool_choice`, `metadata`, `cache_control` 은 앞부분이 아니다.
 2. 문서의 지침: "Keep `system` and `tools` fixed for the session and treat `messages` as append-only."
-3. 앞부분이 다르면 `"error"`(기본값)는 400 `invalid_request_error` 로 거절하고, `"drop_block"` 은 실패한 블록과 그 뒤 thinking 블록을 서버가 버리고 성공시킨다. 버려진 블록은 과금되지 않는다 (같은 페이지, "What the API does with an invalid block").
-4. 2026-08-31 00:00 UTC 이후 만든 계정은 검사가 기본이다. 그 전 계정은 요청에 `thinking.block_binding.prefix_mismatch_behavior` 를 넣을 때만 검사한다. 이 필드는 beta 헤더 `thinking-binding-controls-2026-08-01` 이 있어야 한다 (같은 페이지).
-5. 시작부터, 끝부터, 전부 thinking 블록을 빼는 것은 유효하다. 중간에서 빼면 뒤 블록이 무효다. 뺀 블록을 다시 넣어도 그 사이에 만든 블록이 무효다 ("What counts as an edit" 표). 문서는 "Earlier thinking blocks aren't in the prefix" 라고 적는다.
-6. 오류 본문의 구조는 `{"type":"error","error":{"type","message"},"request_id"}` 이고 "`type` values will grow over time" 이라고 적혀 있다 (errors, "Error shapes"). 서명 400 에 대해 문서는 "That sentence is for people and logs. Its wording can change, so don't match on it in code." 라고 쓴다 (thinking-troubleshooting). 별도 오류 코드 필드는 문서에 없다.
-7. 서명 400 이 아닌 400 도 같은 `invalid_request_error` 이다. 조직·워크스페이스 지출 한도에 닿으면 400 을 돌려준다 (errors, "HTTP errors").
-8. `drop_block` 의 출력 토큰 증가는 표가 아니라 본문 문단에 적혀 있다. 다중 턴 코딩 벤치마크에서 첫 턴 이후 매 턴 버리면 low 4.6%, medium 9.7%, high 10.3%, max 67.1% 늘었다. 한 세션에 한 번 버리면 2.5%, 3.9%, 4.5%, 20.1% 였다 (preserved-thinking, "Output-token cost of `drop_block`"). 문서는 "stopgap" 이라 부른다. 원문에 "table" 은 없었으므로 이 RFC 는 표라고 부르지 않는다.
-9. 앞부분을 건드리지 않고 정보를 더하는 방법: `role: "system"` 메시지를 이력 중간에 덧붙인다. 이 메시지는 beta 헤더 없이 쓴다. Sonnet 5 에서는 못 쓴다 (mid-conversation-system-messages). 턴 범위 메시지 `clear_at: "next_user_message"` 는 `mid-conversation-system-clear-at-2026-08-21` 가 필요하다. 도구 변경 `tool_addition`·`tool_removal` 은 `inline-tools-2026-09-15` 가 필요하다 (preserved-thinking 의 beta 표).
-10. 계정이 다르면: "Thinking blocks that Claude Sonnet 5.5 or Claude Haiku 5.5 produces work only in the account that produced them". 다른 계정이 보내면 서버가 조용히 버린다. 헤더가 있으면 `input_transformations` 에 `organization_binding_mismatch` 로 나온다.
+3. 앞부분이 다르면 `"error"`(기본값)는 400 `invalid_request_error` 로 거절한다. `"drop_block"` 은 실패한 블록과 그 뒤 thinking 블록을 서버가 버리고 성공시키며, 버려진 블록은 과금되지 않는다.
+4. 2026-08-31 00:00 UTC 이후 만든 계정은 검사가 기본이다. 그 전 계정은 요청에 `thinking.block_binding.prefix_mismatch_behavior` 를 넣을 때만 검사한다. 이 필드는 beta 헤더 `thinking-binding-controls-2026-08-01` 이 있어야 한다. Sonnet 5.5 와 Haiku 5.5 에서 `block_binding` 은 `thinking: {"type": "adaptive"}` 일 때만 동작한다. `between_tools`(Sonnet 5.5)나 `disabled`(Haiku 5.5)에서는 이력을 이어 붙이기만 하거나 thinking 블록을 직접 빼야 한다.
+5. thinking 블록을 시작부터, 끝부터, 전부 빼는 것은 유효하다. 중간에서 빼면 뒤 블록이 무효다. 뺀 블록을 다시 넣으면 그 사이에 만든 블록이 무효다. 문서는 "Earlier thinking blocks aren't in the prefix" 라고 적는다.
+6. 이전 도구 결과를 지우거나 줄이면 이후 모든 thinking 이 무효다. 문서의 "What counts as an edit" 표가 "Clear or shorten an earlier `tool_result`" 를 "Invalid for every later thinking block" 으로 분류한다.
+7. 오류 본문은 `{"type":"error","error":{"type","message"},"request_id"}` 이고 "`type` values will grow over time" 이라고 적혀 있다. 서명 400 에 대해 문서는 "That sentence is for people and logs. Its wording can change, so don't match on it in code." 라고 쓴다. 별도 오류 코드 필드는 문서에 없다.
+8. 서명 400 이 아닌 400 도 같은 `invalid_request_error` 다. 조직·워크스페이스 지출 한도에 닿으면 400 이다(errors, "HTTP errors").
+9. `drop_block` 의 출력 토큰 증가는 표가 아니라 본문 문단에 있다. 다중 턴 코딩 벤치마크에서 첫 턴 이후 매 턴 버리면 low 4.6%, medium 9.7%, high 10.3%, max 67.1% 늘었다. 한 세션에 한 번 버리면 2.5%, 3.9%, 4.5%, 20.1% 였다. 문서는 "stopgap" 이라 부른다.
+10. 앞부분을 건드리지 않고 정보를 더하는 방법은 `role: "system"` 메시지다. Fable 5.1, Mythos 5.1, Fable 5, Mythos 5, Opus 5.5, Opus 4.8, Opus 5, Sonnet 5.5, Haiku 5.5 에서 쓸 수 있고 beta 헤더가 필요 없다. Sonnet 5 는 못 쓴다. `clear_at: "next_user_message"` 인 턴 범위 메시지는 같은 모델 목록에서 `mid-conversation-system-clear-at-2026-08-21` 이 필요하다. 정리된 메시지는 이력에 남지만 "renders nothing and costs no input tokens" 이고, 이후 요청에 글자 그대로 다시 보내야 한다. 도구 변경 `tool_addition`·`tool_removal` 은 `inline-tools-2026-09-15` 가 필요하다.
+11. 그 메시지의 제약(Limitations): 첫 메시지가 될 수 없다. 반드시 `user` 턴(도구 결과만 있는 user 턴 포함) 바로 뒤에 오고 `assistant` 턴 앞이거나 배열 끝이어야 한다. `tool_use` 와 `tool_result` 사이에는 못 둔다. 턴 범위 메시지는 text 만 되고 `cache_control` 을 못 단다. "Not a place for untrusted content": 도구 출력·검색 문서 같은 바깥 글을 system 메시지에 넣으면 운영자 권한이 된다.
+12. 계정이 다르면: "Thinking blocks that Claude Sonnet 5.5 or Claude Haiku 5.5 produces work only in the account that produced them". 다른 계정이 보내면 서버가 조용히 버린다. 헤더가 있으면 `input_transformations` 에 `organization_binding_mismatch` 로 나온다.
+13. 문서의 처리 안내: 도구 사용을 끄려면 `tools` 를 빼지 말고 `tool_choice: {"type": "none"}` 를 보낸다.
 
 ### 1.3 앞부분을 바꾸는 곳
 
-요청 하나가 만들어지는 길은 이렇다. Keeper 가 이력을 정하고, agent_core 가 턴 준비 단계에서 턴별 문맥을 붙이고, 공급자 쪽에서 thinking 재생 규칙을 적용해 본문을 만든다.
+요청 하나가 만들어지는 길은 이렇다. Keeper 가 이력을 정하고, 창과 강등을 거쳐 보낼 범위를 자르고, agent_core 가 턴별 문맥을 붙이고, 공급자 쪽에서 thinking 재생 규칙을 적용해 본문을 만든다.
 
 **(1) 턴별 문맥이 요청 끝에 붙었다 빠진다.**
 
-- `Agent_turn.prepare_messages` (`packages/agent_core/lib/agent/agent_turn.ml:34-53`)는 `extra_system_context` 가 있으면 `role = User` 메시지 `[system context] …` 를 만들어 `messages @ [ system_msg ]` (같은 파일 52줄)로 끝에 붙인다.
-- 이 결과는 `prepare_turn` 의 `effective_messages` 로만 쓰인다. `Pipeline_stage_prepare.prepare_turn_for_agent` (`packages/agent_core/lib/pipeline/pipeline_stage_prepare.ml:148-155`)는 `agent.state.messages` 를 넘기고, 붙인 메시지는 `agent.state.messages` 에 돌려놓지 않는다. 그래서 이력에는 남지 않고 다음 라운드에 새 값으로 다시 붙는다.
-- 코드 주석(`agent_turn.ml:38-43`)은 이렇게 한 이유를 "대화 앞부분이 바이트까지 같아야 로컬 LLM 의 KV 캐시가 재사용된다" 로 적는다. 이 판단은 Ollama·llama.cpp 에 대한 것이고 Anthropic 에는 반대로 작용한다.
-- 1.1 의 두 오류 문구와 이 설명이 맞아 보인다. 이슈는 "missing from this request" 43건과 "rewritten since it was created, first at messages.0.content.0" 16건(polisher)을 든다. 두 문구의 건수는 영수증에서 다시 세지 않았다.
-- 용어집(`docs/spec/00-glossary.md` 의 "Extra System Context")은 이 메시지를 `System` 메시지라고 적는데 코드는 `User` 이다. 이 RFC 는 코드를 따른다.
+- `Agent_turn.prepare_messages` (`packages/agent_core/lib/agent/agent_turn.ml:34-53`)는 `extra_system_context` 가 있으면 `role = User`(45줄) 메시지 `[system context] …` 를 만들어 `messages @ [ system_msg ]`(52줄)로 끝에 붙인다.
+- 이 결과는 요청과 입력 검사에만 쓰인다. `Pipeline_stage_prepare.prepare_turn_for_agent` (`packages/agent_core/lib/pipeline/pipeline_stage_prepare.ml:148-155`)는 `agent.state.messages` 를 넘기고, 붙인 메시지를 거기에 돌려놓지 않는다. 이력에는 남지 않는다.
+- Keeper 의 hook 은 라운드마다 돈다(`lib/keeper/keeper_run_tools_hooks.ml` 의 `before_turn_hook`, 810줄. 937줄 `post_tool_round`). 2026-10-12 의 runtime-manifest 에서 문맥이 있는 라운드는 첫 라운드(`pre_tool_context_injection`) 1,188건이고, 두 번째 이후 라운드(`post_tool_context_injection`) 6,883건은 전부 문맥 크기가 비어 있다. 같은 턴의 두 번째 이후 라운드가 전체 라운드의 85%다. 세는 방법은 `~/.masc/keepers/*/runtime-manifests/**/*.jsonl` 에서 `context_injection` 상태 줄의 `extra_system_context_computed_size` 를 읽는 것이다. 모든 Keeper, 모든 공급자를 합친 값이다.
+- 그러므로 오늘의 요청은 첫 라운드에만 문맥을 싣고 둘째 라운드에서 뺀다. 첫 라운드에 만든 서명 블록은 둘째 라운드 앞부분이 달라져 무효가 된다. 이 설명은 1.1 의 두 문구와 맞아 보이나, 요청 본문 대조는 없다.
+- 코드 주석(`agent_turn.ml:38-43`)은 끝에 붙이는 이유를 "앞부분이 바이트까지 같아야 로컬 LLM 의 KV 캐시를 재사용한다" 로 적는다. Ollama·llama.cpp 에 대한 판단이고 Anthropic 에는 반대로 작용한다.
+- 용어집(`docs/spec/00-glossary.md` 의 "Extra System Context")은 이 메시지를 `System` 메시지라고 적는데 코드는 `User` 다. 이 RFC 는 코드를 따른다.
 
 **(2) 이력 창의 시작점이 움직인다.**
 
-- `Runtime_model_input_tail_window` (`lib/runtime/runtime_model_input_tail_window.ml:4`, `atoms_per_window = 60`)는 남는 이력이 들어갈 때까지 앞에서 60 atom 의 배수만큼 자른다 (같은 파일 340-353줄). 자르면 맨 앞에 합성 메시지 `[context window] Older turns … are omitted` 가 붙는다 (같은 파일 4-14줄).
-- 시작점을 어디에 둘지는 `Keeper_carried_front` 가 정한다 (`lib/keeper/keeper_carried_front.mli`). Librarian 이 흡수한 지점이나 마지막에 받아들여진 시작점을 쓴다. 시작점이 한 턴 안에서 자주 움직이는지는 이 조사에서 재지 못했다. 60 atom 단위라 매 라운드 움직이지는 않는 것으로 읽힌다. 움직이는 순간 앞부분의 첫 메시지가 바뀐다.
+- `Runtime_model_input_tail_window` (`lib/runtime/runtime_model_input_tail_window.ml:4`, `atoms_per_window = 60`)는 남는 이력이 들어갈 때까지 앞에서 60 atom 의 배수만큼 자른다(340줄 이하). 자르면 맨 앞에 합성 메시지 `[context window] Older turns … are omitted` 가 붙는다(7줄 이하).
+- 시작점은 `Keeper_carried_front` 가 정한다. 시작점이 움직이는 빈도는 재지 못했다. 움직이는 순간 맨 앞 메시지가 바뀌어 모든 서명 블록이 무효가 된다.
 
-**(3) 앞부분이 달라졌는데 서명 블록을 그대로 다시 보낸다.**
+**(3) 강등이 턴마다 오래된 도구 결과를 바꾼다.**
 
-- Anthropic 쪽 재생 규칙은 `All_assistant_messages` 이다 (`reasoning_dialect.ml:506-531`, 521줄). 이력의 모든 assistant thinking 을 보낸다.
-- 서명 블록은 글자 그대로 직렬화한다 (`api_common.ml:364-379`).
-- 저장된 블록의 출처 검사는 `Reasoning_source` 가 한다 (`types.ml:341-420`). 비교하는 값은 provider 종류, 엔드포인트(`base_url` + `request_path` 의 해시), 모델 id, 재생 규칙이다. Anthropic 은 `Require_identical_source` 이다 (`reasoning_dialect.ml:635-650`). 앞 내용이 같은지는 보지 않는다. `reasoning_history_projection.ml:204-217`(`replay_selected`)과 254-262줄(`rotation_admits` 호출)이 이 판정을 쓴다.
+- `Keeper_model_input_demotion` (`lib/keeper/keeper_model_input_demotion.mli:1-3`)은 오래된 도구 결과 본문을 blob 마커로 바꾼 사본을 공급자에 보낸다. 경계 `demote_before` 는 "마지막으로 끝난 턴의 끝"이고(`keeper_turn_driver_try_provider.ml:1540-1547`), 정책 `Small`(기본값, `keeper_input_policy.ml:2`)에서는 항상 적용된다. `Wide` 는 연속성에 따라 적용하지 않는다(1177-1187).
+- 모듈 설명(`keeper_model_input_demotion.mli` 의 `plan`)이 스스로 적는다. 경계가 움직이면 보내는 앞부분이 다시 쓰이고, 그래서 경계를 "턴마다 한 번" 움직이게 골랐다. 한 턴 안의 라운드 사이에서는 경계가 고정된다("pinned to the turn's seed").
+- 따라서 새 턴의 첫 요청에서 지난 턴의 큰 도구 결과(마커가 더 작아지는 것)가 마커로 바뀐다. 6번 규칙(§1.2)대로 이후 서명 블록이 무효다. 바뀐 도구 결과보다 뒤에 있는 서명 블록이 무효가 된다. 마커보다 작은 결과만 있는 턴은 바뀌지 않는다.
+- 크기 거절 뒤 재전송에서는 이번 턴의 도구 결과도 강등한다(`Current_turn_demoted`, #28845).
+
+**(4) 앞부분이 달라졌는데 서명 블록을 그대로 다시 보낸다.**
+
+- Anthropic 쪽 재생 규칙은 `All_assistant_messages` 다(`reasoning_dialect.ml:521`). 이력의 모든 assistant thinking 을 보낸다. 서명 블록은 글자 그대로 직렬화한다(`api_common.ml:364-379`).
+- 저장된 블록의 출처 검사는 `Reasoning_source` 가 한다(`types.ml:341-420`). 비교하는 값은 provider 종류, 엔드포인트(`base_url` + `request_path` 해시), 모델 id, 재생 규칙이다. Anthropic 은 `Require_identical_source` 다(`reasoning_dialect.ml:635-651`, 643줄). 앞 내용이 같은지는 보지 않는다. 판정 코드는 `reasoning_history_projection.ml:204-217`(`replay_selected`)과 258줄(`rotation_admits`)이다.
 - 같은 엔드포인트에 키만 다른 런타임(`claude`, `claude_vincent`)은 같은 `Reasoning_source` 로 보인다. 계정이 다른 블록을 걸러 낼 수 없다.
 
-**(4) system 과 tools.**
+**(5) system 과 tools.**
 
 - 이슈는 polisher 의 wire-capture 에서 system prompt 해시가 `b89d0d67` 에서 `43079d2e` 로, tools 가 52개와 175개 사이로 바뀐 기록을 든다. 이 RFC 는 그 캡처를 다시 열지 않았다.
-- 코드에서 확인한 것은 일부다. Anthropic 본문은 `system` 을 top-level 에 한 번 놓는다 (`backend_anthropic.ml:550-567`). 턴 프롬프트는 실행 컨텍스트의 `base_system_prompt` 이다 (`lib/keeper/keeper_run_prompt.ml:92`). 이 값이 턴 사이에 달라지는 경로와, tools 목록이 턴마다 달라지는 경로는 찾지 못했다. 구현 1층이 이것을 특정한다.
-- `backend_anthropic.ml:336` 은 `System` 역할 메시지를 `user` 로 내보낸다. `role: "system"` 메시지를 내보내는 길은 지금 없다.
+- tools 는 라운드마다 달라질 수 있는 경로가 코드에 둘 있다. 하나는 hook 이 라운드마다 `Keeper_agent_tool_surface.for_request`(`keeper_run_tools_hooks.ml:998`, `keeper_agent_tool_surface.mli:77`)로 현재 도구 집합을 `tool_choice`, 스키마 필터, 표면 스위치에 맞춰 다시 정하는 것이다. 다른 하나는 Agent Core 레인이 처음에는 목록만 받고, 모델이 서비스를 불러오면 그 라운드부터 도구를 넓히는 것이다(`keeper_agent_tool_surface.mli:47-57`, `on_the_wire`). 넓히면 `tools` 가 바뀐다. 문서는 `defer_loading: true` 없이 도구를 더하면 앞부분이 바뀐다고 적는다.
+- 도구가 없는 요청은 `tools` 필드를 아예 뺀다(`agent_turn.ml:26-31`, `prepare_tools` 가 빈 목록이면 `None`). 문서는 도구를 끄려면 `tool_choice: none` 을 쓰고 `tools` 는 빼지 말라고 한다(§1.2-13).
+- system prompt 는 `build_base_system_prompt` (`lib/keeper/keeper_run_context.ml:43`)가 Keeper 실행마다 만들고, 턴 프롬프트는 그 값이다(`keeper_run_prompt.ml:92`). 값이 턴 사이에 달라지는 경로는 찾지 못했다.
+- `backend_anthropic.ml:336` 은 `System` 역할 메시지를 `user` 로 내보낸다. `role: "system"` 메시지를 내보내는 길은 지금 없다. `anthropic-beta` 헤더를 보내는 코드도 없고(`rg "anthropic-beta" packages lib` 는 테스트 한 곳만 나온다), `thinking.block_binding` 을 보내는 코드도 없다.
 
 ### 1.4 400 처리의 부작용
 
-- `Retry.classify_error` 는 HTTP 400 과 422 를 모두 `InvalidRequest { reason = Unknown_invalid_request }` 로 만든다 (`packages/agent_core/lib/llm_provider/retry.ml:340-341`). 413 은 이미 별도 값 `Request_body_refused_by_provider` 이다 (같은 파일 350줄).
-- `boundary_resend_on` (`lib/keeper/keeper_turn_driver_try_provider.ml:2511-2535`)은 `ContextOverflow`, `Request_body_refused_by_provider`, `Unknown_invalid_request` 에 true 를 돌려준다. 같은 파일의 `refusal_evicts` (2323줄)는 앞의 둘에만 true 이다. 둘이 다르게 쓰인 것은 의도다. 주석(2494-2510줄)이 이유를 적는다. 실제로 재 본 크기 거절이 "문장만 있는 400" 으로 온다는 것이다.
-- `turn_boundary_resend_sequence` (2564줄 이하)는 true 면 시작점을 턴 경계로 옮겨 한 번 더 보낸다. 다시 보낸 요청이 크기 거절이 아니면 앞서 들고 있던 시작점을 돌려놓는다 (2596줄, `restore_front before`).
-- 따라서 이슈가 말하는 "컨텍스트가 조용히 잘린다" 는 다시 보낸 요청이 받아들여졌을 때만 성립한다. 사용 한도 400(이슈 집계 579건)은 다시 보내도 같은 거절이 나므로 코드상으로는 시작점이 돌아오고 요청 한 번이 더 나간다. 서명 400 에서 짧은 창으로 다시 보내면 받아들여지는지는 확인하지 못했다. 로그로 확인한 것이 아니라 코드를 읽은 결과다.
-- 이슈의 집계: 사용 한도 400 579건(`claude.*` 세 종류), temperature 400 5건, 크기 초과 3건. 이 숫자도 다시 세지 않았다.
-- 크기 때문인지 아닌지는 지금 오류 값에 없다. 문장으로 가르면 문자열 분류기가 된다(RFC-AC-029 §S1, §S8). Anthropic 도 문구로 가르지 말라고 한다(§1.2-6).
+- `Retry.classify_error` 는 HTTP 400 과 422 를 모두 `InvalidRequest { reason = Unknown_invalid_request }` 로 만든다(`packages/agent_core/lib/llm_provider/retry.ml:340-341`). 413 은 이미 별도 값 `Request_body_refused_by_provider` 다(350줄).
+- `boundary_resend_on` (`lib/keeper/keeper_turn_driver_try_provider.ml:2511-2535`)은 `ContextOverflow`, `Request_body_refused_by_provider`, `Unknown_invalid_request` 에 true 를 돌려준다. 같은 파일의 `refusal_evicts`(2323줄)는 앞의 둘에만 true 다. 다르게 쓴 것은 의도다. 주석(2494-2510줄)이 이유를 적는다. 지금까지 다시 확인한 크기 거절이 "문장만 있는 400" 으로 온다는 것이다.
+- `turn_boundary_resend_sequence` (2564줄 이하)는 true 면 시작점을 턴 경계로 옮겨 한 번 더 보낸다. 다시 보낸 요청이 크기 거절이 아니면 앞서 들고 있던 시작점을 돌려놓는다(2596줄, `restore_front before`).
+- 따라서 "컨텍스트가 조용히 잘린다" 는 다시 보낸 요청이 받아들여졌을 때만 성립한다. 사용 한도 400 은 다시 보내도 같은 거절이 나므로 코드상으로는 시작점이 돌아오고 요청이 한 번 더 나갈 뿐이다. 서명 400 에서 짧은 창으로 다시 보내면 받아들여지는지는 확인하지 못했다. 로그가 아니라 코드를 읽은 결과다.
+- 크기 때문인지는 지금 오류 값에 없다. 문장으로 가르면 문자열 분류기다(RFC-AC-029 §S1, §S8). Anthropic 도 문구로 가르지 말라고 한다(§1.2-7).
 
-### 1.5 확인 상태 요약
+### 1.5 턴별 문맥의 크기 (2026-10-12)
+
+| 값 | n | 중앙 | p90 | 최대 | 센 방법 |
+|---|---|---|---|---|---|
+| 첫 라운드의 문맥 | 1,188 | 28,732 B | 50,212 B | 63,424 B | runtime-manifest 의 `pre_tool_context_injection` 줄, `extra_system_context_computed_size` |
+| receipt 의 `extra_system_context_injected_size` | 593 | 26,746 B | 47,433 B | 62,230 B | `~/.masc/keepers/*/execution-receipts/2026-10/12.jsonl` 의 같은 이름 필드 (검토자는 n=587 을 얻었다. 그 뒤 줄이 늘어 593 이다) |
+
+단위는 바이트다(`String.length ctx`, `keeper_run_tools_hooks.ml:1276`). 모든 Keeper 와 공급자를 합친 값이다. 토큰으로 바꾸지 않았다.
+
+### 1.6 확인 상태 요약
 
 | 주장 | 상태 |
 |---|---|
-| 앞부분 규칙과 `drop_block` 비용 | 공식 문서를 읽음 (2026-10-13) |
-| 턴별 문맥이 이력에 남지 않고 끝에 붙는다 | 코드로 확인 |
+| 앞부분 규칙, `drop_block` 비용, 도구 결과 변경의 효과 | 공식 문서를 읽음 |
+| 턴별 문맥이 이력에 남지 않고 첫 라운드에만 붙는다 | 코드와 manifest 로 확인 |
+| 강등 경계가 턴마다 움직인다 | 코드로 확인. 움직이는 빈도는 못 쟀다 |
 | 서명 블록을 앞부분 비교 없이 모두 재생한다 | 코드로 확인 |
-| 창 시작점이 움직여 맨 앞 메시지가 바뀐다 | 코드로 확인. 움직이는 빈도는 못 쟀다 |
-| system·tools 가 턴 사이에 바뀐다 | wire-capture 기록을 이슈에서 인용. 코드 경로 미확인 |
+| 창 시작점이 움직여 맨 앞 메시지가 바뀐다 | 코드로 확인. 빈도는 못 쟀다 |
+| tools 가 라운드마다 바뀌는 경로 | 코드로 둘 확인. 52↔175 캡처와 연결은 못 했다 |
+| system prompt 가 턴 사이에 바뀐다 | wire-capture 인용. 코드 경로 미확인 |
 | vincent 계정이 2026-08-31 이후 생성 | 미확인 |
 | 서명 400 이 위 원인 때문에 난다 | 추정. 요청 본문 대조 없음 |
 | 서명 400 뒤 짧은 창 재전송이 성공한다 | 미확인 |
-| 60건·579건·5건·3건 | 이슈의 집계. 이 RFC 에서 재집계하지 않음 |
 
 ## 2. 목표와 비목표
 
 ### 목표
 
-1. Anthropic 레인에서 앞부분 위반으로 나는 400 을 구성으로 막는다. 막지 못한 400 은 숨기지 않는다.
-2. 앞부분이 바뀔 수밖에 없을 때(창 이동, 이력 재작성, 런타임 전환)는 서명 블록을 빼고 보낸다. 빼는 이유를 타입으로 남긴다.
-3. 크기 때문이라는 증거 없이는 짧은 창으로 다시 보내지 않는다.
+1. Anthropic 요청에서 앞부분 위반 400 이 일어나지 않게, 요청을 만들 때부터 막는다. 그래도 나는 400 은 숨기지 않는다.
+2. 앞부분이 바뀔 수밖에 없을 때(창 이동, 강등, 이력 재작성, 런타임·계정 전환)는 서명 블록을 빼고 보내고, 빼는 이유를 타입으로 남긴다.
+3. 크기 때문이라는 증거가 있을 때만 짧은 창으로 다시 보낸다.
 4. 위 세 가지를 라운드 N 과 N+1 의 요청 본문 대조로 테스트한다.
 
 ### 비목표
 
-- `drop_block` 을 기본값으로 쓰지 않는다. 문서가 임시방편이라 부르고, 매 턴 버리면 출력 토큰이 최대 67.1% 늘었다(§1.2-8). 조건: Anthropic 자체 벤치마크이고 effort max 의 값이다. 우리 하네스에서 재지 않았다.
+- `drop_block` 을 기본값으로 쓰지 않는다. 문서가 임시방편이라 부르고 매 턴 버리면 출력 토큰이 최대 67.1% 늘었다(§1.2-9, Anthropic 자체 벤치마크의 effort max 값이고 우리 하네스에서 재지 않았다). 이 이유가 이 RFC 의 설계에도 해당하는지는 §3.5 에 쓴다.
 - 오류 문구를 읽어 원인을 가르지 않는다.
 - 재시도 횟수·쿨다운 같은 상한을 두지 않는다.
-- 이 RFC 는 Codex·Gemini·OpenAI 호환 공급자의 재생 규칙을 바꾸지 않는다. 같은 문제가 있는지는 §6 에 질문으로 남긴다.
+- Anthropic 이 아닌 공급자의 요청 구성과 재전송 규칙은 바꾸지 않는다. 구체적으로 (1) 턴별 문맥을 이력에 남기는 일은 Anthropic 요청 경로를 쓰는 턴에서만 하고, 다른 공급자는 지금처럼 가장 최근 문맥만 끝에 붙인다(§3.2). (2) `boundary_resend_on` 의 `Unknown_invalid_request` 갈래는 크기를 측정할 수 있는 공급자(`Count_tokens_sync.supports_completion_request_measurement`, `count_tokens_sync.ml:151-158`: Anthropic 과 Kimi)에서만 바꾸고, 나머지(OpenAI 호환, Ollama, Gemini, GLM)는 지금 그대로 둔다(§3.4). 그 공급자들에는 "크기와 상관없는 400 에 짧은 창으로 다시 보낸다" 는 문제가 남는다. 이슈로 따로 기록한다.
+- Codex 레인(`keeper_codex_runtime`)은 이 요청 경로가 아니라서 건드리지 않는다. 경로를 끝까지 따라가 확인하지는 않았다.
 - 용어집은 고치지 않는다.
+- system·tools 값을 세션 동안 저장해 고정하지 않는다(§3.3). 불필요한 변경을 없애는 일(위 1.3-5 의 두 경로)은 이 RFC 의 범위 밖이고 후속 이슈로 남긴다.
 
 ## 3. 설계
 
-### 3.1 불변식 (Anthropic 레인)
+### 3.1 불변식 (Anthropic 요청)
 
-세션 안에서 연속한 요청 `R_n`, `R_{n+1}` 이 서명 블록을 하나라도 담으면 아래가 성립해야 한다.
+연속한 요청 `R_n`, `R_{n+1}` 이 서명 블록을 하나라도 담으면 아래가 성립해야 한다.
 
 - 이어 붙이기만 하는 것: `system` 값, `tools` 값, `messages` 의 `R_n` 길이까지의 항목. thinking·redacted_thinking 블록은 비교에서 뺀다(§1.2-5). 비교는 JSON 값으로 한다. 문서가 "JSON formatting and key order don't matter; the values do" 라고 적는다.
 - 바뀌어도 되는 것: `messages` 끝에 덧붙인 항목, `effort`, `max_tokens`, `output_config`, `tool_choice`, `metadata`, `thinking.display`, `cache_control`.
-- 앞부분이 바뀐 요청은 그 앞부분에 묶인 서명 블록을 하나도 담지 않는다(§3.4).
+- 앞부분이 바뀐 요청은 그 앞부분에 묶인 서명 블록을 담지 않는다(§3.4).
 
-이 불변식은 우리가 보내는 JSON 에 대한 것이다. 우리 쪽 값이 같으면 Anthropic 쪽 앞부분도 같다. 반대는 성립하지 않는다. 우리 쪽이 같아도 계정이 다르거나 서버가 다르게 읽으면 거절될 수 있다. 그 경우를 §3.5 가 다룬다.
+이 불변식은 우리가 보내는 JSON 에 대한 것이다. 우리 쪽 값이 다르면 Anthropic 쪽 앞부분도 다르다. 반대는 성립하지 않는다. 우리 쪽 값이 같아도 계정이 다르거나 서버가 다르게 읽으면 거절될 수 있다. 그 경우는 §3.4 의 계정 라벨과 §3.6 의 라이브 증명이 다룬다.
 
 ### 3.2 턴별 문맥을 어디에 두는가
 
-선택지 넷을 비교한다. 이 비교의 기준은 앞부분을 건드리는지, 토큰이 얼마나 드는지, 필요한 beta 와 모델 제약이다.
+선택지와 비교는 다음과 같다. 기준은 앞부분을 건드리는지, 모델이 보는 것이 지금과 같은지, 토큰과 저장 비용, 필요한 beta·모델 제약이다.
 
-| | 방법 | 앞부분 | 토큰 비용 | beta·모델 제약 |
+| | 방법 | 모델이 보는 것 | 비용 | 제약 |
 |---|---|---|---|---|
-| A | 턴이 시작될 때 한 번 만들어 이력에 그대로 남긴다. 요청에는 지금처럼 `User` 메시지로 나간다 | 유지 | 턴마다 문맥 크기만큼 이력이 자란다. 캐시된 앞부분은 읽기 가격이다 | 없다 |
-| B | `role: "system"` 메시지에 `clear_at: "next_user_message"` 를 달아 이력에 남긴다 | 유지 (문서의 표: "A cleared turn-scoped system message left in place" 는 유효) | 문서는 정리된 메시지가 입력 토큰을 쓰지 않는다고 적는다 | `mid-conversation-system-clear-at-2026-08-21`. Sonnet 5 는 못 씀. 와이어에 `role: "system"` 을 내보내야 한다(§1.3-4). "Limitations" 절을 읽지 못했다 |
-| C | 그냥 `role: "system"` 메시지를 남긴다 | 유지 | A 와 같다 | beta 없음. Sonnet 5 는 못 씀 |
-| D | 새 user 메시지에 text 블록으로 합친다 | 유지 | A 와 같다 | 없다. 문서가 "Put changing context in the newest turn" 으로 권한다 |
+| A | 만든 문맥을 `User` 메시지로 이력에 그대로 남긴다 | 지난 문맥이 계속 보인다. 오늘은 첫 라운드에만 보인다 | 토큰이 턴마다 늘고 저장도 는다. 오래된 문맥은 시간이 지나 낡는다 | beta 없음. 모든 Anthropic 행 |
+| B | `role: "system"`, `clear_at: "next_user_message"` 메시지로 이력에 남긴다 | 다음 user 메시지가 오면 정리되어 안 보인다. 도구 결과가 오면 정리되므로 오늘처럼 첫 라운드에만 보인다 | 정리된 뒤에는 입력 토큰이 들지 않는다. 저장은 는다 | beta `mid-conversation-system-clear-at-2026-08-21`. Sonnet 5 는 못 쓴다. system 권한이라 안에 바깥 글이 있으면 안 된다 |
+| C | `clear_at` 없는 `role: "system"` | A 와 같다 | A 와 같다 | 권한 문제는 B 와 같다. 이득이 없다 |
+| D | 새 user 메시지에 text 블록으로 합친다 | A 와 같다 | A 와 같다 | 문맥만 가려내는 지금의 코드(`is_extra_context` 등)가 깨진다 |
 
-추천은 A 다.
+추천은 B 다. 이유는 둘이다.
 
-- 이유: beta 와 모델 제약이 없고, 기존 코드가 이미 이 문맥을 `User` 메시지로 내보낸다. 와이어와 카탈로그를 바꾸지 않고도 앞부분 불변식이 선다.
-- D 를 고르지 않는 이유: 문맥이 사용자 메시지에 섞이면 `Extra_system_context_provenance` 로 문맥만 가려내는 지금의 코드(`runtime_model_input_tail_window.ml` 의 `is_extra_context`, `reasoning_history_projection.ml` 의 `find_latest_user_message_index`)가 깨진다.
-- C 를 고르지 않는 이유: 이 문맥은 Keeper hook 이 조립한 자료다. 운영자 권한의 지시 표면에 올려도 되는지 정해지지 않았다(§6 Q3). 문서도 신뢰할 수 없는 텍스트는 user 턴에 두라고 한다.
-- B 는 나중에 측정해서 고른다. 토큰 비용이 문제가 될 때만 이점이 있다. 첫 구현은 A 만 만든다. B 의 변형을 지금 타입에 선언하지 않는다. 쓰이지 않는 갈래가 되기 때문이다.
+1. 모델이 보는 것이 지금과 같다. A 는 지난 문맥이 계속 보이게 한다. 코드 주석(`keeper_run_tools_hooks.ml` 의 `post_tool_round` 위, task-514)은 세계 상태를 라운드마다 다시 보내면 모델이 같은 대답을 되풀이했다고 적는다. A 는 같은 위험을 새로 만든다.
+2. 정리된 문맥은 입력 토큰을 쓰지 않는다. A 의 비용(§1.5 의 중앙 28.7KB 가 턴마다 쌓인다)을 지지 않는다.
 
-A 의 비용:
+B 의 조건과 비용:
 
-- 턴마다 문맥이 이력에 쌓인다. 문맥 크기는 턴 기록의 `extra_system_context_injected_size` 에 남아 있으나 이 RFC 는 값을 재지 않았다. 쌓이는 양 = 문맥 크기 × 턴 수이므로, 이 값은 구현 3층 전에 재야 한다(§7).
-- 지금 문맥은 고정(pinned)이라 어떤 자르기도 지우지 않고 요청당 하나다. A 이후에는 지난 턴 문맥이 보통 이력 atom 이 되어 자르기에 지워지고, 요청에는 문맥이 여러 개 있다. 용어집의 "요청 하나에 carrier 가 하나" 전제와 `prompt_context_carrier_repeated` 입력 귀속 검사가 바뀐다. 이 두 곳을 같은 층에서 고친다.
-- 한 턴 안의 도구 라운드에서는 문맥을 다시 만들지 않는다. 같은 턴의 시각·도구 수는 턴 시작 값으로 굳는다. 라운드마다 최신 값이 필요한 항목이 있는지는 §6 Q4 다.
-- 이력에 남은 문맥은 만든 뒤 바이트까지 그대로 보낸다. 다시 렌더하지 않는다. 문서의 표에서 "Re-render the context you put in the first user message with a changed value" 는 모든 서명 블록을 무효로 만든다.
+- 조건 1, 권한: B 는 문맥을 운영자 권한으로 올린다. 문맥에는 Librarian 기억 블록 등이 있다. 바깥에서 온 글(도구 출력, 웹 내용)이 섞여 있으면 B 는 쓸 수 없다. 블록별로 확인해야 하고 이 RFC 는 확인하지 않았다(§6 Q3). 확인되지 않은 동안 B 의 구현을 병합하지 않는다.
+- 조건 2, 모델: 카탈로그 행이 `turn_scoped_system_message` 를 지원한다고 적어야 한다. 문서가 지원을 적은 모델은 Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5 를 포함한 목록이다(§1.2-10). 문서에서 확인하지 못한 행은 지원하지 않는 것으로 두고 A 로 간다.
+- 비용: 저장은 는다. 첫 라운드 문맥의 중앙값이 28.7KB 이므로(§1.5), 한 턴에 하나씩 이력에 남으면 턴 수가 6,494 인 polisher 의 경우 약 186MB 를 더한다. 이것은 두 측정값(6,494 는 2026-10-12 receipt 의 `turn_count`, 28.7KB 는 중앙값)을 곱한 산수이고 실제 증가량을 잰 것이 아니다. 같은 Keeper 의 현재 체크포인트 snapshot 한 개가 112MB 다(`~/.masc/traces/trace-1788310783225-00003/agent-core-snapshot-*.json`). 저장량이 문제가 되면 블록 단위로 주소를 붙여 한 번만 저장하는 방법이 있다. 문맥의 큰 블록은 자주 안 바뀌고 시계 줄이 자주 바뀐다(`keeper_run_tools_hooks.ml` 의 `cache_rank` 주석). 이 RFC 는 이 방식을 정하지 않는다(§6 Q4).
+- 문맥 하나를 한 번 만들어 남긴 뒤에는 글자 그대로 다시 보낸다. 다시 렌더하면 앞부분이 바뀐다(문서: "Rebuilding it from current state … is an edit to an earlier message").
 
-### 3.3 system 과 tools 는 세션 동안 고정한다
-
-- 세션은 (Keeper, 런타임, 계정 라벨) 한 줄기를 뜻한다. 그 줄기의 첫 Anthropic 요청에서 `system` 과 `tools` 값을 지문으로 남기고, 이후 요청은 같은 값을 쓴다. 지문의 정의는 §3.4 다.
-- `system` 이 바뀌어야 하면 바꾸지 않는다. 새 지시는 이력 끝에 메시지로 덧붙인다. 문서도 그렇게 권한다(§1.2-9).
-- `tools` 가 바뀌어야 하면 두 길이 있다.
-  - 첫 구현: 앞부분 끊김으로 기록한다. 타입 있는 `Prefix_break` 사유를 남기고 서명 블록을 뺀다. 줄기의 지문을 새로 시작한다. 캐시도 이 지점에서 다시 시작한다. 조용히 바뀌지 않는다는 점이 핵심이다.
-  - 나중: 처음에 도구 전체를 `defer_loading: true` 로 선언하고 `tool_addition`·`tool_removal` 로 켜고 끈다. beta `inline-tools-2026-09-15` 가 필요하다. 도구 목록이 52개와 175개 사이로 오간다는 기록(§1.3-4)이 이 길이 필요한지 가늠하는 근거다. 이 RFC 는 이 길을 설계하지 않는다(§6 Q2).
-- 요청 구성이 `system`·`tools` 를 세션 값과 다르게 만들려 하면 단위 테스트가 실패한다. 이유를 문서가 아닌 코드로 강제한다.
-
-### 3.4 서명 블록 재생 규칙 (타입으로)
-
-앞부분 지문:
-
-- 요청 본문의 `system`, `tools`, 그리고 서명 블록 앞의 `messages`(thinking·redacted_thinking 블록은 뺌)를 JSON 정규형으로 직렬화해 SHA-256 을 낸다. 메시지 단위로 이어 쌓는 지문(`fp_{i+1} = H(fp_i ‖ message_i)`)이면 서명 블록마다 그 앞까지의 값을 하나씩 갖는다.
-- 정규형은 객체 키 순서를 정렬하고, 공백을 정하지 않는다(문서: 값만 본다). 우리가 보낸 JSON 을 정규화한다. 직렬화 코드가 바뀌면(예: `Utf8_sanitize` 변경) 지문도 바뀌어, 구버전이 만든 블록은 뺀다. 안전한 방향이다.
-
-저장:
-
-- `Reasoning_source` (`types.ml:341-`)에 묶음 방식 필드를 더한다. 지금은 `provider_kind`, `provider_instance`, `canonical_model_id`, `replay_contract` 네 개다. `of_json` 은 필드가 정확히 네 개일 때만 받는다(`List.length fields = 4`).
+공급자별 렌더링 방식을 카탈로그가 닫힌 값으로 고른다.
 
 ```
-type binding =
-  | Self_contained                       (* 문장 그대로 쓸 수 있는 추론 글 *)
-  | Prefix_bound of Prefix_fingerprint.t (* 만든 요청의 앞부분에 묶인 서명 블록 *)
-
-(* Reasoning_source.t 에 binding 과 credential_scope 를 더한다 *)
+type context_placement =
+  | Turn_scoped_system     (* B. 지원하는 Anthropic 행 *)
+  | Persisted_user_message (* A. 지원하지 않는 Anthropic 행 *)
+  | Latest_at_tail         (* 지금 방식. 다른 공급자 *)
 ```
 
-- `credential_scope` 는 계정을 가르는 라벨이다. 같은 엔드포인트에 키만 다른 `claude`, `claude_vincent` 를 구별하려고 둔다(§1.3-3). 값은 키 자체가 아니고 설정에서 정해진 런타임 프로필의 안정된 이름으로 한다. 같은 계정에 라벨이 둘이면 보수적으로 빼게 된다. 어떤 라벨을 쓸지는 `Provider_config` 에서 안정된 것을 골라야 하고, 이 RFC 는 거기까지 읽지 못했다.
-- 키를 바꿔도 라벨이 같으면 계속 쓴다. 키 교체가 계정 교체와 같은지는 라벨로 알 수 없다(§6 Q5).
+- 이력에 남기는 것은 앞의 둘일 때만이다. `Latest_at_tail` 인 공급자의 요청은 이력에 남은 지난 문맥을 보내지 않고 가장 최근 문맥만 지금처럼 끝에 붙인다. 이렇게 하면 다른 공급자의 요청 바이트는 변하지 않는다.
+- 폴백으로 런타임이 바뀌어도 이력은 하나다. 각 요청이 자기 공급자의 방식으로 그린다. 앞부분이 바뀌는지는 §3.4 의 지문이 알려 준다.
+- "턴별" 의 뜻: hook 이 문맥을 낼 때마다(`Some ctx`) 한 번 남긴다. 문맥이 없는 라운드는 아무것도 남기지 않는다. 오늘은 첫 라운드에서만 `Some` 이다(§1.3-1). 이후 라운드에 문맥을 싣는 블록(`Prompt_block_id.injected_on_post_tool_round`)이 선언되면 그 라운드의 문맥이 새 메시지로 덧붙는다. 지난 문맥을 고치지 않는다.
+- 지금의 "요청 하나에 문맥 하나" 전제와 점검(`prompt_context_carrier_repeated`, 용어집)은 "요청에 실려 보이는 문맥 하나" 로 바꾼다. 고정(pinned) 규칙도 바뀐다. 이력에 남은 지난 문맥은 보통 이력 atom 이어서 창에 잘린다. 잘리면 §3.4 가 그 앞부분에 묶인 서명 블록을 뺀다.
 
-카탈로그가 선언한다 (RFC-AC-040 의 소유권):
+### 3.3 system·tools 는 고정하지 않고 바뀐 것을 알아낸다
 
-- 모델 행이 `thinking_binding = Prefix_bound | Not_prefix_bound` 를 적는다. 문서가 확인한 네 모델(§1.2-1)은 `Prefix_bound` 이다. 나머지 Anthropic 와이어 행은 적어야 한다. 적지 않은 행은 로드 오류다(RFC-AC-040 의 "아무도 적지 않은 사실은 unknown", RFC-AC-029 §S1.4 의 "fail closed"). 문서에서 확인하지 못한 모델의 값을 이 RFC 가 정하지 않는다.
-- `replay_policy` 에 정해진 한 가지만 두지 않는다. Anthropic 의 `All_assistant_messages` 는 그대로 두고, 그 위에 앞부분 판정을 둔다. 판정은 닫힌 값이다.
+- system prompt 와 tools 의 값을 따로 저장해 세션 동안 고정하지 않는다. 운영자가 `base_system_prompt` 를 고치면 다음 요청부터 반영되어야 하고, 고정하면 그 수정이 숨는다. 값을 저장하면 저장 위치와 갱신 규칙도 새로 정해야 한다.
+- 대신 두 값은 지문의 재료다(§3.4). 바뀌면 그 요청의 서명 블록이 빠지고 이유가 `System_changed`, `Tools_changed` 로 남는다. 운영자 수정의 대가는 그 한 번의 추론 이어짐 손실과 캐시 재시작이다.
+- 도구 목록이 라운드마다 달라지는 경로(§1.3-5)를 없애는 일은 이 RFC 가 하지 않는다. 두 경로가 턴 안에서 앞부분을 바꾸므로 그 턴의 서명 블록은 계속 빠진다. 후속 이슈의 방향은 문서가 말하는 `defer_loading: true` 선언(처음부터 전체 도구를 올려 두고 `tool_addition`·`tool_removal` 로 켜고 끈다, beta `inline-tools-2026-09-15`)과 "도구를 끌 때는 `tool_choice: none`" 이다. 이 방향은 검증하지 않았다.
+
+### 3.4 서명 블록 재생 규칙
+
+**지문을 어디서 만드는가.**
+
+- `Reasoning_history_projection.project` (`reasoning_history_projection.ml:222-226`)는 `messages` 만 받는다. system 과 tools 를 모르므로 지문을 거기서 만들 수 없다.
+- 지문은 Anthropic 요청 객체(`Backend_anthropic.build_request_artifact`, `backend_anthropic.mli:114`, `.ml:763`)가 만든다. 이 객체는 창, 강등, 턴별 문맥, 재생 투영을 모두 거친 뒤의 `system`, `tools`, `messages` 를 가지고 있다. 그 본문이 실제로 나가는 것이다.
+- 지문은 `system` 과 `tools` 를 재료로 시작해 메시지를 하나씩 이어 쌓는다. thinking·redacted_thinking 블록은 재료에서 뺀다(§1.2-5). 메시지 `i` 앞까지의 값을 `prefix_before(i)` 라고 부른다. 요청 객체가 모든 `i` 의 값을 가진다.
+- 응답 시점에 붙인다. 응답으로 만든 assistant 메시지(`Types.assistant_message_of_response`, `types.ml:839`)에 그 요청의 마지막 지문(요청의 모든 메시지 뒤 값)을 붙인다. 지금도 같은 자리에서 `Reasoning_source` 를 붙인다. 지문은 응답 텔레메트리에 실려 그 함수까지 온다.
+- 다음 요청을 만들 때, 이력의 서명 assistant 메시지마다 저장된 지문을 새 요청의 `prefix_before(그 메시지 자리)` 와 비교한다. 투영은 메시지를 지울 수 있으므로(`removed_empty_assistant_indices`) 자리는 투영 뒤 위치로 센다.
+
+**저장: Anthropic 전용 별도 키.**
+
+- `Reasoning_source` 는 그대로 둔다. 지문과 계정 라벨은 새 메타데이터 키 `agent_core.prefix_binding.v1` 에 둔다. 값은 `{ prefix_fingerprint; credential_scope }` 다.
+- `credential_scope` 는 계정을 가르는 라벨이다. `claude` 와 `claude_vincent` 는 같은 `Reasoning_source` 이므로 이 값으로만 구별된다(§1.3-4). 값은 키가 아니고 설정이 정한 런타임 프로필의 안정된 이름이다. 어떤 이름을 쓸지는 `Provider_config` 를 더 읽어야 정해지고 이 RFC 는 거기까지 읽지 못했다. 같은 계정에 라벨이 둘이면 보수적으로 블록을 뺀다. 키를 바꿔도 라벨이 같으면 계속 쓴다. 키 교체가 계정 교체와 같은지는 라벨로 알 수 없다(§6 Q5).
+- 재생하려면 `Reasoning_source` 가 맞고(`rotation_admits`, 지금 그대로) 이 키가 있고 지문과 라벨이 맞아야 한다. 하나라도 빠지면 뺀다.
+
+**카탈로그 사실.**
+
+- 모델 행이 `thinking_binding = prefix_bound | not_prefix_bound` 를 적을 수 있다. 문서가 확인한 네 모델(§1.2-1)은 `prefix_bound` 를 적는다. 안 적은 행은 RFC-AC-040 의 `unknown` 이고, 소비자는 `prefix_bound` 와 같게 다룬다. 이유: 지문이 맞는 블록만 보내므로 틀린 쪽으로 틀려도 요청은 거절되지 않고 추론만 잃는다. `not_prefix_bound` 인 행은 지금 하나도 없다. Anthropic 호환 표면을 쓰는 행(DeepSeek 등, `models.toml` 의 `base = "anthropic"` 12행 중 일부)이 문서로 확인되면 그때 적는다.
+- 소비자의 `match` 는 `Some Not_prefix_bound`, `Some Prefix_bound`, `None` 을 모두 적는다. `_ ->` 갈래를 두지 않는다.
+
+**재생 판정.**
 
 ```
-type signed_thinking_disposition =
-  | Replay of Prefix_fingerprint.t
-  | Omit_prefix_changed of prefix_change
-  | Omit_binding_absent
-  | Omit_source_changed of Reasoning_source.t
-
 type prefix_change =
   | System_changed
   | Tools_changed
   | History_front_moved
   | History_rewritten of { first_index : int }
-  | Context_carrier_changed
+  | Tool_result_demoted of { first_index : int }
+  | Context_message_changed
+
+type signed_thinking_disposition =
+  | Replay
+  | Omit_prefix_changed of prefix_change
+  | Omit_binding_absent
+  | Omit_source_changed
+  | Omit_account_changed
+  | Omit_older_than_unreplayable   (* 이 블록은 맞지만 더 새 블록이 안 맞는다 *)
 ```
 
-- `reasoning_history_projection.project` 는 이 값을 `match` 로 다룬다. `_ ->` 갈래를 두지 않는다. 새 갈래가 생기면 컴파일이 깨진다. 지금 있는 `replay_drop_reason` (`Incompatible_reasoning_source`, `Missing_reasoning_source`, `Replay_policy_excluded`, `Reasoning_on_non_assistant`)에 `Prefix_not_preserved of prefix_change` 를 더하는 방향이다.
-- 재생하는 것은 지금 보내려는 앞부분의 지문이 저장된 지문과 같은 서명 블록뿐이다. 같지 않으면 그 블록과 그 뒤의 서명 블록을 뺀다. 빼는 것은 문서가 유효하다고 적은 방식이다(§1.2-5).
-- 한 번 뺀 블록이 다시 들어오지 않는 이유(추론): 블록이 안 맞는 까닭은 이력에 남은 편집이다. 편집이 이력에 남아 있는 한 지문은 계속 안 맞는다. 문서는 뺀 블록을 되돌리면 그 사이에 만든 블록이 무효라고 한다. 이 성질은 속성 테스트로 확인한다(§3.6). Anthropic 서버가 같은 결론을 내는지는 라이브 증명으로만 안다.
-- 창 시작점이 움직이면 모든 서명 블록의 지문이 달라져 전부 빠진다. 그 뒤 만드는 블록은 새 앞부분에 묶이고, 다음에 시작점이 움직일 때까지 재생된다. 이 비용은 §6 Q6 이 묻는다.
-- `Omit_binding_absent`: 이 RFC 이전에 저장된 블록. 호환 읽기 코드를 만들지 않고 뺀다(§4.1).
+- `reasoning_history_projection.project` 는 `disposition` 을 `match` 로 다루고 `_ ->` 갈래를 두지 않는다. 지금의 `replay_drop_reason` 에 `Prefix_not_preserved of prefix_change` 와 계정·지문 부재 갈래를 더하는 방향이다.
+- 재생할 블록은 이렇게 고른다. 가장 새 서명 블록부터 거슬러 올라가며 `Replay` 인 블록을 모은다. `Replay` 가 아닌 블록을 처음 만나면 멈춘다. 그 블록과 그보다 오래된 서명 블록은 전부 뺀다(앞쪽부터 빼기만 한다). 문서가 유효하다고 적은 방식이다(§1.2-5).
+- 이 규칙은 한 번 앞부분이 바뀐 뒤에 새로 만든 블록을 영구히 잃지 않는다. 바뀐 뒤의 요청은 새 앞부분으로 지문을 붙이고, 그 블록은 이후 요청이 바뀌지 않는 한 재생된다. 앞쪽의 안 맞는 블록만 계속 빠진다. 안 맞는 블록과 같은 앞부분에 묶인 오래된 블록 중 맞는 것까지 빠지는 것은 보수적인 선택의 비용이다. 맞는 블록만 남기고 중간 블록만 빼는 쪽이 유효한지는 문서의 문장으로 단정할 수 없어 라이브 증명 항목에 둔다(§3.6).
+- 창 시작점이 움직이면 모든 지문이 달라져 서명 블록이 전부 빠진다. 강등도 마커로 바뀐 도구 결과 뒤의 모든 서명 블록을 뺀다.
+- 열린 도구 라운드(마지막 assistant 메시지가 `tool_use` 를 가졌고 답이 오는 중)에서 그 마지막 메시지의 서명 블록을 빼야 하는 경우가 있다. 문서의 두 곳이 어긋나 보인다. 앞부분 문서는 끝에서 빼는 것이 유효하다고 하고, 문제 해결 문서는 마지막 assistant 메시지의 thinking 을 고치면 400 이라고 한다. 어느 쪽이 맞는지 확인하지 못했다. 라이브 증명이 이 경우를 시험한다. 400 이 나면 이 경우는 조용히 빼지 않고 타입 있는 턴 실패(`Open_tool_round_cannot_drop_signed_thinking`)로 만든다.
+- `Omit_binding_absent`: 이 RFC 이전에 저장된 블록. 호환 읽기 코드를 만들지 않는다(§4.1).
 
-### 3.5 400 을 타입으로 구분하는 방법
+### 3.5 이 설계가 지키는 것과 못 지키는 것
 
-오류 본문이 주는 구조: `type`(`invalid_request_error`), `message`, `request_id` 와 HTTP 상태 코드뿐이다(§1.2-6). 서명 400, 사용 한도 400, temperature 400, 크기 400 은 모두 같은 `type` 이다. 구조 필드로는 이 넷을 가를 수 없다. 별도 코드 필드를 만들어 내지 않는다.
+이 RFC 가 서명 블록을 빼는 것은 `drop_block` 이 블록을 버리는 것과 같은 비용을 낸다. 모델이 지난 추론을 잃어 출력 토큰이 늘 수 있다. 비목표에서 `drop_block` 을 거부한 이유가 이 설계에도 해당한다. 다른 점은 빈도다. `drop_block` 을 쓰면 앞부분이 바뀌는 모든 요청에서 버리고, 이 설계는 바뀌지 않는 요청에서는 보낸다.
 
-그래서 파싱 경계는 지금처럼 `Unknown_invalid_request` 로 둔다. 아는 만큼만 말하는 값이다. 대신 원인을 가를 증거를 구조 있는 곳에서 따로 얻는다.
+- 지키는 것: 같은 턴의 라운드 사이. 2026-10-12 에 같은 턴의 두 번째 이후 라운드가 전체 라운드의 85%(6,883/8,071)다(§1.3-1). 이 라운드들은 문맥 메시지를 고정하고(§3.2) 강등 경계가 턴 안에서 고정되어 있으므로(§1.3-3), 도구가 안 바뀌고 창이 안 움직이면 앞부분이 이어 붙이기만 한다.
+- 못 지키는 것: 턴 사이. 새 턴의 첫 요청에서 지난 턴의 도구 결과가 마커로 바뀌면(강등) 그 뒤 서명 블록이 전부 빠진다. 창이 움직일 때도 같다. `Small`(기본값) 정책에서 지난 턴에 마커보다 큰 도구 결과가 있으면 해당한다. 마커보다 작은 결과만 있는 턴은 해당하지 않는다. 해당하는 턴이 얼마나 되는지는 재지 않았다.
+- 턴 사이 손실의 비용은 잰 적이 없다. Anthropic 의 수치(첫 턴 이후 매 턴 버리면 4.6~67.1%)는 다른 하네스의 값이라 상한을 가늠하는 참고일 뿐이다. 우리 하네스에서 재는 방법: 실제 체크포인트 하나에 요청 본문 생성기를 돌려 턴 경계마다 빠지는 서명 블록 수와 그 블록들이 가진 추론 크기를 센다. 공급자를 부르지 않으므로 비용이 들지 않고 결정적이다. 값은 아직 없다(미측정).
 
-1. **요청 쪽 사실을 오류에 붙인다.** 보낸 요청이 서명 블록을 몇 개 재생했는지, 지문 검사를 모두 통과했는지, 샘플링 파라미터를 보냈는지는 우리가 안다. 이 값은 응답을 읽지 않고 얻는다. `Unknown_invalid_request` 에 `attempt_facts` 를 붙인다. 이렇게 하면 "서명 블록 N개를 재생했고 지문이 모두 맞았는데도 거절" 같은 줄이 운영자에게 보인다. 이것은 알림이 아니라 원인을 좁히는 사실이다.
-2. **크기 증거는 공급자가 재 준 숫자로만 얻는다.** `Unknown_invalid_request` 를 받은 뒤, 공급자의 토큰 세기(`count_tokens`)가 있는 레인에서만 한 번 센다. 센 입력 토큰이 카탈로그가 적은 `max_context` 를 넘으면 `Size_refusal_measured { input_tokens; max_context }` 로 값을 만든다. 넘지 않거나 셀 수 없으면 크기 때문이라는 증거가 없다. 코드에는 이미 `Count_tokens_sync` 와 `Input_capacity` 의 `Token_measurement_unavailable` 가 있다(`prepared_completion_request.mli:90`, `retry.ml` 의 `input_capacity_reason`). 이 판정은 문구를 읽지 않는다.
-3. **`boundary_resend_on` 은 `Size_refusal_measured`, `ContextOverflow`, `Request_body_refused_by_provider` 에만 true 를 돌려준다.** `Unknown_invalid_request` 는 false 다. 지금 true 인 `Unknown_invalid_request` 갈래를 지운다. 이것은 값을 더하는 것이 아니라 갈래 하나를 지우는 변경이다.
-4. 알 수 없는 400 은 보이게 실패한다. 이력도 줄이지 않고 다시 보내지도 않는다. 이 실패 값에 요청 쪽 사실(1)이 붙는다. 서명 400 이 위 조치로도 나면 그것은 우리 결함이거나 이 RFC 가 모르는 규칙이다. 숨기면 안 된다.
+강등 경계를 안정시키는 선택지와 비교는 다음과 같다.
+
+| 선택지 | 얻는 것 | 잃는 것 |
+|---|---|---|
+| 지금 그대로 둔다 (추천) | 토큰이 줄어드는 지금의 이점 유지. 변경이 없다 | 턴 사이 추론 이어짐을 잃는다 |
+| 서명 블록이 있는 구간 앞은 강등하지 않는다 | 턴 사이 이어짐 | 큰 도구 결과가 마커로 안 바뀌어 요청이 커진다. 강등의 존재 이유와 부딪힌다. 서명 블록은 거의 모든 assistant 턴에 있어 사실상 강등을 끈다 |
+| 강등을 창이 움직이는 때에만 한꺼번에 한다 | 두 경계가 같이 움직여 끊김 횟수가 준다 | 그때까지 큰 결과가 원문으로 남아 요청이 커진다. 늘어나는 크기는 재지 않았다 |
+
+추천은 지금 그대로 두는 것이다. 이유: 턴 사이 이어짐이 줄이는 출력 토큰은 측정하지 않았고, 다른 두 선택지는 모두 입력 토큰과 맞바꾼다. 위 방법으로 측정한 뒤 턴 경계마다 빠지는 추론이 크면 마지막 선택지를 다시 연다.
+
+### 3.6 400 을 타입으로 구분하는 방법과 하네스
+
+**400.** 오류 본문이 주는 구조는 `type`(`invalid_request_error`), `message`, `request_id` 와 HTTP 상태 코드뿐이다(§1.2-7). 서명 400, 사용 한도 400, temperature 400, 크기 400 은 같은 `type` 이다. 구조 필드로는 이 넷을 가를 수 없다. 별도 코드 필드를 만들어 내지 않는다. 파싱 경계는 지금처럼 `Unknown_invalid_request` 로 둔다. 본문이 말하지 않는 것을 말하지 않는 값이다. 원인을 가를 증거는 구조 있는 곳에서 따로 얻는다.
+
+1. 요청 쪽 사실을 오류에 붙인다. 보낸 요청이 서명 블록을 몇 개 재생했는지, 지문이 모두 맞았는지, 샘플링 파라미터를 보냈는지는 우리가 안다. 응답을 읽지 않고 얻는 값이다. 서명 400 이 "서명 블록 N개를 재생했고 지문이 모두 맞았는데도 거절" 로 보이면 우리 결함이거나 이 RFC 가 모르는 규칙이다. 숨기지 않는다.
+2. 크기 증거는 공급자가 재 준 숫자로만 얻는다. 측정할 수 있는 공급자(Anthropic, Kimi)에서 `Unknown_invalid_request` 를 받은 뒤 한 번 센다. 센 입력 토큰이 카탈로그의 `max_context` 를 넘으면 `Size_refusal_measured { input_tokens; max_context }` 를 만든다. 넘지 않거나 셀 수 없으면 크기 증거가 없다. 이미 있는 `Count_tokens_sync` 와 `Input_capacity` 의 `Token_measurement_unavailable` 를 쓴다. 이 판정은 문구를 읽지 않는다.
+3. `boundary_resend_on` 은 `Size_refusal_measured`, `ContextOverflow`, `Request_body_refused_by_provider` 에 true 이고, 측정할 수 있는 공급자의 `Unknown_invalid_request` 에 false 다. 측정할 수 없는 공급자의 `Unknown_invalid_request` 는 지금처럼 true 다(§2). 이 분기는 `supports_completion_request_measurement` 가 정한다. 공급자 이름 문자열이 아니다.
+4. 알 수 없는 400 은 보이게 실패한다. 이력을 줄이지도, 다시 보내지도 않는다. 실패 값에 요청 쪽 사실(1)이 붙는다.
 
 이 설계가 어디서 깨지는지:
 
-- 실제 크기 거절이 문장만 있는 400 으로 온다는 기존 실측(`keeper_turn_driver_try_provider.ml:2495-2510` 의 주석, `RFC-librarian-lifecycle` §4.10)을 이 RFC 는 다시 확인하지 못했다. 그 전제가 맞고 `count_tokens` 가 쓸 수 없는 레인이면, 크기 거절이 보이게 실패한다. 지금은 시작점을 옮겨 해결되던 경우다. 이 비용을 받아들일지는 운영자 결정이다(§6 Q1).
-- `RFC-keeper-context-window-in-tokens` §1 의 결정 2 는 "요청을 보내기 전에 재지 않는다" 이다. 이 RFC 는 거절 뒤에 한 번 센다. 보내기 전 측정이 아니라서 문장은 지키지만, 같은 결정을 다시 읽어 줘야 한다.
-- 사용 한도 400 과 temperature 400 은 타입으로 가르지 못한다. 구조 필드가 있는지 응답 헤더까지 포함해 실제 본문 하나씩을 받아 확인하는 일이 필요하다(§7 의 측정 항목). 있으면 그때 변형을 더한다. 없으면 `Unknown_invalid_request` + 요청 쪽 사실로 남는다. temperature 는 카탈로그의 `ignored_sampling_parameters` 가 이미 보내지 않기 위한 장치이므로 이 400 은 요청 구성 결함으로 읽는다.
-- 서명 400 을 응답으로 구별하는 구조 신호는 없다. 구조 신호가 있는 곳은 2xx 응답의 `input_transformations` 뿐이다. `prefix_binding_mismatch` 이유는 `drop_block` 일 때 `thinking_dropped` 로, 검사하지 않는 계정에서 beta 헤더를 보내고 필드를 비워 두면 `thinking_mismatch_allowed` 로 나온다(preserved-thinking). 이 값은 진단에 쓸 수 있다. 정책으로 쓰지 않는다. 검사가 기본인 계정에서 필드를 비웠을 때 어떻게 되는지는 문서에서 확인하지 못했다.
+- 실제 크기 거절이 문장만 있는 400 으로 온다는 기존 실측(`keeper_turn_driver_try_provider.ml:2494-2510` 의 주석, `RFC-librarian-lifecycle` §4.10)은 이 RFC 가 다시 확인하지 못했다. 그 전제가 맞고 `count_tokens` 가 크기 초과를 가리키지 못하면, 측정할 수 있는 공급자에서도 크기 거절이 보이게 실패한다. 지금은 시작점을 옮겨 해결되던 경우다. 받아들일지는 운영자 결정이다(§6 Q1).
+- `RFC-keeper-context-window-in-tokens` §1 결정 2 는 "요청을 보내기 전에 재지 않는다" 이다. 이 RFC 는 거절 뒤에 한 번 센다. 보내기 전 측정이 아니라 문장은 지키지만 결정을 다시 읽어 줘야 한다.
+- 사용 한도 400 과 temperature 400 은 타입으로 가르지 못한다. 문장은 receipts 에서 구했다(§1.1). 응답 헤더와 구조 필드가 있는지는 모른다. 테스트에는 그 문장을 입력으로 쓰되 분류에는 쓰지 않는다. temperature 는 카탈로그의 `ignored_sampling_parameters` 가 보내지 않으려는 장치이므로 이 400 은 요청 구성 결함으로 읽는다.
+- 서명 400 을 응답으로 구별하는 구조 신호는 없다. 구조 신호는 2xx 응답의 `input_transformations` 뿐이다. 이 신호는 진단에 쓸 수 있고 정책에는 쓰지 않는다.
 
-### 3.6 하네스 먼저
+**하네스.** 결정적인 것과 아닌 것을 나눈다.
 
-결정적인 것과 아닌 것을 나눈다.
+결정적 (오프라인, 항상 돌린다):
 
-**결정적 (오프라인, 항상 돌린다).**
-
-- 순수 함수 `Anthropic_request_prefix.relation : previous:Yojson.Safe.t -> next:Yojson.Safe.t -> relation` 을 둔다. 값은 `Append_only` 와 `Broke of prefix_change` 다. 서명 블록 유무와 함께 읽는다. 오프라인 하네스와 라이브 증명이 같은 함수를 쓴다.
+- 순수 함수 `Anthropic_request_prefix.relation : previous:Yojson.Safe.t -> next:Yojson.Safe.t -> relation` 을 둔다. 값은 `Append_only` 와 `Broke of prefix_change` 다. 오프라인 하네스와 라이브 증명이 같은 함수를 쓴다.
 - 시나리오는 실제 Keeper 경로로 라운드 N 과 N+1 의 본문을 만들어 대조한다.
-  1. 도구 없는 두 라운드 (턴별 문맥 있음, 내용 다름)
-  2. 도구 라운드가 한 턴 안에서 두 번 이어짐
-  3. 창 시작점이 한 칸 움직임 (`atoms_per_window` 경계)
-  4. 폴백으로 다른 런타임(`claude` → `claude_vincent`)으로 넘어감
-  5. 저장된 이력을 읽어 재시작 후 이어서 보냄
-  6. 이 RFC 이전에 저장된 이력 (binding 없음)
-- 합격 조건: 모든 연속 쌍에서 `Append_only` 이거나, N+1 본문이 끊긴 지점 앞에 묶인 서명 블록을 하나도 담지 않고 사유 값이 기록되어 있다.
-- 변이 검사: 턴별 문맥을 요청 끝에 붙이고 이력에 남기지 않는 옛 코드로 되돌리면 시나리오 1 이 실패해야 한다. 지문 비교를 빼면 시나리오 3 이 실패해야 한다.
-- 속성 테스트: 뺀 블록은 이력이 같으면 다시 들어오지 않는다.
-- Anthropic 규칙을 흉내 내는 로컬 스텁 서버는 이 RFC 에서 만들지 않는다. 문서를 읽은 우리 해석이지 Anthropic 이 아니다. 스텁이 통과해도 실제 통과를 뜻하지 않는다.
 
-**비결정적 (라이브, 수동).**
+| # | 시나리오 | 기대 |
+|---|---|---|
+| 1 | 같은 턴 안의 도구 라운드 둘, 첫 라운드에만 문맥 | `Append_only`, 서명 블록 전부 재생 |
+| 2 | 도구 라운드 사이에 도구 결과가 두 번 쌓임 | `Append_only`, 전부 재생 |
+| 3 | 창 시작점이 한 칸 움직임 | 서명 블록 없음, 이유 `History_front_moved` |
+| 4 | 폴백으로 다른 런타임(`claude` → `claude_vincent`) | 서명 블록 없음, `Omit_account_changed` |
+| 5 | 저장된 이력을 읽어 재시작 후 이어서 보냄 | `Append_only`, 전부 재생 |
+| 6 | 이 RFC 이전에 저장된 이력(지문 키 없음) | 서명 블록 없음, `Omit_binding_absent` |
+| 7 | 새 턴에서 지난 턴의 도구 결과가 마커로 바뀜 | 마커 뒤 서명 블록 없음, `Tool_result_demoted` |
+| 8 | 도구가 없는 요청 | `tools` 필드가 있고 `tool_choice: none` |
+| 9 | 한 턴 안에서 도구가 넓어짐 | 서명 블록 없음, `Tools_changed` |
 
-- 기존 `packages/agent_core/test/anthropic_live_proof.ml` 은 두 턴 도구 왕복에서 서명 블록 재생을 확인한다(289-321줄). 어느 test alias 에도 걸려 있지 않고 `ANTHROPIC_LIVE=1` 과 키가 있어야 하며 비용이 든다. 여기서는 턴별 문맥이 있는 두 라운드와 라운드 사이에 문맥 값을 바꾸는 경우를 더한다.
-- 요청에 `thinking.block_binding.prefix_mismatch_behavior: "error"` 와 beta 헤더를 명시한다. 문서는 `"error"` 를 회귀를 크게 실패시키는 용도로 권한다. 이 값이 있으면 계정 나이와 상관없이 검사가 켜진다(문서 FAQ). 그래서 오래된 계정에서도 이 증명이 앞부분 위반을 잡는다.
-- 현재 실행 제약: MASC 는 push 마다 CI 를 돌리지 않고 Release/Tag 에서 Full CI 를 돌린다(`instructions/masc-workflow.md`). 라이브 증명은 수동 실행이고, 결과는 PR 본문에 실행 명령과 모델 이름·날짜로 남긴다. 실행하지 않은 증명의 통과를 적지 않는다.
-- 응답의 비결정성 때문에 모델이 thinking 블록을 아예 안 낼 수 있다(문서: 단순한 요청에는 생략). 기존 증명이 계산을 먼저 시키는 이유다. 블록이 없으면 그 실행은 아무것도 증명하지 않으므로 실패가 아니라 "증명 못 함" 으로 보고한다.
+- 판정 방법: 끊김이 없어야 하는 시나리오(1, 2, 5)는 `Append_only` 이면서 만든 서명 블록 수와 보낸 서명 블록 수가 같아야 한다. 모든 서명 블록을 빼는 구현이 통과하지 못하게 하려는 조건이다. 끊김이 기대되는 시나리오(3, 4, 6, 7, 9)는 끊긴 지점 앞에 묶인 서명 블록이 없고 이유 값이 기록되어야 한다.
+- 일부러 되돌려 보는 검사: 문맥을 요청 끝에 붙이고 이력에 남기지 않는 옛 코드로 되돌리면 1 이 실패해야 한다. 지문 비교를 빼면 3 이 실패해야 한다.
+- 속성 테스트: 이력이 같으면 한 번 뺀 앞쪽 블록이 되살아나지 않는다.
+- Anthropic 규칙을 흉내 내는 스텁 서버는 만들지 않는다. 문서를 읽은 우리 해석이지 Anthropic 이 아니고, 스텁이 통과해도 실제 통과를 뜻하지 않는다.
+
+비결정적 (라이브, 수동):
+
+- 기존 `packages/agent_core/test/anthropic_live_proof.ml` 은 두 턴 도구 왕복에서 서명 블록 재생을 확인한다(296-321줄). 어느 test alias 에도 걸려 있지 않고 `ANTHROPIC_LIVE=1` 과 키가 있어야 하며 비용이 든다. 여기에 턴별 문맥이 있는 두 라운드와 라운드 사이에 문맥 값을 바꾸는 경우를 더한다.
+- 요청에 beta 헤더와 `thinking.block_binding.prefix_mismatch_behavior: "error"` 를 명시한다. 문서는 `"error"` 를 회귀를 크게 실패시키는 용도로 권한다. 이 값이 있으면 계정 나이와 상관없이 검사가 켜진다(문서 FAQ). Sonnet 5.5 와 Haiku 5.5 에서는 `thinking: {"type": "adaptive"}` 일 때만 동작하므로 증명도 adaptive 로 보낸다. 이 필드와 헤더를 보내는 코드가 지금 없으므로 요청 옵션을 타입으로 새로 만든다(`prefix_mismatch_behavior = Provider_default | Error_on_mismatch`). 운영 요청은 `Provider_default`(보내지 않음)다. 테스트 전용 뒷문이 아니라 증명이 쓰는 같은 옵션이다.
+- 추가로 확인할 것 둘. (1) 열린 도구 라운드에서 마지막 assistant 메시지의 thinking 을 빼면 400 이 나는가(§3.4). (2) 안 맞는 중간 블록만 빼고 나머지를 유지해도 받아 주는가. 확인되기 전에는 앞쪽부터 빼기만 한다.
+- 현재 실행 제약: MASC 는 push 마다 CI 를 돌리지 않고 Release/Tag 에서 Full CI 를 돌린다(`instructions/masc-workflow.md`). 라이브 증명은 수동 실행이고 결과는 PR 본문에 실행 명령과 모델 이름·날짜로 남긴다. 실행하지 않은 증명의 통과를 적지 않는다.
+- 모델이 thinking 블록을 아예 안 낼 수 있다(문서: 단순한 요청에는 생략). 블록이 없는 실행은 아무것도 증명하지 않으므로 실패가 아니라 "증명 못 함" 으로 보고한다.
 
 ## 4. 이행
 
-### 4.1 저장된 이력: 하드 컷
+### 4.1 저장된 이력
 
-- 이 저장소 정책은 데이터 스키마가 바뀔 때 migration 이나 명시적 hard cut 중 하나를 고르고, hard cut 에서는 호환 읽기·변환·마이그레이션 코드를 만들지 않는다(`workflow.md` 진입 장벽).
-- 선택: 하드 컷이다. `Reasoning_source` 키를 `agent_core.reasoning_source.v3` 으로 올린다(현재 `v2`, `types.ml`). v2 로 저장된 항목은 `classify` 가 `Absent` 로 읽고, 재생 투영은 이미 `Absent` 를 `Missing_reasoning_source` 로 기록하며 추론을 뺀다(`reasoning_history_projection.ml`).
-- 이유: 옛 블록은 만든 요청의 앞부분이 기록되어 있지 않아 지금 맞는지 알 수 없다. 모르는 것을 맞다고 읽으면 400 이다. 빼는 것은 문서가 유효하다고 적은 길이고 코드를 더하지 않는다. 변환기를 만들면 그 변환이 틀렸을 때 같은 400 을 다시 만든다.
-- 비용: 모든 공급자에서 저장된 추론이 한 번 빠진다. 비 Anthropic 공급자의 자기 완결형 추론 글도 포함이다. 모델이 지난 추론을 잃는다. 이 비용이 크면 대안(§5 의 "별도 키")이 있다. 운영자가 고른다(§6 Q7).
-- 기존 체크포인트 파일은 지우지 않는다. 읽을 때 빠질 뿐이다.
+- 이 저장소는 데이터 형식이 바뀔 때 migration 이나 명시적 hard cut 중 하나를 고른다. hard cut 에서는 호환 읽기·변환 코드를 만들지 않는다. 이 규칙은 저장소 constitution 에 없고 운영자의 작업 지침(`~/me/instructions/workflow.md` "진입 장벽", 저장소 밖)에 있다.
+- 이 RFC 는 `Reasoning_source` 를 바꾸지 않고 새 키를 더한다. 형식이 바뀌는 것이 없으므로 hard cut 도 migration 도 필요 없다. 옛 Anthropic 블록은 새 키가 없어 `Omit_binding_absent` 로 빠진다. 호환 코드가 아니라 재생 판정의 한 갈래다.
+- 대안인 `Reasoning_source` v3(hard cut)를 고르지 않은 이유(§5): `of_json` 이 필드를 정확히 네 개만 받는다(`types.ml:439`). 필드를 더하면 모든 공급자의 저장된 출처가 `Absent` 가 된다. 저장된 v2 표식은 한 Keeper(polisher)의 이력 하나에 6,967개 있다(`~/.masc/traces/trace-1788310783225-00003/` 의 `trace-….json` 에서 `"agent_core.reasoning_source.v2"` 를 센 값. 같은 폴더의 snapshot 3개도 같은 이력의 사본이라 같은 수이고 합치지 않는다. 이 Keeper 는 계속 돌아서 값이 늘고 있다). Gemini 도 `Require_identical_source` 라서(`reasoning_dialect.ml:643`) Anthropic 만의 문제를 고치려고 다른 공급자의 저장된 추론까지 한 번 잃는다. 지문은 요청 앞부분에 대한 사실이고 출처는 만든 쪽에 대한 사실이라 같은 레코드에 둘 이유도 없다.
+- 기존 체크포인트 파일은 고치지 않는다.
 
 ### 4.2 지금 실패하는 Keeper
 
 - 한 번 실패한 Keeper 는 이후 매 턴 같은 400 으로 실패한다(§1.1). 이력에 남은 서명 블록과 지금 앞부분이 맞지 않기 때문이다.
-- 하드 컷이 배포되면 v2 블록이 모두 빠지므로 첫 요청부터 앞부분 위반이 없다. 별도 복구 절차가 없다.
-- 배포 전에 임시로 풀려면 해당 Keeper 의 이력에서 thinking 블록을 지우는 것인데(문서: 지워도 유효), 이것은 운영 조치이고 이 RFC 의 범위가 아니다. 이슈에 따로 적는다.
+- 지문 층이 배포되면 지문 키가 없는 옛 블록이 모두 빠지므로 첫 요청부터 앞부분 위반이 없다. 별도 복구 절차가 없다.
+- 사용 한도 400 으로 멈춘 Keeper(2026-11-01 00:00 UTC 까지)는 이 RFC 로 풀리지 않는다.
+- 배포 전에 풀려면 해당 Keeper 이력에서 thinking 블록을 지우는 것인데(문서: 지워도 유효), 운영 조치이고 이 RFC 의 범위가 아니다. 이슈에 따로 적는다.
 
-### 4.3 PR 스택 (층마다 결과 하나)
+### 4.3 PR 스택 (층마다 결과 하나, 층마다 테스트는 초록)
 
-MASC 규칙에 따라 gh stack 으로 쌓고 맨 위 PR 로 스택째 병합한다(`masc-workflow.md`). 층마다 리뷰한다.
+MASC 규칙에 따라 gh stack 으로 쌓고 맨 위 PR 로 스택째 병합한다(`masc-workflow.md`). 층마다 리뷰한다. 실패하는 테스트를 PR 에 넣지 않는다. 시나리오 테스트는 그것을 초록으로 만드는 층에 둔다.
 
 | 층 | 결과 | 주요 파일 |
 |---|---|---|
-| 1 | 조사: system·tools 가 턴 사이에 바뀌는 코드 경로를 특정하고, 앞부분 대조 함수와 시나리오 1~2 를 일부러 실패하는 상태로 넣는다 (현재 코드가 위반한다는 증거) | `test/`, 새 순수 함수 |
-| 2 | `boundary_resend_on` 에서 `Unknown_invalid_request` 갈래를 지운다. 거절 뒤 `count_tokens` 로 `Size_refusal_measured` 를 만든다. 요청 쪽 사실을 오류에 붙인다 | `retry.ml`, `keeper_turn_driver_try_provider.ml` |
-| 3 | 턴별 문맥을 턴당 한 번 만들어 이력에 남기고 입력 귀속 검사를 맞춘다 | `agent_turn.ml`, `keeper_agent_prompt_metrics.ml`, 용어집 연동 문구 |
-| 4 | `Reasoning_source` v3(`binding`, `credential_scope`), 카탈로그 `thinking_binding`, 재생 판정 `match` | `types.ml`, `reasoning_dialect.ml`, `reasoning_history_projection.ml`, `models.toml` |
-| 5 | system·tools 고정과 `Prefix_break` 기록 | 1층 결과에 따라 정해짐 |
-| 6 | 라이브 증명 확장과 `prefix_mismatch_behavior: "error"` 명시 | `anthropic_live_proof.ml` |
+| 1 | 앞부분 대조 함수와 그 단위 테스트. 실제 체크포인트에 돌려 턴 경계마다 빠질 서명 블록 수를 세는 읽기 전용 보고 명령(§3.5 의 측정) | 새 순수 함수, 보고 명령 |
+| 2 | 서명 블록은 지문이 맞을 때만 재생한다 (400 이 없어지는 층). 별도 키, 요청 객체의 지문, 재생 판정 `match`, 카탈로그 `thinking_binding`. 시나리오 3, 4, 6, 7, 9 | `backend_anthropic.ml`, `types.ml`, `reasoning_dialect.ml`, `reasoning_history_projection.ml`, `models.toml` |
+| 3 | 크기 증거가 있을 때만 짧은 창으로 다시 보낸다 (측정할 수 있는 공급자). 거절 뒤 `count_tokens`, `Size_refusal_measured`, `boundary_resend_on` | `retry.ml`, `keeper_turn_driver_try_provider.ml` |
+| 4 | 알 수 없는 400 이 보낸 요청의 사실과 함께 보이게 실패한다 | `retry.ml` 또는 오류 값, 실패 기록 |
+| 5 | 턴별 문맥을 이력에 남기고(A, `Persisted_user_message`) 다른 공급자는 `Latest_at_tail` 로 그대로 둔다. 문맥 개수 점검을 고친다. 시나리오 1, 2, 5, 8 | `agent_turn.ml`, `keeper_agent_prompt_metrics.ml`, 창의 고정 규칙 |
+| 6 | 와이어: beta 헤더 전송, `role: "system"` 메시지, `clear_at`, `prefix_mismatch_behavior` 옵션을 요청에 담을 수 있다. 기본 동작은 바뀌지 않는다 | `backend_anthropic.ml`, `Provider_config` |
+| 7 | 지원하는 행은 B(`Turn_scoped_system`)로 그린다. Q3 확인 뒤에만 병합한다 | `models.toml`, 5·6 층 코드 |
+| 8 | 라이브 증명 확장 (§3.6) | `anthropic_live_proof.ml` |
 
-순서의 이유: 2층은 3~5층과 독립이라 가장 먼저 증상(조용한 시작점 이동)을 막는다. 4층은 하드 컷이라 3층 뒤에 둔다. 앞부분이 안정되기 전에 지문을 저장하면 지문이 매번 달라져 모든 블록이 빠진다.
+순서의 이유: 2층이 가장 먼저 400 을 없앤다. 문맥이 아직 끝에 붙고 사라지므로 이 시점에는 매 라운드 서명 블록이 빠지지만 요청은 거절되지 않는다. 5층이 라운드 사이 이어짐을 되살린다. 3·4층은 2층과 독립이라 앞서도 되고 뒤에도 된다. 7층은 5·6층 뒤다.
+
+system·tools 가 라운드마다 바뀌는 경로를 없애는 일은 이 스택에 넣지 않는다. 후속 이슈로 남긴다(§3.3).
 
 ## 5. 검토한 대안
 
 | 대안 | 얻는 것 | 버리는 것 / 기각 이유 |
 |---|---|---|
-| `drop_block` 을 기본값으로 | 코드를 거의 안 바꾼다. 요청이 항상 성공한다 | 앞부분이 바뀌는 원인을 안 고친다. 매 턴 버리면 출력 토큰이 늘어난다(§1.2-8, 우리 하네스 측정 없음). 문서도 임시방편이라 한다. 우리 저장소의 워크어라운드 거부 기준과 맞지 않는다. 장점은 있다. 라이브가 지금 깨져 있으면 가장 빠른 완화다. 그래서 이 RFC 는 이 길을 영구 설정으로 쓰지 않는다고 못박을 뿐, 긴급 상황의 임시 조치는 `WORKAROUND:` 라벨과 대체 RFC 번호(이 RFC)를 달고 따로 올릴 수 있다 |
-| 서명 400 문구를 읽어 thinking 을 빼고 한 번 더 보낸다 | 문서가 권하는 복구 순서와 같다 | 문구 매칭이다. 문서가 문구는 바뀔 수 있다고 한다. 우리 규칙의 문자열 분류기 금지 |
-| 서명 블록을 아예 보내지 않는다 (`No_replay`) | 가장 단순하다. 400 이 구조적으로 사라진다 | 모델이 지난 추론을 잃는다. 도구 라운드 안의 최신 assistant 턴은 문서가 thinking 을 그대로 돌려보내라고 한다("Send assistant turns back exactly as returned"). 모든 턴에 `No_replay` 를 걸면 이것도 어긴다. 또 앞부분을 안정시킬 이유가 캐시 적중에도 남는다 |
-| 턴별 문맥을 요청마다 새로 만들되 `system` 으로 올린다 | 이력이 안 자란다 | `system` 이 바뀌면 모든 서명 블록이 무효다(문서의 표). 가장 나쁜 자리다 |
-| 턴별 문맥을 B(`clear_at`)로 | 토큰이 안 든다 | beta 와 모델 제약, 읽지 못한 "Limitations" 절, 와이어에 `role: "system"` 추가. 근거가 모자라 첫 구현에서 뺀다. 측정으로 필요가 확인되면 다음 RFC |
-| 지문을 `Reasoning_source` 대신 별도 메타데이터 키로 | 비 Anthropic 공급자의 저장된 추론이 하드 컷에 안 빠진다 | 같은 메시지에 출처와 지문이 따로 있어 둘이 어긋날 수 있다. 한 사실을 한 곳에 두는 원칙과 맞지 않는다. 운영자가 비용을 크게 본다면 이쪽이 낫다(§6 Q7) |
-| 요청 전에 `count_tokens` 로 매번 크기를 잰다 | 크기 거절을 사전에 안다 | `RFC-keeper-context-window-in-tokens` §1 결정 2 와 충돌한다. 매 요청에 호출이 하나 더 든다 |
-| 이력 창을 없애 앞부분을 안 바꾼다 | 앞부분이 항상 안정된다 | 컨텍스트 한계가 있다. 창은 `RFC-keeper-context-window-in-tokens` 의 설계다. 이 RFC 는 창이 움직일 때의 서명 블록 처리만 정한다 |
+| `drop_block` 을 기본값으로 | 코드를 거의 안 바꾼다. 요청이 항상 성공한다 | 앞부분이 바뀌는 원인을 안 고친다. 매 턴 버리면 출력 토큰이 늘어난다(§1.2-9, 우리 하네스 측정 없음). 문서도 임시방편이라 한다. 저장소의 워크어라운드 거부 기준과 맞지 않는다. 라이브가 지금 깨져 있을 때의 긴급 완화로는 가장 빠르다. 그때는 `WORKAROUND:` 라벨과 대체 RFC 번호(이 RFC)를 달아 따로 올린다 |
+| 서명 400 문구를 읽어 thinking 을 빼고 한 번 더 보낸다 | 문서가 권하는 복구 순서와 같다 | 문구를 읽는 일이다. 문서가 문구는 바뀔 수 있다고 한다. 문자열 분류기 금지 |
+| 서명 블록을 아예 보내지 않는다 (`No_replay`) | 가장 단순하다. 400 이 구조적으로 사라진다 | 모델이 지난 추론을 잃는다. 열린 도구 라운드의 마지막 assistant 턴은 thinking 을 그대로 돌려보내라고 문서가 말한다. 앞부분을 안정시킬 이유(캐시 적중)도 남는다 |
+| 턴별 문맥을 `system` 으로 올린다 | 이력이 안 자란다 | `system` 이 바뀌면 모든 서명 블록이 무효다(§1.2). 가장 나쁜 자리다 |
+| 턴별 문맥을 A(이력의 `User` 메시지)로만 | beta 도 와이어 변경도 필요 없다. 모든 행에서 같다 | 지난 문맥이 계속 보여 같은 대답을 되풀이할 위험(task-514)이 있고, 토큰과 저장이 턴마다 는다. 지원하지 않는 행(Sonnet 5 등)에서는 쓴다 |
+| 턴별 문맥을 C(`clear_at` 없는 `role: "system"`) | 와이어가 B 와 같다 | A 의 비용에 B 의 권한 문제까지 진다. 이득이 없다 |
+| 지문을 `Reasoning_source` 에 넣고 v3 으로 올린다 (hard cut) | 출처와 지문이 한 레코드다 | 모든 공급자의 저장된 추론이 한 번 빠진다(§4.1). 지문은 요청에 대한 사실이라 출처와 다른 사실이다. 별도 키는 추가만이라 컷도 호환 코드도 필요 없다. 별도 키의 단점은 두 키가 어긋날 수 있는 것인데 재생 조건이 둘을 모두 요구해서 어긋나면 뺀다 |
+| 요청 전에 `count_tokens` 로 매번 크기를 잰다 | 크기 거절을 미리 안다 | `RFC-keeper-context-window-in-tokens` §1 결정 2 와 충돌한다. 매 요청에 호출이 하나 더 든다 |
+| 이력 창을 없애 앞부분을 안 바꾼다 | 앞부분이 항상 안정된다 | 컨텍스트 한계가 있다. 창은 `RFC-keeper-context-window-in-tokens` 의 설계다 |
+| 강등 경계를 바꿔 턴 사이 이어짐을 지킨다 | 턴 사이 추론을 지킨다 | 입력 토큰과 맞바꾼다. 얻는 이득을 아직 재지 못했다(§3.5). 측정 뒤 다시 연다 |
+| system·tools 값을 저장해 세션 동안 고정한다 | 바뀔 일이 없다 | 운영자의 `base_system_prompt` 수정이 숨는다. 저장 위치와 갱신 규칙이 새로 필요하다(§3.3) |
 
 ## 6. 열린 질문과 위험
 
 운영자가 정해야 할 것:
 
-- **Q1.** 크기 거절이 문장만 있는 400 으로 오고 `count_tokens` 가 쓸 수 없는 레인이면, 이 RFC 이후 그 거절은 보이게 실패한다. 받아들이는가, 아니면 그 레인에 한해 다른 증거(예: 413)를 찾는가.
-- **Q7.** `Reasoning_source` v3 하드 컷(모든 공급자의 저장 추론이 한 번 빠짐)과 별도 키(비용 적고 사실이 두 곳) 중 어느 쪽인가.
+- **Q1.** 크기 거절이 문장만 있는 400 으로 오고 `count_tokens` 로도 가려지지 않으면, 측정할 수 있는 공급자에서 그 거절이 보이게 실패한다. 받아들이는가, 아니면 다른 증거를 찾는가.
+- **Q2.** 측정할 수 없는 공급자(OpenAI 호환, Ollama, Gemini, GLM)의 `Unknown_invalid_request` 재전송을 지금 그대로 둔다(§2). 이 공급자들의 문제를 별도 RFC 로 낼 것인가.
 
 조사로 닫을 것:
 
-- **Q2.** 도구 목록이 바뀔 때 `tool_addition`·`tool_removal`(beta `inline-tools-2026-09-15`)이 필요한가. 먼저 도구 목록이 52개와 175개 사이로 바뀌는 이유를 코드에서 특정해야 한다(구현 1층).
-- **Q3.** 턴별 문맥에 사용자·외부가 쓴 글이 들어가는가. 들어가면 `role: "system"` 에 올리지 않는다.
-- **Q4.** 턴 시작 값으로 굳혀도 되는가. 도구 라운드마다 최신 값이 필요한 항목(예: 남은 예산)이 있는가.
-- **Q5.** vincent 키 계정이 2026-08-31 이후 생성인가. 맞다면 증상이 설명된다. 틀리면 §1.3 의 세 곳이 원인이 아닐 수 있다. 구현 1층의 대조가 이것을 가른다. 같은 계정에서 키만 바꾼 경우 `credential_scope` 라벨이 같아도 괜찮은지도 같이 본다.
-- **Q6.** 창 시작점이 움직이는 빈도. 한 번 움직일 때마다 서명 블록이 전부 빠지고 캐시가 다시 시작한다. 움직이는 빈도와 그 때 늘어나는 입력 토큰을 측정해야 한다. 자주 움직이면 서명 재생이 실질적으로 꺼지고, 이 RFC 는 400 만 없앨 뿐 추론 보존 이득은 못 얻는다.
-- **Q8.** 서버 쪽 compaction·context editing 은 앞부분 편집으로 세지 않는다고 문서가 적는다. masc 의 Librarian 요약(자체 요약)이 어디에 해당하는지, 고정 구간을 어떻게 다룰지 정해야 한다. 문서는 직접 쓴 요약이 "keep-tail" 방식이면 남긴 턴의 thinking 이 실패한다고 한다.
-- **Q9.** Codex·Gemini·OpenAI 호환 공급자에 같은 문제가 있는지는 이 RFC 가 보지 않았다. Gemini 는 `reasoning_dialect.ml:528` 의 주석에서 서명 파트를 그대로 돌려보내야 한다고 적는다. 같은 모양이면 별도 RFC 로 낸다.
-- **Q10.** 사용 한도 400 과 temperature 400 의 실제 본문과 헤더. 구조 필드가 있으면 §3.5 에 변형을 더한다.
-- **Q11.** mid-conversation 시스템 메시지의 "Limitations" 절(미확인). B 를 고를 때 읽는다.
-- **Q12.** 지문 비교의 소요 비용(요청당 직렬화·해시). 이력이 클 때 얼마인지 측정하지 않았다.
+- **Q3.** 턴별 문맥 블록 중 바깥에서 온 글(도구 출력, 웹 내용, 사용자 입력)이 섞인 것이 있는가. 있으면 B 를 쓸 수 없다. B 를 병합하기 전에 블록별로 확인한다.
+- **Q4.** 이력에 남기는 저장량(§3.2). 블록 단위 주소 저장을 쓸지, 원문 저장으로 시작할지.
+- **Q5.** vincent 키 계정이 2026-08-31 이후 생성인가. 틀리면 §1.3 의 원인들이 vincent 만 실패하는 이유를 설명하지 못한다. 층 1 의 대조가 가른다. 같은 계정에서 키만 바꿨을 때 `credential_scope` 라벨이 같아도 괜찮은지도 같이 본다.
+- **Q6.** 창 시작점이 움직이는 빈도와 강등으로 빠질 추론의 크기(§3.5). 자주 움직이면 서명 재생이 턴 안 이어짐 외에는 꺼진다.
+- **Q7.** 서버 쪽 compaction·context editing 은 앞부분 편집이 아니라고 문서가 적는다. masc 의 Librarian 요약이 어디에 해당하는지, 고정 구간을 어떻게 다룰지 정해야 한다. 직접 쓴 요약이 남긴 턴의 thinking 은 실패한다고 문서가 말한다.
+- **Q8.** Gemini 는 `reasoning_dialect.ml:528` 의 주석이 서명 파트를 그대로 돌려보내야 한다고 적는다. 같은 모양의 문제가 있는지 이 RFC 가 보지 않았다.
+- **Q9.** 사용 한도 400 과 temperature 400 의 응답 헤더와 구조 필드. 본문 문장은 구했다(§1.1). 구조 필드가 있으면 §3.6 에 변형을 더한다.
+- **Q10.** 도구 목록이 라운드마다 달라지는 두 경로(§1.3-5)와 `defer_loading` 으로 옮기는 방법. 후속 이슈다.
+- **Q11.** `clear_at` 메시지가 도구 결과 user 메시지 앞에 오는 위치 제약(§1.2-11)이 우리 문맥 위치(user 입력 바로 뒤)에서 지켜지는지 실제 요청으로 확인한다.
+- **Q12.** 지문 비교의 요청당 비용(직렬화·해시). 이력이 클 때 얼마인지 재지 않았다.
 
 위험:
 
-- A 는 이력을 키운다(§3.2). 키우는 양을 재기 전에 3층을 병합하면 창이 더 자주 움직이고 §6 Q6 의 비용이 커진다.
-- 요청 본문을 로그로 남기지 않아 지문 불일치의 원인을 사후에 가려내기 어렵다. 불일치 지점(`prefix_change`)은 기록하되 본문 전체를 로그에 남기는 것은 이 RFC 가 정하지 않는다. 본문에는 사용자 데이터가 있다.
+- A 는 이력을 키운다. B 도 저장을 키운다. 키우는 양을 재기 전에 5층을 병합하면 창이 더 자주 움직이고 §3.5 의 손실이 커진다.
+- 요청 본문을 로그로 남기지 않아 지문 불일치의 원인을 사후에 가려내기 어렵다. 불일치 지점(`prefix_change`)은 기록하되 본문 전체를 로그에 남기는 일은 이 RFC 가 정하지 않는다. 본문에는 사용자 데이터가 있다.
 - 지문이 우리 JSON 기준이라 서버가 다르게 읽는 경우를 못 잡는다. 계정 불일치와 서버 쪽 규칙 변경이 그렇다. 라이브 증명이 잡을 수 있는 범위만 잡는다.
-- 이 RFC 는 공식 문서 2026-10-13 판에 기대고 있다. 문서가 바뀌면 지문의 범위(thinking 블록 제외 등)를 다시 읽어야 한다.
+- 이 RFC 는 공식 문서 2026-10-13 판에 기댄다. 문서가 바뀌면 지문의 범위(thinking 블록 제외 등)를 다시 읽어야 한다.
 
 ## 7. 테스트 계획과 합격 기준
 
-합격 기준은 층마다 잰다.
-
 | 층 | 기준 | 방법 |
 |---|---|---|
-| 1 | 현재 코드에서 시나리오 1·2 가 실패한다 (위반의 증거) | `dune test` 중 해당 테스트. 실패가 기대 결과이므로 PR 본문에 이유와 함께 적는다 |
-| 2 | 크기 증거 없는 400 에서 `boundary_resend_on` 이 false 다. 한 케이스도 시작점을 옮기지 않는다 | `Unknown_invalid_request`, `Size_refusal_measured`, `ContextOverflow`, `Request_body_refused_by_provider` 를 각각 넣는 표 기반 테스트. 새 변형을 더하면 컴파일이 깨져야 한다 |
-| 2 | 사용 한도 400 과 temperature 400 의 본문을 넣은 요청이 시작점을 옮기지 않고 `attempt_facts` 가 붙은 오류로 끝난다 | 실제 본문을 받은 뒤 고정 입력으로 쓴다 (Q10) |
-| 3 | 오프라인 하네스 시나리오 1·2·5 에서 N+1 본문이 N 본문의 `Append_only` 이다. 라운드 수 N 은 시나리오마다 20 이상 | 변이: 옛 동작으로 되돌리면 실패 |
-| 4 | 시나리오 3·4·6 에서 앞부분이 끊긴 요청은 끊긴 지점 앞에 묶인 서명 블록을 하나도 담지 않는다. 사유가 `prefix_change` 값으로 기록된다 | 속성 테스트: 뺀 블록은 이력이 같으면 다시 들어오지 않는다 |
-| 4 | 카탈로그에 `thinking_binding` 이 없는 Anthropic 와이어 행은 로드가 실패한다 | 카탈로그 로드 테스트 |
-| 4 | `project` 의 `signed_thinking_disposition` 처리에 `_ ->` 갈래가 없다 | 컴파일 (새 변형 추가 시 깨짐) |
-| 5 | `system`·`tools` 가 세션 값과 다른 요청 구성은 `Prefix_break` 로만 나온다 | 단위 테스트 |
-| 6 | 라이브: `claude-haiku-5-5` 등 카탈로그 행마다 턴별 문맥이 있는 두 라운드에서 `prefix_mismatch_behavior: "error"` 로 400 이 0 이다. 서명 블록이 한 번도 안 나온 실행은 "증명 못 함" 이다 | 수동 실행. 명령·모델·날짜를 PR 본문에 남긴다. 실행하지 않았으면 통과라고 적지 않는다 |
+| 1 | 대조 함수가 `Append_only`·`Broke` 를 낸다. 같은 JSON 은 키 순서와 공백이 달라도 `Append_only` 다 | 단위 테스트 |
+| 1 | 보고 명령이 실제 체크포인트에서 턴 경계마다 빠질 서명 블록 수를 출력한다 | 수동 실행. 출력값은 §3.5 의 미측정 칸을 채운다 |
+| 2 | 시나리오 3, 4, 6, 7, 9 에서 끊긴 지점 앞에 묶인 서명 블록이 없고 이유가 기록된다 | 오프라인 하네스 |
+| 2 | 속성: 이력이 같으면 한 번 뺀 앞쪽 블록이 되살아나지 않는다 | 속성 테스트 |
+| 2 | 재생 판정의 `match` 에 `_ ->` 갈래가 없다. 새 변형을 더하면 컴파일이 깨진다 | 컴파일 |
+| 2 | 일부러 지문 비교를 빼면 시나리오 3 이 실패한다 | 되돌려 보는 검사 |
+| 3 | 측정할 수 있는 공급자에서 `Unknown_invalid_request` 는 `boundary_resend_on` 이 false 다. 측정할 수 없는 공급자에서는 지금처럼 true 다 | 공급자마다 값을 넣는 표 기반 테스트. 새 변형을 더하면 컴파일이 깨진다 |
+| 3 | `count_tokens` 가 `max_context` 를 넘는 값을 주면 `Size_refusal_measured` 로 시작점이 옮겨지고, 넘지 않으면 옮겨지지 않는다 | 가짜 측정기를 넣는 단위 테스트 |
+| 3 | receipts 에서 구한 사용 한도·temperature 문장을 넣은 요청이 시작점을 옮기지 않는다 (문장은 입력일 뿐 분류에 쓰지 않는다) | 고정 입력 테스트 |
+| 4 | 알 수 없는 400 의 실패 값에 재생한 서명 블록 수와 지문 일치 여부가 붙는다 | 단위 테스트 |
+| 5 | 시나리오 1, 2, 5 에서 `Append_only` 이고 보낸 서명 블록 수가 만든 수와 같다. 시나리오 8 에서 `tools` 가 있고 `tool_choice: none` 이다 | 오프라인 하네스. 문맥을 옛 방식으로 되돌리면 1 이 실패해야 한다 |
+| 5 | 다른 공급자의 요청 본문이 바뀌지 않는다 | 공급자별 본문 스냅샷 비교(`test_snapshot_provider_serialization.ml` 가 쓰는 방식) |
+| 6 | 기본 설정으로 만든 요청 본문이 이 층 앞과 같다 | 스냅샷 비교 |
+| 7 | 지원하는 행의 요청에 `role: "system"`, `clear_at`, beta 헤더가 있고 지원하지 않는 행에는 없다 | 스냅샷 비교 |
+| 8 | 라이브: 카탈로그 행마다 문맥이 있는 두 라운드에서 `prefix_mismatch_behavior: "error"`, adaptive thinking 으로 앞부분 위반 400 이 0 이다. 서명 블록이 안 나온 실행은 "증명 못 함" 이다 | 수동 실행. 명령·모델·날짜를 PR 본문에 남긴다. 실행하지 않았으면 통과라고 적지 않는다 |
+| 8 | §3.6 의 두 가지 추가 확인(열린 도구 라운드, 중간 블록만 빼기)의 결과를 적는다 | 수동 실행 |
 
 전체 합격 기준:
 
-- 오프라인 하네스의 모든 시나리오에서 서명 블록을 담은 연속 쌍 중 `Append_only` 이거나 끊긴 지점 앞의 서명 블록이 없는 비율이 100% 다. 라운드 수는 시나리오마다 20 이상이다.
-- 크기 증거 없는 400 에서 시작점이 이동한 사례가 테스트에서 0 이다.
+- 오프라인 하네스에서 끊김이 없어야 하는 시나리오(1, 2, 5)는 모두 `Append_only` 이고 만든 서명 블록을 전부 재생한다. 끊김이 기대되는 시나리오는 모두 이유와 함께 블록을 뺀다.
+- 크기 증거가 없는 400 에서 측정할 수 있는 공급자의 시작점 이동이 테스트에서 0 이다.
 - 라이브 증명에서 앞부분 위반 400 이 0 이다. 실행한 모델과 날짜를 적는다.
 - 1.1 의 Keeper 4개가 배포 후 첫 요청부터 서명 400 없이 진행하는지는 운영 관찰이다. 합격 기준에 넣지 않고 배포 후 이슈에 적는다.
 
-## 부록 A. 인용 위치 확인 (`origin/main` `c7fa2a0cec`, 2026-10-13)
+## 부록 A. 인용 위치 확인 (`origin/main` `361883ee64`, 2026-10-13)
 
 이슈 #42636 의 인용 중 줄 번호가 바뀐 것과 그대로인 것을 구분한다.
 
@@ -370,28 +444,28 @@ MASC 규칙에 따라 gh stack 으로 쌓고 맨 위 PR 로 스택째 병합한�
 |---|---|---|
 | `agent_turn.ml:34-54` | `agent_turn.ml:34-53` | 한 줄 차이로 고침 |
 | `pipeline_stage_prepare.ml:148-153` | `packages/agent_core/lib/pipeline/pipeline_stage_prepare.ml:148-155` | 경로 보완, 범위 고침 |
-| `retry.ml:340` | `retry.ml:340-341` (400, 422) | 그대로 맞음 |
+| `retry.ml:340` | `retry.ml:340-341` (400, 422) | 맞음 |
 | `keeper_turn_driver_try_provider.ml:2515-2540` | `:2511-2535` (`boundary_resend_on`) | 줄 번호가 움직임. 고침 |
-| `reasoning_dialect.ml:520-523` | `:506-531` (Anthropic 갈래, 521줄이 `All_assistant_messages`) | 범위 고침 |
+| `reasoning_dialect.ml:520-523` | `:521` (Anthropic 갈래의 `All_assistant_messages`) | 고침 |
 | `api_common.ml:364-379` | 그대로 | 맞음 |
-| `types.ml:383-420` | `:341-420` (`Reasoning_source`, `rotation_admits` 는 401줄) | 범위 넓힘 |
+| `types.ml:383-420` | `:341-420` (`Reasoning_source`, `rotation_admits` 401줄) | 범위 넓힘 |
 | `runtime_model_input_tail_window.ml:4` | 그대로 (`atoms_per_window = 60`) | 맞음 |
 | `keeper_carried_front.mli` | 있음 | 맞음 |
 
-이 RFC 가 새로 인용한 줄은 모두 같은 커밋에서 읽었다. 다시 확인하는 명령:
+버린 인용은 없다. 다시 확인하는 명령:
 
 ```
 rg -n "messages @ \[ system_msg \]" packages/agent_core/lib/agent/agent_turn.ml
 rg -n "Unknown_invalid_request" packages/agent_core/lib/llm_provider/retry.ml | head -3
 rg -n "let boundary_resend_on|restore_front before" lib/keeper/keeper_turn_driver_try_provider.ml
 rg -n "replay_policy = All_assistant_messages" packages/agent_core/lib/llm_provider/reasoning_dialect.ml
+rg -n "supports_completion_request_measurement" packages/agent_core/lib/llm_provider/count_tokens_sync.ml
+rg -n "Keeper_agent_tool_surface.for_request" lib/keeper/keeper_run_tools_hooks.ml
 ```
-
-버린 인용: 없다. 이슈의 `reasoning_dialect.ml:520-523` 은 정확한 범위가 아니라서 위처럼 고쳤다.
 
 ## 부록 B. 디렉터리와 번호
 
 - `packages/agent_core/docs/rfc/` 에 둔다. 번호 `RFC-AC-041` 은 이 디렉터리의 마지막 번호 `RFC-AC-040` 다음이다. 열린 PR 검색(`gh pr list -R jeong-sik/masc --state open --search "RFC-AC-041"`)에서 같은 번호가 나오지 않았다.
-- 이유: 규칙의 중심이 agent_core 에 있다. 요청 본문을 만드는 `backend_anthropic.ml`, 재생 규칙 `reasoning_dialect.ml`, 저장 출처 `types.ml`, 오류 분류 `retry.ml` 이 모두 agent_core 다. 이어받는 RFC-AC-029(재생 표준)와 RFC-AC-040(카탈로그 소유)이 같은 디렉터리에 있다. keeper 쪽 변경(`boundary_resend_on`, 창, 시작점)은 소비자이고, RFC-AC-029 §6 의 경계 원칙(agent_core 는 typed 사실을 내고 MASC 가 쓴다)을 따른다.
+- 이유: 규칙의 중심이 agent_core 에 있다. 요청 본문을 만드는 `backend_anthropic.ml`, 재생 규칙 `reasoning_dialect.ml`, 저장 출처 `types.ml`, 오류 분류 `retry.ml` 이 모두 agent_core 다. 이어받는 RFC-AC-029(재생 표준)와 RFC-AC-040(카탈로그 소유)이 같은 디렉터리에 있다. keeper 쪽 변경(`boundary_resend_on`, 창, 강등, hook)은 소비자이고, RFC-AC-029 §6 의 경계 원칙(agent_core 는 typed 사실을 내고 MASC 가 쓴다)을 따른다.
 - `docs/rfc/` 는 새 RFC 에 번호를 발급하지 않고 `RFC-<slug>.md` 만 받는다(`docs/rfc/README.md`). 번호를 달라는 요구와 맞지 않는다. keeper 쪽 구현 층이 별도 설계 판단을 낳으면 그때 `docs/rfc/` 에 slug RFC 를 따로 쓰고 이 RFC 를 `related` 로 건다.
-- 변경 기록 조각(`changelog.d/<PR 번호>.md`)은 PR 번호가 필요하다. 이 RFC 는 로컬 커밋이라 PR 번호가 없어 만들지 않았다. `changelog-fragments.py missing` 은 알림이지 거절이 아니다(스크립트 설명). PR 을 열 때 필요한지 다시 본다.
+- 변경 기록 조각(`changelog.d/<PR 번호>.md`)은 PR 번호가 필요하다. 이 RFC 는 로컬 커밋이라 PR 번호가 없어 만들지 않았다. `changelog-fragments.py missing` 은 알림이지 거절이 아니다. PR 을 열 때 필요한지 다시 본다.

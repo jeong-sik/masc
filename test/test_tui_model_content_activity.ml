@@ -560,6 +560,12 @@ let test_owned_text_lifecycle () =
     [text 5 1 "intermediate";
      L.Stream_model_started {generation=Some 5;stream_scope=Some 1;message_id=None;model="stale";usage=None};
      observed ~generation:5 ~scope:1 ()];
+  (* The scope-2 chunk weakened only the response scope: the admitted (5,0)
+     owner is still the staleness floor, so an older generation header cannot
+     reopen the response either. *)
+  T.apply ~now:12. t (L.Stream_model_started {generation=Some 4;stream_scope=Some 0;message_id=None;model="older";usage=None});
+  check bool "older generation header cannot rewind after unobserved scope advance" true
+    (T.response_metadata t=unknown_owner);
   T.apply ~now:12. t L.Run_finished;
   let terminal_owner = T.response_metadata t in
   T.apply ~now:12. t (L.Stream_model_started {generation=Some 6;stream_scope=Some 0;message_id=None;model="late";usage=None});

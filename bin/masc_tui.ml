@@ -18753,7 +18753,22 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       (match state.workspace_identity with
        | Masc_tui_types.Workspace_identity_match
          when String.equal base_path state.local_base_path ->
-           Masc_tui_loader.apply_local_workspace state base_path reading
+           let queued_keepers =
+             Chat_queue.waiting state.msg_queued
+             |> List.map (fun (item : Chat_queue.item) -> item.request.keeper_name)
+             |> List.sort_uniq String.compare
+           in
+           let was_unavailable =
+             List.filter
+               (fun keeper_name -> not (keeper_available_for_new_message state keeper_name))
+               queued_keepers
+           in
+           Masc_tui_loader.apply_local_workspace state base_path reading;
+           (* A keeper this queue waits on may have come back with the
+              reading. Without a drain its retained line sits until an
+              unrelated action; with one it goes now that it is sendable. *)
+           if List.exists (keeper_available_for_new_message state) was_unavailable then
+             drain_queued_message state ~base_path ~mailbox
        | Masc_tui_types.Workspace_identity_match
        | Masc_tui_types.Workspace_identity_unread
        | Masc_tui_types.Workspace_identity_match_unconfirmed _

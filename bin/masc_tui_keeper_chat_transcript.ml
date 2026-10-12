@@ -1949,7 +1949,15 @@ let apply_delta ~now t (delta : Live.delta) =
            t.last_approval_settlement <- Some {
              settled_tool_name = pending.tool_name;
              settled_outcome = approval_outcome_of_string outcome}
-       | None -> ())
+       | None ->
+           (* A reconnect can retain the settlement before its request. The
+              event proves closure identity, not the missing question/name. *)
+           (match List.find_opt (fun (settled_id, _) ->
+              Masc.Keeper_tool_approval_id.equal settled_id approval_id) t.settled_approvals with
+            | Some (_, recorded_call) ->
+                if not (String.equal recorded_call call_id) then
+                  note_unreadable t "approval settlement replay conflicts with its observed call"
+            | None -> t.settled_approvals <- (approval_id, call_id) :: t.settled_approvals))
   | Live.Checkpoint -> t.checkpoints <- t.checkpoints + 1
   | Live.External_effect_completed ->
       (* The turn handed work to something outside it and that work finished.

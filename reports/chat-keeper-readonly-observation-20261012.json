@@ -1,0 +1,49 @@
+{
+  "observed_at": "2026-10-12 02:54:48 UTC",
+  "source": "masc_keeper_status readonly",
+  "keeper": "e-masc-the-leader",
+  "keepalive_running": true,
+  "observed_phase": "running",
+  "current_turn": 5914,
+  "selected_model": "glm-5.3-flash",
+  "configured_runtime": "glm-coding.glm-5.3-flash",
+  "last_completed_turn": 5913,
+  "last_turn_at": "2026-10-12T01:59:18Z",
+  "pending_approval_count": 0,
+  "latest_tool_execution_id": "exec-1791773591485-04d1",
+  "latest_tool_keeper_turn": 5914,
+  "latest_receipt_at": "2026-10-12T01:59:18Z",
+  "history_tail_count": 3,
+  "history_tail_roles": [
+    {
+      "role": "user",
+      "source": "direct_user",
+      "kind": "direct_conversation",
+      "is_fragment": false,
+      "ts_unix": 1791770360.180671,
+      "preview_code_units": 96
+    },
+    {
+      "role": "user",
+      "source": "direct_user",
+      "kind": "direct_conversation",
+      "is_fragment": false,
+      "ts_unix": 1791769524.353274,
+      "preview_code_units": 8
+    },
+    {
+      "role": "assistant",
+      "source": "direct_assistant",
+      "kind": "direct_conversation",
+      "is_fragment": false,
+      "ts_unix": 1791696820.54575,
+      "preview_code_units": 131
+    }
+  ],
+  "limits": [
+    "status and bounded history metadata only",
+    "no operation requested, no runtime configuration changed",
+    "no installed binary commit established",
+    "no screenshots or proof this branch is installed"
+  ]
+}

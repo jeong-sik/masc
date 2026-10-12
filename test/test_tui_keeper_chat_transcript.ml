@@ -1263,6 +1263,25 @@ let test_multiple_approval_admissions_settle_independently () =
     [false;true]
 ;;
 
+let test_unseen_approval_settlement_prevents_late_admission () =
+  let t = fresh () in
+  feed t [Live.Approval_settled {approval_id=approval_fixture_id;call_id="settled";outcome="approve"};
+    requested ~approval_id:approval_other_id ~call_id:"pending"
+      ~tool_name:"Read" ~question:"pending question";
+    requested ~approval_id:approval_fixture_id ~call_id:"settled"
+      ~tool_name:"Write" ~question:"late question"];
+  (match Transcript.awaiting_approvals t with
+   | [pending] -> check bool "unseen settled identity does not reopen" true
+       (Masc.Keeper_tool_approval_id.equal pending.Transcript.approval_id approval_other_id)
+   | _ -> fail "late request reopened settled admission");
+  feed t [Live.Approval_settled {approval_id=approval_fixture_id;call_id="foreign";outcome="approve"}];
+  check bool "unseen settlement correlation conflict is reported" true
+    (Option.is_some (Transcript.unreadable t));
+  feed t [Live.Approval_settled {approval_id=approval_other_id;call_id="pending";outcome="deny"}];
+  check int "unrelated admission still settles normally" 0
+    (List.length (Transcript.awaiting_approvals t))
+;;
+
 let test_the_whole_reasoning_trail_is_kept () =
   let t = fresh () in
   feed t
@@ -2905,6 +2924,7 @@ let () =
         test_case "error body and runtime context remain independent" `Quick test_failure_body_and_runtime_are_independent])
     ; ( "event timeline"
       , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
+         test_case "unseen approval settlement prevents late admission" `Quick test_unseen_approval_settlement_prevents_late_admission;
          test_case "multiple approvals settle independently" `Quick test_multiple_approval_admissions_settle_independently;
          test_case "settled approval replay stays settled" `Quick test_settled_approval_request_cannot_reopen_or_displace;
          test_case "approval correlation matches admission" `Quick test_approval_settlement_requires_admitted_call_correlation;

@@ -286,6 +286,8 @@ let save_file_atomic path content =
   Atomic_replace.save_file_atomic ~save_file:save_file_blocking path content
 ;;
 
+let sync_file_and_parent_strict = Atomic_replace.sync_file_and_parent_strict
+
 let save_file_atomic_rename_only path content =
   Atomic_replace.save_file_atomic_rename_only ~save_file:save_file_blocking path content
 ;;

@@ -15,6 +15,7 @@ type event_kind =
   | Pre_dispatch_blocked
   | Provider_lane_resolved
   | Context_injected
+  | History_projection_observed
   | Event_bus_correlated
   | Checkpoint_loaded
   | Checkpoint_saved
@@ -32,6 +33,7 @@ let all_event_kinds =
     Pre_dispatch_blocked;
     Provider_lane_resolved;
     Context_injected;
+    History_projection_observed;
     Event_bus_correlated;
     Checkpoint_loaded;
     Checkpoint_saved;
@@ -49,6 +51,7 @@ let event_kind_to_string = function
   | Pre_dispatch_blocked -> "pre_dispatch_blocked"
   | Provider_lane_resolved -> "provider_lane_resolved"
   | Context_injected -> "context_injected"
+  | History_projection_observed -> "history_projection_observed"
   | Event_bus_correlated -> "event_bus_correlated"
   | Checkpoint_loaded -> "checkpoint_loaded"
   | Checkpoint_saved -> "checkpoint_saved"
@@ -65,6 +68,7 @@ let event_kind_of_string = function
   | "pre_dispatch_blocked" -> Some Pre_dispatch_blocked
   | "provider_lane_resolved" -> Some Provider_lane_resolved
   | "context_injected" -> Some Context_injected
+  | "history_projection_observed" -> Some History_projection_observed
   | "event_bus_correlated" -> Some Event_bus_correlated
   | "checkpoint_loaded" -> Some Checkpoint_loaded
   | "checkpoint_saved" -> Some Checkpoint_saved

@@ -124,7 +124,7 @@ let test_recall_lifecycle_retires_and_restores_held_pointer () =
   let deliver ?(artifact_reader_available = true) () =
     let body = Option.get (Recall.render ~base_path ~artifact_reader_available ~keepers_dir ~keeper_name:"keeper" ()) in
     let composed_context : Host.composed_context =
-      Keeper_context_assembly.assemble ~existing_extra_system_context:None
+      Keeper_context_assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None
         ~blocks:[Prompt_block_id.Librarian_working_context, body] in
     let message : Agent_core.Types.message =
       { role = System; content = [Text body]; name = None; tool_call_id = None

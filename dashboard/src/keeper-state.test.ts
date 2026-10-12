@@ -3,6 +3,7 @@ import { applyKeeperStreamEvent, applyKeeperOperationTurnEvent } from './keeper-
 import { describe, expect, it } from 'vitest'
 import { beforeEach } from 'vitest'
 import {
+  AUTONOMOUS_TURN_ENTRY_CAP,
   THREAD_ENTRY_CAP,
   appendAssistantToolTraceArgsDelta,
   appendAssistantToolTraceStep,
@@ -1680,6 +1681,43 @@ describe('thread history merge & persistence', () => {
     expect(thread.filter(item => item.approvalLifecycle == null)).toHaveLength(THREAD_ENTRY_CAP)
     expect(thread.filter(item => item.approvalLifecycle != null)).toHaveLength(12)
     expect(thread.some(item => item.id === 'direct-0')).toBe(true)
+  })
+
+  it('caps settled autonomous turns at AUTONOMOUS_TURN_ENTRY_CAP', () => {
+    const autonomous = Array.from({ length: AUTONOMOUS_TURN_ENTRY_CAP + 5 }, (_, i) =>
+      entry({ id: `auto-${i}`, text: `a${i}`, delivery: 'delivered', source: 'autonomous_turn' }),
+    )
+
+    mergeServerHistoryEntries('echo', autonomous)
+
+    const thread = keeperThreads.value.echo ?? []
+    const kept = thread.filter(item => item.source === 'autonomous_turn')
+    expect(kept).toHaveLength(AUTONOMOUS_TURN_ENTRY_CAP)
+    expect(kept[0]?.id).toBe('auto-5')
+  })
+
+  it('keeps actionable autonomous turns beyond the cap', () => {
+    const settled = Array.from({ length: AUTONOMOUS_TURN_ENTRY_CAP + 5 }, (_, i) =>
+      entry({ id: `auto-${i}`, text: `a${i}`, delivery: 'delivered', source: 'autonomous_turn' }),
+    )
+
+    mergeServerHistoryEntries('echo', [
+      ...settled,
+      entry({ id: 'auto-sending', text: 'live', delivery: 'sending', source: 'autonomous_turn' }),
+      entry({ id: 'auto-streaming', text: 'live', delivery: 'streaming', source: 'autonomous_turn' }),
+      entry({ id: 'auto-error', text: 'failed', delivery: 'delivered', source: 'autonomous_turn', error: 'decode failed' }),
+      entry({ id: 'auto-approval', text: 'waiting', delivery: 'delivered', source: 'autonomous_turn',
+        approvalLifecycle: { approvalId: 'appr_live', toolName: 'Execute', phase: 'requested', artifactSha256: null } }),
+    ])
+
+    const thread = keeperThreads.value.echo ?? []
+    const kept = thread.filter(item => item.source === 'autonomous_turn')
+    expect(kept).toHaveLength(AUTONOMOUS_TURN_ENTRY_CAP + 4)
+    expect(thread.some(item => item.id === 'auto-sending')).toBe(true)
+    expect(thread.some(item => item.id === 'auto-streaming')).toBe(true)
+    expect(thread.some(item => item.id === 'auto-error')).toBe(true)
+    expect(thread.some(item => item.id === 'auto-approval')).toBe(true)
+    expect(thread.some(item => item.id === 'auto-0')).toBe(false)
   })
 
   it('sorts a stale locally-appended error into chronological position, not the bottom', () => {

@@ -80,6 +80,15 @@ export const keeperToolApprovals = signal<Record<string, Record<string, KeeperTo
 // available server-side (keeper_chat/<name>.jsonl, GET /chat/history).
 export const THREAD_ENTRY_CAP = 200
 
+// Settled autonomous-turn rows kept per keeper. They fold into one collapsed
+// group, so a window of recent turns stays cheap — but nothing else bounds
+// them (THREAD_ENTRY_CAP exempts them), and a dashboard left open accrues
+// one row per turn. The full per-turn record stays server-side in the Agent
+// Core checkpoint. Unterminated turns, rows carrying failure diagnostics,
+// and unresolved approvals stay actionable and never count against this
+// window.
+export const AUTONOMOUS_TURN_ENTRY_CAP = 50
+
 // --- Private stream tracking ---
 
 interface KeeperActiveStream {
@@ -195,14 +204,32 @@ export function isAutonomousTurnEntry(entry: KeeperConversationEntry): boolean {
   return entry.source === 'autonomous_turn'
 }
 
+function isCappedAutonomousTurnEntry(entry: KeeperConversationEntry): boolean {
+  if (!isAutonomousTurnEntry(entry)) return false
+  // Unterminated turns and rows the turn marked with failure evidence are
+  // still actionable: evicting them would drop a live turn or its only
+  // visible diagnostic. So are turns awaiting an operator approval.
+  if (entry.delivery === 'sending' || entry.delivery === 'streaming') return false
+  if (entry.error != null) return false
+  if (entry.approvalLifecycle?.phase === 'requested') return false
+  return true
+}
+
 function capThreadEntries(entries: KeeperConversationEntry[]): KeeperConversationEntry[] {
   let conversationSlots = THREAD_ENTRY_CAP
+  let autonomousSlots = AUTONOMOUS_TURN_ENTRY_CAP
   const kept: KeeperConversationEntry[] = []
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index]
     if (!entry) continue
-    const doesNotConsumeConversationSlot =
-      isAutonomousTurnEntry(entry) || entry.approvalLifecycle != null
+    if (isAutonomousTurnEntry(entry)) {
+      if (!isCappedAutonomousTurnEntry(entry) || autonomousSlots > 0) {
+        kept.push(entry)
+        if (isCappedAutonomousTurnEntry(entry)) autonomousSlots -= 1
+      }
+      continue
+    }
+    const doesNotConsumeConversationSlot = entry.approvalLifecycle != null
     if (doesNotConsumeConversationSlot || conversationSlots > 0) {
       kept.push(entry)
       if (!doesNotConsumeConversationSlot) conversationSlots -= 1

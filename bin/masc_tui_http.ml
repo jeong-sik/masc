@@ -1532,6 +1532,13 @@ let fetch_keeper_chat_events ~(host : string) ~(port : int)
             (Masc_tui_keeper_chat_log.Events_undecodable
                ("events body was not JSON: " ^ detail)))
 
+(* Rows per older page. A page is parsed, decoded and folded on the UI's own
+   domain in one run, and at the server's full window (400 rows, about 400 KB)
+   that was about 18 ms with a key held down; a quarter of it is about a
+   quarter of the stall. A server that does not know [limit] ignores it and
+   answers the full window, which the pane takes as it always did. *)
+let history_page_limit = 100
+
 let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(before : float) :
     (Masc_tui_keeper_chat_history.page, string) result =
@@ -1540,9 +1547,9 @@ let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
        hex form carries a '+' in its exponent, which a query string reads as a
        space. 17 significant digits is the shortest width that is exact for
        every double. *)
-    Printf.sprintf "/api/v1/keepers/%s/chat/history/page?before=%.17g"
+    Printf.sprintf "/api/v1/keepers/%s/chat/history/page?before=%.17g&limit=%d"
       (percent_encode_path_segment keeper_name)
-      before
+      before history_page_limit
   in
   match http_get ~host ~port ~path with
   | Error detail -> Error detail

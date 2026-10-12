@@ -1433,6 +1433,53 @@ let write_numbered_lane ~path ~total ~pad_bytes =
 let content_no (m : K.chat_message) =
   int_of_string (String.sub m.K.content 4 4)
 
+(* A small page narrows the conversation, never the tool rows of a turn that
+   fits the full window: a row pushed out by a smaller tool budget is older
+   than nothing the next page reads, so it would be on no page at all. *)
+let test_load_page_small_window_keeps_the_tool_rows_of_a_turn () =
+  let base_dir = temp_base_path "keeper-chat-store-page-tools" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-page-tools" in
+      let tools = 100 in
+      let row ~id ~role ~ts extra =
+        Yojson.Safe.to_string
+          (`Assoc
+             ([ ("id", `String id)
+              ; ("role", `String role)
+              ; ("content", `String "{}")
+              ; ("ts", `Float ts)
+              ]
+             @ extra))
+        ^ "\n"
+      in
+      let buf = Buffer.create 16384 in
+      Buffer.add_string buf (row ~id:"u" ~role:"user" ~ts:1.0 []);
+      for i = 1 to tools do
+        Buffer.add_string buf
+          (row
+             ~id:(Printf.sprintf "t-%03d" i)
+             ~role:"tool"
+             ~ts:(1.0 +. float_of_int i)
+             [ ("tool_call_id", `String (Printf.sprintf "toolu_%d" i))
+             ; ("tool_call_name", `String "Read")
+             ])
+      done;
+      Buffer.add_string buf
+        (row ~id:"a" ~role:"assistant" ~ts:(float_of_int (tools + 2)) []);
+      write_file (chat_path ~base_dir ~keeper_name) (Buffer.contents buf);
+      let page =
+        K.load_page ~base_dir ~keeper_name ~before:1000.0 ~max_total:100 ()
+      in
+      let tool_rows =
+        List.filter
+          (fun (m : K.chat_message) -> K.Role.equal m.K.role K.Role.Tool)
+          page.K.messages
+      in
+      Alcotest.(check int) "every tool row of the turn is on the page" tools
+        (List.length tool_rows))
+
 let test_load_page_walks_backward_small_file () =
   let base_dir = temp_base_path "keeper-chat-store-page-small" in
   Fun.protect
@@ -1461,6 +1508,51 @@ let test_load_page_walks_backward_small_file () =
       let p4 = K.load_page ~base_dir ~keeper_name ~before:1.0 () in
       Alcotest.(check int) "empty page" 0 (List.length p4.K.messages);
       Alcotest.(check bool) "empty page exhausted" false p4.K.has_more)
+
+(* A smaller window takes fewer rows at the same user/assistant share, walks
+   the same history in more pages, and the default is untouched. *)
+let test_load_page_max_total_scales_the_window_and_walks_the_same_history () =
+  let base_dir = temp_base_path "keeper-chat-store-page-limit" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-page-limit" in
+      write_numbered_lane
+        ~path:(chat_path ~base_dir ~keeper_name)
+        ~total:300 ~pad_bytes:0;
+      let default_page = K.load_page ~base_dir ~keeper_name ~before:250.0 () in
+      let explicit_default =
+        K.load_page ~base_dir ~keeper_name ~before:250.0 ~max_total:400 ()
+      in
+      Alcotest.(check (list string)) "an explicit 400 is the default window"
+        (List.map (fun (m : K.chat_message) -> m.K.id) default_page.K.messages)
+        (List.map (fun (m : K.chat_message) -> m.K.id) explicit_default.K.messages);
+      let above = K.load_page ~base_dir ~keeper_name ~before:250.0 ~max_total:9999 () in
+      Alcotest.(check int) "a limit above the window is the window" 100
+        (List.length above.K.messages);
+      (* 100 rows of a primaries-only lane: a quarter of the budget is the
+         primary bound, so 25 rows come back. *)
+      let small = K.load_page ~base_dir ~keeper_name ~before:250.0 ~max_total:100 () in
+      Alcotest.(check int) "a 100-row budget keeps 25 primaries" 25
+        (List.length small.K.messages);
+      Alcotest.(check int) "it is the newest 25 before the cursor" 225
+        (content_no (List.hd small.K.messages));
+      Alcotest.(check bool) "older rows remain" true small.K.has_more;
+      let tiny = K.load_page ~base_dir ~keeper_name ~before:250.0 ~max_total:0 () in
+      Alcotest.(check int) "a zero limit still returns one row" 1
+        (List.length tiny.K.messages);
+      (* Walking with the small window reaches every row, once. *)
+      let rec walk before acc =
+        let page = K.load_page ~base_dir ~keeper_name ~before ~max_total:100 () in
+        match page.K.messages with
+        | [] -> acc
+        | first :: _ as messages ->
+            let acc = List.map content_no messages @ acc in
+            if page.K.has_more then walk first.K.ts acc else acc
+      in
+      let seen = walk 301.0 [] |> List.sort compare in
+      Alcotest.(check (list int)) "every row once, none repeated"
+        (List.init 300 (fun i -> i + 1)) seen)
 
 let test_load_page_binary_search_large_file () =
   let base_dir = temp_base_path "keeper-chat-store-page-large" in
@@ -3621,6 +3713,10 @@ let () =
         [
           Alcotest.test_case "load_page walks backward (small file)" `Quick
             test_load_page_walks_backward_small_file;
+          Alcotest.test_case "load_page max_total scales the window" `Quick
+            test_load_page_max_total_scales_the_window_and_walks_the_same_history;
+          Alcotest.test_case "load_page small window keeps a turn's tool rows"
+            `Quick test_load_page_small_window_keeps_the_tool_rows_of_a_turn;
           Alcotest.test_case "load_page binary search (large file)" `Quick
             test_load_page_binary_search_large_file;
         ] );

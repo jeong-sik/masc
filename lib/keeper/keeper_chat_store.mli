@@ -531,9 +531,16 @@ type page = { messages : chat_message list; has_more : bool }
     returned [ts] as the next [before]. Bounded I/O per call:
     binary-search probes plus one window slice, never a full scan.
     Legacy rows without [ts] are unreachable through paging (the tail
-    window still serves them). *)
+    window still serves them).
+
+    [max_total] caps the window's rows, at most the default of 400. It scales
+    only the user/assistant share (a quarter of it); the budget for tool rows
+    and receipts stays at the default's, so a smaller page never drops a tool
+    row that no later page reads. The same history takes more, smaller pages;
+    [has_more] and the cursor are unchanged. *)
 val load_page :
-  base_dir:string -> keeper_name:string -> ?before:float -> unit -> page
+  base_dir:string -> keeper_name:string -> ?before:float -> ?max_total:int ->
+  unit -> page
 
 (** {1 Serialisation} *)
 

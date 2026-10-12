@@ -1862,7 +1862,9 @@ let apply_delta ~now t (delta : Live.delta) =
            note_unreadable t "native end has no matching provider occurrence")
   | Live.Tool_args { occurrence; fragment } ->
       (match update_occurrence t occurrence (fun call ->
-         if call.ended
+         if call.authority <> Masc_execution then
+           (note_unreadable t "MASC argument event names a native tool"; call)
+         else if call.ended
          then call
          else
              let args =
@@ -1883,7 +1885,9 @@ let apply_delta ~now t (delta : Live.delta) =
               "TOOL_CALL_ARGS provider correlation conflicts for stream occurrence %s"
               (occurrence_label occurrence)))
   | Live.Tool_ended { occurrence } ->
-      (match update_occurrence t occurrence (fun call -> { call with ended = true }) with
+      (match update_occurrence t occurrence (fun call ->
+         if call.authority = Masc_execution then { call with ended = true }
+         else (note_unreadable t "MASC argument end names a native tool"; call)) with
        | Call_updated -> ()
        | Call_missing ->
          note_unreadable t

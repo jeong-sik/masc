@@ -2246,6 +2246,13 @@ let test_native_tools_are_observations_without_execution_receipts () =
   let call () = match Transcript.tool_calls t with
     | [call] -> call | calls -> failf "expected one native step, got %d" (List.length calls) in
   check tool_outcome "provider step runs; arguments are not inferred" Transcript.Native_running (call ()).outcome;
+  feed t [Live.Tool_args {occurrence; fragment=Live.Args_snapshot "foreign arguments"};
+          Live.Tool_ended {occurrence}];
+  check tool_outcome "MASC argument end cannot finish native activity"
+    Transcript.Native_running (call ()).outcome;
+  check string "MASC arguments cannot overwrite native observation" "" (call ()).args;
+  check bool "mixed argument authority is reported" true
+    (Option.is_some (Transcript.unreadable t));
   feed t [Live.Native_tool_started {occurrence;tool_name=Some "Read"};
           Live.Native_tool_ended {occurrence; completion=Runtime_native_tools.end_observed}; Live.Native_tool_ended {occurrence; completion=Runtime_native_tools.end_observed}];
   check tool_outcome "provider end is not a result receipt" Transcript.Native_ended (call ()).outcome;

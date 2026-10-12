@@ -302,21 +302,15 @@ let custom_deltas_unvalidated fields =
   | Some "KEEPER_STREAM_MESSAGE_START" ->
     (match object_field fields "value" with
      | Some value ->
-       let generation = match List.filter (fun (key,_) -> key="content_generation") value with
-         | [] -> Ok None
-         | [_, json] ->
-             Result.bind (Runtime_json_integer.of_json json) (fun generation ->
-               if generation < 0 then Error "content generation must be nonnegative"
-               else Ok (Some generation))
-         | _ -> Error "duplicate content generation" in
-       (match generation, string_field value "model" with
-        | Ok generation, Some model ->
+       (match Masc.Keeper_chat_events.stream_message_identity_of_fields value,
+              string_field value "model" with
+        | Ok (generation, stream_scope), Some model ->
           (* A start establishes response and usage even when the provider
              has no model label. Presentation handles that absent label. *)
           [ Stream_model_started
               { generation; message_id = Option.bind (string_field value "provider_message_id")
                   (fun id -> if String.trim id = "" then None else Some id)
-              ; stream_scope = nonnegative_int_field value "stream_scope"
+              ; stream_scope
               ; model = String.trim model
               ; usage = Option.bind (List.assoc_opt "usage" value) stream_usage_of_usage_json
               } ]
@@ -347,17 +341,9 @@ let custom_deltas_unvalidated fields =
        carried neither still retains its supplied response identity. *)
     (match object_field fields "value" with
      | Some value ->
-       let generation = match List.filter (fun (key,_) -> key="content_generation") value with
-         | [] -> Ok None
-         | [_, json] ->
-             Result.bind (Runtime_json_integer.of_json json) (fun generation ->
-               if generation < 0 then Error "content generation must be nonnegative"
-               else Ok (Some generation))
-         | _ -> Error "duplicate content generation" in
-       (match generation, optional_stream_scope value "stream_scope" with
-        | Error detail, _ | _, Error detail -> [Undecodable detail]
-        | Ok (Some _), Ok None -> [Undecodable "owned message delta requires stream_scope"]
-        | Ok generation, Ok stream_scope ->
+       (match Masc.Keeper_chat_events.stream_message_identity_of_fields value with
+        | Error detail -> [Undecodable detail]
+        | Ok (generation, stream_scope) ->
        let usage =
          match List.assoc_opt "usage" value with
          | Some usage -> stream_usage_of_usage_json usage

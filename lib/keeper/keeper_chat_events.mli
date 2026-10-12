@@ -434,3 +434,10 @@ val optional_response_identity_of_fields : (string * Yojson.Safe.t) list -> (res
 (** A complete observed response or an explicitly unobserved scope. Simultaneous
     owner/scope wire fields, duplicate fields and invalid numeric identities reject. *)
 val text_response_of_fields : owner_field:string -> scope_field:string -> (string * Yojson.Safe.t) list -> (text_response, string) result
+
+(** Decode identity fields on message-start and message-delta payloads. Absent
+    generation means ownership was not observed. Supplied generation requires
+    scope; both indices must be unique, nonnegative JSON safe integers. Null,
+    malformed and duplicate indices reject. Other payload fields are untouched. *)
+val stream_message_identity_of_fields :
+  (string * Yojson.Safe.t) list -> ((int option * int option), string) result

@@ -666,3 +666,20 @@ let text_response_of_fields ~owner_field ~scope_field fields =
      | Ok scope when scope >= 0 -> Ok (Unobserved_scope (Some scope))
      | Ok _ | Error _ -> Error "text scope must be a nonnegative safe integer")
   | _ -> Error "text response has conflicting or duplicate ownership fields"
+
+let stream_message_identity_of_fields fields =
+  let ( let* ) = Result.bind in
+  let index key =
+    match List.filter (fun (name, _) -> name = key) fields with
+    | [] -> Ok None
+    | [(_, json)] ->
+        (match Runtime_json_integer.of_json json with
+         | Ok n when n >= 0 -> Ok (Some n)
+         | Ok _ | Error _ -> Error (key ^ " must be one nonnegative safe integer"))
+    | _ -> Error ("duplicate " ^ key)
+  in
+  let* generation = index "content_generation" in
+  let* scope = index "stream_scope" in
+  match generation, scope with
+  | Some _, None -> Error "owned stream message requires stream_scope"
+  | (None | Some _), (None | Some _) -> Ok (generation, scope)

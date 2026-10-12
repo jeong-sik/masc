@@ -783,6 +783,26 @@ let test_stream_generation_refuses_malformed_values () =
      ["content_generation",`String "7"];
      ["content_generation",`Int 7;"content_generation",`Int 8]]
 
+  ; List.iter (fun scope_fields ->
+    let fields = ["content_generation", `Int 7;
+                  "provider_message_id", `String "pm-1"; "model", `String "supplied"]
+                 @ scope_fields in
+    List.iter (fun name ->
+      let body = sse (custom name (`Assoc fields)) in
+      (match feed_whole body with
+       | [Live.Undecodable _] -> ()
+       | _ -> fail "malformed scope granted a stream message event");
+      check bool "strict stream refuses malformed message identity" true
+        (Result.is_error (Masc_tui_keeper_chat_projection.validate_custom_value ~name (`Assoc fields))))
+      ["KEEPER_STREAM_MESSAGE_START"; "KEEPER_STREAM_MESSAGE_DELTA"];
+    check bool "journal refuses malformed start identity" true
+      (Result.is_error (Masc.Keeper_chat_event_log.keeper_chat_event_of_json
+        (`Assoc (("type", `String "agent_core_stream_message_start") :: fields)))))
+    [["stream_scope", `Int (-1)]; ["stream_scope", `Null];
+     ["stream_scope", `String "4"]; ["stream_scope", `Float 4.5];
+     ["stream_scope", `Int 9_007_199_254_740_992];
+     ["stream_scope", `Int 4; "stream_scope", `Int 5]; []]
+
 let test_stream_model_stop_reaches_the_view () =
   let body = sse (custom "KEEPER_STREAM_MESSAGE_STOP" `Null) in
   List.iter (fun actual ->

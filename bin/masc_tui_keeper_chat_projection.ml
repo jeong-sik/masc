@@ -833,6 +833,12 @@ let validate_custom_value ~name value =
     Result.map (fun _ -> ()) (decode_acceptance value)
   else if String.equal name "KEEPER_PROVIDER_RETRY" then
     decode_provider_retry value |> Result.map (fun _ -> ())
+  else if List.mem name ["KEEPER_STREAM_MESSAGE_START"; "KEEPER_STREAM_MESSAGE_DELTA"] then
+    (match value with
+     | `Assoc fields -> Masc.Keeper_chat_events.stream_message_identity_of_fields fields
+         |> Result.map (fun _ -> ())
+         |> Result.map_error (fun detail -> Malformed_event detail)
+     | _ -> Error (Malformed_event "stream message value must be an object"))
   else if String.equal name "KEEPER_MODEL_CONTENT_ACTIVITY" then
     Masc.Keeper_chat_events.model_content_activity_of_json value
     |> Result.map (fun _ -> ())

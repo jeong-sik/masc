@@ -464,37 +464,24 @@ let keeper_chat_event_of_json json =
           (`Assoc (List.filter (fun (key, _) -> key <> "type") fields)) in
       Ok (Agent_core_runtime_attempt_started { runtime_id; attempt_index })
     | "agent_core_stream_message_start" ->
-      let* content_generation = match List.filter (fun (key,_) -> key="content_generation")
-          (json |> to_assoc) with
-        | [] -> Ok None
-        | [_, value] ->
-            let* generation = Runtime_json_integer.of_json value in
-            if generation < 0 then Error "content generation must be nonnegative"
-            else Ok (Some generation)
-        | _ -> Error "duplicate content generation" in
+      let* content_generation, scope = stream_message_identity_of_fields (json |> to_assoc) in
+      let* stream_scope = match scope with
+        | Some scope -> Ok scope
+        | None -> Error "journal stream message requires stream_scope" in
       let* usage = opt_member json "usage" api_usage_of_json in
       Ok
         (Agent_core_stream_message_start
            { content_generation
-           ; stream_scope = json |> member "stream_scope" |> to_int
+           ; stream_scope
            ; provider_message_id = json |> member "provider_message_id" |> to_string
            ; model = json |> member "model" |> to_string
            ; usage
            })
     | "agent_core_stream_message_delta" ->
-      let* content_generation = match List.filter (fun (key,_) -> key="content_generation")
-          (json |> to_assoc) with
-        | [] -> Ok None
-        | [_, value] ->
-            let* generation = Runtime_json_integer.of_json value in
-            if generation < 0 then Error "content generation must be nonnegative"
-            else Ok (Some generation)
-        | _ -> Error "duplicate content generation" in
-      let* stream_scope = match List.filter (fun (key,_) -> key="stream_scope") (json |> to_assoc) with
-        | [(_, value)] ->
-          let* scope = Runtime_json_integer.of_json value in
-          if scope >= 0 then Ok scope else Error "stream scope must be nonnegative"
-        | _ -> Error "message delta requires one stream scope" in
+      let* content_generation, scope = stream_message_identity_of_fields (json |> to_assoc) in
+      let* stream_scope = match scope with
+        | Some scope -> Ok scope
+        | None -> Error "journal stream message requires stream_scope" in
       let stop_reason_raw = json |> member "stop_reason" |> to_string_option in
       let* usage = opt_member json "usage" delta_usage_of_json in
       Ok

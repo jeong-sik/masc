@@ -127,11 +127,13 @@ val schedule_terminal_retention_days : int Runtime_params.param
 val task_archive_retention_days : int Runtime_params.param
 (** How many days a terminal task stays in the live backlog before the
     periodic maintenance pass moves it to [tasks-archive.json]. The pass is
-    archive-first ({!Workspace_gc.gc}): the archive takes the task before
-    the backlog commit drops it, and non-terminal tasks are never archived.
-    {!Workspace_gc.gc} has no default retention policy of its own; this
-    param is the horizon the maintenance loop supplies. Range \[1, 365\],
-    default 30. A change takes effect on the next 24h maintenance pass. *)
+    archive-first ({!Workspace_gc.archive_terminal_tasks}): the archive takes
+    the task before the backlog commit drops it, and non-terminal tasks are
+    never archived.
+    {!Workspace_gc.archive_terminal_tasks} has no default retention policy of
+    its own; this param is the horizon the maintenance loop supplies. Range
+    \[1, 365\], default 30. A change takes effect on the next 24h maintenance
+    pass. *)
 
 (** {1 Initialization + JSON} *)
 

@@ -282,20 +282,21 @@ let project_keeper_transition_outbox_page
 
 let latest_keeper_msg_recovery = Atomic.make None
 
-(* One archive-first workspace GC pass on the 24h maintenance cadence
+(* One archive-first task-only GC pass on the 24h maintenance cadence
    (audit 2026-10-07 F-06 / D6-11). Terminal tasks older than the retention
    window move to tasks-archive.json; the window is a preservation policy,
    not a wall-clock kill — non-terminal tasks are never archived and the
    archive holds the task before the backlog commit drops it, so a verdict
    or release obligation on a live task cannot be stranded by this pass.
-   The only other production caller is the manual masc_gc admin tool; a
-   failure here is logged and never cancels the cleanup loop. *)
+   Task-only: old workspace messages and backend pubsub keep their own
+   retention and are never touched here. A failure here is logged and never
+   cancels the cleanup loop. *)
 let run_periodic_task_gc config ~days =
   try
-    let summary = Workspace.gc config ~days () in
+    let _, summary = Workspace.archive_terminal_tasks config ~days () in
     Log.Server.info "periodic task gc: retention=%dd: %s" days summary
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
+  | EioCancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Server.error "periodic task gc failed: %s" (Printexc.to_string exn)
 
@@ -728,6 +729,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~on_error:(log_server_fiber_crash "maintenance_cleanup")
     (fun () ->
     let last_prune = ref (Unix.gettimeofday ()) in
+    (* Task GC starts due: the first maintenance pass runs it, then every 24h
+       of uptime. Servers that restart more often than daily would otherwise
+       never archive, since the pass is gated on uninterrupted uptime. *)
+    let last_task_gc = ref 0.0 in
     let last_chat_journal_audit = ref (Unix.gettimeofday ()) in
     (* Operations the audit has reported: each settled operation is audited
        once per process life. *)
@@ -914,20 +919,30 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                 Log.Server.warn
                   "periodic schedule prune failed: %s"
                   (Schedule_service.service_error_to_string err));
-             (* Task archive on the same 24h cadence (F-06 / D6-11): the
-                backlog only shrank when an operator ran the manual masc_gc
-                tool, so terminal tasks accumulated unbounded — 95% of
-                backlog.json bytes at the 2026-10-07 audit. Archive-first
-                and lock-serialised (#40427/#40571), so automating it is
-                safe; the retention window is a runtime setting, not a
-                wall-clock kill. *)
-             run_periodic_task_gc
-               (Mcp_server.workspace_config state)
-               ~days:(Runtime_params.get Runtime_settings.task_archive_retention_days)
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
              Log.Server.error "periodic JSONL prune failed: %s" (Printexc.to_string exn));
+         (* Task archive on its own 24h cadence (F-06 / D6-11): the backlog
+            only shrank when an operator ran the manual masc_gc tool, so
+            terminal tasks accumulated unbounded — 95% of backlog.json bytes
+            at the 2026-10-07 audit. Archive-first and lock-serialised
+            (#40427/#40571), so automating it is safe; the retention window
+            is a runtime setting, not a wall-clock kill. Its own block, not
+            the JSONL-prune try above: a prune failure must not starve task
+            archival for another 24h. *)
+         if now -. !last_task_gc >= Masc_time_constants.day
+         then begin
+           last_task_gc := now;
+           (try
+              run_periodic_task_gc
+                (Mcp_server.workspace_config state)
+                ~days:(Runtime_params.get Runtime_settings.task_archive_retention_days)
+            with
+            | EioCancel.Cancelled _ as e -> raise e
+            | exn ->
+              Log.Server.error "periodic task gc failed: %s" (Printexc.to_string exn))
+         end;
          (* RFC-0412 stage 2: dual-write consistency audit of the chat event
             journal against keeper_chat_store. Runs hourly — far more often
             than the 30d journal retention prune, so the audit window is never

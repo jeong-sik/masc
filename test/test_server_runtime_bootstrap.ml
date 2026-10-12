@@ -6047,11 +6047,11 @@ let install_suite_watchdog () =
   end
 ;;
 
-(* F-06 / D6-11: the 24h maintenance block runs one archive-first workspace
-   GC pass at the schedule-prune cadence, so the backlog shrinks without an
-   operator running the manual masc_gc tool. The pass archives terminal
-   tasks past the retention window and must leave recent completions and
-   non-terminal obligations untouched. *)
+(* F-06 / D6-11: the 24h maintenance block runs one archive-first task-only
+   GC pass, so the backlog shrinks without an operator running the manual
+   masc_gc tool. The pass archives terminal tasks past the retention window
+   and must leave recent completions, non-terminal obligations and old
+   workspace messages untouched. *)
 let test_periodic_task_gc_archives_only_stale_terminal_tasks () =
   with_temp_dir "periodic-task-gc" (fun dir ->
     let config = Workspace.default_config dir in
@@ -6086,6 +6086,16 @@ let test_periodic_task_gc_archives_only_stale_terminal_tasks () =
       ; last_updated = recent
       ; version = 2
       };
+    (* An old message the full [Workspace.gc] would delete: ancient, and its
+       content names no open task. The task-only pass must leave it alone. *)
+    let messages_dir = Workspace.messages_dir config in
+    mkdir_p messages_dir;
+    let sentinel = Filename.concat messages_dir "task-gc-sentinel.json" in
+    let oc = open_out_bin sentinel in
+    output_string oc
+      ("{\"timestamp\": \"2020-01-01T00:00:00Z\", \
+        \"content\": \"task-gc sentinel\"}");
+    close_out oc;
     Server_bootstrap_maintenance.run_periodic_task_gc config ~days:30;
     let backlog_ids =
       List.map (fun (t : Types.task) -> t.id) (Workspace.read_backlog config).tasks
@@ -6102,7 +6112,9 @@ let test_periodic_task_gc_archives_only_stale_terminal_tasks () =
     Alcotest.(check bool) "old non-terminal task stays in the live backlog"
       true (List.mem "task-703" backlog_ids);
     Alcotest.(check bool) "old non-terminal task is never archived"
-      false (List.mem 703 archive_ids))
+      false (List.mem 703 archive_ids);
+    Alcotest.(check bool) "old message survives the task-only pass"
+      true (Sys.file_exists sentinel))
 ;;
 
 let () =

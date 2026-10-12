@@ -404,11 +404,11 @@ let schedule_terminal_retention_days =
 (* ── task archive retention surface ──────────────────────────── *)
 
 (* How long a terminal task stays in the live backlog before the periodic
-   archive pass moves it to tasks-archive.json. [Workspace_gc.gc] deliberately
-   has no default retention policy — the caller owns the horizon — so the
-   default lives here at the composition root, next to the schedule
-   retention surface the same maintenance block already reads. Aligned with
-   MASC_JSONL_RETENTION_DAYS (30d). *)
+   archive pass moves it to tasks-archive.json. [Workspace_gc.archive_terminal_tasks]
+   deliberately has no default retention policy — the caller owns the
+   horizon — so the default lives here at the composition root, next to the
+   schedule retention surface the same maintenance block already reads.
+   Aligned with MASC_JSONL_RETENTION_DAYS (30d). *)
 let task_archive_retention_days =
   register_int
     ~key:"task.archive_retention_days"

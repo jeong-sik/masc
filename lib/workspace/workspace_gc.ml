@@ -46,16 +46,16 @@ let heartbeat config ~agent_name =
 
 exception Task_archive_failed of string
 
-(** Explicit age-based garbage collection. The caller must choose the retention
-    horizon; this layer has no default retention policy. Agent lifecycle is not
-    part of GC and remains an explicit operator action. *)
-let gc config ~days () =
-  if days < 1 then invalid_arg "Workspace_gc.gc: days must be >= 1";
+(** Task-archive phase of {!gc} on its own: archive terminal tasks older than
+    [days] and self-heal mis-archived non-terminal tasks, without deleting
+    old messages or touching backend pubsub. Scheduled maintenance calls this;
+    the manual [masc_gc] tool calls {!gc} for the full pass. Returns the live
+    task rows after the pass plus the human-readable summary lines. *)
+let archive_terminal_tasks config ~days () =
+  if days < 1 then invalid_arg "Workspace_gc.archive_terminal_tasks: days must be >= 1";
   ensure_initialized config;
 
-  let results = ref [] in
-
-  (* 1. Archive terminal tasks (Done/Cancelled) that ended more than N days ago, and
+  (* Archive terminal tasks (Done/Cancelled) that ended more than N days ago, and
         self-heal any non-terminal task a prior buggy GC pass stranded in the
         archive.
 
@@ -158,6 +158,7 @@ let gc config ~days () =
   in
   let stale_count = List.length archived_tasks in
   let restore_count = List.length restored in
+  let task_results = ref [] in
   List.iter (fun (t : task) ->
     let status = Masc_domain.task_status_to_string t.task_status in
     log_event config (`Assoc [
@@ -176,16 +177,32 @@ let gc config ~days () =
       ()
   ) restored;
   (if stale_count > 0 then
-     results :=
+     task_results :=
        Printf.sprintf "Archived %d terminal task(s) (older than %d days)" stale_count days
-       :: !results
+       :: !task_results
    else
-     results :=
-       Printf.sprintf "No terminal tasks to archive (threshold: %d days)" days :: !results);
+     task_results :=
+       Printf.sprintf "No terminal tasks to archive (threshold: %d days)" days :: !task_results);
   if restore_count > 0 then
-    results :=
+    task_results :=
       Printf.sprintf "Restored %d non-terminal task(s) from archive" restore_count
-      :: !results;
+      :: !task_results;
+  live_tasks_after_gc, String.concat "\n" (List.rev !task_results)
+
+(** Explicit age-based garbage collection. The caller must choose the retention
+    horizon; this layer has no default retention policy. Agent lifecycle is not
+    part of GC and remains an explicit operator action. *)
+let gc config ~days () =
+  if days < 1 then invalid_arg "Workspace_gc.gc: days must be >= 1";
+  let live_tasks_after_gc, task_summary = archive_terminal_tasks config ~days () in
+  let results = ref [ task_summary ] in
+  (* The message-retention cutoff is recomputed here rather than threaded
+     through: the archive pass owns its cutoff, and the two agree to well
+     within the day-granularity retention window. *)
+  let cutoff_iso =
+    let now = Time_compat.now () in
+    Masc_domain.iso8601_of_unix_seconds (now -. (float_of_int days *. 24. *. 60. *. 60.))
+  in
 
   (* 2. Cleanup old messages - but preserve messages referencing open tasks *)
   let messages_path = messages_dir config in

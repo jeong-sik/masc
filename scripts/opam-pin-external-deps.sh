@@ -130,10 +130,10 @@ readonly WS_DIRECT_SHA="d812d6fec4153efc11235661e0d4b4d0d789c45b"
 # drive state in save-state format v3, including in-flight sector reads, so
 # restoring a live disk campaign does not cold-reset the FDC. The core's
 # top-level lib source digest at this pin is cc6489f2ddae4a48596b4879b3c0e368.
-# 94e1923 is the squash merge of #49 (on #48): refresh the build Git
-# identity and publish a commit only for the core project's own clean
-# checkout. The top-level lib source digest is unchanged.
-readonly OCAML_MSX_SHA="94e192317b85695925baf7c8ce47d6d6fbc70cc3"
+# 7cc5836 is ocaml-msx main with #48 and #50 (#49 relanded): refresh the
+# build Git identity and publish a commit only for the core project's own
+# clean checkout. The top-level lib source digest is unchanged.
+readonly OCAML_MSX_SHA="7cc5836b517c43e3690272d7c7d561d9a1e5cc3b"
 # DOS emulator core (8086 + BIOS/DOS interrupt surface + CGA/EGA/VGA video).
 # Path-pinned locally for core development; SHA-pinned here for CI.
 # d887e45 = ocaml-dos #11: keys have names, so lib/dos_lane can take "up" and

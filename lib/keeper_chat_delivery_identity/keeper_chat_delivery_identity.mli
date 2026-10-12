@@ -62,6 +62,13 @@ val transcript_slot_equal : transcript_slot -> transcript_slot -> bool
 val delivery_provenance_fields :
   delivery_provenance -> (string * Yojson.Safe.t) list
 
+(** Reads one optional row field, rejecting a repeated field name. The
+    provenance decoders use this for the authority-bearing fields; the
+    durable readers reuse it for the row role so a repeated [role] cannot
+    grant provenance authority through a first-value read. *)
+val unique_optional_field :
+  string -> (string * Yojson.Safe.t) list -> (Yojson.Safe.t option, string) result
+
 (** Reads the pair back out of a row's fields. [Ok None] when neither field
     is present; [Error] when only one is present, either is repeated, or either
     fails to decode.

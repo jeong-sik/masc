@@ -2688,6 +2688,58 @@ let test_half_provenance_blocks_append_once () =
           Alcotest.fail
             "append-once accepted a file holding an undecodable provenance row")
 
+(* A provenance-addressed row with a repeated role grants no authority
+   anywhere: the row-aware decoder already rejects it, so the durable
+   readers must fail closed the same way instead of reading the first
+   role. The first role below is compatible with the slot on purpose —
+   only the repetition fails the row. *)
+let duplicate_role_addressed_row =
+  {|{"id":"dup-role","role":"user","role":"assistant","content":"x","ts":1.0,"delivery_key":{"kind":"operation","operation_id":"kmsg-dup-role"},"transcript_slot":{"kind":"accepted_user"}}|}
+;;
+
+let test_duplicate_role_drops_addressed_row () =
+  let base_dir = temp_base_path "keeper-chat-store-duplicate-role" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-duplicate-role" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
+      let before = drop_value invalid_payload in
+      write_file path (duplicate_role_addressed_row ^ "\n");
+      (match K.load ~base_dir ~keeper_name with
+       | [] -> ()
+       | messages ->
+           Alcotest.failf "expected 0 messages, got %d" (List.length messages));
+      Alcotest.(check (float 0.001)) "drop counted as invalid payload"
+        1.0
+        (drop_value invalid_payload -. before))
+
+let test_duplicate_role_blocks_append_once () =
+  let base_dir = temp_base_path "keeper-chat-store-duplicate-role-append" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-duplicate-role-append" in
+      let path = chat_path ~base_dir ~keeper_name in
+      write_file path (duplicate_role_addressed_row ^ "\n");
+      let request_id =
+        match
+          Keeper_chat_delivery_identity.Request_id.of_string "kmsg-after-dup-role"
+        with
+        | Ok request_id -> request_id
+        | Error detail -> Alcotest.fail detail
+      in
+      let delivery_key = Keeper_chat_delivery_identity.Operation request_id in
+      match
+        K.append_user_message_once ~base_dir ~keeper_name ~delivery_key
+          ~content:"blocked" ()
+      with
+      | Error _ -> ()
+      | Ok _ ->
+          Alcotest.fail
+            "append-once accepted a file holding a duplicate-role provenance row")
+
 (* The idempotent append-once paths persist the exact delivery provenance on
    the row; load and [to_json_array] preserve both the delivery key and the
    transcript slot so every consumer uses the append-once SSOT. *)
@@ -3885,6 +3937,10 @@ let () =
             test_half_provenance_reads_none;
           Alcotest.test_case "half a provenance pair blocks append-once"
             `Quick test_half_provenance_blocks_append_once;
+          Alcotest.test_case "duplicate role drops its addressed row" `Quick
+            test_duplicate_role_drops_addressed_row;
+          Alcotest.test_case "duplicate role blocks append-once" `Quick
+            test_duplicate_role_blocks_append_once;
           Alcotest.test_case "duplicate provenance poisons its delivery key"
             `Quick test_duplicate_provenance_poisons_whole_delivery_key;
           Alcotest.test_case "duplicate tool ordinal poisons its delivery key"

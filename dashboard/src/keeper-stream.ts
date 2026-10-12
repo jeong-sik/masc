@@ -1028,6 +1028,8 @@ export function applyKeeperStreamEvent(
               || !ownsThinkingPublication(publicationOwner, entry, currentStoredTokenRevision())) return entry
           const activities = entry.modelContentActivity ?? []
           const index = activities.findIndex(sameOccurrence)
+          const current = index < 0 ? undefined : activities[index]
+          if (current && (current.channel !== activity.channel || current.state === 'ended')) return entry
           // Refresh recency: a re-observed occurrence moves to the latest
           // position so the open-piece lookup below follows the newest
           // activity instead of the first arrival order.

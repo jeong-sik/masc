@@ -13,7 +13,7 @@ let with_batch f =
   let keepers_dir = Filename.temp_dir "admission-judgment-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree keepers_dir) (fun () ->
     List.iter (fun (request_id,claim) ->
-      ignore (Queue.append ~keepers_dir ~keeper_id:"keeper" ~request_id (fact claim) |> require))
+      ignore (Queue.append ~keepers_dir ~keeper_id:"keeper" ~request_id (fact claim) |> Result.map_error Queue.append_error_to_string |> require))
       ["one","Alpha failed on Monday."; "two","Alpha failed again on Monday.";
        "three","A transient debug print."; "four","Beta needs separate deployment credentials."];
     let batch = match Queue.read_pending ~keepers_dir ~keeper_id:"keeper" |> require with

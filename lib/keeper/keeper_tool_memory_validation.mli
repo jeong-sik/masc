@@ -52,6 +52,7 @@ type memory_write_error_kind =
   | Supersedes_not_current
   | Supersedes_not_authored
   | Supersedes_premise_of_successor
+  | Pending_admission_capacity_exceeded
   | Pending_admission_persistence_failed
   | Persistence_failed of fact_store
   | Commit_receipt_inconsistent

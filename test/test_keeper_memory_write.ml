@@ -3358,6 +3358,34 @@ let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
    class tells the model that other arguments will not save the claim. A store
    error does not say whether the new snapshot was moved into place before it,
    so the commit is reported as unknown rather than as not saved. *)
+let test_pending_capacity_refusal_is_proven_before_effect () =
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "capacity-refusal" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let queue_path = Masc.Keeper_memory_admission_queue.path ~keepers_dir ~keeper_id:meta.name in
+  let write content = Runtime.keeper_memory_write_with_outcome
+    ~config ~meta ~args:(make_args ~title:"" ~content) in
+  let first = write "keep the first complete claim" in
+  Alcotest.(check bool) "first candidate accepted" true
+    (Yojson.Safe.Util.member "ok"
+       (Yojson.Safe.from_string first.Masc.Keeper_tool_execution.raw_output) = `Bool true);
+  let before = Fs_compat.load_file queue_path in
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.pending_max_bytes_env_key
+    (Some (string_of_int (String.length before))) @@ fun () ->
+  let refused = write "keep the second complete claim too" in
+  check_failure_class "full pending queue" Tool_result.Workflow_rejection refused;
+  Alcotest.(check bool) "refusal proves no effect" true
+    (refused.Masc.Keeper_tool_execution.failure_effect_disposition = Tool_result.Proven_pre_effect);
+  let response = Yojson.Safe.from_string refused.Masc.Keeper_tool_execution.raw_output in
+  Alcotest.(check string) "wire error preserves capacity refusal"
+    "pending_admission_capacity_exceeded" (string_field "error_kind" response);
+  Alcotest.(check string) "wire effect agrees with typed effect"
+    (Tool_result.failure_effect_disposition_to_string Tool_result.Proven_pre_effect)
+    (string_field "effect_disposition" response);
+  Alcotest.(check string) "existing pending input is untouched" before (Fs_compat.load_file queue_path)
+;;
+
 let test_unwritable_store_is_a_dependency_failure () =
   with_temp_dir
   @@ fun base_path ->
@@ -4223,6 +4251,10 @@ let () =
             "an unreadable absorbed store leaves all its current facts"
             `Quick
             test_an_unreadable_absorbed_store_leaves_all_its_current_facts
+        ; Alcotest.test_case
+            "pending capacity refusal is proven before effect"
+            `Quick
+            test_pending_capacity_refusal_is_proven_before_effect
         ; Alcotest.test_case
             "unwritable store is a dependency failure"
             `Quick

@@ -179,7 +179,7 @@ let a_split_atom_at_the_boundary_never_gets_demoted_half () =
 let short_aged_result_uses_exact_preview () =
   let messages = history_with_tool_bodies [String.make 700 'a'] in
   let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 messages in
-  Alcotest.(check int) "short result gets a retrievable reference" 1
+  Alcotest.(check int) "short result selects a smaller planned reference" 1
     (List.length planned.Demotion.pending);
   Alcotest.(check bool) "reference shrinks provider-bound message" true
     (List.fold_left (fun sum m -> sum + measure_message_bytes m) 0 planned.messages

@@ -2374,9 +2374,14 @@ it('preserves canonical delivery through delayed historical operation reasoning 
     })
     think('suffix')
     expect(vi.getTimerCount()).toBeGreaterThan(0)
-    vi.advanceTimersByTime(KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS)
+    // The suffix stays pending: STOP must commit it, so the final trace
+    // assertion below covers the response-boundary flush instead of a timer.
+    expect(trackedKeeperChatOperationsForKeeper('sangsu')[0]?.assistantDraft).toMatchObject({
+      traceSteps: [{ kind: 'think', text: 'reasoning prefix\n' }],
+    })
     applyKeeperOperationTurnEvent('sangsu', { operationId, sequence: 1, event: {
       type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_STOP', value: owner } })
+    expect(vi.getTimerCount()).toBe(0)
     expect(trackedKeeperChatOperationsForKeeper('sangsu')[0]?.assistantDraft).toMatchObject({
       text: 'canonical answer', delivery: 'history', streamState: null,
       responseState: { lastSequence: 1 }, traceSteps: [{ kind: 'think', text: 'reasoning prefix\nsuffix' }],

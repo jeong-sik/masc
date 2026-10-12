@@ -4966,6 +4966,23 @@ let test_older_page_keeps_the_entries_it_moved_down () =
         check string "body is carried over" old_entry.body entry.body)
       before moved)
 
+let test_input_anchor_alias_retains_source_identity () =
+  let source = Log.Autonomous_turn (Ids.Turn_ref.make ~trace_id:"same" ~absolute_turn:1) in
+  let id = Log.source_key source in
+  let persisted = chat_entry ~request_id:id
+    ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None})) ~text:"original" ~at:1. () in
+  let local = {persisted with me_identity=Tui_types.Session_row {
+    request_id=id;turn_phase=Tui_types.Turn_input;operation_seq=0}} in
+  let anchor = Tui_types.msg_anchor local in
+  check bool "actual persisted operation input retains local alias" true
+    (Tui_types.same_msg_anchor anchor persisted);
+  check bool "same textual slot in autonomous source is not local input alias" false
+    (Tui_types.same_msg_anchor anchor {persisted with me_execution_source=Some source});
+  check bool "unobserved source grants no local input alias" false
+    (Tui_types.same_msg_anchor anchor {persisted with me_execution_source=None});
+  check bool "unobserved session cannot create an operation slot alias" true
+    ((Tui_types.msg_anchor {local with me_execution_source=None}).ma_session_user_slot=None)
+
 let test_block_member_keys_preserve_source_authority () =
   let source = Log.Autonomous_turn (Ids.Turn_ref.make ~trace_id:"same" ~absolute_turn:1) in
   let id = Log.source_key source in
@@ -6022,6 +6039,7 @@ let () =
         ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
         ; test_case "older page keeps the blocks it did not change" `Quick test_older_page_keeps_the_blocks_it_did_not_change
         ; test_case "older page keeps the entries it moved down" `Quick test_older_page_keeps_the_entries_it_moved_down
+        ; test_case "input anchor source identity" `Quick test_input_anchor_alias_retains_source_identity
         ; test_case "block member source authority" `Quick test_block_member_keys_preserve_source_authority
         ; test_case "timeline failure source kind" `Quick test_timeline_error_retains_execution_source_kind
         ; test_case "batch member source kind" `Quick test_batch_members_preserve_execution_source_kind

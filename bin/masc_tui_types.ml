@@ -856,7 +856,7 @@ let chat_projected_timeline_ats messages =
 type msg_anchor =
   { ma_identity : msg_identity
   ; ma_session_user_slot :
-      (string * chat_turn_phase * int) option
+      (Masc_tui_keeper_chat_log.journal_source * chat_turn_phase * int) option
       (** A local USER row is replaced by the server's persisted copy after
           terminal refresh. Its server row id cannot be known at submission,
           so this exact turn slot is the one permitted cross-identity match.
@@ -1656,23 +1656,22 @@ let chat_settled_insertion_index ?(member_ids = []) ~request_id ~timeline_at pos
 let msg_anchor entry =
   { ma_identity = entry.me_identity
   ; ma_session_user_slot =
-      (match entry.me_identity, entry.me_role with
-       | Session_row { request_id; turn_phase; operation_seq }, Message_user _ ->
-           Some (request_id, turn_phase, operation_seq)
-       | (Persisted_row _ | Persisted_legacy_row _), Message_user _ -> None
+      (match entry.me_identity, entry.me_role, entry.me_execution_source with
+       | Session_row { request_id; turn_phase; operation_seq }, Message_user _,
+         Some (Masc_tui_keeper_chat_log.Operation owner as source) when String.equal owner request_id ->
+           Some (source, turn_phase, operation_seq)
        | (Persisted_row _ | Persisted_legacy_row _ | Session_row _),
-         (Message_keeper | Message_autonomous | Message_status | Message_local
-         | Message_error | Message_tool | Message_skill _ | Message_thinking
-         | Message_memory) ->
-           None)
+         (Message_user _ | Message_keeper | Message_autonomous | Message_status | Message_local
+         | Message_error | Message_tool | Message_skill _ | Message_thinking | Message_memory),
+         (Some _ | None) -> None)
   }
 
 let same_msg_anchor anchor entry =
   anchor.ma_identity = entry.me_identity
   ||
   match anchor.ma_session_user_slot, entry.me_role with
-  | Some (request_id, turn_phase, operation_seq), Message_user _ ->
-      String.equal request_id entry.me_request_id
+  | Some (source, turn_phase, operation_seq), Message_user _ ->
+      entry.me_execution_source = Some source
       && turn_phase = entry.me_turn_phase
       && Int.equal operation_seq entry.me_operation_seq
   | Some _,

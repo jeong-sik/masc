@@ -3522,7 +3522,7 @@ let search_anchor_of_tag = function
 type search_index_key =
   | Child_identity of child_content_anchor
   | History_identity of msg_identity
-  | History_user_slot of string * chat_turn_phase * int
+  | History_user_slot of Masc_tui_keeper_chat_log.journal_source * chat_turn_phase * int
   | History_reply of Masc_tui_keeper_chat_log.journal_source
   | Journal_origin of Masc_tui_keeper_chat_log.journal_source * Masc_tui_keeper_chat_transcript.drawn_origin
   | Journal_reply of Masc_tui_keeper_chat_log.journal_source
@@ -3542,7 +3542,9 @@ let projection_index_of_anchor projection =
           | Tagged_row row ->
               add (History_identity row.me_identity) at;
               (match row.me_role with
-               | Message_user _ -> add (History_user_slot (row.me_request_id, row.me_turn_phase, row.me_operation_seq)) at
+               | Message_user _ -> Option.iter (fun source ->
+                   add (History_user_slot (source, row.me_turn_phase, row.me_operation_seq)) at)
+                   row.me_execution_source
                | Message_keeper | Message_autonomous | Message_status | Message_local
                | Message_error | Message_tool | Message_skill _ | Message_thinking | Message_memory -> ());
               Option.iter (fun source -> add (History_reply source) at) (search_reply_source row)
@@ -3563,7 +3565,7 @@ let projection_index_of_anchor projection =
       | Search_history {row_anchor; reply_source} ->
           History_identity row_anchor.ma_identity
           :: (match row_anchor.ma_session_user_slot with None -> []
-              | Some (id, phase, seq) -> [History_user_slot (id, phase, seq)])
+              | Some (source, phase, seq) -> [History_user_slot (source, phase, seq)])
           @ (match reply_source with None -> [] | Some source -> [Journal_reply source])
       | Search_journal {source; origin; canonical_reply} ->
           Journal_origin (source, origin)

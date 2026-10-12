@@ -1,0 +1,3357 @@
+{
+  "source_head": "19cbf8a6aa6f9ac746128dddf95612b2086bd949",
+  "meter_sha256": "7c28b3dd55578b19f5fe2eb1d270f5d4db4f7d0a2d160ebff0cb23dcc46ac85b",
+  "source_sha256": {
+    "bin/masc_tui_keeper_chat_transcript.ml": "96a1ad0ba76b017104342c62ab4c198021d1eb59d8909948d390293816d66b57",
+    "bin/masc_tui_keeper_chat_live.ml": "50ff282fcc3d8fd5e8bbebd12b6614425857b4793f27e2d47c0c29d97b07dadf",
+    "bin/masc_tui_keeper_chat_projection.ml": "e6641c053bd27f672be397913523e1e151706ab6e2d14c172d2e29a1274a5d54",
+    "lib/keeper/keeper_chat_events.ml": "b0c38449e048edbc92e65ffa1e9aee93c2aafd745f62f876aaef3a5a88987522",
+    "lib/keeper/keeper_chat_event_log.ml": "2477ce9d9deb47a83523d82c23cc0aa98981d5e8ada59c8af03b07e959825297",
+    "lib/keeper/keeper_chat_agent_core_stream_bridge.ml": "c3210c2603dfa3f3d27f0f826d091a70425e639665dbe5868fbaebc8ffffb092",
+    "lib/server/server_keeper_chat_agui_projection.ml": "f518288664665ce6fc9ddac7e5f015a4178fd4ed8bd80415dd03d9bea5eca6eb",
+    "lib/keeper/keeper_codex_runtime.ml": "b85c35c394045c160e72be32e95b7659331266e2a20c50ffd81ed7b0fc74cdc2",
+    "lib/keeper/keeper_claude_code_runtime.ml": "87af2fa0cb78424ad3bcaea3a5650871fea2e3b8c28673567c5807c42a43b562",
+    "lib/keeper/keeper_antigravity_runtime.ml": "d27827185579b1f89cd80aae045c3da9178769d1696c767af2275a7e99bd3408",
+    "lib/keeper/keeper_muse_runtime.ml": "bb3894535374ebd28dd41ac806dddff9d82c84c64456d0e399266a7a866441fc"
+  },
+  "scope": "all top-level function bindings in 11 chat reducer/codec/projection/runtime boundary files",
+  "function_count": 417,
+  "rows": [
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "apply_delta",
+      "line": 1557,
+      "syntactic_decision_score": 154,
+      "branch_nesting": 9,
+      "field_or_ref_mutation_sites": 70
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "translate",
+      "line": 859,
+      "syntactic_decision_score": 107,
+      "branch_nesting": 7,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "run_without_lifecycle",
+      "line": 835,
+      "syntactic_decision_score": 91,
+      "branch_nesting": 5,
+      "field_or_ref_mutation_sites": 21
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "custom_deltas_unvalidated",
+      "line": 220,
+      "syntactic_decision_score": 81,
+      "branch_nesting": 7,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "run_without_lifecycle",
+      "line": 480,
+      "syntactic_decision_score": 72,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 17
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "run_without_lifecycle",
+      "line": 853,
+      "syntactic_decision_score": 71,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 15
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "run_without_lifecycle",
+      "line": 632,
+      "syntactic_decision_score": 70,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 17
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "keeper_chat_event_of_json",
+      "line": 382,
+      "syntactic_decision_score": 60,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "decode_data_event",
+      "line": 1166,
+      "syntactic_decision_score": 44,
+      "branch_nesting": 5,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "keeper_chat_event_to_json",
+      "line": 183,
+      "syntactic_decision_score": 41,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/server/server_keeper_chat_agui_projection.ml",
+      "function": "project",
+      "line": 111,
+      "syntactic_decision_score": 40,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "codex_stream_callback",
+      "line": 314,
+      "syntactic_decision_score": 39,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 4
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "phase_text",
+      "line": 871,
+      "syntactic_decision_score": 35,
+      "branch_nesting": 5,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "claude_stream_callback",
+      "line": 157,
+      "syntactic_decision_score": 29,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 2
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "stream_protocol_error_kind_of_string",
+      "line": 504,
+      "syntactic_decision_score": 26,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "stream_error_to_string",
+      "line": 294,
+      "syntactic_decision_score": 25,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "stream_protocol_error_kind_to_string",
+      "line": 477,
+      "syntactic_decision_score": 25,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/server/server_keeper_chat_agui_projection.ml",
+      "function": "custom_event_name_to_string",
+      "line": 50,
+      "syntactic_decision_score": 25,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "compute_drawn",
+      "line": 2340,
+      "syntactic_decision_score": 24,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "decode_custom_event",
+      "line": 1045,
+      "syntactic_decision_score": 24,
+      "branch_nesting": 9,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "apply_model_content",
+      "line": 1466,
+      "syntactic_decision_score": 23,
+      "branch_nesting": 6,
+      "field_or_ref_mutation_sites": 18
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "runtime_error_to_core_error",
+      "line": 65,
+      "syntactic_decision_score": 22,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "stream_projection",
+      "line": 591,
+      "syntactic_decision_score": 21,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 9
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "apply_tool_result",
+      "line": 1252,
+      "syntactic_decision_score": 20,
+      "branch_nesting": 6,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "stream_projection",
+      "line": 255,
+      "syntactic_decision_score": 20,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 5
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "redact_content",
+      "line": 208,
+      "syntactic_decision_score": 17,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "codex_error_to_core_error",
+      "line": 607,
+      "syntactic_decision_score": 17,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "finalize",
+      "line": 1507,
+      "syntactic_decision_score": 16,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "claude_error_to_core_error",
+      "line": 370,
+      "syntactic_decision_score": 16,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "project_trail",
+      "line": 717,
+      "syntactic_decision_score": 15,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "event_deltas",
+      "line": 501,
+      "syntactic_decision_score": 15,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "page_of_rows",
+      "line": 1394,
+      "syntactic_decision_score": 15,
+      "branch_nesting": 10,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "model_content_activity_of_json",
+      "line": 593,
+      "syntactic_decision_score": 14,
+      "branch_nesting": 5,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "model_phase_text",
+      "line": 847,
+      "syntactic_decision_score": 13,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "decode_interactive_receipt",
+      "line": 613,
+      "syntactic_decision_score": 13,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "activity_of_live_call",
+      "line": 642,
+      "syntactic_decision_score": 12,
+      "branch_nesting": 6,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "compact_progress_text",
+      "line": 1101,
+      "syntactic_decision_score": 12,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "sequence_after_complete_rows",
+      "line": 1011,
+      "syntactic_decision_score": 12,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "start_tool",
+      "line": 1340,
+      "syntactic_decision_score": 11,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 4
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "admission_prelude",
+      "line": 2230,
+      "syntactic_decision_score": 11,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "validate_custom_value",
+      "line": 831,
+      "syntactic_decision_score": 11,
+      "branch_nesting": 8,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "classify_sse_line",
+      "line": 1468,
+      "syntactic_decision_score": 11,
+      "branch_nesting": 5,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "poison_scope",
+      "line": 367,
+      "syntactic_decision_score": 11,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "model_activity",
+      "line": 2523,
+      "syntactic_decision_score": 10,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "frame_deltas",
+      "line": 543,
+      "syntactic_decision_score": 10,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "passes_unchanged",
+      "line": 243,
+      "syntactic_decision_score": 10,
+      "branch_nesting": 5,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "settle_tool_result",
+      "line": 986,
+      "syntactic_decision_score": 10,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "append_journaled_result",
+      "line": 863,
+      "syntactic_decision_score": 10,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "recovery_failure_of_client_error",
+      "line": 456,
+      "syntactic_decision_score": 10,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "note_tool_outcome",
+      "line": 2104,
+      "syntactic_decision_score": 9,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "with_noted_skills",
+      "line": 2269,
+      "syntactic_decision_score": 9,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "runtime_attempt_of_json",
+      "line": 424,
+      "syntactic_decision_score": 9,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "restart_settlement_of_json",
+      "line": 708,
+      "syntactic_decision_score": 9,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "read_complete_rows",
+      "line": 960,
+      "syntactic_decision_score": 9,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "admit_response_identity",
+      "line": 1438,
+      "syntactic_decision_score": 8,
+      "branch_nesting": 5,
+      "field_or_ref_mutation_sites": 8
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "reconcile_operation",
+      "line": 2018,
+      "syntactic_decision_score": 8,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 5
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "terminal_safe_text",
+      "line": 263,
+      "syntactic_decision_score": 8,
+      "branch_nesting": 6,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "error_certainty",
+      "line": 439,
+      "syntactic_decision_score": 8,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "cursor_pair_failure",
+      "line": 1284,
+      "syntactic_decision_score": 8,
+      "branch_nesting": 5,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "tool_args_event",
+      "line": 662,
+      "syntactic_decision_score": 8,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "turn_failure_to_provider_error",
+      "line": 553,
+      "syntactic_decision_score": 8,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "recovery_failure_of_client_error",
+      "line": 740,
+      "syntactic_decision_score": 8,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "msp_reasoning_effort",
+      "line": 331,
+      "syntactic_decision_score": 8,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "approval_decision_label",
+      "line": 399,
+      "syntactic_decision_score": 8,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "runtime_identity_text",
+      "line": 477,
+      "syntactic_decision_score": 7,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "turn_status_text",
+      "line": 2213,
+      "syntactic_decision_score": 7,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "request_to_yojson",
+      "line": 190,
+      "syntactic_decision_score": 7,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "required_finite_nonnegative_number",
+      "line": 569,
+      "syntactic_decision_score": 7,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "record_terminal_error",
+      "line": 1065,
+      "syntactic_decision_score": 7,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "non_blank_row_from",
+      "line": 1323,
+      "syntactic_decision_score": 7,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "offset_past_held_seq",
+      "line": 1365,
+      "syntactic_decision_score": 7,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "event_channel_conflicts",
+      "line": 800,
+      "syntactic_decision_score": 7,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "finish_native_tool",
+      "line": 832,
+      "syntactic_decision_score": 7,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "runtime_error_to_core_error",
+      "line": 20,
+      "syntactic_decision_score": 7,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "interrupt_text",
+      "line": 1053,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "update_occurrence",
+      "line": 1235,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "response_precedes_current",
+      "line": 1429,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "matching_skill_note",
+      "line": 2165,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "note_skill_activity",
+      "line": 2188,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "stream_usage_of_usage_json",
+      "line": 142,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 5,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "tool_occurrence",
+      "line": 168,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "custom_deltas",
+      "line": 477,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "required_string",
+      "line": 533,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "acceptance_state_of_string",
+      "line": 605,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "publish_with_sequence",
+      "line": 317,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "response_identity_of_json",
+      "line": 634,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "text_response_of_fields",
+      "line": 658,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "stream_message_identity_of_fields",
+      "line": 670,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "reject_non_input_tool_delta",
+      "line": 480,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "reject_quarantined_content_event",
+      "line": 759,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "recovery_failure_of_runtime_error",
+      "line": 54,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "recovery_failure_of_runtime_error",
+      "line": 218,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "phase_name",
+      "line": 826,
+      "syntactic_decision_score": 6,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "stream_tokens_text",
+      "line": 498,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "approval_held_call_ids",
+      "line": 625,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 4,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "paragraph_lines",
+      "line": 683,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "approval_outcome_of_string",
+      "line": 826,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "approval_outcome_to_string",
+      "line": 833,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "model_signal_for_body",
+      "line": 1542,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "of_log",
+      "line": 2073,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 2
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "optional_stream_scope",
+      "line": 127,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "tool_args_deltas",
+      "line": 195,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "operation_record_of_result",
+      "line": 493,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "optional_string",
+      "line": 544,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "object_fields",
+      "line": 53,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "journaled_event_payload_of_json",
+      "line": 731,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "journaled_envelope_of_json",
+      "line": 760,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "page_failure_to_string",
+      "line": 1234,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "terminal_text_scope",
+      "line": 150,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "close_open_content_blocks",
+      "line": 601,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "content_event_allowed",
+      "line": 746,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "progress_native_tool",
+      "line": 817,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "project_messages",
+      "line": 75,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "resolve_input_rejected_for_shrink_retry",
+      "line": 1714,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "resolve_input_rejected_for_shrink_retry",
+      "line": 589,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "failure_leaves_effects_unknown",
+      "line": 288,
+      "syntactic_decision_score": 5,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "stream_details_text",
+      "line": 532,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "elapsed_text",
+      "line": 1084,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "awaiting_text",
+      "line": 1143,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "update_unique_call",
+      "line": 1195,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "close_from_operation_record",
+      "line": 2053,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 5
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "compatible_skill_identity",
+      "line": 2156,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "optional_nonblank_string",
+      "line": 162,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "tool_start_deltas",
+      "line": 208,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "reconciliation_failure_detail",
+      "line": 402,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "required_nonnegative_int",
+      "line": 555,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "optional_nonnegative_int",
+      "line": 562,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "decode_acceptance",
+      "line": 635,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "validate_run_identity",
+      "line": 768,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "decode_tool_occurrence",
+      "line": 868,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "take_nonblocking",
+      "line": 407,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "model_content_activity_to_json",
+      "line": 581,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "optional_identity",
+      "line": 65,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "optional_stream_scope",
+      "line": 142,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "stream_protocol_error_of_json",
+      "line": 152,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "event_floats_are_finite",
+      "line": 849,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "decode_rows_with",
+      "line": 919,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "cursor_refusal_of_wire",
+      "line": 1181,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "row_ending_at",
+      "line": 1253,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "first_row_failure",
+      "line": 1309,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "enter_stream_scope",
+      "line": 127,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "first_quarantine_kind",
+      "line": 222,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "media_persist_error_kind",
+      "line": 527,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "finish_raw_success",
+      "line": 38,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "recovery_failure_of_attempt",
+      "line": 498,
+      "syntactic_decision_score": 4,
+      "branch_nesting": 3,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "trail_text",
+      "line": 586,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "progress_text",
+      "line": 1094,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "status_rows",
+      "line": 1157,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "drawn",
+      "line": 2506,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "nonnegative_int_field",
+      "line": 122,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "same_request_identity",
+      "line": 228,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "error_to_string",
+      "line": 359,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "stream_error_acceptance_observed",
+      "line": 411,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "decode_batch_binding",
+      "line": 669,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "decode_reply_details",
+      "line": 689,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "decode_stream_protocol_error",
+      "line": 918,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "is_decimal",
+      "line": 1465,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "decode_sse_with_provenance",
+      "line": 1492,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "close",
+      "line": 352,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "reader_gone",
+      "line": 367,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "subscribe_published",
+      "line": 390,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "optional_response_identity_of_fields",
+      "line": 652,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "role_of_json",
+      "line": 31,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "occurrence_of_fields",
+      "line": 72,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "stream_scope_of_json",
+      "line": 137,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "open_path",
+      "line": 814,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "existing_restart_terminal",
+      "line": 1052,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "find_restart_terminal",
+      "line": 1058,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "replay_position_of_wire",
+      "line": 1101,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "replay_position_of_yojson",
+      "line": 1124,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "page_start_of_wire",
+      "line": 1149,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "cursor_refusal_to_wire",
+      "line": 1175,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "cursor_mismatch_to_string",
+      "line": 1211,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "occurrence_is_quarantined",
+      "line": 202,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "stream_start_is_media",
+      "line": 286,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "message_start_equal",
+      "line": 310,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "tools_in_current_scope",
+      "line": 318,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "poison_scope_with",
+      "line": 434,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "start_runtime_attempt",
+      "line": 446,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "finalize_media_block",
+      "line": 557,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "observe_model_content",
+      "line": 580,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "declared_channel",
+      "line": 795,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "carried_model_input_projection",
+      "line": 168,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "codex_dynamic_tool",
+      "line": 224,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "read_usage_after_quota_refusal",
+      "line": 259,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "recovery_failure_of_attempt",
+      "line": 780,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "run",
+      "line": 1753,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "project_messages",
+      "line": 29,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "model_input_projection_for_capacity",
+      "line": 75,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 2
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "retry_after_of_rate_limit",
+      "line": 359,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "native_posture_note",
+      "line": 30,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "recovery_failure_for_attempt",
+      "line": 271,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "api_usage_of_token_usage",
+      "line": 345,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 2,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "model_label",
+      "line": 389,
+      "syntactic_decision_score": 3,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "note_priority_unavailable",
+      "line": 470,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "trail_thinking",
+      "line": 578,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "awaiting_continuation",
+      "line": 610,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "awaiting_approval",
+      "line": 623,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "unreadable",
+      "line": 634,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "status_row_survives_folding",
+      "line": 822,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "unreadable_text",
+      "line": 1067,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "update_local_call",
+      "line": 1187,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "same_occurrence",
+      "line": 1214,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "provider_correlation_conflicts",
+      "line": 1220,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "settle",
+      "line": 1336,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "enter_text_response_scope",
+      "line": 1396,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 7
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "skill_identity",
+      "line": 2151,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "complete_skill_runtime",
+      "line": 2183,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "string_field",
+      "line": 112,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "object_field",
+      "line": 117,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "required",
+      "line": 190,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "image_reference_block_to_yojson",
+      "line": 179,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "compact_request_id",
+      "line": 233,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "reader_unauthenticated",
+      "line": 387,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "protocol_error",
+      "line": 424,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "error_acceptance_observed",
+      "line": 431,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "verified_pre_handler_http_rejection",
+      "line": 435,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "unique_object_fields",
+      "line": 518,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "validate_expected_string",
+      "line": 586,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "require_acceptance",
+      "line": 763,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "decode_provider_retry",
+      "line": 815,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "validate_current_custom_name",
+      "line": 864,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "same_tool_occurrence",
+      "line": 883,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "provider_correlation_conflicts",
+      "line": 887,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "update_decoded_tool_call",
+      "line": 974,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "protocol_failure",
+      "line": 1456,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "create",
+      "line": 293,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "subscribe",
+      "line": 401,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "json_opt",
+      "line": 419,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "delta_usage_to_json",
+      "line": 459,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "json_opt",
+      "line": 18,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "role_to_json",
+      "line": 26,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "api_usage_of_json",
+      "line": 100,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "delta_usage_of_json",
+      "line": 115,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "opt_member",
+      "line": 131,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "journaled_event_of_string",
+      "line": 785,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "float_is_finite",
+      "line": 843,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "append",
+      "line": 900,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "read_journal_envelopes",
+      "line": 997,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "same_restart_settlement",
+      "line": 1047,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "replay_position_to_wire",
+      "line": 1106,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "replay_position_to_string",
+      "line": 1111,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "replay_position_to_yojson",
+      "line": 1118,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "seq_is_after",
+      "line": 1131,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "replay_position_advance",
+      "line": 1137,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "page_start_to_wire",
+      "line": 1154,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "page_start_offset",
+      "line": 1159,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "diagnostic_provider_id",
+      "line": 87,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "terminal_message_had_text",
+      "line": 145,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "occupy_non_tool_index",
+      "line": 181,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "tool_start_is_replay",
+      "line": 187,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "append_tool_args",
+      "line": 191,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "same_occurrence",
+      "line": 196,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "remember_tool_quarantines",
+      "line": 249,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "remember_finalized_tool",
+      "line": 272,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "has_any_tool_identity",
+      "line": 292,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "model_content_event",
+      "line": 356,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "fail_stream",
+      "line": 473,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "media_persist_protocol_reason",
+      "line": 542,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "add_media_chunk",
+      "line": 546,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "end_model_content",
+      "line": 591,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/server/server_keeper_chat_agui_projection.ml",
+      "function": "json_opt",
+      "line": 40,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/server/server_keeper_chat_agui_projection.ml",
+      "function": "ag_role",
+      "line": 45,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/server/server_keeper_chat_agui_projection.ml",
+      "function": "is_terminal",
+      "line": 347,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "finish_raw_error",
+      "line": 25,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "record_next_shrink_capacity",
+      "line": 121,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "request_context_of_last_usage",
+      "line": 279,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "native_posture_note",
+      "line": 819,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "observe_failed_dispatch",
+      "line": 832,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "bounded_probe_config",
+      "line": 21,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "initial_turn_prompt",
+      "line": 45,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "run",
+      "line": 1497,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "render_messages",
+      "line": 79,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "required_label",
+      "line": 91,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "carried_history_projection",
+      "line": 107,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "prompt_for_turn",
+      "line": 157,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "resolve_native_posture",
+      "line": 40,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "request_context_of_call_usage",
+      "line": 365,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "render_messages",
+      "line": 414,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "required_label",
+      "line": 428,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "carried_history_projection",
+      "line": 445,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "prompt_for_turn",
+      "line": 495,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "muse_dynamic_tool",
+      "line": 525,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "mcp_servers_of_bridge",
+      "line": 546,
+      "syntactic_decision_score": 2,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "safe_block",
+      "line": 9,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "create_for_source",
+      "line": 414,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "revision",
+      "line": 464,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "create",
+      "line": 465,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "bump",
+      "line": 468,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "current_runtime_id",
+      "line": 475,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "stream_details_within",
+      "line": 556,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "fresh_stretch",
+      "line": 569,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "begin_response",
+      "line": 574,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 2
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "keeper_name",
+      "line": 595,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "request_id",
+      "line": 596,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "execution_id",
+      "line": 597,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "note_rejection",
+      "line": 598,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 3
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "started_at",
+      "line": 604,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "settled_at",
+      "line": 605,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "attempt",
+      "line": 606,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "reply",
+      "line": 607,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "phase",
+      "line": 608,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "ending_source",
+      "line": 609,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "admission",
+      "line": 614,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "interrupt",
+      "line": 615,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "note_interrupt",
+      "line": 616,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 1
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "text",
+      "line": 619,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "thinking",
+      "line": 620,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "awaiting_approvals",
+      "line": 622,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "tool_calls",
+      "line": 666,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "thinking_lines",
+      "line": 674,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "tool_rows",
+      "line": 694,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "trail",
+      "line": 797,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "note_unreadable",
+      "line": 1209,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 2
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "occurrence_correlation_conflicts",
+      "line": 1226,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "occurrence_label",
+      "line": 1231,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "response_metadata",
+      "line": 1415,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "retire_model_content",
+      "line": 1420,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 2
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "response_is_closed",
+      "line": 1425,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_transcript.ml",
+      "function": "apply",
+      "line": 2012,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "create",
+      "line": 110,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_live.ml",
+      "function": "feed",
+      "line": 564,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "create_request",
+      "line": 145,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "attachment_to_yojson",
+      "line": 158,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "attachment_block_to_yojson",
+      "line": 168,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "request_body",
+      "line": 225,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "bounded_http_error_body",
+      "line": 287,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "unverified_retry_notice",
+      "line": 377,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "refused_reader_remedy",
+      "line": 395,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "exact_object_fields",
+      "line": 528,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "expected_thread_id",
+      "line": 580,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "expected_run_id",
+      "line": 581,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "expected_message_id",
+      "line": 583,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "validate_timestamp",
+      "line": 594,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "validate_exact_fields",
+      "line": 598,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "validate_thread",
+      "line": 602,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "occurrence_correlation_conflicts",
+      "line": 893,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "decode_tool_result_ready",
+      "line": 897,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "validate_running_fields",
+      "line": 1035,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "validate_message_identity",
+      "line": 1041,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "decode_response_with_provenance",
+      "line": 1545,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "bin/masc_tui_keeper_chat_projection.ml",
+      "function": "decode_response",
+      "line": 1549,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "publish",
+      "line": 349,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "api_usage_to_json",
+      "line": 444,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "stream_protocol_error_summary",
+      "line": 532,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "stream_protocol_error_to_json",
+      "line": 551,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_events.ml",
+      "function": "response_identity_to_json",
+      "line": 630,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "type_tag",
+      "line": 24,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "occurrence_to_json",
+      "line": 44,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "restart_settlement_to_json",
+      "line": 703,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "journaled_event_to_json",
+      "line": 722,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "journaled_event_of_json",
+      "line": 775,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "journaled_event_to_string",
+      "line": 779,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "events_dir",
+      "line": 802,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "journal_path",
+      "line": 806,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "open_journal",
+      "line": 825,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "turn_journal_path",
+      "line": 829,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "open_turn_journal",
+      "line": 837,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "append_result",
+      "line": 898,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "decode_rows",
+      "line": 940,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "log_settlement_failure",
+      "line": 942,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "read_journal_path",
+      "line": 989,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "read_journal_rows_path",
+      "line": 993,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "read_journal_path_result",
+      "line": 994,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "read_journal",
+      "line": 995,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "next_sequence",
+      "line": 1037,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "empty_page",
+      "line": 1248,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_event_log.ml",
+      "function": "corrupt_row",
+      "line": 1269,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "empty_state",
+      "line": 92,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "reset_runtime_attempt_state",
+      "line": 111,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "stream_block_for_index",
+      "line": 158,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "replace_block",
+      "line": 161,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "invalidate_block",
+      "line": 167,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "invalidate_media_block",
+      "line": 173,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "remove_block",
+      "line": 176,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "finalized_tool_for_occurrence",
+      "line": 265,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "stream_start_is_tool",
+      "line": 281,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "protocol_error",
+      "line": 298,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "record_tool_result",
+      "line": 349,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "media_payload_too_large_reason",
+      "line": 537,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "media_payload_too_large_event",
+      "line": 552,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "content_block_start_event",
+      "line": 645,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "content_block_stop_event",
+      "line": 653,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_chat_agent_core_stream_bridge.ml",
+      "function": "tool_occurrence",
+      "line": 656,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/server/server_keeper_chat_agui_projection.ml",
+      "function": "custom",
+      "line": 77,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/server/server_keeper_chat_agui_projection.ml",
+      "function": "reply_details_to_json",
+      "line": 82,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/server/server_keeper_chat_agui_projection.ml",
+      "function": "continuation_checkpoint_to_json",
+      "line": 90,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/server/server_keeper_chat_agui_projection.ml",
+      "function": "native_tool_to_json",
+      "line": 97,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "measure_model_input_message_bytes",
+      "line": 112,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "record_usage_windows",
+      "line": 248,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "api_usage_of_token_usage",
+      "line": 298,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "function": "note_transport_uncertainty",
+      "line": 1746,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "host_stop_turn_identity",
+      "line": 17,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "measure_model_input_message_bytes",
+      "line": 60,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "record_usage_windows",
+      "line": 139,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "api_usage_of_turn_usage",
+      "line": 146,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "request_context_of_request_input",
+      "line": 514,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "function": "recording_effect_attempt",
+      "line": 623,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "home_error_to_core_error",
+      "line": 69,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "render_message",
+      "line": 75,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "system_instructions_label",
+      "line": 95,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "current_goal_label",
+      "line": 98,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "eager_tool_names",
+      "line": 178,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "tool_spec",
+      "line": 182,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "tool_result",
+      "line": 190,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "antigravity_dynamic_tool",
+      "line": 197,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "find_tool",
+      "line": 211,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "provider_turn_identity",
+      "line": 215,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "api_usage_of_antigravity_usage",
+      "line": 233,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "function": "run",
+      "line": 1354,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "render_message",
+      "line": 410,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "system_instructions_label",
+      "line": 433,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "current_goal_label",
+      "line": 437,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "tool_spec",
+      "line": 510,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "tool_result",
+      "line": 518,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "find_tool",
+      "line": 540,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 0,
+      "field_or_ref_mutation_sites": 0
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "function": "run",
+      "line": 1759,
+      "syntactic_decision_score": 1,
+      "branch_nesting": 1,
+      "field_or_ref_mutation_sites": 0
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "parent": "7943e34d8760152de4ed8907295da3d25596bafa",
+  "red_exit": 1,
+  "green_exit": 0,
+  "source_sha256": "cff113f793592c290b149046b30f2168365625909cf40ed2050c86868d37fb30",
+  "parent_source_sha256": "aa09bd0fca3707657625d5ab81173bac92e478a4e1609887e2596bf95c7e44f4",
+  "artifacts": {
+    "run.py": "a9e536c9840785b7aa39ecffb467be23c4145e7896f32fd8fb9571e0e3fd224c",
+    "red.txt": "b7ca6a81e0a3af791b1c2a6a6c60d1eb22d970cf575b301cb99eda73c966ebb2",
+    "green.txt": "32c6713c8836a2f67321660ae9ea78e54af3c94ce54d7f55e044f437b6d74e64",
+    "repro.ml.in": "ddc3476e7d3fd482db30f404e44ca6389d3d1bf1b766fd4ce2da86a84895bb85"
+  },
+  "scope": "whole production receipt module interpreted with explicit external hooks/join/Ids/Eio_guard doubles; real Eio/HTTP/UI unverified"
+}

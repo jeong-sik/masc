@@ -317,11 +317,12 @@ let claude_stream_callback ?on_child_content_observation ?on_native_task_observa
             (fun identity ->
                Option.iter
                  (fun index ->
-                    Option.iter (fun finish -> finish ~block_index:index
-                      ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
-                      on_native_tool_completion;
                     Hashtbl.remove native_tool_indexes identity;
-                    emit (Agent_core.Types.ContentBlockStop { index }))
+                    Fun.protect
+                      ~finally:(fun () -> Eio.Cancel.protect (fun () -> stop_content index))
+                      (fun () -> Option.iter (fun finish -> finish ~block_index:index
+                        ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                        on_native_tool_completion))
                  (Hashtbl.find_opt native_tool_indexes identity))
             observation.identity
         | Runtime_claude_code.Usage_windows_reported report ->
@@ -339,6 +340,13 @@ let claude_stream_callback ?on_child_content_observation ?on_native_task_observa
             (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
           let indexes = Hashtbl.fold (fun _ index acc -> index :: acc) content_indexes [] in
           List.iter stop_content (List.sort_uniq Int.compare indexes);
+          (* The runtime owns native replay admission. This map only routes
+             admitted open blocks; retiring it before publication prevents
+             reentrant progress/completion from targeting terminal content. *)
+          let unfinished_native = Hashtbl.fold
+              (fun _ index acc -> index :: acc) native_tool_indexes [] in
+          Hashtbl.clear native_tool_indexes;
+          List.iter stop_content (List.sort_uniq Int.compare unfinished_native);
           emit
             (Agent_core.Types.MessageDelta
                { stop_reason = Some Agent_core.Types.EndTurn; usage = None });

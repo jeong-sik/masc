@@ -1,0 +1,14 @@
+{
+  "parent": "df06c35a0cebdccca057a8bc55313d219a18e46b",
+  "red_exit": 1,
+  "green_exit": 0,
+  "source_sha256": "aa09bd0fca3707657625d5ab81173bac92e478a4e1609887e2596bf95c7e44f4",
+  "parent_source_sha256": "c641784fbfc50fd85eec97ce2fc51f108e6518fd496fbb0c7ed6d6b660d23997",
+  "artifacts": {
+    "run.py": "a9e536c9840785b7aa39ecffb467be23c4145e7896f32fd8fb9571e0e3fd224c",
+    "red.txt": "6e9bd450cee017bf73ec46433f26d0af1dc3e1da1914d49f2560ddc3d7d71e97",
+    "green.txt": "a39a637f4e83754138db37c7684d24e6b08a7331e33cac4b24baaf2954b96d95",
+    "repro.ml.in": "aab4434ec20ecdd475b893180dd24eec31343d101c0ae44dc4a0d457b91f6f08"
+  },
+  "scope": "production module interpreted with fake external joins, hook types and Eio_guard; no actual Eio cancellation or HTTP/UI proof"
+}

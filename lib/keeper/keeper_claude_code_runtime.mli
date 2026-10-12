@@ -111,6 +111,9 @@ val run :
     (block_index:int -> tool_call_id:string option -> Runtime_native_tools.progress -> unit) ->
   ?on_native_tool_completion:
     (block_index:int -> tool_call_id:string option -> Runtime_native_tools.completion -> unit) ->
+  (* Completion observes the still-published block after its routing entry is
+     retired. Its block stop is guaranteed even if the observer raises. A turn
+     terminal closes unfinished native blocks without inventing completions. *)
   ?on_child_content_observation:(Keeper_claude_task_binding.child_observation -> unit) ->
   (* Complete child content is delivered separately with original-parent input
      binding or typed refusal preserving actual content. This callback shares

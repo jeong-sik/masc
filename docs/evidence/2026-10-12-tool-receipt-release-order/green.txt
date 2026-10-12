@@ -1,0 +1,4 @@
+observed=a,b,c
+PASS: reentrant release preserves commit order
+recovered=failure-a,failure-b,failure-c,immediate-d
+PASS: unattempted receipts retained, nested release is inert, later commits immediate

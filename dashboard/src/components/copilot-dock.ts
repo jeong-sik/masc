@@ -35,6 +35,8 @@ interface DockMessage {
   role: 'user' | 'assistant'
   ts: string
   text: string
+  /** The reason a frame of this reply could not be read; the text is partial. */
+  incomplete?: string
   sug?: string[]
 }
 
@@ -297,12 +299,14 @@ export function useCopilotDock() {
       })
         .then((outcome) => {
           dockStreaming.value = null
-          const finalText = droppedFrame !== null
-            ? `${replyText.trim()}\n(incomplete reply: ${droppedFrame})`.trim()
-            : replyText.trim() || (outcome.terminal ? '(empty reply)' : '(stream ended unexpectedly)')
+          let finalText = replyText.trim()
+          if (!finalText && droppedFrame === null) finalText = outcome.terminal ? '(empty reply)' : '(stream ended unexpectedly)'
           dockThreads.value = {
             ...dockThreads.value,
-            [kid]: [...(dockThreads.value[kid] ?? []), { role: 'assistant', ts: nowHM(), text: finalText }],
+            [kid]: [...(dockThreads.value[kid] ?? []), {
+              role: 'assistant', ts: nowHM(), text: finalText,
+              ...(droppedFrame !== null ? { incomplete: droppedFrame } : {}),
+            }],
           }
         })
         .catch((err) => {
@@ -382,6 +386,9 @@ function DockMessageRow({ m, keeper, onPick }: { m: DockMessage; keeper: DockKee
           <span class="ts mono">${m.ts}</span>
         </div>
         <div class=${`dbubble ${isUser ? 'user' : ''}`}><${Para} text=${m.text} /></div>
+        ${m.incomplete !== undefined
+          ? html`<div class="dmsg-note" data-dock-incomplete=${m.incomplete}>${m.incomplete}</div>`
+          : null}
         ${!isUser && m.sug
           ? html`
               <div class="dsug">

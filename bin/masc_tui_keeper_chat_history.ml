@@ -425,11 +425,6 @@ let int_field fields name =
   | Some (`Int value) -> Some value
   | Some _ | None -> None
 
-let bool_field fields name =
-  match assoc_opt name fields with
-  | Some (`Bool value) -> value
-  | Some _ | None -> false
-
 let bool_field_opt fields name =
   match assoc_opt name fields with
   | Some (`Bool value) -> Some value
@@ -895,13 +890,14 @@ let add_trace_step summary (step : Yojson.Safe.t) =
   | `Assoc fields -> (
       match string_field fields "kind" with
       | Some "think" ->
-          if bool_field fields "content_withheld" then
-            { summary with withheld = summary.withheld + 1 }
-          else
+          (match Masc.Keeper_chat_blocks.reasoning_visibility_of_fields Content_withheld fields with
+          | Error _ -> { summary with omitted = summary.omitted + 1 }
+          | Ok true -> { summary with withheld = summary.withheld + 1 }
+          | Ok false ->
             let text = Option.value ~default:"" (string_field fields "text") in
             { summary with
               reasoning = List.rev_append (non_blank_lines text) summary.reasoning
-            }
+            })
       | Some "reason" ->
           let text = Option.value ~default:"" (string_field fields "text") in
           let detail =
@@ -951,15 +947,16 @@ let add_trace_block summary (block : Yojson.Safe.t) =
               summary.omitted + Option.value ~default:0 (int_field fields "omitted")
           }
       | Some "thinking" ->
-          if bool_field fields "redacted" then
-            { summary with withheld = summary.withheld + 1 }
-          else
+          (match Masc.Keeper_chat_blocks.reasoning_visibility_of_fields Redacted fields with
+          | Error _ -> { summary with omitted = summary.omitted + 1 }
+          | Ok true -> { summary with withheld = summary.withheld + 1 }
+          | Ok false ->
             let text =
               Option.value ~default:"" (string_field fields "content")
             in
             { summary with
               reasoning = List.rev_append (non_blank_lines text) summary.reasoning
-            }
+            })
       (* Every other block kind is prose the row's [content] already carries
          as text; reading it again would draw the reply twice. *)
       | Some _ | None -> summary)

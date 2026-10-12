@@ -235,3 +235,12 @@ val parse_text_to_blocks : string -> chat_block list
 val block_to_yojson : chat_block -> Yojson.Safe.t
 val blocks_to_yojson : chat_block list -> Yojson.Safe.t
 val blocks_of_yojson : Yojson.Safe.t -> chat_block list option
+
+(** Visibility flags on reasoning records. Absence means exposed according to
+    the encoder's omission rule; a supplied flag must be one unique boolean.
+    Invalid or duplicate flags must not be interpreted as permission to expose. *)
+type reasoning_visibility_field = Content_withheld | Redacted
+type reasoning_visibility_error = Invalid_visibility_flag | Duplicate_visibility_flag
+val reasoning_visibility_of_fields :
+  reasoning_visibility_field -> (string * Yojson.Safe.t) list ->
+  (bool, reasoning_visibility_error) result

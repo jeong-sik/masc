@@ -731,6 +731,22 @@ let test_redacted_thinking_maps_to_the_redacted_block () =
      Alcotest.(check string) "no content exposed" "" th.content
    | _ -> Alcotest.fail "expected one redacted thinking block")
 
+let test_reasoning_visibility_requires_unique_boolean () =
+  let malformed =
+    [ [`String "true"]; [`Null]; [`Int 1]; [`Float 1.]; [`List []]; [`Assoc []]
+    ; [`Bool false; `Bool true]; [`Bool true; `Bool false]; [`Bool false; `Bool false]
+    ]
+  in
+  List.iter (fun values ->
+    let trace = `Assoc ["t", `String "trace"; "trace", `List [
+      `Assoc (("kind", `String "think") :: ("text", `String "private") ::
+        List.map (fun value -> "content_withheld", value) values)]] in
+    let thinking = `Assoc (("t", `String "thinking") :: ("content", `String "private") ::
+      List.map (fun value -> "redacted", value) values) in
+    List.iter (fun block ->
+      Alcotest.(check bool) "invalid visibility does not authorize reasoning exposure" true
+        (B.blocks_of_yojson (`List [block]) = None)) [trace; thinking]) malformed
+
 let () =
   Alcotest.run "keeper_chat_blocks"
     [
@@ -807,6 +823,8 @@ let () =
             test_continuation_status_connector_text;
           Alcotest.test_case "thinking block roundtrip" `Quick
             test_thinking_block_roundtrip;
+          Alcotest.test_case "reasoning visibility requires unique boolean" `Quick
+            test_reasoning_visibility_requires_unique_boolean;
           Alcotest.test_case "redacted thinking block roundtrip" `Quick
             test_redacted_thinking_block_roundtrip;
           Alcotest.test_case "redacted thinking encoder scrubs smuggled content" `Quick

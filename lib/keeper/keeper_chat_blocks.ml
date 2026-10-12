@@ -4,6 +4,18 @@
     shape so the dashboard can prefer server-provided blocks and skip its
     local parser. *)
 
+type reasoning_visibility_field = Content_withheld | Redacted
+type reasoning_visibility_error = Invalid_visibility_flag | Duplicate_visibility_flag
+
+let reasoning_visibility_of_fields field fields =
+  let key = match field with Content_withheld -> "content_withheld" | Redacted -> "redacted" in
+  match List.filter_map (fun (name, value) -> if String.equal name key then Some value else None) fields with
+  | [] -> Ok false
+  | [`Bool value] -> Ok value
+  | [_] -> Error Invalid_visibility_flag
+  | _ :: _ :: _ -> Error Duplicate_visibility_flag
+;;
+
 type image_block = {
   src : string;
   cap : string option;
@@ -746,11 +758,6 @@ let block_of_yojson json : chat_block option =
           | Some (`Int i) -> Some i
           | _ -> None
         in
-        let get_step_bool key =
-          match List.assoc_opt key step_fields with
-          | Some (`Bool b) -> b
-          | _ -> false
-        in
         (match get_step_string "kind" with
           | Some "think" ->
             (* "text" stays required so a payload that merely omits it is
@@ -758,8 +765,9 @@ let block_of_yojson json : chat_block option =
                in-memory record cannot hold text alongside the flag: a payload
                carrying both loses the text here, matching the encoder. *)
             Option.bind (get_step_string "text") (fun text ->
-              let content_withheld = get_step_bool "content_withheld" in
-              Some
+              match reasoning_visibility_of_fields Content_withheld step_fields with
+              | Error _ -> None
+              | Ok content_withheld -> Some
                 (Trace_think
                    { text = (if content_withheld then "" else text)
                    ; content_withheld
@@ -911,23 +919,12 @@ let block_of_yojson json : chat_block option =
              in
              Some (Trace { trace; omitted }))))
      | Some "thinking" ->
-       (* content is required (empty string for signature-only redacted thinking);
-          redacted defaults to false and is only honoured when explicitly
-          [true], matching the encoder's omission rule. *)
        Option.bind (get_string "content") (fun content ->
-         let redacted =
-           match List.assoc_opt "redacted" fields with
-           | Some (`Bool true) -> true
-           | _ -> false
-         in
-         (* Scrub any smuggled content at the decode boundary too: a legacy
-            writer, a hand-crafted payload, or a replayed record could carry
-            [redacted=true] alongside non-empty content. The in-memory
-            [Thinking] value must never expose reasoning text behind a flag
-            that claims it was redacted, regardless of how the JSON reached
-            this decoder. *)
-         let content = if redacted then "" else content in
-         Some (Thinking { content; redacted }))
+         match reasoning_visibility_of_fields Redacted fields with
+         | Error _ -> None
+         | Ok redacted ->
+           let content = if redacted then "" else content in
+           Some (Thinking { content; redacted }))
      | _ -> None)
   | _ -> None
 ;;

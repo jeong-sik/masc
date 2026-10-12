@@ -409,8 +409,11 @@ export async function hydrateKeeperChatHistory(
     setRecordValue(keeperChatHistoryErrors, keeperName, null)
   } catch (err) {
     if (chatHistoryHydrationRequests.get(keeperName) !== request) return
-    // Allow a later mount to retry instead of caching the failure.
-    hydratedChatKeepers.delete(keeperName)
+    // A failed first read may retry on mount. A failed refresh must retain
+    // prior successful membership so inactive Keepers still receive appends.
+    if (keeperChatHistoryHydration.value[keeperName] !== 'hydrated') {
+      hydratedChatKeepers.delete(keeperName)
+    }
     // A failed first hydration is settled, not pending: the error banner
     // explains the empty transcript. Keep an earlier success as-is so a
     // failed forced re-hydration does not demote an authoritative history.

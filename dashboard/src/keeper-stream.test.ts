@@ -298,7 +298,8 @@ describe('Keeper operation stream projection', () => {
   })
 
   it('tracks metadata-only thinking and saying without closing the whole response', () => {
-    assistantEntry()
+    assistantEntry('content-operation')
+    upsertTrackedKeeperChatOperation({ operationId: 'content-operation', keeperName: 'sangsu', message: 'input', submittedAt: 1 })
     const activity = (block_index: number, channel: 'text' | 'thinking', state: 'observed' | 'ended', generation = 1): KeeperChatStreamEvent => ({
       type: 'CUSTOM', name: 'KEEPER_MODEL_CONTENT_ACTIVITY', value: { generation, stream_scope: 0, block_index, channel, state },
     })
@@ -315,6 +316,9 @@ describe('Keeper operation stream projection', () => {
     expect(entry().streamState).toBe('waiting')
     expect(entry().delivery).toBe('streaming')
     expect(entry().responseState).toMatchObject({ phase: 'running', closed: null })
+    expect(trackedKeeperChatOperationsForKeeper('sangsu')[0]?.assistantDraft?.modelContentActivity).toMatchObject([
+      { block_index: 0, state: 'ended' }, { block_index: 1, state: 'ended' },
+    ])
     applyKeeperStreamEvent('sangsu', 'reply-1', activity(0, 'thinking', 'observed'))
     expect(entry().streamState).toBe('waiting')
     applyKeeperStreamEvent('sangsu', 'reply-1', activity(2, 'thinking', 'ended'))

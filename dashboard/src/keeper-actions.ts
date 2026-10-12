@@ -655,6 +655,7 @@ function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation
         reason: 'awaiting durable operation terminal state',
       }),
       responseState: assistantDraft?.responseState,
+      modelContentActivity: assistantDraft?.modelContentActivity,
       toolTranscriptBindings: assistantDraft?.toolTranscriptBindings,
       ...(assistantDraft?.toolObservations?.kind === 'unavailable' ? { toolObservationAuthority: 'unavailable' as const } : {}),
       traceSteps: assistantDraft?.traceSteps,

@@ -1,7 +1,8 @@
+import { KeeperModelContentActivitySchema } from './schemas/sse'
 import { operationDeliveryProvenance, sameDeliveryKey, toolDeliveryBelongsToProducer } from './keeper-delivery-provenance'
 import { captureToolObservations, reconcileTranscriptBindings, toolObservationContinues, toolObservationsFromUnknown, transcriptBindingsFromUnknown, type StoredToolObservations } from './keeper-tool-observations'
 import { normalizeStoredKeeperConversationDetails } from './keeper-message'
-import { ownerFromUnknown, keeperResponseStateFromUnknown, unavailableKeeperResponseState, type KeeperResponseState } from './lib/keeper-response-state'
+import { sameKeeperResponseOwner, ownerFromUnknown, keeperResponseStateFromUnknown, unavailableKeeperResponseState, type KeeperResponseState } from './lib/keeper-response-state'
 import type {
   ChatTraceStep,
   KeeperConversationAttachment,
@@ -13,6 +14,7 @@ import type {
 import { keeperConversationDeliveryFromUnknown } from './lib/keeper-delivery'
 
 export interface TrackedKeeperChatAssistantDraft {
+  modelContentActivity?: KeeperConversationEntry['modelContentActivity']
   producerSayingReplay?: KeeperConversationEntry['producerSayingReplay']
   producerTraceBoundary?: number
   responseState?: KeeperResponseState
@@ -174,6 +176,26 @@ function normalizeTraceSteps(raw: unknown): ChatTraceStep[] | undefined {
   return steps.length > 0 ? (steps as ChatTraceStep[]) : undefined
 }
 
+function storedModelContentActivity(
+  raw: unknown,
+  response: KeeperResponseState | null | undefined,
+): KeeperConversationEntry['modelContentActivity'] | null {
+  if (raw === undefined) return undefined
+  if (!Array.isArray(raw) || response?.kind !== 'known') return null
+  const activities: NonNullable<KeeperConversationEntry['modelContentActivity']>[number][] = []
+  for (const value of raw) {
+    const parsed = KeeperModelContentActivitySchema.safeParse(value)
+    if (!parsed.success) return null
+    const activity = parsed.data
+    if (response.floor === null || activity.generation !== response.floor.content_generation
+        || activity.stream_scope !== response.floor.stream_scope) return null
+    if (activities.some(previous => previous.generation === activity.generation
+      && previous.stream_scope === activity.stream_scope && previous.block_index === activity.block_index)) return null
+    activities.push(Object.freeze({ ...activity }))
+  }
+  return Object.freeze(activities)
+}
+
 function normalizeAssistantDraft(raw: unknown, operationId?: string): TrackedKeeperChatAssistantDraft | null {
   if (!isRecord(raw)) return null
   const text = stringValue(raw.text)
@@ -200,6 +222,7 @@ function normalizeAssistantDraft(raw: unknown, operationId?: string): TrackedKee
     operationDeliveryProvenance(operationId, 'terminal_result').delivery_key, binding.deliveryKey))
   const error = nullableStringValue(raw.error)
   const responseState = raw.responseState === undefined ? undefined : keeperResponseStateFromUnknown(raw.responseState)
+  const modelContentActivity = storedModelContentActivity(raw.modelContentActivity, responseState)
   const pending = raw.producerSayingReplay
   const pendingOwner = isRecord(pending) && pending.owner !== null ? ownerFromUnknown(pending.owner) : null
   const producerSayingReplay = isRecord(pending) && typeof pending.text === 'string'
@@ -219,6 +242,7 @@ function normalizeAssistantDraft(raw: unknown, operationId?: string): TrackedKee
       || producerTraceBoundary > responseState.lastSequence)
 
   return {
+    ...(modelContentActivity !== null && modelContentActivity !== undefined ? { modelContentActivity } : {}),
     ...(!invalidPending && producerSayingReplay ? { producerSayingReplay } : {}),
     ...(!invalidPending && producerTraceBoundary !== undefined ? { producerTraceBoundary } : {}),
     ...(responseState ? { responseState } : responseState === null ? { responseState: unavailableKeeperResponseState } : {}),
@@ -246,6 +270,10 @@ function normalizeAssistantDraft(raw: unknown, operationId?: string): TrackedKee
       responseState: unavailableKeeperResponseState, delivery: 'error' as const, streamState: null,
       error: 'Stored published trace is unavailable; waiting for authoritative recovery.',
     } : {}),
+    ...(modelContentActivity === null ? {
+      responseState: unavailableKeeperResponseState, delivery: 'error' as const, streamState: null,
+      error: 'Stored content ownership is unavailable; waiting for authoritative recovery.',
+    } : {}),
     ...(invalidPending ? {
       responseState: unavailableKeeperResponseState, delivery: 'error' as const, streamState: null,
       error: 'Stored pending speech is unavailable; waiting for authoritative recovery.',
@@ -261,6 +289,7 @@ export function trackedKeeperChatAssistantDraftFromEntry(
   const traceSteps = normalizeTraceSteps(entry.traceSteps)
   const publishedTraceSteps = normalizeTraceSteps(entry.publishedTraceSteps)
   return {
+    ...(entry.modelContentActivity ? { modelContentActivity: entry.modelContentActivity } : {}),
     ...(entry.producerSayingReplay ? { producerSayingReplay: entry.producerSayingReplay } : {}),
     ...(entry.producerTraceBoundary !== undefined ? { producerTraceBoundary: entry.producerTraceBoundary } : {}),
     ...(entry.responseState ? { responseState: entry.responseState } : {}),
@@ -347,6 +376,39 @@ export function trackedKeeperChatOperationsForKeeper(keeperName: string): Tracke
   return readAll().filter(request => request.keeperName === name)
 }
 
+function preserveContentClosure(
+  stored: TrackedKeeperChatAssistantDraft | undefined,
+  incoming: TrackedKeeperChatAssistantDraft,
+): TrackedKeeperChatAssistantDraft {
+  const before = stored?.responseState
+  const after = incoming.responseState
+  const previousActivities = stored?.modelContentActivity
+  if (!previousActivities || before?.kind !== 'known' || after?.kind !== 'known'
+      || before.current === null || after.current === null
+      || !sameKeeperResponseOwner(before.current, after.current)) return incoming
+  if (incoming.modelContentActivity === undefined) return { ...incoming, modelContentActivity: previousActivities }
+  const sameOccurrence = (left: NonNullable<TrackedKeeperChatAssistantDraft['modelContentActivity']>[number],
+    right: NonNullable<TrackedKeeperChatAssistantDraft['modelContentActivity']>[number]): boolean =>
+    left.generation === right.generation && left.stream_scope === right.stream_scope && left.block_index === right.block_index
+  let reopened = false
+  const merged = incoming.modelContentActivity.map(activity => {
+    const previous = previousActivities.find(old => sameOccurrence(old, activity))
+    if (previous?.state === 'ended' && activity.state === 'observed') reopened = true
+    return previous?.state === 'ended' ? previous : activity
+  })
+  const conflict = incoming.modelContentActivity.some(activity => previousActivities.some(previous =>
+    sameOccurrence(previous, activity) && previous.channel !== activity.channel))
+  if (conflict) return { ...incoming, modelContentActivity: undefined, responseState: unavailableKeeperResponseState,
+    delivery: 'error', streamState: null, error: 'Stored content channels conflict; waiting for authoritative recovery.' }
+  const missing = previousActivities.filter(previous => !merged.some(activity => sameOccurrence(previous, activity)))
+  const activities = Object.freeze([...missing, ...merged])
+  const open = activities.filter(activity => activity.state === 'observed').at(-1)
+  return { ...incoming, modelContentActivity: activities,
+    ...(reopened && (incoming.streamState === 'thinking' || incoming.streamState === 'streaming' || incoming.streamState === 'waiting')
+      ? { streamState: open ? (open.channel === 'thinking' ? 'thinking' : 'streaming') : 'waiting' } : {}),
+  }
+}
+
 function preserveNewerDraft(
   stored: TrackedKeeperChatAssistantDraft | undefined,
   incoming: TrackedKeeperChatAssistantDraft | undefined,
@@ -372,13 +434,13 @@ function preserveNewerDraft(
     }
   }
   const previousState = stored?.responseState
-  if (previousState?.kind !== 'known' || previousState.lastSequence === null) return incoming
-  const nextState = incoming?.responseState
+  const nextState = incoming.responseState
   // Both transports use the operation journal cursor. An older observer or a
   // receipt-only upsert cannot replace a snapshot carrying newer applied events.
-  if (nextState?.kind !== 'known' || nextState.lastSequence === null
-    || nextState.lastSequence < previousState.lastSequence) return stored
-  return incoming
+  if (previousState?.kind === 'known' && previousState.lastSequence !== null
+      && (nextState?.kind !== 'known' || nextState.lastSequence === null
+          || nextState.lastSequence < previousState.lastSequence)) return stored
+  return preserveContentClosure(stored, incoming)
 }
 
 export function upsertTrackedKeeperChatOperation(request: TrackedKeeperChatOperation): void {

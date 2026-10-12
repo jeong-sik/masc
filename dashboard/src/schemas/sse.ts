@@ -18,7 +18,7 @@ import {
   KEEPER_CHAT_CUSTOM_EVENT_NAMES,
   KEEPER_STREAM_PROTOCOL_ERROR_KINDS,
 } from '../lib/keeper-chat-stream-contract'
-import type { KeeperChatCustomEventName, KeeperChatStreamEvent } from '../lib/keeper-chat-stream-contract'
+import type { KeeperChatCustomEventName, KeeperChatStreamEvent, KeeperModelContentActivity } from '../lib/keeper-chat-stream-contract'
 import { isRecord } from '../lib/type-guards'
 import { isAgentCoreEventType } from '../lib/sse-event-type'
 
@@ -1045,6 +1045,12 @@ function schema<T>(
 }
 
 /** Both broadcast and direct operation streams use the same payload contract. */
+/** Shared payload boundary for live SSE and stored content observations. */
+export const KeeperModelContentActivitySchema = schema<KeeperModelContentActivity>((value) => {
+  const validated = validateKeeperCustomPayload('KEEPER_MODEL_CONTENT_ACTIVITY', value)
+  return validated.success ? ok(value as KeeperModelContentActivity) : validated
+})
+
 export const KeeperChatStreamEventSchema = schema<KeeperChatStreamEvent>((value) => {
   if (!isRecord(value)) return fail('ag_ui_event', 'Expected an AG-UI event object')
   const validated = validateKeeperChatAgUiEvent(value)

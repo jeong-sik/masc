@@ -101,7 +101,7 @@ import {
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from './tool-call-output-store'
-import { _resetKeeperStreamBuffersForTests } from './keeper-stream'
+import { applyKeeperStreamEvent, _resetKeeperStreamBuffersForTests } from './keeper-stream'
 import type { KeeperChatStreamEvent } from './api'
 import type { ToolCallEntry } from './api/dashboard'
 import type { KeeperStatusDetail } from './types'
@@ -1707,6 +1707,25 @@ describe('recoverKeeperRuntime', () => {
 
 
 describe('restored chat operation outcome', () => {
+  it('restores content closure tombstones from the stored operation draft', async () => {
+    const owner = { content_generation: 1, stream_scope: 0 }
+    const activities = [{ generation: 1, stream_scope: 0, block_index: 0, channel: 'thinking' as const, state: 'ended' as const }]
+    upsertTrackedKeeperChatOperation({ operationId: 'restored-content', keeperName: 'echo', message: 'input', submittedAt: 1,
+      assistantDraft: { text: '', rawText: '', delivery: 'streaming', streamState: 'waiting',
+        modelContentActivity: activities,
+        responseState: { ...initialKeeperResponseState, floor: owner, current: owner, lastSequence: 2 } } })
+    fetchKeeperChatOperation.mockRejectedValue(new Error('lookup unavailable'))
+    await hydrateTrackedKeeperChatOperations('echo')
+    const restored = keeperThreads.value.echo?.find(entry => entry.role === 'assistant')
+    expect(restored?.modelContentActivity).toEqual(activities)
+    if (!restored) throw new Error('Expected restored assistant')
+    const phase = restored.streamState
+    applyKeeperStreamEvent('echo', restored.id, { type: 'CUSTOM', name: 'KEEPER_MODEL_CONTENT_ACTIVITY',
+      value: { generation: 1, stream_scope: 0, block_index: 0, channel: 'thinking', state: 'observed' } })
+    expect(keeperThreads.value.echo?.find(entry => entry.id === restored.id)?.streamState).toBe(phase)
+    expect(keeperThreads.value.echo?.find(entry => entry.id === restored.id)?.modelContentActivity).toEqual(activities)
+  })
+
   it('restores pending producer speech while operation lookup is unavailable', async () => {
     const pending = { text: 'checking result', timestamp: 1,
       owner: { content_generation: 1, stream_scope: 0 }, scope: null }

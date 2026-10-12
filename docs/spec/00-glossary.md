@@ -880,6 +880,30 @@ status: reference
   [docs/evidence/2026-09-30-chat-queue-visibility/README.md](../evidence/2026-09-30-chat-queue-visibility/README.md) ·
   [docs/TUI-GUIDE.md](../TUI-GUIDE.md)
 
+**Keeper Call Association (Keeper 호출 결합)**
+: TUI 채팅 transcript의 도구 호출 행을 영속 호출 원장 스냅숏에 연결해 내리는 표시층 판정
+  (`Masc_tui_keeper_call_evidence.keeper_call_association` — 닫힌 여덟 값, #42320). 행은 실행
+  신원(`execution_id`)만 갖고, 그 실행이 원장에 남았는지·남았다면 어느 레코드인지는 로그 읽기
+  상태와 스냅숏이 본 범위로 결정되므로, 행의 결과 표시는 이 판정을 통해서만 원장 근거에
+  묶인다. `resolve`가 판정하고 `bin/masc_tui_render_chat.ml`의 `keeper_call_association`이
+  채팅 행을 그릴 때 소비한다. 로그 상태와 실행 결합을 한 값에 섞지 않게 나눈다 —
+  `Call_log_not_loaded`(그 Keeper의 로그를 아직 읽지 않음), `Call_log_loading`(첫 읽기가 진행
+  중. 새로고침은 마지막 스냅숏을 유지하므로 loading이 되지 않는다), `Call_log_unavailable`
+  (읽기가 오류로 끝남), `Call_execution_unrecorded`(행이 execution_id를 갖지 않는다 — 조인 키
+  자체가 없음), `Call_execution_exact`(정확히 한 레코드가 매칭), `Call_execution_ambiguous`
+  (둘 이상 — 중복 실행 신원이라 영수증 하나를 고를 수 없음), `Call_execution_missing`(없음이
+  증명됨 — 스냅숏 건강이 ok이거나 비어 있음이 확인된 로그라 로그 완전성이 확인된 상태의
+  없음), `Call_execution_coverage_gap`(없음이 미증명 — stale·coverage gap·모르는 건강 값,
+  또는 다른 Keeper 이름으로 걸러진 행 뒤에 있을 수 있는 없음). missing과 coverage_gap의
+  구분이 이 항목의 원칙이다: 완전함이 확인된 로그의 빈 결과만 부재라 말하고, 불완전한 로그의
+  빈 결과는 "못 봤다"고 말한다. Tool Call Outcome·Execution Disposition이 호출의 실행을,
+  Recorded Call Outcome이 원장이 남긴 기록을 말할 때, 이 판정은 표시층이 지금 이 행을 어느
+  기록에 묶을 수 있는지를 말한다 — 기록이 있어도 행 결과를 대체하지 않는다(`result_state`:
+  `Never_returned` 행도 원장에 기록된 출력이 있으면 "in call log"로 그린다. durable 실패는
+  Exact의 `Recorded_failed`·`Failed` disposition뿐이다).
+  → [Masc_tui_keeper_call_evidence](../../bin/masc_tui_keeper_call_evidence.mli) ·
+  [Masc_tui_render_chat](../../bin/masc_tui_render_chat.ml)
+
 **Fold (접기)**
 : TUI가 넘치는 내용을 줄여 그리는 두 가지 방식. 코드의 타입 이름이 아니라 이 문서와
   [TUI 안내](../TUI-GUIDE.md)가 쓰는 라벨이다. (A) **블록 접기** — 한 블록을 한 줄로

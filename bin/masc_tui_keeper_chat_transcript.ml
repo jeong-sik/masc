@@ -1980,12 +1980,16 @@ let apply_delta ~now t (delta : Live.delta) =
       settle t ~now
   | Live.Run_finished ->
       (match t.phase, t.reply with
+       | (Stream_ended | Stream_failed _), (Some _ | None) ->
+           (* A trailing finish cannot erase failure evidence or move the
+              terminal clock of an already completed operation. *)
+           ()
        | (Waiting | Working), Some { reply_outcome = Masc.Keeper_turn_outcome.Continuation_checkpoint; _ }
          when (match t.source with Masc_tui_keeper_chat_log.Operation _ -> true | Autonomous_turn _ -> false) ->
          t.phase <- Waiting;
          t.ended_at <- None;
          t.settled_at <- None
-       | _, (Some _ | None) ->
+       | (Waiting | Working), (Some _ | None) ->
          t.phase <- Stream_ended;
          t.ending_source <- Ending_heard_in_stream;
          t.ended_at <- Some now;

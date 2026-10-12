@@ -891,7 +891,13 @@ let test_run_failure_and_finish_set_the_phase () =
   let finished = fresh () in
   feed finished [ Live.Run_started; Live.Run_finished ];
   check phase "a finished run says so" Transcript.Stream_ended
-    (Transcript.phase finished)
+    (Transcript.phase finished);
+  let failed_settlement = Transcript.settled_at failed in
+  feed ~now:(origin +. 20.) failed [Live.Run_finished];
+  check phase "trailing finish preserves observed failure"
+    (Transcript.Stream_failed "provider 429") (Transcript.phase failed);
+  check (option (float 0.001)) "trailing finish preserves failure settlement"
+    failed_settlement (Transcript.settled_at failed)
 
 let test_failure_after_recorded_reply_preserves_both () =
   List.iter (fun (outcome, expected_reply) ->

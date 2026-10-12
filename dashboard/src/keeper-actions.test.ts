@@ -657,18 +657,24 @@ describe('sendKeeperThreadMessage operation stream', () => {
       opts.onEvent({ type: 'RUN_FINISHED' })
       return { terminal: true }
     })
+    // The server finished the operation, but the stored transcript cannot be
+    // read, so the incomplete local copy is all the panel has.
     fetchKeeperChatOperation.mockResolvedValue({
       operationId: 'terminal',
-      state: { kind: 'cancelled', completedAt: 1 },
+      state: { kind: 'succeeded', completedAt: 1 },
     })
+    fetchKeeperChatHistory.mockRejectedValue(new Error('history unavailable'))
 
     await sendKeeperThreadMessage('echo', 'hi')
 
     expect(fetchKeeperChatOperation).toHaveBeenCalled()
-    const delivered = (keeperThreads.value.echo ?? []).filter(entry => (
-      entry.role === 'assistant' && entry.delivery === 'delivered' && entry.error == null
-    ))
-    expect(delivered).toHaveLength(0)
+    const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
+    expect(reply).toMatchObject({
+      text: 'a',
+      delivery: 'error',
+      error: 'A Keeper stream frame does not match the protocol.',
+    })
+    expect(keeperActionErrors.value.echo).toBe('A Keeper stream frame does not match the protocol.')
   })
 
   it('marks a stream that dropped a frame before acceptance as incomplete with the reason', async () => {

@@ -168,3 +168,9 @@ export function sameKeeperResponseOwner(left: KeeperResponseOwner | undefined, r
   return left === undefined ? right === undefined : right !== undefined
     && left.content_generation === right.content_generation && left.stream_scope === right.stream_scope
 }
+
+/** A response whose stream dropped a frame is incomplete. No later receipt or
+ * terminal frame completes it; only the stored transcript can replace it. */
+export function keeperResponseIsFailed(state: KeeperResponseState | undefined): boolean {
+  return state?.kind === 'known' && state.phase === 'failed'
+}

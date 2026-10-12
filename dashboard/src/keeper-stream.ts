@@ -219,6 +219,7 @@ function resetUnfinishedRuntimeAttempt(
     text: '',
     rawText: '',
     runtimeAttempt,
+    modelContentActivity: undefined,
     replyTextProjection: undefined,
     replyBlockSource: undefined,
     blocks: producerReplyBlocks(entry).filter(block => (
@@ -772,6 +773,7 @@ function admitResponseEvent(
         responseState: decision.state,
         ...(decision.advanced && decision.authoritative ? {
           replyBlockSource: undefined,
+          modelContentActivity: undefined,
           streamState: 'opening' as const,
           details: current.details ? { ...current.details, providerMessageId: null, modelUsed: null,
             stopReason: null, usage: null, costUsd: null } : current.details,
@@ -1122,10 +1124,38 @@ export function applyKeeperStreamEvent(
     case 'CUSTOM': {
       const customEventName: string = event.name
       if (event.name === 'KEEPER_MODEL_CONTENT_ACTIVITY') {
-        if (event.value.state === 'observed') admitResponseEvent(keeperName, assistantEntryId, {
-          kind: 'observe', source: 'content', scope: event.value.stream_scope,
-          owner: { content_generation: event.value.generation, stream_scope: event.value.stream_scope },
+        if (source.kind !== 'direct' && source.observationOnly) return null
+        const activity = Object.freeze({ ...event.value })
+        const sameOccurrence = (previous: typeof activity): boolean => previous.generation === activity.generation
+          && previous.stream_scope === activity.stream_scope && previous.block_index === activity.block_index
+        const previous = existing.modelContentActivity?.find(sameOccurrence)
+        if (previous && previous.channel !== activity.channel) return 'Conflicting model content channel'
+        if (previous && (previous.state === 'ended' || previous.state === activity.state)) return null
+        const owner = { content_generation: activity.generation, stream_scope: activity.stream_scope }
+        // A piece ending can close only an already admitted response. It cannot
+        // create a newer response or assert whole-response completion.
+        if (activity.state === 'ended' && (existing.responseState?.kind !== 'known'
+          || !sameKeeperResponseOwner(existing.responseState.current ?? undefined, owner))) return null
+        const publicationOwner = captureThinkingPublicationOwner(existing, currentStoredTokenRevision())
+        const response = admitResponseEvent(keeperName, assistantEntryId, {
+          kind: 'observe', source: 'content', scope: activity.stream_scope, owner,
+        }, 'commit')
+        if (!response.accepted || !response.authoritative) return null
+        updateThreadEntry(keeperName, assistantEntryId, entry => {
+          if (entry.responseState !== response.state
+              || !ownsThinkingPublication(publicationOwner, entry, currentStoredTokenRevision())) return entry
+          const activities = entry.modelContentActivity ?? []
+          const index = activities.findIndex(sameOccurrence)
+          const updated = Object.freeze(index < 0 ? [...activities, activity]
+            : activities.map((previous, position) => position === index ? activity : previous))
+          const open = updated.filter(previous => previous.state === 'observed').at(-1)
+          return { ...entry, modelContentActivity: updated,
+            streamState: open ? (open.channel === 'thinking' ? 'thinking' : 'streaming') : 'waiting',
+            delivery: 'streaming',
+            streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_MODEL_CONTENT_ACTIVITY' }),
+          }
         })
+        persistActiveAssistantDraft(keeperName, assistantEntryId)
         return null
       }
       if (event.name === 'KEEPER_TOOL_TRANSCRIPT_COMMITTED') {

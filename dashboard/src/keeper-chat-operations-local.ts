@@ -43,6 +43,7 @@ const KEEPER_STREAM_STATES = [
   'opening',
   'thinking',
   'retrying',
+  'waiting',
   'streaming',
   'finalizing',
 ] as const satisfies ReadonlyArray<Exclude<KeeperConversationStreamState, null>>

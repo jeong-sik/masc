@@ -297,6 +297,39 @@ describe('Keeper operation stream projection', () => {
     } finally { release() }
   })
 
+  it('tracks metadata-only thinking and saying without closing the whole response', () => {
+    assistantEntry()
+    const activity = (block_index: number, channel: 'text' | 'thinking', state: 'observed' | 'ended', generation = 1): KeeperChatStreamEvent => ({
+      type: 'CUSTOM', name: 'KEEPER_MODEL_CONTENT_ACTIVITY', value: { generation, stream_scope: 0, block_index, channel, state },
+    })
+    const entry = () => requiredFixture(keeperThreads.value.sangsu?.find(row => row.id === 'reply-1'))
+    applyKeeperStreamEvent('sangsu', 'reply-1', activity(0, 'thinking', 'observed'))
+    expect(entry().streamState).toBe('thinking')
+    expect(entry().text).toBe('')
+    expect(entry().traceSteps ?? []).toEqual([])
+    applyKeeperStreamEvent('sangsu', 'reply-1', activity(1, 'text', 'observed'))
+    expect(entry().streamState).toBe('streaming')
+    applyKeeperStreamEvent('sangsu', 'reply-1', activity(1, 'text', 'ended'))
+    expect(entry().streamState).toBe('thinking')
+    applyKeeperStreamEvent('sangsu', 'reply-1', activity(0, 'thinking', 'ended'))
+    expect(entry().streamState).toBe('waiting')
+    expect(entry().delivery).toBe('streaming')
+    expect(entry().responseState).toMatchObject({ phase: 'running', closed: null })
+    applyKeeperStreamEvent('sangsu', 'reply-1', activity(0, 'thinking', 'observed'))
+    expect(entry().streamState).toBe('waiting')
+    applyKeeperStreamEvent('sangsu', 'reply-1', activity(2, 'thinking', 'ended'))
+    applyKeeperStreamEvent('sangsu', 'reply-1', activity(2, 'thinking', 'observed'))
+    expect(entry().streamState).toBe('waiting')
+    applyKeeperStreamEvent('sangsu', 'reply-1', activity(0, 'text', 'observed', 2))
+    expect(entry().streamState).toBe('streaming')
+    applyKeeperStreamEvent('sangsu', 'reply-1', activity(0, 'thinking', 'ended', 1))
+    expect(entry().streamState).toBe('streaming')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' })
+    const terminal = entry().streamState
+    applyKeeperStreamEvent('sangsu', 'reply-1', activity(2, 'thinking', 'observed', 3))
+    expect(entry().streamState).toBe(terminal)
+  })
+
   it('deduplicates sequenced reasoning across transport replay and restores its prefix', () => {
     assistantEntry()
     const owner = { content_generation: 4, stream_scope: 2 }

@@ -1,3 +1,4 @@
+import type { KeeperModelContentActivity } from '../lib/keeper-chat-stream-contract'
 import type { KeeperResponseOwner, KeeperResponseState } from '../lib/keeper-response-state'
 import type { KeeperPortraitReading } from '../lib/keeper-portrait'
 import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
@@ -988,6 +989,7 @@ export type KeeperConversationStreamState =
   | 'opening'
   | 'thinking'
   | 'retrying'
+  | 'waiting'
   | 'streaming'
   | 'finalizing'
   | null
@@ -1091,6 +1093,7 @@ export interface KeeperConversationEntry {
   toolTranscriptBindings?: readonly { readonly deliveryKey: KeeperChatDeliveryKey; readonly executionId: string; readonly ordinal: number }[]
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
+  modelContentActivity?: readonly Readonly<KeeperModelContentActivity>[]
   runtimeAttempt?: Readonly<{ runtimeId: string; index: number }>
   responseState?: KeeperResponseState
   /** Published history facts retained separately from locally observed trace.

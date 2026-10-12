@@ -69,6 +69,13 @@ interface PendingThinkingState {
 }
 
 const pendingThinkingDeltas = new Map<string, PendingThinkingState>()
+
+/** The reasons a KEEPER_TOOL_RESULT_READY frame is refused, named so callers
+ * and tests compare a value instead of a fragment of a sentence. */
+export const KEEPER_TOOL_RESULT_REFUSALS = {
+  quarantinedOccurrence: 'KEEPER_TOOL_RESULT_READY targets a quarantined tool occurrence',
+  providerCorrelationConflict: 'KEEPER_TOOL_RESULT_READY provider correlation conflicts with its server occurrence',
+} as const
 function sameToolParent(
   parent: KeeperConversationEntry | undefined,
   tool: KeeperConversationEntry,
@@ -1051,7 +1058,7 @@ export function applyKeeperStreamEvent(
           event.value.toolCallBlockIndex,
         )
         if (isToolOccurrenceQuarantined(keeperName, assistantEntryId, toolOccurrenceId)) {
-          return 'KEEPER_TOOL_RESULT_READY targets a quarantined tool occurrence'
+          return KEEPER_TOOL_RESULT_REFUSALS.quarantinedOccurrence
         }
         const toolEntry = (keeperThreads.value[keeperName] ?? [])
           .find(entry => entry.id === toolOccurrenceId)
@@ -1063,7 +1070,7 @@ export function applyKeeperStreamEvent(
           && entry.executionId === executionId
         ))
         if (toolCallId && toolEntry.toolCallId && toolEntry.toolCallId !== toolCallId) {
-          return 'KEEPER_TOOL_RESULT_READY provider correlation conflicts with its server occurrence'
+          return KEEPER_TOOL_RESULT_REFUSALS.providerCorrelationConflict
         }
         const currentSlot = toolEntry?.deliveryProvenance?.transcript_slot
         if (
@@ -1093,14 +1100,14 @@ export function applyKeeperStreamEvent(
             return 'KEEPER_TOOL_RESULT_READY execution_id belongs to another tool occurrence'
           }
           if (executionOwner.toolOccurrenceQuarantined === true) {
-            return 'KEEPER_TOOL_RESULT_READY targets a quarantined tool occurrence'
+            return KEEPER_TOOL_RESULT_REFUSALS.quarantinedOccurrence
           }
           if (toolEntry.toolCallId && executionOwner.toolCallId
             && toolEntry.toolCallId !== executionOwner.toolCallId) {
-            return 'KEEPER_TOOL_RESULT_READY provider correlation conflicts with its server occurrence'
+            return KEEPER_TOOL_RESULT_REFUSALS.providerCorrelationConflict
           }
           if (toolCallId && executionOwner.toolCallId && executionOwner.toolCallId !== toolCallId) {
-            return 'KEEPER_TOOL_RESULT_READY provider correlation conflicts with its server occurrence'
+            return KEEPER_TOOL_RESULT_REFUSALS.providerCorrelationConflict
           }
           const entries = keeperThreads.value[keeperName] ?? []
           const parent = entries.find(entry => entry.id === assistantEntryId)

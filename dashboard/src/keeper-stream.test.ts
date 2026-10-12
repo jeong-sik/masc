@@ -22,6 +22,7 @@ import {
   applyKeeperOperationTurnEvent,
   applyKeeperStreamEvent,
   failKeeperStreamOperation,
+  KEEPER_TOOL_RESULT_REFUSALS,
 } from './keeper-stream'
 import { parseSSEMessage } from './schemas/sse'
 import {
@@ -619,7 +620,7 @@ describe('Keeper operation stream projection', () => {
     const result = applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
       value: { ...toolOccurrence(), executionId: 'history-execution' } }, source)
     if (conflict) {
-      expect(result).toContain('provider correlation conflicts')
+      expect(result).toBe(KEEPER_TOOL_RESULT_REFUSALS.providerCorrelationConflict)
       expect(keeperThreads.value.sangsu?.filter(row => row.role === 'tool')).toHaveLength(2)
       expect(keeperThreads.value.sangsu?.find(row => row.id === planned.id)?.executionId).toBeUndefined()
       return
@@ -645,7 +646,7 @@ describe('Keeper operation stream projection', () => {
     mergeServerHistoryEntries('sangsu', [{ ...keeperThreads.value.sangsu?.find(row => row.id === 'reply-1')!, id: 'canonical-quarantine-parent', delivery: 'history' }])
     _resetKeeperStreamBuffersForTests()
     expect(applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
-      value: { ...toolOccurrence(), executionId: 'must-not-bind' } } })).toContain('quarantined')
+      value: { ...toolOccurrence(), executionId: 'must-not-bind' } } })).toBe(KEEPER_TOOL_RESULT_REFUSALS.quarantinedOccurrence)
     expect(keeperThreads.value.sangsu?.find(row => row.role === 'tool')).toMatchObject({ toolOccurrenceQuarantined: true, delivery: 'error' })
     expect(keeperThreads.value.sangsu?.some(row => row.executionId === 'must-not-bind')).toBe(false)
   })
@@ -692,7 +693,7 @@ describe('Keeper operation stream projection', () => {
     for (const occurrence of [toolOccurrence(), toolOccurrence(1, 1)]) {
       applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'TOOL_CALL_START', ...occurrence, toolCallName: 'Read' } })
       expect(applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
-        value: { ...occurrence, executionId: 'must-not-rebind' } } })).toContain('quarantined')
+        value: { ...occurrence, executionId: 'must-not-rebind' } } })).toBe(KEEPER_TOOL_RESULT_REFUSALS.quarantinedOccurrence)
     }
     expect(keeperThreads.value.sangsu?.filter(row => row.role === 'tool').map(row => row.id)).toEqual(['canonical-disputed-tool'])
     expect(keeperThreads.value.sangsu?.find(row => row.id === 'canonical-disputed-tool')).toMatchObject({

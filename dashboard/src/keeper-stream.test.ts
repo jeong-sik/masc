@@ -758,6 +758,54 @@ describe('Keeper operation stream projection', () => {
     ])
   })
 
+  it.each([true, false])('converges an acknowledged tool with canonical history in either arrival order (commit first %s)', commitFirst => {
+    const operationId = 'acknowledged-tool-operation'
+    assistantEntry(operationId)
+    const source = { kind: 'operation' as const, operationId }
+    const deliveryKey = { kind: 'operation' as const, operation_id: operationId }
+    const commit: KeeperChatStreamEvent = { type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED',
+      value: { deliveryKey, executionId: 'acknowledged-execution', ordinal: 0 } }
+    const result: KeeperChatStreamEvent = { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(), toolCallId: 'provider-tool', executionId: 'acknowledged-execution' } }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(),
+      toolCallId: 'provider-tool', toolCallName: 'Read' }, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', commitFirst ? commit : result, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', commitFirst ? result : commit, source)
+    const tool = requiredFixture(keeperThreads.value.sangsu).find(row => row.role === 'tool')!
+    expect(tool).toMatchObject({ executionId: 'acknowledged-execution', toolTranscriptOrdinal: 0,
+      deliveryProvenance: { delivery_key: deliveryKey, transcript_slot: { kind: 'tool_call', execution_id: 'acknowledged-execution', ordinal: 0 } } })
+    mergeServerHistoryEntries('sangsu', [{ ...tool, id: 'canonical-tool', text: 'stored output', delivery: 'history',
+      toolOccurrence: undefined, toolCallEnded: undefined }])
+    expect(requiredFixture(keeperThreads.value.sangsu).filter(row => row.role === 'tool').map(row => row.id)).toEqual(['canonical-tool'])
+    expect(requiredFixture(keeperThreads.value.sangsu).find(row => row.id === 'reply-1')?.traceSteps).toMatchObject([
+      { kind: 'tool', toolOccurrenceId: 'canonical-tool', executionId: 'acknowledged-execution' },
+    ])
+    applyKeeperStreamEvent('sangsu', 'reply-1', commit, source)
+    expect(requiredFixture(keeperThreads.value.sangsu).find(row => row.id === 'reply-1')?.toolObservationAuthority).not.toBe('unavailable')
+  })
+
+  it.each([true, false])('converges canonical history that arrived before the tool result (commit before history %s)', commitBeforeHistory => {
+    const operationId = 'early-history-operation'
+    assistantEntry(operationId)
+    const source = { kind: 'operation' as const, operationId }
+    const deliveryKey = { kind: 'operation' as const, operation_id: operationId }
+    const commit: KeeperChatStreamEvent = { type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED',
+      value: { deliveryKey, executionId: 'early-execution', ordinal: 0 } }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(),
+      toolCallId: 'provider-tool', toolCallName: 'Read' }, source)
+    if (commitBeforeHistory) applyKeeperStreamEvent('sangsu', 'reply-1', commit, source)
+    mergeServerHistoryEntries('sangsu', [{ id: 'early-canonical', role: 'tool', source: 'tool_result', label: 'Read',
+      text: 'stored output', delivery: 'history', executionId: 'early-execution',
+      deliveryProvenance: { delivery_key: deliveryKey, transcript_slot: { kind: 'tool_call', execution_id: 'early-execution', ordinal: 0 } } }])
+    if (!commitBeforeHistory) applyKeeperStreamEvent('sangsu', 'reply-1', commit, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(), toolCallId: 'provider-tool', executionId: 'early-execution' } }, source)
+    expect(requiredFixture(keeperThreads.value.sangsu).filter(row => row.role === 'tool').map(row => row.id)).toEqual(['early-canonical'])
+    expect(requiredFixture(keeperThreads.value.sangsu).find(row => row.id === 'early-canonical')).toMatchObject({
+      toolOwnerKey: deliveryKey, executionId: 'early-execution', toolOccurrence: { streamScope: 0, blockIndex: 0 },
+    })
+  })
+
   it('keeps every disputed tool coordinate quarantined through canonical replacement', () => {
     const operationId = 'conflicting-tool-coordinates'
     assistantEntry(operationId)

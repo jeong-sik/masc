@@ -6,7 +6,6 @@ import {
   toolDeliveryBelongsToProducer,
   operationDeliveryProvenance,
   isOperationDeliveryProvenance,
-  toolCallDeliveryProvenance,
 } from './keeper-delivery-provenance'
 import {
   keeperTurnOutcomeSuppressesReply,
@@ -20,6 +19,7 @@ import type { KeeperConversationDetails, KeeperConversationEntry } from './types
 import {
   appendAssistantDelta,
   appendThreadEntry,
+  mergeServerHistoryEntries,
   promoteAssistantTextToProgress,
   appendAssistantToolTraceArgsDelta,
   setAssistantToolTraceArgsSnapshot,
@@ -85,7 +85,27 @@ function sameToolParent(
   const toolKey = tool.toolOwnerKey ?? tool.deliveryProvenance?.delivery_key
   return parentKey ? toolKey !== undefined && (tool.toolOwnerKey !== undefined
     ? sameDeliveryKey(parentKey, tool.toolOwnerKey) : toolDeliveryBelongsToProducer(parentKey, toolKey))
-    : toolKey === undefined && tool.toolParentEntryId === parent.id
+    : tool.toolOwnerKey === undefined && (tool.toolParentEntryId === parent.id || tool.toolParentCandidates?.includes(parent.id) === true)
+}
+
+function convergeAcknowledgedTool(keeperName: string, parent: KeeperConversationEntry,
+  resource: KeeperConversationEntry, binding: NonNullable<KeeperConversationEntry['toolTranscriptBindings']>[number]): void {
+  const entries = keeperThreads.value[keeperName] ?? []
+  const canonical = entries.filter(entry => entry.role === 'tool' && entry.id !== resource.id
+    && entry.deliveryProvenance?.transcript_slot.kind === 'tool_call'
+    && entry.deliveryProvenance.transcript_slot.execution_id === binding.executionId
+    && entry.deliveryProvenance.transcript_slot.ordinal === binding.ordinal
+    && sameDeliveryKey(entry.deliveryProvenance.delivery_key, binding.deliveryKey))
+  if (canonical.length > 1 || canonical.some(entry => entry.toolOccurrenceQuarantined
+    || entry.toolParentCandidates?.length || entry.toolParentEntryId !== undefined && entry.toolParentEntryId !== parent.id)) {
+    updateThreadEntry(keeperName, parent.id, entry => ({ ...entry, toolObservationAuthority: 'unavailable',
+      error: 'Acknowledged tool transcript has conflicting parent associations' }))
+  } else if (canonical[0]) {
+    const durable = canonical[0]
+    // Retain the full inventory while the shared reconciler folds only the
+    // acknowledged fact and its explicit parent/occurrence observations.
+    mergeServerHistoryEntries(keeperName, [durable, ...entries.filter(entry => entry.id !== durable.id)])
+  }
 }
 
 function occurrenceContains(
@@ -1071,6 +1091,11 @@ export function applyKeeperStreamEvent(
           return null
         }
         const resource = matching[0]
+        if (resource?.toolOccurrenceQuarantined || resource?.toolParentCandidates?.length) {
+          updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry, toolObservationAuthority: 'unavailable',
+            error: 'Acknowledged tool transcript is quarantined under disputed parent ownership' }))
+          return null
+        }
         const resourceSlot = resource?.deliveryProvenance?.transcript_slot
         if (resource && resourceSlot?.kind === 'tool_call' && (resourceSlot.execution_id !== executionId || resourceSlot.ordinal !== ordinal
           || !sameDeliveryKey(resource!.deliveryProvenance!.delivery_key, deliveryKey))
@@ -1085,8 +1110,9 @@ export function applyKeeperStreamEvent(
         }))
         if (matching[0]) updateThreadEntry(keeperName, matching[0].id, entry => ({ ...entry,
           toolTranscriptOrdinal: ordinal,
-          deliveryProvenance: toolCallDeliveryProvenance({ ...parent.deliveryProvenance!, delivery_key: deliveryKey }, executionId, ordinal),
+          deliveryProvenance: { delivery_key: deliveryKey, transcript_slot: { kind: 'tool_call', execution_id: executionId, ordinal } },
         }))
+        if (resource) convergeAcknowledgedTool(keeperName, parent, resource, { deliveryKey, executionId, ordinal })
         return null
       }
       if (event.name === 'KEEPER_TOOL_RESULT_READY') {
@@ -1171,9 +1197,9 @@ export function applyKeeperStreamEvent(
           }))
           return null
         }
-        const parentProvenance = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.deliveryProvenance
-        const deliveryProvenance = committedOrdinal === undefined ? null
-          : toolCallDeliveryProvenance(parentProvenance && { ...parentProvenance, delivery_key: committedBinding!.deliveryKey }, executionId, committedOrdinal)
+        const deliveryProvenance = committedBinding === undefined ? null
+          : { delivery_key: committedBinding.deliveryKey,
+            transcript_slot: { kind: 'tool_call' as const, execution_id: executionId, ordinal: committedBinding.ordinal } }
         markAssistantToolTraceEnded(
           keeperName,
           assistantEntryId,
@@ -1194,6 +1220,12 @@ export function applyKeeperStreamEvent(
             { eventName: 'KEEPER_TOOL_RESULT_READY' },
           ),
         }))
+        if (committedBinding) {
+          const current = keeperThreads.value[keeperName] ?? []
+          const parent = current.find(entry => entry.id === assistantEntryId)
+          const resource = current.find(entry => entry.id === toolEntry.id)
+          if (parent && resource) convergeAcknowledgedTool(keeperName, parent, resource, committedBinding)
+        }
         return null
       }
       if (event.name === 'KEEPER_CHAT_OPERATION_ACCEPTED') {

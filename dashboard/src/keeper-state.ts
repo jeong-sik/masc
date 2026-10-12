@@ -1569,12 +1569,14 @@ function mergeLocalToolObservations(
   const slot = provenance.transcript_slot
   const marker = slot.kind === 'tool_call' && matches.some(entry => entry.toolTranscriptOrdinal === slot.ordinal) ? slot.ordinal : undefined
   const correlations = [...new Set([history, ...matches].flatMap(entry => entry.toolCallId ? [entry.toolCallId] : []))]
+  const parents = [...new Set([history, ...matches].flatMap(entry => [...(entry.toolParentEntryId ? [entry.toolParentEntryId] : []), ...(entry.toolParentCandidates ?? [])]))]
   const first = coordinates[0]
-  const conflicting = correlations.length > 1 || matches.some(entry => entry.toolOccurrence?.kind === 'conflicting')
+  const conflicting = parents.length > 1 || correlations.length > 1 || matches.some(entry => entry.toolOccurrence?.kind === 'conflicting')
     || (first && coordinates.some(value => value.streamScope !== first.streamScope || value.blockIndex !== first.blockIndex))
   return {
     ...history,
     toolOwnerKey: history.toolOwnerKey ?? matches.find(entry => entry.toolOwnerKey !== undefined)?.toolOwnerKey,
+    ...(parents.length === 1 ? { toolParentEntryId: parents[0] } : parents.length > 1 ? { toolParentCandidates: Object.freeze(parents) } : {}),
     ...(marker !== undefined ? { toolTranscriptOrdinal: marker } : {}),
     ...(correlations.length === 1 ? { toolCallId: correlations[0] } : {}),
     ...(first ? { toolOccurrence: conflicting
@@ -1613,7 +1615,7 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       if (matchesCanonicalTool(previous, row)) toolRowReplacement.set(previous.id, row)
     }
   }
-  const historyEntries = reconciled.map(entry => entry.traceSteps ? {
+  const remapTrace = (entry: KeeperConversationEntry): KeeperConversationEntry => entry.traceSteps ? {
     ...entry,
     traceSteps: entry.traceSteps.map(step => {
       if (step.kind !== 'tool' || !step.toolOccurrenceId) return step
@@ -1623,7 +1625,8 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       return replacement && parentKey && toolKey && toolDeliveryBelongsToProducer(parentKey, toolKey)
         ? { ...step, toolOccurrenceId: replacement.id } : step
     }),
-  } : entry)
+  } : entry
+  const historyEntries = reconciled.map(remapTrace)
   const localEntries = existing.filter(
     entry => {
       const coveredByHistory = historyEntries.some(historyEntry => sameConversationEntry(entry, historyEntry))
@@ -1655,7 +1658,7 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   // position; no-timestamp entries sort last (in-flight tail stays at the
   // bottom) and the original array index breaks ties so same-second tool calls
   // keep their issued order.
-  const merged = [...historyEntries, ...localEntries]
+  const merged = [...historyEntries, ...localEntries.map(remapTrace)]
     .map((entry, index) => ({ entry, index }))
     .sort((a, b) => entryTimeMs(a.entry) - entryTimeMs(b.entry) || a.index - b.index)
     .map(({ entry }) => entry)

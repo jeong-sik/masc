@@ -578,6 +578,7 @@ function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation
       }),
       runtimeAttempt: assistantDraft?.runtimeAttempt,
       responseState: assistantDraft?.responseState,
+
       traceSteps: assistantDraft?.traceSteps,
       modelContentActivity: assistantDraft?.modelContentActivity,
       error: assistantDraft?.error ?? null,

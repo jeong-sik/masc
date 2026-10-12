@@ -204,15 +204,15 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let module O = Keeper_continuity_observation in
   let trace_id = ref None and selected_range = ref None in
-  let observe state = O.record_synthesis ~config ~keeper_name
+  let observe ?stop_reason state = O.record_synthesis ~config ~keeper_name
       {O.observed_at=Time_compat.now (); trace_id= !trace_id;
-       state; range= !selected_range} in
+       state; stop_reason; range= !selected_range} in
   let select prepared =
     trace_id := Some (Ids.Turn_ref.trace_id (P.turn_ref prepared));
     selected_range := Some {O.start_atom=P.start_atom prepared;
       end_atom=P.end_atom prepared; completed_end_atom=P.completed_end_atom prepared} in
-  let report state detail =
-    observe state;
+  let report state reason detail =
+    observe ~stop_reason:reason state;
     Log.Keeper.warn ~keeper_name "continuity pass stopped: %s" detail in
   (* Keep the server's measured character limit across wakes in this process.
      A domain-output failure must not make the next drain rediscover it with
@@ -268,7 +268,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
     | Disabled | Invalid -> observe O.Disabled
     | Enabled ->
       match Keeper_meta_store.read_effective_meta_presence_named config keeper_name with
-      | Error detail | Ok (_, Keeper_meta_store.Meta_not_current detail) -> report O.Source_unavailable detail
+      | Error detail | Ok (_, Keeper_meta_store.Meta_not_current detail) -> report O.Source_unavailable O.Source_read_failed detail
       | Ok (_, Keeper_meta_store.Meta_absent) -> observe O.Source_unavailable
       | Ok (keeper_id, Keeper_meta_store.Meta_present meta) ->
         let current_trace = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
@@ -291,7 +291,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
         in
         match Domain_pool_ref.submit_io_or_inline (fun () ->
           P.prepare_source ~config ~keeper_name ~trace_id:current_trace ()) with
-        | Error detail -> report O.Source_unavailable detail
+        | Error detail -> report O.Source_unavailable O.Source_read_failed detail
         | Ok (P.No_source no_source) -> settle_no_source no_source
         | Ok (P.Ready prepared) ->
           (match limited_width ~config ~keeper_name ~trace_id:current_trace with
@@ -306,7 +306,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
              (match Domain_pool_ref.submit_io_or_inline (fun () ->
                 P.prepare_source ~end_atom ~config ~keeper_name
                   ~trace_id:current_trace ()) with
-              | Error detail -> report O.Input_unavailable detail
+              | Error detail -> report O.Input_unavailable O.Input_build_failed detail
               | Ok (P.No_source no_source) ->
                 (* The checkpoint changed between the two reads. Sending the
                    first read's range would send more than the width, so this
@@ -365,7 +365,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
             ~through ~atom:(Some range_id) ~official:None in
       Ok (current, memory_committed, range_id, selected, input)) in
     match inputs with
-    | Error detail -> report O.Input_unavailable detail
+    | Error detail -> report O.Input_unavailable O.Input_build_failed detail
     | Ok (current, memory_committed, range_id, selected, input) ->
       if P.end_atom selected <> P.end_atom prepared then
         Log.Keeper.info ~keeper_name
@@ -424,7 +424,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
            or an expired credential by walking the source down toward a single
            atom, and the width is only released when the backlog empties, so
            it would stay there. *)
-        report O.Not_committed
+        report O.Not_committed O.No_smaller_range_evidence
           (Printf.sprintf "no failure a smaller range would avoid; the width stands; cause=%s"
              (cause_detail ()))
       | None ->
@@ -447,7 +447,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
            limit_width ~config ~keeper_name
              ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
              (P.end_atom smaller - P.start_atom smaller);
-           report O.Not_committed
+           report O.Not_committed O.Narrowed_for_next_signal
              (Printf.sprintf
                 "the next pass reads %d atoms instead of %d; cause=%s"
                 (P.end_atom smaller - P.start_atom smaller)
@@ -457,7 +457,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
            (* One indivisible unit remains. The state stays Not_committed:
               this pass no longer decides whether the cause was the range's
               size, and naming it a capacity refusal would assert that. *)
-           report O.Not_committed
+           report O.Not_committed O.Indivisible_unit_uncommitted
              (Printf.sprintf "one unit remains and the pass did not commit; cause=%s" (cause_detail ())))
       | Some observed ->
         (* A CLI slot named the character limit it refused at, so the size
@@ -468,12 +468,12 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
           Runtime.fit_continuity ~capacity:observed ~base_path
             ~keeper_id:keeper_name ~input_for:(memory_input input) selected) in
         (match fitted with
-         | Error detail -> report O.Input_unavailable detail
+         | Error detail -> report O.Input_unavailable O.Input_build_failed detail
          | Ok None when not memory_committed ->
-           report O.Not_committed
+           report O.Not_committed O.Observed_capacity_unfit
              "the unit that finishes this turn does not fit the reported CLI input limit \
               with its observations; its Memory is left to the durable pass"
-         | Ok None -> report O.Capacity_refused "source cannot fit the reported CLI input capacity"
+         | Ok None -> report O.Capacity_refused O.Observed_capacity_unfit "source cannot fit the reported CLI input capacity"
          | Ok (Some smaller) when P.end_atom smaller < P.end_atom selected ->
            Log.Keeper.info ~keeper_name
              "continuity input fitted to reported capacity; runtime=%s max_chars=%d end_atom=%d -> %d"
@@ -481,11 +481,11 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
              (P.end_atom selected) (P.end_atom smaller);
            attempt ~keeper_id meta smaller
          | Ok (Some _) ->
-           report O.Capacity_refused "provider capacity refusal disagrees with local prompt measurement")
+           report O.Capacity_refused O.Observed_capacity_disagrees "provider capacity refusal disagrees with local prompt measurement")
   in
   try next () with
   | Eio.Cancel.Cancelled _ as exn -> observe O.Cancelled; raise exn
-  | exn -> observe O.Not_committed; raise exn
+  | exn -> observe ~stop_reason:O.Raised_during_pass O.Not_committed; raise exn
 ;;
 
 (* The pending inputs the last committed queue pass was shown, beside the

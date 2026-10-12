@@ -264,7 +264,7 @@ describe('fetchKeeperMemoryHealth', () => {
 
   it('keeps synthesis failure and atom range separate from an ordinary drained consumer', async () => {
     const payload = keeperMemoryHealthPayload()
-    const synthesis = { observed_at: 1, trace_id: 'trace-a', state: 'not_committed',
+    const synthesis = { observed_at: 1, trace_id: 'trace-a', state: 'not_committed', stop_reason: 'no_smaller_range_evidence',
       range: { start_atom: 4, end_atom: 6, completed_end_atom: 20 } }
     Object.assign(payload.keepers[0]!.context_cycle, { synthesis })
     getMock.mockResolvedValue(payload)
@@ -272,9 +272,40 @@ describe('fetchKeeperMemoryHealth', () => {
   })
 
   it.each([
-    { observed_at: 1, trace_id: 'trace-a', state: 'drained', range: null },
-    { observed_at: 1, trace_id: 'trace-a', state: 'running', range: null },
-    { observed_at: 1, trace_id: null, state: 'running',
+    ['source_unavailable', null], ['source_unavailable', 'source_read_failed'],
+    ['input_unavailable', 'input_build_failed'],
+    ['not_committed', 'no_smaller_range_evidence'], ['not_committed', 'narrowed_for_next_signal'],
+    ['not_committed', 'indivisible_unit_uncommitted'], ['not_committed', 'observed_capacity_unfit'],
+    ['not_committed', 'raised_during_pass'], ['capacity_refused', 'observed_capacity_unfit'],
+    ['capacity_refused', 'observed_capacity_disagrees'],
+  ])('preserves the local stop branch %s/%s', async (state, stop_reason) => {
+    const payload = keeperMemoryHealthPayload()
+    const synthesis = { observed_at: 1, trace_id: 'trace-a', state, stop_reason, range: null }
+    Object.assign(payload.keepers[0]!.context_cycle, { synthesis })
+    getMock.mockResolvedValue(payload)
+    expect((await fetchKeeperMemoryHealth()).keepers[0]!.context_cycle.synthesis).toEqual(synthesis)
+  })
+
+  it.each([
+    { state: 'running', stop_reason: 'narrowed_for_next_signal' },
+    { state: 'not_committed', stop_reason: 'source_read_failed' },
+    { state: 'capacity_refused', stop_reason: 'raised_during_pass' },
+    { state: 'not_committed', stop_reason: null },
+    { state: 'not_committed', stop_reason: 'provider_quota' },
+    { state: 'not_committed', stop_reason: 'no_smaller_range_evidence', detail: 'PRIVATE' },
+  ])('rejects inferred reasons, stale reasons, and raw details: %o', async fields => {
+    const payload = keeperMemoryHealthPayload()
+    Object.assign(payload.keepers[0]!.context_cycle, { synthesis: {
+      observed_at: 1, trace_id: 'trace-a', range: { start_atom: 0, end_atom: 1, completed_end_atom: 1 }, ...fields,
+    } })
+    getMock.mockResolvedValue(payload)
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
+  })
+
+  it.each([
+    { observed_at: 1, trace_id: 'trace-a', state: 'drained', stop_reason: null, range: null },
+    { observed_at: 1, trace_id: 'trace-a', state: 'running', stop_reason: null, range: null },
+    { observed_at: 1, trace_id: null, state: 'running', stop_reason: null,
       range: { start_atom: 4, end_atom: 6, completed_end_atom: 20 } },
   ])('rejects synthesis without valid source evidence: %o', async synthesis => {
     const payload = keeperMemoryHealthPayload()

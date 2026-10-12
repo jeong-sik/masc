@@ -116,7 +116,14 @@ export interface ContextPosition {
   trace_id: string
   end_atom: number
 }
+/** Local continuity stop branch, not a diagnosis of a provider or its output. */
+export type ContextSynthesisStopReason =
+  | 'source_read_failed' | 'input_build_failed' | 'no_smaller_range_evidence'
+  | 'narrowed_for_next_signal' | 'indivisible_unit_uncommitted'
+  | 'observed_capacity_unfit' | 'observed_capacity_disagrees' | 'raised_during_pass'
+
 export interface ContextSynthesis {
+  stop_reason: ContextSynthesisStopReason | null
   observed_at: number
   trace_id: string | null
   state: 'checking' | 'running' | 'committed' | 'no_source' | 'disabled'
@@ -405,7 +412,7 @@ function decodeContextPosition(raw: unknown): ContextPosition | null {
 }
 
 function decodeContextSynthesis(raw: unknown): ContextSynthesis | null {
-  if (!isRecord(raw) || !exactKeys(raw, ['observed_at', 'trace_id', 'state', 'range'])) return null
+  if (!isRecord(raw) || !exactKeys(raw, ['observed_at', 'trace_id', 'state', 'stop_reason', 'range'])) return null
   const observed_at = finiteNumber(raw.observed_at)
   const trace_id = raw.trace_id === null ? null : nonEmptyString(raw.trace_id)
   if (observed_at === null || observed_at < 0 || (raw.trace_id !== null && trace_id === null)) return null
@@ -415,6 +422,33 @@ function decodeContextSynthesis(raw: unknown): ContextSynthesis | null {
     case 'source_unavailable': case 'input_unavailable': case 'not_committed': case 'capacity_refused': case 'cancelled':
       break
     default: return null
+  }
+  const stop_reason = raw.stop_reason
+  switch (stop_reason) {
+    case null: case 'source_read_failed': case 'input_build_failed':
+    case 'no_smaller_range_evidence': case 'narrowed_for_next_signal':
+    case 'indivisible_unit_uncommitted': case 'observed_capacity_unfit':
+    case 'observed_capacity_disagrees': case 'raised_during_pass': break
+    default: return null
+  }
+  switch (state) {
+    case 'checking': case 'running': case 'committed': case 'no_source': case 'disabled': case 'cancelled':
+      if (stop_reason !== null) return null
+      break
+    case 'source_unavailable':
+      if (stop_reason !== null && stop_reason !== 'source_read_failed') return null
+      break
+    case 'input_unavailable':
+      if (stop_reason !== 'input_build_failed') return null
+      break
+    case 'not_committed':
+      if (stop_reason !== 'no_smaller_range_evidence' && stop_reason !== 'narrowed_for_next_signal'
+        && stop_reason !== 'indivisible_unit_uncommitted' && stop_reason !== 'observed_capacity_unfit'
+        && stop_reason !== 'raised_during_pass') return null
+      break
+    case 'capacity_refused':
+      if (stop_reason !== 'observed_capacity_unfit' && stop_reason !== 'observed_capacity_disagrees') return null
+      break
   }
   let range: ContextSynthesis['range'] = null
   if (raw.range !== null) {
@@ -427,7 +461,7 @@ function decodeContextSynthesis(raw: unknown): ContextSynthesis | null {
     range = { start_atom, end_atom, completed_end_atom }
   }
   if ((state === 'running' || state === 'committed') && range === null) return null
-  return { observed_at, trace_id, state, range }
+  return { observed_at, trace_id, state, stop_reason, range }
 }
 
 function decodeContextCycle(raw: unknown): ContextCycle | null {

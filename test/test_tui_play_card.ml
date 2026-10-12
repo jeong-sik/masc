@@ -225,24 +225,23 @@ let test_the_issue_notice_never_carries_the_link () =
   check bool "and still does not carry a link" false (contains ~sub:"play#" retained)
 ;;
 
-(* The card's address advice reads the link's host through these two
-   predicates. The decision is checked here, not the advice wording. *)
+(* The card's address advice is chosen from this classification. The
+   decision is checked here, not the advice wording. *)
+let address_class = testable (fun ppf address_class -> Format.pp_print_string ppf
+  (match address_class with
+   | Card.Reachable -> "reachable" | Card.Local_only -> "local only"
+   | Card.Wildcard_bind -> "wildcard bind")) (=)
+
 let test_the_link_host_decides_the_address_advice () =
-  let host_of address =
-    let link = "http://" ^ address ^ "/play#fixture" in
-    check bool ("the card takes " ^ address) true (Result.is_ok (make ~link ()));
-    Uri.host (Uri.of_string link) in
-  List.iter (fun (address, local) ->
-    check bool ("local address " ^ address) local
-      (Masc_network_defaults.is_loopback_host_opt (host_of address)))
-    ["localhost:8935", true; "127.5.2.1:8935", true; "[::1]:8935", true;
-     "[::ffff:127.0.0.1]:8935", true; "[::ffff:127.5.2.1]:8935", true;
-     "[::ffff:192.168.0.7]:8935", false;
-     "play.example.test", false];
-  List.iter (fun address ->
-    check bool ("wildcard address " ^ address) true
-      (Option.fold ~none:false ~some:Masc_network_defaults.is_unspecified_host (host_of address)))
-    ["0.0.0.0:8935"; "[::]:8935"]
+  List.iter (fun (address, expected) ->
+    match make ~link:("http://" ^ address ^ "/play#fixture") () with
+    | Error _ -> fail ("the card refused " ^ address)
+    | Ok card -> check address_class ("address " ^ address) expected (Card.classify_address card))
+    ["localhost:8935", Card.Local_only; "127.5.2.1:8935", Card.Local_only;
+     "[::1]:8935", Card.Local_only; "[::ffff:127.0.0.1]:8935", Card.Local_only;
+     "[::ffff:127.5.2.1]:8935", Card.Local_only;
+     "[::ffff:192.168.0.7]:8935", Card.Reachable; "play.example.test", Card.Reachable;
+     "0.0.0.0:8935", Card.Wildcard_bind; "[::]:8935", Card.Wildcard_bind]
 ;;
 
 let () =

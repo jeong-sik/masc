@@ -1578,7 +1578,7 @@ let test_delayed_start_after_scoped_content_keeps_reasoning () =
   feed t [Live.Run_started;
     Live.Stream_model_started {generation=None;stream_scope=Some 1;message_id=None;model="first";usage=None};
     activity 1;
-    Live.Thinking "weighing";
+    Live.Thinking {text="weighing";response=None};
     activity 2;
     (* The delayed start carries its content's generation, so it stays
        admissible once headers bind admission to generation ownership. *)

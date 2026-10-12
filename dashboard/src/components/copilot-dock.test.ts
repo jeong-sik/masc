@@ -361,6 +361,38 @@ describe('CopilotDock', () => {
     )
   })
 
+  async function sendDockMessageAndReadReply(events: unknown[]): Promise<string> {
+    vi.stubGlobal('fetch', dockFetchMock(events))
+    const dock = renderDock()
+    dock.open()
+    await waitFor(() => expect(container.querySelector('[data-testid="copilot-dock-textarea"]')).not.toBeNull())
+    const textarea = container.querySelector('[data-testid="copilot-dock-textarea"]') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: '요약해줘' } })
+    const replies = () => Array.from(container.querySelectorAll('[data-dock-message="assistant"]'))
+    const before = replies().length
+    ;(container.querySelector('[aria-label="메시지 전송"]') as HTMLButtonElement).click()
+    await waitFor(() => {
+      expect(replies().length).toBeGreaterThan(before)
+      expect(replies().some(reply => reply.textContent?.includes('작성 중'))).toBe(false)
+    }, { timeout: 3000 })
+    return replies().at(-1)?.textContent ?? ''
+  }
+
+  const dockContent = (timestamp: number, delta: unknown, extra: Record<string, unknown> = {}) => (
+    { type: 'TEXT_MESSAGE_CONTENT', threadId: 'keeper-consumer:sangsu', timestamp, messageId: 'm1', delta, ...extra }
+  )
+  const dockFinished = { type: 'RUN_FINISHED', threadId: 'keeper-consumer:sangsu', timestamp: 9, runId: 'run-1' }
+
+  it('drops a delayed delta from a superseded response', async () => {
+    const reply = await sendDockMessageAndReadReply([
+      dockContent(1, 'current', { textResponse: { content_generation: 5, stream_scope: 0 } }),
+      dockContent(2, 'STALE', { textResponse: { content_generation: 4, stream_scope: 3 } }),
+      dockFinished,
+    ])
+    expect(reply).toContain('current')
+    expect(reply).not.toContain('STALE')
+  })
+
   it('posts copilot channel and surface context to the keeper stream', async () => {
     window.history.replaceState({}, '', '/?agent=dashboard-eager-manta')
     const fetchMock = dockFetchMock([{ type: 'RUN_FINISHED' }])

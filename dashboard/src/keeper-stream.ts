@@ -134,78 +134,6 @@ function clearQuarantinedToolOccurrences(
 interface TextMessageStreamState {
   activeMessageId: string | null
   endedMessageIds: Set<string>
-  ownership: KeeperTextOwnership
-}
-
-export interface KeeperTextResponseOwner {
-  content_generation: number
-  stream_scope: number
-}
-
-export interface KeeperTextOwnership {
-  admitted: KeeperTextResponseOwner | null
-  staleFloor: KeeperTextResponseOwner | null
-  unobservedScope: number | null
-}
-
-export function createKeeperTextOwnership(): KeeperTextOwnership {
-  return { admitted: null, staleFloor: null, unobservedScope: null }
-}
-
-export function compareKeeperTextOwners(
-  left: KeeperTextResponseOwner,
-  right: KeeperTextResponseOwner,
-): number {
-  if (left.content_generation !== right.content_generation) {
-    return left.content_generation - right.content_generation
-  }
-  return left.stream_scope - right.stream_scope
-}
-
-// A TEXT_MESSAGE_CONTENT names the response its bytes belong to. A delayed
-// delta from an older content generation can share the current operation and
-// message ids, so messageId idempotency alone cannot keep it out of the fresh
-// response: the owner is admitted only when it is not behind the stale floor
-// or the currently admitted response. An unobserved scope from a newer partial
-// response also demotes same-generation owners below it. Mirrors the
-// transcript's ownership rules (bin/masc_tui_keeper_chat_transcript.ml).
-export function admitKeeperTextOwner(
-  ownership: KeeperTextOwnership,
-  owner: KeeperTextResponseOwner,
-): boolean {
-  if (ownership.staleFloor && compareKeeperTextOwners(owner, ownership.staleFloor) <= 0) {
-    return false
-  }
-  const admitted = ownership.admitted
-  if (admitted) {
-    if (compareKeeperTextOwners(owner, admitted) < 0) return false
-    if (owner.content_generation === admitted.content_generation
-      && ownership.unobservedScope !== null
-      && ownership.unobservedScope > owner.stream_scope) {
-      return false
-    }
-  }
-  ownership.admitted = owner
-  ownership.unobservedScope = null
-  return true
-}
-
-export function observeKeeperTextScope(ownership: KeeperTextOwnership, scope: number): void {
-  ownership.unobservedScope = scope
-}
-
-// An advancing runtime attempt starts a newer response. Demote the admitted
-// owner to the stale floor — an equal identity is not "preceding", so without
-// the floor a delayed delta from the superseded response would repopulate the
-// fresh attempt — and restart tracking empty.
-export function retireKeeperTextOwnershipAttempt(ownership: KeeperTextOwnership): void {
-  if (ownership.admitted) {
-    const owner = ownership.admitted
-    const floor = ownership.staleFloor
-    ownership.staleFloor = !floor || compareKeeperTextOwners(owner, floor) > 0 ? owner : floor
-  }
-  ownership.admitted = null
-  ownership.unobservedScope = null
 }
 
 const textMessageStreamStates = new Map<string, TextMessageStreamState>()
@@ -218,7 +146,7 @@ function textMessageStreamState(keeperName: string, assistantEntryId: string): T
   const key = streamEntryKey(keeperName, assistantEntryId)
   let state = textMessageStreamStates.get(key)
   if (!state) {
-    state = { activeMessageId: null, endedMessageIds: new Set(), ownership: createKeeperTextOwnership() }
+    state = { activeMessageId: null, endedMessageIds: new Set() }
     textMessageStreamStates.set(key, state)
   }
   return state
@@ -232,47 +160,6 @@ function clearTextMessageStreamState(keeperName: string, assistantEntryId: strin
   textMessageStreamStates.delete(streamEntryKey(keeperName, assistantEntryId))
 }
 
-// Response ownership for the message stream: START names the newest live
-// response, and stale STOP/THINKING events for an older response must not
-// move the entry. The owner only advances, mirroring the TUI transcript.
-interface StreamResponseOwner {
-  contentGeneration: number
-  streamScope: number
-}
-
-const admittedStreamResponseOwners = new Map<string, StreamResponseOwner>()
-
-function streamResponseOwnerNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
-}
-
-function streamResponseOwnerFromFields(response: unknown): StreamResponseOwner | null {
-  if (!isRecord(response)) return null
-  const contentGeneration = streamResponseOwnerNumber(response.content_generation)
-  const streamScope = streamResponseOwnerNumber(response.stream_scope)
-  if (contentGeneration === undefined || streamScope === undefined) return null
-  return { contentGeneration, streamScope }
-}
-
-function compareStreamResponseOwners(left: StreamResponseOwner, right: StreamResponseOwner): number {
-  if (left.contentGeneration !== right.contentGeneration) {
-    return left.contentGeneration - right.contentGeneration
-  }
-  return left.streamScope - right.streamScope
-}
-
-function admitStreamResponseOwner(
-  keeperName: string,
-  assistantEntryId: string,
-  owner: StreamResponseOwner,
-): void {
-  const key = streamEntryKey(keeperName, assistantEntryId)
-  const current = admittedStreamResponseOwners.get(key)
-  if (!current || compareStreamResponseOwners(owner, current) > 0) {
-    admittedStreamResponseOwners.set(key, owner)
-  }
-}
-
 function resetUnfinishedRuntimeAttempt(
   keeperName: string,
   assistantEntryId: string,
@@ -284,7 +171,6 @@ function resetUnfinishedRuntimeAttempt(
   pendingThinkingDeltas.delete(key)
   clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
   const streamState = textMessageStreamState(keeperName, assistantEntryId)
-  retireKeeperTextOwnershipAttempt(streamState.ownership)
   streamState.activeMessageId = null
   streamState.endedMessageIds = new Set()
   updateThreadEntry(keeperName, assistantEntryId, entry => ({
@@ -466,7 +352,6 @@ export function _resetKeeperStreamBuffersForTests(): void {
   pendingThinkingDeltas.clear()
   pendingAgentCoreTextBlockIndexes.clear()
   textMessageStreamStates.clear()
-  admittedStreamResponseOwners.clear()
   quarantinedToolOccurrences.clear()
 }
 
@@ -866,8 +751,7 @@ export function applyKeeperStreamEvent(
       )
       return null
     case 'TEXT_MESSAGE_START': {
-      const response = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.responseState
-      if (response && (response.kind === 'unavailable' || response.floor || response.phase === 'terminal')) return null
+      if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'text-boundary' }).accepted) return null
       const messageId = textStreamMessageId(event.messageId)
       const streamState = textMessageStreamState(keeperName, assistantEntryId)
       if (messageId !== null && streamState.endedMessageIds.has(messageId)) {
@@ -922,8 +806,7 @@ export function applyKeeperStreamEvent(
       return null
     }
     case 'TEXT_MESSAGE_END': {
-      const response = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.responseState
-      if (response && (response.kind === 'unavailable' || response.floor || response.phase === 'terminal')) return null
+      if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'text-boundary' }).accepted) return null
       const messageId = textStreamMessageId(event.messageId)
       if (messageId !== null) {
         const streamState = textMessageStreamState(keeperName, assistantEntryId)
@@ -1299,8 +1182,6 @@ export function applyKeeperStreamEvent(
         if (!response.accepted) return null
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
-        const startedOwner = streamResponseOwnerFromFields(value)
-        if (startedOwner) admitStreamResponseOwner(keeperName, assistantEntryId, startedOwner)
         const patch: Partial<KeeperConversationDetails> = {}
         const providerMessageId = asString(value?.provider_message_id)
         const modelUsed = asString(value?.model)

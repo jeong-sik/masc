@@ -2103,10 +2103,10 @@ let test_a_journal_built_log_holds_its_turn_in_the_timeline () =
   check bool "terminal log without receipts retains unidentified durable tool facts" true
     (List.exists (fun (row : Tui_types.msg_entry) ->
       row.me_role = Tui_types.Message_tool && row.me_tool_block = None) retained);
-  check bool "held source still owns its observed speech and reasoning" false
+  check bool "held source owns its observed speech" false
     (List.exists (fun (row : Tui_types.msg_entry) ->
       match row.me_role with
-      | Tui_types.Message_keeper | Message_thinking -> true
+      | Tui_types.Message_keeper -> true
       | _ -> false) retained)
 
 ;;
@@ -2418,14 +2418,18 @@ let test_a_settled_log_holds_its_turn_in_the_timeline () =
         ] ];
   let retained () = Tui_types.chat_rows_for state "alpha" in
   let assert_coverage () =
+    check bool "streamed reasoning cannot prove aggregate durable coverage" true
+      (List.exists (fun (row : Tui_types.msg_entry) ->
+        row.me_execution_source=Some (Log.Operation "held")
+        && row.me_role=Tui_types.Message_thinking) (retained ()));
     check bool "unobserved tool facts survive terminal source ownership" true
       (List.exists (fun (row : Tui_types.msg_entry) ->
         row.me_role=Tui_types.Message_tool && row.me_tool_block=None) (retained ()));
-    check bool "observed source speech and reasoning remain in its log" false
+    check bool "observed source speech remains in its log" false
       (List.exists (fun (row : Tui_types.msg_entry) ->
         row.me_execution_source=Some (Log.Operation "held")
         && match row.me_role with
-           | Tui_types.Message_keeper | Message_thinking -> true
+           | Tui_types.Message_keeper -> true
            | _ -> false) (retained ()))
   in
   assert_coverage ();

@@ -9043,34 +9043,25 @@ let reasoning_drawn = function
   | Reasoning_folded | Reasoning_full -> true
 ;;
 
-(* A turn a settled log stands for, as the timeline needs to know it: which
-   request, and whether the log carries reasoning. The wire carries reasoning
-   only from runtimes that stream it; a runtime that does not leaves the
-   durable trace row -- "N reasoning steps, content withheld" -- as the only
-   record that the keeper thought at all, and that row stays. *)
+(* A settled source owns its speech and skills. Durable reasoning is an
+   aggregate without streamed block identities: observing some reasoning
+   cannot establish coverage of that aggregate, withheld steps or omissions. *)
 type held_turn =
-  { ht_source : Masc_tui_keeper_chat_log.journal_source
-  ; ht_reasoning : bool
-  }
+  { ht_source : Masc_tui_keeper_chat_log.journal_source }
 
 let held_turn_of_log turn_log =
-  { ht_source = turn_log_execution_source turn_log
-  ; ht_reasoning =
-      Masc_tui_keeper_chat_transcript.thinking_lines turn_log.tl_transcript <> []
-  }
+  { ht_source = turn_log_execution_source turn_log }
 ;;
 
-(* A held source replaces speech, skills and observed reasoning. Tool rows
-   instead require exact receipt coverage in [compute_chat_rows_for]; hearing
-   an ending cannot prove that every tool event was retained. User/status/error
-   and memory records remain separate durable observations. *)
+(* Tool rows require exact receipt coverage in [compute_chat_rows_for].
+   Reasoning rows remain durable observations until both paths can establish
+   shared block coverage; neither text similarity nor an ending proves it. *)
 let log_draws_row (held : held_turn) (row : msg_entry) =
   row.me_execution_source = Some held.ht_source
   &&
   match row.me_role with
   | Message_keeper | Message_autonomous | Message_skill _ -> true
-  | Message_thinking -> held.ht_reasoning
-  | Message_tool -> false
+  | Message_thinking | Message_tool -> false
   | Message_user _ | Message_status | Message_local | Message_error
   | Message_memory ->
       false

@@ -577,10 +577,9 @@ let test_rows_carry_the_operation_id_only_for_direct_turns () =
              ~tool_call_name:"Read" "{}"
          ; row ~role:"assistant" ~delivery_key:key
              ~transcript_slot:(transcript_slot "terminal_result") "done"
-           (* A failure row carries no transcript slot. Its operation key
-              still owns both journal lookup and conversation grouping. *)
+           (* The producer persists a failure in the terminal result slot. *)
          ; row ~role:"request_failure" ~delivery_key:key
-             "the wire dropped"
+             ~transcript_slot:(transcript_slot "terminal_result") "the wire dropped"
          ; autonomous_turn ~turn_ref:"trace-1#54" [ reason "look"; tool "Read" ]
          ; row ~role:"user"
              ~delivery_key:(`Assoc [ "kind", `String "fusion_run"; "request_id", `String "fr-1" ])
@@ -1900,6 +1899,34 @@ let test_autonomous_marker_requires_matching_source () =
   | _ -> fail "valid marker lost autonomous ownership"
 ;;
 
+let test_failure_requires_canonical_terminal_provenance () =
+  let invalid_keys =
+    [ `Assoc ["kind", `String "operation"; "operation_id", `String "bad/id"]
+    ; `Assoc ["kind", `String "operation"; "operation_id", `String "first";
+               "operation_id", `String "second"]
+    ; `Assoc ["kind", `String "operation"; "operation_id", `String "direct";
+               "unknown", `Bool true]
+    ]
+  in
+  let payloads =
+    List.map (fun key -> row ~role:"request_failure" ~delivery_key:key
+      ~transcript_slot:(transcript_slot "terminal_result") "failure original") invalid_keys
+    @ [row ~role:"request_failure" ~delivery_key:(operation_key "direct") "failure original";
+       row ~role:"request_failure" ~delivery_key:(operation_key "direct")
+         ~transcript_slot:(transcript_slot "accepted_user") "failure original"]
+  in
+  List.iter (fun payload ->
+    match (decode (`List [payload])).History.rows with
+    | [{History.kind = History.Delivery_failed {origin_request_id; _};
+        execution_source; operation_id; turn_id; text; _}] ->
+        check (option string) "invalid provenance has no failure owner" None origin_request_id;
+        check (option string) "no journal authority" None operation_id;
+        check (option string) "no inferred turn" None turn_id;
+        check bool "no execution authority" true (execution_source = None);
+        check string "failure body retained" "failure original" text
+    | _ -> fail "failure record was not retained") payloads
+;;
+
 let () =
   run "tui_keeper_chat_history"
     [ ( "rows"
@@ -1938,6 +1965,8 @@ let () =
             test_a_fenced_core_cause_draws_nothing
         ; test_case "unrelated failure is not marked recovered" `Quick
             test_unrelated_failure_is_not_marked_recovered
+        ; test_case "failure requires canonical terminal provenance" `Quick
+            test_failure_requires_canonical_terminal_provenance
         ; test_case "rows carry the operation id only for direct turns" `Quick
             test_rows_carry_the_operation_id_only_for_direct_turns
         ; test_case "delivery keys do not invent turn ownership" `Quick

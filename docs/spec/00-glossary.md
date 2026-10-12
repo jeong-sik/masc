@@ -1017,6 +1017,58 @@ status: reference
   → [Candidate_fault](../../packages/agent_core/lib/llm_provider/candidate_fault.mli) ·
   [RFC-one-slot-fault-judgment-for-every-walk](../rfc/RFC-one-slot-fault-judgment-for-every-walk.md)
 
+**Accept Rejection (수용 거절)**
+: 후보가 보낸 provider 응답을 MASC가 이번 turn의 답으로 받지 않기로 한 관측
+  (`Agent_core.Types.AcceptRejected` → `Keeper_internal_error.Accept_rejected`).
+  "provider가 실패했다"와 다른 관측이다 — 응답은 도착했고, 받아들이지 않기로 한
+  것이다. 두 닫힌 질문의 짝으로 기록된다(`lib/keeper_runtime/keeper_internal_error.mli`).
+  - 거절 이유 `accept_rejection_kind`(둘) — `Accept_no_usable_progress`(답 안에 이
+    turn을 나르는 쓸 만한 내용이 없음)·`Accept_predicate_rejected`(내용은 있으나
+    수용 조건이 기각함).
+  - 응답 모양 `accept_response_shape`(일곱) — `Accept_response_empty`·
+    `Accept_response_thinking_only`·`Accept_response_blank_text_only`·
+    `Accept_response_tool_result_only`·`Accept_response_media_only`·
+    `Accept_response_mixed_without_deliverable_content`·
+    `Accept_response_has_deliverable_content`.
+  거절 기록이 곧 재시도 이유는 아니다. 세 갈래 재시도 이유는 응답 모양에 따라
+  `accept_no_progress_retry_kind`가 닫아 놓는다 — `Empty_no_progress`(빈 응답)·
+  `Thinking_only_no_progress`(thinking-only). 이 둘은 `stop_reason`과 무관하게
+  모양이 정한다(EndTurn이든 MaxTokens든 그대로다). `Truncated_no_progress`는
+  `stop_reason`이 MaxTokens인 나머지 모양이다. 이 밖의 거절은 재시도 이유를
+  갖지 않는다.
+  이 세 이름은 Failure Route의 `No_progress_empty`·`No_progress_thinking_only`·
+  `No_progress_truncated` 회전과, 이 turn이 다음 후보에게 넘어가며 영수증에 적는
+  `degraded_retry_reason`(`empty_no_progress`·`thinking_only_no_progress`·
+  `truncated_no_progress`)과 같은 사실의 세 표기다.
+  응답을 뽑는 질의는 둘을 섞지 말고 레이어를 구분해 거른다. 거절이 이 후보 쪽
+  일인지는 Accept Rejection이 답하지 않는다 — Candidate Fault가 그 답이다.
+  → [keeper_internal_error](../../lib/keeper_runtime/keeper_internal_error.mli)
+
+**Rotate-now Evidence Asymmetry (회전 강등 증거 비대칭)**
+: 같은 Rotate_now 회전이라도 후보에 남기는 교차 turn 증거가 갈래마다 다른,
+  의도된 비대칭. 이 turn 안에서 후보 순서만 바꾸는 회전은 대부분 증거를
+  남기지 않는다 — 선언된 열일곱 회전 가운데 열다섯(`Auth_failed`·
+  `Model_unavailable`·`Resumable_cli_session`·`Candidates_filtered`·
+  `Runtime_exhausted`·`No_progress_empty`·`No_progress_thinking_only`·
+  `No_progress_truncated`·`Refusal_body_not_received`·`Generation_repeated`·
+  `Admission`·`Provider_reported_failure`·`Request_refused`·
+  `Provider_wire_defect`·`Context_window_exceeded`)은 `Keeper_turn_driver.ml`의
+  Rotate_now 매치에서 `()`로 실패가 이 후보의 고장을 증명하지 않는다. 남기면
+  자매 후보가 답하는 동안 head가 영영 뒤로 밀리므로(RFC-0458 §3.4, §6), 창
+  초과(`Context_window_exceeded`)도 "작은 turn에 답 못 한 증거가 아니다"
+  (#38984)로 같은 팔에 속한다. 이 팔과 구분되는 두 팔이 있다 —
+  `Server_error_not_transient`는 `note_failed_attempt`로
+  `server_error` 실패를 남기고(답하지 못한 사실 자체가 증거),
+  `Authorization_refused`(403)는 증거 대신 usage-read 질문을 한 번 던진다.
+  반대 방향 관측도 비대칭이다 — `Retry_after_observed`의 `Empty_completion`은
+  후보가 답했다는 사실로 기존 실패 증거를 지운다(`clear_answered_candidate_evidence`).
+  남는 증거는 넷뿐인 닫힌 어휘다(`Runtime_candidate_backpressure.attempt_failure`) —
+  `server_error`·`provider_capacity`·`network_transient`·`provider_timeout`.
+  회전 사실 자체는 이후보 증거가 아니라 영수증 `degraded_retry_reason`과
+  Failure Route로 관측된다.
+  → [runtime_candidate_backpressure](../../lib/runtime/runtime_candidate_backpressure.mli)
+  · [Keeper_turn_driver.demote_unavailable_candidates](../../lib/keeper/keeper_turn_driver.ml)
+
 **Demotion (강등)**
 : 어떤 항목을 제거하지 않고 우선순위·가시성·전송 여부만 낮추는 처분. 세 곳이 같은
   불변식을 지킨다 — 강등된 것은 사라지지 않는다.

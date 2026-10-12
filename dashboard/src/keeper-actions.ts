@@ -512,15 +512,37 @@ async function reconcileOperationFromServerHistory(
   localUserId: string,
   localAssistantId: string,
 ): Promise<boolean> {
-  const history = await fetchKeeperChatHistory(keeperName)
-  const historyEntries = chatHistoryEntriesFromRest(keeperName, history)
-  if (!hasCanonicalOperationTurn(historyEntries, operationId)) {
-    return false
+  // Serialize with mount hydration through the same request registry: an
+  // older in-flight history fetch must not merge after this newer canonical
+  // response and evict the operation turns it just restored.
+  const request = {}
+  const displacedHydration = chatHistoryHydrationRequests.has(keeperName)
+  chatHistoryHydrationRequests.set(keeperName, request)
+  try {
+    const history = await fetchKeeperChatHistory(keeperName)
+    if (chatHistoryHydrationRequests.get(keeperName) !== request) return false
+    const historyEntries = chatHistoryEntriesFromRest(keeperName, history)
+    const canonical = hasCanonicalOperationTurn(historyEntries, operationId)
+    // Displacing an in-flight mount hydration means that fetch will bail on
+    // its stale check; honor it by merging its window even without the
+    // canonical turn so the transcript is not left unmerged this session.
+    if (!canonical && !displacedHydration) return false
+    mergeServerHistoryEntries(keeperName, historyEntries)
+    if (!canonical) return false
+    removeThreadEntries(keeperName, [localUserId, localAssistantId])
+    return true
+  } finally {
+    if (chatHistoryHydrationRequests.get(keeperName) === request) {
+      chatHistoryHydrationRequests.delete(keeperName)
+      setRecordValue(keeperHydrating, keeperName, false)
+      if (displacedHydration) {
+        // Settle the status signals the superseded hydration would have set.
+        void hydrateKeeperToolOutputs(keeperName)
+        setRecordValue(keeperChatHistoryHydration, keeperName, 'hydrated')
+        setRecordValue(keeperChatHistoryErrors, keeperName, null)
+      }
+    }
   }
-
-  mergeServerHistoryEntries(keeperName, historyEntries)
-  removeThreadEntries(keeperName, [localUserId, localAssistantId])
-  return true
 }
 
 function operationUserEntryId(operationId: string): string {
@@ -691,7 +713,17 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
       let userDelivery: KeeperConversationDelivery = 'delivered'
       if (isCancelled) userDelivery = 'cancelled'
       else if (failure) userDelivery = 'error'
-      const assistantDelivery: KeeperConversationDelivery = userDelivery
+      const assistantStillLocal = (keeperThreads.value[request.keeperName] ?? [])
+        .find(entry => entry.id === assistantId)
+      // The operation receipt reports termination, not the observed turn
+      // outcome: a legitimately recorded `no_reply` must survive a mere
+      // successful-termination confirmation, or the hidden empty entry
+      // resurfaces as an "(empty reply)" bubble after reload.
+      const assistantDelivery: KeeperConversationDelivery =
+        userDelivery === 'delivered'
+          && (assistantStillLocal?.delivery ?? request.assistantDraft?.delivery) === 'no_reply'
+          ? 'no_reply'
+          : userDelivery
       finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
         delivery: userDelivery,
         error: errorMessage,
@@ -700,19 +732,29 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
           reason: errorMessage,
         }),
       })
-      const assistantStillLocal = (keeperThreads.value[request.keeperName] ?? [])
-        .find(entry => entry.id === assistantId)
       if (assistantStillLocal) {
         // The server finished the operation, but a response whose stream
         // dropped a frame is incomplete and the stored transcript could not
         // replace it: keep the recorded failure instead of a delivered reply.
         const incomplete = !isCancelled && !failure && keeperResponseIsFailed(assistantStillLocal.responseState)
         const incompleteReason = assistantStillLocal.error ?? INCOMPLETE_KEEPER_REPLY_MESSAGE
+        const priorResponseState = assistantStillLocal.responseState
         finalizeAssistantEntry(request.keeperName, assistantId, {
-          responseState: reduceKeeperResponse(assistantStillLocal.responseState ?? initialKeeperResponseState, { kind: 'terminal' }).state,
+          // An unavailable stored state carries no ownership facts to protect;
+          // the authoritative terminal receipt still promotes it to a known
+          // terminal state instead of letting the normalizer downgrade it.
+          responseState: reduceKeeperResponse(
+            priorResponseState && priorResponseState.kind === 'known' ? priorResponseState : initialKeeperResponseState,
+            { kind: 'terminal' },
+          ).state,
           delivery: incomplete ? 'error' : assistantDelivery,
           streamState: null,
           error: incomplete ? incompleteReason : errorMessage,
+          // Keep an observed occurrence time; only a placeholder saved before
+          // any assistant event falls back to the receipt's completion time so
+          // the settled row stops sorting with the no-timestamp in-flight tail.
+          timestamp: assistantStillLocal.timestamp
+            ?? new Date(operation.state.completedAt * 1000).toISOString(),
           streamContract: keeperStreamContract('client_operation_lookup', 'client_operation_terminal', {
             requestId: request.operationId,
             reason: incomplete ? incompleteReason : errorMessage,
@@ -726,7 +768,12 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
         const canonical = await reconcileOperationFromServerHistory(
           request.keeperName, request.operationId, operationUserEntryId(request.operationId), assistantId,
         )
-        if (canonical) removeTrackedKeeperChatOperation(request.operationId)
+        if (canonical) {
+          removeTrackedKeeperChatOperation(request.operationId)
+          // A prior failed hydration left a history banner behind; the
+          // canonical turn is merged now, so the failure signal is stale.
+          setRecordValue(keeperChatHistoryErrors, request.keeperName, null)
+        }
       } catch (historyError) {
         // A missing observation cannot revoke the authoritative terminal receipt.
         const detail = historyError instanceof Error ? historyError.message : 'Chat history unavailable'
@@ -738,9 +785,25 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
     const current = (keeperThreads.value[request.keeperName] ?? []).find(entry => entry.id === assistantId)
     if (keeperResponseIsTerminal(current?.responseState)) {
       // A lookup observation cannot revoke a receipt already restored/applied.
+      // History may now hold the canonical turn even though the lookup
+      // itself fails: reconcile before retaining the receipt so the record
+      // is released instead of re-polling the placeholder on every mount.
       const detail = err instanceof Error ? err.message : 'Operation lookup unavailable'
-      setRecordValue(keeperActionErrors, request.keeperName, detail)
       persistTrackedOperationAssistantDraft(request.keeperName, request.operationId, assistantId)
+      try {
+        const canonical = await reconcileOperationFromServerHistory(
+          request.keeperName, request.operationId, operationUserEntryId(request.operationId), assistantId,
+        )
+        if (canonical) {
+          removeTrackedKeeperChatOperation(request.operationId)
+          setRecordValue(keeperChatHistoryErrors, request.keeperName, null)
+          setRecordValue(keeperActionErrors, request.keeperName, null)
+          return
+        }
+      } catch {
+        // History still unavailable: retain the receipt and report below.
+      }
+      setRecordValue(keeperActionErrors, request.keeperName, detail)
       return
     }
     if (isUnknownKeeperChatOperationError(err)) {

@@ -2639,23 +2639,26 @@ let native_task_entries (state : state) ~keeper_name ~role_label_column =
       native_entries_memo := Some (native,state.msg_tool_visibility,role_label_column,entries);
       entries
 
-(* A Child observation names its parent native task by the exact invocation
-   ticket and parent occurrence. When that task reports [skip_transcript=true]
-   the provider marked its transcript for omission: the observation keeps no
-   chat row, the way [native_task_entries] keeps no inline task entry. An
-   observation without a parent occurrence names no task and stays visible. *)
+(* A Child observation names its parent native task by its origin invocation
+   ticket and parent occurrence. The read rejects observations whose origin
+   leaves the store scope, so the origin invocation always names the
+   observation's own ticket; matching on it keeps the join local to the row.
+   When that task reports [skip_transcript=true] the provider marked its
+   transcript for omission: the observation keeps no chat row, the way
+   [native_task_entries] keeps no inline task entry. An observation without
+   a parent occurrence names no task and stays visible. *)
 let child_omitted_by_skip_transcript
     (tasks : Masc_tui_native_tasks.task list)
-    (receiver : Masc.Keeper_child_content_read.receiver)
     (child : Masc.Keeper_child_content.view) =
   match child.parent_occurrence with
   | None -> false
   | Some occurrence ->
+      let invocation = child.origin.invocation in
       List.exists (fun (task : Masc_tui_native_tasks.task) ->
         task.skip_transcript = Some true
-        && String.equal receiver.receiver_generation task.origin.invocation.receiver_generation
-        && String.equal receiver.session_id task.origin.invocation.session_id
-        && String.equal receiver.client_uuid task.origin.invocation.client_uuid
+        && String.equal invocation.receiver_generation task.origin.invocation.receiver_generation
+        && String.equal invocation.session_id task.origin.invocation.session_id
+        && String.equal invocation.client_uuid task.origin.invocation.client_uuid
         && String.equal occurrence.call_id task.origin.native_call.call_id
         && String.equal occurrence.call_envelope_uuid task.origin.native_call.call_envelope_uuid
         && occurrence.call_ordinal = task.origin.native_call.call_ordinal)
@@ -2712,7 +2715,7 @@ let child_content_entries (state : state) ~keeper_name ~role_label_column ~chat_
         List.stable_sort by_arrival arrivals in
       let rows = List.filter_map (fun ((store : Consumer.store), (record : Consumer.Read.record)) ->
           let child = record.observation in
-          if child_omitted_by_skip_transcript native_tasks store.receiver child then None else
+          if child_omitted_by_skip_transcript native_tasks child then None else
           let visible, style, label = match child.channel with
             | Runtime_claude_code.Text_content -> true, Message_layout.Inbound, "CHILD"
             | Thinking_content -> state.msg_reasoning_visibility <> Reasoning_hidden,
@@ -2981,7 +2984,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                           state.msg_reasoning_visibility) ->
                   None
               | Keeper_chat_transcript.Drawn_thinking lines ->
-                  entry Message_layout.Thinking Message_layout.Thinking_own (label "THINKING") (String.concat "\n" lines)
+                  entry (Message_layout.Thinking Message_layout.Thinking_own) (label "THINKING") (String.concat "\n" lines)
               | Keeper_chat_transcript.Drawn_tools block ->
                   let projection =
                     Keeper_chat_transcript.project_tool_block

@@ -11,7 +11,9 @@ module Layout = Masc_tui_message_layout
 let keeper = "alpha"
 
 (* Child fixtures mirror test_tui_child_content.ml. The store receiver doubles
-   as the native-task invocation ticket so the skip_transcript join is exact. *)
+   as the native-task invocation ticket; the read rejects observations whose
+   origin leaves the store scope, so an origin that differs is invalid data,
+   not a second ticket to join on. *)
 let child_receiver : ChildRead.receiver =
   {receiver_generation="child-gen"; session_id="child-session"; client_uuid="input"}
 let child_receiver_json (receiver : ChildRead.receiver) =
@@ -48,7 +50,7 @@ let observation ?(receiver=child_receiver) ?(ordinal=1) ?(channel="text") ?(know
   `Assoc (["schema", `String "masc.child_content.v1"; "origin", origin;
     "observation_id", `String id; "envelope_uuid", `String provider;
     "ordinal", `Int ordinal; "channel", `String channel;
-    "parent_tool_use_id", `String "parent"; "message_id", `String ""; "model", `String model;
+    "parent_tool_use_id", `String call_id; "message_id", `String ""; "model", `String model;
     "text", `String body; "attribution", attribution] @ provenance)
 let row_at seq at obs = `Assoc ["seq", `Int seq; "recorded_at", `Float at; "observation", obs]
 let page ?(receiver=child_receiver) ?(cleanup=[]) store through rows =
@@ -137,10 +139,10 @@ let native_load previous ~store ~through ~rows ~after =
   | Ok state -> state, !record_reads | Error error -> fail (Native.error_text error)
 
 let project_bodies ?native child =
-  let state = T.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2 () in
+  let state = T.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   state.msg_child_content <- [keeper, child];
   (match native with None -> () | Some tasks -> state.msg_native_tasks <- [keeper, tasks]);
-  let (projection : Render.For_testing.chat_projection) =
+  let (projection : Render.chat_projection) =
     Render.keeper_message_projection state ~keeper_name:keeper ~chat_cols:80 in
   List.map (fun (entry : Layout.entry) -> entry.body) projection.layout_entries
 

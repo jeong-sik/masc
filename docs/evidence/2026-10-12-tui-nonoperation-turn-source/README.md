@@ -1,0 +1,23 @@
+# Explicit nonoperation turn source
+
+Base: f3d759adce5bb5236934f0635e446b6dc25f5802.
+
+`keeper_loop_tool_projection.persist_continuation` writes approval delivery keys
+with explicit turn_ref. History retained turn_id but discarded execution_source
+for these rows. Preserve the validated explicit Turn_ref source for canonical
+Workspace_message, Fusion_run and Approval_lifecycle provenance without granting
+an operation journal identity. Passive rows without turn_ref remain unowned;
+autonomous marker alone cannot grant ownership to these delivery namespaces.
+Malformed provenance remains unowned, and Operation identity keeps precedence.
+
+Isolated artifacts: /tmp/masc-tui-nonoperation-turn-source-20261012/.
+Unchanged parent/current execution_source_of_fields functions were interpreted
+with minimal typed surroundings, accessor stubs, an operation selector stub and
+a single-valid-reference parser stub. Parent exits 1 for lost explicit source;
+current exits 0 across all three nonoperation keys, passive/invalid refusals and
+canonical Operation precedence. Codec, producer persistence and whole history
+pipeline were not executed by this harness.
+
+Two changed files pass syntax-only parsing and diff whitespace checking. Existing
+canonical wire fixture now checks source ownership but is unexecuted. Full
+build/typecheck, runtime/UI/screenshots, CI, approval and merge are unverified.

@@ -184,6 +184,24 @@ The March roster indices differed from the selection list: identify officers
 by their visible names before comparing their results. This verifies those
 six completed orders despite the intervening battle, not a fixed training gain.
 
+## Cancel an undersupplied expedition and buy food
+
+At March 190 Chenliu, a prepared expedition of 10,260 infantry carried
+500 gold and 14,000 food. The advisor warned `군량이 부족한 것은...` at
+`쳐들어가겠습니까(Y/N)?`. Answering `n` returned to city commands with the
+original gold 963, food 18,380 and troops 12,760 restored. Preparation had
+not launched the expedition; do not count the resource-entry screen as dispatch.
+
+At that city's command, merchant `7`, Enter → `2`, Enter selected
+`군량매입`. Choose an available officer from the live charm list; Yu Yuan
+was index `4` in this replay. `4`, Enter opened
+`군량을 얼마나 사겠습니까(64-61632)?`. Entering `20000`, Enter returned
+to commands with food 38,380, gold 651 and unchanged troops 12,760.
+This confirms a purchase of 20,000 food for 312 gold in this state, not a
+universal exchange rate or merchant availability. Preserve the resupplied
+state before preparing another expedition, and inspect the next resource
+and advisor prompts rather than restoring the earlier undersupplied preparation.
+
 ## Going to war
 
 Observed 2026-09-29 in scenario 6 as 조예, from 17 하비 against 33 건업.

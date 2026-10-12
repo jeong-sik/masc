@@ -800,6 +800,23 @@ status: reference
   → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli) ·
   [Keeper chat event timeline](../../docs/design/keeper-chat-event-timeline.md)
 
+**Native Tool Completion (네이티브 도구 완료)**
+: 공식 클라이언트 런타임이 한 네이티브 도구의 끝을 어떻게 보고했는지에 대한 닫힌 일곱
+  값(`Runtime_native_tools.completion_outcome` = `End_observed`·`Completion_unrecorded`·
+  `Completion_reported`·`Error_reported`·`Decline_reported`·`Result_received of { is_error }`·
+  `Unrecognized_status of string`). 프로바이더가 보고한 사실일 뿐 MASC의 실행
+  영수증이 아니다 — `Completion_reported`는 종료 코드 0을 확립하지 않고, Claude 결과가
+  `is_error`를 빠뜨리면 그 빠짐을 성공 보고로 지어내지 않고 보존한다. `End_observed`는
+  상태 보고 없이 라이브로 본 끝이고, `Completion_unrecorded`는 완료 기록을 나르지 않는
+  끝이다 — 옛 기록자가 남기지 않아 프로바이더가 상태를 보고했는지 알 수 없으므로
+  `End_observed`로 읽지 않고 종료 코드도 갖지 않는다. Native Tool Observed Occurrence가
+  도구의 관측 생애주기를 말한다면, 이 어휘는 그 끝에 프로바이더가 붙인 완료 사실을
+  말하며, Recorded Call Outcome(MASC 원장의 기록)·Tool Call Outcome(wire 투영)과 다른
+  층이다. TUI 채팅의 라이브 종료 이벤트(`Native_tool_ended`)는 완료 키가 없으면
+  `completion_unrecorded`로 접고, 완료 키가 둘 이상이면 `Undecodable`로 거절한다.
+  → [Runtime_native_tools](../../lib/runtime/runtime_native_tools.mli) ·
+  [Masc_tui_keeper_chat_live](../../bin/masc_tui_keeper_chat_live.ml)
+
 **Authored Whitespace Preservation (작성 공백 보존)**
 : 운영자 대면 채팅, Board 게시글 및 댓글, 커넥터(Slack, Discord), 위임(delegation)
   요청 전반에서 한국어 띄어쓰기를 포함한 작성자의 공백·들여쓰기·문단 구분을 임의로

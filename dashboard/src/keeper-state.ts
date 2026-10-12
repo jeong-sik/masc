@@ -1210,14 +1210,19 @@ function writeAssistantThinkingText(
               responseOwner,
             }),
           ]
+    const contentAllowsActivity = agentCoreBlockIndex === undefined
+      || !entry.modelContentActivity?.some(activity => activity.block_index === agentCoreBlockIndex
+        && (activity.channel !== 'thinking' || activity.state === 'ended'))
     return {
       ...entry,
       traceSteps,
-      streamState: 'thinking',
-      delivery: 'streaming',
-      streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
-        eventName: 'KEEPER_THINKING_DELTA',
-      }),
+      ...(contentAllowsActivity ? {
+        streamState: 'thinking' as const,
+        delivery: 'streaming' as const,
+        streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
+          eventName: 'KEEPER_THINKING_DELTA',
+        }),
+      } : {}),
     }
   })
 }

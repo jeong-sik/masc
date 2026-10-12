@@ -386,9 +386,11 @@ let handle_get state request reqd = function
      | None -> Server_auth.respond_json_value_with_cors request reqd (current_turn_discovery_page None)
      | Some turn_ref ->
        let path = Keeper_chat_event_log.turn_journal_path ~base_dir:base_path ~keeper_name ~turn_ref in
-       let journal = Keeper_chat_event_log.read_journal_rows_path path
-         |> Result.bind (fun rows -> Domain_pool_ref.submit_cpu_or_inline (fun () ->
-           Keeper_chat_event_log.decode_rows ~path rows)) in
+       let journal =
+         let ( let* ) = Result.bind in
+         let* rows = Keeper_chat_event_log.read_journal_rows_path path in
+         Domain_pool_ref.submit_cpu_or_inline (fun () ->
+           Keeper_chat_event_log.decode_rows ~path rows) in
        (match journal with
         | Ok entries ->
           (match List.rev entries with

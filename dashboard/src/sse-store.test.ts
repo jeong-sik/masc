@@ -43,6 +43,7 @@ const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const hydrateTransportHealthFromSSE = vi.fn<(payload: unknown) => void>()
 const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown, blocks?: unknown) => void>()
+const currentStoredTokenRevision = vi.fn<() => number>(() => 0)
 const refreshKnownKeeperChatHistories = vi.fn<(opts?: { force?: boolean }) => void>()
 
 async function flushAsyncWork(): Promise<void> {
@@ -105,6 +106,10 @@ async function loadSseStore() {
   vi.doMock('./keeper-runtime', () => ({
     noteKeeperChatAppended,
     refreshKnownKeeperChatHistories,
+  }))
+  vi.doMock('./api/core', async importOriginal => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    currentStoredTokenRevision,
   }))
   vi.doMock('./router', () => ({ route }))
   const sseStore = await import('./sse-store')
@@ -721,6 +726,24 @@ describe('setupServerPushReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', undefined, undefined)
+  })
+
+  it('drops a keeper_chat_appended push whose credential scope changed before the deferred import landed', async () => {
+    const { sseStore } = await loadSseStore()
+    noteKeeperChatAppended.mockClear()
+    currentStoredTokenRevision.mockReturnValue(0)
+    sseStore.routeServerPushEvent({
+      type: 'keeper_chat_appended',
+      name: 'echo',
+      connector: 'discord',
+    })
+    // Auth changes while the dynamic import is still pending: the push
+    // belongs to the old scope, and reconnect hydration recovers the append.
+    currentStoredTokenRevision.mockReturnValue(1)
+    await flushAsyncWork()
+
+    expect(noteKeeperChatAppended).not.toHaveBeenCalled()
+    currentStoredTokenRevision.mockReturnValue(0)
   })
 
   it('delivers every Keeper chat-operation inventory invalidation immediately', async () => {

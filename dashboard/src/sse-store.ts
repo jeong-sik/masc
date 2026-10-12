@@ -65,6 +65,7 @@ import {
 } from './schemas/sse'
 import { route } from './router'
 import { routeWantsRefreshTarget, type RouteRefreshTarget } from './refresh-scope'
+import { currentStoredTokenRevision } from './api/core'
 import {
   PERIODIC_REFRESH_DEV_MS,
   PERIODIC_REFRESH_PROD_MS,
@@ -896,10 +897,19 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     const payload = event as unknown as { name?: string; audio?: unknown; blocks?: unknown }
     const name = typeof payload.name === 'string' ? payload.name : ''
     if (name) {
+      // The push belongs to the credential scope that delivered it. The
+      // deferred import can land after an auth change; acting on the
+      // replacement scope would let an old-auth notification initiate and
+      // merge a new-auth history read (reconnect hydration recovers the
+      // missed append instead).
+      const authRevision = currentStoredTokenRevision()
       // Dynamic import keeps sse-store decoupled from the keeper action
       // layer (same pattern as the agent-failed notification above).
       void import('./keeper-runtime')
-        .then(mod => { mod.noteKeeperChatAppended(name, payload.audio, payload.blocks) })
+        .then(mod => {
+          if (authRevision !== currentStoredTokenRevision()) return
+          mod.noteKeeperChatAppended(name, payload.audio, payload.blocks)
+        })
         .catch(err => {
           console.debug('[server-push] keeper chat refresh unavailable', err instanceof Error ? err.message : '')
         })

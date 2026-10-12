@@ -711,6 +711,20 @@ export function applyKeeperOperationTurnEvent(
   ) {
     return null
   }
+  // A protocol-error diagnostic carries no stream content. When it is the
+  // only or final frame for an operation this session has no bubble for —
+  // e.g. a terminal event rejected as malformed during version skew — there
+  // is no local operation poll to reconcile it and no later frame is
+  // guaranteed, so synthesizing a sending/opening bubble would leave a
+  // phantom in-progress response forever. Record diagnostics only on an
+  // already matched operation.
+  if (
+    !matched
+    && operation.event.type === 'CUSTOM'
+    && operation.event.name === 'KEEPER_STREAM_PROTOCOL_ERROR'
+  ) {
+    return null
+  }
   const entryId = matched?.id ?? `operation-turn-${operationId}`
 
   if (!matched) {
@@ -776,10 +790,17 @@ function admitResponseEvent(
     clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
     clearTextMessageStreamState(keeperName, assistantEntryId)
   }
+  // A content-activity observation is side metadata with no authored body:
+  // it may raise the ownership floor for a newer generation, but it must not
+  // reopen a stopped response or wipe provider/usage details the way a real
+  // response header or content advance does.
+  const reopenResponse = decision.advanced
+    && decision.authoritative
+    && !(event.kind === 'observe' && event.source === 'content')
   if (decision.state !== before) updateThreadEntry(keeperName, assistantEntryId, current => ({
     ...current,
     responseState: decision.state,
-    ...(decision.advanced && decision.authoritative ? {
+    ...(reopenResponse ? {
       streamState: 'opening' as const,
       details: current.details ? { ...current.details, providerMessageId: null, modelUsed: null,
         stopReason: null, usage: null, costUsd: null } : current.details,

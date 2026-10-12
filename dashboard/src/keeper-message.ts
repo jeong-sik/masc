@@ -37,11 +37,13 @@ export function normalizeKeeperExternalEffectTarget(
   if (!isRecord(value)) return null
   const kind = asString(value.kind, '').trim()
   if (kind === 'dashboard') return { kind: 'dashboard' }
-  const channelId = asString(value.channel_id, '').trim()
+  // The stored normalized shape camel-cases these keys; the wire payload
+  // snake-cases them. Accept both so a persisted draft restores its target.
+  const channelId = (asString(value.channel_id) ?? asString(value.channelId))?.trim() ?? ''
   if (!channelId) return null
   if (kind === 'discord') return { kind: 'discord', channelId }
   if (kind === 'slack') {
-    const threadTs = asString(value.thread_ts, '').trim()
+    const threadTs = (asString(value.thread_ts) ?? asString(value.threadTs))?.trim() ?? ''
     return { kind: 'slack', channelId, threadTs: threadTs || null }
   }
   return null
@@ -49,14 +51,17 @@ export function normalizeKeeperExternalEffectTarget(
 
 function normalizeKeeperUsage(raw: unknown): NonNullable<KeeperConversationDetails['usage']> | null {
   if (!isRecord(raw)) return null
+  // The server's wire payload snake-cases these keys; the normalized shape
+  // persisted with an in-flight assistant draft camel-cases them. Reading both
+  // keeps usage metadata intact when a draft is restored after a reload.
   const usage: NonNullable<KeeperConversationDetails['usage']> = {
-    inputTokens: asNumber(raw.input_tokens) ?? null,
-    outputTokens: asNumber(raw.output_tokens) ?? null,
-    totalTokens: asNumber(raw.total_tokens) ?? null,
+    inputTokens: asNumber(raw.input_tokens) ?? asNumber(raw.inputTokens) ?? null,
+    outputTokens: asNumber(raw.output_tokens) ?? asNumber(raw.outputTokens) ?? null,
+    totalTokens: asNumber(raw.total_tokens) ?? asNumber(raw.totalTokens) ?? null,
   }
-  const cacheCreationInputTokens = asNumber(raw.cache_creation_input_tokens)
-  const cacheReadInputTokens = asNumber(raw.cache_read_input_tokens)
-  const costUsd = asNumber(raw.cost_usd)
+  const cacheCreationInputTokens = asNumber(raw.cache_creation_input_tokens) ?? asNumber(raw.cacheCreationInputTokens)
+  const cacheReadInputTokens = asNumber(raw.cache_read_input_tokens) ?? asNumber(raw.cacheReadInputTokens)
+  const costUsd = asNumber(raw.cost_usd) ?? asNumber(raw.costUsd)
   if (cacheCreationInputTokens !== undefined) {
     usage.cacheCreationInputTokens = cacheCreationInputTokens
   }
@@ -88,18 +93,22 @@ export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversa
   const usage = normalizeKeeperUsage(payload.usage)
 
   return {
-    traceId: asString(payload.trace_id) ?? null,
-    turnRef: asString(payload.turn_ref) ?? null,
-    providerMessageId: asString(payload.provider_message_id) ?? null,
-    modelUsed: asString(payload.model_used) ?? asString(payload.model) ?? null,
-    stopReason: asString(payload.stop_reason) ?? null,
-    latencyMs: asNumber(payload.latency_ms) ?? null,
-    costUsd: asNumber(payload.cost_usd) ?? usage?.costUsd ?? null,
+    // Each field falls back from the server's snake-case wire key to the
+    // camel-case key of the normalized shape persisted with an in-flight
+    // draft, so restoring that draft keeps continuation state and provider
+    // metadata instead of decoding them back to nulls.
+    traceId: asString(payload.trace_id) ?? asString(payload.traceId) ?? null,
+    turnRef: asString(payload.turn_ref) ?? asString(payload.turnRef) ?? null,
+    providerMessageId: asString(payload.provider_message_id) ?? asString(payload.providerMessageId) ?? null,
+    modelUsed: asString(payload.model_used) ?? asString(payload.model) ?? asString(payload.modelUsed) ?? null,
+    stopReason: asString(payload.stop_reason) ?? asString(payload.stopReason) ?? null,
+    latencyMs: asNumber(payload.latency_ms) ?? asNumber(payload.latencyMs) ?? null,
+    costUsd: asNumber(payload.cost_usd) ?? usage?.costUsd ?? asNumber(payload.costUsd) ?? null,
     usage,
-    replyText: reply.trim() ? reply : null,
-    turnOutcome: normalizeKeeperTurnOutcome(payload.turn_outcome),
+    replyText: asString(payload.replyText) ?? (reply.trim() ? reply : null),
+    turnOutcome: normalizeKeeperTurnOutcome(payload.turn_outcome) ?? normalizeKeeperTurnOutcome(payload.turnOutcome),
     externalEffectTarget: normalizeKeeperExternalEffectTarget(
-      payload.external_effect_target,
+      payload.external_effect_target ?? payload.externalEffectTarget,
     ),
     rawPayload: payload,
   }

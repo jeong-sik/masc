@@ -10,6 +10,7 @@ import {
   clearActiveStream,
   markLiveSendRequestAccepted,
   setActiveStream,
+  updateThreadEntry,
 } from './keeper-state'
 import { keeperThreads, keeperToolApprovals } from './keeper-state'
 import {
@@ -301,7 +302,8 @@ describe('Keeper operation stream projection', () => {
         value: { index: 0, delta: `generation ${generation}`, response: { content_generation: generation, stream_scope: 0 } },
       }, { kind: 'operation', operationId: 'op-1', sequence: generation })
     }
-    expect(keeperThreads.value.sangsu![0]!.traceSteps).toMatchObject([
+    _flushPendingKeeperStreamDeltasForTests()
+    expect(keeperThreads.value.sangsu?.[0]?.traceSteps).toMatchObject([
       { text: 'generation 4', responseOwner: { content_generation: 4, stream_scope: 0 } },
       { text: 'generation 5', responseOwner: { content_generation: 5, stream_scope: 0 } },
     ])
@@ -343,6 +345,87 @@ describe('Keeper operation stream projection', () => {
       { kind: 'operation', operationId: 'op-1', sequence: 12 })
     expect(keeperThreads.value.sangsu![0]!.rawText).toBe('valid counterpart')
     expect(keeperThreads.value.sangsu![0]!.responseState).toMatchObject({ lastSequence: 12 })
+  })
+
+  it('does not open a live bubble for a malformed diagnostic of an unknown operation', () => {
+    // The synthetic parse-failure projection is a diagnostic, not content. An
+    // observer tab that never matched the operation has no poll to reconcile
+    // it and no later frame is guaranteed, so a bubble created here would
+    // stay a phantom in-progress response indefinitely.
+    const applied = applyKeeperOperationTurnEvent('sangsu', {
+      operationId: 'op-malformed-only',
+      event: {
+        type: 'CUSTOM',
+        name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+        value: { kind: 'sse_parse_failed', reason: 'Keeper event could not be decoded' },
+      },
+    })
+    expect(applied).toBeNull()
+    expect(keeperThreads.value.sangsu ?? []).toHaveLength(0)
+  })
+
+  it('records a malformed diagnostic on an already matched operation', () => {
+    assistantEntry('op-matched')
+    const applied = applyKeeperOperationTurnEvent('sangsu', {
+      operationId: 'op-matched',
+      event: {
+        type: 'CUSTOM',
+        name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+        value: { kind: 'sse_parse_failed', reason: 'Keeper event could not be decoded' },
+      },
+    })
+    expect(applied).toBeNull()
+    const entry = keeperThreads.value.sangsu?.[0]
+    expect(entry?.error).toContain('sse_parse_failed')
+  })
+
+  it('keeps content-activity metadata from reopening a stopped owned response', () => {
+    appendThreadEntry('sangsu', {
+      id: 'reply-1',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '',
+      rawText: '',
+      timestamp: null,
+      delivery: 'sending',
+      streamState: 'opening',
+      details: null,
+    })
+    const owner = { content_generation: 3, stream_scope: 0 }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'answer', textResponse: owner })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_STOP', value: owner })
+    const stopped = keeperThreads.value.sangsu?.[0]
+    expect(stopped?.responseState).toMatchObject({ closed: owner })
+    expect(stopped?.streamState).toBe('finalizing')
+    // Settle the provider/usage details the authoritative reply event stamps
+    // after the response body has advanced.
+    updateThreadEntry('sangsu', 'reply-1', entry => ({
+      ...entry,
+      details: {
+        providerMessageId: 'msg-1',
+        modelUsed: 'model-x',
+        stopReason: 'stop_sequence',
+        usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+        costUsd: 0.01,
+      },
+    }))
+    // A newer-generation activity notice is side metadata with no authored
+    // body: it raises the ownership floor but must not reopen the response
+    // or wipe the settled provider/usage details.
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_MODEL_CONTENT_ACTIVITY',
+      value: { generation: 4, stream_scope: 0, block_index: 2, channel: 'text', state: 'observed' },
+    })
+    const after = keeperThreads.value.sangsu?.[0]
+    expect(after?.responseState).toMatchObject({ floor: { content_generation: 4, stream_scope: 0 } })
+    expect(after?.streamState).toBe(stopped?.streamState)
+    expect(after?.details?.providerMessageId).toBe('msg-1')
+    expect(after?.details?.modelUsed).toBe('model-x')
+    expect(after?.details?.stopReason).toBe('stop_sequence')
+    expect(after?.details?.usage).toMatchObject({ totalTokens: 3 })
+    expect(after?.details?.costUsd).toBe(0.01)
   })
 
   it.each(['observed', 'ended'] as const)('keeps content %s metadata outside model progress and body state', state => {

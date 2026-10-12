@@ -10,7 +10,7 @@ export interface ObservedKeeperResponseState {
   readonly current: KeeperResponseOwner | null
   readonly partialScope: number | null
   readonly closed: KeeperResponseOwner | null
-  readonly phase: 'running' | 'awaiting-continuation' | 'terminal'
+  readonly phase: 'running' | 'awaiting-continuation' | 'terminal' | 'failed'
   readonly closedGeneration: number | null
 }
 
@@ -20,7 +20,7 @@ export const unavailableKeeperResponseState: KeeperResponseState = Object.freeze
 export type KeeperResponseEvent =
   | { readonly kind: 'observe'; readonly owner: KeeperResponseOwner | null; readonly scope: number | null; readonly source: 'header' | 'details' | 'body' | 'content' }
   | { readonly kind: 'stop'; readonly owner: KeeperResponseOwner | null }
-  | { readonly kind: 'attempt' | 'started' | 'checkpoint' | 'terminal' }
+  | { readonly kind: 'attempt' | 'started' | 'checkpoint' | 'terminal' | 'failed' | 'text-boundary' }
 
 export interface KeeperResponseDecision {
   readonly state: KeeperResponseState
@@ -48,34 +48,58 @@ export function acknowledgeKeeperResponseSequence(state: KeeperResponseState, se
 export function reduceKeeperResponse(state: KeeperResponseState, event: KeeperResponseEvent): KeeperResponseDecision {
   const refuse = (): KeeperResponseDecision => ({ state, accepted: false, advanced: false, authoritative: false })
   if (state.kind === 'unavailable') return refuse()
-  if ((event.kind === 'observe' || event.kind === 'stop') && event.owner && !ownerFromUnknown(event.owner)) return refuse()
-  if (event.kind === 'observe' && event.scope !== null && (!Number.isSafeInteger(event.scope) || event.scope < 0)) return refuse()
-  if (event.kind === 'started') {
-    if (state.phase === 'terminal' || (state.phase === 'running' && state.floor !== null)) return refuse()
-    return { state: Object.freeze({ ...state, phase: 'running', current: null, partialScope: null }), accepted: true, advanced: false, authoritative: false }
+  // A failed operation takes no further response events: its stream has a hole.
+  if (state.phase === 'failed') return refuse()
+  const settle = (next: ObservedKeeperResponseState): KeeperResponseDecision => (
+    { state: Object.freeze(next), accepted: true, advanced: false, authoritative: false }
+  )
+  switch (event.kind) {
+    case 'started':
+      if (state.phase === 'terminal' || (state.phase === 'running' && state.floor !== null)) return refuse()
+      return settle({ ...state, phase: 'running', current: null, partialScope: null })
+    case 'failed':
+      return state.phase === 'terminal' ? refuse() : settle({ ...state, phase: 'failed' })
+    case 'terminal':
+    case 'checkpoint':
+      if (state.phase === 'terminal') return refuse()
+      return settle({ ...state, phase: event.kind === 'terminal' ? 'terminal' : 'awaiting-continuation',
+        current: event.kind === 'checkpoint' ? null : state.current,
+        partialScope: null, closedGeneration: state.floor?.content_generation ?? state.closedGeneration })
+    case 'text-boundary':
+      // An unowned text message boundary only means something before any
+      // response has been observed; an observed response owns its own text.
+      return state.phase === 'terminal' || state.floor !== null ? refuse() : { state, accepted: true, advanced: false, authoritative: false }
+    case 'attempt':
+      if (state.phase !== 'running') return refuse()
+      return settle({ ...state, current: null, partialScope: null })
+    case 'stop':
+      if (event.owner && !ownerFromUnknown(event.owner)) return refuse()
+      if (state.phase !== 'running') return refuse()
+      if (!event.owner) {
+        return state.floor ? refuse() : { state, accepted: true, advanced: false, authoritative: true }
+      }
+      if (!state.current || compareOwner(event.owner, state.current) !== 0
+        || (state.closed && compareOwner(event.owner, state.closed) <= 0)) return refuse()
+      return { state: Object.freeze({ ...state, closed: state.current }), accepted: true, advanced: false, authoritative: true }
+    case 'observe':
+      return observeResponse(state, event)
+    default:
+      return assertNeverResponseEvent(event)
   }
-  if (event.kind === 'terminal' || event.kind === 'checkpoint') {
-    if (state.phase === 'terminal') return refuse()
-    return { state: Object.freeze({ ...state, phase: event.kind === 'terminal' ? 'terminal' : 'awaiting-continuation',
-      current: event.kind === 'checkpoint' ? null : state.current,
-      partialScope: null, closedGeneration: state.floor?.content_generation ?? state.closedGeneration }), accepted: true, advanced: false, authoritative: false }
-  }
+}
+
+function assertNeverResponseEvent(event: never): never {
+  throw new Error(`Unhandled Keeper response event: ${JSON.stringify(event)}`)
+}
+
+function observeResponse(
+  state: ObservedKeeperResponseState,
+  event: Extract<KeeperResponseEvent, { kind: 'observe' }>,
+): KeeperResponseDecision {
+  const refuse = (): KeeperResponseDecision => ({ state, accepted: false, advanced: false, authoritative: false })
+  if (event.owner && !ownerFromUnknown(event.owner)) return refuse()
+  if (event.scope !== null && (!Number.isSafeInteger(event.scope) || event.scope < 0)) return refuse()
   if (state.phase !== 'running') return refuse()
-  if (event.kind === 'attempt') {
-    return { state: Object.freeze({ ...state, current: null, partialScope: null }), accepted: true, advanced: false, authoritative: false }
-  }
-  if (event.kind === 'stop') {
-    if (!event.owner) {
-      return state.floor ? refuse() : { state, accepted: true, advanced: false, authoritative: true }
-    }
-    if (!state.current || compareOwner(event.owner, state.current) !== 0
-      || (state.closed && compareOwner(event.owner, state.closed) <= 0)) return refuse()
-    return { state: Object.freeze({ ...state, closed: state.current }), accepted: true, advanced: false, authoritative: true }
-  }
-  // The lifecycle handlers above return for every non-observe kind; only an
-  // observation reaches here. The guard teaches the compiler what the early
-  // returns already guarantee about the union member.
-  if (event.kind !== 'observe') return refuse()
   if (!event.owner) {
     if (state.floor && event.source !== 'body') return refuse()
     const partial = event.scope !== null
@@ -128,7 +152,7 @@ export function keeperResponseStateFromUnknown(raw: unknown): KeeperResponseStat
   const closed = value.closed === null ? null : ownerFromUnknown(value.closed)
   if ((value.floor !== null && !floor) || (value.current !== null && !current) || (value.closed !== null && !closed)) return null
   if (value.lastSequence !== null && (typeof value.lastSequence !== 'number' || !Number.isSafeInteger(value.lastSequence) || value.lastSequence < 0)) return null
-  if (value.phase !== 'running' && value.phase !== 'awaiting-continuation' && value.phase !== 'terminal') return null
+  if (value.phase !== 'running' && value.phase !== 'awaiting-continuation' && value.phase !== 'terminal' && value.phase !== 'failed') return null
   if (value.closedGeneration !== null && (typeof value.closedGeneration !== 'number' || !Number.isSafeInteger(value.closedGeneration) || value.closedGeneration < 0)) return null
   if (value.closedGeneration !== null && (!floor || value.closedGeneration > floor.content_generation)) return null
   if (value.partialScope !== null && (typeof value.partialScope !== 'number' || !Number.isSafeInteger(value.partialScope) || value.partialScope < 0)) return null

@@ -61,6 +61,29 @@ describe('Keeper operation stream projection', () => {
     keeperToolApprovals.value = {}
   })
 
+  it('ignores a stale stop for an older response once a newer one begins', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_MESSAGE_START',
+      value: { content_generation: 3, stream_scope: 0, model: 'fixture' },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_MESSAGE_STOP',
+      value: { content_generation: 2, stream_scope: 0 },
+    })
+    const live = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(live?.streamState).toBe('streaming')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_MESSAGE_STOP',
+      value: { content_generation: 3, stream_scope: 0 },
+    })
+    const stopped = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(stopped?.streamState).toBe('finalizing')
+  })
+
   it.each(['observed', 'ended'] as const)('keeps content %s metadata outside model progress and body state', state => {
     assistantEntry()
     for (const hasBody of [false, true]) {
@@ -182,6 +205,44 @@ describe('Keeper operation stream projection', () => {
     const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
     expect(reply?.traceSteps).toEqual([
       { kind: 'think', text: '  hello world\n\t다음 줄  ', ts: expect.any(String), agentCoreBlockIndex: 0 },
+    ])
+  })
+
+  it('drops owned thinking that arrives after its response stops', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_MESSAGE_START',
+      value: { content_generation: 2, stream_scope: 0, model: 'fixture' },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'current', response: { content_generation: 2, stream_scope: 0 } },
+    })
+    _flushPendingKeeperStreamDeltasForTests()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_MESSAGE_STOP',
+      value: { content_generation: 2, stream_scope: 0 },
+    })
+    const stopped = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(stopped?.streamState).toBe('finalizing')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'stale', response: { content_generation: 2, stream_scope: 0 } },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'older', response: { content_generation: 1, stream_scope: 9 } },
+    })
+    _flushPendingKeeperStreamDeltasForTests()
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.streamState).toBe('finalizing')
+    expect(reply?.traceSteps).toEqual([
+      { kind: 'think', text: 'current', ts: expect.any(String), agentCoreBlockIndex: 0 },
     ])
   })
 
@@ -1827,5 +1888,87 @@ describe('applyKeeperStreamEvent tool calls', () => {
     const thread = keeperThreads.value.sangsu ?? []
     expect(thread.filter(entry => entry.toolCallId === 'tc-end-replay')).toHaveLength(1)
     expect(thread.find(entry => entry.id === 'reply-1')?.error).toBeUndefined()
+  })
+})
+
+describe('TEXT_MESSAGE_CONTENT response ownership', () => {
+  beforeEach(() => {
+    _resetKeeperStreamBuffersForTests()
+    _resetLiveSendRequestOwnersForTests()
+    _resetActiveKeeperStreamsForTests()
+    keeperThreads.value = {}
+  })
+
+  const replyText = () => keeperThreads.value.sangsu
+    ?.find(item => item.id === 'reply-1')?.text
+
+  it('admits owned deltas and drops a delayed delta from an older response', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT', delta: 'fresh', messageId: 'msg-1',
+      textResponse: { content_generation: 5, stream_scope: 1 },
+    })
+    expect(replyText()).toBe('fresh')
+    // Same operation and message id: every messageId guard passes, so only
+    // ownership can keep the superseded response's bytes out.
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT', delta: 'stale', messageId: 'msg-1',
+      textResponse: { content_generation: 4, stream_scope: 1 },
+    })
+    expect(replyText()).toBe('fresh')
+  })
+
+  it('demotes same-generation owners below a newer unobserved scope', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT', delta: 'fresh', messageId: 'msg-1',
+      textResponse: { content_generation: 5, stream_scope: 0 },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT', delta: 'partial', messageId: 'msg-1',
+      textStreamScope: 2,
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT', delta: 'stale', messageId: 'msg-1',
+      textResponse: { content_generation: 5, stream_scope: 1 },
+    })
+    expect(replyText()).toBe('freshpartial')
+  })
+
+  it('retires the admitted owner to the stale floor when an attempt advances', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT', delta: 'failed attempt', messageId: 'msg-1',
+      textResponse: { content_generation: 5, stream_scope: 0 },
+    })
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED',
+      value: { runtime_id: 'worker-2', attempt_index: 1 },
+    })).toBeNull()
+    // The delayed superseded delta shares the in-flight message id, so every
+    // messageId guard passes; an equal identity is not "preceding" either —
+    // only the retired floor rejects it.
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT', delta: 'late stale bytes', messageId: 'msg-1',
+      textResponse: { content_generation: 5, stream_scope: 0 },
+    })
+    expect(replyText()).toBe('')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT', delta: 'fresh attempt', messageId: 'msg-1',
+      textResponse: { content_generation: 5, stream_scope: 1 },
+    })
+    expect(replyText()).toBe('fresh attempt')
+  })
+
+  it('preserves unowned bytes without admitting an owner', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT', delta: 'unowned', messageId: 'msg-1',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT', delta: ' then owned', messageId: 'msg-1',
+      textResponse: { content_generation: 3, stream_scope: 0 },
+    })
+    expect(replyText()).toBe('unowned then owned')
   })
 })

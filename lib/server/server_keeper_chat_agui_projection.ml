@@ -120,12 +120,12 @@ let project ~timestamp ~redact_text state event =
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
              ~run_id:state.run_id ~message_id:(Some message_id)
              ~role:(Some (ag_role role)) Ag_ui.Text_message_start) )
-  | Text_delta {text; stream_scope} ->
+  | Text_delta {text; response} ->
       ( state
       , Some
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
              ~run_id:state.run_id ~message_id:state.message_id
-             ~delta:(Some text) ~text_stream_scope:stream_scope Ag_ui.Text_message_content) )
+             ~delta:(Some text) ~text_response:response Ag_ui.Text_message_content) )
   | Text_message_end ->
       ( state
       , Some
@@ -153,19 +153,21 @@ let project ~timestamp ~redact_text state event =
                    (Option.map (fun i -> `Int i) attempt_index))
       in
       state, Some (custom ~timestamp state Runtime_attempt_started value)
-  | Agent_core_stream_message_start { stream_scope; provider_message_id; model; usage } ->
+  | Agent_core_stream_message_start { content_generation; stream_scope; provider_message_id; model; usage } ->
       let value =
         `Assoc
           ([ "stream_scope", `Int stream_scope; "provider_message_id", `String provider_message_id
            ; "model", `String model
            ]
-           @ json_opt "usage" (Option.map api_usage_to_json usage))
+           @ json_opt "content_generation" (Option.map (fun value -> `Int value) content_generation)
+       @ json_opt "usage" (Option.map api_usage_to_json usage))
       in
       state, Some (custom ~timestamp state Stream_message_start value)
-  | Agent_core_stream_message_delta { stream_scope; stop_reason; usage } ->
+  | Agent_core_stream_message_delta { content_generation; stream_scope; stop_reason; usage } ->
       let value =
         `Assoc
           (["stream_scope", `Int stream_scope]
+       @ json_opt "content_generation" (Option.map (fun value -> `Int value) content_generation)
            @ json_opt "stop_reason"
              (Option.map
                 (fun reason ->
@@ -174,8 +176,9 @@ let project ~timestamp ~redact_text state event =
            @ json_opt "usage" (Option.map delta_usage_to_json usage))
       in
       state, Some (custom ~timestamp state Stream_message_delta value)
-  | Agent_core_stream_message_stop ->
-      state, Some (custom ~timestamp state Stream_message_stop `Null)
+  | Agent_core_stream_message_stop owner ->
+      state, Some (custom ~timestamp state Stream_message_stop
+        (match owner with None -> `Null | Some owner -> response_identity_to_json owner))
   | Agent_core_stream_ping ->
       state, Some (custom ~timestamp state Stream_ping `Null)
   | Agent_core_content_block_start
@@ -197,9 +200,10 @@ let project ~timestamp ~redact_text state event =
   | Agent_core_content_block_stop { index } ->
       state, Some (custom ~timestamp state Content_block_stop
                      (`Assoc [ "index", `Int index ]))
-  | Agent_core_thinking_delta { index; delta } ->
+  | Agent_core_thinking_delta { index; delta; response } ->
       state, Some (custom ~timestamp state Thinking_delta
-                     (`Assoc [ "index", `Int index; "delta", `String delta ]))
+                     (`Assoc ([ "index", `Int index; "delta", `String delta ]
+                       @ json_opt "response" (Option.map response_identity_to_json response))))
   | Agent_core_thinking_signature_delta { index; signature_bytes } ->
       state, Some (custom ~timestamp state Thinking_signature_delta
                      (`Assoc

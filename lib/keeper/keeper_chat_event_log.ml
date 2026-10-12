@@ -191,8 +191,10 @@ let keeper_chat_event_to_json event =
     type_tag
       "text_message_start"
       [ "message_id", `String message_id; "role", role_to_json role ]
-  | Text_delta {text; stream_scope} -> type_tag "text_delta"
-      (["delta", `String text] @ json_opt "stream_scope" (Option.map (fun scope -> `Int scope) stream_scope))
+  | Text_delta {text; response} -> type_tag "text_delta"
+      (["delta", `String text] @ (match response with
+       | Unobserved_scope scope -> json_opt "stream_scope" (Option.map (fun scope -> `Int scope) scope)
+       | Observed_response owner -> ["response", response_identity_to_json owner]))
   | Text_message_end -> type_tag "text_message_end" []
   | External_effect_completed { target } ->
     type_tag
@@ -219,22 +221,25 @@ let keeper_chat_event_to_json event =
       (json_opt "runtime_id" (Option.map (fun value -> `String value) runtime_id)
        @ json_opt "attempt_index"
            (Option.map (fun value -> `Int value) attempt_index))
-  | Agent_core_stream_message_start { stream_scope; provider_message_id; model; usage } ->
+  | Agent_core_stream_message_start { content_generation; stream_scope; provider_message_id; model; usage } ->
     type_tag
       "agent_core_stream_message_start"
       ([ "stream_scope", `Int stream_scope; "provider_message_id", `String provider_message_id; "model", `String model ]
+       @ json_opt "content_generation" (Option.map (fun value -> `Int value) content_generation)
        @ json_opt "usage" (Option.map api_usage_to_json usage))
-  | Agent_core_stream_message_delta { stream_scope; stop_reason; usage } ->
+  | Agent_core_stream_message_delta { content_generation; stream_scope; stop_reason; usage } ->
     type_tag
       "agent_core_stream_message_delta"
       (["stream_scope", `Int stream_scope]
+       @ json_opt "content_generation" (Option.map (fun value -> `Int value) content_generation)
        @ json_opt
          "stop_reason"
          (Option.map
             (fun reason -> `String (Agent_core.Types.stop_reason_to_string reason))
             stop_reason)
        @ json_opt "usage" (Option.map delta_usage_to_json usage))
-  | Agent_core_stream_message_stop -> type_tag "agent_core_stream_message_stop" []
+  | Agent_core_stream_message_stop owner -> type_tag "agent_core_stream_message_stop"
+      (json_opt "response" (Option.map response_identity_to_json owner))
   | Agent_core_stream_ping -> type_tag "agent_core_stream_ping" []
   | Agent_core_content_block_start { index; content_type; tool_call_id; tool_call_name }
     ->
@@ -249,8 +254,9 @@ let keeper_chat_event_to_json event =
     type_tag "model_content_activity" ["activity", model_content_activity_to_json activity]
   | Agent_core_content_block_stop { index } ->
     type_tag "agent_core_content_block_stop" [ "index", `Int index ]
-  | Agent_core_thinking_delta { index; delta } ->
-    type_tag "agent_core_thinking_delta" [ "index", `Int index; "delta", `String delta ]
+  | Agent_core_thinking_delta { index; delta; response } ->
+    type_tag "agent_core_thinking_delta" ([ "index", `Int index; "delta", `String delta ]
+      @ json_opt "response" (Option.map response_identity_to_json response))
   | Agent_core_thinking_signature_delta { index; signature_bytes } ->
     (* [signature_bytes] is a byte COUNT (int), not payload bytes. *)
     type_tag
@@ -381,14 +387,8 @@ let keeper_chat_event_of_json json =
         (Text_message_start
            { message_id = json |> member "message_id" |> to_string; role })
     | "text_delta" ->
-        let* stream_scope = match json with
-          | `Assoc fields ->
-              (match List.filter (fun (key, _) -> key = "stream_scope") fields with
-               | [] -> Ok None
-               | [_, `Int scope] when scope >= 0 -> Ok (Some scope)
-               | _ -> Error "text_delta.stream_scope must be one nonnegative integer")
-          | _ -> Error "text_delta must be an object" in
-        Ok (Text_delta {text=json |> member "delta" |> to_string; stream_scope})
+        let* response = text_response_of_fields ~owner_field:"response" ~scope_field:"stream_scope" (json |> to_assoc) in
+        Ok (Text_delta {text=json |> member "delta" |> to_string; response})
     | "text_message_end" -> Ok Text_message_end
     | "external_effect_completed" ->
       let* target =
@@ -434,25 +434,56 @@ let keeper_chat_event_of_json json =
       let attempt_index = json |> member "attempt_index" |> to_int_option in
       Ok (Agent_core_runtime_attempt_started { runtime_id; attempt_index })
     | "agent_core_stream_message_start" ->
+      let* content_generation = match List.filter (fun (key,_) -> key="content_generation")
+          (json |> to_assoc) with
+        | [] -> Ok None
+        | [_, value] ->
+            let* generation = Runtime_json_integer.of_json value in
+            if generation < 0 then Error "content generation must be nonnegative"
+            else Ok (Some generation)
+        | _ -> Error "duplicate content generation" in
       let* usage = opt_member json "usage" api_usage_of_json in
       Ok
         (Agent_core_stream_message_start
-           { stream_scope = json |> member "stream_scope" |> to_int
+           { content_generation
+           ; stream_scope = json |> member "stream_scope" |> to_int
            ; provider_message_id = json |> member "provider_message_id" |> to_string
            ; model = json |> member "model" |> to_string
            ; usage
            })
     | "agent_core_stream_message_delta" ->
+      let* content_generation = match List.filter (fun (key,_) -> key="content_generation")
+          (json |> to_assoc) with
+        | [] -> Ok None
+        | [_, value] ->
+            let* generation = Runtime_json_integer.of_json value in
+            if generation < 0 then Error "content generation must be nonnegative"
+            else Ok (Some generation)
+        | _ -> Error "duplicate content generation" in
+      let* stream_scope = match List.filter (fun (key,_) -> key="stream_scope") (json |> to_assoc) with
+        | [(_, value)] ->
+          let* scope = Runtime_json_integer.of_json value in
+          if scope >= 0 then Ok scope else Error "stream scope must be nonnegative"
+        | _ -> Error "message delta requires one stream scope" in
       let stop_reason_raw = json |> member "stop_reason" |> to_string_option in
       let* usage = opt_member json "usage" delta_usage_of_json in
       Ok
         (Agent_core_stream_message_delta
-           { stream_scope = json |> member "stream_scope" |> to_int
+           { content_generation
+           ; stream_scope
            ; stop_reason =
                Option.map Agent_core.Types.stop_reason_of_string stop_reason_raw
            ; usage
            })
-    | "agent_core_stream_message_stop" -> Ok Agent_core_stream_message_stop
+    | "agent_core_stream_message_stop" ->
+      let* owner = match json with
+        | `Assoc fields ->
+          (match List.filter (fun (key, _) -> key = "response") fields with
+           | [] -> Ok None
+           | [(_, value)] -> Result.map (fun owner -> Some owner) (response_identity_of_json value)
+           | _ -> Error "message stop has duplicate response identity")
+        | _ -> Error "message stop must be an object" in
+      Ok (Agent_core_stream_message_stop owner)
     | "agent_core_stream_ping" -> Ok Agent_core_stream_ping
     | "agent_core_content_block_start" ->
       Ok
@@ -468,9 +499,11 @@ let keeper_chat_event_of_json json =
     | "agent_core_content_block_stop" ->
       Ok (Agent_core_content_block_stop { index = json |> member "index" |> to_int })
     | "agent_core_thinking_delta" ->
+      let* response = optional_response_identity_of_fields (json |> to_assoc) in
       Ok
         (Agent_core_thinking_delta
-           { index = json |> member "index" |> to_int
+           { response
+           ; index = json |> member "index" |> to_int
            ; delta = json |> member "delta" |> to_string
            })
     | "agent_core_thinking_signature_delta" ->

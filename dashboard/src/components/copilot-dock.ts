@@ -10,6 +10,12 @@ import { DASHBOARD_NAV_ITEMS } from '../config/navigation'
 import { isSubmitEnter } from '../lib/keyboard'
 import { streamKeeperMessage } from '../api/keeper'
 import { newKeeperChatOperationId } from '../keeper-delivery-provenance'
+import {
+  admitKeeperTextOwner,
+  createKeeperTextOwnership,
+  observeKeeperTextScope,
+  retireKeeperTextOwnershipAttempt,
+} from '../keeper-stream'
 import { currentDashboardActor } from '../api/core'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
@@ -264,6 +270,7 @@ export function useCopilotDock() {
       const abortController = new AbortController()
       dockStreaming.value = { keeperId: kid, shown: '', full: '', sug: [] }
       let replyText = ''
+      const textOwnership = createKeeperTextOwnership()
       streamKeeperMessage(kid, text.trim(), {
         operationId: newKeeperChatOperationId(),
         signal: abortController.signal,
@@ -271,7 +278,19 @@ export function useCopilotDock() {
         channelWorkspaceId: currentDashboardActor(),
         surfaceContext: ctx,
         onEvent: (event) => {
+          if (event.type === 'CUSTOM' && event.name === 'KEEPER_RUNTIME_ATTEMPT_STARTED') {
+            retireKeeperTextOwnershipAttempt(textOwnership)
+            return
+          }
           if (event.type === 'TEXT_MESSAGE_CONTENT' && typeof event.delta === 'string') {
+            // The delta names the response it belongs to; a delayed delta from
+            // a superseded response shares the message id, so ownership is
+            // what keeps stale bytes out of the fresh reply.
+            if (event.textResponse) {
+              if (!admitKeeperTextOwner(textOwnership, event.textResponse)) return
+            } else if (typeof event.textStreamScope === 'number') {
+              observeKeeperTextScope(textOwnership, event.textStreamScope)
+            }
             replyText += event.delta
             const current = dockStreaming.value
             if (current && current.keeperId === kid) {

@@ -173,7 +173,7 @@ let add ?at t ~seq (delta : Live.delta) =
      | Live.Runtime_attempt_started _ -> t.attempt <- t.attempt + 1
      | Live.Run_started | Live.Batch_bound _ | Live.Text _ | Live.Thinking _ | Live.Stream_model_started _
      | Live.Model_content_activity _
-     | Live.Stream_details _ | Live.Stream_model_stopped
+     | Live.Stream_details _ | Live.Stream_model_stopped _
      | Live.Native_tool_started _ | Live.Native_tool_ended _ | Live.Native_tool_progress _
      | Live.Tool_started _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
      | Live.Stream_protocol_error _ | Live.Approval_requested _
@@ -226,7 +226,7 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
        execution_id = Keeper_chat_operation.Operation_id.to_string execution_id})
   | E.Run_started _ -> Some Live.Run_started
   | E.Text_message_start _ | E.Text_message_end -> None
-  | E.Text_delta {text; stream_scope} -> Some (Live.Text {text; stream_scope})
+  | E.Text_delta {text; response} -> Some (Live.Text {text; response})
   | E.External_effect_completed _ -> Some Live.External_effect_completed
   | E.Run_finished _ -> Some Live.Run_finished
   | E.Event_error { message } -> Some (Live.Run_failed { message })
@@ -238,12 +238,12 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
   | E.Agent_core_stream_connected -> None
   | E.Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
     Some (Live.Runtime_attempt_started { runtime_id; attempt_index })
-  | E.Agent_core_stream_message_start { provider_message_id; model; usage; stream_scope } ->
+  | E.Agent_core_stream_message_start { content_generation; provider_message_id; model; usage; stream_scope } ->
     Some (Live.Stream_model_started
-      { message_id = (if String.trim provider_message_id = "" then None else Some provider_message_id); model; stream_scope = Some stream_scope
+      { generation=content_generation; message_id = (if String.trim provider_message_id = "" then None else Some provider_message_id); model; stream_scope = Some stream_scope
       ; usage = Option.bind usage (fun usage ->
           Live.stream_usage_of_usage_json (E.api_usage_to_json usage)) })
-  | E.Agent_core_stream_message_delta { stream_scope; stop_reason; usage } ->
+  | E.Agent_core_stream_message_delta { content_generation; stream_scope; stop_reason; usage } ->
     (* Through the same readers as the live arm, over the same bytes the
        producer writes ([E.delta_usage_to_json], [E.stop_reason_to_string]), so
        a reloaded turn and a watched one report this identically. A delta that
@@ -263,15 +263,15 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
         | "" -> None
         | _ -> Some reason)
     in
-    if usage = None && stop_reason = None
+    if content_generation = None && usage = None && stop_reason = None
     then None
-    else Some (Live.Stream_details { usage; stop_reason; stream_scope = Some stream_scope })
+    else Some (Live.Stream_details { generation=content_generation; usage; stop_reason; stream_scope = Some stream_scope })
   | E.Model_content_activity activity -> Some (Live.Model_content_activity activity)
-  | E.Agent_core_stream_message_stop -> Some Live.Stream_model_stopped
+  | E.Agent_core_stream_message_stop owner -> Some (Live.Stream_model_stopped owner)
   | E.Agent_core_stream_ping
   | E.Agent_core_content_block_start _
   | E.Agent_core_content_block_stop _ -> None
-  | E.Agent_core_thinking_delta { delta; _ } -> Some (Live.Thinking delta)
+  | E.Agent_core_thinking_delta { delta; response; _ } -> Some (Live.Thinking {text=delta;response})
   | E.Agent_core_thinking_signature_delta _ | E.Agent_core_media_delta _ -> None
   | E.Agent_core_stream_protocol_error error ->
     Some

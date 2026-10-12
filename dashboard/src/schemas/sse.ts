@@ -219,7 +219,7 @@ const KEEPER_CHAT_AG_UI_FIELDS_BY_TYPE = new Map<string, ReadonlySet<string>>([
   ['RUN_FINISHED', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId'])],
   ['RUN_ERROR', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'message', 'code'])],
   ['TEXT_MESSAGE_START', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'role'])],
-  ['TEXT_MESSAGE_CONTENT', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'delta', 'textStreamScope'])],
+  ['TEXT_MESSAGE_CONTENT', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'delta', 'textStreamScope', 'textResponse'])],
   ['TEXT_MESSAGE_END', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId'])],
   ['TOOL_CALL_START', new Set([
     ...KEEPER_CHAT_AG_UI_BASE_FIELDS,
@@ -555,13 +555,14 @@ function validateKeeperCustomPayload(
 ): SafeParseResult<true> {
   if ([
     'KEEPER_CONNECTED',
-    'KEEPER_STREAM_MESSAGE_STOP',
     'KEEPER_STREAM_PING',
   ].includes(name)) {
     return payload === null
       ? ok(true)
       : fail('ag_ui_event.value', `Expected null ${name} payload`)
   }
+
+  if (name === 'KEEPER_STREAM_MESSAGE_STOP' && payload === null) return ok(true)
 
   if (name === 'KEEPER_RUNTIME_ATTEMPT_STARTED' && payload === null) {
     return ok(true)
@@ -601,7 +602,7 @@ function validateKeeperCustomPayload(
   const allowedFields: Record<KeeperChatCustomEventName, readonly string[]> = {
     KEEPER_CONNECTED: [],
     KEEPER_RUNTIME_ATTEMPT_STARTED: ['runtime_id', 'attempt_index'],
-    KEEPER_STREAM_MESSAGE_STOP: [],
+    KEEPER_STREAM_MESSAGE_STOP: ['content_generation', 'stream_scope'],
     KEEPER_STREAM_PING: [],
     KEEPER_EXTERNAL_EFFECT_COMPLETED: ['target'],
     KEEPER_CHAT_OPERATION_ACCEPTED: ['operation_id', 'state', 'queued_count', 'interactive'],
@@ -614,8 +615,8 @@ function validateKeeperCustomPayload(
       'because',
     ],
     KEEPER_TOOL_APPROVAL_SETTLED: ['tool_call_id', 'outcome'],
-    KEEPER_STREAM_MESSAGE_START: ['stream_scope', 'provider_message_id', 'model', 'usage'],
-    KEEPER_STREAM_MESSAGE_DELTA: ['stream_scope', 'stop_reason', 'usage'],
+    KEEPER_STREAM_MESSAGE_START: ['content_generation', 'stream_scope', 'provider_message_id', 'model', 'usage'],
+    KEEPER_STREAM_MESSAGE_DELTA: ['content_generation', 'stream_scope', 'stop_reason', 'usage'],
     KEEPER_CONTENT_BLOCK_START: ['index', 'content_type', 'tool_call_id', 'tool_call_name'],
     KEEPER_CONTENT_BLOCK_STOP: ['index'],
     KEEPER_NATIVE_TOOL_START: [
@@ -630,7 +631,7 @@ function validateKeeperCustomPayload(
     KEEPER_MODEL_CONTENT_ACTIVITY: [
       'generation', 'stream_scope', 'block_index', 'provider_message_id', 'channel', 'state',
     ],
-    KEEPER_THINKING_DELTA: ['index', 'delta'],
+    KEEPER_THINKING_DELTA: ['index', 'delta', 'response'],
     KEEPER_THINKING_SIGNATURE_DELTA: ['index', 'signature_bytes'],
     KEEPER_MEDIA_DELTA: ['index', 'media_type', 'source_type', 'media_ref'],
     KEEPER_STREAM_PROTOCOL_ERROR: [
@@ -671,6 +672,10 @@ function validateKeeperCustomPayload(
       return observation.success ? validateNativeToolProgress(value.progress) : observation
     }
     case 'KEEPER_STREAM_MESSAGE_START': {
+      if (value.content_generation !== undefined) {
+        const generation = requiredInteger(value, 'content_generation')
+        if (!generation.success) return generation
+      }
       const scope = requiredInteger(value, 'stream_scope')
       if (!scope.success) return scope
       const provider = requiredString(value, 'provider_message_id')
@@ -680,6 +685,10 @@ function validateKeeperCustomPayload(
       return value.usage === undefined ? ok(true) : validateUsage(value.usage)
     }
     case 'KEEPER_STREAM_MESSAGE_DELTA': {
+      if (value.content_generation !== undefined) {
+        const generation = requiredInteger(value, 'content_generation', 0)
+        if (!generation.success) return generation
+      }
       const scope = requiredInteger(value, 'stream_scope')
       if (!scope.success) return scope
       const stopReason = optionalString(value, 'stop_reason')
@@ -762,7 +771,10 @@ function validateKeeperCustomPayload(
       return ok(true)
     }
     case 'KEEPER_CONNECTED':
-    case 'KEEPER_STREAM_MESSAGE_STOP':
+    case 'KEEPER_STREAM_MESSAGE_STOP': {
+      const generation = requiredInteger(value, 'content_generation', 0)
+      return generation.success ? requiredInteger(value, 'stream_scope', 0) : generation
+    }
     case 'KEEPER_STREAM_PING':
       // Answered above, before the field map: these carry a null payload.
       // Listed so the switch stays total. The nested-shape event is narrowed
@@ -774,6 +786,14 @@ function validateKeeperCustomPayload(
       return value.attempt_index === undefined ? ok(true) : requiredInteger(value, 'attempt_index', 0)
     }
     case 'KEEPER_THINKING_DELTA': {
+      if (value.response !== undefined) {
+        const owner = exactCustomObject(value.response, 'response', ['content_generation', 'stream_scope'])
+        if (!owner.success) return owner
+        const generation = requiredInteger(owner.data, 'content_generation', 0)
+        if (!generation.success) return generation
+        const scope = requiredInteger(owner.data, 'stream_scope', 0)
+        if (!scope.success) return scope
+      }
       const index = requiredInteger(value, 'index')
       return index.success ? requiredString(value, 'delta') : index
     }
@@ -900,6 +920,15 @@ function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseR
         ? ok(true)
         : fail('ag_ui_event.role', 'Expected assistant or user AG-UI role')
     case 'TEXT_MESSAGE_CONTENT':
+      if ('textResponse' in value) {
+        if ('textStreamScope' in value) return fail('ag_ui_event.textResponse', 'Conflicting text ownership fields')
+        const owner = exactCustomObject(value.textResponse, 'textResponse', ['content_generation', 'stream_scope'])
+        if (!owner.success) return owner
+        const generation = requiredInteger(owner.data, 'content_generation', 0)
+        if (!generation.success) return generation
+        const scope = requiredInteger(owner.data, 'stream_scope', 0)
+        if (!scope.success) return scope
+      }
       if ('textStreamScope' in value && (
         typeof value.textStreamScope !== 'number'
         || !Number.isSafeInteger(value.textStreamScope)

@@ -104,12 +104,6 @@ val take_newest_for_keeper : t -> keeper_name:string -> (item * t) option
     Keeper's items in their original positions. Chat-pane cancel/edit uses
     this rather than acting on a workspace-global queue. *)
 
-val drop_for_keeper : t -> keeper_name:string -> t
-(** Forget what was waiting for one keeper. Used when that keeper is gone: a
-    line cannot be delivered to a keeper that is no longer registered, and
-    holding it forever would make the count say work is pending that never
-    moves. *)
-
 val take : t -> request_id:string -> (item * t) option
 (** Take one named request out, keeping the rest in order. What an edit does
     to the line it replaces: the original leaves the queue in the same step

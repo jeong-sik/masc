@@ -1,3 +1,9 @@
+type response_identity = Ag_ui.response_identity = { response_generation : int; response_scope : int }
+
+type text_response = Ag_ui.text_response =
+  | Unobserved_scope of int option
+  | Observed_response of response_identity
+
 type role = User | Assistant
 
 type stream_protocol_error_kind =
@@ -82,7 +88,7 @@ type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
   | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
   | Text_message_start of { message_id : string; role : role }
-  | Text_delta of { text : string; stream_scope : int option }
+  | Text_delta of { text : string; response : text_response }
   | Text_message_end
   | External_effect_completed of
       { target : Keeper_surface_post.delivery_target }
@@ -96,17 +102,19 @@ type keeper_chat_event =
       ; attempt_index : int option
       }
   | Agent_core_stream_message_start of
-      { stream_scope : int
+      { content_generation : int option
+      ; stream_scope : int
       ; provider_message_id : string
       ; model : string
       ; usage : Agent_core.Types.api_usage option
       }
   | Agent_core_stream_message_delta of
-      { stream_scope : int
+      { content_generation : int option
+      ; stream_scope : int
       ; stop_reason : Agent_core.Types.stop_reason option
       ; usage : Agent_core.Types.delta_usage option
       }
-  | Agent_core_stream_message_stop
+  | Agent_core_stream_message_stop of response_identity option
   | Agent_core_stream_ping
   | Agent_core_content_block_start of
       { index : int
@@ -116,7 +124,7 @@ type keeper_chat_event =
       }
   | Agent_core_content_block_stop of { index : int }
   | Model_content_activity of model_content_activity
-  | Agent_core_thinking_delta of { index : int; delta : string }
+  | Agent_core_thinking_delta of { index : int; delta : string; response : response_identity option }
   | Agent_core_thinking_signature_delta of { index : int; signature_bytes : int }
   | Agent_core_media_delta of
       { index : int
@@ -221,7 +229,7 @@ let redact_content ~redact_text = function
   | (Run_started _ | Batch_bound _ | Text_message_start _ | Text_message_end
     | External_effect_completed _ | Run_finished _ | Agent_core_stream_connected
     | Agent_core_runtime_attempt_started _ | Agent_core_stream_message_start _
-    | Agent_core_stream_message_delta _ | Agent_core_stream_message_stop
+    | Agent_core_stream_message_delta _ | Agent_core_stream_message_stop _
     | Agent_core_stream_ping | Agent_core_content_block_start _
     | Agent_core_content_block_stop _ | Model_content_activity _
     | Agent_core_thinking_signature_delta _ | Tool_call_start _ | Tool_call_end _
@@ -589,3 +597,50 @@ let model_content_activity_of_json json =
       Ok {content_generation; content_scope=stream_scope; content_index=block_index; content_provider_message_id=provider_message_id; channel; state}
   | _ -> error "expected object"
 ;;
+
+let response_identity_to_json owner =
+  `Assoc ["content_generation", `Int owner.response_generation;
+          "stream_scope", `Int owner.response_scope]
+
+let response_identity_of_json = function
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    if List.sort String.compare keys <> ["content_generation"; "stream_scope"] then
+      Error "response identity requires exactly content_generation and stream_scope"
+    else
+      let ( let* ) = Result.bind in
+      let index key = match List.assoc_opt key fields with
+        | Some json ->
+          (match Runtime_json_integer.of_json json with
+           | Ok n when n >= 0 -> Ok n
+           | Ok _ | Error _ -> Error (key ^ " must be a nonnegative safe integer"))
+        | None -> Error ("missing " ^ key) in
+      let* response_generation = index "content_generation" in
+      let* response_scope = index "stream_scope" in
+      Ok {response_generation; response_scope}
+  | _ -> Error "response identity must be an object"
+
+let optional_response_identity_of_fields fields =
+  match List.filter (fun (key, _) -> key = "response") fields with
+  | [] -> Ok None
+  | [(_, value)] -> Result.map (fun owner -> Some owner) (response_identity_of_json value)
+  | _ -> Error "duplicate response identity"
+
+let text_response_of_fields ~owner_field ~scope_field fields =
+  let owners = List.filter (fun (key, _) -> key = owner_field) fields in
+  let scopes = List.filter (fun (key, _) -> key = scope_field) fields in
+  match owners, scopes with
+  | [], [] -> Ok (Unobserved_scope None)
+  | [(_, value)], [] -> Result.map (fun owner -> Observed_response owner) (response_identity_of_json value)
+  | [], [(_, value)] ->
+    (* A scope is a JSON integer on the wire; an integral float is malformed
+       here even when it names a safe value, so it must not downgrade to an
+       unknown or accepted scope. The integer decoder still enforces the
+       safe-integer range once the shape is established. *)
+    (match value with
+     | `Int _ ->
+       (match Runtime_json_integer.of_json value with
+        | Ok scope when scope >= 0 -> Ok (Unobserved_scope (Some scope))
+        | Ok _ | Error _ -> Error "text scope must be a nonnegative safe integer")
+     | _ -> Error "text scope must be a nonnegative safe integer")
+  | _ -> Error "text response has conflicting or duplicate ownership fields"

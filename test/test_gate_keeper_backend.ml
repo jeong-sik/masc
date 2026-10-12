@@ -1113,7 +1113,7 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
       ]
   in
   match events with
-  | [ Keeper_chat_events.Agent_core_thinking_delta { index = first_index; delta = first };
+  | [ Keeper_chat_events.Agent_core_thinking_delta {response=_; index = first_index; delta = first };
       Keeper_chat_events.Model_content_activity
         {content_index=0; channel=Model_thinking; state=Content_observed; _};
       Keeper_chat_events.Agent_core_content_block_start
@@ -1127,7 +1127,7 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
         { tool_call_id = snapshot_id; snapshot; _ };
       Keeper_chat_events.Agent_core_content_block_stop { index = stop_index };
       Keeper_chat_events.Tool_call_end { tool_call_id = end_id; _ };
-      Keeper_chat_events.Agent_core_thinking_delta { index = last_index; delta = last };
+      Keeper_chat_events.Agent_core_thinking_delta {response=_; index = last_index; delta = last };
       Keeper_chat_events.Model_content_activity
         {content_index=2; channel=Model_thinking; state=Content_observed; _} ] ->
       check int "first thinking index" 0 first_index;
@@ -1184,7 +1184,7 @@ let test_keeper_stream_bridge_projects_reasoning_details_delta () =
       ]
   in
   match events with
-  | [ Keeper_chat_events.Agent_core_thinking_delta { index; delta };
+  | [ Keeper_chat_events.Agent_core_thinking_delta {response=_; index; delta };
       Keeper_chat_events.Model_content_activity
         {content_index=0; channel=Model_thinking; state=Content_observed; _} ] ->
       check int "reasoning details index" 0 index;
@@ -1220,7 +1220,7 @@ let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
       ]
   in
   match events with
-  | [ Keeper_chat_events.Agent_core_thinking_delta { index = first_index; delta = first };
+  | [ Keeper_chat_events.Agent_core_thinking_delta {response=_; index = first_index; delta = first };
       Keeper_chat_events.Model_content_activity
         {content_index=0; channel=Model_thinking; state=Content_observed; _};
       Keeper_chat_events.Agent_core_content_block_start
@@ -1235,7 +1235,7 @@ let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
         { tool_call_id = snapshot_id_b; snapshot = snapshot_b; _ };
       Keeper_chat_events.Agent_core_content_block_stop { index = stop_index };
       Keeper_chat_events.Tool_call_end { tool_call_id = end_id; _ };
-      Keeper_chat_events.Agent_core_thinking_delta { index = last_index; delta = last };
+      Keeper_chat_events.Agent_core_thinking_delta {response=_; index = last_index; delta = last };
       Keeper_chat_events.Model_content_activity
         {content_index=2; channel=Model_thinking; state=Content_observed; _} ] ->
       check int "first thinking index" 0 first_index;
@@ -2262,8 +2262,8 @@ let test_keeper_stream_bridge_text_delta_passthrough_incremental () =
     (stream_text_deltas events);
   check (list (option int)) "bridge stamps its allocated scope on every text chunk"
     [Some 0; Some 0; Some 0; Some 0]
-    (List.filter_map (function Keeper_chat_events.Text_delta {stream_scope; _} ->
-       Some stream_scope | _ -> None) events)
+    (List.filter_map (function Keeper_chat_events.Text_delta {response; _} ->
+       Some (match response with Observed_response owner -> Some owner.response_scope | Unobserved_scope scope -> scope) | _ -> None) events)
 
 let test_keeper_stream_pipeline_reconciles_cumulative_snapshot_once () =
   let open Agent_core.Types in
@@ -2461,10 +2461,10 @@ let test_keeper_stream_bridge_surfaces_agent_core_message_metadata () =
   in
   match events with
   | [ Keeper_chat_events.Agent_core_stream_message_start
-        { stream_scope = 0; provider_message_id; model; usage = Some start_usage };
+        { content_generation=Some 0; stream_scope = 0; provider_message_id; model; usage = Some start_usage };
       Keeper_chat_events.Agent_core_stream_message_delta
-        { stream_scope = 0; stop_reason = Some stop_reason; usage = Some delta_usage };
-      Keeper_chat_events.Agent_core_stream_message_stop;
+        {content_generation=Some 0; stream_scope = 0; stop_reason = Some stop_reason; usage = Some delta_usage };
+      Keeper_chat_events.Agent_core_stream_message_stop (Some {response_generation=0; response_scope=0});
       Keeper_chat_events.Agent_core_stream_ping ] ->
       check string "provider message id" "msg-agent_core-1" provider_message_id;
       check string "model" "gpt-5.5" model;
@@ -3269,7 +3269,7 @@ let test_keeper_stream_bridge_cut_stream_is_diagnosed_once () =
                  events
                && List.exists
                     (function
-                      | Keeper_chat_events.Agent_core_stream_message_stop -> true
+                      | Keeper_chat_events.Agent_core_stream_message_stop _ -> true
                       | _ -> false)
                     events);
             let after_terminal =

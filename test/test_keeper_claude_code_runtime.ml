@@ -1713,7 +1713,7 @@ let test_root_heartbeat_reaches_scoped_journal_and_tui ?(retry = false) () =
       let read_journal () = match J.read_journal_path_result journal_path with
         | Ok lines -> lines | Error _ -> fail "heartbeat journal unreadable" in
       let fragments events = List.filter_map (function
-        | E.Text_delta {text=value; stream_scope=None} | E.Agent_core_thinking_delta {delta=value;_} -> Some value
+        | E.Text_delta {text=value; response=Unobserved_scope (None)} | E.Agent_core_thinking_delta {delta=value;_} -> Some value
         | _ -> None) events in
       let failures = ref [] and reports = ref 0 in
       let verify f = try f () with

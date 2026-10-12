@@ -6696,14 +6696,11 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   end
 
 let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~mailbox ~keeper_name =
-  let eligible = server_authority_ready state
-     && state.workspace_identity = Workspace_identity_match
-     && keeper_available_for_new_message state keeper_name in
-  if eligible && mode=Masc_tui_native_tasks.Audit
-     && List.mem keeper_name state.msg_native_tasks_inflight
+  let eligible = server_authority_ready state in
+  if mode=Masc_tui_native_tasks.Audit
      && not (List.mem keeper_name state.msg_native_tasks_audit_pending) then
     state.msg_native_tasks_audit_pending <- keeper_name :: state.msg_native_tasks_audit_pending;
-  if eligible && not (List.mem keeper_name state.msg_native_tasks_inflight) then begin
+  if eligible && not (List.mem_assoc keeper_name state.msg_native_tasks_inflight) then begin
     let mode = if List.mem keeper_name state.msg_native_tasks_audit_pending
       then Masc_tui_native_tasks.Audit else mode in
     state.msg_native_tasks_audit_pending <-
@@ -6714,25 +6711,74 @@ let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~ma
     let host = server_peer_host and port = state.port in
     let previous = Option.value ~default:Masc_tui_native_tasks.empty
         (List.assoc_opt keeper_name state.msg_native_tasks) in
-    state.msg_native_tasks_inflight <- keeper_name :: state.msg_native_tasks_inflight;
+    state.msg_native_tasks_inflight <- (keeper_name,mode) :: state.msg_native_tasks_inflight;
+    let read_authority = state.workspace_read_authority in
     Masc_tui_async_read.launch_with
       ~boundary_error:(fun detail -> Masc_tui_native_tasks.Transport detail)
       ~deliver:(fun result -> enqueue_async mailbox (Keeper_native_tasks_loaded (keeper_name,result)))
       (fun () -> Masc_tui_native_tasks.read ~mode ~keeper_name ~previous
         ~fetch:(fun path ->
           let ( let* ) = Result.bind in
+          let* () = if read_authority == state.workspace_read_authority then Ok ()
+            else Error "workspace observation read was retired" in
           let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
           let result = Masc_tui_http.http_get ~host ~port ~path in
+          let* () = if read_authority == state.workspace_read_authority then Ok ()
+            else Error "workspace observation read was retired" in
           let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          result))
+  end
+
+let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~mailbox ~keeper_name =
+  (* Reading retained server observations does not submit a message or use
+     local attachment paths. Remote/missing roster rows are not a refusal. *)
+  let eligible = server_authority_ready state in
+  (* An explicit Audit is retained intent even while reading is unconfirmed;
+     it does not authorize an HTTP request. Workspace withdrawal clears it. *)
+  let audit_running = match List.assoc_opt keeper_name state.msg_child_content_inflight with
+    | Some Masc_tui_child_content.Audit -> true
+    | None | Some Masc_tui_child_content.Poll -> false in
+  if mode=Masc_tui_child_content.Audit && not audit_running
+     && not (List.mem keeper_name state.msg_child_content_audit_pending) then
+    state.msg_child_content_audit_pending <- keeper_name :: state.msg_child_content_audit_pending;
+  if eligible && not (List.mem_assoc keeper_name state.msg_child_content_inflight) then begin
+    let mode = if List.mem keeper_name state.msg_child_content_audit_pending
+      then Masc_tui_child_content.Audit else mode in
+    state.msg_child_content_audit_pending <-
+      List.filter ((<>) keeper_name) state.msg_child_content_audit_pending;
+    let enqueue_async = workspace_enqueue state in
+    let authority = state.workspace_authority in
+    let identity = state.server_identity in
+    let reading = state.workspace_read_authority in
+    let host = server_peer_host and port = state.port in
+    let previous = Option.value ~default:Masc_tui_child_content.empty
+        (List.assoc_opt keeper_name state.msg_child_content) in
+    state.msg_child_content_inflight <- (keeper_name,mode) :: state.msg_child_content_inflight;
+    Masc_tui_async_read.launch_with
+      ~boundary_error:(fun detail -> Masc_tui_child_content.Transport detail)
+      ~deliver:(fun result -> enqueue_async mailbox (Keeper_child_content_loaded (keeper_name,result)))
+      (fun () -> Masc_tui_child_content.read ~mode ~keeper_name ~previous
+        ~fetch:(fun path ->
+          let ( let* ) = Result.bind in
+          let check () =
+            if reading != state.workspace_read_authority then
+              Error "Child observation read was retired"
+            else check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          let* () = check () in
+          let result = Masc_tui_http.http_get ~host ~port ~path in
+          let* () = check () in
           result))
   end
 
 let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) state ~mailbox
     ~keeper_name =
-  if server_authority_ready state then begin
+  launch_keeper_child_content_load
+    ~mode:(if force then Masc_tui_child_content.Audit else Masc_tui_child_content.Poll)
+    state ~mailbox ~keeper_name;
   launch_keeper_native_tasks_load
     ~mode:(if force then Masc_tui_native_tasks.Audit else Masc_tui_native_tasks.Poll)
     state ~mailbox ~keeper_name;
+  if server_authority_ready state then begin
   let identity = state.server_identity in
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
@@ -8355,31 +8401,11 @@ let drain_queued_message state ~base_path ~mailbox =
             queue_run_next_on_admission state request;
           launch_keeper_request ~promoted:item state ~mailbox request;
           next ())
-        else (
-          (* The keeper this was written to is no longer registered. Sending it
-             would fail; holding it would leave a count reporting work that
-             never moves. Say what is being let go, and let it go. *)
-          let dropped =
-            Chat_queue.waiting state.msg_queued
-            |> List.filter (fun item ->
-                   String.equal item.Chat_queue.request.Keeper_chat.keeper_name
-                     keeper_name)
-          in
-          let before = Chat_queue.length state.msg_queued in
-          state.msg_queued <-
-            Chat_queue.drop_for_keeper state.msg_queued ~keeper_name;
-          (* Their rows go with them: a line left in the conversation for a
-             keeper that will never receive it reads as sent. *)
-          List.iter
-            (fun item -> forget_queued_history state item.Chat_queue.request)
-            dropped;
-          add_event state "error"
-            (Printf.sprintf
-               "Keeper %s is no longer registered; %d queued message(s) for it \
-                were not sent"
-               (Keeper_chat.terminal_safe_text keeper_name)
-               (before - Chat_queue.length state.msg_queued));
-          next ())
+        else
+          (* Availability is an observation, not operator cancellation. The
+             queue still owns the original request until dispatch or explicit
+             edit/cancel; no receipt exists that would authorize its removal. *)
+          ()
   in
   if state.workspace_identity = Workspace_identity_match
      && Option.is_none state.keepers_error then begin
@@ -11654,6 +11680,9 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.msg_native_tasks <- [];
   state.msg_native_tasks_inflight <- [];
   state.msg_native_tasks_audit_pending <- [];
+  state.msg_child_content <- [];
+  state.msg_child_content_inflight <- [];
+  state.msg_child_content_audit_pending <- [];
   state.msg_journal_wanted <- [];
   state.msg_journal_unavailable <- [];
   state.msg_journal_reads_refused <- false;
@@ -12412,7 +12441,9 @@ let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs
   (* Independent task observations continue while reading older chat rows.
      Root-turn settlement and history scroll do not own their lifecycle. *)
   (if needs.Masc_tui_types.needs_keeper_chat then
-     Option.iter (fun keeper_name -> launch_keeper_native_tasks_load state ~mailbox ~keeper_name)
+     Option.iter (fun keeper_name ->
+         launch_keeper_native_tasks_load state ~mailbox ~keeper_name;
+         launch_keeper_child_content_load state ~mailbox ~keeper_name)
        state.msg_target_keeper_name);
   (* The chat pane's history comes down its own generation-guarded path, not
      in the surface bundle, so the tick asks for it here. Without this the
@@ -17886,7 +17917,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           (Result.map Option.some operation_state))
         (settled_log_for_request state ~keeper_name operation_id)
   | Keeper_native_tasks_loaded (keeper_name,result) ->
-      state.msg_native_tasks_inflight <- List.filter ((<>) keeper_name) state.msg_native_tasks_inflight;
+      state.msg_native_tasks_inflight <- List.filter (fun (name,_) -> name <> keeper_name) state.msg_native_tasks_inflight;
       let previous = Option.value ~default:Masc_tui_native_tasks.empty
           (List.assoc_opt keeper_name state.msg_native_tasks) in
       let tasks = match result with
@@ -17895,6 +17926,16 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       state.msg_native_tasks <- (keeper_name,tasks) :: List.remove_assoc keeper_name state.msg_native_tasks;
       if List.mem keeper_name state.msg_native_tasks_audit_pending then
         launch_keeper_native_tasks_load ~mode:Masc_tui_native_tasks.Audit state ~mailbox ~keeper_name
+  | Keeper_child_content_loaded (keeper_name,result) ->
+      state.msg_child_content_inflight <- List.remove_assoc keeper_name state.msg_child_content_inflight;
+      let previous = Option.value ~default:Masc_tui_child_content.empty
+          (List.assoc_opt keeper_name state.msg_child_content) in
+      let snapshots = match result with
+        | Ok snapshots -> snapshots
+        | Error error -> Masc_tui_child_content.failed previous error in
+      state.msg_child_content <- (keeper_name,snapshots) :: List.remove_assoc keeper_name state.msg_child_content;
+      if List.mem keeper_name state.msg_child_content_audit_pending then
+        launch_keeper_child_content_load ~mode:Masc_tui_child_content.Audit state ~mailbox ~keeper_name
   | Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state; terminal_replay } -> (
       let journal_id = Keeper_chat_log.source_key source in
       (* Not generation-guarded: a journal is the turn's record whichever
@@ -18712,7 +18753,22 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       (match state.workspace_identity with
        | Masc_tui_types.Workspace_identity_match
          when String.equal base_path state.local_base_path ->
-           Masc_tui_loader.apply_local_workspace state base_path reading
+           let queued_keepers =
+             Chat_queue.waiting state.msg_queued
+             |> List.map (fun (item : Chat_queue.item) -> item.request.keeper_name)
+             |> List.sort_uniq String.compare
+           in
+           let was_unavailable =
+             List.filter
+               (fun keeper_name -> not (keeper_available_for_new_message state keeper_name))
+               queued_keepers
+           in
+           Masc_tui_loader.apply_local_workspace state base_path reading;
+           (* A keeper this queue waits on may have come back with the
+              reading. Without a drain its retained line sits until an
+              unrelated action; with one it goes now that it is sendable. *)
+           if List.exists (keeper_available_for_new_message state) was_unavailable then
+             drain_queued_message state ~base_path ~mailbox
        | Masc_tui_types.Workspace_identity_match
        | Masc_tui_types.Workspace_identity_unread
        | Masc_tui_types.Workspace_identity_match_unconfirmed _

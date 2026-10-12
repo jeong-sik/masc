@@ -76,7 +76,8 @@ type delta =
       (** New resolved-runtime attempt: discard unfinished text/thinking from
           the prior attempt while retaining tool evidence. *)
   | Stream_model_started of
-      { message_id : string option
+      { generation : int option
+      ; message_id : string option
       ; stream_scope : int option
       ; model : string
       ; usage : stream_usage option
@@ -87,10 +88,13 @@ type delta =
   | Model_content_activity of Masc.Keeper_chat_events.model_content_activity
       (** Exact run generation/scope/index metadata, separate from body bytes.
           Ended closes only the named Text/Thinking occurrence. *)
-  | Stream_model_stopped
+  | Stream_model_stopped of Masc.Keeper_chat_events.response_identity option
       (** The provider response ended; the Keeper turn may still be running. *)
+  (** Supplied response generation; None means no generation was observed.
+      Owned details require a scope and cannot overwrite newer response facts. *)
   | Stream_details of
-      { stream_scope : int option
+      { generation : int option
+      ; stream_scope : int option
       ; usage : stream_usage option
       ; stop_reason : Agent_core.Types.stop_reason option
       }
@@ -100,8 +104,9 @@ type delta =
           them as one record ([dashboard/src/keeper-stream.ts]
           KEEPER_STREAM_MESSAGE_DELTA), so they arrive together here too. At
           least one of the two is present. *)
-  | Text of {text : string; stream_scope : int option}  (** Assistant text to append. *)
-  | Thinking of string  (** Reasoning text to append. *)
+  | Text of {text : string; response : Masc.Keeper_chat_events.text_response}  (** Assistant text to append. *)
+  | Thinking of {text : string; response : Masc.Keeper_chat_events.response_identity option}  (** Supplied reasoning bytes and their observed response identity. None
+          preserves unbound bytes without granting response ownership. *)
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }
   | Native_tool_progress of

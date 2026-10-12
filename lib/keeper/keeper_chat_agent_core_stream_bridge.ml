@@ -886,7 +886,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       in
       let message_start =
         Agent_core_stream_message_start
-          { stream_scope; provider_message_id = id; model; usage }
+          { content_generation=Some bridge_state.content_generation; stream_scope; provider_message_id = id; model; usage }
       in
       if bridge_state.stream_phase <> Accepting_content
       then
@@ -917,7 +917,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
         poison_scope bridge_state ~kind:Tool_message_start_conflict
           ~reason:"conflicting MessageStart invalidated the provider stream scope"
   | MessageDelta { stop_reason; usage } ->
-      let message_delta = Agent_core_stream_message_delta { stream_scope; stop_reason; usage } in
+      let message_delta = Agent_core_stream_message_delta { content_generation=Some bridge_state.content_generation; stream_scope; stop_reason; usage } in
       (match bridge_state.stream_phase, stop_reason with
        | Accepting_content, None ->
          { bridge_state; chat_events = [ message_delta ] }
@@ -941,7 +941,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
   | MessageStop ->
       (match bridge_state.stream_phase with
        | Message_stopped ->
-         { bridge_state; chat_events = [ Agent_core_stream_message_stop ] }
+         { bridge_state; chat_events = [ Agent_core_stream_message_stop (Some { response_generation = bridge_state.content_generation; response_scope = stream_scope }) ] }
        | Accepting_content | Stop_reason_seen _ ->
          let closed = close_open_content_blocks ~redact_text ~base_dir bridge_state in
          { bridge_state =
@@ -953,7 +953,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
              ; last_completed_stream_scope = bridge_state.current_stream_scope
              ; message_open = false
              }
-         ; chat_events = closed.chat_events @ [ Agent_core_stream_message_stop ]
+         ; chat_events = closed.chat_events @ [ Agent_core_stream_message_stop (Some { response_generation = bridge_state.content_generation; response_scope = stream_scope }) ]
          })
   | Ping ->
       { bridge_state; chat_events = [ Agent_core_stream_ping ] }
@@ -987,7 +987,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
           bridge_state.current_message_has_text || text <> ""} in
         let text = redact_text text in
         observe_model_content bridge_state ~stream_scope ~index ~channel:Public_text
-          text [Text_delta {text; stream_scope=Some stream_scope}])
+          text [Text_delta {text; response=Observed_response {response_generation=bridge_state.content_generation;response_scope=stream_scope}}])
   | ContentBlockDelta { index; delta = ThinkingDelta text } ->
       (match
          reject_non_input_tool_delta ~stream_scope ~index ~delta_kind:"thinking"
@@ -998,7 +998,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
          let bridge_state = occupy_non_tool_index ~channel:Provider_reasoning bridge_state index in
          let text = redact_text text in
          observe_model_content bridge_state ~stream_scope ~index ~channel:Provider_reasoning
-           text [Agent_core_thinking_delta {index; delta=text}])
+           text [Agent_core_thinking_delta {index; delta=text; response=Some {response_generation=bridge_state.content_generation;response_scope=stream_scope}}])
   | ContentBlockDelta
       { index; delta = ReasoningDetailsDelta { reasoning_content; details } } ->
       (* MiniMax split-reasoning stream (#2347): project the reasoning payload
@@ -1016,7 +1016,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
          in
          let text = redact_text text in
          observe_model_content bridge_state ~stream_scope ~index ~channel:Provider_reasoning
-           text [Agent_core_thinking_delta {index; delta=text}])
+           text [Agent_core_thinking_delta {index; delta=text; response=Some {response_generation=bridge_state.content_generation;response_scope=stream_scope}}])
   | ContentBlockDelta { index; delta = RedactedThinkingSnapshot _ } ->
       (match
          reject_non_input_tool_delta ~stream_scope ~index

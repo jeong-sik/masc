@@ -203,6 +203,7 @@ type KeeperChatCustomEvent =
       type: 'CUSTOM'
       name: 'KEEPER_STREAM_MESSAGE_START'
       value: {
+        content_generation?: number
         stream_scope: number
         provider_message_id?: string
         model?: string
@@ -212,9 +213,9 @@ type KeeperChatCustomEvent =
   | {
       type: 'CUSTOM'
       name: 'KEEPER_STREAM_MESSAGE_DELTA'
-      value: { stream_scope: number; stop_reason?: string; usage?: KeeperStreamDeltaUsage }
+      value: { content_generation?: number; stream_scope: number; stop_reason?: string; usage?: KeeperStreamDeltaUsage }
     }
-  | { type: 'CUSTOM'; name: 'KEEPER_STREAM_MESSAGE_STOP'; value: null }
+  | { type: 'CUSTOM'; name: 'KEEPER_STREAM_MESSAGE_STOP'; value: null | { content_generation: number; stream_scope: number } }
   | { type: 'CUSTOM'; name: 'KEEPER_STREAM_PING'; value: null }
   | { type: 'CUSTOM'; name: 'KEEPER_NATIVE_TOOL_START'; value: KeeperNativeToolObservation }
   | {
@@ -248,7 +249,7 @@ type KeeperChatCustomEvent =
   | {
       type: 'CUSTOM'
       name: 'KEEPER_THINKING_DELTA'
-      value: { index?: number; delta?: string }
+      value: { index?: number; delta?: string; response?: { content_generation: number; stream_scope: number } }
     }
   | {
       type: 'CUSTOM'
@@ -317,7 +318,10 @@ export type KeeperChatStreamEvent = KeeperChatStreamEventBase & (
   | { type: 'RUN_STARTED' | 'RUN_FINISHED' }
   | { type: 'RUN_ERROR'; message?: string; code?: string }
   | { type: 'TEXT_MESSAGE_START'; messageId?: string; role?: 'assistant' | 'user' }
-  | { type: 'TEXT_MESSAGE_CONTENT'; messageId?: string; delta?: string; textStreamScope?: number }
+  | ({ type: 'TEXT_MESSAGE_CONTENT'; messageId?: string; delta?: string } & (
+      | { textResponse: { content_generation: number; stream_scope: number }; textStreamScope?: never }
+      | { textStreamScope?: number; textResponse?: never }
+    ))
   | { type: 'TEXT_MESSAGE_END'; messageId?: string }
   | (KeeperToolStreamOccurrence & { type: 'TOOL_CALL_START'; toolCallName?: string })
   | (KeeperToolStreamOccurrence & { type: 'TOOL_CALL_ARGS'; delta?: string; snapshot?: string })

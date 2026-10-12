@@ -809,7 +809,7 @@ let known_custom_names =
 
 let null_custom_names =
   [ "KEEPER_CONNECTED"
-  ; "KEEPER_STREAM_MESSAGE_STOP"; "KEEPER_STREAM_PING"
+  ; "KEEPER_STREAM_PING"
   ]
 
 let validate_custom_value ~name value =
@@ -819,6 +819,12 @@ let validate_custom_value ~name value =
     Masc.Keeper_chat_events.model_content_activity_of_json value
     |> Result.map (fun _ -> ())
     |> Result.map_error (fun detail -> Malformed_event detail)
+  else if String.equal name "KEEPER_STREAM_MESSAGE_STOP" then
+    (match value with
+     | `Null -> Ok ()
+     | json -> Masc.Keeper_chat_events.response_identity_of_json json
+       |> Result.map (fun _ -> ())
+       |> Result.map_error (fun detail -> Malformed_event detail))
   else if String.equal name "KEEPER_RUNTIME_ATTEMPT_STARTED" then
     match value with
     | `Null -> Ok ()
@@ -1259,7 +1265,7 @@ let decode_data_event ~request state json =
             validate_running_fields request state ~surface
               ~allowed:
                 [ "type"; "threadId"; "timestamp"; "runId"; "messageId"
-                ; "delta"; "textStreamScope"
+                ; "delta"; "textStreamScope"; "textResponse"
                 ]
               fields
           in
@@ -1283,7 +1289,8 @@ let decode_data_event ~request state json =
               ~surface "delta" fields
             |> Result.map_error (fun detail -> Malformed_event detail)
           in
-          let* _scope = optional_nonnegative_int ~surface "textStreamScope" fields
+          let* _response = Masc.Keeper_chat_events.text_response_of_fields
+              ~owner_field:"textResponse" ~scope_field:"textStreamScope" fields
             |> Result.map_error (fun detail -> Malformed_event detail) in
           Ok state
       | "TEXT_MESSAGE_END" ->

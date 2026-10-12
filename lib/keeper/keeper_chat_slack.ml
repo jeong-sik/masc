@@ -572,14 +572,15 @@ let adapter_loop_with_transport
     if remaining > 0.0 then sleep remaining
   in
   let rec loop ~acc_text ~acc_blocks ~run_id_opt ~message_id
-      ~last_edit_time ~last_edited_text ~post_attempts_left =
+      ~last_edit_time ~last_edited_text ~post_attempts_left ~ownership =
     let continue ?(acc_text = acc_text) ?(acc_blocks = acc_blocks)
         ?(run_id_opt = run_id_opt) ?(message_id = message_id)
         ?(last_edit_time = last_edit_time)
         ?(last_edited_text = last_edited_text)
-        ?(post_attempts_left = post_attempts_left) () =
+        ?(post_attempts_left = post_attempts_left)
+        ?(ownership = ownership) () =
       loop ~acc_text ~acc_blocks ~run_id_opt ~message_id ~last_edit_time
-        ~last_edited_text ~post_attempts_left
+        ~last_edited_text ~post_attempts_left ~ownership
     in
     match Keeper_chat_events.subscribe events with
     | Keeper_chat_events.Closed ->
@@ -594,7 +595,10 @@ let adapter_loop_with_transport
        still name the work. See keeper_chat_tool_trail.mli. *)
     Keeper_chat_tool_trail.on_event !tool_trail event;
     match event with
-    | Text_delta {text; _} ->
+    | Text_delta {text; response} ->
+        (match Keeper_chat_response_ownership.admit ownership response with
+         | Keeper_chat_response_ownership.Stale -> continue ()
+         | Admitted | Preserved_unobserved ->
         let acc_text = acc_text ^ text in
         let patch_content = stream_content acc_text in
         (match streaming_transport, message_id with
@@ -642,7 +646,7 @@ let adapter_loop_with_transport
                    Retry-After is unavailable here (the HTTP client discards
                    response headers), so re-arming the plain interval is the
                    honest bound. *)
-                continue ~acc_text ~last_edit_time:(now ()) ()))
+                continue ~acc_text ~last_edit_time:(now ()) ())))
     | Text_message_end ->
         let final_content = final_stream_content acc_text in
         (match streaming_transport, message_id with
@@ -721,7 +725,9 @@ let adapter_loop_with_transport
         loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:(Some run_id)
           ~message_id:None ~last_edit_time:0.0 ~last_edited_text:""
           ~post_attempts_left:2
+          ~ownership:(Keeper_chat_response_ownership.create ())
     | Agent_core_runtime_attempt_started _ ->
+        Keeper_chat_response_ownership.retire_attempt ownership;
         continue ~acc_text:"" ()
     | Text_message_start { message_id = _; role = _ } ->
         continue ()
@@ -731,7 +737,7 @@ let adapter_loop_with_transport
     | Agent_core_stream_connected
     | Agent_core_stream_message_start _
     | Agent_core_stream_message_delta _
-    | Agent_core_stream_message_stop
+    | Agent_core_stream_message_stop _
     | Agent_core_stream_ping
     | Agent_core_content_block_start _
     | Model_content_activity _
@@ -804,6 +810,7 @@ let adapter_loop_with_transport
   in
   loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:None ~message_id:None
     ~last_edit_time:0.0 ~last_edited_text:"" ~post_attempts_left:2
+    ~ownership:(Keeper_chat_response_ownership.create ())
 
 let adapter_loop ~clock ~token ~channel ?thread_ts ~events ?base_url
     ?on_send_result () =

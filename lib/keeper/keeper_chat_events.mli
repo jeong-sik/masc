@@ -8,6 +8,12 @@
 
 (** {1 Types} *)
 
+type response_identity = Ag_ui.response_identity = { response_generation : int; response_scope : int }
+
+type text_response = Ag_ui.text_response =
+  | Unobserved_scope of int option
+  | Observed_response of response_identity
+
 type role = User | Assistant
 
 type stream_protocol_error_kind =
@@ -110,9 +116,10 @@ type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
   | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
   | Text_message_start of { message_id : string; role : role }
-  | Text_delta of { text : string; stream_scope : int option }
-      (** The producer stamps an allocated response scope when known. Synthetic
-          text and stored observations without that identity remain [None]. *)
+  | Text_delta of { text : string; response : text_response }
+      (** An observed response retains its complete captured generation/scope.
+          [Unobserved_scope] preserves only the partial evidence supplied by
+          the producer; it never grants known generation ownership. *)
   | Text_message_end
   | External_effect_completed of
       { target : Keeper_surface_post.delivery_target }
@@ -132,19 +139,24 @@ type keeper_chat_event =
           text/thinking from the prior attempt while retaining finalized and
           quarantined tool evidence. *)
   | Agent_core_stream_message_start of
-      { stream_scope : int
+      { content_generation : int option
+      ; stream_scope : int
       ; provider_message_id : string
       ; model : string
       ; usage : Agent_core.Types.api_usage option
       }
-      (** [stream_scope] is the bridge's producer-call identity, shared with
+      (** [content_generation] is the captured stream bridge generation,
+          independent of provider message IDs. Absence is unobserved ownership;
+          readers must not assign the previous content generation to it.
+          [stream_scope] is the bridge's producer-call identity, shared with
           tool occurrences and retained by an exact repeated MessageStart. *)
   | Agent_core_stream_message_delta of
-      { stream_scope : int
+      { content_generation : int option
+      ; stream_scope : int
       ; stop_reason : Agent_core.Types.stop_reason option
       ; usage : Agent_core.Types.delta_usage option
       }
-  | Agent_core_stream_message_stop
+  | Agent_core_stream_message_stop of response_identity option
   | Agent_core_stream_ping
   | Agent_core_content_block_start of
       { index : int
@@ -154,7 +166,7 @@ type keeper_chat_event =
       }
   | Agent_core_content_block_stop of { index : int }
   | Model_content_activity of model_content_activity
-  | Agent_core_thinking_delta of { index : int; delta : string }
+  | Agent_core_thinking_delta of { index : int; delta : string; response : response_identity option }
   | Agent_core_thinking_signature_delta of { index : int; signature_bytes : int }
   | Agent_core_media_delta of
       { index : int
@@ -388,3 +400,16 @@ val model_content_activity_of_json : Yojson.Safe.t -> (model_content_activity, s
     use their Run_started sequence as the content generation, so worker-local
     scope counters can restart without colliding in an appended journal. *)
 val publish_with_sequence : t -> keeper_chat_event -> int
+
+(** None on a stop means its response identity was not observed. A known identity
+    is an indivisible generation/scope pair; malformed or partial objects reject. *)
+val response_identity_to_json : response_identity -> Yojson.Safe.t
+val response_identity_of_json : Yojson.Safe.t -> (response_identity, string) result
+
+(** Absent response is explicitly unobserved; duplicate, null or malformed
+    supplied response fields reject instead of weakening ownership. *)
+val optional_response_identity_of_fields : (string * Yojson.Safe.t) list -> (response_identity option, string) result
+
+(** A complete observed response or an explicitly unobserved scope. Simultaneous
+    owner/scope wire fields, duplicate fields and invalid numeric identities reject. *)
+val text_response_of_fields : owner_field:string -> scope_field:string -> (string * Yojson.Safe.t) list -> (text_response, string) result

@@ -866,7 +866,16 @@ type msg_anchor =
 (* Search and scroll pins use the same projected history and journal rows.
    A surviving journal stretch keeps its origin when reasoning is folded or
    a final reply replaces its streamed text. *)
+type child_content_anchor = {
+  child_receiver : Masc.Keeper_child_content_read.receiver;
+  child_store_id : string;
+  child_observation_id : string;
+  child_ordinal : int;
+  child_channel : Runtime_claude_code.content_channel;
+}
+
 type chat_search_anchor =
+  | Search_child of child_content_anchor
   | Search_admission of string
       (** Full request identity: admission belongs to the input even when
           batch binding changes the execution that consumes it. *)
@@ -3364,7 +3373,7 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.Stream_model_started _
   | Masc_tui_keeper_chat_live.Stream_details _
   | Masc_tui_keeper_chat_live.Model_content_activity _
-  | Masc_tui_keeper_chat_live.Stream_model_stopped
+  | Masc_tui_keeper_chat_live.Stream_model_stopped _
   | Masc_tui_keeper_chat_live.Undecodable _ ->
       if Masc_tui_keeper_chat_log.add ~at:now turn_log.tl_log ~seq delta
       then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
@@ -7507,8 +7516,11 @@ type state = {
      arrives before the read returns does not start a second one. *)
   mutable msg_journal_inflight: journal_key list;
   mutable msg_native_tasks: (string * Masc_tui_native_tasks.t) list;
-  mutable msg_native_tasks_inflight: string list;
+  mutable msg_native_tasks_inflight: (string * Masc_tui_native_tasks.read_mode) list;
   mutable msg_native_tasks_audit_pending: string list;
+  mutable msg_child_content: (string * Masc_tui_child_content.t) list;
+  mutable msg_child_content_inflight: (string * Masc_tui_child_content.read_mode) list;
+  mutable msg_child_content_audit_pending: string list;
   (* Journal sources a stream frame named while their journal was being read,
      with the highest journal seq the frames named: the read in flight may
      have stopped short of that line, so when it lands another read starts
@@ -7670,7 +7682,22 @@ let suspend_workspace_readings state =
   state.workspace_read_authority <- ref ();
   (* Retired completions cannot release these slots. Keep observations and
      explicit audit intent for a confirmed read in the successor epoch. *)
+  List.iter (fun (keeper_name, mode) ->
+    match mode with
+    | Masc_tui_native_tasks.Poll -> ()
+    | Audit ->
+        if not (List.mem keeper_name state.msg_native_tasks_audit_pending) then
+          state.msg_native_tasks_audit_pending <- keeper_name :: state.msg_native_tasks_audit_pending)
+    state.msg_native_tasks_inflight;
   state.msg_native_tasks_inflight <- [];
+  List.iter (fun (keeper_name, mode) ->
+    match mode with
+    | Masc_tui_child_content.Poll -> ()
+    | Audit ->
+        if not (List.mem keeper_name state.msg_child_content_audit_pending) then
+          state.msg_child_content_audit_pending <- keeper_name :: state.msg_child_content_audit_pending)
+    state.msg_child_content_inflight;
+  state.msg_child_content_inflight <- [];
   let cancellations = state.workspace_observation_cancellations in
   state.workspace_observation_cancellations <- [];
   List.iter (fun (_, cancel) -> cancel ()) cancellations;
@@ -11021,6 +11048,9 @@ let create_state
   msg_native_tasks = [];
   msg_native_tasks_inflight = [];
   msg_native_tasks_audit_pending = [];
+  msg_child_content = [];
+  msg_child_content_inflight = [];
+  msg_child_content_audit_pending = [];
   msg_journal_wanted = [];
   msg_journal_reads_refused = false;
   detail_scroll = 0;

@@ -319,7 +319,10 @@ let folded_thinking_summary ~line_count ~source_height ~summary_height =
 let thinking_height_cache = Markdown_cache.create ~capacity:chat_markdown_cache_capacity
 
 let fold_thinking_entry (state : state) ~chat_cols (entry : Message_layout.entry) =
-  if entry.style = Message_layout.Thinking && entry.body_presentation=Message_layout.Source_body
+  let is_thinking = match entry.style with
+    | Message_layout.Thinking _ -> true
+    | _ -> false in
+  if is_thinking && entry.body_presentation=Message_layout.Source_body
      && state.msg_reasoning_visibility = Reasoning_folded then
     let context = Chat_theme.body_context (Chat_theme.snapshot ()) entry.style in
     let width = Message_layout.entry_body_cells ~origin:state.msg_origin_display
@@ -579,7 +582,7 @@ let arrival_bar (style : Message_layout.style) =
         Printf.sprintf " %s\xe2\x96\x8e%s" (Chat_theme.origin style) Ansi.reset )
   | Message_layout.User | Message_layout.Keeper | Message_layout.Status
   | Message_layout.Local | Message_layout.Journal | Message_layout.Error
-  | Message_layout.Tool | Message_layout.Skill _ | Message_layout.Thinking ->
+  | Message_layout.Tool | Message_layout.Skill _ | Message_layout.Thinking _ ->
       ("", "")
 
 (* The two cells between a row's margin and its text, styled: the dotted bar
@@ -594,18 +597,18 @@ let body_bar ~origin (row : Message_layout.row) =
       snd (arrival_bar row.style)
   | ( Message_layout.User | Message_layout.Keeper | Message_layout.Status
     | Message_layout.Local | Message_layout.Error | Message_layout.Tool
-    | Message_layout.Skill _ | Message_layout.Thinking ),
+    | Message_layout.Skill _ | Message_layout.Thinking _ ),
     Message_layout.Shade_none ->
       "  "
   | ( Message_layout.User | Message_layout.Keeper | Message_layout.Status
     | Message_layout.Local | Message_layout.Error | Message_layout.Tool
-    | Message_layout.Skill _ | Message_layout.Thinking ),
+    | Message_layout.Skill _ | Message_layout.Thinking _ ),
     Message_layout.Shade_quoted
     when origin = Message_layout.Origin_bare ->
       "  "
   | ( Message_layout.User | Message_layout.Keeper | Message_layout.Status
     | Message_layout.Local | Message_layout.Error | Message_layout.Tool
-    | Message_layout.Skill _ | Message_layout.Thinking ),
+    | Message_layout.Skill _ | Message_layout.Thinking _ ),
     Message_layout.Shade_quoted ->
       Printf.sprintf "%s\xe2\x94\x82%s " (Theme.recede ()) Ansi.reset
 
@@ -820,7 +823,7 @@ let render_chat_row ~theme ~origin ~tool_visibility buf cols (row : Message_layo
       let plain = row.gutter ^ bar ^ mark ^ gap ^ speaker in
       let styled =
         match row.style with
-        | Message_layout.Tool | Message_layout.Thinking ->
+        | Message_layout.Tool | Message_layout.Thinking _ ->
             Printf.sprintf "%s%s%s" (Theme.recede ()) plain Ansi.reset
         | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper
         | Message_layout.Status | Message_layout.Local | Message_layout.Journal
@@ -1784,7 +1787,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
               | Some projection -> tool_block_style projection)
           | Message_skill state ->
               Message_layout.Skill (skill_tone_of_state state)
-          | Message_thinking -> Message_layout.Thinking
+          | Message_thinking -> Message_layout.Thinking Message_layout.Thinking_own
         in
         (* The [Origin_row] heading names whoever the pane does not already.
            This pane is the keeper's own, so its replies carry no name there:
@@ -2461,6 +2464,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
 
 (* Whose a merged row is: a committed message's, or a block's log's. *)
 type tagged_row =
+  | Tagged_child of child_content_anchor
   | Tagged_row of Masc_tui_types.msg_entry
   | Tagged_block of Masc_tui_types.turn_log * Keeper_chat_transcript.drawn_origin option * bool
 
@@ -2634,6 +2638,145 @@ let native_task_entries (state : state) ~keeper_name ~role_label_column =
         @ List.map (entry Message_layout.Status "NATIVE HEALTH") diagnostics in
       native_entries_memo := Some (native,state.msg_tool_visibility,role_label_column,entries);
       entries
+
+(* A Child observation names its parent native task by its origin invocation
+   ticket and parent occurrence. The read rejects observations whose origin
+   leaves the store scope, so the origin invocation always names the
+   observation's own ticket; matching on it keeps the join local to the row.
+   When that task reports [skip_transcript=true] the provider marked its
+   transcript for omission: the observation keeps no chat row, the way
+   [native_task_entries] keeps no inline task entry. An observation without
+   a parent occurrence names no task and stays visible. *)
+let child_omitted_by_skip_transcript
+    (tasks : Masc_tui_native_tasks.task list)
+    (child : Masc.Keeper_child_content.view) =
+  match child.parent_occurrence with
+  | None -> false
+  | Some occurrence ->
+      let invocation = child.origin.invocation in
+      List.exists (fun (task : Masc_tui_native_tasks.task) ->
+        task.skip_transcript = Some true
+        && String.equal invocation.receiver_generation task.origin.invocation.receiver_generation
+        && String.equal invocation.session_id task.origin.invocation.session_id
+        && String.equal invocation.client_uuid task.origin.invocation.client_uuid
+        && String.equal occurrence.call_id task.origin.native_call.call_id
+        && String.equal occurrence.call_envelope_uuid task.origin.native_call.call_envelope_uuid
+        && occurrence.call_ordinal = task.origin.native_call.call_ordinal)
+        tasks
+
+(* Complete Child snapshots have their own durable identity and no Root turn
+   ownership. Rows follow global observation-arrival order by local receipt
+   time, not store iteration order; provider clocks are not a shared timeline.
+   The same entries feed drawing, search and scroll pins. *)
+let child_entries_memo = ref None
+
+let child_content_entries (state : state) ~keeper_name ~role_label_column ~chat_cols =
+  let module Consumer = Masc_tui_child_content in
+  let entry ?(diagnostics=[]) style label body : Message_layout.entry =
+    let label = Keeper_chat.terminal_safe_text label in
+    { delivery_state=None; style; heading_boundary=Message_layout.Start_heading;
+      timestamp=""; timeline_bucket=None; speaker=label;
+      role_label=Message_layout.align_role_label ~column:role_label_column ~style label;
+      role_label_mark_cells=Message_layout.role_label_mark_cells ~column:role_label_column ~style ();
+      diagnostics=List.map Keeper_chat.terminal_safe_text diagnostics;
+      request_label=""; body=Keeper_chat.terminal_safe_text ~preserve_newlines:true body;
+      journal=[]; markdown_source=Message_layout.Markdown_streaming;
+      body_presentation=Message_layout.Source_body;
+      turn_rail=Message_layout.Rail_none; action=Message_layout.Action_none } in
+  match List.assoc_opt keeper_name state.msg_child_content with
+  | None -> [], []
+  | Some received ->
+      let native_opt = List.assoc_opt keeper_name state.msg_native_tasks in
+      let palette_generation = Masc_tui_terminal_palette.snapshot_generation
+        (Masc_tui_terminal_palette.snapshot ()) in
+      let key = state.msg_tool_visibility, state.msg_reasoning_visibility,
+        role_label_column, chat_cols, state.msg_origin_display, palette_generation,
+        state.link_previews_mode, Masc_tui_link_preview.cache_generation () in
+      match !child_entries_memo with
+      | Some (previous, previous_native, previous_key, result)
+        when previous == received && previous_key = key
+        && (match previous_native, native_opt with
+            | None, None -> true
+            | Some before, Some now -> before == now
+            | None, Some _ | Some _, None -> false) -> result
+      | Some _ | None ->
+      let native_tasks = match native_opt with
+        | None -> []
+        | Some native -> Masc_tui_native_tasks.tasks native in
+      let arrivals =
+        List.concat_map (fun (store : Consumer.store) ->
+          List.map (fun (record : Consumer.Read.record) -> store, record)
+            (Consumer.records store))
+          (Consumer.stores received) in
+      let arrivals =
+        let by_arrival
+            (_, (first : Consumer.Read.record)) (_, (second : Consumer.Read.record)) =
+          Float.compare first.recorded_at second.recorded_at in
+        List.stable_sort by_arrival arrivals in
+      let rows = List.filter_map (fun ((store : Consumer.store), (record : Consumer.Read.record)) ->
+          let child = record.observation in
+          if child_omitted_by_skip_transcript native_tasks child then None else
+          let visible, style, label = match child.channel with
+            | Runtime_claude_code.Text_content -> true, Message_layout.Inbound, "CHILD"
+            | Thinking_content -> state.msg_reasoning_visibility <> Reasoning_hidden,
+                Message_layout.Thinking Message_layout.Thinking_arrived, "CHILD THINKING" in
+          if not visible then None else
+          let anchor = { child_receiver=store.receiver; child_store_id=store.store_id;
+            child_observation_id=child.observation_id; child_ordinal=child.ordinal;
+            child_channel=child.channel } in
+          let diagnostics = match state.msg_tool_visibility with
+            | Tools_compact | Tools_results -> []
+            | Tools_full ->
+                ["store " ^ store.store_id;
+                 "receiver " ^ store.receiver.receiver_generation;
+                 "session " ^ store.receiver.session_id;
+                 "input " ^ store.receiver.client_uuid;
+                 "observation " ^ child.observation_id;
+                 "parent tool " ^ child.parent_tool_use_id;
+                 "provider envelope " ^ child.envelope_uuid;
+                 "ordinal " ^ string_of_int child.ordinal] in
+          let identity = Yojson.Safe.to_string (`List (List.map (fun value -> `String value)
+            [store.receiver.receiver_generation; store.receiver.session_id;
+             store.receiver.client_uuid; store.store_id; child.observation_id])) in
+          let projected = entry ~diagnostics style label child.text in
+          let projected = { projected with markdown_source=Message_layout.Markdown_stable {
+            keeper_name; request_id=identity; observed_at=record.recorded_at;
+            entry_index=record.seq } } in
+          Some (Tagged_child anchor, fold_thinking_entry state ~chat_cols projected)) arrivals in
+      let notices =
+        List.map (fun error -> entry Message_layout.Error "CHILD READ" (Consumer.error_text error))
+          (Consumer.errors received)
+        @ List.map (entry Message_layout.Status "CHILD HEALTH") (Consumer.diagnostics received) in
+      let result = rows, notices in
+      child_entries_memo := Some (received, native_opt, key, result);
+      result
+
+let child_join_memo = ref None
+
+let join_child_entries tags entries child_rows =
+  match child_rows with
+  | [] -> tags, entries
+  | _ ->
+      match !child_join_memo with
+      | Some (old_tags, old_entries, old_children, result)
+        when old_tags == tags && old_entries == entries && old_children == child_rows -> result
+      | Some _ | None ->
+          let result = tags @ child_rows, entries @ List.map snd child_rows in
+          child_join_memo := Some (tags, entries, child_rows, result);
+          result
+
+let child_notice_join_memo = ref None
+
+let join_child_notices notices native =
+  match notices with
+  | [] -> native
+  | _ ->
+      match !child_notice_join_memo with
+      | Some (old_notices, old_native, joined) when old_notices == notices && old_native == native -> joined
+      | Some _ | None ->
+          let joined = notices @ native in
+          child_notice_join_memo := Some (notices, native, joined);
+          joined
 
 let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
   (* The same pure derivation the committed rows used, asked again for the
@@ -2841,7 +2984,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                           state.msg_reasoning_visibility) ->
                   None
               | Keeper_chat_transcript.Drawn_thinking lines ->
-                  entry Message_layout.Thinking (label "THINKING") (String.concat "\n" lines)
+                  entry (Message_layout.Thinking Message_layout.Thinking_own) (label "THINKING") (String.concat "\n" lines)
               | Keeper_chat_transcript.Drawn_tools block ->
                   let projection =
                     Keeper_chat_transcript.project_tool_block
@@ -3077,6 +3220,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
       let request_id, execution_id = match tag with
         | Tagged_row message -> message.me_request_id,
             request_owner request_owners message.me_request_id
+        | Tagged_child _ -> "", ""
         | Tagged_block (log, _, _) -> Masc_tui_types.turn_log_request_id log,
             Masc_tui_types.turn_log_execution_id log in
       let identities = request_diagnostics ~tools:state.msg_tool_visibility
@@ -3167,6 +3311,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
            | Some request_id -> request_id
            | None -> message.me_request_id in
           if request_id = "" then None else Some request_id
+      | Tagged_child _ -> None
       | Tagged_block (_, Some (Keeper_chat_transcript.Admission_of_request _), _) -> None
       | Tagged_block (log, _, _) -> Some (Masc_tui_types.turn_log_execution_id log)
     in
@@ -3202,7 +3347,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
             let siding =
               match tag with
               | Tagged_row message -> siding_of_message message
-              | Tagged_block _ -> None
+              | Tagged_child _ | Tagged_block _ -> None
             in
             ( tag
             , { entry with
@@ -3270,7 +3415,11 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
         | Some excerpt -> anchor, excerpt.held_entry
         | None -> anchor, entry) polled in
   let pending = chat_tail_entries state ~keeper_name ~role_label_column in
-  let native = native_task_entries state ~keeper_name ~role_label_column in
+  let child_rows, child_notices = child_content_entries state ~keeper_name ~role_label_column ~chat_cols in
+  let tagged_layout_entries, layout_entries =
+    join_child_entries tagged_layout_entries layout_entries child_rows in
+  let native = join_child_notices child_notices
+    (native_task_entries state ~keeper_name ~role_label_column) in
   let transient_anchors = List.map (fun (anchor, _) -> Some anchor) polled
     @ List.map (fun _ -> None) native
     @ List.map (fun (entry : Message_layout.entry) ->
@@ -3301,6 +3450,7 @@ let search_reply_source (message : msg_entry) =
   | (Message_keeper | Message_autonomous), (Turn_input | Turn_progress | Turn_tool) -> None
 
 let search_anchor_of_tag = function
+  | Tagged_child anchor -> Some (Search_child anchor)
   | Tagged_row message -> Some (Search_history {
       row_anchor = msg_anchor message; reply_source = search_reply_source message })
   | Tagged_block (_, Some (Keeper_chat_transcript.Admission_of_request request_id), _) ->
@@ -3311,6 +3461,7 @@ let search_anchor_of_tag = function
   | Tagged_block (_, None, _) -> None
 
 type search_index_key =
+  | Child_identity of child_content_anchor
   | History_identity of msg_identity
   | History_user_slot of string * chat_turn_phase * int
   | History_reply of Masc_tui_keeper_chat_log.journal_source
@@ -3328,6 +3479,7 @@ let projection_index_of_anchor projection =
         let index = Hashtbl.create 64 in
         let add key at = if not (Hashtbl.mem index key) then Hashtbl.add index key at in
         List.iteri (fun at (tag, _) -> match tag with
+          | Tagged_child anchor -> add (Child_identity anchor) at
           | Tagged_row row ->
               add (History_identity row.me_identity) at;
               (match row.me_role with
@@ -3347,6 +3499,7 @@ let projection_index_of_anchor projection =
         index in
   fun anchor ->
     let keys = match anchor with
+      | Search_child anchor -> [Child_identity anchor]
       | Search_admission request_id -> [Admission_request request_id]
       | Search_history {row_anchor; reply_source} ->
           History_identity row_anchor.ma_identity
@@ -3399,7 +3552,7 @@ let scroll_anchor_index projection =
              | Message_user _, (Turn_input | Turn_progress | Turn_tool | Turn_output)
              | (Message_keeper | Message_autonomous | Message_status | Message_local
                 | Message_error | Message_tool | Message_skill _ | Message_thinking | Message_memory), _ -> ())
-        | Tagged_block _ -> ()) projection.tagged_entries;
+        | Tagged_child _ | Tagged_block _ -> ()) projection.tagged_entries;
       let indexed_entries = Array.of_list projection.layout_entries in
       let anchors = {indexed_entries; indexed_anchors; transient_indices} in
       scroll_anchor_index_memo := Some (projection.layout_entries, anchors);
@@ -3572,20 +3725,25 @@ let source_point_on_row ~source_body entry_index body_row =
   Option.bind (source_body entry_index) (fun body -> Hashtbl.find_opt body.row_sources body_row)
 
 (* The point's entry still stands, but a view stance (Ctrl-D, Ctrl-N, Ctrl-R)
-   replaced the body text the point indexed with another presentation. No byte
-   of the old text names a byte of the new one, so the reader stays on the
-   entry itself, at its first body row. *)
-let presentation_changed_row projection entry_index (point : chat_scroll_point) =
-  match point.source_position with
-  | None | Some (Polled_body_byte _) -> None
-  | Some (Durable_position position) ->
-      let entries = (scroll_anchor_index projection).indexed_entries in
-      if entry_index < 0 || entry_index >= Array.length entries then None else
-      match Search.presentation_of_position position with
-      | None -> None
-      | Some presentation ->
-          if presentation = entries.(entry_index).Message_layout.body_presentation then None
-          else Some 0
+   replaced the body text the point indexed with another presentation. A Child
+   Audit may also redact bytes while retaining the same durable observation.
+   When no exact source byte survives, keep that existing entry at its first
+   body row; a removed observation cannot acquire this fallback. *)
+let surviving_entry_row projection entry_index (point : chat_scroll_point) =
+  let entries = (scroll_anchor_index projection).indexed_entries in
+  if entry_index < 0 || entry_index >= Array.length entries then None else
+  match point.scroll_anchor with
+  | Scroll_durable (Search_child _) -> Some 0
+  | Scroll_durable (Search_admission _ | Search_history _ | Search_journal _)
+  | Scroll_pending _ | Scroll_polled _ ->
+      match point.source_position with
+      | None | Some (Polled_body_byte _) -> None
+      | Some (Durable_position position) ->
+          match Search.presentation_of_position position with
+          | None -> None
+          | Some presentation ->
+              if presentation = entries.(entry_index).Message_layout.body_presentation then None
+              else Some 0
 
 let requested_scroll_from_pin state ~keeper_name projection ~markdown ~source_body ~inner_width =
   if state.msg_scroll = max_int then max_int
@@ -3603,14 +3761,14 @@ let requested_scroll_from_pin state ~keeper_name projection ~markdown ~source_bo
                   ~origin:state.msg_origin_display ~inner_width ~entry_index
                   ~body_row projection.layout_entries))) in
       (* An exact byte anywhere in the pin wins. Only when none survives does
-         an entry redrawn in another presentation hold the reader. Every saved
-         byte may have been removed; a stale numeric distance must not become
+         a surviving Child observation or changed presentation hold the reader.
+         Every saved byte may have been removed; a stale numeric distance must not become
          a successful pin to newly arriving content. *)
       (match List.find_map (scroll_at ~row_of:(body_row_of_point ~source_body)) pin.pin_points with
        | Some scroll -> scroll
        | None ->
            Option.value ~default:0
-             (List.find_map (scroll_at ~row_of:(presentation_changed_row projection)) pin.pin_points))
+             (List.find_map (scroll_at ~row_of:(surviving_entry_row projection)) pin.pin_points))
   | Some _ | None -> state.msg_scroll
 
 let scroll_position_for_window state ~keeper_name projection ~markdown ~source_body ~inner_width
@@ -3818,7 +3976,7 @@ let plan_keeper_message_search ?(preview_lookup=Masc_tui_link_preview.get_previe
                   | Some _ | None -> None in
                 let requests = entry.Message_layout.request_label :: (match tag with
                   | Tagged_row message -> [message.me_request_id]
-                  | Tagged_block _ -> []) in
+                  | Tagged_child _ | Tagged_block _ -> []) in
                 let source_requests = List.sort_uniq String.compare
                     (List.filter (fun request -> request <> "") requests) in
                 Anchored_source {source_index=index;source_anchor=anchor;source_before=before;
@@ -5000,6 +5158,16 @@ module For_testing = struct
   }
   let chat_markdown = chat_markdown
   let fold_thinking_entry = fold_thinking_entry
+  type nonrec tagged_row = tagged_row =
+    | Tagged_child of child_content_anchor
+    | Tagged_row of Masc_tui_types.msg_entry
+    | Tagged_block of Masc_tui_types.turn_log * Keeper_chat_transcript.drawn_origin option * bool
+  type nonrec chat_projection = chat_projection =
+    { tagged_entries : (tagged_row * Message_layout.entry) list
+    ; transient_anchors : chat_scroll_anchor option list
+    ; layout_entries : Message_layout.entry list
+    }
+  let surviving_entry_row = surviving_entry_row
   let thinking_height_cache = thinking_height_cache
   let chat_markdown_cache = chat_markdown_cache
   let chat_markdown_theme_revision = chat_markdown_theme_revision

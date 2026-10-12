@@ -878,6 +878,24 @@ describe('SSEMessageSchema', () => {
     }
   })
 
+  it('preserves supplied response generation and rejects malformed generation', () => {
+    const event = (content_generation: unknown) => ({
+      type: 'keeper_chat_operation_event', name: 'fixture', operation_id: 'operation',
+      ag_ui_event: {
+        type: 'CUSTOM', threadId: 'fixture', runId: 'run',
+        name: 'KEEPER_STREAM_MESSAGE_START',
+        value: { content_generation, stream_scope: 4, provider_message_id: 'message', model: 'model' },
+        timestamp: 1_712_000_000,
+      },
+    })
+    const parsed = SSEMessageSchema.safeParse(event(7))
+    expect(parsed.success).toBe(true)
+    if (parsed.success) expect(parsed.data).toMatchObject({ ag_ui_event: { value: { content_generation: 7 } } })
+    for (const generation of [null, -1, 0.5, '7', Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(SSEMessageSchema.safeParse(event(generation)).success).toBe(false)
+    }
+  })
+
   it.each(['KEEPER_STREAM_MESSAGE_START', 'KEEPER_STREAM_MESSAGE_DELTA'])(
     'retains a response identity on %s frames and rejects invalid identities', name => {
       const event = (stream_scope: unknown) => ({
@@ -1383,5 +1401,83 @@ describe('schema drift log aggregation', () => {
     vi.advanceTimersByTime(60_000)
     expect(warnSpy).toHaveBeenCalledOnce()
     warnSpy.mockRestore()
+  })
+})
+
+
+describe('Keeper response stop ownership protocol', () => {
+  const event = (value: unknown) => ({
+    type: 'keeper_chat_operation_event', name: 'fixture', operation_id: 'kmsg-fixture',
+    ag_ui_event: { type: 'CUSTOM', threadId: 'keeper-consumer:fixture', runId: 'run-1',
+      name: 'KEEPER_STREAM_MESSAGE_STOP', value, timestamp: 1712000000 },
+  })
+  it('retains an observed response identity', () => {
+    expect(SSEMessageSchema.safeParse(event({ content_generation: 7, stream_scope: 2 })).success).toBe(true)
+  })
+  it.each([
+    {}, { content_generation: 7 }, { content_generation: 7, stream_scope: -1 },
+    { content_generation: 7, stream_scope: 0.5 },
+    { content_generation: '7', stream_scope: 2 },
+    { content_generation: 7, stream_scope: 2, extra: true },
+  ])('rejects malformed stop identity %j', value => {
+    expect(SSEMessageSchema.safeParse(event(value)).success).toBe(false)
+  })
+})
+
+
+describe('Keeper response details generation protocol', () => {
+  const event = (value: unknown) => ({
+    type: 'keeper_chat_operation_event', name: 'fixture', operation_id: 'kmsg-fixture',
+    ag_ui_event: { type: 'CUSTOM', threadId: 'keeper-consumer:fixture', runId: 'run-1',
+      name: 'KEEPER_STREAM_MESSAGE_DELTA', value, timestamp: 1712000000 },
+  })
+  it('accepts owned identity even without counters', () => {
+    expect(SSEMessageSchema.safeParse(event({ content_generation: 7, stream_scope: 0 })).success).toBe(true)
+  })
+  it.each([
+    { content_generation: null, stream_scope: 0 },
+    { content_generation: -1, stream_scope: 0 },
+    { content_generation: 7 },
+    { content_generation: 7, stream_scope: -1 },
+    { content_generation: 7, stream_scope: Number.MAX_SAFE_INTEGER + 1 },
+  ])('rejects malformed details identity %j', value => {
+    expect(SSEMessageSchema.safeParse(event(value)).success).toBe(false)
+  })
+})
+
+
+describe('Keeper thinking response ownership protocol', () => {
+  const event = (response: unknown) => ({
+    type: 'keeper_chat_operation_event', name: 'fixture', operation_id: 'kmsg-fixture',
+    ag_ui_event: { type: 'CUSTOM', threadId: 'keeper-consumer:fixture', runId: 'run-1',
+      name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta: 'reason', response }, timestamp: 1712000000 },
+  })
+  it('retains complete response identity with thinking bytes', () => {
+    expect(SSEMessageSchema.safeParse(event({ content_generation: 7, stream_scope: 0 })).success).toBe(true)
+  })
+  it.each([null, {}, { content_generation: 7 },
+    { content_generation: 7, stream_scope: -1 },
+    { content_generation: 7, stream_scope: Number.MAX_SAFE_INTEGER + 1 },
+  ])('rejects malformed supplied thinking identity %j', value => {
+    expect(SSEMessageSchema.safeParse(event(value)).success).toBe(false)
+  })
+})
+
+
+describe('Keeper text response ownership protocol', () => {
+  const event = (extra: Record<string, unknown>) => ({
+    type: 'keeper_chat_operation_event', name: 'fixture', operation_id: 'kmsg-fixture',
+    ag_ui_event: { type: 'TEXT_MESSAGE_CONTENT', threadId: 'keeper-consumer:fixture', runId: 'run-1',
+      messageId: 'message-1', delta: 'answer', timestamp: 1712000000, ...extra },
+  })
+  it('retains complete text response identity', () => {
+    expect(SSEMessageSchema.safeParse(event({ textResponse: { content_generation: 7, stream_scope: 0 } })).success).toBe(true)
+  })
+  it.each([
+    { textResponse: null }, { textResponse: { content_generation: 7 } },
+    { textResponse: { content_generation: 7, stream_scope: -1 } },
+    { textResponse: { content_generation: 7, stream_scope: 0 }, textStreamScope: 0 },
+  ])('rejects ambiguous text ownership %j', value => {
+    expect(SSEMessageSchema.safeParse(event(value)).success).toBe(false)
   })
 })

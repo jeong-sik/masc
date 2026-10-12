@@ -74,16 +74,16 @@ Embedded TOML provider rows:
 id = "mimo"
 kind = "openai_compat"
 base_url = "https://token-plan-sgp.xiaomimimo.com/v1"
-base_url_env = "MIMO_BASE_URL"
 request_path = "/chat/completions"
-api_key_env = "MIMO_API_KEY"
+auth = "api-key"
 default_model = "mimo-v2.5-pro"
 capabilities_base = "mimo"
 ```
 
-`base_url_env` is consulted only when the row names it explicitly. It changes
-the connection address, never provider identity. Selection uses the row's exact
-`id` or alias and stores its canonical id in `Provider_config.provider_id`.
+`auth` states whether the endpoint takes an API key (`"api-key"` or `"none"`,
+exactly); the row never names where the key lives. Selection uses the row's
+exact `id` or alias and stores its canonical id in
+`Provider_config.provider_id`.
 
 Runtime JSON overlay:
 

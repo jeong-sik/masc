@@ -643,6 +643,7 @@ let candidate_rejection_measurement_outcome (receipt : candidate_rejection_recei
 
 let target_selection_error_disposition = function
   | Missing_target_credential _
+  | Missing_declared_target_credential _
   | Target_credential_invalid _
   | Target_credential_read_failed _ -> Runtime_slot_unavailable
 ;;
@@ -1021,6 +1022,11 @@ let target_selection_error_reason = function
       "missing_target_credential(target_ref=%s environment_variable=%s)"
       (quoted_dynamic target_ref)
       (quoted_dynamic environment_variable)
+  | Missing_declared_target_credential { target_ref; provider_id } ->
+    Printf.sprintf
+      "missing_declared_target_credential(target_ref=%s provider_id=%s)"
+      (quoted_dynamic target_ref)
+      (quoted_dynamic provider_id)
   | Target_credential_invalid { target_ref; environment_variable } ->
     Printf.sprintf
       "target_credential_invalid(target_ref=%s environment_variable=%s)"
@@ -1045,6 +1051,12 @@ let target_selection_error_evidence_json = function
       [ "kind", `String "missing_target_credential"
       ; "target_ref", `String target_ref
       ; "environment_variable", `String environment_variable
+      ]
+  | Missing_declared_target_credential { target_ref; provider_id } ->
+    `Assoc
+      [ "kind", `String "missing_declared_target_credential"
+      ; "target_ref", `String target_ref
+      ; "provider_id", `String provider_id
       ]
   | Target_credential_invalid { target_ref; environment_variable } ->
     `Assoc

@@ -177,8 +177,8 @@ val lookup_for_provider
 (** Return the catalog-declared provider identity for a concrete endpoint.
 
     Matching is exact and declaration-driven: [base_url] matches either the
-    provider row's canonical [base_url], its optional [base_url_env] override,
-    or one of its exact [identity_hosts]. No model id is consulted. *)
+    provider row's canonical [base_url] or one of its exact [identity_hosts].
+    No model id is consulted. *)
 val provider_label_for_base_url
   :  ?getenv:(string -> string option)
   -> t

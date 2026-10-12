@@ -139,6 +139,10 @@ type credential_outcome =
   | Credential_not_required
   | Credential_available of Secret.t
   | Credential_missing of string
+  | Credential_missing_declared_key of string
+      (** A catalog-wire target on a keyed provider row. The payload is the
+          provider id, not an environment variable name: catalog rows state
+          whether a key is needed, not where it lives. *)
   | Credential_invalid of string
   | Credential_read_failed of string
 
@@ -186,6 +190,10 @@ type target_selection_error =
   | Missing_target_credential of
       { target_ref : string
       ; environment_variable : string
+      }
+  | Missing_declared_target_credential of
+      { target_ref : string
+      ; provider_id : string
       }
   | Target_credential_invalid of
       { target_ref : string
@@ -881,9 +889,10 @@ let load_resolver_snapshot
            | Catalog_provider_wire ->
              (* Catalog rows state whether a key is needed, not where it
                 lives; a catalog-wire target on a keyed provider has no
-                credential source, so admission names the provider. *)
+                credential source, so admission names the provider with the
+                declared-key outcome rather than the env-var one. *)
              if provider.requires_api_key
-             then Credential_missing provider.id
+             then Credential_missing_declared_key provider.id
              else Credential_not_required
          in
          let target_id = target_ref_id target.target_ref in
@@ -994,6 +1003,8 @@ let resolve_target (admitted : admitted_target) =
   match target.credential with
   | Credential_missing environment_variable ->
     Error (Missing_target_credential { target_ref; environment_variable })
+  | Credential_missing_declared_key provider_id ->
+    Error (Missing_declared_target_credential { target_ref; provider_id })
   | Credential_invalid environment_variable ->
     Error (Target_credential_invalid { target_ref; environment_variable })
   | Credential_read_failed environment_variable ->

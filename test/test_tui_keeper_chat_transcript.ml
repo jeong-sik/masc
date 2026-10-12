@@ -2906,6 +2906,21 @@ let test_body_preserves_owned_content_activity () =
   ) [Masc.Keeper_chat_events.Model_text; Model_thinking]
 ;;
 
+let test_unobserved_body_preserves_observed_response_metadata () =
+  List.iter (fun scope ->
+    let t = fresh () in
+    let usage = {Live.input_tokens=Some 23;output_tokens=Some 7;
+      cache_read_input_tokens=None;cache_creation_input_tokens=None} in
+    feed t [Live.Run_started;Live.Stream_model_started {
+      generation=Some 2;stream_scope=Some 4;message_id=None;model="observed";usage=Some usage}];
+    let before = Transcript.response_metadata t in
+    feed t [Live.Text {text="original unowned bytes";response=Unobserved_scope scope}];
+    check bool "unobserved scope preserves observed metadata" true
+      (before = Transcript.response_metadata t);
+    check string "original body retained" "original unowned bytes" (Transcript.text t)
+  ) [None;Some 1;Some 4;Some 9]
+;;
+
 let () =
   run "tui_keeper_chat_transcript"
     [ ( "body content activity ownership", [test_case "body preserves metadata-owned content lifecycle" `Quick test_body_preserves_owned_content_activity] )
@@ -3044,7 +3059,9 @@ let () =
             test_a_fold_reports_the_outcome_its_marker_stands_for
         ;] )
     ; ( "terminal safety"
-      , [ test_case "terminal reasoning preserves response state" `Quick
+      , [ test_case "unobserved body preserves observed response metadata" `Quick
+            test_unobserved_body_preserves_observed_response_metadata
+        ; test_case "terminal reasoning preserves response state" `Quick
             test_terminal_reasoning_cannot_replace_response_state
         ; test_case "control bytes never reach the pane" `Quick
             test_control_bytes_never_reach_the_pane

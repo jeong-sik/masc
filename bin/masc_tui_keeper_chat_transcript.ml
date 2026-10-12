@@ -1769,8 +1769,11 @@ let apply_delta ~now t (delta : Live.delta) =
             not (response_is_closed t (owner.response_generation,owner.response_scope))
               && admit_response_identity t (Some owner.response_generation) (Some owner.response_scope), false
           | Unobserved_scope scope ->
-            Option.iter (enter_text_response_scope t) scope;
-            t.admitted_response_owner=None, true in
+            (* Preserve original unowned bytes, but their scope alone cannot
+               replace metadata from an explicitly observed response. *)
+            let admitted = t.admitted_response_owner = None in
+            if admitted then Option.iter (enter_text_response_scope t) scope;
+            admitted, true in
         if text <> "" && (admitted || preserve_unbound) then begin
           if admitted then begin
             let owner = match response with

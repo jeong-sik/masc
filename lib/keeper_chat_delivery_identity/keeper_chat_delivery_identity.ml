@@ -408,7 +408,21 @@ let validate_delivery_role ~role_label
     Error "tool transcript slot requires a tool row"
 ;;
 
+module Row_field_names = Set.Make (String)
+
+let validate_row_field_uniqueness fields =
+  let rec loop seen = function
+    | [] -> Ok ()
+    | (name, _) :: rest ->
+        if Row_field_names.mem name seen then
+          Error (Printf.sprintf "duplicate chat row field %S" name)
+        else loop (Row_field_names.add name seen) rest
+  in
+  loop Row_field_names.empty fields
+;;
+
 let row_delivery_provenance_of_fields fields =
+  let* () = validate_row_field_uniqueness fields in
   let* provenance = delivery_provenance_of_fields fields in
   match provenance with
   | None -> Ok None

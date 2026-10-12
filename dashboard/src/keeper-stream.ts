@@ -148,6 +148,54 @@ function clearTextMessageStreamState(keeperName: string, assistantEntryId: strin
   textMessageStreamStates.delete(streamEntryKey(keeperName, assistantEntryId))
 }
 
+// Response ownership for the message stream: START names the newest live
+// response, and stale STOP/THINKING events for an older response must not
+// move the entry. The owner only advances, mirroring the TUI transcript.
+interface StreamResponseOwner {
+  contentGeneration: number
+  streamScope: number
+}
+
+const admittedStreamResponseOwners = new Map<string, StreamResponseOwner>()
+
+function streamResponseOwnerNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+}
+
+function streamResponseOwnerFromFields(response: unknown): StreamResponseOwner | null {
+  if (!isRecord(response)) return null
+  const contentGeneration = streamResponseOwnerNumber(response.content_generation)
+  const streamScope = streamResponseOwnerNumber(response.stream_scope)
+  if (contentGeneration === undefined || streamScope === undefined) return null
+  return { contentGeneration, streamScope }
+}
+
+function compareStreamResponseOwners(left: StreamResponseOwner, right: StreamResponseOwner): number {
+  if (left.contentGeneration !== right.contentGeneration) {
+    return left.contentGeneration - right.contentGeneration
+  }
+  return left.streamScope - right.streamScope
+}
+
+function admittedStreamResponseOwner(
+  keeperName: string,
+  assistantEntryId: string,
+): StreamResponseOwner | null {
+  return admittedStreamResponseOwners.get(streamEntryKey(keeperName, assistantEntryId)) ?? null
+}
+
+function admitStreamResponseOwner(
+  keeperName: string,
+  assistantEntryId: string,
+  owner: StreamResponseOwner,
+): void {
+  const key = streamEntryKey(keeperName, assistantEntryId)
+  const current = admittedStreamResponseOwners.get(key)
+  if (!current || compareStreamResponseOwners(owner, current) > 0) {
+    admittedStreamResponseOwners.set(key, owner)
+  }
+}
+
 function resetUnfinishedRuntimeAttempt(
   keeperName: string,
   assistantEntryId: string,
@@ -302,6 +350,7 @@ export function _resetKeeperStreamBuffersForTests(): void {
   pendingThinkingDeltas.clear()
   pendingAgentCoreTextBlockIndexes.clear()
   textMessageStreamStates.clear()
+  admittedStreamResponseOwners.clear()
   quarantinedToolOccurrences.clear()
 }
 
@@ -1014,6 +1063,8 @@ export function applyKeeperStreamEvent(
       if (event.name === 'KEEPER_STREAM_MESSAGE_START') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
+        const startedOwner = streamResponseOwnerFromFields(value)
+        if (startedOwner) admitStreamResponseOwner(keeperName, assistantEntryId, startedOwner)
         const patch: Partial<KeeperConversationDetails> = {}
         const providerMessageId = asString(value?.provider_message_id)
         const modelUsed = asString(value?.model)
@@ -1046,6 +1097,10 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_STOP') {
+        const value = isRecord(event.value) ? event.value : null
+        const owner = streamResponseOwnerFromFields(value)
+        const admitted = admittedStreamResponseOwner(keeperName, assistantEntryId)
+        if (owner && admitted && compareStreamResponseOwners(owner, admitted) !== 0) return null
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         markFinalizingIfLive('KEEPER_STREAM_MESSAGE_STOP')
         return null

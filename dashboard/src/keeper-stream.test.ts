@@ -61,6 +61,29 @@ describe('Keeper operation stream projection', () => {
     keeperToolApprovals.value = {}
   })
 
+  it('ignores a stale stop for an older response once a newer one begins', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_MESSAGE_START',
+      value: { content_generation: 3, stream_scope: 0, model: 'fixture' },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_MESSAGE_STOP',
+      value: { content_generation: 2, stream_scope: 0 },
+    })
+    const live = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(live?.streamState).toBe('streaming')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_MESSAGE_STOP',
+      value: { content_generation: 3, stream_scope: 0 },
+    })
+    const stopped = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(stopped?.streamState).toBe('finalizing')
+  })
+
   it.each(['observed', 'ended'] as const)('keeps content %s metadata outside model progress and body state', state => {
     assistantEntry()
     for (const hasBody of [false, true]) {

@@ -387,15 +387,23 @@ let custom_deltas_unvalidated fields =
                    { quarantined_occurrence = None; detail }
                ]
              | Some (`Assoc occurrence_fields) ->
-               (match
-                  tool_occurrence ~event:"KEEPER_STREAM_PROTOCOL_ERROR"
-                    occurrence_fields
-                with
-                | Ok occurrence ->
-                  [ Stream_protocol_error
-                      { quarantined_occurrence = Some occurrence; detail }
-                  ]
-                | Error detail -> [ Undecodable detail ])
+               (* The strict decoder rejects a repeated identity field here;
+                  the live view must refuse it too before the occurrence can
+                  mark a tool failed and ended. *)
+               (match Projection.unique_object_fields
+                        ~surface:"Keeper live CUSTOM KEEPER_STREAM_PROTOCOL_ERROR.value.quarantined_occurrence"
+                        (`Assoc occurrence_fields) with
+                | Error detail -> [ Undecodable detail ]
+                | Ok unique_fields ->
+                  (match
+                     tool_occurrence ~event:"KEEPER_STREAM_PROTOCOL_ERROR"
+                       unique_fields
+                   with
+                   | Ok occurrence ->
+                     [ Stream_protocol_error
+                         { quarantined_occurrence = Some occurrence; detail }
+                     ]
+                   | Error detail -> [ Undecodable detail ]))
              | Some _ ->
                [ Undecodable
                    "KEEPER_STREAM_PROTOCOL_ERROR quarantined_occurrence is not an object"

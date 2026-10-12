@@ -511,6 +511,23 @@ let test_protocol_error_carries_only_the_quarantined_occurrence () =
     ]
     (sse (custom "KEEPER_STREAM_PROTOCOL_ERROR" value) |> feed_whole)
 
+let test_duplicate_quarantined_occurrence_does_not_acquire_tool_authority () =
+  let occurrence =
+    `Assoc
+      (("toolStreamScope", `Int 9)
+       :: occurrence_fields ~scope:4 ~block_index:7 ~call_id:None ())
+  in
+  let value =
+    `Assoc
+      [ "kind", `String "tool_replay_mismatch"
+      ; "reason", `String "replayed arguments changed"
+      ; "quarantined_occurrence", occurrence
+      ]
+  in
+  match sse (custom "KEEPER_STREAM_PROTOCOL_ERROR" value) |> feed_whole with
+  | [ Live.Undecodable _ ] -> ()
+  | _ -> fail "repeated quarantined occurrence acquired live tool authority"
+
 let test_args_snapshot_replaces_rather_than_appends () =
   let body =
     sse
@@ -922,6 +939,8 @@ let () =
             test_tool_result_requires_nonblank_canonical_identity
         ; test_case "protocol error carries quarantined occurrence" `Quick
             test_protocol_error_carries_only_the_quarantined_occurrence
+        ; test_case "duplicate quarantined occurrence refuses authority" `Quick
+            test_duplicate_quarantined_occurrence_does_not_acquire_tool_authority
         ; test_case "a run error with no message still fails" `Quick
             test_run_error_is_a_failure_even_with_no_message
         ; test_case "undrawn events stay silent" `Quick

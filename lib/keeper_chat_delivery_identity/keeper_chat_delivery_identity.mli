@@ -77,7 +77,12 @@ val delivery_provenance_of_fields :
 val validate_delivery_role :
   role_label:string -> delivery_provenance -> (unit, string) result
 
-(** Reads provenance and validates its unique row role. Unaddressed rows retain
+(** Rejects repeated names in a chat row, including rows without delivery
+    provenance. Unknown unique fields are outside this uniqueness check. *)
+val validate_row_field_uniqueness :
+  (string * Yojson.Safe.t) list -> (unit, string) result
+
+(** Reads provenance and validates unique row fields and its role. Unique unaddressed rows retain
     [Ok None]; addressed rows with absent, invalid or incompatible role return
     [Error] and grant no execution authority. *)
 val row_delivery_provenance_of_fields :

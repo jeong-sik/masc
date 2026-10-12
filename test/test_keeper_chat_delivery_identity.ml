@@ -197,6 +197,22 @@ let test_duplicate_row_authority_is_rejected () =
   | Ok None | Error _ -> fail "unique canonical row was refused"
 ;;
 
+let test_row_uniqueness_precedes_provenance () =
+  List.iter (fun field ->
+    let duplicate = [field; field] in
+    (match Identity.validate_row_field_uniqueness duplicate with
+     | Error _ -> () | Ok () -> fail "repeated row field accepted");
+    match Identity.row_delivery_provenance_of_fields duplicate with
+    | Error _ -> () | Ok _ -> fail "duplicate unaddressed row acquired decode authority")
+    ["turn_ref", `String "trace#1"; "autonomous_turn", `Assoc [];
+     "content", `String "provided"; "role", `String "assistant"];
+  match Identity.row_delivery_provenance_of_fields
+    ["role", `String "assistant"; "turn_ref", `String "trace#1";
+     "extra_unique", `Bool true] with
+  | Ok None -> ()
+  | Ok (Some _) | Error _ -> fail "unique unaddressed row changed meaning"
+;;
+
 let () =
   run
     "keeper chat delivery identity"
@@ -223,6 +239,8 @@ let () =
             "delivery-only slot rejects execution identity"
             `Quick
             test_tool_delivery_rejects_execution_identity
+        ; test_case "row uniqueness precedes provenance" `Quick
+            test_row_uniqueness_precedes_provenance
         ; test_case "duplicate row authority rejected" `Quick
             test_duplicate_row_authority_is_rejected
         ; test_case

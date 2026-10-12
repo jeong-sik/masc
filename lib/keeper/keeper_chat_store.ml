@@ -394,6 +394,8 @@ let mint_message_id ~ts =
   Printf.sprintf "msg-%016.0f-%d" (ts *. 1_000_000.) n
 
 let validate_row_fields fields =
+  let ( let* ) = Result.bind in
+  let* () = Keeper_chat_delivery_identity.validate_row_field_uniqueness fields in
   let allowed =
     [ "id"; "role"; "content"; "ts"; "attachments"; "mentions"; "tool_call_id"
     ; "execution_id"; "tool_call_name"; "surface"; "conversation_id"

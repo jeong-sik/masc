@@ -1115,7 +1115,7 @@ let test_stream_callback_preserves_reserved_controls () =
   in
   propagated "operator interrupt" Keeper_operator_interrupt.Operator_interrupt;
   propagated "timeout" Eio.Time.Timeout;
-  propagated "cancellation" (EioCancel.Cancelled (Failure "stream observer cancelled"));
+  propagated "cancellation" (Eio.Cancel.Cancelled (Failure "stream observer cancelled"));
   propagated "out of memory" Out_of_memory;
   propagated "stack overflow" Stack_overflow;
   propagated "break" Sys.Break;

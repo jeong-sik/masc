@@ -169,6 +169,48 @@ and confirm the next officer or battle prompt before continuing.
   Return; an empty Return is not an answer. After the last unit the map comes
   back with the next province's command prompt.
 
+## A battle continuing into the next month
+
+In a manually controlled Cao Pi campaign, province 20 attacked province 21
+in January 220. After the January 30 battle command, the game returned to
+province commands. That return did **not** establish a completed battle:
+February's information screen still listed both sides at province 21.
+The defending Sun Quan force showed 231 soldiers and five officers; the
+attacking Cao Pi force showed 46 and one officer, gold 110 and food 91.
+These are the game's displayed units, not exact individual casualty counts.
+
+At the current province command, `8`, Return opens information. `1`, Return
+asks which province to inspect. An owned province's resources were displayed
+directly. Inspecting foreign province 21 required choosing an investigator;
+after that officer's number and Return, the ongoing battle table appeared.
+An empty Return canceled the investigator selection in a separate observation.
+Read the current prompts rather than assuming every inquiry is a free lookup.
+
+To reinforce that ongoing battle from province 20, `3`, Return, then `21`,
+Return opened the officer sortie list. Chen Tai was the only officer, number 1,
+with soldiers 10. Selecting him and ending selection with an empty Return
+opened gold and food entry. Gold 100 and food 50 were each visibly verified
+before Return; the final prompt was `応援部隊を派遣しますか(Y/N)?`.
+`y` dispatched the reinforcement and returned to province commands.
+
+After the remaining February province commands ended, the same battle resumed
+on February 1 with Chen Tai's placement prompt. `0` placed him on a permitted
+hex. The battle then showed soldiers 56, two officers, gold 210 and food 141:
+the increases matched the dispatched soldiers 10, one officer, gold 100 and
+food 50. A later explicit Chen Tai command accepted normal movement south and
+advanced the battle date. Dispatch, arrival, placement and controllable movement
+are separate observations; confirm each before calling a reinforcement joined.
+
+For combat evidence, preserve the command screen, attack direction prompt and
+short successive observations. In the observed February 10 battle, Xiahou Wei's
+`2` attack, `1` normal, direction `2` south was followed by displayed enemy
+soldiers 235 → 233 and own soldiers 30 → 28 while the date remained February 10.
+Only later did February 11 and the opponent Zhu Huan's tactical label appear.
+Longer 300-frame calls can include the next opposing phase, so their final troop
+difference alone does not isolate the player's attack. This proves an observed
+attack-associated reduction before the next opposing phase, not exact casualties,
+a victory, or a completed winning campaign.
+
 ## In-game save
 
 `1`, `9`, Return, then `5`, Return (command 19 機能, option 5) opens the save

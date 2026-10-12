@@ -257,7 +257,7 @@ describe('Keeper operation stream projection', () => {
     } finally { release() }
   })
 
-  it.each(['thinking', 'admission'] as const)('does not roll back response admission after %s publication admits a newer owner', boundary => {
+  it.each(['thinking', 'admission', 'repeated header', 'metadata'] as const)('does not roll back response admission after %s publication admits a newer owner', boundary => {
     assistantEntry('same-operation')
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: {
@@ -267,9 +267,11 @@ describe('Keeper operation stream projection', () => {
     let armed = true
     const release = effect(() => {
       const current = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
-      const reachedBoundary = boundary === 'thinking'
-        ? current?.traceSteps?.some(step => step.kind === 'think')
-        : current?.responseState?.kind === 'known' && current.responseState.current?.content_generation === 2
+      const reachedBoundary = boundary === 'metadata'
+        ? current?.details?.providerMessageId === 'older-header'
+        : boundary !== 'admission'
+          ? current?.traceSteps?.some(step => step.kind === 'think')
+          : current?.responseState?.kind === 'known' && current.responseState.current?.content_generation === 2
       if (armed && current && reachedBoundary) {
         armed = false
         const next = reduceKeeperResponse(current.responseState ?? initialKeeperResponseState, {
@@ -277,13 +279,14 @@ describe('Keeper operation stream projection', () => {
         })
         untracked(() => { keeperThreads.value = { sangsu: [{ ...current,
           responseState: next.state, streamState: 'streaming', text: 'newer answer', rawText: 'newer answer',
+          details: { providerMessageId: 'newer-header', modelUsed: 'newer-model' },
         }] } })
       }
     })
     try {
       applyKeeperStreamEvent('sangsu', 'reply-1', {
         type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: {
-          content_generation: 2, stream_scope: 1, provider_message_id: 'older-header', model: 'older-model',
+          content_generation: boundary === 'repeated header' ? 1 : 2, stream_scope: boundary === 'repeated header' ? 0 : 1, provider_message_id: 'older-header', model: 'older-model',
         },
       })
       const after = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))

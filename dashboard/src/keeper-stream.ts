@@ -738,6 +738,7 @@ function admitResponseEvent(
   keeperName: string,
   assistantEntryId: string,
   event: KeeperResponseEvent,
+  thinkingPublication: 'deferred' | 'commit' = 'deferred',
 ): KeeperResponseDecision {
   const entry = (keeperThreads.value[keeperName] ?? []).find(candidate => candidate.id === assistantEntryId)
   const before = entry?.responseState ?? initialKeeperResponseState
@@ -752,10 +753,12 @@ function admitResponseEvent(
     state: (keeperThreads.value[keeperName] ?? []).find(candidate => candidate.id === assistantEntryId)?.responseState ?? initialKeeperResponseState,
     accepted: false, advanced: false, authoritative: false,
   })
-  if (decision.advanced) {
+  if (decision.advanced || thinkingPublication === 'commit') {
     flushPendingThinkingDeltas(keeperName, assistantEntryId)
     const current = (keeperThreads.value[keeperName] ?? []).find(candidate => candidate.id === assistantEntryId)
     if (!ownsAdmission(current)) return refused()
+  }
+  if (decision.advanced) {
     clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
     clearTextMessageStreamState(keeperName, assistantEntryId)
   }
@@ -1401,13 +1404,13 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_START') {
+        const publicationOwner = captureThinkingPublicationOwner(existing, currentStoredTokenRevision())
         const response = admitResponseEvent(keeperName, assistantEntryId, {
           kind: 'observe', source: 'header', scope: event.value.stream_scope,
           owner: event.value.content_generation === undefined ? null
             : { content_generation: event.value.content_generation, stream_scope: event.value.stream_scope },
-        })
+        }, 'commit')
         if (!response.accepted) return null
-        flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
         const patch: Partial<KeeperConversationDetails> = {}
         const providerMessageId = asString(value?.provider_message_id)
@@ -1424,11 +1427,21 @@ export function applyKeeperStreamEvent(
           patch.usage = initial
         }
         if (usage?.costUsd !== undefined && current?.costUsd == null) patch.costUsd = usage.costUsd
-        if (Object.keys(patch).length > 0) mergeAssistantStreamDetails(keeperName, assistantEntryId, patch)
-        if (response.advanced) setAssistantStreamState(
-          keeperName, assistantEntryId, 'opening', 'streaming',
-          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_MESSAGE_START' }),
-        )
+        updateThreadEntry(keeperName, assistantEntryId, entry => {
+          if ((entry.responseState ?? initialKeeperResponseState) !== response.state
+              || !ownsThinkingPublication(publicationOwner, entry, currentStoredTokenRevision())) return entry
+          return { ...entry,
+            ...(Object.keys(patch).length > 0 ? { details: {
+              ...(entry.details ?? {}), ...patch,
+              usage: patch.usage ? mergeStreamUsage(entry.details?.usage, patch.usage) : entry.details?.usage ?? null,
+              rawPayload: entry.details?.rawPayload,
+            } } : {}),
+            ...(response.advanced ? {
+              streamState: 'opening' as const, delivery: 'streaming' as const,
+              streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_MESSAGE_START' }),
+            } : {}),
+          }
+        })
         persistActiveAssistantDraft(keeperName, assistantEntryId)
         return null
       }

@@ -1,5 +1,6 @@
 import { effect, untracked } from '@preact/signals'
 import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
+import { initialKeeperResponseState, reduceKeeperResponse } from './lib/keeper-response-state'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   _resetActiveKeeperStreamsForTests,

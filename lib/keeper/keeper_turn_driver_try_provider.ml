@@ -1639,6 +1639,22 @@ let bounded_model_input_projection
             0
             windowed)
       in
+      emit_runtime_manifest ctx
+        ~status:(match view.wire with
+          | Ok _ -> "history_projection_prepared"
+          | Error _ -> "history_projection_declined")
+        ~decision:(`Assoc
+          [ "scope", `String "first_request_projection_in_provider_attempt_not_delivery"
+          ; "source_message_count", `Int (List.length messages)
+          ; "projected_message_count", `Int (List.length windowed)
+          ; "history_atom_count", `Int history_atom_count
+          ; "first_atom", `Int composed.projection.Runtime_model_input_tail_window.dropped_atoms
+          ; "origin", `String (Keeper_carried_front.origin_to_string composed.origin)
+          ; "projected_bytes", `Int transmitted_bytes
+          ; "reserved_bytes", `Int reserved_bytes
+          ; "input_policy", `String (Keeper_input_policy.to_string ctx.input_policy)
+          ; "current_turn_results", `String (current_turn_results_to_string current_turn_results)
+          ]) Keeper_runtime_manifest.Context_injected;
       Log.Keeper.info
         ~keeper_name:ctx.keeper_name
         "model input carried range runtime=%s origin=%s first_atom=%d atoms=%d/%d \

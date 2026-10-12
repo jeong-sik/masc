@@ -268,7 +268,9 @@ scripts/review/approve-guard.sh --repo "$repo" --pr "$pr" --head "$head" \
 선택지와 placeholder를 실제 값으로 바꾸세요.
 
 병합 전에 현재 리뷰와 댓글을 다시 읽습니다. 미해결 차단 리뷰나 이후의 FAIL/HOLD 판정이
-있으면 통합하지 않습니다. 스택 아래부터 통합하며 base와 head의 변경을 검토한 뒤 진행합니다.
+있으면 통합하지 않습니다. Native Stack은 맨 위 PR 하나로 스택 전체를 한 번에 병합하며
+아래부터 한 층씩 넣지 않습니다. base와 head의 변경을 검토한 뒤 진행합니다.
+Native Stack이 아님이 확인된 일반 브랜치 체인만 부모부터 처리합니다.
 통합 조건은 [merge-guard](../../scripts/review/merge-guard.sh)와 현재
 [CI·리뷰 안내](../CI-REVIEW-WORKFLOW.md)를 따릅니다. 일반 스택은 소스 리뷰,
 Release head는 완료된 전체 CI가 필요합니다. Fork 기여자는 maintainer에게 통합을 맡깁니다.

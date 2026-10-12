@@ -289,8 +289,10 @@ completed full verification of the same head. These are formats, not decisions;
 replace placeholders and alternatives with actual values.
 
 Read current reviews and comments again before integration. Outstanding blocking
-reviews and later FAIL/HOLD decisions prevent integration. Land stacks bottom
-first and review changes to both base and head before landing. Use
+reviews and later FAIL/HOLD decisions prevent integration. Land a native stack
+whole, once, through its top PR — never layer by layer from the bottom — and
+review changes to both base and head before landing. A confirmed non-native
+branch chain still lands parent first. Use
 [merge-guard](../../scripts/review/merge-guard.sh) and the current
 [CI and review workflow](../CI-REVIEW-WORKFLOW.md) for admission. Ordinary stacks
 use source review; release heads require completed full CI. Fork contributors

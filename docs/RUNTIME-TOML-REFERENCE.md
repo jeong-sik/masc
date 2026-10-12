@@ -30,7 +30,7 @@ different questions. Knowing which side owns a fact decides what you write.
 
 | Fact | Owner |
 | --- | --- |
-| Provider dialect (`kind`), request path, default API-key env | catalog `[[providers]]` row with a matching `id` |
+| Provider dialect (`kind`), request path, default API-key env | catalog `[[providers]]` row with a matching `id` (`request-path` may still override the row's path, §2) |
 | Model context window, output ceiling, effort ladder, pricing, thinking-control policy | catalog `[[models]]` rows, matched by longest `id_prefix` |
 | Endpoint URL, credentials, timeouts, concurrency, eviction marks | `runtime.toml` |
 
@@ -45,8 +45,9 @@ Anthropic preset and refused every reasoning effort, #37849).
 (an install-wizard provider id carries a hash, so no catalog row can match it).
 Everywhere else a written `kind` is refused at load — see §9.
 
-Context window precedence (binding `max-context` > model `max-context` >
-provider `max-context` > catalog) is documented with examples in
+Context window precedence (binding `max-context` > provider `max-context` >
+model `max-context` > catalog, `lib/runtime/runtime_instance.ml`) is
+documented with examples in
 [spec/14-configuration.md](spec/14-configuration.md) §3. A runtime that
 resolves a window from **neither** the TOML nor the catalog fails at load
 (RFC-0206 §2.1).
@@ -70,7 +71,7 @@ Protocol inventory (`lib/runtime/runtime_protocol.ml`):
 | `protocol` | Transport | Wire format | Dialect source |
 | --- | --- | --- | --- |
 | `messages-http` | HTTP | Anthropic Messages API | catalog row, or `kind` (`anthropic`/`kimi`) when uncatalogued |
-| `openai-compatible-http` | HTTP | OpenAI Chat Completions | catalog row, or `kind` when uncatalogued |
+| `openai-compatible-http` | HTTP | OpenAI Chat Completions, or Responses when the request path is `/responses`/`/v1/responses` (`provider_http_codec.ml`) | catalog row, or `kind` when uncatalogued |
 | `ollama-http` | HTTP | Ollama | fixed by the protocol |
 | `gemini-http` | HTTP | Gemini | fixed by the protocol |
 | `vertex-gemini` | HTTP | Vertex AI Gemini | fixed by the protocol |
@@ -86,13 +87,15 @@ Optional:
 | --- | --- | --- |
 | `display-name` | string | UI label |
 | `kind` | `anthropic`\|`kimi`\|`openai_compat`\|`ollama`\|`gemini`\|`glm` | dialect, **only** for an uncatalogued `messages-http`/`openai-compatible-http` endpoint; refused elsewhere (§9) |
-| `request-path` | string | request path override for uncatalogued endpoints; catalogued providers take the catalog row's path |
+| `request-path` | string | request path override, checked before the catalog row's path — also valid for a catalogued provider reached over a different supported surface (e.g. `ollama_cloud` over OpenAI-compatible, where the catalog's native path 404s, #33652) |
 | `enabled` | bool | default `true` |
 | `max-context` | positive int | provider-level window default (precedence in spec/14 §3) |
 | `connect-timeout-s` | positive float | bound on the phase before response headers. **No default**: absent means unbounded. Keeper turns remain bounded by the keeper's first-event budget |
 | `exact-body-timeout-s` | positive float | bound on the whole exact-output request (connect, headers, body). See §7 for when it matters |
-| `is-non-interactive`, `timeout-s` | bool, float | CLI-protocol options |
-| `account-home` | string | account metadata for official-client providers |
+| `is-non-interactive` | bool, default `false` | **required `true`** for every official-client protocol (`claude-code`, `codex-app-server`, `antigravity-cli`, `muse-serve`); otherwise the runtime does not materialize |
+| `timeout-s` (+ `agent`, `effort`, `add-dirs`) | positive float (string; `low`\|`medium`\|`high`; absolute paths) | `antigravity-cli` only — refused on every other protocol. `timeout-s` is **required**; `effort` and `add-dirs` are optional |
+| `account-home` | non-empty absolute path | **required** for `muse-serve`; accepted for `claude-code`/`codex-app-server`; refused elsewhere |
+| `admission-priority-run-limit` | positive int | how many judgment-lane priority permits may run consecutively before a waiting standard request is served. Refused on official-client providers and when none of the provider's bindings declares `max-concurrent` |
 
 ### `[providers.<id>.credentials]`
 
@@ -106,18 +109,27 @@ Resolution (`lib/runtime/runtime_adapter.ml`):
 
 - Omitted credentials fall back to the catalog row's `api_key_env`; a catalog
   row with an **empty** `api_key_env` declares a provider that takes no key.
-  An uncatalogued provider with no credentials is a load error.
+  An uncatalogued provider with no credentials still loads — with an empty
+  key, which is what a keyless local endpoint needs. The refusal for a
+  credential-less uncatalogued provider happens at model discovery
+  (`resolve_api_key`), not at load.
 - `env`: the first non-empty variable is used. `OLLAMA_CLOUD_API_KEY` also
   falls back to `OLLAMA_API_KEY`.
 - `file`: must be absolute, owned by the current user, with no group/other
   permission bits, and contain a raw key — a JSON document is refused.
+- Official clients: `claude-code`, `codex-app-server` and `muse-serve` must
+  **not** declare credentials (the client owns subscription login);
+  `antigravity-cli` requires a `file` credential naming the operator-owned
+  OAuth source.
 
 ### `[providers.<id>.healthcheck]`, `.headers`, `.usage-read`, `.capabilities`
 
 - `healthcheck.path` (absolute) is provider-owned metadata for install/setup
   probes; runtime startup does not use it for admission.
-- `headers` injects fixed HTTP headers per request (e.g. OpenRouter's
-  `HTTP-Referer`).
+- `headers` injects fixed non-auth HTTP headers per request (e.g.
+  OpenRouter's `HTTP-Referer`). `authorization`, `x-api-key`, `api-key` and
+  `x-auth-token` are stripped (case-insensitively) and never reach the
+  request — authentication uses the credentials table only.
 - `usage-read` reads usage windows without a model call: `shape` is one of
   `openrouter-key`, `zai-quota-limit`, `kimi-coding-usages`, `ollama-balance`;
   plus `url` and `refresh-s`.
@@ -140,7 +152,7 @@ bindings and lanes.
 | `temperature`, `top-p`, `top-k`, `min-p` | float/int | absent | sampling; `top-k`/`min-p` are validated against the declared capabilities |
 | `reasoning-effort` | `low`\|`medium`\|`high`\|`xhigh`\|`max` | absent | |
 | `reasoning-uncontrolled` | bool | `false` | send no reasoning control; **cannot** coexist with `reasoning-effort` (load error) |
-| `turn-timeout-s` | positive float | absent | per-turn bound |
+| `turn-timeout-s` | non-negative float | absent | per-turn bound; `0` removes the deadline (the spawned client owns it), absent keeps the adapter default. Negative/non-finite is a load error |
 
 ### `[models.<id>.capabilities]`
 
@@ -186,7 +198,7 @@ assignments. Unknown keys are load errors.
 
 | Key | Meaning |
 | --- | --- |
-| `default` | the runtime binding id used when nothing more specific applies. Must name a runtime, not a lane |
+| `default` | the runtime binding id used when nothing more specific applies. May name a lane or a runtime — lanes resolve first, and a lane name enters on the lane's head (`lib/runtime/runtime.ml`) |
 | `media_failover` | ordered binding ids for media work |
 
 ## 6. `[runtime.lanes.<name>]` — keeper lanes
@@ -207,17 +219,23 @@ name a lane instead of a single runtime.
 
 | Key | Meaning |
 | --- | --- |
+| `enabled` | bool, default `true` (a required lane cannot be disabled) |
 | `slots` | HTTP binding ids, tried in order |
 | `cli_slots` | official-client runtime ids, used when every HTTP slot is blocked |
+| `max_output_tokens` | positive int output budget |
+| `thinking` | bool thinking control |
 
-`slots = []` means `cli_slots` only; both empty is refused at load.
+`slots = []` means `cli_slots` only; both empty is refused at load on an
+enabled lane (a disabled lane may keep empty lists).
 
-**Deadline rule**: a `slots` entry naming an HTTP runtime whose provider
-declares no `exact-body-timeout-s` is refused at save time (rule 3, #38779).
-An older admission layer additionally refuses a target carrying neither
-deadline at all (`Missing_deadline`, #36979, #38573). `connect-timeout-s`
-alone does not qualify a provider for exact-output slots; a keeper turn is
-not affected — it keeps its own first-event budget.
+**Deadline rule**: a `slots` entry that newly adds an HTTP runtime whose
+provider declares no `exact-body-timeout-s` is refused at save time
+(rule 3, #38779); gaps the file already has are grandfathered — unrelated
+saves stay allowed and boot keeps them degraded. Plan admission requires
+the body deadline specifically (`Missing_deadline`, #36979, #38573):
+`connect-timeout-s` alone never qualifies a provider for exact-output
+slots. A keeper turn is not affected — it keeps its own first-event
+budget.
 
 ## 8. Worked example — catalogued Anthropic provider
 
@@ -270,16 +288,25 @@ An uncatalogued Anthropic-dialect endpoint instead states `kind =
 | `kind` on a CLI protocol | an official client speaks no HTTP dialect |
 | provider id naming a reserved namespace | reserved top-level namespace (#39539) |
 | unknown key in provider/model/binding tables | only declared fields are accepted |
-| no credentials on an uncatalogued provider | nothing says whether a key is needed |
 | credential file relative / not owner-private / JSON | file credentials must be a raw, private, owned key |
+| credentials on `claude-code`/`codex-app-server`/`muse-serve` | the official client owns subscription login |
+| missing `is-non-interactive = true` on an official-client protocol | the runtime does not materialize without it |
+| missing `timeout-s`, or non-file credential, on `antigravity-cli` | the CLI's deadline and OAuth source are mandatory |
+| missing `account-home` on `muse-serve`; `account-home` outside the three account clients | the client cannot be addressed / the key belongs elsewhere |
 | `healthcheck.path` not starting with `/` | must be absolute |
 | `reasoning-effort` + `reasoning-uncontrolled` together | two contradictory requests |
 | half-declared water marks, or `low ≥ high` | eviction marks travel as a pair |
 | `max-concurrent` ≤ 0, `max-tokens` ≤ 0, non-positive `max-context` | meaningless values are rejected, not downgraded |
-| exact-output lane with both slot lists empty | nothing to run |
+| negative/non-finite `turn-timeout-s` | only absent (adapter default) or ≥ 0 (0 removes the deadline) |
+| `admission-priority-run-limit` on an official-client provider, or with no `max-concurrent` binding | nothing waits in the permit queue it would order |
+| exact-output lane with both slot lists empty, while enabled | nothing to run |
 
-Runtime (not load-time): an exact-output slot whose provider has neither
-`connect-timeout-s` nor `exact-body-timeout-s` is refused at plan admission
-with `Missing_deadline` (#36979, #38573), and a `slots` entry whose provider
-lacks `exact-body-timeout-s` specifically is refused already at save time
-(rule 3, #38779).
+Discovery (not load-time): an uncatalogued provider with no credentials
+loads with an empty key, but model discovery (`resolve_api_key`) refuses
+it — nothing has said a key is unnecessary.
+
+Runtime (not load-time): an exact-output slot whose provider lacks
+`exact-body-timeout-s` is refused at plan admission with `Missing_deadline`
+(#36979, #38573) — `connect-timeout-s` alone never qualifies — and a
+`slots` entry that newly adds such a gap is refused already at save time
+(rule 3, #38779); gaps the file already has are grandfathered.

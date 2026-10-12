@@ -176,6 +176,16 @@ let a_split_atom_at_the_boundary_never_gets_demoted_half () =
    expand fourfold — and the JSON encoder then escapes those escapes. A Korean
    body and a body of raw high bytes are the cases that broke the RFC's first
    draft, where the bound was stated as a flat 200-300 bytes. *)
+let short_aged_result_uses_exact_preview () =
+  let messages = history_with_tool_bodies [String.make 700 'a'] in
+  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 messages in
+  Alcotest.(check int) "short result gets a retrievable reference" 1
+    (List.length planned.Demotion.pending);
+  Alcotest.(check bool) "reference shrinks provider-bound message" true
+    (List.fold_left (fun sum m -> sum + measure_message_bytes m) 0 planned.messages
+     < List.fold_left (fun sum m -> sum + measure_message_bytes m) 0 messages)
+;;
+
 let bound_holds_for body_label body =
   let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
   let messages = history_with_tool_bodies [ body ] in
@@ -1163,6 +1173,7 @@ let () =
             "demotion actually fires (suite is not vacuous)"
             `Quick
             demotion_actually_happens
+        ; Alcotest.test_case "short aged result uses exact preview" `Quick short_aged_result_uses_exact_preview
         ; Alcotest.test_case "placeholder bounds the real marker" `Quick bound_is_sound
         ; Alcotest.test_case
             "this turn's results survive the boundary"

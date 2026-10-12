@@ -523,6 +523,13 @@ let execution_source_of_fields fields =
        | Error _ -> None)
 ;;
 
+let failure_execution_source_of_fields fields =
+  match Delivery_identity.delivery_provenance_of_fields fields with
+  | Ok (Some { Delivery_identity.transcript_slot = Terminal_result; _ }) ->
+      execution_source_of_fields fields
+  | Ok (Some _) | Ok None | Error _ -> None
+;;
+
 let autonomous_speech_of_fields ~execution_source fields =
   match execution_source with
   | Some (Masc_tui_keeper_chat_log.Autonomous_turn source) ->
@@ -1395,38 +1402,27 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                 }
             ]
       | Some "request_failure" ->
-          (* The server already sends the append-once identity it stored
-             the row under. Only an operation key names a turn this client
-             dispatched; the other producers get [None] rather than a
-             borrowed id. *)
+          let execution_source = failure_execution_source_of_fields fields in
           let origin_request_id =
-            match assoc_opt "delivery_key" fields with
-            | Some (`Assoc key_fields) -> (
-                match string_field key_fields "kind" with
-                | Some "operation" -> string_field key_fields "operation_id"
-                | Some _ | None -> None)
-            | Some _ | None -> None
+            match execution_source with
+            | Some (Masc_tui_keeper_chat_log.Operation id) -> Some id
+            | Some (Masc_tui_keeper_chat_log.Autonomous_turn _) | None -> None
+          in
+          let turn_id =
+            match execution_source with
+            | Some (Masc_tui_keeper_chat_log.Operation id) -> Some id
+            | Some (Masc_tui_keeper_chat_log.Autonomous_turn reference) ->
+                Some (Ids.Turn_ref.to_string reference)
+            | None -> None
           in
           Some
             [ Utterance
               { at
               ; structural_id = structural_id_of_fields fields "failure"
               ; turn_sequence
-              ; turn_id =
-                  (match turn_id with
-                   | Some _ -> turn_id
-                   | None -> origin_request_id)
-              ; (* The failure is the operation's: the key it was stored
-                   under names it even when the row carries no transcript
-                   slot for the provenance reader. *)
-                operation_id =
-                  (match operation_id with
-                   | Some _ -> operation_id
-                   | None -> origin_request_id)
-              ; execution_source =
-                  (match execution_source with
-                   | Some _ -> execution_source
-                   | None -> Option.map (fun id -> Masc_tui_keeper_chat_log.Operation id) origin_request_id)
+              ; turn_id
+              ; operation_id = origin_request_id
+              ; execution_source
               ; kind = Delivery_failed { origin_request_id; recovered_at = None }
               ; text = content
               ; media = (match assoc_opt "blocks" fields with

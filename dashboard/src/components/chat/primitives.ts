@@ -3120,10 +3120,17 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       ${entry.audio
         ? html`<${AudioPlayer} clip=${entry.audio} />`
         : null}
-      ${entry.error && !isFailureMessage
+      ${entry.error && !isFailureMessage && entry.delivery !== 'delivered'
         ? html`
             <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-sm font-medium leading-paragraph text-[var(--bad-light)]">
               ${entry.error}
+            </div>
+          `
+        : null}
+      ${entry.error && !isFailureMessage && entry.delivery === 'delivered'
+        ? html`
+            <div role="status" data-chat-diagnostic="true" class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm leading-paragraph text-[var(--color-fg-secondary)]">
+              진단: ${entry.error}
             </div>
           `
         : null}

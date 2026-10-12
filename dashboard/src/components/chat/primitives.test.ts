@@ -649,6 +649,94 @@ describe('ChatTranscript', () => {
     expect(bubble?.querySelector('[data-chat-failure-card]')).toBeNull()
   })
 
+  it('renders a delivered reply with a preserved diagnostic distinctly from a failure', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'direct-delivered',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: 'answer arrived',
+            rawText: 'answer arrived',
+            delivery: 'delivered',
+            error: 'decode failed: truncated frame',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="direct-delivered"]')
+    expect(bubble?.textContent).toContain('answer arrived')
+    const diagnostic = bubble?.querySelector('[data-chat-diagnostic]')
+    expect(diagnostic).not.toBeNull()
+    expect(diagnostic?.textContent).toContain('진단')
+    expect(diagnostic?.textContent).toContain('decode failed: truncated frame')
+    expect(bubble?.querySelector('[class*="err-border"]')).toBeNull()
+  })
+
+  it('keeps failed replies on the red error box without the diagnostic treatment', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'direct-failed',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: 'partial answer',
+            rawText: 'partial answer',
+            delivery: 'error',
+            error: 'decode failed: truncated frame',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="direct-failed"]')
+    expect(bubble?.querySelector('[data-chat-diagnostic]')).toBeNull()
+    expect(bubble?.querySelector('[class*="err-border"]')).not.toBeNull()
+    expect(bubble?.textContent).toContain('decode failed: truncated frame')
+  })
+
+  it('shows the preserved diagnostic when an autonomous group with a delivered reply opens', async () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'auto-delivered',
+            role: 'assistant',
+            source: 'autonomous_turn',
+            label: 'sangsu',
+            text: 'answer arrived',
+            rawText: 'answer arrived',
+            delivery: 'delivered',
+            error: 'decode failed: truncated frame',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    expect(container.querySelector('[data-chat-diagnostic]')).toBeNull()
+    ;(container.querySelector('.chat-block-trace-hd') as HTMLButtonElement).click()
+    await flushUi()
+    const diagnostic = container.querySelector('[data-chat-diagnostic]')
+    expect(diagnostic).not.toBeNull()
+    expect(diagnostic?.textContent).toContain('진단')
+    expect(diagnostic?.textContent).toContain('decode failed: truncated frame')
+    expect(container.querySelector('[class*="err-border"]')).toBeNull()
+  })
+
   it('exposes entry provenance as rendered attributes and surface links', () => {
     render(
       html`<${ChatTranscript}

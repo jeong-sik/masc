@@ -1042,11 +1042,16 @@ status: reference
 **Rotate-now Evidence Asymmetry (회전 강등 증거 비대칭)**
 : 같은 Rotate_now 회전이라도 후보에 남기는 교차 turn 증거가 갈래마다 다른,
   의도된 비대칭. 이 turn 안에서 후보 순서만 바꾸는 회전은 대부분 증거를
-  남기지 않는다 — `Auth_failed`부터 `Context_window_exceeded`까지 열다섯
-  회전(`Keeper_turn_driver.ml`의 Rotate_now 매치, `()`)은 실패가 이 후보의
-  고장을 증명하지 않는다. 남기면 자매 후보가 답하는 동안 head가 영영 뒤로
-  밀리므로(RFC-0458 §3.4, §6), 창 초과(`Context_window_exceeded`)도 "작은
-  turn에 답 못 한 증거가 아니다"(#38984)로 같은 팔에 속한다. 이 팔과 구분되는
+  남기지 않는다 — 선언된 열일곱 회전 가운데 열다섯(`Auth_failed`·
+  `Model_unavailable`·`Resumable_cli_session`·`Candidates_filtered`·
+  `Runtime_exhausted`·`No_progress_empty`·`No_progress_thinking_only`·
+  `No_progress_truncated`·`Refusal_body_not_received`·`Generation_repeated`·
+  `Admission`·`Provider_reported_failure`·`Request_refused`·
+  `Provider_wire_defect`·`Context_window_exceeded`)은 `Keeper_turn_driver.ml`의
+  Rotate_now 매치에서 `()`로 실패가 이 후보의 고장을 증명하지 않는다. 남기면
+  자매 후보가 답하는 동안 head가 영영 뒤로 밀리므로(RFC-0458 §3.4, §6), 창
+  초과(`Context_window_exceeded`)도 "작은 turn에 답 못 한 증거가 아니다"
+  (#38984)로 같은 팔에 속한다. 이 팔과 구분되는
   두 팔이 있다 — `Server_error_not_transient`는 `note_failed_attempt`로
   `server_error` 실패를 남기고(답하지 못한 사실 자체가 증거),
   `Authorization_refused`(403)는 증거 대신 usage-read 질문을 한 번 던진다.

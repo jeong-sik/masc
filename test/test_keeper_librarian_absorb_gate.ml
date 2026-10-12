@@ -818,6 +818,30 @@ let test_selection_gate_and_store_keep_the_unconveyed_original () =
 ;;
 
 (* Invalid typed choice metadata cannot authorize absorbing a source. *)
+let test_reported_choice_reaches_contextual_consolidation () =
+  let source = fact (List.hd sources) in
+  List.iter (fun (choice, values, absorbed_count) ->
+    let probabilities = List.combine
+        ["mergeable";"different_context";"loses_knowledge";"uncertain"] values in
+    let evaluate ~state:_ ~questions =
+      let answers = List.map (fun (qid, question) ->
+        qid, match question with
+        | T.Choice _ -> T.Choice_answer {choice;probabilities;confidence=0.8}
+        | T.Noul _ -> T.Noul_answer {noul=0.}
+        | T.Score _ -> Alcotest.fail "unexpected score") questions in
+      (* Run the actual response codec before the gate's Forward decoder. *)
+      T.eval_response_of_yojson (`Assoc ["model",`String "reported-choice-fixture";
+        "answers",`Assoc (List.map (fun (id, answer) -> id,T.answer_to_yojson answer) answers)]) in
+    let judgment = judged (Gate.judge ~new_observations:[] ~evaluate ~facts:[source]
+      ~new_claims:[merged] ~absorbed:(absorbed_into merged [source])) in
+    Alcotest.(check int) "only reported mergeable authorizes absorption" absorbed_count
+      (List.length judgment.absorbed);
+    Alcotest.(check int) "loses knowledge still keeps the original" (1-absorbed_count)
+      (List.length judgment.left))
+    ["mergeable",[0.8;0.01;0.17;0.01],1;
+     "loses_knowledge",[0.02;0.;0.8;0.17],0]
+;;
+
 let test_an_invalid_choice_confidence_keeps_the_source () =
   let facts = [ fact (List.hd sources) ] in
   let absorbed = absorbed_into merged facts in
@@ -2450,6 +2474,7 @@ let () =
             test_every_source_mergeable_absorbs_as_answered
         ; Alcotest.test_case "knowledge loss keeps its memory current" `Quick
             test_knowledge_loss_keeps_its_memory_current
+        ; Alcotest.test_case "reported Choice reaches forward consolidation" `Quick test_reported_choice_reaches_contextual_consolidation
         ; Alcotest.test_case "only mergeable permits absorption" `Quick test_only_mergeable_permits_absorption
         ; Alcotest.test_case "the model not answering preserves the originals" `Quick
             test_the_model_not_answering_keeps_the_sources

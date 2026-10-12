@@ -299,7 +299,7 @@ let test_choice_set_builds_request_and_decodes_answer () =
       (teams ())
       (choice_answer ~choice:"backend" ~probabilities:[ "frontend", 0.05; "backend", 0.95 ])
   with
-  | Ok { T.choice = Backend; probabilities = [ (Frontend, _); (Backend, _) ]; _ } -> ()
+  | Ok { T.choice = Backend; reported_probabilities = [ (Frontend, _); (Backend, _) ]; _ } -> ()
   | Ok _ -> Alcotest.fail "the answer decoded to the wrong options"
   | Error detail -> Alcotest.fail detail
 ;;
@@ -329,12 +329,56 @@ let test_choice_protocol_before_effect_authority () =
     ["missing option", ["backend", 1.];
      "duplicate option", ["frontend", 0.; "backend", 1.; "backend", 0.];
      "out of bounds", ["frontend", -1.; "backend", 2.];
-     "non-unit sum", ["frontend", 0.8; "backend", 0.8];
+     "all zero", ["frontend", 0.; "backend", 0.];
      "choice contradicts distribution", ["frontend", 1.; "backend", 0.];
      "nonfinite probability", ["frontend", nan; "backend", 1.]];
   let tied = T.Choice_answer {choice="backend"; confidence=0.; probabilities=["frontend",0.5;"backend",0.5]} in
   Alcotest.(check bool) "ties and zero confidence are protocol-valid" true
     (Result.is_ok (T.decode_choice (teams ()) tied))
+;;
+
+let test_reported_choice_preserves_nonunit_values () =
+  let options = ["mergeable"; "different_context"; "loses_knowledge"; "uncertain"] in
+  let choices = match T.choice_set ~options ~label:Fun.id ~describe:(fun _ -> None) with
+    | Ok value -> value | Error detail -> Alcotest.fail detail in
+  List.iter (fun (choice, values) ->
+    let probabilities = List.combine options values in
+    let wire = T.answer_to_yojson (choice_answer ~choice ~probabilities) in
+    let answer = match T.answer_of_yojson wire with
+      | Ok answer -> answer | Error detail -> Alcotest.fail detail in
+    Alcotest.(check bool) "wire roundtrip preserves raw values" true (T.answer_to_yojson answer = wire);
+    match T.decode_choice choices answer with
+    | Error detail -> Alcotest.fail detail
+    | Ok decoded ->
+      Alcotest.(check string) "reported selection" choice decoded.choice;
+      Alcotest.(check bool) "no normalization or rounding" true (decoded.reported_probabilities = probabilities);
+      Alcotest.(check (float 0.)) "sum remains diagnostic"
+        (List.fold_left (+.) 0. values) decoded.reported_probability_sum)
+    ["mergeable", [0.8;0.01;0.17;0.01];
+     "loses_knowledge", [0.02;0.;0.8;0.17];
+     "mergeable", [0.8;0.01;0.19;0.01]];
+  let canonical_values = [0.7;0.2;0.1;0.] in
+  let canonical = List.combine options canonical_values in
+  List.iter (fun probabilities ->
+    let decoded = match T.decode_choice choices
+        (choice_answer ~choice:"mergeable" ~probabilities) with
+      | Ok decoded -> decoded | Error detail -> Alcotest.fail detail in
+    Alcotest.(check bool) "raw member order remains available" true
+      (decoded.reported_probabilities=probabilities);
+    Alcotest.(check (float 0.)) "diagnostic sum ignores JSON key permutation"
+      (List.fold_left (+.) 0. canonical_values) decoded.reported_probability_sum)
+    [canonical; List.rev canonical; List.tl canonical @ [List.hd canonical]];
+  (* A sum of 1.6 is deliberately accepted as reported values. It does not
+     become a certified normalized distribution by passing Choice decoding. *)
+  (match T.decode_choice (teams ())
+      (choice_answer ~choice:"backend" ~probabilities:["frontend",0.8;"backend",0.8]) with
+   | Error detail -> Alcotest.fail detail
+   | Ok decoded -> Alcotest.(check (float 0.)) "non-normalized sum is preserved" 1.6 decoded.reported_probability_sum);
+  List.iter (fun confidence ->
+    Alcotest.(check bool) "invalid confidence still rejected" true
+      (Result.is_error (T.decode_choice choices
+        (T.Choice_answer {choice="mergeable";probabilities=List.combine options [0.8;0.01;0.17;0.01];confidence}))))
+    [nan;infinity;(-0.1);1.1]
 ;;
 
 let test_choice_set_rejects_no_options_and_shared_labels () =
@@ -651,6 +695,8 @@ let () =
             "choice set builds the request and decodes the answer"
             `Quick
             test_choice_set_builds_request_and_decodes_answer
+        ; Alcotest.test_case "reported Choice values are not normalized" `Quick
+            test_reported_choice_preserves_nonunit_values
         ; Alcotest.test_case "Choice protocol precedes effect authority" `Quick
             test_choice_protocol_before_effect_authority
         ; Alcotest.test_case

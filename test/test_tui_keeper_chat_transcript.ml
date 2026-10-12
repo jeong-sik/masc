@@ -2892,8 +2892,9 @@ let test_model_content_provider_correlation_preserves_ownership () =
       activity (Some "message-b") Content_ended];
     check bool "missing correlation retains previously supplied identity" true
       (Transcript.model_activity t=active);
-    check int "conflicting observations remain explicit evidence" 3
-      (Transcript.unreadable t).count;
+    check bool "conflicting observations remain explicit evidence" true
+      (Option.exists (fun (observed : Transcript.unreadable) -> observed.count=3)
+        (Transcript.unreadable t));
     feed t [activity (Some "message-a") Content_ended;
       activity (Some "message-a") Content_observed];
     check bool "matching stop closes without replay reopening" true

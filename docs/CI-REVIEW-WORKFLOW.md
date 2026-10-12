@@ -40,7 +40,14 @@ not compile the Core library or run behavior suites. Request it deliberately
 when that coverage is needed; it is separate from leader-selected candidate
 verification and does not grant merge permission.
 
-`ci.yml` and `test.yml` are reusable components. Full type checking, release
+`ci.yml` and `test.yml` are reusable components. The operator explicitly approved
+retaining the daily `test.yml` full behavior run on 2026-10-12: 17:43 UTC
+(02:43 KST), with its existing failure issue reporting. The
+[approval record](evidence/2026-10-12-nightly-ci-operator-approval.md) addresses
+the missing authorization raised on #42290. This regression observation does
+not grant PR approval or replace verification of a fixed release candidate.
+
+Full type checking, release
 profile, dashboard, behavioral suites and distribution/installation
 verification belong to `release-candidate.yml` at Release/Tag. Release publication
 uses `release.yml` with an existing version tag, `rc_run_id`, and explicit

@@ -275,6 +275,13 @@ type drawn_item =
   }
 type response_scope = { rs_generation : int option; rs_scope : int }
 
+type model_content_observation =
+  { content_index : int
+  ; content_channel : Masc.Keeper_chat_events.model_content_channel
+  ; provider_message_id : string option
+  ; observed_at : float option
+  }
+
 type t =
   { keeper_name : string
   ; source : Masc_tui_keeper_chat_log.journal_source
@@ -360,7 +367,7 @@ type t =
           observations cannot erase this monotonic admission authority. *)
   ; mutable content_scope : (int * int) option
   ; mutable content_scope_closed : bool
-  ; mutable active_model_content : (int * Masc.Keeper_chat_events.model_content_channel * float option) list
+  ; mutable active_model_content : model_content_observation list
         (* Most recently observed first; None is a closed occurrence. These
            tombstones prevent duplicate/late observations reopening an index.
            An event from an older server scope cannot erase current activity. *)
@@ -857,11 +864,11 @@ let model_phase_text ~show_timing ~now t =
   | Some (Provider_retry_at _) -> Some "provider retrying"
   | Some Model_response_ended -> Some "model response ended"
   | Some Scoped_model_content ->
-      (match List.find_opt (fun (_,_,at) -> Option.is_some at) t.active_model_content with
-       | Some (_,channel,Some since) -> observed ~since
+      (match List.find_opt (fun content -> Option.is_some content.observed_at) t.active_model_content with
+       | Some {content_channel=channel; observed_at=Some since; _} -> observed ~since
            (match channel with Masc.Keeper_chat_events.Model_text -> "STREAMING · answering"
             | Model_thinking -> "THINKING · reasoning")
-       | Some (_,_,None) | None -> Some "model content ended")
+       | Some {observed_at=None; _} | None -> Some "model content ended")
   | Some (Model_started_at since) -> observed ~since "model started"
   | Some (Reasoning_at since) -> observed ~since "THINKING · reasoning"
   | Some (Answering_at since) -> observed ~since "STREAMING · answering"
@@ -1505,13 +1512,21 @@ let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content
         t.content_scope_closed <- false;
         t.active_model_content <- []
       end;
-      (match List.find_opt (fun (index,_,_) -> index=activity.content_index) t.active_model_content with
-       | Some (_,_,None) -> ()
-       | Some (_,channel,Some _) when channel <> activity.channel ->
+      (match List.find_opt (fun (content : model_content_observation) -> content.content_index=activity.content_index) t.active_model_content with
+       | Some content when provider_correlation_conflicts content.provider_message_id activity.content_provider_message_id ->
+           note_unreadable t "model content provider correlation changed within its occurrence"
+       | Some {observed_at=None; _} -> ()
+       | Some content when content.content_channel <> activity.channel ->
            note_unreadable t "model content channel changed within its occurrence"
-       | Some (_,_,Some _) | None ->
-           t.active_model_content <- (activity.content_index,activity.channel,Some now) ::
-             List.filter (fun (index,_,_) -> index<>activity.content_index) t.active_model_content;
+       | previous ->
+           let provider_message_id = match activity.content_provider_message_id, previous with
+             | Some _ as supplied, _ -> supplied
+             | None, Some content -> content.provider_message_id
+             | None, None -> None in
+           t.active_model_content <-
+             {content_index=activity.content_index; content_channel=activity.channel;
+              provider_message_id; observed_at=Some now} ::
+             List.filter (fun (content : model_content_observation) -> content.content_index<>activity.content_index) t.active_model_content;
            t.model_signal <- Some Scoped_model_content)
     | Content_ended ->
       (* A stop cannot admit a response. Within the exact current response,
@@ -1524,18 +1539,26 @@ let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content
           t.content_scope_closed <- false;
           t.active_model_content <- []
         end;
-        match List.find_opt (fun (index,_,_) -> index=activity.content_index) t.active_model_content with
-        | Some (_,channel,Some _) when channel=activity.channel ->
-            t.active_model_content <- List.map (fun (index,channel,at) ->
-              index,channel,(if index=activity.content_index then None else at)) t.active_model_content
+        match List.find_opt (fun (content : model_content_observation) -> content.content_index=activity.content_index) t.active_model_content with
+        | Some content when provider_correlation_conflicts content.provider_message_id activity.content_provider_message_id ->
+            note_unreadable t "model content stop provider correlation conflicts with its occurrence"
+        | Some content when content.content_channel=activity.channel && Option.is_some content.observed_at ->
+            t.active_model_content <- List.map (fun (content : model_content_observation) ->
+              if content.content_index=activity.content_index then
+                {content with observed_at=None;
+                  provider_message_id=(match content.provider_message_id with
+                    | Some _ as observed -> observed
+                    | None -> activity.content_provider_message_id)}
+              else content) t.active_model_content
         | None ->
             t.active_model_content <- t.active_model_content @
-              [activity.content_index,activity.channel,None];
+              [{content_index=activity.content_index; content_channel=activity.channel;
+                provider_message_id=activity.content_provider_message_id; observed_at=None}];
             (match t.model_signal with
              | Some (Provider_retry_at _ | Tool_returned_at _ | Model_response_ended) -> ()
              | None | Some (Scoped_model_content | Model_started_at _ | Reasoning_at _ | Answering_at _) ->
                  t.model_signal <- Some Scoped_model_content)
-        | Some (_,_,_) -> ()
+        | Some _ -> ()
       end
 ;;
 
@@ -2527,10 +2550,10 @@ let model_activity t =
   | Some (Model_started_at _) -> Some Activity_model_started
   | Some Model_response_ended -> Some Activity_response_ended
   | Some Scoped_model_content ->
-      (match List.find_opt (fun (_,_,at) -> Option.is_some at) t.active_model_content with
-       | Some (_, Masc.Keeper_chat_events.Model_text, Some _) -> Some Activity_answering
-       | Some (_, Masc.Keeper_chat_events.Model_thinking, Some _) -> Some Activity_reasoning
-       | Some (_, _, None) | None -> Some Activity_content_ended)
+      (match List.find_opt (fun content -> Option.is_some content.observed_at) t.active_model_content with
+       | Some {content_channel=Masc.Keeper_chat_events.Model_text; observed_at=Some _; _} -> Some Activity_answering
+       | Some {content_channel=Masc.Keeper_chat_events.Model_thinking; observed_at=Some _; _} -> Some Activity_reasoning
+       | Some {observed_at=None; _} | None -> Some Activity_content_ended)
   | Some (Reasoning_at _) -> Some Activity_reasoning
   | Some (Answering_at _) -> Some Activity_answering
   | Some (Tool_returned_at (tool_name, _)) -> Some (Activity_tool_returned tool_name)

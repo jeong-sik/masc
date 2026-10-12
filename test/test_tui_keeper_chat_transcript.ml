@@ -2875,6 +2875,38 @@ let test_provider_retry_progress_owner () =
     (Transcript.model_activity t = settled)
 ;;
 
+let test_model_content_provider_correlation_preserves_ownership () =
+  List.iter (fun channel ->
+    let t=fresh () in
+    let activity ?(scope=0) provider_message_id state = Live.Model_content_activity {
+      Masc.Keeper_chat_events.content_generation=1; content_scope=scope; content_index=0;
+      content_provider_message_id=provider_message_id; channel; state } in
+    let open Masc.Keeper_chat_events in
+    let active = Some (match channel with Model_text -> Transcript.Activity_answering
+      | Model_thinking -> Transcript.Activity_reasoning) in
+    feed t [Live.Run_started; activity (Some "message-a") Content_observed;
+      activity (Some "message-b") Content_ended];
+    check bool "foreign provider stop cannot end current activity" true
+      (Transcript.model_activity t=active);
+    feed t [activity None Content_observed; activity (Some "message-b") Content_observed;
+      activity (Some "message-b") Content_ended];
+    check bool "missing correlation retains previously supplied identity" true
+      (Transcript.model_activity t=active);
+    check int "conflicting observations remain explicit evidence" 3
+      (Transcript.unreadable t).count;
+    feed t [activity (Some "message-a") Content_ended;
+      activity (Some "message-a") Content_observed];
+    check bool "matching stop closes without replay reopening" true
+      (Transcript.model_activity t=Some Transcript.Activity_content_ended);
+    feed t [activity ~scope:1 (Some "message-b") Content_observed];
+    check bool "new response may reuse index with another provider message" true
+      (Transcript.model_activity t=active);
+    feed t [activity ~scope:1 None Content_ended];
+    check bool "missing provider correlation does not forbid a scoped stop" true
+      (Transcript.model_activity t=Some Transcript.Activity_content_ended)
+  ) [Masc.Keeper_chat_events.Model_text; Model_thinking]
+;;
+
 let test_body_preserves_owned_content_activity () =
   List.iter (fun channel ->
     let t = fresh () in
@@ -2929,7 +2961,8 @@ let test_unobserved_body_preserves_observed_response_metadata () =
 
 let () =
   run "tui_keeper_chat_transcript"
-    [ ( "body content activity ownership", [test_case "body preserves metadata-owned content lifecycle" `Quick test_body_preserves_owned_content_activity] )
+    [ ( "provider content correlation", [test_case "provider content correlation preserves ownership" `Quick test_model_content_provider_correlation_preserves_ownership] )
+    ; ( "body content activity ownership", [test_case "body preserves metadata-owned content lifecycle" `Quick test_body_preserves_owned_content_activity] )
     ; ( "provider retry ownership", [test_case "retry progress requires current runtime attempt" `Quick test_provider_retry_progress_owner] )
     ; ( "response boundaries", [test_case "Skill evidence retains runtime identity" `Quick test_skill_evidence_retains_invocation_runtime_identity;
       test_case "scoped details retire prior model activity" `Quick test_scoped_details_retire_prior_model_activity;

@@ -168,4 +168,35 @@ describe('keeper chat operation tracking', () => {
     ])
     expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.modelContentActivity).toHaveLength(1)
   })
+
+  it('restores an omitted open occurrence in stored order and derives its phase', () => {
+    const owner = { content_generation: 1, stream_scope: 0 }
+    const think = { generation: 1, stream_scope: 0, block_index: 0, channel: 'thinking' as const, state: 'observed' as const }
+    const text = { generation: 1, stream_scope: 0, block_index: 1, channel: 'text' as const, state: 'observed' as const }
+    const request = { operationId: 'content-order', keeperName: 'echo', message: 'input', submittedAt: 1 }
+    const draft = { text: '', rawText: '', delivery: 'streaming' as const,
+      responseState: { ...initialKeeperResponseState, floor: owner, current: owner, lastSequence: 2 } }
+    upsertTrackedKeeperChatOperation({ ...request, assistantDraft: { ...draft, streamState: 'streaming', modelContentActivity: [think, text] } })
+    upsertTrackedKeeperChatOperation({ ...request, assistantDraft: { ...draft, streamState: 'thinking', modelContentActivity: [think] } })
+    const stored = trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft
+    expect(stored?.modelContentActivity).toEqual([think, text])
+    expect(stored?.streamState).toBe('streaming')
+  })
+
+  it('rejects open content without a current response owner but keeps ended tombstones', () => {
+    const owner = { content_generation: 1, stream_scope: 0 }
+    const draftFor = (state: 'observed' | 'ended') => ({ text: '', rawText: '', delivery: 'streaming' as const, streamState: 'waiting' as const,
+      responseState: { ...initialKeeperResponseState, floor: owner, current: null, lastSequence: 2 },
+      modelContentActivity: [{ generation: 1, stream_scope: 0, block_index: 0, channel: 'thinking' as const, state }] })
+    upsertTrackedKeeperChatOperation({ operationId: 'content-ownerless', keeperName: 'echo', message: 'input', submittedAt: 1,
+      assistantDraft: draftFor('observed') })
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft).toMatchObject({
+      responseState: { kind: 'unavailable' }, delivery: 'error', streamState: null,
+    })
+    upsertTrackedKeeperChatOperation({ operationId: 'content-tombstone', keeperName: 'echo', message: 'input', submittedAt: 1,
+      assistantDraft: draftFor('ended') })
+    const tombstone = trackedKeeperChatOperationsForKeeper('echo').find(request => request.operationId === 'content-tombstone')
+    expect(tombstone?.assistantDraft?.responseState).toMatchObject({ kind: 'known' })
+    expect(tombstone?.assistantDraft?.modelContentActivity).toHaveLength(1)
+  })
 })

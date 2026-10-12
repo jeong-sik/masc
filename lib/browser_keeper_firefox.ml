@@ -92,12 +92,21 @@ let host_address_unknown_message ~port =
      record; stop it so the next server start attaches one to port %d"
     port
 
-(* The record keeps the address as the host was given it. *)
-let running_host ~port bidi_url =
+(* Which port a host's address names. The record keeps the address as the
+   host was given it. *)
+type address = On_port | On_another_port | Port_not_named
+
+let address_on ~port bidi_url =
   match Browser_bidi_downloads.endpoint bidi_url with
-  | Ok (_host, recorded_port, _resource) when recorded_port = port -> Host_running
-  | Ok _ -> Host_on_another_port bidi_url
-  | Error _ -> Host_address_unknown
+  | Ok (_host, recorded_port, _resource) when recorded_port = port -> On_port
+  | Ok _ -> On_another_port
+  | Error _ -> Port_not_named
+
+let running_host ~port bidi_url =
+  match address_on ~port bidi_url with
+  | On_port -> Host_running
+  | On_another_port -> Host_on_another_port bidi_url
+  | Port_not_named -> Host_address_unknown
 
 let host_step ~port (report : Browser_bidi_host_status.report) =
   let running =
@@ -126,7 +135,9 @@ type recorded_firefox = Started_here | Gone | Unproven of string
    new process is never given the number of a group that still exists
    (POSIX fork(2): "The child process ID also shall not match any active
    process group ID"), so another process under that number means the
-   recorded group has ended, whatever group that number names now. *)
+   recorded group has ended, whatever group that number names now. The
+   start of a process not yet reaped still reads, so a group whose leader
+   is that and which keeps no live member has ended as well. *)
 let recorded_firefox (entry : Browser_keeper_firefox_record.entry) ~leader_started ~leader_group
     ~group_has_members =
   let unproven why = if group_has_members then Unproven why else Gone in
@@ -148,7 +159,7 @@ let recorded_firefox (entry : Browser_keeper_firefox_record.entry) ~leader_start
      | Some now when not (String.equal now recorded) -> Gone
      | Some _ ->
        (match leader_group with
-        | Ok group when group = entry.group -> Started_here
+        | Ok group when group = entry.group -> if group_has_members then Started_here else Gone
         | Ok group ->
           unproven
             (Printf.sprintf "process %d is in process group %d now, not %d" entry.group group
@@ -162,9 +173,9 @@ let session_held_since ~port (report : Browser_bidi_host_status.report) =
   match report.state with
   | Browser_bidi_host_record.Ended
       (entry, { session = Browser_bidi_host_record.(Session_left | Session_refused); at; _ }) ->
-    (match running_host ~port entry.bidi_url with
-     | Host_running -> Some at
-     | Host_on_another_port _ | Host_address_unknown | Start_host _ | Launcher_not_ready _ -> None)
+    (match address_on ~port entry.bidi_url with
+     | On_port -> Some at
+     | On_another_port | Port_not_named -> None)
   | Browser_bidi_host_record.Ended
       (_, { session = Browser_bidi_host_record.(No_session_left | Session_unknown); _ })
   | Browser_bidi_host_record.Never_started
@@ -182,7 +193,9 @@ let restart_for_held_session (entry : Browser_keeper_firefox_record.entry) ~port
   else
     match recorded with
     | Unproven why -> Not_restarted why
-    | Gone -> Not_restarted "the Keeper Firefox MASC started has ended, so another Firefox answers"
+    | Gone ->
+      Not_restarted
+        "the Keeper Firefox MASC started has ended, so what answers on the port is another process"
     | Started_here when entry.started_at > since ->
       Not_restarted
         "the Keeper Firefox MASC started on it started after that host ended, so it does not hold \

@@ -81,8 +81,8 @@ val launcher_missing_message : launcher_missing -> string
 type recorded_firefox =
   | Started_here
       (** The process numbered as the group runs, started when the recorded
-          one started, and is in that group: the group is the Firefox MASC
-          started. *)
+          one started, and is in that group, and the group has a live member:
+          the group is the Firefox MASC started. *)
   | Gone
       (** The recorded group has ended: nothing is left in it, or another
           process runs under the number it was named after. *)

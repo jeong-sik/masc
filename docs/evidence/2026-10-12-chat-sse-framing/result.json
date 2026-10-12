@@ -1,0 +1,15 @@
+{
+  "source_sha256": "60fbb3ebfd2cd98ec1cab93e1fd60d1f9bb6f4d3513ab39b70cf71a9ab89acab",
+  "probe_sha256": "2363e0be9e8a498c3d566ba83a635e5a584fb7a12c973879ccc7db9bd561967e",
+  "source_loaded": "complete lib/sse_wire/sse_wire.ml unchanged",
+  "stubs": [],
+  "exit_code": 0,
+  "stdout": "PASS framing checks=929 events=6 LF_bytes=449 CRLF_bytes=469\n",
+  "stderr": "",
+  "limitations": [
+    "protocol framing only",
+    "synthetic wire corpus",
+    "no Live event validation or journal/state reduction",
+    "no provider/runtime/UI evidence"
+  ]
+}

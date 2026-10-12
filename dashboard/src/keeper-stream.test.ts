@@ -184,8 +184,8 @@ describe('Keeper operation stream projection', () => {
     }
   })
 
-  it('does not publish retry onto a same-runtime operation replaced during thinking flush', () => {
-    assistantEntry('original-operation')
+  it.each(['known', 'unbound'] as const)('does not publish retry onto a replaced operation from %s ownership', owner => {
+    assistantEntry(owner === 'known' ? 'original-operation' : undefined)
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: { runtime_id: 'claude', attempt_index: 0 },
     })

@@ -282,8 +282,9 @@ function captureThinkingPublicationOwner(entry: KeeperConversationEntry, authRev
 function ownsThinkingPublication(pending: ThinkingPublicationOwner, entry: KeeperConversationEntry | undefined, authRevision: number): boolean {
   return entry !== undefined && entry.role === 'assistant' && pending.authRevision === authRevision
     && entry.source === pending.targetSource && entry.turnRef === pending.turnRef
-    && (pending.deliveryKey === null || entry.deliveryProvenance != null
-      && sameDeliveryKey(pending.deliveryKey, entry.deliveryProvenance.delivery_key))
+    && (pending.deliveryKey === null
+      ? entry.deliveryProvenance == null
+      : entry.deliveryProvenance != null && sameDeliveryKey(pending.deliveryKey, entry.deliveryProvenance.delivery_key))
 }
 
 function flushPendingThinkingDeltas(

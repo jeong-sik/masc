@@ -10,7 +10,6 @@ import type {
   KeeperConversationStreamState,
 } from './types'
 import { IN_FLIGHT_DELIVERY } from './lib/keeper-delivery'
-import { keeperConversationDeliveryFromUnknown } from './lib/keeper-delivery'
 
 export interface TrackedKeeperChatAssistantDraft {
   responseState?: KeeperResponseState
@@ -22,6 +21,7 @@ export interface TrackedKeeperChatAssistantDraft {
   timestamp?: string | null
   traceSteps?: ChatTraceStep[]
   modelContentActivity?: KeeperConversationEntry['modelContentActivity']
+  runtimeAttempt?: KeeperConversationEntry['runtimeAttempt']
   error?: string | null
 }
 
@@ -260,6 +260,7 @@ export function trackedKeeperChatAssistantDraftFromEntry(
     timestamp: entry.timestamp ?? null,
     ...(traceSteps ? { traceSteps } : {}),
     ...(entry.modelContentActivity ? { modelContentActivity: entry.modelContentActivity } : {}),
+    ...(entry.runtimeAttempt ? { runtimeAttempt: entry.runtimeAttempt } : {}),
     ...(entry.error !== undefined ? { error: entry.error } : {}),
   }
 }
@@ -343,7 +344,13 @@ function preserveContentClosure(
   if (!previousActivities || before?.kind !== 'known' || after?.kind !== 'known'
       || before.current === null || after.current === null
       || !sameKeeperResponseOwner(before.current, after.current)) return incoming
-  if (incoming.modelContentActivity === undefined) return { ...incoming, modelContentActivity: previousActivities }
+  if (incoming.modelContentActivity === undefined) {
+    const open = previousActivities.filter(activity => activity.state === 'observed').at(-1)
+    return { ...incoming, modelContentActivity: previousActivities,
+      ...((incoming.streamState === 'thinking' || incoming.streamState === 'streaming' || incoming.streamState === 'waiting')
+        ? { streamState: open ? (open.channel === 'thinking' ? 'thinking' : 'streaming') : 'waiting' } : {}),
+    }
+  }
   const sameOccurrence = (left: NonNullable<TrackedKeeperChatAssistantDraft['modelContentActivity']>[number],
     right: NonNullable<TrackedKeeperChatAssistantDraft['modelContentActivity']>[number]): boolean =>
     left.generation === right.generation && left.stream_scope === right.stream_scope && left.block_index === right.block_index

@@ -446,10 +446,14 @@ let autonomous_turn_id_of_fields fields =
   | Some (`Assoc marker) -> string_field marker "turn_id"
   | Some _ | None -> None
 
+let explicit_turn_id_of_fields fields =
+  match string_field fields "turn_ref" with
+  | Some _ as turn_ref -> turn_ref
+  | None -> autonomous_turn_id_of_fields fields
+;;
+
 let turn_id_of_fields fields =
-  let explicit_turn () = match string_field fields "turn_ref" with
-    | Some _ as turn_ref -> turn_ref
-    | None -> autonomous_turn_id_of_fields fields in
+  let explicit_turn () = explicit_turn_id_of_fields fields in
   match Delivery_identity.delivery_provenance_of_fields fields with
   | Ok (Some provenance) ->
       (match provenance.Delivery_identity.delivery_key with
@@ -496,9 +500,7 @@ let execution_source_of_fields fields =
   | None ->
       (match Delivery_identity.delivery_provenance_of_fields fields with
        | Ok None ->
-           let raw = match string_field fields "turn_ref" with
-             | Some _ as reference -> reference
-             | None -> autonomous_turn_id_of_fields fields in
+           let raw = explicit_turn_id_of_fields fields in
            Option.bind raw (fun raw ->
              Option.map (fun reference -> Masc_tui_keeper_chat_log.Autonomous_turn reference)
                (Ids.Turn_ref.of_string raw))
@@ -506,7 +508,7 @@ let execution_source_of_fields fields =
 ;;
 
 let turn_sequence_of_fields fields =
-  Option.bind (string_field fields "turn_ref") (fun raw ->
+  Option.bind (explicit_turn_id_of_fields fields) (fun raw ->
     Option.map Ids.Turn_ref.absolute_turn (Ids.Turn_ref.of_string raw))
 ;;
 

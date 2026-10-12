@@ -54,7 +54,7 @@ let test_notification_only_triggers_journal_read () =
   ignore (Types.turn_log_add_journaled log (lines @ [line 2 12. (E.Text_delta {text=" second"; response=Unobserved_scope (None)})]));
   let texts = Log.entries log.tl_log |> List.filter_map (fun entry ->
     match entry.Log.delta with
-    | Masc_tui_keeper_chat_live.Text { text; stream_scope = _ } -> Some text
+    | Masc_tui_keeper_chat_live.Text { text; response = _ } -> Some text
     | _ -> None) in
   check (list string) "journal overlap keeps ordered text once" ["first"; " second"] texts
 

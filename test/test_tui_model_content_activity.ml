@@ -599,17 +599,11 @@ let test_owned_text_protocol () =
      ["stream_scope",`Int 9_007_199_254_740_992]]
 
 let () = run "model content activity"
-<<<<<<< HEAD
-  ["boundaries", [test_case "owned thinking lifecycle" `Quick test_owned_thinking_lifecycle;
-    test_case "owned thinking refines unbound text scope" `Quick test_owned_thinking_refines_unbound_text_scope;
-    test_case "owned stop closes response without current activity" `Quick test_owned_stop_closes_response_without_current_activity;
-||||||| parent of e658cd106f (fix(chat): preserve exclusive text response ownership)
-  ["boundaries", [test_case "owned thinking lifecycle" `Quick test_owned_thinking_lifecycle;
-=======
   ["boundaries", [test_case "owned text lifecycle" `Quick test_owned_text_lifecycle;
     test_case "owned text protocol" `Quick test_owned_text_protocol;
     test_case "owned thinking lifecycle" `Quick test_owned_thinking_lifecycle;
->>>>>>> e658cd106f (fix(chat): preserve exclusive text response ownership)
+    test_case "owned thinking refines unbound text scope" `Quick test_owned_thinking_refines_unbound_text_scope;
+    test_case "owned stop closes response without current activity" `Quick test_owned_stop_closes_response_without_current_activity;
     test_case "owned thinking protocol" `Quick test_owned_thinking_protocol;
     test_case "owned response details" `Quick test_owned_response_details;
     test_case "details production identity" `Quick test_details_production_identity;

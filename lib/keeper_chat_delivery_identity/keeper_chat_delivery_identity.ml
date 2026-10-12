@@ -350,10 +350,23 @@ let delivery_provenance_fields { delivery_key; transcript_slot } =
   ]
 ;;
 
+let unique_optional_field name fields =
+  let rec loop found = function
+    | [] -> Ok found
+    | (field, value) :: rest ->
+        if String.equal field name then
+          match found with
+          | None -> loop (Some value) rest
+          | Some _ -> Error (Printf.sprintf "duplicate delivery row field %S" name)
+        else loop found rest
+  in
+  loop None fields
+;;
+
 let delivery_provenance_of_fields fields =
-  match
-    List.assoc_opt "delivery_key" fields, List.assoc_opt "transcript_slot" fields
-  with
+  let* delivery_key = unique_optional_field "delivery_key" fields in
+  let* transcript_slot = unique_optional_field "transcript_slot" fields in
+  match delivery_key, transcript_slot with
   | None, None -> Ok None
   | Some _, None | None, Some _ ->
     Error "delivery_key and transcript_slot must appear together"
@@ -400,7 +413,12 @@ let row_delivery_provenance_of_fields fields =
   match provenance with
   | None -> Ok None
   | Some provenance ->
-      let* role_label = string_field "role" fields in
+      let* role = unique_optional_field "role" fields in
+      let* role_label = match role with
+        | Some (`String role) -> Ok role
+        | Some _ -> Error "delivery identity field \"role\" must be a string"
+        | None -> Error "missing delivery identity field \"role\""
+      in
       let* () = validate_delivery_role ~role_label provenance in
       Ok (Some provenance)
 ;;

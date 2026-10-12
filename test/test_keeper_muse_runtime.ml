@@ -2029,13 +2029,13 @@ let test_native_compaction_metadata_reaches_request_trace () =
   List.iter (fun (name, metadata, trigger, outcome, before, after) ->
     with_scripted_host ~fixture:["compaction_metadata", `Assoc
       (("reason", `String "PRIVATE_COMPACTION_REASON") :: metadata)] (fun ~base_path ->
-      let path = Filename.concat base_path "compaction-trace.jsonl" in
-      let raw_trace = match Agent_core.Raw_trace.create ~path ~session_id:"compaction-fixture" () with
+      let trace_path = Filename.concat base_path "compaction-trace.jsonl" in
+      let raw_trace = match Agent_core.Raw_trace.create ~path:trace_path ~session_id:"compaction-fixture" () with
         | Ok sink -> sink | Error error -> fail (Agent_core.Error.to_string error) in
       let run = run_turn_with ~raw_trace ~base_path ~tool:(masc_probe_tool (ref `Null)) () in
       (match run.outcome.result with
        | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
-      let records = match Agent_core.Raw_trace.read_all ~path () with
+      let records = match Agent_core.Raw_trace.read_all ~path:trace_path () with
         | Ok rows -> rows | Error error -> fail (Agent_core.Error.to_string error) in
       let compacted = List.filter (fun (row : Agent_core.Raw_trace.record) ->
         row.hook_name = Some "muse_compaction") records in
@@ -2063,7 +2063,7 @@ let test_native_compaction_metadata_reaches_request_trace () =
       List.iter (fun (key, expected) -> check bool (name ^ " " ^ key) true (member key detail = expected))
         ["trigger",trigger;"outcome",outcome;"tokens_before",before;"tokens_after",after];
       check bool "free-form reason never enters raw trace" false
-        (String_util.contains_substring (read_text path) "PRIVATE_COMPACTION_REASON")))
+        (String_util.contains_substring (read_text trace_path) "PRIVATE_COMPACTION_REASON")))
     ["compacted", ["trigger",`String "auto";"outcome",`String "compacted";
        "tokensBefore",`Int 1274652;"tokensAfter",`Int 4200],
        `Assoc ["kind",`String "auto"], `Assoc ["kind",`String "compacted"], `Int 1274652, `Int 4200;

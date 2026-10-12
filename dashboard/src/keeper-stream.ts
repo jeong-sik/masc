@@ -1008,7 +1008,11 @@ export function applyKeeperStreamEvent(
           && previous.stream_scope === activity.stream_scope && previous.block_index === activity.block_index
         const previous = existing.modelContentActivity?.find(sameOccurrence)
         if (previous && previous.channel !== activity.channel) return 'Conflicting model content channel'
-        if (previous && (previous.state === 'ended' || previous.state === activity.state)) return null
+        if (previous && previous.state === 'ended') return null
+        // A repeated observation of an already observed occurrence carries no
+        // new state, but it does carry recency: fall through so the inventory
+        // moves it to the latest position instead of leaving the lookup stuck
+        // on whichever piece happened to arrive first.
         const owner = { content_generation: activity.generation, stream_scope: activity.stream_scope }
         // A piece ending can close only an already admitted response. It cannot
         // create a newer response or assert whole-response completion.
@@ -1024,8 +1028,11 @@ export function applyKeeperStreamEvent(
               || !ownsThinkingPublication(publicationOwner, entry, currentStoredTokenRevision())) return entry
           const activities = entry.modelContentActivity ?? []
           const index = activities.findIndex(sameOccurrence)
+          // Refresh recency: a re-observed occurrence moves to the latest
+          // position so the open-piece lookup below follows the newest
+          // activity instead of the first arrival order.
           const updated = Object.freeze(index < 0 ? [...activities, activity]
-            : activities.map((previous, position) => position === index ? activity : previous))
+            : [...activities.slice(0, index), ...activities.slice(index + 1), activity])
           const open = updated.filter(previous => previous.state === 'observed').at(-1)
           return { ...entry, modelContentActivity: updated,
             streamState: open ? (open.channel === 'thinking' ? 'thinking' : 'streaming') : 'waiting',

@@ -13,11 +13,6 @@ exists."""
 defer_loading = true
 
 [[params]]
-name = "session_name"
-type = "string"
-description = "Optional session name"
-
-[[params]]
 name = "conversation_mode"
 type = "string"
 enum = ["turn_based", "realtime_bridge"]

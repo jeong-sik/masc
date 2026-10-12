@@ -65,14 +65,6 @@ Think mode choice. auto lets model decide; disabled skips reasoning; enabled \
 forces it."""
 
 [[params]]
-name = "think_policy"
-type = "string"
-description = """
-Adaptive thinking policy for Ollama reasoning models. auto defaults to \
-response-oriented non-thinking probes; enabled measures thinking path \
-explicitly."""
-
-[[params]]
 name = "timeout_sec"
 type = "integer"
 minimum = 1

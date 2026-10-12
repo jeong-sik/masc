@@ -70,6 +70,37 @@ let test_concurrent_acknowledgement_detects_receipt_loss () =
     (List.map (fun (row : Queue.candidate) -> row.request_id)
       (Queue.candidates (batch keepers_dir))))) [false; true]
 
+let test_concurrently_added_tail_requires_receipt_authority () =
+  List.iter (fun lose_receipt -> with_store (fun keepers_dir ->
+    ignore (append keepers_dir "a" "deferred A");
+    let interleaved = ref false in
+    let observations = ref 0 in
+    let queue_path = Queue.path ~keepers_dir ~keeper_id:"keeper" in
+    let after_other_ack = ref "" in
+    let result = Queue.For_testing.acknowledge_with ~keepers_dir ~keeper_id:"keeper"
+      ~read_receipts:(fun ~queue_generation ->
+        incr observations;
+        let earlier = Current.committed_explicit_candidates ~keepers_dir
+          ~keeper_id:"keeper" ~queue_generation |> require in
+        if not !interleaved then (
+          interleaved := true;
+          ignore (append keepers_dir "b" "settled B");
+          let selected = List.filter (fun (id : Current.explicit_candidate_id) ->
+            id.request_id = "b") (Queue.candidate_ids (batch keepers_dir)) in
+          ignore (commit keepers_dir selected [fact "settled B"]);
+          acknowledge keepers_dir;
+          after_other_ack := Fs_compat.load_file queue_path;
+          if lose_receipt then
+            Sys.remove (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper"));
+        Ok earlier) in
+    (match result, lose_receipt with
+     | Ok (), false | Error _, true -> ()
+     | Ok (), true -> fail "consumed new tail without receipt authority accepted"
+     | Error detail, false -> fail detail);
+    check int "new tail authority is reobserved" 2 !observations;
+    check string "outer acknowledgement preserves queue bytes" !after_other_ack
+      (Fs_compat.load_file queue_path))) [false; true]
+
 let test_pending_is_not_current () = with_store (fun keepers_dir ->
   let first = append keepers_dir "one" "first rule" in
   let repeated = append keepers_dir "one" "first rule" in
@@ -553,6 +584,7 @@ let test_size_with_a_same_failure_is_deferred_whole () =
 
 let () = run "durable explicit admission queue"
   ["storage boundaries", [
+    test_case "concurrently added tail requires receipt authority" `Quick test_concurrently_added_tail_requires_receipt_authority;
     test_case "concurrent acknowledgement detects receipt loss" `Quick test_concurrent_acknowledgement_detects_receipt_loss;
     test_case "concurrent acknowledgement preserves deferred input" `Quick test_concurrent_acknowledgement_preserves_deferred_input;
     test_case "missing receipt before acknowledgement remains explicit scope limitation" `Quick test_missing_receipt_before_acknowledgement_is_unresolved_authority;

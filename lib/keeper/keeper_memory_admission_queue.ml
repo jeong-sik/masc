@@ -199,9 +199,15 @@ let rec acknowledge_with ~read_receipts ~keepers_dir ~keeper_id =
           List.exists (fun row ->
             let identity = candidate_id ~generation:initial.generation row in
             not (Candidate_identity_set.mem identity current_ids)
-            && not (Candidate_identity_set.mem identity receipt_ids)) initial.pending ->
-        (* Queue removal happened after our authority observation. Release
-           this lock before reading Memory again; never infer consumption. *)
+            && not (Candidate_identity_set.mem identity receipt_ids)) initial.pending
+          || (match validate_sequence_coverage state
+               (List.filter (fun (receipt : Keeper_memory_os_current.explicit_candidate_id) ->
+                  receipt.sequence <= state.last_sequence) receipts) with
+              | Ok () -> false
+              | Error _ -> true) ->
+        (* A removed row or an uncovered allocated tail outlived our authority
+           observation. Release this lock before reading Memory again; this
+           also covers rows appended and consumed after [initial] was read. *)
         Ok true
       | Some state ->
         let by_request = Hashtbl.create (List.length receipts) in

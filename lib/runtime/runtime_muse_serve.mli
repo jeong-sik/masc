@@ -249,6 +249,12 @@ type stream_event =
           final success/failure projection so a failed turn still reports it. *)
   | Turn_finished of { text : string }
 
+val emit_stream_event : (stream_event -> unit) option -> stream_event -> unit
+(** Invoke an optional stream observer, logging and dropping an ordinary
+    callback failure so a buggy observer cannot abort the turn. Reserved
+    controls (operator interrupt, [Eio.Time.Timeout], [Eio.Cancel.Cancelled],
+    [Out_of_memory], [Stack_overflow], [Sys.Break]) still propagate. *)
+
 val validate_turn
   :  ?session_mode:session_mode
   -> config

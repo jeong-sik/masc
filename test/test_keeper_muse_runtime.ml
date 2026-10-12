@@ -2097,13 +2097,18 @@ let test_compaction_trace_failure_preserves_provider_result () =
         (before +. if tracing then 1. else 0.) (failures ());
       check string "trace absence/failure does not cause another provider turn" "start\n"
         (read_text (Filename.concat base_path "sessions.log")))) [false;true];
-  let cancellation = Eio.Cancel.Cancelled (Failure "compaction observer cancelled") in
-  (try
-     ignore (Keeper_official_client_host.observe_raw_trace ~keeper_name
-       ~stage:Keeper_official_client_host.Context_compaction (fun () -> raise cancellation));
-     fail "reserved observer cancellation was swallowed"
-   with Eio.Cancel.Cancelled _ as observed ->
-     check bool "same reserved cancellation propagates" true (observed == cancellation))
+  List.iter (fun (name, reserved) ->
+    match Keeper_official_client_host.observe_raw_trace ~keeper_name
+      ~stage:Keeper_official_client_host.Context_compaction (fun () -> raise reserved) with
+    | Some _ | None -> fail ("reserved observer " ^ name ^ " was swallowed")
+    | exception observed ->
+      check bool ("same reserved " ^ name ^ " propagates") true (observed == reserved))
+    [ "operator interrupt", Keeper_operator_interrupt.Operator_interrupt
+    ; "timeout", Eio.Time.Timeout
+    ; "cancellation", Eio.Cancel.Cancelled (Failure "compaction observer cancelled")
+    ; "out of memory", Out_of_memory
+    ; "stack overflow", Stack_overflow
+    ; "break", Sys.Break ]
 ;;
 
 let check_resume_recall_blocks ~compaction ~resend_after_start () =

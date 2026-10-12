@@ -1106,11 +1106,31 @@ let test_completed_message_presence () =
     [[], None; [Write blank], Some ""]
 ;;
 
+let test_stream_callback_preserves_reserved_controls () =
+  let event = Serve.Turn_finished { text = "" } in
+  let propagated name exn =
+    match Serve.emit_stream_event (Some (fun _ -> raise exn)) event with
+    | () -> fail (name ^ " was swallowed by the stream callback boundary")
+    | exception observed -> check bool ("same " ^ name ^ " propagates") true (observed == exn)
+  in
+  propagated "operator interrupt" Keeper_operator_interrupt.Operator_interrupt;
+  propagated "timeout" Eio.Time.Timeout;
+  propagated "cancellation" (EioCancel.Cancelled (Failure "stream observer cancelled"));
+  propagated "out of memory" Out_of_memory;
+  propagated "stack overflow" Stack_overflow;
+  propagated "break" Sys.Break;
+  (* Ordinary callback failures stay isolated: the turn continues. *)
+  Serve.emit_stream_event (Some (fun _ -> raise (Failure "buggy observer"))) event;
+  Serve.emit_stream_event None event
+;;
+
 let () =
   run
     "runtime_muse_serve"
     [ ( "turn"
       , [ test_case "completed message presence" `Quick test_completed_message_presence
+        ; test_case "stream callback preserves reserved controls" `Quick
+            test_stream_callback_preserves_reserved_controls
         ; test_case "turn with tool and approval" `Quick test_turn_with_tool_and_approval
         ; test_case "auth required" `Quick test_auth_required
         ; test_case "compaction reaches the stream" `Quick test_compaction_reaches_the_stream

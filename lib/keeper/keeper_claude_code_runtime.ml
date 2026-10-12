@@ -1496,7 +1496,7 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
     ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
-    ?on_native_tool_progress ?on_native_tool_completion ?on_child_content_observation ?on_native_task_observation ?on_provider_retry
+    ?on_native_tool_progress ?on_provider_retry ?on_native_tool_completion ?on_child_content_observation ?on_native_task_observation
     ?on_native_action
     ?on_usage_report
     ?on_tool_execution

@@ -15,3 +15,9 @@ Original source HOLD preserved. Previous selected-function probe covers terminal
 missing/observed tool decisions with explicit doubles, not complete UI pipeline.
 Composite independent rereview required. No full typecheck/build/CI/runtime/UI,
 installation/formal approval/merge proof. Full user objective remains active.
+
+Second review at fcff9e62d247cbdb501612205dea3b9026c29955 remained HOLD:
+settled-log initial/reload and no-reasoning fixtures also used stale text/order
+oracles omitting unmatched tools. All three further assertions are replaced by
+source/role/coverage decisions; unrelated speech and absent-reasoning evidence
+are checked separately. Preserve both prior HOLD reports. No execution claim.

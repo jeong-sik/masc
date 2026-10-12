@@ -42,7 +42,9 @@ val forward : 'message t -> message:'message option -> string -> string
     when it ends in a blank line. Every chat surface draws that break as a
     new paragraph. No newlines are added when {!tool_row} was
     called after the last non-empty piece. An empty piece comes back
-    unchanged and starts nothing. *)
+    unchanged and starts nothing. A supplied identity already closed by
+    {!complete_message} forwards no late/replayed delta. An absent identity
+    cannot prove replay and continues the observed stream. *)
 
 val tool_row : 'message t -> unit
 (** A [tool_use] block was forwarded. The next message's text needs no

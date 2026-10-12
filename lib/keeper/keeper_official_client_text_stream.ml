@@ -49,7 +49,9 @@ let break_after shown =
 
 let forward t ~message piece =
   if String.equal piece ""
-  then piece
+     || Option.fold ~none:false ~some:(fun incoming ->
+          List.exists (t.equal incoming) t.completed_messages) message
+  then ""
   else (
     let delta =
       if starts_new_message t ~message
@@ -81,14 +83,18 @@ let suffix_after ~prefix text =
 let complete_message t ~message ~text =
   if List.exists (t.equal message) t.completed_messages then None
   else (
-    (* Completion is an identity-owned terminal event. Remember it even when
-       it carries no missing text, before any later message becomes current. *)
+    (* Compute the missing bytes before closing identity: [forward] itself
+       refuses deltas for completed messages. No observer runs in this step. *)
+    let missing =
+      if String.equal text "" then None
+      else if starts_new_message t ~message:(Some message)
+      then Some (forward t ~message:(Some message) text)
+      else Option.map (forward t ~message:(Some message))
+          (suffix_after ~prefix:(Buffer.contents t.current) text)
+    in
     t.completed_messages <- message :: t.completed_messages;
-    if String.equal text "" then None
-    else if starts_new_message t ~message:(Some message)
-    then Some (forward t ~message:(Some message) text)
-    else Option.map (forward t ~message:(Some message))
-        (suffix_after ~prefix:(Buffer.contents t.current) text))
+    missing)
+
 ;;
 
 let remainder t ~final_text =

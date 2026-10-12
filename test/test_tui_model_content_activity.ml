@@ -310,6 +310,21 @@ let test_missing_start_retains_content_closure () =
       (T.model_activity t=Some T.Activity_reasoning)
   ) [false;true]
 
+let test_missing_start_closure_preserves_retry () =
+  let t = create () in
+  let retry : Masc.Runtime_claude_api_retry.t = {observation_id="retry";attempt=1;
+    max_retries=10;retry_delay_ms=1000;error_status=None} in
+  T.apply ~now:1. t (L.Runtime_attempt_started {runtime_id=Some "claude";attempt_index=Some 0});
+  T.apply ~now:2. t (L.Stream_model_started {stream_scope=Some 0;
+    message_id=None;model="fixture";usage=None});
+  T.apply ~now:2. t (observed ~generation:7 ~index:9 ());
+  T.apply ~now:2. t (ended ~generation:7 ~index:9 ());
+  T.apply ~now:3. t (L.Provider_retry_observed {attempt={routing_run_id="run";
+    runtime_id="claude";lane_attempt_index=0};retry});
+  T.apply ~now:4. t (ended ~generation:7 ~index:0 ~channel:E.Model_thinking ());
+  T.apply ~now:5. t (L.Thinking {text="late";content_index=Some 0});
+  check bool "missing-start closure and late body preserve current retry" true
+    (T.model_activity t=Some (T.Activity_provider_retry retry))
 
 let test_thinking_index_wire_boundary () =
   let decode fields =
@@ -329,6 +344,7 @@ let () = run "model content activity"
   ["boundaries", [test_case "activity JSON safe-integer boundary" `Quick test_activity_numeric_wire_boundary;
     test_case "thinking content index wire" `Quick test_thinking_index_wire_boundary;
     test_case "missing content start retains closure" `Quick test_missing_start_retains_content_closure;
+    test_case "missing-start closure preserves retry" `Quick test_missing_start_closure_preserves_retry;
     test_case "overlap uses event order" `Quick test_overlap_uses_event_order;
     test_case "scope, response, retry, legacy and late stop" `Quick test_scope_retry_and_fallback;
     test_case "production bridge through SSE and durable replay" `Quick test_bridge_live_and_journal;

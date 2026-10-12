@@ -18,6 +18,13 @@ let with_temp_keepers f =
     (fun () -> f path)
 ;;
 
+let inspect_snapshot_bytes ~keepers_dir ~keeper_id =
+  match Current.For_testing.decode_snapshot (Fs_compat.load_file
+      (Current.path_for_keepers_dir ~keepers_dir ~keeper_id)) with
+  | Ok snapshot -> snapshot
+  | Error rejection -> fail rejection
+;;
+
 let fact ?(claim = "claim") () :
   Types.fact =
   { claim
@@ -662,11 +669,9 @@ let check_batch_retraction_recovers_exact_reason_evidence ~torn_tail () =
   check string "receipt preserves the exact reason before reconciliation" reason
     (prepared |> member "dropped" |> to_list |> List.hd
      |> member "reason" |> to_string);
-  let committed =
-    Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
-    |> require_ok
-    |> require_some
-  in
+  (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
+   | Error _ -> () | Ok _ -> fail "unfinished publication appeared finalized");
+  let committed = inspect_snapshot_bytes ~keepers_dir ~keeper_id:"keeper" in
   check int "snapshot replacement committed before finalize failed" 2
     committed.revision;
   check (list string) "target is absent from committed snapshot" []
@@ -776,10 +781,9 @@ let check_ordinary_removals_preserve_archive_until_journal_recovery ~torn_tail (
     Unix.mkdir journal_path 0o700;
     let committed : Current.t = remove ~keepers_dir ~target ~reason in
     check int (label ^ " snapshot committed") 2 committed.revision;
-    let read () =
-      Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
-      |> require_ok |> require_some
-    in
+    let read () = inspect_snapshot_bytes ~keepers_dir ~keeper_id:"keeper" in
+    (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
+     | Error _ -> () | Ok _ -> fail "unfinished publication appeared finalized");
     check bool (label ^ " original survives in committed snapshot") true
       ((read ()).change.removed = [ target ]);
     let receipt_path =
@@ -3566,7 +3570,7 @@ let test_commit_notifications_follow_all_writers_outside_locks () =
           ~keepers_dir ~keeper_id:event.keeper_id (fun () ->
             File_lock_eio.with_lock
               (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:event.keeper_id)
-              (fun () -> Current.read_for_keepers_dir ~keepers_dir ~keeper_id:event.keeper_id))
+              (fun () -> Ok (Some (inspect_snapshot_bytes ~keepers_dir ~keeper_id:event.keeper_id))))
       in
       (* Registry mutation is also safe inside a dispatched callback. *)
       let stop = Notifications.subscribe (fun _ -> ()) in
@@ -3603,7 +3607,7 @@ let test_commit_notifications_follow_all_writers_outside_locks () =
     check int "unsubscribed listener stays detached" 4 (List.length !observed))
 ;;
 
-let test_commit_notifications_do_not_depend_on_journal () =
+let test_commit_notifications_resume_after_journal_finalization () =
   let module Notifications = Masc.Keeper_memory_commit_notifications in
   with_temp_keepers @@ fun keepers_dir ->
   let physical_keepers_dir = Unix.realpath keepers_dir in
@@ -3616,7 +3620,10 @@ let test_commit_notifications_do_not_depend_on_journal () =
   in
   Fun.protect ~finally:stop (fun () ->
     ignore (replace ~keepers_dir ~facts:[ fact () ] () |> require_ok);
-    check (list int) "snapshot commit notifies despite failed journal append" [ 1 ] !observed;
+    check (list int) "failed journal defers wake but retains committed outcome" [] !observed;
+    Unix.rmdir journal;
+    ignore (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require_ok);
+    check (list int) "public read finalizes journal and dispatches pending wake" [1] !observed;
     (* A different keeper's unreadable snapshot fails before it can commit. *)
     let blocked = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"blocked" in
     Unix.mkdir blocked 0o700;
@@ -3668,6 +3675,7 @@ let test_commit_notification_preserves_cancellation () =
      with Eio.Cancel.Cancelled _ as exn ->
        check bool "same cancellation propagated" true (exn == cancellation));
     check (list int) "other subscriber still sees the real commit" [ 1 ] !observed;
+    stop_cancel ();
     let snapshot = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
       |> require_ok |> require_some in
     check int "cancelled notification does not revoke snapshot" 1 snapshot.revision)
@@ -3916,10 +3924,194 @@ let test_dynamic_category_roundtrip () =
      "all"; "source"; "dropped"]
 ;;
 
+let test_generic_publication_staged_recovery () =
+  List.iter (fun (first_write, after_rename) -> with_temp_keepers @@ fun keepers_dir ->
+    let old = fact ~claim:"previous publication" () in
+    let next = fact ~claim:"next publication" () in
+    if not first_write then ignore (replace ~keepers_dir ~facts:[old] () |> require_ok);
+    let receipt_path = Current.publication_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+    let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let events = ref [] in
+    let unsubscribe = Masc.Keeper_memory_commit_notifications.subscribe
+      (fun event -> events := event.revision :: !events) in
+    Fun.protect ~finally:unsubscribe @@ fun () ->
+    let write_snapshot path content =
+      Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+        ~sync_file:(fun _ -> if not after_rename then failwith "before rename")
+        ~sync_parent:(fun _ -> failwith "after rename") path content in
+    (match Current.For_testing.replace_with_publication_io
+      ~on_committed:(fun _ _ -> ()) ~before_journal:(fun () -> ())
+      ~write_snapshot ~sync_snapshot:(fun _ -> Error "durability unconfirmed")
+      ~keepers_dir ~keeper_id:"keeper" ~now:300. ~source:(source Current.Explicit_write)
+      ~facts:[next] with
+     | Error _ -> () | Ok _ -> fail "injected persistence fault was hidden");
+    check bool "prepared publication persists on staged failure" true (Sys.file_exists receipt_path);
+    check (list int) "uncertain write sends no wake" [] !events;
+    let visible = Fs_compat.load_file_opt snapshot_path in
+    let read = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require_ok in
+    check bool "public read completes pending recovery" false (Sys.file_exists receipt_path);
+    let expected = if after_rename then Some [next] else if first_write then None else Some [old] in
+    check bool "first-write absence and prior publication recover distinctly" true
+      (Option.map (fun (snapshot : Current.t) -> snapshot.facts) read = expected);
+    check bool "recovery never rewrites snapshot bytes" true
+      (Fs_compat.load_file_opt snapshot_path = visible);
+    check (list int) "only durable target recovery emits a revision wake"
+      (if after_rename then [if first_write then 1 else 2] else []) !events)
+    [true,false; true,true; false,false; false,true]
+;;
+
+let test_generic_publication_journal_and_notification_recovery () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let receipt = Current.publication_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  Unix.mkdir journal 0o700;
+  let target = fact ~claim:"first durable publication with unavailable journal" () in
+  let committed = replace ~keepers_dir ~facts:[target] () |> require_ok in
+  check int "durable snapshot outcome survives strict journal failure" 1 committed.revision;
+  check bool "journal failure preserves recovery evidence" true (Sys.file_exists receipt);
+  (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
+   | Error _ -> () | Ok _ -> fail "unfinalized publication became readable authority");
+  Unix.rmdir journal;
+  let wakes = ref 0 in
+  let cancel = Masc.Keeper_memory_commit_notifications.subscribe (fun _ ->
+      incr wakes; raise (Eio.Cancel.Cancelled (Failure "after notification dispatch"))) in
+  (try
+     ignore (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper");
+     fail "notification cancellation was swallowed"
+   with Eio.Cancel.Cancelled _ -> ());
+  cancel ();
+  check int "notification ran after journal finalization" 1 !wakes;
+  check string "crash boundary retains pending notification phase" "notification_pending"
+    Yojson.Safe.Util.(Yojson.Safe.from_file receipt |> member "phase" |> to_string);
+  let journal_once = Fs_compat.load_file journal in
+  let unsubscribe = Masc.Keeper_memory_commit_notifications.subscribe (fun _ -> incr wakes) in
+  Fun.protect ~finally:unsubscribe @@ fun () ->
+  let recovered = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require_ok in
+  check bool "same committed snapshot remains current" true (recovered = Some committed);
+  check int "wake is explicitly at-least-once" 2 !wakes;
+  check string "exact journal finalization is idempotent" journal_once (Fs_compat.load_file journal);
+  check bool "completed dispatch clears receipt" false (Sys.file_exists receipt)
+;;
+
+let test_generic_publication_journal_cancellation_keeps_producer_commit () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let commits = ref 0 in
+  (try
+     ignore (Current.For_testing.replace_with_publication_io
+       ~write_snapshot:Fs_compat.save_file_atomic_strict_staged
+       ~sync_snapshot:Fs_compat.sync_file_and_parent_strict
+       ~on_committed:(fun _ commit ->
+         check bool "original producer sees durable rewrite" true (commit=Current.Rewritten);
+         incr commits)
+       ~before_journal:(fun () -> raise (Eio.Cancel.Cancelled (Failure "journal I/O cancelled")))
+       ~keepers_dir ~keeper_id:"keeper" ~now:300. ~source:(source Current.Explicit_write)
+       ~facts:[fact ()]);
+     fail "journal cancellation was swallowed"
+   with Eio.Cancel.Cancelled _ -> ());
+  check int "durable snapshot publishes producer outcome before journal" 1 !commits;
+  ignore (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require_ok);
+  check int "recovery does not replay old producer callback" 1 !commits
+;;
+
+let test_generic_publication_reused_revision_keeps_exact_history () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (replace ~keepers_dir ~facts:[fact ~claim:"previous snapshot generation" ()] () |> require_ok);
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let old_journal = Fs_compat.load_file journal in
+  ignore (Current.move_aside_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    ~now:250. ~rejection:"fixture explicit quarantine" () |> require_ok);
+  let write_snapshot path content =
+    Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ~sync_parent:(fun _ -> failwith "after rename") path content in
+  let target = fact ~claim:"new snapshot generation" () in
+  ignore (Current.For_testing.replace_with_publication_io
+    ~write_snapshot ~sync_snapshot:(fun _ -> Error "unconfirmed")
+    ~on_committed:(fun _ _ -> ()) ~before_journal:(fun () -> ())
+    ~keepers_dir ~keeper_id:"keeper" ~now:300. ~source:(source Current.Explicit_write)
+    ~facts:[target]);
+  let snapshot = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    |> require_ok |> require_some in
+  check int "new snapshot starts revision one" 1 snapshot.revision;
+  check bool "exact new target recovers despite old revision one" true (snapshot.facts=[target]);
+  check bool "old historical bytes remain" true
+    (String.starts_with ~prefix:old_journal (Fs_compat.load_file journal));
+  let once = Fs_compat.load_file journal in
+  ignore (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require_ok);
+  check string "new target journal entry appended exactly once" once (Fs_compat.load_file journal)
+;;
+
+let test_revision_only_absorption_publication_recovers () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let original = fact ~claim:"original branch" () in
+  let successor = fact ~claim:"consolidated successor branch" () in
+  ignore (replace ~keepers_dir ~facts:[original] () |> require_ok);
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let original_journal = Fs_compat.load_file journal in
+  Fs_compat.invalidate_cached_writer journal;
+  Sys.remove journal;
+  Unix.mkdir journal 0o700;
+  let link : Types.revision =
+    {superseded=Types.memory_id original; superseded_by=Types.memory_id successor} in
+  (* No dropped_statements: absorption performs the removal and the explicit
+     revision edge remains applied. This reaches the empty-reasons receipt. *)
+  let committed = apply_disposition ~keepers_dir
+      ~absorbed:[{Types.absorbed=Types.memory_id original; into=Types.memory_id successor}]
+      ~revisions:[link] ~new_claims:[successor] () |> require_ok in
+  check bool "absorption and revision actually replaced the original" true
+    (committed.facts=[successor] && committed.change.removed=[original]);
+  let publication = Current.publication_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let removal = Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let open Yojson.Safe.Util in
+  check bool "writer gives both receipts the same explicit empty reasons" true
+    (member "dropped" (Yojson.Safe.from_file removal) = `List []
+     && member "dropped" (member "journal" (Yojson.Safe.from_file publication)) = `List []);
+  Unix.rmdir journal;
+  Fs_compat.save_file journal original_journal;
+  let recovered = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    |> require_ok |> require_some in
+  check bool "public recovery preserves the exact committed successor" true (recovered=committed);
+  check bool "both receipts finalized" false
+    (Sys.file_exists publication || Sys.file_exists removal);
+  let _, evidence = revision_evidence ~keepers_dir 1 |> require_ok in
+  check bool "declared edge survives recovery exactly once" true
+    (List.map (fun (row : Current.revision_evidence) -> row.revision_links) evidence = [Some [link]]);
+  let once = Fs_compat.load_file journal in
+  ignore (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require_ok);
+  check string "repeated read does not duplicate recovered journal" once (Fs_compat.load_file journal)
+;;
+
+let test_generic_publication_conflict_preserves_stores () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let write_snapshot path content =
+    Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ~sync_parent:(fun _ -> failwith "after rename") path content in
+  ignore (Current.For_testing.replace_with_publication_io
+      ~on_committed:(fun _ _ -> ()) ~before_journal:(fun () -> ())
+    ~write_snapshot ~sync_snapshot:(fun _ -> Error "not synced")
+    ~keepers_dir ~keeper_id:"keeper" ~now:300. ~source:(source Current.Explicit_write)
+    ~facts:[fact ()]);
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let receipt = Current.publication_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let saved_receipt = Fs_compat.load_file receipt in
+  Fs_compat.save_file path "{corrupt snapshot";
+  (match replace ~keepers_dir ~facts:[] () with
+   | Error _ -> () | Ok _ -> fail "conflicting prepared publication was overwritten");
+  check string "conflict is not quarantined or replaced" "{corrupt snapshot" (Fs_compat.load_file path);
+  check string "conflicting receipt is preserved exactly" saved_receipt (Fs_compat.load_file receipt);
+  check bool "conflict creates no journal" false
+    (Sys.file_exists (Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"))
+;;
+
 let () =
   run
     "keeper_memory_os_current"
-    [ ( "dynamic categories", [test_case "new category survives persistence" `Quick
+    [ ("generic publication", [
+        test_case "staged first and subsequent publication recovery" `Quick test_generic_publication_staged_recovery;
+        test_case "journal failure and notification cancellation recovery" `Quick test_generic_publication_journal_and_notification_recovery;
+        test_case "journal cancellation retains producer commit" `Quick test_generic_publication_journal_cancellation_keeps_producer_commit;
+        test_case "historical revision reuse matches exact entry" `Quick test_generic_publication_reused_revision_keeps_exact_history;
+        test_case "revision-only absorption canonical publication" `Quick test_revision_only_absorption_publication_recovers;
+        test_case "conflict preserves all stores" `Quick test_generic_publication_conflict_preserves_stores]); ( "dynamic categories", [test_case "new category survives persistence" `Quick
           test_dynamic_category_roundtrip] )
     ; ( "commit"
       , [ test_case "a commit parses and prints on the pool" `Quick
@@ -3933,7 +4125,7 @@ let () =
           snapshot_read_cases )
     ; ( "commit notification"
       , [ test_case "all writers notify outside locks" `Quick test_commit_notifications_follow_all_writers_outside_locks
-        ; test_case "snapshot authority independent of journal" `Quick test_commit_notifications_do_not_depend_on_journal
+        ; test_case "durable snapshot retains wake until journal finalization" `Quick test_commit_notifications_resume_after_journal_finalization
         ; test_case "directory alias emits physical identity" `Quick test_commit_notification_directory_is_physical
         ; test_case "cancellation propagates after commit notifications" `Quick test_commit_notification_preserves_cancellation
         ] )

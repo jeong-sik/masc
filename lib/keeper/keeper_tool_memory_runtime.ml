@@ -1739,10 +1739,13 @@ let keeper_memory_write_with_outcome
                 "The candidate was persisted for Librarian admission. This receipt acknowledges pending input and does not confirm admission or a current Memory identity; the worker may already have processed it. This request_id is not a memory_id and cannot be a premise or supersedes target. Search current Memory for an admitted premise identity; supersedes additionally requires origin authored." ])
      | Some source_path, _, _ ->
        (match
-          Keeper_memory_source_current.upsert_file_fact
+          Result.bind
+            (Keeper_memory_os_current.recover_publication ~keepers_dir ~keeper_id:meta.name
+             |> Result.map_error (fun detail -> Keeper_memory_source_current.Store_write_failed detail))
+            (fun () -> Keeper_memory_source_current.upsert_file_fact
             ~ordinary_facts:(fun () ->
               match
-                Keeper_memory_os_current.read_for_keepers_dir
+                Keeper_memory_os_current.read_locked_for_keepers_dir
                   ~keepers_dir
                   ~keeper_id:meta.Keeper_meta_contract.name
               with
@@ -1755,7 +1758,7 @@ let keeper_memory_write_with_outcome
             ~now:(Time_compat.now ())
             ~claim:body
             ~source_path
-            ()
+            ())
         with
         | Ok snapshot ->
           (match

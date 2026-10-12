@@ -284,12 +284,20 @@ val list_durable_range_receipt_keeper_ids : keepers_dir:string -> string list
 val validate_durable_range_receipts :
   keepers_dir:string -> keeper_id:string -> (unit, string) result
 
-(** Durable recovery evidence for a committed removal with an explicit reason.
-    The file is prepared before snapshot replacement and cleared only after
-    exact journal finalization. Later writers reconcile it before replacing
-    the snapshot that preserves the removed originals. Whole-Keeper purge
-    includes this sidecar. *)
+val publication_receipt_path : keepers_dir:string -> keeper_id:string -> string
+(** Prepared snapshot publication and pending wake-dispatch evidence. *)
+
+val recover_publication : keepers_dir:string -> keeper_id:string -> (unit, string) result
+(** Outside all Memory locks: recover a prepared publication and attempt its
+    pending revision-idempotent wake dispatch. Never replays [on_committed].
+    No receipt means no writes or locks. Public snapshot reads call this too. *)
+
+val read_locked_for_keepers_dir : keepers_dir:string -> keeper_id:string -> (t option, string) result
+(** Read under an already held aggregate lock. No recovery or notification;
+    pending publication is an error. The outer owner must recover before locking. *)
+
 val retraction_plan_receipt_path : keepers_dir:string -> keeper_id:string -> string
+(** Durable removal reasons/lineage, reconciled before another replacement. *)
 
 (** Record a librarian pass that produced no snapshot. The commit path already
     journals its own line, so this is the failure counterpart and never runs
@@ -385,11 +393,18 @@ val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 
 val read_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (t option, string) result
+(** Completes pending publication recovery before reading. May append the exact
+    missing journal entry and attempt a revision-idempotent wake outside locks.
+    Without publication evidence this remains a read with no persistent writes.
+    Must not be called from an aggregate-locked callback; use
+    [read_locked_for_keepers_dir] there after outer recovery. *)
 
 val read_classified :
   keepers_dir:string -> keeper_id:string -> read_classified
-(** The same read as [read_for_keepers_dir] with the failure mode kept as a
-    variant instead of flattened to one message. Callers that must route a
+(** Non-mutating classified read. Pending publication is [Io_unreadable], never
+    a decode rejection or an authoritative target. Both receipt checks bracket
+    snapshot acquisition; use [recover_publication] outside locks to resume it.
+    Other failure modes remain variants instead of flattened messages. Callers that must route a
     decode rejection into the write-path quarantine (the librarian durable
     consumer) use this so an undecodable snapshot reaches
     [update_locked_with_error] and is moved aside, instead of being skipped
@@ -825,6 +840,18 @@ val merge_basis
   -> Keeper_memory_os_types.basis
 
 module For_testing : sig
+  val decode_snapshot : string -> (t, string) result
+  (** Decode captured bytes only; does not establish publication durability. *)
+
+  val replace_with_publication_io :
+    write_snapshot:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
+    sync_snapshot:(string -> (unit, string) result) ->
+    on_committed:(t -> commit_effect -> unit) -> before_journal:(unit -> unit) ->
+    keepers_dir:string -> keeper_id:string -> now:float -> source:source ->
+    facts:Keeper_memory_os_types.fact list -> (t, string) result
+  (** Exercises the actual locked publication path with fault-injected snapshot
+      persistence. All receipt/journal/notification I/O remains production I/O. *)
+
   val durable_range_receipt_decodes : unit -> int
   (** How many times this process has decoded receipt sidecar bytes. A read
       answered from the verified receipt cache does not count. *)

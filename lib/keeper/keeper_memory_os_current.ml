@@ -35,6 +35,10 @@ let durable_range_receipt_path ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ durable_range_receipt_suffix)
 ;;
 
+let publication_receipt_path ~keepers_dir ~keeper_id =
+  Filename.concat keepers_dir (keeper_id ^ ".memory-publication.json")
+;;
+
 let retraction_plan_receipt_suffix = ".memory-retraction-plan.json"
 
 let retraction_plan_receipt_path ~keepers_dir ~keeper_id =
@@ -1254,27 +1258,10 @@ let parse path content =
     Error (Printf.sprintf "%s: invalid JSON: %s" path message)
 ;;
 
-let read_with_content ~keepers_dir ~keeper_id =
-  let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-  try
-    match Fs_compat.load_file_opt snapshot_path with
-    | None -> Ok None
-    | Some content ->
-      let+ snapshot = parse snapshot_path content in
-      Some (snapshot, content)
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Sys_error message ->
-    Error
-      (Printf.sprintf
-         "current Memory OS read failed path=%s: %s"
-         snapshot_path
-         message)
-;;
-
-let read_for_keepers_dir ~keepers_dir ~keeper_id =
-  read_with_content ~keepers_dir ~keeper_id
-  |> Result.map (Option.map fst)
+let publication_read_guard ~keepers_dir ~keeper_id =
+  match Fs_compat.load_file_opt (publication_receipt_path ~keepers_dir ~keeper_id) with
+  | None -> Ok ()
+  | Some _ -> Error "current Memory publication recovery is pending; a writer must finalize it"
 ;;
 
 type read_classified =
@@ -1286,12 +1273,17 @@ type read_classified =
 let read_classified ~keepers_dir ~keeper_id =
   let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
   try
-    match Fs_compat.load_file_opt snapshot_path with
+    match publication_read_guard ~keepers_dir ~keeper_id with
+    | Error detail -> Io_unreadable {detail}
+    | Ok () ->
+    let observed = match Fs_compat.load_file_opt snapshot_path with
     | None -> No_snapshot
     | Some content ->
       (match parse snapshot_path content with
        | Ok snapshot -> Readable snapshot
-       | Error rejection -> Undecodable { rejection })
+       | Error rejection -> Undecodable { rejection }) in
+    (match publication_read_guard ~keepers_dir ~keeper_id with
+     | Ok () -> observed | Error detail -> Io_unreadable {detail})
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Sys_error message ->
@@ -1302,12 +1294,6 @@ let read_classified ~keepers_dir ~keeper_id =
             snapshot_path
             message
       }
-;;
-
-let read_with_snapshot_sha256 ~keepers_dir ~keeper_id =
-  read_with_content ~keepers_dir ~keeper_id
-  |> Result.map
-       (Option.map (fun (snapshot, content) -> snapshot, sha256 content))
 ;;
 
 let librarian_failure_kind_to_string = function
@@ -2077,6 +2063,257 @@ let reconcile_retraction_plan_receipt ~keepers_dir ~keeper_id ~snapshot =
            receipt.target_revision))
 ;;
 
+type publication_phase = Publication_prepared | Notification_pending
+
+type publication_receipt =
+  { phase : publication_phase
+  ; prior : (int * string) option
+  ; target_revision : int
+  ; target_sha256 : string
+  ; journal : Yojson.Safe.t
+  }
+
+let publication_to_json receipt =
+  `Assoc
+    [ "phase", `String (match receipt.phase with
+        | Publication_prepared -> "prepared" | Notification_pending -> "notification_pending")
+    ; "prior", (match receipt.prior with
+        | None -> `Null
+        | Some (revision, digest) -> `Assoc ["revision", `Int revision; "sha256", `String digest])
+    ; "target_revision", `Int receipt.target_revision
+    ; "target_sha256", `String receipt.target_sha256
+    ; "journal", receipt.journal ]
+
+let publication_of_json = function
+  | `Assoc fields when exact_object_fields
+      ["phase"; "prior"; "target_revision"; "target_sha256"; "journal"] fields ->
+    let* phase = match List.assoc "phase" fields with
+      | `String "prepared" -> Ok Publication_prepared
+      | `String "notification_pending" -> Ok Notification_pending
+      | _ -> Error "invalid publication phase" in
+    let* prior = match List.assoc "prior" fields with
+      | `Null -> Ok None
+      | `Assoc fields when exact_object_fields ["revision"; "sha256"] fields ->
+        (match List.assoc "revision" fields, List.assoc "sha256" fields with
+         | `Int revision, `String digest when revision > 0
+             && String_util.is_lowercase_sha256_hex digest -> Ok (Some (revision, digest))
+         | _ -> Error "invalid publication prior identity")
+      | _ -> Error "invalid publication prior" in
+    (match List.assoc "target_revision" fields, List.assoc "target_sha256" fields,
+           List.assoc "journal" fields with
+     | `Int target_revision, `String target_sha256, (`Assoc journal_fields as journal)
+       when target_revision = (match prior with None -> 1 | Some (revision, _) -> revision + 1)
+            && String_util.is_lowercase_sha256_hex target_sha256 ->
+       let* entry = journal_entry_of_json journal in
+       let* links = journal_revision_links journal_fields in
+       (match entry, journal_commit_effect journal_fields, links with
+        | Journal_committed entry, Ok (Some Rewritten), Some links
+          when entry.revision = target_revision ->
+          let canonical = journal_entry_to_json ~commit_effect:Rewritten ~revision_links:links
+              ~dropped_statements:entry.dropped
+              {revision=entry.revision; updated_at=entry.recorded_at; source=entry.source;
+               change=entry.change; facts=[]} in
+          if Yojson.Safe.sort canonical = Yojson.Safe.sort journal then
+            Ok {phase; prior; target_revision; target_sha256; journal}
+          else Error "publication journal is not an exact canonical entry"
+        | _ -> Error "publication journal is not the target rewrite")
+     | _ -> Error "invalid publication target")
+  | _ -> Error "publication receipt has unknown, duplicate, or missing fields"
+
+let read_publication ~keepers_dir ~keeper_id =
+  let path = publication_receipt_path ~keepers_dir ~keeper_id in
+  try match Fs_compat.load_file_opt path with
+    | None -> Ok None
+    | Some text ->
+      (match Yojson.Safe.from_string text with
+       | json -> Result.map Option.some (publication_of_json json)
+       | exception Yojson.Json_error detail -> Error ("publication receipt: " ^ detail))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error ("publication receipt unreadable: " ^ Printexc.to_string exn)
+
+let write_publication ~keepers_dir ~keeper_id receipt =
+  let json = publication_to_json receipt in
+  let* _ = publication_of_json json in
+  Fs_compat.save_file_atomic_strict (publication_receipt_path ~keepers_dir ~keeper_id)
+    (Yojson.Safe.to_string json)
+
+let remove_publication ~keepers_dir ~keeper_id =
+  Domain_pool_ref.submit_io_or_inline (fun () ->
+    try
+      (try Unix.unlink (publication_receipt_path ~keepers_dir ~keeper_id)
+       with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      let fd = Unix.openfile keepers_dir [Unix.O_RDONLY] 0 in
+      Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd);
+      Ok ()
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error ("publication receipt removal failed: " ^ Printexc.to_string exn))
+
+(* Check companion evidence before any recovery mutates a store. Older committed
+   consumption identities remain valid, but another prepared transaction cannot
+   be silently promoted as this publication. *)
+let check_publication_companions ~keepers_dir ~keeper_id receipt =
+  let* removal = read_retraction_plan_receipt ~keepers_dir ~keeper_id in
+  let* () = match removal with
+    | None -> Ok ()
+    | Some removal ->
+      let* entry = journal_entry_of_json receipt.journal in
+      (match entry with
+       | Journal_committed entry when
+           receipt.prior = Some (removal.prior_revision, removal.prior_snapshot_sha256)
+           && receipt.target_revision = removal.target_revision
+           && receipt.target_sha256 = removal.target_snapshot_sha256
+           && entry.dropped = Some removal.dropped_statements
+           && (match removal.plan_id, entry.source with
+               | None, _ -> true
+               | Some plan_id, {kind=Explicit_retract; trace_id} -> plan_id = trace_id
+               | Some _, _ -> false)
+           && (match receipt.journal with `Assoc fields ->
+                 journal_revision_links fields = Ok (Some removal.revision_links) | _ -> false) -> Ok ()
+       | _ -> Error "publication and removal receipts conflict; stores preserved") in
+  let* ranges = read_durable_range_receipts ~keepers_dir ~keeper_id in
+  List.fold_left (fun result row ->
+    let* () = result in
+    let valid = match row with
+      | Prepared {snapshot_revision; snapshot_sha256; _} ->
+        snapshot_revision = receipt.target_revision && snapshot_sha256 = receipt.target_sha256
+      | Committed {snapshot_revision; snapshot_sha256; _} ->
+        snapshot_revision < receipt.target_revision
+        || (snapshot_revision = receipt.target_revision && snapshot_sha256 = receipt.target_sha256) in
+    if valid then Ok () else Error "publication and consumption receipts conflict; stores preserved") (Ok ()) ranges
+
+let record_publication_journal ~keepers_dir ~keeper_id receipt =
+  let* () = append_journal_line_strict ~keepers_dir ~keeper_id receipt.journal in
+  let pending = {receipt with phase=Notification_pending} in
+  let+ () = write_publication ~keepers_dir ~keeper_id pending in
+  pending
+
+let finalize_publication_journal ~keepers_dir ~keeper_id receipt =
+  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let* recovered = Fs_compat.recover_private_jsonl_durable_locked_result path
+    |> Result.map_error Fs_compat.private_jsonl_transaction_error_to_string in
+  let rec scan found = function
+    | [] -> Ok found
+    | "" :: rest -> scan found rest
+    | line :: rest ->
+      (match Yojson.Safe.from_string line with
+       | json ->
+         let* entry = journal_entry_of_json json in
+         (match entry with
+          | Journal_committed _ when Yojson.Safe.sort json = Yojson.Safe.sort receipt.journal ->
+            scan true rest
+          | _ -> scan found rest)
+       | exception Yojson.Json_error detail -> Error ("publication journal: " ^ detail)) in
+  let* present = scan false (String.split_on_char '\n' recovered.Fs_compat.bytes) in
+  let* () = if present then Ok () else append_journal_line_strict ~keepers_dir ~keeper_id receipt.journal in
+  let pending = {receipt with phase=Notification_pending} in
+  let+ () = write_publication ~keepers_dir ~keeper_id pending in
+  pending
+
+(* Caller owns aggregate and snapshot locks. Inspect the receipt before parsing
+   or quarantining a snapshot: an unmatched publication must preserve all bytes. *)
+let recover_publication_locked ~keepers_dir ~keeper_id =
+  let* receipt = read_publication ~keepers_dir ~keeper_id in
+  match receipt with
+  | None -> Ok None
+  | Some receipt ->
+    let* () = check_publication_companions ~keepers_dir ~keeper_id receipt in
+    let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+    let content = Fs_compat.load_file_opt path in
+    let prior_matches = match receipt.prior, content with
+      | None, None -> true
+      | Some (_, digest), Some text -> String.equal digest (sha256 text)
+      | None, Some _ | Some _, None -> false in
+    if receipt.phase = Publication_prepared && prior_matches then
+      let* snapshot = match content with
+        | None -> Ok None
+        | Some text ->
+          let* current = parse path text in
+          if Option.map fst receipt.prior = Some current.revision then Ok (Some (current, text))
+          else Error "publication prior revision conflicts; stores preserved" in
+      let* () = reconcile_retraction_plan_receipt ~keepers_dir ~keeper_id ~snapshot in
+      let* _ = reconcile_durable_range_receipts ~keepers_dir ~keeper_id ~snapshot in
+      let+ () = remove_publication ~keepers_dir ~keeper_id in None
+    else match content with
+      | Some text when String.equal receipt.target_sha256 (sha256 text) ->
+        let* current = parse path text in
+        let* expected = journal_entry_of_json receipt.journal in
+        let* () = match expected with
+          | Journal_committed entry when current.revision = receipt.target_revision
+              && current.updated_at = entry.recorded_at && current.source = entry.source
+              && current.change = entry.change -> Ok ()
+          | _ -> Error "publication target metadata conflicts; stores preserved" in
+        let* () = Fs_compat.sync_file_and_parent_strict path in
+        let* pending = finalize_publication_journal ~keepers_dir ~keeper_id receipt in
+        let snapshot = Some (current, text) in
+        let* () = reconcile_retraction_plan_receipt ~keepers_dir ~keeper_id ~snapshot in
+        let+ _ = reconcile_durable_range_receipts ~keepers_dir ~keeper_id ~snapshot in
+        Some pending
+      | None | Some _ -> Error "publication target is absent or conflicting; stores preserved"
+
+let dispatch_publication ~keepers_dir ~keeper_id receipt =
+  Keeper_memory_commit_notifications.notify_committed
+    {keepers_dir=Unix.realpath keepers_dir; keeper_id; store=Ordinary; revision=receipt.target_revision};
+  Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
+    File_lock_eio.with_lock (path_for_keepers_dir ~keepers_dir ~keeper_id) (fun () ->
+      let* current = read_publication ~keepers_dir ~keeper_id in
+      match current with
+      | None -> Ok ()
+      | Some current when current = receipt -> remove_publication ~keepers_dir ~keeper_id
+      | Some _ -> Error "publication changed during notification dispatch; receipt preserved"))
+
+let recover_publication ~keepers_dir ~keeper_id =
+  let* existing = read_publication ~keepers_dir ~keeper_id in
+  match existing with
+  | None -> Ok ()
+  | Some _ ->
+  let* pending = Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
+    File_lock_eio.with_lock (path_for_keepers_dir ~keepers_dir ~keeper_id) (fun () ->
+      recover_publication_locked ~keepers_dir ~keeper_id)) in
+  match pending with None -> Ok () | Some receipt -> dispatch_publication ~keepers_dir ~keeper_id receipt
+
+let read_with_content ~keepers_dir ~keeper_id =
+  let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+  try
+    let* () = recover_publication ~keepers_dir ~keeper_id in
+    let* () = publication_read_guard ~keepers_dir ~keeper_id in
+    let observed = match Fs_compat.load_file_opt snapshot_path with
+    | None -> Ok None
+    | Some content ->
+      let+ snapshot = parse snapshot_path content in
+      Some (snapshot, content) in
+    let* () = publication_read_guard ~keepers_dir ~keeper_id in
+    observed
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Sys_error message ->
+    Error
+      (Printf.sprintf
+         "current Memory OS read failed path=%s: %s"
+         snapshot_path
+         message)
+;;
+
+let read_locked_for_keepers_dir ~keepers_dir ~keeper_id =
+  let* () = publication_read_guard ~keepers_dir ~keeper_id in
+  let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+  match Fs_compat.load_file_opt path with
+  | None -> Ok None
+  | Some text -> Result.map Option.some (parse path text)
+;;
+
+let read_for_keepers_dir ~keepers_dir ~keeper_id =
+  read_with_content ~keepers_dir ~keeper_id
+  |> Result.map (Option.map fst)
+;;
+
+let read_with_snapshot_sha256 ~keepers_dir ~keeper_id =
+  read_with_content ~keepers_dir ~keeper_id
+  |> Result.map
+       (Option.map (fun (snapshot, content) -> snapshot, sha256 content))
+;;
+
 (* The journal only grows (10-13 MB on live keepers) and a reader asks for its
    last 20-500 lines. Reading the whole file and splitting every line on each
    dashboard or TUI request put that copy and split on the scheduler domain;
@@ -2347,6 +2584,10 @@ type 'error equal_facts =
 (* Caller holds the aggregate and snapshot locks. Both boot and ordinary
    writers must move the removal receipt with an undecodable snapshot. *)
 let quarantine_snapshot_and_receipt ~keepers_dir ~keeper_id ~snapshot_path ~now ~rejection =
+  let* publication = read_publication ~keepers_dir ~keeper_id in
+  let* () = match publication with
+    | None -> Ok ()
+    | Some _ -> Error "publication evidence is pending; snapshot quarantine refused" in
   let move path =
     let rejected_path = unused_rejected_path ~snapshot_path:path ~now in
     match Fs_compat.rename_noreplace path rejected_path with
@@ -2400,6 +2641,9 @@ let quarantine_snapshot_and_receipt ~keepers_dir ~keeper_id ~snapshot_path ~now 
 ;;
 
 let update_locked_with_output
+      ?(write_snapshot = Fs_compat.save_file_atomic_strict_staged)
+      ?(sync_snapshot = Fs_compat.sync_file_and_parent_strict)
+      ?(finalize_journal = record_publication_journal)
       ?on_committed
       ?clock
       ?dropped_statements
@@ -2471,11 +2715,14 @@ let update_locked_with_output
   then Error (store_error "retraction plan id must be non-empty and already trimmed")
   else (
     Fs_compat.mkdir_p keepers_dir;
-    let notification_keepers_dir = Unix.realpath keepers_dir in
+    let* () = recover_publication ~keepers_dir ~keeper_id |> Result.map_error store_error in
     let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
     let committed = ref None in
     let notify () =
-      Option.iter Keeper_memory_commit_notifications.notify_committed !committed
+      Option.iter (fun receipt ->
+        match dispatch_publication ~keepers_dir ~keeper_id receipt with
+        | Ok () -> ()
+        | Error detail -> Log.Keeper.warn ~keeper_name:keeper_id "%s" detail) !committed
     in
     let write () = Keeper_memory_os_aggregate_lock.with_lock
       ?clock
@@ -2485,6 +2732,10 @@ let update_locked_with_output
        (* File_lock_eio.with_lock appends ".lock" itself; a pre-suffixed path
           locked "<snapshot>.lock.lock" and left a stray file per keeper. *)
        File_lock_eio.with_lock ?clock snapshot_path (fun () ->
+         let* pending = read_publication ~keepers_dir ~keeper_id |> Result.map_error store_error in
+         let* () = match pending with
+           | None -> Ok ()
+           | Some _ -> Error (store_error "another publication is pending; retry recovery before writing") in
          let* previous, snapshot_content =
            match Fs_compat.load_file_opt snapshot_path with
            | None -> Ok (None, None)
@@ -2781,56 +3032,33 @@ let update_locked_with_output
                   Prepared { range_id; snapshot_revision = next.revision; snapshot_sha256 }))
              |> Result.map_error store_error
          in
-         let commit () =
-           match Fs_compat.save_file_atomic_strict_staged snapshot_path content with
-           | Ok () ->
-             committed := Some
-               { Keeper_memory_commit_notifications.keepers_dir = notification_keepers_dir
-               ; keeper_id
-               ; store = Ordinary
-               ; revision = next.revision
-             };
+         (* The removal receipt owns the canonical reason list, including an
+            empty list for a revision-link-only removal. Both recovery records
+            must name the same exact journal entry. *)
+         let publication_dropped = match retraction_receipt with
+           | Some receipt -> Some receipt.dropped_statements
+           | None -> committed_dropped in
+         let publication =
+           { phase=Publication_prepared
+           ; prior=Option.map (fun (prior, bytes) -> prior.revision, sha256 bytes) snapshot
+           ; target_revision=next.revision
+           ; target_sha256=snapshot_sha256
+           ; journal=journal_entry_to_json ~commit_effect:Rewritten
+               ~revision_links:applied_revision_links ~dropped_statements:publication_dropped next } in
+         let* () = write_publication ~keepers_dir ~keeper_id publication
+           |> Result.map_error store_error in
+         let complete () =
+             (* The snapshot is durable now. Publish the original producer's
+                commit marker before any cancellable secondary I/O. *)
              Option.iter (fun observe -> observe next Rewritten) on_committed;
              let journal_result =
-               match retraction_receipt, retraction_plan with
-               | None, _ ->
-                 append_journal_entry
-                   ~commit_effect:Rewritten
-                   ~revision_links:applied_revision_links
-                   ~keepers_dir
-                   ~keeper_id
-                   ~dropped_statements:committed_dropped
-                   next;
-                 Ok ()
-               | Some receipt, Some (plan_id, evidence_error) ->
-                 (* This commit has not appended its line yet. Only restart
-                    reconciliation needs to scan the historical journal. *)
-                 append_removal_journal_and_clear_receipt
-                   ~keepers_dir ~keeper_id ~snapshot:next receipt
-                 |> Result.map_error (fun detail ->
-                      evidence_error
-                        ~plan_id
-                        ~snapshot_revision:receipt.target_revision
-                        ~snapshot_sha256:receipt.target_snapshot_sha256
-                        ~detail)
-               | Some receipt, None ->
-                 (* The snapshot committed. Preserve that outcome for the
-                    producer while retaining the receipt and the removed
-                    originals in [next.change]. Every later writer must
-                    finalize their journal before replacing this snapshot. *)
-                 (match
-                    append_removal_journal_and_clear_receipt
-                      ~keepers_dir ~keeper_id ~snapshot:next receipt
-                  with
-                  | Ok () -> ()
-                  | Error detail ->
-                    Log.Keeper.warn
-                      ~keeper_name:keeper_id
-                      "memory snapshot committed revision=%d; archive journal finalization pending; removal receipt and originals remain preserved: %s"
-                      receipt.target_revision
-                      detail);
-                 Ok ()
-             in
+               match finalize_journal ~keepers_dir ~keeper_id publication with
+               | Ok pending ->
+                 committed := Some pending;
+                 (match retraction_receipt with
+                  | None -> Ok ()
+                  | Some _ -> remove_retraction_plan_receipt ~keepers_dir ~keeper_id)
+               | Error detail -> Error detail in
              (match ranges with
               | [] -> ()
               | _ :: _ ->
@@ -2842,14 +3070,30 @@ let update_locked_with_output
                  | Error detail ->
                    Log.Keeper.warn ~keeper_name:keeper_id
                      "%s; prepared receipt remains recoverable" detail));
-             let+ () = journal_result in
+             let* () = match journal_result, retraction_plan with
+               | Ok (), _ -> Ok ()
+               | Error detail, None ->
+                 Log.Keeper.warn ~keeper_name:keeper_id
+                   "memory revision=%d committed; publication recovery pending: %s" next.revision detail;
+                 Ok ()
+               | Error detail, Some (plan_id, evidence_error) ->
+                 Error (evidence_error ~plan_id ~snapshot_revision:next.revision
+                   ~snapshot_sha256 ~detail) in
              log_invalidations ~revision:next.revision;
-             next, Rewritten, output
+             Ok (next, Rewritten, output)
+         in
+         let commit () =
+           match write_snapshot snapshot_path content with
+           | Ok () -> complete ()
            | Error failure ->
              (match failure.exception_ with
               | Eio.Cancel.Cancelled _ ->
                 Printexc.raise_with_backtrace failure.exception_ failure.backtrace
               | _ ->
+             match failure.stage with
+             | Fs_compat.After_rename when
+                 sync_snapshot snapshot_path = Ok () -> complete ()
+             | Fs_compat.Before_rename | Fs_compat.After_rename ->
              let outcome =
                match failure.stage with
                | Fs_compat.Before_rename -> "snapshot replacement did not occur"
@@ -2866,9 +3110,9 @@ let update_locked_with_output
          in
          protected commit))
     in
-    (* Dispatch only after BOTH locks have unwound. The marker is set at the
-       snapshot commit, so a later journal failure/cancellation cannot suppress
-       an already committed change or make a failed write look committed. *)
+    (* Dispatch only after BOTH locks unwind. The durable pending phase is
+       written after exact journal finalization. If interrupted, a subsequent
+       public read or writer resumes it without replaying the producer callback. *)
     match write () with
     | result -> notify (); result
     | exception exn ->
@@ -2941,9 +3185,14 @@ let preserved_committed_receipts ~keepers_dir ~keeper_id ~snapshot ~queue_genera
 let with_receipt_status ?(strict_snapshot=false) ?(receipt_read=Reconcile_receipts) ~keepers_dir ~keeper_id select =
   try
     Fs_compat.mkdir_p keepers_dir;
+    let* () = recover_publication ~keepers_dir ~keeper_id in
     let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
     Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
       File_lock_eio.with_lock snapshot_path (fun () ->
+        let* publication = read_publication ~keepers_dir ~keeper_id in
+        let* () = match publication with
+          | None -> Ok ()
+          | Some _ -> Error "publication recovery pending; consumption authority is unavailable" in
         let* snapshot =
           match Fs_compat.load_file_opt snapshot_path with
           | None -> Ok None
@@ -3966,5 +4215,18 @@ let move_aside_for_keepers_dir ?clock ~keepers_dir ~keeper_id ~now ~rejection ()
 ;;
 
 module For_testing = struct
+  let decode_snapshot text = parse "captured snapshot" text
+
+  let replace_with_publication_io ~write_snapshot ~sync_snapshot ~on_committed ~before_journal
+      ~keepers_dir ~keeper_id ~now ~source ~facts =
+    update_locked_with_output ~write_snapshot ~sync_snapshot ~on_committed
+      ~finalize_journal:(fun ~keepers_dir ~keeper_id receipt ->
+        before_journal (); record_publication_journal ~keepers_dir ~keeper_id receipt)
+      ~equal_facts:(Write_revision None)
+      ~store_error:Fun.id ~keepers_dir ~keeper_id ~now
+      (fun ~snapshot_content:_ previous ->
+        let+ snapshot = make_snapshot ~previous ~now ~source ~facts () in snapshot, ())
+    |> Result.map (fun (snapshot, _, ()) -> snapshot)
+
   let durable_range_receipt_decodes () = Atomic.get durable_range_receipt_decodes
 end

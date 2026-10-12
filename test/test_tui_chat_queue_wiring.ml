@@ -2099,10 +2099,16 @@ let test_a_journal_built_log_holds_its_turn_in_the_timeline () =
   state.msg_loaded_keeper <- Some "alpha";
   state.msg_loaded <- loaded_turn ~request_id:"op-1";
   Tui_types.hold_settled_log state (journal_log ~request_id:"op-1" ~started_at:100. ());
-  check (list string) "the keeper's words, tools and reasoning are the log's now"
-    [ "asked"; "Gate approved read_file"; "delivery failed" ]
-    (Tui_types.chat_rows_for state "alpha"
-     |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text))
+  let retained = Tui_types.chat_rows_for state "alpha" in
+  check bool "terminal log without receipts retains unidentified durable tool facts" true
+    (List.exists (fun (row : Tui_types.msg_entry) ->
+      row.me_role = Tui_types.Message_tool && row.me_tool_block = None) retained);
+  check bool "held source still owns its observed speech and reasoning" false
+    (List.exists (fun (row : Tui_types.msg_entry) ->
+      match row.me_role with
+      | Tui_types.Message_keeper | Message_thinking -> true
+      | _ -> false) retained)
+
 ;;
 
 (* A settled block goes after its request's last row of any phase before

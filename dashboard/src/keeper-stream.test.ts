@@ -404,6 +404,18 @@ describe('Keeper operation stream projection', () => {
       value: { deliveryKey: { kind: 'operation', operation_id: operationId }, executionId: 'execution', ordinal: 0 } })
     const rows = requiredFixture(keeperThreads.value.sangsu)
     const reply = requiredFixture(rows.find(row => row.id === 'reply-1'))
+    // The acknowledgement's own writes: the preceding merge already remaps
+    // the trace to canonical-tool, so only these fail when the handler
+    // returns without recording the acknowledgement.
+    expect(reply.toolTranscriptBindings).toEqual([
+      { deliveryKey: { kind: 'operation', operation_id: operationId }, executionId: 'execution', ordinal: 0 },
+    ])
+    const canonicalTool = requiredFixture(rows.find(row => row.id === 'canonical-tool'))
+    expect(canonicalTool.toolTranscriptOrdinal).toBe(0)
+    expect(canonicalTool.deliveryProvenance).toEqual({
+      delivery_key: { kind: 'operation', operation_id: operationId },
+      transcript_slot: { kind: 'tool_call', execution_id: 'execution', ordinal: 0 },
+    })
     expect(reply.publishedTraceSteps).toEqual(published)
     expect(reply.traceSteps?.filter(step => step.kind === 'think')).toMatchObject([{ text: 'provided reasoning' }])
     expect(reply.traceSteps?.filter(step => step.kind === 'tool')).toMatchObject([{ toolOccurrenceId: 'canonical-tool' }])

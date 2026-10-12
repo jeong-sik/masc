@@ -440,7 +440,8 @@ describe('CopilotDock', () => {
       dockFinished,
     ])
     expect(reply).toContain('first halfsecond half')
-    expect(reply).toContain('incomplete reply')
+    const note = container.querySelector('[data-dock-incomplete]')
+    expect(note?.getAttribute('data-dock-incomplete')).toBe('A Keeper stream frame does not match the protocol.')
   })
 
   it('posts copilot channel and surface context to the keeper stream', async () => {

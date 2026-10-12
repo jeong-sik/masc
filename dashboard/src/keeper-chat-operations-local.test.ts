@@ -117,8 +117,8 @@ describe('keeper chat operation tracking', () => {
 
   it('restores persisted camel-case conversation details instead of nulling them', () => {
     // trackedKeeperChatAssistantDraftFromEntry persists the already-normalized
-    // KeeperConversationDetails object (camel-case fields); restoring it through
-    // the wire-only decoder used to silently replace every value with null.
+    // KeeperConversationDetails object (camel-case fields). A decoder that only
+    // reads the snake-case wire keys would replace every value with null.
     upsertTrackedKeeperChatOperation({
       operationId: 'kmsg_echo_1',
       keeperName: 'echo',

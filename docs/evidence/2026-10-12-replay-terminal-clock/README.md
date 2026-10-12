@@ -1,0 +1,9 @@
+# Preserve terminal event clocks individually
+
+`of_log` previously cleared ended_at whenever any replay entry lacked a clock. An untimed start/body could erase the known timestamp of a later failure/finish. The terminal phase survived, but its observed event time disappeared.
+
+Replay now applies each receipt/entry through one local fold and assigns terminal ended_at from that terminal entry's optional timestamp. Run_failed supplies its own event clock. Run_finished supplies a clock only when it first closes an active phase; repeated finish cannot invent or replace the first terminal clock. Checkpoint continuation remains open. Other untimed entries do not erase terminal clocks. Existing settlement records still describe the instant the outcome landed through apply, which is separate from the terminal event clock.
+
+Actual complete parent/current of_log, Run_failed/RUN_FINISHED arms and settle helper were interpreted. Minimal external record/log containers and accessor functions replace the real Log module; Run_started is a minimal phase transition and Text/Accepted are no-ops. No rendering, decoder, real log admission or other reducer arms were exercised. Parent failed `known failure clock erased by untimed unrelated entry`. Current passed untimed start before known failure, untimed body after known failure, known finish after untimed start, missing failure clock and repeated finish after unknown first finish. Artifacts `/tmp/masc-replay-terminal-clock-20261012/{parent,current}.{ml,log}` and generator.
+
+The production file passed syntax-only parsing; git diff --check passed. No wording/layout/row-order test was added. Full replay/state fixtures/typecheck/build/CI/provider/runtime/installation/screenshots/formal approval/merge remain unverified. Tool/body observation clocks and incomplete operation-record reconciliation are separate remaining work.

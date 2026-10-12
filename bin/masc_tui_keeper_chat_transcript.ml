@@ -2074,18 +2074,24 @@ let of_log ~now (log : Masc_tui_keeper_chat_log.t) =
   let t = create_for_source ~keeper_name:(Masc_tui_keeper_chat_log.keeper_name log)
       ~source:(Masc_tui_keeper_chat_log.source log)
       ~started_at:(Masc_tui_keeper_chat_log.started_at log) in
-  let timed = ref true in
-  let apply_receipt entry =
-    apply ~now:(Option.value entry.Masc_tui_keeper_chat_log.at ~default:now) t entry.delta
+  let apply_receipt (entry : Masc_tui_keeper_chat_log.entry) =
+    let previous_phase = t.phase in
+    apply ~now:(Option.value entry.at ~default:now) t entry.delta;
+    (* Missing clocks on unrelated entries cannot erase a known terminal
+       event clock. A terminal event with no clock remains unknown. *)
+    match entry.delta with
+    | Live.Run_failed _ -> t.ended_at <- entry.at
+    | Live.Run_finished ->
+        (match previous_phase, t.phase with
+         | (Waiting | Working), Stream_ended -> t.ended_at <- entry.at
+         | (Waiting | Working), (Waiting | Working | Stream_failed _)
+         | (Stream_ended | Stream_failed _), _ -> ())
+    | _ -> ()
   in
   Option.iter apply_receipt (Masc_tui_keeper_chat_log.first_acceptance log);
-  List.iter (fun (entry : Masc_tui_keeper_chat_log.entry) ->
-      if entry.at = None then timed := false;
-      apply ~now:(Option.value entry.at ~default:now) t entry.delta)
-    (Masc_tui_keeper_chat_log.entries log);
+  List.iter apply_receipt (Masc_tui_keeper_chat_log.entries log);
   Option.iter apply_receipt (Masc_tui_keeper_chat_log.latest_acceptance log);
   if Masc_tui_keeper_chat_log.priority_unavailable log then note_priority_unavailable t;
-  if not !timed then t.ended_at <- None;
   Option.iter (reconcile_operation t) (Masc_tui_keeper_chat_log.operation_state log);
   t
 ;;

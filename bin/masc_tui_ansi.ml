@@ -552,7 +552,7 @@ module Chat_theme = struct
       Theme.warn ()
     | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_failure ->
       Theme.bad ()
-    | Masc_tui_message_layout.Thinking -> Theme.quiet_origin ()
+    | Masc_tui_message_layout.Thinking _ -> Theme.quiet_origin ()
 
   let body : Masc_tui_message_layout.style -> string = function
     (* Speech keeps the terminal foreground: it is the protagonist, and
@@ -567,7 +567,7 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Journal -> Ansi.dim
     | Masc_tui_message_layout.Tool -> Ansi.dim
     | Masc_tui_message_layout.Skill _ -> Ansi.dim
-    | Masc_tui_message_layout.Thinking -> Ansi.dim
+    | Masc_tui_message_layout.Thinking _ -> Ansi.dim
 
   let link_foreground : Masc_tui_message_layout.style -> string = function
     | Masc_tui_message_layout.Status -> Theme.warn ()
@@ -575,7 +575,7 @@ module Chat_theme = struct
     | Masc_tui_message_layout.User | Masc_tui_message_layout.Inbound
     | Masc_tui_message_layout.Keeper | Masc_tui_message_layout.Tool
     | Masc_tui_message_layout.Local | Masc_tui_message_layout.Journal
-    | Masc_tui_message_layout.Skill _ | Masc_tui_message_layout.Thinking ->
+    | Masc_tui_message_layout.Skill _ | Masc_tui_message_layout.Thinking _ ->
       Ansi.default_fg
 
   (* A bare link opens underline and a bright foreground, and the restore
@@ -587,7 +587,7 @@ module Chat_theme = struct
     let foreground =
       match style with
       | Masc_tui_message_layout.Journal | Masc_tui_message_layout.Tool
-      | Masc_tui_message_layout.Skill _ | Masc_tui_message_layout.Thinking ->
+      | Masc_tui_message_layout.Skill _ | Masc_tui_message_layout.Thinking _ ->
         Ansi.default_fg ^ Ansi.dim
       | Masc_tui_message_layout.User | Masc_tui_message_layout.Inbound
       | Masc_tui_message_layout.Keeper | Masc_tui_message_layout.Status
@@ -657,7 +657,7 @@ module Chat_theme = struct
       | Masc_tui_message_layout.Error
       | Masc_tui_message_layout.Tool
       | Masc_tui_message_layout.Skill _
-      | Masc_tui_message_layout.Thinking ), _ ->
+      | Masc_tui_message_layout.Thinking _ ), _ ->
       { opening
       ; markdown_close = Ansi.reset ^ opening
       ; inline_restore = Ansi.reset ^ opening

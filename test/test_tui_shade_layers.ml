@@ -75,7 +75,7 @@ let test_the_keepers_own_words_are_not_quoted () =
     [ ("keeper", Layout.Keeper)
     ; ("user", Layout.User)
     ; ("error", Layout.Error)
-    ; ("thinking", Layout.Thinking)
+    ; ("thinking", Layout.Thinking Layout.Thinking_own)
     ]
 ;;
 

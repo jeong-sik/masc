@@ -170,6 +170,17 @@ module For_testing : sig
     width:int -> string -> string list
   val fold_thinking_entry : Masc_tui_types.state -> chat_cols:int ->
     Message_layout.entry -> Message_layout.entry
+  type tagged_row =
+    | Tagged_child of Masc_tui_types.child_content_anchor
+    | Tagged_row of Masc_tui_types.msg_entry
+    | Tagged_block of Masc_tui_types.turn_log * Masc_tui_keeper_chat_transcript.drawn_origin option * bool
+  type chat_projection =
+    { tagged_entries : (tagged_row * Message_layout.entry) list
+    ; transient_anchors : Masc_tui_types.chat_scroll_anchor option list
+    ; layout_entries : Message_layout.entry list
+    }
+  val surviving_entry_row : chat_projection -> int ->
+    Masc_tui_types.chat_scroll_point -> int option
   val thinking_height_cache : chat_markdown_identity Masc_tui_markdown_render_cache.t
   val chat_markdown_cache : chat_markdown_identity Masc_tui_markdown_render_cache.t
   val chat_markdown_theme_revision : int

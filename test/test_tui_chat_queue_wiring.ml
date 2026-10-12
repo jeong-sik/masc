@@ -3068,7 +3068,7 @@ let test_thinking_measurement_keeps_the_growing_draw_cache () =
   let width = Layout.entry_body_cells ~origin:state.msg_origin_display
     ~inner_width:(Masc_tui_ansi.framed_inner_width 80) initial in
   let theme = Masc_tui_ansi.Chat_theme.snapshot () in
-  let context = Masc_tui_ansi.Chat_theme.body_context theme Layout.Thinking in
+  let context = Masc_tui_ansi.Chat_theme.body_context theme (Layout.Thinking Layout.Thinking_own) in
   state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
   let first = Render.For_testing.fold_thinking_entry state ~chat_cols:80 initial in
   let drawn = Render.cached_chat_markdown ~link_previews_mode:`Off ~theme ~entry:first ~width in
@@ -3078,7 +3078,7 @@ let test_thinking_measurement_keeps_the_growing_draw_cache () =
   (* The same production cache key must still own the summary. A renderer
      call here means measurement replaced it with the growing raw thought. *)
   let identity : Render.For_testing.chat_markdown_identity =
-    {cmi_style=Layout.Thinking; cmi_keeper_name="alpha";
+    {cmi_style=Layout.Thinking Layout.Thinking_own; cmi_keeper_name="alpha";
      cmi_request_id="growing-fold-cache"; cmi_observed_at=None; cmi_entry_index=0} in
   let retained = Cache.render_growing Render.For_testing.chat_markdown_cache
     ~theme_revision:Render.For_testing.chat_markdown_theme_revision
@@ -3107,9 +3107,9 @@ let test_fold_measurement_retains_raw_source_height () =
     ~inner_width:(Masc_tui_ansi.framed_inner_width 80) initial in
   let theme = Masc_tui_ansi.Chat_theme.snapshot () in
   ignore (Render.cached_chat_markdown ~link_previews_mode:`Off ~theme ~entry:folded ~width);
-  let context = Masc_tui_ansi.Chat_theme.body_context theme Layout.Thinking in
+  let context = Masc_tui_ansi.Chat_theme.body_context theme (Layout.Thinking Layout.Thinking_own) in
   let identity : Render.For_testing.chat_markdown_identity =
-    {cmi_style=Layout.Thinking; cmi_keeper_name="alpha"; cmi_request_id="raw-height-owner";
+    {cmi_style=Layout.Thinking Layout.Thinking_own; cmi_keeper_name="alpha"; cmi_request_id="raw-height-owner";
      cmi_observed_at=None; cmi_entry_index=0} in
   let parsed = ref [] in
   let text = initial.body ^ " delta" in

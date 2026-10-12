@@ -71,12 +71,13 @@ let test_work_and_speech_split_the_same_way_for_every_style () =
       Layout.all_styles
   in
   check (list bool) "reasoning, tools and skills are the turn's work"
-    [ true; true; true; true; true; true ]
+    [ true; true; true; true; true; true; true ]
     (* [mem], not [memq]: a [Skill] tone is a block, and the ones written here
        are not the ones the list holds. *)
     (List.map (fun style -> List.mem style work)
        [ Layout.Tool
-       ; Layout.Thinking
+       ; Layout.Thinking Layout.Thinking_own
+       ; Layout.Thinking Layout.Thinking_arrived
        ; Layout.Skill Layout.Skill_live
        ; Layout.Skill Layout.Skill_settled
        ; Layout.Skill Layout.Skill_attention

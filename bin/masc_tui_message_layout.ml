@@ -4,6 +4,10 @@ type skill_tone =
   | Skill_attention
   | Skill_failure
 
+type thinking_origin =
+  | Thinking_own
+  | Thinking_arrived
+
 type style =
   | User
   | Inbound
@@ -14,7 +18,7 @@ type style =
   | Error
   | Tool
   | Skill of skill_tone
-  | Thinking
+  | Thinking of thinking_origin
 
 (* Every style there is, beside the type rather than in the test that walks it.
    The distinctness check reads this list, and a list kept a thousand lines
@@ -30,7 +34,8 @@ let all_styles =
   ; Journal
   ; Error
   ; Tool
-  ; Thinking
+  ; Thinking Thinking_own
+  ; Thinking Thinking_arrived
   ; Skill Skill_live
   ; Skill Skill_settled
   ; Skill Skill_attention
@@ -764,7 +769,7 @@ let speaker_mark : style -> string = function
   | Skill Skill_settled -> "\xe2\x97\x86"
   | Skill Skill_attention -> "\xe2\x96\xb3"
   | Skill Skill_failure -> "\xe2\x9c\x97"
-  | Thinking -> "\xc2\xb7"
+  | Thinking _ -> "\xc2\xb7"
 
 (* Speech or work -- the one question the rail's ordinary pieces answer.
 
@@ -777,7 +782,7 @@ let speaker_mark : style -> string = function
    here. The callers differ only in what a speech row gets: inside a running
    turn the trunk continues, and a lone utterance has no trunk to draw. *)
 let rail_for_style ~work ~speech : style -> turn_rail = function
-  | Tool | Skill _ | Thinking -> work
+  | Tool | Skill _ | Thinking _ -> work
   | User | Inbound | Keeper | Status | Local | Journal | Error -> speech
 
 (* The bracket a turn draws down the left margin. One cell of box drawing plus
@@ -1305,8 +1310,8 @@ let continues_previous ~(previous : entry option) (entry : entry) =
    who asked, a keeper writing in, the server's status, the pane's own
    notes. *)
 let speaks_for_turn = function
-  | Keeper | Tool | Skill _ | Thinking -> true
-  | User | Inbound | Status | Local | Journal | Error -> false
+  | Keeper | Tool | Skill _ | Thinking Thinking_own -> true
+  | User | Inbound | Status | Local | Journal | Error | Thinking Thinking_arrived -> false
 
 (* Under [Origin_row] a heading opens a turn, not a block. A turn that thought,
    called a tool and answered, eight rounds over, drew a heading above each of
@@ -1479,7 +1484,7 @@ let pad_clock text =
    Skill, Status) retain their distinct glyphs. *)
 let continued_mark : style -> string = function
   | User | Inbound | Keeper | Tool -> "\xe2\x94\x82"
-  | Thinking -> "\xc2\xb7"
+  | Thinking _ -> "\xc2\xb7"
   | style -> speaker_mark style
 
 
@@ -1491,7 +1496,7 @@ let continued_mark : style -> string = function
    Reasoning is the Keeper's own, not a quotation, however folded it is. *)
 let shade_of_style : style -> shade = function
   | Tool | Skill _ | Status | Local | Journal -> Shade_quoted
-  | User | Inbound | Keeper | Error | Thinking -> Shade_none
+  | User | Inbound | Keeper | Error | Thinking _ -> Shade_none
 
 let origin_gutter ~origin ~previous ~inner_width entry =
   match origin with
@@ -1501,7 +1506,7 @@ let origin_gutter ~origin ~previous ~inner_width entry =
         if continues_previous ~previous entry then
           (match entry.style with
            | User | Inbound | Keeper | Tool -> " "
-           | Error | Status | Journal | Local | Skill _ | Thinking -> continued_mark entry.style)
+           | Error | Status | Journal | Local | Skill _ | Thinking _ -> continued_mark entry.style)
         else match entry.style with
           | Tool -> " "
           | User -> "›"
@@ -1636,7 +1641,7 @@ let inbound_indent_cells = 2
 let inbound_indent (entry : entry) =
   match entry.style with
   | Inbound -> inbound_indent_cells
-  | User | Keeper | Status | Local | Journal | Error | Tool | Skill _ | Thinking -> 0
+  | User | Keeper | Status | Local | Journal | Error | Tool | Skill _ | Thinking _ -> 0
 
 (* The body column rows_of_entry draws in. Measuring an entry
    (entry_body_cells) and drawing it read this one function, so search and
@@ -1696,7 +1701,7 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     | chunks -> chunks
   in
   let sender_chunks = match origin, entry.style with
-    | Origin_bare, (Inbound | Thinking) when not (continues_previous ~previous entry) ->
+    | Origin_bare, (Inbound | Thinking Thinking_arrived) when not (continues_previous ~previous entry) ->
         wrap_words ~max_cells:body_width entry.speaker
     | _ -> [] in
   let sender_rows = List.length sender_chunks in

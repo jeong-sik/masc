@@ -290,6 +290,24 @@ let test_live_edge_positions_belong_to_actual_selected_rows () =
   check int "a heading-only viewport has no invented source position" 0
     (List.length heading_only.body_positions)
 
+let bare_sender_rows style =
+  let entries = [ entry style "THINKING" "" "body text" ] in
+  let rows =
+    Layout.visible_rows ~origin:Layout.Origin_bare ~inner_width:60 ~height:20
+      entries
+  in
+  List.exists
+    (fun (row : Layout.row) -> row.kind = Layout.Metadata Layout.Sender)
+    rows
+
+let test_bare_sender_row_marks_arrived_reasoning_only () =
+  check bool "arrived reasoning keeps its sender row" true
+    (bare_sender_rows (Layout.Thinking Layout.Thinking_arrived));
+  check bool "own reasoning stays unlabeled" false
+    (bare_sender_rows (Layout.Thinking Layout.Thinking_own));
+  check bool "inbound keeps its sender row" true
+    (bare_sender_rows Layout.Inbound)
+
 let test_a_text_laid_out_again_keeps_its_layout () =
   let texts =
     [ ("\xea\xb0\x80a", 3)
@@ -421,6 +439,8 @@ let () =
             test_a_second_walk_pays_for_what_it_newly_reaches
         ; test_case "one frame renders capacity + 1 markdown entries once" `Quick
             test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity
+        ; test_case "bare sender row marks arrived reasoning only" `Quick
+            test_bare_sender_row_marks_arrived_reasoning_only
         ;] )
     ; ( "composer"
       , [] )

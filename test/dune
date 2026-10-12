@@ -5860,6 +5860,12 @@
  (libraries alcotest yojson uri masc masc.runtime masc_tui_child_content))
 
 (test
+ (name test_tui_child_projection)
+ (modules test_tui_child_projection)
+ (libraries alcotest yojson uri masc masc.runtime masc_tui_child_content masc_tui_native_tasks
+  masc_tui_types masc_tui_message_layout masc_tui_render_chat))
+
+(test
  (name test_tui_native_tasks)
  (modules test_tui_native_tasks)
  (libraries alcotest yojson uri masc masc.runtime masc_tui_native_tasks

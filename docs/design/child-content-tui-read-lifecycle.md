@@ -35,7 +35,8 @@ remain separate verification work.
 
 Received complete Child text uses the external sender style, with `CHILD` sender
 metadata visible in the default bare view. Thinking keeps its dim reasoning style;
-bare reasoning rows now retain sender metadata too. Metadata is separate from the
+bare Child reasoning rows now retain sender metadata too, while the turn's
+own reasoning stays unlabeled. Metadata is separate from the
 original body. The existing hidden/folded/full reasoning decision applies to Child
 thinking. No Child row acquires Root request rails, reply aliases, input delivery
 state, liveness, or completion merely because a complete snapshot was received.
@@ -48,9 +49,12 @@ store incarnation and accepted observation plus durable record sequence. Public
 Audit redaction can replace human text without replacing its durable anchor.
 
 Child history is a separate observed lane after Root history, before live/pending
-input. Cross-store clocks do not establish a total causal order. Retained stores
+input. Cross-store clocks do not establish a total causal order. Rows display
+in observation-arrival order by local receipt time. Retained stores
 remain visible after discovery disappearance; their current completeness and
-redaction coverage remain unknown. Read failures remain separate error notices.
+redaction coverage remain unknown. An observation whose parent native task
+reports skip_transcript=true keeps no chat row. Read failures remain separate
+error notices.
 Projection and concatenation caches preserve list identity on unchanged snapshots,
 including for search and scroll measurements.
 

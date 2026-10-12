@@ -15,6 +15,14 @@ type skill_tone =
   | Skill_attention
   | Skill_failure
 
+type thinking_origin =
+  | Thinking_own
+      (** The turn's own reasoning: the Keeper thinking its reply through. *)
+  | Thinking_arrived
+      (** Reasoning that arrived from another sender -- a Child agent thinking
+          on its own lane. It draws like reasoning but keeps its sender's
+          attribution above its body, the way {!Inbound} does. *)
+
 type style =
   | User  (** The operator of this workspace -- what you sent. *)
   | Inbound
@@ -36,7 +44,7 @@ type style =
   | Error
   | Tool
   | Skill of skill_tone
-  | Thinking
+  | Thinking of thinking_origin
 
 val all_styles : style list
 (** Every style, listed beside the type so a new variant is added in sight of
@@ -300,7 +308,7 @@ type metadata =
       (** Only emitted where the entry has a trustworthy time: a continuation
           that cannot say when it moved has nothing to draw. *)
   | Sender
-      (** One wrapped piece of an inbound or reasoning sender's name above its body in the
+      (** One wrapped piece of an inbound or arrived-reasoning sender's name above its body in the
           {!Origin_bare} view. The row's [text] is that piece and its [gutter]
           is the body's, so the renderer draws the piece once, like a body
           row, instead of building a heading from the whole name. *)

@@ -1,0 +1,8 @@
+{
+  "tag": "v0.52.0",
+  "added_total": 2,
+  "guideless_total": 1,
+  "guideless_items": [
+    "The TUI home now shows when MASC starts the Keeper Firefox, on the BiDi host rows, instead of a bare browser line (#42250, with #42235's start record and #42227's refusal-reason note underneath it). When the host selector cannot tell whether the clock passed, the row says that rather than inventing a start time (#42227). 가이드 없음(대상 문서: docs/design/browser-bidi-live-host.md)."
+  ]
+}

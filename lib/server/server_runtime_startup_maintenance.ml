@@ -260,9 +260,10 @@ let retention_source_label = function
    env -> runtime.toml -> default order in both. *)
 let prune_jsonl_at_resolved_window ~base_path ~masc_root =
   let config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
-  let days, source, diagnostics =
+  let _resolved_days, source, diagnostics =
     Server_maintenance_toml_config.resolve_retention_days ~config_path
   in
+  let days = Env_config_core.jsonl_retention_days () in
   let prune_dir dir =
     if Sys.file_exists dir then
       Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days

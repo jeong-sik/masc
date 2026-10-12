@@ -48,7 +48,7 @@ type delta =
       ; stop_reason : Agent_core.Types.stop_reason option
       }
   | Text of {text : string; stream_scope : int option}
-  | Thinking of string
+  | Thinking of {text : string; content_index : int option}
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }
   | Native_tool_progress of
@@ -249,8 +249,14 @@ let custom_deltas_unvalidated fields =
       match object_field fields "value" with
       | None -> [ Undecodable "KEEPER_THINKING_DELTA value is not an object" ]
       | Some value ->
-          required ~event:"KEEPER_THINKING_DELTA" ~field:"delta" value
-            (fun delta -> Thinking delta))
+          let index = match List.filter (fun (name,_) -> name="index") value with
+            | [(_,raw)] -> Result.bind (Masc.Runtime_json_integer.of_json raw)
+                (fun index -> if index >= 0 then Ok index else Error "negative thinking index")
+            | [] | _ :: _ -> Error "KEEPER_THINKING_DELTA requires one content index" in
+          (match index with
+           | Error detail -> [Undecodable detail]
+           | Ok content_index -> required ~event:"KEEPER_THINKING_DELTA" ~field:"delta" value
+               (fun text -> Thinking {text;content_index=Some content_index})))
   | Some "KEEPER_CHAT_OPERATION_ACCEPTED" -> (
       let event = "KEEPER_CHAT_OPERATION_ACCEPTED" in
       match List.assoc_opt "value" fields with

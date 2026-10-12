@@ -495,11 +495,19 @@ let custom_deltas_unvalidated fields =
 let custom_deltas fields =
   match string_field fields "name", List.assoc_opt "value" fields with
   | Some name, Some value ->
+    let unique_value = match value with
+      | `Assoc _ -> Projection.unique_object_fields
+          ~surface:("Keeper live CUSTOM " ^ name ^ ".value") value
+          |> Result.map (fun _ -> ())
+      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> Ok () in
+    (match unique_value with
+     | Error detail -> [Undecodable detail]
+     | Ok () ->
     (match Projection.validate_custom_value ~name value with
      | Ok () -> custom_deltas_unvalidated fields
      | Error (Projection.Malformed_event detail) -> [ Undecodable detail ]
      | Error error ->
-       [ Undecodable (Projection.stream_error_to_string error) ])
+       [ Undecodable (Projection.stream_error_to_string error) ]))
   | None, _ | Some _, None -> custom_deltas_unvalidated fields
 
 (* Annotated rather than inferred. Without it the parameter widens to an open
@@ -510,7 +518,10 @@ let custom_deltas fields =
    unreachable. *)
 let event_deltas (event : Yojson.Safe.t) =
   match event with
-  | `Assoc fields -> (
+  | `Assoc _ -> (
+      match Projection.unique_object_fields ~surface:"Keeper live event" event with
+      | Error detail -> [Undecodable detail]
+      | Ok fields -> (
       match string_field fields "type" with
       | None -> [ Undecodable "event has no type" ]
       | Some "RUN_STARTED" -> [ Run_started ]
@@ -539,7 +550,7 @@ let event_deltas (event : Yojson.Safe.t) =
       (* Accepted by the strict decode, nothing for this view to draw. *)
       | Some ("TEXT_MESSAGE_START" | "TEXT_MESSAGE_END") -> []
       | Some unknown ->
-          [ Undecodable (Printf.sprintf "unknown event type %s" unknown) ])
+          [ Undecodable (Printf.sprintf "unknown event type %s" unknown) ]))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       (* Spelled out rather than left to a catch-all so a new Yojson variant
          stops the build instead of landing here. *)

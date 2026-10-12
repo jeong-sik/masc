@@ -249,3 +249,9 @@ val reader_unauthenticated : error -> bool
     one the server rejected what it was given. Every other failure keeps the
     server's own words. *)
 val reconciliation_failure_detail : credential_sent:bool -> error -> string
+
+(** Reads a protocol metadata object and rejects repeated field names. Unique
+    unknown fields are retained for the caller's schema validation. Shared by
+    terminal and live stream decoders. *)
+val unique_object_fields :
+  surface:string -> Yojson.Safe.t -> ((string * Yojson.Safe.t) list, string) result

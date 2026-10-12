@@ -1,4 +1,4 @@
-import { sameKeeperResponseOwner, type KeeperResponseOwner, initialKeeperResponseState, reduceKeeperResponse, acknowledgeKeeperResponseSequence, type KeeperResponseDecision, type KeeperResponseEvent } from './lib/keeper-response-state'
+import { sameKeeperResponseOwner, type KeeperResponseOwner, initialKeeperResponseState, ownerFromUnknown, reduceKeeperResponse, acknowledgeKeeperResponseSequence, type KeeperResponseDecision, type KeeperResponseEvent } from './lib/keeper-response-state'
 import { keeperStreamContract } from './keeper-stream-contract'
 import {
   sameDeliveryKey,
@@ -1374,16 +1374,28 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_THINKING_DELTA') {
-        const response = admitResponseEvent(keeperName, assistantEntryId, {
+        // A settled entry may already be terminal: hydration can mark the
+        // response terminal before its canonical history merges. Running-phase
+        // admission would refuse the observation while the frame still
+        // consumes its sequence, losing the reasoning. Observation-only
+        // recovery records the trace and preserves the terminal state instead.
+        const terminalRecovery = source.kind === 'operation' && source.observationOnly === true
+          && existing.responseState?.kind === 'known' && existing.responseState.phase === 'terminal'
+        const response = terminalRecovery ? null : admitResponseEvent(keeperName, assistantEntryId, {
           kind: 'observe', source: 'body', scope: null, owner: event.value.response ?? null,
         })
-        if (!response.accepted) return null
+        if (response && !response.accepted) return null
         const value = isRecord(event.value) ? event.value : null
         const delta = value && typeof value.delta === 'string'
           ? value.delta
           : undefined
         const agentCoreBlockIndex = value ? asNumber(value.index) : undefined
-        if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { agentCoreBlockIndex, responseOwner: event.value.response && response.state.kind === 'known' ? response.state.current ?? undefined : undefined, authoritative: response.authoritative && !(source.kind === 'operation' && source.observationOnly) })
+        const claimedOwner = value?.response
+        if (terminalRecovery && claimedOwner != null && !ownerFromUnknown(claimedOwner)) return null
+        const responseOwner = response
+          ? (event.value.response && response.state.kind === 'known' ? response.state.current ?? undefined : undefined)
+          : ownerFromUnknown(claimedOwner) ?? undefined
+        if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { agentCoreBlockIndex, responseOwner, authoritative: response ? response.authoritative && !(source.kind === 'operation' && source.observationOnly) : false })
         return null
       }
       if (event.name === 'KEEPER_STREAM_PROTOCOL_ERROR') {

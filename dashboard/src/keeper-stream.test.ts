@@ -1,6 +1,7 @@
 import { captureToolObservations } from './keeper-tool-observations'
 
 import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
+import { initialKeeperResponseState } from './lib/keeper-response-state'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   _resetActiveKeeperStreamsForTests,
@@ -2322,6 +2323,29 @@ it('retains late owned operation reasoning without reopening canonical history',
   const draft = trackedKeeperChatOperationsForKeeper('sangsu')[0]?.assistantDraft
   expect(draft).toMatchObject({ text: 'canonical answer', delivery: 'history', streamState: null,
     responseState: { lastSequence: 1 }, traceSteps: [{ kind: 'think', text: 'exposed reasoning' }] })
+})
+
+it('retains late owned operation reasoning when canonical state is already terminal', () => {
+  keeperThreads.value = {}
+  _resetLiveSendRequestOwnersForTests()
+  _resetKeeperStreamBuffersForTests()
+  _clearTrackedKeeperChatOperationsForTests()
+  const operationId = 'late-reasoning-terminal'
+  const owner = { content_generation: 1, stream_scope: 0 }
+  upsertTrackedKeeperChatOperation({ operationId, keeperName: 'sangsu', message: 'request', submittedAt: 1 })
+  appendThreadEntry('sangsu', { id: operationId, role: 'assistant', source: 'direct_assistant', label: 'sangsu',
+    text: 'canonical answer', delivery: 'history', streamState: null,
+    deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'), details: null,
+    responseState: { ...initialKeeperResponseState, phase: 'terminal', floor: owner, current: owner, lastSequence: 0 } })
+  applyKeeperOperationTurnEvent('sangsu', { operationId, sequence: 1, event: {
+    type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta: 'exposed reasoning',
+      response: { content_generation: 1, stream_scope: 0 } } } })
+  const draft = trackedKeeperChatOperationsForKeeper('sangsu')[0]?.assistantDraft
+  expect(draft).toMatchObject({ text: 'canonical answer', delivery: 'history', streamState: null,
+    responseState: { lastSequence: 1 }, traceSteps: [{ kind: 'think', text: 'exposed reasoning' }] })
+  expect(keeperThreads.value.sangsu?.find(entry => entry.id === operationId)?.responseState).toMatchObject({
+    kind: 'known', phase: 'terminal',
+  })
 })
 
 it('isolates persisted metadata for interleaved operations sharing provider identifiers', () => {

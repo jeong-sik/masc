@@ -13,3 +13,13 @@ Final corrected stream suite: `vitest run src/keeper-stream.test.ts --config vit
 Production-correction `tsc --noEmit`: exit0. `git diff --check`: exit0. No local build, CI, installation, provider turn, browser or screenshot evidence.
 
 Metadata-only model activity projection remains a separate pending task. This finding was repaired first because the shared admission boundary governs every such consumer.
+
+## Repeated-header consumer correction
+
+Independent SOURCE HOLD at `e5fb82d689c15685029a23b532c15181c972fa8f` identified a second flush in the model-header caller after admission. A same-owner repeated header did not advance admission, so that caller flush could admit a newer response before merging old metadata.
+
+Actual targeted RED at intermediate `710d24e74c`: selection `-t 'repeated header publication'`, exit1, one failed and132 skipped. Newer response ownership/body remained intact but old providerMessageId was incorrectly merged.
+
+Model headers now request explicit Thinking commit inside the common guarded admission boundary. The caller no longer flushes after acceptance. Header metadata and progress publish in one atomic update bound to accepted response state and original publication ownership. No second signal publication can restore old progress after metadata observers advance the response.
+
+Final corrected stream suite: exit0, 134 tests, 845ms; final `tsc --noEmit`: exit0. Four real signals/reducer scenarios cover Thinking flush, admission publication, repeated headers, and metadata publication. Prior REDs and original HOLD remain recorded. These results do not add runtime/browser/screenshot proof.

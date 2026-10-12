@@ -2051,7 +2051,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
     } finally { release() }
   })
 
-  it('does not roll back response admission after thinking publication admits a newer owner', () => {
+  it.each(['thinking', 'metadata'] as const)('does not roll back response admission after %s publication admits a newer owner', boundary => {
     assistantEntry('same-operation')
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: {
@@ -2061,7 +2061,9 @@ describe('applyKeeperStreamEvent tool calls', () => {
     let armed = true
     const release = effect(() => {
       const current = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
-      const reachedBoundary = current?.traceSteps?.some(step => step.kind === 'think')
+      const reachedBoundary = boundary === 'metadata'
+        ? current?.details?.providerMessageId === 'older-header'
+        : current?.traceSteps?.some(step => step.kind === 'think')
       if (armed && current && reachedBoundary) {
         armed = false
         const next = reduceKeeperResponse(current.responseState ?? initialKeeperResponseState, {

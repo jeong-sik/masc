@@ -224,3 +224,15 @@ export function keeperResponseEventOf(event: KeeperChatStreamEvent): KeeperRespo
       return null
   }
 }
+
+/** Both transports use the operation journal cursor, so a snapshot that carries
+ * a newer applied sequence is never replaced by an older observer's or a
+ * receipt-only write. A snapshot with no applied sequence yet, or with an
+ * unavailable state, can always be replaced. */
+export function keeperResponseStateMayReplace(
+  stored: KeeperResponseState | undefined,
+  incoming: KeeperResponseState | undefined,
+): boolean {
+  if (stored?.kind !== 'known' || stored.lastSequence === null) return true
+  return incoming?.kind === 'known' && incoming.lastSequence !== null && incoming.lastSequence >= stored.lastSequence
+}

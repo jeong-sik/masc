@@ -1,5 +1,5 @@
 import { normalizeKeeperConversationDetails } from './keeper-message'
-import { ownerFromUnknown, keeperResponseStateFromUnknown, unavailableKeeperResponseState, type KeeperResponseState } from './lib/keeper-response-state'
+import { ownerFromUnknown, keeperResponseStateFromUnknown, keeperResponseStateMayReplace, unavailableKeeperResponseState, type KeeperResponseState } from './lib/keeper-response-state'
 import type {
   ChatTraceStep,
   KeeperConversationAttachment,
@@ -302,14 +302,7 @@ function preserveNewerDraft(
   stored: TrackedKeeperChatAssistantDraft | undefined,
   incoming: TrackedKeeperChatAssistantDraft | undefined,
 ): TrackedKeeperChatAssistantDraft | undefined {
-  const previousState = stored?.responseState
-  if (previousState?.kind !== 'known' || previousState.lastSequence === null) return incoming
-  const nextState = incoming?.responseState
-  // Both transports use the operation journal cursor. An older observer or a
-  // receipt-only upsert cannot replace a snapshot carrying newer applied events.
-  if (nextState?.kind !== 'known' || nextState.lastSequence === null
-    || nextState.lastSequence < previousState.lastSequence) return stored
-  return incoming
+  return keeperResponseStateMayReplace(stored?.responseState, incoming?.responseState) ? incoming : stored
 }
 
 export function upsertTrackedKeeperChatOperation(request: TrackedKeeperChatOperation): void {

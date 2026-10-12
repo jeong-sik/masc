@@ -462,7 +462,7 @@ let test_owned_thinking_lifecycle () =
 let test_owned_thinking_refines_unbound_text_scope () =
   let t = T.create ~keeper_name:"fixture" ~request_id:"r" ~started_at:0. in
   T.apply ~now:0. t L.Run_started;
-  T.apply ~now:1. t (L.Text {text="Let me look."; stream_scope=Some 0});
+  T.apply ~now:1. t (L.Text {text="Let me look."; response=Unobserved_scope (Some 0)});
   T.apply ~now:2. t (L.Thinking {text="checking";
     response=Some {E.response_generation=2; response_scope=0}});
   check bool "refinement records the owned response" true

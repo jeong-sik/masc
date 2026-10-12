@@ -83,7 +83,7 @@ describe('Keeper operation stream projection', () => {
       value: { content_generation: 2, stream_scope: 0 },
     })
     const live = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
-    expect(live?.streamState).toBe('opening')
+    expect(live?.streamState).toBe('streaming')
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_STREAM_MESSAGE_STOP',

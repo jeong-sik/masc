@@ -1216,7 +1216,7 @@ export function applyKeeperStreamEvent(
         if (usage?.costUsd !== undefined && current?.costUsd == null) patch.costUsd = usage.costUsd
         if (Object.keys(patch).length > 0) mergeAssistantStreamDetails(keeperName, assistantEntryId, patch)
         if (response.advanced) setAssistantStreamState(
-          keeperName, assistantEntryId, 'opening', 'streaming',
+          keeperName, assistantEntryId, 'streaming', 'streaming',
           keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_MESSAGE_START' }),
         )
         persistActiveAssistantDraft(keeperName, assistantEntryId)

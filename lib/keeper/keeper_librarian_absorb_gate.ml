@@ -897,6 +897,17 @@ let evaluation_to_yojson { direction; destinations; state; questions; result } =
               id, match answer with
                 | Consolidation decision -> `String (consolidation_label decision)
                 | Coverage noul -> `Float noul) answers)
+          ; "reported_probability_sums", `Assoc (List.filter_map (fun (id, answer) ->
+              match answer with
+              | Typesafeai_types.Choice_answer _
+                when direction = Forward && List.mem_assoc id answers ->
+                let decoded = Result.bind consolidation_choices (fun choices ->
+                  Typesafeai_types.decode_choice choices answer) in
+                Option.map (fun judgment -> id, `Float judgment.Typesafeai_types.reported_probability_sum)
+                  (Result.to_option decoded)
+              | Typesafeai_types.Choice_answer _ | Typesafeai_types.Noul_answer _
+              | Typesafeai_types.Score_answer _ -> None)
+              evaluated.response.answers)
           ; "typed_answers", `Assoc (List.map (fun (id, answer) ->
               id, Typesafeai_types.answer_to_yojson answer) evaluated.response.answers)
           ]

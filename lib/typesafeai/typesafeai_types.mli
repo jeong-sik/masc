@@ -100,14 +100,19 @@ val choice_of_set : instructions:string -> 'option choice_set -> question
 
 type 'option decoded_choice =
   { choice : 'option
-  ; probabilities : ('option * float) list
+  ; reported_probabilities : ('option * float) list
+  ; reported_probability_sum : float
   ; confidence : float
   }
 
 val decode_choice :
   'option choice_set -> answer -> ('option decoded_choice, string) result
-(** Requires each declared option exactly once, finite probabilities in [0, 1]
-    summing to 1 (within floating-point summation roundoff), and a selected
-    option with maximal probability. Ties are valid. Confidence must be finite
-    and within [0, 1]; it is not an acceptance threshold. Invalid answers return
-    [Error] before an option can authorize a caller's effect. *)
+(** Requires each declared option exactly once, finite reported values in [0, 1],
+    and a selected option with positive maximal reported probability. Ties are
+    valid. Confidence must be finite and within [0, 1]; it is not an acceptance
+    threshold. The provider describes the sum as approximately one without a
+    numeric tolerance. These are unmodified reported values, NOT a certified
+    normalized distribution. The diagnostic sum uses declared option order,
+    independent of JSON member order; reported values retain their original
+    order. No normalization,
+    rounding, sum tolerance or confidence policy is applied here. *)

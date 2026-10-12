@@ -5651,11 +5651,16 @@ let decode_librarian_preflight output =
       | "judged" ->
         let* decision = required_member preflight "decision" in
         let* confidence = required_member preflight "confidence" in
-        let* probabilities = required_member preflight "probabilities" in
-        let+ judgment = Typesafeai_librarian_preflight.decode_judgment
+        let* probabilities = required_member preflight "reported_probabilities" in
+        let* judgment = Typesafeai_librarian_preflight.decode_judgment
           (`Assoc ["type", `String "choice"; "choice", decision;
                    "confidence", confidence; "probabilities", probabilities]) in
-        Preflight_judged judgment
+        let* reported_sum = required_member preflight "reported_probability_sum" in
+        let* () = match reported_sum with
+          | `Float value when Float.is_finite value && value = judgment.reported_probability_sum -> Ok ()
+          | `Int value when Float.of_int value = judgment.reported_probability_sum -> Ok ()
+          | _ -> Error "preflight reported probability sum disagrees with raw values" in
+        Ok (Preflight_judged judgment)
       | _ -> Error ("unknown Librarian preflight status " ^ status)
     in
     let* path = required_string_field output "generation_path" in
@@ -5694,13 +5699,13 @@ let decode_librarian_preflight output =
         let* _ = decode_list "passed_over" decode_librarian_preflight_attempt passed_over in
         let* () = preflight_fields_absent preflight
           (match lp_status with
-           | Preflight_invalid _ -> ["failure"; "decision"; "confidence"; "probabilities"]
+           | Preflight_invalid _ -> ["failure"; "decision"; "confidence"; "reported_probabilities"; "reported_probability_sum"]
            | _ -> ["failure"; "reason"]) in
         Ok (Some model)
       | Preflight_awaiting | Preflight_not_called _ | Preflight_failed _ ->
         let* () = preflight_fields_absent preflight
           (["model"; "destination"; "request_body_sha256"; "passed_over";
-            "decision"; "confidence"; "probabilities"]
+            "decision"; "confidence"; "reported_probabilities"; "reported_probability_sum"]
            @ (match lp_status with
               | Preflight_awaiting -> ["reason"; "failure"]
               | Preflight_not_called _ -> ["failure"]

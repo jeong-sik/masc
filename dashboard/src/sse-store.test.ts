@@ -43,7 +43,7 @@ const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const hydrateTransportHealthFromSSE = vi.fn<(payload: unknown) => void>()
 const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown, blocks?: unknown) => void>()
-const refreshKnownKeeperChatHistories = vi.fn<(opts?: { force?: boolean }) => void>()
+const refreshKnownKeeperChatHistories = vi.fn<() => void>()
 
 async function flushAsyncWork(): Promise<void> {
   await vi.dynamicImportSettled()
@@ -226,7 +226,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     cleanup()
   })
 
-  it('surfaces active keeper chat reconnect refresh boundary failures without stopping recovery', async () => {
+  it('surfaces known keeper chat reconnect refresh boundary failures without stopping recovery', async () => {
     const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     refreshKnownKeeperChatHistories.mockImplementationOnce(() => {
       throw new Error('keeper chat reconnect refresh exploded')

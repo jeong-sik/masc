@@ -80,7 +80,7 @@ import { KeeperConversationPanel } from './keeper-shared'
 import {
   _resetChatHydrationForTests,
   hydrateKeeperChatHistory,
-  refreshActiveKeeperChatHistory,
+  refreshKnownKeeperChatHistories,
 } from '../keeper-actions'
 import {
   activeKeeperName,
@@ -770,7 +770,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
     // only after the exact per-execution endpoint verifies that same output.
     stubExactToolCallLookup(reconnectRecoveredEntry)
 
-    refreshActiveKeeperChatHistory({ force: true })
+    void refreshKnownKeeperChatHistories()
 
     await waitFor(() => {
       expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)

@@ -536,9 +536,9 @@ async function hydrateAfterReconnect(): Promise<void> {
   // Recover keeper_chat_appended events that fell outside the server replay
   // buffer while disconnected. The WS channel cannot re-deliver them, so the
   // known conversations must re-fetch their transcripts. Route and periodic
-  // refreshes deliberately skip this (guard-respecting no-op to avoid polling),
-  // so force it here — reconnect is the only path that knows a gap may exist.
-  // Route-independent: includes previously visited and currently open panels.
+  // refreshes skip loaded transcripts to avoid polling, and only a reconnect
+  // knows a gap may exist. This covers previously visited and open panels on
+  // any route.
   void import('./keeper-runtime')
     .then(mod => mod.refreshKnownKeeperChatHistories())
     .catch(err =>

@@ -489,22 +489,27 @@ describe('refreshActiveKeeperChatHistory', () => {
   })
 
   it('does nothing when no keeper panel is open', () => {
-    refreshActiveKeeperChatHistory({ force: true })
+    refreshActiveKeeperChatHistory()
     expect(fetchKeeperChatHistory).not.toHaveBeenCalled()
   })
 
-  it('force re-fetches the open keeper transcript on reconnect recovery', async () => {
+  it('fetches the open keeper transcript again on reconnect even when it is already loaded', async () => {
     activeKeeperName.value = 'echo'
     await hydrateKeeperChatHistory('echo')
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
 
-    refreshActiveKeeperChatHistory({ force: true })
-    await Promise.resolve()
-    await Promise.resolve()
+    await refreshKnownKeeperChatHistories()
 
-    // Force bypasses the once-per-page guard so the missed replay-buffer gap
-    // is re-fetched even though 'echo' is already hydrated.
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+  })
+
+  it('names the Keepers whose history could not be fetched after a reconnect', async () => {
+    await hydrateKeeperChatHistory('fine')
+    await hydrateKeeperChatHistory('broken')
+    fetchKeeperChatHistory.mockReset().mockImplementation(name => name === 'broken'
+      ? Promise.reject(new Error('history unavailable')) : Promise.resolve([]))
+    await expect(refreshKnownKeeperChatHistories()).rejects.toThrow('Known Keeper history refresh incomplete: broken')
+    expect(fetchKeeperChatHistory).toHaveBeenCalledWith('fine')
   })
 
   it('recovers a missed completed turn for an inactive previously visited Keeper', async () => {
@@ -530,7 +535,7 @@ describe('refreshActiveKeeperChatHistory', () => {
     expect(keeperThreads.value.inactive?.[0]?.text).toBe('fresh answer')
   })
 
-  it('respects the hydration guard without force (route/periodic no-op)', async () => {
+  it('leaves an already loaded transcript alone on a route or periodic refresh', async () => {
     activeKeeperName.value = 'echo'
     await hydrateKeeperChatHistory('echo')
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)

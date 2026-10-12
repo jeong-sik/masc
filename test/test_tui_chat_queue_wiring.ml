@@ -3621,6 +3621,8 @@ let test_observed_history_handoff_keeps_progress_and_one_final_reply () =
       check int (label ^ ": final reply appears once") 1
         (count "final answer stays once" text);
       check bool (label ^ ": tools remain visible") true
+        (Astring.String.is_infix ~affix:"ReadHandoffEvidence" text);
+      check bool (label ^ ": raw wire name is not drawn") false
         (Astring.String.is_infix ~affix:"read_handoff_evidence" text);
       check bool (label ^ ": an old partial block does not hide new progress") false
         (Tui_types.observed_turn_text_drawn state "alpha")

@@ -343,13 +343,16 @@ let claude_stream_callback ?on_provider_retry ?on_child_content_observation ?on_
             (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
           let indexes = Hashtbl.fold (fun _ index acc -> index :: acc) content_indexes [] in
           List.iter stop_content (List.sort_uniq Int.compare indexes);
-          (* The runtime owns native replay admission. This map only routes
-             admitted open blocks; retiring it before publication prevents
-             reentrant progress/completion from targeting terminal content. *)
+          (* Retire open ownership before publication while preserving completed
+             identities, so replay or reentry cannot reopen terminal blocks. *)
           let unfinished_native = Hashtbl.fold
-              (fun _ index acc -> index :: acc) native_tool_indexes [] in
-          Hashtbl.clear native_tool_indexes;
-          List.iter stop_content (List.sort_uniq Int.compare unfinished_native);
+              (fun identity state acc -> match state with
+               | Native_block_open index -> (identity, index) :: acc
+               | Native_block_closed -> acc) native_tool_indexes [] in
+          List.iter (fun (identity, _) ->
+            Hashtbl.replace native_tool_indexes identity Native_block_closed) unfinished_native;
+          List.iter stop_content
+            (List.sort_uniq Int.compare (List.map snd unfinished_native));
           emit
             (Agent_core.Types.MessageDelta
                { stop_reason = Some Agent_core.Types.EndTurn; usage = None });

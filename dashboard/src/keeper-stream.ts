@@ -1002,12 +1002,14 @@ export function applyKeeperStreamEvent(
     case 'CUSTOM': {
       const customEventName: string = event.name
       if (event.name === 'KEEPER_MODEL_CONTENT_ACTIVITY') {
-        if (source.kind !== 'direct' && source.observationOnly) return null
         const activity = Object.freeze({ ...event.value })
         const sameOccurrence = (previous: typeof activity): boolean => previous.generation === activity.generation
           && previous.stream_scope === activity.stream_scope && previous.block_index === activity.block_index
         const previous = existing.modelContentActivity?.find(sameOccurrence)
-        if (previous && previous.channel !== activity.channel) return 'Conflicting model content channel'
+        // The snapshot above is stale once the frame applies effects; a
+        // channel conflict here is dropped like the flush-time guard below,
+        // never fatal to the stream.
+        if (previous && previous.channel !== activity.channel) return null
         if (previous && previous.state === 'ended') return null
         // A repeated observation of an already observed occurrence carries no
         // new state, but it does carry recency: fall through so the inventory

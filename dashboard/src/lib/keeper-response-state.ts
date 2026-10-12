@@ -66,9 +66,10 @@ export function reduceKeeperResponse(state: KeeperResponseState, event: KeeperRe
         current: event.kind === 'checkpoint' ? null : state.current,
         partialScope: null, closedGeneration: state.floor?.content_generation ?? state.closedGeneration })
     case 'text-boundary':
-      // An unowned text message boundary only means something before any
-      // response has been observed; an observed response owns its own text.
-      return state.phase === 'terminal' || state.floor !== null ? refuse() : { state, accepted: true, advanced: false, authoritative: false }
+      // START and END of a text message mark message boundaries for replay
+      // guards and display only; they do not name a response, so any live
+      // phase admits them.
+      return state.phase === 'terminal' ? refuse() : { state, accepted: true, advanced: false, authoritative: false }
     case 'attempt':
       if (state.phase !== 'running') return refuse()
       return settle({ ...state, current: null, partialScope: null })

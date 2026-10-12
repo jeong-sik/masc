@@ -128,12 +128,13 @@ describe('reduceKeeperResponse lifecycle phases', () => {
     expect(next).toMatchObject({ accepted: true, advanced: true, authoritative: true })
   })
 
-  it('text boundaries are admitted only before any response is observed', () => {
+  it('text boundaries are admitted in every live phase and refused once terminal', () => {
     expect(run([{ kind: 'text-boundary' }]).last).toMatchObject({ accepted: true, advanced: false, authoritative: false })
     expect(run([{ kind: 'text-boundary' }]).state).toBe(initialKeeperResponseState)
-    expect(run([observe(1), { kind: 'text-boundary' }]).last.accepted).toBe(false)
-    expect(run([{ kind: 'terminal' }, { kind: 'text-boundary' }]).last.accepted).toBe(false)
+    expect(run([observe(1), { kind: 'text-boundary' }]).last.accepted).toBe(true)
+    expect(run([observe(1), { kind: 'stop', owner: owner(1) }, { kind: 'text-boundary' }]).last.accepted).toBe(true)
     expect(run([{ kind: 'checkpoint' }, { kind: 'text-boundary' }]).last.accepted).toBe(true)
+    expect(run([{ kind: 'terminal' }, { kind: 'text-boundary' }]).last.accepted).toBe(false)
   })
 
   it('an unowned partial scope alone does not close text boundaries', () => {

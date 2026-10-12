@@ -2229,6 +2229,53 @@ describe('applyKeeperStreamEvent tool calls', () => {
   })
 })
 
+describe('owned text message replay', () => {
+  beforeEach(() => {
+    _resetKeeperStreamBuffersForTests()
+    keeperThreads.value = {}
+  })
+  const owner = { content_generation: 5, stream_scope: 0 }
+  const start = { type: 'TEXT_MESSAGE_START', messageId: 'm1', role: 'assistant' } as unknown as KeeperChatStreamEvent
+  const content = (delta: string): KeeperChatStreamEvent => ({ type: 'TEXT_MESSAGE_CONTENT', messageId: 'm1', delta, textResponse: owner })
+  const end = { type: 'TEXT_MESSAGE_END', messageId: 'm1' } as unknown as KeeperChatStreamEvent
+  const text = () => keeperThreads.value.sangsu![0]!.rawText
+
+  it('does not append an owned message again when its content is replayed without a sequence', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', start)
+    applyKeeperStreamEvent('sangsu', 'reply-1', content('abc'))
+    applyKeeperStreamEvent('sangsu', 'reply-1', start)
+    applyKeeperStreamEvent('sangsu', 'reply-1', content('abc'))
+    expect(text()).toBe('abc')
+  })
+
+  it.each([undefined, 3])('does not append an owned message again after its END (replay sequence %s)', sequence => {
+    assistantEntry('op-1')
+    const source = (n?: number) => ({ kind: 'operation' as const, operationId: 'op-1', ...(n === undefined ? {} : { sequence: n }) })
+    applyKeeperStreamEvent('sangsu', 'reply-1', start, source(sequence === undefined ? undefined : 0))
+    applyKeeperStreamEvent('sangsu', 'reply-1', content('abc'), source(sequence === undefined ? undefined : 1))
+    applyKeeperStreamEvent('sangsu', 'reply-1', end, source(sequence === undefined ? undefined : 2))
+    applyKeeperStreamEvent('sangsu', 'reply-1', content('abc'), source(sequence))
+    expect(text()).toBe('abc')
+  })
+
+  it('marks an owned message finalizing at its END', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', start)
+    applyKeeperStreamEvent('sangsu', 'reply-1', content('abc'))
+    applyKeeperStreamEvent('sangsu', 'reply-1', end)
+    expect(keeperThreads.value.sangsu![0]!.streamState).toBe('finalizing')
+  })
+
+  it('accepts the same message id again for a newer response', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', content('old'))
+    applyKeeperStreamEvent('sangsu', 'reply-1', end)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { ...content('new'), textResponse: { content_generation: 6, stream_scope: 0 } } as KeeperChatStreamEvent)
+    expect(text()).toBe('oldnew')
+  })
+})
+
 describe('TEXT_MESSAGE_CONTENT response ownership', () => {
   beforeEach(() => {
     _resetKeeperStreamBuffersForTests()

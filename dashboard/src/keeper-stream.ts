@@ -806,7 +806,7 @@ export function applyKeeperStreamEvent(
       })
       if (!response.accepted) return null
       const messageId = textStreamMessageId(event.messageId)
-      if (!event.textResponse && messageId !== null) {
+      if (messageId !== null) {
         const streamState = textMessageStreamState(keeperName, assistantEntryId)
         if (streamState.endedMessageIds.has(messageId)) {
           // Content re-delivered after the message ended: already rendered.

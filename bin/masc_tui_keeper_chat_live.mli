@@ -109,8 +109,15 @@ type delta =
           KEEPER_STREAM_MESSAGE_DELTA), so they arrive together here too. At
           least one of the two is present. *)
   | Text of {text : string; response : Masc.Keeper_chat_events.text_response}  (** Assistant text to append. *)
-  | Thinking of {text : string; response : Masc.Keeper_chat_events.response_identity option}  (** Supplied reasoning bytes and their observed response identity. None
-          preserves unbound bytes without granting response ownership. *)
+  | Thinking of
+      { text : string
+      ; response : Masc.Keeper_chat_events.response_identity option
+      ; content_index : int option
+      }
+      (** Supplied reasoning bytes. Missing [response] preserves unbound bytes
+          without granting response ownership. Missing [content_index] cannot
+          identify or reopen a piece. Canonical live/journal frames retain the
+          reported index, separate from the observed response identity. *)
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }
   | Native_tool_progress of

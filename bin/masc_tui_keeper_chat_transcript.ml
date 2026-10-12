@@ -1526,6 +1526,17 @@ let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content
         | Some (_,_,_) | None -> ()
 ;;
 
+let model_signal_for_body t response fallback =
+  match response, t.content_scope, t.active_model_content with
+  | Some (owner : Masc.Keeper_chat_events.response_identity), Some (generation, scope), (_ :: _)
+      when owner.response_generation = generation && owner.response_scope = scope ->
+      (* Content metadata owns activity for this response. Body bytes are
+         retained, but cannot reopen a closed piece or replace another open
+         channel without an observed content transition. *)
+      Scoped_model_content
+  | (Some _ | None), (Some _ | None), (_ :: _ | []) -> fallback
+;;
+
 let apply_delta ~now t (delta : Live.delta) =
   match delta with
   | Live.Run_started -> (
@@ -1750,12 +1761,17 @@ let apply_delta ~now t (delta : Live.delta) =
             Option.iter (enter_text_response_scope t) scope;
             t.admitted_response_owner=None, true in
         if text <> "" && (admitted || preserve_unbound) then begin
-          if admitted then t.model_signal <- Some (Answering_at now);
+          if admitted then begin
+            let owner = match response with
+              | Masc.Keeper_chat_events.Observed_response owner -> Some owner
+              | Unobserved_scope _ -> None in
+            t.model_signal <- Some (model_signal_for_body t owner (Answering_at now))
+          end;
           Buffer.add_string t.text_buffer text;
           trail_text ~now t text
         end
       end
-  | Live.Thinking {text;response} ->
+  | Live.Thinking {text;response;content_index} ->
       let generation, stream_scope = match response with
         | None -> None, None
         | Some owner -> Some owner.response_generation, Some owner.response_scope in
@@ -1766,7 +1782,16 @@ let apply_delta ~now t (delta : Live.delta) =
       let terminal = match t.phase with Stream_ended | Stream_failed _ -> true | Waiting | Working -> false in
       if not terminal && (response=None || admitted) then begin
         if text <> "" then begin
-          if admitted then t.model_signal <- Some (Reasoning_at now);
+          if admitted then begin
+            match response, content_index with
+            | Some owner, Some content_index ->
+                apply_model_content ~now t {
+                  Masc.Keeper_chat_events.content_generation=owner.response_generation;
+                  content_scope=owner.response_scope; content_index;
+                  content_provider_message_id=None; channel=Model_thinking; state=Content_observed }
+            | (Some _ | None), None | None, Some _ ->
+                t.model_signal <- Some (model_signal_for_body t response (Reasoning_at now))
+          end;
           Buffer.add_string t.thinking_buffer text;
           trail_thinking ~now t text
         end

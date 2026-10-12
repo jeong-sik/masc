@@ -114,7 +114,7 @@ let test_replayed_sequence_and_model_signal () =
     check bool "turn terminal rejects new progress" true
       ((List.hd before).native_progress=(List.hd (T.tool_calls t)).native_progress
        && (List.hd before).native_retry=(List.hd (T.tool_calls t)).native_retry))
-    [Live.Text {text="Answer"; response=Unobserved_scope (None)},"STREAMING";Live.Thinking {text="Reason";response=None},"THINKING"]
+    [Live.Text {text="Answer"; response=Unobserved_scope (None)},"STREAMING";Live.Thinking {content_index=None;text="Reason";response=None},"THINKING"]
 
 let test_heartbeat_reported_time_is_not_local_elapsed () =
   let t = T.create ~keeper_name:"fixture" ~request_id:"heartbeat-time" ~started_at:0. in

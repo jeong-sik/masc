@@ -184,7 +184,7 @@ let expected_coding_turn =
       { occurrence = occurrence (); fragment = Live.Args_delta "{\"path\":\"lib/a.ml\"}" }
   ; Live.Tool_ended { occurrence = occurrence () }
   ; Live.Tool_result { occurrence = occurrence (); execution_id = "exec-1" }
-  ; Live.Thinking {text="weighing it";response=None}
+  ; Live.Thinking {content_index=None;text="weighing it";response=None}
   ; Live.Text {text=" Found it."; response=Unobserved_scope (None)}
   ; Live.Run_finished
   ]

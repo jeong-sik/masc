@@ -31,7 +31,7 @@ let test_overlap_uses_event_order () =
   (* Wall clock moves backwards. The last event, not the biggest clock, owns
      the label; stopping it returns to the newest remaining active event. *)
   List.iter (fun (now,delta) -> T.apply ~now t delta)
-    [90.,L.Text {text="A"; response=Unobserved_scope (None)}; 90.,observed (); 80.,L.Thinking {text="R";response=None};
+    [90.,L.Text {text="A"; response=Unobserved_scope (None)}; 90.,observed (); 80.,L.Thinking {text="R";response=None;content_index=None};
      80.,observed ~index:1 ~channel:E.Model_thinking ();
      70.,L.Text {text="B"; response=Unobserved_scope (None)}; 70.,observed ~index:2 ()];
   assert_signal t "STREAMING";
@@ -430,7 +430,7 @@ let test_details_production_identity () =
 
 let test_owned_thinking_lifecycle () =
   let t = create () in
-  let think generation scope text = L.Thinking {text;
+  let think generation scope text = L.Thinking {text;content_index=None;
     response=Some {E.response_generation=generation;response_scope=scope}} in
   T.apply ~now:1. t (think 2 0 "current");
   check bool "owned reasoning establishes current response" true
@@ -453,7 +453,7 @@ let test_owned_thinking_lifecycle () =
   check string "new generation reasoning survives reused scope" (retry_body ^ "fresh") (T.thinking t);
   check bool "new generation reasoning is observed activity" true
     (T.model_activity t=Some T.Activity_reasoning);
-  T.apply ~now:11. t (L.Thinking {text="unbound";response=None});
+  T.apply ~now:11. t (L.Thinking {text="unbound";response=None;content_index=None});
   check string "unobserved owner preserves authored bytes" (retry_body ^ "freshunbound") (T.thinking t);
   T.apply ~now:12. t L.Run_finished;
   T.apply ~now:13. t (think 4 0 "late");
@@ -475,7 +475,7 @@ let test_owned_thinking_protocol () =
   let _, projected = Server_keeper_chat_agui_projection.project ~timestamp:0.
     ~redact_text:Fun.id Server_keeper_chat_agui_projection.initial event in
   let wire = Option.fold ~none:"" ~some:(Ag_ui.event_to_sse ~id:1) projected in
-  let expected = L.Thinking {text="reason";response=Some {E.response_generation=7;response_scope=0}} in
+  let expected = L.Thinking {text="reason";content_index=Some 0;response=Some {E.response_generation=7;response_scope=0}} in
   check bool "owned thinking journal/live identity agree" true
     (Log.delta_of_journaled event=Some expected
      && match L.feed (L.create ()) wire with [{delta;_}] -> delta=expected | _ -> false);
@@ -564,9 +564,25 @@ let test_owned_text_protocol () =
      ["response",owner;"response",owner];["stream_scope",`Int (-1)];
      ["stream_scope",`Int 9_007_199_254_740_992]]
 
+let test_thinking_index_wire_boundary () =
+  let decode fields =
+    let wire = "data: " ^ Yojson.Safe.to_string (`Assoc ["type",`String "CUSTOM";
+      "name",`String "KEEPER_THINKING_DELTA";"value",`Assoc (("delta",`String "provided")::fields)]) ^ "\n\n" in
+    L.feed (L.create ()) wire in
+  check bool "reported content index survives the live boundary" true
+    (match decode ["index",`Int 7] with
+     | [{delta=L.Thinking {content_index=Some 7;_};_}] -> true | _ -> false);
+  List.iter (fun fields ->
+    check bool "invalid content index grants no occurrence authority" true
+      (match decode fields with [{delta=L.Undecodable _;_}] -> true | _ -> false)
+  ) [ []; ["index",`Int (-1)]; ["index",`Float 0.5];
+      ["index",`Int 9_007_199_254_740_992]; ["index",`Int 0;"index",`Int 1] ]
+;;
+
 let () = run "model content activity"
   ["boundaries", [test_case "owned text lifecycle" `Quick test_owned_text_lifecycle;
     test_case "owned text protocol" `Quick test_owned_text_protocol;
+    test_case "thinking content index wire" `Quick test_thinking_index_wire_boundary;
     test_case "owned thinking lifecycle" `Quick test_owned_thinking_lifecycle;
     test_case "owned thinking protocol" `Quick test_owned_thinking_protocol;
     test_case "owned response details" `Quick test_owned_response_details;

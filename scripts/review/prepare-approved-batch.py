@@ -50,7 +50,14 @@ def sha(value):
 def command(args):
     result = subprocess.run(args, text=True, capture_output=True)
     if result.returncode:
-        raise SourceUnavailable("command_failed")
+        # Diagnosability (leader decision c-cd2ceea38de1): a bare
+        # command_failed hides which call failed and why. Name the gh
+        # subcommand and endpoint, the exit code, and the first bytes of
+        # stderr. Tokens travel via env, not argv/stderr, so this is safe.
+        raise SourceUnavailable(
+            f"command_failed: {' '.join(args[:3])} "
+            f"exit={result.returncode} stderr={result.stderr.strip()[:300]}"
+        )
     return result.stdout
 
 

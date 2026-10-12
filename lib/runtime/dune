@@ -4,7 +4,7 @@
  (name masc_runtime)
  (public_name masc.runtime)
  (wrapped false)
- (private_modules runtime_claude_environment_projection embedded_antigravity_context embedded_account_login runtime_codex_environment_projection)
+ (private_modules runtime_config_projection runtime_claude_environment_projection embedded_antigravity_context embedded_account_login runtime_codex_environment_projection)
  (libraries
   masc.apple_keychain
   masc.watched_work

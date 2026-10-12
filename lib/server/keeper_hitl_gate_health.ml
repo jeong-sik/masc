@@ -218,7 +218,7 @@ let section_fields ~counts_complete ~status ~status_reasons
    that outlives its budget is no longer in the registry at all, so live
    waits never drive attention — the durable residual does. *)
 let aggregate ~now ~is_live ~waits ~entries ~unread_entries ~answered_total
-    ~timed_out_total ~late_uncertain =
+    ~timed_out_total ~late_uncertain ?(journal_stats = None) () =
   let counts = List.fold_left (fold_entry ~is_live) zero_counts entries in
   (* Each reason is an operator-only condition: a residual row, a consumed
      late answer whose delivery is unknown, and rows the queue could not
@@ -236,12 +236,25 @@ let aggregate ~now ~is_live ~waits ~entries ~unread_entries ~answered_total
     else []
   in
   let status = if attention <> [] then "warning" else "ok" in
+  (* D4a's bounded-boot-read observation: the fence never hides how big the
+     journal has grown, so growth without a working lane is visible in the
+     section before the next boot pays for reading it. Absent fields mean
+     the store is unbound or the file could not be stat'd — never zero. *)
+  let journal_fields =
+    match journal_stats with
+    | None -> []
+    | Some (bytes, rows) ->
+      [ ("late_approval_journal_bytes", `Int (Int64.to_int bytes))
+      ; ("late_approval_journal_rows", `Int rows)
+      ]
+  in
   section_fields ~counts_complete:(unread_entries = 0) ~status
     ~status_reasons:attention
     ~operator_action_required:(attention <> [])
     ~operator_action_reasons:attention
     ~waits ~entries ~answered_total ~timed_out_total ~late_uncertain ~is_live
     ~now
+  |> (fun (`Assoc fields) -> `Assoc (fields @ journal_fields))
 
 let no_workspace_json ~now ~waits ~answered_total ~timed_out_total
     ~late_uncertain () =
@@ -284,14 +297,26 @@ let queue_unreadable_json ~error =
 let late_journal_unavailable_json ~error =
   (* The late-approval journal fences every late-answer write while it is
      unreadable, so an operator must act; a bare status would drop out of
-     the rollup's operator_action_reasons. *)
+     the rollup's operator_action_reasons. The reasons name the action for
+     each fence cause (design D4's explicit-restore exit, task-2237):
+     unavailable storage is repaired by the CanAdmin journal-restore
+     endpoint, corrupt rows by moving the journal aside and restoring. *)
   `Assoc
-    [ ("schema", `String schema)
-    ; ("status", `String "unavailable")
-    ; ("counts_complete", `Bool false)
-    ; ("operator_action_required", `Bool true)
-    ; ("operator_action_reasons", `List [ `String "late_approval_journal_unavailable" ])
+    [ ( "operator_action_reasons"
+      , `List
+          [ `String "late_approval_journal_unavailable"
+          ; `String
+              "run POST /api/v1/keepers/hitl/late-approval-restore (CanAdmin) \
+               once the journal storage is readable again"
+          ; `String
+              "if the restore reports journal_corrupt, move the journal file \
+               aside (keeping its evidence) and run the restore endpoint again"
+          ] )
     ; ( "status_reasons"
       , `List
           [ `String (Printf.sprintf "late_approval_journal_unavailable: %s" error) ] )
+    ; ( "schema", `String schema )
+    ; ( "status", `String "unavailable" )
+    ; ( "counts_complete", `Bool false )
+    ; ( "operator_action_required", `Bool true )
     ]

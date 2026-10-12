@@ -74,6 +74,8 @@ type store_error =
           exists. The mutation is refused so the surviving bytes are NOT
           overwritten. *)
 
+type failure_scope = Occurrence_failure | Schedule_failure
+
 type running_recovery_reason =
   | Retryable_dispatch_failure of string
   | Interrupted_by_process_restart
@@ -240,10 +242,14 @@ val fail_running :
   Workspace_utils.config ->
   now:float ->
   schedule_id:string ->
+  failure_scope:failure_scope ->
   error:string ->
   (Schedule_domain.schedule_request, store_error) result
-(** Marks a [Running] request and its matching wake attempt [Failed]. The
-    wake is stamped [finished_at] (default [now]). *)
+(** Records the matching wake attempt as [Wake_failed], stamped [finished_at]
+    (default [now]). [Schedule_failure] ends the request as [Failed].
+    [Occurrence_failure] advances to the next [Scheduled] occurrence after
+    [now], or ends as [Failed] when no future occurrence exists. The tick
+    [now], not the attempt's finish time, anchors recurrence advancement. *)
 
 val retry_running :
   ?finished_at:float ->

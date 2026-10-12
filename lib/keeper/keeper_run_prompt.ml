@@ -30,36 +30,11 @@ type user_turn_record =
       (** The resumed AGENT_CORE checkpoint already owns this exact user turn. Do not
           append or persist a second copy before replay. *)
 
-type extra_system_context_assembly =
-  { extra_system_context : string option
-  ; blocks : (Prompt_block_id.t * string) list
-  }
+type extra_system_context_assembly = Keeper_context_assembly.t
 
 let sanitize_user_message = Inference_utils.sanitize_text_utf8
 
-let append_extra_system_context ctx text =
-  match ctx with
-  | None -> Some text
-  | Some existing -> Some (existing ^ "\n\n" ^ text)
-
-let assembled_extra_system_context
-      ~(existing_extra_system_context : string option)
-      ~(included_blocks : (Prompt_block_id.t * string) list) =
-  List.fold_left
-    (fun ctx (_, text) -> append_extra_system_context ctx text)
-    existing_extra_system_context
-    included_blocks
-
-let assemble_extra_system_context
-      ~(existing_extra_system_context : string option)
-      ~(blocks : (Prompt_block_id.t * string) list)
-  : extra_system_context_assembly =
-  { extra_system_context =
-      assembled_extra_system_context
-        ~existing_extra_system_context
-        ~included_blocks:blocks
-  ; blocks
-  }
+let assemble_extra_system_context = Keeper_context_assembly.assemble
 
 (* See the mli: a position question about the last message, deliberately not
    [Hooks.last_tool_results], which answers containment over the whole

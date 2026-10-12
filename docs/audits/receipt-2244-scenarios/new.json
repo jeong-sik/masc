@@ -1,0 +1,9 @@
+{
+  "tag": "v0.52.0",
+  "added_total": 3,
+  "guideless_total": 2,
+  "guideless_items": [
+    "BiDi host cgroup default (#42250). 가이드 없음(대상 문서: docs/design/browser-bidi-live-host.md)",
+    "Stability fix for 4.0.7 hosts (#42186). 가이드 없음(문서 없음)"
+  ]
+}

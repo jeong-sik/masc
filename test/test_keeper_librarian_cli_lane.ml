@@ -659,7 +659,7 @@ let test_admission_worker_requires_actual_input_capacity () =
     ~now:1_000_000. ~source:{Current.kind=Current.Explicit_write; trace_id="seed"}
     ~facts:[current_a;current_b] () |> require in
   List.iter (fun id -> ignore (Queue.append ~keepers_dir ~keeper_id ~request_id:id
-    (fact ~claim:("candidate " ^ id)) |> require)) ["a";"b";"c";"d"];
+    (fact ~claim:("candidate " ^ id)) |> Result.map_error Queue.append_error_to_string |> require)) ["a";"b";"c";"d"];
   let queue_before = Fs_compat.load_file (Queue.path ~keepers_dir ~keeper_id) in
   let current_before = Fs_compat.load_file (Current.path_for_keepers_dir ~keepers_dir ~keeper_id) in
   let attempt ~answers ~expected_calls ~expected_partition_sizes =
@@ -744,7 +744,7 @@ let test_absorb_gate_capacity_refusal_splits_the_admission_batch () =
   let request_ids = List.map (fun id -> "capacity-candidate-" ^ id) ["a";"b";"c";"d"] in
   let candidate_bytes = Masc.Keeper_librarian_absorb_gate.request_bytes_limit * 9 / 32 in
   List.iter (fun request_id -> ignore (Queue.append ~keepers_dir ~keeper_id ~request_id
-    (fact ~claim:(request_id ^ " " ^ String.make candidate_bytes 'x')) |> require)) request_ids;
+    (fact ~claim:(request_id ^ " " ^ String.make candidate_bytes 'x')) |> Result.map_error Queue.append_error_to_string |> require)) request_ids;
   let merged = "keep A together with B" in
   let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
     let present = List.filter (fun affix -> Astring.String.is_infix ~affix prompt) request_ids in

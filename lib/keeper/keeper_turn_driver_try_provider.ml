@@ -397,7 +397,6 @@ type try_provider_ctx =
   ; tools : Agent_core.Tool.t list
   ; initial_messages : Agent_core.Types.message list
   ; model_input_projection : Agent_core.Agent.model_input_projection option
-  ; recovery_view : Keeper_recovery_transmission.t option
   ; stream_idle_timeout_s : float
     (* Bound on the silent gap between two streamed lines. It re-arms after
        every line, so it detects a stalled stream, not a long turn. The keeper
@@ -1426,8 +1425,8 @@ let bounded_model_input_projection
   let demotion_addresses = Keeper_model_input_demotion.create_address_memo () in
   let store_failure_reported = ref false in
   let reader_available = Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools) in
-  let references_enabled = match ctx.input_policy, ctx.recovery_view with
-    | Keeper_input_policy.Small, None ->
+  let references_enabled = match ctx.input_policy with
+    | Keeper_input_policy.Small ->
       reader_available
       && (match ctx.turn_boundary with
           | Keeper_carried_front.Turn_boundary { end_atom } -> end_atom > 0
@@ -2049,17 +2048,12 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
        that does not exist yet would mean measuring something else. *)
     let config =
       { config with
-        Runtime_agent.recovery_view =
-          Option.map Keeper_recovery_transmission.runtime_projection ctx.recovery_view;
         model_input_projection =
-          (match ctx.recovery_view with
-           | Some _ -> ctx.model_input_projection
-           | None ->
-             Some
-               (bounded_model_input_projection
-                  ctx
-                  ~state
-                  ~provider_config:config.Runtime_agent.provider_cfg))
+          Some
+            (bounded_model_input_projection
+               ctx
+               ~state
+               ~provider_config:config.Runtime_agent.provider_cfg)
       }
     in
     (* Explicit stream stall detection is handled by AGENT_CORE's
@@ -2905,36 +2899,29 @@ let run_try_provider_with_carried_range_eviction
         ()
   in
   let result =
-    match ctx.recovery_view with
-    | Some _ ->
-      (* The validated semantic view owns retained source obligations. Retrying
-         the same view with a shorter range or demoted results cannot recover
-         it. *)
-      attempt ()
-    | None ->
-      current_turn_demotion_sequence
-        ~same_run_retry_authorized
-        ~demotable:(fun () ->
-          Option.bind !(state.current_turn_demotion) (fun demotion -> demotion ()))
-        ~demote:(fun error ~refused_atom_count ->
-          let step = Current_turn_demoted { refused_atom_count } in
-          state.current_turn_results := step;
-          let decision =
-            [ "kind", `String "demoted_current_turn"
-            ; "refused_atom_count", `Int refused_atom_count
-            ]
-          in
-          emit_carried_range_retry_manifest ctx ~retry:1 decision;
-          Log.Keeper.info
-            ~keeper_name:ctx.keeper_name
-            "model input current turn demoted runtime=%s: the refused request's tool \
-             results leave as markers and the same candidate is asked once more %s error=%s"
-            ctx.runtime_id
-            (Yojson.Safe.to_string (`Assoc decision))
-            (Agent_core.Error.to_string error))
-        ~first:range_answer
-        ~resend:attempt
-        ()
+    current_turn_demotion_sequence
+      ~same_run_retry_authorized
+      ~demotable:(fun () ->
+        Option.bind !(state.current_turn_demotion) (fun demotion -> demotion ()))
+      ~demote:(fun error ~refused_atom_count ->
+        let step = Current_turn_demoted { refused_atom_count } in
+        state.current_turn_results := step;
+        let decision =
+          [ "kind", `String "demoted_current_turn"
+          ; "refused_atom_count", `Int refused_atom_count
+          ]
+        in
+        emit_carried_range_retry_manifest ctx ~retry:1 decision;
+        Log.Keeper.info
+          ~keeper_name:ctx.keeper_name
+          "model input current turn demoted runtime=%s: the refused request's tool \
+           results leave as markers and the same candidate is asked once more %s error=%s"
+          ctx.runtime_id
+          (Yojson.Safe.to_string (`Assoc decision))
+          (Agent_core.Error.to_string error))
+      ~first:range_answer
+      ~resend:attempt
+      ()
   in
   result, !checkpoint_after, !success_sample
 ;;

@@ -101,6 +101,14 @@ let rejected_files ~keepers_dir =
   |> List.sort String.compare
 ;;
 
+let rejected_receipt_files ~keepers_dir =
+  Sys.readdir keepers_dir
+  |> Array.to_list
+  |> List.filter (fun name ->
+    String.starts_with ~prefix:"keeper.librarian-range-commit.json.rejected-" name)
+  |> List.sort String.compare
+;;
+
 let require_upsert_ok = function
   | Ok value -> value
   | Error error -> fail (Current.upsert_error_to_string error)
@@ -1736,11 +1744,16 @@ let test_atom_receipt_wire_and_exclusive_identity () =
                           (range = durable_range_id)
    | Ok None -> fail "historical atom receipt missing"
    | Error detail -> fail detail);
+  (* An entry with both or neither identity reads as absent: never honored,
+     and never failing the whole file. Failing the file stopped every pass
+     in front of one legacy entry and froze continuity for good (#42597);
+     an unverifiable receipt must read as no receipt (#32461). *)
   List.iter (fun transform ->
     Fs_compat.save_file path (Yojson.Safe.to_string (map_receipts transform expected));
     match read_official ~keepers_dir with
-    | Error _ -> ()
-    | Ok _ -> fail "receipt accepted both or neither identity")
+    | Ok None -> ()
+    | Ok (Some _) -> fail "receipt honored both or neither identity"
+    | Error detail -> fail ("ambiguous receipt wedged the ledger: " ^ detail))
     [ (function
        | `Assoc fields -> `Assoc (("official_range_id", `Null) :: fields)
        | _ -> fail "expected receipt")
@@ -1818,18 +1831,99 @@ let test_official_receipt_rejects_invalid_identity () =
      | Ok _ -> fail "invalid official identity committed");
     check bool "snapshot not created" false
       (Sys.file_exists (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"))) invalid;
+  (* A malformed persisted entry reads as absent, never as an honored
+     receipt and never as a whole-file failure: failing the file stopped
+     every pass in front of one legacy entry (#42597). *)
   List.iter (fun turns ->
     with_temp_keepers @@ fun keepers_dir ->
     ignore (apply_disposition ~keepers_dir ~official_range_id () |> require_ok);
     rewrite_receipts ~keepers_dir
       (map_receipts (map_field "official_range_id" (map_field "turns" (fun _ -> turns))));
     match read_official ~keepers_dir with
-    | Error _ -> ()
-    | Ok _ -> fail "malformed persisted receipt accepted")
+    | Ok None -> ()
+    | Ok (Some _) -> fail "malformed persisted receipt honored"
+    | Error detail -> fail ("malformed receipt wedged the ledger: " ^ detail))
     [ `List []
     ; `List [ `Assoc [ "line", `Int 3; "turn_ref", `String "invalid" ] ]
     ; `List [ `Assoc [ "line", `Int 3; "turn_ref", `String "official#1"; "extra", `Bool true ] ]
     ]
+;;
+
+(* A pre-#42020 explicit-write entry next to valid ones: the readable
+   entries stay honored, the legacy bytes move aside with their reason,
+   and the ledger rewrites itself clean. This is the production wedge
+   from #42597, where one such entry stopped every continuity pass. *)
+let test_legacy_receipt_entry_is_quarantined_and_skipped () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (apply_disposition ~keepers_dir ~durable_range_id ~official_range_id () |> require_ok);
+  let ledger_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let legacy =
+    `Assoc [ "state", `String "committed"
+           ; "explicit_write_range_id", `Assoc
+               [ "receipt_scope", `String "explicit-writes-legacy"
+               ; "after_sequence", `Int 3
+               ; "through_sequence", `Int 4
+               ; "input_sha256", `String (String.make 64 'b') ]
+           ; "snapshot_revision", `Int 1
+           ; "snapshot_sha256", `String (String.make 64 'c') ]
+  in
+  rewrite_receipts ~keepers_dir (function
+    | `Assoc [ "receipts", `List receipts ] ->
+      `Assoc [ "receipts", `List (receipts @ [ legacy ]) ]
+    | _ -> fail "mixed commit did not persist receipts");
+  (match Current.validate_durable_range_receipts ~keepers_dir ~keeper_id:"keeper" with
+   | Error _ -> ()
+   | Ok () -> fail "audit passed a ledger with legacy bytes");
+  require_official ~keepers_dir;
+  (match Current.committed_durable_range ~keepers_dir ~keeper_id:"keeper"
+     ~receipt_scope:durable_range_id.receipt_scope with
+   | Ok (Some range) -> check bool "atom receipt honored" true (range = durable_range_id)
+   | Ok None -> fail "valid atom receipt missing"
+   | Error detail -> fail detail);
+  (match Current.validate_durable_range_receipts ~keepers_dir ~keeper_id:"keeper" with
+   | Ok () -> ()
+   | Error detail -> fail ("ledger did not heal: " ^ detail));
+  let sidecars = rejected_receipt_files ~keepers_dir in
+  check int "one quarantine sidecar" 1 (List.length sidecars);
+  let open Yojson.Safe.Util in
+  let quarantined =
+    Yojson.Safe.from_string
+      (Fs_compat.load_file (Filename.concat keepers_dir (List.hd sidecars)))
+    |> member "receipts" |> to_list
+  in
+  check int "sidecar holds the legacy entry" 1 (List.length quarantined);
+  let entry = List.hd quarantined in
+  check int "sidecar names the entry index" 2 (entry |> member "index" |> to_int);
+  check bool "sidecar names a reason" true
+    (String.length (entry |> member "reason" |> to_string) > 0);
+  check bool "sidecar preserves the entry bytes" true
+    (List.mem_assoc "explicit_write_range_id"
+       (entry |> member "entry" |> to_assoc));
+  let healed =
+    Yojson.Safe.from_string (Fs_compat.load_file ledger_path)
+    |> member "receipts" |> to_list
+  in
+  check int "ledger rewrote itself without the legacy entry" 2 (List.length healed)
+;;
+
+(* Structural breakage still fails the read: only single entries are
+   skipped, never a file that is not a ledger at all. *)
+let test_garbage_receipt_ledger_still_fails () =
+  with_temp_keepers @@ fun keepers_dir ->
+  ignore (apply_disposition ~keepers_dir ~durable_range_id () |> require_ok);
+  let ledger_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let attempt () =
+    Current.committed_durable_range ~keepers_dir ~keeper_id:"keeper"
+      ~receipt_scope:durable_range_id.receipt_scope
+  in
+  Fs_compat.save_file ledger_path "{ not json";
+  (match attempt () with
+   | Error _ -> ()
+   | Ok _ -> fail "garbage ledger read as receipts");
+  Fs_compat.save_file ledger_path (Yojson.Safe.to_string (`Assoc [ "receipts", `String "nope" ]));
+  (match attempt () with
+   | Error _ -> ()
+   | Ok _ -> fail "non-list ledger read as receipts")
 ;;
 
 let require_no_committed_range ~keepers_dir label =
@@ -2124,8 +2218,13 @@ let test_candidate_receipt_reconciliation_preserves_first_order () =
           Yojson.Safe.Util.member "range_id" receipt <> `Null) receipts in
         `List (receipts @ [atom])
     | _ -> fail "expected candidate and atom receipts"));
-  check bool "dedup preserves the first occurrence order" true
+  let unreconciled = Fs_compat.load_file path in
+  check bool "authority projection preserves exact candidate order" true
     (read_candidates ~keepers_dir a.queue_generation = expected);
+  check string "authority read does not rewrite unrelated duplicate receipts" unreconciled
+    (Fs_compat.load_file path);
+  check bool "generic range reader still reconciles its receipt" true
+    (require_committed_range ~keepers_dir "atom receipt disappeared" = durable_range_id);
   let reconciled = Fs_compat.load_file path in
   check string "on-disk first-occurrence order is preserved" canonical reconciled;
   check int "duplicate atom removed without dropping candidates" 3
@@ -2161,19 +2260,33 @@ let test_candidate_prepared_set_recovers_exact_snapshot () =
     let b = candidate_receipt 2 "request-b" "B" in
     let c = candidate_receipt 3 "request-c" "C" in
     ignore (commit_candidates ~keepers_dir [b;c] [fact ~claim:"settled policy" ()] |> require_ok);
+    let expected = read_candidates ~keepers_dir b.queue_generation in
     rewrite_receipts ~keepers_dir (map_receipts (fun receipt ->
       let receipt = map_field "state" (fun _ -> `String "prepared") receipt in
       if exact then receipt
       else map_field "snapshot_sha256" (fun _ -> `String (String.make 64 'f')) receipt));
+    let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+    let prepared = Fs_compat.load_file path in
     let found = read_candidates ~keepers_dir b.queue_generation in
     check bool "whole set recovers only for the exact committed snapshot" true
-      (if exact then List.length found=2 && List.mem b found && List.mem c found else found=[]);
+      (if exact then found=expected && List.length found=2 && List.mem b found && List.mem c found else found=[]);
+    check string "authority projection preserves prepared evidence bytes" prepared
+      (Fs_compat.load_file path);
+    check bool "repeated authority projection returns the same candidate set" true
+      (read_candidates ~keepers_dir b.queue_generation = found);
+    (* Generic range recovery retains its persistence contract even when this
+       mixed-format receipt store has no Atom range for the requested scope. *)
+    require_no_committed_range ~keepers_dir "candidate-only store invented an atom receipt";
     if exact then (
       let json = Yojson.Safe.from_file
         (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper") in
-      check (list string) "recovery persists both committed states" ["committed";"committed"]
+      check (list string) "generic recovery persists both committed states" ["committed";"committed"]
         Yojson.Safe.Util.(json |> member "receipts" |> to_list
-          |> List.map (fun receipt -> receipt |> member "state" |> to_string)))) [true;false]
+          |> List.map (fun receipt -> receipt |> member "state" |> to_string));
+      check bool "persisted recovery retains exact candidate identities" true
+        (read_candidates ~keepers_dir b.queue_generation = found))
+    else check bool "generic recovery discards only unverifiable prepared evidence" false
+      (Sys.file_exists path)) [true;false]
 ;;
 
 let recall_binding sequence source_fact target : Current.admission_recall_binding =
@@ -2761,6 +2874,26 @@ let test_receipt_cache_skips_decoding_an_unchanged_sidecar () =
     (recall_bindings ~keepers_dir = [binding]);
   check int "a later revision that leaves the sidecar alone decodes nothing" decoded
     (receipt_decodes ())
+;;
+
+(* Admission authority reads the committed candidates on every refresh while
+   the queue file exists. Over an unchanged sidecar it decodes nothing, and it
+   never writes the sidecar. *)
+let test_admission_authority_reads_reuse_the_receipt_cache () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let _target, binding = cached_recall_fixture ~keepers_dir in
+  let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let bytes = Fs_compat.load_file path in
+  let decoded = receipt_decodes () in
+  for _ = 1 to 3 do
+    check bool "authority keeps the committed candidate" true
+      (Current.committed_explicit_candidates ~keepers_dir ~keeper_id:"keeper"
+         ~queue_generation:binding.candidate_id.queue_generation
+       |> require_ok = [binding.candidate_id])
+  done;
+  check int "authority reads over an unchanged sidecar decode nothing" decoded
+    (receipt_decodes ());
+  check string "authority reads leave the sidecar bytes alone" bytes (Fs_compat.load_file path)
 ;;
 
 let test_receipt_cache_rereads_an_externally_rewritten_sidecar () =
@@ -3986,6 +4119,10 @@ let () =
             test_mixed_receipt_prepared_recovery
         ; test_case "official receipt rejects invalid identity" `Quick
             test_official_receipt_rejects_invalid_identity
+        ; test_case "legacy receipt entry is quarantined and skipped" `Quick
+            test_legacy_receipt_entry_is_quarantined_and_skipped
+        ; test_case "garbage receipt ledger still fails" `Quick
+            test_garbage_receipt_ledger_still_fails
         ; test_case "sparse candidate receipts survive no-change and retirement" `Quick
             test_sparse_candidate_receipts_survive_retirement
         ; test_case "candidate reconciliation preserves first order" `Quick
@@ -4008,6 +4145,8 @@ let () =
             test_admission_recall_cache_invalidates_external_prefix_edit_and_growth
         ; test_case "receipt cache skips decoding an unchanged sidecar" `Quick
             test_receipt_cache_skips_decoding_an_unchanged_sidecar
+        ; test_case "admission authority reads reuse the receipt cache" `Quick
+            test_admission_authority_reads_reuse_the_receipt_cache
         ; test_case "receipt cache rereads an externally rewritten sidecar" `Quick
             test_receipt_cache_rereads_an_externally_rewritten_sidecar
         ; test_case "receipt cache reflects this process's receipt write" `Quick

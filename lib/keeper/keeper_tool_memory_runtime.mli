@@ -157,6 +157,7 @@ type memory_write_error_kind =
   | Supersedes_premise_of_successor
       (** The new claim is derived and one of its missing premises is the
           fact [supersedes] removes. *)
+  | Pending_admission_capacity_exceeded
   | Pending_admission_persistence_failed
       (** Queue append outcome is unknown; the receipt names its request_id.
           Current search cannot prove absence from the pending queue. *)

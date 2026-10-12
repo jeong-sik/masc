@@ -2135,6 +2135,51 @@ let test_loaded_tool_facts_are_folded_into_the_held_log () =
   | other -> failf "expected one call, got %d" (List.length other)
 ;;
 
+(* A journal that just fed one log changed nothing for the others, so its
+   result enriches that log alone. *)
+let test_enrichment_can_be_limited_to_one_log () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let held request_id execution_id =
+    let occurrence =
+      { Live.stream_scope = 0; block_index = 1; provider_message_id = None; tool_call_id = Some "c1" }
+    in
+    settled_log ~request_id
+      [ Live.Run_started
+      ; Live.Tool_started { occurrence; tool_name = "read_file" }
+      ; Live.Tool_ended { occurrence }
+      ; Live.Tool_result { occurrence; execution_id }
+      ; visible_reply "done"
+      ; Live.Run_finished
+      ]
+  in
+  let first = held "op-1" "exec-1" and second = held "op-2" "exec-2" in
+  state.msg_settled_logs <- [ first; second ];
+  let row request_id execution_id duration =
+    let durable =
+      Keeper_chat_transcript.tool_block
+        [ Keeper_chat_transcript.make_tool_activity ~execution_id
+            ~call_id:(Some "c1") ~tool_name:"read_file" ~args:"{}"
+            ~outcome:Keeper_chat_transcript.Failed ~duration:(Some duration) () ]
+    in
+    { (chat_entry ~request_id ~role:Tui_types.Message_tool ~text:"read_file" ~at:101. ())
+      with me_tool_block = Some durable }
+  in
+  let rows = [ row "op-1" "exec-1" "32ms"; row "op-2" "exec-2" "40ms" ] in
+  let duration (log : Tui_types.turn_log) =
+    match Keeper_chat_transcript.tool_calls log.Tui_types.tl_transcript with
+    | [ activity ] -> activity.Keeper_chat_transcript.duration
+    | other -> failf "expected one call, got %d" (List.length other)
+  in
+  Tui_types.enrich_held_logs_from_rows ~only:first state ~keeper_name:"alpha" rows;
+  check (option string) "the named log is enriched" (Some "32ms") (duration first);
+  check (option string) "the other log is left alone" None (duration second);
+  Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha" rows;
+  check (option string) "without a limit every log is enriched" (Some "40ms")
+    (duration second)
+;;
+
 let drawn_skills_of (log : Tui_types.turn_log) =
   List.concat_map
     (fun (item : Keeper_chat_transcript.drawn_item) ->
@@ -5895,6 +5940,30 @@ let test_interrupted_native_progress_survives_results_projection () =
            quarantined_occurrence=Some occurrence;detail="invalid correlated native event"})])
 ;;
 
+(* A preview landing moves the height of rows with links and changes nothing in
+   an entry, so the entries are kept and only the list is new. *)
+let test_a_landed_preview_keeps_the_entries () =
+  let module Preview = Masc_tui_link_preview in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let url = "https://github.com/jeong-sik/masc/pull/37633" in
+  let plain = { (entry_at 41.0) with me_text = "no link here" } in
+  let linked = { (entry_at 42.0) with me_text = url } in
+  let messages = [ plain; linked ] in
+  let entries () =
+    Masc_tui_render_chat.keeper_message_layout_entries ~messages state
+      ~keeper_name:"alpha" ~chat_cols:120
+  in
+  let before = entries () in
+  check bool "unchanged metadata reuses the list" true (before == entries ());
+  let preview = Preview.get_preview url in
+  Preview.cache_store { preview with title = Some "A landed preview" };
+  let after = entries () in
+  check bool "the list is new, so row counts are asked again" false (before == after);
+  check int "same number of entries" (List.length before) (List.length after);
+  List.iter2
+    (fun b a -> check bool "each entry is the one built before" true (b == a))
+    before after
+
 let () =
   run
     "tui_chat_queue_wiring"
@@ -5928,7 +5997,7 @@ let () =
         ; test_case "Fusion workspace withdrawal" `Quick test_fusion_workspace_withdrawal
         ; test_case "priority completions survive controls" `Quick test_priority_completion_survives_controls
         ; test_case "status details and fold counts reach the frame" `Quick test_status_details_and_fold_counts_reach_the_frame ] )
-    ; ( "link card layout", [] )
+    ; ( "link card layout", [ test_case "a landed preview keeps the entries" `Quick test_a_landed_preview_keeps_the_entries ] )
     ; ( "wiring"
       , [ test_case "queue summary follows admission and execution" `Quick test_queue_summary_follows_admission_and_execution
         ; test_case "checkpoint watcher allows new input" `Quick test_checkpoint_watcher_allows_new_input
@@ -5941,6 +6010,7 @@ let () =
         ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
         ; test_case "older page keeps the blocks it did not change" `Quick test_older_page_keeps_the_blocks_it_did_not_change
         ; test_case "older page keeps the entries it moved down" `Quick test_older_page_keeps_the_entries_it_moved_down
+        ; test_case "enrichment can be limited to one log" `Quick test_enrichment_can_be_limited_to_one_log
         ; test_case "batch reply follows all original inputs" `Quick test_batch_reply_follows_all_original_inputs
         ; test_case "observed checkpoint retains earlier output" `Quick test_observed_checkpoint_retains_earlier_output
         ; test_case "every request of a held batch is held for journal reads" `Quick

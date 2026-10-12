@@ -337,7 +337,6 @@ type try_provider_ctx =
   ; tools : Agent_core.Tool.t list
   ; initial_messages : Agent_core.Types.message list
   ; model_input_projection : Agent_core.Agent.model_input_projection option
-  ; recovery_view : Keeper_recovery_transmission.t option
   ; stream_idle_timeout_s : float
   ; first_event_timeout_s : float
   ; body_timeout_s : float option

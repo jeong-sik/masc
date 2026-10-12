@@ -443,7 +443,13 @@ let test_failed_continuation_after_prior_finished_segment () =
       (event.Ag_ui.event_type = Ag_ui.Run_error)
   | _ -> fail "continuation failure disappeared behind its prior terminal"
 
-let test_journal_failure_keeps_live_error_without_cursor () =
+(* A rejected terminal append leaves no durable seq, and both reconnect
+   replay and the RFC-0412 live dedup key off seq membership. Broadcasting the
+   terminal seq-less would close one live client while reconnecting clients
+   replay the operation as still running (#41687 recurrence), so settlement
+   logs the failure and skips the broadcast rather than projecting a delivery
+   the ledger cannot back (constitution failure_keeps_evidence). *)
+let test_journal_failure_skips_live_broadcast () =
   with_workspace @@ fun base_path ->
   let keeper_name = "unwritable-journal" and operation_id = "op-journal-failed" in
   ignore (Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id ());
@@ -454,10 +460,9 @@ let test_journal_failure_keeps_live_error_without_cursor () =
   Fun.protect ~finally:unregister @@ fun () ->
   Stream.For_testing.synthesize_wire_terminal_on_settle ~base_path ~keeper_name
     ~operation_id ~execution:(failed_execution "interrupted despite journal failure");
-  match !delivered with
-  | [None, event] -> check bool "failure still reaches the live client" true
-      (event.Ag_ui.event_type = Ag_ui.Run_error)
-  | _ -> fail "failed journal append lost the live terminal or fabricated a cursor"
+  check int "journal failure broadcasts nothing live" 0 (List.length !delivered);
+  check bool "no fabricated wire record or cursor survives" true
+    (Option.is_none (Stream.For_testing.take_operation_wire_stream ~base_path ~keeper_name ~operation_id))
 
 (* Every settlement path without a live stream ends the journal through
    [record_terminal_error], so the helper itself carries the guarantees: one
@@ -609,8 +614,8 @@ let () =
             test_interrupted_owner_without_subscriber_replays_failure
         ; test_case "failed continuation follows prior finished segment" `Quick
             test_failed_continuation_after_prior_finished_segment
-        ; test_case "journal failure preserves live terminal without cursor" `Quick
-            test_journal_failure_keeps_live_error_without_cursor
+        ; test_case "journal failure skips live broadcast without durable seq" `Quick
+            test_journal_failure_skips_live_broadcast
         ; test_case "record_terminal_error writes once" `Quick
             test_record_terminal_error_writes_once
         ; test_case "record_terminal_error cuts a torn tail" `Quick

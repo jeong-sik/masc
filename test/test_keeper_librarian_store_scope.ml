@@ -247,7 +247,7 @@ let test_purge_removes_only_the_owned_admission_queue () =
       basis = Observed Transcript } in
   List.iter (fun keeper_id ->
     match Queue.append ~keepers_dir ~keeper_id ~request_id:"request" fact with
-    | Ok _ -> () | Error detail -> fail detail) [keeper_name; "other-keeper"];
+    | Ok _ -> () | Error detail -> fail (Queue.append_error_to_string detail)) [keeper_name; "other-keeper"];
   let other = Queue.path ~keepers_dir ~keeper_id:"other-keeper" in
   let before = Fs_compat.load_file other in
   (match Server_dashboard_http_delete_actions.For_testing.purge_keeper_artifacts

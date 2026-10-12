@@ -46,6 +46,8 @@ type store_error =
       ; recovery_err : string option
       }
 
+type failure_scope = Occurrence_failure | Schedule_failure
+
 type running_recovery_reason =
   | Retryable_dispatch_failure of string
   | Interrupted_by_process_restart
@@ -1205,7 +1207,7 @@ let cancel_matching config ~should_cancel =
     else Ok ())
 ;;
 
-let fail_running ?finished_at config ~now ~schedule_id ~error =
+let fail_running ?finished_at config ~now ~schedule_id ~failure_scope ~error =
   let finished_at = Option.value finished_at ~default:now in
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
@@ -1215,7 +1217,14 @@ let fail_running ?finished_at config ~now ~schedule_id ~error =
       if request.status <> Running then
         Error Schedule_not_running
       else
-        let updated = { request with status = Failed } in
+        let updated =
+          match failure_scope with
+          | Schedule_failure -> { request with status = Failed }
+          | Occurrence_failure ->
+            (match Schedule_domain.next_due_after ~now request with
+             | Some due_at -> { request with status = Scheduled; due_at }
+             | None -> { request with status = Failed })
+        in
         let schedules = replace_schedule state.schedules updated in
         let* wakes =
           update_latest_running_wake state.wakes request

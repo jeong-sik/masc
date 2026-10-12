@@ -4,7 +4,9 @@
  * Produced by `lib/tool_bridge.ml::maybe_externalize` when a tool output
  * exceeds the threshold. The OCaml encoder uses:
  *
- *   Printf.sprintf "[masc:blob sha256=%s bytes=%d mime=%s preview=%S]"
+ *   [masc:blob sha256=... bytes=... mime=... [answer_sha256=...] preview=...]
+ * The optional answer digest identifies semantic output; sha256 still locates
+ * the full-output artifact.
  *
  * `%S` wraps the preview in OCaml string-literal quoting, which uses
  * `"..."` with backslash-escaped double quotes and special chars. We
@@ -21,10 +23,11 @@ export interface ToolBlobMarker {
   bytes: number
   mime: string
   preview: string
+  answerSha256?: string
 }
 
 const MARKER_RE =
-  /^\[masc:blob sha256=([0-9a-fA-F]{64}) bytes=(\d+) mime=(\S+) preview="((?:[^"\\]|\\.)*)"\]$/
+  /^\[masc:blob sha256=([0-9a-fA-F]{64}) bytes=(\d+) mime=(\S+)(?: answer_sha256=([0-9a-fA-F]{64}))? preview="((?:[^"\\]|\\.)*)"\]$/
 
 /**
  * Strict check: the WHOLE string is a marker. Returns null when it isn't.
@@ -34,7 +37,7 @@ export function parseToolBlobMarker(text: string): ToolBlobMarker | null {
   if (!text.startsWith(MARKER_PREFIX)) return null
   const m = text.match(MARKER_RE)
   if (!m) return null
-  const [, sha, bytes, mime, preview] = m
+  const [, sha, bytes, mime, answerSha256, preview] = m
   if (sha === undefined || bytes === undefined || mime === undefined || preview === undefined) {
     return null
   }
@@ -43,6 +46,7 @@ export function parseToolBlobMarker(text: string): ToolBlobMarker | null {
     bytes: Number(bytes),
     mime,
     preview: unescapeOcamlString(preview),
+    ...(answerSha256 === undefined ? {} : { answerSha256: answerSha256.toLowerCase() }),
   }
 }
 

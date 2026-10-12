@@ -821,6 +821,7 @@ let not_reviewed_stop ~retry =
     ; detail = "Payment required"
     ; evaluator_runtime = "ollama_cloud.deepseek"
     ; retryable_runtimes = ["ollama_cloud.deepseek"]
+    ; model_absent_runtimes = []
     ; retry
     }
 ;;
@@ -1322,7 +1323,7 @@ let test_system_llm_review_notes_are_metadata_only () =
     ; generator_runtime = None
     ; gate = Masc.Task.Anti_rationalization.Structured_tool
     ; fallback_reason = None
-    ; retryable_runtimes = []; evaluator_error_retryable = None
+    ; retryable_runtimes = []; model_absent_runtimes = []; evaluator_error_retryable = None
     }
   in
   let notes =
@@ -4360,7 +4361,7 @@ let test_an_unreadable_image_body_is_named_in_the_review_record () =
         ; generator_runtime = None
         ; gate = Masc.Task.Anti_rationalization.Structured_tool
         ; fallback_reason = None
-        ; retryable_runtimes = []; evaluator_error_retryable = None
+        ; retryable_runtimes = []; model_absent_runtimes = []; evaluator_error_retryable = None
         }
       in
       let notes =

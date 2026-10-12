@@ -5131,21 +5131,6 @@ let open_repository_changes state ~mailbox ~scope =
   state.repository_changes_diff_scroll <- 0;
   launch_repository_changes_load state ~mailbox ~scope
 
-let close_repository_changes state =
-  state.repository_changes_open <- false;
-  state.repository_changes_return_chat <- false;
-  state.repository_changes_scope <- None;
-  state.repository_changes <- None;
-  state.repository_changes_error <- None;
-  state.repository_changes_cursor <- 0;
-  state.repository_changes_scroll <- 0;
-  state.repository_changes_diff <- None;
-  state.repository_changes_diff_error <- None;
-  state.repository_changes_diff_path <- None;
-  state.repository_changes_diff_hscroll <- 0;
-  state.repository_changes_diff_max_width <- 0;
-  state.repository_changes_diff_scroll <- 0
-
 let refresh_repository_changes state ~mailbox =
   match state.repository_changes_scope with
   | None -> ()
@@ -12068,7 +12053,18 @@ let apply_confirmed_server_identity_reading state reading =
       state.keeper_roster_error <- None
     end
   | Masc_tui_types.Workspace_identity_match ->
-    load_from_masc_dir state state.local_base_path;
+    (* The same workspace read as a match again leaves the keeper rows and
+       tasks as the cadence tick last loaded them, a refresh ago. A reload
+       here ran the whole directory read on the UI thread a second time for
+       the same answer. A workspace that just changed, or one that was not
+       a match a moment ago, has had its rows put away above and needs it. *)
+    (match previous with
+     | Masc_tui_types.Workspace_identity_match when same_workspace -> ()
+     | Masc_tui_types.Workspace_identity_match
+     | Masc_tui_types.Workspace_identity_unread
+     | Masc_tui_types.Workspace_identity_match_unconfirmed _
+     | Masc_tui_types.Workspace_identity_mismatch _ ->
+         load_from_masc_dir state state.local_base_path);
     let input_workspace = workspace_input_identity_of_server state.server_identity in
     (match List.assoc_opt input_workspace state.suspended_keeper_inputs with
      | None -> ()
@@ -12250,6 +12246,46 @@ let load_local_workspace_if_safe state base_path =
   | Masc_tui_types.Workspace_identity_match_unconfirmed _
   | Masc_tui_types.Workspace_identity_mismatch _ -> ()
 ;;
+
+(* One read of the .masc directory in flight at a time. The cadence tick asks
+   again two seconds later, so a read that is still running is simply not
+   duplicated. *)
+let local_workspace_read_inflight = ref false
+
+(* The cadence tick's reload. The directory read (the backlog, goal links,
+   archive, keeper metadata) takes about 20ms and used to run on the UI thread
+   every tick, which is 20ms that a keypress could not be answered in. It runs
+   on the shared domain pool now and the result comes back as a mailbox
+   message; the apply that changes state stays on the UI thread. A system
+   thread would not do: the stores under the read take guarded mutexes, which
+   raise [Non_eio_mutex_context] anywhere but an Eio fiber. *)
+let launch_local_workspace_read state ~mailbox base_path =
+  match state.workspace_identity with
+  | Masc_tui_types.Workspace_identity_match ->
+      if not !local_workspace_read_inflight then begin
+        match Eio_context.get_switch_opt () with
+        | None -> load_from_masc_dir state base_path
+        | Some sw ->
+            local_workspace_read_inflight := true;
+            Eio.Fiber.fork_daemon ~sw (fun () ->
+              (match
+                 Domain_pool_ref.submit_io_or_inline
+                   (fun () -> Masc_tui_loader.read_local_workspace base_path)
+               with
+               | reading ->
+                   enqueue_async mailbox (Local_workspace_read (base_path, reading))
+               | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+               | exception exn ->
+                   local_workspace_read_inflight := false;
+                   Log.Transport.info "local workspace read failed: %s"
+                     (Printexc.to_string exn));
+              `Stop_daemon)
+      end
+  | Masc_tui_types.Workspace_identity_unread
+  | Masc_tui_types.Workspace_identity_match_unconfirmed _
+  | Masc_tui_types.Workspace_identity_mismatch _ -> ()
+;;
+
 
 let load_live_context_if_safe state base_path keeper =
   match state.workspace_identity with
@@ -17911,7 +17947,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           then launch_keeper_calls_load ~force:true state ~mailbox keeper_name;
           (match state.msg_loaded_keeper with
             | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
-                enrich_held_logs_from_rows state ~keeper_name state.msg_loaded
+                enrich_held_logs_from_rows ~only:log state ~keeper_name state.msg_loaded
             | Some _ | None -> ())
       | Error (Keeper_chat_log.Unknown_operation | Keeper_chat_log.Journal_pruned | Keeper_chat_log.Journal_missing) ->
           (* Nothing to reload, now or later this session: the v1 rows are
@@ -18669,6 +18705,18 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           (* The previous list stays: a failed reload must not make the queue
              look empty, which reads as "nothing is waiting". *)
           state.verification_error <- Some detail)
+  | Local_workspace_read (base_path, reading) ->
+      local_workspace_read_inflight := false;
+      (* A reading that left before the identity moved off Match, or for
+         another base path, describes a directory this pane no longer shows. *)
+      (match state.workspace_identity with
+       | Masc_tui_types.Workspace_identity_match
+         when String.equal base_path state.local_base_path ->
+           Masc_tui_loader.apply_local_workspace state base_path reading
+       | Masc_tui_types.Workspace_identity_match
+       | Masc_tui_types.Workspace_identity_unread
+       | Masc_tui_types.Workspace_identity_match_unconfirmed _
+       | Masc_tui_types.Workspace_identity_mismatch _ -> ())
   | Keeper_chat_older_loaded (generation, keeper_name, before, result) ->
       (* A page that arrived for a keeper the pane has since left, or after a
          reload moved the cursor, is dropped: prepending it would put rows
@@ -22106,6 +22154,33 @@ and is loaded on demand through keeper_skill.
         | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
         | None -> false
       in
+      (* What [r] refreshes on every surface, the Git-changes overlay
+         included. The overlay's arm and the surface arm below both start
+         here; only the reload that follows differs. *)
+      let refresh_shared_sources () =
+        state.pending_approval_action <- None;
+        Masc_tui_theme_choice.invalidate_cache ();
+        load_local_workspace_if_safe state base_path;
+        let host = server_peer_host in
+        let port = state.port in
+        (* Each source owns its read even while the whole-surface refresh
+           is busy. Cadence reads share these requests rather than
+           superseding them before their responses can arrive. *)
+        (match state.connection_status with
+         | Booting -> ()
+         | Disconnected | Connecting | Reconnecting | Degraded | Connected ->
+           launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh
+             state ~mailbox:async_messages;
+           launch_gate_snapshot_load ~intent:Snapshot_read.Refresh
+             state ~mailbox:async_messages;
+           launch_schedules_load ~intent:Snapshot_read.Refresh
+             state ~mailbox:async_messages);
+        start_http_refresh state ~host ~port ~intent:Revalidate
+          ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight
+          ~scoped_refresh_followup
+          ~mailbox:async_messages
+      in
       (match key, browser_lane_on_screen state with
        | Some _, Some view ->
            state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
@@ -23780,6 +23855,311 @@ and is loaded on demand through keeper_skill.
                          report_action state "system"
                            (Printf.sprintf "closed %s" path))
             | _ -> ())
+       (* The Git-changes overlay is a modal like the agenda sheet: while
+          it is open it owns every key, answering its own and swallowing
+          the rest, so a surface binding under it -- a scroll, a refresh,
+          a destructive letter -- cannot act on the wrong pane. Its arms
+          used to live below beside their unguarded twins, and every new
+          surface key had to remember to stand aside for it; the guard
+          now lives here once, the way [modal_owns_keys] names it. *)
+       | Some k when state.repository_changes_open ->
+           (match k with
+            | ("shift-left" | "shift-right") as key
+              when Option.is_some state.repository_changes_diff_path ->
+              let direction = if String.equal key "shift-left" then -1 else 1 in
+              state.repository_changes_diff_hscroll <-
+                max 0 (min (max 0 (state.repository_changes_diff_max_width - 1))
+                  (state.repository_changes_diff_hscroll + direction))
+
+            | "esc" ->
+              if Option.is_some state.repository_changes_diff_path then
+                close_repository_changes_diff state
+              else begin
+                let return_chat = state.repository_changes_return_chat in
+                close_repository_changes state;
+                if return_chat then begin
+                  state.view <- Keepers Keeper_message
+                end
+              end
+
+            | "left" ->
+              if Option.is_some state.repository_changes_diff_path then
+                close_repository_changes_diff state
+              else begin
+                let return_chat = state.repository_changes_return_chat in
+                close_repository_changes state;
+                if return_chat then begin
+                  state.view <- Keepers Keeper_message
+                end
+              end
+
+            | ("j" | "down" | "wheel-down") ->
+              (match state.repository_changes_diff_path with
+               | Some _ ->
+                   state.repository_changes_diff_scroll <-
+                     Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:1
+               | None ->
+                   let cursor, scroll =
+                     move_row_cursor state ~delta:1
+                       ~cursor:state.repository_changes_cursor
+                       ~scroll:state.repository_changes_scroll
+                   in
+                   state.repository_changes_cursor <- cursor;
+                   state.repository_changes_scroll <- scroll)
+
+            | ("k" | "up" | "wheel-up") ->
+              (match state.repository_changes_diff_path with
+               | Some _ ->
+                   state.repository_changes_diff_scroll <-
+                     max 0 (state.repository_changes_diff_scroll - 1)
+               | None ->
+                   let cursor, scroll =
+                     move_row_cursor state ~delta:(-1)
+                       ~cursor:state.repository_changes_cursor
+                       ~scroll:state.repository_changes_scroll
+                   in
+                   state.repository_changes_cursor <- cursor;
+                   state.repository_changes_scroll <- scroll)
+
+            | ("\r" | "\n" | "right") -> (
+              match state.repository_changes_diff_path with
+              | Some _ -> ()
+              | None -> (
+                  match state.repository_changes, state.repository_changes_scope with
+                  | Some snapshot, Some scope -> (
+                      match
+                        List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                          state.repository_changes_cursor
+                      with
+                      | None -> ()
+                      | Some change ->
+                          open_repository_change_diff state
+                            ~mailbox:async_messages ~scope change)
+                  | _ -> ()))
+
+            | "g" | "G" ->
+              let path_opt =
+                match state.repository_changes_diff_path with
+                | Some path -> Some path
+                | None -> (
+                    match state.repository_changes with
+                    | Some snapshot ->
+                        Option.map
+                          (fun (c : Tui_decode.repository_change) -> c.rc_path)
+                          (List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                             state.repository_changes_cursor)
+                    | None -> None)
+              in
+              let change_ctx =
+                Masc_tui_render_prim.resolve_change_context state ~path_opt
+              in
+              goto_surface state ~mailbox:async_messages Planning;
+              state.planning_mode <- Planning_list;
+              (match change_ctx.Masc_tui_render_prim.ctx_goal_id with
+               | Some gid ->
+                   (match state.planning with
+                    | Some snap ->
+                        (* The cursor indexes the rows the pane draws, which
+                           [clamp_planning_cursor] also bounds by that list. The
+                           raw goal list is in the order the server sent; the
+                           filter hides goals and the sort reorders them, so an
+                           index found in it lands on a different row than the
+                           goal it was found for. *)
+                        let rec find_idx i = function
+                          | [] -> ()
+                          | (g : planning_goal) :: rest ->
+                              if String.equal g.pg_id gid then
+                                state.planning_cursor <- i
+                              else find_idx (i + 1) rest
+                        in
+                        find_idx 0
+                          (planning_visible_goals ~filter:state.planning_filter
+                             ~sort:state.planning_sort snap.pl_goals)
+                    | None -> ());
+                   clamp_planning_cursor state
+               | None ->
+                   state.planning_cursor <- 0)
+
+            | "d" -> (
+              match state.repository_changes_diff_path with
+              | Some _ -> ()
+              | None -> (
+                  match state.repository_changes, state.repository_changes_scope with
+                  | Some snapshot, Some scope -> (
+                      match
+                        List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                          state.repository_changes_cursor
+                      with
+                      | None -> ()
+                      | Some change ->
+                          open_repository_change_diff state
+                            ~mailbox:async_messages ~scope change)
+                  | _ -> ()))
+
+            | "t" | "T" ->
+              let path_opt =
+                match state.repository_changes_diff_path with
+                | Some path -> Some path
+                | None -> (
+                    match state.repository_changes with
+                    | Some snapshot ->
+                        Option.map
+                          (fun (c : Tui_decode.repository_change) -> c.rc_path)
+                          (List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                             state.repository_changes_cursor)
+                    | None -> None)
+              in
+              let change_ctx =
+                Masc_tui_render_prim.resolve_change_context state ~path_opt
+              in
+              goto_surface state ~mailbox:async_messages Planning;
+              state.planning_mode <- Planning_list;
+              (match change_ctx.Masc_tui_render_prim.ctx_task_id with
+               | Some tid ->
+                   state.task_detail_id <- Some tid;
+                   state.task_detail_scroll <- 0;
+                   state.task_history <- None;
+                   launch_task_history_load state ~mailbox:async_messages tid;
+                   state.task_focus <-
+                     Masc_tui_overview_tasks.land_on state.tasks ~task_id:tid
+               | None ->
+                   state.task_detail_id <- None;
+                   state.task_detail_scroll <- 0;
+                   state.task_focus <-
+                     Masc_tui_overview_tasks.focus_list state.tasks)
+
+            | "v" -> (
+              match state.repository_changes, state.repository_changes_scope with
+              | Some snapshot, Some scope -> (
+                  let change_opt =
+                    match state.repository_changes_diff_path with
+                    | Some diff_path ->
+                        List.find_opt
+                          (fun (c : Tui_decode.repository_change) ->
+                            String.equal c.rc_path diff_path)
+                          snapshot.Masc.Tui_decode.rcs_changes
+                    | None ->
+                        List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                          state.repository_changes_cursor
+                  in
+                  match change_opt with
+                  | None -> report_action state "error" "no change under the cursor"
+                  | Some change ->
+                      open_repository_change_in_code state
+                        ~mailbox:async_messages ~scope change)
+              | _ -> ())
+
+            | "p" | "P" ->
+              let path_opt =
+                match state.repository_changes_diff_path with
+                | Some path -> Some path
+                | None -> (
+                    match state.repository_changes with
+                    | Some snapshot ->
+                        Option.map
+                          (fun (c : Tui_decode.repository_change) -> c.rc_path)
+                          (List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
+                             state.repository_changes_cursor)
+                    | None -> None)
+              in
+              let change_ctx =
+                Masc_tui_render_prim.resolve_change_context state ~path_opt
+              in
+              (* Only the scope's own repository names a remote. A project-wide
+                 scope spans every registered repository, and picking the first
+                 one opened a PR-N token in whichever repo happened to be
+                 registered first. *)
+              let scope_remote =
+                match state.repository_changes_scope with
+                | Some (Tui_decode.Repository_change_repository repo_id) -> (
+                    match state.repositories with
+                    | Some snapshot ->
+                        Option.map
+                          (fun (r : Masc.Tui_decode.repository) -> r.rp_url)
+                          (List.find_opt
+                             (fun (r : Masc.Tui_decode.repository) ->
+                               String.equal r.rp_id repo_id)
+                             snapshot.rs_repositories)
+                    | None -> None)
+                | Some Tui_decode.Repository_change_project | None -> None
+              in
+              (match change_ctx.Masc_tui_render_prim.ctx_pr with
+               | None ->
+                   report_action state "git"
+                     "no PR to open: this change names no github.com/…/pull/N link or PR-N token"
+               | Some reference -> (
+                   let number = Masc_tui_pr_ref.number reference in
+                   (* A pull link says which repository; a token leaves that to
+                      the scope. *)
+                   let slug =
+                     match reference with
+                     | Masc_tui_pr_ref.Pull_url { slug; _ } -> Some slug
+                     | Masc_tui_pr_ref.Pr_token _ ->
+                         Option.bind scope_remote Masc_tui_pr_ref.github_slug_of_remote
+                   in
+                   match slug with
+                   | None ->
+                       report_action state "error"
+                         (Printf.sprintf
+                            "PR-%d: the scope has no GitHub remote to open it in"
+                            number)
+                   | Some slug -> (
+                       match
+                         Masc_tui_browser.open_url
+                           (Masc_tui_pr_ref.pull_url ~slug ~number)
+                       with
+                       | Ok opener ->
+                           report_action state "git"
+                             (Printf.sprintf "opened %s#%d with %s" slug number opener)
+                       | Error _ ->
+                           (* No opener on this machine; gh may still have one
+                              configured. Named repository, waited on, reported
+                              after the fact: run in the TUI's cwd and detached,
+                              it opened the wrong checkout's PR and the pane
+                              said "opening" whether or not it did. *)
+                           let status, _stdout, stderr =
+                             Process_eio.run_argv_with_status_split
+                               ~timeout_sec:gh_open_timeout_sec
+                               [ "gh"; "pr"; "view"; string_of_int number; "--web"
+                               ; "-R"; slug ]
+                           in
+                           (match status with
+                            | Unix.WEXITED 0 ->
+                                report_action state "git"
+                                  (Printf.sprintf "opened %s#%d with gh" slug number)
+                            | Unix.WEXITED code ->
+                                report_action state "error"
+                                  (Printf.sprintf "gh pr view %d -R %s exited %d: %s"
+                                     number slug code (String.trim stderr))
+                            | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+                                report_action state "error"
+                                  (Printf.sprintf "gh pr view %d -R %s stopped by signal %d"
+                                     number slug signal)))))
+
+            | ("pageup" | "pagedown") as page_key ->
+              (* A surface page at a time, as the shared page arm moved the
+                 overlay before its keys were gathered here. *)
+              let page = surface_page_rows state in
+              let direction = if String.equal page_key "pagedown" then 1 else -1 in
+              (match state.repository_changes_diff_path with
+               | Some _ ->
+                   state.repository_changes_diff_scroll <-
+                     (if direction > 0 then
+                        Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:page
+                      else max 0 (state.repository_changes_diff_scroll + (direction * page)))
+               | None ->
+                   let cursor, scroll =
+                     move_row_cursor state ~delta:(direction * page)
+                       ~cursor:state.repository_changes_cursor
+                       ~scroll:state.repository_changes_scroll
+                   in
+                   state.repository_changes_cursor <- cursor;
+                   state.repository_changes_scroll <- scroll)
+            | "r" | "R" ->
+              refresh_shared_sources ();
+              refresh_repository_changes state ~mailbox:async_messages;
+              add_event state "system" "Manual refresh"
+            | _ -> ())
        (* The palette is the same kind of modal, but typed: printable keys
           build the query, arrows move the cursor, Enter runs the highlighted
           jump through the exact goto/chat paths the bound keys use. *)
@@ -24669,7 +25049,7 @@ and is loaded on demand through keeper_skill.
                      Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host ~port:state.port
                        ~post_id:evidence.fe_post_id ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id))
             | _ -> report_action state "system" "Open a Fusion run to follow its Board evidence")
-       | Some ("h" | "H") when state.view = Repositories && not state.repository_changes_open && Option.is_none state.workspace_activity_repo ->
+       | Some ("h" | "H") when state.view = Repositories && Option.is_none state.workspace_activity_repo ->
            (match state.repositories with
             | None -> ()
             | Some snapshot ->
@@ -24679,13 +25059,13 @@ and is loaded on demand through keeper_skill.
                   state.workspace_activity_context_scroll <- None;
                   launch_workspace_activity state ~mailbox:async_messages ~repo_id:repo.rp_id)
                   (List.nth_opt snapshot.rs_repositories state.repositories_cursor))
-       | Some ("v" | "V") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo && Option.is_none state.workspace_activity_context_scroll ->
+       | Some ("v" | "V") when state.view = Repositories && Option.is_some state.workspace_activity_repo && Option.is_none state.workspace_activity_context_scroll ->
            let _, _, selected = workspace_activity_selection state in
            if Option.is_some selected then state.workspace_activity_context_scroll <- Some 0
-       | Some ("esc" | "left") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_context_scroll ->
+       | Some ("esc" | "left") when state.view = Repositories && Option.is_some state.workspace_activity_context_scroll ->
            state.workspace_activity_context_scroll <- None
        | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" | "home" | "end" | "g" | "G" as move)
-         when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo
+         when state.view = Repositories && Option.is_some state.workspace_activity_repo
               && Option.is_some state.workspace_activity_context_scroll ->
            let terminal_rows, cols = get_terminal_size () in
            let count = List.length (workspace_activity_context_lines state ~cols) in
@@ -24698,14 +25078,14 @@ and is loaded on demand through keeper_skill.
              | "pageup" -> old - Masc_tui_scroll.page_step ~height
              | _ -> old + Masc_tui_scroll.page_step ~height in
            state.workspace_activity_context_scroll <- Some (max 0 (min maximum next))
-       | Some ("esc" | "left") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
+       | Some ("esc" | "left") when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
            state.workspace_activity_repo <- None;
            state.workspace_activity_context_scroll <- None
-       | Some ("r" | "R") when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
+       | Some ("r" | "R") when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
            Option.iter (fun repo_id -> launch_workspace_activity state ~mailbox:async_messages ~repo_id)
              state.workspace_activity_repo
        | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
-         when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
+         when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
            let terminal_rows, _ = get_terminal_size () in
            let page = workspace_activity_page_rows ~surface_rows:(surface_body_rows state ~terminal_rows) in
            let delta = match move with "j" | "down" -> 1 | "k" | "up" -> -1 | "pageup" -> -page | _ -> page in
@@ -24713,7 +25093,7 @@ and is loaded on demand through keeper_skill.
              (state.workspace_activity_cursor + delta));
            state.workspace_activity_context_scroll <- None
        | Some ("\r" | "\n" | "right")
-         when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo ->
+         when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
            let _, _, selected = workspace_activity_selection state in
            (match state.workspace_activity_repo, selected with
             | Some repo_id, Some (change, relative_path) ->
@@ -24722,7 +25102,7 @@ and is loaded on demand through keeper_skill.
                 Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages);
                 Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path
             | None, _ | _, None -> ())
-       | Some key when state.view = Repositories && not state.repository_changes_open && Option.is_some state.workspace_activity_repo
+       | Some key when state.view = Repositories && Option.is_some state.workspace_activity_repo
            && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
        | Some (("S" | "C" | "u" | "U" | "X") as key)
          when state.view = Config && state.config_pane = Config_runtime
@@ -25219,7 +25599,7 @@ and is loaded on demand through keeper_skill.
                      state.view <- Keepers Keeper_message)
             | _ -> ())
        | Some "left"
-         when (state.view = Overview && not state.repository_changes_open)
+         when state.view = Overview
               || (message_mode
                   && state.keeper_message_focus = Right_pane
                   && Option.is_none state.voice_capture
@@ -25650,13 +26030,6 @@ and is loaded on demand through keeper_skill.
                if not (acting_pane_drawn state && focus_acting_pane state)
                then state.resource_focus <- Left_pane)
        | Some ("shift-left" | "shift-right") as key
-         when state.repository_changes_open
-              && Option.is_some state.repository_changes_diff_path ->
-           let direction = if key = Some "shift-left" then -1 else 1 in
-           state.repository_changes_diff_hscroll <-
-             max 0 (min (max 0 (state.repository_changes_diff_max_width - 1))
-               (state.repository_changes_diff_hscroll + direction))
-       | Some ("shift-left" | "shift-right") as key
          when state.view = Changes && Option.is_some (opened_file_change state) ->
            let direction = if key = Some "shift-left" then -1 else 1 in
            state.changes_diff_hscroll <-
@@ -25757,7 +26130,7 @@ and is loaded on demand through keeper_skill.
                 else Masc_tui_code_requests.launch_blame_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path)
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Code && state.code_focus_file = Right_pane
-              && state.code_notes_open && not state.repository_changes_open ->
+              && state.code_notes_open ->
            let count, height = Masc_tui_render_code.code_notes_viewport state in
            let maximum = max 0 (count - height) in
            let current = max 0 (min state.code_notes_scroll maximum) in
@@ -25769,7 +26142,7 @@ and is loaded on demand through keeper_skill.
               | "pagedown" -> min maximum (current + page)
               | _ -> current)
        | Some "t" when state.view = Code && state.code_focus_file = Right_pane
-                       && state.code_history_open && not state.repository_changes_open ->
+                       && state.code_history_open ->
            (match Masc_tui_render_code.code_history_selected state with
             | None | Some (Hist_commit _) ->
                 report_action state "system" "Select a Keeper record with a Task to inspect"
@@ -25819,7 +26192,7 @@ and is loaded on demand through keeper_skill.
              state.code_history_open <- false
            end
        | Some "d" when state.view = Code && state.code_focus_file = Right_pane
-                       && state.code_history_open && not state.repository_changes_open ->
+                       && state.code_history_open ->
            if not (Masc_tui_render_code.toggle_history_change state) then
              report_action state "error" "Select a Keeper record to expand its recorded change"
        | Some "d" when state.view = Code && state.code_focus_file = Right_pane
@@ -25845,7 +26218,7 @@ and is loaded on demand through keeper_skill.
                 end)
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Code && state.code_focus_file = Right_pane
-              && state.code_history_open && not state.repository_changes_open ->
+              && state.code_history_open ->
            let count, height = Masc_tui_render_code.code_history_viewport state in
            let current = Masc_tui_scroll.normalize ~count ~height:1 state.code_history_scroll in
            let maximum = Masc_tui_scroll.maximum ~count ~height:1 in
@@ -25979,7 +26352,7 @@ and is loaded on demand through keeper_skill.
             | Resources -> state.resource_focus <- focus
             | Code
               when Option.is_some (Masc_tui_fetched.current_key state.code_file)
-                   && not state.repository_changes_open ->
+                   ->
                 state.code_focus_file <- focus
             | Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Approvals
             | Planning | Schedules
@@ -26147,7 +26520,7 @@ and is loaded on demand through keeper_skill.
              ~delta:(target - state.board_cursor)
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Config && state.config_pane = Config_prompts
-              && not state.repository_changes_open ->
+              ->
            let count, height = Masc_tui_render.prompts_detail_viewport state in
            state.config_scroll <-
              (match move with
@@ -26178,7 +26551,7 @@ and is loaded on demand through keeper_skill.
            move_list_to_edge state ~to_bottom:(key = Some "end")
        | Some ("pageup" | "pagedown") ->
            let page =
-             if state.view = Repositories && not state.repository_changes_open then
+             if state.view = Repositories then
                let _, cols = get_terminal_size () in
                Masc_tui_render.repository_studio_content_height state ~cols
                  ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
@@ -26227,21 +26600,6 @@ and is loaded on demand through keeper_skill.
                   Masc_tui_scroll.cursor_move
                     ~count:(List.length state.config_models_rows)
                     ~delta:(direction * page) state.config_models_cursor
-            | _ when state.repository_changes_open ->
-                (match state.repository_changes_diff_path with
-                 | Some _ ->
-                     state.repository_changes_diff_scroll <-
-                       (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:page
-                   else max 0 (state.repository_changes_diff_scroll + (direction * page)))
-                 | None ->
-                     let cursor, scroll =
-                       move_row_cursor state ~delta:(direction * page)
-                         ~cursor:state.repository_changes_cursor
-                         ~scroll:state.repository_changes_scroll
-                     in
-                     state.repository_changes_cursor <- cursor;
-                     state.repository_changes_scroll <- scroll)
             | Planning when Option.is_some (goal_detail_on_screen state) ->
                 let count, height = Masc_tui_render.planning_detail_viewport state in
                 state.planning_scroll <-
@@ -26553,32 +26911,10 @@ and is loaded on demand through keeper_skill.
              (fun action -> handle_goal_action_key state ~mailbox:async_messages ~action)
              (planning_action_of_key key)
        | Some "r" | Some "R" ->
-           state.pending_approval_action <- None;
-           Masc_tui_theme_choice.invalidate_cache ();
-           load_local_workspace_if_safe state base_path;
+           refresh_shared_sources ();
            let host = server_peer_host in
            let port = state.port in
-           (* Each source owns its read even while the whole-surface refresh
-              is busy. Cadence reads share these requests rather than
-              superseding them before their responses can arrive. *)
-           (match state.connection_status with
-            | Booting -> ()
-            | Disconnected | Connecting | Reconnecting | Degraded | Connected ->
-              launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh
-                state ~mailbox:async_messages;
-              launch_gate_snapshot_load ~intent:Snapshot_read.Refresh
-                state ~mailbox:async_messages;
-              launch_schedules_load ~intent:Snapshot_read.Refresh
-                state ~mailbox:async_messages);
-           start_http_refresh state ~host ~port ~intent:Revalidate
-             ~refresh_inflight:http_refresh_inflight
-             ~scoped_refresh_inflight:http_scoped_refresh_inflight
-             ~scoped_refresh_followup
-             ~mailbox:async_messages;
            (* Also reload logs / Board detail if viewing them. *)
-           if state.repository_changes_open then
-             refresh_repository_changes state ~mailbox:async_messages
-           else
            (match state.view with
             | Code ->
                 if state.code_history_open then
@@ -26716,16 +27052,6 @@ and is loaded on demand through keeper_skill.
                 (* A Home return must retain the decision's receipt or
                    failure notice; navigation is not its replacement. *)
                 if origin <> Overview then report_action state "system" "back")
-       | Some "esc" when state.repository_changes_open ->
-           if Option.is_some state.repository_changes_diff_path then
-             close_repository_changes_diff state
-           else begin
-             let return_chat = state.repository_changes_return_chat in
-             close_repository_changes state;
-             if return_chat then begin
-               state.view <- Keepers Keeper_message
-             end
-           end
        | Some "esc" ->
            (* Esc goes back *)
            (* A running preview is the innermost thing Esc can go back from:
@@ -26738,9 +27064,7 @@ and is loaded on demand through keeper_skill.
                    && state.theme_before_preview <> None ->
                 cancel_theme_preview state
             | Code ->
-                if state.repository_changes_open then
-                  close_repository_changes state
-                else if state.code_notes_open then state.code_notes_open <- false
+                if state.code_notes_open then state.code_notes_open <- false
                 else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
@@ -26915,10 +27239,7 @@ and is loaded on demand through keeper_skill.
                      | Changes_return_detail, None
                      | Changes_return_list, (Some _ | None) ->
                          Keepers Keeper_list)
-            | Repositories ->
-                if state.repository_changes_open then
-                  close_repository_changes state
-                else state.view <- Overview
+            | Repositories -> state.view <- Overview
             | Runtime ->
                 if Option.is_some state.runtime_detail_target then begin
                   state.runtime_detail_target <- None;
@@ -26943,25 +27264,13 @@ and is loaded on demand through keeper_skill.
                 (* Off-ring child: back to the parent that opened it. *)
                 goto_surface state ~mailbox:async_messages Config
             | Config -> state.runtime_model_jump <- None; state.view <- Overview)
-       | Some "left" when state.repository_changes_open ->
-           if Option.is_some state.repository_changes_diff_path then
-             close_repository_changes_diff state
-           else begin
-             let return_chat = state.repository_changes_return_chat in
-             close_repository_changes state;
-             if return_chat then begin
-               state.view <- Keepers Keeper_message
-             end
-           end
        | Some "left" ->
            (* Left is the non-destructive structural back key. Unlike Esc it
               never interrupts a live chat turn; it only closes a detail the
               matching Right key can open. *)
            (match state.view with
             | Code ->
-                if state.repository_changes_open then
-                  close_repository_changes state
-                else if state.code_notes_open then state.code_notes_open <- false
+                if state.code_notes_open then state.code_notes_open <- false
                 else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
@@ -27022,8 +27331,6 @@ and is loaded on demand through keeper_skill.
                 state.harness_detail <- None;
                 state.harness_detail_scroll <- 0
             | Resources -> state.resource_focus <- Left_pane
-            | Repositories when state.repository_changes_open ->
-                close_repository_changes state
             | Changes ->
                 state.changes_diff_row <- None;
                 state.changes_diff_scroll <- 0;
@@ -27060,31 +27367,10 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
             | Keepers Keeper_list | Acting | Metrics | Approvals
              | Memory | Repositories | Connectors | Config | Tools | Clients -> ())
-       | Some ("j" | "down" | "wheel-down") when state.repository_changes_open ->
-           (match state.repository_changes_diff_path with
-            | Some _ ->
-                state.repository_changes_diff_scroll <-
-                  Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:1
-            | None ->
-                let cursor, scroll =
-                  move_row_cursor state ~delta:1
-                    ~cursor:state.repository_changes_cursor
-                    ~scroll:state.repository_changes_scroll
-                in
-                state.repository_changes_cursor <- cursor;
-                state.repository_changes_scroll <- scroll)
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
             | Code ->
-                if state.repository_changes_open then
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:1
-                      ~cursor:state.repository_changes_cursor
-                      ~scroll:state.repository_changes_scroll
-                  in
-                  state.repository_changes_cursor <- cursor;
-                  state.repository_changes_scroll <- scroll
-                else if state.code_focus_file = Right_pane then (
+                if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
                     let count, height = Masc_tui_render_code.code_notes_viewport state in
                     state.code_notes_scroll <-
@@ -27335,22 +27621,13 @@ and is loaded on demand through keeper_skill.
                   state.memory_health_scroll <- scroll
                 end
             | Repositories ->
-                if state.repository_changes_open then
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:1
-                      ~cursor:state.repository_changes_cursor
-                      ~scroll:state.repository_changes_scroll
-                  in
-                  state.repository_changes_cursor <- cursor;
-                  state.repository_changes_scroll <- scroll
-                else
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:1
-                      ~cursor:state.repositories_cursor
-                      ~scroll:state.repositories_scroll
-                  in
-                  state.repositories_cursor <- cursor;
-                  state.repositories_scroll <- scroll
+                let cursor, scroll =
+                  move_row_cursor state ~delta:1
+                    ~cursor:state.repositories_cursor
+                    ~scroll:state.repositories_scroll
+                in
+                state.repositories_cursor <- cursor;
+                state.repositories_scroll <- scroll
             | Changes -> (
                 (* An open diff owns the scroll keys: the list is behind it and
                    moving both would put the cursor somewhere the operator
@@ -27437,31 +27714,10 @@ and is loaded on demand through keeper_skill.
             (* The picker's own arm takes these keys. *)
             | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())
-       | Some ("k" | "up" | "wheel-up") when state.repository_changes_open ->
-           (match state.repository_changes_diff_path with
-            | Some _ ->
-                state.repository_changes_diff_scroll <-
-                  max 0 (state.repository_changes_diff_scroll - 1)
-            | None ->
-                let cursor, scroll =
-                  move_row_cursor state ~delta:(-1)
-                    ~cursor:state.repository_changes_cursor
-                    ~scroll:state.repository_changes_scroll
-                in
-                state.repository_changes_cursor <- cursor;
-                state.repository_changes_scroll <- scroll)
        | Some "k" | Some "up" | Some "wheel-up" ->
            (match state.view with
             | Code ->
-                if state.repository_changes_open then
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:(-1)
-                      ~cursor:state.repository_changes_cursor
-                      ~scroll:state.repository_changes_scroll
-                  in
-                  state.repository_changes_cursor <- cursor;
-                  state.repository_changes_scroll <- scroll
-                else if state.code_focus_file = Right_pane then (
+                if state.code_focus_file = Right_pane then (
                   if state.code_notes_open then (
                     let count, height = Masc_tui_render_code.code_notes_viewport state in
                     state.code_notes_scroll <-
@@ -27684,22 +27940,13 @@ and is loaded on demand through keeper_skill.
                   state.memory_health_scroll <- scroll
                 end
             | Repositories ->
-                if state.repository_changes_open then
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:(-1)
-                      ~cursor:state.repository_changes_cursor
-                      ~scroll:state.repository_changes_scroll
-                  in
-                  state.repository_changes_cursor <- cursor;
-                  state.repository_changes_scroll <- scroll
-                else
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:(-1)
-                      ~cursor:state.repositories_cursor
-                      ~scroll:state.repositories_scroll
-                  in
-                  state.repositories_cursor <- cursor;
-                  state.repositories_scroll <- scroll
+                let cursor, scroll =
+                  move_row_cursor state ~delta:(-1)
+                    ~cursor:state.repositories_cursor
+                    ~scroll:state.repositories_scroll
+                in
+                state.repositories_cursor <- cursor;
+                state.repositories_scroll <- scroll
             | Changes -> (
                 match state.changes_diff_row with
                 | Some _ ->
@@ -27790,39 +28037,12 @@ and is loaded on demand through keeper_skill.
               && state.detail_tab = Detail_identity ->
            Masc_tui_identity_input.start_cursor state
              ~login:(fun ~keeper_name ~provider_id ~label -> Masc_tui_identity_requests.launch_login state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state) ~keeper_name ~provider_id ~label)
-       | Some ("\r" | "\n" | "right") when state.repository_changes_open -> (
-           match state.repository_changes_diff_path with
-           | Some _ -> ()
-           | None -> (
-               match state.repository_changes, state.repository_changes_scope with
-               | Some snapshot, Some scope -> (
-                   match
-                     List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                       state.repository_changes_cursor
-                   with
-                   | None -> ()
-                   | Some change ->
-                       open_repository_change_diff state
-                         ~mailbox:async_messages ~scope change)
-               | _ -> ()))
        | Some "\r" | Some "\n" | Some "right" ->
            (* Enter remains compatible; Right makes list -> detail and Left
               makes detail -> list consistent across the TUI. *)
            (match state.view with
             | Code -> (
-                if state.repository_changes_open then
-                  (match state.repository_changes, state.repository_changes_scope with
-                   | Some snapshot, Some scope ->
-                       (match
-                          List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                            state.repository_changes_cursor
-                        with
-                        | None -> ()
-                        | Some change ->
-                            open_repository_change_in_code state
-                              ~mailbox:async_messages ~scope change)
-                   | _ -> ())
-                else if state.code_history_open && state.code_focus_file = Right_pane then (
+                if state.code_history_open && state.code_focus_file = Right_pane then (
                   (* The top visible row is the selected one, the way the
                      Changes list treats its scroll. A commit answers with
                      its PR; a durable Keeper change jumps to its
@@ -28025,18 +28245,6 @@ and is loaded on demand through keeper_skill.
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
                         state.changes_tree_diff_path <- None))
-            | Repositories when state.repository_changes_open -> (
-                match state.repository_changes, state.repository_changes_scope with
-                | Some snapshot, Some scope ->
-                    (match
-                       List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                         state.repository_changes_cursor
-                     with
-                     | None -> ()
-                     | Some change ->
-                         open_repository_change_in_code state
-                           ~mailbox:async_messages ~scope change)
-                | _ -> ())
             | Memory -> (
                 match state.memory_facts_keeper with
                 | Some _ ->
@@ -28143,48 +28351,6 @@ and is loaded on demand through keeper_skill.
             (* Client-side over the loaded goals: no refetch. *)
             state.planning_filter <- next_planning_filter state.planning_filter;
             clamp_planning_cursor state
-        | Some "g" | Some "G" when state.repository_changes_open ->
-            let path_opt =
-              match state.repository_changes_diff_path with
-              | Some path -> Some path
-              | None -> (
-                  match state.repository_changes with
-                  | Some snapshot ->
-                      Option.map
-                        (fun (c : Tui_decode.repository_change) -> c.rc_path)
-                        (List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                           state.repository_changes_cursor)
-                  | None -> None)
-            in
-            let change_ctx =
-              Masc_tui_render_prim.resolve_change_context state ~path_opt
-            in
-            goto_surface state ~mailbox:async_messages Planning;
-            state.planning_mode <- Planning_list;
-            (match change_ctx.Masc_tui_render_prim.ctx_goal_id with
-             | Some gid ->
-                 (match state.planning with
-                  | Some snap ->
-                      (* The cursor indexes the rows the pane draws, which
-                         [clamp_planning_cursor] also bounds by that list. The
-                         raw goal list is in the order the server sent; the
-                         filter hides goals and the sort reorders them, so an
-                         index found in it lands on a different row than the
-                         goal it was found for. *)
-                      let rec find_idx i = function
-                        | [] -> ()
-                        | (g : planning_goal) :: rest ->
-                            if String.equal g.pg_id gid then
-                              state.planning_cursor <- i
-                            else find_idx (i + 1) rest
-                      in
-                      find_idx 0
-                        (planning_visible_goals ~filter:state.planning_filter
-                           ~sort:state.planning_sort snap.pl_goals)
-                  | None -> ());
-                 clamp_planning_cursor state
-             | None ->
-                 state.planning_cursor <- 0)
         | Some "g" when state.view = Acting ->
            state.acting_cursor <- 0;
            state.acting_scroll <- 0;
@@ -28232,21 +28398,6 @@ and is loaded on demand through keeper_skill.
                   ~keeper_name ~runtime_id:None;
                 close_keeper_runtime_pick state
             | None -> close_keeper_runtime_pick state)
-       | Some "d" when state.repository_changes_open -> (
-           match state.repository_changes_diff_path with
-           | Some _ -> ()
-           | None -> (
-               match state.repository_changes, state.repository_changes_scope with
-               | Some snapshot, Some scope -> (
-                   match
-                     List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                       state.repository_changes_cursor
-                   with
-                   | None -> ()
-                   | Some change ->
-                       open_repository_change_diff state
-                         ~mailbox:async_messages ~scope change)
-               | _ -> ()))
        | Some "D" when (match state.view with
            | Keepers (Keeper_list | Keeper_detail) -> true | _ -> false) ->
            state.keeper_deletions_open <- true;
@@ -28292,37 +28443,6 @@ and is loaded on demand through keeper_skill.
                before that frame adds one to it. *)
             state.acting_scroll <- List.length state.acting;
             state.acting_cursor <- max 0 (List.length (acting_flat_entries state) - 1)
-        | Some "t" | Some "T" when state.repository_changes_open ->
-            let path_opt =
-              match state.repository_changes_diff_path with
-              | Some path -> Some path
-              | None -> (
-                  match state.repository_changes with
-                  | Some snapshot ->
-                      Option.map
-                        (fun (c : Tui_decode.repository_change) -> c.rc_path)
-                        (List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                           state.repository_changes_cursor)
-                  | None -> None)
-            in
-            let change_ctx =
-              Masc_tui_render_prim.resolve_change_context state ~path_opt
-            in
-            goto_surface state ~mailbox:async_messages Planning;
-            state.planning_mode <- Planning_list;
-            (match change_ctx.Masc_tui_render_prim.ctx_task_id with
-             | Some tid ->
-                 state.task_detail_id <- Some tid;
-                 state.task_detail_scroll <- 0;
-                 state.task_history <- None;
-                 launch_task_history_load state ~mailbox:async_messages tid;
-                 state.task_focus <-
-                   Masc_tui_overview_tasks.land_on state.tasks ~task_id:tid
-             | None ->
-                 state.task_detail_id <- None;
-                 state.task_detail_scroll <- 0;
-                 state.task_focus <-
-                   Masc_tui_overview_tasks.focus_list state.tasks)
         | Some ("p" | "P") when state.view = Planning ->
             goto_surface state ~mailbox:async_messages Approvals
         | Some "t" | Some "T" ->
@@ -28397,26 +28517,6 @@ and is loaded on demand through keeper_skill.
               | Planning -> Verification
               | Verification -> Harness
               | Harness | _ -> Planning)
-       | Some "v" when state.repository_changes_open -> (
-           match state.repository_changes, state.repository_changes_scope with
-           | Some snapshot, Some scope -> (
-               let change_opt =
-                 match state.repository_changes_diff_path with
-                 | Some diff_path ->
-                     List.find_opt
-                       (fun (c : Tui_decode.repository_change) ->
-                         String.equal c.rc_path diff_path)
-                       snapshot.Masc.Tui_decode.rcs_changes
-                 | None ->
-                     List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                       state.repository_changes_cursor
-               in
-               match change_opt with
-               | None -> report_action state "error" "no change under the cursor"
-               | Some change ->
-                   open_repository_change_in_code state
-                     ~mailbox:async_messages ~scope change)
-           | _ -> ())
        | Some "v" when state.view = Changes ->
            (* View the selected change on the Code surface. The clone-relative
               address resolves through the same ?keeper= axis the git-diff
@@ -28735,92 +28835,6 @@ and is loaded on demand through keeper_skill.
            if state.prompts_show_runtime_assets
            then report_action state "system" "런타임 프롬프트 자산에는 기록된 모델 입력이 없습니다"
            else handle_librarian_input_read ()
-       | Some "p" | Some "P" when state.repository_changes_open ->
-           let path_opt =
-             match state.repository_changes_diff_path with
-             | Some path -> Some path
-             | None -> (
-                 match state.repository_changes with
-                 | Some snapshot ->
-                     Option.map
-                       (fun (c : Tui_decode.repository_change) -> c.rc_path)
-                       (List.nth_opt snapshot.Masc.Tui_decode.rcs_changes
-                          state.repository_changes_cursor)
-                 | None -> None)
-           in
-           let change_ctx =
-             Masc_tui_render_prim.resolve_change_context state ~path_opt
-           in
-           (* Only the scope's own repository names a remote. A project-wide
-              scope spans every registered repository, and picking the first
-              one opened a PR-N token in whichever repo happened to be
-              registered first. *)
-           let scope_remote =
-             match state.repository_changes_scope with
-             | Some (Tui_decode.Repository_change_repository repo_id) -> (
-                 match state.repositories with
-                 | Some snapshot ->
-                     Option.map
-                       (fun (r : Masc.Tui_decode.repository) -> r.rp_url)
-                       (List.find_opt
-                          (fun (r : Masc.Tui_decode.repository) ->
-                            String.equal r.rp_id repo_id)
-                          snapshot.rs_repositories)
-                 | None -> None)
-             | Some Tui_decode.Repository_change_project | None -> None
-           in
-           (match change_ctx.Masc_tui_render_prim.ctx_pr with
-            | None ->
-                report_action state "git"
-                  "no PR to open: this change names no github.com/…/pull/N link or PR-N token"
-            | Some reference -> (
-                let number = Masc_tui_pr_ref.number reference in
-                (* A pull link says which repository; a token leaves that to
-                   the scope. *)
-                let slug =
-                  match reference with
-                  | Masc_tui_pr_ref.Pull_url { slug; _ } -> Some slug
-                  | Masc_tui_pr_ref.Pr_token _ ->
-                      Option.bind scope_remote Masc_tui_pr_ref.github_slug_of_remote
-                in
-                match slug with
-                | None ->
-                    report_action state "error"
-                      (Printf.sprintf
-                         "PR-%d: the scope has no GitHub remote to open it in"
-                         number)
-                | Some slug -> (
-                    match
-                      Masc_tui_browser.open_url
-                        (Masc_tui_pr_ref.pull_url ~slug ~number)
-                    with
-                    | Ok opener ->
-                        report_action state "git"
-                          (Printf.sprintf "opened %s#%d with %s" slug number opener)
-                    | Error _ ->
-                        (* No opener on this machine; gh may still have one
-                           configured. Named repository, waited on, reported
-                           after the fact: run in the TUI's cwd and detached,
-                           it opened the wrong checkout's PR and the pane
-                           said "opening" whether or not it did. *)
-                        let status, _stdout, stderr =
-                          Process_eio.run_argv_with_status_split
-                            ~timeout_sec:gh_open_timeout_sec
-                            [ "gh"; "pr"; "view"; string_of_int number; "--web"
-                            ; "-R"; slug ]
-                        in
-                        (match status with
-                         | Unix.WEXITED 0 ->
-                             report_action state "git"
-                               (Printf.sprintf "opened %s#%d with gh" slug number)
-                         | Unix.WEXITED code ->
-                             report_action state "error"
-                               (Printf.sprintf "gh pr view %d -R %s exited %d: %s"
-                                  number slug code (String.trim stderr))
-                         | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
-                             report_action state "error"
-                               (Printf.sprintf "gh pr view %d -R %s stopped by signal %d"
-                                  number slug signal)))))
        | Some "p" | Some "P"
          when state.view = Runtime
               && Option.is_none state.runtime_detail_target ->
@@ -29361,7 +29375,7 @@ and is loaded on demand through keeper_skill.
         (* The armed approval survives the tick: the snapshot apply already
            disarms it when its token leaves the list, so clearing here only
            made the second press race a two-second clock. *)
-        load_local_workspace_if_safe state base_path;
+        launch_local_workspace_read state ~mailbox:async_messages base_path;
         let host = server_peer_host in
         let port = state.port in
         (* The retry a closed feed waits for. *)
@@ -29565,6 +29579,12 @@ and is loaded on demand through keeper_skill.
   run_loop ()
 
 let run_with_eio_context f =
+  (* The server's minor heap, for the same reason: every frame allocates the
+     rows it draws, and at the runtime's default size a held key meets a
+     collection every few frames. Measured on a live chat with PageUp/PageDown
+     held, the median key-to-output time fell about a quarter. A larger
+     OCAMLRUNPARAM setting is left alone. *)
+  Domain_pool.tune_minor_heap ();
   try
     Eio_main.run (fun env ->
         Eio.Switch.run (fun sw ->

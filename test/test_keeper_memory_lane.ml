@@ -727,7 +727,8 @@ let test_boot_catchup_submits_one_unit_per_unlaunched_keeper () =
        List.iter (fun keeper_id ->
          match Masc.Keeper_memory_admission_queue.append ~keepers_dir ~keeper_id
            ~request_id:"boot-candidate" candidate with
-         | Ok _ -> () | Error detail -> Alcotest.fail detail) ["a";"queue-only"];
+         | Ok _ -> () | Error error -> Alcotest.fail
+             (Masc.Keeper_memory_admission_queue.append_error_to_string error)) ["a";"queue-only"];
        let submitted =
          Queue_refresh.submit_durable_for_unlaunched
            ~base_path:root

@@ -100,6 +100,7 @@ let test_grouped_sources_and_compact_results ~limited () =
   check (list string) "each current identity appears once in provider questions" (List.sort String.compare ids)
     (member "questions" request |> Json.to_assoc |> List.map fst |> List.sort String.compare);
   let witnesses=List.fold_left (fun count row -> let detail=member "source_detail" row in
+    check bool "valid provenance has no added failure field" true (member "receipt_verification" detail=`Null);
     count+List.length (rows "direct_admission_witnesses" detail)+List.length (rows "successor_witnesses" detail)) 0 candidates in
   check int "all five lineage and direct witnesses reach evaluator" 5 witnesses;
   let selected=rows "selected" output in
@@ -336,8 +337,46 @@ let test_stalled_endpoint_ends_at_the_turn_clock () =
     (List.filter (fun status -> List.mem status ["started"; "provider_failed"; "response_received"; "cancelled"])
        statuses)
 
+let test_receipt_failure_preserves_incomplete_selection ~choice () =
+  with_fixture @@ fun ~config:_ ~meta:_ ~keepers_dir ~keeper_id ~observed ~reply ~dispatch ->
+  let before=snapshot ~keepers_dir ~keeper_id in
+  let receipt=Current.durable_range_receipt_path ~keepers_dir ~keeper_id in
+  Fs_compat.save_file receipt "{damaged admission receipt";
+  let stores=List.map (fun path -> path,Fs_compat.load_file_opt path)
+    [receipt;Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
+     Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;
+     Queue.path ~keepers_dir ~keeper_id] in
+  reply:=response ~choose:(fun _ -> choice);
+  let output=dispatch () in
+  let request=match !observed with [request] -> request | _ -> fail "one real dispatch expected" in
+  let candidates=rows "candidates" (member "state" request) in
+  check int "verified current facts remain available despite receipt failure" (List.length before.facts)
+    (List.length candidates);
+  List.iter (fun row ->
+    let detail=member "source_detail" row in
+    check string "evaluator sees typed receipt failure" "unavailable"
+      (text "status" (member "receipt_verification" detail));
+    check int "unverified direct witnesses are not invented" 0 (List.length (rows "direct_admission_witnesses" detail));
+    check int "unverified successor witnesses are not invented" 0 (List.length (rows "successor_witnesses" detail));
+    check bool "current claim remains exactly authoritative" true
+      (List.exists (fun fact -> Memory.fact_to_json fact=member "current_fact" detail) before.facts)) candidates;
+  check bool "receipt failure remains incomplete even for a valid semantic answer" true
+    (member "incomplete" output=`Bool true);
+  check bool "receipt failure is visible to the Keeper" true
+    (List.exists (fun row -> text "kind" row="receipt_verification_unavailable") (rows "unavailable" output));
+  check int "current facts are retained only when selected" (if choice="current_decision" then 3 else 0)
+    (integer "selected_count" output);
+  check int "negative labels do not erase retrieval incompleteness" (if choice="not_needed" then 3 else 0)
+    (integer "not_needed_count" output);
+  List.iter (fun (path,bytes) -> check (option string) "unavailable provenance leaves all stores intact"
+    bytes (Fs_compat.load_file_opt path)) stores
+
 let () = run "personal memory select descriptor HTTP"
   ["selection",[
+    test_case "damaged receipts preserve useful current results and incompleteness" `Quick
+      (test_receipt_failure_preserves_incomplete_selection ~choice:"current_decision");
+    test_case "damaged receipts cannot turn omission into complete retrieval" `Quick
+      (test_receipt_failure_preserves_incomplete_selection ~choice:"not_needed");
     test_case "full grouped witnesses produce compact current roles" `Quick (test_grouped_sources_and_compact_results ~limited:false);
     test_case "result limit follows semantic selection" `Quick (test_grouped_sources_and_compact_results ~limited:true);
     test_case "negative verdict invalidated by current retirement" `Quick (test_negative_or_readded_evidence_changes ~readd:false);

@@ -62,3 +62,17 @@ val handle_uncertain_get : Mcp_server.server_state -> Httpun.Request.t -> Httpun
 
 val parse_ack_fields : (string * Yojson.Safe.t) list -> ((string * string), string) result
 (** Exact keeper/consume ID; no original argument reconstruction required. *)
+
+val journal_restore_path : string
+val handle_journal_restore : Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** [POST /api/v1/keepers/hitl/late-approval-restore] — the explicit
+    un-fence for the late-approval journal (design D4's "명시적 재복원").
+    [CanAdmin], no body. Runs the same synchronous rebind-and-re-restore the
+    boot path runs ([Keeper_late_approval.restore]). After
+    [Journal_unavailable] a successful restore answers [200] with
+    [ok:true] and clears the fence; a still-failing medium answers [503]
+    with the storage error verbatim. After [Corrupt_journal] this endpoint
+    deliberately keeps failing with [503 journal_corrupt] until the operator
+    has moved the journal aside: the library never skips or rewrites rows,
+    so the documented repair (move the file, restore again) is the only
+    path. *)

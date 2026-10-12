@@ -262,7 +262,8 @@ status: reference
   허가를 받고, 줄면 쓰는 요청 수가 새 칸 수 아래로 내려갈 때까지 새 허가를 내주지 않는다.
   줄을 선 요청은 기다림이 끝날 때 `masc.provider_admission.waited` 이벤트를 하나 남긴다.
   기다림은 제공자가 보낸 429 관측인 Runtime Rate Limit이나 후보 실패 분류의
-  `Binding Admission`과 다른 단계다.
+  `Binding Admission`과 다른 단계다. 코드에서 이 허용량은 `allowance`라 부르며
+  `Slot_scheduler`가 관리한다.
   → [Provider_admission](../../packages/agent_core/lib/llm_provider/provider_admission.mli) ·
   [Provider_config](../../packages/agent_core/lib/llm_provider/provider_config.mli)
 
@@ -307,7 +308,10 @@ status: reference
   ([`masc_tui_keys.ml`](../../bin/masc_tui_keys.ml)의 판 이름 표), 상세에서 `y`(agree)·`x`(overrule)로 그 판정에 답한다
   (`render_harness_detail`). (2) Eval Harness: Keeper 에이전트의 시나리오 기반 행동
   평가(`lib/eval_harness.mli`). scenario·grader·metric 타입과 runner·summary 를
-  정의하고 eval CLI 와 dashboard 가 소비한다. (3) Lab Safety Harness: Dashboard Lab
+  정의하고 eval CLI 와 dashboard 가 소비한다. Grader는 둘로 나뉜다 —
+  `Deterministic`은 필드(result·tool_name·error)에 대한 Exact/Contains/Regex/NotContains
+  매칭으로 지연 0이고, `ModelBased`는 LLM에 rubric과 결과를 제출해 0.0~1.0 점수를
+  산출하며 비용이 든다. (3) Lab Safety Harness: Dashboard Lab
   표면의 안전 판독(`#lab?section=harness`,
   `lib/dashboard/dashboard_harness_health.ml`) — 평가자 보정 통계와 최근 runtime 안전
   신호를 한 화면에 모은다. (4) Harness First: "측정 없이 AI 에이전트 코드를 진행하지
@@ -876,6 +880,30 @@ status: reference
   [docs/evidence/2026-09-30-chat-queue-visibility/README.md](../evidence/2026-09-30-chat-queue-visibility/README.md) ·
   [docs/TUI-GUIDE.md](../TUI-GUIDE.md)
 
+**Keeper Call Association (Keeper 호출 결합)**
+: TUI 채팅 transcript의 도구 호출 행을 영속 호출 원장 스냅숏에 연결해 내리는 표시층 판정
+  (`Masc_tui_keeper_call_evidence.keeper_call_association` — 닫힌 여덟 값, #42320). 행은 실행
+  신원(`execution_id`)만 갖고, 그 실행이 원장에 남았는지·남았다면 어느 레코드인지는 로그 읽기
+  상태와 스냅숏이 본 범위로 결정되므로, 행의 결과 표시는 이 판정을 통해서만 원장 근거에
+  묶인다. `resolve`가 판정하고 `bin/masc_tui_render_chat.ml`의 `keeper_call_association`이
+  채팅 행을 그릴 때 소비한다. 로그 상태와 실행 결합을 한 값에 섞지 않게 나눈다 —
+  `Call_log_not_loaded`(그 Keeper의 로그를 아직 읽지 않음), `Call_log_loading`(첫 읽기가 진행
+  중. 새로고침은 마지막 스냅숏을 유지하므로 loading이 되지 않는다), `Call_log_unavailable`
+  (읽기가 오류로 끝남), `Call_execution_unrecorded`(행이 execution_id를 갖지 않는다 — 조인 키
+  자체가 없음), `Call_execution_exact`(정확히 한 레코드가 매칭), `Call_execution_ambiguous`
+  (둘 이상 — 중복 실행 신원이라 영수증 하나를 고를 수 없음), `Call_execution_missing`(없음이
+  증명됨 — 스냅숏 건강이 ok이거나 비어 있음이 확인된 로그라 로그 완전성이 확인된 상태의
+  없음), `Call_execution_coverage_gap`(없음이 미증명 — stale·coverage gap·모르는 건강 값,
+  또는 다른 Keeper 이름으로 걸러진 행 뒤에 있을 수 있는 없음). missing과 coverage_gap의
+  구분이 이 항목의 원칙이다: 완전함이 확인된 로그의 빈 결과만 부재라 말하고, 불완전한 로그의
+  빈 결과는 "못 봤다"고 말한다. Tool Call Outcome·Execution Disposition이 호출의 실행을,
+  Recorded Call Outcome이 원장이 남긴 기록을 말할 때, 이 판정은 표시층이 지금 이 행을 어느
+  기록에 묶을 수 있는지를 말한다 — 기록이 있어도 행 결과를 대체하지 않는다(`result_state`:
+  `Never_returned` 행도 원장에 기록된 출력이 있으면 "in call log"로 그린다. durable 실패는
+  Exact의 `Recorded_failed`·`Failed` disposition뿐이다).
+  → [Masc_tui_keeper_call_evidence](../../bin/masc_tui_keeper_call_evidence.mli) ·
+  [Masc_tui_render_chat](../../bin/masc_tui_render_chat.ml)
+
 **Fold (접기)**
 : TUI가 넘치는 내용을 줄여 그리는 두 가지 방식. 코드의 타입 이름이 아니라 이 문서와
   [TUI 안내](../TUI-GUIDE.md)가 쓰는 라벨이다. (A) **블록 접기** — 한 블록을 한 줄로
@@ -1267,9 +1295,35 @@ status: reference
   exact-output 작업의 경로이고, chat lane은 Keeper에게 대화가 들어오고 결과가
   배달되는 표면이다. **Official Client Lane**(공식 클라이언트 실행 경로)과도
   다르다. heartbeat가 여는 자율 turn과 함께 Keeper turn을 시작하는 두 진입
-  경로를 이룬다(RFC-0225).
+  경로를 이룬다(RFC-0225). 다른 축: Play Room 공용 대화는 Keeper chat store에
+  남지 않는다.
   → [Keeper_chat_store](../../lib/keeper/keeper_chat_store.mli),
   [Keeper_msg_async](../../lib/keeper/keeper_msg_async.mli)
+
+**Play Room (플레이 룸)**
+: 작업공간 하나당 하나의 공용 게임 관전 대화 표면(`Masc.Play_room`). MSX·DOS
+  관전자, 초대된 플레이어, 운영자, Keeper가 같은 대화 기록을 공유하고 비공개
+  transcript는 읽히지 않는다. 메시지는 `.masc/play/room.sqlite3`(SQLite,
+  full synchronous durability)에 남아 프로세스 재시작을 견디며, 발신자는
+  인증된 요청·도구 principal(`CanPlayMachine` bearer 또는 검증된 Keeper
+  principal)이고 본문이 화자 이름을 지정할 수 없다. `join`·`read`·`say`·
+  `leave` 네 동작과 60초 presence만 있고, 별도 Keeper turn을 열지 않는다.
+  - **Play Seat**: 공용 기계의 자리, 즉 컨트롤러를 넘겨받을 수 있는 자격 명단.
+    `Play_seat.participants`는 Keeper에 유효한 운영자(`Admin`)·초대(`Player`)
+    자격을 더한 핸드오프 명단(`hand_to`)을 만들고 `masc_dos_pass`는 이 명단의
+    이름만 받는다. Worker 자격은 MCP 클라이언트라 자리가 아니다. 이 명단은
+    온라인 존재재가 아니라 자격 명단이고, 컨트롤러 정책이 허용하는 게스트만
+    DOS 조작이 가능하다 — 관전 중인 사람도 대화(say)는 할 수 있다.
+  - **Keeper chat store와의 경계**: 공용 대화는 Keeper chat store
+    (`.masc/keeper_chat/<name>.jsonl`)에 남지 않는다. 의도된 room 메시지만
+    공유되고 Keeper transcript·워크스페이스 브로드캐스트·비공개 지시·초대
+    자격은 이 표면에 복사되지 않는다(→ Chat Lane의 경계 줄).
+  - **DOS 활동 기록**: 최근 DOS Keeper 활동이 Play room 대화 아래, 배정된
+    room 열이나 좁은 터미널 스트립 안에 표시된다(#41789).
+  → [Play_room](../../lib/play/play_room.mli) ·
+  [Masc_tui_play_room](../../bin/masc_tui_play_room.mli) ·
+  [Play_seat](../../lib/play/play_seat.mli) ·
+  [PLAY-ROOM guide](../guides/PLAY-ROOM.md)
 
 **Runtime Candidate Order (런타임 후보 순서)**
 : Keeper turn이 배정된 runtime이 실패했을 때 시도할 runtime 후보의 순서 있는 목록.
@@ -1429,7 +1483,7 @@ status: reference
   opam 릴리스 패키지 환경에서도 대상 소스 불일치를 결정론적으로 감지한다(전체 바이너리 무결성이나
   하위 디렉터리 변조를 검증하는 것은 아님).
   → [Dos_lane.core](../../lib/dos_lane/dos_lane.mli) ·
-  [Tool_misc_dos_lane](../../lib/tool_misc_dos_lane.ml) ·
+  [Dos_machine_tools.handle_meta](../../lib/dos_tools/dos_machine_tools.ml) ·
   [masc_dos_meta](../../config/tools/masc_dos_meta.toml)
 
 **DOS Program Inventory (DOS 프로그램 인벤토리)**
@@ -1457,7 +1511,7 @@ status: reference
     특정 상업용 게임의 내부 포맷을 해석하거나 제목별로 특화 분기하지 않는다. 디렉터리 내 실행 파일 후보
     (`executable_candidates`)와 기본 부팅 파일(`default_boot`)은 정적 명명 규칙에 따라 객관적으로
     제시될 뿐이며, 에뮬레이터 상에서의 실제 실행 성공이나 바이너리 호환성을 사전에 보증하는 것은 아니다.
-  → [Tool_misc_dos_lane](../../lib/tool_misc_dos_lane.ml) ·
+  → [Dos_machine_tools.handle_inventory](../../lib/dos_tools/dos_machine_tools.ml) ·
   [Fs_compat.with_owned_inventory_root](../../lib/fs_compat/fs_compat.mli) ·
   [Fs_compat.read_owned_directory](../../lib/fs_compat/fs_compat.mli) ·
   [DOS Programs Runbook](../operations/dos-programs-runbook.md)
@@ -1519,7 +1573,7 @@ status: reference
     여부를 재검증한다. 유효한 일반 파일로 이어지는 심볼릭 링크는 작업공간 오버라이드로 수용된다.
   - **버튼 정의 엄격성**: 각 버튼은 비어 있지 않은 `keys` 배열과 `label`을 가져야 하며,
     알 수 없는 테이블·필드·키 이름은 즉시 오류로 거절된다(타이포로 인한 무반응 방지).
-  → [Play_pad](../../lib/play/play_pad.mli) ·
+  → [Dos_pad](../../lib/dos_pad/dos_pad.mli) ·
   [RFC Play Link for Shared Machine](../rfc/RFC-play-link-for-the-shared-machine.md)
 
 **기계 체크포인트 (Machine Checkpoint)**
@@ -1618,6 +1672,12 @@ status: reference
   → [Browser_lane](../../lib/browser_lane/browser_lane.ml) ·
   [Browser_host](../../lib/browser_host/browser_host.mli) ·
   [browser-bidi-live-host 설계](../../docs/design/browser-bidi-live-host.md)
+
+**Keeper Firefox Start Record (Keeper Firefox 시작 기록)**
+: `runtime.toml`의 `[browser.live.bidi]`로 live lane이 켜져 있으면 MASC가 다음 서버 시작 또는 Keeper의 다음 hover·drag 때 Keeper Firefox와 그 BiDi host를 직접 시작한다. 이때 시작이 어떻게 끝났는지를 `<base>/.masc/browser-lane/keeper-firefox-start.json`에 한 entry로 통째로 갈아 쓰는 기록(RFC-browser-keeper-firefox §3.7, #42235·#42250). entry는 끝난 시각·포트·프로필·결과(`Attached`/`Not_attached`)를 담고, `Not_attached`의 사유는 한 줄짜리 인쇄 가능 문자열 최대 1024바이트(`message_limit_bytes`)로 잘린다. 경계가 세 군데 있다. (1) 이 기록은 상태 문장만 읽는다 — 시작을 막는 장치가 아니다. (2) MASC는 자기 기록이 "MASC가 시작했다"고 말하는 Firefox만 재시작을 약속한다. 다른 경로로 띄운 Firefox는 운영자가 먼저 종료한다. (3) 다른 포트의 Firefox는 이 시작을 막지 않는다. 상태 표의 `keeper` 행은 시작 주체를 `kind`로 말하고 `masc_starts`는 설정된 포트·프로필과 `last_start`(`absent`/`recorded`/`unreadable`)를 실는다.
+  → [Browser_keeper_firefox_start_record](../../lib/browser_keeper_firefox_start_record.mli) ·
+  [Browser_bidi_host_status](../../lib/browser_bidi_host_status.mli) ·
+  [RFC-browser-keeper-firefox](../../docs/rfc/RFC-browser-keeper-firefox.md)
 
 **Machine Change Mark (기계 변경 표식)**
 : MSX Lane·DOS Lane 기계의 화면이 바뀌었는지 싸게 묻기 위한 표식. 변경 횟수(`count`)와
@@ -1989,6 +2049,12 @@ status: reference
   → [11-board.md §8](11-board.md),
   [board_types](../../lib/board_types/board_types.mli),
   [board_votes](../../lib/board/board_votes.mli)
+
+**SubBoard (하위 게시판)**
+: Board 안에 독립적인 이름 공간을 여는 Phase 2 기능. 각 SubBoard는 고유한 slug와 접근 정책(`sub_board_access`)을 가진다. 정책은 셋이다. `Open`은 누구나 게시·읽기, `Members_only`는 `members`에 열거된 멤버와 owner만 게시하고 읽기는 전체 공개, `Owner_only`는 owner만 게시하고 읽기는 전체 공개다. 생성·수정 인자의 `access`가 이 셋 중 하나가 아니면 `Validation_error`로 거절하며, 알 수 없는 문자열을 조용히 `Open`으로 떨어뜨리지 않는다(`sub_board_access_field_of_yojson`). 글의 `hearth`가 SubBoard slug와 같으면 그 글은 SubBoard 게시로 간주해 정책을 적용하고, 일치하는 SubBoard가 없는 hearth는 기존 topic hearth로 동작한다. SubBoard가 지워지면 소속 글의 hearth는 orphan 정책으로 지워진다. 저장은 `.masc/board_sub_boards.jsonl`에 JSONL로 하고, 저장 레코드의 `post_count`는 `0`이다 — API view의 count는 현재 post store에서 slug/hearth 매칭으로 파생한다. slug 중복 생성은 `Already_exists`로 거절된다.
+  → [11-board.md §11](11-board.md),
+  [board_types.sub_board](../../lib/board_types/board_types.mli),
+  [board_types.sub_board_access](../../lib/board_types/board_types.mli)
 
 **Broadcast**
 : 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.
@@ -2787,8 +2853,8 @@ status: reference
     직전 스택 브랜치를 base로 지정한다. 기능(피처) 개발 스택과 CI·인프라 개선 스택은 섞지 않고
     각자의 독립 스택으로 분리해 진행한다.
   - 구성 확인과 병합: PR의 REST stack 메타데이터와 Stacks API로 Native Stack인지 먼저 확인한다.
-    API 조회 실패는 stack 없음이 아니라 미확인이다. Native Stack은 선택한 PR까지의 미병합 하위 PR을
-    비동기 병합 API로 함께 아래부터 `stack.base`에 병합한다. `baseRefName`이 `main`이 아니라는 이유로 수동 retarget하지 않는다.
+    API 조회 실패는 stack 없음이 아니라 미확인이다. Native Stack은 맨 위 PR 하나로 스택 전체를
+    비동기 병합 API로 한 번에 `stack.base`에 병합한다. 아래부터 한 층씩 병합하지 않는다. `baseRefName`이 `main`이 아니라는 이유로 수동 retarget하지 않는다.
     포함된 각 PR의 현재 head·독립 승인·판정을 검토하고 병합 직전에 스택 구성과 head를 다시 확인한다.
     stack이 없는 일반 브랜치 체인은 부모부터 병합하고 이후 실제 base와 diff를 다시 확인한다.
     base나 head가 바뀌어 diff가 달라지면 변경 범위를 독립 검토한다. 개별 PR 리뷰는 전체 스택 승인이 아니다.
@@ -3289,6 +3355,21 @@ status: reference
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) ·
   [Keeper_memory_os_types](../../lib/keeper/keeper_memory_os_types.mli)
 
+**Committed Revision Lineage (확정된 리비전 계보)**
+: Memory OS에서 지워진 기억의 Memory ID와 그 스냅샷 안의 대상을 잇는 선언된 리비전 링크(`Keeper_memory_os_types.revision`의 `superseded`·`superseded_by` 쌍). Librarian 정리(`revisions`)와 명시적 `supersedes` 쓰기는 스냅샷 교체와 같은 복구 가능한 제거 트랜잭션에 이 링크를 `revision_links`로 기록한다. 저널은 실제로 내용이 바뀐 커밋에만 링크를 싣고, 변화 없는 재관측은 리비전 전이를 만들지 못한다. 미완성 저널 영수증은 쓰기자가 복구할 때까지 증거를 읽을 수 없는 상태다. 빠진 링크 메타데이터는 추론된 관계가 아니라 기록되지 않은 것이다. 별도 `Revised` 이벤트 사이드카는 관측 표면일 뿐 그 존재만으로 커밋 증명이 되지 않는다. 이 링크는 선언된 구조적 계보일 뿐이며, 과거 입력이 후속 기억에도 그대로 적용됨을 뜻하지 않는다 — 후속 기억을 답으로 쓰려면 별도의 범위 판정(→ Demand Retrieval across Revisions)이 필요하다.
+  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) ·
+  [12-memory-systems](12-memory-systems.md)
+
+**Demand Retrieval across Revisions (리비전을 넘는 요청 시 검색)**
+: 과거 admission 관측이 확정된 리비전 계보를 따라 현재 후속 기억을 찾아내는 `keeper_memory_search`의 경로(#42029·#42054·#42055). 세 단계가 분리되어 있다.
+  1. **Admission Lookup Binding**: Librarian이 `incorporated`/`already_represented`로 판정한 미룬 명시 쓰기는 원본 관측·후보 식별자·선택된 대상의 조회 결속(`admission_recall_binding`)을 후보 소비와 같은 WAL 트랜잭션으로 커밋한다. `not_durable`·`deferred` 판정은 결속을 만들지 않는다. 결속 대상은 Librarian이 돌려준 claim과 글이 똑같은 선택된 기억으로 정해지고(`fact.claim = claim`), 같은 글의 기억이 둘이면 먼저 찾은 쪽이 대상이다(`keeper_librarian_runtime.ml:1022`). 결속은 Librarian이 선언한 관계를 기록할 뿐 그 관계를 독립 검증한 것이 아니다.
+  2. **구조적 후보 수집**: `read_successor_recall_for_keepers_dir`가 커밋된 스냅샷 전이와 리비전 링크만 리비전 순서로 깊이 제한 없이 따라간다. 전이 증거가 빠지면 미해결이고, 철회 뒤 무관하게 같은 글이 다시 추가돼도 끊긴 경로를 되살리지 않는다. 구조적 후보는 아직 답이 아니다.
+  3. **범위 판정**: 후속 선택기(`Keeper_memory_successor_selection`)가 쿼리·원본 관측·대상·커밋된 경로를 보고 현재 대상이 같은 주제·사건·적용 범위를 다루는지 판정한다. 모델 실패·불확실한 범위·바뀐 증거는 미해결로 남기며 직접 일치 결과는 그대로 보존한다 — 권위 있는 "일치 없음" 답으로 바꾸지 않는다.
+  결과의 본문과 Memory ID는 현재 대상 것이고 과거 조회 출처(`lookup_evidence`·`successor_lookup_evidence`)는 별도로 표시된다. 여러 관측이 같은 현재 대상을 가리켜도 결과는 하나다.
+  → [Keeper_memory_successor_selection](../../lib/keeper/keeper_memory_successor_selection.mli) ·
+  [Keeper_memory_os_current.read_successor_recall_for_keepers_dir](../../lib/keeper/keeper_memory_os_current.mli) ·
+  [12-memory-systems](12-memory-systems.md)
+
 **Workspace Memory Ledger (작업공간 기억 원장)**
 : 작업공간 내 모든 Keeper의 자기 기억에서 새로 추가되거나 변경된 사실만 뽑아 분류해 기록한 공용 분류 장부.
   - **저장 위치**: `.masc/workspace-memory/ledger.json` (스키마 `workspace.memory.ledger.v1`).
@@ -3307,11 +3388,11 @@ status: reference
 : Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장의 행 하나(`workspace_memory_ledger`의 `claim_id`가 가리키는 것). 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다. 행의 `claim_id`는 Fact의 문장 필드 `claim`(→ Fact)과 다른 것이다 — 원장 행의 식별자다.
   → [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_request](../../lib/workspace_memory/workspace_memory_request.mli) · [workspace_memory_ledger_view](../../lib/workspace_memory/workspace_memory_ledger_view.mli)
 
-**World Curator / Workspace Curator (공유 맥락 합성)**
+**Workspace Curator (공유 맥락 합성)**
 : 여러 Keeper가 같은 원문을 반복해서 읽지 않도록 공유 맥락을 합성하는 단독 모델 레인. 코드의 `Workspace_curator`는 Keeper Memory의 변경 사실을 공유 주장·충돌로 분류한 뒤, 그 본문을 의미를 보존한 공유 요약으로 합성한다. 새 사실은 이전 요약에 합치고, 삭제·수정된 사실이나 합성 프롬프트 변경이 있으면 현재 자료로 다시 만든다. 동일한 자료의 완성본은 Keeper들이 재사용한다. 요약은 현재 작업공간의 모든 운영 상태나 검증된 사실을 뜻하지 않으며, 원본 Memory를 덮어쓰지 않는다.
 
 **Shared Briefing (공유 요약 / 브리핑 글)**
-: World Curator가 작업공간 기억 원장(`ledger.json`)에 기록된 모든 주장과 충돌 텍스트(`Ledger.briefing_sources`)를 모델로 종합 요약한 자연어 글.
+: Workspace_curator가 작업공간 기억 원장(`ledger.json`)에 기록된 모든 주장과 충돌 텍스트(`Ledger.briefing_sources`)를 모델로 종합 요약한 자연어 글.
   - **저장 위치**: `.masc/workspace-memory/briefing.json` (스키마 `workspace.memory.briefing.v1`).
   - **전달과 조회**: 기본 턴 문맥의 `## Shared workspace memory ledger` 구획에는 원장 메타데이터(`Current ledger SHA-256`, `Classified facts`, `Shared claims`, `Conflicts`), 브리핑의 현재·갱신 대기 상태, 조회 경로를 전달한다. 브리핑 본문은 미리 주입하지 않으며, 넓은 작업공간 요약이 필요할 때 `keeper_workspace_memory_read`의 `{"view":"briefing"}`으로 읽는다. 조회 경로는 실제 요청에서 바로 호출 가능, 도구 검색으로 로드 가능, 사용 불가를 구분한다.
   - **원장과의 구별 및 명칭 주의**:

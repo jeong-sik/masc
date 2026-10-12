@@ -127,6 +127,26 @@ let test_tag_and_cursor () =
       (match field "next_before" body with Some (`Float f) -> Some f | _ -> None))
 ;;
 
+let test_limit_makes_a_smaller_window_with_the_same_cursor_rule () =
+  with_lane "chat-page-limit" (numbered ~total:300) (fun config name ->
+    let body =
+      Keeper_api.keeper_chat_history_page_json ~max_total:100 config name ~before:None
+    in
+    let rows = messages_of body in
+    Alcotest.(check int) "a quarter of the 100-row budget is conversation" 25
+      (List.length rows);
+    Alcotest.(check string) "newest row last" "msg-0300"
+      (content_of (List.hd (List.rev rows)));
+    Alcotest.(check bool) "older rows remain" true (bool_field "has_more" body);
+    Alcotest.(check (option (float 0.001)))
+      "the cursor is the oldest returned ts, as for the full window"
+      (Some 276.0)
+      (match field "next_before" body with Some (`Float f) -> Some f | _ -> None);
+    let default_body = Keeper_api.keeper_chat_history_page_json config name ~before:None in
+    Alcotest.(check int) "no limit is the full window" 100
+      (List.length (messages_of default_body)))
+;;
+
 let test_cursor_walks_without_gap_or_repeat () =
   with_lane "chat-page-walk" (numbered ~total:300) (fun config name ->
     let page before = Keeper_api.keeper_chat_history_page_json config name ~before in
@@ -215,6 +235,10 @@ let () =
     "server_dashboard_http_keeper_chat_page"
     [ ( "GET /chat/history/page"
       , [ Alcotest.test_case "schema tag and next cursor" `Quick test_tag_and_cursor
+        ; Alcotest.test_case
+            "a limit makes a smaller window with the same cursor rule"
+            `Quick
+            test_limit_makes_a_smaller_window_with_the_same_cursor_rule
         ; Alcotest.test_case
             "walking the cursor repeats no row and skips none"
             `Quick

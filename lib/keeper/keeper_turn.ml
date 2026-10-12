@@ -533,7 +533,7 @@ let run_keeper_invocation_turn_admitted_inner
         | Keeper_direct_native_continuation.Resume resumed ->
           Ok (binding, Some resumed, None)
         | Keeper_direct_native_continuation.Terminal_pending _ ->
-          Error "native execution is terminal and awaiting Owner acknowledgement; it cannot be dispatched again"
+          Error "native execution is terminal and awaiting Owner settlement; it cannot be dispatched again"
         | Keeper_direct_native_continuation.No_pending ->
           let* direct_resume = (match Keeper_direct_gate_continuation.load
           ~config:ctx.config ~meta ~operation_id ~session_dir with
@@ -714,6 +714,7 @@ let run_keeper_invocation_turn_admitted_inner
              | Workspace_memory_ledger.Unavailable detail ->
                Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
              | Missing | Available _ -> ());
+            Keeper_workspace_memory_observation_metrics.record workspace_memory;
             let build_turn_prompt ~base_system_prompt:_ ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)

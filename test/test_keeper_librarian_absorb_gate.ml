@@ -1197,7 +1197,7 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
     let elapsed_s = Int64.to_float
         (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) /. 1_000_000_000. in
     match Runs.mark_completed registry ~run_id ~outcome ~elapsed_s
-        ~selected_slot:None ~output with
+        ~selected_slot:None ~output () with
     | Ok () -> ()
     | Error error -> Alcotest.fail (Runs.completion_error_to_string error)
   in
@@ -1323,7 +1323,7 @@ let test_cancellation_during_terminal_callback_settles_registry () =
          Eio.Fiber.yield ();
          (match Runs.mark_completed registry ~run_id:evaluation_id ~outcome:Runs.Succeeded
              ~elapsed_s:0. ~selected_slot:None
-             ~output:(Gate.observation_to_yojson (Gate.Incomplete [evaluation])) with
+             ~output:(Gate.observation_to_yojson (Gate.Incomplete [evaluation])) () with
           | Ok () -> () | Error error -> Alcotest.fail (Runs.completion_error_to_string error));
          events := "after completion" :: !events;
          Eio.Promise.resolve finish_callback ())

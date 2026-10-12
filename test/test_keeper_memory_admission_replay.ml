@@ -217,7 +217,7 @@ let replay filename () =
       else None in
     List.iter (fun (candidate : Queue.candidate) ->
       let restored = Queue.append ~keepers_dir ~keeper_id ~request_id:candidate.request_id
-        candidate.fact |> require in
+        candidate.fact |> Result.map_error Queue.append_error_to_string |> require in
       check bool "original identity, sequence and full provenance restored" true (restored = candidate)) candidates;
     initial) in
   let admission = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
@@ -644,7 +644,7 @@ let test_incomplete_lookup_keeps_direct_search_with failure () =
   let target = fact "Current consolidated policy" in
   let evidence = fact "UNIQUE-HISTORICAL-ALIAS" in
   ignore (Queue.append ~keepers_dir ~keeper_id ~request_id:"lookup-gap-input" evidence
-    |> require : Queue.candidate);
+    |> Result.map_error Queue.append_error_to_string |> require : Queue.candidate);
   let batch = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
     | Some batch -> batch | None -> fail "missing candidate" in
   let candidate_id = match Queue.candidate_ids batch with

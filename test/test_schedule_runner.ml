@@ -825,6 +825,49 @@ let test_tick_marks_terminal_dispatch_rejection_failed () =
        wake.error)
 ;;
 
+(* A consumer's failure scope, not recurrence alone, decides whether the
+   schedule survives. Receipt timing remains independent of its next due. *)
+let test_tick_dispatch_failure_scope () =
+  List.iter
+    (fun (name, recurrence, rejection, expected_status, expected_due) ->
+      with_workspace @@ fun config ->
+      let request = create_ok ~schedule_id:name ~recurrence config in
+      let result =
+        tick_ok config ~now:201.0 ~clock:(fun () -> 301.0)
+          ~consumer:(accepting_consumer ~dispatch_result:(Error rejection) (ref []))
+      in
+      check int "one failed dispatch" 1 (List.length result.dispatches);
+      check_dispatch_status "dispatch records failure" Dispatch_failed
+        (List.hd result.dispatches).status;
+      (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+       | None -> fail "schedule missing after rejection"
+       | Some stored ->
+         check string "failure scope determines schedule state" expected_status
+           (schedule_status_to_string stored.status);
+         check (float 0.001) "next due follows tick time, not finish time"
+           expected_due stored.due_at);
+      match Schedule_store.last_wake_for_schedule_instance
+          (Schedule_store.read_state config)
+          ~schedule_instance_id:request.schedule_instance_id
+          ~schedule_id:request.schedule_id with
+      | None -> fail "rejected occurrence has no receipt"
+      | Some wake ->
+        check string "even an advancing schedule retains a failed wake" "failed"
+          (wake_status_to_string wake.status);
+        check (float 0.001) "receipt names the original occurrence" 200.0 wake.due_at;
+        check (option (float 0.001)) "receipt uses completion clock"
+          (Some 301.0) wake.finished_at;
+        check (option string) "receipt preserves the rejection" (Some "refused") wake.error;
+        check bool "rejection is not an acceptance receipt" true (wake.detail = None))
+    [ "occurrence-interval", Interval { interval_sec = 60 },
+        Occurrence_dispatch_rejection "refused", "scheduled", 260.0
+    ; "occurrence-one-shot", One_shot,
+        Occurrence_dispatch_rejection "refused", "failed", 200.0
+    ; "schedule-interval", Interval { interval_sec = 60 },
+        Terminal_dispatch_rejection "refused", "failed", 200.0
+    ]
+;;
+
 let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
   with_workspace
   @@ fun config ->
@@ -1221,6 +1264,8 @@ let () =
             test_sub_tick_interval_fires_once_per_tick
         ; test_case "marks terminal dispatch rejection failed" `Quick
             test_tick_marks_terminal_dispatch_rejection_failed
+        ; test_case "dispatch failure scope preserves only future occurrences" `Quick
+            test_tick_dispatch_failure_scope
         ; test_case "retries same occurrence without blocking other schedule" `Quick
             test_tick_retries_same_occurrence_without_blocking_other_schedule
         ; test_case "occurrence decode rejects tampered facts" `Quick

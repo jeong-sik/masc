@@ -2193,7 +2193,7 @@ let update_direct_native_call store ~now ~operation_id ~execution_digest change 
             |> Result.map_error (fun error -> Invalid_input (Semantic.error_to_string error)) in
           let* ready = semantic_transition ~now Semantic.Confirm_sources created in
           semantic_transition ~now Semantic.Begin_execution ready
-        | None, (Keeper_native_call.Checkpoint _ | Keeper_native_call.Terminal _ | Keeper_native_call.Acknowledge _) ->
+        | None, (Keeper_native_call.Checkpoint _ | Keeper_native_call.Terminal _) ->
           Error (Invalid_input "native call has no owning execution") in
       (* A stale callback rejects that request; it does not establish that the
          authoritative row is damaged. Owner fences only storage failures. *)

@@ -106,14 +106,41 @@ let disposition_of_json = function
     None
 ;;
 
-let memory_identity ~tool_name ~input ~output_text =
+(* What one output says, read once for both the memory identity and the output
+   fingerprint. A stored marker yields the tool's answer only through verified
+   blob bytes ({!Keeper_tool_answer.verified_stored_answer}); otherwise it keeps
+   the blob's own identity. An inline output yields the tool's answer, or the
+   whole output for a tool that reads no answer. Reading both identities from
+   this one value keeps a stored receipt and its inline form on the same
+   identity. *)
+type output_evidence =
+  | Tool_answer of Yojson.Safe.t
+  | Stored_blob of { sha256 : string; bytes : int; mime : string }
+  | Inline_output of string
+
+let output_evidence ?base_path ~tool_name output_text =
+  match Tool_output.decode_from_agent_core output_text with
+  | Tool_output.Decoded { sha256; bytes; mime; _ } ->
+    (match Option.bind base_path (fun base_path ->
+         Keeper_tool_answer.verified_stored_answer ~base_path ~tool_name ~output_text) with
+     | Some answer -> Tool_answer answer
+     | None -> Stored_blob { sha256; bytes; mime })
+  | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+    (match Keeper_tool_answer.answer ~tool_name ~output_text with
+     | Some answer -> Tool_answer answer
+     | None -> Inline_output output_text)
+;;
+
+let memory_identity ~tool_name ~input ~evidence =
   match Keeper_tool_answer.resolve tool_name with
   | Keeper_tool_answer.Keeper_handler Keeper_tool_descriptor.Tool_memory_write ->
-    Option.bind (Keeper_tool_answer.answer ~tool_name ~output_text) (fun answer ->
-      Option.map
-        (fun memory_id ->
-          Memory_write { disposition = disposition_of_json answer; memory_id })
-        (memory_id_of_json answer))
+    (match evidence with
+     | Tool_answer answer ->
+       Option.map
+         (fun memory_id ->
+           Memory_write { disposition = disposition_of_json answer; memory_id })
+         (memory_id_of_json answer)
+     | Stored_blob _ | Inline_output _ -> None)
   | Keeper_tool_answer.Keeper_handler Keeper_tool_descriptor.Tool_memory_retract ->
     Option.map (fun memory_id -> Memory_retract memory_id)
       (memory_id_of_json input)
@@ -171,27 +198,21 @@ let inline_output_fingerprint value =
     Some (sha256_hex text)
 ;;
 
-let output_fingerprint ~tool_name output_text =
-  match Tool_output.decode_from_agent_core output_text with
-  | Tool_output.Decoded { sha256; bytes; mime; _ } ->
+let evidence_fingerprint = function
+  | Tool_answer answer -> Some (digest_json answer)
+  | Stored_blob { sha256; bytes; mime } ->
     Some (digest_json (stored_output_identity_json ~sha256 ~bytes ~mime))
-  | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
-    (match Keeper_tool_answer.answer ~tool_name ~output_text with
-     | Some answer -> Some (digest_json answer)
-     | None -> inline_output_fingerprint output_text)
+  | Inline_output output_text -> inline_output_fingerprint output_text
 ;;
 
-let digest_tool_output ~tool_name output_text =
-  output_fingerprint ~tool_name output_text
-;;
-
-let compute_tool_io ~tool_name ~input ~output_text =
-  match memory_identity ~tool_name ~input ~output_text with
+let compute_tool_io ~base_path ~tool_name ~input ~output_text =
+  let evidence = output_evidence ?base_path ~tool_name output_text in
+  match memory_identity ~tool_name ~input ~evidence with
   | Some identity ->
     let fingerprint = memory_identity_fingerprint identity in
     Some { input_fingerprint = fingerprint; output_fingerprint = fingerprint }
   | None ->
-    (match digest_tool_input ~tool_name input, digest_tool_output ~tool_name output_text with
+    (match digest_tool_input ~tool_name input, evidence_fingerprint evidence with
      | Some input_fingerprint, Some output_fingerprint ->
        Some { input_fingerprint; output_fingerprint }
      | None, _ | _, None -> None)
@@ -221,13 +242,15 @@ module Io_memo = struct
 
   module Key = struct
     type t =
-      { tool_name : string
+      { base_path : string option
+      ; tool_name : string
       ; input : Yojson.Safe.t
       ; output_text : string
       }
 
     let equal left right =
-      String.equal left.tool_name right.tool_name
+      left.base_path = right.base_path
+      && String.equal left.tool_name right.tool_name
       && String.equal left.output_text right.output_text
       && left.input = right.input
     ;;
@@ -242,12 +265,13 @@ module Io_memo = struct
        down the chain. Hashing the body separately keeps them apart. *)
     let hash key =
       Hashtbl.hash
-        (Hashtbl.hash key.output_text, key.tool_name, Hashtbl.hash key.input)
+        (key.base_path, Hashtbl.hash key.output_text, key.tool_name, Hashtbl.hash key.input)
     ;;
   end
 
   type key = Key.t =
-    { tool_name : string
+    { base_path : string option
+    ; tool_name : string
     ; input : Yojson.Safe.t
     ; output_text : string
     }
@@ -277,7 +301,8 @@ module Io_memo = struct
   ;;
 
   let key_bytes key =
-    String.length key.tool_name + json_bytes key.input + String.length key.output_text
+    Option.fold ~none:0 ~some:String.length key.base_path
+    + String.length key.tool_name + json_bytes key.input + String.length key.output_text
   ;;
 
   let find key =
@@ -307,20 +332,30 @@ module Io_memo = struct
   ;;
 end
 
-let digest_tool_io ~tool_name ~input ~output_text =
-  let key = { Io_memo.tool_name; input; output_text } in
+let stored_marker output_text =
+  match Tool_output.decode_from_agent_core output_text with
+  | Tool_output.Decoded _ -> true
+  | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> false
+;;
+
+let digest_tool_io ?base_path ~tool_name ~input ~output_text () =
+  (* A blob can disappear or change while the marker stays identical. Never
+     memoize verification of external evidence. *)
+  if stored_marker output_text then compute_tool_io ~base_path ~tool_name ~input ~output_text
+  else
+  let key = { Io_memo.base_path; tool_name; input; output_text } in
   match Io_memo.find key with
   | Some answer -> answer
   | None ->
     (* Computed outside the lock: this is the serialising and hashing the
        memo exists to stop repeating, and holding the lock across it would
        serialise every keeper's walk behind one of them. *)
-    let answer = compute_tool_io ~tool_name ~input ~output_text in
+    let answer = compute_tool_io ~base_path ~tool_name ~input ~output_text in
     Io_memo.add key answer;
     answer
 ;;
 
-type history_pair = Io_memo.key =
+type history_pair =
   { tool_name : string
   ; input : Yojson.Safe.t
   ; output_text : string
@@ -378,22 +413,25 @@ let history_memo ~base_path ~keeper_name =
       memo)
 ;;
 
-let digest_history_pairs (memo : History_memo.t) pairs =
+let digest_history_pairs ?base_path (memo : History_memo.t) pairs =
   let previous = Atomic.get memo.History_memo.digests in
   let next = Io_memo.Table.create (List.length pairs) in
   let answers =
     List.map
       (fun (pair : history_pair) ->
+         let key = { Io_memo.base_path; tool_name = pair.tool_name;
+                     input = pair.input; output_text = pair.output_text } in
          let answer =
-           match Io_memo.Table.find_opt previous pair with
+           match (if stored_marker pair.output_text then None
+                  else Io_memo.Table.find_opt previous key) with
            | Some answer -> answer
            | None ->
-             digest_tool_io
+             digest_tool_io ?base_path
                ~tool_name:pair.tool_name
                ~input:pair.input
-               ~output_text:pair.output_text
+               ~output_text:pair.output_text ()
          in
-         Io_memo.Table.replace next pair answer;
+         if not (stored_marker pair.output_text) then Io_memo.Table.replace next key answer;
          answer)
       pairs
   in

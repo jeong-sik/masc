@@ -72,22 +72,26 @@ let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_re
    inside the app-server connection. The shared catalog clamp is for clients
    without that discovery contract. *)
 
-let project_messages messages =
+let project_messages ~assembly messages =
   let rec loop developer history = function
     | [] -> Ok (List.rev developer, List.rev history)
     | (message : Agent_core.Types.message) :: rest ->
-      let text = Host.encode_history_message message in
       (match message.role with
-       | Agent_core.Types.System -> loop (text :: developer) history rest
+       | Agent_core.Types.System ->
+         let projection=Keeper_context_submission_link.encoded_carrier ~assembly ~selected_blocks:None message in
+         loop (projection :: developer) history rest
        | Agent_core.Types.User ->
+         let text = Host.encode_history_message message in
          loop developer
            ({ Runtime_codex_app_server.role = User; text } :: history)
            rest
        | Agent_core.Types.Assistant ->
+         let text = Host.encode_history_message message in
          loop developer
            ({ Runtime_codex_app_server.role = Assistant; text } :: history)
            rest
        | Agent_core.Types.Tool ->
+         let text = Host.encode_history_message message in
          loop developer
            ({ Runtime_codex_app_server.role = User; text } :: history)
            rest)
@@ -978,10 +982,12 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
               images )
     in
     let posture_notes = native_posture_note native_posture in
+    let composed_context = Option.bind composed_context (fun read -> read ()) in
     let compose_developer_instructions developer_messages =
-      (prepared.system_prompt :: posture_notes) @ developer_messages
-      |> List.filter (fun text -> String.trim text <> "")
-      |> String.concat "\n\n"
+      (List.map Keeper_context_submission_link.literal (prepared.system_prompt :: posture_notes)) @ developer_messages
+      |> List.filter (fun piece -> String.trim (Keeper_context_submission_link.text piece) <> "")
+      |> Keeper_context_submission_link.concat ~separator:"\n\n"
+      |> Keeper_context_submission_link.trim
     in
     let* () = Keeper_official_task_reference.require_preserved
       ~reference:historical_task_message prepared.messages
@@ -1007,7 +1013,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let* history, context_frontier, composed_developer_instructions =
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
         let* developer_messages, history =
-          project_messages
+          project_messages ~assembly:composed_context
             (match thread_mode with
              | Runtime_codex_app_server.Start -> prepared.messages
              | Runtime_codex_app_server.Resume _ ->
@@ -1044,33 +1050,24 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
            not see a blank keeper prompt behind the posture note this lane
            appends (#33165). *)
         let composed_developer_instructions =
-          compose_developer_instructions developer_messages |> String.trim
+          compose_developer_instructions developer_messages
         in
         Ok (history, context_frontier, composed_developer_instructions))
     in
-    let composed_context =
-      match composed_context with
-      | None -> None
-      | Some read -> read ()
-    in
-    let prompt, held_context =
+    let prompt, held_context, prompt_projection =
       match thread_mode with
       | Runtime_codex_app_server.Start ->
-        prompt, Host.start_held_context ?composed_context prepared.messages
+        prompt, Host.start_held_context ?composed_context prepared.messages,
+        Keeper_context_submission_link.literal prompt
       | Runtime_codex_app_server.Resume _ ->
-        let delivery =
-          Host.resume_prompt
-            ~goal:prompt
-            ?composed_context
-            ~held:(Keeper_official_client_session_store.held_context_for_resume
-                     claim_plan ~expected:stored_session)
-            prepared.messages
-        in
-        delivery.prompt, delivery.held_context
+        let delivery = Host.resume_prompt ~goal:prompt ?composed_context
+          ~held:(Keeper_official_client_session_store.held_context_for_resume
+            claim_plan ~expected:stored_session) prepared.messages in
+        delivery.prompt, delivery.held_context, delivery.context_projection
     in
     let context_frontier = { context_frontier with held_context } in
     let settled_held_context = ref held_context in
-    let developer_instructions = Some composed_developer_instructions in
+    let developer_instructions = Some (Keeper_context_submission_link.text composed_developer_instructions) in
     (* No developer items: a Start carries the per-turn context in
        [developerInstructions], a Resume in front of its goal. *)
     let developer_context = [] in
@@ -1109,6 +1106,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let terminal_error = ref None in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        ~base_path
         ~content_transport:Runtime_official_client_tool.Codex
         ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
@@ -1196,6 +1194,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        ~base_path
         ~content_transport:Runtime_official_client_tool.Codex
         ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
@@ -1470,6 +1469,28 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                ~expected
                ~session_id:thread_id
                ~updated_at:(Time_compat.now ())))
+         ~on_context_submission:(fun observation ->
+           let logical_context_bindings = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+             match observation.Runtime_codex_app_server.method_ with
+             | Thread_start | Thread_resume -> Keeper_context_submission_link.binding_to_json
+                 ~slot:Developer_instructions composed_developer_instructions observation
+             | Turn_start -> Keeper_context_submission_link.binding_to_json
+                 ~slot:(Turn_text (List.length images)) prompt_projection observation
+             | Thread_inject_items -> `Assoc ["status", `String "out_of_scope_history"]
+             | Turn_steer -> `Assoc ["status", `String "out_of_scope_host_notice"]
+             | Dynamic_tool_response -> `Assoc ["status", `String "out_of_scope_tool_result"]) in
+           let detail=`Assoc ["keeper",`String keeper_name;
+             "runtime_profile",`String runtime_id;"client_turn_ordinal",`Int turn_count;
+             "submission",Runtime_codex_app_server.context_submission_to_json observation;
+             "logical_context_bindings", logical_context_bindings] in
+           match raw_trace_run with
+           | None -> Log.Keeper.warn ~keeper_name
+               "Codex context submission measurement unavailable: no raw-trace attempt binding"
+           | Some active ->
+             ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Context_submission (fun () ->
+               Agent_core.Raw_trace.record_hook_invoked active
+                 ~hook_name:"codex_context_submission" ~hook_decision:"stdin_write_completed"
+                 ~hook_detail:(Yojson.Safe.to_string detail) ())))
          ~on_prompt_sent:report_transmitted_input
          ~on_turn_starting:(fun ~thread_id ->
            update_session "turn-starting transition" (fun expected ->

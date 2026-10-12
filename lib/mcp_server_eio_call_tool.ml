@@ -423,10 +423,10 @@ let record_runtime_mcp_keeper_tool_trace
      cross-cycle seed reads back, computed from the raw input and output the
      same way the live hook computes them. *)
   let progress_io_fingerprints =
-    Keeper_tool_progress_identity.digest_tool_io
+    Keeper_tool_progress_identity.digest_tool_io ~base_path:entry.base_path
       ~tool_name
       ~input:arguments
-      ~output_text:message
+      ~output_text:message ()
   in
   Keeper_tool_call_log.log_call
     ?typed_result

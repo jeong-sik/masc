@@ -2720,8 +2720,6 @@
 
 (include stanzas/test_keeper_checkpoint_stale_guard.inc)
 (include stanzas/test_keeper_owned_checkpoint.inc)
-(include stanzas/test_keeper_recovery_projection.inc)
-(include stanzas/test_keeper_recovery_transmission.inc)
 
 (include stanzas/test_keeper_context_isolation.inc)
 
@@ -5211,6 +5209,11 @@
  (libraries alcotest yojson masc unix))
 
 (test
+ (name test_keeper_workspace_memory_observation_metrics)
+ (modules test_keeper_workspace_memory_observation_metrics)
+ (libraries alcotest masc masc.keeper_metrics))
+
+(test
  (name test_workspace_memory_request)
  (modules test_workspace_memory_request)
  (libraries alcotest digestif yojson masc))
@@ -5870,3 +5873,16 @@
  (libraries alcotest unix masc.keeper_operation_identity masc_tui_msx_checkpoint_pending))
 
 (include stanzas/test_keeper_memory_select.inc)
+
+(include stanzas/test_keeper_memory_select_capture.inc)
+
+(include stanzas/test_keeper_memory_select_provider_wire.inc)
+
+(include stanzas/test_keeper_event_genealogy_capture.inc)
+
+(include stanzas/test_keeper_event_genealogy_replay.inc)
+
+(test
+ (name test_tui_keeper_call_evidence)
+ (modules test_tui_keeper_call_evidence)
+ (libraries alcotest masc masc.tool_types masc_tui_keeper_call_evidence masc_tui_keeper_chat_transcript yojson))

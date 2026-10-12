@@ -26,8 +26,8 @@ module For_testing : sig
     : sw:Eio.Switch.t
     -> base_path:string
     -> execute:(rendered_prompt:string -> selected:Workspace_memory_ledger.pending_fact list
-       -> ledger:Workspace_memory_ledger.t -> (Yojson.Safe.t * string, execution_failure) result)
-    -> summarize:(batch:Workspace_memory_briefing.batch -> (Yojson.Safe.t * string, execution_failure) result)
+       -> ledger:Workspace_memory_ledger.t -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result)
+    -> summarize:(batch:Workspace_memory_briefing.batch -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result)
     -> unit
 
   (** The lane run itself: HTTP slots as one exact-output flow. *)
@@ -36,14 +36,14 @@ module For_testing : sig
     -> rendered_prompt:string
     -> selected:Workspace_memory_ledger.pending_fact list
     -> ledger:Workspace_memory_ledger.t
-    -> (Yojson.Safe.t * string, string) result
+    -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, string) result
 
   val start
     : sw:Eio.Switch.t
     -> base_path:string
     -> execute:(rendered_prompt:string -> selected:Workspace_memory_ledger.pending_fact list
-       -> ledger:Workspace_memory_ledger.t -> (Yojson.Safe.t * string, execution_failure) result)
-    -> summarize:(batch:Workspace_memory_briefing.batch -> (Yojson.Safe.t * string, execution_failure) result)
+       -> ledger:Workspace_memory_ledger.t -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result)
+    -> summarize:(batch:Workspace_memory_briefing.batch -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result)
     -> unit
   val is_idle : base_path:string -> bool
   val stop : base_path:string -> unit

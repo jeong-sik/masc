@@ -9111,7 +9111,7 @@ let skills_in_source_rows ~keeper_name source rows =
     if String.equal row.me_keeper_name keeper_name && row.me_execution_source=source
     then row.me_skill_block else []) rows
 
-let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
+let enrich_held_logs_from_rows ?only state ~keeper_name (rows : msg_entry list) =
   List.iter
     (fun turn_log ->
       let execution_source = turn_log_execution_source turn_log in
@@ -9153,7 +9153,9 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
                   turn_log.tl_transcript skill)
               row.me_skill_block)
         rows)
-    (selected_source_logs_for_keeper state keeper_name)
+    (match only with
+     | Some turn_log -> [ turn_log ]
+     | None -> selected_source_logs_for_keeper state keeper_name)
 ;;
 
 (* Settling a turn: its log is committed and, when it has anything to draw,
@@ -10228,6 +10230,7 @@ let withdraw_machine_control state =
 let modal_owns_keys (state : state) =
   state.help_open || state.keeper_deletions_open || state.agenda_open
   || state.context_inspector_open || state.about_open
+  || state.repository_changes_open
   || (state.view = Lanes && Option.is_some state.exact_activity_open)
   || (state.view = Lanes && Option.is_some state.browser_activity_open)
   || (state.view = Lanes && Option.is_some state.machine_activity_open)
@@ -10250,6 +10253,23 @@ let close_agenda (state : state) =
   state.agenda_navigation <- Agenda_read_rows;
   state.agenda_selected <- Masc_tui_agenda.Nowhere
 
+(* Closed the way the overlay's own Esc closes it, so a handoff chat that
+   clears the key modals never leaves the overlay's half-read state behind. *)
+let close_repository_changes (state : state) =
+  state.repository_changes_open <- false;
+  state.repository_changes_return_chat <- false;
+  state.repository_changes_scope <- None;
+  state.repository_changes <- None;
+  state.repository_changes_error <- None;
+  state.repository_changes_cursor <- 0;
+  state.repository_changes_scroll <- 0;
+  state.repository_changes_diff <- None;
+  state.repository_changes_diff_error <- None;
+  state.repository_changes_diff_path <- None;
+  state.repository_changes_diff_hscroll <- 0;
+  state.repository_changes_diff_max_width <- 0;
+  state.repository_changes_diff_scroll <- 0
+
 (* Every overlay [modal_owns_keys] names, closed the way its own Esc closes
    it, except the invite card: an unrelated event that clears the screen must
    not take the only copy of a link with it. The inspector and the agenda are
@@ -10267,7 +10287,8 @@ let close_key_modals (state : state) =
   state.browser_activity_open <- None;
   state.machine_activity_open <- None;
   if state.agenda_open then close_agenda state;
-  if state.context_inspector_open then close_context_inspector state
+  if state.context_inspector_open then close_context_inspector state;
+  if state.repository_changes_open then close_repository_changes state
 
 let create_state
     ?(reasoning_visibility = Reasoning_folded)

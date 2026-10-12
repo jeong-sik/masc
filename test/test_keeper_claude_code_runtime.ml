@@ -2693,10 +2693,7 @@ let test_resume_prompt_sends_only_changed_blocks () =
       }
     in
     ( Some
-        { Keeper_official_client_host.carrier_sha256 =
-            Digestif.SHA256.(digest_string assembled |> to_hex)
-        ; blocks
-        }
+        (Keeper_context_assembly.assemble ~existing_extra_system_context:None ~blocks)
     , [ message User "held by the vendor session"; carrier ] )
   in
   let rendered_blocks texts =
@@ -2763,10 +2760,7 @@ let test_whole_carrier_supersedes_held_blocks () =
     let blocks = blocks texts in
     let assembled = String.concat "\n\n" (List.map snd blocks) in
     ( Some
-        { Keeper_official_client_host.carrier_sha256 =
-            Digestif.SHA256.(digest_string assembled |> to_hex)
-        ; blocks
-        }
+        (Keeper_context_assembly.assemble ~existing_extra_system_context:None ~blocks)
     , [ message User "held by the vendor session"; carrier_of assembled ] )
   in
   let rendered texts =

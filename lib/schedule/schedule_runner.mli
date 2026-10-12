@@ -68,7 +68,10 @@ and dispatch_result =
 
 type consumer_dispatch_error =
   | Retryable_dispatch_failure of string
+  | Occurrence_dispatch_rejection of string
+      (** This wake cannot be delivered; a future recurrence remains valid. *)
   | Terminal_dispatch_rejection of string
+      (** The schedule itself cannot dispatch, including invalid payloads. *)
 
 type acceptance_commit
 (** Opaque proof that the schedule ledger accepted the durable consumer work.

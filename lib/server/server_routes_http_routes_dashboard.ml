@@ -3844,6 +3844,13 @@ let add_routes ~sw ~clock router =
                   body))
             request reqd
        | None ->
+       if Http.Request.path request = Server_dashboard_http_hitl_recover.journal_restore_path then
+         with_token_permission_auth
+           ~permission:Server_dashboard_http_hitl_recover.permission
+           (fun state _actor req reqd ->
+             Server_dashboard_http_hitl_recover.handle_journal_restore state req reqd)
+           request reqd
+       else
        match Keeper_shutdown_reconciliation.route (Http.Request.path request) with
        | Some target ->
          with_token_permission_auth ~permission:Keeper_shutdown_reconciliation.permission

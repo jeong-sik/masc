@@ -3,9 +3,29 @@ open Keeper_memory_os_types
 let ( let* ) = Result.bind
 let ( let+ ) value f = Result.map f value
 
+module Candidate_identity_set = Set.Make (struct
+  type t = Keeper_memory_os_current.explicit_candidate_id
+  let compare = Stdlib.compare
+end)
+
+(* In memory [pending] is newest-first so an append is O(1); the wire format
+   and every consumer-facing batch stay strictly ascending, enforced by
+   [state_of_json] and produced by reversing only at the serialization and
+   [read_pending] boundaries. *)
 type candidate = { sequence : int; request_id : string; fact : fact }
 type state = { generation : string; last_sequence : int; pending : candidate list }
 type batch = { generation : string; rows : candidate list }
+
+type append_error =
+  | Capacity_exceeded of { required_bytes : int; limit_bytes : int }
+  | Append_failed of string
+
+let append_error_to_string = function
+  | Capacity_exceeded { required_bytes; limit_bytes } ->
+    Printf.sprintf
+      "pending admission queue byte cap exceeded: appending would write %d bytes over the %d byte cap set by %s; the append was refused before any write and pending input is unchanged"
+      required_bytes limit_bytes Env_config.KeeperMemoryOs.pending_max_bytes_env_key
+  | Append_failed detail -> detail
 
 let suffix = ".memory-admission.json"
 let path ~keepers_dir ~keeper_id = Filename.concat keepers_dir (keeper_id ^ suffix)
@@ -65,15 +85,17 @@ let state_of_json = function
         let+ rest = decode row.sequence (Set_util.StringSet.add row.request_id seen) (index+1) rest in
         row :: rest in
     let+ pending = decode 0 Set_util.StringSet.empty 0 rows in
-    { generation; last_sequence; pending }
+    { generation; last_sequence; pending = List.rev pending }
   | _ -> wire_here Expected_object
 
-let protect action =
+let protect_with ~on_error action =
   try action () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Sys_error detail -> Error detail
+  | Sys_error detail -> Error (on_error detail)
   | Unix.Unix_error (error, fn, arg) ->
-    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
+    Error (on_error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error)))
+
+let protect action = protect_with ~on_error:Fun.id action
 
 let read ~keepers_dir ~keeper_id =
   protect (fun () ->
@@ -84,63 +106,89 @@ let read ~keepers_dir ~keeper_id =
        | json -> state_of_json json |> Result.map Option.some |> Result.map_error wire_error_to_string
        | exception Yojson.Json_error detail -> Error detail))
 
+let state_to_json (state : state) =
+  `Assoc ["generation", `String state.generation;
+    "last_sequence", `Int state.last_sequence;
+    "pending", `List (List.rev_map candidate_to_json state.pending)]
+
 let write ~keepers_dir ~keeper_id (state : state) =
   Fs_compat.save_file_atomic_strict (path ~keepers_dir ~keeper_id)
-    (Yojson.Safe.to_string (`Assoc ["generation", `String state.generation;
-      "last_sequence", `Int state.last_sequence;
-      "pending", `List (List.map candidate_to_json state.pending)]))
+    (Yojson.Safe.to_string (state_to_json state))
 
-let locked ~keepers_dir ~keeper_id action = protect (fun () ->
+(* An append that would push the serialized queue past the byte cap is refused
+   before any write: the refusal is an entry denial, not an expiry, so the
+   durable pending input stays byte-exact until a drain makes room. *)
+let append_within_cap ~keepers_dir ~keeper_id state =
+  let cap = Env_config.KeeperMemoryOs.pending_max_bytes () in
+  let bytes = String.length (Yojson.Safe.to_string (state_to_json state)) in
+  if bytes <= cap then
+    write ~keepers_dir ~keeper_id state
+    |> Result.map_error (fun detail -> Append_failed detail)
+  else Error (Capacity_exceeded {required_bytes = bytes; limit_bytes = cap})
+
+let locked_with ~on_error ~keepers_dir ~keeper_id action = protect_with ~on_error (fun () ->
   Fs_compat.mkdir_p keepers_dir;
   Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
     File_lock_eio.with_lock (path ~keepers_dir ~keeper_id) action))
 
+let locked ~keepers_dir ~keeper_id action =
+  locked_with ~on_error:Fun.id ~keepers_dir ~keeper_id action
+
 let append ~keepers_dir ~keeper_id ~request_id fact =
+  let wire_error error = Append_failed (wire_error_to_string error) in
   let* () = canonical_string "request_id" ["request_id", `String request_id]
-    |> Result.map ignore |> Result.map_error wire_error_to_string in
-  let* fact = fact_of_json (fact_to_json fact) |> Result.map_error wire_error_to_string in
-  locked ~keepers_dir ~keeper_id (fun () ->
-    let* prior = read ~keepers_dir ~keeper_id in
+    |> Result.map ignore |> Result.map_error wire_error in
+  let* fact = fact_of_json (fact_to_json fact) |> Result.map_error wire_error in
+  locked_with ~on_error:(fun detail -> Append_failed detail) ~keepers_dir ~keeper_id (fun () ->
+    let* prior = read ~keepers_dir ~keeper_id
+      |> Result.map_error (fun detail -> Append_failed detail) in
     let state = match prior with
       | Some state -> state
       | None -> { generation = Random_id.prefixed ~prefix:"explicit-writes-" ~bytes:16;
                   last_sequence = 0; pending = [] } in
     match List.find_opt (fun row -> String.equal row.request_id request_id) state.pending with
     | Some row when row.fact = fact -> Ok row
-    | Some _ -> Error "pending admission request identity has different content"
+    | Some _ -> Error (Append_failed "pending admission request identity has different content")
     | None ->
       let previous = state.last_sequence in
-      if previous = max_int then Error "pending admission sequence exhausted"
+      if previous = max_int then Error (Append_failed "pending admission sequence exhausted")
       else
         let row = {sequence = previous+1; request_id; fact} in
-        let+ () = write ~keepers_dir ~keeper_id {state with last_sequence=row.sequence; pending = state.pending @ [row]} in
+        let+ () = append_within_cap ~keepers_dir ~keeper_id
+            {state with last_sequence=row.sequence; pending = row :: state.pending} in
         row)
 
 let read_pending ~keepers_dir ~keeper_id =
   let+ state = read ~keepers_dir ~keeper_id in
   match state with
   | None | Some {pending = []; _} -> None
-  | Some state -> Some {generation = state.generation; rows = state.pending}
+  | Some state -> Some {generation = state.generation; rows = List.rev state.pending}
 
-(* Strictly ascending pending sequences are a subset of 1..last_sequence. Every
-   position pending no longer holds was removed by an earlier acknowledgement,
-   which required its committed receipt, and candidate receipts are retained
-   per candidate. So each removed position must still be named by a receipt;
-   one that is not (a restored older receipt file, a rolled-back snapshot) is
-   input nothing proves was consumed. The scan returns the first such position. *)
-let first_unproven_consumed (state : state)
-    (receipts : Keeper_memory_os_current.explicit_candidate_id list) =
-  let covered = Hashtbl.create (List.length state.pending + List.length receipts) in
-  List.iter (fun (row : candidate) -> Hashtbl.replace covered row.sequence ()) state.pending;
-  List.iter (fun (receipt : Keeper_memory_os_current.explicit_candidate_id) ->
-    Hashtbl.replace covered receipt.sequence ()) receipts;
-  let rec scan sequence =
-    if sequence > state.last_sequence then None
-    else if Hashtbl.mem covered sequence then scan (sequence + 1)
-    else Some sequence in
-  scan 1
+(* Sparse acknowledgement may remove rows in any order, but it never erases
+   their allocated sequence. Every hole must still have exact commit authority.
+   Merge the two sorted streams without enumerating an untrusted numeric range. *)
+let validate_sequence_coverage (state : state) receipts =
+  let unavailable detail = Error (detail ^
+    "; recovery needs an independently attested exact backup that this product does not create — without one this state is unrecoverable and the queue stays blocked (docs/guides/MEMORY-ADMISSION-RECOVERY.md)") in
+  let rec cover previous pending committed =
+    let advance sequence pending committed =
+      if previous = max_int || sequence <> previous + 1 then
+        unavailable "explicit admission authority unavailable: allocated sequence has neither pending input nor a committed receipt; stores preserved"
+      else cover sequence pending committed in
+    match pending, committed with
+    | [], [] ->
+      if previous = state.last_sequence then Ok ()
+      else unavailable "explicit admission authority unavailable: allocated tail has no pending input or committed receipt; stores preserved"
+    | row :: pending, [] -> advance row.sequence pending []
+    | [], (receipt : Keeper_memory_os_current.explicit_candidate_id) :: committed ->
+      advance receipt.sequence [] committed
+    | row :: pending_tail, (receipt : Keeper_memory_os_current.explicit_candidate_id) :: committed_tail ->
+      if row.sequence = receipt.sequence then advance row.sequence pending_tail committed_tail
+      else if row.sequence < receipt.sequence then advance row.sequence pending_tail committed
+      else advance receipt.sequence pending committed_tail in
+  cover 0 (List.rev state.pending) receipts
 
-let acknowledge_committed ~keepers_dir ~keeper_id =
+let rec acknowledge_with ~read_receipts ~keepers_dir ~keeper_id =
   let* initial = read ~keepers_dir ~keeper_id in
   match initial with
   | None -> Ok ()
@@ -152,20 +200,33 @@ let acknowledge_committed ~keepers_dir ~keeper_id =
        receipts were read, so they are checked against them here. Rows another
        acknowledgement removes after this read carry receipts this observation
        may not contain, so the locked rewrite does not repeat the check. *)
-    let* receipts = Keeper_memory_os_current.committed_explicit_candidates
-      ~keepers_dir ~keeper_id ~queue_generation:initial.generation in
-    match first_unproven_consumed initial receipts, receipts with
-    | Some unproven_sequence, _ ->
-      Error (Printf.sprintf
-        "admission receipt recovery required: generation=%s unproven_sequence=%d consumed_sequence_count=%d; recovery needs an independently attested exact backup that this product does not create — without one this state is unrecoverable and the queue stays blocked (docs/guides/MEMORY-ADMISSION-RECOVERY.md); pending input is unchanged"
-        initial.generation unproven_sequence (initial.last_sequence - List.length initial.pending))
-    | None, [] -> Ok ()
-    | None, _ :: _ -> locked ~keepers_dir ~keeper_id (fun () ->
+    let* receipts = read_receipts ~queue_generation:initial.generation in
+    let* () = validate_sequence_coverage initial
+      (List.filter (fun (receipt : Keeper_memory_os_current.explicit_candidate_id) ->
+         receipt.sequence <= initial.last_sequence) receipts) in
+    let* reobserve = locked ~keepers_dir ~keeper_id (fun () ->
       let* current = read ~keepers_dir ~keeper_id in
       match current with
       | None -> Error "pending admission queue disappeared before acknowledgement"
       | Some state when state.generation <> initial.generation ->
         Error "pending admission generation changed before acknowledgement"
+      | Some state when
+          let current_ids = Candidate_identity_set.of_list
+            (List.map (candidate_id ~generation:state.generation) state.pending) in
+          let receipt_ids = Candidate_identity_set.of_list receipts in
+          List.exists (fun row ->
+            let identity = candidate_id ~generation:initial.generation row in
+            not (Candidate_identity_set.mem identity current_ids)
+            && not (Candidate_identity_set.mem identity receipt_ids)) initial.pending
+          || (match validate_sequence_coverage state
+               (List.filter (fun (receipt : Keeper_memory_os_current.explicit_candidate_id) ->
+                  receipt.sequence <= state.last_sequence) receipts) with
+              | Ok () -> false
+              | Error _ -> true) ->
+        (* A removed row or an uncovered allocated tail outlived our authority
+           observation. Release this lock before reading Memory again; this
+           also covers rows appended and consumed after [initial] was read. *)
+        Ok true
       | Some state ->
         let by_request = Hashtbl.create (List.length receipts) in
         let by_sequence = Hashtbl.create (List.length receipts) in
@@ -188,8 +249,20 @@ let acknowledge_committed ~keepers_dir ~keeper_id =
             Error "committed admission candidate does not match pending identity and payload")
           (Ok []) state.pending in
         let pending = List.rev retained in
-        if List.length pending = List.length state.pending then Ok ()
-        else write ~keepers_dir ~keeper_id {state with pending})
+        if List.length pending = List.length state.pending then Ok false
+        else Result.map (fun () -> false)
+          (write ~keepers_dir ~keeper_id {state with pending})) in
+    if reobserve then acknowledge_with ~read_receipts ~keepers_dir ~keeper_id
+    else Ok ()
+
+let acknowledge_committed ~keepers_dir ~keeper_id =
+  acknowledge_with ~keepers_dir ~keeper_id
+    ~read_receipts:(Keeper_memory_os_current.committed_explicit_candidates
+      ~keepers_dir ~keeper_id)
+
+module For_testing = struct
+  let acknowledge_with = acknowledge_with
+end
 
 let list_keeper_ids ~keepers_dir = protect (fun () ->
   if not (Sys.file_exists keepers_dir) then Ok []

@@ -554,11 +554,9 @@ let test_board_post_schedule_is_rejected_without_mutation () =
     (List.length (Board_dispatch.list_posts ~limit:10 ()))
 ;;
 
-(* A due occurrence for a name the Keeper store does not hold can never be
-   consumed: no owner exists to take the stimulus. The consumer rejects the
-   occurrence terminally before it touches the queue, and a recurring
-   schedule does not come due again once it has failed. *)
-let test_keeper_wake_for_absent_owner_is_terminal_and_enqueues_nothing () =
+(* An absent owner rejects this occurrence without enqueueing it. The
+   recurring schedule remains usable when that owner is created later. *)
+let test_keeper_wake_for_absent_owner_preserves_recurrence () =
   with_workspace
   @@ fun config ->
   let keeper_name = "schedule-keeper" in
@@ -572,7 +570,7 @@ let test_keeper_wake_for_absent_owner_is_terminal_and_enqueues_nothing () =
   let result = tick_ok config ~now:201.0 in
   check int "one dispatch" 1 (List.length result.dispatches);
   let dispatch = List.hd result.dispatches in
-  check string "an absent owner is a terminal dispatch failure" "failed"
+  check string "the absent owner occurrence fails" "failed"
     (Schedule_runner.dispatch_status_to_string dispatch.status);
   (match dispatch.error with
    | Some detail ->
@@ -584,8 +582,10 @@ let test_keeper_wake_for_absent_owner_is_terminal_and_enqueues_nothing () =
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
    | None -> fail "schedule missing"
    | Some stored ->
-     check string "the schedule fails instead of staying scheduled" "failed"
-       (Schedule_domain.schedule_status_to_string stored.status));
+     check string "the recurring schedule remains scheduled" "scheduled"
+       (Schedule_domain.schedule_status_to_string stored.status);
+     check (float 0.001) "the next occurrence keeps its interval anchor" 260.0
+       stored.due_at);
   (match
      Schedule_store.last_wake_for_schedule_instance
        (Schedule_store.read_state config)
@@ -605,13 +605,41 @@ let test_keeper_wake_for_absent_owner_is_terminal_and_enqueues_nothing () =
   check int "nothing was enqueued for the absent owner" 0
     (Keeper_event_queue.length
        (Keeper_registry_event_queue.snapshot ~base_path keeper_name));
-  (* Past the occurrence that would have followed the failed one. *)
-  let past_next_due = request.due_at +. float_of_int (interval_sec + interval_sec) in
-  check int "the failed recurrence is not dispatched at its next due time" 0
-    (List.length (tick_ok config ~now:past_next_due).dispatches);
-  check int "and still enqueues nothing" 0
+  check int "the failed occurrence is not retried before the next due" 0
+    (List.length (tick_ok config ~now:259.0).dispatches);
+  register_keeper config keeper_name;
+  let next = tick_ok config ~now:260.0 in
+  check int "the next occurrence dispatches after the owner appears" 1
+    (List.length next.dispatches);
+  let next_dispatch = List.hd next.dispatches in
+  check string "the next occurrence is accepted" "succeeded"
+    (Schedule_runner.dispatch_status_to_string next_dispatch.status);
+  check bool "the next occurrence has its own identity" false
+    (String.equal
+       (Schedule_occurrence_id.to_string dispatch.occurrence_id)
+       (Schedule_occurrence_id.to_string next_dispatch.occurrence_id));
+  check int "only the new occurrence is enqueued" 1
     (Keeper_event_queue.length
-       (Keeper_registry_event_queue.snapshot ~base_path keeper_name))
+       (Keeper_registry_event_queue.snapshot ~base_path keeper_name));
+  let state = Schedule_store.read_state config in
+  let wakes = List.filter
+      (fun (wake : Schedule_domain.wake_record) ->
+         String.equal wake.schedule_id request.schedule_id)
+      state.wakes in
+  check int "the failed and accepted receipts both remain" 2 (List.length wakes);
+  (match List.find_opt
+     (fun (wake : Schedule_domain.wake_record) -> Float.equal wake.due_at request.due_at)
+     wakes with
+   | Some wake ->
+     check string "the old failure is not rewritten as success" "failed"
+       (Schedule_domain.wake_status_to_string wake.status)
+   | None -> fail "the failed occurrence receipt disappeared");
+  match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+  | Some stored ->
+    check string "the recurrence stays scheduled" "scheduled"
+      (Schedule_domain.schedule_status_to_string stored.status);
+    check (float 0.001) "accepted occurrence advances again" 320.0 stored.due_at
+  | None -> fail "the recurring schedule disappeared"
 ;;
 
 (* A file the store holds under the name but cannot decode as current is
@@ -2383,6 +2411,7 @@ let test_shutdown_join_waits_for_inflight_schedule_intake () =
                   "test releases schedule acceptance"))
        with
        | Error (Schedule_runner.Retryable_dispatch_failure _) -> ()
+       | Error (Schedule_runner.Occurrence_dispatch_rejection detail)
        | Error (Schedule_runner.Terminal_dispatch_rejection detail) ->
          fail ("schedule intake became terminal: " ^ detail)
        | Ok _ -> fail "test acceptance unexpectedly committed")
@@ -2630,6 +2659,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
        with
        | Ok _ -> ()
        | Error (Schedule_runner.Retryable_dispatch_failure _) -> ()
+       | Error (Schedule_runner.Occurrence_dispatch_rejection detail)
        | Error (Schedule_runner.Terminal_dispatch_rejection detail) ->
          fail ("initial schedule occurrence dispatch was terminal: " ^ detail));
       check bool "initial cancelled dispatch wakes lane" true
@@ -2887,6 +2917,7 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
    | Error (Schedule_runner.Retryable_dispatch_failure detail) ->
      check bool "changed compact source is rejected explicitly" true
        (String_util.contains_substring detail "compact source conflicts")
+   | Error (Schedule_runner.Occurrence_dispatch_rejection detail)
    | Error (Schedule_runner.Terminal_dispatch_rejection detail) ->
      fail ("changed compact source became terminal: " ^ detail)
    | Ok _ -> fail "changed compact source reused the durable occurrence");
@@ -3026,6 +3057,7 @@ let test_terminal_retry_requires_acceptance_commit () =
      check string "terminal result waits for acceptance commit"
        "terminal acceptance commit probe"
        detail
+   | Error (Schedule_runner.Occurrence_dispatch_rejection detail)
    | Error (Schedule_runner.Terminal_dispatch_rejection detail) ->
      fail ("terminal retry became a payload rejection: " ^ detail)
    | Ok _ -> fail "terminal retry returned before acceptance commit");
@@ -4192,9 +4224,9 @@ let () =
     [ ( "keeper_wake"
       , [ test_case "board post schedule is rejected without mutation" `Quick
             test_board_post_schedule_is_rejected_without_mutation
-        ; test_case "keeper wake for an absent owner is terminal and enqueues nothing"
+        ; test_case "absent owner fails one occurrence and preserves recurrence"
             `Quick
-            test_keeper_wake_for_absent_owner_is_terminal_and_enqueues_nothing
+            test_keeper_wake_for_absent_owner_preserves_recurrence
         ; test_case "keeper wake for a not-current owner meta is retained" `Quick
             test_keeper_wake_for_not_current_owner_meta_is_retained
         ; test_case "keeper wake records wake receipt" `Quick

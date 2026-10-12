@@ -175,7 +175,11 @@ let execute_http ~observe ~resolved ~request ~prompt ~requirement =
              if retryable_candidate rejection then retryable := true); Ok ()) ~validate attempt in
       Runtime_exact_lane_backpressure.observe ~resolved flow;
       (match flow with
-       | Ok success -> Ok (success.accepted, (Exact.flow_success_candidate success.transport_success).visit.identity.candidate_id)
+       | Ok success ->
+         Ok (success.accepted,
+             (Exact.flow_success_candidate success.transport_success).visit.identity.candidate_id,
+             (Exact.flow_success_output success.transport_success).usage
+             |> Option.map Runs.usage_of_api_usage)
        | Error (Exact.Flow_execution_terminal {cause;_}) ->
          (match cause with
           | Exact.Flow_exact_execution_failed f -> failed f.candidate f.cause
@@ -322,7 +326,7 @@ let execute ~cli_runner ~base_path ~observe ~request ~prompt =
         ~on_failure:(fun failure -> observe (Failure {transport="cli";detail=Keeper_lane_cli_oneshot.failure_to_string failure})) ()
       |> Result.map (fun (slot, raw) ->
         observe (Response {slot;output=raw});
-        raw, slot)
+        raw, slot, None)
       |> Result.map_error (fun failures ->
         let error = cli_error failures in
         match previous, error with
@@ -357,11 +361,12 @@ let run_with ~base_path ~execute ~identity request =
     match observation with
     | Dispatch slot -> selected := Some slot
     | Response _ | Raw_response _ | Rejection _ | Failure _ | Http_failure _ -> () in
-  let complete outcome output =
+  let complete ?usage outcome output =
     Runs.mark_completed registry ~run_id ~outcome
       ~elapsed_s:(Mtime.Span.to_float_ns (Mtime.span monotonic_start (Mtime_clock.now ())) /. 1e9)
-      ~selected_slot:!selected ~output:(`Assoc ["result", output; "attempts", `List (List.rev !attempts);
+      ~selected_slot:!selected ?usage ~output:(`Assoc ["result", output; "attempts", `List (List.rev !attempts);
         "semantic_verification", `String "not_performed"])
+      ()
     |> Result.map_error Runs.completion_error_to_string in
   let fail error =
     let detail = A.error_to_string error in
@@ -382,11 +387,11 @@ let run_with ~base_path ~execute ~identity request =
   try
     let result =
       let* prompt = prompt |> Result.map_error (fun detail -> A.Transport_unavailable detail) in
-      let* raw, slot_id = execute ~observe ~request ~prompt in
+      let* raw, slot_id, usage = execute ~observe ~request ~prompt in
       selected := Some slot_id;
       let* decision = A.decode request raw |> Result.map_error (fun s -> A.Invalid_response s) in
       let* trace = A.trace_of_json (A.trace_json {run_id;slot_id}) |> Result.map_error (fun s -> A.Invalid_response s) in
-      let* () = complete Runs.Succeeded raw |> Result.map_error (fun s -> A.Transport_unavailable s) in
+      let* () = complete ?usage Runs.Succeeded raw |> Result.map_error (fun s -> A.Transport_unavailable s) in
       Ok {A.decision;trace} in
     match result with Ok answer -> Ok answer | Error detail -> fail detail
   with
@@ -404,5 +409,5 @@ module For_testing = struct
     ~execute:(fun ~observe ~request ~prompt ->
       let* raw, slot = execute ~request ~prompt in
       observe (Response {slot;output=raw});
-      Ok (raw,slot))
+      Ok (raw,slot,None))
 end

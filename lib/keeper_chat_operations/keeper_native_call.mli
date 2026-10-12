@@ -21,7 +21,9 @@ type change =
   | Bind of { observed : state; call : t }
   | Checkpoint of { call_id : string; observed : Keeper_checkpoint_ref.t; checkpoint : Keeper_checkpoint_ref.t }
   | Terminal of { call_id : string; disposition : Agent_core.Agent.execution_terminal_disposition }
-  | Acknowledge of string
+(** Retirement of a terminal call is not a change here: the Owner's actual
+    settlement transaction replaces a Retire receipt with no native call. *)
+
 val transition : state -> change -> (state, string) result
 
 val create :

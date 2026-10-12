@@ -27,6 +27,21 @@ status: runbook
 repository 전체 `@runtest` 회귀는 별도 manual lane이며 필수 profile 통과가 전체 회귀
 또는 production-ready 판정을 뜻하지 않습니다.
 
+### Release note guide coverage (규약 제안 #1)
+
+노트 작성이 끝나면 가이드 커버리지를 계수해 노트 옆에 남긴다(규약 제안 #1의
+"숫자가 쌓인 뒤 게이트화 판단" 재료):
+
+```
+python3 scripts/release/count-guideless-added.py --tag <tag> \
+  --note-path docs/releases/<tag>.md \
+  --out-md docs/releases/guide-metrics-<tag>.md
+python3 scripts/release/run-guideless-check.sh /tmp/guideless-run   # 시나리오 영수증
+```
+
+`가이드 없음(...)` 표기는 규칙상 허용되지만, 계수 결과(`guide-metrics-<tag>.md`)는
+receipt 묶음에 포함해 다음 제안의 게이트화 판단 근거로 남긴다.
+
 ## Production-ready bundle
 
 위 artifact 증거에 [Production Readiness Gates](PRODUCTION-READINESS-GATES.md)의

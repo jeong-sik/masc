@@ -57,7 +57,7 @@ let run_with ~keepers_dir ~keeper_name ~judge =
         | [] -> finish ~committed ~pending_reason
         | part :: siblings ->
           match judge part with
-          | Deferred detail -> Pending detail
+          | Deferred detail -> finish ~committed ~pending_reason:detail
           | Awaiting_evidence ->
             evaluate ~committed ~pending_reason:"admission awaits further evidence" siblings
           | Input_size_refused detail ->

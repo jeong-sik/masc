@@ -60,8 +60,13 @@ val bind_to_journal :
     retry after a restart arrives, and a lazy restore could answer an ask
     the operator already settled.
 
-    Restore validates every complete v2 row before replay. Invalid rows or
-    unavailable storage fence mutations until a successful explicit restore.
+    Restore validates every complete v2 row before replay. Rows carrying
+    this schema's tag that violate its contract, or unavailable storage,
+    fence mutations until a successful explicit restore. A complete row the
+    schema cannot read at all — a foreign or future schema's line, or text
+    that is not a JSON object — is replayed as nothing instead: it is
+    counted by {!journal_skipped}, logged, and left in the journal, so one
+    unreadable line cannot stop the whole store.
     A bound store durably appends every mutation; a known commit receipt
     survives cleanup failure, while an unconfirmed append fences the store. The server binds the shared
     store once at boot; tests bind per-store temp directories. Calling it
@@ -70,9 +75,36 @@ val bind_to_journal :
     so tests can restore with a fixed clock, matching the other
     operations. *)
 
+val restore : ?now:float -> base_path:string -> t -> unit
+(** The explicit un-fence the fencing contract names: the same synchronous
+    rebind-and-re-restore {!bind_to_journal} performs at boot, callable while
+    the store is up. The operator-facing surface for this is the CanAdmin
+    journal-restore endpoint (design D4); corrupt rows are never rewritten or
+    skipped by the library — a moved-aside journal file is what a successful
+    restore reads after {b Corrupt_journal}, and an again-readable journal is
+    what it reads after {b Journal_unavailable}. *)
+
+val journal_stats : t -> (int64 * int) option
+(** [(bytes, rows)] of the bound journal file, read from the actual file so a
+    fenced store still reports its size, or [None] when the store is unbound
+    or the file cannot be stat'd. The bounded-boot-read observation the
+    design's D4a promises: the fence never hides how big the journal has
+    grown, so growth without a working lane is visible before the next boot
+    pays for it. *)
+
 type journal_error = Corrupt_journal of string | Journal_unavailable of string
 val journal_error : t -> journal_error option
 (** A restore error fences all journal mutations; no uncertain count establishes health. *)
+val journal_skipped : t -> int
+(** Complete journal rows the last [bind_to_journal] restore could not read
+    under this schema — a foreign or future schema's line, text that is not
+    JSON, or JSON that is not an object. They replay as nothing and are
+    counted here so the skip stays observable; the journal file itself is
+    never cleaned, so the skipped rows keep their durable evidence, and
+    each skipped row is also logged. The count is per restore: it resets to
+    0 on every [bind_to_journal]. Rows that carry this schema's tag but
+    violate its contract do not count here — they fail the restore
+    ({!journal_error}) instead. *)
 type uncertain_attempt =
   { consume_id : string; base_path : string; keeper_name : string
   ; tool_name : string; args_fingerprint : string; consumed_at : float }

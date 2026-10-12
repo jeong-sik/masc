@@ -121,6 +121,27 @@ choose from the current lists rather than reusing these officer numbers.
   the trainer list showed officer 6 unavailable; no before/after training
   statistic was measured, so this does not establish a training increase.
 
+## Buying weapons
+
+At the province command prompt, `13`, Return opens the merchant menu when
+available. In March 220, province 10 showed `4.武器を買う`; `4`, Return opened
+an officer list headed `武器`. Sima Yi was number 1 with a displayed value of 1.
+Choose from the current list, then send the officer number and Return.
+
+The next prompt was `武器をいくら買いますか(1-99)?`. Separate `5`, `0`, Return
+inputs entered 50 and returned to province commands. Gold fell from 450 to 400.
+A later merchant officer list displayed Sima Yi's weapon value as 51.
+The province officer information panel displays age, service, soldiers, loyalty,
+intelligence, martial ability and charm; do not read its intelligence or other
+attributes as training or armament. Use a labeled battle information panel or
+an explicit action result to verify those values. This purchase establishes
+weapon value 1 to 51, not a measured armament value or conversion formula.
+
+Confirm the resulting gold and the selected officer's actual information before
+claiming improved equipment. This observation does not prove improved combat
+results. In a separate province-19 state, `13`, Return returned to the province
+prompt without opening the merchant menu; no purchase was established there.
+
 ## Going to war
 
 Observed 220年1月 as 曹丕, from 20 against 31 (劉備).
@@ -160,14 +181,85 @@ and confirm the next officer or battle prompt before continuing.
   a partly drawn command menu; a later Return exposed the next officer's command
   prompt. The displayed troop totals did not change, so this does
   not establish an enemy hit or a universally valid attack direction.
-- `4` asks `誰の様子を見ますか? (0:見る RET:やめる)`. `0` displayed an officer
-  panel including soldiers, training and armament. From the officer-choice
-  prompt, `RET:やめる` indicates Return to leave. Inspect training rather than
-  assuming recruited troops are trained.
+- `4` asks `誰の様子を見ますか? (0:見る RET:やめる)`. Move the information
+  cursor with the hex-direction digits, then press `0` to inspect the officer
+  on that hex. This is an information cursor, not a troop movement command.
+  In the March 220 province-21 battle, `0` first showed Yue Jin's panel:
+  soldiers 10, training 53 and martial ability 86. Separate `2`, `2`, `0`
+  inputs then showed Xu Huang: soldiers 50, training 61 and martial ability 92.
+  That sequence depends on the current positions; it is not a universal way to
+  select Xu Huang. Confirm the displayed name before using the numbers.
+  `RET:やめる` indicates Return to leave. Inspect the resulting command prompt
+  before sending another command. Current training values do not establish a
+  training gain, and soldier values use the game's display units.
+  After a later cursor sequence and `0`, Xu Huang's panel remained displayed.
+  Retained information alone does not identify the selected hex or establish
+  that an enemy occupies it.
 - `6` asks `全軍退却しますか(Y/N)?`; after `y` each unit asks
   `<退却>:20 <武将>はどこに退却しますか?`. Type the province number shown and
   Return; an empty Return is not an answer. After the last unit the map comes
   back with the next province's command prompt.
+
+## Battle defection work
+
+In a March 220 province-21 battle, the current Xu Huang command accepted
+`5` for work, then `2` for `寝返り`. This opened an enemy target list containing
+Zhu Huan and Lu Meng. The target number uses a numeric entry field: `2` appeared
+in that field, and Return submitted Lu Meng. Do not send a target number without
+checking its displayed name; list positions depend on the current enemy force.
+
+The next prompt asked `いかほど金を使いますか(0-78)?`. Separate `7`, `8` presses
+entered 78; Return then opened `よろしいですか(Y/N)?`, and `y` confirmed the
+attempt. That maximum was the force's current gold, not a general input limit.
+Read the amount prompt rather than reusing the observed maximum in another battle.
+
+After confirmation, the next own command was Yue Jin. Own gold fell from 78 to
+0, while displayed troops and officers remained enemy 128 / two and own 103 /
+four. This establishes target selection, payment and command progression;
+it does **not** establish a successful defection or faction transfer. Verify an
+actual result and the target's subsequent faction before claiming success.
+
+## A battle continuing into the next month
+
+In a manually controlled Cao Pi campaign, province 20 attacked province 21
+in January 220. After the January 30 battle command, the game returned to
+province commands. That return did **not** establish a completed battle:
+February's information screen still listed both sides at province 21.
+The defending Sun Quan force showed 231 soldiers and five officers; the
+attacking Cao Pi force showed 46 and one officer, gold 110 and food 91.
+These are the game's displayed units, not exact individual casualty counts.
+
+At the current province command, `8`, Return opens information. `1`, Return
+asks which province to inspect. An owned province's resources were displayed
+directly. Inspecting foreign province 21 required choosing an investigator;
+after that officer's number and Return, the ongoing battle table appeared.
+An empty Return canceled the investigator selection in a separate observation.
+Read the current prompts rather than assuming every inquiry is a free lookup.
+
+To reinforce that ongoing battle from province 20, `3`, Return, then `21`,
+Return opened the officer sortie list. Chen Tai was the only officer, number 1,
+with soldiers 10. Selecting him and ending selection with an empty Return
+opened gold and food entry. Gold 100 and food 50 were each visibly verified
+before Return; the final prompt was `応援部隊を派遣しますか(Y/N)?`.
+`y` dispatched the reinforcement and returned to province commands.
+
+After the remaining February province commands ended, the same battle resumed
+on February 1 with Chen Tai's placement prompt. `0` placed him on a permitted
+hex. The battle then showed soldiers 56, two officers, gold 210 and food 141:
+the increases matched the dispatched soldiers 10, one officer, gold 100 and
+food 50. A later explicit Chen Tai command accepted normal movement south and
+advanced the battle date. Dispatch, arrival, placement and controllable movement
+are separate observations; confirm each before calling a reinforcement joined.
+
+For combat evidence, preserve the command screen, attack direction prompt and
+short successive observations. In the observed February 10 battle, Xiahou Wei's
+`2` attack, `1` normal, direction `2` south was followed by displayed enemy
+soldiers 235 → 233 and own soldiers 30 → 28 while the date remained February 10.
+Only later did February 11 and the opponent Zhu Huan's tactical label appear.
+Longer 300-frame calls can include the next opposing phase, so their final troop
+difference alone does not isolate the player's attack. This proves an observed
+attack-associated reduction before the next opposing phase, not exact casualties,
+a victory, or a completed winning campaign.
 
 ## In-game save
 

@@ -1335,7 +1335,7 @@ let test_purge_rebases_repetition_history_on_resume () =
     (Judged.read checkpoint.context = Ok original);
   let pairs = Masc.Keeper_run_tools_setup.initial_tool_calls
       ~history_memo:(Masc.Keeper_tool_progress_identity.History_memo.create ())
-      ~history_messages:(restored.messages @ cycle "new") in
+      ~history_messages:(restored.messages @ cycle "new") () in
   let seeded = Judged.seed_beyond ~judged:boundary.history_pairs pairs in
   Alcotest.(check int) "both retained and new pairs reach repetition after resume" 2 (List.length seeded);
   Judged.record live { boundary with history_pairs = List.length pairs };

@@ -3347,21 +3347,24 @@ let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~ex
   match execution with
   | Keeper_owner.Operation_failed { kind; detail; _ } ->
     let receipt = record_settled_error ~base_path ~keeper_name ~operation_id ~message:detail in
-    (match receipt with
-     | Ok _ -> ()
-     | Error error -> Log.Keeper.error
-         "keeper chat terminal journal failed keeper=%s operation=%s: %s"
-         keeper_name operation_id error);
     (match wire, receipt with
      | Some Wire_terminal_sent, _
      | None, Ok (Keeper_chat_event_log.Existing_terminal_error _) -> ()
-     | (Some Wire_started | None), (Ok _ | Error _) ->
+     | (Some Wire_started | None), Error journal_error ->
+       (* A rejected append leaves no durable seq, and both reconnect replay
+          and the RFC-0412 live dedup key off seq membership. Broadcasting the
+          terminal seq-less would close one live client while reconnecting
+          clients replay the operation as still running (#41687 recurrence),
+          so the failed delivery is logged, not projected as consumed. *)
+       Log.Keeper.error
+         "keeper chat terminal broadcast skipped after journal failure keeper=%s operation=%s: %s"
+         keeper_name operation_id journal_error
+     | (Some Wire_started | None), Ok receipt ->
        let seq, timestamp, message = match receipt with
-         | Ok (Keeper_chat_event_log.Existing_terminal_error { seq; ts; message }) ->
+         | Keeper_chat_event_log.Existing_terminal_error { seq; ts; message } ->
            Some seq, ts, message
-         | Ok (Keeper_chat_event_log.Recorded_terminal_error { seq; ts }) ->
-           Some seq, ts, detail
-         | Error _ -> None, Time_compat.now (), detail in
+         | Keeper_chat_event_log.Recorded_terminal_error { seq; ts } ->
+           Some seq, ts, detail in
        let event = Ag_ui.make_event ~timestamp
          ~thread_id:("keeper:" ^ keeper_name)
          ~run_id:(Some ("keeper-operation-run-" ^ operation_id))

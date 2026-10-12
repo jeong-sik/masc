@@ -61,7 +61,7 @@ let with_gate f =
    from the journal before anything consults the store. *)
 let with_journal (f :
     clock:'a -> journal:'b -> make:(unit -> Late.t) ->
-    remove:(unit -> unit) -> unit) =
+    remove:(unit -> unit) -> base_path:string -> unit) =
   Eio_main.run (fun env ->
       let clock = Eio.Stdenv.clock env in
       let dir =
@@ -97,7 +97,7 @@ let with_journal (f :
             Late.bind_to_journal ~base_path:dir store;
             store
           in
-          f ~clock ~journal ~make ~remove)
+          f ~clock ~journal ~make ~remove ~base_path:dir)
         ~finally:remove)
 
 (* Drain what the stream holds without blocking on an empty one. *)
@@ -332,7 +332,7 @@ let test_a_remembered_answer_past_its_moment_is_asked_about_again () =
 (* ── durability across a restart (design D2) ─────────────────────── *)
 
 let test_a_remembered_answer_survives_a_restart_and_settles_the_retry () =
-  with_journal (fun ~clock:_ ~journal:_ ~make ~remove:_ ->
+  with_journal (fun ~clock:_ ~journal:_ ~make ~remove:_ ~base_path:_ ->
       (* First life: the ask times out and the operator answers late; both
          rows are durable before the process "dies". *)
       let first = make () in
@@ -369,7 +369,7 @@ let test_a_remembered_answer_survives_a_restart_and_settles_the_retry () =
         true)
 
 let test_a_workspace_cannot_consume_another_workspaces_answer () =
-  with_journal (fun ~clock:_ ~journal:_ ~make ~remove:_ ->
+  with_journal (fun ~clock:_ ~journal:_ ~make ~remove:_ ~base_path:_ ->
       let first = make () in
       Late.note_timed_out first ~base_path:"/ws/a" ~keeper_name:keeper
         ~tool_call_id:"call-1" ~tool_name:"Edit"
@@ -396,7 +396,7 @@ let test_a_workspace_cannot_consume_another_workspaces_answer () =
         true)
 
 let test_a_consumed_answer_is_never_reoffered_after_a_restart () =
-  with_journal (fun ~clock:_ ~journal:_ ~make ~remove:_ ->
+  with_journal (fun ~clock:_ ~journal:_ ~make ~remove:_ ~base_path:_ ->
       let first = make () in
       Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"call-1" ~tool_name:"Edit"
@@ -425,7 +425,7 @@ let test_a_consumed_answer_is_never_reoffered_after_a_restart () =
         true)
 
 let test_a_consume_without_deliver_reads_as_uncertain () =
-  with_journal (fun ~clock:_ ~journal ~make ~remove ->
+  with_journal (fun ~clock:_ ~journal ~make ~remove ~base_path:_ ->
       let first = make () in
       Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"call-1" ~tool_name:"Edit"
@@ -498,7 +498,7 @@ let test_a_consume_without_deliver_reads_as_uncertain () =
         true)
 
 let test_later_delivery_preserves_earlier_attempt () =
-  with_journal (fun ~clock:_ ~journal ~make ~remove:_ ->
+  with_journal (fun ~clock:_ ~journal ~make ~remove:_ ~base_path:_ ->
     let store = make () in
     let args = edit_input "lib/a.ml" in
     let now = Unix.gettimeofday () -. Late.ttl_sec -. 100. in
@@ -560,7 +560,7 @@ let test_later_delivery_preserves_earlier_attempt () =
 
 let test_malformed_consume_cannot_restore_approval () =
   List.iter (fun missing ->
-    with_journal (fun ~clock:_ ~journal ~make ~remove:_ ->
+    with_journal (fun ~clock:_ ~journal ~make ~remove:_ ~base_path:_ ->
       let first = make () in
       let args = edit_input "lib/a.ml" in
       Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
@@ -588,23 +588,145 @@ let test_malformed_consume_cannot_restore_approval () =
         (Result.is_error (Late.uncertain_attempts second ~base_path:workspace))))
     ["base_path"; "keeper"; "tool"; "fingerprint"; "at"]
 
-let test_pre_id_journal_fails_closed () =
-  with_journal (fun ~clock:_ ~journal ~make ~remove:_ ->
+let test_pre_id_schema_rows_are_skipped_not_fatal () =
+  (* A row from before the schema tag existed names no v2 identity, so it
+     cannot settle or fence anything: restore skips it, reports it, and the
+     store keeps working. *)
+  with_journal (fun ~clock:_ ~journal ~make ~remove:_ ~base_path:_ ->
     Fs_compat.mkdir_p (Filename.dirname journal);
     Out_channel.with_open_bin journal (fun out ->
       output_string out "{\"op\":\"consume\",\"at\":0}\n");
     let store = make () in
-    check bool "old schema is an explicit fault" true
-      (match Late.journal_error store with Some (Late.Corrupt_journal _) -> true | _ -> false);
-    check bool "operator read cannot claim no uncertainty" true
-      (Result.is_error (Late.uncertain_attempts store ~base_path:workspace));
+    check bool "an old-schema row is not an explicit fault" true
+      (Late.journal_error store = None);
+    check int "the unreadable row is reported" 1 (Late.journal_skipped store);
     Late.note_timed_out store ~base_path:workspace ~keeper_name:keeper
       ~tool_call_id:"new" ~tool_name:"Edit" ~args:(edit_input "lib/a.ml") ();
-    check bool "faulted store cannot create reusable answer" true
+    check bool "a new late answer still stands" true
       (Late.remember_late store ~base_path:workspace ~keeper_name:keeper
-        ~tool_call_id:"new" ~actor:"operator" Registry.Approve () = Late.No_matching_ask);
-    check bool "faulted ack explicitly unavailable" true
-      (Late.ack_uncertain store ~base_path:workspace ~keeper_name:keeper ~consume_id:"unknown" () = Late.Ack_not_journaled))
+        ~tool_call_id:"new" ~actor:"operator" Registry.Approve ()
+       = Late.Remembered { tool_name = "Edit" });
+    check bool "the old row names nothing ackable" true
+      (Late.ack_uncertain store ~base_path:workspace ~keeper_name:keeper
+        ~consume_id:"unknown" () = Late.Not_uncertain);
+    check bool "the operator read is not fenced" true
+      (Result.is_ok (Late.uncertain_attempts store ~base_path:workspace)))
+
+let test_one_foreign_row_among_valid_rows_does_not_fence_restore () =
+  with_journal (fun ~clock:_ ~journal ~make ~remove:_ ~base_path:_ ->
+    let first = make () in
+    let args = edit_input "lib/a.ml" in
+    Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+      ~tool_call_id:"call-1" ~tool_name:"Edit" ~args ();
+    ignore
+      (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:"call-1" ~actor:"operator" Registry.Approve ());
+    (* A future schema's row lands after the valid history, the way a
+       downgrade or a stray write leaves it. *)
+    let oc = open_out_gen [Open_append] 0o644 journal in
+    output_string oc
+      (Yojson.Safe.to_string
+         (`Assoc
+           [ ("schema", `String "masc.late_approval.v3")
+           ; ("op", `String "remember_late") ])
+      ^ "\n");
+    close_out oc;
+    let second = make () in
+    check bool "restore succeeds past the foreign row" true
+      (Late.journal_error second = None);
+    check int "the foreign row is counted" 1 (Late.journal_skipped second);
+    check bool "the remembered answer still settles the retry" true
+      (Late.take second ~base_path:workspace ~keeper_name:keeper
+        ~tool_name:"Edit" ~args () = Some Registry.Approve);
+    check bool "one use still consumes it" true
+      (Late.take second ~base_path:workspace ~keeper_name:keeper
+        ~tool_name:"Edit" ~args () = None);
+    (* Rebinding replays the same journal: the count is per restore, and a
+       still-skipped foreign row proves the file kept it. *)
+    let third = make () in
+    check int "the count is per restore, not cumulative" 1
+      (Late.journal_skipped third);
+    check bool "the store stays unfenced" true
+      (Late.journal_error third = None))
+
+let test_unreadable_row_shapes_are_all_counted () =
+  with_journal (fun ~clock:_ ~journal ~make ~remove:_ ~base_path:_ ->
+    let first = make () in
+    let args = edit_input "lib/a.ml" in
+    Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+      ~tool_call_id:"call-1" ~tool_name:"Edit" ~args ();
+    ignore
+      (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+        ~tool_call_id:"call-1" ~actor:"operator" Registry.Approve ());
+    let oc = open_out_gen [Open_append] 0o644 journal in
+    output_string oc "this is not json at all\n";
+    output_string oc "[1,2,3]\n";
+    output_string oc "{\"schema\":\"masc.late_approval.v1\"}\n";
+    close_out oc;
+    let second = make () in
+    check int "every unreadable shape is counted" 3
+      (Late.journal_skipped second);
+    check bool "the restore itself stays clean" true
+      (Late.journal_error second = None);
+    check bool "the valid history still settles the retry" true
+      (Late.take second ~base_path:workspace ~keeper_name:keeper
+        ~tool_name:"Edit" ~args () = Some Registry.Approve))
+
+let test_unavailable_journal_exits_through_explicit_restore () =
+  with_journal (fun ~clock:_ ~journal ~make ~remove ~base_path:dir ->
+    ignore remove;
+    let store = make () in
+    Late.note_timed_out store ~base_path:workspace ~keeper_name:keeper
+      ~tool_call_id:"before" ~tool_name:"Edit" ~args:(edit_input "lib/a.ml") ();
+    (* Fence the store the way an unconfirmed append failure leaves it:
+       make the journal path unwritable-as-a-file (a directory sits where
+       the file should be), so the next append gets no commit receipt. *)
+    Unix.rename journal (journal ^ ".bak");
+    Unix.mkdir journal 0o700;
+    Late.note_timed_out store ~base_path:workspace ~keeper_name:keeper
+      ~tool_call_id:"during" ~tool_name:"Edit" ~args:(edit_input "lib/b.ml") ();
+    check bool "an append without a commit receipt fences the store" true
+      (match Late.journal_error store with
+       | Some (Late.Journal_unavailable _) -> true
+       | _ -> false);
+    (* Storage becomes available again — the real operator precondition
+       for this fence is that the medium or mount came back. *)
+    Unix.rmdir journal;
+    Unix.rename (journal ^ ".bak") journal;
+    Late.restore ~base_path:dir store;
+    check bool "restore lifts the unavailable fence" true
+      (Late.journal_error store = None);
+    check bool "the repaired store answers reads again" true
+      (Result.is_ok (Late.uncertain_attempts store ~base_path:workspace)))
+
+let test_corrupt_journal_survives_restart_until_operator_moves_it_aside () =
+  with_journal (fun ~clock:_ ~journal ~make ~remove ~base_path:dir ->
+    ignore remove;
+    Fs_compat.mkdir_p (Filename.dirname journal);
+    Out_channel.with_open_bin journal (fun out ->
+      output_string out "{\"schema\":\"masc.late_approval.v2\",\"op\":\"consume\"}\n");
+    (* Restart: the corrupt row fences the fresh store too. *)
+    let fenced = make () in
+    check bool "corruption survives the restart" true
+      (match Late.journal_error fenced with
+       | Some (Late.Corrupt_journal _) -> true
+       | _ -> false);
+    (* Restore alone must NOT lift this fence: the library never skips or
+       rewrites rows. *)
+    Late.restore ~base_path:dir fenced;
+    check bool "restore keeps the corrupt fence" true
+      (match Late.journal_error fenced with
+       | Some (Late.Corrupt_journal _) -> true
+       | _ -> false);
+    (* The documented operator repair: move the journal aside. The corrupt
+       row's evidence is preserved in the moved file; the fence lifts on
+       the next explicit restore, and the store keeps answering. *)
+    Sys.rename journal (journal ^ ".corrupt");
+    Late.restore ~base_path:dir fenced;
+    check bool "moving the corrupt journal aside lifts the fence" true
+      (Late.journal_error fenced = None);
+    check bool "the repaired store writes again" true
+      (Result.is_ok (Late.uncertain_attempts fenced ~base_path:workspace)))
 
 let () =
   run "keeper_late_approval"
@@ -613,7 +735,20 @@ let () =
             test_later_delivery_preserves_earlier_attempt
         ; test_case "malformed v2 consume cannot resurrect approval" `Quick
             test_malformed_consume_cannot_restore_approval
-        ; test_case "pre-ID schema fails closed" `Quick test_pre_id_journal_fails_closed
+        ; test_case "pre-ID schema rows are skipped, not fatal" `Quick
+            test_pre_id_schema_rows_are_skipped_not_fatal
+        ; test_case "one foreign row among valid rows does not fence restore"
+            `Quick test_one_foreign_row_among_valid_rows_does_not_fence_restore
+        ; test_case "unreadable row shapes are all counted" `Quick
+            test_unreadable_row_shapes_are_all_counted
+        ; test_case
+            "an unavailable journal exits through the explicit restore"
+            `Quick test_unavailable_journal_exits_through_explicit_restore
+        ; test_case
+            "a corrupt journal survives restart until the operator moves it \
+             aside"
+            `Quick
+            test_corrupt_journal_survives_restart_until_operator_moves_it_aside
         ; test_case "an answer after the timeout is remembered" `Quick
             test_an_answer_after_the_timeout_is_remembered
         ; test_case "an answer that names no ask is dropped" `Quick

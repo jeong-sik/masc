@@ -358,6 +358,8 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       `Assoc [ "query", `String "keeper_lane_status" ]
   | "keeper_memory_search" ->
       `Assoc [ ("query", `String "memory needle"); ("limit", `Int 2) ]
+  | "keeper_memory_select" ->
+      `Assoc [ ("purpose", `String "tool matrix memory selection") ]
   | "keeper_memory_retract" ->
       `Assoc
         [ "memory_id", `String ("sha256:" ^ String.make 64 '0')

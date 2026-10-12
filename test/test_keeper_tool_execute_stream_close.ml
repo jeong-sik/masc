@@ -277,7 +277,7 @@ let payload bytes =
   let line = "execute lane ceiling fixture 0123456789abcdefghijklmnopqrstuvwxyz\n" in
   String.init bytes (fun index -> line.[index mod String.length line])
 
-let with_completed_execute ~lane ~stdout check_result =
+let with_completed_execute ?(observe = fun ~base_path:_ _ -> ()) ~lane ~stdout check_result =
   setup @@ fun ~config ~meta ~factory ~playground ->
   Fun.protect
     ~finally:(fun () ->
@@ -301,6 +301,7 @@ let with_completed_execute ~lane ~stdout check_result =
           ~args:(typed_exec_args ~cwd:playground)
           ()
       in
+      observe ~base_path:config.Workspace.base_path outcome;
       check_result ~base_path:config.Workspace.base_path
         (Yojson.Safe.from_string outcome.raw_output))
 
@@ -354,6 +355,59 @@ let test_narrow_lanes_still_store_20000_bytes () =
           (stored_bytes ~base_path "output_artifact" result)))
     [ "Codex", codex_lane; "Antigravity", antigravity_lane ]
 
+let test_manifest_preserves_execute_answer_identity () =
+  let observe ~base_path (outcome : Keeper_tool_execution.t) =
+    let require = function Ok value -> value | Error error -> fail error.Tool_bridge.message in
+    let original = match outcome.data with Some value -> value | None -> fail "Execute typed data missing" in
+    let result = Tool_result.make_ok ~tool_name:"tool_execute" ~start_time:(Tool_timing.start ())
+        ~data:original ?metadata:outcome.metadata () in
+    let project result =
+      let content = match Tool_bridge.to_agent_core_typed_result ~base_path
+          ~answer_reader:(fun output_text -> Keeper_tool_answer.answer ~tool_name:"Execute" ~output_text) result with
+        | Ok result -> result.Agent_core.Types.content
+        | Error error -> fail error.Agent_core.Types.message in
+      match Tool_output.decode_from_agent_core content with
+      | Tool_output.Decoded reference ->
+        check string "actual Execute uses manifest projection" Tool_output.artifact_manifest_mime reference.mime;
+        content, reference
+      | _ -> fail "Execute artifacts must project their durable manifest" in
+    let digest ?base_path content =
+      match Keeper_tool_progress_identity.digest_tool_io ?base_path ~tool_name:"Execute"
+          ~input:(`Assoc ["command",`String "fixture"]) ~output_text:content () with
+      | Some io -> io.Keeper_tool_progress_identity.output_fingerprint
+      | None -> fail "Execute fingerprint missing" in
+    let first, reference = project result in
+    let changed_time = match original with
+      | `Assoc fields -> `Assoc (("execution_time_ms",`Int 987654)::List.remove_assoc "execution_time_ms" fields)
+      | _ -> fail "Execute payload must be an object" in
+    let second_result = Tool_result.make_ok ~tool_name:"tool_execute" ~start_time:(Tool_timing.start ())
+        ~data:changed_time () |> Tool_bridge.attach_artifact_manifest ~base_path |> require in
+    let second, second_reference = project second_result in
+    check bool "different measurements retain different manifests" false (reference.sha256=second_reference.sha256);
+    check string "verified manifest equals inline producer answer" (digest outcome.raw_output) (digest ~base_path first);
+    check string "measurement does not invent progress through manifest" (digest ~base_path first) (digest ~base_path second);
+    check bool "unverified manifests remain distinct" false (digest first=digest second);
+    let store = Tool_blob_store.create ~base_path in
+    let forged manifest mime =
+      let reference = Tool_blob_store.put_durable store ~bytes:(Yojson.Safe.to_string manifest) ~mime in
+      match Tool_output.with_answer_fingerprint reference second_reference.answer_fingerprint with
+      | Ok reference -> Tool_output.encode_for_agent_core (Tool_output.Stored reference)
+      | Error error -> fail (Tool_output.make_error_to_string error) in
+    let mismatch = Tool_output.artifact_manifest_to_json
+        ~content:(Yojson.Safe.to_string changed_time) ~structured_content:original in
+    let malformed = `Assoc ["schema",`String "masc.tool-result-artifact-manifest.v1"] in
+    List.iter (fun content -> check string "invalid envelope cannot claim semantic identity"
+        (digest content) (digest ~base_path content))
+      [forged mismatch Tool_output.artifact_manifest_mime;
+       forged malformed Tool_output.artifact_manifest_mime;
+       forged (Tool_output.artifact_manifest_to_json ~content:(Yojson.Safe.to_string changed_time)
+         ~structured_content:changed_time) "application/json"];
+    let payload_after = stored_bytes ~base_path "output_artifact" original in
+    check string "semantic verification leaves command output intact" (payload 40000) payload_after
+  in
+  with_completed_execute ~observe ~lane:claude_lane ~stdout:(payload 40000)
+    (fun ~base_path:_ _ -> ())
+
 let () =
   Alcotest.run
     "keeper-tool-execute-stream-close"
@@ -366,7 +420,8 @@ let () =
               (test_rejected_branch_finalizes_stream case))
           rejected_cases )
     ; ( "lane-ceiling"
-      , [ test_case "Claude Code lane returns 20,000 bytes inline" `Quick
+      , [ test_case "manifest preserves Execute answer identity" `Quick test_manifest_preserves_execute_answer_identity
+        ; test_case "Claude Code lane returns 20,000 bytes inline" `Quick
             test_claude_lane_returns_20000_bytes_inline
         ; test_case "non-UTF-8 capture remains byte-identical across JSON" `Quick
             test_non_utf8_capture_uses_artifacts

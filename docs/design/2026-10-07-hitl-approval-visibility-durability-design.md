@@ -279,3 +279,41 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
 - 2026-10-09 개정(task-1665 운영자 P2 3건 반영): §D4 rearm 전제를 CAS 가 수용하는 유일 조합으로
   축소(`Exact_restart_quarantined` 제외, 이유 문서화), rearm 을 `Keeper_gate` 위임으로(직접 CAS
   금지), late approval 테스트의 `For_testing.fail_next_deliver` seam 제거(저널 직접 기록으로 대체).
+- 2026-10-10 추가(task-2237, late-approval 저널 fence 의 정의된 출구): §D4a 신설.
+
+### D4a — 늦은 승인 저널의 fence 출구와 부팅 읽기 상한 (task-2237)
+
+착지 뒤 소스 직독(#41768, main 36db387f3f)으로 확인된 빈틈: 저널 오류의 fence 는 안전하지만
+나오는 길이 없었다. `Journal_unavailable` 은 서버 재시작뿐(`bind_to_journal` 호출부가
+`server_bootstrap_loops.ml` 하나), `Corrupt_journal` 은 재시작해도 같은 줄에서 다시 fence.
+health 는 `operator_action_required=true` 만 주고 무엇을 해야 하는지는 어디에도 없었다.
+
+**결정 1 — `Journal_unavailable` 의 출구는 CanAdmin 복원 엔드포인트.**
+`POST /api/v1/keepers/hitl/late-approval-restore`(CanAdmin, body 없음)가 부팅 경로와 같은
+동기 재bind·재복원(`Keeper_late_approval.restore`)을 실행한다. 성공은 200 `ok:true` 로
+`journal_error = None` 복귀, 저장소가 아직 못 읽히면 503 `journal_unavailable` 에 원문 오류.
+fence 의 안전성(기억된 답 미기록·쓰기·ack 거절)은 그대로고, 재시작 요건만 사라진다.
+
+**결정 2 — `Corrupt_journal` 의 운영자 절차 (문서로 고정, 자동 수리 금지 유지).**
+라이브러리는 줄을 건너뛰거나 고치지 않는다(§D2 재확인). 절차:
+1. health 의 `status_reasons` 원문 오류로 손상 위치를 확인한다(재시작 뒤에도 동일).
+2. 복원 엔드포인트는 503 `journal_corrupt` 로 계속 실패한다 — 이것이 정상 동작이다.
+3. 저널 파일을 통째로 옮겨 둔다(`late-approval.jsonl` → `late-approval.jsonl.corrupt.<date>`).
+   잃는 것: 그 파일에 있던 기억된 답(TTL 900s 안의 것), 미확정 consume 의 경고 목록,
+   닫힌 시도의 증거. 옮기기 전 `GET /api/v1/keepers/hitl/late-approval-attempts` 로
+   미확정 consume_id 를 따로 적어 둔다(ack 재제출 근거).
+4. 복원 엔드포인트를 다시 부르면 빈 저널에서 `journal_error = None` 로 돌아온다.
+fence 사이의 같은 호출은 다시 물어본다(안전 방향), 15분 안의 기억된 답만 사라진다.
+
+**결정 3 — 부팅 읽기 상한: 이번 범위는 자동 정리 없음 + 크기 관측값.**
+닫힌 시도(consume+deliver/ack 완결)와 TTL 지난 note/remember 줄은 재생해도 아무 상태를
+만들지 않지만, 부팅 동기 읽기는 전체 파일을 검증한다. 세대 파일·압축은 새 파일 회전과
+크래시 경계를 만드는 확장이라 이번 범위에서 하지 않는다(§D2 "the journal is never cleaned"
+유지). 대신 health `keeper_hitl_gate` 섹션에 `late_approval_journal_bytes`(파일 크기)와
+`late_approval_journal_rows`(줄 수)를 내보내 방치 성장을 관측 가능하게 하고, 실측으로 부팅
+시간이 문제되는 워크로드가 확인되면 그때 세대 파일 설계를 연다.
+
+**AC 대응**: fence 원인별 행동은 health `operator_action_reasons` 에 reason 문자열로
+적혀 있고(복원 엔드포인트·이관 절차), `Journal_unavailable` → 복원 출구 통과 테스트,
+`Corrupt_journal` → 재시작 뒤에도 남음(고정) + 이관 뒤 복원으로 해소 테스트가
+`test/test_keeper_late_approval.ml` 에 있다.

@@ -1708,12 +1708,16 @@ let keeper_memory_write_with_outcome
          try Keeper_memory_admission_queue.append ~keepers_dir
              ~keeper_id:meta.name ~request_id fact with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn -> Error (Printexc.to_string exn) in
+         | exn -> Error (Keeper_memory_admission_queue.Append_failed (Printexc.to_string exn)) in
        (match saved with
-        | Error detail ->
-          Log.Keeper.warn "pending memory admission write failed keeper=%s request_id=%s: %s"
+        | Error error ->
+          let detail = Keeper_memory_admission_queue.append_error_to_string error in
+          let error_kind = match error with
+            | Capacity_exceeded _ -> Pending_admission_capacity_exceeded
+            | Append_failed _ -> Pending_admission_persistence_failed in
+          Log.Keeper.warn "pending memory admission failed keeper=%s request_id=%s: %s"
             meta.name request_id detail;
-          respond ~ok:false ~error_kind:Pending_admission_persistence_failed
+          respond ~ok:false ~error_kind
             [ "request_id", `String request_id;
               Write_receipt_key.store, `String "pending_memory_admission";
               Write_receipt_key.detail, `String detail ]

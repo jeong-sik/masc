@@ -90,8 +90,4 @@ val effect_observation : prepared -> Keeper_provider_attempt_effect.t
     checkpoint-based continuation path; it does not claim zero historical
     tool effects. *)
 
-val acknowledge : binding:binding -> (unit, string) result
-(** Only after the host durably accepts this call's returned checkpoint or
-    turn outcome. Retire receipts may be acknowledged; active/unknown calls
-    are retained and rejected. Normal operation settlement can perform the
-    same acknowledgement within its own Owner transaction. *)
+

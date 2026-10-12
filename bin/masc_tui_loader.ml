@@ -455,13 +455,27 @@ let replace_keeper_rows ~preserve_on_error (state : state)
     ~selected_keeper:selected_keeper_name_after_refresh
   |> apply_keeper_log_snapshot state
 
-(** Load state from .masc directory *)
-let load_from_masc_dir (state : state) (base_path : string) =
-  let masc_dir = Filename.concat base_path Common.masc_dirname in
+(** What the .masc directory held at one moment. Reading it touches the disk
+    and changes no state, so it can run away from the UI thread; applying it
+    is [apply_local_workspace]. *)
+type local_reading =
+  { lr_agents : agent list
+  ; lr_rows : Masc_tui_overview_tasks.rows_reading
+  ; lr_tasks_domain : Masc_domain.task list
+  ; lr_tasks_error : string option
+  ; lr_task_flow : Masc_tui_task_flow.t option
+  ; lr_operator_stalled : Masc_tui_agenda.stalled Masc_tui_agenda.reading
+  ; lr_goal_task_links : task_goal_links_reading
+  ; lr_goals_to_confirm : Masc_tui_agenda.goal_to_confirm Masc_tui_agenda.reading
+  ; lr_keepers : keeper list
+  ; lr_keepers_error : string option
+  }
 
+let read_local_workspace (base_path : string) : local_reading =
+  let masc_dir = Filename.concat base_path Common.masc_dirname in
   (* Load agents *)
   let agents_dir = Filename.concat masc_dir "agents" in
-  state.agents <- (
+  let agents =
     if Sys.file_exists agents_dir && Sys.is_directory agents_dir then
       Sys.readdir agents_dir
       |> Array.to_list
@@ -483,23 +497,34 @@ let load_from_masc_dir (state : state) (base_path : string) =
              None
          )
     else []
-  );
-
-  (* Load tasks from their single durable source. The domain rows land first:
-     a detail view open across this refresh keeps its row even when the task
-     just turned terminal, because the projection below drops exactly those. *)
+  in
   let rows, tasks_domain, tasks_error, task_flow, operator_stalled, goal_task_links =
     load_active_tasks base_path
   in
-  state.tasks_domain <- tasks_domain;
-  state.goal_task_links <- goal_task_links;
+  let goals_to_confirm = load_goals_to_confirm base_path in
+  let keepers, keepers_error = load_keepers base_path in
+  { lr_agents = agents; lr_rows = rows; lr_tasks_domain = tasks_domain
+  ; lr_tasks_error = tasks_error; lr_task_flow = task_flow
+  ; lr_operator_stalled = operator_stalled; lr_goal_task_links = goal_task_links
+  ; lr_goals_to_confirm = goals_to_confirm; lr_keepers = keepers
+  ; lr_keepers_error = keepers_error }
+
+let apply_local_workspace (state : state) (base_path : string)
+    (reading : local_reading) =
+  state.agents <- reading.lr_agents;
+  (* The domain rows land first: a detail view open across this refresh keeps
+     its row even when the task just turned terminal, because the projection
+     below drops exactly those. *)
+  let rows = reading.lr_rows in
+  state.tasks_domain <- reading.lr_tasks_domain;
+  state.goal_task_links <- reading.lr_goal_task_links;
   state.task_reading <- rows;
   state.tasks <-
     (match rows with
      | Masc_tui_overview_tasks.Rows_read tasks -> tasks
      | Masc_tui_overview_tasks.Rows_unread
      | Masc_tui_overview_tasks.Rows_unavailable _ -> []);
-  state.tasks_error <- tasks_error;
+  state.tasks_error <- reading.lr_tasks_error;
   (* A chosen task that left rows that were read (finished, or back to Todo)
      is dropped here, where the rows change, and said once. A failed read
      keeps the choice: it did not look, so nothing left. With that task's
@@ -517,16 +542,18 @@ let load_from_masc_dir (state : state) (base_path : string) =
            (Printf.sprintf "%s left the held tasks; nothing is chosen"
               task_id))
      left);
-  state.task_flow <- task_flow;
-  state.operator_stalled <- operator_stalled;
-  state.goals_to_confirm <- load_goals_to_confirm base_path;
-
-  let keepers, error = load_keepers base_path in
-  replace_keeper_rows ~preserve_on_error:true state ~keepers ~error;
+  state.task_flow <- reading.lr_task_flow;
+  state.operator_stalled <- reading.lr_operator_stalled;
+  state.goals_to_confirm <- reading.lr_goals_to_confirm;
+  replace_keeper_rows ~preserve_on_error:true state ~keepers:reading.lr_keepers
+    ~error:reading.lr_keepers_error;
   load_selected_live_context state base_path
     (List.nth_opt state.keepers state.keeper_cursor);
-
   state.local_workspace <- Local_workspace_read
+
+(** Load state from .masc directory *)
+let load_from_masc_dir (state : state) (base_path : string) =
+  apply_local_workspace state base_path (read_local_workspace base_path)
 
 let clear_local_workspace ?(keep_keeper_rows = false) (state : state) =
   state.agents <- [];

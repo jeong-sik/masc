@@ -29,6 +29,13 @@
 
 let default_externalize_threshold_bytes = Common.max_tool_result_wire_bytes
 
+let semantic_answer_fingerprint reader (result : Tool_result.result) =
+  match reader (Tool_result.message result) with
+  | None -> None
+  | Some answer ->
+    Some
+      (Digestif.SHA256.(digest_string (answer |> Yojson.Safe.sort |> Yojson.Safe.to_string) |> to_hex))
+
 type projection_error_kind =
   | Artifact_storage_failure
   | Inline_budget_exceeded
@@ -129,7 +136,7 @@ let resolve_blob_store ?base_path () =
     available; otherwise pass through unchanged. A configured store that
     cannot persist the bytes returns a typed error: putting the oversized
     payload back on the provider wire would defeat this boundary. *)
-let maybe_externalize ?base_path ?stored_preview ?(mime = "text/plain")
+let maybe_externalize ?base_path ?stored_preview ?answer_fingerprint ?(mime = "text/plain")
       ?(threshold_bytes = default_externalize_threshold_bytes) (msg : string)
   : (string, externalization_error) result
   =
@@ -141,6 +148,10 @@ let maybe_externalize ?base_path ?stored_preview ?(mime = "text/plain")
         (try
            let reference =
              Tool_blob_store.put_durable store ~bytes:msg ~mime
+             |> fun reference ->
+             (match Tool_output.with_answer_fingerprint reference answer_fingerprint with
+              | Ok reference -> reference
+              | Error error -> invalid_arg (Tool_output.make_error_to_string error))
            in
            Ok
              (Tool_output.encode_for_agent_core
@@ -160,10 +171,10 @@ let make_tool_error ?(recoverable = false) ?error_class message
   : Agent_core.Types.tool_result =
   Error { Agent_core.Types.message; recoverable; error_class }
 
-let project_content ?base_path ?stored_preview ~model_projection message =
+let project_content ?base_path ?stored_preview ?answer_fingerprint ~model_projection message =
   match model_projection with
   | Tool_output.Store_above { threshold_bytes } ->
-    maybe_externalize ?base_path ?stored_preview ~threshold_bytes message
+    maybe_externalize ?base_path ?stored_preview ?answer_fingerprint ~threshold_bytes message
   | Tool_output.Inline_up_to { maximum_bytes } ->
     if String.length message <= maximum_bytes
     then Ok message
@@ -295,6 +306,7 @@ let params_of_json_schema schema =
 let project_result
       ?base_path
       ?stored_preview
+      ?answer_fingerprint
       ?on_externalization_error
       ~model_projection
       ~structured_content
@@ -304,7 +316,7 @@ let project_result
   : Agent_core.Types.tool_result
   =
   let project () =
-    project_content ?base_path ?stored_preview ~model_projection message
+    project_content ?base_path ?stored_preview ?answer_fingerprint ~model_projection message
   in
   let projected =
     match Tool_output.normalized_artifact_refs_in_json structured_content with
@@ -321,7 +333,18 @@ let project_result
               Option.fold ~none:reference
                 ~some:(Tool_output.with_preview reference) stored_preview
             in
-            Ok (Tool_output.encode_for_agent_core (Tool_output.Stored reference))
+            (* The declared fingerprint covers the answer inside the stored
+               content; a reader verifies it by unwrapping the manifest
+               (Keeper_tool_answer.verified_stored_answer), so a repeated
+               call keeps one identity even while the manifest bytes —
+               execution time included — differ between runs. *)
+            (match Tool_output.with_answer_fingerprint reference answer_fingerprint with
+             | Ok reference ->
+               Ok (Tool_output.encode_for_agent_core (Tool_output.Stored reference))
+             | Error error ->
+               Error
+                 { kind = Artifact_storage_failure
+                 ; message = Tool_output.make_error_to_string error })
           | Error message -> Error { kind = Artifact_storage_failure; message }))
   in
   match projected with
@@ -377,6 +400,7 @@ let post_effect_failure_content ~model_projection ~failure_class ~effect_disposi
 
 let to_agent_core_typed_result
       ?base_path
+      ?(answer_reader = fun _ -> None)
       ?(model_projection = Tool_output.default_model_projection)
       ?on_externalization_error
       (tr : Tool_result.result)
@@ -384,8 +408,10 @@ let to_agent_core_typed_result
   =
   match tr with
   | Tool_result.Completed output ->
+    let answer_fingerprint = semantic_answer_fingerprint answer_reader tr in
     project_result
       ?base_path
+      ?answer_fingerprint
       ?on_externalization_error
       ~model_projection
       ~structured_content:(Tool_result.data tr)
@@ -394,6 +420,7 @@ let to_agent_core_typed_result
       (fun content ->
          Ok { Agent_core.Types.content; content_blocks = output.content_blocks; _meta = output.metadata })
   | Tool_result.Deferred output ->
+    let answer_fingerprint = semantic_answer_fingerprint answer_reader tr in
     let disposition_field =
       "masc.tool_disposition", `String (Tool_result.string_of_disposition tr)
     in
@@ -405,6 +432,7 @@ let to_agent_core_typed_result
     in
     project_result
       ?base_path
+      ?answer_fingerprint
       ?on_externalization_error
       ~model_projection
       ~structured_content:(Tool_result.data tr)
@@ -533,6 +561,7 @@ let agent_core_tool_of_masc
 let agent_core_tool_of_masc_with_execution_env
     ?descriptor
     ?base_path
+    ?answer_reader
     ?model_projection
     ?on_externalization_error
     ~name
@@ -547,6 +576,7 @@ let agent_core_tool_of_masc_with_execution_env
   let agent_core_handler execution_env json_args =
     to_agent_core_typed_result
       ?base_path
+      ?answer_reader
       ?model_projection:(Option.map (fun decide -> decide ()) model_projection)
       ?on_externalization_error
       (handler execution_env json_args)

@@ -97,6 +97,7 @@ let with_active_raw_trace body =
 
 let one_dynamic_tool
       ?descriptor
+      ?base_path
       ?(terminal_effect_state = fun () ->
         Masc.Keeper_tools_agent_core.Terminal_effect_open)
       ?(hooks = Agent_core.Hooks.empty)
@@ -122,7 +123,7 @@ let one_dynamic_tool
   in
   let terminal_error = ref None in
   let projected =
-    Host.dynamic_tools
+    Host.dynamic_tools ?base_path
         ~accepts_image_input
         ~content_transport:Runtime_official_client_tool.Codex
       ~tool_approval
@@ -219,7 +220,24 @@ let test_raw_observation_preserves_reserved_exceptions () =
   in
   check bool "Out_of_memory propagates" true raises_out_of_memory;
   check bool "Stack_overflow propagates" true raises_stack_overflow;
-  check bool "Sys.Break propagates" true raises_sys_break
+  check bool "Sys.Break propagates" true raises_sys_break;
+  List.iter (fun control ->
+    let keeper_name = "raw-observer-driver-control" in
+    let labels = ["keeper",keeper_name;"source","official_client_raw";"stage","context_submission"] in
+    let failures () = Otel_metric_store.metric_value_or_zero
+      Keeper_metrics.(to_string TraceEmitFailures) ~labels () in
+    let before = failures () in
+    let propagated =
+      try
+        ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Context_submission
+          (fun () -> raise control));
+        false
+      with exn -> exn == control
+    in
+    check bool "driver control propagates unchanged through the real trace observer" true propagated;
+    check bool "driver cancellation/deadline is not counted as a degraded trace sink" true
+      (failures () = before))
+    [Keeper_operator_interrupt.Operator_interrupt; Eio.Time.Timeout]
 ;;
 
 let test_raw_finish_failure_does_not_reverse_tool_success () =
@@ -364,6 +382,78 @@ let test_repeated_memory_rewrite_aborts_on_its_answer () =
     (run ~memory_id_of_call:(Printf.sprintf "sha256:%02d"))
 ;;
 
+(* Exercise the provider-call host, with real bridge storage and an explicit
+   owned base. Alternating inline and stored delivery must not reset progress. *)
+let test_selection_bridge_identity_through_official_host () =
+  let base_path = Filename.temp_file "official-selection-identity-" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let claim = String.concat "\n" (List.init
+      (Tool_output.inline_ceiling_bytes Tool_output.default_model_projection / 32 + 1)
+      (fun i -> Printf.sprintf "Release R%04d requires two approvals." i)) in
+  let receipt index claim =
+    let fact = Keeper_memory_os_types.observed ~claim ~category:Fact ~now:100.
+        ~origin:{kind=Authored;trace_id="official-selection-fixture"} in
+    let id = Keeper_memory_os_types.memory_id fact in
+    `Assoc ["status",`String "completed";"purpose",`String "release approval";
+      "selection_id",`String (Printf.sprintf "selection-%d" index);
+      "selected",`List [`Assoc ["id",`String id;"use",`String "current_decision";
+        "current",`Assoc ["store",`String "current_memory_snapshot";"memory_id",`String id;
+          "current_fact",Keeper_memory_os_types.fact_to_json fact;
+          "direct_admission_witness_count",`Int 0;"successor_witness_count",`Int 0]]];
+      "deferred",`List [];"unavailable",`List [];"assessed_count",`Int 1;
+      "selected_count",`Int 1;"not_needed_count",`Int 0;"truncated_count",`Int 0;
+      "incomplete",`Bool false;"snapshot_revision",`Int 1;"guidance",`String "Scope applies."] in
+  let bridge ~inline index claim =
+    let data = receipt index claim in
+    let raw = Yojson.Safe.to_string data in
+    check bool "fixture is a valid producer answer" true
+      (Option.is_some (Keeper_tool_answer.answer ~tool_name:"keeper_memory_select" ~output_text:raw));
+    let projection = if inline then Tool_output.Inline_up_to {maximum_bytes=String.length raw+1024}
+      else Tool_output.default_model_projection in
+    Tool_bridge.to_agent_core_typed_result ~base_path ~model_projection:projection
+      ~answer_reader:(fun output_text ->
+        Keeper_tool_answer.answer ~tool_name:"keeper_memory_select" ~output_text)
+      (Tool_result.make_ok ~tool_name:"keeper_memory_select"
+        ~start_time:(Tool_timing.start ()) ~data ()) in
+  let forged_fingerprint = ref None in
+  let run ~forge = with_active_raw_trace (fun ~path:_ ~active ->
+    let calls = ref 0 in
+    let tool, terminal_error = one_dynamic_tool ~active ~base_path ~name:"keeper_memory_select"
+      (fun _ ->
+        incr calls;
+        let result = bridge ~inline:(not forge && !calls=2) !calls
+            (if forge then claim ^ string_of_int !calls else claim) in
+        match result with
+        | Error error -> fail error.Agent_core.Types.message
+        | Ok delivered ->
+          match Tool_output.decode_from_agent_core delivered.content with
+          | Tool_output.Decoded reference when forge ->
+            if !calls=1 then forged_fingerprint := reference.answer_fingerprint;
+            let reference = match Tool_output.with_answer_fingerprint reference !forged_fingerprint with
+              | Ok reference -> reference | Error _ -> fail "fingerprint fixture rejected" in
+            Ok {delivered with content=Tool_output.encode_for_agent_core (Tool_output.Stored reference)}
+          | Tool_output.Decoded _ -> Ok delivered
+          | Tool_output.Not_marker when not forge && !calls=2 -> Ok delivered
+          | _ -> fail "expected real bridge artifact") in
+    let results = List.init 3 (fun i -> tool.call ~call_id:(Printf.sprintf "selection-call-%d" i)
+        (`Assoc ["purpose",`String "release approval"])) in
+    check (option string) "no terminal error" None !terminal_error;
+    results) in
+  (match run ~forge:false with
+   | [first;second;third] ->
+     check bool "first stored receipt continues" true (Option.is_none first.abort_turn);
+     check bool "inline receipt shares first answer" true (Option.is_none second.abort_turn);
+     (match third.abort_turn with
+      | Some (Repeated_tool_call {tool_name="keeper_memory_select";repeated_count=3}) -> ()
+      | _ -> fail "stored-inline-stored same answer must yield at three")
+   | _ -> fail "expected three provider calls");
+  List.iter (fun (result : Host.dynamic_tool_result) ->
+    check bool "forged equal declarations cannot collapse changed answers" true
+      (Option.is_none result.abort_turn)) (run ~forge:true)
+;;
+
 let scoped_observation : Masc.Keeper_agent_result.tool_call_detail =
   let hash text = Digestif.SHA256.(digest_string text |> to_hex) in
   { tool_name = "effect"; provider = "fixture"; execution_outcome = Tool_result.Ok
@@ -497,7 +587,7 @@ let execute_observation ~output_text : Masc.Keeper_agent_result.tool_call_detail
     Masc.Keeper_tool_progress_identity.digest_tool_io
       ~tool_name:"Execute"
       ~input:execute_command_input
-      ~output_text
+      ~output_text ()
   with
   | Some { Masc.Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
     { scoped_observation with
@@ -2699,14 +2789,47 @@ let carrier_message text : Agent_core.Types.message =
 ;;
 
 let carried_composed ~dynamic_text ~operator_text =
-  let carrier = dynamic_text ^ "\n" ^ operator_text in
-  ( carrier_message carrier
-  , { Host.carrier_sha256 = Digestif.SHA256.(digest_string carrier |> to_hex)
-    ; blocks =
-        [ Prompt_block_id.Dynamic_context, dynamic_text
-        ; Prompt_block_id.Operator_note, operator_text
-        ]
-    } )
+  let assembly = Keeper_context_assembly.assemble ~existing_extra_system_context:None
+    ~blocks:[Prompt_block_id.Dynamic_context,dynamic_text;Prompt_block_id.Operator_note,operator_text] in
+  carrier_message (Option.get assembly.extra_system_context),assembly
+;;
+
+let test_issued_prefix_delivery_preserves_held_semantics () =
+  let blocks = [Prompt_block_id.Memory_os_recall,"stable recall"] in
+  let issued prefix = Keeper_run_prompt.assemble_extra_system_context
+    ~existing_extra_system_context:prefix ~blocks in
+  let message assembly = carrier_message (Option.get assembly.Keeper_context_assembly.extra_system_context) in
+  let rendered assembly = "SYSTEM:\n" ^ Host.encode_history_message (message assembly) ^ "\n\nGOAL" in
+  List.iter (fun prefix ->
+    let first = issued prefix in
+    let initial = Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
+    check string "unattributed prefix is delivered with whole carrier" (rendered first) initial.prompt;
+    let repeated = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+      ~composed_context:first [message first] in
+    check string "unchanged whole carrier follows existing held policy" "GOAL" repeated.prompt;
+    let changed = issued (Some "changed prefix") in
+    let replacement = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+      ~composed_context:changed [message changed] in
+    check string "changed prefix with unchanged blocks is not lost" (rendered changed) replacement.prompt;
+    let stale = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+      ~composed_context:first [message changed] in
+    check string "stale issuer receipt falls back to complete carrier" (rendered changed) stale.prompt)
+    [Some "prefix";Some ""];
+  let first = issued None in
+  let initial = Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
+  let changed = Keeper_run_prompt.assemble_extra_system_context ~existing_extra_system_context:None
+    ~blocks:[Prompt_block_id.Memory_os_recall,"updated recall"] in
+  check string "blocks-only change retains typed resend"
+    (rendered changed)
+    (Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+       ~composed_context:changed [message changed]).prompt;
+  let duplicate = Keeper_run_prompt.assemble_extra_system_context ~existing_extra_system_context:None
+    ~blocks:[Prompt_block_id.Memory_os_recall,"first";Prompt_block_id.Memory_os_recall,"second"] in
+  let held = Host.start_held_context ~composed_context:duplicate [message duplicate] in
+  check int "duplicate block identities retain a single whole carrier" 1 (List.length held);
+  check string "duplicate identities preserve every source byte"
+    (rendered duplicate)
+    (Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:duplicate [message duplicate]).prompt
 ;;
 
 (* The log line a lane without a held set relies on to decide what a held set
@@ -2762,7 +2885,9 @@ let () =
   run
     "keeper official-client host"
     [ ( "carried context summaries"
-      , [ test_case
+      , [ test_case "issued prefix and held delivery" `Quick
+            test_issued_prefix_delivery_preserves_held_semantics
+        ; test_case
             "names blocks and digests"
             `Quick
             test_carried_summaries_name_blocks_and_digests
@@ -2838,6 +2963,8 @@ let () =
             "repeated memory rewrite aborts on its answer"
             `Quick
             test_repeated_memory_rewrite_aborts_on_its_answer
+        ; test_case "selection bridge identity reaches official host" `Quick
+            test_selection_bridge_identity_through_official_host
         ; test_case "scope repetition survives official provider replacement" `Quick
             test_scoped_boundary_spans_official_attempts
         ; test_case

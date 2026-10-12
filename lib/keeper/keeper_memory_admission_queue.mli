@@ -10,6 +10,13 @@ type candidate =
 
 type batch
 
+type append_error =
+  | Capacity_exceeded of { required_bytes : int; limit_bytes : int }
+  | Append_failed of string
+
+val append_error_to_string : append_error -> string
+(** Presentation only. Callers decide effect certainty from the variant. *)
+
 val candidates : batch -> candidate list
 val candidate_ids : batch -> Keeper_memory_os_current.explicit_candidate_id list
 (** One receipt identity per candidate in input order. Each digest covers the
@@ -23,9 +30,14 @@ val split : batch -> (batch * batch) option
 
 val append :
   keepers_dir:string -> keeper_id:string -> request_id:string ->
-  Keeper_memory_os_types.fact -> (candidate, string) result
+  Keeper_memory_os_types.fact -> (candidate, append_error) result
 (** Atomic pending append. Retrying an identity still pending returns the same
-    candidate only if the entire fact matches. It never writes current Memory. *)
+    candidate only if the entire fact matches. It never writes current Memory.
+    An append whose serialized queue would exceed the pending byte cap
+    (MASC_KEEPER_MEMORY_OS_PENDING_MAX_BYTES, default 16 MiB) is refused
+    as [Capacity_exceeded] before any write: the durable pending input is unchanged, and a drain
+    that acknowledges committed candidates makes room for a later retry.
+    [Append_failed] does not establish whether a write committed. *)
 
 val read_pending :
   keepers_dir:string -> keeper_id:string -> (batch option, string) result
@@ -37,11 +49,18 @@ val acknowledge_committed :
     generation and exact ID/sequence/payload matches before removing those rows.
     Deferred gaps and concurrently appended rows survive. Any receipt collision
     refuses the entire rewrite. No success flag authorizes consumption.
-    Every sequence up to last_sequence that pending no longer holds must be
-    named by a committed receipt of the generation; otherwise this returns a
-    recovery-required error and leaves the queue unchanged, whether all or only
-    some of those receipts are missing.
-    The persisted last_sequence is never reduced, even when pending is empty. *)
+    Every allocated sequence must be represented by pending input or a committed
+    candidate; an unexplained sparse gap refuses judgment without rewriting stores.
+    The persisted last_sequence is never reduced, even when pending is empty.
+    Missing receipts before any acknowledgement can remain indistinguishable from
+    never-committed contiguous input; this check cannot reconstruct that authority. *)
 
 val path : keepers_dir:string -> keeper_id:string -> string
 val list_keeper_ids : keepers_dir:string -> (string list, string) result
+
+module For_testing : sig
+  val acknowledge_with :
+    read_receipts:(queue_generation:string ->
+      (Keeper_memory_os_current.explicit_candidate_id list, string) result) ->
+    keepers_dir:string -> keeper_id:string -> (unit, string) result
+end

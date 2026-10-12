@@ -435,6 +435,8 @@ let make_tool_bundle_for_descriptors_with_policy
              ( Tool_bridge.agent_core_tool_of_masc_with_execution_env
                ?descriptor:agent_core_descriptor
                ~base_path:config.base_path
+               ~answer_reader:(fun output_text ->
+                 Keeper_tool_answer.answer ~tool_name:model_name ~output_text)
                ~model_projection:(model_projection_for_call descriptor)
                ?on_externalization_error
                ~name:model_name

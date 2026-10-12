@@ -62,7 +62,7 @@ let fixture_summarize ~batch =
     let kind = field "kind" entry |> string in
     let text = field "text" entry |> string in
     kind ^ " observation: " ^ text) entries in
-  Ok (`Assoc ["briefing", `String (String.concat "\n" (previous @ texts))], "summary.slot")
+  Ok (`Assoc ["briefing", `String (String.concat "\n" (previous @ texts))], "summary.slot", None)
 
 (* These passes perform real strict ledger/briefing writes. Await the owner
    state rather than imposing a per-pass disk-latency deadline; the focused
@@ -88,7 +88,7 @@ let test_changed_facts_update_ledger_and_no_work_is_silent () = with_base (fun b
       | _ -> Alcotest.fail "unchanged facts reached the classifier" in
     Alcotest.(check (list string)) "only changed facts reach classification" expected
       (List.map (fun (fact : Ledger.pending_fact) -> fact.claim) selected);
-    Ok (answer selected, "test.slot") in
+    Ok (answer selected, "test.slot", None) in
   Eio.Switch.run (fun sw ->
     Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
     await_idle ~base_path;
@@ -109,7 +109,7 @@ let test_failure_preserves_ledger_and_later_change_retries () = with_base (fun b
   commit base_path "First observation";
   let fail = ref true in
   let execute ~rendered_prompt:_ ~selected ~ledger:_ =
-    if !fail then Error (Worker.Execution_failed "injected provider failure") else Ok (answer selected, "test.slot") in
+    if !fail then Error (Worker.Execution_failed "injected provider failure") else Ok (answer selected, "test.slot", None) in
   Eio.Switch.run (fun sw ->
     Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
     await_idle ~base_path;
@@ -131,7 +131,7 @@ let test_failure_preserves_ledger_and_later_change_retries () = with_base (fun b
 let test_invalid_model_answer_is_not_saved () = with_base (fun base_path _clock ->
   commit base_path "Stable observation";
   let execute ~rendered_prompt:_ ~selected:_ ~ledger:_ =
-    Ok (`Assoc ["decisions", `List []], "test.slot") in
+    Ok (`Assoc ["decisions", `List []], "test.slot", None) in
   Eio.Switch.run (fun sw ->
     Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
     await_idle ~base_path;
@@ -141,7 +141,7 @@ let test_invalid_model_answer_is_not_saved () = with_base (fun base_path _clock 
 
 let test_owner_switch_liveness () = with_base (fun base_path clock ->
   commit base_path "Observation";
-  let execute ~rendered_prompt:_ ~selected ~ledger:_ = Ok (answer selected, "test.slot") in
+  let execute ~rendered_prompt:_ ~selected ~ledger:_ = Ok (answer selected, "test.slot", None) in
   match Eio.Time.with_timeout clock 5. (fun () ->
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
@@ -190,7 +190,7 @@ let test_initial_inventory_drains_after_provider_size_refusal refusal = with_bas
     match selected with
     | [fact] ->
       accepted := fact :: !accepted;
-      Ok (answer selected, "test.slot")
+      Ok (answer selected, "test.slot", None)
     | _ ->
       incr refused;
       Error (size_failure refusal "fixture provider accepts one fact per request") in
@@ -233,7 +233,7 @@ let test_large_singleton_refusal_preserves_pending_until_wake () =
       Alcotest.(check (list string)) "the source row is never truncated" [claim]
         (List.map (fun (fact : Ledger.pending_fact) -> fact.claim) selected);
       if !refused then Error (Worker.Input_too_large "fixture singleton capacity refusal")
-      else Ok (answer selected, "test.slot") in
+      else Ok (answer selected, "test.slot", None) in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
       await_idle ~base_path;
@@ -276,7 +276,7 @@ let test_reenable_wakes_retained_facts () = with_base (fun base_path clock ->
     publish false;
     let calls = ref 0 in
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
-      incr calls; Ok (answer selected, "curator-fixture") in
+      incr calls; Ok (answer selected, "curator-fixture", None) in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw ~base_path ~execute;
       await_idle ~base_path;
@@ -301,7 +301,7 @@ let test_fence_exit_retries_deferred_work outcome = with_base (fun base_path clo
     publish true;
     let calls = ref 0 in
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
-      incr calls; Ok (answer selected, "curator-fixture") in
+      incr calls; Ok (answer selected, "curator-fixture", None) in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw ~base_path ~execute;
       await_idle ~base_path;
@@ -341,7 +341,7 @@ let test_initial_publication_wakes_parked_owner () = with_base (fun base_path cl
     commit base_path "Pending before first registry";
     let calls = ref 0 in
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
-      incr calls; Ok (answer selected, "curator-fixture") in
+      incr calls; Ok (answer selected, "curator-fixture", None) in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw ~base_path ~execute;
       await_idle ~base_path;
@@ -361,7 +361,7 @@ let test_off_preserves_in_flight_and_reenable_resumes_next_fact () = with_base (
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
       incr calls;
       if !calls = 1 then (Eio.Promise.resolve mark_entered (); Eio.Promise.await release);
-      Ok (answer selected, "curator-fixture") in
+      Ok (answer selected, "curator-fixture", None) in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw ~base_path ~execute;
       Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await entered);
@@ -385,7 +385,7 @@ let test_cancelled_owner_does_not_consume_another_owners_wake () = with_base (fu
       publish false;
       let stopped_calls, surviving_calls = ref 0, ref 0 in
       let execute calls ~rendered_prompt:_ ~selected ~ledger:_ =
-        incr calls; Ok (answer selected, "curator-fixture") in
+        incr calls; Ok (answer selected, "curator-fixture", None) in
       Eio.Switch.run (fun survivor ->
         Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw:survivor ~base_path:other
           ~execute:(execute surviving_calls);
@@ -424,7 +424,7 @@ let test_enable_publication_resumes_existing_fact () = with_registry (fun () ->
     commit base_path "Existing fact before Curator is enabled";
     let calls = ref 0 in
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
-      incr calls; Ok (answer selected, "curator-test") in
+      incr calls; Ok (answer selected, "curator-test", None) in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start_configured ~summarize:fixture_summarize ~sw ~base_path ~execute;
       await_idle ~base_path;
@@ -455,7 +455,7 @@ let test_transaction_recovery_is_relevant_and_committed () = with_registry (fun 
     let calls = ref 0 in
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
       incr calls;
-      if !calls = 1 then Error (Worker.Execution_failed "binding refused") else Ok (answer selected, "curator-test") in
+      if !calls = 1 then Error (Worker.Execution_failed "binding refused") else Ok (answer selected, "curator-test", None) in
     let prepare snapshot lanes =
       registry_ok (Registry.prepare_replacement ~runtime_observations:[] ~lanes
         ~excused_lane_ids:[] ~load_resolver_snapshot:(fun () -> Ok snapshot)) in
@@ -527,7 +527,7 @@ let test_credential_publication_resumes_pending_fact () = with_registry (fun () 
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
       incr calls;
       if !calls = 1 then Error (Worker.Execution_failed "injected credential refusal")
-      else Ok (answer selected, "curator-test") in
+      else Ok (answer selected, "curator-test", None) in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
       await_idle ~base_path;
@@ -618,7 +618,7 @@ let test_publication_during_failed_call_keeps_wake () = with_registry (fun () ->
         Eio.Promise.resolve enter ();
         Eio.Promise.await released;
         Error (Worker.Execution_failed "old configuration failed"))
-      else Ok (answer selected, "curator-test") in
+      else Ok (answer selected, "curator-test", None) in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
       Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await entered);
@@ -732,13 +732,13 @@ let test_briefing_reaches_turns_and_tracks_addition_and_deletion () =
     let removed = "The release gate is closed pending review; deployment remains paused." in
     let inputs = ref [] in
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
-      incr classifications; Ok (answer selected, "classify.slot") in
+      incr classifications; Ok (answer selected, "classify.slot", None) in
     let summarize ~batch =
       incr summaries; inputs := Briefing.input batch :: !inputs;
       let text = match !summaries with
         | 1 -> first | 2 -> added | 3 -> removed
         | _ -> Alcotest.fail "unchanged evidence reached the summarizer" in
-      Ok (`Assoc ["briefing", `String text], "summary.slot") in
+      Ok (`Assoc ["briefing", `String text], "summary.slot", None) in
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~sw ~base_path ~execute ~summarize;
       await_idle ~base_path;
@@ -810,7 +810,7 @@ let test_existing_ledger_briefing_survives_new_classification_failure fault =
         :: !selected_claims;
       match fault with
       | Provider_error -> Error (Worker.Execution_failed "injected classifier failure")
-      | Invalid_decision -> Ok (`Assoc ["decisions", `List []], "classify.slot") in
+      | Invalid_decision -> Ok (`Assoc ["decisions", `List []], "classify.slot", None) in
     let summarize ~batch =
       incr summaries;
       Alcotest.(check (list string)) "synthesis uses only the durable classified claim"
@@ -853,7 +853,7 @@ let test_failed_briefing_keeps_publication_and_request_resumes_same_input () =
     let classifications, summaries = ref 0, ref 0 in
     let failing = ref false in
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
-      incr classifications; Ok (answer selected, "classify.slot") in
+      incr classifications; Ok (answer selected, "classify.slot", None) in
     let summarize ~batch =
       incr summaries;
       if !failing then Error (Worker.Execution_failed "injected summarizer failure") else fixture_summarize ~batch in
@@ -891,7 +891,7 @@ let test_removing_all_sources_erases_publication_and_pending_pass () =
     let failing = ref false in
     let inputs = ref [] in
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
-      incr classifications; Ok (answer selected, "classify.slot") in
+      incr classifications; Ok (answer selected, "classify.slot", None) in
     let summarize ~batch =
       incr summaries; inputs := Briefing.input batch :: !inputs;
       if !failing then Error (Worker.Execution_failed "injected pending-pass failure")
@@ -944,7 +944,7 @@ let test_removing_pending_addition_cleans_pass_without_model_work () =
     let classifications, summaries = ref 0, ref 0 in
     let failing = ref false in
     let execute ~rendered_prompt:_ ~selected ~ledger:_ =
-      incr classifications; Ok (answer selected, "classify.slot") in
+      incr classifications; Ok (answer selected, "classify.slot", None) in
     let summarize ~batch =
       incr summaries;
       if !failing then Error (Worker.Execution_failed "injected pending-pass failure")
@@ -989,14 +989,14 @@ let test_in_flight_addition_waits_for_fixed_briefing_pass () =
     commit base_path "Initial source remains valid";
     let calls = ref 0 in
     let first_summary = ref None in
-    let execute ~rendered_prompt:_ ~selected ~ledger:_ = Ok (answer selected, "classify.slot") in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ = Ok (answer selected, "classify.slot", None) in
     let summarize ~batch =
       incr calls;
       if !calls = 1 then (
         commit ~keeper_id:"later" base_path "New evidence arrived during summarization";
         let result = fixture_summarize ~batch in
         (match result with
-         | Ok (output, _) -> first_summary := Some (field "briefing" output |> string)
+         | Ok (output, _, _) -> first_summary := Some (field "briefing" output |> string)
          | Error (Worker.Execution_failed detail | Worker.Input_too_large detail
                  | Worker.Output_too_large detail) -> Alcotest.fail detail);
         result)
@@ -1032,7 +1032,7 @@ let test_summary_narrows_only_after_provider_size_refusal () =
     let claims = ["Owner review remains pending"; "Deployment is paused until confirmation"] in
     commit_facts base_path claims;
     let attempts, inputs, successful = ref [], ref [], ref [] in
-    let execute ~rendered_prompt:_ ~selected ~ledger:_ = Ok (answer selected, "classify.slot") in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ = Ok (answer selected, "classify.slot", None) in
     let summarize ~batch =
       let count = Briefing.selected_count batch in
       attempts := count :: !attempts;
@@ -1042,7 +1042,7 @@ let test_summary_narrows_only_after_provider_size_refusal () =
       else
         let result = fixture_summarize ~batch in
         (match result with
-         | Ok (output, _) -> successful := (field "briefing" output |> string) :: !successful
+         | Ok (output, _, _) -> successful := (field "briefing" output |> string) :: !successful
          | Error (Worker.Input_too_large detail | Worker.Execution_failed detail
                  | Worker.Output_too_large detail) -> Alcotest.fail detail);
         result in
@@ -1076,7 +1076,7 @@ let test_non_size_failure_does_not_narrow_or_spin phase =
       classifications := List.length selected :: !classifications;
       match phase with
       | During_classification -> Error (Worker.Execution_failed "fixture transport failure")
-      | During_summary -> Ok (answer selected, "classify.slot") in
+      | During_summary -> Ok (answer selected, "classify.slot", None) in
     let summarize ~batch =
       summaries := Briefing.selected_count batch :: !summaries;
       Error (Worker.Execution_failed "fixture transport failure") in
@@ -1101,7 +1101,7 @@ let test_size_refusal_keeps_previous_briefing_and_parks refusal =
     commit base_path "Release still needs owner review";
     let refuse = ref false in
     let attempts = ref [] in
-    let execute ~rendered_prompt:_ ~selected ~ledger:_ = Ok (answer selected, "classify.slot") in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ = Ok (answer selected, "classify.slot", None) in
     let summarize ~batch =
       attempts := Briefing.selected_count batch :: !attempts;
       if !refuse then Error (size_failure refusal "fixture provider refused the summary")

@@ -1,6 +1,7 @@
 open Alcotest
 module Current = Masc.Keeper_memory_os_current
 module Queue = Masc.Keeper_memory_admission_queue
+module Types = Masc.Typesafeai_types
 module Selection = Masc.Keeper_workspace_memory_selection
 module Io = Masc.Keeper_workspace_memory_selection_io
 module Fixture = Exact_output_fixture
@@ -31,9 +32,33 @@ let restore ~keepers_dir ~keeper_id bundle =
     Fs_compat.save_file_atomic_strict path bytes |> require) decoded;
   decoded
 
+(* Old recorded responses are replayed against their exact historical question
+   contract. Assert the current generator differs by only the adopted spans. *)
+let captured_questions request =
+  member "questions" request |> Json.to_assoc |> List.map (fun (id,row) ->
+    id,Types.Choice {instructions=jstring "instructions" row;
+      criteria=member "criteria" row |> Json.to_assoc |> List.map (fun (label,value) ->
+        label,(match value with `String text -> Some text | `Null -> None | _ -> fail "invalid criterion"))})
+let adopted_questions spans questions =
+  let description=List.nth spans 0 and instruction=List.nth spans 1 in
+  List.map (fun (id,question) -> match question with
+    | Types.Choice {instructions;criteria} ->
+      let instructions=match Astring.String.cuts ~sep:(jstring "before" instruction) instructions with
+        | [before;after] -> before ^ jstring "after" instruction ^ after
+        | _ -> fail "historical instruction span must occur once" in
+      let criteria=List.map (fun (label,value) ->
+        if label<>"comparison" then label,value else (
+          check (option string) "historical comparison span" (Some (jstring "before" description)) value;
+          label,Some (jstring "after" description))) criteria in
+      id,Types.Choice {instructions;criteria}
+    | Types.Score _ | Types.Noul _ -> fail "expected choice question") questions
+
 let replay ~enabled () =
   let envelope=Yojson.Safe.from_file (Masc_test_deps.source_path "test/fixtures/memory_resolved_selection_replay/actual.json") in
   let capture=member "capture" envelope in
+  let spans=Yojson.Safe.from_file (Masc_test_deps.source_path "test/fixtures/event_genealogy_selection/scenario.json")
+    |> rows "experimental_spans" in
+  check int "only the frozen two-span bundle is adopted" 2 (List.length spans);
   let responses=Hashtbl.create 8 in
   List.iter (fun row ->
     let body=jstring "request_body" row and response=jstring "response_raw" row in
@@ -91,8 +116,13 @@ let replay ~enabled () =
     let io=match Masc.Typesafeai_config.workspace_memory_selection_destinations ~keeper_id with
       | Error reason -> Error (Masc.Typesafeai_config.unavailable_reason_to_string reason)
       | Ok destinations -> Ok (Io.create ~config ~keeper_id ~destinations) in
-    let evaluate ~state ~questions = match io with
-      | Ok io -> Io.evaluate io ~state ~questions
+    let historical=captured_questions request in
+    let evaluate ~state:actual_state ~questions =
+      check bool "current state equals historical source state" true (actual_state=state);
+      check bool "current questions differ only by the frozen adopted spans" true
+        (questions=adopted_questions spans historical);
+      match io with
+      | Ok io -> Io.evaluate io ~state:actual_state ~questions:historical
       | Error detail -> Error (Selection.Unavailable detail) in
     observed:=[];
     let outcomes=Selection.select_resolved_many ~evaluate ~purpose:(member "current_purpose" query) candidates in
@@ -139,9 +169,9 @@ let replay ~enabled () =
     "deferred",`Int (occurrences "deferred");
     "selected",`Int (occurrences "current_decision" + occurrences "comparison")] in
   Printf.printf "MEMORY_RESOLVED_SELECTION_REPLAY %s\n%!" (Yojson.Safe.to_string (`Assoc
-    ["measurement",`String "recorded_response_through_selection_core_and_http_io";
+    ["measurement",`String "historical_recorded_response_through_explicit_frozen_question_adapter";
      "production_tool_integration",`Bool false;"lane_enabled",`Bool enabled;
      "http_requests",`Int (Fixture.post_count server);"occurrence_counts",counts;"queries",`List measurements]))
 let () = run "resolved selection HTTP replay"
   ["recorded responses",[test_case "disabled lane preserves unresolved candidates" `Quick (replay ~enabled:false);
-    test_case "actual seven responses retain typed selection uses" `Quick (replay ~enabled:true)]]
+    test_case "historical seven responses retain typed selection uses" `Quick (replay ~enabled:true)]]

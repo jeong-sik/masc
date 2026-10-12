@@ -125,6 +125,7 @@ type rejected_tool_call =
 type raw_trace_stage =
   | Run_start
   | Reasoning_effort
+  | Context_submission
   | Assistant_block
   | Tool_start
   | Tool_finish
@@ -246,17 +247,14 @@ val is_carried_on_resume : Agent_core.Types.message -> bool
     context must be tagged with one; an untagged one lands in the system
     prompt file only, which a resume does not read. *)
 
-type composed_context =
-  { carrier_sha256 : string
-  ; blocks : (Prompt_block_id.t * string) list
-  }
-(** The typed assembly behind a turn's context carrier: the sha256 of the
-    carrier text the hook returned, and the blocks it assembled, in order.
-    The carrier splits into these blocks only when its own text has exactly
-    this digest; otherwise it is carried whole. *)
+type composed_context = Keeper_context_assembly.t
+(** The immutable renderer-issued assembly behind a turn's context carrier.
+    Only exact carrier bytes without an existing prefix and with unique block
+    identities permit splitting. Otherwise the whole carrier is retained. *)
 
 type resume_delivery =
   { prompt : string
+  ; context_projection : Keeper_context_submission_link.t
   ; held_context : Keeper_official_client_session_store.held_context list
   }
 
@@ -300,7 +298,8 @@ val resume_prompt :
     The messages {!is_carried_on_resume} selects are carried contexts: the
     historical task reference, the Librarian working state, and the context
     carrier -- one carried context per typed block when [composed_context]
-    names the carrier's exact text, the whole carrier otherwise. A carried
+    proves its exact text contains only uniquely named blocks and separators,
+    the whole carrier otherwise. A carried
     context goes out only when [held] does not already name it with the same
     digest, or when its block is {!Prompt_block_id.resent_when_held}. A
     resumed vendor session stores every prompt as history, so re-sending an
@@ -575,6 +574,7 @@ val prepare_turn :
     copy kept. *)
 
 val dynamic_tools :
+  ?base_path:string ->
   content_transport:Runtime_official_client_tool.content_transport ->
   accepts_image_input:bool ->
   tool_approval:Agent_core.Hooks.tool_approval_callback option ->

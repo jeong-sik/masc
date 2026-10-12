@@ -7,6 +7,7 @@ let reader (handler : Keeper_tool_descriptor.runtime_handler) =
   match handler with
   | Tool_execute -> Reads_answer Keeper_tool_execute_runtime.answer_of_output
   | Tool_memory_write -> Reads_answer Keeper_tool_memory_runtime.memory_write_answer_of_output
+  | Tool_memory_select -> Reads_answer Keeper_memory_select.answer_of_output
   | Tool_lane_addon _
   | Tool_search_files
   | Tool_read_file
@@ -22,7 +23,6 @@ let reader (handler : Keeper_tool_descriptor.runtime_handler) =
   | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
-  | Tool_memory_select
   | Tool_memory_retract
   | Tool_constitution_write
   | Tool_constitution_read
@@ -84,4 +84,44 @@ let answer ~tool_name ~output_text =
     (match reader handler with
      | Whole_output -> None
      | Reads_answer read -> read output_text)
+;;
+
+(* Only the bridge's closed manifest envelope may expose an original answer.
+   Child artifact addresses remain answer data; never follow them recursively. *)
+let stored_answer_content ~mime original =
+  if not (String.equal mime Tool_output.artifact_manifest_mime) then Some original
+  else
+    match Yojson.Safe.from_string original with
+    | json ->
+      (match Tool_output.artifact_manifest_of_json json with
+       | Tool_output.Decoded_artifact_manifest {content; structured_content; artifact_refs = _ :: _} ->
+         (match Yojson.Safe.from_string content with
+          | data when Yojson.Safe.sort data = Yojson.Safe.sort structured_content -> Some content
+          | _ -> None
+          | exception Yojson.Json_error _ -> None)
+       | Tool_output.Decoded_artifact_manifest _
+       | Tool_output.Not_artifact_manifest | Tool_output.Invalid_artifact_manifest _ -> None)
+    | exception Yojson.Json_error _ -> None
+;;
+
+let verified_stored_answer ~base_path ~tool_name ~output_text =
+  let declared_reader = match resolve tool_name with
+    | Outside_keeper_descriptors -> None
+    | Keeper_handler handler ->
+      (match reader handler with Whole_output -> None | Reads_answer read -> Some read) in
+  match declared_reader with
+  | None -> None
+  | Some read -> Domain_pool_ref.submit_io_or_inline (fun () ->
+  match Tool_output.decode_from_agent_core output_text with
+  | Tool_output.Decoded {sha256; bytes; mime; answer_fingerprint = Some declared; _} ->
+    (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with
+     | Ok (Some original) when String.length original = bytes ->
+       (match Option.bind (stored_answer_content ~mime original) read with
+        | Some value ->
+          let actual = Digestif.SHA256.(digest_string
+              (value |> Yojson.Safe.sort |> Yojson.Safe.to_string) |> to_hex) in
+          if String.equal actual declared then Some value else None
+        | None -> None)
+     | Ok _ | Error _ -> None)
+  | Tool_output.Decoded _ | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> None)
 ;;

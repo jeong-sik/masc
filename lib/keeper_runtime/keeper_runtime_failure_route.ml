@@ -81,6 +81,22 @@ let core_error_is_hard_quota (err : Agent_core.Error.t) =
     false
 ;;
 
+let core_error_is_model_absent : Agent_core.Error.t -> bool = function
+  | Agent_core.Error.Api (Llm_provider.Retry.NotFound _)
+  | Agent_core.Error.Provider (Llm_provider.Error.NotFound _) ->
+    true
+  | Agent_core.Error.Api _
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _ ->
+    false
+;;
+
 let observe_retry ?retry_after retry_class =
   Retry_after_observed { retry_class; retry_after }
 

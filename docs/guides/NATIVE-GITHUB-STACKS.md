@@ -16,8 +16,13 @@ gh api repos/OWNER/REPO/stacks/STACK_NUMBER
 
 The PR's `stack` reports membership, position, size and stack base. The
 [Stacks endpoint](https://docs.github.com/en/rest/pulls/stacks) returns ordered
-`pull_requests`. For a selected PR, the merge scope includes every still-open
-PR below it through that PR, excluding already merged entries and higher PRs.
+`pull_requests`.
+
+**Merge a native stack whole, once, through its top PR. Never merge it layer by
+layer from the bottom.** GitHub lets `merge-async` on a lower PR merge only the
+PRs below it; do not use that. Each partial merge moves `main`, so the remaining
+layers, and other stacks, conflict again. The merge scope is therefore every
+still-open PR in the stack, read through its top PR.
 Read each included PR's current identity and diff. Do not infer membership from
 title, branch naming, or base chains when authoritative stack metadata exists.
 An API error or missing CLI field is unknown state, not proof of no stack.
@@ -47,7 +52,7 @@ FAIL/HOLD or change request cannot be cleared by a clean leaf. Release heads als
 need the full verification required by the repository. Ordinary MASC PRs do not
 require an Actions run simply because they belong to a stack.
 
-A closed but unmerged downstack PR still blocks the selected PR. Only already
+A closed but unmerged downstack PR still blocks the top PR. Only already
 merged members can be excluded from new approval checks; closing a prerequisite
 is not equivalent to merging it. See [closed middle PRs](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-stacked-pull-requests#you-closed-a-pull-request-in-the-middle-of-the-stack).
 
@@ -55,7 +60,7 @@ Use `scripts/review/merge-guard.sh --check --repo OWNER/REPO --pr NUMBER --head 
 to check the included scope. To inspect the read-only identity snapshot directly:
 
 ```bash
-python3 scripts/review/stack-scope.py OWNER/REPO NUMBER SELECTED_CURRENT_HEAD
+python3 scripts/review/stack-scope.py OWNER/REPO TOP_PR_NUMBER TOP_PR_CURRENT_HEAD
 ```
 
 Re-read membership, stack base and all included
@@ -68,17 +73,17 @@ the server evaluates repository rules during the asynchronous operation.
 For native stacks the API operation is:
 
 ```bash
-gh api --method PUT repos/OWNER/REPO/pulls/NUMBER/merge-async \
-  -f merge_method=squash -f sha=SELECTED_CURRENT_HEAD
+gh api --method PUT repos/OWNER/REPO/pulls/TOP_PR_NUMBER/merge-async \
+  -f merge_method=squash -f sha=TOP_PR_CURRENT_HEAD
 ```
 
-This is a write affecting **all included downstack PRs**, not only NUMBER. Use
+This is a write affecting **every PR in the stack**, not only the top PR. Use
 it only after the whole scope is reviewed and authorized. External coding agents
 use the guard in read-only `--check` mode before this request. For non-native PRs,
 use `gh pr merge --match-head-commit SHA` under the repository's normal procedure.
 Do not use `--admin` or `--auto`.
 
-The API's `sha` pins the selected head, not a client-supplied vector of all lower
+The API's `sha` pins the top PR's head, not a client-supplied vector of all lower
 heads. The final snapshot reduces races but is not an atomic all-head lock.
 GitHub's server-side checks still apply. Receipt output labels the destination as the preflight target, not an accepted
 destination: stack metadata may still change between that read and the request.
@@ -94,9 +99,14 @@ queued, in progress, failed and merged distinctly; do not resubmit an uncertain
 operation before reading its result. A stack operation is atomic for its included
 group, as described in the official API contract.
 
-After a partial stack merge, GitHub rebases the next unmerged PR onto the stack
-base. Inspect the resulting identities instead of performing a parallel manual
-retarget/rebase. See [merging native stacks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/merging-stacked-pull-requests).
+## Resolve conflicts over the whole stack
+
+When a native stack conflicts with its base, run `gh stack rebase` over the whole
+stack and push every layer once (`gh stack push`, or one atomic push with a lease
+per branch). Do not rebase or push the bottom layer alone and cascade the rest
+later; collect a layer's fix as a commit or patch and restack once. Report the
+conflict per stack ("stack #N conflicts with main, whole rebase needed"), not as
+a problem of its bottom PR. See [merging native stacks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/merging-stacked-pull-requests).
 
 ## Agent and Keeper context
 

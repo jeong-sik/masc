@@ -47,6 +47,23 @@ type persistence_failure =
   ; state : persistence_state
   }
 
+type usage =
+  { input_tokens : int
+  ; output_tokens : int
+  ; cache_creation_input_tokens : int
+  ; cache_read_input_tokens : int
+  ; cost_usd : float option
+  }
+
+let usage_of_api_usage (api_usage : Agent_core.Types.api_usage) =
+  { input_tokens = api_usage.input_tokens
+  ; output_tokens = api_usage.output_tokens
+  ; cache_creation_input_tokens = api_usage.cache_creation_input_tokens
+  ; cache_read_input_tokens = api_usage.cache_read_input_tokens
+  ; cost_usd = api_usage.cost_usd
+  ;}
+;;
+
 type run_status =
   | Running
   | Completed of
@@ -54,12 +71,14 @@ type run_status =
       ; elapsed_s : float
       ; output : Yojson.Safe.t
       ; selected_slot : string option
+      ; usage : usage option
       }
   | Completion_persistence_failed of
       { intended_outcome : outcome
       ; elapsed_s : float
       ; output : Yojson.Safe.t
       ; selected_slot : string option
+      ; usage : usage option
       ; failure : persistence_failure
       }
 
@@ -135,6 +154,49 @@ let availability_of_yojson json =
     in
     Ok (Unavailable error)
   | _ -> Error (Printf.sprintf "unknown payload availability %S" state)
+;;
+
+let usage_to_yojson usage =
+  let fields =
+    [ "input_tokens", `Int usage.input_tokens
+    ; "output_tokens", `Int usage.output_tokens
+    ; "cache_creation_input_tokens", `Int usage.cache_creation_input_tokens
+    ; "cache_read_input_tokens", `Int usage.cache_read_input_tokens
+    ]
+  in
+  `Assoc
+    (match usage.cost_usd with
+     | None -> fields
+     | Some cost_usd -> fields @ [ "cost_usd", `Float cost_usd ])
+;;
+
+let usage_of_yojson json =
+  let ( let* ) = Result.bind in
+  let module Json = Run_registry_core.Json in
+  let* fields = Json.object_fields json in
+  let* () =
+    Json.exact_fields
+      ~required:[ "input_tokens"; "output_tokens"; "cache_creation_input_tokens"; "cache_read_input_tokens" ]
+      ~optional:[ "cost_usd" ]
+      fields
+  in
+  let int_field name =
+    match List.assoc_opt name fields with
+    | Some (`Int value) when value >= 0 -> Ok value
+    | Some _ | None -> Error (Printf.sprintf "field %s must be a non-negative integer" name)
+  in
+  let* input_tokens = int_field "input_tokens" in
+  let* output_tokens = int_field "output_tokens" in
+  let* cache_creation_input_tokens = int_field "cache_creation_input_tokens" in
+  let* cache_read_input_tokens = int_field "cache_read_input_tokens" in
+  let* cost_usd =
+    match List.assoc_opt "cost_usd" fields with
+    | None -> Ok None
+    | Some (`Float cost_usd) when Float.is_finite cost_usd && cost_usd >= 0. -> Ok (Some cost_usd)
+    | Some (`Int cost_usd) when cost_usd >= 0 -> Ok (Some (float_of_int cost_usd))
+    | Some _ -> Error "field cost_usd must be a non-negative finite float"
+  in
+  Ok { input_tokens; output_tokens; cache_creation_input_tokens; cache_read_input_tokens; cost_usd }
 ;;
 
 type run =
@@ -222,6 +284,7 @@ module Payload = struct
     ; output : Yojson.Safe.t
     ; output_source : payload_source
     ; selected_slot : string option
+    ; usage : usage option
     }
 
   let name = "exact_lane_run_registry"
@@ -244,6 +307,7 @@ module Payload = struct
                ]
          ; output_source = In_row
          ; selected_slot = None
+         ; usage = None
          })
   ;;
 
@@ -339,6 +403,10 @@ module Payload = struct
          , match completion.selected_slot with
            | None -> `Null
            | Some selected_slot -> `String selected_slot )
+       ; ( "usage"
+         , match completion.usage with
+           | None -> `Null
+           | Some usage -> usage_to_yojson usage )
        ]
        @ detail)
   ;;
@@ -357,6 +425,7 @@ module Payload = struct
     let* () =
       Run_registry_core.Json.exact_fields
         ~required:([ "outcome"; "elapsed_s"; "output"; "selected_slot" ] @ detail_fields)
+        ~optional:[ "usage" ]
         fields
     in
     let* elapsed_s = Run_registry_core.Json.float_field "elapsed_s" fields in
@@ -383,7 +452,15 @@ module Payload = struct
       | Some _ -> Error "field selected_slot must be a non-empty string"
       | None -> Error "missing field selected_slot"
     in
-    Ok { outcome; elapsed_s; output; output_source; selected_slot }
+    let* usage =
+      match List.assoc_opt "usage" fields with
+      | None | Some `Null -> Ok None
+      | Some json ->
+        (match usage_of_yojson json with
+         | Ok usage -> Ok (Some usage)
+         | Error detail -> Error (Printf.sprintf "field usage: %s" detail))
+    in
+    Ok { outcome; elapsed_s; output; output_source; selected_slot; usage }
   ;;
 end
 
@@ -394,6 +471,7 @@ type failed_completion =
   ; elapsed_s : float
   ; output : Yojson.Safe.t
   ; selected_slot : string option
+  ; usage : usage option
   ; failure : persistence_failure
   }
 
@@ -501,6 +579,7 @@ let projected_run_of_entry failed_completions (entry : Store.entry) =
         ; elapsed_s = failed.elapsed_s
         ; output = `Null
         ; selected_slot = failed.selected_slot
+        ; usage = failed.usage
         ; failure = failed.failure
         }
     | None, Store.Running -> Running
@@ -510,6 +589,7 @@ let projected_run_of_entry failed_completions (entry : Store.entry) =
         ; elapsed_s = completion.elapsed_s
         ; output = `Null
         ; selected_slot = completion.selected_slot
+        ; usage = completion.usage
         }
   in
   { run_id = entry.id
@@ -533,6 +613,7 @@ let full_run_of_entry failed_completions (entry : Store.entry) =
         ; elapsed_s = failed.elapsed_s
         ; output = failed.output
         ; selected_slot = failed.selected_slot
+        ; usage = failed.usage
         ; failure = failed.failure
         }
     | None, Store.Running -> Running
@@ -544,6 +625,7 @@ let full_run_of_entry failed_completions (entry : Store.entry) =
         ; elapsed_s = completion.elapsed_s
         ; output = completion.output
         ; selected_slot = completion.selected_slot
+        ; usage = completion.usage
         }
   in
   { run_id = entry.id
@@ -727,7 +809,7 @@ let register_running t ~run_id ~lane ~actor ~started_at ~input =
   notify_changed ()
 ;;
 
-let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~output =
+let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~usage ~output =
   (* Outside the lock, as in [register_running]. A run that stops being known
      before the lock is taken leaves this file for the replay sweep. *)
   let stored =
@@ -750,7 +832,7 @@ let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~output
         match stored with
         | Error _ as error -> error
         | Ok output_source ->
-          let completion = { Payload.outcome; elapsed_s; output; output_source; selected_slot } in
+          let completion = { Payload.outcome; elapsed_s; output; output_source; selected_slot; usage } in
           (match Store.complete t.store ~id:run_id ~completion with
            | `Completed -> Ok ()
            | (`Unknown | `Persistence_failed _) as error -> Error error)
@@ -769,7 +851,7 @@ let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~output
         in
         let failure = { detail = failure.detail; state } in
         let failed =
-          { intended_outcome = outcome; elapsed_s; output; selected_slot; failure }
+          { intended_outcome = outcome; elapsed_s; output; selected_slot; usage; failure }
         in
         Atomic.set
           t.failed_completions
@@ -788,11 +870,11 @@ let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~output
     Error error
 ;;
 
-let mark_completed t ~run_id ~outcome ~elapsed_s ~selected_slot ~output =
+let mark_completed t ~run_id ~outcome ~elapsed_s ~selected_slot ?usage ~output () =
   match selected_slot with
   | Some selected_slot when String.trim selected_slot = "" -> Error Invalid_selected_slot
   | None | Some _ ->
-    mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~output
+    mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~usage ~output
 ;;
 
 (* [total] counts every retained run, not the page, so a caller can say
@@ -930,6 +1012,7 @@ let get t ~run_id =
                ; elapsed_s = completion.elapsed_s
                ; output = value_or_null output
                ; selected_slot = completion.selected_slot
+               ; usage = completion.usage
                }
            , Some (availability_of output) )
          | None, Some failed ->
@@ -939,6 +1022,7 @@ let get t ~run_id =
                ; elapsed_s = failed.elapsed_s
                ; output = failed.output
                ; selected_slot = failed.selected_slot
+               ; usage = failed.usage
                ; failure = failed.failure
                }
            , Some Available )
@@ -986,7 +1070,7 @@ let run_summary_fields run =
   let completion =
     match run.status with
     | Running -> []
-    | Completed { outcome; elapsed_s; output = _; selected_slot } ->
+    | Completed { outcome; elapsed_s; output = _; selected_slot; usage } ->
       let detail =
         match outcome with
         | Succeeded | Cancelled -> []
@@ -998,10 +1082,14 @@ let run_summary_fields run =
         , match selected_slot with
           | None -> `Null
           | Some selected_slot -> `String selected_slot )
+      ; ( "usage"
+        , match usage with
+          | None -> `Null
+          | Some usage -> usage_to_yojson usage )
       ]
       @ detail
     | Completion_persistence_failed
-        { intended_outcome; elapsed_s; output = _; selected_slot; failure } ->
+        { intended_outcome; elapsed_s; output = _; selected_slot; usage; failure } ->
       let intended_failure =
         match intended_outcome with
         | Succeeded | Cancelled -> []
@@ -1014,6 +1102,10 @@ let run_summary_fields run =
         , match selected_slot with
           | None -> `Null
           | Some selected_slot -> `String selected_slot )
+      ; ( "usage"
+        , match usage with
+          | None -> `Null
+          | Some usage -> usage_to_yojson usage )
       ; "persistence_error", `String failure.detail
       ; ( "persistence_state"
         , `String

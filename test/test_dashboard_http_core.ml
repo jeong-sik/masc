@@ -339,6 +339,10 @@ let test_hitl_recover_route_and_preconditions () =
   check (option string)
     "recover route refuses an empty id" None
     (Recover.route (base ^ "hitl/approvals//recover"));
+  (* task-2237: the journal-restore exit is its own CanAdmin POST path. *)
+  check string "journal restore path is the D4a exit"
+    "/api/v1/keepers/hitl/late-approval-restore"
+    Recover.journal_restore_path;
   let rearm_body ~status ~disposition =
     `Assoc
       [ "action", `String "rearm"

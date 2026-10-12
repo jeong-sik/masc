@@ -276,6 +276,12 @@ When available in the Keeper's tool surface, `keeper_memory_select` accepts a
 current ordinary and source-bound memories with their provenance. `keeper_memory_search`
 remains the text-search tool, including explicit historical lookup.
 
+The personal memory notice guides the Keeper to purpose selection only when
+policy permits it and the tool is offered directly or loadable through an
+offered discovery tool with a live loader. Rendering this notice does not call
+selection or inject stored claims. Otherwise, the notice keeps the existing
+search, artifact-only or unavailable route according to the tools actually offered.
+
 Selection requires `typesafeai.workspace_memory_selection_enabled`, an enabled
 TypeSafe lane and an armed destination; Keeper exclusions apply. Selected
 memories are labeled `current_decision` or `comparison`. A comparison retains

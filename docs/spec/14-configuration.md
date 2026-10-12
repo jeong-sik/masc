@@ -8,6 +8,10 @@ status: reference
 
 For Dashboard editing, draft retention, revision conflicts and workspace changes,
 see [runtime.toml drafts](../guides/runtime-toml-drafts.md).
+For the key-by-key reference of the provider/model/binding/lane tables
+(`[providers.<id>]`, `[models.<id>]`, `[<provider>.<model>]`, lanes,
+exact-output lanes, assignments), see
+[Runtime TOML reference](../RUNTIME-TOML-REFERENCE.md).
 For configuration-preserving Exact Lane activity and its Required/Optional
 boundary, see [Exact Lane activity](../guides/exact-lane-activity.md).
 

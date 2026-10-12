@@ -133,6 +133,73 @@ let test_resolve_broken_toml_yields_default_with_diagnostics () =
   check_source "source is default" Maintenance.Default source;
   check bool "diagnostics explain the fallback" true (diagnostics <> [])
 
+module Prune = Server_runtime_startup_maintenance
+
+let rec mkdir_p dir =
+  if not (Sys.file_exists dir) then begin
+    mkdir_p (Filename.dirname dir);
+    Unix.mkdir dir 0o755
+  end
+
+let rec remove_tree path =
+  if Sys.is_directory path then begin
+    Array.iter (fun entry -> remove_tree (Filename.concat path entry)) (Sys.readdir path);
+    Unix.rmdir path
+  end
+  else Sys.remove path
+
+(* A day file [age_days] old, named by the module that owns the writer's
+   day-file layout. *)
+let write_day_file ~store_dir ~age_days =
+  let ts = Unix.gettimeofday () -. (float_of_int age_days *. Masc_time_constants.day) in
+  let dated = Jsonl_writer.dated_path ~base_dir:store_dir ~ts in
+  mkdir_p (Filename.dirname dated.Jsonl_writer.path);
+  let oc = open_out dated.Jsonl_writer.path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc "{}\n");
+  dated.Jsonl_writer.path
+
+(* The pass both prunes call, run against a workspace whose runtime.toml
+   names a window. [toml] = None leaves the file out. *)
+let with_workspace ~toml f =
+  let base_path =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc_retention_pass_%d_%.0f" (Unix.getpid ()) (Unix.gettimeofday ()))
+  in
+  mkdir_p base_path;
+  Fun.protect ~finally:(fun () -> remove_tree base_path) @@ fun () ->
+  (match toml with
+   | None -> ()
+   | Some content ->
+     let path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+     mkdir_p (Filename.dirname path);
+     let oc = open_out path in
+     Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content));
+  let masc_root = Filename.concat base_path ".masc" in
+  let store_dir = Filename.concat masc_root (List.hd Prune.top_level_dated_stores) in
+  let ten_days_old = write_day_file ~store_dir ~age_days:10 in
+  let three_days_old = write_day_file ~store_dir ~age_days:3 in
+  Eio_main.run @@ fun _env ->
+  f (Prune.prune_jsonl_at_resolved_window ~base_path ~masc_root) ~ten_days_old ~three_days_old
+
+let test_the_shared_pass_prunes_at_the_workspace_toml_window () =
+  with_env None @@ fun () ->
+  with_workspace ~toml:(Some "[maintenance]\njsonl_retention_days = 7\n")
+  @@ fun outcome ~ten_days_old ~three_days_old ->
+  check int "the pass uses the runtime.toml window" 7 outcome.Prune.days;
+  check_source "and says it came from runtime.toml" Maintenance.Toml outcome.Prune.source;
+  check int "no diagnostics" 0 (List.length outcome.Prune.diagnostics);
+  check bool "a day file older than the window is gone" false (Sys.file_exists ten_days_old);
+  check bool "a day file inside the window stays" true (Sys.file_exists three_days_old)
+
+let test_the_shared_pass_keeps_the_default_window_without_toml () =
+  with_env None @@ fun () ->
+  with_workspace ~toml:None @@ fun outcome ~ten_days_old ~three_days_old ->
+  check int "the pass uses the documented default" documented_default outcome.Prune.days;
+  check_source "and says it is the default" Maintenance.Default outcome.Prune.source;
+  check bool "a ten-day-old file stays under the default" true (Sys.file_exists ten_days_old);
+  check bool "a three-day-old file stays under the default" true (Sys.file_exists three_days_old)
+
 let () =
   run
     "jsonl_retention_window"
@@ -157,5 +224,11 @@ let () =
             test_resolve_missing_file_yields_default_quietly
         ; test_case "broken toml yields default with diagnostics" `Quick
             test_resolve_broken_toml_yields_default_with_diagnostics
+        ] )
+    ; ( "prune pass"
+      , [ test_case "the shared pass prunes at the workspace toml window" `Quick
+            test_the_shared_pass_prunes_at_the_workspace_toml_window
+        ; test_case "the shared pass keeps the default window without toml" `Quick
+            test_the_shared_pass_keeps_the_default_window_without_toml
         ] )
     ]

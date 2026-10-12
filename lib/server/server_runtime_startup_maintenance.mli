@@ -43,6 +43,24 @@ val prune_shared_jsonl_stores :
     pass call exactly this function so the covered-store set cannot drift.
     Returns the number of files removed. Exposed for unit tests. *)
 
+type jsonl_prune_outcome = {
+  pruned : int;  (** Files removed. *)
+  days : int;  (** The window this pass used. *)
+  source : Server_maintenance_toml_config.source;  (** Where the window came from. *)
+  diagnostics : Server_maintenance_toml_config.diagnostic list;
+      (** runtime.toml [maintenance] problems for the caller to log. *)
+}
+
+val retention_source_label : Server_maintenance_toml_config.source -> string
+(** ["env"], ["runtime.toml"] or ["default"], for prune log lines. *)
+
+val prune_jsonl_at_resolved_window :
+  base_path:string -> masc_root:string -> jsonl_prune_outcome
+(** One prune of {!prune_shared_jsonl_stores} at the window
+    {!Server_maintenance_toml_config.resolve_retention_days} gives for the
+    workspace runtime.toml under [base_path]. The startup pass and the 24h
+    periodic pass both call this, so neither can read a different window. *)
+
 val startup_prune_jsonl : Mcp_server.server_state -> unit
 
 val startup_sweep_microvm_guests : Mcp_server.server_state -> unit

@@ -296,7 +296,7 @@ let run_periodic_task_gc config ~days =
     let _, summary = Workspace.archive_terminal_tasks config ~days () in
     Log.Server.info "periodic task gc: retention=%dd: %s" days summary
   with
-  | EioCancel.Cancelled _ as e -> raise e
+  | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Server.error "periodic task gc failed: %s" (Printexc.to_string exn)
 
@@ -939,7 +939,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                 (Mcp_server.workspace_config state)
                 ~days:(Runtime_params.get Runtime_settings.task_archive_retention_days)
             with
-            | EioCancel.Cancelled _ as e -> raise e
+            | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
               Log.Server.error "periodic task gc failed: %s" (Printexc.to_string exn))
          end;

@@ -198,7 +198,11 @@ val make_http_transport
     When [transport] is provided, uses that transport for I/O.
     Otherwise falls back to the built-in HTTP transport.
 
-    When [cache] is provided, checks response cache before I/O and stores on success.
+    With the built-in HTTP transport and a static credential, [cache] checks
+    the exact serialized request before I/O and stores successful responses.
+    Injected transports and refreshable credentials bypass this optional
+    response cache. Injected transports still run normally, without requiring
+    an HTTP codec or serialization. Provider prompt caching is independent.
     When [connection_cache] is provided, the built-in HTTP transport reuses idle
     connections. It has no effect when a custom [transport] is supplied.
     When [metrics] is provided, fires lifecycle callbacks.

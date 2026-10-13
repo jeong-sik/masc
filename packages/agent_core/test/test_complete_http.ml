@@ -965,6 +965,156 @@ let test_complete_cache_store_and_hit () =
   | Exit -> ()
 ;;
 
+let with_response_cache_server ?(response_body = anthropic_response "cached") f =
+  Eio_main.run @@ fun env ->
+  try
+    Eio.Switch.run @@ fun sw ->
+    let captured = ref None in
+    let bodies = ref [] in
+    let url = start_mock_server ~sw ~net:env#net ~capture_body:captured
+        ~on_request:(fun () -> bodies := Option.get !captured :: !bodies) response_body in
+    let store = Hashtbl.create 4 in
+    let cache : Cache.t =
+      { get = (fun ~key -> Hashtbl.find_opt store key)
+      ; set = (fun ~key ~ttl_sec value ->
+          check int "response cache TTL is unchanged" Constants.Cache.default_ttl_sec ttl_sec;
+          Hashtbl.replace store key value)
+      } in
+    f ~sw ~net:env#net ~url ~cache ~bodies;
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
+let with_response_cache_catalog f =
+  let previous = Model_catalog.global () in
+  Fun.protect ~finally:(fun () ->
+    match previous with
+    | Some catalog -> Model_catalog.set_global catalog
+    | None -> Model_catalog.clear_global ()) f
+;;
+
+let response_cache_catalog ~ceiling ~replay =
+  match Model_catalog.of_toml_string ~source:"response cache projection fixture"
+      (Printf.sprintf {|[[models]]
+id_prefix = "response-cache-model"
+base = "anthropic"
+max_context_tokens = 4096
+max_output_tokens = %d
+reasoning_replay = "%s"
+|} ceiling replay) with
+  | Ok catalog -> catalog
+  | Error detail -> fail detail
+;;
+
+let require_cached_response = function
+  | Ok response -> response
+  | Error _ -> fail "response-cache completion failed"
+;;
+
+let test_response_cache_tracks_catalog_defaults () =
+  with_response_cache_catalog @@ fun () ->
+  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  with_response_cache_server @@ fun ~sw ~net ~url ~cache ~bodies ->
+  let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
+      ~base_url:url ~request_path:"/v1/messages" () in
+  let run () = Complete.complete ~sw ~net ~config ~messages ~cache () |> require_cached_response in
+  ignore (run ());
+  Model_catalog.set_global (response_cache_catalog ~ceiling:16 ~replay:"preserve_always");
+  ignore (run ());
+  ignore (run ());
+  check int "changed resolved body misses; identical body hits" 2 (List.length !bodies);
+  let ceilings = List.rev !bodies |> List.map (fun body ->
+    Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "max_tokens" |> to_int)) in
+  check (list int) "each dispatched body has its own resolved ceiling" [64;16] ceilings
+;;
+
+let test_response_cache_tracks_reasoning_source_projection () =
+  with_response_cache_catalog @@ fun () ->
+  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  with_response_cache_server @@ fun ~sw ~net ~url ~cache ~bodies ->
+  let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
+      ~base_url:url ~request_path:"/v1/messages" ~max_tokens:64 () in
+  let source = Reasoning_dialect.reasoning_source_for_provider_config config |> Result.get_ok in
+  let foreign = Reasoning_dialect.reasoning_source_for_provider_config
+      { config with model_id = "foreign-model" } |> Result.get_ok in
+  let history metadata : Types.message list =
+    [ { (Types.assistant_msg "prior answer") with metadata
+      ; content = [ Thinking { signature = Some "opaque-signed-history"; content = "prior reasoning" }
+                  ; Text "prior answer" ] }
+    ; Types.user_msg "continue" ] in
+  let matching = history (Types.Reasoning_source.metadata source) in
+  let mismatching = history (Types.Reasoning_source.metadata foreign) in
+  check bool "canonical content alone cannot distinguish source" true
+    (List.map Api_common.message_to_json matching = List.map Api_common.message_to_json mismatching);
+  let run messages = Complete.complete ~sw ~net ~config ~messages ~cache () |> require_cached_response in
+  ignore (run matching);
+  ignore (run mismatching);
+  ignore (run (history []));
+  ignore (run matching);
+  check int "source changes miss; identical projected bodies hit" 2 (List.length !bodies);
+  let has_thinking body =
+    let open Yojson.Safe.Util in
+    Yojson.Safe.from_string body |> member "messages" |> to_list
+    |> List.exists (fun message -> message |> member "content" |> to_list
+       |> List.exists (fun block -> member "type" block = `String "thinking")) in
+  check (list bool) "matching source keeps signed history; foreign or absent source strips it"
+    [true;false] (List.rev_map has_thinking !bodies)
+;;
+
+let test_response_cache_does_not_restamp_cached_reasoning () =
+  with_response_cache_catalog @@ fun () ->
+  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  let response_body = {|{"id":"cached-reasoning","type":"message","role":"assistant","model":"response-cache-model","content":[{"type":"thinking","thinking":"original reasoning","signature":"original-signature"},{"type":"text","text":"answer"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}|} in
+  with_response_cache_server ~response_body @@ fun ~sw ~net ~url ~cache ~bodies ->
+  let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
+      ~base_url:url ~request_path:"/v1/messages" ~max_tokens:64 () in
+  let run () = Complete.complete ~sw ~net ~config ~messages ~cache () |> require_cached_response in
+  let original = run () in
+  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"no_replay");
+  let current_source = Reasoning_dialect.reasoning_source_for_provider_config config |> Result.get_ok in
+  let cached = run () in
+  check int "unchanged effective body reuses the stored response" 1 (List.length !bodies);
+  check bool "cached signed content is unchanged" true (cached.content = original.content);
+  check bool "cache retains original telemetry" true (cached.telemetry = original.telemetry);
+  let original_source = Option.bind original.telemetry (fun telemetry -> telemetry.reasoning_source)
+      |> Option.get in
+  check bool "fixture changed the current source" false
+    (Types.Reasoning_source.equal original_source current_source);
+  let assistant = match Types.assistant_message_of_response cached with
+    | Ok message -> message
+    | Error error -> fail (Types.show_assistant_message_error error) in
+  match Types.Reasoning_source.classify assistant.metadata with
+  | Present actual -> check bool "cached reasoning keeps its original source" true
+      (Types.Reasoning_source.equal original_source actual)
+  | Absent | Invalid | Duplicate -> fail "cached reasoning lost its original source"
+;;
+
+let test_response_cache_reuses_admitted_body_without_dispatch_on_hit () =
+  with_response_cache_catalog @@ fun () ->
+  Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"preserve_always");
+  with_response_cache_server @@ fun ~sw ~net ~url ~cache ~bodies ->
+  let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
+      ~base_url:url ~request_path:"/v1/messages" () in
+  let serialized = Complete.prepare_request ~config ~messages ()
+      |> Complete.admit_request_body ~stream:false |> Result.get_ok in
+  Model_catalog.set_global (response_cache_catalog ~ceiling:16 ~replay:"no_replay");
+  let observations = ref [] in
+  let observer observation = observations := observation :: !observations; Ok () in
+  let run () = Complete.complete_serialized ~sw ~net serialized ~cache
+      ~request_wire_observer:observer () |> require_cached_response in
+  ignore (run ());
+  ignore (run ());
+  check int "admitted body cache hit does not dispatch" 1 (List.length !bodies);
+  check int "admitted body cache hit does not emit a dispatch observation" 1 (List.length !observations);
+  let body = List.hd !bodies in
+  check int "dispatch reuses the previously admitted 64-token body" 64
+    Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "max_tokens" |> to_int);
+  let observation = List.hd !observations in
+  let observed = Request_wire_observer.observation ~capture_id:None ~provider:observation.provider
+      ~model:observation.model ~http_codec:observation.http_codec ~stream:false ~body in
+  check string "dispatch evidence matches the cached body" observed.body_sha256 observation.body_sha256
+;;
+
 (* ── complete with metrics ───────────────────────────── *)
 
 let test_complete_metrics () =
@@ -3811,7 +3961,7 @@ let test_complete_deadline_preflight_precedes_cache_hit () =
   Eio.Switch.run
   @@ fun sw ->
   let cache_reads = ref 0 in
-  let transport_calls = ref 0 in
+  let observations = ref 0 in
   let response = mock_transport_response "cached" in
   let cache : Cache.t =
     { get =
@@ -3821,28 +3971,20 @@ let test_complete_deadline_preflight_precedes_cache_hit () =
     ; set = (fun ~key:_ ~ttl_sec:_ _ -> ())
     }
   in
-  let transport =
-    { (make_transport (Ok response)) with
-      complete_sync =
-        (fun _ ->
-          incr transport_calls;
-          { Llm_transport.response = Ok response; latency_ms = Some 1 })
-    }
-  in
   match
     Complete.complete
       ~sw
       ~net:env#net
-      ~transport
       ~config:(make_config "")
       ~messages
       ~cache
       ~body_timeout_s:1.0
+      ~request_wire_observer:(fun _ -> incr observations; Ok ())
       ()
   with
   | Error (Http_client.AcceptRejected _) ->
     check int "deadline preflight precedes cache lookup" 0 !cache_reads;
-    check int "deadline preflight precedes transport" 0 !transport_calls
+    check int "deadline preflight precedes dispatch observation" 0 !observations
   | Ok _ -> fail "cache hit silently bypassed invalid deadline contract"
   | Error _ -> fail "cache preflight returned the wrong typed error"
 ;;
@@ -4385,7 +4527,17 @@ let () =
             `Quick
             test_complete_rejects_missing_anthropic_output_ceiling_before_io
         ] )
-    ; "cache", [ test_case "store and hit" `Quick test_complete_cache_store_and_hit ]
+    ; "cache",
+      [ test_case "store and hit" `Quick test_complete_cache_store_and_hit
+      ; test_case "catalog defaults are part of the HTTP identity" `Quick
+          test_response_cache_tracks_catalog_defaults
+      ; test_case "reasoning source projects into HTTP cache identity" `Quick
+          test_response_cache_tracks_reasoning_source_projection
+      ; test_case "cached reasoning is not restamped" `Quick
+          test_response_cache_does_not_restamp_cached_reasoning
+      ; test_case "admitted body is reused and cache hits skip dispatch" `Quick
+          test_response_cache_reuses_admitted_body_without_dispatch_on_hit
+      ]
     ; ( "metrics"
       , [ test_case "callbacks" `Quick test_complete_metrics
         ; test_case "tool call callback" `Quick test_complete_tool_call_metrics

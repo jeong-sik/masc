@@ -79,6 +79,14 @@ shim 을 `--probe` 해서 그 shim 이 말하는 프로토콜 major(v2 또는 v3
 거부하므로, 서버는 모든 shim 이 아는 키만 설정에 쓴다. 두 major 밖의 shim 만
 `remote_shim_version_skew` 로 거부된다.
 
+shim 이 서버와 다른 릴리즈에서 나온 것이면 서버는 `remote_shim_outdated` WARN 을
+남기고 계속 돈다. 그 줄에는 이 호스트에서 바꿀 파일 경로가 적혀 있다
+(`<base>/.masc/microvm/shim/masc-exec-shim` 과 옆의 `.sha256`). 바꾸는 방법은 아래
+"shim 받기"다. SSH 엔드포인트용 `masc-exec-ssh-bootstrap` 은 게스트에 쓰지 않는다.
+게스트는 이 디렉터리를 마운트로 읽으므로 켜져 있는 게스트도 다음 요청부터 새 shim 을
+쓴다. 다만 서버는 probe 답을 프로세스가 사는 동안 들고 있어서, `keeper_lane_status`
+의 `shim_release` 는 다음 probe 까지 옛 값을 보여 준다.
+
 게스트가 마운트하는 것: 설정 디렉터리(읽기 전용, `/tmp/masc-runtime/.masc/config`),
 GitHub identity 스냅샷, 작업 볼륨(`masc-keeper-work-<keeper>` →
 `/masc-work`), shim 디렉터리(읽기 전용, `/opt/masc-exec-shim`), 그리고

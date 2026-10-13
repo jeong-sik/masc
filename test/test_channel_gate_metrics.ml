@@ -23,6 +23,13 @@ let find_channel_json channel json =
 let check_error_kind name expected actual =
   check string name expected (Metrics.error_kind_to_string actual)
 
+let check_last_error name ~kind ~message (last_error : Metrics.failure option) =
+  match last_error with
+  | Some failure ->
+      check_error_kind (name ^ " kind") kind failure.kind;
+      check string (name ^ " message") message failure.message
+  | None -> fail (name ^ ": expected a failure")
+
 let test_error_kind_round_trip () =
   match Metrics.error_kind_of_string "validation" with
   | Some kind -> check_error_kind "round trip" "validation" kind
@@ -47,7 +54,8 @@ let test_record_attempt_tracks_connector_diagnostics () =
       check int "validation_error_count" 1 stats.validation_error_count;
       check int "workspace_count counts unique workspaces" 2 stats.workspace_count;
       check string "last_keeper trimmed" "luna" stats.last_keeper;
-      check_error_kind "last_error_kind" "validation" stats.last_error_kind;
+      check_last_error "last_error" ~kind:"validation" ~message:"content is required"
+        stats.last_error;
       check string "last_outcome" "validation_error" (Metrics.outcome_to_string stats.last_outcome);
       check string "last_workspace_id" "workspace-b" stats.last_workspace_id)
 
@@ -69,8 +77,8 @@ let test_record_internal_error_exn_tracks_internal_failures () =
       check int "error_count" 1 stats.error_count;
       check int "internal_error_count" 1 stats.internal_error_count;
       check string "last_keeper trimmed" "alpha" stats.last_keeper;
-      check string "last_error redacted" "internal error" stats.last_error;
-      check_error_kind "last_error_kind" "internal" stats.last_error_kind;
+      check_last_error "last_error redacted" ~kind:"internal" ~message:"internal error"
+        stats.last_error;
       check string "last_outcome" "internal_error" (Metrics.outcome_to_string stats.last_outcome))
 
 let test_record_validation_error_metric_tracks_request_metadata () =
@@ -95,7 +103,8 @@ let test_record_validation_error_metric_tracks_request_metadata () =
       check int "validation_error_count" 1 stats.validation_error_count;
       check string "last_workspace_id" "workspace-route" stats.last_workspace_id;
       check string "last_keeper" "luna" stats.last_keeper;
-      check string "last_error" "invalid payload" stats.last_error)
+      check_last_error "last_error" ~kind:"validation" ~message:"invalid payload"
+        stats.last_error)
 
 let test_record_validation_error_metric_falls_back_for_invalid_json () =
   with_eio (fun () ->
@@ -119,7 +128,8 @@ let test_record_validation_error_metric_falls_back_for_invalid_json () =
         stats.message_count;
       check int "validation count incremented" (before_validation + 1)
         stats.validation_error_count;
-      check string "last_error" "invalid json" stats.last_error)
+      check_last_error "last_error" ~kind:"validation" ~message:"invalid json"
+        stats.last_error)
 
 let test_snapshot_json_reports_health_and_latency () =
   with_eio (fun () ->
@@ -206,9 +216,48 @@ let test_events_json_filters_newest_first () =
         (newest |> U.member "outcome" |> U.to_string);
       check string "older outcome" "success"
         (older |> U.member "outcome" |> U.to_string);
+      (* The kind and message are read off the outcome when the event is
+         written out; a success writes neither. *)
+      check string "newest error_kind" "keeper"
+        (newest |> U.member "error_kind" |> U.to_string);
+      check string "newest error" "upstream timeout"
+        (newest |> U.member "error" |> U.to_string);
+      check string "older error_kind" ""
+        (older |> U.member "error_kind" |> U.to_string);
+      check string "older error" ""
+        (older |> U.member "error" |> U.to_string);
       check bool "latest seq present" true
         ((json |> U.member "latest_seq" |> U.to_int) >=
          (newest |> U.member "seq" |> U.to_int)))
+
+(* The last failure outlives later successes: an operator reads it as "what
+   last went wrong" while [last_outcome] says the channel works again. Until a
+   channel fails there is no failure, which the JSON spells as two empty
+   strings. *)
+let test_last_error_outlives_a_success () =
+  with_eio (fun () ->
+      let channel = unique_channel "last-error" in
+      Metrics.record_attempt ~channel ~workspace_id:"" ~keeper:"luna"
+        ~duration_ms:0 Metrics.Success;
+      let row = find_channel_json channel (Metrics.snapshot_json ()) in
+      check string "no failure yet: last_error" ""
+        (row |> U.member "last_error" |> U.to_string);
+      check string "no failure yet: last_error_kind" ""
+        (row |> U.member "last_error_kind" |> U.to_string);
+      Metrics.record_attempt ~channel ~workspace_id:"" ~keeper:"luna"
+        ~duration_ms:0 Metrics.Dispatch_unavailable;
+      Metrics.record_attempt ~channel ~workspace_id:"" ~keeper:"luna"
+        ~duration_ms:0 Metrics.Success;
+      let stats =
+        Metrics.snapshot ()
+        |> List.find (fun (row : Metrics.channel_stats) ->
+               String.equal row.channel channel)
+      in
+      check string "last_outcome is the success" "success"
+        (Metrics.outcome_to_string stats.last_outcome);
+      check_last_error "last_error kept" ~kind:"dispatch_unavailable"
+        ~message:"keeper dispatch unavailable" stats.last_error;
+      check int "dispatch_unavailable_count" 1 stats.dispatch_unavailable_count)
 
 let test_workspace_tracking_is_bounded () =
   with_eio (fun () ->
@@ -285,6 +334,8 @@ let () =
              test_snapshot_json_includes_workspace_bindings;
            test_case "serializes filtered recent events" `Quick
              test_events_json_filters_newest_first;
+           test_case "keeps the last failure after a success" `Quick
+             test_last_error_outlives_a_success;
            test_case "bounds tracked workspaces" `Quick
              test_workspace_tracking_is_bounded;
          ] );

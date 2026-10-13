@@ -15,31 +15,38 @@ let outcome_to_string = function
   | Dispatch_unavailable -> "dispatch_unavailable"
   | Internal_error _ -> "internal_error"
 
-(* Closed sum mirroring the in-module producer surface (5 sites in this
-   file).  [Ek_none] replaces the [Error_kind ""] marker previously
-   used to encode the no-error state for [Success]
-   outcomes. *)
 type error_kind =
-  | Ek_none
   | Ek_validation
   | Ek_keeper
   | Ek_dispatch_unavailable
   | Ek_internal
 
 let error_kind_to_string = function
-  | Ek_none -> ""
   | Ek_validation -> "validation"
   | Ek_keeper -> "keeper"
   | Ek_dispatch_unavailable -> "dispatch_unavailable"
   | Ek_internal -> "internal"
 
 let error_kind_of_string = function
-  | "" -> Some Ek_none
   | "validation" -> Some Ek_validation
   | "keeper" -> Some Ek_keeper
   | "dispatch_unavailable" -> Some Ek_dispatch_unavailable
   | "internal" -> Some Ek_internal
   | _ -> None
+
+type failure = {
+  kind : error_kind;
+  message : string;
+}
+
+(* The failure an outcome carries; [Success] carries none. *)
+let outcome_failure = function
+  | Success -> None
+  | Validation_error message -> Some { kind = Ek_validation; message }
+  | Keeper_error message -> Some { kind = Ek_keeper; message }
+  | Dispatch_unavailable ->
+      Some { kind = Ek_dispatch_unavailable; message = "keeper dispatch unavailable" }
+  | Internal_error message -> Some { kind = Ek_internal; message }
 
 type channel_stats = {
   channel : string;
@@ -55,8 +62,7 @@ type channel_stats = {
   last_error_ts : float;
   last_keeper : string;
   last_workspace_id : string;
-  last_error : string;
-  last_error_kind : error_kind;
+  last_error : failure option;
   last_outcome : outcome;
   total_duration_ms : int;
   timed_count : int;
@@ -75,8 +81,7 @@ type binding_stats = {
   last_activity_ts : float;
   last_success_ts : float;
   last_error_ts : float;
-  last_error : string;
-  last_error_kind : error_kind;
+  last_error : failure option;
   last_outcome : outcome;
   total_duration_ms : int;
   timed_count : int;
@@ -101,8 +106,7 @@ type binding_acc = {
   last_success_ts : float;
   last_error_ts : float;
   keeper : string;
-  last_error : string;
-  last_error_kind : error_kind;
+  last_error : failure option;
   last_outcome : outcome;
   total_dur_ms : int;
   timed_count : int;
@@ -122,8 +126,7 @@ type stats_acc = {
   last_error_ts : float;
   last_keeper : string;
   last_workspace_id : string;
-  last_error : string;
-  last_error_kind : error_kind;
+  last_error : failure option;
   last_outcome : outcome;
   total_dur_ms : int;
   timed_count : int;
@@ -149,8 +152,7 @@ let make_binding_acc ~last_outcome =
     last_success_ts = 0.0;
     last_error_ts = 0.0;
     keeper = "";
-    last_error = "";
-    last_error_kind = Ek_none;
+    last_error = None;
     last_outcome;
     total_dur_ms = 0;
     timed_count = 0;
@@ -171,8 +173,7 @@ let make_acc ~last_outcome =
     last_error_ts = 0.0;
     last_keeper = "";
     last_workspace_id = "";
-    last_error = "";
-    last_error_kind = Ek_none;
+    last_error = None;
     last_outcome;
     total_dur_ms = 0;
     timed_count = 0;
@@ -192,30 +193,33 @@ let next_event_seq = ref 0
 
 (* A channel or binding is created by the attempt that first names it, so it
    starts out holding that attempt's outcome; there is no "no attempt yet"
-   value to carry. *)
-let get_or_create_acc channel ~outcome =
+   value to carry. A new one reaches its table only once that attempt has been
+   folded in, at the end of [record_attempt]. *)
+let acc_for channel ~outcome =
   match Hashtbl.find_opt table channel with
   | Some acc -> acc
-  | None ->
-      let acc = make_acc ~last_outcome:outcome in
-      Hashtbl.replace table channel acc;
-      acc
+  | None -> make_acc ~last_outcome:outcome
 
-let update_error_fields acc ~now ~kind ~message =
+let update_error_fields acc ~now ~failure =
   { acc with
     err_count = acc.err_count + 1
   ; last_error_ts = now
-  ; last_error_kind = kind
-  ; last_error = message
+  ; last_error = Some failure
   }
 
-let update_binding_error_fields (acc : binding_acc) ~now ~kind ~message =
+let update_binding_error_fields (acc : binding_acc) ~now ~failure =
   { acc with
     err_count = acc.err_count + 1
   ; last_error_ts = now
-  ; last_error_kind = kind
-  ; last_error = message
+  ; last_error = Some failure
   }
+
+let count_failure (acc : stats_acc) = function
+  | Ek_validation -> { acc with validation_error_count = acc.validation_error_count + 1 }
+  | Ek_keeper -> { acc with keeper_error_count = acc.keeper_error_count + 1 }
+  | Ek_dispatch_unavailable ->
+      { acc with dispatch_unavailable_count = acc.dispatch_unavailable_count + 1 }
+  | Ek_internal -> { acc with internal_error_count = acc.internal_error_count + 1 }
 
 (* The workspace set and its eviction queue are containers held by [acc];
    they keep mutating in place. Only [last_workspace_id] is a field, so it
@@ -233,28 +237,23 @@ let remember_workspace acc workspace_id =
    end;
   { acc with last_workspace_id = workspace_id }
 
-let get_or_create_binding acc workspace_id ~outcome =
+let binding_for acc workspace_id ~outcome =
   match Hashtbl.find_opt acc.bindings workspace_id with
   | Some binding -> binding
-  | None ->
-      if Hashtbl.length acc.bindings >= max_tracked_workspaces
-         && not (Queue.is_empty acc.binding_order)
-      then begin
-        let evicted = Queue.take acc.binding_order in
-        Hashtbl.remove acc.bindings evicted
-      end;
-      let binding = make_binding_acc ~last_outcome:outcome in
-      Hashtbl.replace acc.bindings workspace_id binding;
-      Queue.add workspace_id acc.binding_order;
-      binding
+  | None -> make_binding_acc ~last_outcome:outcome
 
-let outcome_error_details = function
-  | Validation_error message -> (Ek_validation, message)
-  | Keeper_error message -> (Ek_keeper, message)
-  | Dispatch_unavailable ->
-      (Ek_dispatch_unavailable, "keeper dispatch unavailable")
-  | Internal_error message -> (Ek_internal, message)
-  | Success -> (Ek_none, "")
+(* A binding first seen here takes a slot, evicting the oldest when full. *)
+let store_binding acc workspace_id binding =
+  if not (Hashtbl.mem acc.bindings workspace_id) then begin
+    if Hashtbl.length acc.bindings >= max_tracked_workspaces
+       && not (Queue.is_empty acc.binding_order)
+    then begin
+      let evicted = Queue.take acc.binding_order in
+      Hashtbl.remove acc.bindings evicted
+    end;
+    Queue.add workspace_id acc.binding_order
+  end;
+  Hashtbl.replace acc.bindings workspace_id binding
 
 let append_event ~channel ~workspace_id ~keeper ~duration_ms outcome ~timestamp =
   incr next_event_seq;
@@ -282,7 +281,7 @@ let record_attempt ~channel ~workspace_id ~keeper ~duration_ms outcome =
          and the two tables are written once at the end. The nested [bindings]
          / [workspaces] tables are shared handles carried by [{ acc with ... }],
          so their in-place updates land whichever copy is held. *)
-      let acc = get_or_create_acc channel_key ~outcome in
+      let acc = acc_for channel_key ~outcome in
       let now = Unix.gettimeofday () in
       let trimmed_keeper = String.trim keeper in
       let acc =
@@ -299,7 +298,7 @@ let record_attempt ~channel ~workspace_id ~keeper ~duration_ms outcome =
         if trimmed_workspace = "" then acc, None
         else begin
           let acc = remember_workspace acc trimmed_workspace in
-          let binding = get_or_create_binding acc trimmed_workspace ~outcome in
+          let binding = binding_for acc trimmed_workspace ~outcome in
           let binding =
             { binding with
               msg_count = binding.msg_count + 1
@@ -335,17 +334,9 @@ let record_attempt ~channel ~workspace_id ~keeper ~duration_ms outcome =
               }
         | (Some _ | None) as binding -> binding
       in
-      let error_outcome (acc : stats_acc) (binding : binding_acc option)
-          ~kind ~message =
-        ( update_error_fields acc ~now ~kind ~message,
-          Option.map
-            (fun (binding : binding_acc) ->
-              update_binding_error_fields binding ~now ~kind ~message)
-            binding )
-      in
       let acc, binding =
-        match outcome with
-        | Success ->
+        match outcome_failure outcome with
+        | None ->
             ( { acc with
                 success_count = acc.success_count + 1
               ; last_success_ts = now
@@ -357,36 +348,16 @@ let record_attempt ~channel ~workspace_id ~keeper ~duration_ms outcome =
                   ; last_success_ts = now
                   })
                 binding )
-        | Validation_error message ->
-            error_outcome
-              { acc with validation_error_count = acc.validation_error_count + 1 }
-              binding
-              ~kind:Ek_validation
-              ~message
-        | Keeper_error message ->
-            error_outcome
-              { acc with keeper_error_count = acc.keeper_error_count + 1 }
-              binding
-              ~kind:Ek_keeper
-              ~message
-        | Dispatch_unavailable ->
-            error_outcome
-              { acc with
-                dispatch_unavailable_count = acc.dispatch_unavailable_count + 1
-              }
-              binding
-              ~kind:Ek_dispatch_unavailable
-              ~message:"keeper dispatch unavailable"
-        | Internal_error message ->
-            error_outcome
-              { acc with internal_error_count = acc.internal_error_count + 1 }
-              binding
-              ~kind:Ek_internal
-              ~message
+        | Some failure ->
+            ( update_error_fields (count_failure acc failure.kind) ~now ~failure,
+              Option.map
+                (fun (binding : binding_acc) ->
+                  update_binding_error_fields binding ~now ~failure)
+                binding )
       in
       (match binding with
        | Some binding when trimmed_workspace <> "" ->
-           Hashtbl.replace acc.bindings trimmed_workspace binding
+           store_binding acc trimmed_workspace binding
        | Some _ | None -> ());
       Hashtbl.replace table channel_key acc;
       append_event ~channel:channel_key ~workspace_id:trimmed_workspace ~keeper:trimmed_keeper
@@ -415,7 +386,6 @@ let snapshot () : channel_stats list =
             last_keeper = acc.last_keeper;
             last_workspace_id = acc.last_workspace_id;
             last_error = acc.last_error;
-            last_error_kind = acc.last_error_kind;
             last_outcome = acc.last_outcome;
             total_duration_ms = acc.total_dur_ms;
             timed_count = acc.timed_count;
@@ -525,8 +495,13 @@ let binding_health (stats : binding_stats) =
     ~error_count:stats.error_count ~success_count:stats.success_count
     ~timed_count:stats.timed_count ~slow_count:0
 
+(* The status JSON spells "no failure" as two empty strings. *)
+let failure_fields = function
+  | None -> ("", "")
+  | Some { kind; message } -> (error_kind_to_string kind, message)
+
 let gate_event_to_json (event : gate_event) =
-  let error_kind, error = outcome_error_details event.outcome in
+  let error_kind, error = failure_fields (outcome_failure event.outcome) in
   `Assoc
     [
       ("seq", `Int event.seq);
@@ -535,7 +510,7 @@ let gate_event_to_json (event : gate_event) =
       ("workspace_id", `String event.workspace_id);
       ("keeper", `String event.keeper);
       ("outcome", `String (outcome_to_string event.outcome));
-      ("error_kind", `String (error_kind_to_string error_kind));
+      ("error_kind", `String error_kind);
       ("error", `String error);
       ("duration_ms", `Int event.duration_ms);
     ]
@@ -559,7 +534,6 @@ let snapshot_locked () =
           last_keeper = acc.last_keeper;
           last_workspace_id = acc.last_workspace_id;
           last_error = acc.last_error;
-          last_error_kind = acc.last_error_kind;
           last_outcome = acc.last_outcome;
           total_duration_ms = acc.total_dur_ms;
           timed_count = acc.timed_count;
@@ -590,7 +564,6 @@ let snapshot_locked () =
               last_success_ts = binding.last_success_ts;
               last_error_ts = binding.last_error_ts;
               last_error = binding.last_error;
-              last_error_kind = binding.last_error_kind;
               last_outcome = binding.last_outcome;
               total_duration_ms = binding.total_dur_ms;
               timed_count = binding.timed_count;
@@ -630,6 +603,7 @@ let snapshot_json () =
       0 channels
   in
   let channel_json (stats : channel_stats) =
+    let last_error_kind, last_error = failure_fields stats.last_error in
     let avg_dur =
       if stats.timed_count > 0 then stats.total_duration_ms / stats.timed_count
       else 0
@@ -649,8 +623,8 @@ let snapshot_json () =
         ("last_error_at", `String (iso_of_ts stats.last_error_ts));
         ("last_keeper", `String stats.last_keeper);
         ("last_workspace_id", `String stats.last_workspace_id);
-        ("last_error", `String stats.last_error);
-        ("last_error_kind", `String (error_kind_to_string stats.last_error_kind));
+        ("last_error", `String last_error);
+        ("last_error_kind", `String last_error_kind);
         ("last_outcome", `String (outcome_to_string stats.last_outcome));
         ("avg_duration_ms", `Int avg_dur);
         ("max_duration_ms", `Int stats.max_duration_ms);
@@ -662,6 +636,7 @@ let snapshot_json () =
       ]
   in
   let binding_json (stats : binding_stats) =
+    let last_error_kind, last_error = failure_fields stats.last_error in
     let avg_dur =
       if stats.timed_count > 0 then stats.total_duration_ms / stats.timed_count
       else 0
@@ -677,8 +652,8 @@ let snapshot_json () =
         ("last_activity", `String (iso_of_ts stats.last_activity_ts));
         ("last_success", `String (iso_of_ts stats.last_success_ts));
         ("last_error_at", `String (iso_of_ts stats.last_error_ts));
-        ("last_error", `String stats.last_error);
-        ("last_error_kind", `String (error_kind_to_string stats.last_error_kind));
+        ("last_error", `String last_error);
+        ("last_error_kind", `String last_error_kind);
         ("last_outcome", `String (outcome_to_string stats.last_outcome));
         ("avg_duration_ms", `Int avg_dur);
         ("max_duration_ms", `Int stats.max_duration_ms);

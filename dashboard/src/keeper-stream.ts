@@ -225,7 +225,7 @@ function persistActiveAssistantDraft(keeperName: string, assistantEntryId: strin
   if (!entry) return
   const deliveryKey = entry.deliveryProvenance?.delivery_key
   if (deliveryKey?.kind !== 'operation') return
-  updateTrackedKeeperChatAssistantDraft(deliveryKey.operation_id, entry)
+  updateTrackedKeeperChatAssistantDraft(deliveryKey.operation_id, entry, keeperThreads.value[keeperName] ?? [])
 }
 
 function captureThinkingPublicationOwner(entry: KeeperConversationEntry, authRevision: number): ThinkingPublicationOwner {
@@ -845,6 +845,11 @@ export function applyKeeperStreamEvent(
       return null
     }
     case 'TOOL_CALL_START': {
+      if ((keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.toolObservationAuthority === 'unavailable') {
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry, error: 'Stored tool ownership is unavailable; authoritative recovery is required' }))
+        return null
+      }
+
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       const toolCallId = nonBlankToolCallId(event.toolCallId) ?? undefined
       const toolName = event.toolCallName?.trim()
@@ -1048,6 +1053,10 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_TOOL_RESULT_READY') {
+        if ((keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.toolObservationAuthority === 'unavailable') {
+          updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry, error: 'Stored tool ownership is unavailable; authoritative recovery is required' }))
+          return null
+        }
         const toolCallId = nonBlankToolCallId(event.value.toolCallId) ?? undefined
         const executionId = event.value.executionId
         if (!executionId.trim()) return 'KEEPER_TOOL_RESULT_READY missing executionId'

@@ -236,7 +236,10 @@ let execute_action t action =
       | Browser_lane.Action.Dismiss_dialog | Browser_lane.Action.Back | Browser_lane.Action.Forward
       | Browser_lane.Action.Reload | Browser_lane.Action.Click _ | Browser_lane.Action.Fill _
       | Browser_lane.Action.Press _ | Browser_lane.Action.Select _ | Browser_lane.Action.Scroll _
-      | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _ -> Ok (`Assoc ["tabId",`Int id;"performed",`Bool true;"result",result]))
+      | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _ ->
+        (* Do not issue another fallible browser request after an effect.
+           The caller observes the resulting page with a separate read. *)
+        Ok (`Assoc ["tabId",`Int id;"performed",`Bool true;"result",result]))
   in result, !phase
 (* The remote end's own answer to "can a session be created now" (W3C
    WebDriver, Status: [ready] and [message]). A driver that does not answer is

@@ -89,7 +89,11 @@ let scrolled_surface state surface =
       Some (Masc_tui_render.config_models_scrolled state)
   | Overview | Acting | Metrics | Lanes | Clients | Board | Approvals | Planning | Schedules
   | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Resources
-  | System_logs | Keepers _ | (Memory|Config) -> let _terminal_rows, cols = get_terminal_size () in
+  | System_logs | Keepers _ | (Memory|Config) ->
+      (* The Lanes overview's chrome counts the rows a multi-line refusal
+         wraps to, so it is read at the terminal width like the Memory
+         overview's and Runtime's. *)
+      let _terminal_rows, cols = get_terminal_size () in
       Masc_tui_types.scrolled_surface state ~cols surface
 ;;
 

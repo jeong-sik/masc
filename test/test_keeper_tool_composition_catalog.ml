@@ -1031,10 +1031,13 @@ let test_read_only_outer_invocations_overlap_without_identity_mixing () =
   let module Ledger = Masc.Keeper_skill_activation_ledger in
   let module Causal = Masc.Keeper_gate_causal_context in
   let config = Masc.Workspace.default_config base_path in
-  let meta = Masc_test_deps.meta_of_json_fixture
-      (`Assoc [ "name", `String "overlap"; "activation_mode", `String "manual"
-              ; "sandbox_profile", `String "docker"; "sandbox_image", `String "base" ])
-    |> Result.get_ok in
+  (* Sandbox configuration is TOML-owned, outside the runtime JSON codec. *)
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "overlap"; "activation_mode", `String "manual" ]) with
+    | Ok meta ->
+      { meta with Masc.Keeper_meta_contract.sandbox_profile = Masc.Keeper_types_profile.Docker
+                ; sandbox_image = Some "base" }
+    | Error detail -> failf "overlap fixture Keeper meta decode failed: %s" detail in
   let image_reference = "composition-overlap:test" in
   Masc_test_deps.write_sandbox_image_catalog ~base_path [ "base", image_reference ];
   let read_root = Masc.Keeper_tool_shared_runtime.keeper_playground_root ~config ~meta in

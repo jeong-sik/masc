@@ -1,0 +1,100 @@
+{
+  "observed_at": "2026-10-13T06:16:09.373858+00:00",
+  "source_head": "a6f5e55e0154ed1bdec7ecf0d332b4e8399ae383",
+  "command": "opam exec -- ocamlc -stop-after parsing -impl/-intf FILE",
+  "scope": "syntax only, no typecheck or test execution",
+  "results": [
+    {
+      "file": "lib/keeper/keeper_agent_prompt_metrics.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "lib/keeper/keeper_context_submission_link.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "lib/keeper/keeper_official_client_context_projection.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "lib/runtime/runtime_model_input_tail_window.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/lib/agent/agent_turn.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/lib/agent/agent_turn.mli",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/lib/llm_provider/backend_anthropic.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/lib/llm_provider/backend_anthropic.mli",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/lib/llm_provider/complete_stream.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/lib/llm_provider/complete_sync.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/lib/llm_provider/exact_output_count_tokens.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/lib/llm_provider/exact_output_plan.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/lib/llm_provider/reasoning_history_projection.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/lib/llm_provider/types.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/lib/llm_provider/types.mli",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/lib/pipeline/pipeline.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/test/test_agent_turn.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/test/test_anthropic_input_token_count.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/test/test_exact_output_flow.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "packages/agent_core/test/test_pipeline.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "test/test_keeper_prompt_metrics.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "test/test_runtime_codex_app_server.ml",
+      "exit_code": 0
+    },
+    {
+      "file": "test/test_runtime_model_input_tail_window.ml",
+      "exit_code": 0
+    }
+  ]
+}

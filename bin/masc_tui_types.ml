@@ -9205,6 +9205,74 @@ let settle_turn_log_ended_by state (entry : inflight) ~record =
   settle_turn_log state entry
 ;;
 
+(* The in-flight owner of a request, by the id it was sent under. These four
+   live here rather than in the executable for the reason [settle_turn_log]
+   does: what they do to the state is linkable by a test. *)
+let inflight_entry_by_request_id (state : state) request_id =
+  List.find_opt
+    (fun (entry : inflight) -> String.equal entry.sent_request.request_id request_id)
+    state.msg_inflight
+;;
+
+let inflight_by_request_id state request_id =
+  Option.map
+    (fun (entry : inflight) -> entry.sent_request)
+    (inflight_entry_by_request_id state request_id)
+;;
+
+(* The turn settled: its log is committed and kept, and the pane goes on
+   drawing it from the same projection with a closing rail. Nothing is copied
+   into session rows -- the tool and skill rows used to be, and were then
+   replaced by the loaded transcript's copies on the next refresh, two
+   replacements of the same words with the reasoning lost at the first
+   (RFC-0412 §3.3). A log with no entries is not kept: the POST never left, or
+   the stream never opened, and there is nothing to draw. *)
+let settle_live_turn state (request : Masc_tui_keeper_chat_projection.request) ~record =
+  match inflight_entry_by_request_id state request.request_id with
+  | Some entry
+    when Masc_tui_keeper_chat_projection.same_request_identity entry.sent_request request ->
+      settle_turn_log_ended_by state entry ~record
+  | Some _ | None -> ()
+;;
+
+let drop_inflight (state : state) (request : Masc_tui_keeper_chat_projection.request) =
+  let same = Masc_tui_keeper_chat_projection.same_request_identity in
+  state.keeper_run_next_receipts <- List.filter (fun (received, _) ->
+    not (same received request)) state.keeper_run_next_receipts;
+  state.keeper_run_next_pending <- List.filter
+    (fun pending -> not (same pending request))
+    state.keeper_run_next_pending;
+  state.keeper_run_next_ready <- List.filter
+    (fun ready -> not (same ready request))
+    state.keeper_run_next_ready;
+  state.keeper_auto_priority_pending <- List.filter (fun (keeper_name, id) ->
+    not (String.equal keeper_name request.keeper_name
+         && String.equal id request.request_id))
+    state.keeper_auto_priority_pending;
+  state.keeper_auto_priority_requests <-
+    List.filter_map (fun (keeper_name, request_ids) ->
+      let request_ids = List.filter (fun id ->
+        not (String.equal keeper_name request.keeper_name
+             && String.equal id request.request_id)) request_ids in
+      if request_ids = [] then None else Some (keeper_name, request_ids))
+      state.keeper_auto_priority_requests;
+  state.msg_inflight <-
+    List.filter
+      (fun (entry : inflight) -> not (same entry.sent_request request))
+      state.msg_inflight
+;;
+
+(* Take back a request whose first POST never started. The pane stops showing
+   it as a live turn and its owner goes. Its dispatch job is still running; when
+   that job asks to start the first POST, the Keeper_chat_dispatch_started
+   handler finds no owner and answers no, and the job's result then finds no
+   owner either (apply_keeper_chat_result). Nothing durable exists for the
+   request. *)
+let withdraw_undispatched_request state (request : Masc_tui_keeper_chat_projection.request) =
+  settle_live_turn state request ~record:None;
+  drop_inflight state request
+;;
+
 (* The strict decode's row for a completed turn, or nothing when the settled
    log stands for the turn and draws its reply itself
    ([Masc_tui_keeper_chat_transcript.drawn]). *)
@@ -11327,27 +11395,49 @@ type keeper_message_pending_delivery =
   | Keeper_queued
   | Rechecking_delivery
 
+(* What the server last answered for a request it accepted. *)
+type keeper_server_answer =
+  | Server_queued  (** It waits in the Keeper's queue. *)
+  | Server_started  (** It had started. *)
+
+(* An in-flight owner's phase, without the queue item a preflight owner
+   carries. *)
+type keeper_owner_stage =
+  | Before_first_post
+  | Stream_open
+  | Reading_delivery_again
+
 (* Where one waiting message stands. This is the fact; the delivery label
    above and the treatment /queue clear gives a message are each a total
-   function of it, so neither reads the queue or the in-flight owners again. *)
+   function of it, so neither reads the queue or the in-flight owners again.
+
+   The server's answer and the owner's stage are separate facts and stay
+   separate here. The label needs only the stage, /queue clear needs only the
+   answer, and a value that folded the two could serve one of them and not the
+   other. Today an owner is created before its first POST with an empty log
+   and has left that stage by the time an answer reaches it, so
+   [Server_answered (_, Before_first_post)] has no producer. The pair is still
+   a value, and both functions below say what it gets. *)
 type keeper_message_waiting_position =
   | In_local_queue
       (** Waits in this client's queue; nothing was handed to a dispatch. *)
   | Undispatched
       (** Handed to a dispatch whose first POST has not started, and the
           server has never answered for it. *)
-  | Resending
-      (** Handed to a dispatch again after the server had answered for it. *)
-  | Posting  (** The POST is out and unanswered. *)
-  | Queued_on_server  (** The server answered that it waits in the Keeper's queue. *)
-  | Started_on_server  (** The server answered that it had started. *)
-  | Rechecking  (** Its delivery is being read again. *)
+  | Posting  (** The POST is out and the server has not answered. *)
+  | Rechecking
+      (** The server has not answered and the delivery is being read again,
+          or the stream failed. *)
+  | Server_answered of keeper_server_answer * keeper_owner_stage
 
 let pending_delivery_of_position = function
-  | In_local_queue | Undispatched | Resending -> Local_pending
+  | In_local_queue | Undispatched
+  | Server_answered ((Server_queued | Server_started), Before_first_post) -> Local_pending
   | Posting -> Awaiting_receipt
-  | Queued_on_server | Started_on_server -> Keeper_queued
-  | Rechecking -> Rechecking_delivery
+  | Server_answered ((Server_queued | Server_started), Stream_open) -> Keeper_queued
+  | Rechecking
+  | Server_answered ((Server_queued | Server_started), Reading_delivery_again) ->
+      Rechecking_delivery
 ;;
 
 let keeper_message_waiting_positions (state : state) ~keeper_name =
@@ -11386,26 +11476,25 @@ let keeper_message_waiting_positions (state : state) ~keeper_name =
       then None
       else
         let transcript = entry.log.tl_transcript in
-        (* What an entry the server has answered for is doing now. *)
-        let answered when_streaming =
+        let stage =
           match entry.phase with
-          | Turn_preflight _ -> Resending
-          | Turn_streaming -> when_streaming
-          | Turn_reconciling -> Rechecking in
+          | Turn_preflight _ -> Before_first_post
+          | Turn_streaming -> Stream_open
+          | Turn_reconciling -> Reading_delivery_again in
         match Masc_tui_keeper_chat_transcript.phase transcript,
               Masc_tui_keeper_chat_transcript.admission transcript with
         | Waiting, None
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
-            (match entry.phase with
-             | Turn_preflight _ -> Some (entry.sent_request, Undispatched)
-             | Turn_reconciling -> Some (entry.sent_request, Rechecking)
-             | Turn_streaming -> Some (entry.sent_request, Posting))
+            (match stage with
+             | Before_first_post -> Some (entry.sent_request, Undispatched)
+             | Stream_open -> Some (entry.sent_request, Posting)
+             | Reading_delivery_again -> Some (entry.sent_request, Rechecking))
         | Waiting, Some (Masc_tui_keeper_chat_live.Queued, _)
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
-            Some (entry.sent_request, answered Queued_on_server)
+            Some (entry.sent_request, Server_answered (Server_queued, stage))
         | Waiting, Some (Masc_tui_keeper_chat_live.Running, _)
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
-            Some (entry.sent_request, answered Started_on_server)
+            Some (entry.sent_request, Server_answered (Server_started, stage))
         | Stream_failed _, _ -> Some (entry.sent_request, Rechecking)
         | Waiting, (None | Some _) | (Working | Stream_ended), _ -> None)
   in
@@ -11418,13 +11507,21 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
     (keeper_message_waiting_positions state ~keeper_name)
 ;;
 
-(* What /queue clear does with a waiting message, by where it stands. A line
-   still in the queue, or handed to a dispatch that has not posted it, exists
-   only in this client and is withdrawn here. One the server holds in its
-   queue is the server's to cancel, under the id this client sent it with.
-   The rest are left: the outcome of a POST that is out or being read again
-   is not known yet, a line the server started is stopped with Esc, and a
-   line being sent again reaches an operation the server already has. *)
+(* What /queue clear does with a waiting message, by where it stands.
+
+   A line still in the queue, or handed to a dispatch that has not posted it
+   and that the server never answered for, exists only in this client and is
+   withdrawn here.
+
+   A line the server answered as queued is the server's to cancel, under the
+   id this client sent it with, whatever the owner is doing with it now. The
+   cancel names the operation, not the stream, and the server cancels it only
+   while it is still queued there; an owner that is reading the delivery again
+   or about to post again then reads an operation that was cancelled.
+
+   The rest are left. The outcome of a POST that is out, or of a delivery
+   being read again with no answer, is not known. A line the server answered
+   as started is stopped with Esc. *)
 type keeper_queue_clear_treatment =
   | Drop_from_local_queue
   | Withdraw_before_post
@@ -11434,8 +11531,12 @@ type keeper_queue_clear_treatment =
 let keeper_queue_clear_treatment = function
   | In_local_queue -> Drop_from_local_queue
   | Undispatched -> Withdraw_before_post
-  | Queued_on_server -> Cancel_on_server
-  | Resending | Posting | Started_on_server | Rechecking -> Leave_waiting
+  | Server_answered
+      (Server_queued, (Before_first_post | Stream_open | Reading_delivery_again)) ->
+      Cancel_on_server
+  | Server_answered
+      (Server_started, (Before_first_post | Stream_open | Reading_delivery_again))
+  | Posting | Rechecking -> Leave_waiting
 ;;
 
 let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =

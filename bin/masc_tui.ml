@@ -1133,7 +1133,8 @@ let drop_unsent_request (state : state) (request : Keeper_chat.request) =
     state.msg_queued <- rest;
     (match state.msg_recall_replaces with
      | Some editing
-       when Keeper_chat.same_request_identity editing.Chat_queue.request request ->
+       when String.equal editing.Chat_queue.request.request_id
+              request.Keeper_chat.request_id ->
          state.msg_recall_replaces <- None;
          clear_staged_attachments state
      | Some _ | None -> ());
@@ -2238,35 +2239,9 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
       in
       watch ~first_post:true ~since_seq:Masc.Keeper_chat_event_log.Whole_turn false
 
-let inflight_entry_by_request_id state request_id =
-  List.find_opt
-    (fun entry -> String.equal entry.sent_request.request_id request_id)
-    state.msg_inflight
-;;
-
-let inflight_by_request_id state request_id =
-  Option.map
-    (fun entry -> entry.sent_request)
-    (inflight_entry_by_request_id state request_id)
-;;
-
 (* The strict decode carries no tool information, so the rows the live pane
    drew are the only record of what the turn did. They are committed before
    the reply lands so the scrollback reads in the order it happened. *)
-(* The turn settled: its log is committed and kept, and the pane goes on
-   drawing it from the same projection with a closing rail. Nothing is copied
-   into session rows -- the tool and skill rows used to be, and were then
-   replaced by the loaded transcript's copies on the next refresh, two
-   replacements of the same words with the reasoning lost at the first
-   (RFC-0412 §3.3). A log with no entries is not kept: the POST never left, or
-   the stream never opened, and there is nothing to draw. *)
-let settle_live_turn state (request : Keeper_chat.request) ~record =
-  match inflight_entry_by_request_id state request.Keeper_chat.request_id with
-  | Some entry
-    when Keeper_chat.same_request_identity entry.sent_request request ->
-      settle_turn_log_ended_by state entry ~record
-  | Some _ | None -> ()
-
 (* Ask the server to interrupt the turn this request opened.
 
    Nothing here decides that the turn stopped. The server reports whether it
@@ -7962,43 +7937,6 @@ let inflight_for state keeper_name =
     (blocking_inflight_for_keeper state keeper_name)
 ;;
 
-let drop_inflight state request =
-  state.keeper_run_next_receipts <- List.filter (fun (received, _) ->
-    not (Keeper_chat.same_request_identity received request)) state.keeper_run_next_receipts;
-  state.keeper_run_next_pending <- List.filter
-    (fun pending -> not (Keeper_chat.same_request_identity pending request))
-    state.keeper_run_next_pending;
-  state.keeper_run_next_ready <- List.filter
-    (fun ready -> not (Keeper_chat.same_request_identity ready request))
-    state.keeper_run_next_ready;
-  state.keeper_auto_priority_pending <- List.filter (fun (keeper_name, id) ->
-    not (String.equal keeper_name request.Keeper_chat.keeper_name
-         && String.equal id request.request_id))
-    state.keeper_auto_priority_pending;
-  state.keeper_auto_priority_requests <-
-    List.filter_map (fun (keeper_name, request_ids) ->
-      let request_ids = List.filter (fun id ->
-        not (String.equal keeper_name request.Keeper_chat.keeper_name
-             && String.equal id request.request_id)) request_ids in
-      if request_ids = [] then None else Some (keeper_name, request_ids))
-      state.keeper_auto_priority_requests;
-  state.msg_inflight <-
-    List.filter
-      (fun entry ->
-        not (Keeper_chat.same_request_identity entry.sent_request request))
-      state.msg_inflight
-;;
-
-(* Take back a request whose first POST never started. The pane stops showing
-   it as a live turn and its owner goes. Its dispatch job is still running; when
-   that job asks to start the first POST, [Keeper_chat_dispatch_started] finds no
-   owner and answers no, and the job's result then finds no owner either
-   ([apply_keeper_chat_result]). Nothing durable exists for the request. *)
-let withdraw_undispatched_request state (request : Keeper_chat.request) =
-  settle_live_turn state request ~record:None;
-  drop_inflight state request
-;;
-
 (* POST the request. There is no durable claim to take first: the server keys
    every chat operation by this request's id and refuses a second submission of
    it ([Keeper_chat_operation_store.submit] answers [Existing] for a repeat and
@@ -8902,8 +8840,9 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn) in
     enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, action, result)) in
-  (* Said here, past both refusals above, so the row appears only when the
-     cancels are really about to be sent. *)
+  (* Said here, past both refusals above. The job can still send none: it
+     checks the workspace and the control generation first and reports a
+     failure of either, and without an Eio switch it does not start. *)
   let cancelling = match clear_targets with
     | [] -> []
     | _ :: _ ->
@@ -10554,27 +10493,30 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
        | Some keeper_name, Ok Masc_tui_queue_inspection.Clear ->
          (* The part that needs no server. A line that exists only in this
             client is withdrawn here, so it is gone even when the queue request
-            below is refused. What that request cancels on the server, and how
-            the server answers, is its own report. It is made even when this
-            client holds nothing to cancel: its snapshot is the one place a
-            line this client no longer tracks is still listed. *)
-         let withdrawn, left =
-           List.fold_left (fun (withdrawn, left) (request, position) ->
+            below is refused. This row also counts the lines the server holds,
+            as a fact about them and not a claim that a cancel was sent: the
+            queue request says whether it sends, and each cancel's answer. It
+            is made even when this client holds nothing to cancel, because its
+            snapshot is the one place a line this client no longer tracks is
+            still listed. *)
+         let withdrawn, on_server, left =
+           List.fold_left (fun (withdrawn, on_server, left) (request, position) ->
              match keeper_queue_clear_treatment position with
              | Drop_from_local_queue ->
-               if drop_unsent_request state request then (withdrawn + 1, left)
-               else (withdrawn, left + 1)
+               if drop_unsent_request state request then (withdrawn + 1, on_server, left)
+               else (withdrawn, on_server, left + 1)
              | Withdraw_before_post ->
                withdraw_undispatched_request state request;
                forget_queued_history state request;
-               withdrawn + 1, left
-             | Cancel_on_server -> withdrawn, left
-             | Leave_waiting -> withdrawn, left + 1)
-             (0, 0) (keeper_message_waiting_positions state ~keeper_name) in
+               withdrawn + 1, on_server, left
+             | Cancel_on_server -> withdrawn, on_server + 1, left
+             | Leave_waiting -> withdrawn, on_server, left + 1)
+             (0, 0, 0) (keeper_message_waiting_positions state ~keeper_name) in
          let clause count what =
            if count = 0 then None else Some (Printf.sprintf "%d %s" count what) in
          (match List.filter_map Fun.id
                   [ clause withdrawn "unsent cancelled"
+                  ; clause on_server "in the server queue"
                   ; clause left "left waiting (being posted, being rechecked, or already started)" ] with
           | [] -> ()
           | _ :: _ as clauses ->

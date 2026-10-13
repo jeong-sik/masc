@@ -352,9 +352,11 @@ let test_open_request_between_segments_has_no_banner () =
     (texts (Tui.keeper_message_activity_rows state))
 ;;
 
-(* Where each waiting message stands decides what /queue clear does with it.
-   This is the decision only: the drop, the withdrawal and the cancel requests
-   that act on it live in the executable. *)
+(* Where each waiting message stands decides what /queue clear does with it,
+   and the delivery label drawn for it. Every position the classifier can
+   return is here, with the label the classifier returned before positions
+   existed. This is the decision only: the drop and the cancel requests that
+   act on it live in the executable. *)
 let test_queue_clear_treats_a_message_by_where_it_stands () =
   let state = state () in
   let add keeper_name request_id =
@@ -363,44 +365,88 @@ let test_queue_clear_treats_a_message_by_where_it_stands () =
     match Queue.push state.msg_queued ~submitted_at:1. request with
     | Ok (queue, _) -> state.msg_queued <- queue
     | Error error -> fail error in
-  add "alpha" "queued-1";
+  add "alpha" "local-1";
   add "beta" "other-keeper";
-  add "alpha" "queued-2";
+  add "alpha" "local-2";
   let accept admission (entry : Tui.inflight) =
     Tui.turn_log_add ~now:3. entry.log ~seq:None
       (Live.Accepted {admission; queue_length=1; interactive=None});
     entry in
+  let before_first_post (entry : Tui.inflight) =
+    { entry with
+      phase = Tui.Turn_preflight
+        { Queue.request = entry.sent_request; submitted_at = 2.; submission_seq = 0
+        ; intent = Queue.Next; causal_parent_request_id = None } } in
+  let reading_again (entry : Tui.inflight) = { entry with phase = Tui.Turn_reconciling } in
+  let stream_failed (entry : Tui.inflight) =
+    Masc_tui_keeper_chat_transcript.note_rejection ~now:5. entry.log.tl_transcript "cut";
+    entry in
+  let owners =
+    [ before_first_post (inflight ~request_id:"handed-over" ~at:2. ())
+    ; inflight ~request_id:"posting" ~at:3. ()
+    ; reading_again (inflight ~request_id:"rechecking" ~at:4. ())
+    ; stream_failed (inflight ~request_id:"stream-failed" ~at:5. ())
+    ; accept Live.Queued (inflight ~request_id:"queued" ~at:6. ())
+    ; reading_again (accept Live.Queued (inflight ~request_id:"queued-rereading" ~at:7. ()))
+    ; before_first_post (accept Live.Queued (inflight ~request_id:"queued-reposting" ~at:8. ()))
+    ; accept Live.Running (inflight ~request_id:"started" ~at:9. ())
+    ; accept Live.Queued (inflight ~keeper_name:"beta" ~request_id:"beta-queued" ~at:10. ())
+    ] in
+  (* In-flight owners are kept newest first. *)
+  state.msg_inflight <- List.rev owners;
+  let treatment = function
+    | Tui.Drop_from_local_queue -> "drop"
+    | Tui.Withdraw_before_post -> "withdraw"
+    | Tui.Cancel_on_server -> "cancel on server"
+    | Tui.Leave_waiting -> "leave" in
+  let delivery = function
+    | Tui.Local_pending -> "Local_pending"
+    | Tui.Awaiting_receipt -> "Awaiting_receipt"
+    | Tui.Keeper_queued -> "Keeper_queued"
+    | Tui.Rechecking_delivery -> "Rechecking_delivery" in
+  check (list (pair string (pair string string)))
+    "this Keeper's waiting messages: treatment, and the delivery label as before"
+    [ "handed-over", ("withdraw", "Local_pending")
+    ; "posting", ("leave", "Awaiting_receipt")
+    ; "rechecking", ("leave", "Rechecking_delivery")
+    ; "stream-failed", ("leave", "Rechecking_delivery")
+    ; "queued", ("cancel on server", "Keeper_queued")
+    ; "queued-rereading", ("cancel on server", "Rechecking_delivery")
+    ; "queued-reposting", ("cancel on server", "Local_pending")
+    ; "started", ("leave", "Keeper_queued")
+    ; "local-1", ("drop", "Local_pending")
+    ; "local-2", ("drop", "Local_pending") ]
+    (Tui.keeper_message_waiting_positions state ~keeper_name:"alpha"
+     |> List.map (fun ((request : Chat.request), position) ->
+          request.request_id,
+          ( treatment (Tui.keeper_queue_clear_treatment position)
+          , delivery (Tui.pending_delivery_of_position position) )))
+;;
+
+(* Taking back a request whose first POST never started leaves nothing that
+   still refers to it, and touches no other request. *)
+let test_withdrawing_an_undispatched_request_leaves_no_owner () =
+  let state = state () in
+  let entry : Tui.inflight = inflight ~request_id:"handed-over" ~at:2. () in
   let handed_over =
-    let entry : Tui.inflight = inflight ~request_id:"handed-over" ~at:2. () in
     { entry with
       phase = Tui.Turn_preflight
         { Queue.request = entry.sent_request; submitted_at = 2.; submission_seq = 0
         ; intent = Queue.Next; causal_parent_request_id = None } } in
   let posting = inflight ~request_id:"posting" ~at:3. () in
-  let on_server = accept Live.Queued (inflight ~request_id:"on-server" ~at:4. ()) in
-  let started = accept Live.Running (inflight ~request_id:"started" ~at:5. ()) in
-  let rechecking =
-    { (inflight ~request_id:"rechecking" ~at:6. ()) with phase = Tui.Turn_reconciling } in
-  let elsewhere =
-    accept Live.Queued (inflight ~keeper_name:"beta" ~request_id:"beta-on-server" ~at:7. ()) in
-  state.msg_inflight <- [elsewhere; rechecking; started; on_server; posting; handed_over];
-  let treatment = function
-    | Tui.Drop_from_local_queue -> "drop from the local queue"
-    | Tui.Withdraw_before_post -> "withdraw before the first POST"
-    | Tui.Cancel_on_server -> "cancel on the server"
-    | Tui.Leave_waiting -> "leave waiting" in
-  check (list (pair string string))
-    "this Keeper's waiting messages, each with the treatment its position allows"
-    [ "handed-over", "withdraw before the first POST"
-    ; "posting", "leave waiting"
-    ; "on-server", "cancel on the server"
-    ; "started", "leave waiting"
-    ; "rechecking", "leave waiting"
-    ; "queued-1", "drop from the local queue"
-    ; "queued-2", "drop from the local queue" ]
-    (Tui.keeper_message_waiting_positions state ~keeper_name:"alpha"
-     |> List.map (fun ((request : Chat.request), position) ->
-          request.request_id, treatment (Tui.keeper_queue_clear_treatment position)))
+  state.msg_inflight <- [posting; handed_over];
+  state.msg_live <- Some handed_over.log;
+  state.keeper_run_next_pending <- [handed_over.sent_request; posting.sent_request];
+  Tui.withdraw_undispatched_request state handed_over.sent_request;
+  let ids requests = List.map (fun (request : Chat.request) -> request.request_id) requests in
+  check (list string) "only the other request still has an owner" ["posting"]
+    (ids (List.map (fun (owner : Tui.inflight) -> owner.sent_request) state.msg_inflight));
+  check bool "the pane no longer shows it as the live turn" true
+    (Option.is_none state.msg_live);
+  check (list string) "its pending priority request went with it" ["posting"]
+    (ids state.keeper_run_next_pending);
+  check (list string) "it is no longer a waiting message" ["posting"]
+    (ids (List.map fst (Tui.keeper_message_waiting_positions state ~keeper_name:"alpha")))
 ;;
 
 let () =
@@ -426,4 +472,6 @@ let () =
           test_a_live_turn_elsewhere_covers_nothing_here
       ; test_case "queue clear treats a message by where it stands" `Quick
           test_queue_clear_treats_a_message_by_where_it_stands
+      ; test_case "withdrawing an undispatched request leaves no owner" `Quick
+          test_withdrawing_an_undispatched_request_leaves_no_owner
       ] ]

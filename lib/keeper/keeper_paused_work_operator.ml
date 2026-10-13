@@ -222,9 +222,48 @@ let admission_busy = function
     Some block
   | Invalid_request _
   | Resume_rejected _
-  | Cancellation_rejected _
-  | Transfer_rejected _
-  | Source_terminal_rejected _ ->
+  | Cancellation_rejected
+      ( Cancellation.Owner_unavailable _
+      | Cancellation.Reservation_conflict _
+      | Cancellation.Failed _ )
+  | Transfer_rejected
+      { cause =
+          ( Transfer.Invalid_request _
+          | Transfer.Owner_unavailable _
+          | Transfer.Reservation_conflict _
+          | Transfer.Receipt_lock_failed _
+          | Transfer.Receipt_read_failed _
+          | Transfer.Receipt_conflict _
+          | Transfer.Receipt_write_failed _
+          | Transfer.Durable_meta_read_failed _
+          | Transfer.Durable_meta_missing _
+          | Transfer.Source_owner_not_paused
+          | Transfer.Source_owner_identity_changed
+          | Transfer.Target_owner_not_active
+          | Transfer.Target_owner_identity_changed
+          | Transfer.Source_queue_validation_failed _
+          | Transfer.Source_transfer_shutdown_reserved _
+          | Transfer.Target_transfer_shutdown_reserved _
+          | Transfer.Committed_projection_failed _ )
+      ; _
+      }
+  | Source_terminal_rejected
+      { cause =
+          ( Source_terminal.Invalid_request _
+          | Source_terminal.Owner_unavailable _
+          | Source_terminal.Reservation_conflict _
+          | Source_terminal.Receipt_lock_failed _
+          | Source_terminal.Receipt_read_failed _
+          | Source_terminal.Receipt_conflict _
+          | Source_terminal.Receipt_write_failed _
+          | Source_terminal.Durable_meta_read_failed _
+          | Source_terminal.Durable_meta_missing
+          | Source_terminal.Durable_owner_not_paused
+          | Source_terminal.Durable_owner_identity_changed
+          | Source_terminal.Source_queue_validation_failed _
+          | Source_terminal.Committed_ack_failed _ )
+      ; _
+      } ->
     None
 ;;
 

@@ -854,7 +854,9 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                    | Ok outcome, Ok (Some receipt) -> Execution_observed (receipt, outcome)
                    | Ok _, Ok None -> Execution_unavailable Peer_receipt_missing
                    | Error detail, _ | _, Error detail -> Execution_unavailable (Invalid_receipt detail))
-              | Dispatch_failed _ -> ());
+              | Dispatch_failed
+                  { failure = Local_timeout | Transport_failed | Trailer_disagreement; _ }
+                -> ());
              Atomic.set t.shared.last_dispatch (Some record);
              triple
            in

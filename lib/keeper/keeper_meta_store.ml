@@ -422,14 +422,15 @@ let retained_root_entries_read_only_result config =
         | Error detail, _, _ | _, Error detail, _ ->
           Error
             (Printf.sprintf "failed to list keeper directory %s: %s" dir detail)
-        | _, _, _ -> Error ("keeper store changed while listing: " ^ dir)
+        | Ok _, Ok (), _ -> Error ("keeper store changed while listing: " ^ dir)
         | exception Unix.Unix_error (cause, _, _) ->
           Error
             (Printf.sprintf
                "keeper store changed while listing %s: %s"
                dir
                (Unix.error_message cause))))
-  | _ -> Error (Printf.sprintf "keeper store is not a directory: %s" dir)
+  | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } ->
+    Error (Printf.sprintf "keeper store is not a directory: %s" dir)
 ;;
 
 let persisted_keeper_names_read_only_result config =
@@ -475,7 +476,8 @@ let retained_keeper_names_read_only_result config =
               (match Keeper_id.Keeper_name.of_string entry with
                | Ok _ -> Error ("retained Keeper entry is a symlink: " ^ entry)
                | Error _ -> Ok names)
-            | _ -> Ok names
+            | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_FIFO | S_SOCK); _ } ->
+              Ok names
             | exception Unix.Unix_error (cause, _, _) ->
               Error
                 (Printf.sprintf

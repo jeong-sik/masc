@@ -39,7 +39,9 @@ let last_external_signal_ts = Atomic.make None
 let last_external_signal_reason = Atomic.make None
 
 let note_exception ?(site = "unknown") exn =
-  match exn with
+  (* Unix.error has about 70 constructors and only EMFILE and ENFILE are acted
+     on, so the others are not listed. *)
+  match[@warning "-4"] exn with
   | Unix.Unix_error (Unix.EMFILE, _, _) ->
     Atomic.incr process_fd_exhaustion_total;
     Atomic.set last_fd_exhaustion_ts (Some (Time_compat.now ()));
@@ -226,7 +228,7 @@ let detect_darwin_system_fd_snapshot_now () =
           With_process.drain_lines
       with
       | lines, Unix.WEXITED 0 -> parse_system_fd_snapshot lines
-      | _lines, status ->
+      | _lines, ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status) ->
         Log.Keeper.warn
           "fd_observation: sysctl FD probe exited with %s"
           (With_process.status_to_string status);

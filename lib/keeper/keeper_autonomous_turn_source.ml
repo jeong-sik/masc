@@ -51,7 +51,10 @@ let check_trace_file ~dir path =
   else
     match Unix.lstat path with
     | { Unix.st_kind = Unix.S_REG; _ } -> Current_regular_file
-    | _ -> Missing_or_non_regular
+    | { Unix.st_kind =
+          ( Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK )
+      ; _
+      } -> Missing_or_non_regular
     | exception Unix.Unix_error _ -> Missing_or_non_regular
 ;;
 
@@ -265,7 +268,17 @@ let reading_of_records ~keeper_name (run_ref : Turn_record.raw_trace_run_ref) = 
            | Agent_core.Raw_trace.Tool_execution_started, Some turn, Some planned_index ->
              Invocation_map.update (turn, planned_index)
                (function None -> Some 1 | Some count -> Some (count + 1)) index
-           | _ -> index)
+           | Agent_core.Raw_trace.Tool_execution_started, None, (Some _ | None)
+           | Agent_core.Raw_trace.Tool_execution_started, Some _, None
+           | ( ( Agent_core.Raw_trace.Run_started
+               | Agent_core.Raw_trace.Assistant_block
+               | Agent_core.Raw_trace.Tool_execution_finished
+               | Agent_core.Raw_trace.Native_tool_started
+               | Agent_core.Raw_trace.Native_tool_finished
+               | Agent_core.Raw_trace.Hook_invoked
+               | Agent_core.Raw_trace.Run_finished )
+             , (Some _ | None)
+             , (Some _ | None) ) -> index)
          Invocation_map.empty records
        in
        let steps =
@@ -425,7 +438,19 @@ let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
                    run_ref.worker_run_id
                    (Agent_core.Error.to_string err);
                  None
-               | Error err ->
+               | Error
+                   ((Agent_core.Error.Api _
+                    | Agent_core.Error.Provider _
+                    | Agent_core.Error.Agent _
+                    | Agent_core.Error.Mcp _
+                    | Agent_core.Error.Config _
+                    | Agent_core.Error.Serialization
+                        (Agent_core.Error.JsonParseError _
+                        | Agent_core.Error.UnknownVariant _)
+                    | Agent_core.Error.Io _
+                    | Agent_core.Error.Orchestration _
+                    | Agent_core.Error.Internal _
+                    | Agent_core.Error.Internal_carried _) as err) ->
                  Log.Keeper.warn ~keeper_name
                    "autonomous turn source: cannot read exact run %s: %s"
                    run_ref.worker_run_id

@@ -115,7 +115,16 @@ let is_reference = valid_reference
 
 let table ~path = function
   | Otoml.TomlTable fields | Otoml.TomlInlineTable fields -> Ok fields
-  | _ -> Error (Expected_table { path })
+  | Otoml.TomlString _
+  | Otoml.TomlInteger _
+  | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _
+  | Otoml.TomlOffsetDateTime _
+  | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _
+  | Otoml.TomlLocalTime _
+  | Otoml.TomlArray _
+  | Otoml.TomlTableArray _ -> Error (Expected_table { path })
 
 (* Every key a table may carry is named by its reader; anything else is an
    error rather than ignored, so a misspelt field cannot read as absent. *)

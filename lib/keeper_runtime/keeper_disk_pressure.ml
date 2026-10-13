@@ -30,7 +30,9 @@ let storage_space_exhaustion_total = Atomic.make 0
 let last_storage_space_exhaustion_ts = Atomic.make None
 
 let note_exception ?(site = "unknown") exn =
-  match exn with
+  (* Unix.error has about 70 constructors and only ENOSPC is acted on, so the
+     others are not listed. *)
+  match[@warning "-4"] exn with
   | Unix.Unix_error (Unix.ENOSPC, _, _) ->
     Atomic.incr storage_space_exhaustion_total;
     Atomic.set last_storage_space_exhaustion_ts (Some (Time_compat.now ()));
@@ -119,7 +121,7 @@ let probe_uncached path =
         With_process.drain_lines
     with
     | lines, Unix.WEXITED 0 -> parse_df_output ~path lines
-    | _lines, status ->
+    | _lines, ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status) ->
       let detail = "df -Pk " ^ With_process.status_to_string status in
       Log.Keeper.warn "disk_observation: probe failed path=%s detail=%s" path detail;
       Probe_error detail

@@ -144,6 +144,35 @@ let finalize stmt =
   ignore (Sqlite3.finalize stmt : Sqlite3.Rc.t)
 ;;
 
+(* Column decoders for result rows. Each lists every [Sqlite3.Data.t]
+   constructor, so a row of unexpected shape is rejected by the caller
+   without a wildcard over [Data.t]. *)
+let text_cell = function
+  | Sqlite3.Data.TEXT value -> Some value
+  | Sqlite3.Data.NONE | Sqlite3.Data.NULL | Sqlite3.Data.INT _ | Sqlite3.Data.FLOAT _
+  | Sqlite3.Data.BLOB _ -> None
+;;
+
+let int_cell = function
+  | Sqlite3.Data.INT value -> Some value
+  | Sqlite3.Data.NONE | Sqlite3.Data.NULL | Sqlite3.Data.TEXT _ | Sqlite3.Data.FLOAT _
+  | Sqlite3.Data.BLOB _ -> None
+;;
+
+let float_cell = function
+  | Sqlite3.Data.FLOAT value -> Some value
+  | Sqlite3.Data.NONE | Sqlite3.Data.NULL | Sqlite3.Data.INT _ | Sqlite3.Data.TEXT _
+  | Sqlite3.Data.BLOB _ -> None
+;;
+
+(* [Some None] is SQL NULL; [None] is any other non-text cell. *)
+let nullable_text_cell = function
+  | Sqlite3.Data.TEXT value -> Some (Some value)
+  | Sqlite3.Data.NULL -> Some None
+  | Sqlite3.Data.NONE | Sqlite3.Data.INT _ | Sqlite3.Data.FLOAT _ | Sqlite3.Data.BLOB _ ->
+    None
+;;
+
 (* Every statement runs through here so a caller cannot forget to finalize;
    an abandoned statement holds the WAL read lock open. *)
 let with_stmt db ~operation sql f =
@@ -264,14 +293,18 @@ let read_cursors store =
          match Sqlite3.step stmt with
          | Sqlite3.Rc.ROW ->
            (match Array.to_list (Sqlite3.row_data stmt) with
-            | [ Sqlite3.Data.TEXT path; Sqlite3.Data.INT boundary
-              ; Sqlite3.Data.INT device; Sqlite3.Data.INT inode
-              ; Sqlite3.Data.TEXT generation ] ->
-              let cursor =
-                { boundary = Int64.to_int boundary; device = Int64.to_int device
-                ; inode = Int64.to_int inode; generation }
-              in
-              loop ((path, cursor) :: acc)
+            | [ c_path; c_boundary; c_device; c_inode; c_generation ] ->
+              (match
+                 ( text_cell c_path, int_cell c_boundary, int_cell c_device
+                 , int_cell c_inode, text_cell c_generation )
+               with
+               | Some path, Some boundary, Some device, Some inode, Some generation ->
+                 let cursor =
+                   { boundary = Int64.to_int boundary; device = Int64.to_int device
+                   ; inode = Int64.to_int inode; generation }
+                 in
+                 loop ((path, cursor) :: acc)
+               | _ -> Error "read cursors: unexpected column types")
             | _ -> Error "read cursors: unexpected column types")
          | Sqlite3.Rc.DONE -> Ok acc
          | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error store.db "read cursors" rc)
@@ -636,16 +669,15 @@ let select_locations store ~keeper_name ~n =
       match Sqlite3.step stmt with
       | Sqlite3.Rc.ROW ->
         (match Array.to_list (Sqlite3.row_data stmt) with
-         | [ Sqlite3.Data.TEXT path; Sqlite3.Data.INT offset; Sqlite3.Data.INT length
-           ; Sqlite3.Data.TEXT keeper; Sqlite3.Data.FLOAT ts
-           ; (Sqlite3.Data.TEXT _ | Sqlite3.Data.NULL as execution) ] ->
-           let execution_id = match execution with
-             | Sqlite3.Data.TEXT value -> Some value
-             | Sqlite3.Data.NONE | Sqlite3.Data.NULL | Sqlite3.Data.INT _ | Sqlite3.Data.FLOAT _
-             | Sqlite3.Data.BLOB _ -> None
-           in
-           loop ((path, Int64.to_int offset, Int64.to_int length, keeper, ts,
-                  execution_id) :: acc)
+         | [ c_path; c_offset; c_length; c_keeper; c_ts; c_execution ] ->
+           (match
+              ( text_cell c_path, int_cell c_offset, int_cell c_length
+              , text_cell c_keeper, float_cell c_ts, nullable_text_cell c_execution )
+            with
+            | Some path, Some offset, Some length, Some keeper, Some ts, Some execution_id ->
+              loop ((path, Int64.to_int offset, Int64.to_int length, keeper, ts,
+                     execution_id) :: acc)
+            | _ -> Error "select rows: unexpected column types")
          | _ -> Error "select rows: unexpected column types")
       | Sqlite3.Rc.DONE -> Ok acc
       | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error store.db "select rows" rc)
@@ -681,11 +713,15 @@ let select_execution_locations store ~keeper_name ~execution_ids =
         match Sqlite3.step stmt with
         | Sqlite3.Rc.ROW ->
           (match Array.to_list (Sqlite3.row_data stmt) with
-           | [ Sqlite3.Data.TEXT path; Sqlite3.Data.INT offset; Sqlite3.Data.INT length
-             ; Sqlite3.Data.TEXT keeper; Sqlite3.Data.FLOAT ts
-             ; Sqlite3.Data.TEXT execution_id ] ->
-             collect ((path, Int64.to_int offset, Int64.to_int length, keeper, ts,
-                       Some execution_id) :: acc)
+           | [ c_path; c_offset; c_length; c_keeper; c_ts; c_execution_id ] ->
+             (match
+                ( text_cell c_path, int_cell c_offset, int_cell c_length
+                , text_cell c_keeper, float_cell c_ts, text_cell c_execution_id )
+              with
+              | Some path, Some offset, Some length, Some keeper, Some ts, Some execution_id ->
+                collect ((path, Int64.to_int offset, Int64.to_int length, keeper, ts,
+                          Some execution_id) :: acc)
+              | _ -> Error "select execution rows: unexpected column types")
            | _ -> Error "select execution rows: unexpected column types")
         | Sqlite3.Rc.DONE -> Ok acc
         | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error store.db "select execution rows" rc)
@@ -798,10 +834,15 @@ let select_frontier store ~keeper_name =
       match Sqlite3.step stmt with
       | Sqlite3.Rc.ROW ->
         (match Array.to_list (Sqlite3.row_data stmt) with
-         | [Sqlite3.Data.TEXT path; Sqlite3.Data.INT device; Sqlite3.Data.INT inode;
-            Sqlite3.Data.TEXT generation; Sqlite3.Data.INT offset] ->
-           loop ({path; device = Int64.to_int device; inode = Int64.to_int inode;
-             generation; offset = Int64.to_int offset} :: acc)
+         | [c_path; c_device; c_inode; c_generation; c_offset] ->
+           (match
+              ( text_cell c_path, int_cell c_device, int_cell c_inode
+              , text_cell c_generation, int_cell c_offset )
+            with
+            | Some path, Some device, Some inode, Some generation, Some offset ->
+              loop ({path; device = Int64.to_int device; inode = Int64.to_int inode;
+                generation; offset = Int64.to_int offset} :: acc)
+            | _ -> Error "select frontier: unexpected column types")
          | _ -> Error "select frontier: unexpected column types")
       | Sqlite3.Rc.DONE -> Ok (merge_frontiers [] acc)
       | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error store.db "select frontier" rc)
@@ -832,14 +873,19 @@ let rows_after ~store ~keeper_name ~after ~project =
             match Sqlite3.step stmt with
             | Sqlite3.Rc.ROW ->
               (match Array.to_list (Sqlite3.row_data stmt) with
-               | [Sqlite3.Data.TEXT path; Sqlite3.Data.INT offset; Sqlite3.Data.INT length;
-                  Sqlite3.Data.TEXT keeper; Sqlite3.Data.FLOAT ts; execution] ->
-                 let* execution_id = match execution with
-                   | Sqlite3.Data.TEXT value -> Ok (Some value)
-                   | Sqlite3.Data.NULL -> Ok None
-                   | Sqlite3.Data.NONE | Sqlite3.Data.INT _ | Sqlite3.Data.FLOAT _
-                   | Sqlite3.Data.BLOB _ -> Error "select after frontier: invalid execution identity" in
-                 loop ((path, Int64.to_int offset, Int64.to_int length, keeper, ts, execution_id) :: acc)
+               | [c_path; c_offset; c_length; c_keeper; c_ts; execution] ->
+                 (match
+                    ( text_cell c_path, int_cell c_offset, int_cell c_length
+                    , text_cell c_keeper, float_cell c_ts )
+                  with
+                  | Some path, Some offset, Some length, Some keeper, Some ts ->
+                    let* execution_id = match execution with
+                      | Sqlite3.Data.TEXT value -> Ok (Some value)
+                      | Sqlite3.Data.NULL -> Ok None
+                      | Sqlite3.Data.NONE | Sqlite3.Data.INT _ | Sqlite3.Data.FLOAT _
+                      | Sqlite3.Data.BLOB _ -> Error "select after frontier: invalid execution identity" in
+                    loop ((path, Int64.to_int offset, Int64.to_int length, keeper, ts, execution_id) :: acc)
+                  | _ -> Error "select after frontier: unexpected column types")
                | _ -> Error "select after frontier: unexpected column types")
             | Sqlite3.Rc.DONE -> Ok (List.rev acc)
             | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error index.db "select after frontier" rc)

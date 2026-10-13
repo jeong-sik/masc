@@ -45,14 +45,33 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Schedule_due _, Schedule_due -> stimulus.post_id
   | Keeper_event_queue.Completion_authority_rejected _, Completion_authority_rejected ->
     stimulus.post_id
-  | (Keeper_event_queue.Board_signal _, kind) | (Keeper_event_queue.Board_attention _, kind)
-  | (Keeper_event_queue.Bootstrap, kind) | (Keeper_event_queue.Fusion_completed _, kind)
-  | (Keeper_event_queue.Schedule_due _, kind) | (Keeper_event_queue.Connector_attention _, kind)
-  | (Keeper_event_queue.Hitl_resolved _, kind) | (Keeper_event_queue.Ask_answered _, kind)
-  | (Keeper_event_queue.Completion_authority_rejected _, kind)
-  | (Keeper_event_queue.Task_cancelled _, kind) | (Keeper_event_queue.Workspace_message _, kind)
-  | (Keeper_event_queue.Delegate_completed _, kind)
-  | (Keeper_event_queue.Composition_completed _, kind) | (Keeper_event_queue.Task_outcome _, kind) ->
+  | ( ( Keeper_event_queue.Board_signal _
+      | Keeper_event_queue.Board_attention _
+      | Keeper_event_queue.Bootstrap
+      | Keeper_event_queue.Fusion_completed _
+      | Keeper_event_queue.Schedule_due _
+      | Keeper_event_queue.Connector_attention _
+      | Keeper_event_queue.Hitl_resolved _
+      | Keeper_event_queue.Ask_answered _
+      | Keeper_event_queue.Completion_authority_rejected _
+      | Keeper_event_queue.Task_cancelled _
+      | Keeper_event_queue.Workspace_message _
+      | Keeper_event_queue.Delegate_completed _
+      | Keeper_event_queue.Composition_completed _
+      | Keeper_event_queue.Task_outcome _ )
+    , (( Board_signal
+       | Bootstrap
+       | Fusion_completed
+       | Schedule_due
+       | Connector_attention
+       | Hitl_resolved
+       | Ask_answered
+       | Completion_authority_rejected
+       | Task_outcome
+       | Task_cancelled
+       | Workspace_message
+       | Delegate_completed
+       | Composition_completed ) as kind) ) ->
     digest_id
       "stimulus"
       (String.concat

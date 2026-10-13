@@ -57,7 +57,7 @@ let source assembly selected_blocks (message : Agent_core.Types.message) =
                Some (List.filter_map (fun (i, (span : Assembly.span)) ->
                  match span.kind with
                  | Block id when List.exists (Prompt_block_id.equal id) ids -> Some i
-                 | _ -> None) (List.mapi (fun i span -> i, span) receipt.spans)))
+                 | Block _ | Unattributed _ -> None) (List.mapi (fun i span -> i, span) receipt.spans)))
       in
       (match selected with
        | None ->

@@ -265,7 +265,7 @@ let protect_io f =
 let regular_file ~create path =
   match Unix.lstat path with
   | {Unix.st_kind=Unix.S_REG;_} -> Ok ()
-  | _ -> corrupt "store path is not a regular file"
+  | {Unix.st_kind=Unix.(S_DIR|S_CHR|S_BLK|S_LNK|S_FIFO|S_SOCK);_} -> corrupt "store path is not a regular file"
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> if create then Ok () else Error Missing_store
 let with_database ?(io=sqlite_io) ~create reader f = protect_io (fun () ->
   let cleanup = ref [] in

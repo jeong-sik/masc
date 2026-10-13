@@ -162,7 +162,7 @@ let verify_readback ~endpoint ~config ~meta ~file_name ~expected_bytes =
                "read-back of %s answered %S, not a byte count"
                remote_path
                answer))
-     | status ->
+     | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status ->
        Error
          (Printf.sprintf
             "read-back of %s failed (%s) on endpoint %s: %s"

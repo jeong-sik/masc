@@ -43,7 +43,23 @@ let initial_terminal_effect_state = function
       ; _
       } ->
     Keeper_tools_agent_core.Terminal_effect_completed receipt
-  | Some _ | None -> Keeper_tools_agent_core.Terminal_effect_open
+  | None
+  | Some
+      { Keeper_tools_agent_core.outcome =
+          ( Keeper_gate_replay.Applied _
+          | Keeper_gate_replay.Applied_with_warning _ )
+      ; terminal_effect_receipt = None
+      ; _
+      }
+  | Some
+      { Keeper_tools_agent_core.outcome =
+          ( Keeper_gate_replay.Not_applicable
+          | Keeper_gate_replay.Failed _
+          | Keeper_gate_replay.Indeterminate _
+          | Keeper_gate_replay.Repair_required _
+          | Keeper_gate_replay.Resolution_absent _ )
+      ; _
+      } -> Keeper_tools_agent_core.Terminal_effect_open
 ;;
 
 (* The failure callback every ordinary descriptor's handler receives. The
@@ -223,7 +239,10 @@ let make_tool_bundle_for_descriptors_with_policy
           ; outcome
           ; terminal_effect_receipt = replay_execution.terminal_effect_receipt
           }
-    | _ -> None
+    | None, _
+    | Some { Keeper_event_queue.decision = Keeper_event_queue.Hitl_rejected _; _ }, _
+    | Some { Keeper_event_queue.decision = Keeper_event_queue.Hitl_approved; _ }, None ->
+      None
   in
   let record_gate_result =
     Option.map
@@ -751,7 +770,8 @@ let make_tool_bundle_for_descriptors_with_policy
              match descriptor.model_output_projection with
              | Tool_output.Store_above _ ->
                Runtime_execution.claude_code_inline_result_bytes
-             | projection -> Tool_output.inline_ceiling_bytes projection
+             | Tool_output.Inline_up_to _ as projection ->
+               Tool_output.inline_ceiling_bytes projection
            in
            List.map
              (fun model_name -> model_name, bound)

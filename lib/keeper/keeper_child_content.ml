@@ -60,7 +60,18 @@ let validate (value : view) =
     | Parent_input_refused Binding.Unknown_parent,Some _ -> Error (Invalid_view "unknown parent is present")
     | Original_parent_input (Command_inherited_parent_input {stamp_uuid}),Some _ -> identity "stamp_uuid" stamp_uuid
     | Original_parent_input (Explicit_parent_input | Response_inherited_parent_input),Some _
-    | Parent_input_refused _,_ -> Ok () in
+    | Parent_input_refused
+        ( Binding.Missing_ticket
+        | Binding.Conflicting_invocation
+        | Binding.Foreign_session
+        | Binding.Foreign_invocation
+        | Binding.Unknown_parent
+        | Binding.Conflicting_parent_provenance
+        | Binding.Missing_assistant_evidence
+        | Binding.Unattributed_assistant
+        | Binding.Rejected_assistant _
+        | Binding.Input_not_in_group
+        | Binding.Conflicting_assistant_evidence ),(None | Some _) -> Ok () in
   Ok value
 
 let obj fields = `Assoc fields

@@ -73,7 +73,7 @@ let decode_marker = function
               Digestif.SHA256.consistent_of_hex_opt body_digest with
         | Ok identity, Some hash when String.equal body_digest (Digestif.SHA256.to_hex hash) ->
           Ok (identity, body_digest)
-        | _ -> Error Malformed_marker)
+        | (Ok _ | Error _), (Some _ | None) -> Error Malformed_marker)
      | _ -> Error Malformed_marker)
   | _ -> Error Malformed_marker
 

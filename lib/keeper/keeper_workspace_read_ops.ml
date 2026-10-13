@@ -191,7 +191,7 @@ let try_handle_with_outcome
                   let is_ok =
                     match st with
                     | Unix.WEXITED 0 | Unix.WEXITED 1 -> true
-                    | _ -> false
+                    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
                   in
                   let trimmed_out = String.trim out in
                   let error_detail =
@@ -228,7 +228,8 @@ let try_handle_with_outcome
                             ()
                         with
                         | Ok (Unix.WEXITED 0, listing) -> Some listing
-                        | Ok _ | Error _ -> None))
+                        | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _)
+                        | Error _ -> None))
                       (Yojson.Safe.to_string payload))
            in
            match read_target () with

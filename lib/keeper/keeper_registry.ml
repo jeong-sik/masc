@@ -871,9 +871,15 @@ let rec dispatch_event_with_audit_internal
            | exn -> record_phase_broadcast_failure ~name exn);
           (* Update running count based on phase transition *)
           (match tr.prev_phase, tr.new_phase with
-           | Running, phase when phase <> Running -> decr_running_count_clamped ()
-           | phase, Running when phase <> Running -> Atomic.incr running_count_atomic
-           | _ -> ());
+           | ( Running
+             , (Offline | Failing | Draining | Paused | Stopped | Crashed | Restarting) ) ->
+             decr_running_count_clamped ()
+           | ( (Offline | Failing | Draining | Paused | Stopped | Crashed | Restarting)
+             , Running ) -> Atomic.incr running_count_atomic
+           | Running, Running -> ()
+           | ( (Offline | Failing | Draining | Paused | Stopped | Crashed | Restarting)
+             , (Offline | Failing | Draining | Paused | Stopped | Crashed | Restarting) )
+             -> ());
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string LifecycleTransitions)
             ~labels:

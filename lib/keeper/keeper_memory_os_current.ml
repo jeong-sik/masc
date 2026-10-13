@@ -2019,7 +2019,7 @@ let reconcile_retraction_plan_receipt ~keepers_dir ~keeper_id ~snapshot =
         | None, _ -> Ok ()
         | Some plan_id, { kind = Explicit_retract; trace_id }
           when String.equal trace_id plan_id -> Ok ()
-        | _ ->
+        | Some _, { kind = Librarian | Explicit_write | Explicit_retract; _ } ->
           Error
             (Printf.sprintf
                "retraction plan target snapshot has another source target_revision=%d"
@@ -2116,7 +2116,10 @@ let publication_of_json = function
           if Yojson.Safe.sort canonical = Yojson.Safe.sort journal then
             Ok {phase; prior; target_revision; target_sha256; journal}
           else Error "publication journal is not an exact canonical entry"
-        | _ -> Error "publication journal is not the target rewrite")
+        | (Journal_committed _ | Journal_failed _ | Journal_quarantined _),
+          (Ok (Some (Rewritten | Unchanged) | None) | Error _),
+          (Some _ | None) ->
+          Error "publication journal is not the target rewrite")
      | _ -> Error "invalid publication target")
   | _ -> Error "publication receipt has unknown, duplicate, or missing fields"
 
@@ -2168,7 +2171,7 @@ let check_publication_companions ~keepers_dir ~keeper_id receipt =
            && (match removal.plan_id, entry.source with
                | None, _ -> true
                | Some plan_id, {kind=Explicit_retract; trace_id} -> plan_id = trace_id
-               | Some _, _ -> false)
+               | Some _, { kind = Librarian | Explicit_write; _ } -> false)
            && (match receipt.journal with `Assoc fields ->
                  journal_revision_links fields = Ok (Some removal.revision_links) | _ -> false) -> Ok ()
        | Journal_failed _ | Journal_quarantined _ | Journal_committed _ -> Error "publication and removal receipts conflict; stores preserved") in
@@ -2213,7 +2216,7 @@ let finalize_publication_journal ~keepers_dir ~keeper_id receipt =
           | Journal_quarantined _ -> scan false rest
           | Journal_committed _ when Yojson.Safe.sort json = Yojson.Safe.sort receipt.journal ->
             scan true rest
-          | _ -> scan found rest)
+          | Journal_committed _ | Journal_failed _ -> scan found rest)
        | exception Yojson.Json_error detail -> Error ("publication journal: " ^ detail)) in
   let* present = scan false (String.split_on_char '\n' recovered.Fs_compat.bytes) in
   let* () = if present then Ok () else append_journal_line_strict ~keepers_dir ~keeper_id receipt.journal in
@@ -2997,7 +3000,7 @@ let update_locked_with_output
              (match next.source with
               | { kind = Explicit_retract; trace_id }
                 when String.equal trace_id plan_id -> Ok ()
-              | _ ->
+              | { kind = Librarian | Explicit_write | Explicit_retract; _ } ->
                 Error
                   (store_error
                      "retraction plan source must be an exact explicit-retract plan"))
@@ -3378,7 +3381,8 @@ let read_with_admission_recall_status_for_keepers_dir ~keepers_dir ~keeper_id =
         let bindings = List.filter_map (function
           | Committed {range_id=Explicit_candidate_with_recall binding; snapshot_revision; _} ->
             Some (snapshot_revision, binding)
-          | Committed _ | Prepared _ -> None) receipts in
+          | Committed { range_id = (Atom_range _ | Official_range _ | Explicit_candidate _); _ }
+          | Prepared _ -> None) receipts in
         Ok (Some current, live_admission_bindings ~keepers_dir ~keeper_id current bindings))
 ;;
 
@@ -3473,7 +3477,8 @@ let read_recall_transitions ~keepers_dir ~keeper_id ~after_revision ~through_rev
                 revision_links;removed_memory_ids=List.map memory_id change.removed;
                 added_memory_ids=List.map memory_id change.added};removed=change.removed} in
               decode (row::acc) rest
-            | _ -> Error "cached rewrite is not a committed journal record" in
+            | (Journal_committed _ | Journal_failed _ | Journal_quarantined _), _ ->
+              Error "cached rewrite is not a committed journal record" in
         decode [] (List.rev projection.rewrites_rev))
 ;;
 
@@ -3562,7 +3567,8 @@ let read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id =
       let bindings = List.filter_map (function
         | Committed {range_id=Explicit_candidate_with_recall binding; snapshot_revision; _} ->
           Some (snapshot_revision,binding)
-        | Committed _ | Prepared _ -> None) receipts in
+        | Committed { range_id = (Atom_range _ | Official_range _ | Explicit_candidate _); _ }
+        | Prepared _ -> None) receipts in
       let oldest = List.fold_left (fun earliest (revision, _) -> min earliest revision)
         current.revision bindings in
       let history = if oldest=current.revision then Ok [] else

@@ -189,7 +189,18 @@ let note_stream ~writer ~now event =
         Option.map (fun name ->
           { preview with last_tool = Some name; activity = Tool_observed })
           (Tool_indexes.find_opt index entry.tools)
-      | _ -> entry.tools, activity_of_event preview event
+      | Agent_core.Types.ContentBlockStart _
+      | Agent_core.Types.MessageStop | Agent_core.Types.Ping
+      | Agent_core.Types.Connected | Agent_core.Types.MessageStart _
+      | Agent_core.Types.ContentBlockDelta _ | Agent_core.Types.MessageDelta _
+      | Agent_core.Types.SSEError _ | Agent_core.Types.NDJSONError _
+      | Agent_core.Types.SSEParseFailed _ | Agent_core.Types.NDJSONParseFailed _
+      | Agent_core.Types.SSEUnknownEventType _
+      | Agent_core.Types.SSEUnsupportedPart _
+      | Agent_core.Types.SSEUnsupportedResponse _ | Agent_core.Types.Timeout _
+      | Agent_core.Types.StreamIncomplete _
+      | Agent_core.Types.StreamRepeating _ ->
+        entry.tools, activity_of_event preview event
     in
     let entry = { released_entry with tools } in
     match activity, text_changed with

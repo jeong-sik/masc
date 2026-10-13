@@ -184,7 +184,14 @@ let core_error_to_runtime_outcome err =
        Some
          (Runtime_attempt_fsm.Call_err
             (Llm_provider.Http_client.AcceptRejected { reason }))
-    | Agent_core.Error.Agent _
+    | Agent_core.Error.Agent
+        ( Agent_core.Error.ToolRoundLimitExceeded _
+        | Agent_core.Error.HookExecutionFailed _
+        | Agent_core.Error.TerminalToolEffectFailed _
+        | Agent_core.Error.TerminalToolDurabilityFailed _
+        | Agent_core.Error.GuardrailViolation _
+        | Agent_core.Error.TripwireViolation _
+        | Agent_core.Error.InputRequired _ )
      | Agent_core.Error.Config _
      | Agent_core.Error.Mcp _
      | Agent_core.Error.Serialization _

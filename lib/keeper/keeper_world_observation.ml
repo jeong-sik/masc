@@ -66,7 +66,16 @@ let same_board_event_identity (left : pending_board_event) (right : pending_boar
          (Board.Comment_id.to_string left_comment.Board_dispatch.comment_id)
          (Board.Comment_id.to_string right_comment.Board_dispatch.comment_id)
      | Board_post_updated, Board_post_updated -> Float.equal left.updated_at right.updated_at
-     | _ -> left.event_kind = right.event_kind
+     | ( ( Board_post_created | Board_post_updated | Board_comment_added _
+         | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
+         | Delegate_completed _ | Ask_answered_row _ | Composition_completed
+         | Schedule_due _ | External_attention _ | Completion_authority_rejected _
+         | Task_outcome _ | Task_cancelled _ )
+       , ( Board_post_created | Board_post_updated | Board_comment_added _
+         | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
+         | Delegate_completed _ | Ask_answered_row _ | Composition_completed
+         | Schedule_due _ | External_attention _ | Completion_authority_rejected _
+         | Task_outcome _ | Task_cancelled _ ) ) -> left.event_kind = right.event_kind
 ;;
 
 let is_board_activity_event (event : pending_board_event) =

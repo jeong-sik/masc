@@ -92,8 +92,9 @@ let path_kind_no_follow path =
 let is_directory_no_follow abs =
   match path_kind_no_follow abs with
   | Fs_compat.Exact_kind Unix.S_DIR -> true
-  | Fs_compat.Exact_kind _ | Fs_compat.Exact_missing | Fs_compat.Exact_unknown ->
-    false
+  | Fs_compat.Exact_kind Unix.(S_REG | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK)
+  | Fs_compat.Exact_missing
+  | Fs_compat.Exact_unknown -> false
 ;;
 
 (* A [.git] symlink is rejected rather than followed: it can point outside the
@@ -103,8 +104,9 @@ let git_link_of_dir abs =
   match path_kind_no_follow (Filename.concat abs ".git") with
   | Fs_compat.Exact_kind Unix.S_DIR -> Some Git_directory
   | Fs_compat.Exact_kind Unix.S_REG -> Some Git_pointer_file
-  | Fs_compat.Exact_kind _ | Fs_compat.Exact_missing | Fs_compat.Exact_unknown ->
-    None
+  | Fs_compat.Exact_kind Unix.(S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK)
+  | Fs_compat.Exact_missing
+  | Fs_compat.Exact_unknown -> None
 ;;
 
 let relative_of_segments = function
@@ -262,7 +264,8 @@ let discover ~root =
                       take max_reported_checkouts (sort_by_relative_path !found)
                   ; limit
                   }))))
-  | Fs_compat.Exact_kind kind ->
+  | Fs_compat.Exact_kind
+      (Unix.(S_REG | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK) as kind) ->
     Error (Root_not_directory { root; kind = file_kind_to_string kind })
 ;;
 

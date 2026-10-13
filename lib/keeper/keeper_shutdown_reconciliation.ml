@@ -58,7 +58,12 @@ let require_absent_identity ~config ~keeper_name =
   let* () =
     match Keeper_owner_registry.get ~base_path ~keeper_name with
     | Error (Keeper_owner_registry.Owner_not_found _) -> Ok ()
-    | Error error -> Error (Owner_unavailable error)
+    | Error
+        (( Keeper_owner_registry.Inventory_not_installed _
+         | Keeper_owner_registry.Owner_unavailable _
+         | Keeper_owner_registry.Owner_initialization_failed _
+         | Keeper_owner_registry.Inventory_stopping ) as error) ->
+      Error (Owner_unavailable error)
     | Ok _ -> Error Owner_present
   in
   let* () = match Keeper_registry.get ~base_path keeper_name with

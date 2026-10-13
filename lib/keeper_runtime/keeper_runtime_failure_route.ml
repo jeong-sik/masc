@@ -69,8 +69,36 @@ let core_error_is_hard_quota (err : Agent_core.Error.t) =
   | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _)
   | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) ->
     true
-  | Agent_core.Error.Api _
-  | Agent_core.Error.Provider _
+  | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _)
+  | Agent_core.Error.Api (Llm_provider.Retry.Overloaded _)
+  | Agent_core.Error.Api (Llm_provider.Retry.ServerError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.AuthError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.AuthorizationError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest _)
+  | Agent_core.Error.Api (Llm_provider.Retry.NotFound _)
+  | Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)
+  | Agent_core.Error.Api (Llm_provider.Retry.InputCapacity _)
+  | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _)
+  | Agent_core.Error.Provider (Llm_provider.Error.InvalidConfig _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ParseError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderWireError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.UnknownVariant _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)
+  | Agent_core.Error.Provider (Llm_provider.Error.EmptyCompletion _)
+  | Agent_core.Error.Provider (Llm_provider.Error.RepeatingGeneration _)
+  | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _)
+  | Agent_core.Error.Provider (Llm_provider.Error.CapacityExhausted _)
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthorizationError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ServerError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.NetworkError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.InvalidRequest _)
+  | Agent_core.Error.Provider (Llm_provider.Error.NotFound _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderTerminal _)
   | Agent_core.Error.Agent _
   | Agent_core.Error.Mcp _
   | Agent_core.Error.Config _
@@ -85,8 +113,36 @@ let core_error_is_model_absent : Agent_core.Error.t -> bool = function
   | Agent_core.Error.Api (Llm_provider.Retry.NotFound _)
   | Agent_core.Error.Provider (Llm_provider.Error.NotFound _) ->
     true
-  | Agent_core.Error.Api _
-  | Agent_core.Error.Provider _
+  | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _)
+  | Agent_core.Error.Api (Llm_provider.Retry.Overloaded _)
+  | Agent_core.Error.Api (Llm_provider.Retry.ServerError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.AuthError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.AuthorizationError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _)
+  | Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest _)
+  | Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)
+  | Agent_core.Error.Api (Llm_provider.Retry.InputCapacity _)
+  | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _)
+  | Agent_core.Error.Provider (Llm_provider.Error.InvalidConfig _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ParseError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderWireError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.UnknownVariant _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)
+  | Agent_core.Error.Provider (Llm_provider.Error.EmptyCompletion _)
+  | Agent_core.Error.Provider (Llm_provider.Error.RepeatingGeneration _)
+  | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _)
+  | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _)
+  | Agent_core.Error.Provider (Llm_provider.Error.CapacityExhausted _)
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthorizationError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ServerError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.NetworkError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.InvalidRequest _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderTerminal _)
   | Agent_core.Error.Agent _
   | Agent_core.Error.Mcp _
   | Agent_core.Error.Config _
@@ -382,7 +438,20 @@ let route_of_error ~boundary (err : Agent_core.Error.t) : route =
       (( Keeper_internal_error.Terminal_effect_failed _
        | Keeper_internal_error.Runtime_connection_closed _ ) as internal) ->
     route_of_masc_internal ~err internal
-  | Some internal ->
+  | Some
+      (( Keeper_internal_error.Official_client_recovery_required _
+       | Keeper_internal_error.Runtime_exhausted _
+       | Keeper_internal_error.Resumable_cli_session _
+       | Keeper_internal_error.Accept_rejected _
+       | Keeper_internal_error.Internal_unhandled_exception _
+       | Keeper_internal_error.Internal_bridge_exception _
+       | Keeper_internal_error.Internal_contract_rejected _
+       | Keeper_internal_error.Incomplete_tool_transcript _
+       | Keeper_internal_error.Provider_attempt_effect_fenced _
+       | Keeper_internal_error.Tool_correction_lost _
+       | Keeper_internal_error.Host_stopped_turn _
+       | Keeper_internal_error.Receipt_persistence_failed _
+       | Keeper_internal_error.Gate_replay_repair_required _ ) as internal) ->
     (match boundary with
      | Masc_execution -> route_of_masc_internal ~err internal
      | Agent_core_execution -> route_of_error_family err)

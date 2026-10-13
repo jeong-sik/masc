@@ -244,7 +244,12 @@ let clear_tool_result_blocks (message : Agent_core.Types.message) =
          | Agent_core.Types.ToolResult { outcome = Agent_core.Types.Tool_failed _; _ }
            -> block
          | Agent_core.Types.ToolResult
-             ({ content; json; content_blocks; _ } as result) ->
+             ({ content
+              ; json
+              ; content_blocks
+              ; outcome = Agent_core.Types.Tool_succeeded
+              ; _
+              } as result) ->
            if String.equal content cleared_tool_result_content
               && Option.is_none json
               && Option.is_none content_blocks

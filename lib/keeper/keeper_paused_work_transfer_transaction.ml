@@ -330,7 +330,10 @@ let target_enqueue ?intake_token config receipt transfer =
   | Keeper_registry_event_queue.Transfer_projection_target_unavailable
       Keeper_registry_event_queue.Transfer_target_trace_changed ->
     Error Target_owner_identity_changed
-  | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
+  | Keeper_registry_event_queue.Transfer_projection_target_unavailable
+      (( Keeper_registry_event_queue.Transfer_target_name_mismatch _
+       | Keeper_registry_event_queue.Transfer_target_metadata_read_failed _
+       | Keeper_registry_event_queue.Transfer_target_metadata_absent ) as error) ->
     Error
       (Committed_projection_failed
          { stage = Target_enqueue

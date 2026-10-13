@@ -538,7 +538,39 @@ let read_pending_log_unlocked
        with
        | Ok receipt -> Ok (receipt, true)
        | Error error -> Error error)
-    | Error error -> Error error
+    | Error
+        (( Fs_compat.Stable_lock_contended _
+         | Fs_compat.Unexpected_stable_lock_permissions _
+         | Fs_compat.Invalid_stable_lock_state _
+         | Fs_compat.Cursor_mismatch _
+         | Fs_compat.Unexpected_transaction_file_kind _
+         | Fs_compat.Ambiguous_transaction_file_identity _
+         | Fs_compat.Transaction_path_binding_changed _
+         | Fs_compat.Invalid_transaction_suffix
+         | Fs_compat.Private_jsonl_operation_failed _
+         | Fs_compat.Rewrite_stage_failed _
+         | Fs_compat.Rewrite_published_durability_unknown _
+         | Fs_compat.Transaction_settlement_failed
+             { primary = Fs_compat.Transaction_succeeded _; _ }
+         | Fs_compat.Transaction_settlement_failed
+             { primary =
+                 Fs_compat.Transaction_failed
+                   ( Fs_compat.Stable_lock_contended _
+                   | Fs_compat.Unexpected_stable_lock_permissions _
+                   | Fs_compat.Invalid_stable_lock_state _
+                   | Fs_compat.Cursor_mismatch _
+                   | Fs_compat.Unexpected_transaction_file_kind _
+                   | Fs_compat.Ambiguous_transaction_file_identity _
+                   | Fs_compat.Transaction_path_binding_changed _
+                   | Fs_compat.Invalid_transaction_suffix
+                   | Fs_compat.Private_jsonl_operation_failed _
+                   | Fs_compat.Rewrite_stage_failed _
+                   | Fs_compat.Rewrite_published_durability_unknown _
+                   | Fs_compat.Transaction_settlement_failed _
+                   | Fs_compat.Transaction_append_failed _ )
+             ; _
+             }
+         | Fs_compat.Transaction_append_failed _ ) as error) -> Error error
   in
   match log_result with
   | Error error -> Error (private_jsonl_error ~path error)
@@ -1556,7 +1588,12 @@ let mark_summary_attempt_persistence_uncertain
        | Summary_not_requested, _
        | _, Summary_attempt_persistence_uncertain ->
          None
-       | _ ->
+       | ( (Summary_pending | Summary_available _ | Summary_failed _)
+         , ( Summary_attempt_ready
+           | Summary_attempt_in_flight
+           | Summary_attempt_identity_unbound
+           | Summary_attempt_pre_worker_unavailable _
+           | Summary_attempt_settled ) ) ->
          Some
            { entry with
              summary_attempt_disposition =

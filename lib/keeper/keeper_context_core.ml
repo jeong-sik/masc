@@ -243,7 +243,15 @@ let patch_checkpoint_last_assistant
           in
           patch_content true acc rest
       | Agent_core.Types.Text _ :: rest -> patch_content replaced acc rest
-      | block :: rest -> patch_content replaced (block :: acc) rest
+      | (Agent_core.Types.Thinking _
+         | Agent_core.Types.ReasoningDetails _
+         | Agent_core.Types.RedactedThinking _
+         | Agent_core.Types.ToolUse _
+         | Agent_core.Types.ToolResult _
+         | Agent_core.Types.Image _
+         | Agent_core.Types.Document _
+         | Agent_core.Types.Audio _ as block) :: rest ->
+          patch_content replaced (block :: acc) rest
     in
     let content = patch_content false [] msg.Agent_core.Types.content in
     let rec content_unchanged left right =
@@ -256,7 +264,25 @@ let patch_checkpoint_last_assistant
       | left_block :: left_rest, right_block :: right_rest
         when left_block == right_block ->
         content_unchanged left_rest right_rest
-      | _ -> false
+      | [], _ :: _ | _ :: _, [] -> false
+      | ( Agent_core.Types.Text _
+        | Agent_core.Types.Thinking _
+        | Agent_core.Types.ReasoningDetails _
+        | Agent_core.Types.RedactedThinking _
+        | Agent_core.Types.ToolUse _
+        | Agent_core.Types.ToolResult _
+        | Agent_core.Types.Image _
+        | Agent_core.Types.Document _
+        | Agent_core.Types.Audio _ ) :: _
+      , ( Agent_core.Types.Text _
+        | Agent_core.Types.Thinking _
+        | Agent_core.Types.ReasoningDetails _
+        | Agent_core.Types.RedactedThinking _
+        | Agent_core.Types.ToolUse _
+        | Agent_core.Types.ToolResult _
+        | Agent_core.Types.Image _
+        | Agent_core.Types.Document _
+        | Agent_core.Types.Audio _ ) :: _ -> false
     in
     if content_unchanged content msg.Agent_core.Types.content
        && Option.is_none msg.name

@@ -711,7 +711,16 @@ let load_or_materialize_boot_meta (ctx : _ context) name
                       (admit_boot_meta ctx.config resolved)
                   | Error msg ->
                       Error (materialized_reload_boot_error ~name ~toml_path msg)))))
-    | Error original_error -> Error original_error
+    | Error
+        ({ cause =
+             ( Meta_read_error
+             | Config_invalid
+             | Sandbox_profile_required
+             | Sandbox_image_required
+             | Sandbox_image_unresolved
+             | Materialization_failed )
+         ; _
+         } as original_error) -> Error original_error
   in
   remember_boot_meta_result ctx name result
 

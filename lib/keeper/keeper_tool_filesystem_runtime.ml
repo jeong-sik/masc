@@ -2729,7 +2729,9 @@ let handle_file_write_content_with_outcome
               with
               | Error Fs_compat.Capability_append_open_missing ->
                 create_missing_entry ()
-              | Error open_error ->
+              | Error
+                  (( Fs_compat.Capability_append_open_invalid_leaf _
+                   | Fs_compat.Capability_append_open_failed _ ) as open_error) ->
                 observe_capability_append_open_error
                   ~keeper_name:meta.name
                   ~target

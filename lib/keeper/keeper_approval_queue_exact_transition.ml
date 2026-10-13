@@ -55,7 +55,15 @@ let bind ~(candidate : exact_attempt_binding) (entry : pending_approval) =
              ; summary_attempt_disposition = Summary_attempt_in_flight
              }
          }
-     | Exact_bound existing ->
+     | Exact_bound
+         ({ status =
+              ( Exact_dispatch_uncertain
+              | Exact_released_recovery_required
+              | Exact_quarantined _
+              | Exact_restart_quarantined
+              | Exact_completed )
+          ; _
+          } as existing) ->
        Error (Exact_attempt_rejected (Exact_attempt_identity_conflict existing)))
 ;;
 

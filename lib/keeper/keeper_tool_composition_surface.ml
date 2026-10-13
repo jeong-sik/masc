@@ -431,7 +431,13 @@ let result_of_execution ~tool_name ~tool_kind ~start_time = function
          ~start_time
          ~data
          "composition executor reported a completed result as incomplete")
-  | Error failure ->
+  | Error
+      ({ Executor.cause =
+           ( Executor.Plan_execution_failed _
+           | Executor.Node_observation_failed _
+           | Executor.Outer_completion_mismatch _ )
+       ; _
+       } as failure) ->
     let data = failure_data ~tool_name ~tool_kind failure in
     Tool_result.make_err
       ~tool_name

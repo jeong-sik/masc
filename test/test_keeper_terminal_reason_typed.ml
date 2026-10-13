@@ -1303,7 +1303,7 @@ max-concurrent = 1
       let observation = Masc.Keeper_world_observation.observe
         ~pending_board_events:(Some []) ~config ~meta in
       Masc.Keeper_unified_metrics_decision.append_decision_record
-        ~config ~meta ~observation ~latency_ms:3 ~outcome:"success"
+        ~config ~meta ~observation ~latency_ms:3 ~outcome:Keeper_decision_outcome.Success
         ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
         ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
         ~degraded_retry_applied:settlement.degraded_retry_applied
@@ -2975,7 +2975,7 @@ max-concurrent = 1
     Yojson.Safe.Util.(row |> member outer |> member inner)
   in
   let answered =
-    append_and_read ~outcome:"success" ~result:(Some answered_result) ()
+    append_and_read ~outcome:Keeper_decision_outcome.Success ~result:(Some answered_result) ()
   in
   check "an observed success row keeps the lane in provider_context.runtime_id"
     (member_at answered "provider_context" "runtime_id" = `String lane);
@@ -2996,7 +2996,7 @@ max-concurrent = 1
   (* No run result: the turn failed and only the runtime walk's own report
      names who was dispatched. *)
   let failed =
-    append_and_read ~outcome:"error" ~result:None ~executed_runtime_id:head_runtime ()
+    append_and_read ~outcome:Keeper_decision_outcome.Error ~result:None ~executed_runtime_id:head_runtime ()
   in
   check "a failed row without a run result keeps the lane in provider_context.runtime_id"
     (member_at failed "provider_context" "runtime_id" = `String lane);
@@ -3005,6 +3005,10 @@ max-concurrent = 1
   check "a failed row without a run result does not repeat the pair in telemetry"
     (member_at failed "telemetry" "runtime_id" = `Null
      && member_at failed "telemetry" "executed_runtime_id" = `Null);
+  check "a failed row without a run result records the failure as its telemetry outcome"
+    (member_at failed "telemetry" "outcome" = `String "error"
+     && member_at failed "telemetry" "coverage_stage" = `String "unknown"
+     && member_at failed "telemetry" "coverage_reason" = `String "error_turn");
   let aggregate =
     compute_model_metrics ~base_path:workspace_dir ~window_minutes:60
   in

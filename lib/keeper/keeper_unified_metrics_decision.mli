@@ -24,7 +24,7 @@ val append_decision_record :
   turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->
   observation:Keeper_world_observation.world_observation ->
   latency_ms:int ->
-  outcome:string ->
+  outcome:Keeper_decision_outcome.t ->
   ?channel:Keeper_world_observation.keeper_cycle_channel ->
   execution_path:execution_path ->
   degraded_retry_applied:Keeper_error_classify.degraded_retry option ->

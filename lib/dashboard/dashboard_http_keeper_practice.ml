@@ -2,28 +2,6 @@
 
 open Dashboard_http_keeper_types
 
-type turn_outcome =
-  | Success
-  | Checkpoint
-  | Input_required
-  | Error
-
-let turn_outcome_to_string = function
-  | Success -> "success"
-  | Checkpoint -> "checkpoint"
-  | Input_required -> "input_required"
-  | Error -> "error"
-;;
-
-let turn_outcome_of_string raw =
-  match raw with
-  | "success" -> Some Success
-  | "checkpoint" -> Some Checkpoint
-  | "input_required" -> Some Input_required
-  | "error" -> Some Error
-  | _ -> None
-;;
-
 (* Mirrors Keeper_unified_metrics_decision.execution_path wire labels. A new
    writer label parses to None and its rows count as unrecognized. *)
 type path =
@@ -42,8 +20,8 @@ module String_histogram = Map.Make (String)
 (* Mirrors the observed-affordance writer labels
    (Keeper_unified_metrics_support.observed_affordances_of_observation).
    The writer spells these as call-site literals with no label function,
-   so they are pinned here like the turn outcomes; a new writer label
-   parses to None and its occurrences count as unrecognized. *)
+   so they are pinned here; a new writer label parses to None and its
+   occurrences count as unrecognized. *)
 type affordance =
   | Board_post_or_comment
   | Board_curation
@@ -303,7 +281,7 @@ let record_affordance_response acc mode outcome affordance =
     | None -> { response with resp_mode_absent = response.resp_mode_absent + 1 }
   in
   let outcome_bump response =
-    match outcome with
+    match (outcome : Keeper_decision_outcome.t) with
     | Success -> { response with resp_success = response.resp_success + 1 }
     | Checkpoint -> { response with resp_checkpoint = response.resp_checkpoint + 1 }
     | Input_required -> { response with resp_input_required = response.resp_input_required + 1 }
@@ -316,7 +294,7 @@ let record_affordance_response acc mode outcome affordance =
 let fold_autonomous_turn acc json outcome =
   let acc = { acc with autonomous_turns = acc.autonomous_turns + 1 } in
   let acc =
-    match outcome with
+    match (outcome : Keeper_decision_outcome.t) with
     | Success -> { acc with outcome_success = acc.outcome_success + 1 }
     | Checkpoint -> { acc with outcome_checkpoint = acc.outcome_checkpoint + 1 }
     | Input_required -> { acc with outcome_input_required = acc.outcome_input_required + 1 }
@@ -347,7 +325,7 @@ let fold_autonomous_turn acc json outcome =
       (raw_string_list_member "observed_affordances" json)
   in
   let acc =
-    match outcome with
+    match (outcome : Keeper_decision_outcome.t) with
     | Error ->
       (match string_member_opt "terminal_reason_code" json with
        | Some code -> { acc with terminal_codes = bump acc.terminal_codes code }
@@ -385,7 +363,9 @@ let is_turn_row json =
 let fold_turn_row acc json =
   let acc = { acc with turn_rows = acc.turn_rows + 1 } in
   let path = Option.bind (raw_string_member_opt "execution_path" json) path_of_string in
-  let outcome = Option.bind (raw_string_member_opt "outcome" json) turn_outcome_of_string in
+  let outcome =
+    Option.bind (raw_string_member_opt "outcome" json) Keeper_decision_outcome.of_string
+  in
   match path with
   | None -> { acc with unrecognized_turn_rows = acc.unrecognized_turn_rows + 1 }
   | Some Direct ->

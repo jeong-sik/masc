@@ -428,20 +428,10 @@ let emit_resolved_cost_event
     ()
 ;;
 
-type decision_outcome =
-  | Decision_success
-  | Decision_checkpoint
-  | Decision_input_required
-
 let decision_outcome_of_terminal_outcome = function
-  | Terminal_done -> Decision_success
-  | Terminal_checkpoint -> Decision_checkpoint
-  | Terminal_input_required -> Decision_input_required
-
-let decision_outcome_to_label = function
-  | Decision_success -> "success"
-  | Decision_checkpoint -> "checkpoint"
-  | Decision_input_required -> "input_required"
+  | Terminal_done -> Keeper_decision_outcome.Success
+  | Terminal_checkpoint -> Keeper_decision_outcome.Checkpoint
+  | Terminal_input_required -> Keeper_decision_outcome.Input_required
 
 let terminal_reason_of_result (result : Keeper_agent_run.run_result) =
   match Keeper_execution_receipt.disposition_of_stop_reason result.stop_reason with
@@ -724,9 +714,7 @@ let handle
       ~turn_ctx_cell
       ~observation
       ~latency_ms
-      ~outcome:
-        (decision_outcome_to_label
-           (decision_outcome_of_terminal_outcome terminal_outcome))
+      ~outcome:(decision_outcome_of_terminal_outcome terminal_outcome)
       ~channel
       ~execution_path:
         (match Keeper_execution_outcome.lane execution_outcome with

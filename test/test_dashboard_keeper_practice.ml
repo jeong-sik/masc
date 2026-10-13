@@ -459,11 +459,9 @@ let test_practice_role_comes_from_meta () =
 ;;
 
 let test_practice_writer_vocabulary_coupling () =
-  (* Paths and modes come from the writer's own label functions, so a
-     writer rename breaks this test instead of silently landing
-     unrecognized. Outcomes stay pinned: decision_outcome_to_label is
-     not exposed (keeper_unified_turn_success.ml:441-444) and "error" is
-     a call-site literal (keeper_unified_turn.ml:1517). *)
+  (* Paths, modes and the outcome come from the writer's own label
+     functions, so a writer rename breaks this test instead of silently
+     landing unrecognized. *)
   let module Decision = Masc.Keeper_unified_metrics_decision in
   let module Codec = Masc.Turn_mode_codec in
   let paths = [ Decision.Direct_turn; Decision.Autonomous_cycle ] in
@@ -476,7 +474,7 @@ let test_practice_writer_vocabulary_coupling () =
             turn_row
               [ "execution_path", `String (Decision.execution_path_to_string path)
               ; "turn_mode", `String (Codec.turn_mode_to_string mode)
-              ; "outcome", `String "success"
+              ; "outcome", `String Keeper_decision_outcome.(to_string Success)
               ])
           modes)
       paths

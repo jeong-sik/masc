@@ -2071,10 +2071,16 @@ let test_a_journal_built_log_holds_its_turn_in_the_timeline () =
   state.msg_loaded_keeper <- Some "alpha";
   state.msg_loaded <- loaded_turn ~request_id:"op-1";
   Tui_types.hold_settled_log state (journal_log ~request_id:"op-1" ~started_at:100. ());
-  check (list string) "the keeper's words, tools and reasoning are the log's now"
-    [ "asked"; "Gate approved read_file"; "delivery failed" ]
-    (Tui_types.chat_rows_for state "alpha"
-     |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text))
+  let retained = Tui_types.chat_rows_for state "alpha" in
+  check bool "terminal log without receipts retains unidentified durable tool facts" true
+    (List.exists (fun (row : Tui_types.msg_entry) ->
+      row.me_role = Tui_types.Message_tool && row.me_tool_block = None) retained);
+  check bool "held source owns its observed speech" false
+    (List.exists (fun (row : Tui_types.msg_entry) ->
+      match row.me_role with
+      | Tui_types.Message_keeper -> true
+      | _ -> false) retained)
+
 ;;
 
 (* A settled block goes after its request's last row of any phase before
@@ -2401,7 +2407,7 @@ let test_a_failed_skill_call_keeps_its_failure () =
 ;;
 
 (* A turn the settled log holds has one source. The loaded transcript's rows
-   the log draws itself -- the keeper's words, tools, reasoning -- leave the
+   the log draws itself -- observed keeper speech and reasoning -- leave the
    timeline; what a person said, what the server said about the turn, and a
    failure stay, because the log draws none of them. Another turn's rows are
    untouched, and a later reload does not bring the suppressed rows back. *)
@@ -2427,18 +2433,30 @@ let test_a_settled_log_holds_its_turn_in_the_timeline () =
             }
         ; Live.Run_finished
         ] ];
-  let texts () =
-    Tui_types.chat_rows_for state "alpha"
-    |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text)
+  let retained () = Tui_types.chat_rows_for state "alpha" in
+  let assert_coverage () =
+    check bool "streamed reasoning cannot prove aggregate durable coverage" true
+      (List.exists (fun (row : Tui_types.msg_entry) ->
+        row.me_execution_source=Some (Log.Operation "held")
+        && row.me_role=Tui_types.Message_thinking) (retained ()));
+    check bool "unobserved tool facts survive terminal source ownership" true
+      (List.exists (fun (row : Tui_types.msg_entry) ->
+        row.me_role=Tui_types.Message_tool && row.me_tool_block=None) (retained ()));
+    check bool "observed source speech remains in its log" false
+      (List.exists (fun (row : Tui_types.msg_entry) ->
+        row.me_execution_source=Some (Log.Operation "held")
+        && match row.me_role with
+           | Tui_types.Message_keeper -> true
+           | _ -> false) (retained ()))
   in
-  check (list string) "the log's rows leave; the rest stay"
-    [ "asked"; "Gate approved read_file"; "delivery failed"; "other turn" ]
-    (texts ());
-  (* A reload replaces the loaded page, not the settled logs. *)
+  assert_coverage ();
+  check bool "unrelated operation speech is preserved" true
+    (List.exists (fun (row : Tui_types.msg_entry) ->
+      row.me_execution_source=Some (Log.Operation "other")
+      && row.me_role=Tui_types.Message_keeper) (retained ()));
   state.msg_loaded <- loaded_turn ~request_id:"held";
-  check (list string) "after a reload the held turn is still the log's"
-    [ "asked"; "Gate approved read_file"; "delivery failed" ]
-    (texts ())
+  assert_coverage ()
+
 ;;
 
 (* A runtime that streams no reasoning leaves the durable trace row -- "N
@@ -2455,11 +2473,13 @@ let test_a_log_without_reasoning_leaves_the_trace_row () =
     [ settled_log ~request_id:"held"
         [ Live.Run_started; Live.Text {text="answered"; response=Unobserved_scope (None)}; visible_reply "answered"; Live.Run_finished ]
     ];
-  check (list string) "the trace row stays beside the log's rows"
-    [ "asked"; "2 reasoning steps, content withheld"; "Gate approved read_file"
-    ; "delivery failed" ]
-    (Tui_types.chat_rows_for state "alpha"
-     |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text))
+  let retained = Tui_types.chat_rows_for state "alpha" in
+  check bool "unobserved reasoning remains as durable evidence" true
+    (List.exists (fun (row : Tui_types.msg_entry) -> row.me_role=Tui_types.Message_thinking) retained);
+  check bool "unobserved tool facts remain alongside reasoning evidence" true
+    (List.exists (fun (row : Tui_types.msg_entry) ->
+      row.me_role=Tui_types.Message_tool && row.me_tool_block=None) retained)
+
 ;;
 
 (* A log that never heard how the turn ended holds part of it at most; the

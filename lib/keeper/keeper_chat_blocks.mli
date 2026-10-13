@@ -235,3 +235,19 @@ val parse_text_to_blocks : string -> chat_block list
 val block_to_yojson : chat_block -> Yojson.Safe.t
 val blocks_to_yojson : chat_block list -> Yojson.Safe.t
 val blocks_of_yojson : Yojson.Safe.t -> chat_block list option
+
+(** Visibility flags on reasoning records. Absence means exposed according to
+    the encoder's omission rule; a supplied flag must be one unique boolean.
+    Invalid or duplicate flags must not be interpreted as permission to expose.
+
+    Malformed flags reject the whole record they decorate — a [Trace] whose
+    [think] step carries an invalid flag drops that whole trace block, and a
+    [thinking] block with one drops that block ([list_all_map] makes the
+    decoder all-or-nothing per list). Honest multi-step traces carry their
+    tool steps inside the same block, so this is stricter than "the flag's
+    step vanishes": it is decode-fail-closed at the record level. *)
+type reasoning_visibility_field = Content_withheld | Redacted
+type reasoning_visibility_error = Invalid_visibility_flag | Duplicate_visibility_flag
+val reasoning_visibility_of_fields :
+  reasoning_visibility_field -> (string * Yojson.Safe.t) list ->
+  (bool, reasoning_visibility_error) result

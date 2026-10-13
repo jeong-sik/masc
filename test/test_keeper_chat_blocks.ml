@@ -731,6 +731,57 @@ let test_redacted_thinking_maps_to_the_redacted_block () =
      Alcotest.(check string) "no content exposed" "" th.content
    | _ -> Alcotest.fail "expected one redacted thinking block")
 
+let test_reasoning_visibility_requires_unique_boolean () =
+  let malformed =
+    [ [`String "true"]; [`Null]; [`Int 1]; [`Float 1.]; [`List []]; [`Assoc []]
+    ; [`Bool false; `Bool true]; [`Bool true; `Bool false]; [`Bool false; `Bool false]
+    ]
+  in
+  List.iter (fun values ->
+    let trace = `Assoc ["t", `String "trace"; "trace", `List [
+      `Assoc (("kind", `String "think") :: ("text", `String "private") ::
+        List.map (fun value -> "content_withheld", value) values)]] in
+    let thinking = `Assoc (("t", `String "thinking") :: ("content", `String "private") ::
+      List.map (fun value -> "redacted", value) values) in
+    List.iter (fun block ->
+      Alcotest.(check bool) "invalid visibility does not authorize reasoning exposure" true
+        (B.blocks_of_yojson (`List [block]) = None)) [trace; thinking]) malformed
+
+(* The malformed-flag rejection is all-or-nothing per block ([list_all_map]):
+   one bad [think] flag drops the whole trace block, including its unrelated
+   tool steps, rather than keeping the block minus the bad step. This is the
+   documented fail-closed scope in keeper_chat_blocks.mli. *)
+let test_malformed_think_flag_rejects_whole_trace_block () =
+  let ok_tool = `Assoc ["kind", `String "tool"; "name", `String "read_file"] in
+  let withheld_think flag =
+    `Assoc
+      [ ("kind", `String "think")
+      ; ("text", `String "private")
+      ; ("content_withheld", flag) ]
+  in
+  let trace_block steps = `Assoc ["t", `String "trace"; "trace", `List steps] in
+  let good_block = `Assoc ["t", `String "p"; "html", `String "hello"] in
+  let witness =
+    match
+      B.blocks_of_yojson (`List [trace_block [ok_tool]; good_block])
+    with
+    | Some [ B.Trace _; B.Text _ ] -> ()
+    | _ -> Alcotest.fail "baseline trace with a tool step must decode"
+  in
+  let stripped =
+    B.blocks_of_yojson
+      (`List
+        [ trace_block [withheld_think (`String "true"); ok_tool]
+        ; good_block ])
+  in
+  (match stripped with
+   | Some [ B.Trace _; _ ] | Some [ _; B.Trace _ ] ->
+     Alcotest.fail "malformed flag must not leave a surviving trace block"
+   | Some blocks -> Alcotest.(check int) "only the trace block is dropped" 1
+       (List.length blocks)
+   | None -> Alcotest.fail "unrelated blocks must survive");
+  witness
+
 let () =
   Alcotest.run "keeper_chat_blocks"
     [
@@ -807,6 +858,10 @@ let () =
             test_continuation_status_connector_text;
           Alcotest.test_case "thinking block roundtrip" `Quick
             test_thinking_block_roundtrip;
+          Alcotest.test_case "reasoning visibility requires unique boolean" `Quick
+            test_reasoning_visibility_requires_unique_boolean;
+          Alcotest.test_case "malformed think flag rejects whole trace block" `Quick
+            test_malformed_think_flag_rejects_whole_trace_block;
           Alcotest.test_case "redacted thinking block roundtrip" `Quick
             test_redacted_thinking_block_roundtrip;
           Alcotest.test_case "redacted thinking encoder scrubs smuggled content" `Quick

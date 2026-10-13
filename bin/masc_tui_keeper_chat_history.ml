@@ -420,11 +420,6 @@ let int_field fields name =
   | Some (`Int value) -> Some value
   | Some _ | None -> None
 
-let bool_field fields name =
-  match assoc_opt name fields with
-  | Some (`Bool value) -> value
-  | Some _ | None -> false
-
 let bool_field_opt fields name =
   match assoc_opt name fields with
   | Some (`Bool value) -> Some value
@@ -861,13 +856,14 @@ let add_trace_step summary (step : Yojson.Safe.t) =
   | `Assoc fields -> (
       match string_field fields "kind" with
       | Some "think" ->
-          if bool_field fields "content_withheld" then
-            { summary with withheld = summary.withheld + 1 }
-          else
+          (match Masc.Keeper_chat_blocks.reasoning_visibility_of_fields Content_withheld fields with
+          | Error _ -> { summary with omitted = summary.omitted + 1 }
+          | Ok true -> { summary with withheld = summary.withheld + 1 }
+          | Ok false ->
             let text = Option.value ~default:"" (string_field fields "text") in
             { summary with
               reasoning = List.rev_append (non_blank_lines text) summary.reasoning
-            }
+            })
       | Some "reason" ->
           let text = Option.value ~default:"" (string_field fields "text") in
           let detail =
@@ -917,15 +913,16 @@ let add_trace_block summary (block : Yojson.Safe.t) =
               summary.omitted + Option.value ~default:0 (int_field fields "omitted")
           }
       | Some "thinking" ->
-          if bool_field fields "redacted" then
-            { summary with withheld = summary.withheld + 1 }
-          else
+          (match Masc.Keeper_chat_blocks.reasoning_visibility_of_fields Redacted fields with
+          | Error _ -> { summary with omitted = summary.omitted + 1 }
+          | Ok true -> { summary with withheld = summary.withheld + 1 }
+          | Ok false ->
             let text =
               Option.value ~default:"" (string_field fields "content")
             in
             { summary with
               reasoning = List.rev_append (non_blank_lines text) summary.reasoning
-            }
+            })
       (* Every other block kind is prose the row's [content] already carries
          as text; reading it again would draw the reply twice. *)
       | Some _ | None -> summary)
@@ -1318,27 +1315,16 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
              other authors that share this role. A surface this build cannot
              decode is dropped to [None] rather than guessed at. *)
           let speaker_id = string_field fields "speaker_id" in
-          let speaker =
-            match string_field fields "speaker_name" with
-            (* The producer repeating the id in the name field is the store
-               saying it had no name, not a person called [U09L0RHPW7P]. *)
-            | Some name
-              when String.trim name <> ""
-                   && not (Option.equal String.equal (Some name) speaker_id) ->
-                Named name
-            | Some _ | None ->
-                (* The producer wrote down whose row this is; reading that
-                   beats inferring it. The surface says where a row came from,
-                   not who spoke — a dashboard row can carry an external
-                   author, and an operator can write from a connector.
-
-                   Absent or unrecognised authority stays unresolved rather
-                   than defaulting to the reader: calling someone else "you"
-                   is the one wrong answer with no way back. *)
-                (match assoc_opt "speaker_authority" fields with
-                 | Some (`String "owner") -> Operator
-                 | Some (`String _) | Some _ | None ->
-                     Unresolved { id = speaker_id })
+          let authority = Option.bind (string_field fields "speaker_authority")
+              Masc.Keeper_chat_store.authority_of_label in
+          let speaker = match authority with
+            | Some Masc.Keeper_chat_store.Owner -> Operator
+            | Some (Masc.Keeper_chat_store.External | Masc.Keeper_chat_store.Keeper) ->
+                (match string_field fields "speaker_name" with
+                 | Some name when String.trim name <> ""
+                     && not (Option.equal String.equal (Some name) speaker_id) -> Named name
+                 | Some _ | None -> Unresolved {id=speaker_id})
+            | None -> Unresolved {id=speaker_id}
           in
           let surface =
             match assoc_opt "surface" fields with

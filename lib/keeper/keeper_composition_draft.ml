@@ -102,9 +102,10 @@ let contracts ~capability_surface plan =
 ;;
 
 let put_document ~base_path json =
+  let document = Tool_output.artifact_manifest_to_json ~content:"" ~structured_content:json in
   match Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
-      ~bytes:(Yojson.Safe.to_string json) ~mime:"application/json" with
-  | reference -> Ok reference
+      ~bytes:(Yojson.Safe.to_string document) ~mime:Tool_output.artifact_manifest_mime with
+  | reference -> Ok (Tool_output.with_preview reference "")
   | exception Sys_error detail -> Error (Storage_failed detail)
 ;;
 
@@ -143,6 +144,10 @@ let load ~base_path ~capability_surface ~keeper_name ~sha256 =
   let* bytes = match bytes with Some bytes -> Ok bytes | None -> Error Draft_not_found in
   let* json = match Yojson.Safe.from_string bytes with
     | json -> Ok json | exception Yojson.Json_error detail -> Error (Malformed_draft detail) in
+  let* json = match Tool_output.artifact_manifest_of_json json with
+    | Tool_output.Decoded_artifact_manifest { structured_content; _ } -> Ok structured_content
+    | Tool_output.Not_artifact_manifest -> Error (Malformed_draft "expected canonical draft manifest")
+    | Tool_output.Invalid_artifact_manifest { detail } -> Error (Malformed_draft detail) in
   let* fields = draft_fields json in
   let* owner = required_string fields "keeper" in
   let* () = if String.equal owner keeper_name then Ok () else Error Different_keeper in
@@ -157,7 +162,7 @@ let load ~base_path ~capability_surface ~keeper_name ~sha256 =
     | Some recorded when Yojson.Safe.equal (Yojson.Safe.sort recorded) (Yojson.Safe.sort (contracts ~capability_surface plan)) -> Ok ()
     | Some _ | None -> Error Capability_changed in
   let* reference = Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length bytes)
-      ~preview:(Tool_blob_store.make_preview bytes) ~mime:"application/json"
+      ~preview:"" ~mime:Tool_output.artifact_manifest_mime
       |> Result.map_error (fun error -> Malformed_draft (Tool_output.make_error_to_string error)) in
   Ok { plan; execution; reference }
 ;;

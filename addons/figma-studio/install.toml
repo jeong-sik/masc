@@ -1,0 +1,10 @@
+id = "figma-studio"
+run_id = "figma-studio"
+# Resolve this relative to the declaration. Update when copying into live config.
+manifest_path = "lane.toml"
+
+[binding]
+installation = "figma-studio"
+keeper = "leader"
+relay_agent = "figma-studio-relay"
+sources = []

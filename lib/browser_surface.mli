@@ -24,7 +24,8 @@ val read : request -> (Yojson.Safe.t, failure) result
 (** Tabs, [selection] as "requested" | "active" | "none_active", the page of the
     selected tab or null, source, clientId and elapsed_ms. A partial inventory
     additionally carries [complete=false] and [unavailableTabs], retaining the
-    IDs and errors of tabs whose metadata could not be read. Naming one of
+    IDs and errors of tabs whose metadata could not be read, including when
+    that list is empty. Naming one of
     those tabs refuses the read without substituting another tab. *)
 
 (** [lane] names the lane the answer came from, so an absent backend is

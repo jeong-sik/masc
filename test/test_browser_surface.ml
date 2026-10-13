@@ -173,15 +173,15 @@ let test_absent_lane_names_its_setup () =
 let answer data = Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])
 let tab id url active = `Assoc ["id", `Int id; "title", `String "Page";
   "url", `String url; "active", `Bool active]
-let with_browser ?(unavailable = []) tabs f =
+let with_browser ?unavailable tabs f =
   Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run (fun sw ->
       let reads = ref [] in
       Browser_lane.install_automation_executor (Some (function
         | Browser_lane.Tabs_list -> answer (match unavailable with
-            | [] -> `List tabs
-            | _ :: _ -> `Assoc ["tabs",`List tabs;"complete",`Bool false;
+            | None -> `List tabs
+            | Some unavailable -> `Assoc ["tabs",`List tabs;"complete",`Bool false;
                                "unavailableTabs",`List unavailable])
         | Browser_lane.Page_read { tab_id = Some id; max_chars = Some 50_000 } ->
           reads := id :: !reads;
@@ -209,6 +209,22 @@ let test_partial_inventory_preserves_requested_work () =
          "selected tab 12 is present but unreadable: unsupported operation" detail
      | _ -> fail "unreadable requested tab was substituted or silently lost");
     check (list int) "only the requested readable tab was read" [41] !reads)
+
+let test_partial_inventory_without_unavailable_tabs () =
+  with_browser ~unavailable:[] [tab 41 "https://example.org/page" true] (fun reads ->
+    let data = read_ok (request (Some 41)) in
+    check bool "empty unavailable list does not claim a complete inventory" true
+      (Yojson.Safe.Util.member "complete" data = `Bool false
+       && Yojson.Safe.Util.member "unavailableTabs" data = `List []);
+    check (list int) "the requested readable tab is still read" [41] !reads);
+  with_browser ~unavailable:[] [] (fun reads ->
+    let data = read_ok (request None) in
+    check bool "an empty partial inventory remains explicitly incomplete" true
+      (Yojson.Safe.Util.member "complete" data = `Bool false
+       && Yojson.Safe.Util.member "unavailableTabs" data = `List []
+       && selection data = `String "none_active"
+       && Yojson.Safe.Util.member "page" data = `Null);
+    check (list int) "no page is guessed for an empty partial inventory" [] !reads)
 
 let test_transport_unavailability_is_not_a_workflow_refusal () =
   List.iter (fun answer ->
@@ -1096,6 +1112,7 @@ let test_compound_read_keeps_admission () =
 
 let () = run "browser surface" ["behavior",[
   test_case "unreadable tabs do not block the requested readable tab" `Quick test_partial_inventory_preserves_requested_work;
+  test_case "partial inventories remain incomplete without unavailable tabs" `Quick test_partial_inventory_without_unavailable_tabs;
   test_case "transport availability keeps its failure class" `Quick test_transport_unavailability_is_not_a_workflow_refusal;
   test_case "compound read retains its original admission" `Quick test_compound_read_keeps_admission;
   test_case "input correction resumes on the same connected browser" `Quick test_tool_input_recovery;

@@ -63,8 +63,10 @@ let decode_tab json =
 let rec decode_tabs = function
   | [] -> Ok []
   | json :: rest -> let* tab = decode_tab json in let* tabs = decode_tabs rest in Ok (tab :: tabs)
+type inventory_completeness = Complete | Partial of Yojson.Safe.t list
+type inventory = { tabs : tab list; completeness : inventory_completeness }
 let decode_inventory = function
-  | `List rows -> let* tabs = decode_tabs rows in Ok (tabs, [])
+  | `List rows -> let* tabs = decode_tabs rows in Ok {tabs; completeness=Complete}
   | `Assoc fields ->
     (match List.assoc_opt "tabs" fields, List.assoc_opt "unavailableTabs" fields,
            List.assoc_opt "complete" fields with
@@ -73,7 +75,8 @@ let decode_inventory = function
        let valid = List.for_all (fun row -> match field "id" row, field "error" row with
          | Some (`Int id), Some (`String _) -> id >= 0
          | _ -> false) unavailable in
-       if valid then Ok (tabs, unavailable) else Error "malformed unavailable browser tab"
+       if valid then Ok {tabs; completeness=Partial unavailable}
+       else Error "malformed unavailable browser tab"
      | _ -> Error "malformed partial browser inventory")
   | _ -> Error "browser tabs must be a list or inventory"
 let tab_json tab = `Assoc ["id",`Int tab.id;"title",`String tab.title;
@@ -102,7 +105,11 @@ let read request =
   let target = Browser_lane.Read_admission.target admission in
   let issue command = exchange ~admission ~command in
   let* raw_tabs = issue Browser_lane.Read_admission.Tabs in
-  let* tabs, unavailable = decode_inventory raw_tabs |> unobserved in
+  let* inventory = decode_inventory raw_tabs |> unobserved in
+  let tabs = inventory.tabs in
+  let unavailable = match inventory.completeness with
+    | Complete -> []
+    | Partial unavailable -> unavailable in
   let* () = match request.tab_id with
     | None -> Ok ()
     | Some id ->
@@ -131,7 +138,7 @@ let read request =
   let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
   Ok (`Assoc (["tabs",`List (List.map tab_json tabs);"selection",selection_json selection;"page",page;
     "source",`String lane_name] @ Browser_lane.target_connection_fields target
-    @ (match unavailable with [] -> [] | _ :: _ ->
+    @ (match inventory.completeness with Complete -> [] | Partial unavailable ->
         ["complete",`Bool false;"unavailableTabs",`List unavailable])
     @ ["elapsed_ms",`Float elapsed_ms]))
 

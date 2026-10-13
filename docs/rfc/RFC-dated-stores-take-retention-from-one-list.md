@@ -16,6 +16,7 @@ related: ["0103", "every-durable-store-has-one-boot-policy", "tool-librarian-act
 - 이슈: #42785. 운영자가 2026-10-13 에 "RFC 먼저"를 골랐다.
 - 근거: §2 의 크기와 날짜는 2026-10-13 라이브 base path 에서 파일 이름과 크기만 읽어 쟀다. tool events 는 하루치(2026-10-12)의 줄 수와 바이트만 셌다. §3 은 `origin/main` `0a7538661e` 의 코드다.
 - 앞선 문서: RFC-0103(보존 기간을 기본으로 끈다), RFC "모든 영속 store 가 부팅 정책을 한 목록에서 받는다"(같은 틀을 부팅 정책에 썼다).
+- 같이 볼 PR: #42625(열림). 운영자 창을 `runtime.toml` 의 `[maintenance].jsonl_retention_days` 에서도 읽게 한다. 본문에 따르면 운영자는 30일이 아니라 7일을 원한다.
 
 ## 0. 요약
 
@@ -31,12 +32,14 @@ masc 는 기록을 `<폴더>/YYYY-MM/DD.jsonl` 로 하루에 파일 하나씩 �
 
 보존 규칙은 쓰는 양을 줄이지 못한다. 2.9GB 짜리 store 가 왜 그렇게 큰지는 §2.2 에 적고, 어떻게 할지는 §9 Q1 로 남긴다.
 
+날짜별 store 는 디스크의 일부일 뿐이다. #42625 본문이 잰 값으로 `.masc` 는 150GB 를 넘고 그중 날짜 파일은 21GB 쯤이다. 나머지(official-clients 80GB 등)는 이 RFC 가 다루지 않는다.
+
 ## 1. 결정
 
 - D1. 날짜별 store 는 닫힌 타입에 모두 있다. 항목마다 폴더 자리와 보존 규칙을 exhaustive match 로 답한다.
 - D2. store 는 그 타입의 값으로만 연다. 경로 문자열로 날짜 경로를 여는 문은 라이브러리 밖에서 부를 수 없다(§4.2).
 - D3. 날짜로 지우는 일은 정리 한 곳이 목록 전체를 돌며 한다. handle 이 append 때 따로 지우던 `?retention_days` 는 없앤다. store 하나에 규칙이 하나만 남는다.
-- D4. 보존 규칙은 네 가지다: 운영자 창, 그 store 의 환경 변수, 정해진 날수, 안 지움.
+- D4. 보존 규칙은 네 가지다: 운영자 창, 정해진 날수, 그 store 의 환경 변수, 안 지움. 환경 변수를 따로 갖는 store 는 `wire-capture` 하나만 남긴다.
 - D5. 지금 빠진 6개에 규칙을 준다(§4.5). 값은 운영자가 정한다(§9).
 - D6. 목록에 있지만 지울 것이 없는 두 줄(`voice_sessions`, `resilience_audit`)을 지운다.
 
@@ -52,6 +55,8 @@ masc 는 기록을 `<폴더>/YYYY-MM/DD.jsonl` 로 하루에 파일 하나씩 �
 | schedule signals | `schedules/signals` | 49 | 34MB | 2026-08-26 | 대시보드. 최근 줄만 |
 | telemetry coverage gaps | `telemetry-coverage-gaps` | 14 | 112KB | 2026-08-23 | 최근 32줄, 50줄 |
 | continuity requests | `keepers/<keeper>/continuity-requests` | 22 | 8MB | 2026-10-13 | 없다 |
+
+같은 날 정리가 닿는 store 들(`tool_calls`, `agent-core-events`, `costs` 등)은 날짜 파일이 9개씩만 남아 있었다. 가장 오래된 날이 2026-10-05 다. 라이브에서는 기본 30일이 아니라 일주일쯤의 창이 듣고 있다. 그 값이 어디서 오는지는 확인하지 않았다.
 
 위 셋은 #42789 가 `<base>/data/` 에서 `.masc` 아래로 옮겼다. 라이브 서버는 옛 빌드라서 아직 옛 자리에 쓴다. 표의 크기는 옛 자리에서 쟀다.
 
@@ -119,7 +124,7 @@ Keeper 별 store 를 닫힌 타입(`Common.keeper_runtime_store`)에서 뽑게 �
 **지우는 쪽은 길이 셋이다.**
 
 1. handle 이 append 할 때. `?retention_days` 가 양수면 handle 마다 하루에 한 번 지운다. `?max_bytes` 가 양수면 append 마다 오래된 날부터 지우고 오늘 파일은 남긴다. 43곳 중 8곳이 이 인자를 넘긴다.
-2. 정리. `Server_runtime_startup_maintenance.prune_shared_jsonl_stores` 가 서버 시작 때와 24시간마다 돈다. 날수는 `MASC_JSONL_RETENTION_DAYS` 이고 기본 30, 0 이하면 아무것도 지우지 않는다. 대상은 세 묶음이다.
+2. 정리. `Server_runtime_startup_maintenance.prune_shared_jsonl_stores` 가 서버 시작 때와 24시간마다 돈다. 날수는 `MASC_JSONL_RETENTION_DAYS` 이고 기본 30, 0 이하면 아무것도 지우지 않는다. 이 글은 이 날수를 운영자 창이라고 부른다. 대상은 세 묶음이다.
    - 이름 목록 `top_level_dated_stores` 11개.
    - Keeper 별 store. `Common.keeper_runtime_store` 의 placement 에서 뽑는다.
    - 손으로 적은 줄들: `logs`, `trajectories`, `keeper_chat_events`, `keeper_turn_events`, `messages`, `resilience_audit`, `decision_audit`.
@@ -131,7 +136,7 @@ Keeper 별 store 를 닫힌 타입(`Common.keeper_runtime_store`)에서 뽑게 �
 
 ### 4.1 목록 (D1)
 
-`lib/dated_jsonl` 안에 둔다. 이 라이브러리는 `Common` 과 `lib/config` 를 이미 볼 수 있다. 모자란 것은 둘이다. dune 에 `ppx_enumerate` 를 더한다. telemetry, tool_calls, agent-core-events 의 환경 변수를 읽는 함수 셋을 `lib/config` 로 내린다.
+`lib/dated_jsonl` 안에 둔다. 이 라이브러리는 `Common` 과 `lib/config` 를 이미 볼 수 있다. `wire-capture` 의 환경 변수를 읽는 함수도 `lib/config` 에 있다. dune 에 `ppx_enumerate` 만 더하면 된다.
 
 ```ocaml
 module Store : sig
@@ -162,9 +167,9 @@ module Store : sig
   val all : t list   (* [@@deriving enumerate] *)
 
   type retention =
-    | Operator_window            (* MASC_JSONL_RETENTION_DAYS *)
-    | Own_days of (unit -> int)  (* 그 store 의 환경 변수 *)
+    | Operator_window            (* 운영자 창 *)
     | Fixed_days of int          (* 읽는 쪽 창이 정한 날수 *)
+    | Own_days of (unit -> int)  (* 그 store 의 환경 변수. wire-capture 뿐 *)
     | Kept                       (* 날짜로 지우지 않는다 *)
 
   val retention : t -> retention   (* exhaustive *)
@@ -220,26 +225,28 @@ val dated_path_now : Store.location -> Jsonl_writer.dated_path
 |---|---|---|---|
 | audit, events, activity-events, transition-audit, costs, audit-approvals | 운영자 창 | `Operator_window` | 없다 |
 | Keeper 별 8개 (metrics, execution-receipts, turn-records, provider-inputs, memory-recall-artifacts, crash-events, reaction-ledger, decision_audit) | 운영자 창 | `Operator_window` | 없다 |
-| telemetry, tool_calls, agent-core-events | 자기 변수(기본 30일)와 운영자 창 중 짧은 쪽 | `Own_days` | 아래 세 가지 |
-| tool_usage | 자기 변수(기본 "안 지움")와 운영자 창 중 짧은 쪽 | `Operator_window` | 자기 변수로 창보다 짧게 줄여 둔 장비에서는 창까지 늘어난다(Q4) |
+| telemetry, tool_calls, agent-core-events | 자기 변수(기본 30일)와 운영자 창 중 짧은 쪽 | `Operator_window`. 자기 변수 셋은 지운다 | 자기 변수로 창보다 짧게 줄여 둔 장비에서는 창까지 늘어난다 |
+| tool_usage | 자기 변수(기본 "안 지움")와 운영자 창 중 짧은 쪽 | `Operator_window`. 자기 변수는 지운다 | 위와 같다 |
 | provider_usage_history | handle 의 16일 | `Fixed_days 16` | 지우는 때가 append 에서 정리로 바뀐다 |
-| wire-capture | 자기 변수(기본 3일) | `Own_days` | 위와 같다 |
+| wire-capture | 자기 변수(기본 3일, 1~30일) | `Own_days` | 위와 같다 |
 
-`Own_days` 로 옮기는 세 store 에서 달라지는 것:
+`Operator_window` 는 지금처럼 0 이하면 아무것도 지우지 않는다.
 
-1. 자기 변수를 운영자 창보다 길게 두면 그 값이 듣는다. 지금은 창에서 잘린다.
-2. 운영자 창을 30일보다 짧게 둔 장비에서는 이 셋이 자기 기본값 30일로 늘어난다. 지금은 창을 따른다.
-3. 자기 변수를 0 으로 두면 지우지 않는다. 지금은 0 이어도 정리가 지운다.
+자기 변수 넷을 지우는 까닭은 셋이다.
 
-`Operator_window` 와 `Own_days` 는 값이 0 이하면 아무것도 지우지 않는다.
+- 지금도 늘리는 쪽으로는 듣지 않는다. 창보다 긴 값과 0 은 정리가 덮는다(§2.4).
+- 운영자가 창을 7일로 줄이면(#42625) 이 store 들도 7일을 따라야 한다. 자기 변수를 규칙으로 삼으면 `tool_calls`(라이브 9일치 1.8GB)와 `agent-core-events`(771MB)가 자기 기본값 30일에 남는다.
+- 헌법의 `env_var_sprawl` 항목이 묻는 그대로다: TOML 로 값을 쓰는데 환경 변수를 따로 둘 까닭이 있는가.
 
-이 셋에 자기 변수를 남길지는 §9 Q7 이다.
+`wire-capture` 는 남긴다. 기본 3일이 창보다 짧다. 2026-10-13 에 쟀을 때 그날 반나절 치가 239MB 였으니, 창을 따르게 하면 디스크가 늘어난다.
+
+자기 변수를 남기는 쪽은 §9 Q7 에 적었다.
 
 ### 4.5 빠진 6개 (D5)
 
 | store | 권고 | 까닭 |
 |---|---|---|
-| tool events | `Operator_window` | 읽는 코드가 없다. 30일이면 586MB 가 남는다. 쓰는 양은 Q1 |
+| tool events | `Operator_window` | 읽는 코드가 없다. 30일이면 586MB, 7일이면 129MB 가 남는다. 쓰는 양은 Q1 |
 | keeper wake payload | `Operator_window` | 대시보드가 최근 500줄만 읽는다 |
 | verdicts | `Kept` | 6개월 반 동안 5.1MB 다. 통계가 최근 5,000줄을 읽는데, 지금 속도(하루 약 29줄)로 173일치다. 30일로 자르면 870줄쯤 남는다. 사람이 붙인 label 은 다시 만들 수 없다 |
 | schedule signals | `Operator_window` | 대시보드가 최근 줄만 읽는다. 같은 신호를 두 번 쏘지 않게 막는 일은 다른 파일(`schedules/signal_keys.json`)이 맡는다. 이 store 를 지워도 다시 쏘지 않는다 |
@@ -276,7 +283,7 @@ val dated_path_now : Store.location -> Jsonl_writer.dated_path
 - 테스트. 임시 root 아래에 `Store.all` 의 모든 항목을 연다. 항목마다 창보다 오래된 날짜 파일 하나와 오늘 파일 하나를 쓰고 `Store.prune` 을 한 번 부른다.
   - `Operator_window`, `Own_days`, `Fixed_days` 항목은 오래된 파일만 사라진다.
   - `Kept` 항목은 둘 다 남는다.
-  - 운영자 창이나 자기 변수가 0 이면 그 항목에서 아무것도 사라지지 않는다.
+  - 운영자 창이 0 이면 `Operator_window` 항목에서 아무것도 사라지지 않는다.
   - 등록되지 않은 Keeper 폴더도 정리된다.
   - reaction-ledger 의 옛 세대 폴더도 정리된다.
 - 변형. 항목 하나의 규칙을 `Kept` 로 바꾸면 위 테스트가 실패해야 한다. `Fixed_days 16` 을 17 로 바꾸면 16일 된 파일을 둔 케이스가 실패해야 한다.
@@ -291,28 +298,27 @@ val dated_path_now : Store.location -> Jsonl_writer.dated_path
 ## 9. 열어 둔 물음
 
 - Q1. tool events 를 계속 쓸 것인가. 읽는 코드가 없다.
-  - (가) 지금처럼 쓰고 운영자 창으로 지운다. 30일이면 586MB.
+  - (가) 지금처럼 쓰고 운영자 창으로 지운다. 30일이면 586MB, 7일이면 129MB.
   - (나) 그 agent 의 도구 목록이 바뀔 때만 `Assigned` 를 쓴다. 2026-10-12 기준으로 16,005줄이 276줄이 된다. 이때 창으로 지우면, 목록이 30일 넘게 안 바뀐 agent 는 `Assigned` 줄이 하나도 안 남는다. 읽을 계획인 RFC 는 "첫 호출 전 마지막 `Assigned`"를 찾으므로, (나)를 고르면 이 store 의 규칙을 다시 정해야 한다.
   - (다) 읽는 쪽이 생길 때까지 쓰지 않고 모듈을 지운다.
 - Q2. verdicts 를 `Kept` 로 둘 것인가, 날수를 줄 것인가.
 - Q3. 운영자 창의 기본값. RFC-0103 은 기본을 끄자고 했고 지금 코드는 30일이다. 이 RFC 는 30일을 그대로 둔다. RFC-0103 을 닫을지 정해야 한다.
-- Q4. `tool_usage` 의 기본을 무엇으로 볼 것인가. `.ml` 은 "안 지움", `.mli` 는 30일, 실제 동작은 운영자 창이다. 권고는 운영자 창으로 맞추고 `MASC_TOOL_USAGE_LOG_RETENTION_DAYS` 를 지우는 것이다.
+- Q4. `tool_usage` 의 기본을 무엇으로 볼 것인가. `.ml` 은 "안 지움", `.mli` 는 30일, 실제 동작은 운영자 창이다. 이 RFC 는 실제 동작인 운영자 창으로 맞춘다.
 - Q5. `continuity-requests` 는 진단용이다. 며칠치가 있어야 진단에 쓸 수 있는가. 이 store 를 읽는 코드를 더하는 열린 PR 은 없다(2026-10-13 검색).
 - Q6. 기본이 아닌 클러스터를 실제로 쓰는가. 쓴다면 §6 의 root 문제를 따로 고쳐야 한다.
-- Q7. telemetry, tool_calls, agent-core-events 에 자기 변수를 남길 것인가.
-  - 남기면 §4.4 의 세 가지가 달라진다.
-  - 지우고 운영자 창 하나로 모으면 손잡이가 셋 줄어든다. 대신 자기 변수로 창보다 짧게 줄여 둔 장비에서는 그 store 가 창까지 늘어난다.
-  - 이 장비의 설정 파일 한 곳에 `MASC_TOOL_CALL_LOG_RETENTION_DAYS` 라는 이름이 나온다. 값은 읽지 않았다.
+- Q7. telemetry, tool_calls, agent-core-events, tool_usage 의 자기 변수를 지워도 되는가. 이 RFC 는 지운다(§4.4).
+  - 남기는 쪽을 고르면 그 store 는 자기 변수만 따른다. 이때 달라지는 것은 셋이다. 창보다 긴 값이 듣는다. 0 을 주면 지우지 않는다. 운영자가 창을 30일보다 짧게 줄여도 이 store 들은 자기 기본값 30일에 남는다.
+  - 이 장비의 `~/.zshenv`, `~/.zshrc`, `~/.config/masc` 에는 네 변수가 없다. 서버가 다른 길로 받는 환경은 확인하지 않았다.
 - Q8. `Shared_audit` 모듈을 지울 것인가. `lib` 와 `bin` 에서 부르는 곳이 없다.
 
 ## 10. 구현 순서
 
 Native Stack 하나로 올린다.
 
-1. `Store` 목록과 `location` 을 더한다. `location` 을 받는 `create` 를 옛 `create` 옆에 둔다. 규칙은 §4.4 대로 적는다. 빠진 6개는 `Kept` 로 시작한다.
+1. `Store` 목록과 `location` 을 더한다. `location` 을 받는 `create` 를 옛 `create` 옆에 둔다. 규칙은 §4.4 대로 적는다. 빠진 6개는 `Kept` 로 시작한다. #42625 가 먼저 병합되면 운영자 창은 그 PR 의 함수로 읽는다.
 2. `lib` 의 `create` 43곳과 날짜 경로를 직접 만드는 8개 파일, 테스트 123곳을 영역별로 나눠 옮긴다.
 3. 옛 `create` 와 `?retention_days` 를 지운다. `Jsonl_writer.dated_path*` 와 `append_dated_jsonl` 을 `lib/dated_jsonl` 안으로 옮긴다. 스택은 통째로 병합하므로 main 에는 문이 하나만 남는다.
-4. 정리가 `Store.prune` 을 부르게 하고 §4.3 의 목록들을 지운다. 여기서 §4.4 의 "달라지는 것"이 생긴다.
+4. 정리가 `Store.prune` 을 부르게 하고 §4.3 의 목록들과 자기 변수 넷을 지운다. 여기서 §4.4 의 "달라지는 것"이 생긴다.
 5. 빠진 6개의 규칙을 운영자가 정한 값으로 바꾼다. 첫 시작 때 지워지는 양을 PR 본문에 적는다.
 
 Q1 의 답이 (나)나 (다)면 그 일은 이 스택과 따로 한다.

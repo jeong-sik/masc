@@ -13,8 +13,8 @@
 type provider_defaults =
   { kind : Provider_config.provider_kind
   ; base_url : string
-  ; api_key_env : string
   ; request_path : string
+  ; requires_api_key : bool
   }
 
 (** A registered provider entry.

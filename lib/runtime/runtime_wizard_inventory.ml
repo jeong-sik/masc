@@ -117,7 +117,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
         ~origin:"agent_core_catalog" ~supported ~verification_supported:supported
         (endpoint_fields entry.base_url
          @ [ "request_path", `String entry.request_path
-           ; "api_key_env", `String entry.api_key_env
+           ; "requires_api_key", `Bool entry.requires_api_key
            ; "provider_kind", `String (Llm_provider.Provider_config.string_of_provider_kind entry.kind)
            ])))
   in

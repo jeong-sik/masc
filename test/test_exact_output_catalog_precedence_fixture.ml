@@ -44,7 +44,7 @@ let replacement_secondary_target = "replacement-secondary-target"
 let unbound_target = "unbound-target"
 
 let catalog_toml
-      ?(api_key_env = "")
+      ?(requires_api_key = false)
       ?(additional_target_ids = [])
       ~provider_id
       ~model_id
@@ -58,7 +58,7 @@ id = %S
 kind = "openai_compat"
 base_url = "http://127.0.0.1:1"
 request_path = "/v1/chat/completions"
-api_key_env = %S
+auth = %S
 capabilities_base = "openai_chat_extended"
 
 [[models]]
@@ -76,7 +76,7 @@ provider_ref = %S
 model_id = %S
 |}
     provider_id
-    api_key_env
+    (if requires_api_key then "api-key" else "none")
     model_id
     provider_id
     target_id

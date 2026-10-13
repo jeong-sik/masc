@@ -43,8 +43,8 @@ let provider_endpoint_label_of_config (cfg : Llm_provider.Provider_config.t) =
 let binding_auth_is_no_auth (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true
-  | Runtime_binding.Api_key_env _
-  | Runtime_binding.Setup_token_env _ -> false
+  | Runtime_binding.Api_key
+  | Runtime_binding.Setup_token -> false
 ;;
 
 let binding_base_url_is_loopback (binding : Runtime_binding.t) =

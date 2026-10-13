@@ -123,8 +123,8 @@ let shared_endpoint_catalog_json =
 
 let auth_to_string = function
   | Provider_runtime_binding.No_auth -> "none"
-  | Provider_runtime_binding.Api_key_env env -> "api_key_env:" ^ env
-  | Provider_runtime_binding.Setup_token_env env -> "setup:" ^ env
+  | Provider_runtime_binding.Api_key -> "api-key"
+  | Provider_runtime_binding.Setup_token -> "setup"
 ;;
 
 let expect_binding label =
@@ -415,7 +415,7 @@ id = "ollama_cloud"
 kind = "openai_compat"
 base_url = "https://ollama.com/v1"
 request_path = "/chat/completions"
-api_key_env = "OLLAMA_CLOUD_API_KEY"
+auth = "api-key"
 capabilities_base = "ollama_cloud"
 
 [[models]]
@@ -632,7 +632,7 @@ id = "ollama_cloud"
 kind = "openai_compat"
 base_url = "https://ollama.com/v1"
 request_path = "/chat/completions"
-api_key_env = "OLLAMA_CLOUD_API_KEY"
+auth = "api-key"
 capabilities_base = "ollama_cloud"
 
 [[models]]
@@ -784,8 +784,8 @@ let test_all_includes_catalog_entry_once () =
 let test_catalog_auth_variants () =
   with_provider_catalog catalog_variants_json (fun () ->
     let cases =
-      [ "rich-alias", "setup:RICH_SETUP_TOKEN", Some "rich-default"
-      ; "api-key-auth", "api_key_env:API_KEY_AUTH", None
+      [ "rich-alias", "setup", Some "rich-default"
+      ; "api-key-auth", "api-key", None
       ]
     in
     List.iter

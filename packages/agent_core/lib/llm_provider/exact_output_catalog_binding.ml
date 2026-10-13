@@ -615,7 +615,7 @@ let%test "exact catalog binding preserves reasoning efforts and thinking control
      kind = \"openai_compat\"\n\
      base_url = \"https://openrouter.ai/api/v1\"\n\
      request_path = \"/chat/completions\"\n\
-     api_key_env = \"\"\n\
+     auth = \"none\"\n\
      capabilities_base = \"openai_chat_extended\"\n\
      [[models]]\n\
      id_prefix = \"deepseek/deepseek-v4-flash\"\n\
@@ -644,7 +644,7 @@ let%test "exact catalog binding clears reasoning efforts when reasoning is unsup
      kind = \"openai_compat\"\n\
      base_url = \"https://openrouter.ai/api/v1\"\n\
      request_path = \"/chat/completions\"\n\
-     api_key_env = \"\"\n\
+     auth = \"none\"\n\
      capabilities_base = \"openai_chat_extended\"\n\
      [[models]]\n\
      id_prefix = \"non-reasoning-model\"\n\
@@ -670,7 +670,7 @@ let%test "exact catalog binding gates forced tool choice on supports_tool_choice
      kind = \"openai_compat\"\n\
      base_url = \"http://127.0.0.1:11434\"\n\
      request_path = \"/v1/chat/completions\"\n\
-     api_key_env = \"\"\n\
+     auth = \"none\"\n\
      capabilities_base = \"openai_chat\"\n\
      [[models]]\n\
      id_prefix = \"no-tools-model\"\n\
@@ -700,7 +700,7 @@ let%test "exact pricing-only overlay preserves functional fields" =
        kind = \"openai_compat\"\n\
        base_url = \"https://pricing.example\"\n\
        request_path = \"/v1/chat/completions\"\n\
-       api_key_env = \"\"\n\
+       auth = \"none\"\n\
        capabilities_base = \"openai_chat\"\n\
        [[models]]\n\
        id_prefix = \"pricing-model\"\n\

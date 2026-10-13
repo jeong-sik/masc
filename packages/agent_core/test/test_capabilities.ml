@@ -3059,7 +3059,7 @@ id = "precedence-provider"
 kind = "gemini"
 base_url = "https://example.invalid"
 request_path = ""
-api_key_env = ""
+auth = "none"
 capabilities_base = "gemini"
 
 [[models]]

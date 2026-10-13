@@ -412,7 +412,7 @@ let test_scoped_lookup_retries_under_the_canonical_provider () =
        kind = \"openai_compat\"\n\
        base_url = \"https://alias.example\"\n\
        request_path = \"/v1/chat/completions\"\n\
-       api_key_env = \"\"\n\
+       auth = \"none\"\n\
        \n\
        [[models]]\n\
        id_prefix = \"alias-model\"\n\

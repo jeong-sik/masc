@@ -76,8 +76,19 @@ def main():
     upstream_model = model_config['api-name']
     upstream_url = upstream_provider['base_url'].rstrip('/') + upstream_provider['request_path']
     assert upstream_url == 'https://api.kimi.com/coding/v1/chat/completions'
-    upstream_key = os.environ[upstream_provider['api_key_env']]
-    assert upstream_key
+    kimi_credentials = source_runtime['providers']['kimi_coding']['credentials']
+    kimi_credential_type = kimi_credentials.get('type', 'env')
+    if kimi_credential_type == 'env':
+        upstream_key = os.environ[kimi_credentials['key']]
+    elif kimi_credential_type == 'file':
+        credential_path = Path(kimi_credentials['path']).expanduser()
+        assert credential_path.is_absolute(), 'kimi_coding credential file must use an absolute path'
+        upstream_key = credential_path.read_text().strip()
+    elif kimi_credential_type == 'inline':
+        upstream_key = kimi_credentials['value']
+    else:
+        raise AssertionError(f'unsupported kimi_coding credential type: {kimi_credential_type}')
+    assert upstream_key, 'kimi_coding credential is empty'
     upstream_opener = build_opener(ProxyHandler({}), NoRedirect)
     token = secrets.token_hex(32)
     requests = {'producer': [], 'verifier': []}

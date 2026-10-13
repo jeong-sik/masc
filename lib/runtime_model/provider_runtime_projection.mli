@@ -31,3 +31,9 @@ val default_model_candidate_for_runtime_prefix :
   ?getenv:(string -> string option) -> string -> default_model_candidate option
 
 val default_execution_model_strings : string -> string list
+
+val binding_auth_available : Runtime_binding.t -> bool
+(** Whether a binding may join auto-detected model labels. Keyless bindings
+    always qualify; keyed bindings qualify when actually available, since the
+    [auth] requirement fact alone must not exclude providers whose credential
+    is present. Exposed for unit tests. *)

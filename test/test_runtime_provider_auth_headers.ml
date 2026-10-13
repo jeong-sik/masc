@@ -1366,7 +1366,7 @@ id = "glm-coding"
 kind = "glm"
 base_url = "https://example.invalid/v4"
 request_path = "/chat/completions"
-api_key_env = "TEST_UNUSED_GLM_KEY"
+auth = "api-key"
 capabilities_base = "glm"
 |}
     (fun () ->
@@ -2897,7 +2897,7 @@ kind = "anthropic"
 capabilities_base = "anthropic"
 base_url = "https://fixture.invalid"
 request_path = "/v1/messages"
-api_key_env = ""
+auth = "none"
 %s
 |} value in
   List.iter (fun (declaration, supported) ->
@@ -2963,7 +2963,7 @@ kind = "anthropic"
 capabilities_base = "anthropic"
 base_url = "https://fixture.invalid"
 request_path = "/v1/messages"
-api_key_env = ""
+auth = "none"
 %s
 
 [[models]]

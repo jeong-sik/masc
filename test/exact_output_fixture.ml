@@ -167,7 +167,7 @@ let target_fixture_toml
       ~requires_token_measurement
       ~supports_response_format_json
       ~supports_structured_output
-      ~api_key_env
+      ~requires_api_key
       index
       fixture
   =
@@ -201,7 +201,7 @@ let target_fixture_toml
      kind = %S\n\
      base_url = %S\n\
      request_path = %S\n\
-     api_key_env = %S\n\n\
+     auth = %S\n\n\
      [[models]]\n\
      id_prefix = %S\n\
      provider_name = %S\n\
@@ -220,7 +220,7 @@ let target_fixture_toml
     provider_kind
     fixture.base_url
     request_path
-    api_key_env
+    (if requires_api_key then "api-key" else "none")
     model_id
     provider_id
     serving_constraint_lines
@@ -242,8 +242,8 @@ let catalog_document
       ?(connect_timeouts = [])
       ?(body_timeouts = [])
       ?(enable_thinkings = [])
-      ?(api_key_env = "")
-      ?(api_key_envs = [])
+      ?(requires_api_key = false)
+      ?(requires_api_keys = [])
       ?(requires_token_measurement = false)
       ?(supports_response_format_json = true)
       ?(supports_structured_output = true)
@@ -260,8 +260,8 @@ let catalog_document
     |> Option.value ~default:fixture_post_body_timeout_seconds
   in
   let enable_thinking_for id = List.assoc_opt id enable_thinkings in
-  let api_key_env_for id =
-    List.assoc_opt id api_key_envs |> Option.value ~default:api_key_env
+  let requires_api_key_for id =
+    List.assoc_opt id requires_api_keys |> Option.value ~default:requires_api_key
   in
   { source
   ; contents =
@@ -274,7 +274,7 @@ let catalog_document
             ~requires_token_measurement
             ~supports_response_format_json
             ~supports_structured_output
-            ~api_key_env:(api_key_env_for fixture.id)
+            ~requires_api_key:(requires_api_key_for fixture.id)
           index
           fixture)
       |> String.concat "\n"
@@ -290,8 +290,8 @@ let resolver_snapshot
       ?connect_timeouts
       ?body_timeouts
       ?enable_thinkings
-      ?api_key_env
-      ?api_key_envs
+      ?requires_api_key
+      ?requires_api_keys
       ?requires_token_measurement
       ?supports_response_format_json
       ?supports_structured_output
@@ -303,8 +303,8 @@ let resolver_snapshot
       ?connect_timeouts
       ?body_timeouts
       ?enable_thinkings
-      ?api_key_env
-      ?api_key_envs
+      ?requires_api_key
+      ?requires_api_keys
       ?requires_token_measurement
       ?supports_response_format_json
       ?supports_structured_output

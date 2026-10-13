@@ -55,9 +55,10 @@ let name_width (score : Score.t) =
 
 (* The barlines a measure brings. The left edge adds past the bar line the
    measure shares with the one before it -- a [:] for an [\ro], an ending
-   tag, or both -- and the right edge is whole, a [:|xN] for an [\rc N].
-   A plain measure adds nothing on the left and one [|] on the right, as
-   before. *)
+   tag, or both -- and the right edge is whole, a [:|xN|] for an [\rc N].
+   The close edge ends at a barline so the next bar's marks join past one:
+   without it a count would run into them ([:|x21|]). A plain measure adds
+   nothing on the left and one [|] on the right, as before. *)
 let left_marks (measure : Score.measure) =
   let start = if measure.repeat_start then ":" else "" in
   match measure.endings with
@@ -68,7 +69,7 @@ let left_marks (measure : Score.measure) =
 let right_marks (measure : Score.measure) =
   match measure.repeat_end with
   | None -> "|"
-  | Some count -> ":|x" ^ string_of_int count
+  | Some count -> ":|x" ^ string_of_int count ^ "|"
 
 let systems ~max_width (score : Score.t) =
   let lead = name_width score + 1 in

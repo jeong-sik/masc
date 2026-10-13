@@ -748,7 +748,7 @@ let test_coverage_diagnostics_survive_aggregation () =
     ];
     let agg = compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
-    check string "coverage status" "none" s.coverage_status;
+    check string "coverage status" "none" (M.coverage_status_to_string s.coverage_status);
     check int "usage missing count" 1 s.usage_missing_count;
     check int "telemetry missing count" 1 s.telemetry_missing_count;
     check (option string) "primary coverage reason"
@@ -1577,7 +1577,7 @@ let zero_model_stats (model_id : string) ~entry_count
     telemetry_sample_count = entry_count;
     usage_missing_count = 0;
     telemetry_missing_count = 0;
-    coverage_status = "full";
+    coverage_status = M.Coverage_full;
     primary_coverage_stage = None;
     primary_coverage_reason = None;
     coverage_reason_counts = [];
@@ -1625,7 +1625,7 @@ let test_prompt_feedback_redacts_provider_model_identity () =
          ; total_output_tokens = Some 250
          ; usage_missing_count = 1
          ; telemetry_missing_count = 1
-         ; coverage_status = "partial"
+         ; coverage_status = M.Coverage_partial
     }
   in
   let agg : M.aggregate =

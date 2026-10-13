@@ -75,6 +75,16 @@ type cached_input = {
   ci_sample_count : int;
 }
 
+(** How much of a model's successful turns reported usage and telemetry. *)
+type coverage_status =
+  | Coverage_error_only  (** No successful turn, at least one error turn. *)
+  | Coverage_full  (** Every successful turn reported both. *)
+  | Coverage_none  (** No successful turn reported either. *)
+  | Coverage_partial  (** Some successful turns are missing one or both. *)
+
+val coverage_status_to_string : coverage_status -> string
+(** ["error_only"], ["full"], ["none"], ["partial"] — the JSON and text value. *)
+
 type model_stats = {
   model_id : string;
   entry_count : int;
@@ -107,7 +117,7 @@ type model_stats = {
   telemetry_sample_count : int;
   usage_missing_count : int;
   telemetry_missing_count : int;
-  coverage_status : string;
+  coverage_status : coverage_status;
   primary_coverage_stage : string option;
   primary_coverage_reason : string option;
   coverage_reason_counts : coverage_reason_count list;

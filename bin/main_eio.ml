@@ -2315,10 +2315,11 @@ let browser_lane_setup_cmd =
        ~man:
          [ `S Manpage.s_description
          ; `P
-             "Installs the browser lane host the MASC extension talks to, and writes the \
-              extension itself, so no source checkout is needed. It starts no browser: \
-              Firefox loads a temporary add-on only from about:debugging, and the last \
-              thing this prints is what to do there."
+             "Installs the browser lane host and its launcher, and with --mode extension \
+              the MASC extension itself (so no source checkout is needed) and the manifest \
+              Firefox starts the host through. It starts no browser: Firefox loads a \
+              temporary add-on only from about:debugging, and the last thing --mode \
+              extension prints is what to do there."
          ; `P
              "Installing again replaces the host, launcher, manifest and extension files \
               and keeps the workspace's lane token."

@@ -175,10 +175,11 @@ Without the table the operator does both steps.
    above is an example.
 
    The browser lane has to be installed for that workspace first.
-   `masc browser-lane-setup --mode extension` (or `--mode bidi`, which writes the
-   table above as well and no extension) writes the lane token the host and the
+   `masc browser-lane-setup --mode host` writes the lane token the host and the
    server share (`<base-path>/.masc/browser-lane/token`), a copy of the host
-   executable, and the `launch` script used here. The launcher runs that copy
+   executable, and the `launch` script used here, and nothing else. (`--mode bidi`
+   writes the same and the table above, so MASC starts the Firefox; `--mode
+   extension` writes the same and the extension.) The launcher runs that copy
    with this workspace's `--base-path` and token file and passes on what
    follows it, so it does not depend on the `PATH`.
 

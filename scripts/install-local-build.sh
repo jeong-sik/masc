@@ -20,10 +20,13 @@
 # A lane set up with `masc browser-lane-setup --mode bidi` or `--mode host`
 # registers no manifest, so the manifests cannot lead to it. The workspace this
 # install works with (--base-path, or the one masc would use) is brought up as
-# well when its lane is installed and no manifest already covers it, through
+# well when masc's own lookup resolved it, its lane is installed (a launcher
+# and its declaration) and no manifest already covers it, through
 # `masc browser-lane-setup --mode host`, which writes the host and the launcher
-# and leaves runtime.toml alone. Other workspaces with such a lane are not
-# found; run that command for them.
+# and leaves runtime.toml alone. A lane that has an extension and no manifest
+# here is named on stderr and left as it is: a host replaced beside an old
+# extension would put the two on different builds. Other workspaces with such a
+# lane are not found; run that command for them.
 #
 # Before anything is replaced, the new build judges the runtime.toml of the
 # workspace its server runs on (#39311). A refusal leaves every binary and
@@ -54,7 +57,9 @@
 #   --skip-build    install what --build-dir already holds
 #   --build-dir     directory holding main_eio.exe, masc_tui.exe, masc_browser_host.exe
 #                   and deployment_preflight_helper.exe (default <repo>/_build/default/bin)
-#   --base-path     workspace whose runtime.toml the new build must accept
+#   --base-path     workspace whose runtime.toml the new build must accept, and
+#                   whose browser lane host is brought up to this build when no
+#                   manifest covers it
 #                   (default: the one masc would use -- MASC_BASE_PATH, a current
 #                   directory holding .masc/config, then the recorded default)
 #   --keep-build    retain build artifacts after a successful default build/install
@@ -70,6 +75,7 @@ guest_shim=true
 custom_build_dir=false
 base_path=""
 workspace_root=""
+workspace_state=""
 install_args=("$@")
 case "$(uname -s)" in
   Darwin) manifest_dir="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts" ;;
@@ -338,7 +344,7 @@ else
   echo "installed masc, masc-tui, masc-browser-host into $prefix (no deployment preflight pair: $build_dir/deployment_preflight_helper.exe is missing)"
 fi
 
-python3 - "$prefix/masc" "$prefix/masc-browser-host" "$manifest_dir" "$workspace_root" <<'PY'
+python3 - "$prefix/masc" "$prefix/masc-browser-host" "$manifest_dir" "$workspace_root" "$workspace_state" <<'PY'
 import fcntl
 import filecmp
 import json
@@ -351,6 +357,11 @@ import sys
 
 masc, binary, manifest_dir = sys.argv[1], sys.argv[2], Path(sys.argv[3])
 workspace = Path(sys.argv[4]) if sys.argv[4] else None
+# "resolved" only when the workspace is the answer of masc's own lookup (the
+# deployment preflight helper), which trims and normalizes the path as every
+# masc command does; a path this shell was merely given is not the one masc
+# would write to.
+workspace_resolved = sys.argv[5] == "resolved"
 launcher_suffix = Path(".masc/browser-lane/host/launch")
 
 registered = []
@@ -363,6 +374,10 @@ if manifest_dir.is_dir():
         name, launcher = declared.get("name"), declared.get("path")
         if not isinstance(name, str) or not isinstance(launcher, str):
             continue
+        if "\0" in name or "\0" in launcher:
+            # Neither can be a host name or a path, and a process cannot be
+            # started with one.
+            continue
         launcher = Path(launcher)
         if launcher.parts[-len(launcher_suffix.parts):] != launcher_suffix.parts:
             continue
@@ -373,12 +388,51 @@ if manifest_dir.is_dir():
 # registers no manifest, so the manifests above cannot lead to it. The one
 # workspace this install works with is looked at as well: when its lane is
 # installed and no registration already covers it, its host is brought up too.
-registered_bases = {os.path.realpath(base) for _, base, _ in registered}
+def same_directory(a, b):
+    try:
+        return os.path.realpath(a) == os.path.realpath(b)
+    except (OSError, ValueError):
+        return False
+
+# Installed as masc reads it (lib/browser_lane_launcher.ml): the launcher and
+# the declaration beside it, both written by one installation. A directory that
+# cannot be read holds no lane this script can refresh.
+def lane_installed(base):
+    host_directory = base / ".masc/browser-lane/host"
+    try:
+        return (host_directory / "launch").is_file() and (host_directory / "launch.json").is_file()
+    except OSError:
+        return False
+
+def lane_has_extension(base):
+    try:
+        return (base / ".masc/browser-lane/extension/manifest.json").is_file()
+    except OSError:
+        return False
+
 unregistered = []
-if (workspace is not None
-        and os.path.realpath(workspace) not in registered_bases
-        and (workspace / ".masc/browser-lane/host/launch.json").is_file()):
-    unregistered.append(workspace)
+if workspace is None:
+    pass
+elif not workspace_resolved:
+    # masc may write to another path than the one this shell was given, so the
+    # host is not replaced on a guess. Said only where a lane is there to skip:
+    # the runtime.toml check has already said once that nothing was resolved.
+    if lane_installed(workspace) and not any(same_directory(workspace, base) for _, base, _ in registered):
+        print(f"install-local-build: WARN the browser lane host of {workspace} is not refreshed: "
+              "masc's own lookup did not resolve that workspace (the runtime.toml check above says "
+              "why); run masc browser-lane-setup --mode host with --base-path for it",
+              file=sys.stderr)
+elif lane_installed(workspace) and not any(same_directory(workspace, base) for _, base, _ in registered):
+    if lane_has_extension(workspace):
+        # Its manifest is in another directory than this one. A host replaced
+        # beside an extension that is not would put the two on different
+        # builds, and the extension is written for the host that comes with it.
+        print(f"install-local-build: WARN the browser lane of {workspace} has an extension and no "
+              f"manifest in {manifest_dir}, so neither its host nor its extension is refreshed; run "
+              "masc browser-lane-setup --mode extension with that lane's --manifest-dir",
+              file=sys.stderr)
+    else:
+        unregistered.append(workspace)
 
 if not registered and not unregistered:
     print(f"no browser lane host is registered in {manifest_dir}")

@@ -1,5 +1,6 @@
-(** [masc browser-lane-setup]: connect this workspace's browser lane to
-    Firefox, by either route or both.
+(** [masc browser-lane-setup]: install this workspace's browser lane host, and
+    connect it to Firefox by the extension, by a Firefox MASC starts, or by
+    neither (a browser attached by hand).
 
     Without a mode it writes nothing and says what is installed. [--mode
     extension] installs the native host, its launcher and manifest, and writes

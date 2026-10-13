@@ -404,8 +404,8 @@ let test_public_nested_prepare_run_records_only_admitted_children ~reject_child 
   let receipt : Ledger.tool_result_receipt =
     { tool_use_id = "run-nested"; content_bytes = String.length result_content
     ; content_sha256 = Digestif.SHA256.(digest_string result_content |> to_hex) } in
-  let _, delivered = Recorder.observe_delivery ~config recorder ~tool_results:[ receipt ]
-      ~boundary:(Ledger.Model_response { agent_core_turn = 1 }) ~runtime_id:"fixture.runtime"
+  let delivered = Recorder.observe_delivery ~config recorder ~tool_results:[ receipt ]
+      ~boundary:(Ledger.Model_response { agent_core_turn = 2 }) ~runtime_id:"fixture.runtime"
       |> require "deliver actual public result to its children" in
   check int "actual parent result delivers both activated children" 2 (List.length delivered);
   Printf.printf "composition_nested_public_trial rejected_child=%b prepared_scopes=%d admitted_children=%d child_admission_calls=%d actual_leaf_successes=%d blocked_children=%d parent_deliveries=%d exact_run_binding=true original_task_retained=true model_latency_measured=false\n%!"

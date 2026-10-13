@@ -91,7 +91,6 @@ type run_observation =
 type case_manifest =
   { scenario : scenario
   ; case_id : string
-  ; expected_verified : bool
   ; expected_outcome : string
   ; required_entities : string list
   ; phase_boundaries : string list
@@ -109,7 +108,6 @@ type manifest =
   ; execution_mode : string
   ; required_entities_by_case : (string * string list) list
   ; phase_boundaries_by_case : (string * string list) list
-  ; cases : case_manifest list
   }
 
 val default_case_manifests : unit -> case_manifest list

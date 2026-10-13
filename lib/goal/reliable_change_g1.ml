@@ -135,7 +135,6 @@ type run_observation =
 type case_manifest =
   { scenario : scenario
   ; case_id : string
-  ; expected_verified : bool
   ; expected_outcome : string
   ; required_entities : string list
   ; phase_boundaries : string list
@@ -153,7 +152,6 @@ type manifest =
   ; execution_mode : string
   ; required_entities_by_case : (string * string list) list
   ; phase_boundaries_by_case : (string * string list) list
-  ; cases : case_manifest list
   }
 
 let default_phase_boundaries =
@@ -180,42 +178,36 @@ let default_required_entities =
 let default_case_manifests () =
   [ { scenario = Success
     ; case_id = "success"
-    ; expected_verified = true
     ; expected_outcome = "verified"
     ; required_entities = default_required_entities
     ; phase_boundaries = default_phase_boundaries
     }
   ; { scenario = Exit_nonzero
     ; case_id = "exit-nonzero"
-    ; expected_verified = false
     ; expected_outcome = "command_exit_nonzero"
     ; required_entities = default_required_entities
     ; phase_boundaries = default_phase_boundaries
     }
   ; { scenario = Stale_revision
     ; case_id = "stale-revision"
-    ; expected_verified = false
     ; expected_outcome = "stale_revision_rejected"
     ; required_entities = default_required_entities
     ; phase_boundaries = default_phase_boundaries
     }
   ; { scenario = Missing_artifact
     ; case_id = "missing-artifact"
-    ; expected_verified = false
     ; expected_outcome = "missing_artifact_rejected"
     ; required_entities = [ "request_or_task_identity"; "run_turn_attempt_identity" ]
     ; phase_boundaries = default_phase_boundaries
     }
   ; { scenario = Retry_success
     ; case_id = "retry-success"
-    ; expected_verified = true
     ; expected_outcome = "verified_after_retry"
     ; required_entities = default_required_entities
     ; phase_boundaries = default_phase_boundaries
     }
   ; { scenario = Usage_unreported
     ; case_id = "usage-unreported"
-    ; expected_verified = false
     ; expected_outcome = "unreported_usage_preserved"
     ; required_entities = default_required_entities
     ; phase_boundaries = default_phase_boundaries
@@ -254,7 +246,6 @@ let make_manifest
   ; execution_mode
   ; required_entities_by_case
   ; phase_boundaries_by_case
-  ; cases
   }
 ;;
 
@@ -992,42 +983,6 @@ let manifest_of_json (json : Yojson.Safe.t) : (manifest, string) result =
       |> to_assoc
       |> List.map (fun (k, v) -> k, to_list v |> List.map to_string)
     in
-    let cases =
-      List.filter_map
-        (fun cid ->
-           match scenario_of_string cid with
-           | Error _ -> None
-           | Ok sc ->
-             let exp_out =
-               match List.assoc_opt cid expected_outcomes with
-               | Some v -> v
-               | None -> ""
-             in
-             let req_ent =
-               match List.assoc_opt cid required_entities_by_case with
-               | Some v -> v
-               | None -> []
-             in
-             let ph_bnd =
-               match List.assoc_opt cid phase_boundaries_by_case with
-               | Some v -> v
-               | None -> []
-             in
-             let exp_ver =
-               match sc with
-               | Success | Retry_success -> true
-               | Exit_nonzero | Stale_revision | Missing_artifact | Usage_unreported -> false
-             in
-             Some
-               { scenario = sc
-               ; case_id = cid
-               ; expected_verified = exp_ver
-               ; expected_outcome = exp_out
-               ; required_entities = req_ent
-               ; phase_boundaries = ph_bnd
-               })
-        case_ids
-    in
     Ok
       { contract_sha256
       ; source_commit
@@ -1040,7 +995,6 @@ let manifest_of_json (json : Yojson.Safe.t) : (manifest, string) result =
       ; execution_mode
       ; required_entities_by_case
       ; phase_boundaries_by_case
-      ; cases
       }
   with
   | Yojson.Json_error msg -> Error ("JSON syntax error: " ^ msg)

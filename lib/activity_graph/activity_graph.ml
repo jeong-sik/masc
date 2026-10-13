@@ -31,7 +31,7 @@ let current_dated_path (config : Workspace_utils.config) =
   Dated_jsonl.Store.dated_path_now (location config)
 
 let day_path (config : Workspace_utils.config) =
-  (current_dated_path config).Jsonl_writer.path
+  (current_dated_path config).Dated_jsonl.Store.path
 
 let seq_path (config : Workspace_utils.config) =
   Filename.concat (root_dir config) "_seq"
@@ -41,10 +41,10 @@ let lock_path (config : Workspace_utils.config) =
 
 (* Takes the path the caller is about to append to, so the directory made and
    the file opened come from one reading of the clock. *)
-let ensure_dirs config (dated : Jsonl_writer.dated_path) =
+let ensure_dirs config (dated : Dated_jsonl.Store.dated_path) =
   Workspace_utils.mkdir_p (root_dir config);
   (* [month_dir] is the directory name, not a path; the full one is here. *)
-  Workspace_utils.mkdir_p (Filename.dirname dated.Jsonl_writer.path)
+  Workspace_utils.mkdir_p (Filename.dirname dated.Dated_jsonl.Store.path)
 
 let read_current_seq config =
   match Safe_ops.read_file_safe (seq_path config) with
@@ -908,7 +908,7 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
           |> sanitize_event_traced
         in
         let json_line = Yojson.Safe.to_string (event_to_yojson value) in
-        append_line dated.Jsonl_writer.path (json_line ^ "\n");
+        append_line dated.Dated_jsonl.Store.path (json_line ^ "\n");
         (value, json_line))
   in
   let encoded = format_sse_event_data ~seq:value.seq json_line in

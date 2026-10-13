@@ -3765,9 +3765,7 @@ let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
   let result = tick_ok config ~now:201.0 in
   let stimulus_id = single_occurrence_id result in
   Dated_jsonl.append
-    (Dated_jsonl.create
-       ~base_dir:(reaction_ledger_dir ~base_path ~keeper_name)
-       ())
+    (Dated_jsonl.open_store (Masc.Keeper_reaction_ledger.location ~base_path ~keeper_name))
     (`Assoc
         [ "schema", `String Masc.Keeper_reaction_ledger.schema
         ; "record_kind", `String "reaction"

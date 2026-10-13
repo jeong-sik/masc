@@ -179,7 +179,7 @@ let timestamp_iso () = Time_codec.rfc3339_of_unix (Time_compat.now ())
     KST/UTC boundary case (KST midnight = UTC 15:00) without
     depending on the host clock. *)
 (* The ring's date files sit in the same YYYY-MM/DD.jsonl layout every other
-   .masc store uses, and [Jsonl_writer.dated_path] is what puts them there.
+   .masc store uses, and [Jsonl_writer.utc_calendar_day] picks the day.
    Rebuilding the key here meant the reader could drift from the writer that
    named the file; [day_key] is the writer's own key (#27143). *)
 let format_utc_date_of (t : float) = Jsonl_writer.day_key ~ts:t

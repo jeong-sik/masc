@@ -58,19 +58,6 @@ type recent_entry =
 val read_error_to_string : read_error -> string
 (** Render a typed storage read failure for operator-facing diagnostics. *)
 
-val create :
-  base_dir:string ->
-  ?mutex:Eio.Mutex.t ->
-  ?max_bytes:int ->
-  unit ->
-  t
-(** [create ~base_dir ()] builds a store rooted at [base_dir].
-    An optional [mutex] can be injected to bypass the shared registry
-    (useful for testing). When [?max_bytes] is positive, [append] prunes
-    oldest completed day-files until the store is at or below the cap, while
-    preserving the current day-file. Day files are removed by age only by
-    {!prune_listed_stores}. *)
-
 module Store = Dated_jsonl_store
 (** The closed list of stores and where each one lives. *)
 
@@ -79,8 +66,14 @@ val open_store :
   ?max_bytes:int ->
   Store.location ->
   t
-(** Open the store at a listed location. The optional arguments mean what
-    they mean for {!create}. *)
+(** Open the store at a listed location. A store can be opened only where
+    {!Store} puts it.
+
+    An optional [mutex] can be injected to bypass the shared registry
+    (useful for testing). When [?max_bytes] is positive, [append] prunes
+    oldest completed day-files until the store is at or below the cap, while
+    preserving the current day-file. Day files are removed by age only by
+    {!prune_listed_stores}. *)
 
 val base_dir : t -> string
 (** Return the base directory of this store. *)
@@ -125,7 +118,7 @@ val append_rotating :
     over [max_current_file_bytes] (a non-positive cap never rotates).
     Rotated segments are ordinary completed files: readers include them
     in day and numeric sequence order (sequences have at least three digits,
-    and grow past 999), and the [?max_bytes] byte-budget prune from {!create}
+    and grow past 999), and the [?max_bytes] byte-budget prune from {!open_store}
     removes the oldest of them first while the current file survives —
     so a capped store keeps the newest records and sheds the oldest,
     instead of dropping new rows for the rest of the day.
@@ -473,6 +466,6 @@ module For_testing : sig
 
   val mutex_for_base_dir : string -> Eio.Mutex.t
   (** Lookup or insert the registry entry for [base_dir].
-      Equivalent to the default-mutex path of {!create}. *)
+      Equivalent to the default-mutex path of {!open_store}. *)
 
 end

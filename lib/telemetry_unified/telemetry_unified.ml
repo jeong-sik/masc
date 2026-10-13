@@ -538,7 +538,7 @@ let read_tool_metrics ~masc_root ~n ?since_ts ?until_ts () =
 
    Projecting to the timestamp during the read costs one float per row instead
    of one tree. Store classification and failure handling mirror
-   {!read_fixed_source} exactly, including that only [Dated_jsonl.create] is
+   {!read_fixed_source} exactly, including that only [Dated_jsonl.open_store] is
    guarded — a read that raises still propagates. Entries are not tagged
    because nothing downstream sees them. *)
 let probe_latest_ts location source ~n : float option =

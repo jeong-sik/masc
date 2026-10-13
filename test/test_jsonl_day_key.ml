@@ -27,8 +27,12 @@ let instants =
 let test_key_matches_the_path () =
   List.iter
     (fun (label, ts) ->
-      let dated = Jsonl_writer.dated_path ~base_dir:"/store" ~ts in
-      let expected = dated.Jsonl_writer.month_dir ^ "-" ^ Filename.remove_extension dated.Jsonl_writer.day_file in
+      let dated =
+        Dated_jsonl.Store.(dated_path (cluster (cluster_root "/store") Cluster.Audit) ~ts)
+      in
+      let expected =
+        dated.Dated_jsonl.Store.month_dir ^ "-" ^ Filename.remove_extension dated.day_file
+      in
       check string (label ^ ": key names the file the writer picks") expected (Jsonl_writer.day_key ~ts))
     instants
 ;;

@@ -200,5 +200,21 @@ let locations_on_disk ~base_path (Cluster_root root as cluster_root) store =
   | Decision_audit ->
     subdirectories (Filename.concat (base_root ~base_path) decision_audit_dirname)
     |> List.map (fun keeper_dirname -> decision_audit ~base_path ~keeper_dirname)
-let dated_path location ~ts = Jsonl_writer.dated_path ~base_dir:location.dir ~ts
-let dated_path_now location = Jsonl_writer.dated_path_now ~base_dir:location.dir
+type dated_path =
+  { base_dir : string
+  ; month_dir : string
+  ; day_file : string
+  ; path : string
+  }
+
+let dated_path location ~ts =
+  let year, month, day = Jsonl_writer.utc_calendar_day ~ts in
+  let month_dir = Printf.sprintf "%04d-%02d" year month in
+  let day_file = Printf.sprintf "%02d.jsonl" day in
+  let path = Filename.concat (Filename.concat location.dir month_dir) day_file in
+  { base_dir = location.dir; month_dir; day_file; path }
+
+let dated_path_now location =
+  (* NDT-OK: this is the runtime write boundary for date-split JSONL;
+     deterministic callers use [dated_path ~ts] with an explicit timestamp. *)
+  dated_path location ~ts:(Unix.gettimeofday ())

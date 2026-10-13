@@ -112,13 +112,15 @@ let metadata_fields ~source_name ~source_producer ~dashboard_surface
       ?coverage_gap ()
 
 let keeper_tool_call_io_fields ~dashboard_surface () =
+  (* One read of the log's store, so the directory and the count name the
+     same store even if the log is initialized again meanwhile. *)
+  let store = Keeper_tool_call_log.store () in
   metadata_fields
     ~source_name:"tool_call_io"
     ~source_producer:"keeper_hooks_agent_core|mcp_server_eio_call_tool"
     ~dashboard_surface
     ~freshness_slo_s:300.0
-    ~durable_store:
-      (Keeper_tool_call_log.store_dir () |> Option.value ~default:"")
-    ~count_entries:Keeper_tool_call_log.count_entries
+    ~durable_store:(Option.fold ~none:"" ~some:Dated_jsonl.base_dir store)
+    ~count_entries:(fun () -> Option.fold ~none:0 ~some:Dated_jsonl.count_entries store)
     ~latest_record:(Keeper_tool_call_log.read_latest ())
     ()

@@ -283,8 +283,8 @@ let audit_today_path ~base_path =
   let location = audit_location ~base_path in
   let dated = Dated_jsonl.Store.dated_path_now location in
   Fs_compat.mkdir_p
-    (Filename.concat (Dated_jsonl.Store.dir location) dated.Jsonl_writer.month_dir);
-  dated.Jsonl_writer.path
+    (Filename.concat (Dated_jsonl.Store.dir location) dated.Dated_jsonl.Store.month_dir);
+  dated.Dated_jsonl.Store.path
 ;;
 
 let store_create_probe = Atomic.make (fun ~base_path:_ -> ())

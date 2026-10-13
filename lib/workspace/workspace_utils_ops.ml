@@ -765,8 +765,8 @@ let log_event config event_json =
      between them filed the last day of one month under the next one's
      directory. [Jsonl_writer] runs one call behind both (#27143). *)
   let dated = Dated_jsonl.Store.dated_path_now location in
-  let month_dir = Filename.concat events_dir dated.Jsonl_writer.month_dir in
+  let month_dir = Filename.concat events_dir dated.Dated_jsonl.Store.month_dir in
   mkdir_p month_dir;
-  let log_file = dated.Jsonl_writer.path in
+  let log_file = dated.Dated_jsonl.Store.path in
 
   Fs_compat.append_file log_file (Yojson.Safe.to_string event_json ^ "\n")

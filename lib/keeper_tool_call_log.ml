@@ -419,17 +419,9 @@ let pending_file_change_evidence_count_for_testing () =
     Invocation_table.length pending_file_change_evidence)
 ;;
 
-let store_dir () =
-  match (Atomic.get store_state).store with
-  | Some store -> Some (Dated_jsonl.base_dir store)
-  | None -> None
-;;
+let store () = (Atomic.get store_state).store
 
-let count_entries () =
-  match (Atomic.get store_state).store with
-  | Some store -> Dated_jsonl.count_entries store
-  | None -> 0
-;;
+let store_dir () = Option.map Dated_jsonl.base_dir (store ())
 
 let current_log_path () =
   let state = Atomic.get store_state in
@@ -437,7 +429,7 @@ let current_log_path () =
   | Some _, Some (masc_root, _) ->
     (* Same layout this file already reads through Jsonl_writer.day_key below;
        it was spelled out again here (#27143). *)
-    Some (Dated_jsonl.Store.dated_path_now (location masc_root)).Jsonl_writer.path
+    Some (Dated_jsonl.Store.dated_path_now (location masc_root)).Dated_jsonl.Store.path
   | Some _, None | None, (Some _ | None) -> None
 ;;
 

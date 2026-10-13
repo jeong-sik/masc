@@ -43,7 +43,7 @@ name = "kind"
 type = "string"
 required = true
 enum = ["image", "video", "youtube", "external_link", "file", "audio", "score", "midi"]
-description = "How the attachment is shown. file/audio/score/midi are stored like any artifact and render as labelled download cards until a per-kind renderer lands."
+description = "How the attachment is shown. file is any file; audio, score (Guitar Pro, MusicXML, alphaTex) and midi say what the file is. The TUI lists these four by name and size and the dashboard offers a stored one as a download; nothing plays or draws them yet."
 
 [[params.items.params]]
 name = "url"
@@ -197,7 +197,7 @@ name = "kind"
 type = "string"
 required = true
 enum = ["image", "video", "youtube", "external_link", "file", "audio", "score", "midi"]
-description = "How the attachment is shown. file/audio/score/midi are stored like any artifact and render as labelled download cards until a per-kind renderer lands."
+description = "How the attachment is shown. file is any file; audio, score (Guitar Pro, MusicXML, alphaTex) and midi say what the file is. The TUI lists these four by name and size and the dashboard offers a stored one as a download; nothing plays or draws them yet."
 
 [[keeper_projection.params.items.params]]
 name = "url"

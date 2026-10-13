@@ -486,6 +486,10 @@ const BOARD_ATTACHMENT_KINDS: ReadonlySet<string> = new Set([
   'video',
   'youtube',
   'external_link',
+  'file',
+  'audio',
+  'score',
+  'midi',
 ])
 
 function isHttpsAttachmentUrl(raw: unknown): raw is string {

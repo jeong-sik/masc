@@ -1122,6 +1122,15 @@ describe('normalizeBoardAttachments', () => {
     ])
   })
 
+  it('reads the file, audio, score and midi kinds the handler stores', () => {
+    const artifact = { _blob: { sha256: 'b'.repeat(64), bytes: 3, mime: 'audio/midi', preview: '' } }
+    const kinds = ['file', 'audio', 'score', 'midi']
+    expect(
+      normalizeBoardAttachments(kinds.map((kind) => ({ kind, artifact })))
+        ?.map((entry) => (entry.ok ? entry.attachment.kind : null)),
+    ).toEqual(kinds)
+  })
+
   it('shows a failure card for an entry whose name is not a string', () => {
     const entry = { kind: 'image', url: 'https://cdn.example.com/a.png', name: 42 }
     expect(normalizeBoardAttachments([entry])).toEqual([{ ok: false, raw: entry }])

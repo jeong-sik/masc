@@ -284,7 +284,12 @@ function AttachmentView({ entry, compact }: { entry: BoardAttachmentDecode; comp
       return html`<${VideoAttachment} source=${source} compact=${compact} />`
     case 'youtube':
       return html`<${YoutubeAttachment} source=${source} compact=${compact} />`
+    // No player or score view yet: a url of these kinds is a link to follow.
     case 'external_link':
+    case 'file':
+    case 'audio':
+    case 'score':
+    case 'midi':
       return html`<${ExternalLinkAttachment} source=${source} />`
   }
 }

@@ -129,7 +129,9 @@ type BoardPostMeta = Record<string, unknown> & {
 }
 
 /** Decoded Board attachment written through the typed post argument. */
-export type BoardAttachmentKind = 'image' | 'video' | 'youtube' | 'external_link'
+export type BoardAttachmentKind =
+  | 'image' | 'video' | 'youtube' | 'external_link'
+  | 'file' | 'audio' | 'score' | 'midi'
 
 export type BoardAttachmentSource =
   | { kind: 'url'; url: string; name?: string; sizeBytes?: number; width?: number | null; height?: number | null }

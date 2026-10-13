@@ -111,9 +111,9 @@ let test_exception_in_hook_is_swallowed () =
 
 let test_exception_in_hook_records_coverage_gap_with_context () =
   setup ();
-  let base_dir = temp_dir () in
+  let masc_root = temp_dir () in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
+    ~finally:(fun () -> cleanup_dir masc_root)
     (fun () ->
       let requested_keeper = "keeper-lifecycle-gap-test" in
       let trace_id = "trace-lifecycle-gap-test" in
@@ -121,8 +121,8 @@ let test_exception_in_hook_records_coverage_gap_with_context () =
       let keeper = meta.name in
       H.register (fun ~keeper_id:_ _ ->
         failwith "synthetic lifecycle hook failure");
-      H.run ~base_dir ~meta ~keeper_id:keeper H.Supervisor_cleaned;
-      match TCG.read_recent ~masc_root:base_dir ~n:1 with
+      H.run ~masc_root ~meta ~keeper_id:keeper H.Supervisor_cleaned;
+      match TCG.read_recent ~masc_root ~n:1 with
       | [ row ] ->
         let open Yojson.Safe.Util in
         check string "gap schema" "masc.telemetry_coverage_gap.v1"

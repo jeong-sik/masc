@@ -1262,10 +1262,14 @@ let test_export_failure_preserves_independent_branch () =
   let exports =
     [ Plan.export ~name:"independent" ~node_id:(node_id "a") ~pointer:(export_pointer "/post_count")
     ; Plan.export ~name:"failed" ~node_id:(node_id "b") ~pointer:(export_pointer "/post_count")
-    ; Plan.export ~name:"blocked" ~node_id:(node_id "d") ~pointer:(export_pointer "/tools") ] in
+    ; Plan.export ~name:"blocked" ~node_id:(node_id "d") ~pointer:(export_pointer "/profile") ] in
+  let nodes = List.map (fun (node : Plan.node) ->
+    if String.equal (node_name node) "d" then
+      { node with tool_name = "keeper_lane_status" }
+    else node) (Plan.nodes source) in
   let plan =
     match Plan.create ~descriptors:(Descriptor.all_descriptors ())
-            ~branch_failure_policy:Plan.Continue_independent ~exports (Plan.nodes source) with
+            ~branch_failure_policy:Plan.Continue_independent ~exports nodes with
     | Ok plan -> plan
     | Error error -> fail (Plan.error_to_string error)
   in

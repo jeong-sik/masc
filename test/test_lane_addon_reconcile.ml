@@ -1066,6 +1066,87 @@ let test_historical_publication_is_not_completion ~never_started ~cold_recovery 
         check int "publication retry never repeats successful cleanup" 1 (requests ());
         check string "publication does not alter desired bytes" off (In_channel.with_open_bin path In_channel.input_all))))
 
+(* Three real retained records that carry neither visibility nor
+   source_access, so none names a reader: two producers of installation
+   dos-counter and one consumer of it, which owns installation
+   dos-output-statistics. *)
+let retained_without_read_authority = ["producer-a.json"; "producer-b.json"; "consumer.json"]
+let fixture_directory = Filename.concat "fixtures" "lane_addon_bindings_without_read_authority"
+let fixture_bytes name =
+  In_channel.with_open_bin (Filename.concat fixture_directory name) In_channel.input_all
+let retained_store config =
+  Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons")
+let seed_retained_without_read_authority config =
+  let store = retained_store config in
+  List.map (fun name ->
+    let json = Yojson.Safe.from_string (fixture_bytes name) in
+    let id = text "instance_id" json in
+    unwrap (Store.save_binding store ~instance_id:id json);
+    id) retained_without_read_authority
+let issues_of id result =
+  values "issues" result |> List.filter (fun issue -> member "id" issue = `String id)
+
+let test_unreadable_bindings_do_not_block_unrelated_declarations () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let seeded = seed_retained_without_read_authority config in
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    write (Filename.concat directory "dos-counter.toml") (declaration ~id:"dos-counter" ~manifest ());
+    let result = reconcile config directory in
+    let observer = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config observer;
+    check_application config "observer" "applied";
+    check (list string) "only the declaration without an unreadable record starts a worker"
+      [observer] (starts state);
+    check_application config "dos-counter" "failed";
+    check int "each unreadable record of dos-counter is listed once, plus the refusal to apply" 3
+      (List.length (issues_of "dos-counter" result));
+    check int "the consumer record is listed under its own installation id" 1
+      (List.length (issues_of "dos-output-statistics" result));
+    check int "no issue names the unrelated declaration" 0 (List.length (issues_of "observer" result));
+    List.iter2 (fun id name ->
+      let stored = unwrap (Store.bindings (retained_store config))
+        |> List.find (fun json -> text "instance_id" json = id) in
+      check bool (name ^ " is neither rewritten nor cleaned up") true
+        (Yojson.Safe.sort stored = Yojson.Safe.sort (Yojson.Safe.from_string (fixture_bytes name))))
+      seeded retained_without_read_authority;
+    let slice = dispatch config Runtime.Slice [] in
+    check bool "a slice that skipped unreadable records is not complete" false
+      (member "complete" slice = `Bool true);
+    detach clock config observer)
+
+let test_declaration_waits_for_its_unreadable_records_then_applies () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    ignore (seed_retained_without_read_authority config);
+    write (Filename.concat directory "dos-counter.toml") (declaration ~id:"dos-counter" ~manifest ());
+    ignore (reconcile config directory);
+    check (list string) "the declaration with unreadable records waits" [] (starts state);
+    let bindings = Filename.concat (Filename.concat (Workspace.masc_dir config) "lane-addons") "bindings" in
+    Array.iter (fun name -> Sys.remove (Filename.concat bindings name)) (Sys.readdir bindings);
+    ignore (reconcile config directory);
+    let id = declared_instance config "dos-counter" |> text "instance_id" in
+    await_ready clock config id;
+    check_application config "dos-counter" "applied";
+    detach clock config id)
+
+let test_corrupt_binding_store_stops_reconciliation () =
+  with_fixture (fun _ _ config directory packages state ->
+    let manifest = package packages "ready" in
+    let store = retained_store config in
+    unwrap (Store.save_binding store ~instance_id:"present"
+      (`Assoc ["instance_id", `String "present"; "observation_seq", `Int 0]));
+    let bindings = Filename.concat (Filename.concat (Workspace.masc_dir config) "lane-addons") "bindings" in
+    write (Filename.concat bindings "corrupt.json") "{";
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    let result = reconcile config directory in
+    check (list string) "an unreadable store starts no declaration" [] (starts state);
+    check bool "the store failure is a configuration issue" true (values "issues" result <> []);
+    check bool "Inspect refuses an unreadable store" true
+      (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Inspect (`Assoc []))))
+
 let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension", [
   test_case "persistent runtime switch preserves old state and requires new installation" `Quick
     test_persistent_runtime_switch_requires_new_installation;
@@ -1112,4 +1193,10 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     (test_restart_recovers_exact_owner_before_replacement ~runtime:Types.Apple_container);
   test_case "held observation preserves primary and other declaration progress" `Quick
     test_held_observer_does_not_block_other_declarations;
+  test_case "unreadable retained bindings do not block unrelated declarations" `Quick
+    test_unreadable_bindings_do_not_block_unrelated_declarations;
+  test_case "a declaration waits for its unreadable records and applies once they are gone" `Quick
+    test_declaration_waits_for_its_unreadable_records_then_applies;
+  test_case "a corrupt binding store still stops reconciliation" `Quick
+    test_corrupt_binding_store_stops_reconciliation;
 ]]

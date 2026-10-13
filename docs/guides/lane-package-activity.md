@@ -49,11 +49,19 @@ not the activity control.
 
 ## Incomplete and rejected readings
 
-The reconciler requires a complete declaration and retained-binding inventory
-before applying changes. An unrelated unreadable file can therefore defer a
-valid off request; the configuration reports that cleanup awaits a complete
-reading. The observed worker remains visible. Malformed or duplicate declarations
-keep the last applied worker; invalid input is never interpreted as off.
+The reconciler requires a complete declaration reading and a readable retained
+binding store before applying changes. An unrelated unreadable file or a binding
+store that cannot be read can therefore defer a valid off request; the
+configuration reports that cleanup awaits a complete reading. The observed worker
+remains visible. Malformed or duplicate declarations keep the last applied
+worker; invalid input is never interpreted as off.
+
+A retained binding record that was read but does not parse (it records no read
+visibility or source access) is reported in the configuration issues with its
+file path and, when its configuration owner is readable, that installation id.
+Only the installation it names is held back, and its application state is
+`failed`. The record is not rewritten, retired or cleaned up. Move the file away
+or repair it, and the installation applies on the next reconciliation.
 
 New Skill publications exclude workers that are stopping, including those whose
 cleanup failed and will retry. A complete declaration reading also withdraws

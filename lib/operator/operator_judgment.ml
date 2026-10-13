@@ -8,7 +8,6 @@ type record = {
   surface : string;
   target_type : target_type;
   target_id : string option;
-  status : string;
   summary : string;
   confidence : float;
   generated_at : string;
@@ -63,7 +62,6 @@ let to_yojson (value : record) =
       ("surface", `String value.surface);
       ("target_type", `String (target_type_to_string value.target_type));
       ("target_id", Json_util.option_to_yojson (fun v -> `String v) value.target_id);
-      ("status", `String value.status);
       ("summary", `String value.summary);
       ("confidence", `Float value.confidence);
       ("generated_at", `String value.generated_at);
@@ -126,9 +124,6 @@ let of_yojson json =
         surface = (match Json_util.assoc_member_opt "surface" json with Some (`String s) -> s | _ -> "");
         target_type;
         target_id = Json_util.get_string json "target_id";
-        status =
-          Json_util.get_string json "status"
-          |> Option.value ~default:"active";
         summary = (match Json_util.assoc_member_opt "summary" json with Some (`String s) -> s | _ -> "");
         confidence;
         generated_at = (match Json_util.assoc_member_opt "generated_at" json with Some (`String s) -> s | _ -> "");
@@ -225,7 +220,6 @@ let record config ~surface ~target_type ~target_id ~summary ~confidence
       surface;
       target_type;
       target_id;
-      status = "active";
       summary = String.trim summary;
       confidence;
       generated_at;

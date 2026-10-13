@@ -26,7 +26,6 @@ type record = {
   surface : string;
   target_type : target_type;
   target_id : string option;
-  status : string;
   summary : string;
   confidence : float;
   generated_at : string;
@@ -156,9 +155,4 @@ val record :
       the write boundary does not reparse display strings.
     - [confidence]: clamped to [\[0.0, 1.0\]].
     - [summary]: trimmed.
-    - [evidence_refs]: trimmed + empty entries dropped.
-
-    {2 status}
-
-    Always [["active"]] on write.  A future "let's add a
-    superseded status" change must touch this contract. *)
+    - [evidence_refs]: trimmed + empty entries dropped. *)

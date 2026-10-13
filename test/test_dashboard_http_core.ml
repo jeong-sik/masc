@@ -6126,14 +6126,34 @@ let test_context_shrink_detection () =
     (shrink (with_max_override base (Some 1000)) [ ("name", `String "shrink-fixture") ])
 ;;
 
+(* The two control fields come back typed and leave the persisted fields; the
+   handler no longer reads them from the JSON again. *)
+let test_config_patch_separates_control_fields () =
+  let meta = shrink_base_meta () in
+  match
+    Keeper_config_post.validate_dashboard_config_patch ~meta
+      [ ("name", `String "shrink-fixture");
+        ("confirm_context_shrink", `Bool true);
+        ("expected_config_revision", `String "revision");
+        ("max_context_override", `Int 1000) ]
+  with
+  | Error error -> Alcotest.fail error
+  | Ok patch ->
+    Alcotest.(check bool) "confirmation is read" true
+      patch.Keeper_config_post.confirm_context_shrink;
+    Alcotest.(check (list string)) "only persisted fields remain, in order"
+      [ "name"; "max_context_override" ]
+      (List.map fst patch.Keeper_config_post.config_fields)
+;;
+
 let test_config_patch_input_policy () =
   let meta = shrink_base_meta () in
   List.iter (fun wire ->
     match Keeper_config_post.validate_dashboard_config_patch ~meta ["input_policy", `String wire] with
-    | Ok () -> () | Error error -> Alcotest.fail error) ["small"; "wide"];
+    | Ok _ -> () | Error error -> Alcotest.fail error) ["small"; "wide"];
   List.iter (fun value ->
     match Keeper_config_post.validate_dashboard_config_patch ~meta ["input_policy", value] with
-    | Error _ -> () | Ok () -> Alcotest.fail "invalid config policy accepted")
+    | Error _ -> () | Ok _ -> Alcotest.fail "invalid config policy accepted")
     [`String "automatic"; `String "Wide"; `Null; `Int 1; `Bool true]
 ;;
 
@@ -6144,13 +6164,13 @@ let test_config_patch_accepts_typed_skills () =
   in
   let check_ok label fields =
     match validate fields with
-    | Ok () -> ()
+    | Ok _ -> ()
     | Error error -> Alcotest.failf "%s: %s" label error
   in
   let check_error label fields =
     match validate fields with
     | Error _ -> ()
-    | Ok () -> Alcotest.failf "%s unexpectedly accepted" label
+    | Ok _ -> Alcotest.failf "%s unexpectedly accepted" label
   in
   check_ok "empty object selects all" [ "skills", `Assoc [] ];
   check_ok "empty names select none"
@@ -6176,13 +6196,13 @@ let test_config_patch_remote_endpoint_shape () =
   in
   let check_ok label fields =
     match validate fields with
-    | Ok () -> ()
+    | Ok _ -> ()
     | Error error -> Alcotest.failf "%s: %s" label error
   in
   let check_error label fields =
     match validate fields with
     | Error _ -> ()
-    | Ok () -> Alcotest.failf "%s unexpectedly accepted" label
+    | Ok _ -> Alcotest.failf "%s unexpectedly accepted" label
   in
   check_ok "an endpoint name is accepted"
     [ "remote_endpoint", `String "builder" ];
@@ -8161,6 +8181,8 @@ let () =
           test_case "config patch accepts typed Skills" `Quick
             test_config_patch_accepts_typed_skills;
           test_case "config patch input policy" `Quick test_config_patch_input_policy;
+          test_case "config patch separates control fields" `Quick
+            test_config_patch_separates_control_fields;
           test_case "config patch shape-checks remote_endpoint" `Quick
             test_config_patch_remote_endpoint_shape;
           test_case "config POST atomically restarts runtime" `Quick

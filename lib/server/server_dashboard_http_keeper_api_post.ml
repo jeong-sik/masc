@@ -867,8 +867,16 @@ let validate_dashboard_max_context_override = function
       Keeper_config.validate_max_context_override_value value |> Result.map ignore
   | other -> dashboard_field_type_error "max_context_override" "an integer or null" other
 
+(* What one checked field contributes. The two control fields are consumed by
+   [handle_keeper_config_post] and never persisted. *)
+type checked_config_field =
+  | Persisted_field of string * Yojson.Safe.t
+  | Confirm_context_shrink of bool
+  | Expected_config_revision
+
 let validate_dashboard_config_field field value =
   let key = dashboard_config_field_key field in
+  let persisted = Result.map (fun () -> Persisted_field (key, value)) in
   match field with
   | Field_name
   | Field_runtime_id
@@ -876,46 +884,58 @@ let validate_dashboard_config_field field value =
   | Field_sandbox_profile
   | Field_network_mode
   | Field_activation_mode ->
-    (match value with
-     | `String _ -> Ok ()
-     | other -> dashboard_field_type_error key "a string" other)
+    persisted
+      (match value with
+       | `String _ -> Ok ()
+       | other -> dashboard_field_type_error key "a string" other)
   | Field_tools | Field_skills ->
-    (match value with
-     | `Assoc _ -> Ok ()
-     | other -> dashboard_field_type_error key "an object" other)
+    persisted
+      (match value with
+       | `Assoc _ -> Ok ()
+       | other -> dashboard_field_type_error key "an object" other)
   | Field_input_policy ->
-    (match value with
-     | `String raw when Option.is_some (Keeper_input_policy.of_string raw) -> Ok ()
-     | other -> dashboard_field_type_error key "small or wide" other)
-  | Field_max_context_override -> validate_dashboard_max_context_override value
+    persisted
+      (match value with
+       | `String raw when Option.is_some (Keeper_input_policy.of_string raw) -> Ok ()
+       | other -> dashboard_field_type_error key "small or wide" other)
+  | Field_max_context_override ->
+    persisted (validate_dashboard_max_context_override value)
   | Field_confirm_context_shrink ->
     (match value with
-     | `Bool _ -> Ok ()
+     | `Bool confirm -> Ok (Confirm_context_shrink confirm)
      | other -> dashboard_field_type_error key "a boolean" other)
   | Field_expected_config_revision ->
-    Keeper_turn_up_config_persistence.config_revision_of_yojson value
-    |> Result.map ignore
+    (* The handler parses and requires this before the patch is checked;
+       here it is only kept out of the persisted fields. *)
+    Ok Expected_config_revision
   | Field_sandbox_image ->
-    (match value with
-     | `Null -> Ok ()
-     | `String image ->
-       (match Keeper_sandbox_image_catalog.name_error ~field:key image with
-        | None -> Ok ()
-        | Some detail -> Error detail)
-     | other -> dashboard_field_type_error key "an image catalog name or null" other)
+    persisted
+      (match value with
+       | `Null -> Ok ()
+       | `String image ->
+         (match Keeper_sandbox_image_catalog.name_error ~field:key image with
+          | None -> Ok ()
+          | Some detail -> Error detail)
+       | other -> dashboard_field_type_error key "an image catalog name or null" other)
   | Field_remote_endpoint ->
     (* Shape only. Whether the name is declared under [exec.ssh.endpoints], and
        whether the profile admits an endpoint at all, are decided by
        [Keeper_turn_up_args.parse] on the apply path. *)
-    (match value with
-     | `String raw ->
-         if String.trim raw = "" then
-           Error "remote_endpoint must not be blank (send null to clear it)"
-         else Ok ()
-     | `Null -> Ok ()
-     | other -> dashboard_field_type_error key "a string or null" other)
+    persisted
+      (match value with
+       | `String raw ->
+           if String.trim raw = "" then
+             Error "remote_endpoint must not be blank (send null to clear it)"
+           else Ok ()
+       | `Null -> Ok ()
+       | other -> dashboard_field_type_error key "a string or null" other)
   | Field_mention_targets | Field_board_interests ->
-    validate_dashboard_string_list_field key value
+    persisted (validate_dashboard_string_list_field key value)
+
+type dashboard_config_patch = {
+  confirm_context_shrink : bool;
+  config_fields : (string * Yojson.Safe.t) list;
+}
 
 let validate_dashboard_config_patch ~meta:_ fields =
   match duplicate_assoc_keys fields with
@@ -938,14 +958,20 @@ let validate_dashboard_config_patch ~meta:_ fields =
              (Printf.sprintf "unsupported dashboard config field(s): %s"
                 (String.concat ", " unknown))
        | [] ->
-           let rec validate_types = function
-             | [] -> Ok ()
+           let rec check patch = function
+             | [] -> Ok { patch with config_fields = List.rev patch.config_fields }
              | (field, value) :: rest ->
                  (match validate_dashboard_config_field field value with
                   | Error msg -> Error msg
-                  | Ok () -> validate_types rest)
+                  | Ok (Persisted_field (key, value)) ->
+                      check
+                        { patch with config_fields = (key, value) :: patch.config_fields }
+                        rest
+                  | Ok (Confirm_context_shrink confirm) ->
+                      check { patch with confirm_context_shrink = confirm } rest
+                  | Ok Expected_config_revision -> check patch rest)
            in
-           validate_types known)
+           check { confirm_context_shrink = false; config_fields = [] } known)
 
 (* [Some (previous_display, new_value)] when the patch reduces the keeper's
    context window below its current setting — introducing a cap where there was
@@ -1084,19 +1110,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                else
                  (match validate_dashboard_config_patch ~meta:meta0 fields with
                   | Error msg -> respond_error reqd msg
-                  | Ok () ->
-                      let confirm_context_shrink =
-                        match
-                          List.assoc_opt confirm_context_shrink_field fields
-                        with
-                        | Some (`Bool b) -> b
-                        | _ -> false
-                      in
-                      (* Control field: consumed here, never persisted. *)
-                      let fields =
-                        List.remove_assoc confirm_context_shrink_field fields
-                        |> List.remove_assoc expected_config_revision_field
-                      in
+                  | Ok { confirm_context_shrink; config_fields = fields } ->
                       (match context_shrink_of_patch ~meta:meta0 fields with
                        | Some (previous, new_v) when not confirm_context_shrink ->
                            respond_error reqd

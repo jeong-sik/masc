@@ -371,10 +371,11 @@ let summarize_drops drops =
    - [Prefix_entry_invalid] and [Prefix_entry_duplicate]: the stored digest
      tag cannot be read. They name corrupted history, not a changed request.
    - [Prefix_request_mismatch]: the request digest differs from the chain and
-     no earlier message in this request was dropped.
-   - [Prefix_chain_broken_upstream]: the same mismatch after an earlier drop in
-     this request. The earlier drop already changed the chain, so this one is
-     not an independent finding. *)
+     no earlier drop in this request could have changed the chain.
+   - [Prefix_chain_broken_upstream]: the same mismatch after an earlier drop
+     that could have changed the chain. Later digests were stamped over the
+     history with that block present, so this one is not an independent
+     finding. *)
 type prefix_drop_cause =
   | Prefix_source_not_present
   | Prefix_digest_absent
@@ -400,6 +401,22 @@ type prefix_verdict =
   ; final_digest : string
   }
 [@@deriving show]
+
+(* Whether a dropped block can be the reason a later stored digest no longer
+   matches the chain. A block that carried no readable stamp was never admitted
+   by any request: every request that stamped a later block dropped it too, so
+   the later digests already chain over its absence. A block that was stamped,
+   or whose stamp is unreadable and so might have been, was sent at some point,
+   and removing it moves every digest stamped after it. Listing every
+   constructor makes a new cause fail to compile until it is classified. *)
+let drop_can_change_later_digests = function
+  | Prefix_source_not_present | Prefix_digest_absent -> false
+  | Prefix_entry_invalid
+  | Prefix_entry_duplicate
+  | Prefix_request_mismatch
+  | Prefix_chain_broken_upstream
+  | Prefix_reasoning_mismatch -> true
+;;
 
 let sha256_hex material = Digestif.SHA256.(to_hex (digest_string material))
 
@@ -454,9 +471,12 @@ let verify_prefix_binding ~head ~encode_block ~role_tag messages =
                   (String.equal prefix.Reasoning_prefix.request_digest !chain)
               then (
                 let cause =
-                  match drops with
-                  | [] -> Prefix_request_mismatch
-                  | _ :: _ -> Prefix_chain_broken_upstream
+                  if
+                    List.exists
+                      (fun drop -> drop_can_change_later_digests drop.cause)
+                      drops
+                  then Prefix_chain_broken_upstream
+                  else Prefix_request_mismatch
                 in
                 dropped ~stored_message_digest cause)
               else (

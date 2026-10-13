@@ -538,12 +538,26 @@ let project_tools_for_kind kind tools =
    settings, sampling, budgets) and [cache_control] markers are not part of
    the check, so hashing them would drop thinking the API accepts and force
    needless regeneration. Deliberately not shared with the body builders: if
-   the wire gains a marker, the head must not follow. *)
+   the wire gains a marker, the head must not follow.
+
+   The system prompt keeps the form it has on the wire: a string, or a list of
+   text blocks when [cache_system_prompt] is set. The API documents a change
+   of the top-level system string or blocks as invalid, and says nothing on
+   whether a string and the same text as one block count as equal. Treating
+   them as different drops thinking once when the option is toggled, while
+   treating them as equal would send a block the API may reject with an
+   unretryable 400. The [cache_control] marker on that block is left out. *)
 let prefix_head ~tools (config : Provider_config.t) =
   let system =
     match config.system_prompt with
     | Some s when not (Api_common.string_is_blank s) ->
-      Some ("system", `String (Utf8_sanitize.sanitize s))
+      let text = Utf8_sanitize.sanitize s in
+      if config.cache_system_prompt
+      then
+        Some
+          ( "system"
+          , `List [ `Assoc [ "type", `String "text"; "text", `String text ] ] )
+      else Some ("system", `String text)
     | _ -> None
   in
   let tools =

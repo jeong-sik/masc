@@ -1090,6 +1090,62 @@ let test_a_cut_counts_once_per_request_and_later_blocks_survive () =
     (snapshot |> member "dropped_block_ids" |> to_list |> List.map to_string)
 ;;
 
+(* A block that never carried a readable stamp is dropped the same way by every
+   request, so it says nothing about a later block whose digest stopped
+   matching. That later block is the first real mismatch. A block whose stamp
+   is unreadable might have been sent, and its removal does move later digests. *)
+let test_a_stable_earlier_drop_does_not_hide_the_first_real_mismatch () =
+  let config = anthropic_build_config () in
+  let head_one = [ "system", `String "one" ] in
+  let head_two = [ "system", `String "two" ] in
+  let reasoning label =
+    [ Thinking { content = label; signature = Some ("sig-" ^ label) }; Text label ]
+  in
+  let u1 = message User [ Text "u1" ] in
+  let u2 = message User [ Text "u2" ] in
+  List.iter
+    (fun (label, earlier, earlier_cause, later_cause) ->
+       let b =
+         stamp_over ~head:head_one ~request_messages:[ u1; earlier; u2 ] (reasoning "b")
+       in
+       let history = [ u1; earlier; u2; b ] in
+       let stable = fold ~head:head_one history in
+       Alcotest.(check (list drop_testable))
+         (label ^ ": the creating head drops only the earlier block")
+         [ { Reasoning_history_projection.message_index = 1
+           ; cause = earlier_cause
+           ; stored_message_digest = None
+           }
+         ]
+         stable.prefix_drops;
+       let changed = fold ~head:head_two history in
+       Alcotest.(check (list drop_testable))
+         (label ^ ": a changed head names the later block")
+         [ { Reasoning_history_projection.message_index = 1
+           ; cause = earlier_cause
+           ; stored_message_digest = None
+           }
+         ; { Reasoning_history_projection.message_index = 3
+           ; cause = later_cause
+           ; stored_message_digest = Some (stored_message_digest_exn b)
+           }
+         ]
+         changed.prefix_drops)
+    [ ( "no stamp"
+      , assistant_with_prefix_entries ~config [] (reasoning "earlier")
+      , Reasoning_history_projection.Prefix_digest_absent
+      , Reasoning_history_projection.Prefix_request_mismatch )
+    ; ( "no source"
+      , message Assistant (reasoning "earlier")
+      , Reasoning_history_projection.Prefix_source_not_present
+      , Reasoning_history_projection.Prefix_request_mismatch )
+    ; ( "unreadable stamp"
+      , assistant_with_prefix_entries ~config invalid_prefix_entries (reasoning "earlier")
+      , Reasoning_history_projection.Prefix_entry_invalid
+      , Reasoning_history_projection.Prefix_chain_broken_upstream )
+    ]
+;;
+
 (* The Keeper path admits the request body before dispatch, so the response
    that stamps the digest comes from [complete_serialized] and
    [complete_stream_serialized], not from the direct [complete] calls. This
@@ -1142,7 +1198,35 @@ let free_loopback_port () =
   port
 ;;
 
-let admitted_wire_types ~stream =
+let extra_tool_schema =
+  `Assoc
+    [ "name", `String "msx_press"
+    ; "description", `String "press a key on the MSX"
+    ; "input_schema", `Assoc [ "type", `String "object" ]
+    ]
+;;
+
+(* A restart reads the history back from its stored form. *)
+let reload_through_checkpoint (stored : message) =
+  let json = Agent_core.Checkpoint.message_to_json stored in
+  match
+    Agent_core.Checkpoint.message_of_json
+      (Yojson.Safe.from_string (Yojson.Safe.to_string json))
+  with
+  | Ok reloaded -> reloaded
+  | Error _ -> Alcotest.fail "the checkpoint round trip failed"
+;;
+
+(* The second request keeps the creating request's tools and system prompt
+   unless [second_tools] or [second_system] says otherwise, and reads its
+   history back through the checkpoint codec when [reload_history] is set. *)
+let admitted_wire_types
+      ~stream
+      ?(reload_history = false)
+      ?(second_tools = [ prefix_test_tool_schema ])
+      ?second_system
+      ()
+  =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -1197,7 +1281,7 @@ let admitted_wire_types ~stream =
       ()
   in
   let tools = [ prefix_test_tool_schema ] in
-  let dispatch messages =
+  let dispatch ~config ~tools messages =
     let serialized =
       match
         Complete.admit_request_body
@@ -1217,7 +1301,7 @@ let admitted_wire_types ~stream =
     | Error _ -> Alcotest.fail "the loopback provider call failed"
   in
   let carrier = message User [ Text "trigger"; Text "extra context block" ] in
-  let first = dispatch [ carrier ] in
+  let first = dispatch ~config ~tools [ carrier ] in
   let assistant =
     match Types.assistant_message_of_response first with
     | Ok assistant -> assistant
@@ -1229,9 +1313,20 @@ let admitted_wire_types ~stream =
     (match first.Types.telemetry with
      | Some { Types.reasoning_prefix = Some _; _ } -> true
      | Some { Types.reasoning_prefix = None; _ } | None -> false);
-  let _second =
-    dispatch [ carrier; assistant; message Tool [ tool_result "call-1" ] ]
+  let second_history =
+    [ carrier; assistant; message Tool [ tool_result "call-1" ] ]
   in
+  let second_history =
+    if reload_history
+    then List.map reload_through_checkpoint second_history
+    else second_history
+  in
+  let second_config =
+    match second_system with
+    | None -> config
+    | Some system -> { config with Provider_config.system_prompt = Some system }
+  in
+  let _second = dispatch ~config:second_config ~tools:second_tools second_history in
   match !completion_bodies with
   | second_body :: _first_body :: [] -> wire_content_types second_body
   | bodies ->
@@ -1239,12 +1334,59 @@ let admitted_wire_types ~stream =
 ;;
 
 let test_admitted_path_records_a_digest_the_next_request_honors ~stream () =
-  let types = admitted_wire_types ~stream in
+  let types = admitted_wire_types ~stream () in
   check_int "three wire messages" 3 (List.length types);
   check_bool
     "thinking recorded on the admitted path replays in the next admitted body"
     true
     (List.mem "thinking" (List.nth types 1))
+;;
+
+(* A restart reads the stored history back, tags included. The block replays
+   only if the tags survived the stored form. *)
+let test_admitted_path_digest_survives_a_restart ~stream () =
+  let types = admitted_wire_types ~stream ~reload_history:true () in
+  check_int "three wire messages" 3 (List.length types);
+  check_bool
+    "thinking replays after the history is reloaded from its stored form"
+    true
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+(* The live incident: a restart, then a tool set that grew between the request
+   that created the thinking and the one that replays it. *)
+let test_admitted_path_drops_thinking_when_the_tool_set_grows ~stream ~reload_history () =
+  let types =
+    admitted_wire_types
+      ~stream
+      ~reload_history
+      ~second_tools:[ prefix_test_tool_schema; extra_tool_schema ]
+      ()
+  in
+  check_int "three wire messages" 3 (List.length types);
+  check_bool
+    "an added tool drops the stale thinking from the admitted body"
+    false
+    (List.mem "thinking" (List.nth types 1));
+  check_bool
+    "the assistant text still rides"
+    true
+    (List.mem "text" (List.nth types 1))
+;;
+
+let test_admitted_path_drops_thinking_when_the_system_prompt_changes () =
+  let types =
+    admitted_wire_types ~stream:false ~second_system:"a different system prompt" ()
+  in
+  check_int "three wire messages" 3 (List.length types);
+  check_bool
+    "a new system prompt drops the stale thinking from the admitted body"
+    false
+    (List.mem "thinking" (List.nth types 1));
+  check_bool
+    "the assistant text still rides"
+    true
+    (List.mem "text" (List.nth types 1))
 ;;
 
 let test_prefix_binding_drops_thinking_when_the_request_head_changes () =
@@ -1285,15 +1427,42 @@ let test_prefix_binding_keeps_thinking_when_tool_choice_changes () =
     (List.mem "thinking" (List.nth types 1))
 ;;
 
-let test_prefix_binding_keeps_thinking_when_cache_markers_toggle () =
+(* Turning [cache_system_prompt] on moves the system prompt from a string to a
+   list of text blocks. The API documents no equality between the two forms, so
+   the head treats the change as an edit and drops. *)
+let test_prefix_binding_drops_thinking_when_the_system_form_changes () =
   let _config, tools, carrier, assistant = round_one_fixtures () in
-  (* [cache_control] markers are not part of the API's prefix check either. *)
   let cached = anthropic_build_config_variant ~cache_system_prompt:true () in
   let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
   let body = Backend_anthropic.build_request ~config:cached ~messages:round_two ~tools () in
   let types = wire_content_types body in
   check_bool
-    "a cache toggle keeps thinking"
+    "a string system prompt that becomes a block list drops thinking"
+    false
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+(* The [cache_control] marker on the system block is not part of the check, and
+   the same form on both sides keeps thinking. *)
+let test_prefix_binding_keeps_thinking_when_the_cached_system_form_is_unchanged () =
+  let cached = anthropic_build_config_variant ~cache_system_prompt:true () in
+  let tools = [ prefix_test_tool_schema ] in
+  let carrier = message User [ Text "trigger"; Text "extra context block" ] in
+  let assistant =
+    stamped_assistant
+      ~config:cached
+      ~request_messages:[ carrier ]
+      ~tools
+      [ Thinking { content = "cached reasoning"; signature = Some "sig-cached" }
+      ; Text "cached text"
+      ; ToolUse { id = "call-1"; name = "inspect"; input = `Assoc [] }
+      ]
+  in
+  let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config:cached ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "a block-list system prompt on both requests keeps thinking"
     true
     (List.mem "thinking" (List.nth types 1))
 ;;
@@ -2301,6 +2470,40 @@ let () =
             `Quick
             (test_admitted_path_records_a_digest_the_next_request_honors ~stream:true)
         ; Alcotest.test_case
+            "admitted sync digest survives a restart"
+            `Quick
+            (test_admitted_path_digest_survives_a_restart ~stream:false)
+        ; Alcotest.test_case
+            "admitted stream digest survives a restart"
+            `Quick
+            (test_admitted_path_digest_survives_a_restart ~stream:true)
+        ; Alcotest.test_case
+            "admitted sync path drops thinking when the tool set grows"
+            `Quick
+            (test_admitted_path_drops_thinking_when_the_tool_set_grows
+               ~stream:false
+               ~reload_history:false)
+        ; Alcotest.test_case
+            "admitted sync path drops thinking when the tool set grows after a restart"
+            `Quick
+            (test_admitted_path_drops_thinking_when_the_tool_set_grows
+               ~stream:false
+               ~reload_history:true)
+        ; Alcotest.test_case
+            "admitted stream path drops thinking when the tool set grows after a restart"
+            `Quick
+            (test_admitted_path_drops_thinking_when_the_tool_set_grows
+               ~stream:true
+               ~reload_history:true)
+        ; Alcotest.test_case
+            "admitted path drops thinking when the system prompt changes"
+            `Quick
+            test_admitted_path_drops_thinking_when_the_system_prompt_changes
+        ; Alcotest.test_case
+            "a stable earlier drop does not hide the first real mismatch"
+            `Quick
+            test_a_stable_earlier_drop_does_not_hide_the_first_real_mismatch
+        ; Alcotest.test_case
             "prefix binding drops thinking when the request head changes"
             `Quick
             test_prefix_binding_drops_thinking_when_the_request_head_changes
@@ -2313,9 +2516,13 @@ let () =
             `Quick
             test_prefix_binding_keeps_thinking_when_tool_choice_changes
         ; Alcotest.test_case
-            "prefix binding keeps thinking when cache markers toggle"
+            "prefix binding drops thinking when the system form changes"
             `Quick
-            test_prefix_binding_keeps_thinking_when_cache_markers_toggle
+            test_prefix_binding_drops_thinking_when_the_system_form_changes
+        ; Alcotest.test_case
+            "prefix binding keeps thinking when the cached system form is unchanged"
+            `Quick
+            test_prefix_binding_keeps_thinking_when_the_cached_system_form_is_unchanged
         ; Alcotest.test_case
             "prefix binding keeps thinking across chained rounds"
             `Quick

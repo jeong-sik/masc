@@ -82,10 +82,13 @@ val observe : component:string -> stream:bool -> t -> unit
     - [Prefix_entry_invalid] and [Prefix_entry_duplicate]: the stored digest tag
       cannot be read. They name corrupted history, not a changed request.
     - [Prefix_request_mismatch]: the request digest differs from the chain and
-      no earlier message in this request was dropped.
+      no earlier drop in this request could have changed the chain.
     - [Prefix_chain_broken_upstream]: the same mismatch after an earlier drop
-      in this request. The earlier drop already changed the chain, so this one
-      is not an independent finding. *)
+      that could have changed the chain. Blocks that carried no readable stamp
+      ([Prefix_source_not_present], [Prefix_digest_absent]) were never sent, so
+      dropping them again explains nothing about a later mismatch. Later
+      digests were stamped over the history with a stamped block present, so a
+      mismatch after one is not an independent finding. *)
 type prefix_drop_cause =
   | Prefix_source_not_present
   | Prefix_digest_absent

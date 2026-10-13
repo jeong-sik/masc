@@ -111,14 +111,14 @@ let test_prune_removes_only_porcelain_named_worktrees () =
     let run_argv ~timeout_sec:_ argv =
       calls := argv :: !calls;
       match argv with
-      | [ _; _; _; "worktree"; "list"; _ ] ->
+      | [ _; _; _; _; _; "worktree"; "list"; _ ] ->
         Unix.WEXITED 0
       , String.concat "\n"
           [ "worktree " ^ repo_path; "HEAD abc"; ""
           ; "worktree " ^ wt_clean; "HEAD def"; ""
           ; "worktree " ^ wt_dirty; "HEAD 123"; ""
           ]
-      | [ _; _; _; "worktree"; "remove"; path ] when String.equal path wt_dirty ->
+      | [ _; _; _; _; _; "worktree"; "remove"; path ] when String.equal path wt_dirty ->
         (* git refuses a dirty worktree without --force; the failure is
            recorded and the remaining removals still run *)
         Unix.WEXITED 1, Printf.sprintf "fatal: '%s' contains modified or untracked files" path
@@ -137,7 +137,7 @@ let test_prune_removes_only_porcelain_named_worktrees () =
     let removed_paths =
       List.filter_map
         (function
-          | [ _; _; _; "worktree"; "remove"; path ] -> Some path
+          | [ _; _; _; _; _; "worktree"; "remove"; path ] -> Some path
           | _ -> None)
         !calls
     in
@@ -156,7 +156,7 @@ let test_prune_leaves_foreign_worktrees_untouched () =
          let run_argv ~timeout_sec:_ argv =
            calls := argv :: !calls;
            match argv with
-           | [ _; _; _; "worktree"; "list"; _ ] ->
+           | [ _; _; _; _; _; "worktree"; "list"; _ ] ->
              Unix.WEXITED 0
            , String.concat "\n"
                [ "worktree " ^ repo_path; "HEAD abc"; ""
@@ -185,7 +185,7 @@ let test_prune_leaves_foreign_worktrees_untouched () =
          let removed_paths =
            List.filter_map
              (function
-               | [ _; _; _; "worktree"; "remove"; path ] -> Some path
+               | [ _; _; _; _; _; "worktree"; "remove"; path ] -> Some path
                | _ -> None)
              !calls
          in
@@ -244,7 +244,7 @@ let test_removal_walks_only_the_dissolved_keepers_bundle () =
        let run_argv ~timeout_sec:_ argv =
          calls := argv :: !calls;
          match argv with
-         | [ _; _; repo; "worktree"; "list"; _ ] ->
+         | [ _; _; _; _; repo; "worktree"; "list"; _ ] ->
            ( Unix.WEXITED 0
            , String.concat
                "\n"
@@ -282,10 +282,11 @@ let test_removal_walks_only_the_dissolved_keepers_bundle () =
 
 let test_argv_spellings () =
   check (list string) "list goes through git -C with porcelain"
-    [ "git"; "-C"; repo_path; "worktree"; "list"; "--porcelain" ]
+    [ "git"; "-c"; "core.fsmonitor=false"; "-C"; repo_path; "worktree"; "list"
+    ; "--porcelain" ]
     (W.worktree_list_argv ~repo_path);
   check (list string) "remove names the porcelain path"
-    [ "git"; "-C"; repo_path; "worktree"; "remove"
+    [ "git"; "-c"; "core.fsmonitor=false"; "-C"; repo_path; "worktree"; "remove"
     ; "/base/.masc/playground/gone/app-wt" ]
     (W.worktree_remove_argv ~repo_path
        ~worktree_path:"/base/.masc/playground/gone/app-wt")

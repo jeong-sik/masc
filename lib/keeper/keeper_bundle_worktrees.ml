@@ -36,11 +36,15 @@ let worktree_paths_of_porcelain ~repo_path raw =
 ;;
 
 let worktree_list_argv ~repo_path =
-  [ "git"; "-C"; repo_path; "worktree"; "list"; "--porcelain" ]
+  [ "git"; "-c"; "core.fsmonitor=false"; "-C"; repo_path; "worktree"; "list"
+  ; "--porcelain"
+  ]
 ;;
 
 let worktree_remove_argv ~repo_path ~worktree_path =
-  [ "git"; "-C"; repo_path; "worktree"; "remove"; worktree_path ]
+  [ "git"; "-c"; "core.fsmonitor=false"; "-C"; repo_path; "worktree"; "remove"
+  ; worktree_path
+  ]
 ;;
 
 (* Same containment shape as [Exec_shim.resolve_within]: resolve both sides

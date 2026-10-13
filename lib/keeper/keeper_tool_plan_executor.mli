@@ -24,7 +24,7 @@ val schedule : Keeper_tool_plan.t -> batch list
     single outer composite invocation terminal. *)
 val outer_completion : Keeper_tool_plan.t -> Agent_core.Tool_contract.completion
 
-type node_execution_origin =
+type node_execution_origin = Keeper_skill_composition_evidence.Node_execution_origin.t =
   | Fresh_dispatch
   | Retained_completion
   | Dispatch_refused

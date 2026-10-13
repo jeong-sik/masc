@@ -384,6 +384,8 @@ let child_refuse_active base_path run_id =
   |> expect_admission_error (function Journal.Prior_owner_not_terminal _ -> true | _ -> false);
   check int "another process cannot infer active ownership lost" 0 !calls
 let test_owned_transport_and_race () = with_workspace (fun env sw base_path ->
+  Eio_context.with_test_env ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
+    ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
   let prepared = prepare base_path in
   let entered, enter = Eio.Promise.create () and release, release_owner = Eio.Promise.create () in
   let first = submit ~before_execute:(fun _ -> Eio.Promise.resolve enter (); Eio.Promise.await release)

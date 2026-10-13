@@ -107,15 +107,13 @@ let outer_completion plan =
   else Agent_core.Tool_contract.Continue_after_success
 ;;
 
-type node_execution_origin =
+type node_execution_origin = Keeper_skill_composition_evidence.Node_execution_origin.t =
   | Fresh_dispatch
   | Retained_completion
   | Dispatch_refused
 
-let node_execution_origin_to_string = function
-  | Fresh_dispatch -> "fresh_dispatch"
-  | Retained_completion -> "retained_completion"
-  | Dispatch_refused -> "dispatch_refused"
+let node_execution_origin_to_string =
+  Keeper_skill_composition_evidence.Node_execution_origin.to_string
 ;;
 
 type node_result =

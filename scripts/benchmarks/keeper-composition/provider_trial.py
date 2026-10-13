@@ -189,7 +189,8 @@ def run_sample(args, options, key, scenario, condition, directory):
             try:
                 response = json.loads(raw)
             except ValueError:
-                stem.with_suffix(".response.json").write_bytes(raw.replace(key.encode(), b"[REDACTED]"))
+                row["response_body_retained"] = False
+                row["response_evidence_error"] = "safe response decoding or redaction did not complete"
                 if sample["outcome"] == "provider_error":
                     break
                 raise

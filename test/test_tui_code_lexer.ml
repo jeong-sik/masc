@@ -252,6 +252,35 @@ let test_python_reads_triple_quoted_string () =
     ]
     (Masc_tui_code_lexer.python_lexer "x = \"\"\"doc\"\"\"")
 
+let test_alphatex_reads_a_directive_a_string_and_a_comment () =
+  check seg "the directive is a keyword, its value a string, then the comment"
+    [ ("\\title", Masc_tui_code_lexer.kind_keyword)
+    ; (" ", Masc_tui_code_lexer.kind_code)
+    ; ("\"Canon Rock\"", Masc_tui_code_lexer.kind_string)
+    ; (" ", Masc_tui_code_lexer.kind_code)
+    ; ("// key", Masc_tui_code_lexer.kind_comment)
+    ]
+    (spans "alphatex" "\\title \"Canon Rock\" // key")
+
+let test_alphatex_reads_notes_and_durations_apart () =
+  check seg "a note is a number, the duration it carries is not"
+    [ (":4", Masc_tui_code_lexer.kind_type)
+    ; (" ", Masc_tui_code_lexer.kind_code)
+    ; ("0.6", Masc_tui_code_lexer.kind_number)
+    ; (" ", Masc_tui_code_lexer.kind_code)
+    ; ("3.6", Masc_tui_code_lexer.kind_number)
+    ; (":8", Masc_tui_code_lexer.kind_type)
+    ]
+    (spans "alphatex" ":4 0.6 3.6:8")
+
+let test_alphatex_reads_a_chord_as_one_span () =
+  check seg "the bracketed chord and its duration are one span"
+    [ ("(0.4 2.4).2", Masc_tui_code_lexer.kind_string)
+    ; (" ", Masc_tui_code_lexer.kind_code)
+    ; ("3.6", Masc_tui_code_lexer.kind_number)
+    ]
+    (spans "alphatex" "(0.4 2.4).2 3.6")
+
 let test_numbered_diff_rows_read_their_gutter_marker () =
   check seg "a numbered addition"
     [ ("    -    42 + new", Masc_tui_code_lexer.kind_diff_added) ]
@@ -449,7 +478,7 @@ let awkward_fragments =
 
 let lexer_languages =
   [ "ocaml"; "bash"; "json"; "diff"; "diff:ocaml"; "diff:diff:ocaml"; "yaml"; "toml"; "sql";
-    "typescript"; "go"; "rust"; "c"; "python" ]
+    "typescript"; "go"; "rust"; "c"; "python"; "alphatex" ]
 
 let in_flight = ref "the suite"
 
@@ -547,6 +576,14 @@ let () =
             test_python_reads_keyword_and_hash_comment
         ; Alcotest.test_case "triple-quoted string" `Quick
             test_python_reads_triple_quoted_string
+        ] )
+    ; ( "alphatex"
+      , [ Alcotest.test_case "a directive, a string and a comment" `Quick
+            test_alphatex_reads_a_directive_a_string_and_a_comment
+        ; Alcotest.test_case "notes and durations read apart" `Quick
+            test_alphatex_reads_notes_and_durations_apart
+        ; Alcotest.test_case "a chord is one span" `Quick
+            test_alphatex_reads_a_chord_as_one_span
         ] )
     ; ( "config"
       , [ Alcotest.test_case "yaml reads a key, a value and a comment" `Quick

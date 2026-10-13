@@ -147,7 +147,106 @@ let block_kind_equal left right =
   | Tool_result_block left, Tool_result_block right ->
     Bool.equal left.is_error right.is_error
   | Unknown_block left, Unknown_block right -> String.equal left right
-  | _ -> false
+  | Text_block
+  , ( Thinking_block
+    | Reasoning_details_block
+    | Redacted_thinking_block
+    | Tool_use_block
+    | Tool_result_block _
+    | Image_block
+    | Document_block
+    | Audio_block
+    | Unknown_block _ )
+  | Thinking_block
+  , ( Text_block
+    | Reasoning_details_block
+    | Redacted_thinking_block
+    | Tool_use_block
+    | Tool_result_block _
+    | Image_block
+    | Document_block
+    | Audio_block
+    | Unknown_block _ )
+  | Reasoning_details_block
+  , ( Text_block
+    | Thinking_block
+    | Redacted_thinking_block
+    | Tool_use_block
+    | Tool_result_block _
+    | Image_block
+    | Document_block
+    | Audio_block
+    | Unknown_block _ )
+  | Redacted_thinking_block
+  , ( Text_block
+    | Thinking_block
+    | Reasoning_details_block
+    | Tool_use_block
+    | Tool_result_block _
+    | Image_block
+    | Document_block
+    | Audio_block
+    | Unknown_block _ )
+  | Tool_use_block
+  , ( Text_block
+    | Thinking_block
+    | Reasoning_details_block
+    | Redacted_thinking_block
+    | Tool_result_block _
+    | Image_block
+    | Document_block
+    | Audio_block
+    | Unknown_block _ )
+  | Tool_result_block _
+  , ( Text_block
+    | Thinking_block
+    | Reasoning_details_block
+    | Redacted_thinking_block
+    | Tool_use_block
+    | Image_block
+    | Document_block
+    | Audio_block
+    | Unknown_block _ )
+  | Image_block
+  , ( Text_block
+    | Thinking_block
+    | Reasoning_details_block
+    | Redacted_thinking_block
+    | Tool_use_block
+    | Tool_result_block _
+    | Document_block
+    | Audio_block
+    | Unknown_block _ )
+  | Document_block
+  , ( Text_block
+    | Thinking_block
+    | Reasoning_details_block
+    | Redacted_thinking_block
+    | Tool_use_block
+    | Tool_result_block _
+    | Image_block
+    | Audio_block
+    | Unknown_block _ )
+  | Audio_block
+  , ( Text_block
+    | Thinking_block
+    | Reasoning_details_block
+    | Redacted_thinking_block
+    | Tool_use_block
+    | Tool_result_block _
+    | Image_block
+    | Document_block
+    | Unknown_block _ )
+  | Unknown_block _
+  , ( Text_block
+    | Thinking_block
+    | Reasoning_details_block
+    | Redacted_thinking_block
+    | Tool_use_block
+    | Tool_result_block _
+    | Image_block
+    | Document_block
+    | Audio_block ) -> false
 ;;
 
 let block_header_equal left right =
@@ -464,16 +563,57 @@ let block_kind_accepts_delta kind delta =
   | Image_block, Types.MediaDelta _
   | Document_block, Types.MediaDelta _
   | Audio_block, Types.MediaDelta _ -> true
-  | Redacted_thinking_block, _
-  | Unknown_block _, _
-  | Text_block, _
-  | Thinking_block, _
-  | Reasoning_details_block, _
-  | Tool_use_block, _
-  | Tool_result_block _, _
-  | Image_block, _
-  | Document_block, _
-  | Audio_block, _ -> false
+  | ( Redacted_thinking_block | Unknown_block _ )
+  , ( Types.TextDelta _
+      | Types.TextSnapshot _
+      | Types.ThinkingDelta _
+      | Types.ThinkingSignatureDelta _
+      | Types.RedactedThinkingSnapshot _
+      | Types.ReasoningDetailsDelta _
+      | Types.InputJsonDelta _
+      | Types.InputJsonSnapshot _
+      | Types.MediaDelta _ )
+  | (Text_block | Tool_result_block _)
+  , ( Types.ThinkingDelta _
+      | Types.ThinkingSignatureDelta _
+      | Types.RedactedThinkingSnapshot _
+      | Types.ReasoningDetailsDelta _
+      | Types.InputJsonDelta _
+      | Types.InputJsonSnapshot _
+      | Types.MediaDelta _ )
+  | Thinking_block
+  , ( Types.TextDelta _
+      | Types.TextSnapshot _
+      | Types.ReasoningDetailsDelta _
+      | Types.InputJsonDelta _
+      | Types.InputJsonSnapshot _
+      | Types.MediaDelta _ )
+  | Reasoning_details_block
+  , ( Types.TextDelta _
+      | Types.TextSnapshot _
+      | Types.ThinkingDelta _
+      | Types.ThinkingSignatureDelta _
+      | Types.RedactedThinkingSnapshot _
+      | Types.InputJsonDelta _
+      | Types.InputJsonSnapshot _
+      | Types.MediaDelta _ )
+  | Tool_use_block
+  , ( Types.TextDelta _
+      | Types.TextSnapshot _
+      | Types.ThinkingDelta _
+      | Types.ThinkingSignatureDelta _
+      | Types.RedactedThinkingSnapshot _
+      | Types.ReasoningDetailsDelta _
+      | Types.MediaDelta _ )
+  | (Image_block | Document_block | Audio_block)
+  , ( Types.TextDelta _
+      | Types.TextSnapshot _
+      | Types.ThinkingDelta _
+      | Types.ThinkingSignatureDelta _
+      | Types.RedactedThinkingSnapshot _
+      | Types.ReasoningDetailsDelta _
+      | Types.InputJsonDelta _
+      | Types.InputJsonSnapshot _ ) -> false
 ;;
 
 let normalize_text_snapshot ~accumulated snapshot =
@@ -512,10 +652,44 @@ let normalize_event state event =
           Error
             (Types.Stream_parse_failed
                { reason = Printf.sprintf "%s:index:%d" reason index; raw = "" }))
-     | Some _ | None -> Ok (Some event))
+     | Some { header = Unannounced; lifecycle = Open | Closed; _ }
+     | Some
+         { header = Announced { kind = Text_block | Tool_result_block _; _ }
+         ; lifecycle = Closed
+         ; _
+         }
+     | Some
+         { header =
+             Announced
+               { kind =
+                   ( Thinking_block
+                   | Reasoning_details_block
+                   | Redacted_thinking_block
+                   | Tool_use_block
+                   | Image_block
+                   | Document_block
+                   | Audio_block
+                   | Unknown_block _ )
+               ; _
+               }
+         ; lifecycle = Open | Closed
+         ; _
+         }
+     | None -> Ok (Some event))
   | Types.MessageStart _
   | Types.ContentBlockStart _
-  | Types.ContentBlockDelta _
+  | Types.ContentBlockDelta
+      { index = _
+      ; delta =
+          ( Types.TextDelta _
+          | Types.ThinkingDelta _
+          | Types.ThinkingSignatureDelta _
+          | Types.RedactedThinkingSnapshot _
+          | Types.ReasoningDetailsDelta _
+          | Types.InputJsonDelta _
+          | Types.InputJsonSnapshot _
+          | Types.MediaDelta _ )
+      }
   | Types.ContentBlockStop _
   | Types.MessageDelta _
   | Types.MessageStop
@@ -704,7 +878,16 @@ let transition_open state = function
             ; raw = ""
             })
          state
-     | _ ->
+     | ( Some { header = Announced _; lifecycle = Open; _ }
+       , ( Types.TextDelta _
+         | Types.TextSnapshot _
+         | Types.ThinkingDelta _
+         | Types.ThinkingSignatureDelta _
+         | Types.RedactedThinkingSnapshot _
+         | Types.ReasoningDetailsDelta _
+         | Types.InputJsonDelta _
+         | Types.InputJsonSnapshot _
+         | Types.MediaDelta _ ) ) ->
        guard_repeating_generation
          ~index
          (update_block
@@ -1260,7 +1443,31 @@ let%test "snapshot delta replaces an earlier complete tool input" =
   match finalize state with
   | Completed { content = [ Types.ToolUse { input; _ } ]; _ } ->
     input = `Assoc [ "limit", `Int 10 ]
-  | Completed _ | Failed _ -> false
+  | Completed
+      { content =
+          ( []
+          | [ ( Types.Text _
+              | Types.Thinking _
+              | Types.ReasoningDetails _
+              | Types.RedactedThinking _
+              | Types.ToolResult _
+              | Types.Image _
+              | Types.Document _
+              | Types.Audio _ )
+            ]
+          | ( Types.Text _
+            | Types.Thinking _
+            | Types.ReasoningDetails _
+            | Types.RedactedThinking _
+            | Types.ToolUse _
+            | Types.ToolResult _
+            | Types.Image _
+            | Types.Document _
+            | Types.Audio _ )
+            :: _ :: _ )
+      ; _
+      }
+  | Failed _ -> false
 ;;
 
 let%test "terminal sentinel without stop semantics remains incomplete" =

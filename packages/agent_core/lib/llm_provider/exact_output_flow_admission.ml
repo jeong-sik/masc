@@ -86,7 +86,13 @@ let rejection_outcome dispatch = function
   | Measurement_rejected (Invalid_response_failure _) -> Measurement_invalid_response
   | Measurement_rejected (Transport_failure (Http_client.AcceptRejected _)) ->
     Measurement_local_invalid
-  | Measurement_rejected (Transport_failure _) -> Measurement_transport_failed
+  | Measurement_rejected
+      (Transport_failure
+         ( Http_client.HttpError _
+         | Http_client.NetworkError _
+         | Http_client.TimeoutError _
+         | Http_client.ProviderTerminal _
+         | Http_client.ProviderFailure _ )) -> Measurement_transport_failed
   | Measurement_rejected (Output_token_resolution_failure _ | Invalid_request_failure _)
   | Serving_evidence_rejected _ | Plan_finalization_rejected _ ->
     Measurement_local_invalid

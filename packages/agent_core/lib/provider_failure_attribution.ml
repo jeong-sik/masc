@@ -101,8 +101,23 @@ let core_error_of_http_error ?(accept_rejected = Api_invalid_request) ?provider 
                   message
             ; reason = Retry.Unknown_invalid_request
             }))
-  | Http.ProviderTerminal _ | Http.ProviderFailure _ ->
-    Error.Provider (Llm_provider.Error.of_http_error ?provider err)
+  | Http.ProviderTerminal _
+  | Http.ProviderFailure
+      { kind =
+          ( Http.Capacity_exhausted _
+          | Http.Hard_quota _
+          | Http.Capability_mismatch _
+          | Http.Cli_policy_invalid _
+          | Http.Cli_startup_failed _
+          | Http.Provider_parse_error _
+          | Http.Provider_wire_error _
+          | Http.Provider_reported_error _
+          | Http.Provider_interrupted
+          | Http.Response_body_too_large _
+          | Http.Repeating_generation _
+          | Http.Unknown_provider_failure _ )
+      ; _
+      } -> Error.Provider (Llm_provider.Error.of_http_error ?provider err)
 ;;
 
 let of_core_error error =

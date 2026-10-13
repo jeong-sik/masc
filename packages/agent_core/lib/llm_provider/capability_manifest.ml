@@ -680,8 +680,9 @@ let%test "of_json: parses Anthropic thinking policy as typed declaration" =
       {|{"schema_version":1,"models":[{"id_prefix":"claude-future","anthropic_thinking_control":"adaptive_only"}]}|}
   in
   match of_json json with
-  | Ok [ { anthropic_thinking_control = Some Capability_vocab.Adaptive_only; _ } ] -> true
-  | Ok _ | Error _ -> false
+  | Ok [ { anthropic_thinking_control; _ } ] ->
+    anthropic_thinking_control = Some Capability_vocab.Adaptive_only
+  | Ok ([] | _ :: _ :: _) | Error _ -> false
 ;;
 
 let%test "of_json: rejects unknown Anthropic thinking policy" =

@@ -54,7 +54,23 @@ let drain sub =
       (match Llm_provider.Telemetry_event.of_yojson json with
        | Ok telemetry_event -> Ok telemetry_event
        | Error detail -> Error { event = ev; detail })
-    | _ ->
+    | Event_bus.(
+        Custom _
+        | AgentStarted _
+        | AgentCompleted _
+        | AgentYielded _
+        | AgentInputRequired _
+        | AgentFailed _
+        | ToolCalled _
+        | ToolCompleted _
+        | TurnStarted _
+        | TurnReady _
+        | TurnCompleted _
+        | HandoffRequested _
+        | HandoffCompleted _
+        | ElicitationCompleted _
+        | ToolApprovalCompleted _
+        | InferenceTelemetry _) ->
       Error
         { event = ev; detail = "telemetry subscription received a non-telemetry payload" })
 ;;

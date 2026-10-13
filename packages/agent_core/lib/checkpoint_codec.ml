@@ -444,7 +444,9 @@ let rec content_block_of_json_strict json =
                  { detail =
                      "Checkpoint ReasoningDetails reasoning_content must be a string"
                  })))
-    | Some block -> Ok block
+    | Some
+        (( Text _ | Thinking _ | RedactedThinking _ | ToolUse _ | Image _ | Document _
+         | Audio _ ) as block) -> Ok block
     | None ->
       (* The option-returning decoder collapses every refusal into [None], and
          reading the block's own "type" back out of the JSON described the

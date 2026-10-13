@@ -114,5 +114,7 @@ let%test "make_handoff_tool rejects missing prompt without invoking delegate" =
   match Tool.execute tool (`Assoc []) with
   | Error { recoverable = true; error_class = Some Types.Deterministic; _ } ->
     not !invoked
-  | Ok _ | Error _ -> false
+  | Ok _
+  | Error { recoverable = false; _ }
+  | Error { error_class = None | Some (Types.Transient | Types.Unknown); _ } -> false
 ;;

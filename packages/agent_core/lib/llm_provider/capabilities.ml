@@ -1335,7 +1335,7 @@ let%test "apply_manifest_entry applies assistant_tool_content_format" =
   | Ok [ entry ] ->
     (apply_manifest_entry entry).assistant_tool_content_format
     = Assistant_tool_content_empty_string
-  | _ -> false
+  | Ok ([] | _ :: _ :: _) | Error _ -> false
 ;;
 
 let%test "apply_manifest_entry without reasoning_replay keeps base default" =

@@ -685,7 +685,7 @@ let ollama_native_user_message ~modality_priority content : Yojson.Safe.t option
            (* Ollama native /api/chat accepts base64 image payloads in the
               images field. *)
            texts, data :: images
-         | Image { source_type; _ } ->
+         | Image { source_type = (Url | File_id) as source_type; _ } ->
            Api_common.unsupported_media_source
              ~backend:"ollama_native"
              ~block:"image"
@@ -825,7 +825,15 @@ let ollama_messages_of_history
       (match validate_content blocks with
        | Error _ as error -> error
        | Ok () -> validate_content rest)
-    | _ :: rest -> validate_content rest
+    | (Text _
+      | Thinking _
+      | ReasoningDetails _
+      | RedactedThinking _
+      | ToolUse _
+      | ToolResult { content_blocks = None; _ }
+      | Image _
+      | Audio _)
+      :: rest -> validate_content rest
   in
   let rec validate = function
     | [] -> Ok ()

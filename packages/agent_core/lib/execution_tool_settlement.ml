@@ -77,7 +77,7 @@ let rebind ~writer ~invocation_node =
     | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), (None | Some _), Journal.Agent_turn_state)
     | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), (None | Some _), Journal.Provider_attempt_state _)
     | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), (None | Some _), Journal.Output_block_state _)
-    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), (None | Some _), Journal.Tool_invocation_state _)
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), (None | Some _), Journal.Tool_invocation_state { input = None | Some (Llm_provider.Types.(Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _)); _ })
     | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), (None | Some _), Journal.Tool_attempt_state) -> Error Invocation_identity_mismatch
   in
   let* provider_view = read_node writer provider_attempt in

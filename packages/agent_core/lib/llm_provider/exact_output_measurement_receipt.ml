@@ -239,9 +239,16 @@ let shape_is_valid snapshot =
   | Measurement_fence_committed, No_measurement_dispatch, None
   | Measurement_wire_started, Measurement_dispatch_started, None -> true
   | Measurement_terminal, _, Some Measurement_not_required -> false
-  | (Measurement_terminal, No_measurement_dispatch, Some _)
-  | (Measurement_terminal, Measurement_dispatch_unknown, Some _)
-  | (Measurement_terminal, Measurement_dispatch_started, Some _) -> true
+  | ( Measurement_terminal
+    , (No_measurement_dispatch | Measurement_dispatch_unknown | Measurement_dispatch_started)
+    , Some
+        ( Measurement_succeeded
+        | Measurement_unsupported
+        | Measurement_local_invalid
+        | Measurement_transport_failed
+        | Measurement_invalid_response
+        | Measurement_fence_rejected
+        | Measurement_cancelled ) ) -> true
   | Measurement_fence_committed, _, _
   | Measurement_wire_started, _, _
   | Measurement_terminal, _, None -> false

@@ -1352,7 +1352,7 @@ let scan_committed_batches
                 let locations = reverse_cooperatively locations_rev in
                 let events = reverse_cooperatively events_rev in
                 Ok (next_offset, expected_last, locations, events))
-            | Complete_frame _ ->
+            | Complete_frame { kind = Metadata | Batch_begin | Event_record; _ } ->
               Error
                 (Corrupt_store
                    { offset = event_offset; detail = "batch is missing its commit frame" })
@@ -1392,7 +1392,7 @@ let scan_committed_batches
                 (feed_payload_digest digest_context payload)
                 locations_rev
                 (event :: events_rev)
-            | Complete_frame _ ->
+            | Complete_frame { kind = Metadata | Batch_begin | Batch_commit; _ } ->
               Error
                 (Corrupt_store
                    { offset = event_offset; detail = "batch contains a non-event frame" })
@@ -1412,7 +1412,7 @@ let scan_committed_batches
                 batch_locations);
         events_rev := reverse_append_cooperatively batch_events !events_rev;
         scan_batches next_offset last_seq)
-    | Complete_frame _ ->
+    | Complete_frame { kind = Metadata | Event_record | Batch_commit; _ } ->
       Error (Corrupt_store { offset; detail = "expected a batch begin frame" })
   in
   scan_batches first_offset committed_seq
@@ -1425,7 +1425,7 @@ let scan_store codec file ~file_size ~mode =
     | Complete_frame { kind = Metadata; payload; next_offset; _ } ->
       let+ scope_id, correlation_id = metadata_of_string ~offset:0L payload in
       scope_id, correlation_id, next_offset
-    | Complete_frame _ ->
+    | Complete_frame { kind = Batch_begin | Event_record | Batch_commit; _ } ->
       Error (Corrupt_store { offset = 0L; detail = "first frame is not metadata" })
     | End_of_store | Incomplete_frame ->
       Error (Corrupt_store { offset = 0L; detail = "metadata frame is incomplete" })
@@ -1737,7 +1737,7 @@ let create ~sw ~codec ~dir ?correlation_id () =
           match result with
           | Error error when !wal_renamed ->
             Error (Commit_outcome_unknown (error_to_string error))
-          | result -> result)
+          | (Ok _ | Error _) as result -> result)
       in
       Ok
         ( bind_lifecycle_to_switch
@@ -1807,7 +1807,9 @@ let open_existing ~sw ~codec ~dir =
             | Complete_frame { kind = Metadata; payload; next_offset; _ }
               when Int64.equal next_offset actual_size ->
               metadata_of_string ~offset:0L payload
-            | Complete_frame _ | End_of_store | Incomplete_frame ->
+            | Complete_frame
+                { kind = Metadata | Batch_begin | Event_record | Batch_commit; _ }
+            | End_of_store | Incomplete_frame ->
               Error Store_initialization_incomplete
           in
           let authority =
@@ -2339,7 +2341,31 @@ let append_new_batch store ~expected_next_seq ~count payloads =
       | Error (Commit_outcome_unknown _ as error) ->
         require_reconciliation store error;
         Error error
-      | Error primary -> rollback_uncommitted store ~offset primary
+      | Error
+          (( Invalid_argument _
+           | Identity_failure _
+           | Io_failure _
+           | Codec_failure _
+           | Writer_already_active
+           | Store_already_attached
+           | Store_released
+           | Store_release_forbidden
+           | Resource_cleanup_failed _
+           | Construction_cleanup_failed _
+           | Store_already_exists
+           | Store_not_found
+           | Store_initialization_incomplete
+           | Store_initialization_conflict
+           | Unsupported_store_version _
+           | Corrupt_store _
+           | Correlation_mismatch
+           | Sequence_conflict _
+           | Committed_content_conflict _
+           | Cursor_scope_mismatch
+           | Cursor_ahead _
+           | Commit_authority_identity_changed
+           | Commit_authority_regressed _
+           | Store_poisoned _ ) as primary) -> rollback_uncommitted store ~offset primary
       | Ok outcome -> Ok outcome))
 ;;
 

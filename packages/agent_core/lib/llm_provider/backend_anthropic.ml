@@ -245,22 +245,38 @@ let validate_thinking_controls wire (config : Provider_config.t) =
       (Printf.sprintf
          "model %S disabled thinking accepts only low, medium or high effort"
          config.model_id)
-  | _, Some false, Some effort ->
+  | _, Some false,
+    Some
+      ((Reasoning_effort.None_ | Minimal | Low | Medium | High | XHigh | Max | Ultra)
+       as effort) ->
     Error
       (Printf.sprintf
          "model %S cannot set reasoning_effort %S when enable_thinking=false"
          config.model_id
          (Reasoning_effort.to_string effort))
-  | Capabilities.Anthropic_always_adaptive, Some false, _ ->
+  | Capabilities.Anthropic_always_adaptive, Some false, None ->
     Error
       (Printf.sprintf
          "model %S cannot disable always-on adaptive thinking"
          config.model_id)
-  | (Capabilities.Anthropic_adaptive_default, _, _)
-  | (Capabilities.Anthropic_adaptive_disabled_through_high, _, _)
-  | (Capabilities.Anthropic_adaptive_between_tools, _, _)
-  | (Capabilities.Anthropic_adaptive_preferred, _, _) | (Capabilities.Anthropic_adaptive_only, _, _)
-  | (Capabilities.Anthropic_always_adaptive, _, _) -> Provider_config.validate_reasoning_effort_request config
+  | ( ( Capabilities.Anthropic_adaptive_default
+      | Capabilities.Anthropic_adaptive_disabled_through_high
+      | Capabilities.Anthropic_adaptive_between_tools
+      | Capabilities.Anthropic_adaptive_preferred
+      | Capabilities.Anthropic_adaptive_only
+      | Capabilities.Anthropic_always_adaptive )
+    , (None | Some (true | false))
+    , ( None
+      | Some
+          ( Reasoning_effort.None_
+          | Reasoning_effort.Minimal
+          | Reasoning_effort.Low
+          | Reasoning_effort.Medium
+          | Reasoning_effort.High
+          | Reasoning_effort.XHigh
+          | Reasoning_effort.Max
+          | Reasoning_effort.Ultra ) ) ) ->
+    Provider_config.validate_reasoning_effort_request config
 ;;
 
 let output_config_for_config _mode (config : Provider_config.t) =
@@ -568,9 +584,14 @@ let build_request_payload
        (Printf.sprintf
           "Backend_anthropic.build_request: model %S does not accept a final assistant prefill; end messages with a user turn"
           config.model_id)
-   | Provider_config.Anthropic, (true | false), _
-   | (Provider_config.Kimi | Provider_config.OpenAI_compat | Provider_config.Ollama
-     | Provider_config.Gemini | Provider_config.Glm), _, _ -> ());
+   | ( ( Provider_config.Anthropic
+       | Provider_config.Kimi
+       | Provider_config.OpenAI_compat
+       | Provider_config.Ollama
+       | Provider_config.Gemini
+       | Provider_config.Glm )
+     , (true | false)
+     , ([] | { role = System | User | Assistant | Tool; _ } :: _) ) -> ());
   let message_to_json =
     match config.kind with
     | Provider_config.Anthropic -> anthropic_message_to_json

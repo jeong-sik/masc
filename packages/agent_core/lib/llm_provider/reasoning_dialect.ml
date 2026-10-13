@@ -321,7 +321,28 @@ let validate_request_control_inputs request_wire dialect ~reasoning_effort =
   | None, _, _
   | Some _, (Chat_completions | Responses), Reasoning_effort
   | Some _, Chat_completions, Thinking_object { includes_reasoning_effort = true } -> Ok ()
-  | (Some _, Chat_completions, _) | (Some _, Responses, _) -> Error Reasoning_effort_unsupported
+  | ( Some _
+    , Chat_completions
+    , ( No_toggle
+      | Thinking_object _
+      | Thinking_object_adaptive
+      | Thinking_object_only
+      | Chat_template_kwargs
+      | Chat_template_token
+      | Ollama_think
+      | Anthropic_thinking
+      | Gemini_thinking_config ) )
+  | ( Some _
+    , Responses
+    , ( No_toggle
+      | Thinking_object _
+      | Thinking_object_adaptive
+      | Thinking_object_only
+      | Chat_template_kwargs
+      | Chat_template_token
+      | Ollama_think
+      | Anthropic_thinking
+      | Gemini_thinking_config ) ) -> Error Reasoning_effort_unsupported
 ;;
 
 let normalized_effort_for_request dialect = function

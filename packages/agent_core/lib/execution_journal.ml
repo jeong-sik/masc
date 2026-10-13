@@ -340,7 +340,31 @@ let commit_error_disposition = function
   | Stale_batch _
   | Cursor_scope_mismatch
   | Cursor_ahead _
-  | Persistence_failure _
+  | Persistence_failure
+      ( Store.Invalid_argument _
+        | Store.Identity_failure _
+        | Store.Io_failure _
+        | Store.Codec_failure _
+        | Store.Writer_already_active
+        | Store.Store_already_attached
+        | Store.Store_released
+        | Store.Store_release_forbidden
+        | Store.Resource_cleanup_failed _
+        | Store.Construction_cleanup_failed _
+        | Store.Store_already_exists
+        | Store.Store_not_found
+        | Store.Store_initialization_incomplete
+        | Store.Store_initialization_conflict
+        | Store.Unsupported_store_version _
+        | Store.Corrupt_store _
+        | Store.Correlation_mismatch
+        | Store.Sequence_conflict _
+        | Store.Committed_content_conflict _
+        | Store.Cursor_scope_mismatch
+        | Store.Cursor_ahead _
+        | Store.Commit_authority_identity_changed
+        | Store.Commit_authority_regressed _
+        | Store.Store_poisoned _ )
   | Invariant_violation _ -> Final_failure
 ;;
 
@@ -2022,7 +2046,17 @@ let stage : type value. batch -> value Transaction.t -> (batch * value, error) r
          ~agent_name)
   | Transaction.Open_node { kind = Event.Tool_invocation _; _ } ->
     Error (Invariant_violation Tool_invocation_requires_atomic_open)
-  | Transaction.Open_node { causes; run; parent; kind } ->
+  | Transaction.Open_node
+      { causes
+      ; run
+      ; parent
+      ; kind =
+          ( Event.Agent_run _
+          | Event.Agent_turn _
+          | Event.Provider_attempt _
+          | Event.Output_block _
+          | Event.Tool_attempt) as kind
+      } ->
     stage_mutation
       (stage_open_node ~causes batch.journal batch.staged_state ~run ~parent ~kind)
   | Transaction.Update_node { causes; node; update } ->
@@ -2174,7 +2208,31 @@ let reconcile_durable_batch (writer : durable_writer) (batch : batch) =
                   { first_seq = base_seq + 1; last_seq = final_seq })
            | Error (Store.Committed_content_conflict { first_seq; last_seq }) ->
              Error (Reconciliation_content_conflict { first_seq; last_seq })
-           | Error error -> Error (Persistence_failure error)))
+           | Error
+               (( Store.Invalid_argument _
+                 | Store.Identity_failure _
+                 | Store.Io_failure _
+                 | Store.Codec_failure _
+                 | Store.Writer_already_active
+                 | Store.Store_already_attached
+                 | Store.Store_released
+                 | Store.Store_release_forbidden
+                 | Store.Resource_cleanup_failed _
+                 | Store.Construction_cleanup_failed _
+                 | Store.Store_already_exists
+                 | Store.Store_not_found
+                 | Store.Store_initialization_incomplete
+                 | Store.Store_initialization_conflict
+                 | Store.Unsupported_store_version _
+                 | Store.Corrupt_store _
+                 | Store.Correlation_mismatch
+                 | Store.Sequence_conflict _
+                 | Store.Cursor_scope_mismatch
+                 | Store.Cursor_ahead _
+                 | Store.Commit_authority_identity_changed
+                 | Store.Commit_authority_regressed _
+                 | Store.Store_poisoned _
+                 | Store.Commit_outcome_unknown _ ) as error) -> Error (Persistence_failure error)))
       else Error (Reconciliation_conflict { base_seq; final_seq; current_seq })))
 ;;
 

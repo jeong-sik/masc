@@ -44,6 +44,14 @@ sessions require explicit pairing and binding. Duplicate operation IDs must
 carry identical input. Accepted result and snapshot insertion are one SQLite
 transaction. Keep `/state` on the host-managed persistent volume.
 
+Relay acknowledgements contain the operation identity, state and snapshot
+reference without repeating the full readback. `masc_figma_operation` returns
+completion counts; supply `completed_offset` and `completed_limit` together
+to read a range of the retained completion entries. Upstream omissions remain
+explicit in `completed_available` and `completed_omitted`. The package's byte
+limit applies to replies and published observations; the host owns incoming
+transport framing, including its private caller envelope.
+
 `masc_figma_snapshot` returns native JSON in model-visible text and the PNG
 as an MCP image. `masc_figma_validate` checks supplied node/property assertions;
 it never certifies appearance. Its report records the evaluator and exact

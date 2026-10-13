@@ -46,7 +46,13 @@ SCHEMAS = {
         },
         {"snapshot_id": STRING, "ops": {"type": "array", "items": OBJECT}},
     ),
-    "masc_figma_operation": schema({"operation_id": STRING}),
+    "masc_figma_operation": schema(
+        {"operation_id": STRING},
+        {
+            "completed_offset": {"type": "integer", "minimum": 0},
+            "completed_limit": {"type": "integer", "minimum": 1},
+        },
+    ),
     "masc_figma_snapshot": schema({"snapshot_id": STRING}),
     "masc_figma_validate": schema(
         {
@@ -98,7 +104,7 @@ DESCRIPTIONS = {
     "masc_figma_status": "List reported Plugin sessions and the latest retained design snapshot.",
     "masc_figma_bind": "Select an explicit Plugin session before capture or editing.",
     "masc_figma_submit": "Retain an idempotent capture/edit request. A receipt is not edit completion.",
-    "masc_figma_operation": "Read a retained operation without replaying it.",
+    "masc_figma_operation": "Read a retained operation without replaying it. Request completed_offset and completed_limit together for an explicit range of retained operation details.",
     "masc_figma_snapshot": "Read native design JSON and its exact PNG for vision review.",
     "masc_figma_validate": "Check explicit node property expectations on one retained snapshot; no visual verdict.",
     "masc_figma_relay": "Private-authority relay port; only the configured authenticated agent may use it.",
@@ -141,14 +147,36 @@ def check_response(identity: str | int | None, output: Json) -> None:
         raise Refused("Result exceeds the package's declared UTF-8 envelope")
 
 
-def summary(operation: Json) -> Json:
+def summary(operation: Json, completed_range: tuple[int, int] | None = None) -> Json:
     outcome = operation["result"]
     if outcome and "relay_result" in outcome:
         payload = outcome["relay_result"]["payload"]
         outcome = {
             key: value for key, value in outcome.items() if key != "relay_result"
         }
-        outcome["completed"] = payload.get("completed", [])
+        completed = payload.get("completed", [])
+        if not isinstance(completed, list):
+            completed = []
+        total = payload.get("completed_count")
+        if type(total) is not int or total < len(completed):
+            omitted = payload.get("completed_omitted", 0)
+            total = len(completed) + (
+                omitted if type(omitted) is int and omitted >= 0 else 0
+            )
+        selected = (
+            completed[completed_range[0] : completed_range[0] + completed_range[1]]
+            if completed_range is not None
+            else []
+        )
+        outcome.update(
+            completed_count=total,
+            completed_available=len(completed),
+            completed=selected,
+            completed_omitted=total - len(selected),
+            details_omitted=True,
+        )
+        if completed_range is not None:
+            outcome["completed_offset"] = completed_range[0]
         outcome["error"] = payload.get("error")
     return {
         **operation,
@@ -156,6 +184,20 @@ def summary(operation: Json) -> Json:
         "request": {
             key: value for key, value in operation["request"].items() if key != "ops"
         },
+    }
+
+
+def acknowledgement(operation: Json) -> Json:
+    value = summary(operation)
+    outcome = value["result"]
+    if outcome:
+        # Raw errors and completed entries may each exceed the outbound
+        # envelope. The authoritative payload stays in the operation ledger.
+        outcome = {key: item for key, item in outcome.items() if key != "error"}
+    return {
+        "operation_id": value["operation_id"],
+        "state": value["state"],
+        "result": outcome,
     }
 
 
@@ -225,7 +267,7 @@ class Worker:
                     check_snapshot=check_snapshot,
                 )
                 return result(
-                    self.rest.summary(response)
+                    acknowledgement(response)
                     if "operation_id" in response
                     else response
                 )
@@ -235,7 +277,9 @@ class Worker:
                 check_snapshot=check_snapshot,
                 check_session=check_session,
             )
-            return result(summary(response) if "operation_id" in response else response)
+            return result(
+                acknowledgement(response) if "operation_id" in response else response
+            )
         if tool == "masc_figma_status":
             fields(args, set())
             return result(self.store.status())
@@ -250,8 +294,28 @@ class Worker:
         if tool == "masc_figma_submit":
             return result(summary(self.store.submit(args)))
         if tool == "masc_figma_operation":
-            fields(args, {"operation_id"})
-            return result(summary(self.store.operation(args["operation_id"])))
+            fields(args, {"operation_id"}, {"completed_offset", "completed_limit"})
+            completed_range = None
+            if "completed_offset" in args or "completed_limit" in args:
+                offset, limit = (
+                    args.get("completed_offset"),
+                    args.get("completed_limit"),
+                )
+                if (
+                    type(offset) is not int
+                    or offset < 0
+                    or type(limit) is not int
+                    or limit < 1
+                ):
+                    raise Refused(
+                        "Provide completed_offset >= 0 and completed_limit >= 1 together"
+                    )
+                completed_range = (offset, limit)
+            response = result(
+                summary(self.store.operation(args["operation_id"]), completed_range)
+            )
+            check_response(response_id, response)
+            return response
         if tool == "masc_figma_snapshot":
             fields(args, {"snapshot_id"})
             metadata, image = self.store.snapshot(args["snapshot_id"])
@@ -285,15 +349,13 @@ def reject(message: str, *, pre_effect: bool) -> Json:
 
 def serve(worker: Worker) -> None:
     while True:
-        line = sys.stdin.buffer.readline(MAX_BYTES + 1)
+        # This stream comes from the trusted host, which adds its private
+        # caller envelope. max_reply_bytes governs output, not host input.
+        line = sys.stdin.buffer.readline()
         if not line:
             return
         identity: Any = None
         try:
-            if len(line) > MAX_BYTES:
-                while line and not line.endswith(b"\n"):
-                    line = sys.stdin.buffer.readline(MAX_BYTES + 1)
-                raise Refused("Request exceeds the package's declared envelope")
             request = json.loads(
                 line,
                 parse_constant=lambda _: (_ for _ in ()).throw(

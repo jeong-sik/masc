@@ -3,6 +3,7 @@
 import base64
 import importlib.util
 import json
+import sqlite3
 from pathlib import Path
 import subprocess
 import sys
@@ -146,6 +147,209 @@ class StudioTests(unittest.TestCase):
         response = self.call("masc_figma_status")
         self.assertNotIn("structuredContent", response)
         self.assertIn("worker_boot_id", json.loads(response["content"][0]["text"]))
+
+    def test_private_stdin_envelope_retains_large_result_and_acknowledges_next_work(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            process = subprocess.Popen(
+                [sys.executable, str(PACKAGE / "server.py"), "--state-dir", directory],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+            )
+            assert process.stdin and process.stdout
+            sequence = 0
+
+            def request(method, params):
+                nonlocal sequence
+                sequence += 1
+                wire = {
+                    "jsonrpc": "2.0",
+                    "id": sequence,
+                    "method": method,
+                    "params": params,
+                }
+                process.stdin.write(module.encode(wire).encode() + b"\n")
+                process.stdin.flush()
+                line = process.stdout.readline()
+                self.assertLessEqual(len(line), module.MAX_BYTES)
+                reply = json.loads(line)
+                self.assertEqual(reply["id"], sequence)
+                result = reply["result"]
+                self.assertFalse(result.get("isError"), result)
+                if "structuredContent" in result:
+                    return result["structuredContent"]
+                return json.loads(result["content"][0]["text"])
+
+            def call(tool, arguments, caller=OWNER):
+                return request(
+                    "tools/call",
+                    {
+                        "name": "lane_call",
+                        "arguments": {
+                            "tool": tool,
+                            "arguments": arguments,
+                            "caller": caller,
+                        },
+                    },
+                )
+
+            try:
+                request(
+                    "tools/call",
+                    {
+                        "name": "lane_observe",
+                        "arguments": {"binding": BINDING, "sources": []},
+                    },
+                )
+                boot = call("masc_figma_relay", {"kind": "status"}, RELAY)[
+                    "worker_boot_id"
+                ]
+                relay = {"worker_boot_id": boot, "session_id": "plugin-1"}
+                call(
+                    "masc_figma_relay",
+                    {
+                        "kind": "session",
+                        **relay,
+                        "document": {
+                            "name": "File",
+                            "page_id": "page:1",
+                            "selection": [],
+                            "editor_type": "figma",
+                            "mode": "default",
+                            "can_edit": True,
+                        },
+                    },
+                    RELAY,
+                )
+                call("masc_figma_bind", {"session_id": "plugin-1"})
+                call(
+                    "masc_figma_submit",
+                    {
+                        "operation_id": "large-private",
+                        "session_id": "plugin-1",
+                        "root_id": "frame:1",
+                        "kind": "capture",
+                    },
+                )
+                call("masc_figma_relay", {"kind": "poll", **relay}, RELAY)
+                payload = bundle()
+                payload["completed"] = [
+                    {"index": 0, "op": "rename", "node_id": "frame:1", "details": ""},
+                    {"index": 1, "op": "rename", "node_id": "text:1"},
+                ]
+                arguments = {
+                    "kind": "result",
+                    **relay,
+                    "operation_id": "large-private",
+                    "ok": True,
+                    "payload": payload,
+                }
+                public = {
+                    "jsonrpc": "2.0",
+                    "id": sequence + 1,
+                    "method": "tools/call",
+                    "params": {"name": "masc_figma_relay", "arguments": arguments},
+                }
+                payload["completed"][0]["details"] = "x" * (
+                    module.MAX_BYTES - len(module.encode(public).encode())
+                )
+                self.assertEqual(len(module.encode(public).encode()), module.MAX_BYTES)
+                private = {
+                    **public,
+                    "params": {
+                        "name": "lane_call",
+                        "arguments": {
+                            "tool": "masc_figma_relay",
+                            "arguments": arguments,
+                            "caller": RELAY,
+                        },
+                    },
+                }
+                self.assertGreater(
+                    len(module.encode(private).encode()) + 1, module.MAX_BYTES
+                )
+                acknowledgement = call("masc_figma_relay", arguments, RELAY)
+                self.assertEqual(acknowledgement["state"], "outcome_unknown")
+                self.assertEqual(acknowledgement["result"]["completed_count"], 2)
+                self.assertEqual(acknowledgement["result"]["completed"], [])
+                self.assertEqual(acknowledgement["result"]["completed_omitted"], 2)
+                self.assertTrue(acknowledgement["result"]["details_omitted"])
+                self.assertEqual(
+                    call("masc_figma_relay", arguments, RELAY), acknowledgement
+                )
+                overview = call(
+                    "masc_figma_operation", {"operation_id": "large-private"}
+                )
+                self.assertEqual(overview["result"]["completed_available"], 2)
+                page = call(
+                    "masc_figma_operation",
+                    {
+                        "operation_id": "large-private",
+                        "completed_offset": 1,
+                        "completed_limit": 1,
+                    },
+                )
+                self.assertEqual(page["result"]["completed"], [payload["completed"][1]])
+                self.assertEqual(page["result"]["completed_omitted"], 1)
+                with sqlite3.connect(Path(directory) / "studio.sqlite3") as db:
+                    row = db.execute(
+                        "SELECT state,result FROM operations WHERE id='large-private'"
+                    ).fetchone()
+                self.assertEqual(row[0], "outcome_unknown")
+                self.assertEqual(
+                    len(
+                        json.loads(row[1])["relay_result"]["payload"]["completed"][0][
+                            "details"
+                        ]
+                    ),
+                    len(payload["completed"][0]["details"]),
+                )
+                call(
+                    "masc_figma_submit",
+                    {
+                        "operation_id": "next-capture",
+                        "session_id": "plugin-1",
+                        "root_id": "frame:1",
+                        "kind": "capture",
+                    },
+                )
+                self.assertEqual(
+                    call("masc_figma_relay", {"kind": "poll", **relay}, RELAY)[
+                        "command"
+                    ]["id"],
+                    "next-capture",
+                )
+                next_result = call(
+                    "masc_figma_relay",
+                    {
+                        "kind": "result",
+                        **relay,
+                        "operation_id": "next-capture",
+                        "ok": True,
+                        "payload": bundle(),
+                    },
+                    RELAY,
+                )
+                self.assertEqual(next_result["state"], "captured")
+                self.assertTrue(next_result["result"]["snapshot_id"])
+            finally:
+                process.stdin.close()
+                process.wait()
+                process.stdout.close()
+                self.assertEqual(process.returncode, 0)
+
+    def test_completed_range_requires_explicit_valid_offset_and_limit(self):
+        self.capture()
+        for page in (
+            {"completed_offset": 0},
+            {"completed_limit": 1},
+            {"completed_offset": -1, "completed_limit": 1},
+            {"completed_offset": 0, "completed_limit": 0},
+            {"completed_offset": True, "completed_limit": 1},
+        ):
+            with self.subTest(page=page), self.assertRaises(Refused):
+                self.call("masc_figma_operation", {"operation_id": "capture-1", **page})
 
     def test_oversized_poll_baseline_rejects_without_starving_the_next_request(self):
         self.pair()

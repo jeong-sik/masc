@@ -93,10 +93,15 @@ let iso_of_unix unix_ts =
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
 let record_operator_judgment config ~surface ~target_type ~target_id ~summary ?recommended_action ~fresh_for_sec () =
+  let fixture_confidence =
+    match Operator_judgment.Confidence.of_float 0.91 with
+    | Some confidence -> confidence
+    | None -> Alcotest.fail "fixture confidence 0.91 is out of range"
+  in
   let now_unix = Unix.gettimeofday () in
   ignore
     (Operator_judgment.record config ~surface ~target_type ~target_id ~summary
-       ~confidence:0.91 ?recommended_action ~generated_at:(Masc_domain.now_iso ())
+       ~confidence:fixture_confidence ?recommended_action ~generated_at:(Masc_domain.now_iso ())
        ~generated_at_unix:now_unix
        ~fresh_until:(iso_of_unix (now_unix +. fresh_for_sec))
        ~fresh_until_unix:(now_unix +. fresh_for_sec)

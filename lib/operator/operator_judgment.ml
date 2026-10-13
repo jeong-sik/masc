@@ -8,13 +8,24 @@ type surface =
   | Intervene
 [@@deriving enumerate]
 
+module Confidence = struct
+  type t = float
+
+  let of_float value =
+    if Float.is_finite value
+       && Float.compare value 0.0 >= 0
+       && Float.compare value 1.0 <= 0
+    then Some value
+    else None
+end
+
 type record = {
   judgment_id : string;
   surface : surface;
   target_type : target_type;
   target_id : string option;
   summary : string;
-  confidence : float;
+  confidence : Confidence.t;
   generated_at : string;
   generated_at_unix : float;
   fresh_until : string;
@@ -78,7 +89,7 @@ let to_yojson (value : record) =
       ("target_type", `String (target_type_to_string value.target_type));
       ("target_id", Json_util.option_to_yojson (fun v -> `String v) value.target_id);
       ("summary", `String value.summary);
-      ("confidence", `Float value.confidence);
+      ("confidence", `Float (value.confidence :> float));
       ("generated_at", `String value.generated_at);
       ("generated_at_unix", `Float value.generated_at_unix);
       ("fresh_until", `String value.fresh_until);
@@ -127,11 +138,7 @@ let of_yojson json =
       | None -> Error "missing confidence"
     in
     let* confidence =
-      if Float.is_finite confidence
-         && Float.compare confidence 0.0 >= 0
-         && Float.compare confidence 1.0 <= 0
-      then Ok confidence
-      else Error "confidence out of range"
+      Option.to_result ~none:"confidence out of range" (Confidence.of_float confidence)
     in
     (* The same holds for every other member: [record] writes all of them, so
        a record that lacks one, or carries the wrong JSON type, is corrupt.

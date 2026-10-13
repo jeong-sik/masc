@@ -142,6 +142,118 @@ let test_invalid_event_is_typed_codec_result env =
     | Ok _ -> fail "invalid event decoded successfully")
 ;;
 
+(* A provider-response event as the build before the [reasoning_prefix]
+   telemetry field (#42729) serialized it: the key is absent. Captured from
+   commit 9473aab67f by serializing one [Provider_response_snapshot] update;
+   only the wall-clock fields are fixed. *)
+let pre_reasoning_prefix_event =
+  {json|{"schema_version":4,"envelope":{"event_id":"execution-event-fixture","correlation_id":"execution-run-fixture","run_id":"execution-run-fixture","event_time":1791920612.124057,"observed_at":1791920612.124057,"seq":1,"parent_event_id":null,"caused_by":null,"source_clock":"wall","caller_scope":null},"causes":[],"payload":{"type":"node_updated","node_id":"execution-node-fixture","update":{"type":"provider_response_snapshot","value":{"id":"response-1","model":"claude-test","stop_reason":"end_turn","content":[{"type":"text","text":"hello"}],"usage":null,"telemetry":{"system_fingerprint":"fp-1","timings":null,"reasoning_tokens":7,"request_latency_ms":null,"peak_memory_gb":null,"provider_kind":null,"reasoning_effort":null,"canonical_model_id":null,"reasoning_source":null,"effective_context_window":null,"provider_internal_action_count":null,"ttfrc_ms":null,"prefill_ms":null}}}}}|json}
+;;
+
+let replace_once ~pattern ~by text =
+  let plen = String.length pattern in
+  let rec find index =
+    if index + plen > String.length text
+    then fail ("fixture does not contain " ^ pattern)
+    else if String.equal (String.sub text index plen) pattern
+    then index
+    else find (index + 1)
+  in
+  let index = find 0 in
+  String.sub text 0 index
+  ^ by
+  ^ String.sub text (index + plen) (String.length text - index - plen)
+;;
+
+let after_reasoning_source = {json|"reasoning_source":null,|json}
+
+(* The same event as the build that always emitted the field wrote it. *)
+let explicit_null_event =
+  replace_once
+    ~pattern:after_reasoning_source
+    ~by:(after_reasoning_source ^ {json|"reasoning_prefix":null,|json})
+    pre_reasoning_prefix_event
+;;
+
+let digest_a = String.make 64 'a'
+let digest_b = String.make 64 'b'
+
+let valued_event =
+  replace_once
+    ~pattern:after_reasoning_source
+    ~by:
+      (after_reasoning_source
+       ^ Printf.sprintf
+           {json|"reasoning_prefix":{"request_digest":"%s","message_digest":"%s"},|json}
+           digest_a
+           digest_b)
+    pre_reasoning_prefix_event
+;;
+
+let expect_decoded codec name payload =
+  match require (Codec.decode_canonical_event codec payload) with
+  | Ok event ->
+    check
+      string
+      (name ^ " keeps its identity")
+      "execution-event-fixture"
+      (Event.Event_id.to_string (Event.event_id event))
+  | Error (Codec.Invalid_event { detail }) -> fail (name ^ " is invalid: " ^ detail)
+  | Error Codec.Noncanonical_event -> fail (name ^ " is reported noncanonical")
+;;
+
+let test_reasoning_prefix_spellings_load_canonically env =
+  with_runtime env (fun _runtime codec ->
+    expect_decoded codec "event written before the field" pre_reasoning_prefix_event;
+    expect_decoded codec "event written with an explicit null" explicit_null_event;
+    expect_decoded codec "event carrying a digest pair" valued_event)
+;;
+
+let test_reasoning_prefix_tolerance_keeps_tampering_noncanonical env =
+  with_runtime env (fun _runtime codec ->
+    let expect_noncanonical name payload =
+      match require (Codec.decode_canonical_event codec payload) with
+      | Error Codec.Noncanonical_event -> ()
+      | Ok _ -> fail (name ^ " was accepted")
+      | Error (Codec.Invalid_event { detail }) -> fail (name ^ " is invalid: " ^ detail)
+    in
+    (* Whitespace inside the object: same JSON value, different bytes. *)
+    expect_noncanonical
+      "padded legacy event"
+      (replace_once ~pattern:{json|"seq":1|json} ~by:{json|"seq": 1|json} pre_reasoning_prefix_event);
+    (* The tolerated spelling does not excuse any other difference. *)
+    expect_noncanonical
+      "padded explicit-null event"
+      (replace_once ~pattern:{json|"seq":1|json} ~by:{json|"seq": 1|json} explicit_null_event);
+    (* A field order the encoder never writes. *)
+    expect_noncanonical
+      "reordered explicit-null event"
+      (replace_once
+         ~pattern:{json|"timings":null,"reasoning_tokens":7,|json}
+         ~by:{json|"reasoning_tokens":7,"timings":null,|json}
+         explicit_null_event))
+;;
+
+let test_reasoning_prefix_spellings_compare_identical env =
+  with_runtime env (fun _runtime codec ->
+    let identical expected actual =
+      require (Codec.compare_canonical_payload codec ~expected ~actual)
+    in
+    check bool "absent key equals explicit null" true
+      (identical pre_reasoning_prefix_event explicit_null_event);
+    check bool "explicit null equals absent key" true
+      (identical explicit_null_event pre_reasoning_prefix_event);
+    check bool "a stored digest pair is not the absent key" false
+      (identical pre_reasoning_prefix_event valued_event);
+    check bool "other content still differs" false
+      (identical
+         pre_reasoning_prefix_event
+         (replace_once
+            ~pattern:{json|"text":"hello"|json}
+            ~by:{json|"text":"hellp"|json}
+            explicit_null_event)))
+;;
+
 let test_released_runtime_is_typed_executor_failure env =
   let escaped = ref None in
   Eio.Switch.run (fun sw ->
@@ -356,6 +468,12 @@ let () =
               test_closed_requests_share_real_worker env)
           ; test_case "invalid event remains a typed decode result" `Quick (fun () ->
               test_invalid_event_is_typed_codec_result env)
+          ; test_case "reasoning_prefix spellings load canonically" `Quick (fun () ->
+              test_reasoning_prefix_spellings_load_canonically env)
+          ; test_case "reasoning_prefix tolerance keeps tampering noncanonical" `Quick (fun () ->
+              test_reasoning_prefix_tolerance_keeps_tampering_noncanonical env)
+          ; test_case "reasoning_prefix spellings compare identical" `Quick (fun () ->
+              test_reasoning_prefix_spellings_compare_identical env)
           ; test_case "released runtime is an explicit executor failure" `Quick (fun () ->
               test_released_runtime_is_typed_executor_failure env)
           ; test_case "running and queued cancellation stop workers" `Quick (fun () ->

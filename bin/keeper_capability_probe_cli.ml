@@ -225,7 +225,15 @@ let run_surface_pass ~tools =
 let is_antigravity runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
   | Some { execution = Runtime_execution.Antigravity_cli _; _ } -> true
-  | Some _ | None -> false
+  | Some
+      { execution =
+          ( Runtime_execution.Agent_core _
+          | Runtime_execution.Codex_app_server _
+          | Runtime_execution.Claude_code _
+          | Runtime_execution.Muse_serve _ )
+      ; _
+      }
+  | None -> false
 ;;
 
 let probe_for_lane ~sw ~net ~secure_random ~clock ~mgr ~fs ~base_path ~runtime_id ~tool

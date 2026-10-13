@@ -427,7 +427,11 @@ let awaiting_approval_notice (state : state) =
           let where =
             match state.view with
             | Keepers Keeper_message -> ""
-            | Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Board
+            | Overview | Acting | Metrics
+            | Keepers
+                ( Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
+                | Keeper_runtime_pick )
+            | Lanes | Clients | Board
             | Approvals | Planning
             | Memory | Schedules | Verification | Harness | Fusion
             | Repositories | Code | Changes | Connectors | Runtime | Config
@@ -3275,7 +3279,10 @@ let runtime_config_unmatched_current (state : state) =
   match runtime_config_edit_session state, state.runtime_config_view with
   | Some {rce_view=Config_edit_current _;rce_session={current=Some current;_};_}, Some reading
     when current.source_revision <> reading.rcv_metadata.source_revision -> Some current
-  | _ -> None
+  | None, _
+  | Some {rce_view=Config_edit_draft;_}, _
+  | Some {rce_view=Config_edit_current _;rce_session={current=None;_};_}, _
+  | Some {rce_view=Config_edit_current _;rce_session={current=Some _;_};_}, _ -> None
 
 let config_metadata_summary (state : state) =
   match runtime_config_unmatched_current state with
@@ -4072,7 +4079,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                 recent.turn ts
             ^ Ansi.reset
           ]
-      | _, Some input ->
+      | Runtime_usage_scope.Per_request, Some input ->
           fact
             (* fit_width, not %-7s: the cells hold the no-value mark, which is
                three bytes and one column, and byte padding would end the row
@@ -4093,7 +4100,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                  | Some tokens, _ -> Inspector.format_tokens tokens
                  | None, Some tokens -> "turn " ^ Inspector.format_tokens tokens
                  | None, None -> Masc_tui_theme.Glyph.no_value))
-      | _, None ->
+      | Runtime_usage_scope.Per_request, None ->
           [ (if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " ")
             ^ Ansi.dim
             ^ Printf.sprintf

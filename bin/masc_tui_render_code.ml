@@ -690,7 +690,12 @@ let render_code (state : state) =
                          (file_change_ranges change)
                      | Hist_commit _ -> [])
                    listing.chl_entries
-             | _ -> []
+             | Some
+                 ( _,
+                   ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                   | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
+                   | Masc_tui_fetched.Failed _ ) )
+             | None -> []
            in
            let covers line spans =
              List.exists (fun (a, b) -> line >= a && line <= b) spans
@@ -702,7 +707,12 @@ let render_code (state : state) =
              match Masc_tui_fetched.current state.code_blame with
              | Some (loaded_path, Masc_tui_fetched.Ready blocks)
                when matches_open_file loaded_path -> blocks
-             | Some _ | None -> []
+             | Some
+                 ( _,
+                   ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                   | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
+                   | Masc_tui_fetched.Failed _ ) )
+             | None -> []
            in
            let blame_now_s = Unix.gettimeofday () in
            (* One name per run, not one per line: the run boundary is the fact

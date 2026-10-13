@@ -242,7 +242,7 @@ let prepare_server ~base_path ~port ~owned =
                 | Ok (200, body) when health_state ~base_path body -> Ok ()
                 | Ok (status, _) when status <> 200 ->
                   fail (Printf.sprintf "Server readiness returned HTTP %d." status)
-                | _ -> Eio.Time.sleep clock 0.2; wait ()
+                | Ok _ | Error _ -> Eio.Time.sleep clock 0.2; wait ()
               in wait ())
         with
         | Ok () ->

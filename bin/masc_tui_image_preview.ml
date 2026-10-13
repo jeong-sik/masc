@@ -54,9 +54,13 @@ let in_message ~text ~attachments =
 let choose_preview ~conversation ~staged ~order =
   match conversation, List.rev staged with
   | No_image, [] -> No_image
-  | image, [] -> image
+  | ( ( Named_path _ | Staged _ | Stored_attachment _ | Output_image _
+      | Unavailable_image _ ) as image )
+    , [] -> image
   | No_image, newest :: _ -> Staged newest
-  | image, newest :: _ ->
+  | ( ( Named_path _ | Staged _ | Stored_attachment _ | Output_image _
+      | Unavailable_image _ ) as image )
+    , newest :: _ ->
       match order with
       | Staged_is_newer -> Staged newest
       | Named_is_newer | Unordered -> image

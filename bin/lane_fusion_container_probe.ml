@@ -195,7 +195,7 @@ let run ~repo_root ~output_dir ~head_sha =
               let params = member "params" value |> S.create_message_params_of_yojson |> require in
               match params.messages with
               | [{content=S.Text {text;_};_}] -> text=prompt
-              | _ -> false) captures in
+              | [{content=S.Image _;_}] | [] | _ :: _ :: _ -> false) captures in
             let params = member "params" capture |> S.create_message_params_of_yojson |> require in
             ensure (params.max_tokens=limit provider) "durable request lost the requested provider output limit";
             ensure (params.temperature=Some 0.25) "durable request lost sampling temperature";

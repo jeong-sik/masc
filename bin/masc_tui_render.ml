@@ -1668,7 +1668,10 @@ let schedule_outcome_word (row : schedule_row) =
   match row.sch_last_wake_status with
   | Some Schedule_contract_values.Wake_succeeded ->
       schedule_delivery_word row
-  | Some other -> schedule_wake_word other
+  | Some
+      (( Schedule_contract_values.Wake_running
+       | Schedule_contract_values.Wake_failed ) as other) ->
+      schedule_wake_word other
   | None -> Masc_tui_theme.Glyph.no_value
 
 (* Whether a status word names a schedule that can still act. The word is
@@ -2915,7 +2918,13 @@ let render_keeper_list (state : state) =
         | Some { Keeper_control.name; liveness = Keeper_control.Invalid detail; _ } ->
             box_line buf cols ((Theme.warn ()) ^ "  "
               ^ Terminal_text.single_line (name ^ ": " ^ detail) ^ Ansi.reset)
-        | Some _ | None -> ())
+        | Some
+            { Keeper_control.liveness =
+                ( Keeper_control.Unobserved | Keeper_control.Absent
+                | Keeper_control.Present _ )
+            ; _
+            }
+        | None -> ())
    | Keeper_control.Roster_partial { observed; total } ->
        box_line buf cols
          (Printf.sprintf
@@ -8919,7 +8928,17 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Scene_click _) -> "Clicking observed browser control…", Theme.info ()
         | Loading (_, (Viewport_refresh _ | Viewport_cadence _)) -> "Refreshing selected browser viewport…", Theme.info ()
         | Loading (_, Viewport_pointer {action=Browser_lane.Scroll_at _;_}) -> "Scrolling selected browser viewport…", Theme.info ()
-        | Loading (_, Viewport_pointer _) -> "Interacting with selected browser viewport…", Theme.info ()
+        | Loading
+            ( _
+            , Viewport_pointer
+                { action =
+                    ( Browser_lane.Activate_tab | Browser_lane.Click _
+                    | Browser_lane.Fill _ | Browser_lane.Scroll _
+                    | Browser_lane.Hover_at _ | Browser_lane.Click_at _
+                    | Browser_lane.Drag _ | Browser_lane.Follow_link _
+                    | Browser_lane.Click_node _ | Browser_lane.Fill_node _ )
+                ; _
+                } ) -> "Interacting with selected browser viewport…", Theme.info ()
         | Loading (_, Screenshot _) ->
             (match browser_label view with
              | Some browser -> "Capturing selected " ^ browser ^ " tab… (any key cancels preview)"
@@ -10072,7 +10091,14 @@ let render_runtime (state : state) =
              | Masc_tui_types.Runtime_choice runtime,
                (Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _) ->
                  Masc_tui_types.runtime_model_picker_title runtime
-             | _ -> Masc_tui_types.runtime_picker_label_for picker.rlp_pick choice in
+             | Masc_tui_types.Runtime_choice _,
+               (Masc_tui_types.Pick_route_default | Masc_tui_types.Pick_media_failover
+               | Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_new_lane _)
+             | Masc_tui_types.Lane_choice _,
+               (Masc_tui_types.Pick_route_default | Masc_tui_types.Pick_media_failover
+               | Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_exact_lane _
+               | Masc_tui_types.Pick_exact_lane_replacement _ | Masc_tui_types.Pick_new_lane _) ->
+                 Masc_tui_types.runtime_picker_label_for picker.rlp_pick choice in
            match choice with
            | Masc_tui_types.Lane_choice lane ->
                let note =
@@ -10704,7 +10730,23 @@ let render_acting (state : state) =
           Acting.duration_of_completion
             ~before:(List.map (fun e -> e.Acting.ae_event) older)
             completed
-      | Masc_tui_observer.Agent_core _ | Masc_tui_observer.Keeper_heartbeat _
+      | Masc_tui_observer.Agent_core
+          { Masc_tui_observer.kind =
+              ( Masc_tui_observer.Tool_called
+              | Masc_tui_observer.Turn_started
+              | Masc_tui_observer.Turn_ready
+              | Masc_tui_observer.Turn_completed
+              | Masc_tui_observer.Agent_started
+              | Masc_tui_observer.Agent_completed _
+              | Masc_tui_observer.Agent_failed _
+              | Masc_tui_observer.Agent_yielded _
+              | Masc_tui_observer.Agent_input_required _
+              | Masc_tui_observer.Tool_approval_completed
+              | Masc_tui_observer.Telemetry
+              | Masc_tui_observer.Agent_core_other _ )
+          ; _
+          }
+      | Masc_tui_observer.Keeper_heartbeat _
       | Masc_tui_observer.Keeper_tool_call _
       | Masc_tui_observer.Keeper_turn_complete _
       | Masc_tui_observer.Keeper_turn_observation _
@@ -13225,7 +13267,11 @@ let render_surface (state : state) =
                         c.push (match state.planning_error with
                           | Some error -> " Goal detail unavailable · " ^ Terminal_text.single_line error
                           | None -> " Goal detail not read · waiting for its source"))
-                | Some _ | None -> render_planning_list state))
+                | Some
+                    ( Home_held_call _ | Home_gate_request _
+                    | Home_operator_request _ | Home_question _
+                    | Home_goal_confirmation _ | Home_operator_task _ )
+                | None -> render_planning_list state))
   | Approvals when (match state.ask_answer_mode with Ask_answering _ -> true | Ask_browsing -> false) ->
       Masc_tui_render_approvals.render_question_reader state
   | Approvals ->

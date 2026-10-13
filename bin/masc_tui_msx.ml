@@ -269,7 +269,10 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
         cw > 0 && ch > 0 && screen_rows > 0
         && width > 0 && height > 0 && String.length rgb = width * height * 3
         && ch * width <= picture_cols * cw * height
-    | _ -> false
+    | (None | Some _),
+      ( Masc_tui_graphics.Kitty_protocol | Masc_tui_graphics.ITerm2_protocol
+      | Masc_tui_graphics.Unsupported_protocol ),
+      (None | Some _) -> false
   in
   let previous = !retained in
   (* Invalidate before output so even a partially written batch cannot be
@@ -280,15 +283,15 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
         old.geometry = geometry
         && (match old.pixels with
             | Some (Pixels p) -> p.width = width && p.height = height
-            | _ -> false)
-    | _ -> false
+            | None -> false)
+    | (None | Some _), (None | Some _) -> false
   in
   let same_pixels = match previous, dims with
     | Some old, Some (_, _, rgb) when same_layout ->
         (match old.pixels with
          | Some (Pixels p) -> String.equal p.rgb rgb
-         | _ -> false)
-    | _ -> false
+         | None -> false)
+    | (None | Some _), (None | Some _) -> false
   in
   let buf = Buffer.create 1024 in
   if same_layout then Buffer.add_string buf "\027[H"

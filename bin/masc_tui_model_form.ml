@@ -54,7 +54,8 @@ let step_context t delta =
   let content = match choice with Preset tokens -> string_of_int tokens | Custom -> t.custom_context in
   let name_choice = match t.mode, t.name_choice with
     | Copy, (Suggested_name | Context_name) -> Context_name
-    | (Edit, choice) | (Copy, choice) -> choice in
+    | (Edit, ((Suggested_name | Context_name | Operator_name) as choice))
+    | (Copy, (Operator_name as choice)) -> choice in
   let suggested = if t.mode=Copy && name_choice=Context_name then context_name t.source content else None in
   {t with context_choice=choice; name_choice; error=None;
     values=List.map (fun (field, old) -> field,

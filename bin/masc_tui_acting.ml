@@ -54,7 +54,17 @@ let visible filter (event : Observer.event) =
           | Masc.Lane_addon_resource_events.Acquire_failed | Masc.Lane_addon_resource_events.Release_incomplete -> true
           | Masc.Lane_addon_resource_events.Acquired | Masc.Lane_addon_resource_events.Release_confirmed -> false)
       | Observer.Agent_core { Observer.kind = Observer.Telemetry; _ } -> false
-      | Observer.Agent_core _ -> true
+      | Observer.Agent_core
+          { Observer.kind =
+              ( Observer.Tool_called | Observer.Tool_completed
+              | Observer.Turn_started | Observer.Turn_ready
+              | Observer.Turn_completed | Observer.Agent_started
+              | Observer.Agent_completed _ | Observer.Agent_failed _
+              | Observer.Agent_yielded _ | Observer.Agent_input_required _
+              | Observer.Tool_approval_completed
+              | Observer.Agent_core_other _ )
+          ; _
+          } -> true
       | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
       | Observer.Snapshot _
       (* A reply sends one stream frame per token, and a queue-size change is
@@ -1212,7 +1222,18 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
             when String.equal started_id id
                  && Option.equal String.equal agent completed.Observer.agent ->
               Some ((completed.Observer.at -. at) *. 1000.)
-          | Observer.Agent_core _ | Observer.Keeper_heartbeat _
+          | Observer.Agent_core
+              { Observer.kind =
+                  ( Observer.Tool_called | Observer.Tool_completed
+                  | Observer.Turn_started | Observer.Turn_ready
+                  | Observer.Turn_completed | Observer.Agent_started
+                  | Observer.Agent_completed _ | Observer.Agent_failed _
+                  | Observer.Agent_yielded _ | Observer.Agent_input_required _
+                  | Observer.Tool_approval_completed | Observer.Telemetry
+                  | Observer.Agent_core_other _ )
+              ; _
+              }
+          | Observer.Keeper_heartbeat _
           | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
           | Observer.Keeper_turn_observation _
           | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _

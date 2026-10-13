@@ -25,11 +25,15 @@ val apply_board_post_load :
 
 val new_post_done :
   Masc_tui_types.state -> reply_to:string option -> sent_draft:string ->
+  sent_attachments:Masc_tui_types.board_staged_attachment list ->
   report:(string -> string -> unit) -> refresh:(unit -> unit) ->
   refresh_detail:(string -> unit) -> (string, string) result -> unit
 (** Completion clears only an unchanged submitted draft. Success reports first,
     then updates that draft's compose state, refreshes the list and refreshes a
-    reply's detail. Failure keeps the text and records its refusal. *)
+    reply's detail. The staged files that were sent leave the list even when
+    the draft changed meanwhile; one staged during the send stays, and a
+    comment carried none. Failure keeps the text and the staged files, and
+    records its refusal. *)
 
 val vote_done :
   Masc_tui_types.state -> report:(string -> string -> unit) ->

@@ -1345,6 +1345,15 @@
  (modules masc_tui_board_attachments)
  (libraries masc_tui_types masc_tui_context_inspector))
 
+;; The write side: raw artifact uploads and the staged-file sequencing the
+;; compose send runs. Own library so the flow can be driven without the
+;; executable around it.
+(library
+ (name masc_tui_board_upload)
+ (wrapped false)
+ (modules masc_tui_board_upload)
+ (libraries masc.masc_tool_blob_store masc.http_client masc_tui_types yojson eio unix))
+
 (library
  (name masc_tui_magnitude)
  (wrapped false)
@@ -2234,6 +2243,7 @@
   masc_tui_approval_authority
   masc_tui_board_detail
   masc_tui_board_attachments
+  masc_tui_board_upload
   masc_tui_board_read_layout
   masc_tui_browser_lane_layout
   masc_tui_fetched

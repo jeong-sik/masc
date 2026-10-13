@@ -91,7 +91,7 @@ let apply_board_post_load state ~report_error request result =
              post_id post.bp_id)
     | Error err -> fail err
 
-let new_post_done state ~reply_to ~sent_draft ~report ~refresh ~refresh_detail result =
+let new_post_done state ~reply_to ~sent_draft ~sent_attachments ~report ~refresh ~refresh_detail result =
   (* The completion answers for the draft it carried, not for whatever
      is in the buffer now: a slow server must not clear words typed
      since, nor yank the operator out of a compose they restarted. *)
@@ -102,12 +102,21 @@ let new_post_done state ~reply_to ~sent_draft ~report ~refresh ~refresh_detail r
   match result with
   | Ok message ->
       report "system" ("Board: " ^ message);
+      (* The files that went out with the post leave the staged list whether
+         or not the draft was touched since: they are on the board now, and
+         left staged they would ride the next post too. A file staged while
+         the send was out stays. [sent_attachments] is [] for a comment. *)
+      state.board_compose_attachments <-
+        List.filter
+          (fun staged -> not (List.memq staged sent_attachments))
+          state.board_compose_attachments;
       if compose_unchanged then begin
         Buffer.clear state.board_draft;
         state.board_compose_armed <- false;
         state.board_compose_reply_to <- None;
         state.board_compose_hearth <- None;
         state.board_post_error <- None;
+        state.board_compose_attach_input <- None;
         match reply_to with
         | Some post_id -> state.board_mode <- Board_read post_id
         | None -> state.board_mode <- Board_list

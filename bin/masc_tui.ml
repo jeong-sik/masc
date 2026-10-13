@@ -11660,6 +11660,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.board_vote_armed <- None;
   state.board_compose_armed <- false;
   state.board_compose_reply_to <- None;
+  state.board_compose_attach_input <- None;
   state.board_post_inflight <- false;
   state.board_posts <- [];
   state.board_detail <- Board_detail.clear state.board_detail;
@@ -14487,11 +14488,88 @@ let open_board_composer_editor state ~restore ~reenter =
           end )
 ;;
 
+(* Stage one local file for the post. Kind and media type come from the
+   file's name on purpose: a keeper-exported file's stored mime is always
+   application/octet-stream, so the extension is the only honest signal. A
+   path that does not name a plain file keeps the input open with the error
+   showing, so the typing can be fixed rather than re-entered. *)
+let stage_board_compose_path state raw =
+  (* A shell would have expanded a leading [~]; nothing does here, and a
+     path typed by hand usually starts with one. *)
+  let path =
+    let typed = String.trim raw in
+    match Sys.getenv_opt "HOME" with
+    | Some home when String.equal typed "~" -> home
+    | Some home when String.starts_with ~prefix:"~/" typed ->
+        Filename.concat home (String.sub typed 2 (String.length typed - 2))
+    | Some _ | None -> typed
+  in
+  if String.equal path "" then begin
+    state.board_compose_attach_input <- None;
+    state.board_post_error <- None;
+    report_action state "system" "attach cancelled"
+  end
+  else if
+    List.exists
+      (fun (staged : board_staged_attachment) -> String.equal staged.sa_path path)
+      state.board_compose_attachments
+  then state.board_post_error <- Some "that file is already attached"
+  else
+    match
+      Masc_tui_board_upload.attachable
+        ~max_bytes:Masc_tui_board_upload.max_attachment_bytes path
+    with
+    | Error reason -> state.board_post_error <- Some reason
+    | Ok () ->
+        let sa_kind = upload_kind_of_path path in
+        state.board_compose_attachments <-
+          state.board_compose_attachments
+          @ [ { sa_path = path; sa_name = Filename.basename path; sa_kind } ];
+        state.board_compose_attach_input <- None;
+        state.board_post_error <- None;
+        report_action state "system"
+          (Printf.sprintf "attached %s (%s) — %d staged for the post"
+             (Filename.basename path)
+             (board_upload_kind_to_wire sa_kind)
+             (List.length state.board_compose_attachments))
+;;
+
+(* While the attach path is being typed it owns the compose keys: Enter
+   stages, Esc cancels, printable keys are path text. Tab keeps its global
+   meaning, the rule the draft itself keeps. *)
+let handle_board_attach_input_key state (input : Buffer.t) (key : string) : bool =
+  match key with
+  | "\r" | "\n" ->
+      stage_board_compose_path state (Buffer.contents input);
+      true
+  | "esc" ->
+      state.board_compose_attach_input <- None;
+      state.board_post_error <- None;
+      report_action state "system" "attach cancelled";
+      true
+  | "\127" | "\b" ->
+      let next =
+        Buffer.contents input
+        |> Masc_tui_message_layout.drop_last_utf8_scalar
+      in
+      Buffer.clear input;
+      Buffer.add_string input next;
+      true
+  | "\t" | "shift-tab" -> false
+  | s when Masc_tui_message_layout.is_printable_utf8_scalar s ->
+      Buffer.add_string input s;
+      true
+  | _ -> true
+;;
+
 (* Compose-mode keys. Sending is armed rather than pressed: esc offers
    send-or-discard, so a stray key during writing cannot publish. Returns
    false for keys this pane does not own, so Tab and quit keep their global
    meaning. *)
 let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : bool =
+  match state.board_compose_attach_input with
+  | Some input -> handle_board_attach_input_key state input key
+  | None ->
   let armed_allowed =
     if Option.is_none state.board_compose_reply_to then
       [ "s"; "S"; "d"; "D"; "e"; "E"; "h"; "H"; "esc" ]
@@ -14501,6 +14579,19 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
   if state.board_compose_armed && not (List.mem key armed_allowed) then
     state.board_compose_armed <- false;
   match key with
+  | "\001" -> (
+      (* Ctrl-A stages a local file: the path input takes the keys until
+         Enter or Esc. The comment wire has no attachments, so a reply keeps
+         its staged files parked for a new post and says so. *)
+      match state.board_compose_reply_to with
+      | Some _ ->
+          report_action state "system"
+            "attachments are sent with new posts; a comment carries text only";
+          true
+      | None ->
+          state.board_compose_attach_input <- Some (Buffer.create 128);
+          state.board_post_error <- None;
+          true )
   | "\005" -> (
       match restore, reenter with
       | Some r, Some re ->
@@ -14572,9 +14663,14 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
       state.board_compose_armed <- false;
       state.board_compose_hearth <- None;
       state.board_post_error <- None;
+      (* The staged files belong to the new post being discarded. A reply
+         never showed or carried them, so discarding one leaves them waiting
+         for the post they were staged for. *)
       (match state.board_compose_reply_to with
        | Some post_id -> state.board_mode <- Board_read post_id
-       | None -> state.board_mode <- Board_list);
+       | None ->
+           state.board_compose_attachments <- [];
+           state.board_mode <- Board_list);
       report_action state "system" "Board draft discarded";
       true
   | "\r" | "\n" ->
@@ -16091,8 +16187,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
       end
-  | Board_new_post_done { reply_to; sent_draft; result } ->
+  | Board_new_post_done { reply_to; sent_draft; sent_attachments; result } ->
       Masc_tui_board_updates.new_post_done state ~reply_to ~sent_draft
+        ~sent_attachments
         ~report:(report_action state)
         ~refresh:(fun () ->
           start_http_refresh state ~host:server_peer_host
@@ -21982,6 +22079,13 @@ and is loaded on demand through keeper_skill.
                 Buffer.add_string state.board_draft
                   (Keeper_chat.terminal_safe_text ~preserve_newlines:true
                      paste.Masc_tui_paste.text)
+            (* A path is what an operator pastes, or drops onto the terminal.
+               It belongs to the input that is open, not to the post under
+               it, where it would be published as text. *)
+            | Some Text_board_attach_path ->
+                Option.iter
+                  (fun input -> Buffer.add_string input text)
+                  state.board_compose_attach_input
             (* A prompt holds many lines, like a board post; the form puts
                the text into whichever field its cursor is on. *)
             | Some Text_fusion_launch ->
@@ -25993,8 +26097,9 @@ and is loaded on demand through keeper_skill.
                in
                ()
        | Some k
-         when text_input_target state ~compact_viewport
-              = Some Text_board_draft ->
+         when (match text_input_target state ~compact_viewport with
+               | Some (Text_board_draft | Text_board_attach_path) -> true
+               | Some _ | None -> false) ->
            (* Same shape as the chat pane: while a draft is being written,
               printable keys belong to the draft. A key the handler declines
               (Tab) keeps its global meaning, so the cycle works mid-compose
@@ -28735,6 +28840,7 @@ and is loaded on demand through keeper_skill.
                 state.board_compose_armed <- false;
                 state.board_compose_reply_to <- Some post_id;
                 state.board_compose_hearth <- None;
+                state.board_compose_attach_input <- None;
                 state.board_post_error <- None
             | Board_list | Board_compose -> ())
        | Some "v" | Some "V" when state.view = Board ->
@@ -29084,6 +29190,7 @@ and is loaded on demand through keeper_skill.
                      state.board_compose_armed <- false;
                      state.board_compose_reply_to <- None;
                      state.board_compose_hearth <- state.board_hearth;
+                     state.board_compose_attach_input <- None;
                      state.board_post_error <- None
                  | Board_read _ | Board_compose -> ())
             | Keepers (Keeper_list | Keeper_detail) ->

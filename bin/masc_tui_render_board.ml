@@ -113,11 +113,50 @@ let render_board_compose (state : state) =
   in
   let addressing_kind = Board_composer.analyze_addressing draft_content in
   let addressing_line = Board_composer.format_addressing_hint ~max_cells:(framed_inner_width cols) addressing_kind in
+  (* Staged files ride the post being written; a comment has no attachment
+     wire, so like the hearth they are not named on a reply's pane. *)
+  let attachments_line =
+    match state.board_compose_reply_to, state.board_compose_attachments with
+    | None, _ :: _ ->
+        Some
+          (Printf.sprintf "  attachments: %s"
+             (String.concat " \xc2\xb7 "
+                (List.map
+                   (fun (staged : board_staged_attachment) ->
+                      board_upload_kind_to_wire staged.sa_kind
+                      ^ " " ^ Terminal_text.single_line staged.sa_name)
+                   state.board_compose_attachments)))
+    | None, [] | Some _, _ -> None
+  in
+  (* The path being typed after Ctrl-A, on a row of its own. The footer drops
+     a hint that does not fit, and a path is longer than any hint: riding
+     there, it vanished while it was being typed. A path too long for the row
+     keeps both ends -- the start says which tree, the end is the file name
+     and the part being typed. *)
+  let attach_input_line =
+    match state.board_compose_attach_input with
+    | Some input ->
+        let label = "  attach file: " in
+        let room = max 1 (cols - 8 - String.length label - 1) in
+        let path = Terminal_text.single_line (Buffer.contents input) in
+        let shown =
+          if Message_layout.display_width path <= room then path
+          else Message_layout.fit_middle room path
+        in
+        Some (label ^ shown ^ Ansi.reverse ^ " " ^ Ansi.reset)
+    | None -> None
+  in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   box_line buf cols (Ansi.dim ^ kind_line ^ Ansi.reset);
   box_line buf cols addressing_line;
+  (match attachments_line with
+   | Some line -> box_line buf cols (Ansi.dim ^ line ^ Ansi.reset)
+   | None -> ());
+  (match attach_input_line with
+   | Some line -> box_line buf cols line
+   | None -> ());
   (match state.board_post_error with
    | Some err ->
        box_line buf cols
@@ -135,7 +174,9 @@ let render_board_compose (state : state) =
            if w = [] then [ "" ] else w)
   in
   let error_rows = if Option.is_some state.board_post_error then 1 else 0 in
-  let chrome_top_rows = 5 + error_rows in
+  let attachment_rows = if Option.is_some attachments_line then 1 else 0 in
+  let attach_input_rows = if Option.is_some attach_input_line then 1 else 0 in
+  let chrome_top_rows = 5 + error_rows + attachment_rows + attach_input_rows in
   let content_height = max 1 (rows - (chrome_top_rows + 3)) in
   let visible_lines =
     let total = List.length draft_lines in
@@ -155,16 +196,23 @@ let render_board_compose (state : state) =
   done;
   box_bottom buf cols;
   let prompt =
-    if state.board_compose_armed then
-      Masc_tui_keys.footer_hints_board_compose_armed
-        ~reply:(Option.is_some state.board_compose_reply_to)
-    else
-      (* Projected from the key table; the table says why there is no [q]. *)
-      Masc_tui_keys.footer_hints_board_compose_writing
+    match state.board_compose_attach_input with
+    | Some _ ->
+        (* The path input owns the keys, so the footer names its two; the
+           path itself is on the pane above. *)
+        Masc_tui_keys.footer_hints_board_attach_input
+    | None ->
+        if state.board_compose_armed then
+          Masc_tui_keys.footer_hints_board_compose_armed
+            ~reply:(Option.is_some state.board_compose_reply_to)
+        else
+          (* Projected from the key table; the table says why there is no [q]. *)
+          Masc_tui_keys.footer_hints_board_compose_writing
+            ~reply:(Option.is_some state.board_compose_reply_to)
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:prompt);
   let cursor =
-    if state.board_compose_armed then
+    if state.board_compose_armed || Option.is_some state.board_compose_attach_input then
       Frame_presenter.Hidden
     else
       let (row, column) =

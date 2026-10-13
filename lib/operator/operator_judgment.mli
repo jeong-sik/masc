@@ -25,13 +25,23 @@ type surface =
   | Command_namespace
   | Intervene
 
+(** How sure the judge is, as a finite number in [\[0.0, 1.0\]]. The only
+    way to make one is {!Confidence.of_float}, so a record cannot carry a
+    value its own reader would refuse. *)
+module Confidence : sig
+  type t = private float
+
+  val of_float : float -> t option
+  (** [None] for NaN, infinities, and values outside [\[0.0, 1.0\]]. *)
+end
+
 type record = {
   judgment_id : string;
   surface : surface;
   target_type : target_type;
   target_id : string option;
   summary : string;
-  confidence : float;
+  confidence : Confidence.t;
   generated_at : string;
   generated_at_unix : float;
   fresh_until : string;
@@ -137,7 +147,7 @@ val record :
   target_type:target_type ->
   target_id:string option ->
   summary:string ->
-  confidence:float ->
+  confidence:Confidence.t ->
   ?model_name:string ->
   ?runtime_name:string ->
   ?recommended_action:Yojson.Safe.t ->
@@ -168,7 +178,6 @@ val record :
       list if first).
     - [generated_at_unix] and [fresh_until_unix]: required numeric timestamps;
       the write boundary does not reparse display strings.
-    - [confidence]: written as given. {!of_yojson} rejects values outside
-      [\[0.0, 1.0\]], so callers check the range before recording.
+    - [confidence]: a {!Confidence.t}, so it is already in range.
     - [summary]: trimmed.
     - [evidence_refs]: trimmed + empty entries dropped. *)

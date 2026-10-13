@@ -59,11 +59,9 @@ let judgment_write_json (ctx : 'a context) args =
       | None -> Error "confidence is required"
     in
     let* confidence =
-      if Float.is_finite confidence
-         && Float.compare confidence 0.0 >= 0
-         && Float.compare confidence 1.0 <= 0
-      then Ok confidence
-      else Error "confidence must be a number between 0.0 and 1.0"
+      Option.to_result
+        ~none:"confidence must be a number between 0.0 and 1.0"
+        (Operator_judgment.Confidence.of_float confidence)
     in
     (* The writer is the caller's authenticated name, never a body field:
        a body field would let any caller record a judgment as another

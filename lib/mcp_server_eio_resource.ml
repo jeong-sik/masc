@@ -245,13 +245,13 @@ let handle_read_resource_eio state id params =
                     | exception Sys_error _ -> None)
                 in
                 let metadata_fields (fm : Tool_wiki.frontmatter) =
-                  [ ("title", `String fm.title)
-                  ; ("summary", `String fm.summary)
+                  [ ("title", `String (fm.title :> string))
+                  ; ("summary", `String (fm.summary :> string))
                   ; ("source", `String (Tool_wiki.source_to_string fm.source))
-                  ; ("author", `String fm.author)
-                  ; ("created", `String fm.created)
+                  ; ("author", `String (fm.author :> string))
+                  ; ("created", `String (fm.created :> string))
                   ; ("revision", `Int fm.revision)
-                  ; ("tags", `List (List.map (fun t -> `String t) fm.tags))
+                  ; ("tags", `List (List.map (fun (t : Tool_wiki.Tag.t) -> `String (t :> string)) fm.tags))
                   ]
                 in
                 let unreadable_fields error =
@@ -272,8 +272,8 @@ let handle_read_resource_eio state id params =
                     match header with
                     | Ok (fm : Tool_wiki.frontmatter) ->
                       let tag_str = if fm.tags = [] then ""
-                        else " -- " ^ String.concat ", " (List.map (fun t -> "`" ^ t ^ "`") fm.tags) in
-                      Printf.sprintf "- **%s** -- `%s` (%s)%s" fm.title (uri_of path)
+                        else " -- " ^ String.concat ", " (List.map (fun (t : Tool_wiki.Tag.t) -> "`" ^ (t :> string) ^ "`") fm.tags) in
+                      Printf.sprintf "- **%s** -- `%s` (%s)%s" (fm.title :> string) (uri_of path)
                         (Tool_wiki.source_to_string fm.source) tag_str
                     | Error error ->
                       Printf.sprintf "- %s -- `%s`"

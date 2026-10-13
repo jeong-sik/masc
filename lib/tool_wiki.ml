@@ -41,29 +41,92 @@ let source_of_string_opt raw =
 let string_contains = String_util.string_contains_substring
 
 (* Header values. Each is written on one line as [key: value] and read back
-   trimmed, so the writer refuses any value that would come back as something
-   else: a page that was accepted must read as what was sent. *)
+   trimmed. A [Line.t] comes back as it went in: not blank, one line, nothing
+   to trim. Both ways into this module, the tool arguments and a page on
+   disk, build one with [Line.of_string], and the page writer takes nothing
+   else, so a header value nobody checked does not type. *)
+module Line : sig
+  type t = private string
 
-(* Blank once trimmed: it would read back as a missing field. *)
-let blank value = String.equal (String.trim value) ""
+  type problem =
+    | Blank
+    | Spans_lines
+    | Outer_whitespace
 
-let one_line value = not (String.contains value '\n' || String.contains value '\r')
+  val of_string : string -> (t, problem) result
 
-(* The tags line is [tags: \[a, b\]]. A comma splits one tag into two, a
-   bracket or a line break ends the list or the header early, and outer
-   spaces are trimmed on the way back. *)
-let tag_reads_back tag =
-  (not (blank tag))
-  && String.equal (String.trim tag) tag
-  && not
-       (Stdlib.String.exists
-          (fun c ->
-             match c with
-             | '\n' | '\r' | ',' | '[' | ']' -> true
-             | _ -> false)
-          tag)
+  val of_date : Unix.tm -> t
+  (** [YYYY-MM-DD]. *)
+end = struct
+  type t = string
 
-let first_bad_tag tags = List.find_opt (fun tag -> not (tag_reads_back tag)) tags
+  type problem =
+    | Blank
+    | Spans_lines
+    | Outer_whitespace
+
+  let of_string value =
+    let trimmed = String.trim value in
+    if String.equal trimmed ""
+    then Error Blank
+    else if String.contains value '\n' || String.contains value '\r'
+    then Error Spans_lines
+    else if not (String.equal trimmed value)
+    then Error Outer_whitespace
+    else Ok value
+
+  let of_date (date : Unix.tm) =
+    sprintf "%04d-%02d-%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday
+end
+
+(* The tags line is [tags: \[a, b\]]. A tag is a header value with no comma:
+   a comma would come back as two tags. [of_line] reads what [to_line] wrote
+   and nothing looser: a value outside the brackets, or an empty piece between
+   two commas, is not cut down to the pieces that happen to parse. *)
+module Tag : sig
+  type t = private string
+
+  type problem =
+    | Not_a_line of Line.problem
+    | Has_comma
+
+  val of_string : string -> (t, problem) result
+  val to_line : t list -> string
+  val of_line : string -> t list option
+end = struct
+  type t = string
+
+  type problem =
+    | Not_a_line of Line.problem
+    | Has_comma
+
+  let of_string value =
+    match Line.of_string value with
+    | Error problem -> Error (Not_a_line problem)
+    | Ok _ when String.contains value ',' -> Error Has_comma
+    | Ok _ -> Ok value
+
+  let to_line tags = "[" ^ String.concat ", " tags ^ "]"
+
+  let of_line value =
+    let raw = String.trim value in
+    let len = String.length raw in
+    if len < 2 || not (Char.equal raw.[0] '[' && Char.equal raw.[len - 1] ']')
+    then None
+    else (
+      let inner = String.sub raw 1 (len - 2) in
+      if String.equal (String.trim inner) ""
+      then Some []
+      else
+        String.split_on_char ',' inner
+        |> List.fold_left
+             (fun read piece ->
+                match read, of_string (String.trim piece) with
+                | Some tags, Ok tag -> Some (tag :: tags)
+                | None, _ | _, Error _ -> None)
+             (Some [])
+        |> Option.map List.rev)
+end
 
 type context = {
   base_path: string;
@@ -79,13 +142,13 @@ let wiki_root ~base_path =
    is required: a page missing one does not read, rather than reading as an
    empty string. [updated] is written but nothing reads it. *)
 type frontmatter = {
-  title: string;
-  summary: string;
+  title: Line.t;
+  summary: Line.t;
   source: wiki_source;
-  author: string;
-  created: string;
+  author: Line.t;
+  created: Line.t;
   revision: int;
-  tags: string list;
+  tags: Tag.t list;
 }
 
 type frontmatter_field =
@@ -115,6 +178,7 @@ type frontmatter_error =
   | Unknown_source of string
   | Bad_revision of string
   | Bad_tags of string
+  | Not_one_line of frontmatter_field
 
 let parse_frontmatter content =
   match Frontmatter.read content with
@@ -132,14 +196,23 @@ let parse_frontmatter content =
       | Some value when not (String.equal value "") -> Ok value
       | Some _ | None -> Error (Missing_field field)
     in
-    let* title = scalar Title in
-    let* summary = scalar Summary in
+    (* The reader trims a value, so the only [Line] problem left for one that
+       is present is a carriage return inside it. *)
+    let line field =
+      let* value = scalar field in
+      match Line.of_string value with
+      | Ok line -> Ok line
+      | Error Line.Blank -> Error (Missing_field field)
+      | Error (Line.Spans_lines | Line.Outer_whitespace) -> Error (Not_one_line field)
+    in
+    let* title = line Title in
+    let* summary = line Summary in
     let* raw_source = scalar Source in
     let* source =
       Option.to_result ~none:(Unknown_source raw_source) (source_of_string_opt raw_source)
     in
-    let* author = scalar Author in
-    let* created = scalar Created in
+    let* author = line Author in
+    let* created = line Created in
     let* raw_revision = scalar Revision in
     let* revision =
       match int_of_string_opt raw_revision with
@@ -148,11 +221,7 @@ let parse_frontmatter content =
     in
     let* tags =
       match lookup Tags with
-      | Some value ->
-        (* A list the tags line cannot hold, such as one with no closing
-           bracket, is not cut down to the pieces that happen to parse. *)
-        let tags = Frontmatter.list_value value in
-        if List.for_all tag_reads_back tags then Ok tags else Error (Bad_tags value)
+      | Some value -> Option.to_result ~none:(Bad_tags value) (Tag.of_line value)
       | None -> Error (Missing_field Tags)
     in
     Ok { title; summary; source; author; created; revision; tags }
@@ -168,6 +237,8 @@ let frontmatter_error_to_string = function
     sprintf "source \"%s\" is not one of: %s" raw (String.concat ", " valid_source_strings)
   | Bad_revision raw -> sprintf "revision \"%s\" is not a whole number from 1" raw
   | Bad_tags raw -> sprintf "tags \"%s\" is not a list of tags" raw
+  | Not_one_line field ->
+    sprintf "%s in frontmatter is not one line" (frontmatter_field_key field)
 
 (* The one line list, read and search print for a page whose header does
    not read: its filename and the reason. *)
@@ -200,7 +271,9 @@ let index_entries ~base_path =
     | content ->
       (match parse_frontmatter content with
        | Ok fm ->
-         Some (Wiki_journal.Page { file; title = fm.title; summary = fm.summary })
+         Some
+           (Wiki_journal.Page
+              { file; title = (fm.title :> string); summary = (fm.summary :> string) })
        | Error error ->
          Some
            (Wiki_journal.Unreadable
@@ -208,10 +281,10 @@ let index_entries ~base_path =
 
 (* RFC-0189 PR-1b.7 — handlers in this module return typed
    [Tool_result.result]. Boundary back to [Tool_result.result option] in
-   [dispatch] below via [lift]. Three input-rejection helpers
-   ([topic_required], [query_required], [missing_required]) replace 5
-   duplicated empty-string [Tool_result.error] sites and share the
-   [class_:Workflow_rejection] tag at one place. I/O failures during
+   [dispatch] below via [lift]. Two input-rejection helpers
+   ([topic_required], [query_required]) share the
+   [class_:Workflow_rejection] tag at one place; create and update collect
+   what they refuse as one message and hand it to [workflow_err]. I/O failures during
    read/write/promote remain [Runtime_failure]; the "No page
    matching ..." / "No candidate matching ..." not-found cases are
    [Workflow_rejection] because the caller chose the topic. *)
@@ -224,9 +297,6 @@ let topic_required ~tool_name ~start_time =
 
 let query_required ~tool_name ~start_time =
   workflow_err ~tool_name ~start_time "query is required"
-
-let missing_required ~tool_name ~start_time field =
-  workflow_err ~tool_name ~start_time (sprintf "%s is required" field)
 
 (* Free-form wiki content remains opaque text. *)
 let text_ok ~tool_name ~start_time body : Tool_result.result =
@@ -259,7 +329,8 @@ let handle_read ~tool_name ~start_time ctx args : Tool_result.result =
     let files = list_pages ~base_path:ctx.base_path in
     let title_matches content =
       match parse_frontmatter content with
-      | Ok fm -> string_contains ~needle:topic_lc (String.lowercase_ascii fm.title)
+      | Ok fm ->
+        string_contains ~needle:topic_lc (String.lowercase_ascii (fm.title :> string))
       | Error _ -> false
     in
     let matched =
@@ -347,10 +418,9 @@ let page_path ~base_path page =
 let today () =
   (* Local, not UTC: the header dates are read by the people and Keepers on
      this machine. *)
-  let date = Time_compat.now () |> Unix.localtime in
-  sprintf "%04d-%02d-%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday
+  Line.of_date (Time_compat.now () |> Unix.localtime)
 
-let render_page ~title ~summary ~source ~author ~created ~updated ~revision ~tags ~body =
+let render_page (header : frontmatter) ~(updated : Line.t) ~body =
   let body_end = if String.ends_with ~suffix:"\n" body then "" else "\n" in
   sprintf {|---
 title: %s
@@ -360,12 +430,17 @@ author: %s
 created: %s
 updated: %s
 revision: %d
-tags: [%s]
+tags: %s
 ---
 
 %s%s|}
-    title summary (source_to_string source) author created updated revision
-    (String.concat ", " tags) body body_end
+    (header.title :> string)
+    (header.summary :> string)
+    (source_to_string header.source)
+    (header.author :> string)
+    (header.created :> string)
+    (updated :> string)
+    header.revision (Tag.to_line header.tags) body body_end
 
 (* The body as the writer sent it: everything after the header, without the
    blank line [render_page] puts between the two. *)
@@ -398,8 +473,8 @@ let with_wiki_lock ~tool_name ~start_time ctx f : Tool_result.result =
    is already on disk when the other two are written, so a failure there is
    reported as one: the caller learns that the page changed and which file did
    not follow. *)
-let write_page ~tool_name ~start_time ctx ~path ~content ~action ~revision ~page ~note
-    ~written
+let write_page ~tool_name ~start_time ctx ~path ~content ~action ~revision ~page
+    ~(author : Line.t) ~(note : Line.t) ~written
   : Tool_result.result
   =
   match Fs_compat.save_file_atomic_strict_staged path content with
@@ -411,7 +486,9 @@ let write_page ~tool_name ~start_time ctx ~path ~content ~action ~revision ~page
     let line =
       Wiki_journal.log_line
         ~time:(Time_compat.now () |> Unix.localtime)
-        ~action ~revision ~page ~author:ctx.agent_name ~note
+        ~action ~revision ~page
+        ~author:(author :> string)
+        ~note:(note :> string)
     in
     (match Wiki_journal.append_log ~wiki_root line with
      | Error message ->
@@ -426,18 +503,64 @@ let write_page ~tool_name ~start_time ctx ~path ~content ~action ~revision ~page
             (sprintf "%s, but index.md could not be rebuilt: %s" written message)
         | Ok () -> text_ok ~tool_name ~start_time written))
 
-(* The tag is quoted as written, line breaks included. *)
-let bad_tag_message tag =
-  sprintf
-    "tag \"%s\" cannot be stored: a tag may not contain a comma, a bracket or a line \
-     break, or start or end with a space"
-    tag
-
 (* A field the schema does not offer but a caller sent anyway. *)
 let has_field args name =
   match args with
   | `Assoc fields -> List.mem_assoc name fields
   | _ -> false
+
+(* What the caller is told when a value it sent is not a header value. *)
+let line_arg name value =
+  Line.of_string value
+  |> Result.map_error (function
+    | Line.Blank -> sprintf "%s is required" name
+    | Line.Spans_lines -> sprintf "%s must be one line" name
+    | Line.Outer_whitespace -> sprintf "%s may not start or end with whitespace" name)
+
+(* The caller's name goes into the header as [author] and into the log line.
+   [missing] says which of the two a caller with no name cannot be written
+   to. *)
+let caller_name ctx ~missing =
+  Line.of_string ctx.agent_name
+  |> Result.map_error (function
+    | Line.Blank -> missing
+    | Line.Spans_lines -> "the caller's agent name must be one line"
+    | Line.Outer_whitespace ->
+      "the caller's agent name may not start or end with whitespace")
+
+(* The tag is quoted as written, line breaks included. *)
+let bad_tag_message tag problem =
+  sprintf "tag \"%s\" cannot be stored: a tag %s" tag
+    (match problem with
+     | Tag.Not_a_line Line.Blank -> "may not be blank"
+     | Tag.Not_a_line Line.Spans_lines -> "may not contain a line break"
+     | Tag.Not_a_line Line.Outer_whitespace -> "may not start or end with whitespace"
+     | Tag.Has_comma -> "may not contain a comma")
+
+(* [tags] as the caller sent it: [None] when the field is absent. Every item
+   has to be a tag. A blank item or one that is not a string is refused, not
+   dropped, so a page holds the tags that were sent or the call fails. *)
+let tags_arg args : (Tag.t list option, string) result =
+  let sent =
+    match args with
+    | `Assoc fields -> List.assoc_opt "tags" fields
+    | _ -> None
+  in
+  match sent with
+  | None -> Ok None
+  | Some (`List items) ->
+    List.fold_left
+      (fun read item ->
+         match read, item with
+         | (Error _ as refused), _ -> refused
+         | Ok tags, `String raw ->
+           (match Tag.of_string raw with
+            | Ok tag -> Ok (tag :: tags)
+            | Error problem -> Error (bad_tag_message raw problem))
+         | Ok _, _ -> Error "tags must be a list of strings")
+      (Ok []) items
+    |> Result.map (fun tags -> Some (List.rev tags))
+  | Some _ -> Error "tags must be a list of strings"
 
 (* Create page.
    TEL-OK: the change is written to log.md by [write_page] and handed back to
@@ -445,64 +568,62 @@ let has_field args name =
 let handle_create ~tool_name ~start_time ctx args : Tool_result.result =
   let text name = Json_util.get_string args name |> Option.value ~default:"" in
   let raw_page = text "page" in
-  let title = text "title" in
-  let summary = text "summary" in
   let body = text "body" in
-  let tags = Json_util.get_string_list args "tags" in
-  match validate_page_name raw_page, first_bad_tag tags with
-  | Error error, _ ->
-    workflow_err ~tool_name ~start_time (page_name_error_to_string raw_page error)
-  | Ok _, Some tag -> workflow_err ~tool_name ~start_time (bad_tag_message tag)
-  | Ok page, None ->
-    if blank title then missing_required ~tool_name ~start_time "title"
-    else if not (one_line title)
-    then workflow_err ~tool_name ~start_time "title must be one line"
-    else if blank summary then missing_required ~tool_name ~start_time "summary"
-    else if not (one_line summary)
-    then workflow_err ~tool_name ~start_time "summary must be one line"
-    else if String.equal body "" then missing_required ~tool_name ~start_time "body"
-    else if blank ctx.agent_name
-    then
-      (* The reader requires [author]; a page this handler writes must read
-         back through it, so a caller with no name is refused here rather than
-         leaving a header the wiki then reports as unreadable. *)
-      workflow_err ~tool_name ~start_time "the caller has no agent name to write as author"
-    else if not (one_line ctx.agent_name)
-    then workflow_err ~tool_name ~start_time "the caller's agent name must be one line"
-    else begin
-      (* The schema requires [source]. A missing or unknown value is refused,
-         never filled in: the frontmatter records what kind of work the writer
-         said the page came from, and a default would record a claim
-         nobody made. *)
+  let ( let* ) = Result.bind in
+  let sent =
+    let* page =
+      validate_page_name raw_page
+      |> Result.map_error (page_name_error_to_string raw_page)
+    in
+    let* tags = tags_arg args in
+    let* title = line_arg "title" (text "title") in
+    let* summary = line_arg "summary" (text "summary") in
+    let* () = if String.equal body "" then Error "body is required" else Ok () in
+    (* The reader requires [author]; a page this handler writes must read
+       back through it, so a caller with no name is refused here rather than
+       leaving a header the wiki then reports as unreadable. *)
+    let* author =
+      caller_name ctx ~missing:"the caller has no agent name to write as author"
+    in
+    (* The schema requires [source]. A missing or unknown value is refused,
+       never filled in: the frontmatter records what kind of work the writer
+       said the page came from, and a default would record a claim nobody
+       made. *)
+    let* source =
       match Json_util.get_string args "source" with
-      | None -> missing_required ~tool_name ~start_time "source"
+      | None -> Error "source is required"
       | Some raw ->
-      match source_of_string_opt raw with
-      | None ->
+        Option.to_result
+          ~none:
+            (sprintf "Invalid source. Must be one of: %s"
+               (String.concat ", " valid_source_strings))
+          (source_of_string_opt raw)
+    in
+    Ok (page, title, summary, author, source, Option.value tags ~default:[])
+  in
+  match sent with
+  | Error message -> workflow_err ~tool_name ~start_time message
+  | Ok (page, title, summary, author, source, tags) ->
+    with_wiki_lock ~tool_name ~start_time ctx (fun () ->
+      let path = page_path ~base_path:ctx.base_path page in
+      if Sys.file_exists path
+      then
         workflow_err ~tool_name ~start_time
-         (sprintf "Invalid source. Must be one of: %s"
-           (String.concat ", " valid_source_strings))
-      | Some source ->
-        with_wiki_lock ~tool_name ~start_time ctx (fun () ->
-          let path = page_path ~base_path:ctx.base_path page in
-          if Sys.file_exists path
-          then
-            workflow_err ~tool_name ~start_time
-              (sprintf
-                 "page \"%s\" already exists. Read it and call masc_wiki_update to \
-                  change it."
-                 page)
-          else begin
-            let day = today () in
-            let content =
-              render_page ~title ~summary ~source ~author:ctx.agent_name ~created:day
-                ~updated:day ~revision:1 ~tags ~body
-            in
-            write_page ~tool_name ~start_time ctx ~path ~content
-              ~action:Wiki_journal.Created ~revision:1 ~page ~note:summary
-              ~written:(sprintf "Created wiki page %s at revision 1: %s" page path)
-          end)
-    end
+          (sprintf
+             "page \"%s\" already exists. Read it and call masc_wiki_update to change \
+              it."
+             page)
+      else begin
+        let day = today () in
+        let content =
+          render_page
+            { title; summary; source; author; created = day; revision = 1; tags }
+            ~updated:day ~body
+        in
+        write_page ~tool_name ~start_time ctx ~path ~content
+          ~action:Wiki_journal.Created ~revision:1 ~page ~author ~note:summary
+          ~written:(sprintf "Created wiki page %s at revision 1: %s" page path)
+      end)
 
 (* A refused update tells the writer where the page is now, so the writer can
    merge into that body and send again without another read. *)
@@ -526,87 +647,87 @@ let stale_revision ~tool_name ~start_time ~page ~base_revision ~current_revision
 let handle_update ~tool_name ~start_time ctx args : Tool_result.result =
   let raw_page = Json_util.get_string args "page" |> Option.value ~default:"" in
   let body = Json_util.get_string args "body" |> Option.value ~default:"" in
-  match validate_page_name raw_page with
-  | Error error ->
-    workflow_err ~tool_name ~start_time (page_name_error_to_string raw_page error)
-  | Ok page ->
-    match Json_util.get_int args "base_revision" with
-    | None -> missing_required ~tool_name ~start_time "base_revision"
-    | Some base_revision ->
-    let note = Json_util.get_string args "note" |> Option.value ~default:"" in
-    if String.equal body "" then missing_required ~tool_name ~start_time "body"
-    else if blank note then missing_required ~tool_name ~start_time "note"
-    else if not (one_line note)
-    then workflow_err ~tool_name ~start_time "note must be one line"
-    else if blank ctx.agent_name
-    then
-      (* The log line names who made the change. *)
-      workflow_err ~tool_name ~start_time "the caller has no agent name to write in the log"
-    else if not (one_line ctx.agent_name)
-    then workflow_err ~tool_name ~start_time "the caller's agent name must be one line"
-    else if has_field args "source"
-    then
-      (* [source] says what kind of work the page first came from. *)
-      workflow_err ~tool_name ~start_time "source cannot change on update"
-    else begin
-      let new_title = Json_util.get_string args "title" in
-      let new_summary = Json_util.get_string args "summary" in
-      let one_line_field name = function
-        | None -> Ok ()
-        | Some value when blank value ->
-          Error (sprintf "%s may not be empty; omit it to keep the current one" name)
-        | Some value when not (one_line value) -> Error (sprintf "%s must be one line" name)
-        | Some _ -> Ok ()
-      in
-      let new_tags =
-        if has_field args "tags" then Some (Json_util.get_string_list args "tags") else None
-      in
-      match
-        ( one_line_field "title" new_title
-        , one_line_field "summary" new_summary
-        , Option.bind new_tags first_bad_tag )
-      with
-      | Error message, _, _ | Ok (), Error message, _ ->
-        workflow_err ~tool_name ~start_time message
-      | Ok (), Ok (), Some tag -> workflow_err ~tool_name ~start_time (bad_tag_message tag)
-      | Ok (), Ok (), None ->
-        with_wiki_lock ~tool_name ~start_time ctx (fun () ->
-          let path = page_path ~base_path:ctx.base_path page in
-          if not (Sys.file_exists path)
-          then
-            workflow_err ~tool_name ~start_time
-              (sprintf "No page named \"%s\". Create it with masc_wiki_create." page)
-          else
-            match In_channel.with_open_text path In_channel.input_all with
-            | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-            | exception exn ->
-              runtime_err ~tool_name ~start_time
-                (sprintf "Read error: %s" (Tool_error.to_string (Tool_error.of_exn exn)))
-            | content ->
-              (match parse_frontmatter content with
-               | Error error ->
-                 workflow_err ~tool_name ~start_time
-                   (sprintf
-                      "page \"%s\" cannot be updated: its header does not read (%s)"
-                      page
-                      (frontmatter_error_to_string error))
-               | Ok current when current.revision <> base_revision ->
-                 stale_revision ~tool_name ~start_time ~page ~base_revision
-                   ~current_revision:current.revision ~body:(page_body content)
-               | Ok current ->
-                 let revision = current.revision + 1 in
-                 let tags = Option.value new_tags ~default:current.tags in
-                 let content =
-                   render_page
-                     ~title:(Option.value new_title ~default:current.title)
-                     ~summary:(Option.value new_summary ~default:current.summary)
-                     ~source:current.source ~author:current.author
-                     ~created:current.created ~updated:(today ()) ~revision ~tags ~body
-                 in
-                 write_page ~tool_name ~start_time ctx ~path ~content
-                   ~action:Wiki_journal.Updated ~revision ~page ~note
-                   ~written:(sprintf "Updated wiki page %s to revision %d" page revision)))
-    end
+  let ( let* ) = Result.bind in
+  (* A title or summary the caller left out keeps the current one. One that
+     was sent has to be a header value. *)
+  let kept_or_new name =
+    match Json_util.get_string args name with
+    | None -> Ok None
+    | Some value ->
+      (match Line.of_string value with
+       | Ok line -> Ok (Some line)
+       | Error Line.Blank ->
+         Error (sprintf "%s may not be empty; omit it to keep the current one" name)
+       | Error (Line.Spans_lines | Line.Outer_whitespace) ->
+         Result.map Option.some (line_arg name value))
+  in
+  let sent =
+    let* page =
+      validate_page_name raw_page
+      |> Result.map_error (page_name_error_to_string raw_page)
+    in
+    let* base_revision =
+      Option.to_result ~none:"base_revision is required"
+        (Json_util.get_int args "base_revision")
+    in
+    let* () = if String.equal body "" then Error "body is required" else Ok () in
+    let* note =
+      line_arg "note" (Json_util.get_string args "note" |> Option.value ~default:"")
+    in
+    (* The log line names who made the change. *)
+    let* editor =
+      caller_name ctx ~missing:"the caller has no agent name to write in the log"
+    in
+    (* [source] says what kind of work the page first came from. *)
+    let* () =
+      if has_field args "source" then Error "source cannot change on update" else Ok ()
+    in
+    let* new_title = kept_or_new "title" in
+    let* new_summary = kept_or_new "summary" in
+    let* new_tags = tags_arg args in
+    Ok (page, base_revision, note, editor, new_title, new_summary, new_tags)
+  in
+  match sent with
+  | Error message -> workflow_err ~tool_name ~start_time message
+  | Ok (page, base_revision, note, editor, new_title, new_summary, new_tags) ->
+    with_wiki_lock ~tool_name ~start_time ctx (fun () ->
+      let path = page_path ~base_path:ctx.base_path page in
+      if not (Sys.file_exists path)
+      then
+        workflow_err ~tool_name ~start_time
+          (sprintf "No page named \"%s\". Create it with masc_wiki_create." page)
+      else
+        match In_channel.with_open_text path In_channel.input_all with
+        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+        | exception exn ->
+          runtime_err ~tool_name ~start_time
+            (sprintf "Read error: %s" (Tool_error.to_string (Tool_error.of_exn exn)))
+        | content ->
+          (match parse_frontmatter content with
+           | Error error ->
+             workflow_err ~tool_name ~start_time
+               (sprintf
+                  "page \"%s\" cannot be updated: its header does not read (%s)"
+                  page
+                  (frontmatter_error_to_string error))
+           | Ok current when current.revision <> base_revision ->
+             stale_revision ~tool_name ~start_time ~page ~base_revision
+               ~current_revision:current.revision ~body:(page_body content)
+           | Ok current ->
+             let revision = current.revision + 1 in
+             let content =
+               render_page
+                 { current with
+                   title = Option.value new_title ~default:current.title
+                 ; summary = Option.value new_summary ~default:current.summary
+                 ; revision
+                 ; tags = Option.value new_tags ~default:current.tags
+                 }
+                 ~updated:(today ()) ~body
+             in
+             write_page ~tool_name ~start_time ctx ~path ~content
+               ~action:Wiki_journal.Updated ~revision ~page ~author:editor ~note
+               ~written:(sprintf "Updated wiki page %s to revision %d" page revision)))
 
 (* Search pages *)
 let handle_search ~tool_name ~start_time ctx args : Tool_result.result =
@@ -622,7 +743,8 @@ let handle_search ~tool_name ~start_time ctx args : Tool_result.result =
         let content_lower = String.lowercase_ascii content in
         if string_contains ~needle:query_lower content_lower then
           match parse_frontmatter content with
-          | Ok fm -> Some (sprintf "- **%s** %s" fm.title (Filename.basename path))
+          | Ok fm ->
+            Some (sprintf "- **%s** %s" (fm.title :> string) (Filename.basename path))
           | Error error -> Some (sprintf "- %s" (describe_unreadable path error))
         else None
       with Sys_error _ -> None

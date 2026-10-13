@@ -8021,14 +8021,24 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
          Config_dir_resolver.keepers_dir_for_base_path
            ~base_path:config.base_path
        in
-       let snapshot_path =
-         Masc.Keeper_memory_os_current.path_for_keepers_dir
-           ~keepers_dir
-           ~keeper_id:meta.name
-       in
-       (* A directory at the canonical snapshot path forces the writable
-          producer to report its exact unknown-effect persistence failure. *)
-       Fs_compat.mkdir_p snapshot_path;
+       (* An ordinary observation is saved to the pending admission queue while
+          the Librarian runs (the default), and to the current snapshot only
+          when it is off or the write is source-bound. A directory at the
+          canonical path of either store makes that store's open for writing
+          fail whatever user the test runs as, so the writable producer
+          reports its exact unknown-effect persistence failure whichever
+          route the write takes (pending_admission_persistence_failed or
+          persistence_failed). A directory at the snapshot path alone no
+          longer fails the default route: the write succeeds into the queue. *)
+       List.iter
+         (fun path -> Fs_compat.mkdir_p path)
+         [ Masc.Keeper_memory_os_current.path_for_keepers_dir
+             ~keepers_dir
+             ~keeper_id:meta.name
+         ; Masc.Keeper_memory_admission_queue.path
+             ~keepers_dir
+             ~keeper_id:meta.name
+         ];
        let skill_catalog =
          skill_catalog_of_composition ~name:"unknown-write-before-post" unknown_effect_terminal_failure_composition
        in

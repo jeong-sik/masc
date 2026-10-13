@@ -309,7 +309,16 @@ let clear_matching_registry_recovery ~base_path ~keeper_name ~runtime_id ~recove
           when String.equal current_runtime_id runtime_id
                && String.equal current_recovery_id recovery_id ->
           { current with last_failure_reason = None }
-        | Some _ | None -> current)
+        | Some
+            ( Keeper_registry.Official_client_recovery_required _
+            | Keeper_registry.Heartbeat_consecutive_failures _
+            | Keeper_registry.Turn_consecutive_failures _
+            | Keeper_registry.Provider_runtime_error _
+            | Keeper_registry.Turn_configuration_error _
+            | Keeper_registry.Fiber_unresolved _
+            | Keeper_registry.Exception _
+            | Keeper_registry.Operator_interrupt )
+        | None -> current)
     in
     (match result with
      | Keeper_registry.Exact_updated -> ()

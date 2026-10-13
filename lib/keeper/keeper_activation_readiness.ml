@@ -195,8 +195,28 @@ let classify_owner_execution_with
                ; _
                } ->
              Paused_dead (Runtime_terminal phase)
-           | Owner_registered { live_fiber = true; _ } -> Executable
-           | Owner_registered { live_fiber = false; _ } -> Recoverable)))
+           | Owner_registered
+               { phase =
+                   ( Keeper_state_machine.Offline
+                   | Keeper_state_machine.Running
+                   | Keeper_state_machine.Failing
+                   | Keeper_state_machine.Draining
+                   | Keeper_state_machine.Crashed
+                   | Keeper_state_machine.Restarting )
+               ; live_fiber = true
+               ; _
+               } -> Executable
+           | Owner_registered
+               { phase =
+                   ( Keeper_state_machine.Offline
+                   | Keeper_state_machine.Running
+                   | Keeper_state_machine.Failing
+                   | Keeper_state_machine.Draining
+                   | Keeper_state_machine.Crashed
+                   | Keeper_state_machine.Restarting )
+               ; live_fiber = false
+               ; _
+               } -> Recoverable)))
 ;;
 
 let classify_owner_execution =

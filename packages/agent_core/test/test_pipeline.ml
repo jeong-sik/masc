@@ -262,6 +262,99 @@ let transport_returning response =
   }
 ;;
 
+let test_provider_context_retention () =
+  List.iter (fun (kind, next_kind, signed, retained, duplicate_context) ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let captured = ref [] in
+  let response = pipeline_response Types.EndTurn in
+  let capture (request : Llm_provider.Llm_transport.completion_request) =
+    captured := request.messages :: !captured;
+    if signed then (
+      let source = Llm_provider.Reasoning_dialect.reasoning_source_for_provider_config
+          request.config |> Result.get_ok in
+      Ok { response with
+        content = [Types.Thinking {signature = Some "fixture-signature"; content = "fixture"};
+                   Types.Text "done"];
+        telemetry = Some {Types.default_inference_telemetry with reasoning_source = Some source} })
+    else Ok response
+  in
+  let transport =
+    { Llm_provider.Llm_transport.complete_sync = (fun request ->
+        { Llm_provider.Llm_transport.response = capture request; latency_ms = Some 0 });
+      complete_stream = (fun ?on_telemetry:_ ~on_event:_ request -> capture request) }
+  in
+  let hooks =
+    { Hooks.empty with before_turn_params = Some (function
+        | Hooks.BeforeTurnParams { turn = 0; current_params; _ } ->
+          Hooks.AdjustParams
+            { current_params with extra_system_context = Some "first request context" }
+        | _ -> Hooks.Continue) }
+  in
+  let options =
+    { Internal_agent.default_options with transport = Some transport; hooks;
+      provider_config = Some
+        { (Provider_mock.to_provider_config ()) with kind } }
+  in
+  let projection (messages : Types.message list) =
+    match duplicate_context, List.rev messages with
+    | true, last :: _ when
+        Types.Extra_system_context_provenance.classify last.metadata = Present ->
+      Ok (messages @ [last])
+    | _ -> Ok messages
+  in
+  let agent = Internal_agent.create ~net:env#net ~model_input_projection:projection
+      ~config:{ (Types.default_config ~model:"test-model") with max_tokens = Some 64 } ~options () in
+  Internal_agent.set_state agent
+    { (Internal_agent.state agent) with messages = [Types.user_msg "first"] };
+  let run agent api_strategy =
+    match run_pipeline_turn ~sw ~api_strategy agent with
+    | Ok _ -> ()
+    | Error error -> Alcotest.fail (Error.to_string error)
+  in
+  run agent Internal_pipeline.Sync;
+  let saved = (Internal_agent.state agent).messages in
+  let saved = List.map (fun message ->
+      Checkpoint.message_to_json message |> Checkpoint.message_of_json |> Result.get_ok) saved in
+  let has_historical = List.exists (fun (m : Types.message) ->
+    Types.Extra_system_context_provenance.classify m.metadata = Historical) saved in
+  Alcotest.(check bool) "retention follows the producing provider" retained has_historical;
+  Alcotest.(check int) "only Anthropic adds durable context"
+    (if retained then 3 else 2) (List.length saved);
+  let next_options = { options with provider_config = Some
+    { (Provider_mock.to_provider_config ()) with kind = next_kind } } in
+  let resumed = Internal_agent.create ~net:env#net
+      ~config:{ (Types.default_config ~model:"test-model") with max_tokens = Some 64 }
+      ~options:next_options () in
+  Internal_agent.set_state resumed
+    { (Internal_agent.state agent) with messages = saved @ [Types.user_msg "next"] };
+  run resumed (Internal_pipeline.Stream { on_event = ignore; on_telemetry = None });
+  match !captured with
+  | second :: first :: [] ->
+    let content messages = List.map (fun (m : Types.message) -> m.role, m.content) messages in
+    if retained then
+      Alcotest.(check bool) "Anthropic previous request stays an unchanged prefix" true
+        (List.take (List.length first) (content second) = content first)
+    else
+      Alcotest.(check bool) "other-provider continuation keeps its existing transcript" true
+        (second = saved @ [Types.user_msg "next"])
+  | _ -> Alcotest.fail "expected exactly two provider requests")
+    Llm_provider.Provider_config.[
+      Anthropic, Anthropic, true, true, false;
+      Anthropic, Anthropic, false, false, false;
+      Anthropic, Anthropic, false, false, true;
+      Kimi, Kimi, false, false, true;
+      OpenAI_compat, OpenAI_compat, false, false, true;
+      Ollama, Ollama, false, false, true;
+      Gemini, Gemini, false, false, true;
+      Glm, Glm, false, false, true;
+      Anthropic, Kimi, true, true, false;
+      Anthropic, OpenAI_compat, true, true, false;
+      Anthropic, Ollama, true, true, false;
+      Anthropic, Gemini, true, true, false;
+      Anthropic, Glm, true, true, false]
+;;
+
 let make_pipeline_test_agent ~net ~response =
   let transport = transport_returning response in
   let options =
@@ -1711,6 +1804,180 @@ let test_terminal_disposition_observes_cancellation () =
      Alcotest.failf "unexpected cancellation exception: %s" (Printexc.to_string exn)
    | Ok _ | Error _ -> Alcotest.fail "cancellation did not propagate");
   check_terminal_disposition ~outcome:"cancelled" ~recovery:"retire" !terminal_disposition
+;;
+
+exception Native_parent_interrupt
+
+type native_cancel_source = Parent_switch | Nested_context | Losing_race
+type native_cancel_boundary = Before_callback | Provider_wait | Tool_effect
+
+(* Raising Cancelled directly does not cancel the writer's parent context.
+   Exercise real cancellation while the provider or a tool is in flight, then
+   read the canonical journal after the caller has finished unwinding. *)
+let test_native_parent_cancellation ?(resumed = false) source boundary () =
+  with_execution_test_dir "agent_core-native-parent-cancel-"
+  @@ fun ~env ~sw ~runtime ~dir ->
+  let locator = ref None in
+  let terminal_dispositions = ref [] in
+  let provider_calls = ref 0 in
+  let tool_effects = ref 0 in
+  let caller_binding = Eio.Fiber.create_key () in
+  let interrupt_before_callback = ref None in
+  let interrupted_publication_completed = ref false in
+  let resume =
+    if not resumed then None
+    else
+      let internal_runtime =
+        match Internal_runtime.create ~sw ~domain_mgr:(Eio.Stdenv.domain_mgr env)
+            ~domain_count:1 with
+        | Ok runtime -> runtime
+        | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error)
+      in
+      let codec = Internal_codec.of_runtime internal_runtime in
+      let saved =
+        match Internal_writer.run ~codec ~dir (fun ~sw:_ writer ->
+          match Internal_scope.start ~writer ~agent_name:"native-parent-cancel" with
+          | Ok scope -> Internal_scope.scope_locator_to_yojson
+              (Internal_scope.scope_locator scope)
+          | Error error -> Alcotest.fail (Internal_scope.error_to_string error)) with
+        | Ok locator -> locator
+        | Error error -> Alcotest.fail (Internal_writer.scope_failure_to_string error)
+      in
+      match Agent.execution_locator_of_yojson saved with
+      | Ok locator -> Some locator
+      | Error detail -> Alcotest.fail detail
+  in
+  let execution_store =
+    Agent.execution_store ~runtime ~dir ?resume
+      ~on_scope_ready:(fun value ->
+        locator := Some value;
+        (match boundary with
+         | Before_callback ->
+           (match !interrupt_before_callback with
+            | Some interrupt ->
+              interrupt ();
+              interrupted_publication_completed := true
+            | None -> Alcotest.fail "pre-callback cancellation is not installed")
+         | Provider_wait | Tool_effect -> ());
+        Ok ())
+      ~on_terminal_disposition:(fun disposition ->
+        Eio.Fiber.check ();
+        terminal_dispositions := disposition :: !terminal_dispositions;
+        Ok ()) ()
+  in
+  let run ~sw interrupt =
+    interrupt_before_callback := Some interrupt;
+    let response () =
+      incr provider_calls;
+      Alcotest.(check bool) "provider retains the caller's fiber binding" true
+        (Eio.Fiber.get caller_binding = Some ());
+      Alcotest.(check bool) "provider retains its native scope" true
+        (Option.is_some (Internal.Execution_context.agent_scope ()));
+      match boundary with
+      | Before_callback -> Alcotest.fail "pre-callback cancellation dispatched a provider"
+      | Provider_wait ->
+        interrupt ();
+        Alcotest.fail "provider ignored cancellation"
+      | Tool_effect ->
+        Provider_mock.tool_use_response
+          ~tool_name:"interrupted_effect" ~tool_input:(`Assoc []) () []
+    in
+    let transport : Llm_provider.Llm_transport.t =
+      { complete_sync = (fun _ ->
+          { Llm_provider.Llm_transport.response=Ok (response ()); latency_ms=Some 0 })
+      ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok (response ()))
+      }
+    in
+    let tool = Tool.create ~name:"interrupted_effect"
+        ~description:"Effect whose completion is interrupted" ~parameters:[]
+        (fun _ ->
+          incr tool_effects;
+          Alcotest.(check bool) "tool retains the caller's fiber binding" true
+            (Eio.Fiber.get caller_binding = Some ());
+          Alcotest.(check bool) "tool retains its child execution authority" true
+            (Option.is_some (Internal.Execution_context.child_scope_factory ()));
+          interrupt ();
+          Alcotest.fail "tool ignored cancellation")
+    in
+    let agent = Agent.create ~net:(Eio.Stdenv.net env)
+        ~config:{(Types.default_config ~model:"test-model") with name="native-parent-cancel"}
+        ~tools:[tool]
+        ~options:{Agent.default_options with transport=Some transport;
+          provider_config=Some (Provider_mock.to_provider_config ())} ()
+    in
+    if resumed then Agent.set_state agent
+        {(Agent.state agent) with messages=[Types.user_msg "wait for cancellation"]};
+    match Eio.Fiber.with_binding caller_binding () (fun () ->
+      Agent.run ~sw ~execution_store agent "wait for cancellation") with
+    | Ok _ | Error _ -> Alcotest.fail "cancelled native call returned normally"
+  in
+  (match source with
+   | Parent_switch ->
+     (match Eio.Switch.run (fun call_sw ->
+        run ~sw:call_sw (fun () ->
+          Eio.Switch.fail call_sw Native_parent_interrupt;
+          Eio.Fiber.yield ())) with
+      | () -> Alcotest.fail "parent switch cancellation disappeared"
+      | exception Native_parent_interrupt -> ())
+   | Nested_context ->
+     (match Eio.Cancel.sub (fun context ->
+        run ~sw (fun () ->
+          Eio.Cancel.cancel context Native_parent_interrupt;
+          Eio.Fiber.yield ())) with
+      | () -> Alcotest.fail "nested cancellation disappeared"
+      | exception Eio.Cancel.Cancelled Native_parent_interrupt -> ())
+   | Losing_race ->
+     let started, notify_started = Eio.Promise.create () in
+     Eio.Fiber.first
+       (fun () -> run ~sw (fun () ->
+          Eio.Promise.resolve notify_started ();
+          Eio.Fiber.await_cancel ()))
+       (fun () -> Eio.Promise.await started));
+  Alcotest.(check int) "terminal callback runs exactly once" 1
+    (List.length !terminal_dispositions);
+  (match boundary with
+   | Before_callback ->
+     Alcotest.(check bool) "locator publication finishes before cancelled callback admission"
+       true !interrupted_publication_completed
+   | Provider_wait | Tool_effect -> ());
+  let disposition = match !terminal_dispositions with
+    | [disposition] -> disposition
+    | _ -> Alcotest.fail "missing or repeated terminal disposition"
+  in
+  let recovery = match boundary with
+    | Before_callback | Provider_wait -> "retire"
+    | Tool_effect -> "operator_repair:effect_outcome_unknown"
+  in
+  check_terminal_disposition ~outcome:"cancelled" ~recovery (Some disposition);
+  Alcotest.(check int) "provider dispatch follows admission"
+    (match boundary with Before_callback -> 0 | Provider_wait | Tool_effect -> 1)
+    !provider_calls;
+  Alcotest.(check int) "tool effect is never repeated"
+    (match boundary with Before_callback | Provider_wait -> 0 | Tool_effect -> 1) !tool_effects;
+  (match resume, !locator with
+   | None, Some _ -> ()
+   | Some expected, Some actual ->
+     Alcotest.(check bool) "resume preserves the admitted locator" true
+       (Agent.execution_locator_to_yojson expected = Agent.execution_locator_to_yojson actual)
+   | None, None | Some _, None -> Alcotest.fail "native locator was not published");
+  let projection = match !locator with
+    | None -> Alcotest.fail "native locator was not published"
+    | Some locator ->
+      (match Agent.open_execution_projection ~runtime ~dir locator with
+       | Ok projection -> projection
+       | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error))
+  in
+  let terminal = match Agent.read_execution_terminal projection with
+    | Ok (Some terminal) -> terminal
+    | Ok None -> Alcotest.fail "parent cancellation left an open native journal"
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error)
+  in
+  Alcotest.(check bool) "callback agrees with canonical terminal evidence" true
+    (terminal.disposition = disposition);
+  Alcotest.(check bool) "unknown effect keeps its admitted tool attempt"
+    (boundary = Tool_effect) terminal.has_tool_attempts;
+  Alcotest.(check int) "cancellation invents no settled tool result" 0
+    (List.length terminal.settled_tool_results)
 ;;
 
 let test_agent_run_uses_durable_tool_authority () =
@@ -3888,6 +4155,10 @@ let () =
             `Quick
             test_pipeline_sends_exact_supplied_tools
         ; Alcotest.test_case
+            "provider context retention survives sync, checkpoint and stream"
+            `Quick
+            test_provider_context_retention
+        ; Alcotest.test_case
             "effective provider config drives lifecycle and pricing"
             `Quick
             test_effective_provider_config_drives_lifecycle_and_pricing
@@ -4025,6 +4296,30 @@ let () =
             "terminal disposition observes cancellation"
             `Quick
             test_terminal_disposition_observes_cancellation
+        ; Alcotest.test_case
+            "parent switch cancellation commits native terminal"
+            `Quick
+            (test_native_parent_cancellation Parent_switch Provider_wait)
+        ; Alcotest.test_case
+            "cancellation before fresh callback commits native terminal"
+            `Quick
+            (test_native_parent_cancellation Parent_switch Before_callback)
+        ; Alcotest.test_case
+            "cancellation before resumed callback commits native terminal"
+            `Quick
+            (test_native_parent_cancellation ~resumed:true Parent_switch Before_callback)
+        ; Alcotest.test_case
+            "nested cancellation retains the caller context"
+            `Quick
+            (test_native_parent_cancellation Nested_context Provider_wait)
+        ; Alcotest.test_case
+            "losing provider race commits native terminal"
+            `Quick
+            (test_native_parent_cancellation Losing_race Provider_wait)
+        ; Alcotest.test_case
+            "parent cancellation preserves unknown tool effects"
+            `Quick
+            (test_native_parent_cancellation Parent_switch Tool_effect)
         ] )
     ]
 ;;

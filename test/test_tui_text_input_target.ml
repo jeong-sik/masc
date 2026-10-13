@@ -32,6 +32,7 @@ let target =
       | Some Tui_types.Text_browser_url -> "browser-url"
       | Some Tui_types.Text_ask_answer -> "ask-answer"
       | Some Tui_types.Text_board_draft -> "board-draft"
+      | Some Tui_types.Text_board_attach_path -> "board-attach-path"
       | Some Tui_types.Text_fusion_launch -> "fusion-launch"
       | Some Tui_types.Text_goal_drop_reason -> "goal-drop-reason"))
     ( = )
@@ -382,6 +383,20 @@ let test_a_new_lane_name_claims_typing_on_runtime () =
   check target "another surface" None (resolved state)
 ;;
 
+(* While the attach path is being typed, typed and pasted text is the path:
+   a pasted path that landed in the draft would be published as post text. *)
+let test_the_attach_path_input_claims_over_the_board_draft () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Board;
+  state.Tui_types.board_mode <- Tui_types.Board_compose;
+  state.Tui_types.board_compose_attach_input <- Some (Buffer.create 16);
+  check target "typing a path" (Some Tui_types.Text_board_attach_path)
+    (resolved state);
+  state.Tui_types.board_compose_attach_input <- None;
+  check target "back to the draft" (Some Tui_types.Text_board_draft)
+    (resolved state)
+;;
+
 let test_the_palette_claims_over_a_board_draft () =
   (* The palette draws over the board pane, and its key handler runs first.
      A paste follows the characters. *)
@@ -679,6 +694,8 @@ let () =
             test_a_board_post_being_written_claims_its_draft;
           test_case "the palette claims over a board draft" `Quick
             test_the_palette_claims_over_a_board_draft;
+          test_case "the attach path input claims over the board draft" `Quick
+            test_the_attach_path_input_claims_over_the_board_draft;
           test_case "a new lane name claims typing on Runtime" `Quick
             test_a_new_lane_name_claims_typing_on_runtime;
           test_case "the runtime picker filter claims once opened" `Quick

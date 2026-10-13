@@ -289,7 +289,8 @@ let narrow_param_types types =
   match List.sort_uniq compare types with
   | [ param_type ] -> Some param_type
   | [ Integer; Number ] | [ Number; Integer ] -> Some Number
-  | [] | _ :: _ :: _ -> None
+  | [] | (String)::_::_ | (Integer)::_::_ | (Number)::_::_ | (Boolean)::_::_ | (Array)::_::_
+  | (Object)::_::_ -> None
 ;;
 
 let property_type_from_union name values =

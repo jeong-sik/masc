@@ -55,7 +55,8 @@ let call t session method_ suffix body =
   let result = t.request ~method_ ~path:(path session suffix) ~body in
   (match result with
    | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; release_resources session
-   | Ok _ | Error _ -> ());
+   | Ok _ | Error (Transport _) | Error (Protocol _)
+   | Error (Remote { code = No_such_window | No_such_alert | Unexpected_alert_open | Other _; _ }) -> ());
   result
 (* State changes below never yield: cancellation can interrupt remote I/O but
    cannot leave a half-written local session. Explicit ownership releases the
@@ -78,7 +79,8 @@ let close_unlocked ?request t = match t.session with
     let result = request ~method_:`DELETE ~path:(path session "") ~body:None in
     match result with
     | Ok _ | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; release_resources session; Ok ()
-    | Error error -> Error error
+    | Error ((Transport _ | Protocol _
+             | Remote { code = No_such_window | No_such_alert | Unexpected_alert_open | Other _; _ }) as error) -> Error error
 let close ?request t = with_session_lock t (fun () -> close_unlocked ?request t)
 let session t = match t.session with
   | Some session ->
@@ -141,7 +143,8 @@ let dialog_text t session =
   | Ok (`String text) -> Ok (`Assoc ["open",`Bool true;"text",`String text])
   | Error (Remote {code=No_such_alert;_}) -> Ok (`Assoc ["open",`Bool false])
   | Ok _ -> Error (Protocol "invalid dialog text response")
-  | Error error -> Error error
+  | Error ((Transport _ | Protocol _
+           | Remote { code = Invalid_session_id | No_such_window | Unexpected_alert_open | Other _; _ }) as error) -> Error error
 let element_call perform_effect id suffix body =
   perform_effect `POST ("/element/" ^ Uri.pct_encode id ^ suffix) (Some body)
 let interact t session ~perform_effect = function
@@ -204,7 +207,7 @@ let execute_action t action =
         (match handles with
          | `List (`String handle :: _) -> select t session handle
          | _ -> Error (Protocol "no surviving browser window; reopen the session"))
-      | result -> result in
+      | (Error (Remote { code = (Invalid_session_id | (No_such_alert | (Unexpected_alert_open | Other _)));_}) | Error (Transport _ | Protocol _) | Ok _) as result -> result in
     let* created = perform_effect session `POST "/window/new" (Some (`Assoc ["type",`String "tab"])) in
     let* handle = string_field "handle" created in
     let id = tab_id t session handle in
@@ -218,7 +221,8 @@ let execute_action t action =
        (* The tab was created, and its document is waiting on a user prompt.
           Retain the identity without claiming that navigation completed. *)
        Ok (`Assoc ["tabId",`Int id;"navigation",`String "blocked_by_dialog";"requested_url",`String url])
-     | Error error -> Error (error_at_tab id error))
+     | Error ((Transport _ | Protocol _
+              | Remote { code = Invalid_session_id | No_such_window | No_such_alert | Other _; _ }) as error) -> Error (error_at_tab id error))
   | Browser_lane.Action.On_tab {tab_id=id;frame_path;interaction} ->
     let* session = session t in
     with_tab t session (Some id) (fun () ->
@@ -229,7 +233,10 @@ let execute_action t action =
         session.handles <- List.filter (fun (_,known) -> known <> id) session.handles;
         (match result with `List [] -> t.session <- None; release_resources session | _ -> ());
         Ok (`Assoc ["tabId",`Int id;"closed",`Bool true])
-      | _ ->
+      | Browser_lane.Action.Dismiss_dialog | Browser_lane.Action.Back | Browser_lane.Action.Forward
+      | Browser_lane.Action.Reload | Browser_lane.Action.Click _ | Browser_lane.Action.Fill _
+      | Browser_lane.Action.Press _ | Browser_lane.Action.Select _ | Browser_lane.Action.Scroll _
+      | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _ ->
         (* Do not issue another fallible browser request after an effect.
            The caller observes the resulting page with a separate read. *)
         Ok (`Assoc ["tabId",`Int id;"performed",`Bool true;"result",result]))
@@ -401,13 +408,19 @@ let execute_unlocked t = function
           let button kind = `Assoc ["type",`String kind; "button",`Int 0] in
           let moves = match action with
             | Browser_lane.Drag {to_;_} -> [move to_]
-            | _ -> [] in
+            | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
+            | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
+            | Browser_lane.Scroll_at _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
+            | Browser_lane.Fill_node _ -> [] in
           let pointer_actions = `Assoc ["actions",`List [`Assoc [
             "type",`String "pointer"; "id",`String "masc-browser-pointer";
             "parameters",`Assoc ["pointerType",`String "mouse"];
             "actions",`List (match action with
               | Browser_lane.Hover_at _ -> [move point]
-              | _ -> [move point;button "pointerDown"] @ moves @ [button "pointerUp"])]]] in
+              | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
+              | Browser_lane.Scroll _ | Browser_lane.Click_at _ | Browser_lane.Scroll_at _
+              | Browser_lane.Drag _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
+              | Browser_lane.Fill_node _ -> [move point;button "pointerDown"] @ moves @ [button "pointerUp"])]]] in
           let actions = match action with
             | Browser_lane.Scroll_at {x;y;_} -> `Assoc ["actions",`List [`Assoc [
                 "type",`String "wheel";"id",`String "masc-browser-wheel";
@@ -416,7 +429,10 @@ let execute_unlocked t = function
                   "x",`Int (int_of_float (point.x *. viewport.width));
                   "y",`Int (int_of_float (point.y *. viewport.height));
                   "deltaX",`Int x;"deltaY",`Int y]]]]]
-            | _ -> pointer_actions in
+            | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
+            | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
+            | Browser_lane.Drag _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
+            | Browser_lane.Fill_node _ -> pointer_actions in
           (* Release even if transport cancellation interrupts a pressed gesture.
              The enclosing session lock remains held throughout cleanup. *)
           let applied, released = match action with
@@ -424,8 +440,9 @@ let execute_unlocked t = function
                 (* Hover and wheel actions do not press buttons. Session acquisition
                    already recovers any older pending pointer release. *)
                 call t session `POST "/actions" (Some actions), Ok ()
-            | _ ->
-            let released = ref None in
+            | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
+            | Browser_lane.Scroll _ | Browser_lane.Click_at _ | Browser_lane.Drag _
+            | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> let released = ref None in
             let applied = Eio.Switch.run (fun sw ->
               Eio.Switch.on_release sw (fun () ->
                 let result = call t session `DELETE "/actions" None in
@@ -441,9 +458,11 @@ let execute_unlocked t = function
           let* url_before = string_field "url" before in
           (match after with
            | `Assoc fields -> Ok (`Assoc (("urlBefore",`String url_before) ::
-               ("action",`String (match action with Browser_lane.Hover_at _ -> "hover_at" | Browser_lane.Click_at _ -> "click_at" | Browser_lane.Scroll_at _ -> "scroll_at" | _ -> "drag")) :: fields))
+               ("action",`String (Browser_lane.interaction_verb action)) :: fields))
            | _ -> Error (Protocol "invalid pointer receipt")))
-        | _ -> script t session (Browser_scene_script.runtime ^ Browser_interaction.script) [args]
+        | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
+        | Browser_lane.Scroll _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
+        | Browser_lane.Fill_node _ -> script t session (Browser_scene_script.runtime ^ Browser_interaction.script) [args]
       in
       match result with
       | `Assoc fields -> Ok (`Assoc (("tabId", `Int tab_id) :: fields))
@@ -472,7 +491,7 @@ let execute_unlocked t = function
     let* handles = call t session `GET "/window/handles" None in
     let* current = match call t session `GET "/window" None with
       | Error (Remote { code = No_such_window; _ }) -> Ok `Null
-      | result -> result in
+      | (Error (Remote { code = (Invalid_session_id | (No_such_alert | (Unexpected_alert_open | Other _)));_}) | Error (Transport _ | Protocol _) | Ok _) as result -> result in
     match current, handles with
     | (`String _ | `Null), `List handles ->
       let original = match current with `String handle -> Some handle | _ -> None in
@@ -501,7 +520,7 @@ let execute_unlocked t = function
         | Some handle ->
           (match select t session handle with
            | Error (Remote { code = No_such_window; _ }) -> Ok `Null
-           | result -> result) in
+           | (Error (Remote { code = (Invalid_session_id | (No_such_alert | (Unexpected_alert_open | Other _)));_}) | Error (Transport _ | Protocol _) | Ok _) as result -> result) in
       (match result, restored with
        | Error error, _ | _, Error error -> Error error
        | Ok tabs, Ok _ -> Ok tabs)
@@ -518,7 +537,19 @@ let execute t verb =
        | Ok data, _ -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])
        | Error error, Not_started -> Browser_lane.Rejected_before_effect (error_message error)
        | Error error, Started -> Browser_lane.Refused (error_message error))
-    | _ ->
+    | Browser_lane.Tabs_list | Browser_lane.Page_read _ | Browser_lane.Page_document _
+    | Browser_lane.Page_downloads _ | Browser_lane.Page_capture _ | Browser_lane.Page_scene _
+    | Browser_lane.Page_interact
+        { action =
+            ( Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Scroll _
+            | Browser_lane.Hover_at _ | Browser_lane.Click_at _
+            | Browser_lane.Scroll_at _ | Browser_lane.Drag _
+            | Browser_lane.Follow_link _ | Browser_lane.Click_node _
+            | Browser_lane.Fill_node _ )
+        ; _ }
+    | Browser_lane.Session_open _ | Browser_lane.Session_close
+    | Browser_lane.Session_status | Browser_lane.Page_goto _ | Browser_lane.Page_elements _
+    | Browser_lane.Page_context _ ->
       match execute_unlocked t verb with
       | Ok (`Assoc fields as data) ->
           (match verb, List.assoc_opt "interactionFailure" fields with
@@ -528,7 +559,9 @@ let execute t verb =
                (match List.assoc_opt "effectStarted" failure with
                 | Some (`Bool false) -> Browser_lane.Rejected_before_effect message
                 | _ -> Browser_lane.Refused message)
-           | _ -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data]))
+           | (Browser_lane.Page_interact _, Some (`Null | (`List _ | (`Bool _ | (`Float _ | (`Int _ | (`Intlit _ | `String _)))))))
+           | (Browser_lane.Page_interact _, None)
+           | ((Browser_lane.Tabs_list | (Browser_lane.Session_close | (Browser_lane.Session_status | (Browser_lane.Page_read _ | (Browser_lane.Page_document _ | (Browser_lane.Page_downloads _ | (Browser_lane.Page_capture _ | (Browser_lane.Page_scene _ | (Browser_lane.Session_open _ | (Browser_lane.Page_goto _ | (Browser_lane.Page_elements _ | (Browser_lane.Page_act _ | (Browser_lane.Page_context _ | (Browser_lane.Page_instruct _ | (Browser_lane.Page_locate _ | Browser_lane.Page_extract _))))))))))))))), _) -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data]))
       | Ok data -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])
       | Error error -> Browser_lane.Refused (error_message error))
 

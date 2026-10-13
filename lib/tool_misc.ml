@@ -165,7 +165,37 @@ let dispatch ?dos_admission ?(lane_access = Lane_addon_sources.Unauthenticated) 
   | Some (Tool_schemas_misc.Misc_lane_declaration_read | Tool_schemas_misc.Misc_lane_declaration_save as operation) ->
       let result = match operation with
         | Tool_schemas_misc.Misc_lane_declaration_read -> Lane_addon_runtime.read_declaration ~access:lane_access ~config:ctx.config args
-        | _ -> Lane_addon_runtime.save_declaration ~access:lane_access ~config:ctx.config args in
+        | Tool_schemas_misc.Misc_lane_declaration_save | Tool_schemas_misc.Misc_lane_updates
+        | Tool_schemas_misc.Misc_lane_attach | Tool_schemas_misc.Misc_lane_inspect
+        | Tool_schemas_misc.Misc_lane_observe | Tool_schemas_misc.Misc_lane_slice
+        | Tool_schemas_misc.Misc_lane_detach | Tool_schemas_misc.Misc_lane_evidence
+        | Tool_schemas_misc.Misc_lane_act | Tool_schemas_misc.Misc_lane_action_status
+        | Tool_schemas_misc.Misc_ask | Tool_schemas_misc.Misc_ask_status
+        | Tool_schemas_misc.Misc_ask_withdraw | Tool_schemas_misc.Misc_config
+        | Tool_schemas_misc.Misc_dashboard | Tool_schemas_misc.Misc_gc
+        | Tool_schemas_misc.Misc_keeper_waiting_inventory | Tool_schemas_misc.Misc_tool_help
+        | Tool_schemas_misc.Misc_web_fetch | Tool_schemas_misc.Misc_web_search
+        | Tool_schemas_misc.Misc_browser_tabs | Tool_schemas_misc.Misc_browser_read
+        | Tool_schemas_misc.Misc_browser_session | Tool_schemas_misc.Misc_browser_goto
+        | Tool_schemas_misc.Misc_browser_act | Tool_schemas_misc.Misc_browser_interact
+        | Tool_schemas_misc.Misc_browser_instruct | Tool_schemas_misc.Misc_msx_load
+        | Tool_schemas_misc.Misc_msx_eject | Tool_schemas_misc.Misc_msx_export_disk
+        | Tool_schemas_misc.Misc_msx_save | Tool_schemas_misc.Misc_msx_restore
+        | Tool_schemas_misc.Misc_msx_change_disk | Tool_schemas_misc.Misc_msx_screen
+        | Tool_schemas_misc.Misc_msx_meta | Tool_schemas_misc.Misc_msx_checkpoint_info
+        | Tool_schemas_misc.Misc_msx_press | Tool_schemas_misc.Misc_msx_step
+        | Tool_schemas_misc.Misc_msx_step_until_change | Tool_schemas_misc.Misc_msx_peek
+        | Tool_schemas_misc.Misc_msx_ram_diff | Tool_schemas_misc.Misc_portrait_read
+        | Tool_schemas_misc.Misc_candle_balance | Tool_schemas_misc.Misc_candle_catalog
+        | Tool_schemas_misc.Misc_candle_purchase | Tool_schemas_misc.Misc_candle_equip
+        | Tool_schemas_misc.Misc_candle_gift | Tool_schemas_misc.Misc_dos_load
+        | Tool_schemas_misc.Misc_dos_meta | Tool_schemas_misc.Misc_dos_inventory
+        | Tool_schemas_misc.Misc_dos_eject | Tool_schemas_misc.Misc_dos_screen
+        | Tool_schemas_misc.Misc_dos_step | Tool_schemas_misc.Misc_dos_press
+        | Tool_schemas_misc.Misc_dos_click | Tool_schemas_misc.Misc_dos_type
+        | Tool_schemas_misc.Misc_dos_peek | Tool_schemas_misc.Misc_play_room
+        | Tool_schemas_misc.Misc_dos_pass | Tool_schemas_misc.Misc_dos_save
+        | Tool_schemas_misc.Misc_dos_restore -> Lane_addon_runtime.save_declaration ~access:lane_access ~config:ctx.config args in
       Some (match result with
         | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
         | Error error ->

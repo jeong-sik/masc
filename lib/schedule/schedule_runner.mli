@@ -124,6 +124,9 @@ val dispatch_status_to_string : dispatch_status -> string
 
 val signals_dir : Workspace_utils.config -> string
 
+val signal_store : Workspace_utils.config -> Dated_jsonl.t
+(** The wake signal store under {!signals_dir}. *)
+
 val wake_signal_of_yojson : Yojson.Safe.t -> (wake_signal, string) result
 
 val hold_reason_to_json : hold_reason -> Yojson.Safe.t

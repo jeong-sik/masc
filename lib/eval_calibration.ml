@@ -3,7 +3,7 @@ module StringMap = Set_util.StringMap
 (** Eval_calibration — Verdict logging and evaluator calibration loop.
 
     Persists every anti-rationalization verdict to a date-partitioned JSONL
-    store ([data/verdicts/YYYY-MM/DD.jsonl]).  Supports human-label
+    store ([.masc/verdicts/YYYY-MM/DD.jsonl]).  Supports human-label
     attachment for ground-truth tracking and divergence analysis to
     generate few-shot calibration examples for prompt improvement.
 
@@ -102,14 +102,16 @@ type calibration_example = {
 
 let store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 
-let base_path () =
-  Filename.concat (Env_config_core.base_path ()) "data/verdicts"
+let location ~base_path =
+  Dated_jsonl.Store.base ~base_path Dated_jsonl.Store.Base.Verdicts
 
 let rec get_store () =
   match Atomic.get store_ref with
   | Some s -> s
   | None ->
-    let s = Dated_jsonl.create ~base_dir:(base_path ()) () in
+    let s =
+      Dated_jsonl.open_store (location ~base_path:(Env_config_core.base_path ()))
+    in
     if Atomic.compare_and_set store_ref None (Some s)
     then s
     else
@@ -120,8 +122,8 @@ let rec get_store () =
 
 module For_testing = struct
   let reset_store () = Atomic.set store_ref None
-  let set_store ~base_dir =
-    Atomic.set store_ref (Some (Dated_jsonl.create ~base_dir ()))
+  let set_store ~base_path =
+    Atomic.set store_ref (Some (Dated_jsonl.open_store (location ~base_path)))
 end
 
 

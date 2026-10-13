@@ -85,9 +85,7 @@ let rec jsonl_rows_under path =
 let reaction_ledger_dir ~base_path ~keeper_name =
   (* Ask the writer where it writes. Rebuilding the path here made a storage
      generation bump silently point the test at an empty old namespace. *)
-  Masc.Keeper_reaction_ledger.store_dir
-    ~masc_root:(Common.masc_dir_from_base_path ~base_path)
-    ~keeper_name
+  Masc.Keeper_reaction_ledger.store_dir ~base_path ~keeper_name
 ;;
 
 let write_malformed_reaction_ledger_row ~base_path ~keeper_name =
@@ -3767,9 +3765,7 @@ let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
   let result = tick_ok config ~now:201.0 in
   let stimulus_id = single_occurrence_id result in
   Dated_jsonl.append
-    (Dated_jsonl.create
-       ~base_dir:(reaction_ledger_dir ~base_path ~keeper_name)
-       ())
+    (Dated_jsonl.open_store (Masc.Keeper_reaction_ledger.location ~base_path ~keeper_name))
     (`Assoc
         [ "schema", `String Masc.Keeper_reaction_ledger.schema
         ; "record_kind", `String "reaction"

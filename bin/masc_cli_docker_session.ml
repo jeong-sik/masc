@@ -13,7 +13,8 @@ let actions distribution (observed:Account.observation) =
   match observed.state, distribution with
   | Account.Membership_required, (Prerequisites.Debian | Ubuntu) -> [Grant]
   | Account.Session_refresh_required, _ -> [Handoff]
-  | _ -> []
+  | (Account.Membership_required, Prerequisites.Other)
+  | ((Account.Group_missing | Account.Group_active), _) -> []
 let action_json action =
   let label,detail,admin = match action with
     | Grant -> "Allow this account to use Docker", Account.grant_detail, true

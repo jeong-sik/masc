@@ -518,11 +518,14 @@ let store_directories root =
          match Fs_compat.exact_path_kind ~follow:false path with
          | Fs_compat.Exact_kind Unix.S_DIR -> Ok (path :: paths)
          | Fs_compat.Exact_kind Unix.S_REG -> Ok paths
-         | Fs_compat.Exact_missing | Fs_compat.Exact_unknown
-         | Fs_compat.Exact_kind _ -> Error ("store entry cannot be inspected safely: " ^ path))
+         | Fs_compat.Exact_missing | Fs_compat.Exact_unknown | Fs_compat.Exact_kind (Unix.S_CHR)
+         | Fs_compat.Exact_kind (Unix.S_BLK) | Fs_compat.Exact_kind (Unix.S_LNK)
+         | Fs_compat.Exact_kind (Unix.S_FIFO) | Fs_compat.Exact_kind (Unix.S_SOCK) -> Error ("store entry cannot be inspected safely: " ^ path))
          (Ok [])
        |> Result.map List.rev)
-  | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ ->
+  | Fs_compat.Exact_unknown | Fs_compat.Exact_kind (Unix.S_REG) | Fs_compat.Exact_kind (Unix.S_CHR)
+  | Fs_compat.Exact_kind (Unix.S_BLK) | Fs_compat.Exact_kind (Unix.S_LNK)
+  | Fs_compat.Exact_kind (Unix.S_FIFO) | Fs_compat.Exact_kind (Unix.S_SOCK) ->
     Error ("store directory cannot be inspected safely: " ^ root)
 ;;
 
@@ -656,7 +659,10 @@ let turn_fragment_store =
                                 | Ok _ -> count_row report (Ok ())
                                 | Error Keeper_turn_fragments.Incomplete_line ->
                                   report
-                                | Error error ->
+                                | Error
+                                    (( Keeper_turn_fragments.Not_json _
+                                     | Keeper_turn_fragments.Malformed _
+                                     | Keeper_turn_fragments.Message_rejected _ ) as error) ->
                                   count_row
                                     report
                                     (Error

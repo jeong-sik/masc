@@ -86,10 +86,12 @@ let keeper_tool_call_lookup_response ~config ~keeper_name req =
     if not (Keeper_config.validate_name keeper_name) then
       error `Bad_request "invalid_keeper_name" "invalid keeper name"
     else
-      let ledger_dir =
-        Filename.concat (Workspace.masc_root_dir config) "tool_calls"
+      let store =
+        Dated_jsonl.open_store
+          (Dated_jsonl.Store.cluster
+             (Workspace.dated_store_cluster_root config)
+             Dated_jsonl.Store.Cluster.Tool_calls)
       in
-      let store = Dated_jsonl.create ~base_dir:ledger_dir () in
       (match
          Keeper_tool_call_index.by_execution_ids
            ~store ~keeper_name ~execution_ids:[ execution_id ]
@@ -1587,7 +1589,9 @@ let handle_keeper_get_subroutes state req request reqd =
          (`Assoc
             [ "error", `String (Keeper_operator_note.read_error_to_string error) ])
          reqd
-     | Error error ->
+     | Error
+         ((Keeper_operator_note.Read_unknown_keeper _
+          | Keeper_operator_note.Malformed _) as error) ->
        Http.Response.json_value ~status:`Bad_request
          (`Assoc
             [ "error", `String (Keeper_operator_note.read_error_to_string error) ])
@@ -1637,7 +1641,9 @@ let handle_keeper_get_subroutes state req request reqd =
          (`Assoc
             [ "error", `String (Keeper_prompt_capture.read_error_to_string error) ])
          reqd
-     | Error error ->
+     | Error
+         ((Keeper_prompt_capture.Unknown_keeper _
+          | Keeper_prompt_capture.Malformed _) as error) ->
        Http.Response.json_value ~status:`Bad_request
          (`Assoc
             [ "error", `String (Keeper_prompt_capture.read_error_to_string error) ])
@@ -1706,7 +1712,15 @@ let handle_keeper_get_subroutes state req request reqd =
                         (Keeper_provider_input_snapshot.read_error_to_string error)
                     ])
                  reqd
-             | Error error ->
+             | Error
+                 ((Keeper_provider_input_snapshot.Unknown_keeper _
+                  | Keeper_provider_input_snapshot.Store_read_failed _
+                  | Keeper_provider_input_snapshot.Malformed_snapshot _
+                  | Keeper_provider_input_snapshot.Invalid_artifact_reference _
+                  | Keeper_provider_input_snapshot.Artifact_read_failed _
+                  | Keeper_provider_input_snapshot.Artifact_missing _
+                  | Keeper_provider_input_snapshot.Artifact_length_mismatch _
+                  | Keeper_provider_input_snapshot.Artifact_json_invalid _) as error) ->
                Http.Response.json_value
                  ~status:`Service_unavailable
                  (`Assoc
@@ -1775,7 +1789,11 @@ let handle_keeper_get_subroutes state req request reqd =
          (`Assoc
             [ "error", `String (Keeper_raw_trace_reader.read_error_to_string error) ])
          reqd
-     | Error error ->
+     | Error
+         ((Keeper_raw_trace_reader.Unknown_keeper _
+          | Keeper_raw_trace_reader.Invalid_file_name _
+          | Keeper_raw_trace_reader.Invalid_trace_record _
+          | Keeper_raw_trace_reader.Read_failed _) as error) ->
        Http.Response.json_value ~status:`Bad_request
          (`Assoc
             [ "error", `String (Keeper_raw_trace_reader.read_error_to_string error) ])

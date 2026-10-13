@@ -15,6 +15,12 @@
 type turn_preparation =
   { tools_json : Yojson.Safe.t list option
   ; effective_messages : Types.message list
+  ; context_message : (Types.message option, Error.t) result
+    (** The fresh carrier as actually transmitted after projection, or [None]
+        if no carrier was generated or the projection removed it. An ambiguous
+        selection is data, not a preparation failure: only a signed Anthropic
+        response needs this result. Projected history never replaces the
+        canonical transcript. *)
   ; visible_tool_names : string list
     (** Names of the caller-supplied tools. This is exactly the list the LLM
         sees this turn. Useful for [Event_bus.TurnReady] subscribers and
@@ -44,6 +50,8 @@ val prepare_messages
 
 (** Full turn preparation: exact caller-supplied tools plus messages. A failed
     caller projection is returned before provider measurement or dispatch.
+    Retention selection cannot reject another provider's request. Collection
+    consumes that selection only for an Anthropic response with signed reasoning.
 
     @since 0.185.0 added optional [config] parameter for provider-facing
       thinking preservation. *)

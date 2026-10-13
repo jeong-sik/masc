@@ -357,7 +357,7 @@ let format_current_task_with_heading ?skill_surfaces ~heading
        ]
      ^ "\n");
   (match task.Masc_domain.handoff_context with
-   | Some h when h.Masc_domain.summary <> "" ->
+   | Some h ->
        (* RFC-0365: a handoff can now come from a previous owner, so the note
           must say whose it is. Without this the model reads another agent's
           first-person account ("I already verified the spec") as its own
@@ -385,19 +385,20 @@ let format_current_task_with_heading ?skill_surfaces ~heading
        | None, None ->
          " " ^ render_fragment Prompt_names.keeper_world_current_task_attribution_none []
      in
-     Buffer.add_string
-       buf
-       (render_fragment
-          Prompt_names.keeper_world_current_task_handoff
-          [ "attribution", attribution; "summary", h.Masc_domain.summary ]
-        ^ "\n");
+     if h.Masc_domain.summary <> "" then
+       Buffer.add_string
+         buf
+         (render_fragment
+            Prompt_names.keeper_world_current_task_handoff
+            [ "attribution", attribution; "summary", h.Masc_domain.summary ]
+          ^ "\n");
      (match h.Masc_domain.next_step with
       | Some step when step <> "" ->
         Buffer.add_string
           buf
           (render_fragment
              Prompt_names.keeper_world_current_task_handoff_next_step
-             [ "step", step ]
+             [ "attribution", attribution; "step", step ]
            ^ "\n")
       | Some _ | None -> ());
      (* The refs are where the previous owner's work actually is. Dropping
@@ -411,9 +412,9 @@ let format_current_task_with_heading ?skill_surfaces ~heading
           buf
           (render_fragment
              Prompt_names.keeper_world_current_task_handoff_evidence
-             [ "refs", String.concat ", " refs ]
+             [ "attribution", attribution; "refs", String.concat ", " refs ]
            ^ "\n"))
-   | Some _ | None -> ());
+   | None -> ());
   (* RFC skills-declared-not-discovered: the task names its skills, so this
      block does not list what is available and let the model match — there is
      nothing to choose between by the time the turn starts.
@@ -602,7 +603,14 @@ let answered_ask_inputs (observation : Keeper_world_observation.world_observatio
     match event.event_kind with
     | Keeper_world_observation.Ask_answered_row { answered_by } ->
       Some (event.post_id, format_board_event_text event, answered_by)
-    | _ -> None)
+    | Keeper_world_observation.Board_post_created | Keeper_world_observation.Board_post_updated
+    | Keeper_world_observation.Fusion_completed | Keeper_world_observation.Composition_completed
+    | Keeper_world_observation.Board_comment_added _
+    | Keeper_world_observation.Board_reaction_changed _ | Keeper_world_observation.Board_vote_cast _
+    | Keeper_world_observation.Delegate_completed _ | Keeper_world_observation.Schedule_due _
+    | Keeper_world_observation.External_attention _
+    | Keeper_world_observation.Completion_authority_rejected _
+    | Keeper_world_observation.Task_outcome _ | Keeper_world_observation.Task_cancelled _ -> None)
 ;;
 
 (* Who said the autonomous turn's User message. The host wrote the wake cue and
@@ -949,7 +957,8 @@ let autonomous_trigger_lines
            Prompt_names.keeper_world_autonomous_trigger_reasons
            [ "reasons", String.concat ", " reasons ]
        ])
-  | _ -> []
+  | (Keeper_world_observation.Reactive, false)
+  | (Keeper_world_observation.Scheduled_autonomous, false) -> []
 
 let effective_instructions
     ~(meta : Keeper_meta_contract.keeper_meta)

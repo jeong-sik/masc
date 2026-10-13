@@ -599,7 +599,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     | Dispatch_outcome.Handled, Some r ->
       Tool_metrics.record r;
       Tool_metrics_persist.enqueue ~masc_root:tool_metrics_masc_root r
-    | _ -> ());
+    | (Dispatch_outcome.Handled, None) | (Dispatch_outcome.No_handler, _) -> ());
   (* RFC-0234 scheduled automation runner.  Public schedule tools and the
      dashboard-only approval route only mutate the durable ledger; this loop is
      the production caller that observes due rows and emits at-most-once generic wake signals.  It
@@ -876,32 +876,30 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          then (
            last_prune := now;
            try
-             let days =
-               Env_config_core.jsonl_retention_days ()
-             in
-             let masc = Workspace.masc_dir (Mcp_server.workspace_config state) in
-             let prune_dir dir =
-               if Sys.file_exists dir
-               then Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days
-               else 0
-             in
-             let total =
-               (* Store list and fold are the SSOT in
-                  Server_runtime_startup_maintenance — the two inline sums
-                  this replaces had already drifted (this pass lacked
+             let config = Mcp_server.workspace_config state in
+             let outcome =
+               (* Window, store list and fold are shared with the startup
+                  pass in Server_runtime_startup_maintenance — the two inline
+                  sums this replaces had already drifted (this pass lacked
                   resilience_audit; the startup pass lacked
                   tool_calls/transition-audit). *)
-               Server_runtime_startup_maintenance.prune_shared_jsonl_stores
-                 ~prune_dir
-                 ~days
-                 ~masc_root:masc
+               Server_runtime_startup_maintenance.prune_jsonl_at_resolved_window
+                 ~base_path:config.base_path
+                 ~masc_root:(Workspace.masc_dir config)
              in
-             if total > 0
+             List.iter
+               (fun diagnostic ->
+                  Log.Server.warn
+                    "periodic JSONL prune: ignoring runtime.toml [maintenance]: %s"
+                    (Server_maintenance_toml_config.diagnostic_to_string diagnostic))
+               outcome.diagnostics;
+             if outcome.pruned > 0
              then
                Log.Server.info
-                 "periodic JSONL prune: pruned %d day-files (retention=%dd)"
-                 total
-                 days;
+                 "periodic JSONL prune: pruned %d day-files (retention=%dd from %s)"
+                 outcome.pruned
+                 outcome.days
+                 (Server_runtime_startup_maintenance.retention_source_label outcome.source);
                (* Schedule terminal-row GC on the same 24h cadence: terminal
                   rows (Succeeded/Failed/Cancelled/Expired) otherwise
                 accumulate unbounded — the only pruner was the manual
@@ -1017,8 +1015,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                 (fun (keeper, operation_id, verdict) ->
                    match verdict with
                    | Keeper_chat_journal_audit.Match -> ()
-                   | verdict ->
-                     Otel_metric_store.inc_counter
+                   | (Keeper_chat_journal_audit.Journal_missing | Keeper_chat_journal_audit.Journal_truncated | Keeper_chat_journal_audit.Mismatch _ | Keeper_chat_journal_audit.Journal_unreadable _ | Keeper_chat_journal_audit.Journal_corrupt _ | Keeper_chat_journal_audit.Store_unreadable _ | Keeper_chat_journal_audit.Liveness_unknown _) as verdict -> Otel_metric_store.inc_counter
                        Keeper_metrics.(to_string ChatJournalAuditMismatches)
                        ~labels:
                          [ "keeper", keeper

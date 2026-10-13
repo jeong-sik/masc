@@ -66,9 +66,8 @@ type provider_entry = Model_provider_catalog.entry =
   ; kind : Provider_kind.t
   ; identity_kinds : Provider_kind.t list
   ; base_url : string
-  ; base_url_env : string option
   ; request_path : string
-  ; api_key_env : string
+  ; requires_api_key : bool
   ; default_model : string option
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
@@ -700,8 +699,8 @@ let%test "parse_entry rejects duplicate supported_models" =
 let%test "parse_entry parses a canonical task value into the closed variant" =
   let entry = Otoml.Parser.from_string "id_prefix = \"m\"\ntask = \"transcription\"" in
   match parse_entry entry with
-  | Ok { task = Some Capability_vocab.Transcription; _ } -> true
-  | Ok _ | Error _ -> false
+  | Ok { task; _ } -> task = Some Capability_vocab.Transcription
+  | Error _ -> false
 ;;
 
 let%test "parse_entry rejects an unknown task value, not silently dropped" =
@@ -725,9 +724,9 @@ let%test "parse_entry parses Anthropic thinking control as typed catalog data" =
        anthropic_thinking_control = \"adaptive_preferred\""
   in
   match parse_entry entry with
-  | Ok { anthropic_thinking_control = Some Capability_vocab.Adaptive_preferred; _ } ->
-    true
-  | Ok _ | Error _ -> false
+  | Ok { anthropic_thinking_control; _ } ->
+    anthropic_thinking_control = Some Capability_vocab.Adaptive_preferred
+  | Error _ -> false
 ;;
 
 let%test "parse_entry rejects unknown Anthropic thinking control" =
@@ -746,12 +745,10 @@ let%test "parse_entry parses ignored_sampling_parameters into closed variants" =
       "id_prefix = \"m\"\nignored_sampling_parameters = [\"temperature\", \"top_p\"]"
   in
   match parse_entry entry with
-  | Ok
-      { ignored_sampling_parameters =
-          Some [ Capability_vocab.Temperature; Capability_vocab.Top_p ]
-      ; _
-      } -> true
-  | Ok _ | Error _ -> false
+  | Ok { ignored_sampling_parameters; _ } ->
+    ignored_sampling_parameters
+    = Some [ Capability_vocab.Temperature; Capability_vocab.Top_p ]
+  | Error _ -> false
 ;;
 
 let%test "parse_entry rejects unknown ignored_sampling_parameters" =

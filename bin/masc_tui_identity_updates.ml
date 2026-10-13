@@ -58,7 +58,9 @@ let apply_login_status (state : state) ~report ~catalog expectation result =
   (* Both outcomes are read against this catalog, so a refresh whose catalog
      failed keeps the wait for the next one instead of guessing. *)
   | Ok (Credentials_published _ | Attempt_unavailable), None -> ()
-  | Ok terminal, _ ->
+  | Ok
+      (( Credentials_published _ | Login_exchange_failed | Consent_expired
+       | Consent_superseded | Attempt_unavailable ) as terminal), _ ->
       forget_identity_login state ~keeper_name:expectation.ile_keeper ~provider_id:expectation.ile_provider;
       (* An attached provider does not say this attempt attached it: a
          provider that was already attached can be logged into again. So a

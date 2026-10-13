@@ -26,17 +26,20 @@ let judgment_of_json = function
     let* request_id = nonblank "request_id" fields in
     let* reason = nonblank "reason" fields in
     let* label = Types.wire_string_field "outcome" fields in
+    let without_claim outcome =
+      let* claim = Types.wire_json_field "memory_claim" fields in
+      if claim <> `Null then
+        Types.wire_fail [Types.Wire_field "memory_claim"]
+          (Types.Unknown_token "expected null for not_durable or deferred")
+      else Ok outcome
+    in
     let* outcome = match label with
       | "incorporated" ->
         let+ claim = nonblank "memory_claim" fields in Incorporated claim
       | "already_represented" ->
         let+ claim = nonblank "memory_claim" fields in Already_represented claim
-      | "not_durable" | "deferred" ->
-        let* claim = Types.wire_json_field "memory_claim" fields in
-        if claim <> `Null then
-          Types.wire_fail [Types.Wire_field "memory_claim"]
-            (Types.Unknown_token "expected null for not_durable or deferred")
-        else Ok (if label = "not_durable" then Not_durable else Deferred)
+      | "not_durable" -> without_claim Not_durable
+      | "deferred" -> without_claim Deferred
       | unknown -> Types.wire_fail [Types.Wire_field "outcome"] (Types.Unknown_token unknown) in
     Ok {request_id; outcome; reason}
   | _ -> Types.wire_here Types.Expected_object

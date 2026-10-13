@@ -31,11 +31,23 @@ type flow = private
   ; batches : flow_batch list
   }
 
+(** What kind of skill a profile describes and how it runs. An instruction
+    skill always runs on demand. *)
+type surface =
+  | Instruction_skill
+  | Composition_skill of Keeper_tool_composition_catalog.execution_mode
+
+val kind_label : surface -> string
+(** ["instruction"] or ["composition"], the profile JSON's [kind]. *)
+
+val execution_label : surface -> string
+(** ["on_demand"] for an instruction, else the composition's execution mode;
+    the profile JSON's [execution]. *)
+
 type profile = private
   { reference : Skill_reference.t
-  ; kind : string
+  ; surface : surface
   ; activation_tool : string
-  ; execution : string
   ; body_bytes : int
   ; discovery_bytes : int
   ; tool_schema_bytes : int option

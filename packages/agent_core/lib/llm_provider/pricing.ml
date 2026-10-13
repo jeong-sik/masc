@@ -363,8 +363,8 @@ let%test "observed cache tokens expose every missing cache price" =
       ~cache_read_input_tokens:30
       ()
   with
-  | Incomplete [ Cache_creation; Cache_read ] -> true
-  | Estimated _ | Incomplete _ -> false
+  | Incomplete components -> components = [ Cache_creation; Cache_read ]
+  | Estimated _ -> false
 ;;
 
 [@@@coverage on]

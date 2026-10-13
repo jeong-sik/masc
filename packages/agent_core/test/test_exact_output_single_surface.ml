@@ -68,9 +68,7 @@ type catalog_fixture =
   { id : string
   ; kind : Provider_config.provider_kind
   ; base_url : string
-  ; base_url_env : string option
   ; request_path : string
-  ; api_key_env : string
   ; capabilities : Capabilities.capabilities
   ; body_timeout_s : float option
   ; connect_timeout_s : float option
@@ -82,8 +80,6 @@ type catalog_fixture =
 let fixture_body_timeout_s = 30.0
 
 let catalog_entry
-      ?base_url_env
-      ?(api_key_env = "")
       ?(body_timeout_s = Some fixture_body_timeout_s)
       ?(connect_timeout_s = Some 30.0)
       ~id
@@ -96,9 +92,7 @@ let catalog_entry
   { id
   ; kind
   ; base_url
-  ; base_url_env
   ; request_path
-  ; api_key_env
   ; capabilities
   ; body_timeout_s
   ; connect_timeout_s
@@ -111,8 +105,8 @@ let catalog_fixture_toml entry =
      id = %S\n\
      kind = %S\n\
      base_url = %S\n\
-     %srequest_path = %S\n\
-     api_key_env = %S\n\n\
+     request_path = %S\n\
+     auth = \"none\"\n\n\
      [[models]]\n\
      id_prefix = %S\n\
      provider_name = %S\n\
@@ -129,11 +123,7 @@ let catalog_fixture_toml entry =
     entry.id
     (Provider_config.string_of_provider_kind entry.kind)
     entry.base_url
-    (match entry.base_url_env with
-     | None -> ""
-     | Some name -> Printf.sprintf "base_url_env = %S\n" name)
     entry.request_path
-    entry.api_key_env
     (entry.id ^ "-model")
     entry.id
     entry.capabilities.supports_response_format_json
@@ -1691,183 +1681,6 @@ let check_receipt_provenance label (provenance : EO.plan_provenance) receipt =
     (EO.receipt_catalog_evidence receipt |> EO.catalog_evidence_sha256)
 ;;
 
-let header_value name headers =
-  List.find_map
-    (fun (header_name, value) ->
-       if String.equal (String.lowercase_ascii header_name) (String.lowercase_ascii name)
-       then Some value
-       else None)
-    headers
-;;
-
-let header_values name headers =
-  List.filter_map
-    (fun (header_name, value) ->
-       if String.equal (String.lowercase_ascii header_name) (String.lowercase_ascii name)
-       then Some value
-       else None)
-    headers
-;;
-
-let test_overlay_endpoint_and_credential_are_materialized () =
-  let response = openai_response {|{"name":"accepted"}|} in
-  let result, posts, _, captures =
-    with_server ~response
-    @@ fun ~sw:_ ~net ~clock ~base_url ->
-    let entry =
-      catalog_entry
-        ~id:"environment-surface"
-        ~kind:Provider_config.OpenAI_compat
-        ~base_url:"https://fallback.invalid"
-        ~base_url_env:"EXACT_SURFACE_BASE_URL"
-        ~api_key_env:"EXACT_SURFACE_API_KEY"
-        ~request_path:"/v1/chat/completions"
-        ~capabilities:(capabilities ~native:true ~json:true)
-        ()
-    in
-    let frozen_base_url = ref base_url in
-    let frozen_credential = ref "  frozen-surface-secret  " in
-    let getenv name =
-      Ok
-        (if String.equal name "EXACT_SURFACE_BASE_URL"
-         then Some !frozen_base_url
-         else if String.equal name "EXACT_SURFACE_API_KEY"
-         then Some !frozen_credential
-         else None)
-    in
-    with_catalog ~getenv [ entry ]
-    @@ fun snapshot ->
-    frozen_base_url := "https://rotated.invalid";
-    frozen_credential := "rotated-surface-secret";
-    flow snapshot "environment-surface" EO.Json_syntax |> attempt |> execute_once ~net ~clock
-  in
-  check int "environment target dispatches once" 1 posts;
-  (match result with
-   | Ok _ -> ()
-   | Error _ -> fail "environment target should execute");
-  let capture =
-    match captures with
-    | [ capture ] -> capture
-    | _ -> fail "environment target should produce one capture"
-  in
-  check
-    (option string)
-    "frozen credential reaches Authorization header"
-    (Some "Bearer frozen-surface-secret")
-    (header_value "authorization" capture.headers);
-  check
-    (list string)
-    "exact request owns exactly one JSON content type"
-    [ "application/json" ]
-    (header_values "content-type" capture.headers)
-;;
-
-let test_credential_rotation_keeps_snapshot_bound_wire_authority () =
-  let response = openai_response {|{"name":"accepted"}|} in
-  let (result_a, result_b), posts, token_posts, captures =
-    with_server ~response
-    @@ fun ~sw:_ ~net ~clock ~base_url ->
-    let entry =
-      catalog_entry
-        ~id:"credential-rotation-surface"
-        ~kind:Provider_config.OpenAI_compat
-        ~base_url
-        ~api_key_env:"ROTATING_SURFACE_API_KEY"
-        ~request_path:"/v1/chat/completions"
-        ~capabilities:(capabilities ~native:true ~json:true)
-        ()
-    in
-    let credential = ref "snapshot-secret-a" in
-    let getenv name =
-      Ok (if String.equal name "ROTATING_SURFACE_API_KEY" then Some !credential else None)
-    in
-    let snapshot_a = with_catalog ~getenv [ entry ] Fun.id in
-    let handle_a =
-      match EO.admit_target_ref snapshot_a "credential-rotation-surface" with
-      | Ok admitted -> admitted
-      | Error _ -> fail "snapshot A target should admit"
-    in
-    credential := "snapshot-secret-b";
-    let snapshot_b = with_catalog ~getenv [ entry ] Fun.id in
-    let handle_b =
-      match EO.admit_target_ref snapshot_b "credential-rotation-surface" with
-      | Ok admitted -> admitted
-      | Error _ -> fail "snapshot B target should admit"
-    in
-    check
-      string
-      "credential rotation leaves catalog generation unchanged"
-      (EO.resolver_catalog_generation snapshot_a |> EO.catalog_generation_fingerprint)
-      (EO.resolver_catalog_generation snapshot_b |> EO.catalog_generation_fingerprint);
-    check
-      string
-      "credential rotation leaves catalog evidence unchanged"
-      (EO.resolver_catalog_evidence snapshot_a |> EO.catalog_evidence_sha256)
-      (EO.resolver_catalog_evidence snapshot_b |> EO.catalog_evidence_sha256);
-    let domain_a = Domain.spawn (fun () -> EO.resolve_target handle_a) in
-    let domain_b = Domain.spawn (fun () -> EO.resolve_target handle_b) in
-    let target_a =
-      match Domain.join domain_a with
-      | Ok target -> target
-      | Error _ -> fail "snapshot A handle should resolve across a Domain"
-    in
-    let target_b =
-      match Domain.join domain_b with
-      | Ok target -> target
-      | Error _ -> fail "snapshot B handle should resolve across a Domain"
-    in
-    check
-      string
-      "credential rotation leaves target identity unchanged"
-      (EO.selected_target_identity target_a |> EO.target_identity_fingerprint)
-      (EO.selected_target_identity target_b |> EO.target_identity_fingerprint);
-    let ready target =
-      match
-        EO.admit
-          ~target
-          ~messages:[ msg "credential rotation" ]
-          (requirement EO.Json_syntax)
-      with
-      | Ok ready -> ready
-      | Error _ -> fail "credential rotation target should admit a request"
-    in
-    ignore (ready target_a : EO.ready_plan);
-    ignore (ready target_b : EO.ready_plan);
-    let execute id admitted_target =
-      flow_from_admitted_target
-        ~id
-        ~messages:[ msg "credential rotation" ]
-        (requirement EO.Json_syntax)
-        admitted_target
-      |> attempt
-      |> execute_once ~net ~clock
-    in
-    let result_a = execute "credential-rotation-a" handle_a in
-    let result_b = execute "credential-rotation-b" handle_b in
-    result_a, result_b
-  in
-  check int "two frozen credential plans dispatch once each" 2 posts;
-  check int "credential rotation performs no token measurement" 0 token_posts;
-  List.iter
-    (function
-      | Ok _ -> ()
-      | Error _ -> fail "both frozen credential plans should execute")
-    [ result_a; result_b ];
-  match captures with
-  | [ capture_a; capture_b ] ->
-    check
-      (option string)
-      "snapshot A retains credential A after snapshot B exists"
-      (Some "Bearer snapshot-secret-a")
-      (header_value "authorization" capture_a.headers);
-    check
-      (option string)
-      "snapshot B retains credential B"
-      (Some "Bearer snapshot-secret-b")
-      (header_value "authorization" capture_b.headers)
-  | _ -> fail "credential rotation should produce exactly two ordered captures"
-;;
-
 let test_identity_survives_success_error_and_cancellation () =
   let run ?(status = `OK) response =
     let (provenance, result), posts, _, _ =
@@ -2350,14 +2163,6 @@ let () =
             "identity survives all outcomes"
             `Quick
             test_identity_survives_success_error_and_cancellation
-        ; test_case
-            "overlay endpoint and credential"
-            `Quick
-            test_overlay_endpoint_and_credential_are_materialized
-        ; test_case
-            "credential rotation keeps snapshot-bound wire authority"
-            `Quick
-            test_credential_rotation_keeps_snapshot_bound_wire_authority
         ] )
     ]
 ;;

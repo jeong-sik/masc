@@ -749,6 +749,13 @@ let horizontal cells =
 
 let styled_span (opening, closing) text = opening ^ text ^ closing
 
+(* What a fence's header names. Most tags name themselves; one names what the
+   reader is looking at -- an alphatex fence holds a score, and the header is
+   the place that says so while the fence still shows its source. *)
+let is_alphatex_tag tag = String.equal (String.lowercase_ascii (String.trim tag)) "alphatex"
+
+let fence_header_label tag = if is_alphatex_tag tag then "alphaTex 악보" else tag
+
 (* The tag was previously consumed only to choose a lexer, so [```bash] and an
    untagged fence looked identical. Fill the row so reverse video can provide a
    terminal-theme-safe background without choosing a light- or dark-only
@@ -1156,7 +1163,7 @@ let closes_fence line ~opened =
   | Some _, None -> true
   | None, _ -> false
 
-type generated_field = Fence_language | Mermaid_diagnostic
+type generated_field = Fence_language | Mermaid_diagnostic | Alphatex_diagnostic
 
 type semantic_origin =
   | Original of source_range
@@ -1262,14 +1269,24 @@ let render_streaming_internal ?on_semantic ?on_unmapped ~palette ~width text =
     let body = List.rev rev_body in
     let body_text () = String.concat "\n" (List.map (fun line -> line.source_text) body) in
     let body_base = match body with first :: _ -> first.source_start | [] -> block_start in
+    let emit_lexed_body source lexer =
+      let lines=fence_rows_of_segments (lexer source) in
+      let source_byte=ref body_base in
+      List.iteri (fun i pieces ->
+        (match on_semantic with
+         | None -> emit_all (styled_code_rows palette ~width pieces)
+         | Some _ -> emit_inline ~joins_previous:(i>0) ~base:!source_byte (render_lexed_line_with_spans ~palette ~width pieces));
+        source_byte := !source_byte + String.length (String.concat "" (List.map fst pieces)) + 1) lines
+    in
     Option.iter
       (fun language ->
+        let label = fence_header_label language in
         let on_language = Option.map (fun _ visible ->
-          emit_run {joins_previous=false;semantic_text=language;
-            origins=Array.init (String.length language) (fun byte -> Some (Generated {block_start;field=Fence_language;byte}));
+          emit_run {joins_previous=false;semantic_text=label;
+            origins=Array.init (String.length label) (fun byte -> Some (Generated {block_start;field=Fence_language;byte}));
             visible_rows=[!rendered_rows, [{start_byte=0;end_byte=visible}]];
             reading=Source_order}) on_semantic in
-        emit_all [code_header ?on_language palette ~width language]) language;
+        emit_all [code_header ?on_language palette ~width label]) language;
     (match language, lexer with
      | Some "mermaid", _ ->
          let body_width = max 1 (width - Layout.display_width palette.code_gutter) in
@@ -1312,14 +1329,27 @@ let render_streaming_internal ?on_semantic ?on_unmapped ~palette ~width text =
                         Some (Original {start_byte=body_base+range.start_byte;end_byte=body_base+range.end_byte})) label.ranges;
                       visible_rows=Option.value (Hashtbl.find_opt visible label.identity) ~default:[] |> List.rev;
                       reading=Drawn_diagram {block_start}}) labels))
-     | _, Some lexer ->
-         let lines=fence_rows_of_segments (lexer (body_text ())) in
-         let source_byte=ref body_base in
-         List.iteri (fun i pieces ->
-           (match on_semantic with
-            | None -> emit_all (styled_code_rows palette ~width pieces)
-            | Some _ -> emit_inline ~joins_previous:(i>0) ~base:!source_byte (render_lexed_line_with_spans ~palette ~width pieces));
-           source_byte := !source_byte + String.length (String.concat "" (List.map fst pieces)) + 1) lines
+     | Some tag, Some lexer when is_alphatex_tag tag ->
+         let source = body_text () in
+         let body_width = max 1 (width - Layout.display_width palette.code_gutter) in
+         (* A score outside the drawn subset shows its source with the reason,
+            the way a mermaid fence falls back; so does one whose single
+            measure is wider than the pane. The tablature rows are generated
+            text with no source-byte mapping, so a drawn tab has no semantic
+            run: the block is reported unmapped rather than passed off as a
+            document whose every visible row has a source. *)
+         (match Masc_tui_alphatex.render_tab ~max_width:body_width source with
+          | Ok tab_lines ->
+              Option.iter (fun emit -> emit (block_start, [])) on_unmapped;
+              List.iter (fun line -> emit_all (code_rows palette ~width line)) tab_lines
+          | Error failure ->
+              let diagnostic = "alphatex: " ^ Masc_tui_alphatex.failure_text failure in
+              (match on_semantic with
+               | None -> emit_all (code_rows palette ~width diagnostic)
+               | Some _ ->
+                   emit_generated ~block_start ~field:Alphatex_diagnostic diagnostic);
+              emit_lexed_body source lexer)
+     | _, Some lexer -> emit_lexed_body (body_text ()) lexer
      | _, None -> List.iteri (fun i line -> emit_code ~joins_previous:(i>0) ~base:line.source_start line.source_text) body);
     if closed && Option.is_some language then emit_all [code_footer palette ~width]
   in

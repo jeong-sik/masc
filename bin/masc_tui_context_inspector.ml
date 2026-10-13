@@ -544,7 +544,13 @@ let input_map_rows (record : Turn_record.t) provider_input =
              match item.component with
              | Turn_record.Prompt_block Prompt_block_id.Keeper_instructions ->
                verified_system_prompt record provider_input item.bytes
-             | Turn_record.Prompt_block _
+             | Turn_record.Prompt_block
+                 ( Prompt_block_id.Dynamic_context
+                 | Prompt_block_id.Temporal_summary
+                 | Prompt_block_id.Memory_os_recall
+                 | Prompt_block_id.Librarian_working_context
+                 | Prompt_block_id.Operator_note
+                 | Prompt_block_id.Skill_compositions )
              | Turn_record.Tool_schemas
              | Turn_record.Message_user
              | Turn_record.Message_system

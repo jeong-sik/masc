@@ -454,7 +454,11 @@ let direct_reply_projection json =
             ~turn_outcome:Keeper_turn_outcome.Visible_reply
             ~reply:(Some reply))
      | None -> Error Visible_reply_missing_reply)
-  | Ok turn_outcome ->
+  | Ok
+      (( Keeper_turn_outcome.Continuation_checkpoint
+       | Keeper_turn_outcome.Terminal_effect_settled
+       | Keeper_turn_outcome.Awaiting_gate_approval
+       | Keeper_turn_outcome.No_visible_reply ) as turn_outcome) ->
     Ok
       (Keeper_chat_blocks.connector_projection
          ~turn_outcome
@@ -828,7 +832,25 @@ let completed_delegate_reply ~base_dir ~keeper_name ~delivery_key ~outcome_ref =
                             ; "blocks", (match message.blocks with
                                 | None -> `Null
                                 | Some blocks -> Keeper_chat_blocks.blocks_to_yojson blocks) ])
-             | _ -> None)
+             | ( Keeper_chat_store.Role.User
+               | Keeper_chat_store.Role.System
+               | Keeper_chat_store.Role.Request_failure
+               | Keeper_chat_store.Role.Tool ), _ -> None
+             | Keeper_chat_store.Role.Assistant,
+               ( None
+               | Some
+                   { Keeper_chat_delivery_identity.transcript_slot =
+                       ( Keeper_chat_delivery_identity.Accepted_user
+                       | Keeper_chat_delivery_identity.Tool_call _
+                       | Keeper_chat_delivery_identity.Tool_delivery _
+                       | Keeper_chat_delivery_identity.Terminal_result
+                       | Keeper_chat_delivery_identity.Approval_request
+                       | Keeper_chat_delivery_identity.Approval_resolution
+                       | Keeper_chat_delivery_identity.Approval_replay
+                       | Keeper_chat_delivery_identity.Approval_replay_correction
+                       | Keeper_chat_delivery_identity.Approval_continuation )
+                   ; _
+                   } ) -> None)
            transcript.assistant
        in
        match replies with
@@ -892,7 +914,13 @@ let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
                     ~keeper_name ~delivery_key ~outcome_ref
               in
               `Assoc (fields @ [ "completed_reply", reply ])
-            | _ -> operation_json
+            | ( Keeper_owner.Chat_operation.Queued
+              | Keeper_owner.Chat_operation.Running _
+              | Keeper_owner.Chat_operation.Failed _
+              | Keeper_owner.Chat_operation.Cancelled _ ), _ -> operation_json
+            | ( Keeper_owner.Chat_operation.Succeeded _ ),
+              ( `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+              | `List _ ) -> operation_json
           in
           tool_result_ok_data data))
 ;;

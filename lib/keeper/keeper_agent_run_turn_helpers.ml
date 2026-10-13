@@ -106,7 +106,20 @@ let sse_event_progress_kind (event : Agent_core.Types.sse_event) =
       { delta = Agent_core.Types.RedactedThinkingSnapshot _; _ }
     when agent_core_stream_event_is_first_token event ->
       Some "sse_redacted_thinking"
-  | Agent_core.Types.ContentBlockDelta _ ->
+  | Agent_core.Types.ContentBlockDelta
+      {
+        delta =
+          ( Agent_core.Types.TextDelta _
+          | Agent_core.Types.TextSnapshot _
+          | Agent_core.Types.ThinkingDelta _
+          | Agent_core.Types.ThinkingSignatureDelta _
+          | Agent_core.Types.RedactedThinkingSnapshot _
+          | Agent_core.Types.ReasoningDetailsDelta _
+          | Agent_core.Types.InputJsonDelta _
+          | Agent_core.Types.InputJsonSnapshot _
+          | Agent_core.Types.MediaDelta _ );
+        _;
+      } ->
       (* Empty deltas and carrier deltas, such as provider-private reasoning
          signatures, are diagnostic stream evidence only: not text/tool
          progress, not keeper-visible output, and not watchdog progress,

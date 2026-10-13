@@ -484,7 +484,17 @@ let session_full_cause ~(checkpoint : Semantic.official_client_checkpoint) ~appr
   | Some
       { Native.phase =
           ( Native.Ready | Native.Start _ | Native.Active _ | Native.Turn_inflight _
-          | Native.Recovery_required _ | Native.Settled _ )
+          | Native.Recovery_required
+              { Native.failure =
+                  ( Native.Pre_dispatch_failed | Native.Transient_spawn_failed
+                  | Native.Owner_stopped_turn | Native.Retryable_turn_failed
+                  | Native.Transport_interrupted | Native.Protocol_failed
+                  | Native.Provider_rejected | Native.Input_rejected _
+                  | Native.Host_hook_failed | Native.State_persistence_failed
+                  | Native.Process_restarted | Native.Vendor_session_full _ )
+              ; _
+              }
+          | Native.Settled _ )
       ; _
       }
   | None -> None
@@ -500,7 +510,7 @@ let session_full ~config ~keeper_name admission =
 let finish_run ~config ~keeper_name ~operation_id admission run_result =
   match admission.authority, run_result with
   | Agent_core _, Error _ -> run_result
-  | (Agent_core _ | Official_client _), _ ->
+  | ((Agent_core _ | Official_client _), Ok _) | (Official_client _, Error _) ->
     match complete_native ~config ~keeper_name ~operation_id admission with
     | Error detail ->
       (match run_result with

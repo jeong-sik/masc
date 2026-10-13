@@ -728,6 +728,7 @@ let test_attachment_artifact_read_bound () =
   let entries =
     [ { Board_tool_attachment.kind = Board_tool_attachment.Image
       ; source = Board_tool_attachment.Artifact_sha256 blob.sha256
+      ; name = None
       }
     ]
   in
@@ -748,7 +749,7 @@ let test_attachment_artifact_read_bound () =
        (Board_tool_attachment.error_to_string error)
    | Ok _ -> Alcotest.fail "one byte over the bound was accepted");
   match resolve size with
-  | Ok [ Board_tool_attachment.Artifact { kind = Board_tool_attachment.Image; reference } ] ->
+  | Ok [ Board_tool_attachment.Artifact { kind = Board_tool_attachment.Image; reference; name = _ } ] ->
     Alcotest.(check int) "recorded size" size reference.Tool_output.bytes;
     Alcotest.(check string) "recorded hash" blob.sha256 reference.Tool_output.sha256
   | Ok _ -> Alcotest.fail "exact bound resolved to an unexpected shape"

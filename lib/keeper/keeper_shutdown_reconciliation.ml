@@ -58,7 +58,12 @@ let require_absent_identity ~config ~keeper_name =
   let* () =
     match Keeper_owner_registry.get ~base_path ~keeper_name with
     | Error (Keeper_owner_registry.Owner_not_found _) -> Ok ()
-    | Error error -> Error (Owner_unavailable error)
+    | Error
+        (( Keeper_owner_registry.Inventory_not_installed _
+         | Keeper_owner_registry.Owner_unavailable _
+         | Keeper_owner_registry.Owner_initialization_failed _
+         | Keeper_owner_registry.Inventory_stopping ) as error) ->
+      Error (Owner_unavailable error)
     | Ok _ -> Error Owner_present
   in
   let* () = match Keeper_registry.get ~base_path keeper_name with
@@ -133,7 +138,14 @@ let acknowledge_absent_owner_observing ~on_guards_acquired ~config ~keeper_name 
                       { finalization = ({ completion = Completion_not_requested; _ } as evidence)
                       ; _ } ),
                   Some { terminal = Terminal_stopped; cleanup_error = None; _ } -> Ok evidence
-                | _ -> Error Ineligible_operation in
+                | (Operator_stop_retain_meta, No_inflight_turn, (Finalized { completion = Completion_not_requested;_} | Owner_absent { finalization = { completion = Completion_not_requested;_};_}), Some { terminal = Terminal_stopped; cleanup_error = Some _;_})
+                | (Operator_stop_retain_meta, No_inflight_turn, (Finalized { completion = Completion_not_requested;_} | Owner_absent { finalization = { completion = Completion_not_requested;_};_}), Some { terminal = Terminal_crashed _; cleanup_error = _;_})
+                | (Operator_stop_retain_meta, No_inflight_turn, (Finalized { completion = Completion_not_requested;_} | Owner_absent { finalization = { completion = Completion_not_requested;_};_}), None)
+                | (Operator_stop_retain_meta, No_inflight_turn, Finalized { completion = (Completion_pending _ | (Completion_delivery_failed _ | Completion_delivered _));_}, _)
+                | (Operator_stop_retain_meta, No_inflight_turn, Owner_absent { finalization = { completion = (Completion_pending _ | (Completion_delivery_failed _ | Completion_delivered _));_};_}, _)
+                | (Operator_stop_retain_meta, No_inflight_turn, (Prepared | (Joining_lanes | (Joined_idle | (Finalizing_tasks _ | (Cleanup_ready _ | (Reconciliation_required _ | (Operator_absence_acknowledged _ | (Blocked _ | Superseded _)))))))), _)
+                | (Operator_stop_retain_meta, Inflight_effect_unknown _, _, _)
+                | ((Operator_stop_remove_meta | (Supervisor_cleanup | Dashboard_keeper_purge _)), _, _, _) -> Error Ineligible_operation in
               let unsettled = List.filter (fun id ->
                 not (List.exists (Keeper_id.Task_id.equal id) finalization.cleanup.settled_task_ids))
                   operation.owned_task_ids in

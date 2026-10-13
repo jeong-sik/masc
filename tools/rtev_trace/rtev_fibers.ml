@@ -156,7 +156,8 @@ let () =
          Hashtbl.replace opened creator n;
          if not (Hashtbl.mem opened_first creator) then Hashtbl.replace opened_first creator n
        | None -> ())
-    | _ -> ()
+    | `Create (_, `Obj _) | `Suspend_domain (End) | `Try_get _ | `Exit_span | `Error _ | `Put _
+    | `Log _ | `Get _ | `Domain_spawn _ | `Exit_cc | `Enter_span _ -> ()
   in
   let runtime_begin d ts phase =
     if counted_gc_phase (RE.runtime_phase_name phase) then

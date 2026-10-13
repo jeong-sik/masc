@@ -82,36 +82,49 @@ let target_of_entry (entry : pending_confirm) =
   | None -> Error (Printf.sprintf "invalid pending-confirm target type: %S" entry.target_type)
 ;;
 
-let make_available_action ~action_type ~tool_name ~target_type ~description =
-  { action_type; tool_name; target_type; description;
-    confirm_required = Operator_action_catalog.requires_confirmation action_type }
+(* The tool name each catalog action is recorded under, and how the action
+   describes itself. Each function is total over the catalog: a new action
+   stops the build here instead of going without a row in
+   [available_actions]. The name is a label. [keeper_recover] runs
+   [masc_keeper_down] and [masc_keeper_up], and the namespace actions call
+   [Workspace] without dispatching a tool. *)
+let delegated_tool_name = function
+  | Operator_action_catalog.Broadcast -> "masc_broadcast"
+  | Operator_action_catalog.Namespace_pause -> "masc_pause"
+  | Operator_action_catalog.Namespace_resume -> "masc_resume"
+  | Operator_action_catalog.Task_inject -> "masc_add_task"
+  | Operator_action_catalog.Keeper_message ->
+    Keeper_tool_name.(to_string Keeper_delegate)
+  | Operator_action_catalog.Keeper_probe -> "masc_keeper_status"
+  | Operator_action_catalog.Keeper_recover -> "masc_keeper_recover"
+;;
+
+let action_description = function
+  | Operator_action_catalog.Broadcast -> "Namespace-wide operator broadcast."
+  | Operator_action_catalog.Namespace_pause ->
+    "Pause namespace automation and spawning."
+  | Operator_action_catalog.Namespace_resume -> "Resume a paused namespace."
+  | Operator_action_catalog.Task_inject ->
+    "Inject a backlog task into the namespace."
+  | Operator_action_catalog.Keeper_message ->
+    "Send a direct operator message to a keeper."
+  | Operator_action_catalog.Keeper_probe -> "Immediate keeper diagnostic snapshot."
+  | Operator_action_catalog.Keeper_recover ->
+    "Safe down/up recovery for stale/degraded keeper."
+;;
+
+let available_action_of action : available_action =
+  { action_type = Operator_action_catalog.to_string action
+  ; tool_name = delegated_tool_name action
+  ; target_type = Operator_action_catalog.target_type_string action
+  ; description = action_description action
+  ; confirm_required = Operator_action_catalog.requires_confirmation action
+  }
+;;
 
 let available_actions : available_action list =
-  [
-    make_available_action ~action_type:"broadcast" ~tool_name:"masc_broadcast"
-      ~target_type:Operator_action_constants.workspace_target_type
-      ~description:"Namespace-wide operator broadcast.";
-    make_available_action ~action_type:"namespace_pause" ~tool_name:"masc_pause"
-      ~target_type:Operator_action_constants.workspace_target_type
-      ~description:"Pause namespace automation and spawning.";
-    make_available_action ~action_type:"namespace_resume" ~tool_name:"masc_resume"
-      ~target_type:Operator_action_constants.workspace_target_type
-      ~description:"Resume a paused namespace.";
-    make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
-      ~target_type:Operator_action_constants.workspace_target_type
-      ~description:"Inject a backlog task into the namespace.";
-    make_available_action ~action_type:"keeper_message" ~tool_name:Keeper_tool_name.(to_string Keeper_delegate)
-      ~target_type:Operator_action_constants.keeper_target_type
-      ~description:"Send a direct operator message to a keeper.";
-    make_available_action ~action_type:"keeper_probe" ~tool_name:"masc_keeper_status"
-      ~target_type:Operator_action_constants.keeper_target_type
-      ~description:"Immediate keeper diagnostic snapshot.";
-    make_available_action
-      ~action_type:Operator_action_constants.keeper_recover
-      ~tool_name:"masc_keeper_recover"
-      ~target_type:Operator_action_constants.keeper_target_type
-      ~description:"Safe down/up recovery for stale/degraded keeper.";
-  ]
+  List.map available_action_of Operator_action_catalog.all
+;;
 
 let validate_pending_confirm_identity
       ~action_type
@@ -119,42 +132,35 @@ let validate_pending_confirm_identity
       ~target_id
       ~delegated_tool
   =
-  let action =
-    match Operator_action_catalog.of_string action_type with
-    | None -> None
-    | Some _ ->
-      List.find_opt
-        (fun (action : available_action) ->
-           String.equal action.action_type action_type)
-        available_actions
-  in
-  match action with
+  match Operator_action_catalog.of_string action_type with
   | None ->
     Error (Printf.sprintf "unsupported pending-confirm action_type: %S" action_type)
-  | Some action when not (String.equal action.tool_name delegated_tool) ->
+  | Some action when not (String.equal (delegated_tool_name action) delegated_tool) ->
     Error
       (Printf.sprintf
          "pending-confirm delegated_tool mismatch for %s"
          action_type)
-  | Some action when not (String.equal action.target_type target_type) ->
+  | Some action
+    when not
+           (String.equal (Operator_action_catalog.target_type_string action) target_type)
+    ->
     Error
       (Printf.sprintf
          "pending-confirm target_type mismatch for %s"
          action_type)
   | Some action ->
-    (match Operator_action_constants.target_type_of_string action.target_type, target_id with
-     | Some Operator_action_constants.Workspace, None -> Ok ()
-     | Some Operator_action_constants.Workspace, Some _ ->
+    (match Operator_action_catalog.target_type action, target_id with
+     | Operator_action_constants.Workspace, None -> Ok ()
+     | Operator_action_constants.Workspace, Some _ ->
        Error "workspace pending-confirm must not carry target_id"
-     | Some Operator_action_constants.Keeper, Some keeper_name
+     | Operator_action_constants.Keeper, Some keeper_name
        when String.trim keeper_name <> "" -> Ok ()
-     | Some Operator_action_constants.Keeper, _ ->
+     | Operator_action_constants.Keeper, _ ->
        Error "keeper pending-confirm requires a non-empty target_id"
-     | Some Operator_action_constants.Goal, Some goal_id
+     | Operator_action_constants.Goal, Some goal_id
        when String.trim goal_id <> "" -> Ok ()
-     | Some Operator_action_constants.Goal, _ ->
-       Error "goal pending-confirm requires a non-empty target_id"
-     | None, _ -> Error "pending-confirm action has an invalid target contract")
+     | Operator_action_constants.Goal, _ ->
+       Error "goal pending-confirm requires a non-empty target_id")
 
 let pending_confirm_common_fields (entry : pending_confirm) =
   [

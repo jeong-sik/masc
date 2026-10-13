@@ -214,6 +214,51 @@ let test_prepare_messages_extra_context () =
 
 (* ── system_prompt_override does not affect prepare_messages ── *)
 
+let test_retained_context_respects_projection () =
+  let turn_params = { Hooks.default_turn_params with extra_system_context = Some "private" } in
+  let prepare project =
+    Agent_turn.prepare_turn ~tools:Tool_set.empty ~messages:[Types.user_msg "hello"]
+      ~turn_params ~model_input_projection:project () |> Result.get_ok
+  in
+  let is_current (message : Types.message) =
+    Types.Extra_system_context_provenance.classify message.metadata = Present
+  in
+  let removed = prepare (fun messages -> Ok (List.filter (fun m -> not (is_current m)) messages)) in
+  Alcotest.(check bool) "removed context is never retained" true
+    (Result.get_ok removed.context_message = None);
+  let rewritten = prepare (fun messages -> Ok (List.map (fun message ->
+    if is_current message then
+      { message with content = [Text "redacted"];
+        metadata = ("test-origin", `String "projected") :: message.metadata }
+    else message) messages)) in
+  match Result.get_ok rewritten.context_message with
+  | None -> Alcotest.fail "projected context missing"
+  | Some message ->
+    Alcotest.(check string) "retained bytes equal transmitted bytes" "redacted"
+      (Types.text_of_content message.content);
+    Alcotest.(check (option string)) "other metadata survives retention"
+      (Some "projected")
+      (Types.Extra_system_context_provenance.as_historical message.metadata
+       |> List.assoc_opt "test-origin" |> Option.map Yojson.Safe.Util.to_string)
+;;
+
+let test_context_ambiguity_does_not_reject_preparation () =
+  let turn_params =
+    { Hooks.default_turn_params with extra_system_context = Some "context" }
+  in
+  let messages = [Types.user_msg "request"] in
+  let duplicate_current projected =
+    let carrier = List.hd (List.rev projected) in
+    Ok (projected @ [carrier])
+  in
+  let prepared = Agent_turn.prepare_turn ~tools:Tool_set.empty ~messages ~turn_params
+      ~model_input_projection:duplicate_current () |> Result.get_ok in
+  Alcotest.(check int) "all projected messages remain available" 3
+    (List.length prepared.effective_messages);
+  Alcotest.(check bool) "ambiguity is deferred to signed-response collection" true
+    (Result.is_error prepared.context_message)
+;;
+
 let test_prepare_messages_system_prompt_override_noop () =
   let msgs =
     [ { Types.role = Types.User
@@ -798,6 +843,10 @@ let () =
             `Quick
             test_prepare_messages_no_reducer
         ; Alcotest.test_case "extra context" `Quick test_prepare_messages_extra_context
+        ; Alcotest.test_case "retained context respects projection" `Quick
+            test_retained_context_respects_projection
+        ; Alcotest.test_case "context ambiguity does not reject preparation" `Quick
+            test_context_ambiguity_does_not_reject_preparation
         ; Alcotest.test_case
             "system_prompt_override noop"
             `Quick

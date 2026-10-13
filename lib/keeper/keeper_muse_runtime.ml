@@ -218,7 +218,12 @@ let runtime_error_to_core_error (error : Serve.error) =
 let recovery_failure_of_runtime_error ?current (error : Serve.error) =
   match current with
   | Some Session_store.State_persistence_failed -> Session_store.State_persistence_failed
-  | None | Some _ ->
+  | None | Some (Session_store.Pre_dispatch_failed) | Some (Session_store.Transient_spawn_failed)
+  | Some (Session_store.Owner_stopped_turn) | Some (Session_store.Retryable_turn_failed)
+  | Some (Session_store.Transport_interrupted) | Some (Session_store.Protocol_failed)
+  | Some (Session_store.Provider_rejected) | Some (Session_store.Input_rejected _)
+  | Some (Session_store.Host_hook_failed) | Some (Session_store.Process_restarted)
+  | Some (Session_store.Vendor_session_full _) ->
   match error with
   | Serve.Spawn_failed _ -> Session_store.Transient_spawn_failed
   | Serve.Turn_input_write_failed _
@@ -273,7 +278,9 @@ let recovery_failure_for_attempt ~current ~admission error =
   | Session_store.State_persistence_failed, _, _ -> current
   | _, Not_dispatched, (Serve.Timeout {turn_accepted=false; _} | Serve.Capability_not_granted _) ->
     Session_store.Pre_dispatch_failed
-  | _ -> recovery_failure_of_runtime_error ~current error
+  | ((Session_store.Pre_dispatch_failed | (Session_store.Transient_spawn_failed | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), Not_dispatched, Serve.Timeout { turn_accepted = true;_})
+  | ((Session_store.Pre_dispatch_failed | (Session_store.Transient_spawn_failed | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), Not_dispatched, (Serve.Session_not_durable | (Serve.Turn_cancelled | (Serve.Runtime_shutting_down | (Serve.Invalid_config _ | (Serve.Spawn_failed _ | (Serve.Turn_input_write_failed _ | (Serve.Protocol_error _ | (Serve.Rpc_error _ | (Serve.Session_model_mismatch _ | (Serve.Session_workspace_mismatch _ | (Serve.Session_approval_mode_mismatch _ | (Serve.Auth_required _ | (Serve.Turn_failed _ | (Serve.Unsupported_server_request _ | Serve.Process_exited _)))))))))))))))
+  | ((Session_store.Pre_dispatch_failed | (Session_store.Transient_spawn_failed | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), (Dispatched | Acknowledged), _) -> recovery_failure_of_runtime_error ~current error
 ;;
 
 (* Whether a failed attempt can no longer claim it was effect-free. Before the
@@ -900,7 +907,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         | Runtime_muse_home.Sign_in_required _ as error ->
           Agent_core.Error.Provider (Llm_provider.Error.AuthError
             { provider = provider_name; detail = Runtime_muse_home.error_to_string error })
-        | error -> config_error ~field:"account_home"
+        | (Runtime_muse_home.Invalid_account_home _ | Runtime_muse_home.State_unavailable _) as error -> config_error ~field:"account_home"
             (Runtime_muse_home.error_to_string error)) in
     let* historical_task_message = match official_task_reference with
       | None -> Ok None
@@ -1218,7 +1225,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let require_recovery detail =
       match !session_state with
       | { Session_store.phase = Ready | Settled _ | Recovery_required _; _ } -> Ok ()
-      | expected ->
+      | ({ Session_store.phase = Start _ | Active _ | Turn_inflight _; _ } as expected) ->
         Session_store.require_recovery
           ~base_path
           ~keeper_name
@@ -1233,7 +1240,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       | Session_store.Transient ->
         (match !session_state with
          | { phase = Ready | Settled _ | Recovery_required _; _ } -> Ok ()
-         | expected ->
+         | ({ phase = Start _ | Active _ | Turn_inflight _; _ } as expected) ->
            Session_store.release_transient
              ~base_path
              ~keeper_name
@@ -1549,7 +1556,14 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                 | Runtime_provider_usage_read.Scheduling_failed ->
                   Log.Keeper.warn ~keeper_name
                     "Muse usage not read after model error: background scheduling failed")
-             | Serve.Turn_failed _
+             | Serve.Turn_failed
+                 { Msp.kind =
+                     ( Msp.Step_limit | Msp.Config_error | Msp.Projection_error
+                     | Msp.Log_error | Msp.Workflow_launch_error
+                     | Msp.Environment_error | Msp.Model_error | Msp.Launch_error
+                     | Msp.Auth_required | Msp.Unrecognized_error_kind _ )
+                 ; _
+                 }
              | Serve.Invalid_config _ | Serve.Spawn_failed _
              | Serve.Turn_input_write_failed _ | Serve.Protocol_error _
              | Serve.Rpc_error _ | Serve.Capability_not_granted _
@@ -1575,7 +1589,15 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             | Some Msp.Terminal_completed -> !recovery_failure
             | Some (Msp.Terminal_failed {kind=Msp.Auth_required; message; _}) ->
               terminal_failure (Serve.Auth_required message)
-            | Some (Msp.Terminal_failed error) -> terminal_failure (Serve.Turn_failed error)
+            | Some
+                (Msp.Terminal_failed
+                  ({ kind =
+                       ( Msp.Step_limit | Msp.Config_error | Msp.Projection_error
+                       | Msp.Log_error | Msp.Workflow_launch_error
+                       | Msp.Environment_error | Msp.Model_error | Msp.Launch_error
+                       | Msp.Unrecognized_error_kind _ )
+                   ; _
+                   } as error)) -> terminal_failure (Serve.Turn_failed error)
             | Some Msp.Terminal_cancelled -> terminal_failure Serve.Turn_cancelled
             | Some (Msp.Unrecognized_terminal terminal) ->
               terminal_failure (Serve.Protocol_error
@@ -1604,8 +1626,10 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
           (match stop, !terminal_error with
            | Host.Terminal_tool_boundary _, _
              when Option.is_some on_official_client_tool_boundary -> settle_host_stop stop
-           | _, Some detail -> Error (internal_error detail)
-           | _, None -> settle_host_stop stop)
+           | (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _), Some detail ->
+             Error (internal_error detail)
+           | (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _), None ->
+             settle_host_stop stop)
         | Ok (`Completed (turn : Serve.turn_result)) ->
           recovery_failure := Session_store.Protocol_failed;
           let* () =

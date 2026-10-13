@@ -121,7 +121,7 @@ let reject_symlink ~kind path =
             "keeper secret %s entry must not be a symlink: %s"
             (source_label kind)
             path)
-     | _ -> Ok st)
+     | Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> Ok st)
 ;;
 
 let valid_env_name name =
@@ -212,8 +212,7 @@ let load_env_entries env_root =
                   (match read_env_entry path with
                    | Error _ as err -> err
                    | Ok value -> loop ((name, value) :: acc) rest)
-                | _ ->
-                  Error
+                | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> Error
                     (Printf.sprintf
                        "keeper secret env entry must be a regular file: %s"
                        path)))
@@ -293,8 +292,7 @@ let collect_file_entries files_root =
        | Unix.S_LNK ->
          Error
            (Printf.sprintf "keeper secret file entry must not be a symlink: %s" host_dir)
-       | _ ->
-         Error
+       | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> Error
            (Printf.sprintf
               "keeper secret file entry must be a regular file or directory: %s"
               host_dir))
@@ -498,7 +496,7 @@ let ensure_secret_directory ~label path =
                 "keeper secret %s path must not be a symlink: %s"
                 label
                 path)
-         | _ -> Ok ()))
+         | Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> Ok ()))
   with
   | Sys_error msg -> Error msg
   | Unix.Unix_error (err, fn, arg) -> Error (unix_error_message err fn arg)
@@ -512,8 +510,7 @@ let validate_env_entry_target path =
     | Unix.S_LNK ->
       Error
         (Printf.sprintf "keeper secret env entry must not be a symlink: %s" path)
-    | _ ->
-      Error
+    | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> Error
         (Printf.sprintf
            "keeper secret env entry must be a regular file: %s"
            path)
@@ -665,8 +662,7 @@ let existing_secret_directory ~label path =
            "keeper secret %s path must not be a symlink: %s"
            label
            path)
-    | _ ->
-      Error (Printf.sprintf "keeper secret %s path is not a directory: %s" label path)
+    | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> Error (Printf.sprintf "keeper secret %s path is not a directory: %s" label path)
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
   | Unix.Unix_error (err, fn, arg) -> Error (unix_error_message err fn arg)
@@ -697,8 +693,7 @@ let validate_file_entry_target path =
     | Unix.S_LNK ->
       Error
         (Printf.sprintf "keeper secret file entry must not be a symlink: %s" path)
-    | _ ->
-      Error
+    | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> Error
         (Printf.sprintf
            "keeper secret file entry must be a regular file: %s"
            path)
@@ -772,7 +767,7 @@ let read_file_entry ~base_path ~keeper_name ~scope ~container_path =
     (* Absent is not an error: a Keeper that never attached has no file, and
        reading that as a failure would make "not set up" look like "broken". *)
     | Error _ when not (Sys.file_exists path) -> Ok None
-    | other -> other
+    | (Ok _ | Error _) as other -> other
 ;;
 
 let delete_file_entry ~base_path ~keeper_name ~scope ~container_path =

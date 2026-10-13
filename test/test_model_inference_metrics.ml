@@ -67,8 +67,12 @@ let inference_identity_values ?identity_seed ~model ~ts () =
   "trace-" ^ Digest.to_hex (Digest.string seed), 1, 0
 
 let write_costs base entries =
-  let costs_dir = Filename.concat base ".masc/costs" in
-  let store = Dated_jsonl.create ~base_dir:costs_dir () in
+  let store =
+    Dated_jsonl.open_store
+      (Dated_jsonl.Store.cluster
+         (Dated_jsonl.Store.cluster_root (Filename.concat base ".masc"))
+         Costs)
+  in
   List.iter (Dated_jsonl.append store) entries
 
 let cost_day_file base =

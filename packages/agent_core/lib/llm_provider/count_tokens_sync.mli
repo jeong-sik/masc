@@ -38,6 +38,8 @@ val count_anthropic
     reached its transport boundary, after Agent turn hooks, tool projection,
     and caller-owned message projection. The input count uses the provider's
     native count endpoint. The output receipt is resolved from the same config.
+    An already-prepared policy snapshot is reused; a direct caller gets one
+    snapshot for both input projection and output-token resolution.
 
     This is a lower-level transport-adapter primitive. Application callers
     must not reconstruct a completion request to call it: final Agent-level

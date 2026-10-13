@@ -154,7 +154,8 @@ let generate ~sw ~net ~runtime_id ~provider_cfg (prompt : R.prompt) =
       let complete =
         match result.stop_reason, result.response.stop_reason with
         | Runtime_agent.Completed, (T.EndTurn | T.StopSequence) -> true
-        | _ -> false
+        | (Runtime_agent.Completed, (T.StopToolUse | (T.MaxTokens | (T.Refusal | (T.ContentFilter | (T.RepetitionTruncation | (T.PauseTurn | (T.Compaction | (T.ContextWindowExceeded | (T.UnmatchedToolCalls | T.Unknown _))))))))))
+        | ((Runtime_agent_context.Yielded_to_operation_queued _ | (Runtime_agent_context.Yielded_to_durable_stimulus _ | (Runtime_agent_context.Yielded_after_repeated_tool_call _ | (Runtime_agent_context.Yielded_after_repeated_assistant_text _ | Runtime_agent_context.InputRequired _)))), _) -> false
       in
       if complete && String.trim response.text <> "" then
         Ok ({ request = request (); response } : R.generation)
@@ -408,7 +409,10 @@ let run_comparison options =
             loop ((case, progress) :: completed) rest
         in
         let* completed = loop [] samples in
-        let arm_scored = function R.Scored _ -> true | _ -> false in
+        let arm_scored = function
+          | R.Scored _ -> true
+          | R.Not_started | R.Question_failed _ | R.Question_ready _ | R.Answer_failed _
+          | R.Answer_ready _ | R.Judge_failed _ -> false in
         let all_scored = List.for_all (fun (_, (progress : M.progress)) ->
           arm_scored progress.baseline && arm_scored progress.restored) completed in
         let bytes = encode completed in

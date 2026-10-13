@@ -90,7 +90,7 @@ let run () =
   let input_path = Config_dir_resolver.absolute_path !input in
   let output_path = Config_dir_resolver.absolute_path !output in
   let* () = match Fs_compat.exact_path_kind ~follow:false output_path with
-    | Fs_compat.Exact_missing -> Ok () | _ -> Error "output must be a new file" in
+    | Fs_compat.Exact_missing -> Ok () | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ -> Error "output must be a new file" in
   (* Equal, recent fact ages avoid making a refresh look like a semantic win. *)
   let fact_observed_at = Time_compat.now () in
   let keeper_instructions = "" in

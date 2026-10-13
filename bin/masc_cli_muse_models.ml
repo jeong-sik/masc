@@ -23,4 +23,13 @@ let run ~cli_path ~account_home ~timeout_s =
     (match error with
      | Runtime_muse_serve.Auth_required _
      | Runtime_muse_serve.Turn_failed {kind=Runtime_muse_msp.Auth_required; _} -> 3
-     | _ -> 1)
+     | Runtime_muse_serve.Turn_failed { kind = (Runtime_muse_msp.Step_limit | (Runtime_muse_msp.Config_error | (Runtime_muse_msp.Projection_error | (Runtime_muse_msp.Log_error | (Runtime_muse_msp.Workflow_launch_error | (Runtime_muse_msp.Environment_error | (Runtime_muse_msp.Model_error | (Runtime_muse_msp.Launch_error | Runtime_muse_msp.Unrecognized_error_kind _))))))));_}
+     | Runtime_muse_serve.Session_not_durable | Runtime_muse_serve.Turn_cancelled
+     | Runtime_muse_serve.Runtime_shutting_down | Runtime_muse_serve.Invalid_config _
+     | Runtime_muse_serve.Spawn_failed _ | Runtime_muse_serve.Turn_input_write_failed _
+     | Runtime_muse_serve.Protocol_error _ | Runtime_muse_serve.Rpc_error _
+     | Runtime_muse_serve.Capability_not_granted _ | Runtime_muse_serve.Session_model_mismatch _
+     | Runtime_muse_serve.Session_workspace_mismatch _
+     | Runtime_muse_serve.Session_approval_mode_mismatch _
+     | Runtime_muse_serve.Unsupported_server_request _ | Runtime_muse_serve.Process_exited _
+     | Runtime_muse_serve.Timeout _ -> 1)

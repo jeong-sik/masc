@@ -60,6 +60,32 @@ let test_context_identity () =
   check (list int) "same URL does not merge opaque contexts" [1;2] (ids ());
   contexts:=["b"];check (list int) "remaining context keeps identity" [2] (ids ());
   contexts:=["b";"c"];check (list int) "closed context ID never reused" [2;3] (ids ())
+
+let test_unreadable_tab_does_not_hide_other_tabs () =
+  let peer = peer_of (fun method_ args -> match method_ with
+    | "browsingContext.getTree" ->
+      Ok (obj ["contexts", `List [obj ["context", `String "protected"];
+                                   obj ["context", `String "work"]]])
+    | "script.callFunction" ->
+      (match Yojson.Safe.Util.(args |> member "target" |> member "context" |> to_string) with
+       | "protected" -> Error (Peer.Rejected (Peer.error_code_of_wire "unsupported operation"))
+       | "work" -> Ok (script_value (obj ["url", `String "https://example.test/work";
+           "title", `String "Work"; "active", `Bool true]))
+       | _ -> fail "unknown context")
+    | _ -> fail "unexpected command") in
+  match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
+  | Error _ -> fail "one unreadable tab hid the work tab"
+  | Ok data ->
+    let open Yojson.Safe.Util in
+    check bool "inventory says it is partial" false (data |> member "complete" |> to_bool);
+    let available = data |> member "tabs" |> to_list in
+    check (list int) "work tab keeps its context identity" [2]
+      (List.map (fun row -> row |> member "id" |> to_int) available);
+    let unavailable = data |> member "unavailableTabs" |> to_list in
+    check (list int) "unreadable tab is not silently dropped" [1]
+      (List.map (fun row -> row |> member "id" |> to_int) unavailable);
+    check string "browser's refusal survives" "BiDi command rejected: unsupported operation"
+      (List.hd unavailable |> member "error" |> to_string)
 (* A document-source read is the automation lane's document helper, which
    reports HTML it had to leave out instead of cutting it. *)
 let test_document_source () =
@@ -718,6 +744,7 @@ let test_an_error_code_is_read_once_and_written_back () =
       check string ("written back: " ^ code) code (Peer.error_code_to_wire (Peer.error_code_of_wire code)))
     [ "session not created"; "invalid session id"; "no such frame"; "" ]
 let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity;
+    test_case "one unreadable tab leaves other tabs visible" `Quick test_unreadable_tab_does_not_hide_other_tabs;
     test_case "an error code is read once and written back" `Quick test_an_error_code_is_read_once_and_written_back;
     test_case "a session runs the expected profile" `Quick test_a_session_runs_the_expected_profile];
   "lifetime",[test_case "normal callback closes held socket" `Quick (test_held_open_completion (Ok ()) );

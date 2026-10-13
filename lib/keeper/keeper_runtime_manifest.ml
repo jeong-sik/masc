@@ -36,7 +36,9 @@ let source_clock_of_string = function
 let source_clock_of_event = function
   | Event_bus_correlated -> Event_bus
   | Context_injected | History_projection_observed -> Logical
-  | _ -> Wall
+  | Turn_started | Phase_gate_decided | Runtime_routed | Runtime_execution_built | Runtime_completed
+  | Runtime_failed | Pre_dispatch_blocked | Provider_lane_resolved | Checkpoint_loaded
+  | Checkpoint_saved | Receipt_appended | Turn_finished -> Wall
 
 type logical_ordering = {
   parent_event_id : string option;
@@ -196,14 +198,20 @@ let clock_refs_for_context ctx ~event ?agent_core_turn_count ?elapsed_ms
     match event with
     | Provider_lane_resolved ->
       Some (context_tool_batch_id ctx ?agent_core_turn_count ())
-    | _ -> None
+    | Turn_started | Phase_gate_decided | Runtime_routed | Runtime_execution_built
+    | Runtime_completed | Runtime_failed | Pre_dispatch_blocked | Context_injected
+    | History_projection_observed | Event_bus_correlated | Checkpoint_loaded | Checkpoint_saved
+    | Receipt_appended | Turn_finished -> None
   in
   let checkpoint_id =
     match event with
     | Checkpoint_loaded
     | Checkpoint_saved ->
       Some (context_checkpoint_id ctx ?agent_core_turn_count ())
-    | _ -> None
+    | Turn_started | Phase_gate_decided | Runtime_routed | Runtime_execution_built
+    | Runtime_completed | Runtime_failed | Pre_dispatch_blocked | Provider_lane_resolved
+    | Context_injected | History_projection_observed | Event_bus_correlated | Receipt_appended
+    | Turn_finished -> None
   in
   clock_refs ~edge_id:(context_edge_id ctx event)
     ~lane:(clock_lane_of_event event) ~source_clock:(source_clock_of_event event)
@@ -542,13 +550,15 @@ let decode_persisted_row json =
      | None -> Ok (Unsupported_row (row_identity row, row.event_wire)))
 
 let execution_receipt_path_for_today config ~keeper_name =
-  (* [Jsonl_writer.dated_path_now] is the same calculation the writer runs;
+  (* [Dated_jsonl.Store.dated_path_now] is the same calculation the writer runs;
      a second copy here is free to drift to a different calendar (#27143). *)
-  let base_dir =
-    Keeper_types_support.keeper_execution_receipt_store config keeper_name
-    |> Dated_jsonl.base_dir
+  let location =
+    Keeper_types_support.keeper_store_location
+      config
+      keeper_name
+      Dated_jsonl.Store.Keeper.Execution_receipts
   in
-  (Jsonl_writer.dated_path_now ~base_dir).Jsonl_writer.path
+  (Dated_jsonl.Store.dated_path_now location).Dated_jsonl.Store.path
 
 let base_dir config ~keeper_name =
   Filename.concat

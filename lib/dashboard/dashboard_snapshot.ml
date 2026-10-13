@@ -109,7 +109,7 @@ let refresh_tools_projection ~now ~ttl ~cache ~config compute =
   | Some (Ready_tools entry)
     when should_reuse_projection ~now:(now ()) ~ttl ~refreshed_at:entry.refreshed_at ->
     entry.value
-  | _ ->
+  | None | Some (Pending_tools _ | Failed_tools _ | Ready_tools _) ->
     let started_at = now () in
     let allocated_before = Gc.allocated_bytes () in
     let retain_or_prepare transient json =
@@ -117,7 +117,9 @@ let refresh_tools_projection ~now ~ttl ~cache ~config compute =
       | Some (Ready_tools entry), _ -> entry.value
       | Some (Pending_tools value), `Pending
       | Some (Failed_tools value), `Failed -> value
-      | _ ->
+      | None, _
+      | Some (Pending_tools _), `Failed
+      | Some (Failed_tools _), `Pending ->
         let value = prepare_tools ~config (fun () -> json) in
         Atomic.set cache (Some (match transient with
           | `Pending -> Pending_tools value

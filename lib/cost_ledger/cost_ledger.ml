@@ -365,17 +365,16 @@ let to_json ?(extra_fields = []) row =
      @ extra_fields)
 ;;
 
-let directory_name = "costs"
-let dir_of_masc_root masc_root = Filename.concat masc_root directory_name
-
-let dir_of_base_path ~base_path =
-  dir_of_masc_root (Common.masc_dir_from_base_path ~base_path)
-;;
-
 let store_of_masc_root masc_root =
-  Dated_jsonl.create ~base_dir:(dir_of_masc_root masc_root) ()
+  Dated_jsonl.open_store
+    Dated_jsonl.Store.(cluster (cluster_root masc_root) Cluster.Costs)
 ;;
 
+(* The raw rows are written under the cluster's root, while this reader and
+   the settlement rows use [<base>/.masc]. The two are one directory in the
+   default cluster and two under MASC_CLUSTER_NAME. Which root the ledger
+   belongs to is not settled here; this keeps every caller where it was
+   (#42837). *)
 let store_of_base_path ~base_path =
-  Dated_jsonl.create ~base_dir:(dir_of_base_path ~base_path) ()
+  store_of_masc_root (Common.masc_dir_from_base_path ~base_path)
 ;;

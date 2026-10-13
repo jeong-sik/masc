@@ -84,8 +84,7 @@ let inspect_current_task_path effective_masc_root =
     | Unix.S_REG ->
         let shape, error = inspect_regular_current_task path in
         (path, shape, error)
-    | kind ->
-        ( path,
+    | (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK) as kind -> ( path,
           Fs_compat.file_kind_to_string kind,
           Some
             (Printf.sprintf

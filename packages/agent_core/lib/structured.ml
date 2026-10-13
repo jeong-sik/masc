@@ -235,7 +235,7 @@ let%test "json_extractor parses json from text block" =
   in
   match extractor resp with
   | Ok "val" -> true
-  | _ -> false
+  | Ok _ | Error _ -> false
 ;;
 
 let%test "json_extractor returns error on empty content" =
@@ -283,7 +283,7 @@ let%test "text_extractor parses text content" =
   in
   match extractor resp with
   | Ok true -> true
-  | _ -> false
+  | Ok false | Error _ -> false
 ;;
 
 let%test "text_extractor returns error when parse returns None" =
@@ -351,7 +351,7 @@ let%test "text_extractor skips non-text blocks" =
   in
   match extractor resp with
   | Ok "target" -> true
-  | _ -> false
+  | Ok _ | Error _ -> false
 ;;
 
 let%test "text_extractor empty content" =
@@ -367,7 +367,7 @@ let%test "text_extractor empty content" =
   in
   match extractor resp with
   | Error "no text content in response" -> true
-  | _ -> false
+  | Ok _ | Error _ -> false
 ;;
 
 let%test "json_extractor non-text content only" =
@@ -383,5 +383,5 @@ let%test "json_extractor non-text content only" =
   in
   match extractor resp with
   | Error "no text content in response" -> true
-  | _ -> false
+  | Ok _ | Error _ -> false
 ;;

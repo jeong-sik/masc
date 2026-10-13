@@ -356,6 +356,11 @@ let valid_absolute_path value =
   && not (String.contains value '\x00')
 ;;
 
+(* With no parent components the parent is the allowed root itself. *)
+let empty_parent_path_mismatch ~allowed_root ~parent parent_components =
+  parent_components = [] && not (equal_identity allowed_root parent)
+;;
+
 let locator
       ~allowed_root_path
       ~allowed_root
@@ -378,7 +383,7 @@ let locator
     (match parse_components 0 [] parent_components with
      | Error _ as error -> error
      | Ok parent_components ->
-       if parent_components = [] && not (equal_identity allowed_root parent)
+       if empty_parent_path_mismatch ~allowed_root ~parent parent_components
        then
          Error
            (Empty_parent_path_identity_mismatch { allowed_root; parent })
@@ -396,18 +401,36 @@ let locator
               }))
 ;;
 
+(* [locator] for a caller that already holds parsed components. The two
+   component errors cannot occur here; the other two can. *)
+let locator_of_leaves
+      ~allowed_root_path
+      ~allowed_root
+      ~parent_components
+      ~parent
+      ~target_leaf
+      ~initial_target
+  =
+  if not (valid_absolute_path allowed_root_path)
+  then Error (Invalid_allowed_root_path allowed_root_path)
+  else if empty_parent_path_mismatch ~allowed_root ~parent parent_components
+  then Error (Empty_parent_path_identity_mismatch { allowed_root; parent })
+  else
+    Ok
+      { allowed_root_path
+      ; allowed_root
+      ; parent_components
+      ; parent
+      ; target_leaf
+      ; initial_target
+      }
+;;
+
 let locator_allowed_root_path (locator : locator) = locator.allowed_root_path
 let locator_allowed_root (locator : locator) = locator.allowed_root
-
-let locator_parent_components (locator : locator) =
-  List.map Capability_leaf.to_string locator.parent_components
-;;
-
+let locator_parent_components (locator : locator) = locator.parent_components
 let locator_parent (locator : locator) = locator.parent
-
-let locator_target_leaf (locator : locator) =
-  Capability_leaf.to_string locator.target_leaf
-;;
+let locator_target_leaf (locator : locator) = locator.target_leaf
 
 let prepared_operation_id (prepared : prepared) = prepared.operation_id
 let prepared_locator (prepared : prepared) = prepared.locator

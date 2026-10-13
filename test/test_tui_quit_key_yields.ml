@@ -23,6 +23,7 @@ let every_text_target =
   ; ("identity filter", Text_identity_filter)
   ; ("github token", Text_github_token)
   ; ("board draft", Text_board_draft)
+  ; ("board attach path", Text_board_attach_path)
   ]
 
 (* A field showing a cursor owns [q]. Three of the first thirteen were named
@@ -51,9 +52,9 @@ let test_with_no_field_open_the_quit_key_is_a_quit_key () =
    before it goes on measuring all of them rather than a subset someone
    trimmed. *)
 let test_the_list_covers_every_target_this_build_has () =
-  Alcotest.(check int) "fields counted" 19 (List.length every_text_target);
+  Alcotest.(check int) "fields counted" 20 (List.length every_text_target);
   let spelled = List.map fst every_text_target in
-  Alcotest.(check int) "and none of them is listed twice" 19
+  Alcotest.(check int) "and none of them is listed twice" 20
     (List.length (List.sort_uniq String.compare spelled))
 
 let () =

@@ -11,6 +11,95 @@ type request_artifact = string Request_artifact_internal.t
 let request_payload = Request_artifact_internal.payload
 let request_output_token_receipt = Request_artifact_internal.output_token_receipt
 
+let binding_controls_beta = "thinking-binding-controls-2026-08-01"
+
+(* Measurement switch (RFC-AC-041 Q15, task-2306): set to a false value to stop
+   sending [thinking.block_binding.prefix_mismatch_behavior = "drop_block"] on
+   adaptive Sonnet/Haiku 5.5 completions. Read per request; the default keeps
+   the current behaviour. *)
+let drop_block_env_var = "AGENT_CORE_ANTHROPIC_DROP_BLOCK"
+
+let request_headers ~body headers =
+  let has_binding =
+    match Yojson.Safe.from_string body with
+    | `Assoc fields ->
+      (match List.assoc_opt "thinking" fields with
+       | Some (`Assoc fields) -> List.mem_assoc "block_binding" fields
+       | _ -> false)
+    | _ -> false
+  in
+  if has_binding then (
+    let betas, other =
+      List.partition
+        (fun (name, _) -> String.equal (String.lowercase_ascii name) "anthropic-beta")
+        headers
+    in
+    let values =
+      List.concat_map
+        (fun (_, value) -> String.split_on_char ',' value |> List.map String.trim)
+        betas
+    in
+    let values = List.sort_uniq String.compare (binding_controls_beta :: values) in
+    ("anthropic-beta", String.concat "," values) :: other)
+  else headers
+;;
+
+let observe_input_transformations json =
+  let transformations =
+    match json with
+    | `Assoc fields ->
+      (match List.assoc_opt "input_transformations" fields with
+       | Some (`List items) -> items
+       | _ ->
+         (match List.assoc_opt "message" fields with
+          | Some (`Assoc fields) ->
+            (match List.assoc_opt "input_transformations" fields with
+             | Some (`List items) -> items
+             | _ -> [])
+          | _ -> []))
+    | _ ->
+      []
+  in
+  (let message =
+     match json with
+     | `Assoc fields ->
+       (match List.assoc_opt "message" fields with
+        | Some (`Assoc inner) -> inner
+        | _ -> fields)
+     | _ -> []
+   in
+   let str key =
+     match List.assoc_opt key message with
+     | Some (`String value) -> [ key, `String value ]
+     | _ -> []
+   in
+   (* One line per response, including zero transformations, so a mismatch
+      rate has a denominator. Carries no block contents or signatures. *)
+   Diag.info "anthropic" "%s"
+     (Yojson.Safe.to_string
+        (`Assoc
+            ((("event", `String "thinking_input_transformation_summary")
+              :: str "id")
+             @ str "model"
+             @ [ "count", `Int (List.length transformations) ]))));
+  List.iter
+    (function
+      | `Assoc fields ->
+        let details =
+          List.filter_map
+            (fun key ->
+               match List.assoc_opt key fields with
+               | Some (`String value) -> Some (key, `String value)
+               | _ -> None)
+            [ "type"; "path"; "reason" ]
+        in
+        Diag.info "anthropic" "%s"
+          (Yojson.Safe.to_string
+             (`Assoc (("event", `String "thinking_input_transformation") :: details)))
+      | _ -> ())
+    transformations
+;;
+
 (* The Messages wire reports exclusive input: "input_tokens: Number of input
    tokens which were not read from or used to create a cache", with
    total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens
@@ -184,18 +273,38 @@ let validate_thinking_controls wire (config : Provider_config.t) =
       (Printf.sprintf
          "model %S disabled thinking accepts only low, medium or high effort"
          config.model_id)
-  | _, Some false, Some effort ->
+  | _, Some false,
+    Some
+      ((Reasoning_effort.None_ | Minimal | Low | Medium | High | XHigh | Max | Ultra)
+       as effort) ->
     Error
       (Printf.sprintf
          "model %S cannot set reasoning_effort %S when enable_thinking=false"
          config.model_id
          (Reasoning_effort.to_string effort))
-  | Capabilities.Anthropic_always_adaptive, Some false, _ ->
+  | Capabilities.Anthropic_always_adaptive, Some false, None ->
     Error
       (Printf.sprintf
          "model %S cannot disable always-on adaptive thinking"
          config.model_id)
-  | _, _, _ -> Provider_config.validate_reasoning_effort_request config
+  | ( ( Capabilities.Anthropic_adaptive_default
+      | Capabilities.Anthropic_adaptive_disabled_through_high
+      | Capabilities.Anthropic_adaptive_between_tools
+      | Capabilities.Anthropic_adaptive_preferred
+      | Capabilities.Anthropic_adaptive_only
+      | Capabilities.Anthropic_always_adaptive )
+    , (None | Some (true | false))
+    , ( None
+      | Some
+          ( Reasoning_effort.None_
+          | Reasoning_effort.Minimal
+          | Reasoning_effort.Low
+          | Reasoning_effort.Medium
+          | Reasoning_effort.High
+          | Reasoning_effort.XHigh
+          | Reasoning_effort.Max
+          | Reasoning_effort.Ultra ) ) ) ->
+    Provider_config.validate_reasoning_effort_request config
 ;;
 
 let output_config_for_config _mode (config : Provider_config.t) =
@@ -324,12 +433,24 @@ let rec anthropic_content_block_to_json = function
     `Assoc
       [ "type", `String "tool_result"
       ; "tool_use_id", `String tool_use_id
-      ; "content", `List (List.map anthropic_content_block_to_json blocks)
+      ; "content", `List (List.map anthropic_tool_result_content_block_to_json blocks)
       ; "is_error", `Bool (tool_result_outcome_is_error outcome)
       ]
   | ( Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
     | ToolUse _ | ToolResult { content_blocks = None; _ }
     | Document _ | Audio _ ) as block -> Api_common.content_block_to_json block
+and anthropic_tool_result_content_block_to_json = function
+  | (Text _ | Image _ | Document _) as block -> anthropic_content_block_to_json block
+  | (Thinking _ | ReasoningDetails _ | RedactedThinking _
+    | ToolUse _ | ToolResult _ | Audio _) as block ->
+    (* Tool output is data, not a nested assistant turn. Messages accepts
+       text, image, document, and search_result here; the other canonical
+       variants remain visible as text without becoming protocol blocks.
+       https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls *)
+    `Assoc
+      [ "type", `String "text"
+      ; "text", `String (Yojson.Safe.to_string (Api_common.content_block_to_json block))
+      ]
 ;;
 
 let anthropic_message_to_json (msg : message) =
@@ -491,9 +612,14 @@ let build_request_payload
        (Printf.sprintf
           "Backend_anthropic.build_request: model %S does not accept a final assistant prefill; end messages with a user turn"
           config.model_id)
-   | Provider_config.Anthropic, (true | false), _
-   | (Provider_config.Kimi | Provider_config.OpenAI_compat | Provider_config.Ollama
-     | Provider_config.Gemini | Provider_config.Glm), _, _ -> ());
+   | ( ( Provider_config.Anthropic
+       | Provider_config.Kimi
+       | Provider_config.OpenAI_compat
+       | Provider_config.Ollama
+       | Provider_config.Gemini
+       | Provider_config.Glm )
+     , (true | false)
+     , ([] | { role = System | User | Assistant | Tool; _ } :: _) ) -> ());
   let message_to_json =
     match config.kind with
     | Provider_config.Anthropic -> anthropic_message_to_json
@@ -602,7 +728,37 @@ let build_request_payload
     | Count_tokens, _ | Completion _, None -> body
   in
   let body =
-    match thinking_config_for_config thinking_mode config with
+    let thinking = thinking_config_for_config thinking_mode config in
+    let thinking =
+      (* These catalog policies describe Sonnet/Haiku 5.5. Their adaptive
+         wire accepts binding controls; between_tools and disabled do not.
+         The server validates the actual serialized prefix, including any
+         intentional window or tool-schema changes. *)
+      let binds_prefix_mismatch =
+        match request_mode, thinking_mode with
+        | Completion _,
+          Anthropic_control (Capabilities.Anthropic_adaptive_between_tools
+                             | Capabilities.Anthropic_adaptive_disabled_through_high)
+          -> true
+        | Completion _,
+          ( Anthropic_control (Capabilities.Anthropic_adaptive_default
+                               | Capabilities.Anthropic_adaptive_preferred
+                               | Capabilities.Anthropic_adaptive_only
+                               | Capabilities.Anthropic_always_adaptive)
+          | Anthropic_no_policy
+          | Kimi_flag )
+        | Count_tokens, (Anthropic_control _ | Anthropic_no_policy | Kimi_flag) -> false
+      in
+      match binds_prefix_mismatch, config.enable_thinking, thinking with
+      | true, Some true, Some (`Assoc fields)
+        when Env_parse.bool_env ~default:true drop_block_env_var ->
+        Some (`Assoc (("block_binding",
+          `Assoc [ "prefix_mismatch_behavior", `String "drop_block" ]) :: fields))
+      | true, Some true, (None | Some _)
+      | true, (Some false | None), (None | Some _)
+      | false, (Some true | Some false | None), (None | Some _) -> thinking
+    in
+    match thinking with
     | Some thinking -> ("thinking", thinking) :: body
     | None -> body
   in
@@ -722,29 +878,7 @@ let build_request_artifact_with_thinking_control
    wrapper; it calls [build_request_artifact_with_thinking_control] with the
    snapshot-frozen option, including an explicit [None]. *)
 let nonexact_anthropic_thinking_control (config : Provider_config.t) =
-  match config.kind with
-  | Provider_config.Anthropic ->
-    (* Provider-qualified rows (deepseek on the Anthropic-compatible surface)
-       are invisible to the bare lookup, so a provider label resolves them
-       first; without one — or when the provider row declares no policy — the
-       bare reading stands. Adversarial F1. *)
-    (match config.provider_id with
-     | Some provider_label -> (
-       match
-         Capabilities.anthropic_thinking_control_for_provider_model_id
-           ~provider_label
-           ~model_id:config.model_id
-       with
-       | Some _ as control -> control
-       | None ->
-         Capabilities.anthropic_thinking_control_for_model_id config.model_id)
-     | None ->
-       Capabilities.anthropic_thinking_control_for_model_id config.model_id)
-  | Provider_config.Kimi
-  | Provider_config.OpenAI_compat
-  | Provider_config.Ollama
-  | Provider_config.Gemini
-  | Provider_config.Glm -> None
+  Provider_config.anthropic_thinking_control config
 ;;
 
 let validate_nonexact_thinking_controls (config : Provider_config.t) =

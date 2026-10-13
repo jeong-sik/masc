@@ -97,7 +97,9 @@ let render_fusion_list (state : state) =
         let failed_count =
           List.fold_left
             (fun acc (r : Masc.Tui_decode_fusion.fusion_run) ->
-               match r.fur_status with Masc.Tui_decode_fusion.Fusion_failed _ -> acc + 1 | _ -> acc)
+               match r.fur_status with
+                 | Masc.Tui_decode_fusion.Fusion_failed _ -> acc + 1
+                 | Masc.Tui_decode_fusion.Fusion_running | Fusion_completed -> acc)
             0 runs
         in
         let running_count = Stdlib.max 0 (List.length runs - completed_count - failed_count) in

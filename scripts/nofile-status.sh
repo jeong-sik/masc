@@ -12,7 +12,8 @@ Usage: scripts/nofile-status.sh [options]
 
 Options:
   --kill-bare-dune    SIGTERM unwrapped Dune processes reported as bypasses.
-  --kill-repo-scans   SIGTERM broad find/bfs scans over ~/me or masc.
+  --kill-repo-scans   SIGTERM broad find/bfs scans over the home directory
+                      or a masc path.
   --kill-risky        Enable both kill options above.
   --watch [seconds]   Repeat until interrupted. Defaults to 5 seconds.
   --once              Run one snapshot even when invoked from watch mode.
@@ -187,7 +188,6 @@ if [[ "${ps_available}" -eq 1 ]]; then
     ps ax -o pid=,ppid=,stat=,etime=,command= 2>/dev/null \
       | awk '
           /dune-local[.]sh/ ||
-          /me-dune-local[.]lock/ ||
           /(^|[[:space:]\/])dune([[:space:]]|$)/ ||
           /(^|[[:space:]\/])opam[[:space:]]+exec[[:space:]].*([[:space:]\/])dune([[:space:]]|$)/ {
             print
@@ -209,7 +209,6 @@ if [[ "${ps_available}" -eq 1 ]]; then
       | awk '
           $2 == 1 &&
           /dune-local[.]sh/ &&
-          /me-dune-local[.]lock/ &&
           /(^|[[:space:]\/])(lockf|flock)([[:space:]]|$)/ {
             print
           }' || true
@@ -227,12 +226,38 @@ printf 'repo-wide scan processes:\n'
 if [[ "${ps_available}" -eq 1 ]]; then
   scan_rows="$(
     ps ax -o pid=,ppid=,stat=,etime=,command= 2>/dev/null \
-      | awk '
+      | awk -v home="${HOME:-}" '
+          # The home directory itself or a path under it: the match starts
+          # a path (line start, space, quote, = or :) and ends a path
+          # component (line end, space, quote or /), so neither
+          # /backup<home>/x nor <home>2/x counts.
+          # An unset or root home names nothing.
+          function names_home(line, rest, at, consumed, before) {
+            if (length(home) < 2) {
+              return 0
+            }
+            rest = line
+            consumed = 0
+            while ((at = index(rest, home)) > 0) {
+              before = (consumed + at == 1) ? " " : substr(line, consumed + at - 1, 1)
+              rest = substr(rest, at + length(home))
+              consumed += at + length(home) - 1
+              if (index(path_starts, before) > 0 &&
+                  (rest == "" || index(path_ends, substr(rest, 1, 1)) > 0)) {
+                return 1
+              }
+            }
+            return 0
+          }
+
+          BEGIN {
+            path_starts = sprintf(" \t=:\"%c", 39)
+            path_ends = sprintf(" \t/\"%c", 39)
+          }
+
           /(^|[[:space:]])(bfs|find)[[:space:]]/ &&
-          (/\/Users\/dancer([[:space:]]|\/|$)/ ||
-           /\/Users\/dancer\/me([[:space:]]|\/|$)/ ||
+          (names_home($0) ||
            /masc/ ||
-           /~\/me/ ||
            /[[:space:]]~([[:space:]]|\/|$)/) {
             print
           }' || true
@@ -273,7 +298,7 @@ if [[ "${ps_available}" -eq 1 ]]; then
             depth = 0
             while ((cur in cmd) && depth < 64) {
               if (cmd[cur] ~ /dune-local[.]sh/ ||
-                  cmd[cur] ~ /me-dune-local[.]lock/ ||
+                  cmd[cur] ~ /(^|[[:space:]\/])(lockf|flock)([[:space:]]|$)/ ||
                   cmd[cur] ~ /MASC_DUNE_LOCK_HELD=1/) {
                 return 1
               }

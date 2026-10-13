@@ -96,7 +96,14 @@ let parse_failure message =
 let validate_declared_task (config : Provider_config.t) =
   match Provider_config.capabilities_for_config_model config with
   | Some { Capabilities.task = Some Capabilities.Speech; _ } -> Ok ()
-  | Some { task = Some task; _ } ->
+  | Some
+      { task =
+          Some
+            ((Capabilities.Transcription
+             | Capabilities.Image_generation
+             | Capabilities.Video_generation) as task)
+      ; _
+      } ->
     reject
       (Printf.sprintf
          "model %S declares task %S, not speech"
@@ -373,7 +380,9 @@ let[@warning "-32"] test_config ?(kind = Provider_config.OpenAI_compat) task =
 let%test "speech request requires exact catalog task" =
   match validate_request (test_config None) "hello" (Named "alloy") with
   | Error (Http_client.AcceptRejected _) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.ProviderTerminal _)
+  | Error (Http_client.ProviderFailure _) -> false
 ;;
 
 let%test "named voice request preserves exact model and format" =
@@ -417,15 +426,17 @@ let%test "Gemini response preserves exact audio and absent usage" =
   | Ok
       { provider_response_id = Some "ix-tts"
       ; audios =
-          [ { format = Wav
-            ; source = Inline_base64 { media_type = "audio/wav"; data = "eA==" }
+          [ { format
+            ; source
             ; sample_rate = Some 24000
             ; channels = Some 1
             }
           ]
       ; usage = Some { input_tokens = None; output_tokens = None; _ }
       ; _
-      } -> true
+      }
+    when format = Wav
+         && source = Inline_base64 { media_type = "audio/wav"; data = "eA==" } -> true
   | Ok _ | Error _ -> false
 ;;
 
@@ -436,17 +447,17 @@ let%test "Opus maps to the documented audio/opus in both directions" =
   &&
   match format_of_media_type "audio/opus" with
   | Ok Opus -> true
-  | Ok _ | Error _ -> false
+  | Ok (Mp3) | Error _ | Ok (Aac) | Ok (Flac) | Ok (Wav) | Ok (Pcm) -> false
 ;;
 
 let%test "parameterized and case-variant MIME still resolves" =
   (match format_of_media_type "audio/L16;codec=pcm;rate=24000" with
    | Ok Pcm -> true
-   | Ok _ | Error _ -> false)
+   | Ok (Mp3) | Error _ | Ok (Opus) | Ok (Aac) | Ok (Flac) | Ok (Wav) -> false)
   &&
   match format_of_media_type "audio/mpeg" with
   | Ok Mp3 -> true
-  | Ok _ | Error _ -> false
+  | Error _ | Ok (Opus) | Ok (Aac) | Ok (Flac) | Ok (Wav) | Ok (Pcm) -> false
 ;;
 
 let%test "Gemini non-object 2xx body is a typed parse failure" =
@@ -454,7 +465,31 @@ let%test "Gemini non-object 2xx body is a typed parse failure" =
   | Error
       (Http_client.ProviderFailure
          { kind = Http_client.Provider_parse_error { parser = Some _ }; _ }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _
+  | Error (Http_client.HttpError _)
+  | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _)
+  | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _)
+  | Error
+      (Http_client.ProviderFailure
+         { kind =
+             ( Http_client.Capacity_exhausted _
+          | Http_client.Hard_quota _
+          | Http_client.Capability_mismatch _
+          | Http_client.Cli_policy_invalid _
+          | Http_client.Cli_startup_failed _
+          | Http_client.Provider_parse_error { parser = None }
+          | Http_client.Provider_wire_error _
+          | Http_client.Provider_reported_error _
+          | Http_client.Provider_interrupted
+          | Http_client.Response_body_too_large _
+          | Http_client.Empty_completion _
+          | Http_client.Context_overflow _
+          | Http_client.Repeating_generation _
+          | Http_client.Unknown_provider_failure _ )
+         ; _
+         }) -> false
 ;;
 
 let%test "Gemini non-completed status is a provider failure, not a parse error" =
@@ -463,5 +498,29 @@ let%test "Gemini non-completed status is a provider failure, not a parse error" 
       (Http_client.ProviderFailure
          { kind = Http_client.Unknown_provider_failure { reason = Some reason }; _ }) ->
     String.equal reason "gemini interaction status cancelled"
-  | Ok _ | Error _ -> false
+  | Ok _
+  | Error (Http_client.HttpError _)
+  | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _)
+  | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _)
+  | Error
+      (Http_client.ProviderFailure
+         { kind =
+             ( Http_client.Capacity_exhausted _
+          | Http_client.Hard_quota _
+          | Http_client.Capability_mismatch _
+          | Http_client.Cli_policy_invalid _
+          | Http_client.Cli_startup_failed _
+          | Http_client.Provider_parse_error _
+          | Http_client.Provider_wire_error _
+          | Http_client.Provider_reported_error _
+          | Http_client.Provider_interrupted
+          | Http_client.Response_body_too_large _
+          | Http_client.Empty_completion _
+          | Http_client.Context_overflow _
+          | Http_client.Repeating_generation _
+          | Http_client.Unknown_provider_failure { reason = None } )
+         ; _
+         }) -> false
 ;;

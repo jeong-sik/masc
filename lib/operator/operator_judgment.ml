@@ -8,7 +8,6 @@ type record = {
   surface : string;
   target_type : target_type;
   target_id : string option;
-  status : string;
   summary : string;
   confidence : float;
   generated_at : string;
@@ -63,7 +62,6 @@ let to_yojson (value : record) =
       ("surface", `String value.surface);
       ("target_type", `String (target_type_to_string value.target_type));
       ("target_id", Json_util.option_to_yojson (fun v -> `String v) value.target_id);
-      ("status", `String value.status);
       ("summary", `String value.summary);
       ("confidence", `Float value.confidence);
       ("generated_at", `String value.generated_at);
@@ -120,44 +118,79 @@ let of_yojson json =
       then Ok confidence
       else Error "confidence out of range"
     in
+    (* The same holds for every other member: [record] writes all of them, so
+       a record that lacks one, or carries the wrong JSON type, is corrupt.
+       Reading it as [""], [false] or an empty list would put a judgment the
+       judge never wrote into the digest, under a surface key ([""]) that
+       matches nothing it was meant for. *)
+    let required_string key =
+      match Json_util.assoc_member_opt key json with
+      | Some (`String value) -> Ok value
+      | Some _ -> Error ("invalid " ^ key)
+      | None -> Error ("missing " ^ key)
+    in
+    let optional_string key =
+      match Json_util.assoc_member_opt key json with
+      | None | Some `Null -> Ok None
+      | Some (`String value) -> Ok (Some value)
+      | Some _ -> Error ("invalid " ^ key)
+    in
+    let required_strings key =
+      match Json_util.assoc_member_opt key json with
+      | Some (`List items) ->
+        let values =
+          List.filter_map (function `String value -> Some value | _ -> None) items
+        in
+        if List.compare_lengths values items = 0 then Ok values
+        else Error ("invalid " ^ key)
+      | Some _ -> Error ("invalid " ^ key)
+      | None -> Error ("missing " ^ key)
+    in
+    let required_bool key =
+      match Json_util.assoc_member_opt key json with
+      | Some (`Bool value) -> Ok value
+      | Some _ -> Error ("invalid " ^ key)
+      | None -> Error ("missing " ^ key)
+    in
+    let* judgment_id = required_string "judgment_id" in
+    let* surface = required_string "surface" in
+    let* target_id = optional_string "target_id" in
+    let* summary = required_string "summary" in
+    let* generated_at = required_string "generated_at" in
+    let* fresh_until = required_string "fresh_until" in
+    let* keeper_name = required_string "keeper_name" in
+    let* model_name = optional_string "model_name" in
+    let* runtime_name = optional_string "runtime_name" in
+    let* evidence_refs = required_strings "evidence_refs" in
+    let* recommended_action =
+      match Json_util.assoc_member_opt "recommended_action" json with
+      | None | Some `Null -> Ok None
+      | Some (`Assoc _ as value) -> Ok (Some value)
+      | Some _ -> Error "invalid recommended_action"
+    in
+    let* supersedes = required_strings "supersedes" in
+    let* fallback_used = required_bool "fallback_used" in
+    let* disagreement_with_truth = required_bool "disagreement_with_truth" in
     Ok
       {
-        judgment_id = (match Json_util.assoc_member_opt "judgment_id" json with Some (`String s) -> s | _ -> "");
-        surface = (match Json_util.assoc_member_opt "surface" json with Some (`String s) -> s | _ -> "");
+        judgment_id;
+        surface;
         target_type;
-        target_id = Json_util.get_string json "target_id";
-        status =
-          Json_util.get_string json "status"
-          |> Option.value ~default:"active";
-        summary = (match Json_util.assoc_member_opt "summary" json with Some (`String s) -> s | _ -> "");
+        target_id;
+        summary;
         confidence;
-        generated_at = (match Json_util.assoc_member_opt "generated_at" json with Some (`String s) -> s | _ -> "");
+        generated_at;
         generated_at_unix;
-        fresh_until = (match Json_util.assoc_member_opt "fresh_until" json with Some (`String s) -> s | _ -> "");
+        fresh_until;
         fresh_until_unix;
-        keeper_name =
-          Json_util.get_string json "keeper_name"
-          |> Option.value ~default:"operator-judge";
-        model_name = Json_util.get_string json "model_name";
-        runtime_name = Json_util.get_string json "runtime_name";
-        evidence_refs =
-          (match json |> Json_util.assoc_member_opt "evidence_refs" with
-          | Some (`List items) -> List.filter_map (function `String s -> Some s | _ -> None) items
-          | _ -> []);
-        recommended_action =
-          (match json |> Json_util.assoc_member_opt "recommended_action" with
-          | Some (`Assoc _ as value) -> Some value
-          | _ -> None);
-        supersedes =
-          (match json |> Json_util.assoc_member_opt "supersedes" with
-          | Some (`List items) -> List.filter_map (function `String s -> Some s | _ -> None) items
-          | _ -> []);
-        fallback_used =
-          Json_util.get_bool json "fallback_used"
-          |> Option.value ~default:false;
-        disagreement_with_truth =
-          Json_util.get_bool json "disagreement_with_truth"
-          |> Option.value ~default:false;
+        keeper_name;
+        model_name;
+        runtime_name;
+        evidence_refs;
+        recommended_action;
+        supersedes;
+        fallback_used;
+        disagreement_with_truth;
       }
   with Yojson.Safe.Util.Type_error (msg, _) | Failure msg -> Error msg
 
@@ -174,11 +207,13 @@ let load_all config =
   let path = judgments_path config in
   Fs_compat.fold_jsonl_lines
     ~init:[]
-    ~f:(fun acc ~line_no:_ json ->
+    ~f:(fun acc ~line_no json ->
       try
         match of_yojson json with
         | Ok value -> value :: acc
-        | Error _ -> acc
+        | Error reason ->
+          Log.Gate.warn "operator judgment parse: line %d: %s" line_no reason;
+          acc
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         Log.Gate.warn "operator judgment parse: %s" (Printexc.to_string exn);
         acc)
@@ -225,7 +260,6 @@ let record config ~surface ~target_type ~target_id ~summary ~confidence
       surface;
       target_type;
       target_id;
-      status = "active";
       summary = String.trim summary;
       confidence;
       generated_at;

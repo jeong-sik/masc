@@ -223,8 +223,10 @@ let test_execution_identity_joins_exact_occurrence () =
   let selected_run = { (run_ref ~path ~worker_run_id ~start_seq:1) with end_seq = 7 } in
   write_turn_record ~execution_ids config ~absolute_turn:428 ~turn_kind:Turn_record.Autonomous
     ~raw_trace_run_ref:(Some selected_run);
-  let ledger = Dated_jsonl.create
-    ~base_dir:(Filename.concat (Workspace.masc_root_dir config) "tool_calls") () in
+  let ledger =
+    Dated_jsonl.open_store
+      (Dated_jsonl.Store.cluster (Workspace.dated_store_cluster_root config) Tool_calls)
+  in
   let row ~id ~invocation_turn ~keeper_turn =
     `Assoc [ "record_kind", `String "tool_call"; "ts", `Float 2005.;
       "keeper", `String keeper_name; "execution_id", `String id;

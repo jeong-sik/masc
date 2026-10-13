@@ -135,6 +135,17 @@ val describe_unreadable : string -> frontmatter_error -> string
 val page_path : base_path:string -> string -> string
 (** [page_path ~base_path page] is [<wiki_root>/<page>.md]. *)
 
+type page_name_error =
+  | Empty_page_name
+  | Bad_page_characters
+  | Dash_at_edge
+  | Reserved_page_name
+
+(** Whether [raw] can serve as a page topic: lowercase letters, digits and
+    inner dashes only, and not one of the wiki's own names. Readers and
+    writers agree on this one judgment. *)
+val validate_page_name : string -> (string, page_name_error) result
+
 val list_pages : base_path:string -> string list
 (** Every [.md] file directly under {!wiki_root}, as full paths in name
     order; [[]] when the directory does not exist. No file is skipped by

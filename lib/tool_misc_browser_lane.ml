@@ -58,12 +58,17 @@ let answer_to_result ~lane ~tool_name ~start_time = function
          | Some (`String message) -> message
          | _ -> "browser backend failed without an error message" in
        make_workflow_err ~tool_name ~start_time message
-     | _ -> make_workflow_err ~tool_name ~start_time "invalid browser backend response")
+     | _ -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+         "invalid browser backend response")
   | Browser_lane.Answered _ ->
-    make_workflow_err ~tool_name ~start_time "invalid browser backend response"
-  | Browser_lane.Lane_absent -> make_workflow_err ~tool_name ~start_time (Browser_lane.lane_absent_message lane)
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+      "invalid browser backend response"
+  | Browser_lane.Lane_absent ->
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable
+      ~effect_disposition:Tool_result.Proven_pre_effect (Browser_lane.lane_absent_message lane)
   | Browser_lane.Timed_out ->
-    make_workflow_err ~tool_name ~start_time "the browser lane did not answer in time"
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable
+      "the browser lane did not answer in time; the dispatched outcome is unknown. Read the current page before repeating an interaction."
   | Browser_lane.Rejected_before_effect reason ->
     Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
       ~effect_disposition:Tool_result.Proven_pre_effect reason
@@ -82,7 +87,9 @@ let add_client target = function
       | Some (`List tabs) -> `Assoc (Browser_lane.target_connection_fields target @ ["tabs", `List tabs])
       | Some other -> other | None -> `Null in
     Browser_lane.Answered (`Assoc (("data", data) :: List.remove_assoc "data" envelope))
-  | other -> other
+  | ( Browser_lane.Answered _ | Browser_lane.Timed_out
+    | Browser_lane.Rejected_before_effect _ | Browser_lane.Lane_absent
+    | Browser_lane.Refused _ ) as other -> other
 (* What a Keeper is told when no connected browser can take its command. The
    Keeper cannot start a browser or move a host, so the text names the cause
    the doctor reports for the same configuration and says the operator acts. *)
@@ -292,6 +299,8 @@ let selection_error ?bidi_start ~base_path ~tool_name ~start_time error =
 let read_failure ~base_path ~tool_name ~start_time = function
   | Browser_surface.Unselected error -> selection_error ~base_path ~tool_name ~start_time error
   | Browser_surface.Unobserved detail -> make_workflow_err ~tool_name ~start_time detail
+  | Browser_surface.Unavailable detail ->
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable detail
 
 let handle_tabs ~base_path ~tool_name ~start_time args : Tool_result.result =
   match tool_request args with
@@ -396,8 +405,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
     match Browser_page_script.text_cap (get_int_opt args "maxChars") with
     | Error detail -> make_input_err ~tool_name ~start_time detail
     | Ok max_chars ->
-    match get_string args "mode" "text" with
-    | ("scene" | "regions") as mode ->
+    let read_scene view =
       (match get_int_opt args "tabId" with
        | Some tab_id when tab_id >= 0 ->
            (let scope = match args with
@@ -422,11 +430,15 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
             | Error detail -> make_input_err ~tool_name ~start_time detail
             | Ok (navigation_source, expected_url, scope) ->
               match Browser_scene.read ?navigation_source ?expected_url
-                ~view:(if mode = "regions" then Browser_lane.Regions else Browser_lane.Content)
+                ~view
                 ?scope {request with tab_id=Some tab_id} ~max_chars with
               | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
               | Error failure -> read_failure ~base_path ~tool_name ~start_time failure)
        | _ -> make_input_err ~tool_name ~start_time "scene requires an observed tabId")
+    in
+    match get_string args "mode" "text" with
+    | "scene" -> read_scene Browser_lane.Content
+    | "regions" -> read_scene Browser_lane.Regions
     | "downloads" ->
       if not automation then make_input_err ~tool_name ~start_time "downloads require automation"
       else (match get_int_opt args "tabId" with
@@ -496,11 +508,23 @@ let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
   | _, Error detail -> make_input_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect
   | Ok _, Ok (Browser_lane.Action.On_tab {interaction=Upload _;_}) when upload_paths = None ->
     pre_error "upload requires an authoritative Keeper file context"
-  | Ok route, Ok action ->
+  | Ok route, Ok (( Browser_lane.Action.Open_tab _
+                  | Browser_lane.Action.On_tab
+                      { interaction =
+                          ( Click _ | Fill _ | Press _ | Select _ | Scroll _ | Upload _
+                          | Accept_dialog _ | Dismiss_dialog | Back | Forward | Reload
+                          | Close_tab )
+                      ; _ } ) as action) ->
     let action = match action, upload_paths with
       | Browser_lane.Action.On_tab ({interaction=Upload {selector;_};_} as target), Some paths ->
         Browser_lane.Action.On_tab {target with interaction=Upload {selector;paths}}
-      | _ -> action in
+      | Browser_lane.Action.Open_tab _, (None | Some _)
+      | Browser_lane.Action.On_tab { interaction = Upload _; _ }, None
+      | Browser_lane.Action.On_tab
+          { interaction =
+              ( Click _ | Fill _ | Press _ | Select _ | Scroll _ | Accept_dialog _
+              | Dismiss_dialog | Back | Forward | Reload | Close_tab )
+          ; _ }, (None | Some _) -> action in
     let verb = Browser_lane.Page_act action in
     let issued = Result.bind (Browser_lane.resolve_target ~verb route) (fun target ->
       Browser_lane.issue_for ~target ~verb ~timeout_sec:60.) in

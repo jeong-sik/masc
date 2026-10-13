@@ -511,9 +511,10 @@ def main() -> int:
     ap.add_argument("--executable", type=Path, default=DEFAULT_EXECUTABLE)
     args = ap.parse_args()
 
-    base = masc_base_path.resolve(args.base_path)
-    if base is None:
-        ap.error(masc_base_path.required("--base-path"))
+    base = masc_base_path.require(ap, args.base_path, "--base-path")
+    if not (base / ".masc").is_dir():
+        print(f"not a MASC base path (no .masc directory): {base}", file=sys.stderr)
+        return 1
     if not TTYD.is_file():
         print(f"missing ttyd: {TTYD}", file=sys.stderr)
         return 1

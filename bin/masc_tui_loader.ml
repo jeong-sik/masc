@@ -738,6 +738,11 @@ let decode_board_post ?(require_body = false) json =
     | Some other -> Some (Post_kind_unknown other)
     | None -> None
   in
+  (* Attachments decode per entry and can never fail the post: a broken
+     entry is carried as its [Error], an unknown kind as [Ak_unknown]
+     (spec decision 5 -- deliberately not the [bp_closed] shape above, where
+     one malformed nested field fails the whole read). *)
+  let bp_attachments = decode_board_attachments json in
   Ok
     {
       bp_id;
@@ -755,6 +760,7 @@ let decode_board_post ?(require_body = false) json =
       bp_hearth;
       bp_kind;
       bp_closed;
+      bp_attachments;
     }
 
 (* The board's own hearth census: name and post count, over the whole board.
@@ -1027,7 +1033,8 @@ let load_runtime_surface ~(host : string) ~(port : int) ~(force : bool) :
              | Ok json -> Masc_tui_runtime_evidence.decode json
              | Error _ -> Error "runtime history unavailable; check server support and operator access" in
            Ok { rsl_resolved; rsl_probe; rsl_evidence })
-  | _ -> Error "runtime surface loader lost a projection read"
+  | [] | [ _ ] | [ _; _ ] | _ :: _ :: _ :: _ :: _ ->
+      Error "runtime surface loader lost a projection read"
 
 (** Load the tool calls keepers are holding, for the Approvals surface. *)
 let load_keeper_tool_approvals ~(host : string) ~(port : int) :

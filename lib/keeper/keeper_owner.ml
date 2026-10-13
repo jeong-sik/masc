@@ -1474,7 +1474,8 @@ let start
             match command, (Keeper_owner_reducer.projection state).meta with
             | Keeper_owner_reducer.Create _, None ->
               reopen_operation_store_if_missing t
-            | _ -> Ok ()
+            | (Keeper_owner_reducer.Create _, Some _)
+            | ((Keeper_owner_reducer.Pause _ | (Keeper_owner_reducer.Resume _ | (Keeper_owner_reducer.Reset_latch _ | (Keeper_owner_reducer.Retain_shutdown_latch _ | (Keeper_owner_reducer.Update_profile _ | (Keeper_owner_reducer.Delete_if_snapshot _ | (Keeper_owner_reducer.Commit_turn_runtime _ | Keeper_owner_reducer.Set_current_task _))))))), _) -> Ok ()
           in
           (match operation_store_ready with
            | Error error ->
@@ -1572,7 +1573,7 @@ let start
           (match response with
            | Ok _ when continuation.Keeper_semantic_execution.not_before = None ->
              rearm_transient_retry_wake ()
-           | _ -> ());
+           | Ok _ | Error _ -> ());
           rearm_cooling_retry_wake ();
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
@@ -1663,7 +1664,12 @@ let start
              Eio.Promise.resolve resolve (Ok
                (Interrupt_result (Operation_not_current { running_operation_id = (Atomic.get t.operation_projection).running_operation_id }), chat_control_token t));
              loop state shutdown_operation_id
-           | Ok (interrupt, _) ->
+           | Ok
+               ( ( Interrupt_now _ | Interrupt_settling
+                 | Interrupt_maintenance_running | Interrupt_held_by_autonomous_turn
+                 | Interrupt_not_current )
+                 as interrupt
+               , _ ) ->
              Atomic.set t.chat_control_token (Random_id.uuid_v7 ());
              let result = match interrupt with
                | Interrupt_not_current -> Pending_admission_paused
@@ -2075,7 +2081,8 @@ let start
                           Eio.Promise.resolve
                             resolve
                             (Ok (Autonomous_busy (Turn_busy (Some chat))))
-                        | Some _ | None -> run_admitted_turn ())))));
+                        | Some { lane = Autonomous | Maintenance; _ } | None ->
+                          run_admitted_turn ())))));
           loop state shutdown_operation_id
         | Command (Child_finished completion, resolve) ->
           let result =

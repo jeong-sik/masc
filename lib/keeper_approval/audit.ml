@@ -273,12 +273,18 @@ let approval_decision_kind_and_reason = function
   | Decision.Reject reason -> Decision_reject, non_empty_reason reason
 ;;
 
-let audit_today_path base_dir =
+let audit_location ~base_path =
+  Dated_jsonl.Store.base ~base_path Dated_jsonl.Store.Base.Audit_approvals
+;;
+
+let audit_today_path ~base_path =
   (* The layout belongs to [Jsonl_writer]; a copy here can pick a different
      calendar than the one readers filter with (#27143). *)
-  let dated = Jsonl_writer.dated_path_now ~base_dir in
-  Fs_compat.mkdir_p (Filename.concat base_dir dated.Jsonl_writer.month_dir);
-  dated.Jsonl_writer.path
+  let location = audit_location ~base_path in
+  let dated = Dated_jsonl.Store.dated_path_now location in
+  Fs_compat.mkdir_p
+    (Filename.concat (Dated_jsonl.Store.dir location) dated.Dated_jsonl.Store.month_dir);
+  dated.Dated_jsonl.Store.path
 ;;
 
 let store_create_probe = Atomic.make (fun ~base_path:_ -> ())
@@ -334,12 +340,7 @@ let get_audit_store ~base_path () =
             (match Hashtbl.find_opt audit_stores base_path with
                | Some store -> store
                | None ->
-               let dir =
-                 Filename.concat
-                   (Common.masc_dir_from_base_path ~base_path)
-                   "audit-approvals"
-               in
-               let store = Dated_jsonl.create ~base_dir:dir () in
+               let store = Dated_jsonl.open_store (audit_location ~base_path) in
                Hashtbl.replace audit_stores base_path store;
                store)
         with
@@ -394,7 +395,7 @@ let record
     ; write_result = Error { stage = Store_create; detail }
     ; cleanup_failure = None
     }
-  | Ok store ->
+  | Ok (_ : Dated_jsonl.t) ->
     let json =
       `Assoc
         ([ "ts", `Float timestamp
@@ -450,7 +451,7 @@ let record
         Ok
           (Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
              (Atomic.get append_jsonl)
-               (audit_today_path (Dated_jsonl.base_dir store))
+               (audit_today_path ~base_path)
                json))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn

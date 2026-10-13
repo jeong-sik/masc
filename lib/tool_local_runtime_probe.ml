@@ -553,7 +553,8 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
           [
             "No Ollama model was requested, loaded, or configured via OLLAMA_DEFAULT_MODEL.";
           ] )
-    | Skip_generate_probe _, _ -> ([], [])
+    | (Skip_generate_probe (Status_only), _) | (Skip_generate_probe (Ps_preflight_error), _)
+    | (Skip_generate_probe (Model_unloaded), _) | (Skip_generate_probe (Policy_skip), _) -> ([], [])
     | Run_generate_probe, None ->
         ([],
          [
@@ -581,7 +582,8 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
   let generate_skipped_unloaded_model =
     match generate_decision with
     | Skip_generate_probe Model_unloaded -> true
-    | _ -> false
+    | Skip_generate_probe (No_effective_model | (Status_only | (Ps_preflight_error | Policy_skip)))
+    | Run_generate_probe -> false
   in
   let after_status, loaded_after, after_error =
     fetch_ollama_ps ~timeout_sec:ps_timeout_sec ~server_url ()

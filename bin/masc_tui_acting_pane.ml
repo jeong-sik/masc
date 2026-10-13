@@ -1459,7 +1459,8 @@ let fleet_lines ~below ~scroll (body, overview) =
         else scrolled_rows ~below ~scroll:(scroll - 1) body
       in
       visible, scroll_max
-  | _ -> window ~below ~scroll body ~overview:(fun () -> overview ~below)
+  | (Rule | (Trace_unavailable_summary _ | (Fleet_row (_, _) | (Focus_header (_, _, _) | (Approval_row _ | (Calls_heading _ | (Tool_row (_, _, _, _, _) | (Call_detail (_, _, _) | (Earlier_turn (_, _) | (More _ | (Indicator (_, _) | (File_row (_, _) | Formatted_status (_, _)))))))))))))::_
+  | [] | Trace_unavailable (_, _)::_ -> window ~below ~scroll body ~overview:(fun () -> overview ~below)
 
 (* A row that spends the pane's four columns -- state, tool, calls and tokens.
    The column names sit over these. A focus header with no record of its own

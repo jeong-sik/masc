@@ -37,7 +37,11 @@ module Lifecycle = struct
     | Booting, Boot_complete -> Applied Serving
     | Serving, Start_draining -> Applied Draining
     | Draining, Stop -> Applied Stopped
-    | phase, event -> Ignored { phase; event }
+    | Booting, (Start_draining | Stop)
+    | Serving, (Boot_complete | Stop)
+    | Draining, (Boot_complete | Start_draining)
+    | Stopped, (Boot_complete | Start_draining | Stop) ->
+      Ignored { phase = current; event }
 
   let apply_event_lossy ~current event =
     match apply_event ~current event with
@@ -72,7 +76,7 @@ module Lazy_task_queue = struct
     | Pending tasks, Task_fail { task; _ } ->
       let remaining = List.filter (fun t -> t <> task) tasks in
       if remaining = [] then Complete else Pending remaining
-    | state, _ -> state
+    | Complete, (Task_finish _ | Task_fail _) | Pending _, Tasks_appear _ -> current
 
   let pp fmt = function
     | Complete -> Format.fprintf fmt "complete"
@@ -100,7 +104,8 @@ module Readiness = struct
     match current, event with
     | NotReady, Set_ready -> Applied Ready
     | Ready, Set_not_ready -> Applied NotReady
-    | phase, event -> Ignored { phase; event }
+    | NotReady, Set_not_ready | Ready, Set_ready ->
+      Ignored { phase = current; event }
 
   let apply_event_lossy ~current event =
     match apply_event ~current event with

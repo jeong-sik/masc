@@ -1394,7 +1394,9 @@ let routine_skill_report = function
   | Builtin_skill_package.Bundled
       { result = Ok (Builtin_skill_package.Up_to_date
                     | Builtin_skill_package.Install_missing); _ } -> true
-  | _ -> false
+  | Builtin_skill_package.Bundled { result = Ok (Builtin_skill_judgement.Adopt_identical | (Builtin_skill_judgement.Adopt_with_release_permissions | (Builtin_skill_judgement.Permissions_pending _ | (Builtin_skill_judgement.Replace_recorded _ | (Builtin_skill_judgement.Replace_pending _ | (Builtin_skill_judgement.Keep_modified _ | (Builtin_skill_judgement.Keep_untracked_different _ | Builtin_skill_judgement.Keep_uninspectable _)))))));_}
+  | Builtin_skill_package.Bundled { result = Error _;_} | Builtin_skill_package.Interrupted _
+  | Builtin_skill_package.Retired _ | Builtin_skill_package.Unfinished _ -> false
 
 let print_skill_report ~report skill_report =
   match report with
@@ -2120,7 +2122,7 @@ let voice_local_setup_exit base_path speak_voice hear_model =
      below is decided against a configuration this command cannot write. *)
   | Ok (_, Some (Voice_setup.Standalone_json path, _)) ->
     refuse (Voice_setup.error_message (Voice_setup.Standalone_source_active path))
-  | Ok (revision, active) ->
+  | Ok (revision, ((None | Some (Voice_setup.Runtime_toml, _)) as active)) ->
     let existing = Option.map snd active in
     let tts = Option.bind existing (fun config -> config.Voice_config.tts) in
     if Option.is_some speak_voice
@@ -2727,7 +2729,18 @@ let keeper_lifecycle_post ~action ~base_path ~host ~port ~agent ~token ~keeper_n
   let text, code =
     match action, outcome with
     | `Boot, (Masc_cli_keeper_create.Created _ | Masc_cli_keeper_create.Reconfigured _) -> "imp is running.", 0
-    | _ -> Masc_cli_keeper_create.render outcome
+    | ( `Up
+      , ( Masc_cli_keeper_create.Created _
+        | Masc_cli_keeper_create.Reconfigured _
+        | Masc_cli_keeper_create.Revision_conflict
+        | Masc_cli_keeper_create.Unauthorized _
+        | Masc_cli_keeper_create.Refused _
+        | Masc_cli_keeper_create.Unreachable _ ) )
+    | ( `Boot
+      , ( Masc_cli_keeper_create.Revision_conflict
+        | Masc_cli_keeper_create.Unauthorized _
+        | Masc_cli_keeper_create.Refused _
+        | Masc_cli_keeper_create.Unreachable _ ) ) -> Masc_cli_keeper_create.render outcome
   in
   if code = 0 then print_endline text else prerr_endline text;
   code
@@ -3038,7 +3051,10 @@ let rec sandbox_image_remove_tree path =
       (fun entry -> sandbox_image_remove_tree (Filename.concat path entry))
       (Sys.readdir path);
     Unix.rmdir path
-  | _ -> Sys.remove path
+  | { Unix.st_kind =
+        ( Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK )
+    ; _
+    } -> Sys.remove path
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let sandbox_image_report_build ~cli ~tag status =
@@ -3591,7 +3607,7 @@ let wizard_model_entries client catalog =
         ~prefix:
           (Llm_provider.Model_identifiers.Id_prefix.of_string_exn "gpt-")
         entry.id_prefix
-    | _ -> false)
+    | (Wizard_claude_code | Wizard_codex), Some _ -> false)
 
 let wizard_exact_model_entries ~prefer_bare model entries =
   let exact_entries = entries
@@ -3901,7 +3917,11 @@ let setup_validate_runtime base_path =
           (match result.failure, runtime.provider.credentials with
            | Some (Runtime_verification.Unavailable (Missing_credential _)), Some (Runtime_schema.Env key) ->
              Printf.eprintf "Missing model credential: %s. Set this variable in the shell that starts MASC.\n" key
-           | _ -> ());
+           | (Some (Runtime_verification.Unavailable (Runtime_verification.Missing_credential _)), Some (Runtime_schema.File _ | Runtime_schema.Inline _))
+           | (Some (Runtime_verification.Unavailable (Runtime_verification.Missing_credential _)), None)
+           | (Some (Runtime_verification.Unavailable (Runtime_verification.Unsupported_runtime | (Runtime_verification.Tools_not_declared | (Runtime_verification.Invalid_credential _ | (Runtime_verification.Invalid_configuration _ | (Runtime_verification.Client_not_authenticated _ | Runtime_verification.Client_not_started _)))))), _)
+           | (Some (Runtime_verification.Timed_out | (Runtime_verification.Tool_not_called | (Runtime_verification.Tool_result_not_consumed | (Runtime_verification.Empty_response | (Runtime_verification.Model_unreported | (Runtime_verification.Rate_limited _ | (Runtime_verification.Quota_exhausted _ | (Runtime_verification.Provider_overloaded _ | (Runtime_verification.Provider_auth_refused _ | (Runtime_verification.Provider_unreachable _ | (Runtime_verification.Model_not_found _ | Runtime_verification.Provider_rejected _))))))))))), _)
+           | (None, _) -> ());
           (* Name the cause: a refused key needs a new one, a missing model
              another choice, and the operator cannot tell them apart from the
              sentence below alone. *)
@@ -4095,7 +4115,7 @@ let setup_sandbox_selection sandbox_profile microvm_backend =
                 Printf.sprintf "--microvm-backend takes one of: %s"
                   (String.concat ", " Keeper_microvm_backend.valid_strings))
            | Some backend -> `Ok (Some Keeper_sandbox_config.Micro_vm, Some backend)))
-     | Some profile ->
+     | Some ((Keeper_sandbox_config.Docker | Keeper_sandbox_config.Remote_ssh) as profile) ->
        (match backend with
         | None -> `Ok (Some profile, None)
         | Some _ ->
@@ -4181,7 +4201,9 @@ let sandbox_install_apple_verified_cmd =
         let output = Fun.protect
           ~finally:(fun () -> status := Some (Unix.close_process_in channel))
           (fun () -> In_channel.input_all channel) in
-        (match !status with Some (Unix.WEXITED 0) -> Ok output | _ -> Error ())
+        (match !status with
+         | Some (Unix.WEXITED 0) -> Ok output
+         | Some (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) | None -> Error ())
       with Unix.Unix_error _ | Sys_error _ -> Error () in
   let execute source sha256 size =
     match Masc.Apple_container_install.install_privileged ~run ~source ~sha256 ~size with

@@ -252,14 +252,82 @@ let panel_failure ~runtime_id = function
   | Missing_reply -> provider_error ~runtime_id "completed turn has no assistant reply"
   | Setup_failure detail -> provider_error ~runtime_id detail
   | Codex_failure (Runtime_codex_app_server.Timeout _) -> Fusion_types.Timeout
-  | Codex_failure error -> provider_error ~runtime_id (Runtime_codex_app_server.error_to_string error)
+  | Codex_failure
+      (( Runtime_codex_app_server.Invalid_config _
+       | Runtime_codex_app_server.Spawn_failed _
+       | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+       | Runtime_codex_app_server.Turn_input_write_failed _
+       | Runtime_codex_app_server.Protocol_error _
+       | Runtime_codex_app_server.Rpc_error _
+       | Runtime_codex_app_server.Subscription_required _
+       | Runtime_codex_app_server.Unsupported_server_request _
+       | Runtime_codex_app_server.Context_window_exceeded _
+       | Runtime_codex_app_server.Turn_failed _
+       | Runtime_codex_app_server.Stopped_by_host _
+       | Runtime_codex_app_server.Turn_interrupted
+       | Runtime_codex_app_server.Runtime_shutting_down
+       | Runtime_codex_app_server.Process_exited _ ) as error) ->
+    provider_error ~runtime_id (Runtime_codex_app_server.error_to_string error)
   | Claude_failure (Runtime_claude_code.Timeout _)
   | Claude_admission_failure (Runtime_claude_code.Timeout _) -> Fusion_types.Timeout
-  | Claude_failure error | Claude_admission_failure error -> provider_error ~runtime_id (Runtime_claude_code.error_to_string error)
+  | Claude_failure
+      (( Runtime_claude_code.Invalid_config _
+       | Runtime_claude_code.Spawn_failed _
+       | Runtime_claude_code.Protocol_error _
+       | Runtime_claude_code.Subscription_required _
+       | Runtime_claude_code.Unsupported_control_request _
+       | Runtime_claude_code.Turn_transport_interrupted _
+       | Runtime_claude_code.Context_window_exceeded _
+       | Runtime_claude_code.Turn_failed _
+       | Runtime_claude_code.Turn_failed_with_observation _
+       | Runtime_claude_code.Stopped_by_host _
+       | Runtime_claude_code.Quota_blocked _
+       | Runtime_claude_code.Process_exited _
+       | Runtime_claude_code.Unhandled_exception _ ) as error)
+  | Claude_admission_failure
+      (( Runtime_claude_code.Invalid_config _
+       | Runtime_claude_code.Spawn_failed _
+       | Runtime_claude_code.Protocol_error _
+       | Runtime_claude_code.Subscription_required _
+       | Runtime_claude_code.Unsupported_control_request _
+       | Runtime_claude_code.Turn_transport_interrupted _
+       | Runtime_claude_code.Context_window_exceeded _
+       | Runtime_claude_code.Turn_failed _
+       | Runtime_claude_code.Turn_failed_with_observation _
+       | Runtime_claude_code.Stopped_by_host _
+       | Runtime_claude_code.Quota_blocked _
+       | Runtime_claude_code.Process_exited _
+       | Runtime_claude_code.Unhandled_exception _ ) as error) ->
+    provider_error ~runtime_id (Runtime_claude_code.error_to_string error)
   | Antigravity_failure (Runtime_antigravity.Timeout _) -> Fusion_types.Timeout
-  | Antigravity_failure error -> provider_error ~runtime_id (Runtime_antigravity.error_to_string error)
+  | Antigravity_failure
+      (( Runtime_antigravity.Invalid_config _
+       | Runtime_antigravity.Spawn_failed _
+       | Runtime_antigravity.Protocol_error _
+       | Runtime_antigravity.State_callback_failed _
+       | Runtime_antigravity.Turn_failed _
+       | Runtime_antigravity.Process_exited _
+       | Runtime_antigravity.Unhandled_exception _ ) as error) ->
+    provider_error ~runtime_id (Runtime_antigravity.error_to_string error)
   | Muse_failure (Runtime_muse_serve.Timeout _) -> Fusion_types.Timeout
-  | Muse_failure error -> provider_error ~runtime_id (Runtime_muse_serve.error_to_string error)
+  | Muse_failure
+      (( Runtime_muse_serve.Invalid_config _
+       | Runtime_muse_serve.Spawn_failed _
+       | Runtime_muse_serve.Turn_input_write_failed _
+       | Runtime_muse_serve.Protocol_error _
+       | Runtime_muse_serve.Rpc_error _
+       | Runtime_muse_serve.Capability_not_granted _
+       | Runtime_muse_serve.Session_not_durable
+       | Runtime_muse_serve.Session_model_mismatch _
+       | Runtime_muse_serve.Session_workspace_mismatch _
+       | Runtime_muse_serve.Session_approval_mode_mismatch _
+       | Runtime_muse_serve.Auth_required _
+       | Runtime_muse_serve.Turn_failed _
+       | Runtime_muse_serve.Turn_cancelled
+       | Runtime_muse_serve.Unsupported_server_request _
+       | Runtime_muse_serve.Runtime_shutting_down
+       | Runtime_muse_serve.Process_exited _ ) as error) ->
+    provider_error ~runtime_id (Runtime_muse_serve.error_to_string error)
 
 
 (* A Muse Code panelist starts in an empty temporary directory rather than
@@ -347,7 +415,14 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
           Runtime_quota_window.note_exhausted
             ~scope:quota_scope ~resets_at:(float_of_int resets_at)
         | None -> Runtime_quota_window.note_observed_exhausted ~scope:quota_scope)
-     | _ -> ());
+     | Runtime_claude_code.Invalid_config _ | Runtime_claude_code.Spawn_failed _
+     | Runtime_claude_code.Protocol_error _ | Runtime_claude_code.Subscription_required _
+     | Runtime_claude_code.Unsupported_control_request _
+     | Runtime_claude_code.Turn_transport_interrupted _
+     | Runtime_claude_code.Context_window_exceeded _ | Runtime_claude_code.Turn_failed _
+     | Runtime_claude_code.Turn_failed_with_observation _ | Runtime_claude_code.Stopped_by_host _
+     | Runtime_claude_code.Process_exited _ | Runtime_claude_code.Unhandled_exception _
+     | Runtime_claude_code.Timeout _ -> ());
     Error (if admission then Claude_admission_failure error else Claude_failure error)
   in
   (* A Codex account out of usage is the fact a Keeper turn already records
@@ -398,7 +473,18 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
           Runtime_claude_code.run_turn
             ~on_stream_event:(function
               | Runtime_claude_code.Usage_reported {usage; _} -> on_usage (claude_usage usage)
-              | _ -> ())
+              | Runtime_claude_code.Conversation_compacted | Runtime_claude_code.Turn_started _
+              | Runtime_claude_code.Text_delta _ | Runtime_claude_code.Thinking_delta _
+              | Runtime_claude_code.Child_content_observed _
+              | Runtime_claude_code.Content_block_stopped _
+              | Runtime_claude_code.Dynamic_tool_started _
+              | Runtime_claude_code.Dynamic_tool_finished _
+              | Runtime_claude_code.Native_tool_started _
+              | Runtime_claude_code.Native_tool_finished _
+              | Runtime_claude_code.Native_tool_progress _
+              | Runtime_claude_code.Native_task_observed _
+              | Runtime_claude_code.Usage_windows_reported _
+              | Runtime_claude_code.Provider_retry_observed _ | Runtime_claude_code.Turn_finished _ -> ())
             ~admitted_subscription
             ~mgr
             ~clock
@@ -428,13 +514,23 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
                                output_tokens=thread_total.output_tokens };
            on_usage !observed_usage
          | Usage_reported {frame=Context_window_filled _; _} -> counter_replaced := true
-         | _ -> ())
+         | Runtime_codex_app_server.Compaction_observed | Runtime_codex_app_server.Turn_started _
+         | Runtime_codex_app_server.Text_delta _ | Runtime_codex_app_server.Thinking_delta _
+         | Runtime_codex_app_server.Text_completed _ | Runtime_codex_app_server.Thinking_completed _
+         | Runtime_codex_app_server.Dynamic_tool_started _
+         | Runtime_codex_app_server.Dynamic_tool_finished _
+         | Runtime_codex_app_server.Native_tool_started _
+         | Runtime_codex_app_server.Native_tool_finished _
+         | Runtime_codex_app_server.Native_tool_progress _
+         | Runtime_codex_app_server.Elicitation_cancelled _
+         | Runtime_codex_app_server.Usage_windows_reported _
+         | Runtime_codex_app_server.Turn_finished _ | Usage_reported {frame=Counted _; _ } -> ())
        ~mgr ~clock ~cwd config ~prompt ~images:(List.map (fun (image : image_input) ->
            ({ media_type = image.media_type; base64_data = image.base64_data }
             : Runtime_codex_app_server.image_input)) images) with
      | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = result.text; model = result.model; usage = (match result.usage with
          | Some Runtime_codex_app_server.Thread_count_replaced -> !observed_usage
-         | usage -> optional_usage codex_usage usage) }
+         | (Some (Runtime_codex_app_server.Thread_count _) | None) as usage -> optional_usage codex_usage usage) }
      | Error error -> codex_failed error)
   | Runtime_execution.Antigravity_cli _ when not (List.is_empty images) ->
     Error (Setup_failure "Antigravity transport does not support image input")
@@ -452,7 +548,9 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
     (match Runtime_antigravity.run_turn
        ~on_stream_event:(function
          | Runtime_antigravity.Usage_reported {usage; _} -> on_usage (antigravity_usage usage)
-         | _ -> ())
+         | Runtime_antigravity.Turn_started _ | Runtime_antigravity.Text_delta _
+         | Runtime_antigravity.Text_completed _ | Runtime_antigravity.Native_tool_started _
+         | Runtime_antigravity.Native_tool_finished _ | Runtime_antigravity.Turn_finished _ -> ())
        ~home_dir:(Runtime_antigravity_home.home_dir home)
        ~mgr ~clock ~cwd:Eio.Path.(Eio.Stdenv.fs env / native_cwd) config ~prompt with
      | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model; usage = antigravity_usage result.usage }

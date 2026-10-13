@@ -645,7 +645,8 @@ module Make (Payload : Payload) = struct
                   Some r.registration, completion
                 | Ok (Some (Complete c)) when String.equal c.id shed.id ->
                   registration, Some c.completion
-                | Ok _ | Error _ -> registration, completion)
+                | Ok (None | Some (Register _ | Complete _)) | Error _ ->
+                  registration, completion)
           in
           let entry =
             match registration with

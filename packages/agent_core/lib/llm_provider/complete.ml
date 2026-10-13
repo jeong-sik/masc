@@ -144,9 +144,36 @@ let complete_prepared_sync
               ~clock
               call_bound))
   in
+  (* An injected transport owns its request projection and has no stable HTTP
+     body identity here. A refreshable credential has no stable account
+     identity in this config. Neither may reuse this response cache. *)
+  let cache =
+    match transport, config.credential_source with
+    | None, Provider_config.Static_credential -> cache
+    | Some _, _ | None, Provider_config.Refreshable_credential _ -> None
+  in
+  let preflight =
+    Result.bind preflight (fun (body_deadline, call_window) ->
+      match cache with
+      | None -> Ok (body_deadline, call_window, admitted_body, None)
+      | Some _ ->
+        let body =
+          match admitted_body with
+          | Some body -> Ok body
+          | None ->
+            Prepared_completion_request.admit_serialized_body ~stream:false prepared
+            |> Result.map Prepared_completion_request.serialized_admitted_body
+        in
+        Result.map (fun (body : Prepared_completion_request.admitted_body) ->
+          let key = Cache.http_request_fingerprint
+              ~config ~messages ~tools
+              ~http_codec:(Prepared_completion_request.admitted_body_http_codec body)
+              ~body:(Prepared_completion_request.admitted_body_contents body) () in
+          body_deadline, call_window, Some body, Some key) body)
+  in
   match preflight with
   | Error err -> Error err
-  | Ok (body_deadline, call_window) ->
+  | Ok (body_deadline, call_window, admitted_body, cache_key) ->
     let m =
       match metrics with
       | Some m -> m
@@ -154,14 +181,7 @@ let complete_prepared_sync
     in
     let model_id = config.model_id in
     let request_config = config in
-    (* Cache lookup *)
-    (* Compute fingerprint once; reuse for both lookup and store *)
-    let cache_key =
-      match cache, config.credential_source with
-      | Some _, Provider_config.Static_credential ->
-        Some (Cache.request_fingerprint ~config ~messages ~tools ())
-      | None, _ | Some _, Provider_config.Refreshable_credential _ -> None
-    in
+    (* Reuse both the admitted body and its key for lookup, dispatch and store. *)
     let cached =
       match cache, cache_key with
       | Some c, Some key ->
@@ -170,7 +190,22 @@ let complete_prepared_sync
            (match Cache.response_of_json json with
             | Some resp ->
               m.on_cache_hit ~model_id;
-              Some (Ok resp)
+              (* A hit replays the original call's telemetry, but its
+                 latency fields describe a network round trip this call
+                 never made. Clear them so latency consumers do not bill
+                 the hit as a slow call; the stored entry keeps the
+                 original numbers for provenance. *)
+              let telemetry =
+                Option.map
+                  (fun t ->
+                     { t with
+                       Types.request_latency_ms = None
+                     ; Types.ttfrc_ms = None
+                     ; Types.prefill_ms = None
+                     })
+                  resp.Types.telemetry
+              in
+              Some (Ok { resp with Types.telemetry })
             | None ->
               m.on_cache_miss ~model_id;
               None)
@@ -295,7 +330,9 @@ let complete_prepared_sync
              ~provider:(Provider_registry.provider_name_of_config config)
              ~model_id
              ~status:code
-         | Error _ -> ());
+         | Error (Http_client.NetworkError _) | Error (Http_client.TimeoutError _)
+         | Error (Http_client.AcceptRejected _) | Error (Http_client.ProviderTerminal _)
+         | Error (Http_client.ProviderFailure _) -> ());
        let result = ensure_nonempty_completion result in
        (match result with
         | Ok resp ->

@@ -38,6 +38,9 @@ type credential_source =
   | Static_credential
   | Refreshable_credential of (unit -> (Secret.t, credential_refresh_error) result)
 
+type request_policy_snapshot
+(** Internal request-owned catalog resolution, including absent entries. *)
+
 type t =
   { kind : provider_kind
   ; provider_id : string option
@@ -120,6 +123,9 @@ type t =
         [None] uses the normal provider/model catalog resolution policy.
 
         @since 0.208.4 *)
+  ; request_policy_snapshot : request_policy_snapshot option
+    (** Set by request preparation, never a caller capability override or
+        configuration option. [None] resolves the current process catalogs. *)
   ; keep_alive : string option
   ; return_progress : bool
     (** Ollama [keep_alive] request field. Accepted values: integer
@@ -271,14 +277,6 @@ val string_of_provider_kind : provider_kind -> string
     @since 0.166.0 *)
 val all_provider_kinds : provider_kind list
 
-(** Conventional API key env var name per kind. Re-export of
-    {!Provider_kind.default_api_key_env}. Returns [None] for kinds
-    that do not have a universally-agreed env var (local / transport-
-    mediated / OpenAI-compatible spaces where the env name is
-    consumer-specified).
-    @since 0.166.0 *)
-val default_api_key_env : provider_kind -> string option
-
 (** Canonical inverse of {!string_of_provider_kind}.
 
     Accepts every lowercase form produced by {!string_of_provider_kind}.
@@ -363,8 +361,18 @@ val capability_provider_label : t -> string
     [provider_id], native typed provider kinds may use a provider-independent
     model row; [OpenAI_compat] never does, because its wire kind alone cannot
     select a vendor/model dialect. Generic compatibility callers can provide
-    [model_capabilities_override] or an exact [provider_id]. *)
+    [model_capabilities_override] or an exact [provider_id]. Explicit overrides
+    retain precedence; a request snapshot otherwise fixes the lookup result,
+    including [None]. *)
 val capabilities_for_config_model : t -> Capabilities.capabilities option
+
+val freeze_for_request : t -> t
+(** Capture the catalog resolution for this request without changing explicit
+    overrides. Idempotent while provider/model identity is unchanged. *)
+
+val anthropic_thinking_control : t -> Capabilities.anthropic_thinking_control option
+(** Provider-scoped policy first, then the bare model/manifest policy. Request
+    snapshots preserve an absent policy as well as a present one. *)
 
 (** Context window, in tokens, that a request with [config] is sized against:
     the caller's [max_context] when set, otherwise the window of the model row

@@ -329,7 +329,7 @@ let runtime_surface_json config (meta : keeper_meta) =
   let fiber_health =
     match Keeper_registry.fiber_health_of ~base_path:config.base_path meta.name with
     | Fiber_unknown when keepalive_running -> Fiber_alive
-    | health -> health
+    | (Fiber_alive | Fiber_zombie | Fiber_unknown) as health -> health
   in
   let phase =
     match runtime_registry_entry config meta.name with

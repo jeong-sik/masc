@@ -29,7 +29,7 @@ let session = function
      | Ok _, Ok lane, Some (`String "close") ->
        Browser_lane.issue_server_lane lane ~verb:Browser_lane.Session_close ~timeout_sec:60.
        |> Browser_surface.decode_answer ~lane:(Browser_lane.server_lane_name lane)
-     | _ -> Error "action must be open or close")
+     | Ok _, Ok _, _ -> Error "action must be open or close")
   | _ -> Error "body must be an object"
 let goto = function
   | `Assoc fields ->

@@ -30,9 +30,12 @@ let deliver config host (notice : Goal_store.pending_notification) =
         |> Result.map_error Workspace_broadcast.broadcast_error_to_string in
       let result = List.fold_left (fun result recipient ->
         let next = protect (fun () ->
-          let* () = host.project ~config ~delivery ~recipient in
+          let* () =
+            host.project ~config ~delivery ~recipient:(Keeper_id.Keeper_name.to_string recipient)
+          in
           Goal_store.acknowledge_notification_recipient config notice ~recipient |> store_result)
-          |> Result.map_error (fun detail -> recipient ^ ": " ^ detail) in
+          |> Result.map_error (fun detail ->
+               Keeper_id.Keeper_name.to_string recipient ^ ": " ^ detail) in
         keep_first_error result next) (Ok ()) recipients in
       let* () = result in
       (* This checks the authoritative remaining set again. A failed transcript

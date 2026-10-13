@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -20,6 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
+import masc_base_path  # noqa: E402
 from keeper_store_layout import (  # noqa: E402
     StoreLayoutUnavailable,
     load_store_layout,
@@ -36,14 +36,6 @@ from typing import Any
 
 
 ERROR_STATUSES = {"error", "failed", "failure", "timeout", "cancelled", "canceled"}
-
-
-def default_base_path() -> str | None:
-    # RFC-0121: MASC_BASE_PATH is the sole canonical source. Argparse
-    # handles the None case by surfacing an explicit error rather than
-    # silently writing to the wrong root.
-    value = os.environ.get("MASC_BASE_PATH", "").strip()
-    return value or None
 
 
 @dataclass
@@ -797,8 +789,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--base-path",
-        default=default_base_path(),
-        help="MASC base path containing .masc (required; reads MASC_BASE_PATH).",
+        default=None,
+        help="MASC base path containing .masc (default: MASC_BASE_PATH).",
     )
     parser.add_argument(
         "--keeper", action="append", default=[], help="Keeper name to scan. Repeatable."
@@ -841,12 +833,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     thresholds = thresholds_from_args(args)
-    if args.base_path is None:
-        raise SystemExit(
-            "Error: MASC_BASE_PATH is required (or pass --base-path PATH)."
-        )
     summary = evaluate(
-        base_path=Path(args.base_path).expanduser(),
+        base_path=masc_base_path.require_or_exit(args.base_path, "--base-path"),
         keepers=args.keeper,
         trace_ids=args.trace_id,
         max_traces_per_keeper=args.max_traces_per_keeper,

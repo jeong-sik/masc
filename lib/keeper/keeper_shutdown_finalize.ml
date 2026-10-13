@@ -18,7 +18,20 @@ let error_to_string = function
       (Operation_id.to_string operation.operation_id)
       (failure_stage_to_string stage)
       detail
-  | Finalization_blocked operation ->
+  | Finalization_blocked
+      ({ phase =
+           ( Prepared
+           | Joining_lanes
+           | Joined_idle
+           | Finalizing_tasks _
+           | Cleanup_ready _
+           | Reconciliation_required _
+           | Finalized _
+           | Owner_absent _
+           | Operator_absence_acknowledged _
+           | Superseded _ )
+       ; _
+       } as operation) ->
     Printf.sprintf
       "Keeper shutdown finalization blocked in operation %s"
       (Operation_id.to_string operation.operation_id)
@@ -485,7 +498,15 @@ let remove_meta_file ~config operation cleanup =
         | Ok None -> Ok ()
         | Ok (Some _) -> Error "Keeper metadata exists without its Owner"
         | Error detail -> Error detail)
-     | Error error -> Error (Keeper_owner_registry.command_error_to_string error))
+     | Error
+         (( Keeper_owner_registry.Command_lookup_failed
+              ( Keeper_owner_registry.Inventory_not_installed _
+              | Keeper_owner_registry.Owner_unavailable _
+              | Keeper_owner_registry.Owner_initialization_failed _
+              | Keeper_owner_registry.Inventory_stopping )
+          | Keeper_owner_registry.Command_lifecycle_reserved _
+          | Keeper_owner_registry.Command_rejected _ ) as error) ->
+       Error (Keeper_owner_registry.command_error_to_string error))
 ;;
 
 (* What a failed owner-side admission release means once the owner registry
@@ -823,7 +844,9 @@ let complete_cleanup
            (`Draining
               (Keeper_approval_queue_result.summary_owner_retirement_error_to_string
                  error))
-       | Error error ->
+       | Error
+           (Keeper_approval_queue_result.Summary_owner_retirement_storage_error _
+            as error) ->
          Error
            (`Failed
               (Printf.sprintf
@@ -965,7 +988,9 @@ let run ~config ~entry ?successor_operation_id operation =
                   ?successor_operation_id
                   ready
                   cleanup
-              | _ -> Error Unsupported_phase))))
+              | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _
+              | Reconciliation_required _ | Finalized _ | Owner_absent _
+              | Operator_absence_acknowledged _ | Blocked _ | Superseded _ -> Error Unsupported_phase))))
   | Finalizing_tasks settled_task_ids ->
     (match read_operation_meta ~config operation with
      | Error detail -> block ~config operation Meta_read detail
@@ -984,7 +1009,9 @@ let run ~config ~entry ?successor_operation_id operation =
                   ?successor_operation_id
                   ready
                   cleanup
-              | _ -> Error Unsupported_phase))))
+              | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _
+              | Reconciliation_required _ | Finalized _ | Owner_absent _
+              | Operator_absence_acknowledged _ | Blocked _ | Superseded _ -> Error Unsupported_phase))))
   | Cleanup_ready cleanup ->
     complete_cleanup
       ~config

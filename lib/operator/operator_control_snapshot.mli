@@ -89,7 +89,6 @@ type action_result_status = ActionOk | ActionDeferred | ActionError
 
 type confirmation_state =
   | Preview
-  | Immediate
   | Expired
   | Denied
   | Confirmed

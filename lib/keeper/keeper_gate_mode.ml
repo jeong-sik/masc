@@ -95,7 +95,7 @@ let status_json_lane ~file read_result =
          ; "state", `String "unavailable"
          ; "read_error", `String detail
          ])
-  | Ok mode ->
+  | Ok ((Manual | Always_allow) as mode) ->
     `Assoc
       [ "mode", `String (to_string mode)
       ; "configured", `Bool (Sys.file_exists file)

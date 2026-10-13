@@ -94,7 +94,8 @@ let acquire ~host ~run =
           keep := true;
           Ok artifact)
      with Sys_error _ | Unix.Unix_error _ -> Error Invalid_file)
-  | _ -> Error Unsupported_host
+  | Sandbox_readiness.Macos { architecture = Sandbox_readiness.X64; major = _ }
+  | Sandbox_readiness.Unsupported | Sandbox_readiness.Linux _ | Macos {architecture=Arm64; _ } -> Error Unsupported_host
 let install ~executable_path ~run ~elevate artifact =
   let* verified = verify ~run ~release:artifact.release ~path:artifact.path in
   try

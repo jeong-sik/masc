@@ -66,6 +66,11 @@ let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
             }
           in
           append_entry ~keeper_name ~failure_label:"redacted thinking" acc entry
-        | _ -> ())
+        | Agent_core.Types.Text _
+        | Agent_core.Types.ToolUse _
+        | Agent_core.Types.ToolResult _
+        | Agent_core.Types.Image _
+        | Agent_core.Types.Document _
+        | Agent_core.Types.Audio _ -> ())
       content
 ;;

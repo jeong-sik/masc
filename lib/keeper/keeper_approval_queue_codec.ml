@@ -278,7 +278,23 @@ let validate_entry_exact_attempt
     Ok ()
   | _, Exact_bound { status = Exact_completed; _ }, _ ->
     Error "completed exact attempt requires an available summary"
-  | _ ->
+  | ( ( Summary_attempt_ready
+      | Summary_attempt_in_flight
+      | Summary_attempt_identity_unbound
+      | Summary_attempt_persistence_uncertain
+      | Summary_attempt_pre_worker_unavailable _
+      | Summary_attempt_settled )
+    , ( Exact_unbound
+      | Exact_bound
+          { status =
+              ( Exact_dispatch_uncertain
+              | Exact_released_before_dispatch
+              | Exact_released_recovery_required
+              | Exact_quarantined _
+              | Exact_restart_quarantined )
+          ; _
+          } )
+    , (Summary_not_requested | Summary_pending | Summary_available _ | Summary_failed _) ) ->
     Error "exact attempt and summary status are not a valid current-schema pair"
 ;;
 

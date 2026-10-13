@@ -157,7 +157,8 @@ let load_fixtures path =
     let expected = match fixture with Extract -> "Extraction" | Progress -> "Metadata" | Act -> "Act" in
     match Model.parse_params params with
     | Ok {generation = Model.Structured {name; _}; _} when name = expected -> ()
-    | Ok _ | Error _ -> reject Fixture_protocol_invalid) params;
+    | Ok {generation = Model.Structured _ | Model.Text_generation | Model.Tool_generation _; _}
+    | Error _ -> reject Fixture_protocol_invalid) params;
   params
 
 let lane_pair () =
@@ -201,7 +202,7 @@ let injected_slot ~sw ~net ~timeout_s ~primary_id =
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Cohttp_eio.Server.run socket server ~on_error:(fun _ -> incr server_errors));
   let contents = Printf.sprintf
-    "[[providers]]\nid = \"probe-injected\"\nkind = \"openai_compat\"\nbase_url = \"http://127.0.0.1:%d\"\nrequest_path = \"/v1/chat/completions\"\napi_key_env = \"\"\n\n[[models]]\nid_prefix = \"probe-model\"\nprovider_name = \"probe-injected\"\nmax_context_tokens = 65536\nmax_output_tokens = 4096\nsupports_response_format_json = true\nsupports_structured_output = true\nsupports_system_prompt = true\n\n[[targets]]\nid = %S\nprovider_ref = \"probe-injected\"\nmodel_id = \"probe-model\"\nconnect_timeout_s = %g\nbody_timeout_s = %g\n"
+    "[[providers]]\nid = \"probe-injected\"\nkind = \"openai_compat\"\nbase_url = \"http://127.0.0.1:%d\"\nrequest_path = \"/v1/chat/completions\"\nauth = \"none\"\n\n[[models]]\nid_prefix = \"probe-model\"\nprovider_name = \"probe-injected\"\nmax_context_tokens = 65536\nmax_output_tokens = 4096\nsupports_response_format_json = true\nsupports_structured_output = true\nsupports_system_prompt = true\n\n[[targets]]\nid = %S\nprovider_ref = \"probe-injected\"\nmodel_id = \"probe-model\"\nconnect_timeout_s = %g\nbody_timeout_s = %g\n"
     port primary_id timeout_s timeout_s in
   let snapshot = match Exact.load_resolver_snapshot
       ~io:{getenv = (fun _ -> Ok None)}
@@ -265,7 +266,9 @@ let run ~env ~sw ~config ~base_path ~fixtures ~repetitions ~injection_timeout_s 
           | Error error -> Error (Model_refused error.Browser_stagehand_wire.code)
           | Ok answer -> Result.bind (answer_value answer) (validate fixture)
         in
-        (match result with Ok () | Error Semantics_invalid -> incr shape_valid | Error _ -> ());
+        (match result with
+         | Ok () | Error Semantics_invalid -> incr shape_valid
+         | Error (Model_refused _ | Envelope_invalid | Shape_invalid | Injection_missing) -> ());
         let result = match route with
           | Injected_primary_then_fallback when !requests <= before || !server_errors <> errors_before ->
               Error Injection_missing
@@ -275,7 +278,9 @@ let run ~env ~sw ~config ~base_path ~fixtures ~repetitions ~injection_timeout_s 
         emit channel (`Assoc ["kind", `String "trial"; "route", `String (route_name route);
           "fixture", `String (fixture_name fixture); "trial", `Int trial;
           "elapsed_s", `Float (Eio.Time.now clock -. started); "result", json_result result;
-          "rpc_error_code", (match result with Error (Model_refused code) -> `Int code | _ -> `Null);
+          "rpc_error_code", (match result with
+            | Error (Model_refused code) -> `Int code
+            | Ok () | Error (Envelope_invalid | Shape_invalid | Semantics_invalid | Injection_missing) -> `Null);
           "refusal_observation", (match !refusal with None -> `Null
             | Some observed -> Browser_stagehand_model_observation.refusal_json observed);
           "synthetic_primary_requests", `Int (!requests - before)])

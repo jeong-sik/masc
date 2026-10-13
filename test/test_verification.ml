@@ -40,7 +40,7 @@ let with_temp_dir f =
       Masc_test_deps.cleanup_test_workspace dir)
     (fun () ->
       Masc.Eval_calibration.For_testing.set_store
-        ~base_dir:(Filename.concat dir "data/verdicts");
+        ~base_path:dir;
       Alcotest.(check int) "new workspace has no earlier verdicts" 0
         Yojson.Safe.Util.(Masc.Eval_calibration.calibration_stats ()
                           |> member "total_verdicts" |> to_int);

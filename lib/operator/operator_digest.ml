@@ -39,7 +39,7 @@ let recent_tool_host_failures ~now () =
               let fingerprint =
                 String.concat "|"
                   [
-                    envelope.cause_code;
+                    Failure_envelope.tool_host_cause_code envelope.cause;
                     Option.value ~default:"" envelope.entity_id;
                     envelope.summary;
                   ]
@@ -49,7 +49,7 @@ let recent_tool_host_failures ~now () =
               else
                 let item =
                   {
-                    kind = envelope.cause_code;
+                    kind = Failure_envelope.tool_host_cause_code envelope.cause;
                     severity =
                       operator_severity_of_failure_envelope envelope.severity;
                     summary = envelope.summary;
@@ -151,7 +151,13 @@ let connector_attention_pending_selections ~base_path ~keeper_name =
   |> List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
     match selection.Keeper_event_queue_state.source.payload with
     | Keeper_event_queue.Connector_attention _ -> true
-    | _ -> false)
+    | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+    | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+    | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
+    | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
+    | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+    | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+    | Keeper_event_queue.Task_outcome _ -> false)
 
 let connector_attention_evidence ~keeper_name selections =
   let event_ids =
@@ -161,7 +167,13 @@ let connector_attention_evidence ~keeper_name selections =
             match selection.Keeper_event_queue_state.source.payload with
             | Keeper_event_queue.Connector_attention { event_id; _ } ->
               Some (`String event_id)
-            | _ -> None)
+            | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+            | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+            | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
+            | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
+            | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+            | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+            | Keeper_event_queue.Task_outcome _ -> None)
   in
   let oldest =
     List.fold_left

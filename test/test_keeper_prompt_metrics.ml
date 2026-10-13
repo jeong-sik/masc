@@ -656,6 +656,14 @@ let test_transmitted_carrier_removal_ignores_a_prefix_cut () =
   in
   (* The head of the history is gone: this is what a tail window returns. *)
   let transmitted = [ message "surviving history"; carrier; message "goal" ] in
+  let historical =
+    { (message "previous context") with
+      metadata = Agent_core.Types.Extra_system_context_provenance.historical_metadata }
+  in
+  check (option (list string)) "historical context is history, not a second carrier"
+    (Some [ "previous context"; "surviving history"; "goal" ])
+    (texts (KAPM.provider_content_of_transmitted
+      ~prompt_context_present:true ~messages:(historical :: transmitted)));
   check (option (list string)) "the carrier is removed by identity, not position"
     (Some [ "surviving history"; "goal" ])
     (texts

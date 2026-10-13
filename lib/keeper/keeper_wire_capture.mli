@@ -35,9 +35,10 @@
     continues in a fresh file, while the budget prunes the oldest
     completed files — so a busy day keeps a ring of its newest segments
     and sheds its oldest instead of going dark after the cap
-    ([Dated_jsonl.append_rotating]). Retention is bounded by
-    [MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS]. A write failure is
-    logged and never interrupts the turn.
+    ([Dated_jsonl.append_rotating]). The server's prune pass removes day
+    files older than [MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS], whether
+    capture is on or off. A write failure is logged and never interrupts
+    the turn.
 
     Motivation: the request boundary is the primary suspect for
     self-reinforcing repetition — the keeper's own prior visible text is
@@ -57,21 +58,6 @@ val enabled : unit -> bool
 (** [enabled ()] is [true] when [MASC_KEEPER_WIRE_CAPTURE] is enabled through
     {!Env_config_keeper.KeeperWireCapture}. When [false], {!capture_request} is
     a no-op with no filesystem access. *)
-
-type prune_error =
-  | Retention_prune_failed of
-      { path : string
-      ; detail : string
-      }
-
-val prune_error_to_string : prune_error -> string
-
-val prune_expired : masc_root:string -> (int, prune_error) result
-(** Prune expired capture day-files using this module's configured retention
-    SSOT. This is intentionally ungated: captures written while the feature
-    was enabled must still expire after it is disabled. Startup blob maintenance
-    calls this before scanning references, so expired diagnostic rows cannot
-    retain a blob indefinitely. *)
 
 val capture_request :
   base_path:string ->

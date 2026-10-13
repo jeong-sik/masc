@@ -544,7 +544,8 @@ let validate_operation operation =
     else
       Error (Invalid_operation (Invalid_absence_acknowledgement
         "retained original shutdown observation digest differs"))
-  | _ -> Ok ()
+  | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _
+  | Reconciliation_required _ | Finalized _ | Owner_absent _ | Blocked _ | Superseded _ -> Ok ()
 ;;
 
 let active_turn_of_json json =
@@ -968,7 +969,8 @@ let reclaimable_terminal_phase (operation : Keeper_shutdown_types.t) =
   (* The operator-facing deletion inventory consumes these receipts after
      the Keeper itself disappears, including across server restarts. *)
   | Dashboard_keeper_purge _, _ -> false
-  | _, phase -> match phase with
+  | (Operator_stop_retain_meta, phase) | (Operator_stop_remove_meta, phase)
+  | (Supervisor_cleanup, phase) -> match phase with
   | Keeper_shutdown_types.Owner_absent _
   | Keeper_shutdown_types.Operator_absence_acknowledged _ -> false
   | Keeper_shutdown_types.Superseded _ -> true
@@ -1025,7 +1027,8 @@ let replace ~config ~expected_revision operation =
   let* () = match operation.phase with
     | Operator_absence_acknowledged _ -> Error (Invalid_operation
         (Invalid_absence_acknowledgement "use the explicit absence acknowledgement transaction"))
-    | _ -> Ok () in
+    | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _
+    | Reconciliation_required _ | Finalized _ | Owner_absent _ | Blocked _ | Superseded _ -> Ok () in
   let* operation_path = path_for_operation ~config operation in
   with_keeper_inventory_lock
     ~access:Write
@@ -1056,7 +1059,20 @@ let replace ~config ~expected_revision operation =
          | Ok existing when Keeper_shutdown_types.immutable_fields_equal existing operation ->
            Keeper_fs.save_json_atomic operation_path (to_json operation)
            |> Result.map_error (fun detail -> Io_error detail)
-         | Ok _ ->
+         | Ok
+             { phase =
+                 ( Prepared
+                 | Joining_lanes
+                 | Joined_idle
+                 | Finalizing_tasks _
+                 | Cleanup_ready _
+                 | Reconciliation_required _
+                 | Finalized _
+                 | Owner_absent _
+                 | Blocked _
+                 | Superseded _ )
+             ; _
+             } ->
            Error
              (Identity_mismatch
                 (Operation_id.to_string operation.operation_id))))
@@ -1159,9 +1175,36 @@ let prepare_operator_metadata_supersession
       ; actor
       ; superseded_admission = Blocked_dashboard_purge
       }
-  | Ok ({ phase = Blocked _; _ } as operation) ->
+  | Ok
+      ({ phase = Blocked _
+       ; cleanup_intent =
+           { reason = Operator_stop_remove_meta | Supervisor_cleanup; _ }
+       ; _
+       } as operation) ->
     Error (Supersession_intent_mismatch operation)
-  | Ok operation -> Error (Supersession_phase_mismatch operation)
+  | Ok
+      (( { phase =
+             ( Prepared
+             | Joining_lanes
+             | Joined_idle
+             | Finalizing_tasks _
+             | Cleanup_ready _
+             | Finalized _
+             | Owner_absent _
+             | Operator_absence_acknowledged _
+             | Superseded (Boot_replay_abandoned _) )
+         ; _
+         }
+       | { phase = Reconciliation_required _
+         ; cleanup_intent =
+             { reason =
+                 ( Operator_stop_remove_meta
+                 | Supervisor_cleanup
+                 | Dashboard_keeper_purge _ )
+             ; _
+             }
+         ; _
+         } ) as operation) -> Error (Supersession_phase_mismatch operation)
 ;;
 
 let supersession_token_operation_id (token : operator_metadata_supersession_token) =
@@ -1245,9 +1288,36 @@ let supersede_blocked_operator_stop ~config ~token ~now =
              Keeper_fs.save_json_atomic operation_path (to_json superseded)
              |> Result.map_error (fun detail -> Io_error detail)
              |> Result.map (fun () -> Superseded_persisted superseded)
-         | Ok ({ phase = Blocked _; _ } as existing) ->
+         | Ok
+             ({ phase = Blocked _
+              ; cleanup_intent =
+                  { reason = Operator_stop_remove_meta | Supervisor_cleanup; _ }
+              ; _
+              } as existing) ->
            Error (Supersession_intent_mismatch existing)
-         | Ok existing -> Error (Supersession_phase_mismatch existing)))
+         | Ok
+             (( { phase =
+                    ( Prepared
+                    | Joining_lanes
+                    | Joined_idle
+                    | Finalizing_tasks _
+                    | Cleanup_ready _
+                    | Finalized _
+                    | Owner_absent _
+                    | Operator_absence_acknowledged _
+                    | Superseded (Boot_replay_abandoned _) )
+                ; _
+                }
+              | { phase = Reconciliation_required _
+                ; cleanup_intent =
+                    { reason =
+                        ( Operator_stop_remove_meta
+                        | Supervisor_cleanup
+                        | Dashboard_keeper_purge _ )
+                    ; _
+                    }
+                ; _
+                } ) as existing) -> Error (Supersession_phase_mismatch existing)))
 ;;
 
 let persist_blocked_latest ~config ~identity ~failure ~now =
@@ -1426,9 +1496,30 @@ let acknowledge_absent_owner ~config ~keeper_name ~operation_id
       | Operator_absence_acknowledged ack
         when expected_revision = ack.prior_revision || expected_revision = current.revision ->
         Ok (Ok (Absence_already_acknowledged current))
-      | _ when current.revision <> expected_revision ->
+      | ( Prepared
+        | Joining_lanes
+        | Joined_idle
+        | Finalizing_tasks _
+        | Cleanup_ready _
+        | Reconciliation_required _
+        | Finalized _
+        | Owner_absent _
+        | Operator_absence_acknowledged _
+        | Blocked _
+        | Superseded _ )
+        when current.revision <> expected_revision ->
         Error (Revision_conflict { expected = expected_revision; actual = current.revision })
-      | _ ->
+      | Prepared
+      | Joining_lanes
+      | Joined_idle
+      | Finalizing_tasks _
+      | Cleanup_ready _
+      | Reconciliation_required _
+      | Finalized _
+      | Owner_absent _
+      | Operator_absence_acknowledged _
+      | Blocked _
+      | Superseded _ ->
         match decide current inventory with
         | Error error -> Ok (Error error)
         | Ok (acknowledgement : absent_owner_acknowledgement) ->
@@ -1437,7 +1528,9 @@ let acknowledge_absent_owner ~config ~keeper_name ~operation_id
             | Finalized evidence when evidence = acknowledgement.finalization -> Ok ()
             | Owner_absent { finalization; _ }
               when finalization = acknowledgement.finalization -> Ok ()
-            | _ -> Error (Invalid_operation
+            | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _
+            | Reconciliation_required _ | Operator_absence_acknowledged _ | Blocked _ | Superseded _
+            | (Finalized _|Owner_absent _) -> Error (Invalid_operation
                 (Invalid_absence_acknowledgement "acknowledgement must retain original Finalized evidence"))
           in
           let acknowledged =

@@ -16,6 +16,12 @@
 category_cap = 30
 facts_per_category_cap = 30
 
+[maintenance]
+# Day-file retention for the JSONL stores under .masc, shared by the startup
+# prune and the periodic maintenance prune. Must be a positive integer.
+# Precedence is MASC_JSONL_RETENTION_DAYS, then this key, then 30.
+jsonl_retention_days = 30
+
 [skills]
 # The Skill resource read bound is not configured here: it is the shared
 # inline tool-result boundary (Common.max_tool_result_wire_bytes). An older

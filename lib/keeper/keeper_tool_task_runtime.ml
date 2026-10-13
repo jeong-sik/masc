@@ -625,7 +625,9 @@ let handle_keeper_task_tool_with_outcome
         Keeper_tool_execution.failure
           ~class_:Tool_result.Policy_rejection
           (error_json ("broadcast rejected: " ^ detail))
-      | Error error ->
+      | Error
+          (( Workspace_broadcast.Broadcast_not_persisted _
+           | Workspace_broadcast.Broadcast_dependency_unavailable _ ) as error) ->
         Keeper_tool_execution.failure
           ~class_:Tool_result.Runtime_failure
           (error_json

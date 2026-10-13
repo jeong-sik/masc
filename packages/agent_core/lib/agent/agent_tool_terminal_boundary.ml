@@ -42,7 +42,23 @@ let completed_dispatch completion (dispatch : tool_dispatch option) =
   | Some
       { result = { outcome = Tool_failed { failure_kind = Validation_error; _ }; _ }; _ }
     -> Continue_after_batch
-  | Some { result = { outcome = Tool_failed _; invocation; content; _ }; _ } ->
+  | Some
+      { result =
+          { outcome =
+              Tool_failed
+                { failure_kind =
+                    ( Recoverable_tool_error
+                    | Non_retryable_tool_error
+                    | Reported_tool_error
+                    | Unattributed_tool_error)
+                ; _
+                }
+          ; invocation
+          ; content
+          ; _
+          }
+      ; _
+      } ->
     (match completion with
      | Tool_contract.Terminal_after_success Tool_contract.Proven_pre_effect ->
        Continue_after_batch
@@ -140,7 +156,16 @@ let recovered_batch_completion ~invocations tool_results =
       | Some (_, Tool_succeeded) -> Ok (Terminal_completed invocation)
       | Some (_, Tool_failed { failure_kind = Validation_error; _ }) ->
         Ok Continue_after_batch
-      | Some (detail, Tool_failed _) ->
+      | Some
+          ( detail
+          , Tool_failed
+              { failure_kind =
+                  ( Recoverable_tool_error
+                  | Non_retryable_tool_error
+                  | Reported_tool_error
+                  | Unattributed_tool_error)
+              ; _
+              } ) ->
         (match Tool_contract.Invocation.completion invocation with
          | Tool_contract.Terminal_after_success Tool_contract.Proven_pre_effect ->
            Ok Continue_after_batch

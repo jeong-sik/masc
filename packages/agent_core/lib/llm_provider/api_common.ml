@@ -253,7 +253,7 @@ let degrade_blocks_messages rewrite_block messages =
                   in
                   ToolResult { result with content; content_blocks = Some blocks }
                 end
-              | block -> block))
+              | (ToolResult { content_blocks = None;_} | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _) as block -> block))
         message.content
     in
     { message with content }
@@ -284,7 +284,8 @@ let degrade_document_messages ~wire_form ~supports_document_input messages =
            Some
              ( document_omitted_note ~media_type
              , document_omitted_placeholder ~media_type )
-       | _ -> None)
+       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+       | Image _ | Audio _ -> None)
     messages
 ;;
 
@@ -335,7 +336,8 @@ let degrade_audio_messages ~supports_audio_input messages =
          Some
            ( audio_omitted_note ~media_type
            , audio_omitted_placeholder ~media_type )
-       | _ -> None)
+       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+       | Image _ | Document _ | Audio _ -> None)
     messages
 ;;
 
@@ -347,7 +349,8 @@ let degrade_image_messages ~supports_image_input messages =
          Some
            ( image_omitted_note ~media_type
            , image_omitted_placeholder ~media_type )
-       | _ -> None)
+       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+       | Document _ | Audio _ | Image _ -> None)
     messages
 ;;
 
@@ -673,7 +676,8 @@ let merge_tool_result_followup_user_messages messages =
         }
       in
       aux (merged :: acc) rest
-    | msg :: rest -> aux (msg :: acc) rest
+    | ({ role = System | User | Assistant | Tool; _ } as msg) :: rest ->
+      aux (msg :: acc) rest
     | [] -> List.rev acc
   in
   aux [] messages

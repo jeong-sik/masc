@@ -204,6 +204,48 @@ let field_json name fields =
   | None -> fail ("missing request field: " ^ name)
 ;;
 
+let test_binding_controls_completion_only () =
+  let cfg = Provider_config.make ~kind:Anthropic ~model_id:"claude-sonnet-5-5"
+      ~base_url:"https://api.anthropic.com" ~api_key:"fixture" ~max_tokens:64
+      ~enable_thinking:true () in
+  let build cfg =
+    Backend_anthropic.build_request_artifact_with_thinking_control
+      ~anthropic_thinking_control:(Some Capabilities.Anthropic_adaptive_between_tools)
+      ~config:cfg ~messages:[msg User [Text "hello"]] ()
+    |> Result.get_ok |> Backend_anthropic.request_payload
+  in
+  let body = build cfg in
+  let open Yojson.Safe.Util in
+  check string "adaptive requests recover only invalid thinking" "drop_block"
+    (Yojson.Safe.from_string body |> member "thinking" |> member "block_binding"
+     |> member "prefix_mismatch_behavior" |> to_string);
+  let headers = Backend_anthropic.request_headers ~body
+      ["Anthropic-Beta", "existing-beta"; "x-test", "retained"] in
+  check (option string) "existing beta retained with required beta"
+    (Some "existing-beta,thinking-binding-controls-2026-08-01")
+    (List.assoc_opt "anthropic-beta" headers);
+  let without_switch =
+    Env_parse.with_env Backend_anthropic.drop_block_env_var "false" (fun () ->
+      build cfg)
+  in
+  check bool "measurement switch withholds block_binding" false
+    (List.mem_assoc "block_binding"
+       (Yojson.Safe.from_string without_switch |> member "thinking" |> to_assoc));
+  check (option string) "no binding beta without block_binding"
+    (Some "existing-beta")
+    (List.assoc_opt "Anthropic-Beta"
+       (Backend_anthropic.request_headers ~body:without_switch
+          ["Anthropic-Beta", "existing-beta"]));
+  let disabled = build {cfg with enable_thinking = Some false; reasoning_effort = None} in
+  check bool "between_tools does not send forbidden binding" false
+    (List.mem_assoc "block_binding"
+       (Yojson.Safe.from_string disabled |> member "thinking" |> to_assoc));
+  let count = Backend_anthropic.build_count_tokens_request
+      ~config:{cfg with enable_thinking = None} ~messages:[msg User [Text "hello"]] () in
+  check (list (pair string string)) "count request adds no beta" []
+    (Backend_anthropic.request_headers ~body:count [])
+;;
+
 let test_shared_projection () =
   let cfg = config "https://api.anthropic.com" in
   let completion =
@@ -247,6 +289,112 @@ let test_kimi_shared_projection () =
     (fun name ->
        check bool ("Kimi count omits " ^ name) false (List.mem_assoc name count))
     [ "max_tokens"; "stream"; "temperature"; "top_p"; "top_k" ]
+;;
+
+let tool_result_projection_cases =
+  [ "signed thinking", Thinking { content = "signed tool data"; signature = Some "fixture-signature" }
+  ; "unsigned thinking", Thinking { content = "unsigned tool data"; signature = None }
+  ; "redacted thinking", RedactedThinking "opaque-redacted-tool-data"
+  ; "foreign opaque reasoning",
+    ReasoningDetails
+      { reasoning_content = Some "foreign tool data"
+      ; details =
+          [ { raw = `Assoc [ "type", `String "reasoning.encrypted"
+                          ; "data", `String "foreign-opaque-tool-data" ]
+            ; text = None
+            } ]
+      }
+  ; "nested tool call",
+    ToolUse { id = "nested-call"; name = "inspect"; input = `Assoc [ "path", `String "nested" ] }
+  ; "nested tool result",
+    ToolResult
+      { tool_use_id = "nested-call"; content = "nested fallback"
+      ; outcome = Tool_succeeded; json = None
+      ; content_blocks = Some [ Text "nested result"
+                              ; Thinking { content = "nested signed data"; signature = Some "nested-signature" } ]
+      }
+  ; "audio", Audio { media_type = "audio/wav"; data = "YXVkaW8="; source_type = Base64 }
+  ]
+;;
+
+let messages_with_tool_result_data block =
+  [ msg User [ Text "Inspect the artifact" ]
+  ; msg Assistant [ ToolUse { id = "tool-1"; name = "inspect"; input = `Assoc [] } ]
+  ; msg Tool
+      [ ToolResult
+          { tool_use_id = "tool-1"; content = "fallback"
+          ; outcome = Tool_failed { failure_kind = Reported_tool_error; error_class = None }
+          ; json = None
+          ; content_blocks = Some
+              [ Text "before"
+              ; Image { media_type = "image/png"; data = "AAAA"; source_type = Base64 }
+              ; Image { media_type = "image/png"; data = "https://example.test/tool.png"; source_type = Url }
+              ; Image { media_type = "image/png"; data = "file_tool_image"; source_type = File_id }
+              ; block
+              ; Document { media_type = "application/pdf"; data = "UERG"; source_type = Base64 }
+              ; Text "after"
+              ]
+          }
+      ]
+  ]
+;;
+
+let test_anthropic_tool_result_content_projection () =
+  let open Yojson.Safe.Util in
+  let cfg = config "https://api.anthropic.com" in
+  List.iter (fun (label, block) ->
+    let messages = messages_with_tool_result_data block in
+    let canonical_before = List.map Api_common.message_to_json messages in
+    List.iter (fun body ->
+      let tool_result = Yojson.Safe.from_string body |> member "messages" |> to_list
+        |> List.rev |> List.hd |> member "content" |> to_list |> List.hd in
+      check string (label ^ " result still answers its tool call") "tool-1"
+        (tool_result |> member "tool_use_id" |> to_string);
+      check bool (label ^ " result keeps its failure outcome") true
+        (tool_result |> member "is_error" |> to_bool);
+      let content = tool_result |> member "content" |> to_list in
+      check (list string) (label ^ " uses only legal nested blocks in original order")
+        [ "text"; "image"; "image"; "image"; "text"; "document"; "text" ]
+        (List.map (fun item -> item |> member "type" |> to_string) content);
+      check string (label ^ " keeps leading text") "before"
+        (List.nth content 0 |> member "text" |> to_string);
+      check bool (label ^ " keeps base64 image") true
+        (List.nth content 1 |> member "source"
+         = `Assoc [ "type", `String "base64"; "media_type", `String "image/png"; "data", `String "AAAA" ]);
+      check bool (label ^ " keeps URL image") true
+        (List.nth content 2 |> member "source"
+         = `Assoc [ "type", `String "url"; "url", `String "https://example.test/tool.png" ]);
+      check bool (label ^ " keeps file image") true
+        (List.nth content 3 |> member "source"
+         = `Assoc [ "type", `String "file"; "file_id", `String "file_tool_image" ]);
+      check bool (label ^ " survives as exact canonical JSON inside text") true
+        (List.nth content 4 |> member "text" |> to_string |> Yojson.Safe.from_string
+         = Api_common.content_block_to_json block);
+      check bool (label ^ " keeps document source") true
+        (List.nth content 5 |> member "source"
+         = `Assoc [ "type", `String "base64"; "media_type", `String "application/pdf"; "data", `String "UERG" ]);
+      check string (label ^ " keeps trailing text") "after"
+        (List.nth content 6 |> member "text" |> to_string))
+      [ Backend_anthropic.build_request ~config:cfg ~messages ~tools:[ tool ] ()
+      ; Backend_anthropic.build_count_tokens_request ~config:cfg ~messages ~tools:[ tool ] ()
+      ];
+    check bool (label ^ " leaves canonical history unchanged") true
+      (canonical_before = List.map Api_common.message_to_json messages))
+    tool_result_projection_cases
+;;
+
+let test_kimi_tool_result_content_unchanged () =
+  let open Yojson.Safe.Util in
+  let cfg = kimi_config "https://api.kimi.com/coding" in
+  List.iter (fun (label, block) ->
+    let messages = messages_with_tool_result_data block in
+    let expected = `List (List.map Api_common.kimi_message_to_json messages) in
+    List.iter (fun body ->
+      check bool (label ^ " keeps the existing Kimi message wire") true
+        (Yojson.Safe.from_string body |> member "messages" = expected))
+      [ Backend_anthropic.build_request ~config:cfg ~messages ~tools:[ tool ] ()
+      ; Backend_anthropic.build_count_tokens_request ~config:cfg ~messages ~tools:[ tool ] ()
+      ]) tool_result_projection_cases
 ;;
 
 let combinator_tool =
@@ -419,7 +567,7 @@ let admitted_anthropic_sync_response =
   {|{"id":"msg-1","type":"message","role":"assistant","model":"input-count-fixture","content":[{"type":"text","text":"accepted"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":1}}|}
 ;;
 
-let with_admitted_http_mock ~stream f =
+let with_admitted_http_mock ?(input_tokens = 10) ?(on_count = fun _ -> ()) ~stream f =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -431,7 +579,10 @@ let with_admitted_http_mock ~stream f =
     let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
     let path = Cohttp.Request.uri request |> Uri.path in
     if String.ends_with ~suffix:"/count_tokens" path
-    then Cohttp_eio.Server.respond_string ~status:`OK ~body:{|{"input_tokens":10}|} ()
+    then (
+      on_count body;
+      Cohttp_eio.Server.respond_string ~status:`OK
+        ~body:(Printf.sprintf {|{"input_tokens":%d}|} input_tokens) ())
     else (
       completion_body := Some body;
       let headers =
@@ -496,6 +647,179 @@ max_output_tokens = 64
   match Model_catalog.of_toml_string ~source:"frozen admitted body test" contents with
   | Ok catalog -> catalog
   | Error detail -> fail detail
+;;
+
+let with_preserved_catalog f =
+  let previous = Model_catalog.global () in
+  Fun.protect ~finally:(fun () ->
+    match previous with
+    | Some catalog -> Model_catalog.set_global catalog
+    | None -> Model_catalog.clear_global ()) f
+;;
+
+let request_policy_catalog ~model_id ~base ~max_output_tokens ~replay ~thinking =
+  let contents = Printf.sprintf
+      {|[[models]]
+id_prefix = "%s"
+base = "%s"
+max_context_tokens = 512
+max_output_tokens = %d
+reasoning_replay = "%s"
+%s
+|} model_id base max_output_tokens replay thinking in
+  match Model_catalog.of_toml_string ~source:"request policy freeze test" contents with
+  | Ok catalog -> catalog
+  | Error detail -> fail detail
+;;
+
+let test_policy_is_frozen_before_measurement ~stream () =
+  with_preserved_catalog @@ fun () ->
+  let catalog_a = request_policy_catalog ~model_id:"frozen-catalog-model" ~base:"anthropic"
+      ~max_output_tokens:64 ~replay:"preserve_always"
+      ~thinking:{|anthropic_thinking_control = "adaptive_default"|} in
+  let catalog_b = request_policy_catalog ~model_id:"frozen-catalog-model" ~base:"anthropic"
+      ~max_output_tokens:16 ~replay:"no_replay"
+      ~thinking:{|anthropic_thinking_control = "always_adaptive"|} in
+  Model_catalog.set_global catalog_a;
+  let counted = ref None in
+  let (result, expected_source), dispatched =
+    with_admitted_http_mock ~stream ~on_count:(fun body -> counted := Some body)
+    @@ fun ~sw ~net ~base_url ->
+    let cfg = { (config ~max_context:512 base_url) with model_id = "frozen-catalog-model"
+      ; enable_thinking = Some true; response_format = Off } in
+    let expected_source = Reasoning_dialect.reasoning_source_for_provider_config cfg |> Result.get_ok in
+    let prepared = Complete.prepare_request ~config:cfg ~messages () in
+    let serialized = Complete.admit_request_body ~stream prepared |> Result.get_ok in
+    Model_catalog.set_global catalog_b;
+    let fresh_source = Reasoning_dialect.reasoning_source_for_provider_config cfg |> Result.get_ok in
+    check bool "catalog change really changes the unfrozen replay contract" false
+      (Types.Reasoning_source.equal expected_source fresh_source);
+    let next_stage = if stream then Complete.Stream
+        { admission_window = unbounded_window; first_event_timeout_s = None }
+      else unbounded_completion in
+    let measured = Complete.measure_request ~sw ~net ~next_stage serialized |> Result.get_ok in
+    let admitted = Complete.admit_request ~now_unix_s:0 ~max_context_tokens:512 measured |> Result.get_ok in
+    check int "count reserves the generation's original output ceiling" 64
+      (Complete.admitted_fit admitted).reserved_output_tokens;
+    let result = if stream then
+        Complete.complete_stream_admitted ~sw ~net admitted ~admission_window:unbounded_window
+          ~on_event:(fun _ -> ()) ()
+      else Complete.complete_admitted ~sw ~net admitted ~call_window:unbounded_window () in
+    result, expected_source
+  in
+  let response = match result with Ok response -> response | Error _ -> fail "frozen request failed" in
+  let actual_source = Option.bind response.telemetry (fun telemetry -> telemetry.reasoning_source) in
+  check bool "response carries the request's original reasoning source" true
+    (match actual_source with Some source -> Types.Reasoning_source.equal source expected_source | None -> false);
+  let open Yojson.Safe.Util in
+  let counted = Option.get !counted |> Yojson.Safe.from_string in
+  let dispatched = Option.get dispatched |> Yojson.Safe.from_string in
+  check bool "count and generation keep the same original thinking policy" true
+    (member "thinking" counted = `Assoc [ "type", `String "adaptive" ]
+     && member "thinking" counted = member "thinking" dispatched);
+  check int "frozen generation keeps its original max_tokens" 64
+    (member "max_tokens" dispatched |> to_int)
+;;
+
+let test_catalog_reload_cannot_underreserve_output () =
+  with_preserved_catalog @@ fun () ->
+  let catalog ceiling = request_policy_catalog ~model_id:"frozen-catalog-model" ~base:"anthropic"
+      ~max_output_tokens:ceiling ~replay:"preserve_always" ~thinking:"" in
+  Model_catalog.set_global (catalog 64);
+  let (), dispatched = with_admitted_http_mock ~stream:false ~input_tokens:480
+    @@ fun ~sw ~net ~base_url ->
+    let cfg = { (config ~max_context:512 base_url) with model_id = "frozen-catalog-model"; response_format = Off } in
+    let serialized = Complete.prepare_request ~config:cfg ~messages () |> serialize_sync in
+    Model_catalog.set_global (catalog 16);
+    let measured = Complete.measure_request ~sw ~net ~next_stage:unbounded_completion serialized |> Result.get_ok in
+    match Complete.admit_request ~now_unix_s:0 ~max_context_tokens:512 measured with
+    | Error (Complete.Context_window_exceeded fit) ->
+      check int "input count" 480 fit.input_tokens;
+      check int "the output reservation remains 64, not the new 16" 64 fit.reserved_output_tokens
+    | Error _ -> fail "unexpected admission rejection"
+    | Ok _ -> fail "480 input plus frozen 64 output exceeds 512" in
+  check bool "the oversized request is never dispatched" true (dispatched = None)
+;;
+
+let test_response_policy_survives_catalog_reload ~stream () =
+  with_preserved_catalog @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  List.iter (fun kind ->
+    List.iter (fun known ->
+      List.iter (fun override ->
+        let base = match kind with
+          | Provider_config.Anthropic -> "anthropic" | Kimi -> "kimi"
+          | OpenAI_compat -> "openai_chat" | Ollama -> "ollama"
+          | Gemini -> "gemini" | Glm -> "glm" in
+        let catalog ~known ~replay ~context =
+          let model = if known then "policy-response-model" else "unrelated-model" in
+          let thinking = match kind with
+            | Provider_config.Anthropic -> {|anthropic_thinking_control = "adaptive_default"|}
+            | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> "" in
+          let contents = Printf.sprintf {|[[models]]
+id_prefix = "%s"
+provider_name = "policy-response-provider"
+base = "%s"
+max_context_tokens = %d
+max_output_tokens = 64
+reasoning_replay = "%s"
+%s
+|} model base context replay thinking in
+          match Model_catalog.of_toml_string ~source:"response policy freeze test" contents with
+          | Ok catalog -> catalog | Error detail -> fail detail in
+        let original = catalog ~known ~replay:"preserve_always" ~context:512 in
+        let replacement = catalog ~known:(not known) ~replay:"no_replay" ~context:1024 in
+        Model_catalog.set_global original;
+        let declared = { (Capabilities.capabilities_of_kind kind) with
+          max_context_tokens = Some 256; max_output_tokens = Some 48 } in
+        let cfg = Provider_config.make ~kind ~provider_id:"policy-response-provider"
+            ~model_id:"policy-response-model" ~base_url:"https://provider.invalid"
+            ~max_tokens:48 ~reasoning_uncontrolled:true
+            ?model_capabilities_override:(if override then Some declared else None) () in
+        let expected_capabilities = Provider_config.capabilities_for_config_model cfg in
+        let expected_thinking = Provider_config.anthropic_thinking_control cfg in
+        let expected_context = Option.bind expected_capabilities (fun caps -> caps.Capabilities.max_context_tokens) in
+        let expected_source = Reasoning_dialect.reasoning_source_for_provider_config cfg |> Result.get_ok in
+        let invoke (request : Llm_transport.completion_request) =
+          Model_catalog.set_global replacement;
+          check bool "prepared lookup preserves presence and absence" true
+            (Provider_config.capabilities_for_config_model request.config = expected_capabilities);
+          check bool "prepared thinking policy preserves presence and absence" true
+            (Provider_config.anthropic_thinking_control request.config = expected_thinking);
+          check bool "caller override stays explicit" true
+            (request.config.model_capabilities_override = cfg.model_capabilities_override);
+          check bool "freezing a matching request is idempotent" true
+            (Provider_config.freeze_for_request request.config == request.config);
+          let other_kind = match kind with
+            | Provider_config.Anthropic -> Provider_config.Kimi
+            | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> Provider_config.Anthropic in
+          List.iter (fun (rebound, fresh) ->
+            check bool "a different kind, provider or model does not inherit the old lookup" true
+              (Provider_config.capabilities_for_config_model rebound
+               = Provider_config.capabilities_for_config_model fresh))
+            [ ({ request.config with model_id = "other-model" }, { cfg with model_id = "other-model" })
+            ; ({ request.config with provider_id = Some "other-provider" }, { cfg with provider_id = Some "other-provider" })
+            ; ({ request.config with kind = other_kind }, { cfg with kind = other_kind }) ];
+          Ok response
+        in
+        let transport : Llm_transport.t =
+          { complete_sync = (fun request -> { response = invoke request; latency_ms = None })
+          ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ request -> invoke request) } in
+        let result = if stream then
+            Complete.complete_stream ~sw ~net ~transport ~config:cfg
+              ~messages:[msg User [Text "hello"]] ~on_event:(fun _ -> ()) ()
+          else Complete.complete ~sw ~net ~transport ~config:cfg ~messages:[msg User [Text "hello"]] () in
+        let result = match result with Ok result -> result | Error _ -> fail "injected completion failed" in
+        let telemetry = match result.telemetry with Some telemetry -> telemetry | None -> fail "response has no telemetry" in
+        check (option int) "response retains the prepared context declaration"
+          expected_context telemetry.effective_context_window;
+        check bool "response reasoning source belongs to the prepared policy" true
+          (match telemetry.reasoning_source with
+           | Some source -> Types.Reasoning_source.equal expected_source source
+           | None -> false)) [false;true]) [false;true])
+    Provider_config.all_provider_kinds
 ;;
 
 let test_admitted_body_is_frozen_across_catalog_mutation () =
@@ -1565,6 +1889,10 @@ let () =
     [ ( "request"
       , [ test_case "shared canonical projection" `Quick test_shared_projection
         ; test_case "Kimi shared canonical projection" `Quick test_kimi_shared_projection
+        ; test_case "Anthropic tool result data stays inside legal nested blocks" `Quick
+            test_anthropic_tool_result_content_projection
+        ; test_case "Kimi tool result content remains unchanged" `Quick
+            test_kimi_tool_result_content_unchanged
         ; test_case
             "anthropic strips top-level schema combinators"
             `Quick
@@ -1622,6 +1950,10 @@ let () =
             `Quick
             test_measurement_uses_provider_admission
         ; test_case
+            "binding controls use the adaptive completion wire only"
+            `Quick
+            test_binding_controls_completion_only
+        ; test_case
             "Agent route uses prepared admission"
             `Quick
             test_agent_route_uses_prepared_admission
@@ -1641,6 +1973,16 @@ let () =
             "admitted body is frozen across catalog mutation"
             `Quick
             test_admitted_body_is_frozen_across_catalog_mutation
+        ; test_case "sync policy is frozen before token measurement" `Quick
+            (test_policy_is_frozen_before_measurement ~stream:false)
+        ; test_case "stream policy is frozen before token measurement" `Quick
+            (test_policy_is_frozen_before_measurement ~stream:true)
+        ; test_case "catalog reload cannot underreserve frozen output" `Quick
+            test_catalog_reload_cannot_underreserve_output
+        ; test_case "sync responses retain provider policy including absent lookups" `Quick
+            (test_response_policy_survives_catalog_reload ~stream:false)
+        ; test_case "stream responses retain provider policy including absent lookups" `Quick
+            (test_response_policy_survives_catalog_reload ~stream:true)
         ; test_case
             "Agent projection is shared by measurement and dispatch"
             `Quick

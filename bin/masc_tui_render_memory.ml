@@ -384,7 +384,7 @@ let memory_context_lines ~cols ~detail ~unit ~input (k : Masc.Tui_decode_memory_
         let module O = Masc.Keeper_continuity_observation in
         let state = match value.state with
           | O.No_source -> "no new completed source (coverage not inferred)"
-          | state -> O.synthesis_state_to_string state in
+          | (O.Checking | O.Running | O.Committed | O.Disabled | O.Source_unavailable | O.Input_unavailable | O.Not_committed | O.Capacity_refused | O.Cancelled) as state -> O.synthesis_state_to_string state in
         let range = match value.range with
           | None -> " · atom range unavailable"
           | Some range -> Printf.sprintf " · last selected atoms [%d,%d) / observed completed %d"
@@ -613,7 +613,12 @@ let format_row_badge badge =
       | Badge_category (Memory_category.Custom _) ->
           Message_layout.take_cells label 4 ^ "\xe2\x80\xa6"
           ^ Message_layout.drop_cells label (Message_layout.display_width label - 5)
-      | Badge_category _ | Badge_source | Badge_dropped ->
+      | Badge_category
+          ( Memory_category.Blocker | Memory_category.Code_change
+          | Memory_category.Fact | Memory_category.Preference
+          | Memory_category.Goal | Memory_category.Constraint
+          | Memory_category.Validated_approach | Memory_category.Lesson )
+      | Badge_source | Badge_dropped ->
           Message_layout.take_cells label 9 ^ "\xe2\x80\xa6"
     else label
   in
@@ -1381,13 +1386,13 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
           match snapshot.mfs_ordinary with
           | Memory_store_present store ->
               (List.length store.mos_facts, store.mos_facts)
-          | _ -> (0, [])
+          | Memory_store_absent | Memory_store_read_error _ -> (0, [])
         in
         let store_source, store_dropped =
           match snapshot.mfs_source with
           | Memory_store_present store ->
               (List.length store.mss_facts, List.length store.mss_invalidations)
-          | _ -> (0, 0)
+          | Memory_store_absent | Memory_store_read_error _ -> (0, 0)
         in
         let grand_total = store_ordinary + store_source + store_dropped in
         let stats =
@@ -1494,8 +1499,10 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
          empty_page_of ~snapshot:(memory_facts_snapshot state) ~error:(memory_facts_failure state),
          state.memory_facts_category
        with
-       | Page_failed, _ -> page_failed_note
-       | Page_unread, _ -> page_unread_note
+       | (Page_failed, Category_all) | (Page_failed, Category_ordinary _)
+       | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> page_failed_note
+       | (Page_unread, Category_all) | (Page_unread, Category_ordinary _)
+       | (Page_unread, Category_source) | (Page_unread, Category_dropped) -> page_unread_note
        | Page_empty, Category_all ->
            (* [total] counts rows filtered by [memory_search_query], so the
               note reads the same value; the store is not empty just because
@@ -1564,7 +1571,11 @@ let render_memory_facts_body ~cols ~budget (state : state)
           Some (List.length (List.filter (fun (fact : memory_fact) -> fact.mf_category = cat) facts))
         | Category_source, _, Some (count, _) | Category_dropped, _, Some (_, count) -> Some count
         | Category_all, Some facts, Some (source, dropped) -> Some (List.length facts + source + dropped)
-        | _ -> None
+        | Category_ordinary _, None, _
+        | Category_source, _, None
+        | Category_dropped, _, None
+        | Category_all, None, _
+        | Category_all, _, None -> None
     in
     let header = [Theme.info () ^ "CATEGORIES" ^ Ansi.reset ^ Ansi.dim ^ "  d:접기" ^ Ansi.reset; "c/C 순서 이동 · 클릭 선택"; ""] in
     let height = max 0 (budget - List.length header) in

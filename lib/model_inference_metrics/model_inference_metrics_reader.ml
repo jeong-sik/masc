@@ -143,11 +143,24 @@ let read_cost_entries_dated ~base_path ~since_unix
         | Dated_jsonl.Parsed json ->
           (match Cost_ledger.of_json json with
            | Ok { usage_projection = Cost_ledger.Raw_observation _; _ } -> ()
-           | Ok _ | Error _ ->
+           | Ok { usage_projection = Cost_ledger.(Resolved_delta | Resolved_attempt_delta _); _ }
+           | Error _ ->
              (match parse_cost_entry json ~since_unix with
               | Ok entry -> entries := entry :: !entries
               | Error Out_of_window -> ()
-              | Error err ->
+              | Error
+                  (( Not_assoc
+                   | Invalid_ts_unix
+                   | Missing_ts_unix
+                   | No_telemetry_object
+                   | Missing_outcome
+                   | Missing_usage_reported
+                   | Missing_telemetry_reported
+                   | Missing_success_model
+                   | Missing_success_inference_identity
+                   | Missing_error_model_attribution
+                   | Invalid_executed_runtime_id
+                   | Invalid_current_cost_row _ ) as err) ->
                 incr schema_violation_rows;
                 Log.Model_inference_metrics.warn
                   "cost ledger schema drop: reason=%s detail=%s"

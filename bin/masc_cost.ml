@@ -107,7 +107,9 @@ let read_costs period =
     | Dated_jsonl.Parsed json ->
       (match Cost_ledger.of_json json with
        | Ok ({ usage_projection = Raw_observation _; _ } : Cost_ledger.t) -> ()
-       | Ok entry -> entries := entry :: !entries
+       | Ok
+           ({ usage_projection = Resolved_delta | Resolved_attempt_delta _; _ } as entry) ->
+         entries := entry :: !entries
        | Error error ->
          note_invalid
            (Dated_jsonl.base_dir store)

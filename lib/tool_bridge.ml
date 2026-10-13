@@ -508,8 +508,8 @@ let to_agent_core_typed_result
         ~error_class:(agent_core_error_class_of_tool_failure_class class_)
         (post_effect_failure_content ~model_projection ~failure_class
            ~effect_disposition ~data ~references)
-    | _ ->
-    project_result
+    | (Tool_result.Proven_post_effect, _::_, Ok _) | (Tool_result.Proven_post_effect, [], _)
+    | ((Tool_result.Proven_pre_effect | Tool_result.Effect_outcome_unknown), _, _) -> project_result
       ~stored_preview
       ?base_path
       ?on_externalization_error

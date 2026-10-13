@@ -3,10 +3,10 @@ module Usage = Runtime_provider_usage_window
 let ( let* ) = Result.bind
 
 let store config =
-  let base_dir =
-    Filename.concat (Workspace_utils.masc_dir config) "provider_usage_history"
-  in
-  Dated_jsonl.create ~base_dir ~retention_days:16 ()
+  Dated_jsonl.open_store
+    (Dated_jsonl.Store.cluster
+       (Workspace_utils.dated_store_cluster_root config)
+       Dated_jsonl.Store.Cluster.Provider_usage_history)
 
 let scope_id = Runtime_quota_window.scope_id
 

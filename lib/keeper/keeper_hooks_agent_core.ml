@@ -315,7 +315,7 @@ let make_hooks
       | Agent_core.Hooks.BeforeTurn _ ->
         record_progress "agent_core_before_turn";
         Agent_core.Hooks.Continue
-      | _event -> Agent_core.Hooks.Continue);
+      | (Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 
     after_turn = Some (fun event ->
       match event with
@@ -645,7 +645,7 @@ let make_hooks
                turn (Printexc.to_string exn));
         tool_call_count_ref := 0;
         Agent_core.Hooks.Continue
-      | _event -> Agent_core.Hooks.Continue);
+      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 
     post_tool_use = Some (fun event ->
       match event with
@@ -971,7 +971,7 @@ let make_hooks
               Log.Keeper.error ~keeper_name:(!meta_ref).name "on_tool_executed callback failed for %s: %s"
                 tool_name (Printexc.to_string exn));
         Agent_core.Hooks.Continue
-      | _event -> Agent_core.Hooks.Continue);
+      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 
     on_stop = Some (fun event ->
       match event with
@@ -984,7 +984,7 @@ let make_hooks
             ]
           ();
         Agent_core.Hooks.Continue
-      | _event -> Agent_core.Hooks.Continue);
+      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 
     on_error = Some (function
       | Agent_core.Hooks.OnError { detail; context = err_ctx; _ } ->
@@ -995,7 +995,7 @@ let make_hooks
         Log.Keeper.error ~keeper_name:(!meta_ref).name "on_error: %s (context: %s)"
           detail err_ctx;
         Agent_core.Hooks.Continue
-      | _event -> Agent_core.Hooks.Continue);
+      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 
     on_tool_error = Some (function
       | Agent_core.Hooks.OnToolError { tool_name; error; _ } ->
@@ -1027,7 +1027,7 @@ let make_hooks
            nothing after a restart. *)
         Log.Keeper.debug ~keeper_name "tool_error: %s — %s" tool_name error;
         Agent_core.Hooks.Continue
-      | _event -> Agent_core.Hooks.Continue);
+      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _) as _event -> Agent_core.Hooks.Continue);
 
     post_tool_use_failure = Some (function
       | Agent_core.Hooks.PostToolUseFailure
@@ -1119,7 +1119,7 @@ let make_hooks
                 tool_name (Printexc.to_string exn);
               if tool_result_commit_required () then raise exn));
         Agent_core.Hooks.Continue
-      | _event -> Agent_core.Hooks.Continue);
+      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
   }
   in
   hooks

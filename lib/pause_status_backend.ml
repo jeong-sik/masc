@@ -23,7 +23,10 @@ let keeper_pause_status_json config =
          let by_phase =
            match Keeper_registry.get_phase ~base_path:config.base_path name with
            | Some Keeper_state_machine.Paused -> name :: by_phase
-           | Some _ | None -> by_phase
+           | Some (Keeper_state_machine.Offline) | None | Some (Keeper_state_machine.Running)
+           | Some (Keeper_state_machine.Failing) | Some (Keeper_state_machine.Draining)
+           | Some (Keeper_state_machine.Stopped) | Some (Keeper_state_machine.Crashed)
+           | Some (Keeper_state_machine.Restarting) -> by_phase
          in
          errs, by_meta, by_phase)
       ([], [], [])

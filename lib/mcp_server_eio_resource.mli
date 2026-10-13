@@ -43,6 +43,17 @@ val handle_read_resource_eio :
     error fields).  Never raises — all error paths produce error
     envelopes via {!Mcp_transport_protocol.make_error}. *)
 
+val wiki_resources : base_path:string -> Mcp_server.mcp_resource list
+(** One [masc://wiki/<topic>] resource per page in the wiki, in page-name
+    order, and [masc://wiki/log] first when the wiki has a log. A page's title
+    and summary become the resource's title and description; a page whose
+    header does not read is listed by file name with the reason. An absent
+    wiki directory lists nothing.
+
+    The pages are also reachable through the [masc://wiki/{topic}] template,
+    which a client that only lists resources cannot expand. The filesystem
+    reads run in a system thread. *)
+
 module For_testing : sig
   val blocking_io_execution_context : unit -> Eio_guard.execution_context
   (** Execution context observed inside the resource filesystem boundary. *)

@@ -24,7 +24,13 @@ let prepare_official_resume ~(observed : Semantic.official_client_checkpoint) ~e
     (* Queued steering may have advanced this same authoritative conversation.
        Resume its latest settled turn; never substitute another client thread. *)
     Ok { observed with Semantic.turn_id = settled.turn_id }
-  | Some _ | None -> Error "original official-client conversation is no longer settled with its admitted tool surface"
+  | Some
+      { Native.phase =
+          ( Native.Ready | Native.Start _ | Native.Active _ | Native.Turn_inflight _
+          | Native.Recovery_required _ | Native.Settled _ )
+      ; _
+      }
+  | None -> Error "original official-client conversation is no longer settled with its admitted tool surface"
 let owner result = Result.map_error Owner.command_error_to_string result
 let validate_scope ~operation_id (checkpoint : Agent_core.Checkpoint.t) =
   let* frame = Keeper_repetition_scope.load checkpoint.context

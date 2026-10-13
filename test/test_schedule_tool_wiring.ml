@@ -188,12 +188,12 @@ let check_refusal label expected result =
       (Tool_result.message result)
 ;;
 
-let create_service_exn config ~schedule_id ~due_at ~payload ?recurrence () =
+let create_service_exn config ~schedule_id ~due_at ~payload ?recurrence ?expires_at () =
   match
     Schedule_service.create config ~runner_tick_sec ~now:100.0 ~schedule_id ~requested_at:100.0
       ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent")
-      ~due_at ~payload ~source:Schedule_domain.Operator_request ?recurrence ()
+      ~due_at ~payload ~source:Schedule_domain.Operator_request ?recurrence ?expires_at ()
   with
   | Ok request -> request
   | Error err -> fail (Schedule_service.service_error_to_string err)
@@ -382,7 +382,7 @@ let test_update_keeps_public_id_and_replaces_instance () =
     (List.length (Schedule_store.read_state config).schedules)
 ;;
 
-let test_update_omitted_kind_preserves_daily_and_warns () =
+let test_update_omitted_kind_preserves_daily () =
   with_config
   @@ fun config ->
   let schedule_id = "sched-daily-edit" in
@@ -406,7 +406,6 @@ let test_update_omitted_kind_preserves_daily_and_warns () =
     | Some request -> request
     | None -> fail "daily schedule missing"
   in
-  let before_log = (Log.Ring.bounds ()).total - 1 in
   let omitted = update [] in
   check bool "omitting kind updates the daily schedule" true (Tool_result.is_success omitted);
   let retained = stored () in
@@ -414,16 +413,6 @@ let test_update_omitted_kind_preserves_daily_and_warns () =
     (String.equal original.schedule_instance_id retained.schedule_instance_id);
   check string "omission retains the stored recurrence" "daily"
     (Schedule_domain.recurrence_kind_to_string retained.recurrence);
-  let warnings =
-    Log.Ring.recent ~since_seq:before_log ~module_filter:"ToolValidation" ()
-    |> List.filter (fun (entry : Log.Ring.entry) ->
-      entry.level = Log.Warn
-      && String_util.contains_substring entry.message schedule_id
-      && String_util.contains_substring entry.message "recurrence_kind"
-      && String_util.contains_substring entry.message "next version")
-  in
-  check int "one migration warning names the schedule and deadline" 1
-    (List.length warnings);
   let explicit = update [ "recurrence_kind", `String "one_shot" ] in
   check bool "explicit one-shot replacement succeeds" true
     (Tool_result.is_success explicit);
@@ -486,6 +475,114 @@ let test_update_requires_id_and_active_row () =
     (Tool_result.data refused |> member "current_status" |> to_string);
   check string "refusal names the attempted transition" "modify"
     (Tool_result.data refused |> member "attempted" |> to_string)
+;;
+
+let test_content_edit_preserves_due_and_recurrence () =
+  List.iter
+    (fun (schedule_id, due_at, recurrence) ->
+       with_config @@ fun config ->
+       let original = create_service_exn config ~schedule_id ~due_at
+           ~payload:(keeper_wake_payload "before") ~recurrence () in
+       let args extra = `Assoc
+           ([ "schedule_id", `String schedule_id
+            ; "keeper_name", `String "schedule-keeper"
+            ; "message", `String "after" ] @ extra) in
+       let updated = dispatch_exn config Tool_schemas_schedule.Update_request (args []) in
+       check bool "content-only update succeeds" true (Tool_result.is_success updated);
+       let stored = match Schedule_store.get_schedule config ~schedule_id with
+         | Some request -> request | None -> fail "content edit lost schedule" in
+       check (float 0.) "exact due time preserved" original.due_at stored.due_at;
+       check bool "recurrence preserved" true (original.recurrence = stored.recurrence);
+       check bool "new definition has its own instance" false
+         (String.equal original.schedule_instance_id stored.schedule_instance_id);
+       check string "content changed" "after"
+         Yojson.Safe.Util.(Schedule_domain.payload_to_yojson stored.payload
+           |> member "body" |> member "message" |> to_string);
+       let malformed = dispatch_exn config Tool_schemas_schedule.Update_request
+           (args ["due_at_unix", `String "later"]) in
+       check bool "malformed due is not treated as omitted" false
+         (Tool_result.is_success malformed);
+       check_refusal "explicit one-shot change still requires a due time"
+         Schedule_contract_values.Refusal_due_input_missing
+         (dispatch_exn config Tool_schemas_schedule.Update_request
+            (args ["recurrence_kind", `String "one_shot"])))
+    [ "content-future", future_due_at, Schedule_domain.One_shot
+    ; "content-overdue", 200., Schedule_domain.One_shot
+    ; "content-daily", future_due_at,
+        Schedule_domain.Daily {hour=9; minute=0; second=0; timezone="UTC"} ]
+;;
+
+(* The expiry is part of the timing a content edit keeps. A content edit that
+   dropped it would turn an expiring schedule into one that never reaches
+   [Expired]. An expiry sent on the call wins, and an update that also sends a
+   due input is a full replacement, so omitting the expiry there still clears
+   it, as the tool description says. *)
+let test_content_edit_keeps_expiry () =
+  with_config @@ fun config ->
+  let schedule_id = "content-edit-expiring" in
+  let expires_at = future_due_at +. 3600. in
+  let stored_expiry () =
+    match Schedule_store.get_schedule config ~schedule_id with
+    | Some request -> request.expires_at
+    | None -> fail "expiring schedule missing"
+  in
+  let update extra =
+    dispatch_exn config Tool_schemas_schedule.Update_request
+      (`Assoc
+        ([ "schedule_id", `String schedule_id
+         ; "keeper_name", `String "schedule-keeper"
+         ; "message", `String "after" ] @ extra))
+  in
+  ignore
+    (create_service_exn config ~schedule_id ~due_at:future_due_at ~expires_at
+       ~payload:(keeper_wake_payload "before") ());
+  check bool "content-only update succeeds" true
+    (Tool_result.is_success (update []));
+  check (option (float 0.)) "content edit keeps the stored expiry"
+    (Some expires_at) (stored_expiry ());
+  let later_expiry = expires_at +. 60. in
+  check bool "content edit with an expiry succeeds" true
+    (Tool_result.is_success
+       (update [ "expires_at_unix", `Float later_expiry ]));
+  check (option (float 0.)) "an expiry on the call replaces the stored one"
+    (Some later_expiry) (stored_expiry ());
+  check bool "retiming update succeeds" true
+    (Tool_result.is_success
+       (update [ "due_at_unix", `Float (future_due_at +. 7200.) ]));
+  check (option (float 0.)) "a full replacement without an expiry clears it"
+    None (stored_expiry ())
+;;
+
+let test_content_edit_preserves_concurrently_changed_due () =
+  with_config @@ fun config ->
+  let schedule_id = "content-edit-retimed" in
+  let original = create_service_exn config ~schedule_id ~due_at:future_due_at
+      ~payload:(keeper_wake_payload "before") () in
+  let latest_due = future_due_at +. 600. in
+  let latest_recurrence = Schedule_domain.Daily
+      {hour=10; minute=0; second=0; timezone="UTC"} in
+  let context = { (schedule_ctx config) with
+    admit_keeper_wake_creation = (fun _config ~keeper_name:_ write ->
+      match Schedule_service.update config ~now:100. ~runner_tick_sec ~schedule_id
+          ~requested_by:original.requested_by ~scheduled_by:original.scheduled_by
+          ~due_at:latest_due ~payload:(Schedule_domain.payload_to_yojson original.payload)
+          ~source:original.source ~recurrence:latest_recurrence () with
+      | Error error -> Error error
+      | Ok _ -> write ()) } in
+  let result = match Tool_schedule.dispatch context
+      ~name:(schedule_tool_name Tool_schemas_schedule.Update_request)
+      ~args:(`Assoc ["schedule_id",`String schedule_id;
+        "keeper_name",`String "schedule-keeper"; "message",`String "after"]) with
+    | Some result -> result | None -> fail "update tool missing" in
+  check bool "content update succeeds after retiming" true (Tool_result.is_success result);
+  let stored = match Schedule_store.get_schedule config ~schedule_id with
+    | Some request -> request | None -> fail "concurrent edit lost schedule" in
+  check (float 0.) "latest committed due wins over observed snapshot" latest_due stored.due_at;
+  check bool "latest committed recurrence survives content edit" true
+    (latest_recurrence = stored.recurrence);
+  check string "new content is committed" "after"
+    Yojson.Safe.Util.(Schedule_domain.payload_to_yojson stored.payload
+      |> member "body" |> member "message" |> to_string)
 ;;
 
 (* The checkpoint encoder rejects an object that binds the same key twice,
@@ -978,7 +1075,7 @@ let test_due_signal_and_dashboard_projection () =
   let signal_json =
     match
       Dated_jsonl.read_recent
-        (Dated_jsonl.create ~base_dir:(Schedule_runner.signals_dir config) ())
+        (Schedule_runner.signal_store config)
         1
     with
     | [ row ] -> row
@@ -2032,12 +2129,18 @@ let () =
         ; test_case "create list get cancel" `Quick test_create_list_get_cancel
         ; test_case "update keeps public id and replaces instance" `Quick
             test_update_keeps_public_id_and_replaces_instance
-        ; test_case "update omitted kind keeps daily and warns" `Quick
-            test_update_omitted_kind_preserves_daily_and_warns
+        ; test_case "update omitted kind keeps daily" `Quick
+            test_update_omitted_kind_preserves_daily
         ; test_case "update omitted kind keeps one-shot" `Quick
             test_update_omitted_kind_preserves_one_shot
         ; test_case "update requires id and active row" `Quick
             test_update_requires_id_and_active_row
+        ; test_case "content edit preserves time and recurrence" `Quick
+            test_content_edit_preserves_due_and_recurrence
+        ; test_case "content edit keeps the stored expiry" `Quick
+            test_content_edit_keeps_expiry
+        ; test_case "content edit keeps a concurrent retime" `Quick
+            test_content_edit_preserves_concurrently_changed_due
         ; test_case "results survive the checkpoint encoder" `Quick
             test_results_survive_the_checkpoint_encoder
         ; test_case "creation boundary owns result delivery destination" `Quick

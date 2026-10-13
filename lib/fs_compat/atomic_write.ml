@@ -9,8 +9,8 @@ type atomic_replace_recovery_target_error =
 type atomic_replace_recovery_target =
   { allowed_root_path : string
   ; allowed_root : Recovery.identity
-  ; parent_components : string list
-  ; target_leaf : string
+  ; parent_components : Capability_leaf.t list
+  ; target_leaf : Capability_leaf.t
   ; permissions : Recovery.permissions
   }
 
@@ -1107,16 +1107,6 @@ let replace_capability_file_with
   let target_effect = ref Target_unchanged in
   let callback_result = ref None in
   try
-    let () =
-      match Capability_leaf.of_string recovery_target.target_leaf with
-      | Some _ -> ()
-      | None ->
-        raise_failure
-          Validate_leaf
-          (Invalid_recovery_target
-             (Recovery_target_validation_failed
-                (Recovery.Invalid_target_leaf recovery_target.target_leaf)))
-    in
     Eio.Switch.run @@ fun sw ->
     let parent_stat =
       run_stage
@@ -1131,7 +1121,9 @@ let replace_capability_file_with
             (Unexpected_resource_kind parent_stat.kind);
         parent_stat)
     in
-    let target_path = Eio.Path.(parent / recovery_target.target_leaf) in
+    let target_path =
+      Eio.Path.(parent / Capability_leaf.to_string recovery_target.target_leaf)
+    in
     let preliminary_target = observe_target_entry ~before_stage target_path in
     let mutation_lease =
       run_stage ~before_stage Acquire_mutation_lease (fun () ->
@@ -1153,7 +1145,7 @@ let replace_capability_file_with
     in
     let locator =
       match
-        Recovery.locator
+        Recovery.locator_of_leaves
           ~allowed_root_path:recovery_target.allowed_root_path
           ~allowed_root:recovery_target.allowed_root
           ~parent_components:recovery_target.parent_components

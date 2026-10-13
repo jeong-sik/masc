@@ -45,7 +45,33 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Schedule_due _, Schedule_due -> stimulus.post_id
   | Keeper_event_queue.Completion_authority_rejected _, Completion_authority_rejected ->
     stimulus.post_id
-  | _, kind ->
+  | ( ( Keeper_event_queue.Board_signal _
+      | Keeper_event_queue.Board_attention _
+      | Keeper_event_queue.Bootstrap
+      | Keeper_event_queue.Fusion_completed _
+      | Keeper_event_queue.Schedule_due _
+      | Keeper_event_queue.Connector_attention _
+      | Keeper_event_queue.Hitl_resolved _
+      | Keeper_event_queue.Ask_answered _
+      | Keeper_event_queue.Completion_authority_rejected _
+      | Keeper_event_queue.Task_cancelled _
+      | Keeper_event_queue.Workspace_message _
+      | Keeper_event_queue.Delegate_completed _
+      | Keeper_event_queue.Composition_completed _
+      | Keeper_event_queue.Task_outcome _ )
+    , (( Board_signal
+       | Bootstrap
+       | Fusion_completed
+       | Schedule_due
+       | Connector_attention
+       | Hitl_resolved
+       | Ask_answered
+       | Completion_authority_rejected
+       | Task_outcome
+       | Task_cancelled
+       | Workspace_message
+       | Delegate_completed
+       | Composition_completed ) as kind) ) ->
     digest_id
       "stimulus"
       (String.concat
@@ -56,18 +82,19 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
          ])
 ;;
 
-let store_dir ~masc_root ~keeper_name =
-  Filename.concat
-    (Filename.concat
-       (Filename.concat (Filename.concat masc_root Common.keepers_runtime_dirname) keeper_name)
-       "reaction-ledger")
-    storage_generation
+let location ~base_path ~keeper_name =
+  Dated_jsonl.Store.reaction_ledger
+    ~base_path
+    ~keeper:keeper_name
+    ~generation:storage_generation
+;;
+
+let store_dir ~base_path ~keeper_name =
+  Dated_jsonl.Store.dir (location ~base_path ~keeper_name)
 ;;
 
 let store_for_base_path ~base_path ~keeper_name =
-  Dated_jsonl.create
-    ~base_dir:(store_dir ~masc_root:(Common.masc_dir_from_base_path ~base_path) ~keeper_name)
-    ()
+  Dated_jsonl.open_store (location ~base_path ~keeper_name)
 ;;
 
 (* An occurrence whose queue witness was retired needs an exact, bounded

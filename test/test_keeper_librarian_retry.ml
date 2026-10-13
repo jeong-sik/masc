@@ -1432,6 +1432,59 @@ let user_text_of_messages messages =
   |> String.concat "\n"
 ;;
 
+let test_runtime_context_is_not_new_memory_evidence () =
+  let module Context = Agent_core.Types.Extra_system_context_provenance in
+  let carrier metadata text =
+    Agent_core.Types.make_message ~metadata ~role:Agent_core.Types.User
+      [Agent_core.Types.Text text]
+  in
+  let messages =
+    [ Agent_core.Types.user_msg "actual new observation"
+    ; carrier Context.metadata "injected current memory payload"
+    ; carrier Context.historical_metadata "injected historical memory payload"
+    ; carrier (List.map (fun (key, _) -> key, `Bool false) Context.metadata)
+        "injected invalid memory payload"
+    ; carrier (Context.metadata @ Context.historical_metadata)
+        "injected duplicate memory payload"
+    ; Agent_core.Types.user_msg "[system context] is literal user text"
+    ; Agent_core.Types.assistant_msg "actual response"
+    ]
+  in
+  let selected = { (input ()) with messages } in
+  let check_rendering label rendered =
+    List.iter (fun text ->
+      check bool (label ^ ": omits " ^ text) false
+        (String_util.contains_substring rendered text))
+      ["injected current memory payload"; "injected historical memory payload";
+       "injected invalid memory payload"; "injected duplicate memory payload"];
+    List.iter (fun text ->
+      check bool (label ^ ": retains " ^ text) true
+        (String_util.contains_substring rendered text))
+      ["actual new observation"; "actual response"; "source=runtime_context";
+       "provenance=invalid"; "provenance=duplicate";
+       "[system context] is literal user text"]
+  in
+  let history = List.assoc "conversation_history" (Librarian.prompt_variables selected) in
+  check_rendering "prompt variables" history;
+  check bool "context keeps its original position" true
+    (String_util.contains_substring history "[turn=2 role=user source=runtime_context]");
+  check bool "following observation keeps its original position" true
+    (String_util.contains_substring history "[turn=6 role=assistant] actual response");
+  (match Runtime.messages_for_librarian selected with
+   | Error detail -> failf "librarian render failed: %s" detail
+   | Ok rendered -> check_rendering "rendered request" (user_text_of_messages rendered));
+  let observations = Librarian.observations_for_absorption selected
+    |> List.filter (fun observation ->
+      Json_util.assoc_string_opt "kind" observation = Some "conversation") in
+  check int "absorption keeps one slot per canonical message" 7 (List.length observations);
+  check (list int) "absorption positions are unchanged" [0; 1; 2; 3; 4; 5; 6]
+    (List.map (fun observation ->
+      Yojson.Safe.Util.(member "local_position" observation |> to_int)) observations);
+  check_rendering "absorption observations" (Yojson.Safe.to_string (`List observations));
+  check bool "presentation leaves canonical context intact" true
+    (selected.messages = messages)
+;;
+
 let test_prompt_carries_typed_tool_observations_without_payloads () =
   let variables = Librarian.prompt_variables (input ()) in
   let observations = List.assoc "turn_tool_observations" variables in
@@ -2300,6 +2353,8 @@ let () =
             test_prompt_carries_keeper_instructions
         ; test_case "conversation headers carry the stamped speaker" `Quick
             test_conversation_headers_carry_the_stamped_speaker
+        ; test_case "runtime context is not new memory evidence" `Quick
+            test_runtime_context_is_not_new_memory_evidence
         ; test_case "prompt carries typed tool observations without payloads" `Quick
             test_prompt_carries_typed_tool_observations_without_payloads
         ; test_case "durable speaker attribution reaches counterpart observations" `Quick

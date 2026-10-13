@@ -43,7 +43,9 @@ let tool_use_ids_of_message (message : Agent_core.Types.message) =
     (fun (block : Agent_core.Types.content_block) ->
        match block with
        | Agent_core.Types.ToolUse { id; _ } -> Some id
-       | _ -> None)
+       | Agent_core.Types.Text _ | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+       | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolResult _
+       | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
     message.content
 ;;
 
@@ -52,7 +54,9 @@ let tool_result_ids_of_message (message : Agent_core.Types.message) =
     (fun (block : Agent_core.Types.content_block) ->
        match block with
        | Agent_core.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
-       | _ -> None)
+       | Agent_core.Types.Text _ | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+       | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+       | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
     message.content
 ;;
 
@@ -249,7 +253,10 @@ let seed_tool_calls_from_history ?base_path
             match block with
             | Agent_core.Types.ToolResult { tool_use_id; content; _ } ->
               Hashtbl.replace result_by_id tool_use_id content
-            | _ -> ())
+            | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+            | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+            | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
+            | Agent_core.Types.Audio _ -> ())
          message.content)
     history_messages;
   (* Newest first, matching the live accumulator's order. Only matched
@@ -271,7 +278,10 @@ let seed_tool_calls_from_history ?base_path
                         ; output_text
                         })
                      (Hashtbl.find_opt result_by_id id)
-                 | _ -> None)
+                 | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+                 | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+                 | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+                 | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
               message.content)
   in
   List.map2
@@ -318,7 +328,10 @@ let history_tool_use_ids (history_messages : Agent_core.Types.message list) =
          (fun (block : Agent_core.Types.content_block) ->
             match block with
             | Agent_core.Types.ToolUse { id; _ } -> Some id
-            | _ -> None)
+            | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+            | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+            | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
+            | Agent_core.Types.Audio _ -> None)
          message.content)
     history_messages
 ;;
@@ -1075,7 +1088,7 @@ let prepare_agent_setup
       else (
         match current_tool_choice with
         | Some Agent_core.Types.None_ -> Lane_tool_disabled
-        | _ -> Lane_text_only)
+        | Some (Agent_core.Types.Auto | (Agent_core.Types.Any | Agent_core.Types.Tool _)) | None -> Lane_text_only)
     in
     (schema_filter, lane)
   in

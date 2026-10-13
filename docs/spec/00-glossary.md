@@ -887,8 +887,12 @@ status: reference
     `rechecking delivery` 건수를 분리하고 로컬 NEXT 프리뷰를
     별도 행으로 표시한다. 각 모드는 같은 표시 행 계산으로 뷰포트 예산을 예약하며,
     큐 입력 단축키(`Ctrl-T:queue`)와 현재 작업 중단 안내를 보존한다.
-  - 큐 제어와 입력 보존: 대화 대기열 제어 명령(`/queue`·`/queue resume` 및 `Ctrl-T`)을 제공하며,
-    작성 도중 `Esc`로 다른 화면을 탐색하더라도 대기열 상태와 입력 드래프트는 파기되지 않고 유지된다.
+  - 큐 제어와 입력 보존: 대화 대기열 제어 명령(`/queue`·`/queue resume`·`/queue clear` 및
+    `Ctrl-T`)을 제공하며, 작성 도중 `Esc`로 다른 화면을 탐색하더라도 대기열 상태와 입력
+    드래프트는 파기되지 않고 유지된다. `/queue clear`는 이 TUI가 화면의 Keeper에 대해 추적하는
+    대기 메시지를 한 번에 취소한다. 아직 보내지 않은 것은 버리고, 전송 작업에 넘겼으나 첫
+    POST가 나가기 전인 것은 거둬들이고, 서버 큐에 들어 있는 것은 서버에 취소를 요청한다
+    (사용법: `docs/guides/tui-chat-queue.md`).
   - 검증과 증거: OCaml 생애주기 테스트(`test/test_tui_chat_queue_wiring.ml`,
     `test/test_tui_chat_activity.ml`)가 재연결 불확실성·Keeper 이동 후 복귀 계약을
     다룬다. 실행 증거와 한계는
@@ -2075,11 +2079,15 @@ status: reference
   를 적는다(#38835). Keeper 도구 경로와 HTTP 경로가 같은 입력을 쓰고, 게시 처리기가
   유일한 작성자다. 저장 wire 형식은 `_blob` 래퍼로 기록해 durable 정리가 자식 참조를
   따라가게 한다.
-  - `kind`는 읽는 쪽이 어떻게 보여 줄지 정한다: `image`·`video`·`youtube`·`external_link`.
+  - `kind`는 읽는 쪽이 어떻게 보여 줄지 정한다: `image`·`video`·`youtube`·`external_link`·
+    `file`·`audio`·`score`·`midi`.
     아티팩트를 가리키는 참조는 대시보드가 바이트를 불러온 뒤 `image`는 이미지,
     `video`는 영상으로 보여 주고, 그 외는 다운로드를 둔다(미디어 종류는 해시마다
     저장되지 않아 요소가 직접 감지한다). `youtube`는 `url`만 허용한다 — 저장된
-    아티팩트는 유튜브 영상이 아니다.
+    아티팩트는 유튜브 영상이 아니다. `file`·`audio`·`score`·`midi`는 파일이 무엇인지만
+    말한다. TUI는 이름과 크기를 한 줄로 보여 주고, 재생하거나 악보로 그리지는 않는다.
+  - `name`은 선택이다. 보통 원래 파일 이름이고, 읽는 쪽이 첨부 옆에 보여 준다.
+    비어 있지 않은 한 줄이고 255바이트를 넘지 않는다.
   - 출처 둘은 동시에 쓰지 않고, 둘 다 없으면 거절한다. `http:`·`javascript:`·
     `data:` URL과 형식이 맞지 않는 항목은 받지 않는다. 아티팩트 참조는
     쓰기 전에 기존 Tool_blob_store에서 바이트를 확인하고, 지정된 상한

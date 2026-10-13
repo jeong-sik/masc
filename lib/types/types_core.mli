@@ -320,6 +320,20 @@ type message_mention_delivery =
 
 val message_mention_delivery_to_string : message_mention_delivery -> string
 
+(** The kinds of message this codebase writes. {!message.msg_type} stays the
+    string on disk; read it with {!message_kind_of_string}. *)
+type message_kind =
+  | Msg_broadcast
+  | Msg_session_bound
+  | Msg_session_rebound
+  | Msg_session_ended
+  | Msg_cache_invalidated
+
+val message_kind_to_string : message_kind -> string
+
+(** [None] for a type this build does not write. *)
+val message_kind_of_string : string -> message_kind option
+
 type message =
   { request_id : string
   ; seq : int

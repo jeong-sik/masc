@@ -225,7 +225,7 @@ let ensure_nonempty_completion
 let%test "latency counter yields non-negative elapsed duration when available" =
   match start_latency_counter () with
   | Unknown_latency -> true
-  | counter ->
+  | (Monotonic_latency _ | Eio_clock_latency _) as counter ->
     (match latency_ms_float counter with
      | Some elapsed_ms -> elapsed_ms >= 0.0
      | None -> false)

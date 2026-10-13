@@ -63,6 +63,29 @@ let test_of_exn_unix_enoent () =
       Alcotest.(check string) "what is path" "/missing/path" what
   | _ -> Alcotest.fail "expected Not_found on ENOENT"
 
+let test_of_exn_unix_eacces () =
+  match TE.of_exn (Unix.Unix_error (Unix.EACCES, "open", "/etc/shadow")) with
+  | TE.Permission_denied { path } ->
+      Alcotest.(check string) "path is argument" "/etc/shadow" path
+  | _ -> Alcotest.fail "expected Permission_denied on EACCES"
+
+let test_of_exn_unix_enfile () =
+  match TE.of_exn (Unix.Unix_error (Unix.ENFILE, "socket", "")) with
+  | TE.Resource_exhausted { resource; detail } ->
+      Alcotest.(check string) "resource is fd" "fd" resource;
+      Alcotest.(check string) "detail is op" "socket" detail
+  | _ -> Alcotest.fail "expected Resource_exhausted on ENFILE"
+
+(* Only EACCES, ENOENT, EMFILE and ENFILE are classified; the other errnos,
+   including EPERM and ENOSPC, stay Internal_error and keep the exception. *)
+let test_of_exn_other_errno_is_internal_error () =
+  List.iter
+    (fun code ->
+      match TE.of_exn (Unix.Unix_error (code, "write", "/tmp/x")) with
+      | TE.Internal_error { exn = Some _; _ } -> ()
+      | _ -> Alcotest.fail "expected Internal_error for an unclassified errno")
+    [ Unix.EPERM; Unix.ENOSPC; Unix.EAGAIN; Unix.ECONNREFUSED; Unix.EUNKNOWNERR 4242 ]
+
 let test_to_string_single_line () =
   (* Logs must stay grep-friendly: one line per error. *)
   let cases = [
@@ -98,6 +121,12 @@ let () =
         test_of_exn_unix_emfile;
       Alcotest.test_case "Unix ENOENT maps to Not_found" `Quick
         test_of_exn_unix_enoent;
+      Alcotest.test_case "Unix EACCES maps to Permission_denied" `Quick
+        test_of_exn_unix_eacces;
+      Alcotest.test_case "Unix ENFILE maps to Resource_exhausted/fd" `Quick
+        test_of_exn_unix_enfile;
+      Alcotest.test_case "other errnos stay Internal_error" `Quick
+        test_of_exn_other_errno_is_internal_error;
     ];
     "to_string", [
       Alcotest.test_case "all variants single-line" `Quick

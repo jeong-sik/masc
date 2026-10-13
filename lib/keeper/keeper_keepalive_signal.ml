@@ -832,7 +832,10 @@ let keepalive_entry_accepts_late_event ~(ctx : _ context) ~(keeper_name : string
   match Keeper_registry.get_phase ~base_path:ctx.config.base_path keeper_name with
   | None -> true
   | Some Keeper_state_machine.Stopped -> false
-  | Some _ -> true
+  | Some (Keeper_state_machine.Offline) | Some (Keeper_state_machine.Running)
+  | Some (Keeper_state_machine.Failing) | Some (Keeper_state_machine.Draining)
+  | Some (Keeper_state_machine.Paused) | Some (Keeper_state_machine.Crashed)
+  | Some (Keeper_state_machine.Restarting) -> true
 
 let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
   if keepalive_entry_accepts_late_event ~ctx ~keeper_name then

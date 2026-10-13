@@ -21,7 +21,7 @@ type t =
 let message_of_core_error = function
   | Agent_core.Error.Internal message
   | Agent_core.Error.Internal_carried { message; _ } -> message
-  | error -> Agent_core.Error.to_string error
+  | (Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _ | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _ | Agent_core.Error.Orchestration _) as error -> Agent_core.Error.to_string error
 ;;
 
 let of_core_error error =

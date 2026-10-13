@@ -66,7 +66,14 @@ let protocol_of_config (config : Provider_config.t) =
 let validate_declared_task (config : Provider_config.t) =
   match Provider_config.capabilities_for_config_model config with
   | Some { Capabilities.task = Some Capabilities.Image_generation; _ } -> Ok ()
-  | Some { task = Some task; _ } ->
+  | Some
+      { task =
+          Some
+            (( Capabilities.Transcription
+             | Capabilities.Speech
+             | Capabilities.Video_generation ) as task)
+      ; _
+      } ->
     reject
       (Printf.sprintf
          "model %S declares task %S, not image_generation"
@@ -367,7 +374,16 @@ let[@warning "-32"] catalog_declares_image_task provider_label model_id =
       ~model_id
   with
   | Some { task = Some Capabilities.Image_generation; _ } -> true
-  | Some _ | None -> false
+  | Some
+      { task =
+          ( None
+          | Some
+              ( Capabilities.Transcription
+              | Capabilities.Speech
+              | Capabilities.Video_generation ) )
+      ; _
+      }
+  | None -> false
 ;;
 
 let%test "embedded catalog declares exact image providers" =
@@ -381,7 +397,9 @@ let%test "embedded catalog declares exact image providers" =
 let%test "request requires an exact image-generation task" =
   match validate_request (test_config Provider_config.Glm None) "draw" with
   | Error (Http_client.AcceptRejected _) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.ProviderTerminal _)
+  | Error (Http_client.ProviderFailure _) -> false
 ;;
 
 let%test "Gemini image interaction is explicitly stateless" =
@@ -408,7 +426,20 @@ let%test "Z.AI URL response and safety observation are typed" =
       ; content_filter =
           [ { role = None; level = 1 }; { role = Some Assistant; level = 2 } ]
       } -> String.equal url "https://example.test/a.png"
-  | Ok _ | Error _ -> false
+  | Ok
+      { images =
+          ( []
+          | [ { source = Remote_url _ | Inline_base64 _ } ]
+          | { source = Remote_url _ | Inline_base64 _ }
+            :: { source = Remote_url _ | Inline_base64 _ } :: _ )
+      ; content_filter =
+          ( []
+          | [ { role = None | Some (User | Assistant | History | Other _); level = _ } ]
+          | { role = None | Some (User | Assistant | History | Other _); level = _ }
+            :: { role = None | Some (User | Assistant | History | Other _); level = _ } :: _ )
+      ; _
+      }
+  | Error _ -> false
 ;;
 
 let%test "OpenAI base64 response preserves usage and declared format" =
@@ -431,7 +462,15 @@ let%test "OpenAI base64 response preserves usage and declared format" =
       ; content_filter = []
       ; _
       } -> String.equal data "aGVsbG8="
-  | Ok _ | Error _ -> false
+  | Ok
+      { images =
+          ( []
+          | [ { source = Remote_url _ | Inline_base64 _ } ]
+          | { source = Remote_url _ | Inline_base64 _ }
+            :: { source = Remote_url _ | Inline_base64 _ } :: _ )
+      ; _
+      }
+  | Error _ -> false
 ;;
 
 let%test "base64 without a declared format carries no media type" =
@@ -442,7 +481,15 @@ let%test "base64 without a declared format carries no media type" =
   with
   | Ok { images = [ { source = Inline_base64 { media_type = None; data } } ]; _ } ->
     String.equal data "aGVsbG8="
-  | Ok _ | Error _ -> false
+  | Ok
+      { images =
+          ( []
+          | [ { source = Remote_url _ | Inline_base64 _ } ]
+          | { source = Remote_url _ | Inline_base64 _ }
+            :: { source = Remote_url _ | Inline_base64 _ } :: _ )
+      ; _
+      }
+  | Error _ -> false
 ;;
 
 let%test "non-object 2xx body is a typed parse failure" =
@@ -452,7 +499,28 @@ let%test "non-object 2xx body is a typed parse failure" =
          { kind = Http_client.Provider_parse_error { parser = Some "image_generation" }
          ; _
          }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _)
+  | Error
+      (Http_client.ProviderFailure
+         { kind =
+             ( Http_client.Capacity_exhausted _
+             | Http_client.Hard_quota _
+             | Http_client.Capability_mismatch _
+             | Http_client.Cli_policy_invalid _
+             | Http_client.Cli_startup_failed _
+             | Http_client.Provider_parse_error _
+             | Http_client.Provider_wire_error _
+             | Http_client.Provider_reported_error _
+             | Http_client.Provider_interrupted
+             | Http_client.Response_body_too_large _
+             | Http_client.Empty_completion _
+             | Http_client.Context_overflow _
+             | Http_client.Repeating_generation _
+             | Http_client.Unknown_provider_failure _ )
+         ; _
+         }) -> false
 ;;
 
 let%test "ambiguous image source fails closed" =
@@ -462,7 +530,9 @@ let%test "ambiguous image source fails closed" =
       {|{"data":[{"url":"https://x","b64_json":"eA=="}]}|}
   with
   | Error (Http_client.ProviderFailure _) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _) -> false
 ;;
 
 let%test "Gemini interaction preserves image, identity, time, and usage" =
@@ -488,7 +558,15 @@ let%test "Gemini interaction preserves image, identity, time, and usage" =
             }
       ; content_filter = []
       } -> true
-  | Ok _ | Error _ -> false
+  | Ok
+      { images =
+          ( []
+          | [ { source = Remote_url _ | Inline_base64 _ } ]
+          | { source = Remote_url _ | Inline_base64 _ }
+            :: { source = Remote_url _ | Inline_base64 _ } :: _ )
+      ; _
+      }
+  | Error _ -> false
 ;;
 
 let%test "Gemini non-object 2xx body is a typed parse failure" =
@@ -498,7 +576,28 @@ let%test "Gemini non-object 2xx body is a typed parse failure" =
          { kind = Http_client.Provider_parse_error { parser = Some "image_generation" }
          ; _
          }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _)
+  | Error
+      (Http_client.ProviderFailure
+         { kind =
+             ( Http_client.Capacity_exhausted _
+             | Http_client.Hard_quota _
+             | Http_client.Capability_mismatch _
+             | Http_client.Cli_policy_invalid _
+             | Http_client.Cli_startup_failed _
+             | Http_client.Provider_parse_error _
+             | Http_client.Provider_wire_error _
+             | Http_client.Provider_reported_error _
+             | Http_client.Provider_interrupted
+             | Http_client.Response_body_too_large _
+             | Http_client.Empty_completion _
+             | Http_client.Context_overflow _
+             | Http_client.Repeating_generation _
+             | Http_client.Unknown_provider_failure _ )
+         ; _
+         }) -> false
 ;;
 
 let%test "Gemini non-completed status is a provider failure, not a parse error" =
@@ -511,7 +610,28 @@ let%test "Gemini non-completed status is a provider failure, not a parse error" 
       (Http_client.ProviderFailure
          { kind = Http_client.Unknown_provider_failure { reason = Some reason }; _ }) ->
     String.equal reason "gemini interaction status failed"
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _)
+  | Error
+      (Http_client.ProviderFailure
+         { kind =
+             ( Http_client.Capacity_exhausted _
+             | Http_client.Hard_quota _
+             | Http_client.Capability_mismatch _
+             | Http_client.Cli_policy_invalid _
+             | Http_client.Cli_startup_failed _
+             | Http_client.Provider_parse_error _
+             | Http_client.Provider_wire_error _
+             | Http_client.Provider_reported_error _
+             | Http_client.Provider_interrupted
+             | Http_client.Response_body_too_large _
+             | Http_client.Empty_completion _
+             | Http_client.Context_overflow _
+             | Http_client.Repeating_generation _
+             | Http_client.Unknown_provider_failure _ )
+         ; _
+         }) -> false
 ;;
 
 let%test "Gemini image-only response rejects text output" =
@@ -521,7 +641,9 @@ let%test "Gemini image-only response rejects text output" =
       {|{"id":"ix-2","status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"not an image"}]}]}|}
   with
   | Error (Http_client.ProviderFailure _) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _) -> false
 ;;
 
 let%test "Gemini optional usage fields stay absent rather than becoming zero" =

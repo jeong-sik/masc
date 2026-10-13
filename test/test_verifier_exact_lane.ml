@@ -393,7 +393,7 @@ id = "verifier_provider"
 kind = "openai_compat"
 base_url = "http://127.0.0.1:1"
 request_path = "/v1/chat/completions"
-api_key_env = ""
+auth = "none"
 capabilities_base = "openai_chat_extended"
 
 [[models]]

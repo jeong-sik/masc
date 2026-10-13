@@ -36,16 +36,32 @@ let start_board_post state ~host ~launch ~report ~(title : string) ~(body : stri
   (* What this send answers for: the completion clears and lands against
      these, not against whatever the operator typed while it was out. *)
   let sent_draft = Buffer.contents state.board_draft in
+  let sent_attachments = state.board_compose_attachments in
   let port = state.port in
   let expected_workspace = state.server_identity in
   launch
-    ~deliver:(fun result -> Board_new_post_done { reply_to = None; sent_draft; result })
+    ~deliver:(fun result -> Board_new_post_done { reply_to = None; sent_draft; sent_attachments; result })
     (fun () ->
       let ( let* ) = Result.bind in
       let* expected_workspace = match expected_workspace with
         | Some identity -> Ok identity
         | None -> Error "Board workspace identity is unavailable" in
-      match Masc_tui_http.post_board_new ~expected_workspace ~host ~port ~title ~body ?hearth () with
+      (* Staged files upload before the post: a failure here means the post
+         was not sent, and the draft and staged list stay as they were. The
+         read runs off the UI fiber -- a slow disk or a network mount would
+         otherwise hold the screen for as long as it takes. *)
+      let* attachments =
+        Masc_tui_board_upload.upload_staged
+          ~read:(fun path ->
+            Eio_guard.run_in_systhread ~label:"tui-board-attachment-read"
+              (fun () ->
+                Masc_tui_board_upload.read_file
+                  ~max_bytes:Masc_tui_board_upload.max_attachment_bytes path))
+          ~upload:(fun ~bytes -> Masc_tui_http.upload_artifact ~host ~port ~bytes)
+          sent_attachments
+        |> Result.map_error (fun detail -> "not sent, attachment failed: " ^ detail)
+      in
+      match Masc_tui_http.post_board_new ~expected_workspace ~host ~port ~title ~body ?hearth ~attachments () with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
   end
@@ -65,7 +81,7 @@ let start_board_comment state ~host ~launch ~report ~(post_id : string)
   let port = state.port in
   let expected_workspace = state.server_identity in
   launch
-    ~deliver:(fun result -> Board_new_post_done { reply_to = Some post_id; sent_draft; result })
+    ~deliver:(fun result -> Board_new_post_done { reply_to = Some post_id; sent_draft; sent_attachments = []; result })
     (fun () ->
       let ( let* ) = Result.bind in
       let* expected_workspace = match expected_workspace with

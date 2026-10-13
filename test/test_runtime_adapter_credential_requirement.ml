@@ -23,12 +23,16 @@ let test_the_two_absences_are_different_answers () =
    with
    | Runtime_adapter.Not_required -> ()
    | Reference _ -> fail "a keyless catalog row must not name a credential"
+   | Missing_declared_credential _ ->
+     fail "a keyless catalog row does not ask the deployment for a credential"
    | Unknown_provider -> fail "a provider in the catalog is not unknown");
   match
     Runtime_adapter.credential_requirement ~provider_id:provider_with_no_catalog_row None
   with
   | Runtime_adapter.Unknown_provider -> ()
   | Not_required -> fail "no catalog row is not the same as a row saying no key is needed"
+  | Missing_declared_credential _ ->
+    fail "no catalog row is not the same as a row that requires a key"
   | Reference _ -> fail "nothing names a credential here"
 
 let test_a_provider_with_no_catalog_row_is_refused () =

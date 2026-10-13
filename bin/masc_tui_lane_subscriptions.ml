@@ -69,7 +69,7 @@ let remove t = match t.phase with
   | Browse index -> (match at (entries t) index with
       | Some (subscription,_) -> {t with phase=Confirm_remove subscription;error=None}
       | None -> {t with error=Some "No subscription selected."})
-  | _ -> t
+  | Keeper _ | Output (_, _) | Confirm_add (_, _) | Confirm_remove _ -> t
 let back t = match t.phase with
   | Browse _ -> None
   | Keeper _ -> Some {t with phase=Browse 0;error=None}

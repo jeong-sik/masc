@@ -246,7 +246,8 @@ let available reading =
 let primary reading =
   match available reading with
   | [] | [ Delete ] -> None
-  | first :: _ -> Some first
+  | ((Pause | Resume | Boot | Shutdown | Wakeup) as first) :: _
+  | (Delete as first) :: _ :: _ -> Some first
 
 type step =
   | Lifecycle of string
@@ -381,8 +382,21 @@ let decode_deletion_inventory json =
                (Completion_pending Dashboard_keeper_purged
                | Completion_delivery_failed { action = Dashboard_keeper_purged; _ }); _ } ->
              Some (false, true)
-           | Dashboard_keeper_purge _, _ -> Some (false, false)
-           | _ -> None in
+           | Dashboard_keeper_purge _,
+             ( Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _
+             | Cleanup_ready _ | Reconciliation_required _ | Owner_absent _
+             | Operator_absence_acknowledged _ | Blocked _ | Superseded _
+             | Finalized
+                 { completion =
+                     ( Completion_not_requested
+                     | Completion_pending Supervisor_cleaned
+                     | Completion_delivery_failed
+                         { action = Supervisor_cleaned; _ }
+                     | Completion_delivered Supervisor_cleaned )
+                 ; _
+                 } ) -> Some (false, false)
+           | ( Operator_stop_retain_meta | Operator_stop_remove_meta
+             | Supervisor_cleanup ), _ -> None in
          if expected = Some (completed, can_retry)
          then decode_rows ({ operation = Runtime_shutdown operation; completed; can_retry } :: acc) rest
          else Error "deletion projection contradicts its durable operation"

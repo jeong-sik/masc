@@ -608,7 +608,7 @@ let preset_overrides_error_to_string = function
        this preset cannot be restored; set its prompts again and save them as a \
        new preset"
       overrides_file actual expected
-  | error -> Override.error_to_string error
+  | (Override.Invalid_json _ | Override.Read_failed _ | Override.Write_failed _ | Override.Expected_object _ | Override.Expected_list _ | Override.Expected_integer _ | Override.Expected_string _ | Override.Duplicate_field _ | Override.Missing_field _ | Override.Unexpected_field _ | Override.Duplicate_override_key _) as error -> Override.error_to_string error
 ;;
 
 let load ~base_path name =

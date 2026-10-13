@@ -20,7 +20,10 @@ let claim ~base_path ~worker_epoch candidate =
   let* partitions = Partition.load ~base_path ~keeper_name in
   match List.find_opt (fun (p : Partition.t) ->
     String.equal p.candidate_id candidate.candidate_id
-    && match p.state with Partition.Ready -> true | _ -> false) partitions with
+    && match p.state with
+       | Partition.Ready -> true
+       | Partition.Running _ | Partition.Completed _ | Partition.Settled _
+       | Partition.Abandoned _ | Partition.Blocked _ -> false) partitions with
   | None -> Ok None
   | Some partition ->
     Partition.claim_ready_exact ~now:(Time_compat.now ()) ~worker_epoch

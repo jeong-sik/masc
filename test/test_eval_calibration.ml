@@ -85,7 +85,7 @@ let test_a_date_filter_does_not_remove_the_row_cap () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_dir:dir;
+  Cal.For_testing.set_store ~base_path:dir;
   Fun.protect ~finally:Cal.For_testing.reset_store (fun () ->
     Cal.record_verdict ~task_id:"cap-seed" ~req:(make_req ()) ~result:(make_result ()) ();
     (* Replicate the row the public API just wrote rather than hand-writing the
@@ -108,11 +108,33 @@ let test_a_date_filter_does_not_remove_the_row_cap () =
     check int "a date filter reads no more than an unfiltered read" unfiltered
       filtered)
 
+(* A store nobody bound by hand opens where the workspace keeps its state.
+   It used to open in the workspace's own [data/] folder, beside [.masc]. *)
+let test_verdicts_live_under_the_masc_directory () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir () in
+  let previous = Sys.getenv_opt "MASC_BASE_PATH" in
+  Unix.putenv "MASC_BASE_PATH" dir;
+  Cal.For_testing.reset_store ();
+  Fun.protect
+    ~finally:(fun () ->
+      Cal.For_testing.reset_store ();
+      Unix.putenv "MASC_BASE_PATH" (Option.value previous ~default:""))
+    (fun () ->
+      Cal.record_verdict ~task_id:"home" ~req:(make_req ()) ~result:(make_result ()) ();
+      check int "the verdict is read back" 1
+        (List.length (Dated_jsonl.read_recent (Cal.get_store ()) 10));
+      check bool "the store is under .masc" true
+        (Sys.is_directory (Filename.concat dir ".masc/verdicts"));
+      check bool "nothing is written beside .masc" false
+        (Sys.file_exists (Filename.concat dir "data")))
+
 let test_record_verdict_writes () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_dir:dir;
+  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req () in
   let result = make_result () in
   Cal.record_verdict ~task_id:"task-1" ~req ~result ();
@@ -128,7 +150,7 @@ let test_record_verdict_reject () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_dir:dir;
+  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req () in
   let result =
     make_result ~verdict:(AR.Reject "vague notes") ~gate:AR.Structured_tool ()
@@ -145,7 +167,7 @@ let test_record_verdict_approve_with_reason () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_dir:dir;
+  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req () in
   let result =
     make_result ~verdict:(AR.Approve "verified artifact and board comment")
@@ -167,7 +189,7 @@ let test_record_verdict_hash_matches () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_dir:dir;
+  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req () in
   let result = make_result () in
   Cal.record_verdict ~task_id:"task-3" ~req ~result ();
@@ -187,7 +209,7 @@ let test_record_human_label () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_dir:dir;
+  Cal.For_testing.set_store ~base_path:dir;
   Cal.record_human_label
     ~notes_hash:"abc123" ~human_verdict:Cal.Reject_label
     ~labeler:"vincent" ~reason:"work was incomplete";
@@ -208,7 +230,7 @@ let test_find_divergences_false_positive () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_dir:dir;
+  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req ~title:"FP task" ~notes:"looks ok but not" () in
   let result = make_result ~verdict:(AR.Approve "") ~gate:AR.Structured_tool () in
   Cal.record_verdict ~task_id:"t1" ~req ~result ();
@@ -229,7 +251,7 @@ let test_find_divergences_false_negative () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_dir:dir;
+  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req ~title:"FN task" ~notes:"actually good work" () in
   let result =
     make_result ~verdict:(AR.Reject "unclear") ~gate:AR.Structured_tool ()
@@ -250,7 +272,7 @@ let test_find_divergences_agreement () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_dir:dir;
+  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req ~title:"OK task" ~notes:"done correctly" () in
   let result = make_result ~verdict:(AR.Approve "") () in
   Cal.record_verdict ~task_id:"t3" ~req ~result ();
@@ -266,7 +288,7 @@ let test_find_divergences_no_labels () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_dir:dir;
+  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req () in
   let result = make_result () in
   Cal.record_verdict ~task_id:"t4" ~req ~result ();
@@ -282,7 +304,7 @@ let test_select_examples_max () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_dir:dir;
+  Cal.For_testing.set_store ~base_path:dir;
   (* Create 3 false positives *)
   for i = 1 to 3 do
     let title = Printf.sprintf "task-%d" i in
@@ -303,7 +325,7 @@ let test_select_examples_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_dir:dir;
+  Cal.For_testing.set_store ~base_path:dir;
   let examples = Cal.select_examples ~max_examples:5 in
   check int "empty when no data" 0 (List.length examples);
   Cal.For_testing.reset_store ()
@@ -348,7 +370,7 @@ let test_calibration_stats () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_dir:dir;
+  Cal.For_testing.set_store ~base_path:dir;
   (* 2 approvals, 1 rejection *)
   let req1 = make_req ~title:"t1" ~notes:"n1" () in
   Cal.record_verdict ~task_id:"id1" ~req:req1
@@ -383,7 +405,7 @@ let test_calibration_stats_cross_model_mix () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_dir:dir;
+  Cal.For_testing.set_store ~base_path:dir;
   Fun.protect ~finally:Cal.For_testing.reset_store @@ fun () ->
   (* Four verdicts:
      - same runtime (generator = evaluator)     → NOT cross-model
@@ -437,6 +459,8 @@ let () =
     ];
     "record_verdict", [
       test_case "writes to store" `Quick test_record_verdict_writes;
+      test_case "verdicts live under .masc" `Quick
+        test_verdicts_live_under_the_masc_directory;
       test_case "a date filter does not remove the row cap" `Quick
         test_a_date_filter_does_not_remove_the_row_cap;
       test_case "reject verdict" `Quick test_record_verdict_reject;

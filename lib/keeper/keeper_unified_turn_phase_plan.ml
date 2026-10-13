@@ -72,9 +72,10 @@ let turn_plan_manifest_status plan =
 let turn_plan_manifest_decision plan =
   let phase_fields =
     match plan.turn_plan_phase, plan.turn_plan_status with
-    | Some phase, _ -> [ "phase", `String phase ]
+    | (Some phase, Turn_plan_dispatch) | (Some phase, Turn_plan_skipped)
+    | (Some phase, Turn_plan_cancelled) | (Some phase, Turn_plan_error) -> [ "phase", `String phase ]
     | None, Turn_plan_error -> [ "phase", `Null ]
-    | None, _ -> []
+    | (None, Turn_plan_dispatch) | (None, Turn_plan_skipped) | (None, Turn_plan_cancelled) -> []
   in
   `Assoc
     (phase_fields

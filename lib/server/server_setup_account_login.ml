@@ -158,7 +158,12 @@ let start ~actor ~base_path ~body request reqd =
            | (Running | Failed | Cancelled | Interrupted), outcome ->
              let status, message = match outcome with
                | Error Session.Cancelled -> Receipt.Cancelled, Session.error_message Session.Cancelled
-               | Error error -> Receipt.Failed, Session.error_message error
+               | Error
+                   ((Session.Already_running | Session.Not_found | Session.Not_running
+                    | Session.Input_pending | Session.Invalid_input
+                    | Session.Transport_failed | Session.Process_failed _
+                    | Session.Interpreter_missing) as error) ->
+                 Receipt.Failed, Session.error_message error
                | Ok (Error (status, message)) -> status, message
                | Ok (Ok ()) -> Receipt.Failed, receipt_failure in
              let recovered = Eio.Cancel.protect (fun () -> recover status) in

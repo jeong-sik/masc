@@ -100,7 +100,7 @@ let resolve_auto_model
           { requested_model_id = model_id; resolved_model_id; provenance = Discovery }
         | None -> default_resolution ?getenv provider_name ~requested_model_id:model_id)
      | Concrete _ -> explicit_resolution model_id (String.trim model_id))
-  | Some _ ->
+  | Some { runtime_kind = Provider_runtime_projection.Direct_api; _ } ->
     (match selector with
      | Auto -> default_resolution ?getenv provider_name ~requested_model_id:model_id
      | Concrete _ -> explicit_resolution model_id (String.trim model_id))

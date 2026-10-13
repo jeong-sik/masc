@@ -1045,8 +1045,10 @@ let prepare_keeper_persistence ?requested_base_path ~accept_store_quarantine ~co
          match error with
          | Preparation_base_path_identity_unavailable failure
          | Preparation_config_not_canonical failure -> failure
-         | _ ->
-           persistence_failure
+         | Preparation_in_progress | Preparation_awaiting_claim | Preparation_already_claimed
+         | Preparation_ownership_lost | Shutdown_inventory_unavailable _
+         | Shutdown_admission_unavailable _ | Preparation_failed_previously _
+         | Store_quarantine_refused _ -> persistence_failure
              ~phase:!phase
              ~base_path:requested_base_path
              ~cause:(failure_cause_of_prepare_error error)
@@ -1335,7 +1337,22 @@ let handle_keeper_lifecycle_event ~refresh (evt : Agent_core.Event_bus.event) =
          Otel_metric_store.metric_keeper_lifecycle_malformed
          ();
        Lifecycle_undecodable)
-  | _ ->
+  | Agent_core.Event_bus.Custom (_, _)
+  | Agent_core.Event_bus.AgentStarted _
+  | Agent_core.Event_bus.AgentCompleted _
+  | Agent_core.Event_bus.AgentYielded _
+  | Agent_core.Event_bus.AgentInputRequired _
+  | Agent_core.Event_bus.AgentFailed _
+  | Agent_core.Event_bus.ToolCalled _
+  | Agent_core.Event_bus.ToolCompleted _
+  | Agent_core.Event_bus.TurnStarted _
+  | Agent_core.Event_bus.TurnReady _
+  | Agent_core.Event_bus.TurnCompleted _
+  | Agent_core.Event_bus.HandoffRequested _
+  | Agent_core.Event_bus.HandoffCompleted _
+  | Agent_core.Event_bus.ElicitationCompleted _
+  | Agent_core.Event_bus.ToolApprovalCompleted _
+  | Agent_core.Event_bus.InferenceTelemetry _ ->
     Log.Dashboard.debug "ignored non-lifecycle event";
     Lifecycle_ignored
 ;;
@@ -1983,7 +2000,11 @@ let start_keeper_loops_owned
        let base_path = (Mcp_server.workspace_config state).base_path in
        (match Keeper_owner_registry.begin_stopping_all ~base_path with
         | Error Keeper_owner_registry.Inventory_stopping -> ()
-        | Error error ->
+        | Error
+            (( Keeper_owner_registry.Inventory_not_installed _
+             | Keeper_owner_registry.Owner_not_found _
+             | Keeper_owner_registry.Owner_unavailable _
+             | Keeper_owner_registry.Owner_initialization_failed _ ) as error) ->
           Log.Keeper.error
             "keeper_owner: shutdown inventory fence failed error=%s"
             (Keeper_owner_registry.lookup_error_to_string error)
@@ -2152,8 +2173,7 @@ let start_keeper_loops_owned
               (match launch_outcome with
                | Keeper_keepalive.Keepalive_started _
                | Keeper_keepalive.Keepalive_already_registered _ -> ()
-               | outcome ->
-                 Log.Keeper.warn
+               | (Keeper_keepalive.Keepalive_lane_ownership_lost | Keeper_keepalive.Keepalive_lifecycle_denied _ | Keeper_keepalive.Keepalive_registration_rejected _ | Keeper_keepalive.Keepalive_fiber_start_rejected _ | Keeper_keepalive.Keepalive_launch_callback_failed _ | Keeper_keepalive.Keepalive_fork_rejected _) as outcome -> Log.Keeper.warn
                    "%s: start_keepalive rejected %s: %s"
                    log_prefix
                    m.name

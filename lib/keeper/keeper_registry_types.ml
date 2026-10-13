@@ -231,5 +231,11 @@ let pending_measurement_after_event now entry event =
   match event with
   | Keeper_state_machine.Context_measured { context_actions; _ } ->
     Some { tm_captured_at = now; tm_context_actions = context_actions }
-  | _ -> entry.pending_turn_measurement
+  | Keeper_state_machine.Heartbeat_ok | Keeper_state_machine.Turn_succeeded
+  | Keeper_state_machine.Operator_pause | Keeper_state_machine.Operator_resume
+  | Keeper_state_machine.Stop_requested | Keeper_state_machine.Drain_complete
+  | Keeper_state_machine.Fiber_started | Keeper_state_machine.Heartbeat_failed _
+  | Keeper_state_machine.Turn_failed _ | Keeper_state_machine.Fiber_terminated _
+  | Keeper_state_machine.Supervisor_restart_attempt _
+  | Keeper_state_machine.Operator_clear_requested _ -> entry.pending_turn_measurement
 ;;

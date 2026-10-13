@@ -773,7 +773,21 @@ let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
       (if tool_effect_attempted
        then Keeper_official_client_session_store.Activity_observed
        else Keeper_official_client_session_store.No_activity_observed)
-  | (Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), _ ->
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Invalid_config _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Spawn_failed _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Reasoning_effort_admission_failed _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Turn_input_write_failed _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Protocol_error _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Rpc_error _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Subscription_required _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Unsupported_server_request _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Context_window_exceeded _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Turn_failed _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Stopped_by_host _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Turn_interrupted)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Runtime_shutting_down)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Process_exited _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Timeout _) ->
     recovery_failure_of_client_error error
 ;;
 
@@ -1264,7 +1278,10 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         ; _
         } ->
         Ok ()
-      | expected ->
+      | ({ Keeper_official_client_session_store.phase =
+             (Start _ | Active _ | Turn_inflight _)
+         ; _
+         } as expected) ->
         (match
            Keeper_official_client_session_store.require_recovery
              ~base_path
@@ -1287,7 +1304,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       | Transient ->
         (match !session_state with
          | { phase = (Ready | Settled _ | Recovery_required _); _ } -> Ok ()
-         | expected ->
+         | ({ phase = (Start _ | Active _ | Turn_inflight _); _ } as expected) ->
            (match
               Keeper_official_client_session_store.release_transient
                 ~base_path
@@ -1519,9 +1536,25 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
        (match stop, !terminal_error with
         | Host.Terminal_tool_boundary _, _
           when Option.is_some on_official_client_tool_boundary -> settle_host_stop stop
-        | _, Some detail -> Error (internal_error detail)
-        | _, None -> settle_host_stop stop)
-     | Error error ->
+        | ( (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _)
+          , Some detail ) -> Error (internal_error detail)
+        | ( (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _)
+          , None ) -> settle_host_stop stop)
+     | Error
+         (( Runtime_codex_app_server.Invalid_config _
+          | Runtime_codex_app_server.Spawn_failed _
+          | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+          | Runtime_codex_app_server.Turn_input_write_failed _
+          | Runtime_codex_app_server.Protocol_error _
+          | Runtime_codex_app_server.Rpc_error _
+          | Runtime_codex_app_server.Subscription_required _
+          | Runtime_codex_app_server.Unsupported_server_request _
+          | Runtime_codex_app_server.Context_window_exceeded _
+          | Runtime_codex_app_server.Turn_failed _
+          | Runtime_codex_app_server.Turn_interrupted
+          | Runtime_codex_app_server.Runtime_shutting_down
+          | Runtime_codex_app_server.Process_exited _
+          | Runtime_codex_app_server.Timeout _ ) as error) ->
        observe_failed_dispatch ~observe_transport_uncertain error;
        if Runtime_codex_app_server.refused_for_spent_usage error
        then
@@ -1726,7 +1759,34 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id
      with
      | Ok _ -> ()
      | Error _ -> ())
-  | Ok _ -> ()
+  | Ok None
+  | Ok
+      (Some
+        { Keeper_official_client_session_store.phase =
+            ( Ready | Start _ | Active _ | Turn_inflight _ | Settled _ )
+        ; _
+        })
+  | Ok
+      (Some
+        { Keeper_official_client_session_store.phase =
+            Recovery_required
+              { failure =
+                  ( Pre_dispatch_failed
+                  | Transient_spawn_failed
+                  | Owner_stopped_turn
+                  | Retryable_turn_failed
+                  | Transport_interrupted
+                  | Protocol_failed
+                  | Provider_rejected
+                  | Input_rejected (Bootstrap_floor_exceeded | Effect_fenced)
+                  | Host_hook_failed
+                  | State_persistence_failed
+                  | Process_restarted
+                  | Vendor_session_full _ )
+              ; _
+              }
+        ; _
+        }) -> ()
 ;;
 (* Uncertainty cannot erase stronger evidence from an earlier attempt. The
    compare-and-set also preserves an effect observed concurrently. *)

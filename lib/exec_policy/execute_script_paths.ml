@@ -84,7 +84,16 @@ let argv_stage_destinations (stage : Masc_exec.Shell_ir.simple) : named =
     | [ Masc_exec.Shell_ir.Lit (dest, meta) ] when not meta.glob ->
       if looks_like_option dest then Outside_vocabulary
       else Destinations [ { raw = dest; is_cd = true } ]
-    | _ -> Outside_vocabulary
+    | []
+    | [ ( Masc_exec.Shell_ir.Lit _
+        | Masc_exec.Shell_ir.Var _
+        | Masc_exec.Shell_ir.Concat _
+        | Masc_exec.Shell_ir.Subst _ ) ]
+    | ( Masc_exec.Shell_ir.Lit _
+      | Masc_exec.Shell_ir.Var _
+      | Masc_exec.Shell_ir.Concat _
+      | Masc_exec.Shell_ir.Subst _ )
+      :: _ :: _ -> Outside_vocabulary
   else (
     match operand_specs (bin_name stage.bin) with
     | [] -> Destinations []
@@ -110,7 +119,13 @@ let argv_stage_destinations (stage : Masc_exec.Shell_ir.simple) : named =
               | w :: ws, Masc_exec.Shell_ir.Lit (a, _) :: rest when String.equal a w ->
                 drop_words (ws, rest)
               | [], rest -> Some rest
-              | _ -> None
+              | _ :: _
+                , ([]
+                  | ( Masc_exec.Shell_ir.Lit _
+                    | Masc_exec.Shell_ir.Var _
+                    | Masc_exec.Shell_ir.Concat _
+                    | Masc_exec.Shell_ir.Subst _ )
+                    :: _) -> None
             in
             match drop_words (words, args) with
             | None -> match_specs rest
@@ -129,7 +144,13 @@ let argv_stage_destinations (stage : Masc_exec.Shell_ir.simple) : named =
                   Outside_vocabulary
               in
               collect [] 0 rest))
-          | _ -> match_specs rest)
+          | ( Flag_operand _
+            , ([]
+              | ( Masc_exec.Shell_ir.Lit _
+                | Masc_exec.Shell_ir.Var _
+                | Masc_exec.Shell_ir.Concat _
+                | Masc_exec.Shell_ir.Subst _ )
+                :: _) ) -> match_specs rest)
       in
       match_specs specs))
 ;;
@@ -145,7 +166,36 @@ let sh_script_of_stage (stage : Masc_exec.Shell_ir.simple) : string option =
     | [ Masc_exec.Shell_ir.Lit (flag, _); Masc_exec.Shell_ir.Lit (script, script_meta) ]
       when String.equal flag "-c" && not script_meta.glob
       -> Some script
-    | _ -> None)
+    | []
+    | [ ( Masc_exec.Shell_ir.Lit _
+        | Masc_exec.Shell_ir.Var _
+        | Masc_exec.Shell_ir.Concat _
+        | Masc_exec.Shell_ir.Subst _ ) ]
+    | [ Masc_exec.Shell_ir.Lit _; Masc_exec.Shell_ir.Lit _ ]
+    | [ ( Masc_exec.Shell_ir.Lit _
+        | Masc_exec.Shell_ir.Var _
+        | Masc_exec.Shell_ir.Concat _
+        | Masc_exec.Shell_ir.Subst _ )
+      ; ( Masc_exec.Shell_ir.Var _
+        | Masc_exec.Shell_ir.Concat _
+        | Masc_exec.Shell_ir.Subst _ ) ]
+    | [ ( Masc_exec.Shell_ir.Var _
+        | Masc_exec.Shell_ir.Concat _
+        | Masc_exec.Shell_ir.Subst _ )
+      ; Masc_exec.Shell_ir.Lit _ ]
+    | ( Masc_exec.Shell_ir.Lit _
+      | Masc_exec.Shell_ir.Var _
+      | Masc_exec.Shell_ir.Concat _
+      | Masc_exec.Shell_ir.Subst _ )
+      :: ( Masc_exec.Shell_ir.Lit _
+         | Masc_exec.Shell_ir.Var _
+         | Masc_exec.Shell_ir.Concat _
+         | Masc_exec.Shell_ir.Subst _ )
+      :: ( Masc_exec.Shell_ir.Lit _
+         | Masc_exec.Shell_ir.Var _
+         | Masc_exec.Shell_ir.Concat _
+         | Masc_exec.Shell_ir.Subst _ )
+      :: _ -> None)
   | _ -> None
 ;;
 

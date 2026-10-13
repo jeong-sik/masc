@@ -189,8 +189,7 @@ let info_of_json json : (info, Error.t) result =
            (JsonParseError
               { detail = "Mcp_session.info_of_json: HTTP transport requires http_base_url"
               }))
-    | _ ->
-      Ok
+    | (Http, Some _) | (Stdio, _) -> Ok
         { server_name = json |> member "server_name" |> to_string
         ; command = json |> member "command" |> to_string
         ; args = json |> member "args" |> to_list |> List.map to_string

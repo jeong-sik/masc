@@ -427,7 +427,11 @@ let awaiting_approval_notice (state : state) =
           let where =
             match state.view with
             | Keepers Keeper_message -> ""
-            | Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Board
+            | Overview | Acting | Metrics
+            | Keepers
+                ( Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
+                | Keeper_runtime_pick )
+            | Lanes | Clients | Board
             | Approvals | Planning
             | Memory | Schedules | Verification | Harness | Fusion
             | Repositories | Code | Changes | Connectors | Runtime | Config
@@ -766,7 +770,9 @@ let surface_strip (state : state) ~cols =
          | Some snapshot when snapshot.Masc.Tui_decode.vs_total > 0 ->
              Printf.sprintf "\xc2\xb7%d" snapshot.Masc.Tui_decode.vs_total
          | Some _ | None -> "")
-    | _ -> ""
+    | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals | Schedules
+    | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
+    | Config | Resources | Tools | System_logs | Keepers _ -> ""
   in
   let label i =
     let surface, name = ring.(i) in
@@ -3273,7 +3279,10 @@ let runtime_config_unmatched_current (state : state) =
   match runtime_config_edit_session state, state.runtime_config_view with
   | Some {rce_view=Config_edit_current _;rce_session={current=Some current;_};_}, Some reading
     when current.source_revision <> reading.rcv_metadata.source_revision -> Some current
-  | _ -> None
+  | None, _
+  | Some {rce_view=Config_edit_draft;_}, _
+  | Some {rce_view=Config_edit_current _;rce_session={current=None;_};_}, _
+  | Some {rce_view=Config_edit_current _;rce_session={current=Some _;_};_}, _ -> None
 
 let config_metadata_summary (state : state) =
   match runtime_config_unmatched_current state with
@@ -4070,7 +4079,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                 recent.turn ts
             ^ Ansi.reset
           ]
-      | _, Some input ->
+      | Runtime_usage_scope.Per_request, Some input ->
           fact
             (* fit_width, not %-7s: the cells hold the no-value mark, which is
                three bytes and one column, and byte padding would end the row
@@ -4091,7 +4100,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                  | Some tokens, _ -> Inspector.format_tokens tokens
                  | None, Some tokens -> "turn " ^ Inspector.format_tokens tokens
                  | None, None -> Masc_tui_theme.Glyph.no_value))
-      | _, None ->
+      | Runtime_usage_scope.Per_request, None ->
           [ (if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " ")
             ^ Ansi.dim
             ^ Printf.sprintf
@@ -4506,7 +4515,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
           (fun acc (index, (item : Inspector.exact_input_item)) ->
              match item.kind with
              | Inspector.Message _ -> Some index
-             | _ -> acc)
+             | Inspector.System_prompt | Inspector.Tool_schema _ -> acc)
           None
           (List.mapi (fun index item -> (index, item)) items)
       in
@@ -5006,7 +5015,9 @@ let keeper_deletions_lines (state : state) ~cols =
               | Finalized { completion = Completion_pending _; _ } -> "파일·설정 정리 대기"
               | Blocked failure -> "종료 작업 중단: " ^ failure.detail
               | Reconciliation_required _ -> "진행 중이던 도구 실행 결과 확인 필요"
-              | _ -> if row.completed then "삭제·정리 완료" else phase_to_string operation.phase in
+              | Finalized { completion = (Completion_not_requested | Completion_delivered _);_}
+              | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _
+              | Owner_absent _ | Operator_absence_acknowledged _ | Superseded _ -> if row.completed then "삭제·정리 완료" else phase_to_string operation.phase in
           [Printf.sprintf "%d / %d · %s · %s"
              (state.keeper_deletions_cursor + 1) (List.length inventory.operations)
              (Keeper_control.deletion_keeper_name row) status]

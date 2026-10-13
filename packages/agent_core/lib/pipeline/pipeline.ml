@@ -181,7 +181,7 @@ let admission_refusal_message names : Types.message =
 
 (** Accumulate usage, invoke AfterTurn hook, emit events, append
     assistant message, and increment turn_count. *)
-let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
+let stage_collect ?raw_trace_run ?clock ~turn ~provider_config ~context_message agent response =
   Tracing.with_span
     agent.options.tracer
     { kind = Hook_invoke
@@ -257,8 +257,7 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
                 ~tool_name:None
                 ~tool_use_id:None
                 ~detail)
-         | decision ->
-           Error
+         | (Hooks.AdjustParams _ | Hooks.ElicitInput _ | Hooks.ElicitToolApproval _ | Hooks.Nudge _ | Hooks.Block _) as decision -> Error
              (Pipeline_common.illegal_hook_decision_core_error
                 ~hook_name:"after_turn"
                 ~stage:Hooks.After_turn
@@ -272,6 +271,19 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
              (Error.Internal
                 ("assistant response has invalid reasoning provenance: "
                  ^ Types.show_assistant_message_error error))
+       in
+       let binds_context =
+         List.exists (function
+           | Thinking { signature = Some _; _ } | RedactedThinking _ -> true
+           | Thinking { signature = None; _ } | ReasoningDetails _ | Text _
+           | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+           response.content
+       in
+       let* context_message =
+         match provider_config.Llm_provider.Provider_config.kind, binds_context with
+         | Anthropic, true -> context_message
+         | Anthropic, false
+         | (Kimi | OpenAI_compat | Ollama | Gemini | Glm), _ -> Ok None
        in
        let next_turn = turn + 1 in
        (* A dropped call leaves no tool_use for a tool_result to answer, so the
@@ -316,8 +328,17 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
           stops the turn here but never leaves live state behind a snapshot
           the sink has already seen. *)
        update_state agent (fun state ->
+         let messages =
+           match provider_config.Llm_provider.Provider_config.kind, context_message with
+           | Anthropic, Some message ->
+             Util.snoc state.messages
+               { message with
+                 metadata = Extra_system_context_provenance.as_historical message.metadata }
+           | Anthropic, None
+           | (Kimi | OpenAI_compat | Ollama | Gemini | Glm), _ -> state.messages
+         in
          { state with
-           messages = collected_messages state.messages
+           messages = collected_messages messages
          ; turn_count = next_turn
          ; usage
          });
@@ -783,7 +804,8 @@ let run_new_turn
              |> tag_error "response"
            in
            let* response, rejected_tool_calls =
-             stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response
+             stage_collect ?raw_trace_run ?clock ~turn ~provider_config
+               ~context_message:prep.Agent_turn.context_message agent response
              |> tag_error "collect"
            in
            (match Pipeline_execution_scope.provider execution with
@@ -924,7 +946,7 @@ let%test "last_tool_results_from finds tool results in last tool message" =
   | [ Ok { content = "result1"; _ }
     ; Error { message = "error msg"; recoverable = false; error_class = None }
     ] -> true
-  | _ -> false
+  | [] | [ (Ok _ | Error _) ] | _ :: _ :: _ -> false
 ;;
 
 let%test "last_tool_results_from ignores tool results outside tool role" =
@@ -1033,7 +1055,7 @@ let%test "last_tool_results_from picks last tool-result message" =
   in
   match Agent_turn.last_tool_results_from msgs with
   | [ Ok { content = "second"; _ } ] -> true
-  | _ -> false
+  | [] | [ (Ok _ | Error _) ] | _ :: _ :: _ -> false
 ;;
 
 let%test "last_tool_results_from ignores mixed content outside tool role" =
@@ -1080,7 +1102,7 @@ let%test "last_tool_results_from error tool result" =
   in
   match Agent_turn.last_tool_results_from msgs with
   | [ Error { message = "fail msg"; recoverable = false; error_class = None } ] -> true
-  | _ -> false
+  | [] | [ (Ok _ | Error _) ] | _ :: _ :: _ -> false
 ;;
 
 (* --- Additional pipeline tests --- *)

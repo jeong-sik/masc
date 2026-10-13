@@ -622,7 +622,11 @@ let traverse_parent ~sw ~fs locator =
                | Ok opened ->
                  traverse (index + 1) opened subject rest)))
     in
-    traverse 0 root root_subject (Core.locator_parent_components locator)
+    traverse
+      0
+      root
+      root_subject
+      (List.map Capability_leaf.to_string (Core.locator_parent_components locator))
 ;;
 
 let record_transition_failure ~source_state ~operation_id error =
@@ -823,7 +827,7 @@ let reconcile_bound ~fs ~store bound =
        record_transition_failure ~source_state:Bound ~operation_id error)
   | Ok (Parent_opened parent) ->
     let stage_name = Core.bound_stage_name bound in
-    let target_name = Core.locator_target_leaf locator in
+    let target_name = Capability_leaf.to_string (Core.locator_target_leaf locator) in
     let stage_subject = Stage_leaf stage_name in
     let target_subject = Target_leaf target_name in
     let stage = observe_entry ~subject:stage_subject Eio.Path.(parent / stage_name) in

@@ -510,7 +510,8 @@ let parts_of_content_blocks ~role tool_signatures blocks =
            (Gemini_api_error
               "Malformed Gemini thoughtSignature carrier in conversation history")
        | Not_gemini_part_signature -> List.rev acc)
-    | block :: rest ->
+    | (((Text _ | Thinking _ | ReasoningDetails _ | ToolUse _ | ToolResult _
+         | Image _ | Document _ | Audio _), _) as block) :: rest ->
       let acc =
         match part_of_content_block tool_signatures block with
         | Some part -> part :: acc

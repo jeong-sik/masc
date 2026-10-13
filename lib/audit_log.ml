@@ -240,7 +240,7 @@ type config = Workspace_utils.config
     [Eio.Mutex] instances — otherwise file I/O to the same
     [YYYY-MM/DD.jsonl] path would serialise through two different
     mutexes and racing appends could interleave on disk.  Under the
-    current single-domain Eio with a non-yielding [Dated_jsonl.create]
+    current single-domain Eio with a non-yielding [Dated_jsonl.open_store]
     this race does not fire today, but the fix is cheap and removes a
     fragile implicit invariant. *)
 let audit_store_cache : Dated_jsonl.t StringMap.t ref = ref StringMap.empty
@@ -248,15 +248,20 @@ let audit_store_cache_mu = Eio.Mutex.create ()
 
 (* The directory this store occupies under [.masc]. Exposed so readers of the
    same store name it from here instead of spelling the literal. *)
-let store_dirname = "audit"
+let store_dirname = Dated_jsonl.Store.Cluster.(relative_path Audit)
 
 let get_audit_store (config : config) : Dated_jsonl.t =
-  let base = Filename.concat (Workspace_utils.masc_dir config) store_dirname in
+  let location =
+    Dated_jsonl.Store.cluster
+      (Workspace_utils.dated_store_cluster_root config)
+      Dated_jsonl.Store.Cluster.Audit
+  in
+  let base = Dated_jsonl.Store.dir location in
   Eio_guard.with_mutex audit_store_cache_mu (fun () ->
     match StringMap.find_opt base !audit_store_cache with
     | Some store -> store
     | None ->
-      let store = Dated_jsonl.create ~base_dir:base () in
+      let store = Dated_jsonl.open_store location in
       audit_store_cache := StringMap.add base store !audit_store_cache;
       store)
 
@@ -526,7 +531,8 @@ let audit_summary ~action ~details =
        (match extract_str "path" with
         | Some p -> Printf.sprintf "runtime.toml updated: %s" p
         | None -> "runtime.toml updated"))
-  | _ -> kind
+  | ClaimTask | StartTask | DoneTask | ReleaseTask | AuthSuccess | AuthFailure | CircuitOpen
+  | CircuitClose | SearchRefinement | Custom _ | Unknown _ -> kind
 
 (** Extract primary target from action + details, if any. *)
 let audit_target ~action ~details =

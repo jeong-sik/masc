@@ -103,7 +103,17 @@ let error_message = function
     in
     Printf.sprintf "Input capacity (%s): %s" reason r.message
   | NetworkError { message; kind = Unknown } -> Printf.sprintf "Network error: %s" message
-  | NetworkError { message; kind } ->
+  | NetworkError
+      { message
+      ; kind =
+          ( Http_client.Connection_refused
+          | Http_client.Dns_failure
+          | Http_client.Tls_error
+          | Http_client.Timeout
+          | Http_client.Local_resource_exhaustion
+          | Http_client.Connection_reset
+          | Http_client.End_of_file ) as kind
+      } ->
     Printf.sprintf "Network error (%s): %s" (Http_client.network_error_kind_to_string kind) message
   | Timeout r ->
     (* The phase is the whole diagnostic value of a timeout -- a stalled stream
@@ -145,7 +155,11 @@ let is_retryable = function
        opens a fresh window that may read the answer. A determinate refusal
        -- one whose body arrived -- still ends the attempt. *)
     true
-  | InvalidRequest _ -> false
+  | InvalidRequest
+      { reason =
+          Attempt_rejected | Request_body_refused_by_provider _ | Unknown_invalid_request
+      ; _
+      } -> false
   | AuthError _ | AuthorizationError _ | ContextOverflow _ | InputCapacity _ | NotFound _
     -> false
   | PaymentRequired _ -> false
@@ -232,7 +246,10 @@ let%test "overflow_of_empty_completion: ContextWindowExceeded yields ContextOver
          { message = "empty completion (stop_reason=model_context_window_exceeded): X"
          ; limit = None
          }) -> true
-  | Some _ | None -> false
+  | Some (RateLimited _) | None | Some (Overloaded _) | Some (ServerError _) | Some (AuthError _)
+  | Some (AuthorizationError _) | Some (PaymentRequired _) | Some (InvalidRequest _)
+  | Some (NotFound _) | Some (ContextOverflow _) | Some (InputCapacity _) | Some (NetworkError _)
+  | Some (Timeout _) -> false
 ;;
 
 let%test "overflow_of_empty_completion: non-overflow stop_reason yields None" =
@@ -246,7 +263,21 @@ let%test "verdict_of_empty_completion: ContextWindowExceeded is Empty_overflow" 
     verdict_of_empty_completion ~stop_reason:Types.ContextWindowExceeded ~message:"X"
   with
   | Empty_overflow (ContextOverflow { limit = None; _ }) -> true
-  | Empty_overflow _ | Empty_attributed | Empty_unattributed _ -> false
+  | Empty_overflow
+      ( ContextOverflow { limit = Some _; _ }
+      | RateLimited _
+      | Overloaded _
+      | ServerError _
+      | AuthError _
+      | AuthorizationError _
+      | PaymentRequired _
+      | InvalidRequest _
+      | NotFound _
+      | InputCapacity _
+      | NetworkError _
+      | Timeout _ )
+  | Empty_attributed
+  | Empty_unattributed _ -> false
 ;;
 
 (* An unmodeled stop_reason token must stay distinguishable from a recognized
@@ -465,7 +496,12 @@ let%test "HTTP 400 prompt-too-long report without ref stays Unknown InvalidReque
   in
   match classify_error ~retry_after_header:None ~status:400 ~body with
   | InvalidRequest { reason = Unknown_invalid_request; _ } -> true
-  | InvalidRequest _
+  | InvalidRequest
+      { reason =
+          Json_parse_error | Attempt_rejected
+          | Request_body_refused_by_provider _ | Refusal_body_not_received
+      ; _
+      }
   | ContextOverflow _
   | InputCapacity _
   | RateLimited _
@@ -491,7 +527,12 @@ let%test "HTTP 400 prompt-too-long report with UUID ref stays unknown" =
   | AuthError _
   | AuthorizationError _
   | PaymentRequired _
-  | InvalidRequest _
+  | InvalidRequest
+      { reason =
+          Json_parse_error | Attempt_rejected
+          | Request_body_refused_by_provider _ | Refusal_body_not_received
+      ; _
+      }
   | NotFound _
   | ContextOverflow _
   | InputCapacity _
@@ -511,7 +552,12 @@ let%test "measured Ollama HTTP 400 prose stays unknown" =
   | AuthError _
   | AuthorizationError _
   | PaymentRequired _
-  | InvalidRequest _
+  | InvalidRequest
+      { reason =
+          Json_parse_error | Attempt_rejected
+          | Request_body_refused_by_provider _ | Refusal_body_not_received
+      ; _
+      }
   | NotFound _
   | ContextOverflow _
   | InputCapacity _
@@ -525,7 +571,12 @@ let%test "nested HTTP 400 prompt-too-long prose stays Unknown InvalidRequest" =
   in
   match classify_error ~retry_after_header:None ~status:400 ~body with
   | InvalidRequest { reason = Unknown_invalid_request; _ } -> true
-  | InvalidRequest _
+  | InvalidRequest
+      { reason =
+          Json_parse_error | Attempt_rejected
+          | Request_body_refused_by_provider _ | Refusal_body_not_received
+      ; _
+      }
   | ContextOverflow _
   | InputCapacity _
   | RateLimited _
@@ -545,7 +596,12 @@ let%test "HTTP 400 prompt-too-long report requires an ASCII token count" =
   in
   match classify_error ~retry_after_header:None ~status:400 ~body with
   | InvalidRequest { reason = Unknown_invalid_request; _ } -> true
-  | InvalidRequest _
+  | InvalidRequest
+      { reason =
+          Json_parse_error | Attempt_rejected
+          | Request_body_refused_by_provider _ | Refusal_body_not_received
+      ; _
+      }
   | ContextOverflow _
   | InputCapacity _
   | RateLimited _
@@ -565,7 +621,12 @@ let%test "HTTP 400 prompt-too-long report rejects unrelated suffixes" =
   in
   match classify_error ~retry_after_header:None ~status:400 ~body with
   | InvalidRequest { reason = Unknown_invalid_request; _ } -> true
-  | InvalidRequest _
+  | InvalidRequest
+      { reason =
+          Json_parse_error | Attempt_rejected
+          | Request_body_refused_by_provider _ | Refusal_body_not_received
+      ; _
+      }
   | ContextOverflow _
   | InputCapacity _
   | RateLimited _
@@ -585,7 +646,12 @@ let%test "HTTP 422 prompt-too-long report stays Unknown InvalidRequest" =
   in
   match classify_error ~retry_after_header:None ~status:422 ~body with
   | InvalidRequest { reason = Unknown_invalid_request; _ } -> true
-  | InvalidRequest _
+  | InvalidRequest
+      { reason =
+          Json_parse_error | Attempt_rejected
+          | Request_body_refused_by_provider _ | Refusal_body_not_received
+      ; _
+      }
   | ContextOverflow _
   | InputCapacity _
   | RateLimited _

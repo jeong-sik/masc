@@ -222,6 +222,26 @@ let base_path_config_root ~cwd base_path =
   in
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "config"
 
+let environment_for_workspace ~cwd ~base_path ~env =
+  let base_path =
+    base_path
+    |> Env_config_core.normalize_masc_base_path_input
+    |> absolute_path_from ~cwd
+  in
+  let inherited =
+    Array.to_list env
+    |> List.filter (fun entry ->
+      let key = match String.index_opt entry '=' with
+        | None -> entry
+        | Some index -> String.sub entry 0 index
+      in
+      not (List.mem key ["MASC_BASE_PATH"; "MASC_CONFIG_DIR"]))
+  in
+  Array.of_list (inherited @
+    [ "MASC_BASE_PATH=" ^ base_path
+    ; "MASC_CONFIG_DIR=" ^ base_path_config_root ~cwd base_path
+    ])
+
 let path_from_local_masc (inputs : inputs) =
   match trim_opt inputs.env_base_path with
   | None -> None
@@ -448,7 +468,7 @@ let log_resolution ?(context = "ConfigDir") () =
             unset MASC_CONFIG_DIR to prefer the overlay)"
            overlay_path
        | _ -> "")
-    | _ -> ""
+    | Local_masc | Invalid_env | Missing -> ""
   in
   let signature =
     Printf.sprintf "source=%s path=%s%s" source item.path shadow_note
@@ -502,8 +522,8 @@ let microvm_shim_dir ~base_path =
 
 let wiki_dir ~base_path = Filename.concat (masc_root ~base_path) "wiki"
 
-let data_dir ~base_path =
-  Filename.concat base_path "data"
+let event_queue_bulk_backups_dir ~base_path =
+  Filename.concat (masc_root ~base_path) "event-queue-bulk-backups"
 
 let repositories_toml_basename = "repositories.toml"
 

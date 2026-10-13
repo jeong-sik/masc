@@ -195,7 +195,7 @@ let run ~repo_root ~output_dir ~head_sha =
               let params = member "params" value |> S.create_message_params_of_yojson |> require in
               match params.messages with
               | [{content=S.Text {text;_};_}] -> text=prompt
-              | _ -> false) captures in
+              | [{content=S.Image _;_}] | [] | _ :: _ :: _ -> false) captures in
             let params = member "params" capture |> S.create_message_params_of_yojson |> require in
             ensure (params.max_tokens=limit provider) "durable request lost the requested provider output limit";
             ensure (params.temperature=Some 0.25) "durable request lost sampling temperature";
@@ -329,7 +329,7 @@ let run ~repo_root ~output_dir ~head_sha =
             ensure (int64 "NanoCpus"=Int64.of_float (Float.round (package.resources.cpus *. 1_000_000_000.))) "Docker CPU limit differs from the installed package";
             ensure (int64 "Memory"=package.resources.memory_bytes
               && int64 "MemorySwap"=package.resources.memory_bytes
-              && int64 "PidsLimit"=Int64.of_int package.resources.pids) "Docker memory or PID limits differ from the installed package";
+              && Some (int64 "PidsLimit")=Option.map Int64.of_int package.resources.pids) "Docker memory or PID limits differ from the installed package";
             (match list "Mounts" data with
              | [mount] -> ensure (member "RW" mount=`Bool false
                  && text "Destination" mount="/addon" && text "Source" mount=package.directory)

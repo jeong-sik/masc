@@ -65,6 +65,28 @@ type uncertain_attempt =
   ; tool_name : string; args_fingerprint : string; consumed_at : float }
 let journal_schema = "masc.late_approval.v2"
 
+(* The journal's row kinds. Every row is written and replayed in this module;
+   [journal_op_to_string] is the "op" value on disk. *)
+type journal_op =
+  | Note_timed_out
+  | Remember_late
+  | Consume
+  | Deliver
+  | Ack_uncertain
+[@@deriving enumerate]
+
+let journal_op_to_string = function
+  | Note_timed_out -> "note_timed_out"
+  | Remember_late -> "remember_late"
+  | Consume -> "consume"
+  | Deliver -> "deliver"
+  | Ack_uncertain -> "ack_uncertain"
+;;
+
+let journal_op_of_string raw =
+  List.find_opt (fun op -> String.equal (journal_op_to_string op) raw) all_of_journal_op
+;;
+
 type t =
   { mutable expired : expired_ask list
   ; mutable remembered : remembered list
@@ -111,42 +133,97 @@ let fingerprint_of (args : Yojson.Safe.t) =
    behavior: the server binds the shared store at boot, and tests that
    exercise durability bind their own temp-dir store. *)
 
-let validate_records records =
+(* One journal row as the replay uses it. [decode_records] proves every field
+   present and well formed; these keep what it proved, so the replay never
+   reads a field a second time. *)
+type journal_identity =
+  { row_base_path : string
+  ; row_keeper : string
+  ; row_tool : string
+  ; row_fingerprint : string
+  }
+
+type journal_row =
+  | Row_note_timed_out of
+      { identity : journal_identity
+      ; tool_call_id : string
+      ; at : float
+      }
+  | Row_remember_late of
+      { identity : journal_identity
+      ; tool_call_id : string
+      ; decision : Registry.decision
+      ; actor : string
+      ; at : float
+      }
+  | Row_consume of
+      { identity : journal_identity
+      ; consume_id : string
+      ; at : float
+      }
+  | Row_deliver of
+      { identity : journal_identity
+      ; consume_id : string
+      }
+  | Row_ack_uncertain of
+      { identity : journal_identity
+      ; consume_id : string
+      ; at : float
+      }
+
+(* Rows are decoded oldest first, the order they were appended in: a deliver
+   or ack is accepted only after the consume it closes. *)
+let decode_records records =
   let attempts = Hashtbl.create 16 in
   let bad detail = raise (Yojson.Json_error detail) in
-  List.iter (fun fields ->
+  let decode fields =
     let string name = match List.assoc_opt name fields with
       | Some (`String value) when value <> "" -> value
       | _ -> bad ("missing or invalid " ^ name) in
-    let op = string "op" in
+    let op = match journal_op_of_string (string "op") with
+      | Some op -> op
+      | None -> bad "unknown late approval operation" in
     let names = ["schema";"op";"base_path";"keeper";"tool";"fingerprint";"at"] @
       (match op with
-       | "note_timed_out" -> ["tool_call_id"]
-       | "remember_late" -> ["tool_call_id";"decision";"actor"]
-       | "consume" | "deliver" | "ack_uncertain" -> ["consume_id"]
-       | _ -> bad "unknown late approval operation") in
+       | Note_timed_out -> ["tool_call_id"]
+       | Remember_late -> ["tool_call_id";"decision";"actor"]
+       | Consume | Deliver | Ack_uncertain -> ["consume_id"]) in
     if List.sort String.compare (List.map fst fields) <> List.sort String.compare names then
       bad "missing, duplicate or unknown journal fields";
     if string "schema" <> journal_schema then bad "unknown journal schema";
-    let identity = string "base_path", string "keeper", string "tool", string "fingerprint" in
-    (match List.assoc "at" fields with
-     | `Float value when Float.is_finite value -> ()
-     | `Int _ -> () | _ -> bad "invalid journal timestamp");
+    let (base_path, keeper, tool, fingerprint) as identity_key =
+      string "base_path", string "keeper", string "tool", string "fingerprint" in
+    let identity =
+      { row_base_path = base_path; row_keeper = keeper; row_tool = tool
+      ; row_fingerprint = fingerprint } in
+    let at = match List.assoc "at" fields with
+      | `Float value when Float.is_finite value -> value
+      | `Int value -> float_of_int value
+      | _ -> bad "invalid journal timestamp" in
+    let close_consume () =
+      let id = string "consume_id" in
+      (match Hashtbl.find_opt attempts id with
+       | Some (expected, false) when expected = identity_key ->
+           Hashtbl.replace attempts id (identity_key, true)
+       | _ -> bad "closure does not name an open exact consume");
+      id in
     match op with
-    | "note_timed_out" -> ignore (string "tool_call_id")
-    | "remember_late" ->
-        ignore (string "tool_call_id"); ignore (string "actor");
-        if Option.is_none (Registry.decision_of_string (string "decision")) then bad "invalid decision"
-    | "consume" ->
+    | Note_timed_out -> Row_note_timed_out { identity; tool_call_id = string "tool_call_id"; at }
+    | Remember_late ->
+        let tool_call_id = string "tool_call_id" in
+        let actor = string "actor" in
+        let decision = match Registry.decision_of_string (string "decision") with
+          | Some decision -> decision
+          | None -> bad "invalid decision" in
+        Row_remember_late { identity; tool_call_id; decision; actor; at }
+    | Consume ->
         let id = string "consume_id" in
         if Hashtbl.mem attempts id then bad "duplicate consume attempt";
-        Hashtbl.add attempts id (identity, false)
-    | "deliver" | "ack_uncertain" ->
-        let id = string "consume_id" in
-        (match Hashtbl.find_opt attempts id with
-         | Some (expected, false) when expected = identity -> Hashtbl.replace attempts id (identity, true)
-         | _ -> bad "closure does not name an open exact consume")
-    | _ -> bad "unknown journal operation") records
+        Hashtbl.add attempts id (identity_key, false);
+        Row_consume { identity; consume_id = id; at }
+    | Deliver -> Row_deliver { identity; consume_id = close_consume () }
+    | Ack_uncertain -> Row_ack_uncertain { identity; consume_id = close_consume (); at } in
+  List.fold_left (fun rows fields -> decode fields :: rows) [] records |> List.rev
 
 (* Entries older than the TTL leave on every write and every read, so the
    lists cannot grow on nothing but time: an unattended keeper whose asks
@@ -183,7 +260,7 @@ let bind_to_journal ?now ~base_path t =
            line must not fence the whole store. It stays in the journal
            (never cleaned) and lands in the log, so skipping loses no
            evidence. Only rows carrying this schema's tag reach
-           [validate_records] — an unverifiable v2 row cannot be told
+           [decode_records] — an unverifiable v2 row cannot be told
            apart from a tampered one, so those still fail the restore. *)
         let skipped = ref 0 in
         let records =
@@ -200,13 +277,16 @@ let bind_to_journal ?now ~base_path t =
                    when List.assoc_opt "schema" fields
                         = Some (`String journal_schema) ->
                      (match List.assoc_opt "op" fields with
-                      | Some (`String ("consume" | "deliver" | "ack_uncertain")) ->
-                          (match List.assoc_opt "consume_id" fields with
-                           | Some (`String id) when id <> "" -> ()
-                           | _ ->
-                               raise
-                                 (Yojson.Json_error
-                                    "missing consume attempt identity"))
+                      | Some (`String raw) ->
+                          (match journal_op_of_string raw with
+                           | Some (Consume | Deliver | Ack_uncertain) ->
+                               (match List.assoc_opt "consume_id" fields with
+                                | Some (`String id) when id <> "" -> ()
+                                | _ ->
+                                    raise
+                                      (Yojson.Json_error
+                                         "missing consume attempt identity"))
+                           | Some (Note_timed_out | Remember_late) | None -> ())
                       | _ -> ());
                      Some fields
                  | _ ->
@@ -218,18 +298,7 @@ let bind_to_journal ?now ~base_path t =
                      None)
         in
         t.skipped_rows <- !skipped;
-        validate_records records;
-        let read_field fields name =
-          match List.assoc_opt name fields with
-          | Some (`String s) -> Some s
-          | _ -> None
-        in
-        let read_float fields name =
-          match List.assoc_opt name fields with
-          | Some (`Float f) -> Some f
-          | Some (`Int i) -> Some (float_of_int i)
-          | _ -> None
-        in
+        let rows = decode_records records in
         (* The replay state: live asks (recorded, not yet answered or
            consumed), remembered answers, the consumed identities whose
            deliver row has not closed them, and the consume-only tails an
@@ -238,130 +307,87 @@ let bind_to_journal ?now ~base_path t =
         let remembered = ref [] in
         let consumed = ref [] in
         let acked = ref [] in
+        let same_remembered identity existing =
+          String.equal existing.remembered_base_path identity.row_base_path
+          && String.equal existing.remembered_keeper_name identity.row_keeper
+          && String.equal existing.remembered_tool_name identity.row_tool
+          && String.equal existing.remembered_args_fingerprint identity.row_fingerprint
+        in
         List.iter
-          (fun fields ->
-            let op = read_field fields "op" in
-            let row_base_path = read_field fields "base_path" in
-            let keeper = read_field fields "keeper" in
-            let call_id = read_field fields "tool_call_id" in
-            let tool = read_field fields "tool" in
-            let fingerprint = read_field fields "fingerprint" in
-            let at = read_float fields "at" in
-            let consume_id = read_field fields "consume_id" in
-            match op with
-            | Some "note_timed_out" -> (
-                match (row_base_path, keeper, call_id, tool, fingerprint, at)
-                with
-                | Some bp, Some k, Some c, Some tl, Some f, Some at ->
-                    live_asks :=
-                      { expired_base_path = bp
-                      ; expired_keeper_name = k
-                      ; expired_tool_call_id = c
-                      ; expired_tool_name = tl
-                      ; expired_args_fingerprint = f
-                      ; expired_noted_at = at
-                      }
-                      :: !live_asks
-                | _ -> ())
-            | Some "remember_late" -> (
-                match (row_base_path, keeper, tool, fingerprint, at) with
-                | Some bp, Some k, Some tl, Some f, Some at -> (
-                    (* The ask leaves [live] — it was answered — and any
-                       earlier memory of the same identity is the operator's
-                       superseded answer, exactly what [remember_late]
-                       replaces in memory. *)
-                    let row_call_id =
-                      Option.value call_id ~default:"" in
-                    live_asks :=
-                      List.filter
-                        (fun ask ->
-                          not
-                            (String.equal ask.expired_base_path bp
-                            && String.equal ask.expired_keeper_name k
-                            && String.equal ask.expired_tool_call_id
-                                 row_call_id))
-                        !live_asks;
-                    match
-                      ( read_field fields "decision"
-                      , read_field fields "actor" )
-                    with
-                    | Some decision, Some actor -> (
-                        match Registry.decision_of_string decision with
-                        | Some decision ->
-                            remembered :=
-                              { remembered_base_path = bp
-                              ; remembered_keeper_name = k
-                              ; remembered_tool_name = tl
-                              ; remembered_args_fingerprint = f
-                              ; remembered_decision = decision
-                              ; remembered_decision_actor = actor
-                              ; remembered_answered_at = at
-                              }
-                              :: List.filter
-                                   (fun existing ->
-                                     not
-                                       (String.equal
-                                          existing.remembered_base_path bp
-                                       && String.equal
-                                            existing.remembered_keeper_name k
-                                       && String.equal
-                                            existing.remembered_tool_name tl
-                                       && String.equal
-                                            existing.remembered_args_fingerprint
-                                            f))
-                                   !remembered
-                        | None -> ())
-                    | _ -> ())
-                | _ -> ())
-            | Some "consume" -> (
-                match (consume_id, row_base_path, keeper, tool, fingerprint, at) with
-                | Some id, Some bp, Some k, Some tl, Some f, Some at ->
-                    (* The remembered answer is durably spent: dropping it
-                       here mirrors the in-memory path, so a replayed
-                       consume can never hand the same decision to a second
-                       call. A later [deliver] closes the window; a crash
-                       before it leaves this consume uncertain. Not yet
-                       TTL-reaped here — the bound-time reap below decides
-                       what still counts. *)
-                    remembered :=
-                      List.filter
-                        (fun existing ->
-                          not
-                            (String.equal existing.remembered_base_path bp
-                            && String.equal existing.remembered_keeper_name k
-                            && String.equal existing.remembered_tool_name tl
-                            && String.equal
-                                 existing.remembered_args_fingerprint f))
-                        !remembered;
-                    consumed := (id, bp, k, tl, f, at) :: !consumed
-                | _ -> ())
-            | Some "deliver" -> (
-                match (consume_id, row_base_path, keeper, tool, fingerprint, at) with
-                | Some id, Some bp, Some k, Some tl, Some f, Some at ->
-                    consumed :=
-                      List.filter
-                        (fun (cid, cbp, ck, ctl, cf, _) ->
-                          not
-                            (String.equal cbp bp
-                            && String.equal ck k
-                            && String.equal ctl tl
-                            && String.equal cf f
-                            && String.equal cid id))
-                        !consumed
-                | _ -> ())
-            | Some "ack_uncertain" -> (
+          (function
+            | Row_note_timed_out { identity; tool_call_id; at } ->
+                live_asks :=
+                  { expired_base_path = identity.row_base_path
+                  ; expired_keeper_name = identity.row_keeper
+                  ; expired_tool_call_id = tool_call_id
+                  ; expired_tool_name = identity.row_tool
+                  ; expired_args_fingerprint = identity.row_fingerprint
+                  ; expired_noted_at = at
+                  }
+                  :: !live_asks
+            | Row_remember_late { identity; tool_call_id; decision; actor; at } ->
+                (* The ask leaves [live] — it was answered — and any
+                   earlier memory of the same identity is the operator's
+                   superseded answer, exactly what [remember_late]
+                   replaces in memory. *)
+                live_asks :=
+                  List.filter
+                    (fun ask ->
+                      not
+                        (String.equal ask.expired_base_path identity.row_base_path
+                        && String.equal ask.expired_keeper_name identity.row_keeper
+                        && String.equal ask.expired_tool_call_id tool_call_id))
+                    !live_asks;
+                remembered :=
+                  { remembered_base_path = identity.row_base_path
+                  ; remembered_keeper_name = identity.row_keeper
+                  ; remembered_tool_name = identity.row_tool
+                  ; remembered_args_fingerprint = identity.row_fingerprint
+                  ; remembered_decision = decision
+                  ; remembered_decision_actor = actor
+                  ; remembered_answered_at = at
+                  }
+                  :: List.filter
+                       (fun existing -> not (same_remembered identity existing))
+                       !remembered
+            | Row_consume { identity; consume_id; at } ->
+                (* The remembered answer is durably spent: dropping it
+                   here mirrors the in-memory path, so a replayed
+                   consume can never hand the same decision to a second
+                   call. A later [deliver] closes the window; a crash
+                   before it leaves this consume uncertain. Not yet
+                   TTL-reaped here — the bound-time reap below decides
+                   what still counts. *)
+                remembered :=
+                  List.filter
+                    (fun existing -> not (same_remembered identity existing))
+                    !remembered;
+                consumed :=
+                  ( consume_id, identity.row_base_path, identity.row_keeper
+                  , identity.row_tool, identity.row_fingerprint, at )
+                  :: !consumed
+            | Row_deliver { identity; consume_id } ->
+                consumed :=
+                  List.filter
+                    (fun (cid, cbp, ck, ctl, cf, _) ->
+                      not
+                        (String.equal cbp identity.row_base_path
+                        && String.equal ck identity.row_keeper
+                        && String.equal ctl identity.row_tool
+                        && String.equal cf identity.row_fingerprint
+                        && String.equal cid consume_id))
+                    !consumed
+            | Row_ack_uncertain { identity; consume_id; at } ->
                 (* The operator's acknowledgement that they have seen this
                    consume-only tail (design D4/§7): a warning
                    acknowledgement, never a re-authorization — nothing is
                    re-applied, no memory is restored, and no new attempt is
                    authorized. The acked consume leaves the count. *)
-                match (consume_id, row_base_path, keeper, tool, fingerprint, at) with
-                | Some id, Some bp, Some k, Some tl, Some f, Some at ->
-                    acked :=
-                      (id, bp, k, tl, f, at) :: !acked
-                | _ -> ())
-            | _ -> ())
-          records;
+                acked :=
+                  ( consume_id, identity.row_base_path, identity.row_keeper
+                  , identity.row_tool, identity.row_fingerprint, at )
+                  :: !acked)
+          rows;
         (* An ack closes only its exact consume attempt under the same scope.
            Its timestamp cannot settle another attempt of the same input. *)
         let acked_consumes =
@@ -494,7 +520,7 @@ let note_timed_out t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
       reap_locked t ~now;
       let appended =
         append_record_locked t
-          [ ("op", `String "note_timed_out")
+          [ ("op", `String (journal_op_to_string Note_timed_out))
           ; ("base_path", `String base_path)
           ; ("keeper", `String keeper_name)
           ; ("tool_call_id", `String tool_call_id)
@@ -546,7 +572,7 @@ let remember_late t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
       | None -> No_matching_ask
       | Some ask -> (
           let record =
-            [ ("op", `String "remember_late")
+            [ ("op", `String (journal_op_to_string Remember_late))
             ; ("base_path", `String base_path)
             ; ("keeper", `String keeper_name)
             ; ("tool_call_id", `String tool_call_id)
@@ -621,7 +647,7 @@ let take t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name ~tool_name
              the call is asked about live. *)
           match
             append_record_locked t
-              [ ("op", `String "consume")
+              [ ("op", `String (journal_op_to_string Consume))
               ; ("consume_id", `String consume_id)
               ; ("base_path", `String base_path)
               ; ("keeper", `String keeper_name)
@@ -655,7 +681,7 @@ let take t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name ~tool_name
                  returns, so the exact consume remains outcome-unknown. *)
               (match
                  append_record_locked t
-                   [ ("op", `String "deliver")
+                   [ ("op", `String (journal_op_to_string Deliver))
                    ; ("consume_id", `String consume_id)
                    ; ("base_path", `String base_path)
                    ; ("keeper", `String keeper_name)
@@ -691,7 +717,7 @@ let ack_uncertain t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
     | None -> Not_uncertain
     | Some entry ->
         match append_record_locked t
-          ["op", `String "ack_uncertain"; "consume_id", `String consume_id;
+          ["op", `String (journal_op_to_string Ack_uncertain); "consume_id", `String consume_id;
            "base_path", `String base_path; "keeper", `String keeper_name;
            "tool", `String entry.tool_name; "fingerprint", `String entry.args_fingerprint;
            "at", `Float now] with

@@ -1317,7 +1317,21 @@ let root_native_agent_parent registry ~call_id : native_agent_parent_witness opt
       Some {invocation=registry.invocation;call_id;
         call_envelope_uuid=envelope_uuid;call_ordinal=ordinal}
   | (Native_full | Native_read | Native_none),
-    (Some (Native_open _ | Native_closed _ | Native_ambiguous) | None) -> None
+    ( Some
+        ( Native_open
+            { observation = { identity = Some _ | None
+                            ; tool_name = Some _ | None
+                            ; origin = Built_in | Mcp_wrapper }
+            ; scope = Root_response | Child_response _
+            ; envelope_uuid = _; ordinal = _ }
+        | Native_closed
+            { observation = { identity = Some _ | None
+                            ; tool_name = Some _ | None
+                            ; origin = Built_in | Mcp_wrapper }
+            ; scope = Root_response | Child_response _
+            ; envelope_uuid = _; ordinal = _ }
+        | Native_ambiguous )
+    | None ) -> None
 ;;
 
 type heartbeat_ignored =
@@ -1366,7 +1380,8 @@ let project_native_heartbeat registry ~expected_session_id fields =
   | Ok heartbeat ->
     match Hashtbl.find_opt registry.progress_uuids heartbeat.uuid with
     | Some (Heartbeat_frame previous) when same_heartbeat previous heartbeat -> Heartbeat_ignored Replayed_heartbeat
-    | Some _ -> Heartbeat_ignored Conflicting_heartbeat
+    | Some (Heartbeat_frame _ | Agent_retry_frame _ | Task_frame _) ->
+      Heartbeat_ignored Conflicting_heartbeat
     | None ->
       Hashtbl.add registry.progress_uuids heartbeat.uuid (Heartbeat_frame heartbeat);
       match Hashtbl.find_opt registry.calls heartbeat.parent_id with
@@ -1374,7 +1389,21 @@ let project_native_heartbeat registry ~expected_session_id fields =
           observation={origin=Runtime_native_tools.Built_in; tool_name=Some name; _}; _})
         when name=heartbeat.tool_name ->
           Heartbeat_observed (Runtime_native_tools.Call_id heartbeat.parent_id, heartbeat.elapsed_seconds)
-      | Some (Native_open _ | Native_closed _ | Native_ambiguous) | None ->
+      | Some
+          ( Native_open
+              { observation = { identity = Some _ | None
+                              ; tool_name = Some _ | None
+                              ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+              ; scope = Root_response | Child_response _
+              ; envelope_uuid = _; ordinal = _ }
+          | Native_closed
+              { observation = { identity = Some _ | None
+                              ; tool_name = Some _ | None
+                              ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+              ; scope = Root_response | Child_response _
+              ; envelope_uuid = _; ordinal = _ }
+          | Native_ambiguous )
+      | None ->
           Heartbeat_ignored No_active_root_call
 ;;
 
@@ -1405,7 +1434,10 @@ let parse_agent_retry ~expected_session_id fields =
           (match Runtime_native_tools.progress_of_json
             (`Assoc (("kind",`String "retry_reported")::("subagent_type",`String subagent_type)::note_fields)) with
            | Ok (Runtime_native_tools.Retry_observed (Retry_reported note)) -> Some (Some note)
-           | Ok _ | Error _ -> None)
+           | Ok (Runtime_native_tools.Output_observed _) | Error _
+           | Ok (Runtime_native_tools.Message_reported _)
+           | Ok (Runtime_native_tools.Heartbeat_reported _)
+           | Ok (Runtime_native_tools.Retry_observed (Runtime_native_tools.Retry_cleared _)) -> None)
       | [_] | _::_ -> None in
     Some {retry_uuid;progress_id;parent_id;subagent_type;note}
 ;;
@@ -1438,7 +1470,22 @@ let project_agent_retry registry ~expected_session_id fields =
              | None, Some binding when matches binding && binding.pending ->
                  binding.pending <- false; report (Runtime_native_tools.Retry_cleared binding.agent)
              | Some _, Some _ | None, (Some _ | None) -> Retry_ignored)
-        | (Native_full | Native_read | Native_none), _ -> Retry_ignored
+        | (Native_full | Native_read | Native_none),
+          ( Some
+              ( Native_open
+                  { observation = { identity = Some _ | None
+                                  ; tool_name = Some _ | None
+                                  ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+                  ; scope = Root_response | Child_response _
+                  ; envelope_uuid = _; ordinal = _ }
+              | Native_closed
+                  { observation = { identity = Some _ | None
+                                  ; tool_name = Some _ | None
+                                  ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+                  ; scope = Root_response | Child_response _
+                  ; envelope_uuid = _; ordinal = _ }
+              | Native_ambiguous )
+          | None ) -> Retry_ignored
       end
 ;;
 
@@ -2037,26 +2084,28 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* block = required_member stage "content_block" event in
         let* block = assoc_at stage block in
         let* kind = required_string stage "type" block in
+        let start_text_block channel =
+          let* text = partial_text_value stage channel block in
+          let* message_id = match partial.message_id with
+            | Some id -> Ok id
+            | None -> protocol_error stage "content block has no message start" in
+          if List.exists (fun (held : partial_block) -> held.message_id = message_id && held.index = index)
+              partial.blocks then
+            protocol_error stage "content block index already started"
+          else begin
+            let buffer = Buffer.create 256 in
+            Buffer.add_string buffer text;
+            let identity = Partial_block {message_id; index} in
+            partial.blocks <- partial.blocks @
+              [{identity; message_id; index; channel; buffer; phase=Streaming}];
+            emit_content ~on_stream_event ~response_emitted
+              ~message_id:partial.message_id ~block:identity channel text;
+            Ok ()
+          end
+        in
         (match kind with
-         | ("text" | "thinking") as kind ->
-             let channel = if kind = "text" then Text_content else Thinking_content in
-             let* text = partial_text_value stage channel block in
-             let* message_id = match partial.message_id with
-               | Some id -> Ok id
-               | None -> protocol_error stage "content block has no message start" in
-             if List.exists (fun (held : partial_block) -> held.message_id = message_id && held.index = index)
-                 partial.blocks then
-               protocol_error stage "content block index already started"
-             else begin
-               let buffer = Buffer.create 256 in
-               Buffer.add_string buffer text;
-               let identity = Partial_block {message_id; index} in
-               partial.blocks <- partial.blocks @
-                 [{identity; message_id; index; channel; buffer; phase=Streaming}];
-               emit_content ~on_stream_event ~response_emitted
-                 ~message_id:partial.message_id ~block:identity channel text;
-               Ok ()
-             end
+         | "text" -> start_text_block Text_content
+         | "thinking" -> start_text_block Thinking_content
          | "tool_use" | "redacted_thinking" -> Ok ()
          | other -> protocol_error stage ("unsupported content block type " ^ other))
     | "content_block_delta" ->
@@ -2064,20 +2113,22 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* delta = required_member stage "delta" event in
         let* delta = assoc_at stage delta in
         let* kind = required_string stage "type" delta in
+        let append_text_delta channel =
+          let* text = partial_text_value stage channel delta in
+          let held = List.find_opt (fun (held : partial_block) ->
+            Some held.message_id = partial.message_id && held.index = index
+            && held.channel = channel) partial.blocks in
+          (match held with
+           | Some held when held.phase = Streaming ->
+               Buffer.add_string held.buffer text;
+               emit_content ~on_stream_event ~response_emitted
+                 ~message_id:partial.message_id ~block:held.identity channel text;
+               Ok ()
+           | _ -> protocol_error stage "content delta has no matching open message/channel block")
+        in
         (match kind with
-         | ("text_delta" | "thinking_delta") as kind ->
-             let channel = if kind = "text_delta" then Text_content else Thinking_content in
-             let* text = partial_text_value stage channel delta in
-             let held = List.find_opt (fun (held : partial_block) ->
-               Some held.message_id = partial.message_id && held.index = index
-               && held.channel = channel) partial.blocks in
-             (match held with
-              | Some held when held.phase = Streaming ->
-                  Buffer.add_string held.buffer text;
-                  emit_content ~on_stream_event ~response_emitted
-                    ~message_id:partial.message_id ~block:held.identity channel text;
-                  Ok ()
-              | _ -> protocol_error stage "content delta has no matching open message/channel block")
+         | "text_delta" -> append_text_delta Text_content
+         | "thinking_delta" -> append_text_delta Thinking_content
          | "input_json_delta" | "signature_delta" | "citations_delta" -> Ok ()
          | other -> protocol_error stage ("unsupported content delta type " ^ other))
     | "content_block_stop" ->
@@ -2383,7 +2434,10 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       | Ok _ -> Some Input_attribution.Provider_success
       | Error (Quota_blocked _ | Context_window_exceeded _
           | Turn_failed _ | Turn_failed_with_observation _) -> Some Input_attribution.Provider_error
-      | Error _ -> None in
+      | Error (Invalid_config _) | Error (Spawn_failed _) | Error (Protocol_error _)
+      | Error (Subscription_required _) | Error (Unsupported_control_request _)
+      | Error (Turn_transport_interrupted _) | Error (Stopped_by_host _) | Error (Process_exited _)
+      | Error (Unhandled_exception _) | Error (Timeout _) -> None in
     observe_input input_observer ~session_id:expected_session_id
       ~frame:(Input_attribution.Result {uuid=Some turn_id;outcome}) fields;
     let* turn_id, result, usage =
@@ -2394,7 +2448,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
         if !stream_started
         then emit_stream_event on_stream_event (Turn_finished { text = "" });
         Error error
-      | result -> result
+      | (Error (Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_}) | Error (Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_}) | Error (Invalid_config _ | (Spawn_failed _ | (Protocol_error _ | (Subscription_required _ | (Unsupported_control_request _ | (Turn_transport_interrupted _ | (Turn_failed _ | (Turn_failed_with_observation _ | (Stopped_by_host _ | (Quota_blocked _ | (Process_exited _ | (Unhandled_exception _ | Timeout _)))))))))))) | Ok _) as result -> result
     in
     let* () =
       invoke_state_callback ~stage:"turn started callback" (fun () ->
@@ -3098,7 +3152,12 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
      Log.Runtime_agent.info
        "Claude Code turn stopped by host: %s"
        (error_to_string stopped)
-   | Error error ->
+   | Error
+       (( Invalid_config _ | Spawn_failed _ | Protocol_error _ | Subscription_required _
+        | Unsupported_control_request _ | Turn_transport_interrupted _
+        | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+        | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+        | Unhandled_exception _ | Timeout _ ) as error) ->
      (* The sibling branches above pass [error_to_string]; this one passed only
         the kind, so every failure that does not stop at a host boundary landed
         in the log as a bare "kind=turn_failed". [Turn_failed] carries its

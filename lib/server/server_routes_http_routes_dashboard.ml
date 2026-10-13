@@ -2012,7 +2012,7 @@ let add_routes ~sw ~clock router =
                        ::("source_revision",`String (Runtime.config_source_revision_to_string observation.source_revision))
                        ::("account_emails",Runtime_account_email.inventory_json config)::fields)
                    | value -> value) reqd)
-           | _ -> Http.Response.json_value ~status:`Service_unavailable ~request:req
+           | Error _ -> Http.Response.json_value ~status:`Service_unavailable ~request:req
                (`Assoc ["error", `String "Runtime configuration is unavailable."]) reqd) request reqd)
   |> Http.Router.get "/api/v1/setup/account-emails" (fun request reqd ->
        (* The Overview reads this on every refresh, so it carries only the

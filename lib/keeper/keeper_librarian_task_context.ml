@@ -40,7 +40,17 @@ let atom_spans ~trace_id ~messages ~start_atom ~end_atom ~boundary =
        gap start_atom (min end_atom known_start)
        @ (if known_start < end_atom then [span attribution known_start end_atom] else [])
      | None -> gap start_atom end_atom @ [{source=Boundary_only;attribution}])
-  | Some _ | None -> gap start_atom end_atom
+  | Some
+      { B.event =
+          B.Turn_ended
+            { position =
+                (B.Atom_history _ | B.Empty_atom_history | B.No_atom_history | B.Stale_noop)
+            ; _
+            }
+      ; _
+      }
+  | Some { B.event = B.History_restarted _; _ }
+  | None -> gap start_atom end_atom
 
 let source_to_json = function
   | Atom_span {trace_id;start_atom;end_atom} ->

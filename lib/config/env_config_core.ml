@@ -705,11 +705,6 @@ let orchestrator_enabled_env_key = "MASC_ORCHESTRATOR_ENABLED"
 (** SSOT for the MASC_CONFIG_DIR env-var name (issue 8352). *)
 let config_dir_env_key = "MASC_CONFIG_DIR"
 
-(** SSOT for the MASC_DATA_DIR env-var name (issue 8352).
-    Overrides [<base_path>/data] as the root for runtime data stores. *)
-let data_dir_env_key = "MASC_DATA_DIR"
-
-(** Data directory override. *)
 (** {1 Auth} *)
 
 (** SSOT for auth env-var names (issue 8352). *)

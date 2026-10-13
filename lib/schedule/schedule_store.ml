@@ -833,7 +833,10 @@ let changed_due_not_past ~now ~(current : schedule_request) (request : schedule_
          })
 ;;
 
-let update_request config ~now ~runner_tick_sec (request : Schedule_domain.schedule_request) =
+type timing_update = Replace_timing | Keep_timing
+
+let update_request config ~now ~runner_tick_sec ?(timing_update = Replace_timing)
+    (request : Schedule_domain.schedule_request) =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state request.schedule_id with
@@ -841,6 +844,23 @@ let update_request config ~now ~runner_tick_sec (request : Schedule_domain.sched
     | Some current ->
       if Schedule_domain.modify_allowed current.status
       then (
+        let request = match timing_update with
+          | Replace_timing -> request
+          | Keep_timing ->
+            (* The expiry is part of the timing a content edit keeps: a
+               replacement that carries none must not turn an expiring
+               schedule into one that never reaches [Expired]. An explicit
+               expiry on the call still wins. *)
+            let expires_at = match request.expires_at with
+              | Some _ as given -> given
+              | None -> current.expires_at
+            in
+            { request with
+              due_at = current.due_at
+            ; recurrence = current.recurrence
+            ; expires_at
+            }
+        in
         let* () = validate_initial_request request in
         let* () = changed_due_not_past ~now ~current request in
         let* () = interval_fires_as_declared ~runner_tick_sec request in

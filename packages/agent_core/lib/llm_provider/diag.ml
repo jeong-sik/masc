@@ -21,8 +21,7 @@ let debug_enabled () =
 let default_sink (lvl : level) ~ctx msg =
   match lvl with
   | Debug when not (debug_enabled ()) -> ()
-  | _ ->
-    Printf.eprintf
+  | Info | Warn | Error | Debug -> Printf.eprintf
       "[llm_provider] [%s] [%s] %s\n%!"
       (level_to_string lvl)
       ctx

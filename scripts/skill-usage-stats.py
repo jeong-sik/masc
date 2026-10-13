@@ -33,7 +33,9 @@ from pathlib import Path
 from typing import Any, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "harness" / "workload"))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
+import masc_base_path  # noqa: E402
 import skill_activation_events  # noqa: E402
 
 
@@ -123,11 +125,11 @@ def rollup(base_path: str) -> tuple[dict[str, SkillRow], int, set[str]]:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Cross-session Skill usage rollup.")
-    parser.add_argument("--base-path", default=os.environ.get("MASC_BASE_PATH", "."))
+    parser.add_argument("--base-path", default=None, help="MASC base path (default: MASC_BASE_PATH)")
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
 
-    base = os.path.abspath(os.path.expanduser(args.base_path))
+    base = str(masc_base_path.require(parser, args.base_path, "--base-path"))
     per_skill, total, sessions = rollup(base)
     installed = installed_skill_names(base, os.path.expanduser("~"))
     used = set(per_skill)

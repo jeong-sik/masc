@@ -90,7 +90,11 @@ let awaiting_task config task_id =
       ; _
       } ->
     Ok (assignee, verification_id)
-  | Some task ->
+  | Some
+      ({ task_status =
+           Masc_domain.(Todo | Claimed _ | InProgress _ | Done _ | Cancelled _)
+       ; _
+       } as task) ->
     Error
       (Printf.sprintf
          "Task %s is %s; operator evidence and verdicts require \

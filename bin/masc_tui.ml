@@ -87,7 +87,9 @@ let scrolled_surface state surface =
      one wrapped item per binding, taller than the table it replaces. *)
   | Config when state.config_pane = Config_models ->
       Some (Masc_tui_render.config_models_scrolled state)
-  | _ ->
+  | Overview | Acting | Metrics | Lanes | Clients | Board | Approvals | Planning | Schedules
+  | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Resources
+  | System_logs | Keepers _ | (Memory|Config) ->
       (* The Lanes overview's chrome counts the rows a multi-line refusal
          wraps to, so it is read at the terminal width like the Memory
          overview's and Runtime's. *)
@@ -1112,7 +1114,10 @@ let forget_queued_history (state : state) (request : Keeper_chat.request) =
       (fun entry ->
         not
           (String.equal entry.me_request_id request.Keeper_chat.request_id
-           && match entry.me_role with Message_user _ -> true | _ -> false))
+           && match entry.me_role with
+             | Message_user _ -> true
+             | Message_keeper | Message_autonomous | Message_status | Message_local | Message_error
+             | Message_tool | Message_skill _ | Message_thinking | Message_memory -> false))
       state.msg_history
 ;;
 
@@ -1120,6 +1125,26 @@ let clear_staged_attachments (state : state) =
   state.msg_attachments <- [];
   state.msg_references <- [];
   state.msg_attachments_since <- None
+;;
+
+(* One unsent line leaves the local queue: its place there, the edit that was
+   replacing it, and its row. Nothing was dispatched, so this is the whole
+   cancel. [false] when the queue no longer holds it. Ctrl-K, /queue cancel ID
+   and /queue clear all drop a line through here. *)
+let drop_unsent_request (state : state) (request : Keeper_chat.request) =
+  match Chat_queue.take state.msg_queued ~request_id:request.Keeper_chat.request_id with
+  | None -> false
+  | Some (_, rest) ->
+    state.msg_queued <- rest;
+    (match state.msg_recall_replaces with
+     | Some editing
+       when String.equal editing.Chat_queue.request.request_id
+              request.Keeper_chat.request_id ->
+         state.msg_recall_replaces <- None;
+         clear_staged_attachments state
+     | Some _ | None -> ());
+    forget_queued_history state request;
+    true
 ;;
 
 (* The chat pane's Enter: the draft goes to the keeper, the pane returns to
@@ -1438,21 +1463,14 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
            Chat_queue.take_newest_for_keeper state.msg_queued ~keeper_name)
        with
        | None -> () (* nothing waits; consume quietly like Ctrl-U on empty *)
-       | Some (item, rest) ->
+       | Some (item, _) ->
          let request = item.Chat_queue.request in
-         state.msg_queued <- rest;
-         (match state.msg_recall_replaces with
-          | Some editing
-            when String.equal editing.Chat_queue.request.request_id
-                   request.request_id ->
-              state.msg_recall_replaces <- None;
-              clear_staged_attachments state
-          | Some _ | None -> ());
-         forget_queued_history state request;
-         report_action state "info"
-           (Printf.sprintf "Cancelled queued message to %s"
-              (Keeper_chat.terminal_safe_text request.Keeper_chat.keeper_name));
-         drain_queue ());
+         if drop_unsent_request state request then begin
+           report_action state "info"
+             (Printf.sprintf "Cancelled queued message to %s"
+                (Keeper_chat.terminal_safe_text request.Keeper_chat.keeper_name));
+           drain_queue ()
+         end);
       true
     end else if c = Some 16 then begin
       (* Ctrl-P: pull the newest waiting line back into the composer. That is
@@ -1942,7 +1960,8 @@ let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
           me_image = Masc_tui_image_preview.in_message ~text
             ~attachments:(match role with
               | Message_user _ -> List.map (fun a -> Masc_tui_image_preview.Staged a) request.Keeper_chat.attachments
-              | _ -> []);
+              | Message_keeper | Message_autonomous | Message_status | Message_local | Message_error
+              | Message_tool | Message_thinking | Message_memory | Message_skill _ -> []);
           me_media = [];
           me_memory_summary = None;
           me_memory_pass = Masc_tui_message_layout.No_pass;
@@ -1969,7 +1988,10 @@ let append_user_history_once ~submitted_at state
   let already_present =
     List.exists
       (fun entry ->
-        (match entry.me_role with Message_user _ -> true | _ -> false)
+        (match entry.me_role with
+          | Message_user _ -> true
+          | Message_keeper | Message_autonomous | Message_status | Message_local | Message_error
+          | Message_tool | Message_skill _ | Message_thinking | Message_memory -> false)
         && String.equal entry.me_request_id request.Keeper_chat.request_id
         && String.equal entry.me_keeper_name request.keeper_name
         && String.equal entry.me_text expected_text)
@@ -2183,7 +2205,22 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
                 | Keeper_chat_live.Accepted {interactive=Some receipt;_} ->
                   enqueue_async mailbox (Keeper_chat_control_received
                     (request.Keeper_chat.keeper_name, control_generation, receipt.chat_control_token))
-                | _ -> ()) deltas;
+                | Keeper_chat_live.Accepted { interactive = None;_} | Keeper_chat_live.Run_started
+                | Keeper_chat_live.Checkpoint | Keeper_chat_live.External_effect_completed
+                | Keeper_chat_live.Run_finished | Keeper_chat_live.Batch_bound _
+                | Keeper_chat_live.Runtime_attempt_started _
+                | Keeper_chat_live.Provider_retry_observed _
+                | Keeper_chat_live.Stream_model_started _
+                | Keeper_chat_live.Model_content_activity _
+                | Keeper_chat_live.Stream_model_stopped _ | Keeper_chat_live.Stream_details _
+                | Keeper_chat_live.Text _ | Keeper_chat_live.Thinking _
+                | Keeper_chat_live.Native_tool_started _ | Keeper_chat_live.Native_tool_progress _
+                | Keeper_chat_live.Native_tool_ended _ | Keeper_chat_live.Tool_started _
+                | Keeper_chat_live.Tool_args _ | Keeper_chat_live.Tool_ended _
+                | Keeper_chat_live.Tool_result _ | Keeper_chat_live.Stream_protocol_error _
+                | Keeper_chat_live.Approval_requested _ | Keeper_chat_live.Approval_settled _
+                | Keeper_chat_live.Reply_details _ | Keeper_chat_live.Run_failed _
+                | Keeper_chat_live.Undecodable _ -> ()) deltas;
               List.iter
                 (fun (item : Keeper_chat_live.observed_delta) ->
                   match item.seq with
@@ -2222,39 +2259,19 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
                turn whose first stream merely disappeared. *)
             Eio.Time.sleep clock 0.5;
             watch ~first_post:false ~since_seq:(resume_position ()) true
-        | (Ok _ | Error _) as terminal -> terminal
+        | (Ok (Keeper_chat.Turn_completed
+                 { turn_outcome =
+                     ( Keeper_chat.Visible_reply | Keeper_chat.Terminal_effect_settled
+                     | Keeper_chat.Awaiting_gate_approval | Keeper_chat.No_visible_reply );
+                   _ }
+              | Keeper_chat.Replayed_succeeded _)
+          | Error _) as terminal -> terminal
       in
       watch ~first_post:true ~since_seq:Masc.Keeper_chat_event_log.Whole_turn false
-
-let inflight_entry_by_request_id state request_id =
-  List.find_opt
-    (fun entry -> String.equal entry.sent_request.request_id request_id)
-    state.msg_inflight
-;;
-
-let inflight_by_request_id state request_id =
-  Option.map
-    (fun entry -> entry.sent_request)
-    (inflight_entry_by_request_id state request_id)
-;;
 
 (* The strict decode carries no tool information, so the rows the live pane
    drew are the only record of what the turn did. They are committed before
    the reply lands so the scrollback reads in the order it happened. *)
-(* The turn settled: its log is committed and kept, and the pane goes on
-   drawing it from the same projection with a closing rail. Nothing is copied
-   into session rows -- the tool and skill rows used to be, and were then
-   replaced by the loaded transcript's copies on the next refresh, two
-   replacements of the same words with the reasoning lost at the first
-   (RFC-0412 §3.3). A log with no entries is not kept: the POST never left, or
-   the stream never opened, and there is nothing to draw. *)
-let settle_live_turn state (request : Keeper_chat.request) ~record =
-  match inflight_entry_by_request_id state request.Keeper_chat.request_id with
-  | Some entry
-    when Keeper_chat.same_request_identity entry.sent_request request ->
-      settle_turn_log_ended_by state entry ~record
-  | Some _ | None -> ()
-
 (* Ask the server to interrupt the turn this request opened.
 
    Nothing here decides that the turn stopped. The server reports whether it
@@ -2856,7 +2873,7 @@ let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
       (* The typed refusal already proved this endpoint is another workspace.
          Do not read its screen while a health refresh is still in flight. *)
       state.msx_notice <- Some (Masc_tui_msx_tick.refusal_notice Workspace_changed)
-  | Poll_ready (Observing refusal) ->
+  | Poll_ready (Observing ((Masc_tui_msx_tick.Off | Masc_tui_msx_tick.Activity_unobserved) as refusal)) ->
       let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority; poll_reading = state.workspace_read_authority } in
       let since = Masc_tui_machine_live.since state.msx_live in
       msx_pending_poll := Poll_observing (request,refusal);
@@ -3606,7 +3623,7 @@ let launch_keeper_deletions state ~mailbox ?retry () =
                   (match Keeper_control.classify_purge_response ~keeper_name ~status ~body with
                    | Purge_accepted { operation_id = returned } when String.equal returned operation_id -> Ok ()
                    | Rejected { detail; _ } | Paused_owner_conflict detail -> Error detail
-                   | _ -> Error "deletion retry response did not identify the requested operation")
+                   | Accepted _ | Purge_accepted _ -> Error "deletion retry response did not identify the requested operation")
                 with Eio.Cancel.Cancelled _ as exn -> raise exn
                    | exn -> Error (Printexc.to_string exn)
               in
@@ -3692,7 +3709,11 @@ let restore_account_login state (view : Masc_tui_account_login.t) =
 
 let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t) action =
   let module Login = Masc_tui_account_login in
-  let needs_identity = match action with Login.Nothing | Close | Cancel -> false | _ -> true in
+  let needs_identity = match action with
+    | Login.Nothing | Close | Cancel -> false
+    | Login.Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry | Select_existing _
+    | Start _ | Input _ | Recover | Discover | Prepare _ | Save _ | Preview_removal _ | Remove _
+    | Refresh_removed _ | Refresh_list _ -> true in
   if action = Login.Nothing then ()
   else if needs_identity && not (server_authority_ready state) then begin
     if account_login_action_is_read action then begin
@@ -3711,7 +3732,10 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
              :: List.filter (fun (pending, _, _) -> pending != view)
                   state.account_login_activation_resume;
            view.notice <- "Saved configuration is waiting for workspace reconfirmation before activation."
-       | _ -> view.notice <- "Workspace identity is unconfirmed; account action was not sent.")
+       | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Recover | Login.Discover
+       | Login.Close | Login.Nothing | Login.Refresh_saved _ | Login.Select_existing _
+       | Login.Start _ | Login.Input (_, _) | Login.Prepare _ | Login.Save _
+       | Login.Preview_removal _ | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ -> view.notice <- "Workspace identity is unconfirmed; account action was not sent.")
     end
   end
   else begin
@@ -3747,10 +3771,19 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
         try Eio.Cancel.sub (fun cancellation ->
           (match action with
            | Login.Input _ -> ()
-           | _ -> view.cancel_stream <- Some (fun () -> Eio.Cancel.cancel cancellation (Failure "login panel superseded")));
+           | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Recover | Login.Discover
+           | Login.Close | Login.Nothing | Login.Activate_saved _ | Login.Refresh_saved _
+           | Login.Select_existing _ | Login.Start _ | Login.Prepare _ | Login.Save _
+           | Login.Preview_removal _ | Login.Remove _ | Login.Refresh_removed _
+           | Login.Refresh_list _ -> view.cancel_stream <- Some (fun () -> Eio.Cancel.cancel cancellation (Failure "login panel superseded")));
           Fun.protect ~finally:(fun () ->
             if generation = view.generation then
-              match action with Login.Input _ -> () | _ -> view.cancel_stream <- None)
+              match action with
+                | Login.Input _ -> ()
+                | Login.Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry
+                | Select_existing _ | Start _ | Cancel | Recover | Discover | Prepare _ | Save _
+                | Close | Nothing | Preview_removal _ | Remove _ | Refresh_removed _
+                | Refresh_list _ -> view.cancel_stream <- None)
             (fun () -> match check_workspace () with Error detail -> enqueue (Error detail) | Ok () -> f ()))
         with
         | Eio.Cancel.Cancelled _ as exn -> if generation = view.generation then raise exn
@@ -3796,7 +3829,11 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     (match view.login_id with None -> view.input_pending<-false
      | Some id -> start_job (fun () -> enqueue (post (login_path id ^ "/input") json)))
   | Inventory | Refresh_saved _ | Refresh_retry | Refresh_list _ ->
-    (match action with Inventory | Refresh_retry | Refresh_list _ -> view.phase<-Login.Loading | _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
+    (match action with
+      | Inventory | Refresh_retry | Refresh_list _ -> view.phase<-Login.Loading
+      | Activate_saved _ | Refresh_saved _ | Select_existing _ | Start _ | Input _ | Cancel
+      | Recover | Discover | Prepare _ | Save _ | Close | Nothing | Preview_removal _ | Remove _
+      | Refresh_removed _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
   | Recover -> (match view.login_id with
       | None -> view.notice<-"조회할 로그인 세션이 없습니다. n으로 새 로그인을 시작하세요."
       | Some id -> view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:(login_path id))))
@@ -4131,7 +4168,10 @@ let visible_item_revision state =
           (Masc_tui_types.canonical_path identity.Tui_decode.sid_base_path,
            Masc_tui_types.canonical_path identity.sid_masc_root,
            identity.sid_state_ready)) state.server_identity)
-  | _ -> None
+  | (Keepers (Keeper_detail), Detail_items, None)
+  | (Keepers (Keeper_detail), (Detail_info | (Detail_sandbox | (Detail_instructions | (Detail_secrets | (Detail_github | (Detail_identity | (Detail_channels | (Detail_automation | Detail_runs)))))))), _)
+  | (Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick)))), _, _)
+  | ((Overview | (Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | System_logs))))))))))))))))))))), _, _) -> None
 
 let refresh_changed_keeper_items state ~mailbox ~roster_refreshed previous =
   let current = visible_item_revision state in
@@ -4588,8 +4628,12 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
   let last_action, action_receipt = match request with
     | Addons.Act action -> Some action, None
     | Addons.Action_status action -> Some action, view.action_receipt
-    | _ -> view.last_action, view.action_receipt in
-  let presentation = match request with Addons.Subscriptions _ -> Addons.Technical | _ -> view.presentation in
+    | Addons.Inspect | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Slice _
+    | Addons.Evidence _ | Addons.Subscriptions _ -> view.last_action, view.action_receipt in
+  let presentation = match request with
+    | Addons.Subscriptions _ -> Addons.Technical
+    | Addons.Inspect | Attach _ | Observe _ | Detach _ | Slice _ | Evidence _ | Act _
+    | Action_status _ -> view.presentation in
   let application_reading = match lane_addons_request_failure_kind request with
     | `Request -> Masc_tui_lane_application.empty
     | `Inventory | `Detail -> view.application_reading in
@@ -4671,13 +4715,15 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
           | Addons.Act _ -> request_result (post_json
               ~path:"/api/v1/lane-addons/actions"
               ~body:(Yojson.Safe.to_string (Addons.action_json action)))
-          | _ -> detail_result (get_json
+          | Addons.Inspect | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Slice _
+          | Addons.Evidence _ | Addons.Action_status _ | Addons.Subscriptions _ -> detail_result (get_json
               ~path:("/api/v1/lane-addons/actions?instance_id="
               ^ Masc_tui_http.percent_encode_query_value action.instance_id ^ "&request_id="
               ^ Masc_tui_http.percent_encode_query_value action.request_id)) in
         let* receipt = (match request with
           | Addons.Act _ -> request_result (Addons.action_receipt action json)
-          | _ -> detail_result (Addons.action_receipt action json)) in
+          | Addons.Inspect | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Slice _
+          | Addons.Evidence _ | Addons.Action_status _ | Addons.Subscriptions _ -> detail_result (Addons.action_receipt action json)) in
         Ok (reply ~receipt:json ~action:receipt ())
     | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Evidence _ ->
         let suffix, body = match request with
@@ -4688,7 +4734,8 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
           | Addons.Inspect | Addons.Slice _ | Addons.Act _ | Addons.Action_status _ | Addons.Subscriptions _ -> assert false in
         let broadcast=match request,body with
           | Addons.Evidence _,`Assoc fields -> List.assoc_opt "broadcast" fields=Some (`Bool true)
-          | _ -> false in
+          | (Addons.Evidence _, (`Null | (`List _ | (`Bool _ | (`Float _ | (`Int _ | (`Intlit _ | `String _)))))))
+          | ((Addons.Inspect | (Addons.Attach _ | (Addons.Observe _ | (Addons.Detach _ | (Addons.Slice _ | (Addons.Act _ | (Addons.Action_status _ | Addons.Subscriptions _))))))), _) -> false in
         let credential=Masc_tui_http.bind_credential () in
         let* scope = if not broadcast then Ok None
           else if not broadcast_workspace_verified then Error (`Request
@@ -4782,10 +4829,18 @@ let launch_browser_lane state ~mailbox operation =
   | Some view when Option.is_some state.browser_history ->
       (match operation with
        | Read -> state.browser_lane <- Some (defer_read view)
-       | _ -> ())
+       | Open_session | Close_session | Read_refresh | Discover _ | Goto _ | Screenshot _
+       | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _ | Scene_focus _
+       | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+       | Viewport_cadence _ | Viewport_pointer _ -> ())
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
+  | Some view when (match operation with
+    | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _
+    | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _
+    | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+    | Viewport_cadence _ | Viewport_pointer _ -> true
+    | Discover _ | Open_session | Close_session | Goto _ -> false)
       && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0; scene_scope = None; scene_delta = None;
@@ -4818,9 +4873,18 @@ let launch_browser_lane state ~mailbox operation =
       let generation = state.browser_lane_generation in
       let image_generation = state.image_request_generation in
       let launched = { view with load = Loading (generation, operation);
-        read_continuation = (match operation with Read -> No_read_continuation | _ -> view.read_continuation);
+        read_continuation = (match operation with
+          | Read -> No_read_continuation
+          | Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Read_refresh
+          | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _ | Scene_focus _
+          | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+          | Viewport_cadence _ | Viewport_pointer _ -> view.read_continuation);
         read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
-        refresh_pending = (match operation with Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> Some generation | _ -> view.refresh_pending) } in
+        refresh_pending = (match operation with
+          | Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> Some generation
+          | Discover _ | Read | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _
+          | Scene_regions _ | Scene_scroll _ | Scene_focus _ | Scene_click _ | Scene_follow _
+          | Viewport_refresh _ | Viewport_pointer _ -> view.refresh_pending) } in
       (* The picker that asks for the list again shows nothing of the read
          before it. Every other request leaves what the last discovery said. *)
       state.browser_lane <- Some (match operation with
@@ -5645,7 +5709,9 @@ let launch_machine_activity_read state ~mailbox owner =
                      | Machine_enabled -> Machine_configuration.Enabled
                      | Machine_disabled -> Machine_configuration.Disabled
                      | Machine_unobserved -> Machine_configuration.Unobserved)
-               | None | Some _ -> Error "The selected machine is absent from the server reading.") in
+               | None
+               | Some {state=(Exact_state _ | Browser_clients _ | Browser_executor _ | Package_state _);_} ->
+                   Error "The selected machine is absent from the server reading.") in
            Result.map (fun () -> Masc_tui_machine_activity.{document;activity})
              (check ()))))
   end
@@ -6622,7 +6688,9 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
   (match state.view with
    | Config when state.config_pane = Config_themes && destination <> Config ->
        cancel_theme_preview state
-   | _ -> ());
+   | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals | Planning
+   | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+   | Runtime | Resources | Tools | System_logs | Keepers _ | Config -> ());
   if state.view = Lanes || destination = Lanes then
     state.lanes_action_error <- None;
   (* The lane editor's line belongs to the view that drew it. *)
@@ -6682,7 +6750,9 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
   (match state.view with
    | Approvals when destination <> Approvals ->
        state.pending_approval_action <- None
-   | _ -> ());
+   | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Planning | Schedules
+   | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime | Config
+   | Resources | Tools | System_logs | Keepers _ | Approvals -> ());
   state.view <- destination
 
 (* One step around the ring the surface strip draws. Tab and Shift-Tab
@@ -7950,33 +8020,6 @@ let inflight_for state keeper_name =
     (blocking_inflight_for_keeper state keeper_name)
 ;;
 
-let drop_inflight state request =
-  state.keeper_run_next_receipts <- List.filter (fun (received, _) ->
-    not (Keeper_chat.same_request_identity received request)) state.keeper_run_next_receipts;
-  state.keeper_run_next_pending <- List.filter
-    (fun pending -> not (Keeper_chat.same_request_identity pending request))
-    state.keeper_run_next_pending;
-  state.keeper_run_next_ready <- List.filter
-    (fun ready -> not (Keeper_chat.same_request_identity ready request))
-    state.keeper_run_next_ready;
-  state.keeper_auto_priority_pending <- List.filter (fun (keeper_name, id) ->
-    not (String.equal keeper_name request.Keeper_chat.keeper_name
-         && String.equal id request.request_id))
-    state.keeper_auto_priority_pending;
-  state.keeper_auto_priority_requests <-
-    List.filter_map (fun (keeper_name, request_ids) ->
-      let request_ids = List.filter (fun id ->
-        not (String.equal keeper_name request.Keeper_chat.keeper_name
-             && String.equal id request.request_id)) request_ids in
-      if request_ids = [] then None else Some (keeper_name, request_ids))
-      state.keeper_auto_priority_requests;
-  state.msg_inflight <-
-    List.filter
-      (fun entry ->
-        not (Keeper_chat.same_request_identity entry.sent_request request))
-      state.msg_inflight
-;;
-
 (* POST the request. There is no durable claim to take first: the server keys
    every chat operation by this request's id and refuses a second submission of
    it ([Keeper_chat_operation_store.submit] answers [Existing] for a repeat and
@@ -8056,7 +8099,8 @@ let launch_keeper_request ~(promoted : Chat_queue.item) ?(admission_intent = Kee
         (Keeper_chat_dispatch_blocked
            (request, "Eio switch is unavailable")))
   end
-  | _ -> enqueue_async mailbox
+  | (Workspace_identity_match, None)
+  | ((Workspace_identity_unread | (Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _)), _) -> enqueue_async mailbox
       (Keeper_chat_dispatch_blocked (request, "workspace identity is not verified"))
 
 (* The joined line keeps the request identity the history row already carries,
@@ -8071,7 +8115,10 @@ let update_queued_history_text state (request : Keeper_chat.request) =
     List.map
       (fun entry ->
         if
-          (match entry.me_role with Message_user _ -> true | _ -> false)
+          (match entry.me_role with
+            | Message_user _ -> true
+            | Message_keeper | Message_autonomous | Message_status | Message_local | Message_error
+            | Message_tool | Message_skill _ | Message_thinking | Message_memory -> false)
           && String.equal entry.me_request_id request.Keeper_chat.request_id
           && String.equal entry.me_keeper_name request.keeper_name
         then { entry with me_text = text;
@@ -8530,7 +8577,8 @@ let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
            ; detail = "Eio switch is unavailable"
            ; original
            }))
-  | _ -> enqueue_async mailbox
+  | (Workspace_identity_match, None)
+  | ((Workspace_identity_unread | (Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _)), _) -> enqueue_async mailbox
       (Task_dispatch_failed { keeper = keeper_name;
         detail = "workspace identity is not verified"; original })
 
@@ -8738,7 +8786,20 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
     | Inbox.Pause | Inbox.Resume ->
         Some (begin_keeper_chat_control ~preserve_input_holds:local_resume
                 ~preserve_priority_requests:local_resume state keeper_name)
-    | _ -> None in
+    | Inbox.Inspect | Inbox.Cancel _ | Inbox.Move_to_end _ | Inbox.Edit (_, _)
+    | Inbox.Cancel_event (_, _, _) | Inbox.Prioritize_event (_, _, _)
+    | Inbox.Clear -> None in
+  (* The lines /queue clear asks the server to cancel. Read here, on the fiber
+     that owns [state]; the job below only sends. No other action names any. *)
+  let clear_targets = match action with
+    | Inbox.Clear ->
+      List.filter_map (fun (request, position) ->
+        match keeper_queue_clear_treatment position with
+        | Cancel_on_server -> Some request
+        | Drop_from_local_queue | Withdraw_before_post | Leave_waiting -> None)
+        (keeper_message_waiting_positions state ~keeper_name)
+    | Inbox.Inspect | Inbox.Pause | Inbox.Resume | Inbox.Cancel _ | Inbox.Move_to_end _
+    | Inbox.Edit _ | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> [] in
   let check_control () =
     Result.bind (check_authority ()) (fun () ->
       match control_generation with
@@ -8748,6 +8809,11 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   let operator_operation_id = "tui-queue-" ^ Random_id.uuid_v7 () in
   let host = server_peer_host and port = state.port in
   let root = "/api/v1/keepers/" ^ Masc_tui_http.percent_encode_path_segment keeper_name in
+  (* One queued message on the server, and the verb that cancels it. Both the
+     single cancel and /queue clear post to this address. *)
+  let operation_path id =
+    root ^ "/chat/operations/" ^ Masc_tui_http.percent_encode_path_segment id in
+  let cancel_suffix = "cancel" in
   let local_lines () =
     let pending = Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name in
     (Printf.sprintf "Local unsent messages: %d (same Keeper input joins: %s)"
@@ -8806,20 +8872,37 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
             :: ("operator_operation_id", `String operator_operation_id) :: fields
           | Inbox.Prioritize_event (_, _, urgency) ->
             ("action", `String "reprioritize") :: ("urgency", `String (Keeper_event_queue.urgency_to_string urgency)) :: fields
-          | Inspect | Pause | Resume | Cancel _ | Move_to_end _ | Edit _ -> assert false in
+          | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _ -> assert false in
         let* _ = post_json ~host ~port ~path:(root ^ "/events/operator")
           ~body:(Yojson.Safe.to_string (`Assoc fields)) in
         Ok ["Server confirmed event update: " ^ reference]
+      | Inbox.Clear ->
+        (* Each line is its own operation on the server, so one failure says
+           nothing about the next: every cancel is attempted and answered by
+           id. "Not sent" is this client declining to send. "Not confirmed"
+           is a refusal or an answer that never arrived, and the snapshot
+           read below shows which lines are still queued. *)
+        Ok (List.map (fun (request : Keeper_chat.request) ->
+          let id = request.request_id in
+          match check_authority () with
+          | Error detail -> "Cancel not sent for " ^ id ^ ": " ^ detail
+          | Ok () ->
+            (match Masc_tui_http.post_json ~host ~port
+                     ~path:(operation_path id ^ "/" ^ cancel_suffix)
+                     ~body:(Yojson.Safe.to_string (`Assoc [])) with
+             | Ok _ -> "Server confirmed cancel: " ^ id
+             | Error detail -> "Cancel not confirmed for " ^ id ^ ": " ^ detail))
+          clear_targets)
       | Inbox.Cancel id | Inbox.Move_to_end id | Inbox.Edit (id, _) ->
-        let path = root ^ "/chat/operations/" ^ Masc_tui_http.percent_encode_path_segment id in
+        let path = operation_path id in
         let* suffix, body = match action with
-          | Inbox.Cancel _ -> Ok ("cancel", `Assoc [])
+          | Inbox.Cancel _ -> Ok (cancel_suffix, `Assoc [])
           | Inbox.Move_to_end _ -> Ok ("move-to-end", `Assoc [])
           | Inbox.Edit (_, message) ->
             let* operation = get_json ~host ~port ~path in
             let* input = Inbox.edited_input ~message operation in
             Ok ("edit", `Assoc ["input", input])
-          | Inbox.Inspect | Inbox.Pause | Inbox.Resume | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> assert false in
+          | Inbox.Inspect | Inbox.Pause | Inbox.Resume | Inbox.Clear | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> assert false in
         let* _ = post_json ~host ~port ~path:(path ^ "/" ^ suffix)
           ~body:(Yojson.Safe.to_string body) in
         Ok ["Server confirmed " ^ suffix ^ ": " ^ id] in
@@ -8847,8 +8930,15 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn) in
     enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, action, result)) in
+  (* Said here, past both refusals above. The job can still send none: it
+     checks the workspace and the control generation first and reports a
+     failure of either, and without an Eio switch it does not start. *)
+  let cancelling = match clear_targets with
+    | [] -> []
+    | _ :: _ ->
+      [Printf.sprintf "Cancelling %d in the server queue…" (List.length clear_targets)] in
   chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
-    (String.concat "\n" (local_lines () @ ["Reading server queue…"]));
+    (String.concat "\n" (local_lines () @ cancelling @ ["Reading server queue…"]));
   match Eio_context.get_switch_opt () with
   | Some sw -> fork_workspace_job state ~sw run
   | None -> enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, action, Error "Eio switch is unavailable"))
@@ -9047,7 +9137,9 @@ let msx_frame_of_live ~previous_live ~previous_frame
         match previous_live, previous_frame with
         | Masc_tui_machine_live.Showing old, Some frame
           when String.equal old.mark.incarnation p.mark.incarnation -> frame.msx_meta
-        | _ -> None
+        | ( ( Masc_tui_machine_live.Showing _ | Masc_tui_machine_live.Unread
+            | Masc_tui_machine_live.Not_loaded | Masc_tui_machine_live.Failed _ ),
+            _ ) -> None
       in
       (view, Some { Masc_tui_types.msx_number = number; msx_width = p.width;
                     msx_height = p.height; msx_rgb = p.rgb; msx_meta = meta })
@@ -9109,7 +9201,8 @@ let observe_msx_frame ?(clear_notice = false) ?expected_workspace
   | Poll_ready Outcome_unknown when Result.is_ok result && Option.is_some state.msx_frame ->
       msx_pending_poll := Poll_ready Advancing;
       if clear_notice then state.msx_notice <- None
-  | Poll_ready _ | Poll_pending _ | Poll_observing _ -> ()
+  | Poll_ready (Advancing | Observing _ | Outcome_unknown)
+  | Poll_pending _ | Poll_observing _ -> ()
   end)
 ;;
 
@@ -9610,7 +9703,7 @@ let open_image state ~notice path =
                   match Masc.Keeper_vision_tool.sniff_image_media_type initial_data with
                   | Ok media when String.equal media Masc_tui_graphics.payload_media_type ->
                       initial_data
-                  | _ -> (
+                  | Ok _ | Error _ -> (
                       match convert_to_png local_path with
                       | Ok png_path -> (
                           match read_file_bytes png_path with
@@ -9621,7 +9714,7 @@ let open_image state ~notice path =
                 match Masc.Keeper_vision_tool.sniff_image_media_type prepared_data with
                 | Ok media when String.equal media Masc_tui_graphics.payload_media_type ->
                     draw_image state ~refuse ~title:path prepared_data
-                | _ ->
+                | Ok _ | Error _ ->
                     if is_remote then
                       match Masc_tui_browser.open_url path with
                       | Ok opener ->
@@ -9700,7 +9793,7 @@ let newest_named_image rows =
   |> List.find_map (fun entry ->
          match entry.me_image with
          | Masc_tui_image_preview.No_image -> None
-         | image -> Some image)
+         | (Masc_tui_image_preview.Named_path _ | Masc_tui_image_preview.Staged _ | Masc_tui_image_preview.Stored_attachment _ | Masc_tui_image_preview.Output_image _ | Masc_tui_image_preview.Unavailable_image _) as image -> Some image)
 
 let image_request_is_active state entry =
   let matches request =
@@ -10123,7 +10216,9 @@ let leave_acting_pane (state : state) =
   (match state.view with
    | Board -> state.board_focus <- Left_pane
    | Resources -> state.resource_focus <- Left_pane
-   | _ -> ())
+   | Overview | Acting | Metrics | Memory | Lanes | Clients | Approvals | Planning | Schedules
+   | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime | Config
+   | Tools | System_logs | Keepers _ -> ())
 
 let move_acting_pane_cursor (state : state) ~row ~step =
   match
@@ -10162,7 +10257,23 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   let command = Masc_tui_command.parse text in
   if
     Option.is_some state.msg_recall_replaces
-    && match command with Masc_tui_command.Say _ -> false | _ -> true
+    && match command with
+      | Masc_tui_command.Say _ -> false
+      | Masc_tui_command.Task_for_keeper _ | Task_missing_title | Help | Show_load_errors | About
+      | Lane_addons _ | Play_invites | Play_link _ | Play_invite _ | Play_revoke _ | Play_invalid _
+      | Open_metrics | Account_login _ | Open_settings | Open_diff | Open_patch_modal | Open_usage
+      | Open_link_preview _ | Open_links_list | Copy_latest_reply | Set_embeds _ | Open_changes
+      | Toggle_acting_pane | Show_acting_pane_tab _ | Acting_pane_tab_unknown _
+      | Set_acting_pane_call_order _ | Acting_pane_call_order_unknown _ | Scroll_acting_pane _
+      | Acting_pane_scroll_unknown _ | Switch_keeper _ | Switch_keeper_missing_name | Queue _
+      | Run_next | Priority _ | Answer_tool_approval _ | Interrupt_turn | Interrupt_keeper_turn _
+      | Steer_turn _ | Steer_missing_message | Set_thinking _ | Set_tools _ | Cycle_memory
+      | Open_fleet_memory | Find_in_chat _ | Find_next | Open_measurement _
+      | Measurement_missing_sha | Inspect_context | View_image _ | View_image_missing_path
+      | Attach_image _ | Attach_image_missing_path | Attach_image_ref _
+      | Attach_image_ref_missing_value | Preset_list | Preset_save _ | Preset_save_missing_name
+      | Preset_restore _ | Preset_restore_missing_name | Preset_show _ | Preset_show_missing_name
+      | Preset_delete _ | Preset_delete_missing_name | Unknown _ -> true
   then
     notice ~kind:Notice_failure
       "A queued edit is active; press Enter for its text or Ctrl-U to abandon it"
@@ -10454,9 +10565,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       (match restored, view.phase with
        | Some _, (Login.Saving | Login.Failed) -> ()
        | Some _, Login.Finished {activation = Login.Activating; _} -> ()
-       | Some _, Login.Finished {saved; _} ->
+       | Some _, Login.Finished {saved; activation = (Login.Activation_failed _ | Login.Active _); _} ->
          launch_account_login_action state ~mailbox view (Login.Refresh_saved saved)
-       | _ -> launch_account_login_action state ~mailbox view Login.Inventory)
+       | (Some _, (Login.Loading | (Login.Logging | (Login.Models | (Login.Removing | (Login.Providers _ | (Login.Documented_context _ | Login.Removal _)))))))
+       | (None, _) -> launch_account_login_action state ~mailbox view Login.Inventory)
   | Masc_tui_command.Open_settings ->
       Masc_tui_message_input.clear state.msg_input;
       state.config_pane <- Config_params;
@@ -10490,26 +10602,56 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       (match state.msg_target_keeper_name, Masc_tui_queue_inspection.parse input with
        | None, _ -> notice ~kind:Notice_failure "Select a Keeper first"
        | _, Error detail -> notice ~kind:Notice_failure detail
-       | Some keeper_name, Ok action ->
+       | Some keeper_name, Ok Masc_tui_queue_inspection.Clear ->
+         (* The part that needs no server. A line that exists only in this
+            client is withdrawn here, so it is gone even when the queue request
+            below is refused. This row also counts the lines the server holds,
+            as a fact about them and not a claim that a cancel was sent: the
+            queue request says whether it sends, and each cancel's answer. It
+            is made even when this client holds nothing to cancel, because its
+            snapshot is the one place a line this client no longer tracks is
+            still listed. *)
+         let withdrawn, on_server, left =
+           List.fold_left (fun (withdrawn, on_server, left) (request, position) ->
+             match keeper_queue_clear_treatment position with
+             | Drop_from_local_queue ->
+               if drop_unsent_request state request then (withdrawn + 1, on_server, left)
+               else (withdrawn, on_server, left + 1)
+             | Withdraw_before_post ->
+               withdraw_undispatched_request state request;
+               forget_queued_history state request;
+               withdrawn + 1, on_server, left
+             | Cancel_on_server -> withdrawn, on_server + 1, left
+             | Leave_waiting -> withdrawn, on_server, left + 1)
+             (0, 0, 0) (keeper_message_waiting_positions state ~keeper_name) in
+         let clause count what =
+           if count = 0 then None else Some (Printf.sprintf "%d %s" count what) in
+         (match List.filter_map Fun.id
+                  [ clause withdrawn "unsent cancelled"
+                  ; clause on_server "in the server queue"
+                  ; clause left "left waiting (being posted, being rechecked, or already started)" ] with
+          | [] -> ()
+          | _ :: _ as clauses ->
+            notice ~kind:Notice_reply ("/queue clear: " ^ String.concat " · " clauses));
+         drain_queued_message state ~base_path ~mailbox;
+         launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Clear
+       | Some keeper_name,
+         Ok ((Masc_tui_queue_inspection.Inspect | Pause | Resume | Cancel _
+             | Move_to_end _ | Edit _ | Cancel_event _ | Prioritize_event _) as action) ->
          let local_id = match action with
            | Masc_tui_queue_inspection.Cancel id | Move_to_end id | Edit (id, _) -> Some id
-           | Inspect | Pause | Resume | Cancel_event _ | Prioritize_event _ -> None in
+           | Inspect | Pause | Resume | Clear | Cancel_event _ | Prioritize_event _ -> None in
          match Option.bind local_id (fun id -> Chat_queue.find state.msg_queued ~request_id:id) with
          | Some item when item.request.keeper_name <> keeper_name ->
            notice ~kind:Notice_failure "That message belongs to another Keeper"
          | Some item ->
            (match action with
             | Masc_tui_queue_inspection.Cancel id ->
-              (match Chat_queue.take state.msg_queued ~request_id:id with
-               | Some (_, rest) -> state.msg_queued <- rest;
-                   forget_queued_history state item.request;
-                   (match state.msg_recall_replaces with
-                    | Some editing when editing.Chat_queue.request.request_id = id ->
-                      state.msg_recall_replaces <- None; clear_staged_attachments state
-                    | Some _ | None -> ());
-                   notice ~kind:Notice_reply ("Cancelled unsent message " ^ id);
-                   drain_queued_message state ~base_path ~mailbox
-               | None -> notice ~kind:Notice_failure "Local queue changed; inspect /queue again")
+              if drop_unsent_request state item.request then begin
+                notice ~kind:Notice_reply ("Cancelled unsent message " ^ id);
+                drain_queued_message state ~base_path ~mailbox
+              end
+              else notice ~kind:Notice_failure "Local queue changed; inspect /queue again"
             | Edit (id, message) ->
               let request = {item.request with Keeper_chat.message = message} in
               (match Chat_queue.replace_request state.msg_queued ~request_id:id request with
@@ -10517,7 +10659,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                | Ok queue -> state.msg_queued <- queue; update_queued_history_text state request;
                    notice ~kind:Notice_reply ("Updated unsent message " ^ id))
             | Move_to_end _ -> notice ~kind:Notice_failure "Local input is already joined in submission order"
-            | Inspect | Pause | Resume | Cancel_event _ | Prioritize_event _ -> assert false)
+            | Inspect | Pause | Resume | Clear | Cancel_event _ | Prioritize_event _ -> assert false)
          | None -> launch_keeper_queue state ~mailbox ~keeper_name action)
   | Masc_tui_command.Run_next
     when state.workspace_identity <> Workspace_identity_match ->
@@ -11003,7 +11145,11 @@ let apply_asks_load state = function
       (* Silent while the operator is on the Approvals surface -- the panel is
          already in front of them there. A question that arrives on any other
          surface rings, since nothing else on that surface would show it. *)
-      let watching_asks = match state.view with Approvals -> true | _ -> false in
+      let watching_asks = match state.view with
+        | Approvals -> true
+        | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board | Planning
+        | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+        | Runtime | Config | Resources | Tools | System_logs -> false in
       if
         Ask.should_ring_for_new_ask ~new_ids:arrived
           ~operator_is_watching_asks:watching_asks
@@ -11632,6 +11778,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.board_vote_armed <- None;
   state.board_compose_armed <- false;
   state.board_compose_reply_to <- None;
+  state.board_compose_attach_input <- None;
   state.board_post_inflight <- false;
   state.board_posts <- [];
   state.board_detail <- Board_detail.clear state.board_detail;
@@ -11953,7 +12100,9 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
    | Keepers (Keeper_message | Keeper_detail | Keeper_runtime_pick) ->
      state.view <- Keepers Keeper_list;
      set_msg_scroll state 0
-   | _ -> ())
+   | Keepers (Keeper_list | (Keeper_logs | Keeper_calls)) | Overview | Acting | Metrics | Memory
+   | Lanes | Clients | Board | Approvals | Planning | Schedules | Verification | Harness | Fusion
+   | Repositories | Code | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
 
 let apply_confirmed_server_identity_reading state reading =
   let previous_server = state.server_identity in
@@ -12027,7 +12176,15 @@ let apply_confirmed_server_identity_reading state reading =
     , Workspace_identity_match -> true
     | Workspace_identity_mismatch prior, Workspace_identity_mismatch current ->
       String.equal prior.server_base_path current.server_base_path
-    | _ -> false
+    | (Workspace_identity_match | Workspace_identity_match_unconfirmed _)
+    , (Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+      | Workspace_identity_mismatch _)
+    | Workspace_identity_mismatch _
+    , (Workspace_identity_unread | Workspace_identity_match
+      | Workspace_identity_match_unconfirmed _)
+    | Workspace_identity_unread
+    , (Workspace_identity_unread | Workspace_identity_match
+      | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _) -> false
   in
   if not same_workspace then begin
     (* Recover local input before cancellation drops its preflight owner.
@@ -12072,7 +12229,10 @@ let apply_confirmed_server_identity_reading state reading =
     let keep_detail_navigation =
       match previous, state.workspace_identity with
       | Workspace_identity_unread, _ | _, Workspace_identity_unread -> true
-      | _ -> false
+      | ( Workspace_identity_match | Workspace_identity_match_unconfirmed _
+        | Workspace_identity_mismatch _ )
+      , ( Workspace_identity_match | Workspace_identity_match_unconfirmed _
+        | Workspace_identity_mismatch _ ) -> false
     in
     withdraw_keeper_workspace_presentation state ~previous:withdrawn_workspace
       ~keep_detail_navigation;
@@ -12451,7 +12611,9 @@ let refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_aut
         launch_detail_tab_reading state ~mailbox keeper
     | Connectors, _, _ -> launch_connectors_load state ~mailbox
     | Fusion, _, _ -> launch_fusion_runs_load state ~mailbox
-    | _ -> ()
+    | (Keepers (Keeper_detail), (Detail_info | (Detail_sandbox | (Detail_instructions | (Detail_secrets | (Detail_github | (Detail_identity | (Detail_channels | (Detail_automation | Detail_runs)))))))), None)
+    | (Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick)))), _, _)
+    | ((Overview | (Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Repositories | (Code | (Changes | (Runtime | (Config | (Resources | (Tools | System_logs))))))))))))))))))), _, _) -> ()
   end
 ;;
 
@@ -12817,7 +12979,7 @@ let launch_observer state ~host ~port ~mailbox =
                            | Some requested when String.equal requested.instance_id handshake.instance_id ->
                                Ok (Some handshake)
                            | Some _ | None -> Error "Observer resumed without a matching requested instance")
-                      | other -> other
+                      | (Ok (Some { replay = (Sse_wire.Fresh | Sse_wire.Reset _);_}) | Ok (None) | Error _) as other -> other
                     in
                     instance_id :=
                       (match handshake with
@@ -13058,7 +13220,8 @@ let launch_goal_confirmation_read state ~mailbox ~goal_id =
                  let* confirmation = Goal_confirmation.decode_confirmation ~goal_id json in
                  match confirmation.phase with
                  | Goal_phase.Awaiting_confirmation -> Ok confirmation
-                 | _ -> Error "goal is not awaiting confirmation"))
+                 | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Completed
+                 | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ -> Error "goal is not awaiting confirmation"))
 
 let launch_skill_evidence_read state ~mailbox reference =
   if server_authority_ready state then begin
@@ -13200,7 +13363,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
                  when Goal_confirmation_read.current_key read = Some goal_id ->
                    launch_goal_confirmation_read state ~mailbox ~goal_id
                | Goal_confirmation.Inspecting _ | Goal_confirmation.Submitting _ -> ())
-          | _ -> ())
+          | Planning_list -> ())
      | Tools ->
          (match state.tools_evidence_reference, selected_tools_skill_profile state with
           | Some reference, Some profile when Skill_reference.equal reference profile.esp_reference ->
@@ -13254,7 +13417,8 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
           | Some "*" -> launch_all_memory_facts_load state ~mailbox
           | Some keeper_name -> launch_memory_facts_load state ~mailbox ~keeper_name
           | None -> ())
-     | _ -> ());
+     | Keepers (Keeper_list | (Keeper_detail | Keeper_logs)) | Overview | Acting | Metrics | Clients
+     | Approvals | Harness | Repositories | Connectors | Runtime | Config | Resources | System_logs -> ());
     (match state.view with
      | Resources -> Option.iter (fun uri ->
          Masc_tui_resources_requests.launch_read state ~host:server_peer_host
@@ -13265,7 +13429,9 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
           | Some prompt_key, Some row when String.equal row.Tui_decode.pr_key prompt_key ->
               launch_librarian_input_load state ~mailbox ~prompt_key
           | _ -> ())
-     | _ -> ());
+     | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals | Planning
+     | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+     | Runtime | Tools | System_logs | Keepers _ | Config -> ());
     Option.iter (launch_task_history_load state ~mailbox) state.task_detail_id;
     Option.iter (fun repo_id -> launch_workspace_activity state ~mailbox ~repo_id)
       state.workspace_activity_repo;
@@ -13295,8 +13461,9 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
               (match read with
                | Masc_tui_lane_installer.Read_catalog directory -> launch_lane_package_catalog state ~mailbox directory
                | Read_preview path -> launch_lane_package_preview state ~mailbox path)
-          | _ when not view.loading -> launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
-          | _ -> ()));
+          | (None | Some (_, (Lane_subscriptions_read | Lane_declaration_read _))), _
+            when not view.loading -> launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
+          | (None | Some (_, (Lane_subscriptions_read | Lane_declaration_read _))), _ -> ()));
     if state.context_inspector_open then Option.iter (fun keeper_name ->
       launch_context_inspector_load state ~mailbox ~keeper_name) state.context_inspector_keeper;
     if state.repository_changes_open then
@@ -13511,7 +13678,9 @@ let apply_approval_decision_result state approval decision approvals result =
          | Error error -> approval_decision_unverified decision ^ ": " ^ approval.ap_summary ^ " · " ^ error
        in
        state.home_decision_receipt <- Some (request, receipt)
-   | Some _ | None -> ());
+   | Some (Home_held_call _ | Home_gate_request _ | Home_operator_request _
+          | Home_question _ | Home_goal_confirmation _ | Home_operator_task _)
+   | None -> ());
   state.home_decision_inflight <- None;
   (match result with
    | Ok (Approval.Completed _) ->
@@ -14105,7 +14274,8 @@ let handle_goal_confirmation_key state ~mailbox =
                | Goal_phase.Completed
                  when Goal_confirmation.same_confirmation_binding confirmation confirmed ->
                    Ok "completion confirmed"
-               | _ -> Error "goal confirmation: server did not confirm completion"
+               | Goal_phase.Executing | Goal_phase.Verifying | Goal_phase.Awaiting_confirmation
+               | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ | Completed -> Error "goal confirmation: server did not confirm completion"
              )
        | Loading -> ()
        (* A confirmation read before a failed re-read is not the goal's
@@ -14459,11 +14629,88 @@ let open_board_composer_editor state ~restore ~reenter =
           end )
 ;;
 
+(* Stage one local file for the post. Kind and media type come from the
+   file's name on purpose: a keeper-exported file's stored mime is always
+   application/octet-stream, so the extension is the only honest signal. A
+   path that does not name a plain file keeps the input open with the error
+   showing, so the typing can be fixed rather than re-entered. *)
+let stage_board_compose_path state raw =
+  (* A shell would have expanded a leading [~]; nothing does here, and a
+     path typed by hand usually starts with one. *)
+  let path =
+    let typed = String.trim raw in
+    match Sys.getenv_opt "HOME" with
+    | Some home when String.equal typed "~" -> home
+    | Some home when String.starts_with ~prefix:"~/" typed ->
+        Filename.concat home (String.sub typed 2 (String.length typed - 2))
+    | Some _ | None -> typed
+  in
+  if String.equal path "" then begin
+    state.board_compose_attach_input <- None;
+    state.board_post_error <- None;
+    report_action state "system" "attach cancelled"
+  end
+  else if
+    List.exists
+      (fun (staged : board_staged_attachment) -> String.equal staged.sa_path path)
+      state.board_compose_attachments
+  then state.board_post_error <- Some "that file is already attached"
+  else
+    match
+      Masc_tui_board_upload.attachable
+        ~max_bytes:Masc_tui_board_upload.max_attachment_bytes path
+    with
+    | Error reason -> state.board_post_error <- Some reason
+    | Ok () ->
+        let sa_kind = upload_kind_of_path path in
+        state.board_compose_attachments <-
+          state.board_compose_attachments
+          @ [ { sa_path = path; sa_name = Filename.basename path; sa_kind } ];
+        state.board_compose_attach_input <- None;
+        state.board_post_error <- None;
+        report_action state "system"
+          (Printf.sprintf "attached %s (%s) — %d staged for the post"
+             (Filename.basename path)
+             (board_upload_kind_to_wire sa_kind)
+             (List.length state.board_compose_attachments))
+;;
+
+(* While the attach path is being typed it owns the compose keys: Enter
+   stages, Esc cancels, printable keys are path text. Tab keeps its global
+   meaning, the rule the draft itself keeps. *)
+let handle_board_attach_input_key state (input : Buffer.t) (key : string) : bool =
+  match key with
+  | "\r" | "\n" ->
+      stage_board_compose_path state (Buffer.contents input);
+      true
+  | "esc" ->
+      state.board_compose_attach_input <- None;
+      state.board_post_error <- None;
+      report_action state "system" "attach cancelled";
+      true
+  | "\127" | "\b" ->
+      let next =
+        Buffer.contents input
+        |> Masc_tui_message_layout.drop_last_utf8_scalar
+      in
+      Buffer.clear input;
+      Buffer.add_string input next;
+      true
+  | "\t" | "shift-tab" -> false
+  | s when Masc_tui_message_layout.is_printable_utf8_scalar s ->
+      Buffer.add_string input s;
+      true
+  | _ -> true
+;;
+
 (* Compose-mode keys. Sending is armed rather than pressed: esc offers
    send-or-discard, so a stray key during writing cannot publish. Returns
    false for keys this pane does not own, so Tab and quit keep their global
    meaning. *)
 let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : bool =
+  match state.board_compose_attach_input with
+  | Some input -> handle_board_attach_input_key state input key
+  | None ->
   let armed_allowed =
     if Option.is_none state.board_compose_reply_to then
       [ "s"; "S"; "d"; "D"; "e"; "E"; "h"; "H"; "esc" ]
@@ -14473,6 +14720,19 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
   if state.board_compose_armed && not (List.mem key armed_allowed) then
     state.board_compose_armed <- false;
   match key with
+  | "\001" -> (
+      (* Ctrl-A stages a local file: the path input takes the keys until
+         Enter or Esc. The comment wire has no attachments, so a reply keeps
+         its staged files parked for a new post and says so. *)
+      match state.board_compose_reply_to with
+      | Some _ ->
+          report_action state "system"
+            "attachments are sent with new posts; a comment carries text only";
+          true
+      | None ->
+          state.board_compose_attach_input <- Some (Buffer.create 128);
+          state.board_post_error <- None;
+          true )
   | "\005" -> (
       match restore, reenter with
       | Some r, Some re ->
@@ -14544,9 +14804,14 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
       state.board_compose_armed <- false;
       state.board_compose_hearth <- None;
       state.board_post_error <- None;
+      (* The staged files belong to the new post being discarded. A reply
+         never showed or carried them, so discarding one leaves them waiting
+         for the post they were staged for. *)
       (match state.board_compose_reply_to with
        | Some post_id -> state.board_mode <- Board_read post_id
-       | None -> state.board_mode <- Board_list);
+       | None ->
+           state.board_compose_attachments <- [];
+           state.board_mode <- Board_list);
       report_action state "system" "Board draft discarded";
       true
   | "\r" | "\n" ->
@@ -15145,7 +15410,85 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            with
            | Ok card -> Masc_tui_types.retain_withdrawn_play_invite state request card
            | Error _ -> ())
-        | _ -> ())
+        | Play_invite_issued (_, _, Play_answered (Error _))
+        | Play_invite_issued (_, _, (Play_refused _ | Play_not_dispatched _ | Play_unanswered _))
+        | Approvals_listing_superseded | Surface_composer_released
+        | Chat_search_finished (_, _, _, _) | Workspace_scoped (_, _, _) | Workspace_operation _
+        | Chat_command_read_completed (_, _) | Workspace_identity_unconfirmed _
+        | Schedule_form_authority_refused _ | Lane_package_catalog_loaded (_, _, _)
+        | Lane_package_preview_loaded (_, _, _) | Keeper_queue_resume_confirmed (_, _, _)
+        | Keeper_queue_loaded (_, _, _, _) | Lane_addons_loaded (_, _, _)
+        | Lane_application_loaded (_, _) | Lane_subscriptions_loaded (_, _)
+        | Lane_declaration_loaded (_, _, _, _, _) | Keeper_deletions_loaded (_, _)
+        | Msx_tick_withdrawn (_, _) | Keeper_deletion_retry_done (_, _) | Msx_frame_loaded (_, _)
+        | Msx_activity_loaded (_, _) | Msx_live_loaded (_, _) | Dos_live_loaded (_, _)
+        | Voice_wizard_saved (_, _) | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
+        | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _)
+        | Voice_level _ | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
+        | Http_refresh_done _ | Http_refresh_failed (_, _, _)
+        | Approvals_summary_loaded (_, _, _, _) | Http_scoped_refresh_done (_, _, _)
+        | Http_scoped_refresh_failed (_, _, _, _, _) | Board_post_refresh_done (_, _)
+        | Approval_decision_done (_, _, _, _, _) | Ask_answer_done (_, _, _)
+        | Keeper_chat_stream_deltas (_, _) | Keeper_chat_stream_unavailable (_, _)
+        | Keeper_run_next_done (_, _) | Keeper_observed_interrupt_done (_, _, _, _)
+        | Keeper_chat_interrupt_done (_, _, _) | Keeper_chat_history_loaded (_, _, _, _)
+        | Keeper_chat_copy_loaded (_, _, _) | Keeper_chat_operation_loaded _
+        | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded (_, _)
+        | Keeper_child_content_loaded (_, _) | Context_inspector_loaded (_, _, _)
+        | Keeper_chat_older_loaded (_, _, _, _) | Local_workspace_read (_, _) | Lanes_loaded (_, _)
+        | Lane_inventory_loaded (_, _) | Clients_loaded (_, _) | Lane_runs_loaded (_, _, _, _)
+        | Lane_run_detail_loaded (_, _, _) | Measurement_artifact_loaded (_, _, _)
+        | Verification_loaded _ | Harness_loaded _ | Fusion_runs_loaded (_, _)
+        | Fusion_detail_loaded (_, _, _) | Fusion_historical_detail_loaded (_, _, _)
+        | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _) | Repositories_loaded _
+        | Workspace_activity_loaded (_, _) | Memory_loaded _ | Memory_input_loaded (_, _)
+        | Memory_facts_loaded (_, _) | Repository_changes_loaded (_, _)
+        | Repository_changes_diff_loaded (_, _) | File_changes_loaded (_, _)
+        | Keeper_chat_file_changes_loaded (_, _, _) | Git_diff_loaded (_, _)
+        | Browser_history_list_loaded (_, _) | Browser_history_page_loaded (_, _)
+        | Browser_lane_clients_loaded (_, _) | Browser_lane_loaded (_, _)
+        | Browser_lane_action_done (_, _) | Browser_lane_scene_loaded (_, _)
+        | Browser_lane_follow_loaded (_, _) | Browser_lane_screenshot_ready _
+        | Connectors_loaded (_, _) | Connector_unbind_all_done _ | Runtime_surface_loaded (_, _)
+        | Tools_loaded (_, _, _) | Skills_catalog_loaded (_, _) | Skill_evidence_loaded (_, _, _)
+        | Tools_async_observation_loaded (_, _) | Runtime_lane_slots_written (_, _, _)
+        | Runtime_catalog_loaded (_, _) | Runtime_assignment_set (_, _, _)
+        | Keeper_chat_approval_answered (_, _, _, _) | Keeper_tool_approvals_loaded (_, _, _)
+        | Sent_image_ready _ | Image_render_ready _ | Keeper_turns_loaded (_, _)
+        | Keeper_chat_control_received (_, _, _) | Gate_approval_resolved (_, _, _, _, _)
+        | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)
+        | Surface_tool_approval_answered (_, _, _, _, _) | Keeper_gate_settings_loaded _
+        | Keeper_tool_modes_loaded (_, _) | Keeper_tool_mode_set (_, _, _, _)
+        | Keeper_chat_dispatch_blocked (_, _) | Keeper_action_done (_, _, _, _)
+        | Board_new_post_done _ | Board_vote_done _ | Goal_transition_done _
+        | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
+        | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
+        | System_logs_loaded _ | Schedule_cancel_done (_, _) | Verification_verdict_done _
+        | Harness_label_done _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
+        | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
+        | Verification_evidence_loaded (_, _) | Keeper_config_view_loaded (_, _)
+        | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
+        | Keeper_sandbox_logs_loaded (_, _, _) | Exact_activity_read (_, _)
+        | Exact_activity_saved (_, _) | Browser_activity_read (_, _) | Browser_activity_saved (_, _)
+        | Machine_activity_read (_, _) | Machine_activity_saved (_, _)
+        | Runtime_config_view_loaded (_, _, _) | Runtime_params_loaded _
+        | Runtime_param_written (_, _) | Prompts_loaded (_, _)
+        | Keeper_board_quarantines_loaded (_, _) | Board_quarantine_requeued (_, _, _)
+        | Board_quarantines_bulk_progress (_, _, _, _, _, _)
+        | Board_quarantines_bulk_requeued (_, _) | Presets_listed (_, _)
+        | Preset_detail_loaded (_, _) | Preset_contents_shown (_, _) | Preset_saved (_, _)
+        | Preset_restored (_, _) | Preset_deleted (_, _) | Play_room_received (_, _)
+        | Play_invites_listed (_, _) | Play_invite_revoked (_, _, _, _)
+        | Librarian_input_loaded (_, _) | Resources_listed _ | Code_entries_loaded (_, _)
+        | Code_file_loaded (_, _, _) | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
+        | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _) | Code_lsp_answered (_, _)
+        | Resource_read (_, _) | Github_identity_view_loaded (_, _)
+        | Identity_providers_loaded (_, _, _) | Identity_switch_set (_, _, _, _)
+        | Identity_login_started (_, _) | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
+        | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
+        | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
+        | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_opened _
+        | Observer_received (_, _) | Observer_closed _ | Task_dispatched _ | Task_dispatch_failed _ -> ())
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
         state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
@@ -15228,7 +15571,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               | Error detail -> receipt @ ["Read unavailable: " ^ detail] in
             Notice_reply,
             ("Queue snapshot (refresh with /queue)" :: lines @
-             ["/queue pause · /queue resume · /queue cancel ID · /queue edit ID message · /queue last ID";
+             [Masc_tui_command.usage Masc_tui_command.queue_help;
               "Events: /queue cancel-event REF INCARNATION reason · /queue priority-event REF INCARNATION immediate|normal|low";
               "Enter queues your line in arrival order; Esc stops the current turn and pauses queue consumption."])
       in
@@ -15293,7 +15636,12 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               && Option.is_none view.action_menu && Option.is_none view.installer && Option.is_none view.subscription_panel
               && Option.is_none view.evidence_prompt ->
            launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
-       | _ -> ())
+       | (Ok { lar_action = Some { Masc.Lane_addon_action.state = (Masc.Lane_addon_action.Confirmed | Masc.Lane_addon_action.Failed_before_effect | Masc.Lane_addon_action.Outcome_unknown);_};_}, None)
+       | (Ok { lar_action = Some { state = (Masc.Lane_addon_action.Queued | Masc.Lane_addon_action.Running);_};_}, _)
+       | (Ok { lar_action = None;_}, _) | (Error _, _)
+       | (Ok {lar_action=Some {state=Confirmed; _ }; _ }, Some _)
+       | (Ok {lar_action=Some {state=Failed_before_effect; _ }; _ }, Some _)
+       | (Ok {lar_action=Some {state=Outcome_unknown; _ }; _ }, Some _) -> ())
   | Lane_declaration_loaded (generation, request, edit, create_directory, result) ->
       (match state.lane_nested_read_resume with
        | Some (pending, _) when pending = generation -> state.lane_nested_read_resume <- None
@@ -15647,7 +15995,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       (match state.view with
        | Overview | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
-       | _ -> ());
+       | Acting | Metrics | Memory | Lanes | Clients | Board | Planning | Schedules | Verification
+       | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime | Config
+       | Resources | Tools | System_logs -> ());
       (* The refresh that confirmed this identity also confirmed its own
          listing request, so its confirm-queue answer was refused as
          superseded before it could ever be drawn. The other approval
@@ -15774,7 +16124,20 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                | Masc_tui_observer.Agent_core { kind = Masc_tui_observer.Tool_completed; _ }
                  when acted_by_pane_keeper event ->
                    pane_keeper_acted := true
-               | Masc_tui_observer.Agent_core _
+               | Masc_tui_observer.Agent_core
+                   { kind =
+                       ( Masc_tui_observer.Tool_called | Masc_tui_observer.Tool_completed
+                       | Masc_tui_observer.Turn_started | Masc_tui_observer.Turn_ready
+                       | Masc_tui_observer.Turn_completed
+                       | Masc_tui_observer.Agent_started
+                       | Masc_tui_observer.Agent_completed _
+                       | Masc_tui_observer.Agent_failed _
+                       | Masc_tui_observer.Agent_yielded _
+                       | Masc_tui_observer.Agent_input_required _
+                       | Masc_tui_observer.Tool_approval_completed
+                       | Masc_tui_observer.Telemetry
+                       | Masc_tui_observer.Agent_core_other _ );
+                     _ }
                | Masc_tui_observer.Keeper_heartbeat _
                | Masc_tui_observer.Keeper_tool_call _
                | Masc_tui_observer.Keeper_turn_complete _
@@ -15971,7 +16334,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       (match state.view with
        | Overview | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
        | Keepers _ -> launch_keeper_tool_modes_load state ~mailbox
-       | _ -> ());
+       | Acting | Metrics | Memory | Lanes | Clients | Board | Planning | Schedules | Verification
+       | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime | Config
+       | Resources | Tools | System_logs -> ());
       end;
       start_scoped_refresh_followup state ~host:(server_peer_host)
         ~port:state.port ~refresh_inflight:http_refresh_inflight
@@ -16063,8 +16428,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
       end
-  | Board_new_post_done { reply_to; sent_draft; result } ->
+  | Board_new_post_done { reply_to; sent_draft; sent_attachments; result } ->
       Masc_tui_board_updates.new_post_done state ~reply_to ~sent_draft
+        ~sent_attachments
         ~report:(report_action state)
         ~refresh:(fun () ->
           start_http_refresh state ~host:server_peer_host
@@ -16087,7 +16453,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       (match message, state.goal_confirmation with
        | Goal_confirmation_submitted _, Goal_confirmation.Submitting (_, read) ->
            state.goal_confirmation <- Goal_confirmation.Inspecting read
-       | _ -> ());
+       | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
+       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( Http_refresh_done _ | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( Keeper_chat_history_loaded (_, _, _, _) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | ( Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( Connectors_loaded (_, _) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( Tools_async_observation_loaded (_, _) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_set (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( Board_vote_done _ | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( Resources_listed _ | ( Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatched _ | Task_dispatch_failed _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
       match result with
       | Ok message ->
           state.goal_action_pending <- None;
@@ -16132,7 +16499,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       (match state.planning_mode with
        | Planning_detail current when String.equal current goal_id ->
            state.goal_timeline <- Some (goal_id, result)
-       | _ -> ())
+       | Planning_list | Planning_detail _ -> ())
   | Task_history_loaded (task_id, result) ->
       (match state.task_detail_id with
        | Some current when String.equal current task_id ->
@@ -16169,7 +16536,10 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               Option.exists
                 (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
                 (selected_keeper state)
-          | _ -> false
+          | Keepers (Keeper_list | (Keeper_detail | (Keeper_logs | Keeper_runtime_pick))) | Overview
+          | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals | Planning | Schedules
+          | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
+          | Config | Resources | Tools | System_logs -> false
         in
         if refresh_pending && still_visible then
           launch_keeper_calls_load ~force:true state ~mailbox keeper_name
@@ -16806,7 +17176,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       (match state.account_login with
        | Some current when current == view && view.generation = generation ->
          let action = Masc_tui_account_login.event ~generation view event in
-         (match event with Masc_tui_account_login.Started _ | Login_failed _ -> remember_account_login state view | _ -> ());
+         (match event with
+           | Masc_tui_account_login.Started _ | Login_failed _ -> remember_account_login state view
+           | Masc_tui_account_login.Output _ | Input_ready | Complete _ | Login_error -> ());
          launch_account_login_action state ~mailbox view action
        | Some _ | None -> ())
   | Account_login_json (view, generation, action, result) ->
@@ -16835,8 +17207,19 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               the transport's for a dropped connection. A fixed sentence here
               hid which runtime a save's verification refused. *)
            | Login.Save _, Error detail -> Error detail
-           | _, Error detail -> Error (detail ^ " · r로 다시 확인하세요.")
-           | _, Ok json -> (match action with
+           | (Login.Inventory, Error detail) | (Login.Select_existing _, Error detail)
+           | (Login.Start _, Error detail) | (Login.Cancel, Error detail)
+           | (Login.Recover, Error detail) | (Login.Discover, Error detail)
+           | (Login.Prepare _, Error detail) | (Login.Close, Error detail)
+           | (Login.Nothing, Error detail) | (Login.Preview_removal _, Error detail)
+           | (Login.Remove _, Error detail) | (Login.Refresh_removed _, Error detail)
+           | (Login.Refresh_list _, Error detail) -> Error (detail ^ " · r로 다시 확인하세요.")
+           | (Login.Inventory, Ok json) | (Login.Select_existing _, Ok json)
+           | (Login.Start _, Ok json) | (Login.Cancel, Ok json) | (Login.Recover, Ok json)
+           | (Login.Discover, Ok json) | (Login.Prepare _, Ok json) | (Login.Save _, Ok json)
+           | (Login.Close, Ok json) | (Login.Nothing, Ok json) | (Login.Preview_removal _, Ok json)
+           | (Login.Remove _, Ok json) | (Login.Refresh_removed _, Ok json)
+           | (Login.Refresh_list _, Ok json) -> (match action with
              | Login.Inventory ->
                (match Login.inventory view json with
                 | Ok () -> restore_account_login state view; Ok () | Error _ as error -> error)
@@ -16871,7 +17254,10 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             (match action with
              | Login.Save _ -> Login.save_failed view message
              | Login.Input _ -> view.notice<-message
-             | _ -> view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-message))
+             | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Recover | Login.Discover
+             | Login.Close | Login.Nothing | Login.Activate_saved _ | Login.Refresh_saved _
+             | Login.Select_existing _ | Login.Start _ | Login.Prepare _ | Login.Preview_removal _
+             | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ -> view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-message))
        | Some _ | None -> ())
   | Account_login_removal (view, generation, provider, login_store, outcome) ->
       (match state.account_login with
@@ -17088,7 +17474,28 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               && List.exists
                    (function
                      | {Keeper_chat_live.delta=Keeper_chat_live.Tool_result _; _} -> true
-                     | _ -> false)
+                     | {Keeper_chat_live.delta=
+                          ( Keeper_chat_live.Run_started | Keeper_chat_live.Checkpoint
+                          | Keeper_chat_live.External_effect_completed
+                          | Keeper_chat_live.Run_finished
+                          | Keeper_chat_live.Batch_bound _
+                          | Keeper_chat_live.Runtime_attempt_started _
+                          | Keeper_chat_live.Provider_retry_observed _
+                          | Keeper_chat_live.Stream_model_started _
+                          | Keeper_chat_live.Model_content_activity _
+                          | Keeper_chat_live.Stream_model_stopped _
+                          | Keeper_chat_live.Stream_details _ | Keeper_chat_live.Text _
+                          | Keeper_chat_live.Thinking _
+                          | Keeper_chat_live.Native_tool_started _
+                          | Keeper_chat_live.Native_tool_progress _
+                          | Keeper_chat_live.Native_tool_ended _
+                          | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_args _
+                          | Keeper_chat_live.Tool_ended _
+                          | Keeper_chat_live.Stream_protocol_error _
+                          | Keeper_chat_live.Approval_requested _
+                          | Keeper_chat_live.Approval_settled _
+                          | Keeper_chat_live.Accepted _ | Keeper_chat_live.Reply_details _
+                          | Keeper_chat_live.Run_failed _ | Keeper_chat_live.Undecodable _ ); _} -> false)
                    deltas
            then
              launch_keeper_calls_load ~force:true state ~mailbox
@@ -17097,13 +17504,39 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              | Keeper_chat_live.Accepted {interactive=None;_} ->
                launch_keeper_turns_load state ~mailbox
              | Keeper_chat_live.Accepted {interactive=Some _;_} -> ()
-             | _ -> ()) deltas;
+             | Keeper_chat_live.Run_started | Keeper_chat_live.Checkpoint
+             | Keeper_chat_live.External_effect_completed | Keeper_chat_live.Run_finished
+             | Keeper_chat_live.Batch_bound _ | Keeper_chat_live.Runtime_attempt_started _
+             | Keeper_chat_live.Provider_retry_observed _ | Keeper_chat_live.Stream_model_started _
+             | Keeper_chat_live.Model_content_activity _ | Keeper_chat_live.Stream_model_stopped _
+             | Keeper_chat_live.Stream_details _ | Keeper_chat_live.Text _
+             | Keeper_chat_live.Thinking _ | Keeper_chat_live.Native_tool_started _
+             | Keeper_chat_live.Native_tool_progress _ | Keeper_chat_live.Native_tool_ended _
+             | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_args _
+             | Keeper_chat_live.Tool_ended _ | Keeper_chat_live.Tool_result _
+             | Keeper_chat_live.Stream_protocol_error _ | Keeper_chat_live.Approval_requested _
+             | Keeper_chat_live.Approval_settled _ | Keeper_chat_live.Reply_details _
+             | Keeper_chat_live.Run_failed _ | Keeper_chat_live.Undecodable _ -> ()) deltas;
            if List.exists (Keeper_chat.same_request_identity request)
                 state.keeper_run_next_pending then begin
               let acceptance = List.find_map (fun (item : Keeper_chat_live.observed_delta) -> match item.delta with
                 | Keeper_chat_live.Accepted {admission; interactive; _} ->
                   Some (admission, interactive)
-                | _ -> None) deltas in
+                | Keeper_chat_live.Run_started | Keeper_chat_live.Checkpoint
+                | Keeper_chat_live.External_effect_completed | Keeper_chat_live.Run_finished
+                | Keeper_chat_live.Batch_bound _ | Keeper_chat_live.Runtime_attempt_started _
+                | Keeper_chat_live.Provider_retry_observed _
+                | Keeper_chat_live.Stream_model_started _
+                | Keeper_chat_live.Model_content_activity _
+                | Keeper_chat_live.Stream_model_stopped _ | Keeper_chat_live.Stream_details _
+                | Keeper_chat_live.Text _ | Keeper_chat_live.Thinking _
+                | Keeper_chat_live.Native_tool_started _ | Keeper_chat_live.Native_tool_progress _
+                | Keeper_chat_live.Native_tool_ended _ | Keeper_chat_live.Tool_started _
+                | Keeper_chat_live.Tool_args _ | Keeper_chat_live.Tool_ended _
+                | Keeper_chat_live.Tool_result _ | Keeper_chat_live.Stream_protocol_error _
+                | Keeper_chat_live.Approval_requested _ | Keeper_chat_live.Approval_settled _
+                | Keeper_chat_live.Reply_details _ | Keeper_chat_live.Run_failed _
+                | Keeper_chat_live.Undecodable _ -> None) deltas in
               (match acceptance with
                | Some (Keeper_chat_live.Queued, interactive) ->
                  state.keeper_run_next_pending <- List.filter
@@ -17150,7 +17583,32 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                | None -> ())
            end;
            if List.exists (fun (item : Keeper_chat_live.observed_delta) -> match item.delta with
-             | Keeper_chat_live.Accepted _ -> true | _ -> false) deltas then
+             | Keeper_chat_live.Accepted _ -> true | Keeper_chat_live.Run_started
+                                                   | Keeper_chat_live.Checkpoint
+                                                   | Keeper_chat_live.External_effect_completed
+                                                   | Keeper_chat_live.Run_finished
+                                                   | Keeper_chat_live.Batch_bound _
+                                                   | Keeper_chat_live.Runtime_attempt_started _
+                                                   | Keeper_chat_live.Provider_retry_observed _
+                                                   | Keeper_chat_live.Stream_model_started _
+                                                   | Keeper_chat_live.Model_content_activity _
+                                                   | Keeper_chat_live.Stream_model_stopped _
+                                                   | Keeper_chat_live.Stream_details _
+                                                   | Keeper_chat_live.Text _
+                                                   | Keeper_chat_live.Thinking _
+                                                   | Keeper_chat_live.Native_tool_started _
+                                                   | Keeper_chat_live.Native_tool_progress _
+                                                   | Keeper_chat_live.Native_tool_ended _
+                                                   | Keeper_chat_live.Tool_started _
+                                                   | Keeper_chat_live.Tool_args _
+                                                   | Keeper_chat_live.Tool_ended _
+                                                   | Keeper_chat_live.Tool_result _
+                                                   | Keeper_chat_live.Stream_protocol_error _
+                                                   | Keeper_chat_live.Approval_requested _
+                                                   | Keeper_chat_live.Approval_settled _
+                                                   | Keeper_chat_live.Reply_details _
+                                                   | Keeper_chat_live.Run_failed _
+                                                   | Keeper_chat_live.Undecodable _ -> false) deltas then
              launch_waiting_keeper_input state ~mailbox
                ~keeper_name:request.Keeper_chat.keeper_name;
            if Keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript
@@ -17213,7 +17671,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
          | Ok { Masc_tui_http.settled = true; _ }
          | Ok { Masc_tui_http.remembered = true; _ } ->
              Message_status
-         | _ -> Message_error)
+         | Ok { remembered = false; settled = false } | Error _ -> Message_error)
         text
   | Keeper_tool_approvals_loaded (request, expected_workspace, result) ->
       (match Snapshot_read.settle state.keeper_tool_approvals_read request with
@@ -17362,7 +17820,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                         | None -> Ok ()
                         | Some (Masc_tui_machine_live.Failed detail) ->
                             Error detail
-                        | Some live ->
+                        | Some ((Masc_tui_machine_live.Unread | Masc_tui_machine_live.Not_loaded
+                                | Masc_tui_machine_live.Showing _) as live) ->
                             let live,frame = msx_frame_of_live ~previous_live:state.msx_live ~previous_frame:state.msx_frame live in
                             state.msx_live <- live; state.msx_frame <- frame; msx_surface_frame := frame;
                             Ok () in
@@ -17395,7 +17854,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                   msx_surface_frame := frame);
              (match !msx_pending_poll with
               | Poll_ready Outcome_unknown when Result.is_ok result && Option.is_some state.msx_frame -> msx_pending_poll := Poll_ready Advancing
-              | Poll_ready _ | Poll_pending _ | Poll_observing _ -> ());
+              | Poll_ready (Advancing | Observing _ | Outcome_unknown)
+              | Poll_pending _ | Poll_observing _ -> ());
              state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
              render_spectator state
            end
@@ -17493,7 +17953,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            (match state.view, state.msg_target_keeper_name with
             | Keepers Keeper_message, Some keeper_name ->
                 launch_current_autonomous_journals state ~mailbox ~keeper_name
-            | _ -> ());
+            | (Keepers (Keeper_message), None)
+            | (Keepers (Keeper_list | (Keeper_detail | (Keeper_logs | (Keeper_calls | Keeper_runtime_pick)))), _)
+            | ((Overview | (Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | System_logs))))))))))))))))))))), _) -> ());
            List.iter (fun row -> launch_waiting_keeper_input state ~mailbox
              ~keeper_name:row.Tui_decode.ktr_keeper_name) fresh
        | Error detail ->
@@ -17675,7 +18137,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
          | Ok { Masc_tui_http.settled = true; _ }
          | Ok { Masc_tui_http.remembered = true; _ } ->
              "system"
-         | _ -> "error")
+         | Ok { remembered = false; settled = false } | Error _ -> "error")
         (match result with
          | Ok { Masc_tui_http.settled = true; _ } ->
              Printf.sprintf "%s %s's held call %s"
@@ -17762,10 +18224,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Some entry when Keeper_chat.same_request_identity entry.sent_request request ->
            Masc_tui_types.retain_preflight_inputs state [entry]
        | Some _ | None -> ());
-      settle_live_turn state request ~record:None;
       (match inflight_by_request_id state request.Keeper_chat.request_id with
        | Some current when Keeper_chat.same_request_identity current request ->
-           drop_inflight state request;
+           withdraw_undispatched_request state request;
            report_action state "error"
              (Printf.sprintf "Keeper request %s was not dispatched: %s"
                 request.request_id detail)
@@ -18012,7 +18473,27 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              && List.exists
                   (function
                     | _, Keeper_chat_live.Tool_result _ -> true
-                    | _ -> false)
+                    | _, ( Keeper_chat_live.Run_started | Keeper_chat_live.Batch_bound _
+                         | Keeper_chat_live.Runtime_attempt_started _
+                         | Keeper_chat_live.Provider_retry_observed _
+                         | Keeper_chat_live.Stream_model_started _
+                         | Keeper_chat_live.Model_content_activity _
+                         | Keeper_chat_live.Stream_model_stopped _
+                         | Keeper_chat_live.Stream_details _ | Keeper_chat_live.Text _
+                         | Keeper_chat_live.Thinking _
+                         | Keeper_chat_live.Native_tool_started _
+                         | Keeper_chat_live.Native_tool_progress _
+                         | Keeper_chat_live.Native_tool_ended _
+                         | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_args _
+                         | Keeper_chat_live.Tool_ended _
+                         | Keeper_chat_live.Stream_protocol_error _
+                         | Keeper_chat_live.Approval_requested _
+                         | Keeper_chat_live.Approval_settled _
+                         | Keeper_chat_live.Accepted _ | Keeper_chat_live.Checkpoint
+                         | Keeper_chat_live.External_effect_completed
+                         | Keeper_chat_live.Reply_details _
+                         | Keeper_chat_live.Run_failed _ | Keeper_chat_live.Run_finished
+                         | Keeper_chat_live.Undecodable _ ) -> false)
                   accepted
           then launch_keeper_calls_load ~force:true state ~mailbox keeper_name;
           (match state.msg_loaded_keeper with
@@ -18218,7 +18699,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                   | Some false -> refuse terminal_draws_no_images
                   | Some true | None ->
                       draw_browser_viewport state shot bytes)
-             | _ ->
+             | None, (Ok _ | Error _) | Some _, Error _ ->
                  if Option.is_some state.browser_viewport then close_image state)
   | Browser_lane_action_done (generation, result) ->
       (match state.browser_lane with
@@ -18241,7 +18722,13 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                      state.browser_lane <- Some
                        (Browser_lane_view.after_action view);
                      launch_browser_lane state ~mailbox Browser_lane_view.Read)
-            | Loading _ | Idle | No_browser | Failed _ -> ())
+            | Browser_lane_view.Loading
+                (_, ( Close_session | Open_session | Goto _ | Discover _ | Read
+                    | Screenshot _ | Read_refresh | Scene_read _ | Scene_regions _
+                    | Scene_refresh _ | Scene_scroll _ | Scene_focus _ | Scene_click _
+                    | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+                    | Viewport_cadence _ | Viewport_pointer _ ))
+            | Idle | No_browser | Failed _ -> ())
        | None -> ())
   | Connector_unbind_all_done { keeper_name; results } ->
       state.connector_unbind_all_inflight <- false;
@@ -18624,7 +19111,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                       state.slot_editor <- Some { editor with se_selection = Some next }
                   | _ -> ());
                  state.runtime_lane_replacement_selection <- None
-             | _ -> ());
+             | Lane_write_rereading (Runtime_surface_list, _, _) | Lane_write_idle
+             | Lane_write_posting | Lane_write_rereading (Standalone_lanes_list, _, _) -> ());
             Masc_tui_types.reconcile_slot_editor_selection state;
             state.standalone_lanes_error <- None;
             (* Reuse the same geometry as key movement after identity retention. *)
@@ -18677,7 +19165,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                  | Some _, Lanes_run_list _, _ :: _ ->
                    state.lane_runs_cursor <- List.length previous;
                    state.lane_runs_scroll <- List.length previous
-                 | _ -> state.lane_runs_cursor <-
+                 | (Some _, Lanes_run_list _, [])
+                 | (Some _, (Lanes_overview | (Lanes_run_detail (_, _) | (Lanes_measurement_detail _ | Lanes_inventory_detail _))), _)
+                 | (None, _, _) -> state.lane_runs_cursor <-
                    max 0 (min state.lane_runs_cursor (List.length runs - 1)))
             | Error detail ->
                 (* A failed page retains both the rows and its retry cursor.
@@ -19151,7 +19641,7 @@ let main
        state.opening_mode <- opening;
        state.opening_notice <-
          Some "Could not open last chat (no saved Keeper). Showing Dashboard."
-   | Ok opening ->
+   | Ok ((Masc_tui_config.Last (Some _) | Masc_tui_config.Keeper _) as opening) ->
        state.opening_mode <- opening;
        state.opening_pending <- true
    | Error reason ->
@@ -19514,7 +20004,20 @@ let main
         (match reader with
          | Some (Planning_confirmation_scroll (_, Some confirmation)) ->
              state.goal_confirmation_presented <- Some confirmation
-         | Some _ | None -> ());
+         | Some (Task_detail _) | None | Some (Board_read _) | Some (Message_scroll _)
+         | Some (Schedule_detail_scroll _) | Some (Keeper_detail _) | Some (Keeper_calls _)
+         | Some (Keeper_logs_scroll _) | Some (Acting _) | Some (Acting_selection (_, _))
+         | Some (Acting_detail_scroll _) | Some (Memory_fact_detail_scroll _)
+         | Some (Client_detail_scroll _) | Some (Verification_detail_scroll _)
+         | Some (Harness_detail_scroll _) | Some (Fusion_detail_scroll _)
+         | Some (Runtime_detail_scroll _) | Some (Runtime_params_scroll _)
+         | Some (System_log_detail_scroll _) | Some (Planning_confirmation_scroll (_, _))
+         | Some (Planning_detail_scroll _) | Some (Lane_run_detail_scroll _)
+         | Some (Changes_diff_scroll _) | Some (Repository_changes_diff_scroll _)
+         | Some (Resource_scroll _) | Some (Metrics_scroll _) | Some (Approval_detail_scroll _)
+         | Some (Patch_modal_scroll (_, _)) | Some (Link_modal_scroll _)
+         | Some (Play_invite_scroll _) | Some (Voice_scroll _) | Some (Preset_detail_scroll _)
+         | Some (Keeper_list_scroll _) | Some (Context_inspector_scroll _) -> ());
         commit_presented_approval approval;
         presented_presses := presses;
         presented_reader := reader;
@@ -19728,7 +20231,14 @@ let main
     let keeper_name =
       match state.view, selected_keeper state with
       | Keepers Keeper_detail, Some keeper -> keeper.k_name
-      | _, _ -> ""
+      | (Overview, _) | (Acting, _) | (Metrics, _)
+      | (Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
+                  | Keeper_message | Keeper_runtime_pick), _)
+      | (Memory, _) | (Lanes, _)
+      | (Clients, _) | (Board, _) | (Approvals, _) | (Planning, _) | (Schedules, _)
+      | (Verification, _) | (Harness, _) | (Fusion, _) | (Repositories, _) | (Code, _)
+      | (Changes, _) | (Connectors, _) | (Runtime, _) | (Config, _) | (Resources, _) | (Tools, _)
+      | (System_logs, _) -> ""
     in
     match selected_connector () with
     | None -> report_action state "error" "bind: select a transport first"
@@ -19811,7 +20321,10 @@ let main
                          "unbind armed: press u again to remove %s → %s"
                          label binding.cb_keeper_name)
                   end)
-         | _ -> submit "")
+         | Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick))))
+         | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals | Planning
+         | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+         | Runtime | Config | Resources | Tools | System_logs -> submit "")
   in
   (* [U] twice: every binding the selected Keeper holds, on every transport.
      The first press names each channel; the second sends exactly those, each
@@ -20808,7 +21321,9 @@ and is loaded on demand through keeper_skill.
                   state.keeper_config_view_error <- None;
                   launch_keeper_config_view state
                     ~mailbox:async_messages keeper.k_name
-                | Error error ->
+                | Error
+                    (( Masc_tui_http.Keeper_config_transport_error _
+                     | Masc_tui_http.Keeper_config_http_error _ ) as error) ->
                   report_action state "error"
                     (Masc_tui_http.keeper_config_post_error_to_string error)
                 | Ok response ->
@@ -21297,7 +21812,9 @@ and is loaded on demand through keeper_skill.
                  but nothing is drawn: the operator sees no answer to Ctrl-G. *)
               Render_schedule.request render_schedule Render_schedule.Input;
               None
-          | other -> other
+          | (Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
+                  | Mouse_left_release _ | Mouse_wheel _)
+            | None) as other -> other
         else input
       in
       (* The footer's notice answers the last key. The next input is a new
@@ -21407,7 +21924,9 @@ and is loaded on demand through keeper_skill.
                  press and release or reopen a dismissed viewport. *)
               state.image_request_generation <- state.image_request_generation + 1;
               state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
-          | _ -> ()
+          | Some { load = Browser_lane_view.Loading (_, (Browser_lane_view.Read | (Browser_lane_view.Open_session | (Browser_lane_view.Close_session | (Browser_lane_view.Read_refresh | (Browser_lane_view.Discover _ | (Browser_lane_view.Goto _ | (Browser_lane_view.Screenshot _ | (Browser_lane_view.Scene_read _ | (Browser_lane_view.Scene_regions _ | (Browser_lane_view.Scene_refresh _ | (Browser_lane_view.Scene_scroll _ | (Browser_lane_view.Scene_focus _ | (Browser_lane_view.Scene_click _ | (Browser_lane_view.Scene_follow _ | (Browser_lane_view.Scene_follow_refresh _ | (Browser_lane_view.Viewport_refresh _ | Browser_lane_view.Viewport_pointer _)))))))))))))))));_}
+          | Some { load = (Browser_lane_view.Idle | (Browser_lane_view.No_browser | Browser_lane_view.Failed _));_}
+          | None -> ()
       end;
       (* The key channel stays exactly what it was: every surface below reads
          [key] the way it always has, and a paste is simply not one. Splitting
@@ -21477,7 +21996,7 @@ and is loaded on demand through keeper_skill.
             | Key ("k" | "up") -> scroll_at {x=0.5;y=0.5} (-120)
             | Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_down,row,column) -> wheel row column 120
             | Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_up,row,column) -> wheel row column (-120)
-            | _ -> ())
+            | Key _ | Pasted _ | Graphics_reply _ -> ())
        | _ -> ());
       let input = if viewport_owned_input then None else input in
       let dismissed_image =
@@ -21497,7 +22016,8 @@ and is loaded on demand through keeper_skill.
         else if state.msx_open then
           match input with
           | Some (Key name) -> Some name
-          | Some _ -> Some ""  (* deliberate non-key input: step, own it *)
+          | Some (Pasted _) | Some (Graphics_reply _) | Some (Mouse_left_press (_, _))
+          | Some (Mouse_left_release (_, _)) | Some (Mouse_wheel (_, _, _)) -> Some ""  (* deliberate non-key input: step, own it *)
           | None -> None
         else None
       in
@@ -21545,7 +22065,8 @@ and is loaded on demand through keeper_skill.
               if not room_visible && not (List.mem name ["esc"; "tab"; "\t"]) then room, Masc_tui_play_room.Repaint
               else match input with
                 | Some (Pasted paste) -> Masc_tui_play_room.paste room paste.Masc_tui_paste.text, Masc_tui_play_room.Repaint
-                | _ -> Masc_tui_play_room.key room name in
+                | Some (Key _ | (Graphics_reply _ | (Mouse_left_press (_, _) | (Mouse_left_release (_, _) | Mouse_wheel (_, _, _)))))
+                | None -> Masc_tui_play_room.key room name in
             state.play_room <- Some room;
             (match intent with Repaint -> () | Send -> send_play_room state ~mailbox:async_messages)) state.play_room;
           render_spectator state
@@ -21745,7 +22266,9 @@ and is loaded on demand through keeper_skill.
                && acting_pane_hit state ~row ~column = Pane_miss ->
             Option.bind !presented_reader (fun reader ->
                 reader_after_wheel (clamped_scroll_now state reader) direction)
-        | Some _ | None -> None
+        | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
+               | Mouse_left_release _ | Mouse_wheel _)
+        | None -> None
       in
       let key =
         if dismissed_image || Option.is_some msx_key then None
@@ -21811,7 +22334,9 @@ and is loaded on demand through keeper_skill.
                && Option.is_none msx_key
                && Option.is_none text_target ->
             Masc_tui_hit.target_at !presented_presses ~row ~column
-        | Some _ | None -> None
+        | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
+               | Mouse_left_release _ | Mouse_wheel _)
+        | None -> None
       in
       (match input with
        (* The invite card owns every key, and a paste is keys. One that reached
@@ -21955,6 +22480,13 @@ and is loaded on demand through keeper_skill.
                 Buffer.add_string state.board_draft
                   (Keeper_chat.terminal_safe_text ~preserve_newlines:true
                      paste.Masc_tui_paste.text)
+            (* A path is what an operator pastes, or drops onto the terminal.
+               It belongs to the input that is open, not to the post under
+               it, where it would be published as text. *)
+            | Some Text_board_attach_path ->
+                Option.iter
+                  (fun input -> Buffer.add_string input text)
+                  state.board_compose_attach_input
             (* A prompt holds many lines, like a board post; the form puts
                the text into whichever field its cursor is on. *)
             | Some Text_fusion_launch ->
@@ -22654,7 +23186,9 @@ and is loaded on demand through keeper_skill.
                          let width = framed_inner_width cols in
                          let last = List.length (Addons.lines ~width view) - 1 in
                          update { view with scroll = max 0 (min last (view.scroll + (if key = "J" then 1 else -1))) }
-                     | "left" | "right" when (match view.focus with Addons.Timeline | Addons.Connections -> true | _ -> false) ->
+                     | "left" | "right" when (match view.focus with
+                       | Addons.Timeline | Addons.Connections -> true
+                       | Addons.Configurations | Instances | Rows -> false) ->
                          let delta = if key = "right" then 1 else -1 in
                          update (Addons.move_lane view delta)
                      | "j" | "down" | "k" | "up" ->
@@ -22777,7 +23311,7 @@ and is loaded on demand through keeper_skill.
                    | Masc_tui_types.Renaming_lane _
                      when Masc_tui_types.runtime_lane_write_busy state ->
                        state.runtime_lane_notice <- Some Masc_tui_types.Lane_write_pending
-                   | _ ->
+                   | Masc_tui_types.Naming_new_lane _ | Masc_tui_types.Renaming_lane _ ->
                      state.runtime_lane_name_draft <- None;
                      Masc_tui_types.dismiss_runtime_lane_notice state;
                      match entry with
@@ -23212,7 +23746,9 @@ and is loaded on demand through keeper_skill.
                 (match state.home_opened_request with
                  | Some (Home_question _) ->
                      goto_surface state ~mailbox:async_messages Overview
-                 | Some _ | None -> ())
+                 | Some (Home_held_call _) | None | Some (Home_gate_request _)
+                 | Some (Home_operator_request _) | Some (Home_goal_confirmation _)
+                 | Some (Home_operator_task _) -> ())
             | "left" | "up" | "k" -> move_ask_question_cursor state (-1)
             | "right" | "down" | "j" -> move_ask_question_cursor state 1
             | "pageup" | "pagedown" | "wheel-up" | "wheel-down" ->
@@ -23295,7 +23831,13 @@ and is loaded on demand through keeper_skill.
                      { provider_input = Ok input; _ }
                  ) ->
                  Masc_tui_context_inspector.exact_input_items input
-             | Some _ | None -> []
+             | Some
+                 ( _
+                 , ( Masc_tui_context_inspector.Request_failed _
+                   | Masc_tui_context_inspector.Turn_read_failed _
+                   | Masc_tui_context_inspector.Turn_read
+                       { provider_input = Error _; _ } ) )
+             | None -> []
            in
            let input_map_rows () =
              match state.context_inspector_reading with
@@ -23320,7 +23862,11 @@ and is loaded on demand through keeper_skill.
                      Masc_tui_context_inspector.input_map_rows
                        attributed.Masc_tui_context_inspector.record
                        provider_input)
-             | Some _ | None -> []
+             | Some
+                 ( _
+                 , ( Masc_tui_context_inspector.Request_failed _
+                   | Masc_tui_context_inspector.Turn_read_failed _ ) )
+             | None -> []
            in
            let close () = close_context_inspector state in
            (match k with
@@ -23343,7 +23889,8 @@ and is loaded on demand through keeper_skill.
                           { selection = { Masc_tui_context_inspector.rows; _ }
                         ; _ } ) ->
                       List.length rows
-                  | _ -> 0
+                  | Some (_, (Masc_tui_context_inspector.Request_failed _ | Masc_tui_context_inspector.Turn_read_failed _))
+                  | None -> 0
                 in
                 if count > 0 then begin
                   let moved =
@@ -23519,7 +24066,7 @@ and is loaded on demand through keeper_skill.
             | "r" -> launch_keeper_deletions state ~mailbox:async_messages ()
             | "j" | "down" | "k" | "up" ->
               let count = match state.keeper_deletions with
-                | Some (Ok inventory) -> List.length inventory.operations | _ -> 0 in
+                | Some (Ok inventory) -> List.length inventory.operations | Some (Error _) | None -> 0 in
               let delta = if k = "j" || k = "down" then 1 else -1 in
               state.keeper_deletions_cursor <- max 0 (min (count - 1) (state.keeper_deletions_cursor + delta));
               state.keeper_deletions_scroll <- 0
@@ -23536,7 +24083,7 @@ and is loaded on demand through keeper_skill.
                   | Some row when row.can_retry && Option.is_none state.keeper_deletions_retry_receipt ->
                       launch_keeper_deletions state ~mailbox:async_messages ~retry:row ()
                   | _ -> ())
-               | _ -> ())
+               | Some (Error _) | None -> ())
             | _ -> ())
        | Some k when Option.is_some state.client_detail ->
            if k = "esc" then (
@@ -24287,7 +24834,22 @@ and is loaded on demand through keeper_skill.
                   | Some (_, Masc_tui_palette.Palette_lsp (question, symbol))
                     ->
                       Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~report:(report_action state) ~question ~symbol
-                  | Some _ | None ->
+                  | Some
+                      ( _,
+                        ( Masc_tui_palette.Palette_browser_lane
+                        | Masc_tui_palette.Palette_hide_browser_lane
+                        | Masc_tui_palette.Palette_connectors
+                        | Masc_tui_palette.Palette_collab | Masc_tui_palette.Palette_msx
+                        | Masc_tui_palette.Palette_dos
+                        | Masc_tui_palette.Palette_lane_addons
+                        | Masc_tui_palette.Palette_goto _
+                        | Masc_tui_palette.Palette_config _
+                        | Masc_tui_palette.Palette_gate_mode _
+                        | Masc_tui_palette.Palette_chat _
+                        | Masc_tui_palette.Palette_task _
+                        | Masc_tui_palette.Palette_board_hearth _
+                        | Masc_tui_palette.Palette_board_post _ ) )
+                  | None ->
                       report_action state "error"
                         (question ^ " needs a symbol: :" ^ question
                        ^ " <name>"))
@@ -24477,7 +25039,14 @@ and is loaded on demand through keeper_skill.
                     | Masc_tui_pick_list.Back, Some "",
                       (Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _) ->
                         Masc_tui_pick_list.Dismissed
-                    | _ -> Masc_tui_pick_list.apply
+                    | ( ( Masc_tui_pick_list.Move _ | Masc_tui_pick_list.Open_query
+                        | Masc_tui_pick_list.Type _ | Masc_tui_pick_list.Erase
+                        | Masc_tui_pick_list.Back | Masc_tui_pick_list.Choose ),
+                        _,
+                        ( Masc_tui_types.Pick_route_default | Masc_tui_types.Pick_conversation_lane _
+                        | Masc_tui_types.Pick_exact_lane _
+                        | Masc_tui_types.Pick_exact_lane_replacement _
+                        | Masc_tui_types.Pick_new_lane _ | Masc_tui_types.Pick_media_failover ) ) -> Masc_tui_pick_list.apply
                      ~page
                      ~label:(Masc_tui_types.runtime_picker_label_for pick) catalog
                      list action)
@@ -24592,7 +25161,7 @@ and is loaded on demand through keeper_skill.
            (match state.slot_editor with
             | Some { se_target = Masc_tui_types.Media_failover_slots; _ } ->
                 state.slot_editor <- None
-            | Some _ | None ->
+            | Some { se_target = Masc_tui_types.Exact_lane_slots _; _ } | None ->
                 Masc_tui_types.open_slot_editor state Masc_tui_types.Media_failover_slots);
            Masc_tui_types.dismiss_runtime_lane_notice state
        | Some "a"
@@ -24634,7 +25203,9 @@ and is loaded on demand through keeper_skill.
                   (Masc_tui_types.Pick_exact_lane_replacement (lane, row.sr_slot, group));
                 launch_runtime_catalog_load state ~mailbox:async_messages;
                 Masc_tui_types.dismiss_runtime_lane_notice state
-            | _ -> ())
+            | Some { se_target = Masc_tui_types.Media_failover_slots; _ }, _
+            | Some { se_target = Masc_tui_types.Exact_lane_slots _; _ }, None
+            | None, _ -> ())
        | Some ("j" | "k" | "up" | "down" | "wheel-up" | "wheel-down" | "x" | "J" | "K" | "1" | "esc")
          when (state.view = Lanes || state.view = Runtime)
               && Option.is_some state.slot_editor
@@ -24664,7 +25235,7 @@ and is loaded on demand through keeper_skill.
                 open_exact_activity state ~mailbox:async_messages lane
             | Some {selection=Machine machine;_} ->
                 open_machine_activity state ~mailbox:async_messages machine
-            | None | Some _ -> show_lanes_action_error state "Select an Exact, Browser or machine Lane to change activity.")
+            | None | Some {selection=(Declaration _ | Manual_instance _);_} -> show_lanes_action_error state "Select an Exact, Browser or machine Lane to change activity.")
        | Some "s"
          when state.view = Lanes
               && state.lanes_mode = Lanes_overview
@@ -24746,7 +25317,16 @@ and is loaded on demand through keeper_skill.
                  | "esc" | "b" ->
                      state.browser_lane_generation <- state.browser_lane_generation + 1;
                      state.browser_lane <- Some { view with client_picker = None;
-                       load = (match view.load with Loading (_, Discover _) -> Idle | other -> other) }
+                       load = (match view.load with
+                          | Loading (_, Discover _) -> Idle
+                          | (Idle | No_browser | Failed _
+                            | Loading
+                                (_, ( Read | Open_session | Close_session | Goto _ | Screenshot _
+                                    | Read_refresh | Scene_read _ | Scene_regions _
+                                    | Scene_refresh _ | Scene_scroll _ | Scene_focus _
+                                    | Scene_click _ | Scene_follow _ | Scene_follow_refresh _
+                                    | Viewport_refresh _ | Viewport_cadence _
+                                    | Viewport_pointer _ ))) as other -> other) }
                  | "r" when not (busy view) ->
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "a" when not (busy view) ->
@@ -25059,7 +25639,8 @@ and is loaded on demand through keeper_skill.
            && (match state.fusion_mode, Masc_tui_fusion_model.selected_fusion_entry state with
                | Fusion_historical_detail _, _
                | Fusion_list, Some (Masc.Tui_decode_fusion.Fusion_historical_evidence _) -> true
-               | _ -> false) ->
+               | (Fusion_list, Some (Masc.Tui_decode_fusion.Fusion_retained_run _))
+               | (Fusion_list, None) | (Fusion_detail _, _) -> false) ->
            report_action state "system" "Historical Board evidence has no retained caller identity"
        | Some "K" when state.view = Fusion ->
            let run = match state.fusion_mode, Masc_tui_fusion_model.fusion_snapshot state with
@@ -25133,7 +25714,7 @@ and is loaded on demand through keeper_skill.
                      goto_surface ~from_reference:true state ~mailbox:async_messages Board;
                      Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host ~port:state.port
                        ~post_id:evidence.fe_post_id ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id))
-            | _ -> report_action state "system" "Open a Fusion run to follow its Board evidence")
+            | (Fusion_list | Fusion_detail _), _ -> report_action state "system" "Open a Fusion run to follow its Board evidence")
        | Some ("h" | "H") when state.view = Repositories && Option.is_none state.workspace_activity_repo ->
            (match state.repositories with
             | None -> ()
@@ -25365,7 +25946,10 @@ and is loaded on demand through keeper_skill.
            (match state.lanes_mode, state.lane_runs_next, state.lane_runs_loading with
             | Lanes_run_list lane, Some before, false ->
               launch_lane_runs_load ~before state ~mailbox:async_messages ~lane
-            | _ -> ())
+            | ( ( Lanes_overview | Lanes_run_list _ | Lanes_run_detail _
+                | Lanes_measurement_detail _ | Lanes_inventory_detail _ ),
+                _,
+                _ ) -> ())
        | Some (("[" | "]") as bracket) when state.view = Tools ->
            cycle_tools_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
@@ -25559,7 +26143,9 @@ and is loaded on demand through keeper_skill.
        | Some ("d" | "D")
          when state.view = Lanes && (match state.lanes_mode, state.lane_run_detail with
            | Lanes_run_detail (_, _), Some {Tui_decode.lrd_librarian_preflight=Some _;_} -> true
-           | _ -> false) ->
+           | (Lanes_run_detail (_, _), Some { lrd_librarian_preflight = None;_})
+           | (Lanes_run_detail (_, _), None)
+           | ((Lanes_overview | (Lanes_run_list _ | (Lanes_measurement_detail _ | Lanes_inventory_detail _))), _) -> false) ->
            state.lane_run_preflight_details <- not state.lane_run_preflight_details;
            state.lane_run_detail_scroll <- 0
        | Some ("d" | "D")
@@ -25966,8 +26552,18 @@ and is loaded on demand through keeper_skill.
                in
                ()
        | Some k
-         when text_input_target state ~compact_viewport
-              = Some Text_board_draft ->
+         when (match text_input_target state ~compact_viewport with
+               | Some (Text_board_draft | Text_board_attach_path) -> true
+               | Some
+                   (Text_collab_form | Text_account_login | Text_browser_url
+                   | Text_ask_answer | Text_fusion_launch | Text_preset_name
+                   | Text_runtime_lane_name | Text_runtime_param
+                   | Text_runtime_model_form | Text_runtime_account_form
+                   | Text_voice_wizard | Text_palette | Text_row_search
+                   | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
+                   | Text_identity_app_form | Text_identity_filter
+                   | Text_goal_drop_reason | Text_github_token)
+               | None -> false) ->
            (* Same shape as the chat pane: while a draft is being written,
               printable keys belong to the draft. A key the handler declines
               (Tab) keeps its global meaning, so the cycle works mid-compose
@@ -26157,7 +26753,10 @@ and is loaded on demand through keeper_skill.
                          state.code_focus_file <- Right_pane
                      (* A different file, or this one not readable yet.
                         [start] collapses a repeat of the read in flight. *)
-                     | Some _ | None ->
+                     | Some (_, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent
+                                | Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _
+                                | Masc_tui_fetched.Failed _))
+                     | None ->
                          state.code_target_line <- Some (cursor + 1);
                          Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path)))
        | Some (("K" | "D" | "R") as key_name)
@@ -26422,7 +27021,10 @@ and is loaded on demand through keeper_skill.
                            | Board_read_wide | Board_read_one_pane -> false)
                        | Board_list | Board_compose -> false)
                   | Code -> Option.is_some (Masc_tui_fetched.current_key state.code_file)
-                  | Overview | Acting | Metrics | Keepers _ | Lanes | Clients
+                  | Overview | Acting | Metrics
+                  | Keepers (Keeper_list | Keeper_logs | Keeper_calls | Keeper_message
+                             | Keeper_runtime_pick)
+                  | Lanes | Clients
                   | Approvals | Planning
                   | Schedules | Verification | Harness | Fusion
                   | Memory | Repositories | Changes | Connectors | Runtime | Config
@@ -26439,7 +27041,10 @@ and is loaded on demand through keeper_skill.
               when Option.is_some (Masc_tui_fetched.current_key state.code_file)
                    ->
                 state.code_focus_file <- focus
-            | Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Approvals
+            | Overview | Acting | Metrics
+            | Keepers (Keeper_list | Keeper_logs | Keeper_calls | Keeper_message
+                       | Keeper_runtime_pick)
+            | Lanes | Clients | Approvals
             | Planning | Schedules
             | Memory | Verification | Harness | Fusion | Repositories | Changes
             | Connectors | Runtime | Config | Code | Tools
@@ -26514,7 +27119,15 @@ and is loaded on demand through keeper_skill.
                       with
                       | Some index -> state.keeper_cursor <- index
                       | None -> ())
-                 | _, _, _ -> ());
+                 | (Link.Board_post | Link.Goal | Link.Schedule | Link.Task
+                   | Link.Fusion_run | Link.Keeper),
+                   (Overview | Acting | Metrics
+                   | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
+                              | Keeper_message | Keeper_runtime_pick)
+                   | Memory | Lanes | Clients | Board | Approvals | Planning | Schedules
+                   | Verification | Harness | Fusion | Repositories | Code | Changes
+                   | Connectors | Runtime | Config | Resources | Tools | System_logs),
+                   _ -> ());
                 report_action state "system" ("followed " ^ reference))
        | Some "Y" ->
            (match presented_surface_reference () with
@@ -26528,7 +27141,9 @@ and is loaded on demand through keeper_skill.
            (match state.view with
             | Approvals -> answer_presented_approval Confirm
             | Harness -> handle_harness_agree ()
-            | _ -> ())
+            | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Planning | Schedules
+            | Verification | Fusion | Repositories | Code | Changes | Connectors | Runtime | Config
+            | Resources | Tools | System_logs | Keepers _ -> ())
        (* Stepping the last search is what [n] means on a surface that binds
           it to nothing else, so it is the tail of this arm rather than an
           arm of its own above it. As its own arm it sat above every surface
@@ -26902,7 +27517,8 @@ and is loaded on demand through keeper_skill.
                 edge. [move_list_by_rows] finds the list itself and answers
                 to nothing when there is none; the arm below is where there
                 is none. *)
-             | Keepers _ | Approvals | Planning | Memory | Repositories
+             | Keepers (Keeper_list | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+             | Approvals | Planning | Memory | Repositories
              | Changes | Connectors | Runtime | System_logs ->
                  move_list_by_rows state ~delta:(direction * page)
              (* Two panes, two meanings: the list moves a cursor like the
@@ -27468,7 +28084,10 @@ and is loaded on demand through keeper_skill.
                             (max 0
                                (List.length diff.Masc.Tui_decode.gd_rows - 1))
                             (state.code_diff_scroll + 1)
-                    | Some (_, _) | None -> ())
+                    | Some (_, Goal_confirmation_read.Absent) | None
+                    | Some (_, Goal_confirmation_read.Loading)
+                    | Some (_, Goal_confirmation_read.Stale (_, _))
+                    | Some (_, Goal_confirmation_read.Failed _) -> ())
                   else if state.code_history_open then (
                     let count, _ = Masc_tui_render_code.code_history_viewport state in
                     state.code_history_scroll <-
@@ -27487,7 +28106,10 @@ and is loaded on demand through keeper_skill.
                             ~height:(Masc_tui_render_code.code_pane_content_height state)
                             state.code_file_scroll
                     (* No rows to move a cursor through. *)
-                    | Some (_, _) | None -> ())
+                    | Some (_, Goal_confirmation_read.Absent) | None
+                    | Some (_, Goal_confirmation_read.Loading)
+                    | Some (_, Goal_confirmation_read.Stale (_, _))
+                    | Some (_, Goal_confirmation_read.Failed _) -> ())
                 else
                   state.code_cursor <-
                     Masc_tui_scroll.cursor_down
@@ -27828,7 +28450,10 @@ and is loaded on demand through keeper_skill.
                             ~height:(Masc_tui_render_code.code_pane_content_height state)
                             state.code_file_scroll
                     (* No rows to move a cursor through. *)
-                    | Some (_, _) | None -> ())
+                    | Some (_, Goal_confirmation_read.Absent) | None
+                    | Some (_, Goal_confirmation_read.Loading)
+                    | Some (_, Goal_confirmation_read.Stale (_, _))
+                    | Some (_, Goal_confirmation_read.Failed _) -> ())
                 else
                   state.code_cursor <-
                     Masc_tui_scroll.cursor_up
@@ -28158,7 +28783,10 @@ and is loaded on demand through keeper_skill.
                                   (Masc_tui_render_code.code_pane_content_height state)
                                 state.code_file_scroll
                           (* No rows on screen to jump within. *)
-                          | Some (_, _) | None -> ())
+                          | Some (_, Goal_confirmation_read.Absent) | None
+                          | Some (_, Goal_confirmation_read.Loading)
+                          | Some (_, Goal_confirmation_read.Stale (_, _))
+                          | Some (_, Goal_confirmation_read.Failed _) -> ())
                       | Some (Hist_commit row) ->
                           let open Masc.Tui_decode in
                           state.code_lsp_note <-
@@ -28204,7 +28832,10 @@ and is loaded on demand through keeper_skill.
                                               unknown"
                                              number))))
                   (* Nothing listed to jump from. *)
-                  | Some (_, _) | None -> ())
+                  | Some (_, Goal_confirmation_read.Absent) | None
+                  | Some (_, Goal_confirmation_read.Loading)
+                  | Some (_, Goal_confirmation_read.Stale (_, _))
+                  | Some (_, Goal_confirmation_read.Failed _) -> ())
                 else if state.code_focus_file = Right_pane then ()
                 else
                   match List.nth_opt (code_entries state) state.code_cursor with
@@ -28443,7 +29074,10 @@ and is loaded on demand through keeper_skill.
        | Some "g"
          when (match state.view with
                | Keepers Keeper_list | Keepers Keeper_detail -> true
-               | _ -> false)
+               | Keepers (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick)))
+               | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+               | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
+               | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> false)
               && state.keeper_cursor < List.length state.keepers ->
            (* Toggle the approval gate for the keeper under the cursor. One
               press: the stance is in-memory and a restart returns it to
@@ -28464,7 +29098,10 @@ and is loaded on demand through keeper_skill.
                    (* The Channels tab takes [U] for unbind-all, as it takes
                       [u] for removing one binding. *)
                    key = Some "U" && state.detail_tab <> Detail_channels
-               | _ -> false)
+               | Keepers (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick)))
+               | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+               | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
+               | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> false)
               && state.keeper_cursor < List.length state.keepers ->
            (* Open the runtime picker for the keeper under the cursor. The
               catalogue is fetched on open so the list reflects the server
@@ -28484,7 +29121,13 @@ and is loaded on demand through keeper_skill.
                 close_keeper_runtime_pick state
             | None -> close_keeper_runtime_pick state)
        | Some "D" when (match state.view with
-           | Keepers (Keeper_list | Keeper_detail) -> true | _ -> false) ->
+           | Keepers (Keeper_list | Keeper_detail) -> true | Keepers (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick)))
+                                                           | Overview | Acting | Metrics | Memory
+                                                           | Lanes | Clients | Board | Approvals
+                                                           | Planning | Schedules | Verification
+                                                           | Harness | Fusion | Repositories | Code
+                                                           | Changes | Connectors | Runtime | Config
+                                                           | Resources | Tools | System_logs -> false) ->
            state.keeper_deletions_open <- true;
            state.keeper_deletions_scroll <- 0;
            launch_keeper_deletions state ~mailbox:async_messages ()
@@ -28492,13 +29135,19 @@ and is loaded on demand through keeper_skill.
        | Some "x" | Some "X"
          when (match state.view with
                | Keepers (Keeper_list | Keeper_detail) -> true
-               | _ -> false) ->
+               | Keepers (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick)))
+               | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+               | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
+               | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> false) ->
            handle_keeper_action state ~base_path ~mailbox:async_messages
              Keeper_control.Delete
        | Some "d"
          when (match state.view with
                | Keepers (Keeper_list | Keeper_detail) -> true
-               | _ -> false) ->
+               | Keepers (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick)))
+               | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+               | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
+               | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> false) ->
            open_repository_changes state ~mailbox:async_messages
              ~scope:Tui_decode.Repository_change_project
        | Some "d"
@@ -28601,7 +29250,9 @@ and is loaded on demand through keeper_skill.
              (match state.view with
               | Planning -> Verification
               | Verification -> Harness
-              | Harness | _ -> Planning)
+              | Harness | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
+              | Approvals | Schedules | Fusion | Repositories | Code | Changes | Connectors
+              | Runtime | Config | Resources | Tools | System_logs -> Planning)
        | Some "v" when state.view = Changes ->
            (* View the selected change on the Code surface. The clone-relative
               address resolves through the same ?keeper= axis the git-diff
@@ -28708,6 +29359,7 @@ and is loaded on demand through keeper_skill.
                 state.board_compose_armed <- false;
                 state.board_compose_reply_to <- Some post_id;
                 state.board_compose_hearth <- None;
+                state.board_compose_attach_input <- None;
                 state.board_post_error <- None
             | Board_list | Board_compose -> ())
        | Some "v" | Some "V" when state.view = Board ->
@@ -28822,7 +29474,12 @@ and is loaded on demand through keeper_skill.
          when (match log_key, state.view with
                | ("l" | "L"), Keepers (Keeper_list | Keeper_detail)
                | "o", Keepers Keeper_detail -> true
-               | _ -> false) ->
+               | _, (Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
+                             | Keeper_message | Keeper_runtime_pick)
+                    | Overview | Acting | Metrics | Memory | Lanes | Clients | Board
+                    | Approvals | Planning | Schedules | Verification | Harness | Fusion
+                    | Repositories | Code | Changes | Connectors | Runtime | Config
+                    | Resources | Tools | System_logs) -> false) ->
            (* Logs, from the roster as well as from detail, for the same reason
               chat is reachable from both: the keeper an operator wants the
               logs of is the one under the cursor. *)
@@ -29057,6 +29714,7 @@ and is loaded on demand through keeper_skill.
                      state.board_compose_armed <- false;
                      state.board_compose_reply_to <- None;
                      state.board_compose_hearth <- state.board_hearth;
+                     state.board_compose_attach_input <- None;
                      state.board_post_error <- None
                  | Board_read _ | Board_compose -> ())
             | Keepers (Keeper_list | Keeper_detail) ->
@@ -29359,7 +30017,8 @@ and is loaded on demand through keeper_skill.
               && Int64.compare (Int64.sub now_ns started_ns) refresh_interval_ns >= 0 ->
            state.connection_status <- Reconnecting;
            Render_schedule.request render_schedule Render_schedule.Background
-       | _ -> ());
+       | None, _
+       | Some _, (Disconnected | Connecting | Booting | Reconnecting | Degraded | Connected) -> ());
       (* Periodic refresh *)
       let _, terminal_cols = get_terminal_size () in
       let current_marquee_target =
@@ -29641,7 +30300,8 @@ and is loaded on demand through keeper_skill.
                           (Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows - 1) in
                       let first, _ = Masc_tui_home.home_decision_window state ~budget in
                       state.home_decision_scroll <- first
-                  | _ -> ());
+                  | (Overview, (`Palette | (`Link | (`Help | (`About | (`Play_card _ | (`Client_detail _ | (`Account_login _ | (`Keeper_deletions | (`Agenda | (`Too_small _ | (`Collab _ | (`Context | (`Lane_addons _ | (`Answering | `Patch)))))))))))))))
+                  | ((Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | (System_logs | Keepers _))))))))))))))))))))), _) -> ());
                  render state)
            in
            (* The frame is what the operator will act on next, so the scroll it

@@ -267,6 +267,10 @@
 
 (env
  (_
+  ; Test assertions match the one case they check and fail on the rest, so
+  ; listing every other constructor would only bury the assertion.
+  (flags
+   (:standard -w -4))
   (env-vars
    ; Ignore shell-level workspace overrides so tests stay isolated in temp dirs.
    ; Prevent inherited shell MASC_BASE_PATH from binding tests to real
@@ -2454,6 +2458,8 @@
 (include stanzas/test_exec_policy_log_sanitize.inc)
 (include stanzas/test_lane_cli_probe_args.inc)
 
+(include stanzas/test_artifacts_upload.inc)
+
 (include stanzas/test_auth_bearer_mismatch_9786.inc)
 (include stanzas/test_auth_oauth.inc)
 (include stanzas/test_server_oauth_protocol.inc)
@@ -2465,6 +2471,8 @@
 (include stanzas/test_base_path_prod_guard.inc)
 
 (include stanzas/test_persisted_default_base_path.inc)
+
+(include stanzas/test_board_attachment_kinds.inc)
 
 (include stanzas/test_board_api_e2e.inc)
 
@@ -2633,6 +2641,7 @@
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
+(include stanzas/test_dated_jsonl_store.inc)
 (include stanzas/test_play_role_permissions.inc)
 (include stanzas/test_play_screen.inc)
 (include stanzas/test_play_page.inc)
@@ -2650,6 +2659,20 @@
 (include stanzas/test_distributed_lock_backoff_jitter_9645.inc)
 
 (include stanzas/test_docker_playground_gc_script.inc)
+
+; nofile-status reads the process table: which finds scan the caller's home,
+; which lock waiters lost their parent, which dune runs outside a wrapper.
+(rule
+ (alias runtest-test_nofile_status)
+ (deps
+  test_nofile_status.py
+  ../scripts/nofile-status.sh)
+ (action
+  (run python3 %{dep:test_nofile_status.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_nofile_status)))
 
 (include stanzas/test_env_config_dashboard_compute_timeouts.inc)
 
@@ -2951,6 +2974,7 @@
 (include stanzas/test_runtime_claude_code.inc)
 (include stanzas/test_runtime_claude_input_attribution.inc)
 (include stanzas/test_runtime_antigravity.inc)
+(include stanzas/test_runtime_binding_auth_available.inc)
 (include stanzas/test_runtime_antigravity_home.inc)
 (include stanzas/test_runtime_antigravity_context.inc)
 (include stanzas/test_runtime_muse_msp.inc)
@@ -3109,7 +3133,7 @@
  (libraries masc_test_deps))
 
 ; RFC-0085 PR-6 — Host_config exposes env-derived path fields
-; (base_path / config_dir / data_dir) + from_env alias.
+; (base_path / config_dir) + from_env alias.
 
 (test
  (name test_rfc_0085_pr6_host_config_from_env)
@@ -3893,7 +3917,7 @@
 (test
  (name test_tui_markdown)
  (modules test_tui_markdown)
- (libraries alcotest masc_tui_code_lexer masc_tui_markdown masc_tui_message_layout masc_tui_render_prim masc_tui_theme)
+ (libraries alcotest masc_tui_alphatex masc_tui_code_lexer masc_tui_markdown masc_tui_message_layout masc_tui_render_prim masc_tui_theme)
  (action (setenv MASC_TUI_FORCE_COLOR 1 (run %{test}))))
 
 (test
@@ -4447,6 +4471,7 @@
 
 (include stanzas/test_keeper_prompt_capture.inc)
 (include stanzas/test_keeper_provider_input_snapshot.inc)
+(include stanzas/test_keeper_store_locations.inc)
 (include stanzas/test_keeper_projection_change.inc)
 
 (include stanzas/test_keeper_operator_note.inc)
@@ -4469,11 +4494,13 @@
 
 (include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_next_request_band.inc)
+(include stanzas/test_tui_board_attachments.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
 
 (include stanzas/test_workspace_git_log.inc)
+(include stanzas/test_tui_alphatex.inc)
 (include stanzas/test_tui_code_lexer.inc)
 (include stanzas/test_tui_overview_transport_item.inc)
 (include stanzas/test_tui_runtime_account_form.inc)
@@ -5228,15 +5255,25 @@
  (deps
   test_scripts_require_base_path.py
   ../scripts/lib/masc_base_path.py
+  ../scripts/lib/keeper_store_layout.py
+  ../scripts/analyze-keeper-execute-failures.sh
+  ../scripts/audit-keeper-fleet-readiness.py
   ../scripts/bench-web-tools.py
   ../scripts/board-slo-extractor.sh
+  ../scripts/capture-dashboard-screenshots.py
   ../scripts/capture-tui-lane-runs.py
   ../scripts/capture-tui-screenshots.py
+  ../scripts/harness/workload/skill_activation_events.py
+  ../scripts/keeper-production-readiness-gate.py
   ../scripts/measure-keeper-denial-streaks.py
   ../scripts/measure-tool-roundtrips.py
   ../scripts/memory_os_judge_eval.py
+  ../scripts/msx-fetch-homebrew-carts.sh
   ../scripts/probe-structured-output-enforcement.py
-  ../scripts/searxng-local.sh)
+  ../scripts/progress/extract_progress.py
+  ../scripts/searxng-local.sh
+  ../scripts/skill-usage-stats.py
+  ../scripts/tui-frame-latency.py)
  (action
   (run python3 %{dep:test_scripts_require_base_path.py})))
 
@@ -5946,6 +5983,8 @@
 (include stanzas/test_keeper_memory_select_provider_wire.inc)
 
 (include stanzas/test_keeper_event_genealogy_capture.inc)
+
+(include stanzas/test_keeper_librarian_admission_mode.inc)
 
 (test
  (name test_tui_keeper_call_evidence)

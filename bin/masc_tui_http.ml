@@ -640,7 +640,7 @@ let play_mutation_outcome = function
     (match Masc.Tui_decode.play_invite_refusal ~status_code ~body with
      | Some said -> Post_refused said
      | None -> mutation_outcome answer)
-  | answer -> mutation_outcome answer
+  | (Ok _ | Error _) as answer -> mutation_outcome answer
 
 let issue_play_invite ~expected_base_path ~expected_masc_root ~host ~port ~name ~hours =
   http_post ~headers:(auth_headers ()) ~host ~port ~path:"/api/v1/play/invites"
@@ -669,7 +669,7 @@ let revoke_play_invite ~expected_base_path ~expected_masc_root ~host ~port ~name
       (match Masc.Tui_decode.play_revoke_release_failure ~status_code ~body with
        | Some detail -> Revoke_release_failed detail
        | None -> Revoke_other (Post_unanswered (Masc.Tui_decode.http_status_error ~status_code ~body)))
-  | answer -> Revoke_other (play_mutation_outcome answer)
+  | (Ok _ | Error _) as answer -> Revoke_other (play_mutation_outcome answer)
 
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
@@ -1667,7 +1667,12 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
                              Some
                                (Masc_tui_context_inspector.Reasoning_lines
                                   lines)
-                         | _ -> None)
+                         | Masc_tui_keeper_chat_history.Addressed_to_keeper _
+                         | Masc_tui_keeper_chat_history.Delivery_failed _
+                         | Masc_tui_keeper_chat_history.Skill_activity _
+                         | Masc_tui_keeper_chat_history.Gate_activity _
+                         | Masc_tui_keeper_chat_history.Memory_activity _
+                         | Masc_tui_keeper_chat_history.Fusion_conclusion _ -> None)
                     page.Masc_tui_keeper_chat_history.decoded.rows
                 in
                 Ok
@@ -2351,11 +2356,13 @@ let fetch_board_hearths ~(host : string) ~(port : int) :
 
 (** POST /api/v1/tools/masc_board_post. The draft follows the commit-message
     shape -- first line is the title, the rest is the body -- and the server
-    stamps the author from the HTTP auth resolver, so the payload carries
-    text only. The response is the tools envelope [{ok, message}]; interpreting
-    it stays with the caller. *)
+    stamps the author from the HTTP auth resolver. [attachments] are the
+    compose-staged files already uploaded to the artifact store; absent or
+    empty omits the field, so a plain post's payload is exactly what it was.
+    The response is the tools envelope [{ok, message}]; interpreting it
+    stays with the caller. *)
 let post_board_new ~expected_workspace ~(host : string) ~(port : int) ~(title : string)
-    ~(body : string) ?hearth () : (Yojson.Safe.t, string) result =
+    ~(body : string) ?hearth ?(attachments = []) () : (Yojson.Safe.t, string) result =
   let hearth_field =
     match hearth with
     | Some h when String.trim h <> "" -> [ ("hearth", `String (String.trim h)) ]
@@ -2364,10 +2371,32 @@ let post_board_new ~expected_workspace ~(host : string) ~(port : int) ~(title : 
   let payload =
     `Assoc
       ([ expected_workspace_field expected_workspace; ("title", `String title); ("body", `String body) ]
-      @ hearth_field)
+      @ hearth_field
+      @ Option.to_list (Masc_tui_types.board_outbound_attachments_field attachments))
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_board_post"
     ~body:(Yojson.Safe.to_string payload)
+
+(** POST /api/v1/artifacts: one staged file's bytes. The bearer and its
+    one-time 401 refresh are the other write routes'; the response decodes
+    strictly -- a success that cannot name its content address is a failed
+    upload. *)
+let upload_artifact ~(host : string) ~(port : int) ~(bytes : string)
+    : (string, string) result =
+  match
+    with_credential_refresh @@ fun () ->
+    Masc_tui_board_upload.post_artifact_raw ?clock:(request_clock ())
+      ~timeout_sec:(request_timeout_sec ()) ~headers:(auth_headers ())
+      ~host ~port ~bytes ()
+  with
+  | Error detail ->
+      Error
+        (Masc.Tui_decode.http_transport_error ~verb:"POST"
+           ~url:(url_of ~host ~port ~path:"/api/v1/artifacts") ~detail)
+  | Ok (status_code, body) -> (
+      match decode_json ~allow_empty:false ~status_code:status_code ~body with
+      | Error _ as error -> error
+      | Ok json -> Masc_tui_board_upload.uploaded_sha256 json)
 
 let fetch_goal_confirmation ~host ~port ~goal_id =
   get_json ~host ~port

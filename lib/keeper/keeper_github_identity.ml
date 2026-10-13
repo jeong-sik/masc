@@ -1420,7 +1420,7 @@ let run_cli_logout ~config ~keeper_name ~hostname =
     let logged_out =
       match status with
       | Unix.WEXITED 0 -> true
-      | _ ->
+      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
         prerr_endline ("gh auth logout failed: " ^ process_exit_text status);
         false
     in

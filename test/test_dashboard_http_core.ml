@@ -3961,7 +3961,8 @@ let test_execution_parameterized_timeout_keeps_request_metadata () =
   for _attempt = 1 to 3 do
     let timeout = Dashboard_cache.get_or_compute_with_timeout key
         ~ttl:120.0 ~clock ~timeout_sec:0.01
-        (fun () -> raise (Dashboard_cache.Compute_timeout (key, false))) in
+        (fun () ->
+          raise (Dashboard_cache.Compute_timeout { key; role = Dashboard_cache.Compute_owner })) in
     check bool "timeout does not publish a successful payload" true
       (Dashboard_cache.is_timeout_envelope timeout)
   done;
@@ -6163,9 +6164,9 @@ let test_config_patch_accepts_typed_skills () =
   check_error "skills must be an object" [ "skills", `List [] ]
 ;;
 
-(* [remote_endpoint] takes a string or an explicit null, so it cannot sit in
-   [dashboard_config_string_fields]: that list demands a string and would
-   refuse the null an operator sends to detach the endpoint. Whether the name
+(* [remote_endpoint] takes a string or an explicit null, unlike the plain
+   string fields, which refuse the null an operator sends to detach the
+   endpoint. Whether the name
    is declared under [exec.ssh.endpoints], and whether the profile admits an
    endpoint at all, are decided later by [Keeper_turn_up_args.parse]. *)
 let test_config_patch_remote_endpoint_shape () =

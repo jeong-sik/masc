@@ -117,14 +117,36 @@ let record_memory_recall_read_error ~site path exn_class =
     ()
 ;;
 
+type context_provenance_error =
+  | Invalid_context_provenance
+  | Duplicate_context_provenance
+
+let context_provenance_error_to_string = function
+  | Invalid_context_provenance -> "invalid runtime-context provenance"
+  | Duplicate_context_provenance -> "duplicate runtime-context provenance"
+;;
+
+let user_message_text ~on_error (message : Agent_core.Types.message) =
+  match message.role with
+  | Agent_core.Types.System | Agent_core.Types.Assistant | Agent_core.Types.Tool -> None
+  | Agent_core.Types.User ->
+    (match Agent_core.Types.Extra_system_context_provenance.classify message.metadata with
+     | Present | Historical -> None
+     | Invalid -> on_error Invalid_context_provenance; None
+     | Duplicate -> on_error Duplicate_context_provenance; None
+     | Absent ->
+       let content = String.trim (Agent_core.Types.text_of_message message) in
+       if content = "" then None else Some content)
+;;
+
 let user_messages_newest_first (msgs : Agent_core.Types.message list) : string list =
+  let on_error error =
+    Log.Keeper.warn "user_messages_newest_first: omitting message with %s"
+      (context_provenance_error_to_string error)
+  in
   msgs
   |> List.rev
-  |> List.filter_map (fun (m : Agent_core.Types.message) ->
-       if m.role = Agent_core.Types.User then
-         let content = String.trim (Agent_core.Types.text_of_message m) in
-         if content = "" then None else Some content
-       else None)
+  |> List.filter_map (user_message_text ~on_error)
 ;;
 
 let load_history_user_messages_result ~path ~limit ~accept =
@@ -154,10 +176,16 @@ let load_history_user_messages_result ~path ~limit ~accept =
          if role = Some "user"
             && not (Keeper_types_support.is_internal_history_source source)
          then
-           let content = String.trim (Keeper_context_core.text_of_history_jsonl_json json) in
-           if content = "" then None else Some content
+           let on_error error =
+             record_unreadable Keeper_memory_recall_exn_class.Type_error
+               (context_provenance_error_to_string error)
+           in
+           Keeper_context_core.message_of_json json |> user_message_text ~on_error
          else None
        with
+       | Invalid_argument detail ->
+         record_unreadable Keeper_memory_recall_exn_class.Type_error detail;
+         None
        | (Yojson.Safe.Util.Type_error _ | Failure _) as exn ->
          record_unreadable (Keeper_memory_recall_exn_class.classify exn)
            (Printexc.to_string exn);

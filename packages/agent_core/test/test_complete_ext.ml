@@ -96,14 +96,6 @@ let metrics_of_probe probe =
   }
 ;;
 
-let in_memory_cache () =
-  let table = Hashtbl.create 4 in
-  ({ Cache.get = (fun ~key -> Hashtbl.find_opt table key)
-   ; set = (fun ~key ~ttl_sec:_ json -> Hashtbl.replace table key json)
-   }
-   : Cache.t)
-;;
-
 let transport_of_sync sync_response =
   { Llm_transport.complete_sync = (fun _request -> sync_response ())
   ; complete_stream =
@@ -172,14 +164,55 @@ let test_gemini_url_variants () =
 
 (* ── complete wrapper paths ───────────────────────────── *)
 
-let test_complete_transport_success_cache_metrics_and_trace_headers () =
+let test_cache_hit_clears_latency_telemetry () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let telemetry =
+    { Types.default_inference_telemetry with
+      request_latency_ms = Some 4242
+    ; ttfrc_ms = Some 1.5
+    ; prefill_ms = Some 2.5
+    ; reasoning_tokens = Some 3
+    }
+  in
+  let stored =
+    { (make_response ~content:[ Types.Text "cached" ] ()) with
+      Types.telemetry = Some telemetry
+    }
+  in
+  let cache : Cache.t =
+    { get = (fun ~key:_ -> Some (Cache.response_to_json stored))
+    ; set = (fun ~key:_ ~ttl_sec:_ _ -> ())
+    }
+  in
+  (* No injected transport: an injected transport bypasses the cache, and a
+     hit must never reach the network. *)
+  let config = make_config ~model_id:"cache-hit-test" () in
+  let messages = [ Types.user_msg "hello" ] in
+  match Complete.complete ~sw ~net:(Eio.Stdenv.net env) ~config ~messages ~cache () with
+  | Error err -> failf "unexpected complete error: %s" (string_of_http_error err)
+  | Ok resp ->
+    (match resp.telemetry with
+     | None -> fail "expected telemetry on a cache hit"
+     | Some t ->
+       check (option int) "hit clears request latency" None t.request_latency_ms;
+       check (option (float 0.)) "hit clears ttfrc" None t.ttfrc_ms;
+       check (option (float 0.)) "hit clears prefill" None t.prefill_ms;
+       check (option int) "hit keeps non-latency telemetry" (Some 3) t.reasoning_tokens)
+
+let test_complete_transport_bypasses_cache_with_metrics_and_trace_headers () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
   let probe = metric_probe () in
   let metrics = metrics_of_probe probe in
-  let cache = in_memory_cache () in
+  let cache : Cache.t =
+    { get = (fun ~key:_ -> fail "opaque transport must not read HTTP response cache")
+    ; set = (fun ~key:_ ~ttl_sec:_ _ -> fail "opaque transport must not write HTTP response cache")
+    } in
   let calls = ref 0 in
   let config =
     make_config
@@ -251,16 +284,43 @@ let test_complete_transport_success_cache_metrics_and_trace_headers () =
       ()
   in
   (match second with
-   | Ok resp -> check string "cached text" "done" (Types.text_of_response resp)
-   | Error err -> failf "unexpected cached error: %s" (string_of_http_error err));
-  check int "transport called once" 1 !calls;
-  check int "cache miss once" 1 probe.cache_misses;
-  check int "cache hit once" 1 probe.cache_hits;
-  check int "request start once" 1 probe.starts;
-  check int "request end once" 1 probe.ends;
-  check (list int) "status 200" [ 200 ] (List.rev probe.statuses);
-  check (list (pair int int)) "usage" [ 11, 7 ] (List.rev probe.token_usage);
-  check (list int) "tool calls" [ 1 ] (List.rev probe.tool_calls)
+   | Ok resp -> check string "fresh transport text" "done" (Types.text_of_response resp)
+   | Error err -> failf "unexpected transport error: %s" (string_of_http_error err));
+  check int "transport called twice" 2 !calls;
+  check int "no cache miss" 0 probe.cache_misses;
+  check int "no cache hit" 0 probe.cache_hits;
+  check int "request start twice" 2 probe.starts;
+  check int "request end twice" 2 probe.ends;
+  check (list int) "status 200" [ 200; 200 ] (List.rev probe.statuses);
+  check (list (pair int int)) "usage" [ 11, 7; 11, 7 ] (List.rev probe.token_usage);
+  check (list int) "tool calls" [ 1; 1 ] (List.rev probe.tool_calls)
+;;
+
+let test_opaque_transport_cache_bypass_does_not_require_http_serialization () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let config =
+    { (make_config ~kind:Anthropic ~model_id:"opaque-only-model"
+         ~base_url:"opaque://native" ()) with
+      model_capabilities_override =
+        Some { Capabilities.anthropic_capabilities with max_output_tokens = None } } in
+  let messages = [ Types.user_msg "hello" ] in
+  check bool "fixture has no valid built-in HTTP body" true
+    (Result.is_error (Complete.inspect_serialized_request ~stream:false ~config ~messages ()));
+  let cache : Cache.t =
+    { get = (fun ~key:_ -> fail "opaque request must not read response cache")
+    ; set = (fun ~key:_ ~ttl_sec:_ _ -> fail "opaque request must not write response cache")
+    } in
+  let calls = ref 0 in
+  let transport = transport_of_sync (fun () ->
+    incr calls;
+    { Llm_transport.response = Ok (make_response ()); latency_ms = None }) in
+  for _ = 1 to 2 do
+    match Complete.complete ~sw ~net:(Eio.Stdenv.net env) ~transport ~config ~messages ~cache () with
+    | Ok _ -> ()
+    | Error err -> failf "opaque request was rejected: %s" (string_of_http_error err)
+  done;
+  check int "opaque request always reaches its transport" 2 !calls
 ;;
 
 let test_complete_injected_transport_rejects_typed_empty () =
@@ -322,23 +382,18 @@ let test_complete_cached_empty_fails_before_transport () =
   let cache : Cache.t =
     { get = (fun ~key:_ -> Some cached_json); set = (fun ~key:_ ~ttl_sec:_ _ -> ()) }
   in
-  let transport_calls = ref 0 in
-  let transport =
-    transport_of_sync (fun () ->
-      incr transport_calls;
-      { Llm_transport.response = Ok (make_response ()); latency_ms = Some 1 })
-  in
+  let observations = ref 0 in
   let result =
     Complete.complete
       ~sw
       ~net:(Eio.Stdenv.net env)
-      ~transport
       ~config:(make_config ~model_id:"cached-empty" ())
       ~messages:[ Types.user_msg "hello" ]
       ~cache
+      ~request_wire_observer:(fun _ -> incr observations; Ok ())
       ()
   in
-  check int "transport not called" 0 !transport_calls;
+  check int "cache hit does not emit dispatch observation" 0 !observations;
   check_typed_empty_completion Types.MaxTokens result
 ;;
 
@@ -608,10 +663,16 @@ let () =
     "complete_ext"
     [ "helpers", [ test_case "gemini URL variants" `Quick test_gemini_url_variants ]
     ; ( "complete"
-      , [ test_case
-            "transport success cache metrics and trace headers"
+      , [ test_case "cache hit clears latency telemetry" `Quick
+            test_cache_hit_clears_latency_telemetry
+        ; test_case
+            "transport bypasses response cache with metrics and trace headers"
             `Quick
-            test_complete_transport_success_cache_metrics_and_trace_headers
+            test_complete_transport_bypasses_cache_with_metrics_and_trace_headers
+        ; test_case
+            "opaque cache bypass does not require HTTP serialization"
+            `Quick
+            test_opaque_transport_cache_bypass_does_not_require_http_serialization
         ; test_case
             "provider failure is one shot"
             `Quick

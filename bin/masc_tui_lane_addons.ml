@@ -522,7 +522,7 @@ let acknowledge_broadcast view receipt =
   | Ok (`String request_id), Ok (`String "committed") ->
       {view with pending_broadcasts=List.filter
         (fun (_,id) -> not (String.equal id request_id)) view.pending_broadcasts}
-  | _ -> view
+  | (Ok _ | Error _), (Ok _ | Error _) -> view
 let evidence_lines prompt =
   let choice index label = (if prompt.choice=index then "> " else "  ") ^ label in
   [Printf.sprintf "Preserve %d marked row%s from %s" prompt.row_count
@@ -574,12 +574,13 @@ let selected_source_path view =
           if d.instance_id=Some instance.id && Some d.source_path=instance.source_path
           then Some d.source_path else None) config.declarations) in
       let path = match view.focus, view.screen with
-        | Configurations, _ -> Option.map (fun (d : declaration) -> d.source_path) (selected_declaration view)
+        | (Configurations, Overview) | (Configurations, Detail (_, _)) -> Option.map (fun (d : declaration) -> d.source_path) (selected_declaration view)
         | Instances, Overview ->
             (match at_cursor (selectable_overview_entries view snapshot) view.instance_cursor with
              | Some (`Declaration (_, declaration)) -> Some declaration.source_path
              | Some (`Instance _) | None -> instance_path)
-        | (Timeline | Connections | Instances | Rows), _ -> instance_path in
+        | ((Timeline | Connections | Rows), Overview)
+        | ((Timeline | Connections | Instances | Rows), Detail (_, _)) -> instance_path in
       Option.bind path (fun path ->
         if Document.editable_source_path ~directory:config.directory path then Some path else None)))
 let subscription_targets view =
@@ -590,7 +591,9 @@ let subscription_targets view =
         | Some installation_id,Some id when declaration.issues=[] ->
             (match List.find_opt (fun (instance:instance) -> instance.id=id
                 && instance.source_path=Some declaration.source_path
-                && (match instance.phase with Row.Attached | Row.Observing -> true | _ -> false)) instances with
+                && (match instance.phase with
+                  | Row.Attached | Row.Observing -> true
+                  | Row.Failed _ | Detaching | Detached -> false)) instances with
              | None -> []
              | Some instance -> List.map (fun (output_id,_) ->
                  ({installation_id;run_id=instance.run_id;output_id;instance_id=instance.id;title=instance.title}
@@ -947,7 +950,11 @@ let installation_detail_lines ~width view =
 let pending_action view =
   match view.last_action, view.action_receipt with
   | Some request, Some {Action.state=(Action.Queued | Action.Running);_} -> Some request
-  | _ -> None
+  | (None | Some _), None
+  | None, Some {Action.state=(Action.Queued | Action.Running | Action.Confirmed
+                              | Action.Failed_before_effect | Action.Outcome_unknown);_}
+  | Some _, Some {Action.state=(Action.Confirmed | Action.Failed_before_effect
+                                | Action.Outcome_unknown);_} -> None
 
 let action_target view = selected_instance view
 
@@ -1213,7 +1220,9 @@ let overview_lines ~width view =
                   | Some _ | None -> "" in
                 let lead = marker ^ instance_heading snapshot item ^ " · " ^
                   activity ^
-                  (match item.phase with Row.Failed _ -> "failed" | _ -> phase_label item.phase) ^
+                  (match item.phase with
+                    | Row.Failed _ -> "failed"
+                    | Row.Attached | Observing | Detaching | Detached -> phase_label item.phase) ^
                   " · " ^ count_text in
                 let controls = "    Enter:open  " ^ instance_controls view item in
                 let detail = match item.phase with
@@ -1221,7 +1230,7 @@ let overview_lines ~width view =
                       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 4))
                         ("D:full · " ^ detail)
                       |> List.map (fun line -> "    " ^ line)
-                  | _ -> [] in
+                  | Row.Attached | Row.Observing | Row.Detaching | Row.Detached -> [] in
                 group_header @ [lead]
                 @ (match view.overview_mode, snapshot.configuration with
                    | Current_installations, Some config ->

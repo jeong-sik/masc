@@ -2834,7 +2834,33 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
           match event with
           | Keeper_chat_events.Tool_result_ready { occurrence; _ } ->
             Keeper_chat_agent_core_stream_bridge.record_tool_result bridge_state occurrence
-          | _ -> bridge_state
+          | Keeper_chat_events.Text_message_end | Keeper_chat_events.Agent_core_stream_connected
+          | Keeper_chat_events.Agent_core_stream_ping | Keeper_chat_events.Run_started _
+          | Keeper_chat_events.Batch_bound _ | Keeper_chat_events.Text_message_start _
+          | Keeper_chat_events.Text_delta _ | Keeper_chat_events.External_effect_completed _
+          | Keeper_chat_events.Run_finished _ | Keeper_chat_events.Event_error _
+          | Keeper_chat_events.Reply_details _ | Keeper_chat_events.Continuation_checkpoint _
+          | Keeper_chat_events.Provider_retry_observed _
+          | Keeper_chat_events.Agent_core_runtime_attempt_started _
+          | Keeper_chat_events.Agent_core_stream_message_start _
+          | Keeper_chat_events.Agent_core_stream_message_delta _
+          | Keeper_chat_events.Agent_core_stream_message_stop _
+          | Keeper_chat_events.Agent_core_content_block_start _
+          | Keeper_chat_events.Agent_core_content_block_stop _
+          | Keeper_chat_events.Model_content_activity _
+          | Keeper_chat_events.Agent_core_thinking_delta _
+          | Keeper_chat_events.Agent_core_thinking_signature_delta _
+          | Keeper_chat_events.Agent_core_media_delta _
+          | Keeper_chat_events.Agent_core_stream_protocol_error _
+          | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_args _
+          | Keeper_chat_events.Tool_call_args_snapshot _ | Keeper_chat_events.Tool_call_end _
+          | Keeper_chat_events.Native_tool_start _ | Keeper_chat_events.Native_tool_end (_, _)
+          | Keeper_chat_events.Native_tool_progress (_, _)
+          | Keeper_chat_events.Tool_approval_requested _
+          | Keeper_chat_events.Tool_approval_settled _
+          | Keeper_chat_events.Tool_transcript_committed _ | Keeper_chat_events.Link_block _
+          | Keeper_chat_events.Image_block _ | Keeper_chat_events.Status_block _
+          | Keeper_chat_events.Audio_block _ | Keeper_chat_events.Tool_context_block _ -> bridge_state
         in
         Keeper_chat_events.publish events event;
         consume_worker_events bridge_state
@@ -3238,7 +3264,43 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                                   Imessage_applescript.error_to_string)
                       | Keeper_chat_events.Next (Keeper_chat_events.Event_error { message }) ->
                         settle_delivery (Error message)
-                      | Keeper_chat_events.Next _ -> loop reply
+                      | Keeper_chat_events.Next (Keeper_chat_events.Run_started _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Batch_bound _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Text_message_start _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Text_delta _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Text_message_end)
+                      | Keeper_chat_events.Next (Keeper_chat_events.External_effect_completed _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Continuation_checkpoint _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_connected)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Provider_retry_observed _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_runtime_attempt_started _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_message_start _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_message_delta _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_message_stop _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_ping)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_content_block_start _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_content_block_stop _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Model_content_activity _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_thinking_delta _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_thinking_signature_delta _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_media_delta _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_protocol_error _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_start _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_args _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_args_snapshot _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_end _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Native_tool_start _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Native_tool_end (_, _))
+                      | Keeper_chat_events.Next (Keeper_chat_events.Native_tool_progress (_, _))
+                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_approval_requested _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_approval_settled _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_result_ready _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_transcript_committed _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Link_block _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Image_block _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Status_block _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Audio_block _)
+                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_context_block _) -> loop reply
                     in
                     loop None))
              | Keeper_continuation_channel.Keeper { keeper_name = asked_by } ->
@@ -3281,7 +3343,43 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                            | None -> Keeper_event_queue.Delegate_no_reply))
                    | Keeper_chat_events.Next (Keeper_chat_events.Event_error { message }) ->
                      commit (Keeper_event_queue.Delegate_failed message)
-                   | Keeper_chat_events.Next _ -> loop reply
+                   | Keeper_chat_events.Next (Keeper_chat_events.Run_started _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Batch_bound _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Text_message_start _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Text_delta _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Text_message_end)
+                   | Keeper_chat_events.Next (Keeper_chat_events.External_effect_completed _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Continuation_checkpoint _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_connected)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Provider_retry_observed _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_runtime_attempt_started _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_message_start _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_message_delta _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_message_stop _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_ping)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_content_block_start _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_content_block_stop _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Model_content_activity _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_thinking_delta _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_thinking_signature_delta _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_media_delta _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_protocol_error _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_start _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_args _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_args_snapshot _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_end _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Native_tool_start _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Native_tool_end (_, _))
+                   | Keeper_chat_events.Next (Keeper_chat_events.Native_tool_progress (_, _))
+                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_approval_requested _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_approval_settled _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_result_ready _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_transcript_committed _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Link_block _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Image_block _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Status_block _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Audio_block _)
+                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_context_block _) -> loop reply
                  in
                  loop None)
              | Keeper_continuation_channel.Unrouted { reason } ->
@@ -3386,7 +3484,9 @@ let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~ex
        Log.Keeper.error
          "keeper chat terminal broadcast skipped after journal failure keeper=%s operation=%s: %s"
          keeper_name operation_id journal_error
-     | (Some Wire_started | None), Ok receipt ->
+     | (Some Wire_started | None),
+       Ok ((Keeper_chat_event_log.Existing_terminal_error _
+           | Keeper_chat_event_log.Recorded_terminal_error _) as receipt) ->
        let seq, timestamp, message = match receipt with
          | Keeper_chat_event_log.Existing_terminal_error { seq; ts; message } ->
            Some seq, ts, message
@@ -3433,8 +3533,11 @@ let operation_runner ~state ~clock : Keeper_owner.operation_runner =
       (fun ~keeper_name ->
          match Keeper_registry.get_with_health ~base_path keeper_name with
          | Some (_, Keeper_registry.Healthy) -> true
-         | Some (_, _)
-         | None -> false)
+         | None | Some (_, Keeper_registry_types.Lifecycle_transaction_reserved _)
+         | Some (_, Keeper_registry_types.Meta_validation_failed _)
+         | Some (_, Keeper_registry_types.Required_field_missing _)
+         | Some (_, Keeper_registry_types.Base_path_mismatch _)
+         | Some (_, Keeper_registry_types.Name_mismatch _) -> false)
   ; execute = operation_executor ~state ~clock
   ; on_execution_settled = (fun ~keeper_name ~claimed_operation_id ~execution ->
       match claimed_operation_id with
@@ -3561,7 +3664,24 @@ let restart_terminal_after_replay ~base_path ~keeper_name
         ~run_id:(Some ("keeper-operation-run-" ^ operation_id))
         ~message:(Some (Keeper_request_failure.summary {cause=Keeper_request_failure.Server_restarted}))
         ~code:(Some (Keeper_chat_operation.failure_kind_to_string Interrupted_by_restart)) Ag_ui.Run_error)
-  | Queued | Running _ | Succeeded _ | Failed _ | Cancelled _ -> None
+  | Queued
+  | Running _
+  | Succeeded _
+  | Failed
+      { failure =
+          { kind =
+              ( Keeper_chat_operation.Turn_cancelled
+              | Keeper_chat_operation.Turn_exception
+              | Keeper_chat_operation.Store_unavailable
+              | Keeper_chat_operation.No_queued_operation
+              | Keeper_chat_operation.Invalid_input
+              | Keeper_chat_operation.Turn_invariant
+              | Keeper_chat_operation.Delivery_failed )
+          ; _
+          }
+      ; _
+      }
+  | Cancelled _ -> None
 ;;
 
 let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payload =

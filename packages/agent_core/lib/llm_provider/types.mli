@@ -385,10 +385,17 @@ module Extra_system_context_provenance : sig
   type classification =
     | Absent
     | Present
+    | Historical
     | Invalid
     | Duplicate
 
   val metadata : metadata
+  val historical_metadata : metadata
+  (** A previously transmitted context retained in the conversation. Unlike
+      [Present], this is ordinary history, not the current request's pinned
+      context or a second contribution to its prompt-context metrics. *)
+  val as_historical : metadata -> metadata
+  (** Replace only the carrier marker, preserving all other metadata. *)
   val classify : metadata -> classification
 end
 

@@ -18,7 +18,30 @@
     - 400 — malformed sha256 (not 64 lowercase hex chars)
     - 404 — sha256 not in store
     - 413 — artifact exceeds the 32 MiB whole-response limit
-    - 503 — stored artifact unreadable *)
+    - 503 — stored artifact unreadable
+
+    Uploads arrive as raw bytes (board file sharing):
+
+    {v POST /api/v1/artifacts v}
+
+    The request body is the stored bytes. Its [Content-Type] is not read: the
+    store keeps bytes under their digest and nothing else.
+
+    Response (201): JSON envelope
+    {[
+      { "sha256": ..., "bytes": <int> }
+    ]}
+
+    Errors:
+    - 400 — empty body, or a body shorter than its Content-Length
+    - 401/403 — missing or under-privileged credential
+    - 413 — body above the 32 MiB artifact limit (the upload reads against
+      this limit, not the general request cap)
+    - 500 — durable write failed
+
+    The JSON routes ([GET /api/v1/artifacts/<sha256>] and this upload) are
+    HTTP/1 only; the H2 gateway serves only the raw-bytes
+    [GET /api/v1/artifact-bytes/<sha256>]. *)
 
 val is_valid_sha256 : string -> bool
 (** Shared exact lowercase SHA-256 validation used by the route guard. *)
@@ -56,10 +79,27 @@ val artifact_bytes :
     rejects files above {!maximum_artifact_response_bytes} before allocating
     their full content. *)
 
+type upload_refusal =
+  | Empty_upload
+  | Truncated_upload of { declared : int; received : int }
+  | Upload_too_large of { maximum : int }
+  | Upload_store_failed
+
+val store_upload :
+  base_path:string ->
+  declared:int option ->
+  bytes:string ->
+  (Tool_output.artifact_ref, upload_refusal) result
+(** Durably persist one uploaded body under its content address.
+    [declared] is the request's Content-Length when it carried one: a body
+    of another length was cut short and is refused, as is an empty one, so
+    nothing but a whole file is stored. Cancellation propagates. *)
+
 val add_routes :
   Http_server_eio.Router.t ->
   Http_server_eio.Router.t
 (** Register the [GET /api/v1/artifacts/<sha256>] route on
-    [router], plus binary-safe [GET /api/v1/artifact-bytes/<sha256>]. Exact bytes require a token-bound operator credential even when
+    [router], plus binary-safe [GET /api/v1/artifact-bytes/<sha256>] and the
+    [POST /api/v1/artifacts] upload route. Exact bytes require a token-bound operator credential even when
     general HTTP auth is non-strict; a content digest is not an authorization
     capability. Returns the augmented router. *)

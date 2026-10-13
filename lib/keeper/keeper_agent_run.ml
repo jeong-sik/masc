@@ -58,7 +58,12 @@ let response_policy_for_turn ~turn_kind ~input_speaker
        && List.for_all reminder_only observation.pending_board_events
     then Allow_quiet_final
     else Require_progress
-  | (Direct | Autonomous), _, _, _ -> Require_progress
+  | ( (Direct | Autonomous)
+    , Keeper_input_speaker.Host_prompt
+        (Keeper_input_speaker.Autonomous_wake _ | Keeper_input_speaker.Official_client_resume)
+    , _
+    , _ )
+  | ((Direct | Autonomous), Keeper_input_speaker.Person _, _, _) -> Require_progress
 ;;
 
 (* Accept lets a quiet final through; finalization must agree or the turn
@@ -574,7 +579,16 @@ let provider_transcript_admission messages =
        turn forever (#31595): one keeper went an hour without completing a
        turn on 2026-09-01, another logged 585 of these in a day. *)
     close_with ~close:Keeper_transcript_unit.close_open_cycles ~transcript_error
-  | Error (Keeper_transcript_unit.Invalid_transcript_structure _ as transcript_error) ->
+  | Error (Keeper_transcript_unit.Invalid_transcript_structure (Keeper_transcript_unit.Empty_tool_use_id _) as transcript_error)
+  | Error (Keeper_transcript_unit.Invalid_transcript_structure (Keeper_transcript_unit.Empty_tool_result_id _) as transcript_error)
+  | Error (Keeper_transcript_unit.Invalid_transcript_structure (Keeper_transcript_unit.Message_tool_call_id_mismatch _) as transcript_error)
+  | Error (Keeper_transcript_unit.Invalid_transcript_structure (Keeper_transcript_unit.Orphan_tool_result _) as transcript_error)
+  | Error (Keeper_transcript_unit.Invalid_transcript_structure (Keeper_transcript_unit.Duplicate_tool_result _) as transcript_error)
+  | Error (Keeper_transcript_unit.Invalid_transcript_structure (Keeper_transcript_unit.Unknown_tool_result _) as transcript_error)
+  | Error (Keeper_transcript_unit.Invalid_transcript_structure (Keeper_transcript_unit.Non_assistant_tool_use _) as transcript_error)
+  | Error (Keeper_transcript_unit.Invalid_transcript_structure (Keeper_transcript_unit.Duplicate_tool_use_id _) as transcript_error)
+  | Error (Keeper_transcript_unit.Invalid_transcript_structure (Keeper_transcript_unit.Tool_request_contains_result _) as transcript_error)
+  | Error (Keeper_transcript_unit.Invalid_transcript_structure (Keeper_transcript_unit.Non_result_tool_role _) as transcript_error) ->
     (* Every other member stays fatal: an orphaned result has no request to
        attach to, and a request in a non-assistant role is not a missing
        result. *)
@@ -1672,7 +1686,9 @@ let run_turn
            | Ok (Some (Keeper_official_client_host.Repeated_tool_call _)) as stop ->
              record_repetition_judged ();
              stop
-           | (Ok (Some _) | Ok None | Error _) as other -> other
+           | ( Ok (Some (Keeper_official_client_host.Terminal_tool_boundary _))
+             | Ok None
+             | Error _ ) as other -> other
          in
          let cooperative_yield_probe =
            Some
@@ -1695,8 +1711,14 @@ let run_turn
                    | Ok (Runtime_agent.Yield (Runtime_agent.Repeated_tool_call _)) as decision ->
                      record_repetition_judged ();
                      decision
-                   | (Ok (Runtime_agent.Yield _) | Ok Runtime_agent.Continue | Error _) as other
-                     -> other)
+                   | ( Ok
+                         (Runtime_agent.Yield
+                            ( Runtime_agent.Operation_queued
+                            | Runtime_agent.Durable_stimulus_waiting
+                            | Runtime_agent.Repeated_assistant_text _
+                            | Runtime_agent.Terminal_tool_completed ))
+                     | Ok Runtime_agent.Continue
+                     | Error _ ) as other -> other)
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn ->
@@ -2162,7 +2184,15 @@ let run_turn
                        Some context.Runtime_observation.input_tokens
                      | Some { usage_scope = Runtime_usage_scope.Per_request; _ }
                        when usage.input_tokens > 0 -> Some usage.input_tokens
-                     | Some _ | None -> None
+                     | Some
+                         { usage_scope =
+                             ( Runtime_usage_scope.Per_request
+                             | Runtime_usage_scope.Turn_total
+                             | Runtime_usage_scope.Conversation_cumulative
+                             | Runtime_usage_scope.Usage_scope_unavailable )
+                         ; _
+                         }
+                     | None -> None
                    in
                    (* Absent evidence and unresolved provenance are recorded
                       as what they are. Writing a zero here is what let a
@@ -2434,7 +2464,19 @@ let run_turn
                ; _
                } as result) ->
             Some result.usage.output_tokens
-          | Ok _ | Error _ -> None
+          | Ok
+              { usage_scope =
+                  ( Runtime_usage_scope.Per_request
+                  | Runtime_usage_scope.Turn_total
+                  | Runtime_usage_scope.Conversation_cumulative
+                  | Runtime_usage_scope.Usage_scope_unavailable )
+              ; _
+              }
+          | Error (Agent_core.Error.Api _) | Error (Agent_core.Error.Provider _)
+          | Error (Agent_core.Error.Agent _) | Error (Agent_core.Error.Mcp _)
+          | Error (Agent_core.Error.Config _) | Error (Agent_core.Error.Serialization _)
+          | Error (Agent_core.Error.Io _) | Error (Agent_core.Error.Orchestration _)
+          | Error (Agent_core.Error.Internal _) | Error (Agent_core.Error.Internal_carried _) -> None
         in
         let request_latency_ms : int option =
           (* RFC-0233 §9 — wall-clock duration of the provider call in

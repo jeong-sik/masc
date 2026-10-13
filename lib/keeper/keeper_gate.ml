@@ -240,7 +240,10 @@ let resolve_judgment (entry : Keeper_approval_queue_rules_types.pending_approval
      | Ok _ -> Ok Judgment_finalized
      | Error (Keeper_approval_queue.Not_found _ | Keeper_approval_queue.Already_resolved _) ->
        Ok Judgment_skipped
-     | Error error -> Error (Keeper_approval_queue.resolve_error_to_string error))
+     | Error
+         (( Keeper_approval_queue.Delivery_failed _
+          | Keeper_approval_queue.Persistence_failed _ ) as error) ->
+       Error (Keeper_approval_queue.resolve_error_to_string error))
 ;;
 
 type auto_judge_start_outcome =
@@ -401,8 +404,15 @@ let classify_auto_judge_entry
       { status = Keeper_approval_queue_rules_types.Exact_completed; _ },
     Keeper_approval_queue_rules_types.Summary_available summary ->
     Auto_judge_finalizable summary
-  | _ ->
-    Auto_judge_ineligible
+  | (Keeper_approval_queue_rules_types.Summary_attempt_settled, Keeper_approval_queue_rules_types.Exact_bound { status = Keeper_approval_queue_rules_types.Exact_completed;_}, (Keeper_approval_queue_rules_types.Summary_not_requested | (Keeper_approval_queue_rules_types.Summary_pending | Keeper_approval_queue_rules_types.Summary_failed _)))
+  | (Keeper_approval_queue_rules_types.Summary_attempt_settled, Keeper_approval_queue_rules_types.Exact_bound { status = (Keeper_approval_queue_rules_types.Exact_dispatch_uncertain | (Keeper_approval_queue_rules_types.Exact_released_before_dispatch | (Keeper_approval_queue_rules_types.Exact_released_recovery_required | (Keeper_approval_queue_rules_types.Exact_restart_quarantined | Keeper_approval_queue_rules_types.Exact_quarantined _))));_}, _)
+  | (Keeper_approval_queue_rules_types.Summary_attempt_settled, Keeper_approval_queue_rules_types.Exact_unbound, _)
+  | (Keeper_approval_queue_rules_types.Summary_attempt_persistence_uncertain, Keeper_approval_queue_rules_types.Exact_bound { status = Keeper_approval_queue_rules_types.Exact_completed;_}, (Keeper_approval_queue_rules_types.Summary_not_requested | (Keeper_approval_queue_rules_types.Summary_pending | Keeper_approval_queue_rules_types.Summary_failed _)))
+  | (Keeper_approval_queue_rules_types.Summary_attempt_persistence_uncertain, Keeper_approval_queue_rules_types.Exact_bound { status = (Keeper_approval_queue_rules_types.Exact_dispatch_uncertain | (Keeper_approval_queue_rules_types.Exact_released_before_dispatch | (Keeper_approval_queue_rules_types.Exact_released_recovery_required | (Keeper_approval_queue_rules_types.Exact_restart_quarantined | Keeper_approval_queue_rules_types.Exact_quarantined _))));_}, _)
+  | (Keeper_approval_queue_rules_types.Summary_attempt_persistence_uncertain, Keeper_approval_queue_rules_types.Exact_unbound, _)
+  | (Keeper_approval_queue_rules_types.Summary_attempt_ready, Keeper_approval_queue_rules_types.Exact_unbound, (Keeper_approval_queue_rules_types.Summary_available _ | Keeper_approval_queue_rules_types.Summary_failed _))
+  | (Keeper_approval_queue_rules_types.Summary_attempt_ready, Keeper_approval_queue_rules_types.Exact_bound _, _)
+  | ((Keeper_approval_queue_rules_types.Summary_attempt_in_flight | (Keeper_approval_queue_rules_types.Summary_attempt_identity_unbound | Keeper_approval_queue_rules_types.Summary_attempt_pre_worker_unavailable _)), _, _) -> Auto_judge_ineligible
 ;;
 
 let auto_judge_entry_ready entry =
@@ -452,7 +462,10 @@ let auto_judge_entry_has_start_reservation
       ; _
       } ->
     true
-  | _ -> false
+  | (Keeper_approval_queue_rules_types.Summary_pending, Keeper_approval_queue_rules_types.Exact_unbound, Keeper_approval_queue_rules_types.Summary_attempt_pre_worker_unavailable { reason_code = (Keeper_approval_queue_rules_types.Summary_pre_worker_auto_judge_unavailable | Keeper_approval_queue_rules_types.Summary_pre_worker_mode_state_invalid);_})
+  | (Keeper_approval_queue_rules_types.Summary_pending, Keeper_approval_queue_rules_types.Exact_unbound, (Keeper_approval_queue_rules_types.Summary_attempt_ready | (Keeper_approval_queue_rules_types.Summary_attempt_in_flight | (Keeper_approval_queue_rules_types.Summary_attempt_identity_unbound | (Keeper_approval_queue_rules_types.Summary_attempt_persistence_uncertain | Keeper_approval_queue_rules_types.Summary_attempt_settled)))))
+  | (Keeper_approval_queue_rules_types.Summary_pending, Keeper_approval_queue_rules_types.Exact_bound _, _)
+  | ((Keeper_approval_queue_rules_types.Summary_not_requested | (Keeper_approval_queue_rules_types.Summary_available _ | Keeper_approval_queue_rules_types.Summary_failed _)), _, _) -> false
 ;;
 
 (* Sequence order is kept, but selection ranges over the entries Auto Judge can
@@ -1190,7 +1203,13 @@ let reclaim_orphaned_start_reservation
          entry.id
          (Keeper_approval_queue_result.exact_attempt_error_to_string error);
        entry)
-  | _ -> entry
+  | Keeper_approval_queue_rules_types.Summary_attempt_pre_worker_unavailable { reason_code = (Keeper_approval_queue_rules_types.Summary_pre_worker_auto_judge_unavailable | Keeper_approval_queue_rules_types.Summary_pre_worker_mode_state_invalid);_}
+  | Keeper_approval_queue_rules_types.Summary_attempt_ready
+  | Keeper_approval_queue_rules_types.Summary_attempt_in_flight
+  | Keeper_approval_queue_rules_types.Summary_attempt_identity_unbound
+  | Keeper_approval_queue_rules_types.Summary_attempt_persistence_uncertain
+  | Keeper_approval_queue_rules_types.Summary_attempt_settled
+  | Summary_attempt_pre_worker_unavailable {reason_code=Summary_pre_worker_start_reserved; _ } -> entry
 ;;
 
 let recovered_work_for_base_path ~base_path =
@@ -1477,7 +1496,15 @@ let finalize_recovered_judgment
        Error
          ( Resume_completion_rejected rejection
          , completion_rejection_operator_detail rejection ))
-  | Keeper_approval_queue_rules_types.Exact_bound _ ->
+  | Keeper_approval_queue_rules_types.Exact_bound
+      { status =
+          ( Keeper_approval_queue_rules_types.Exact_dispatch_uncertain
+          | Keeper_approval_queue_rules_types.Exact_released_before_dispatch
+          | Keeper_approval_queue_rules_types.Exact_released_recovery_required
+          | Keeper_approval_queue_rules_types.Exact_quarantined _
+          | Keeper_approval_queue_rules_types.Exact_restart_quarantined )
+      ; _
+      } ->
     Error
       ( Resume_exact_state_not_completed
       , "Recovered Auto Judge entry is not a completed exact judgment." )

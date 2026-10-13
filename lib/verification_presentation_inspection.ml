@@ -149,7 +149,10 @@ let inspect ~base_path ~max_image_bytes ~bytes =
             ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
             ~timeout_sec:decoder_timeout_sec ~cwd:root (program :: arguments) with
         | Error (Process_eio.Executable_not_found missing) -> Error (Dependency_unavailable [missing])
-        | Error refusal -> Error (Storage_failed (Process_eio.spawn_refusal_to_string refusal))
+        | Error
+            (( Process_eio.Empty_argv | Process_eio.Spawn_failed _
+             | Process_eio.Child_setup_failed _ | Process_eio.Cwd_unavailable _ )
+             as refusal) -> Error (Storage_failed (Process_eio.spawn_refusal_to_string refusal))
         | Ok (status,stdout,stderr) ->
           let detail = String.trim (stdout ^ "\n" ^ stderr) in
           match status with

@@ -404,7 +404,6 @@ function makeDashboardConfig(overrides: Partial<DashboardConfig> = {}): Dashboar
       ],
       path: [
         makeConfigEntry({ env: 'MASC_CONFIG_DIR', description: 'Config directory override', displayValue: '(none)', defaultValue: '(none)', source: 'default', sourceDetail: 'compiled default value' }),
-        makeConfigEntry({ env: 'MASC_DATA_DIR', description: 'Data directory override', displayValue: '(none)', defaultValue: '(none)', source: 'default', sourceDetail: 'compiled default value' }),
       ],
       dashboard: [
         makeConfigEntry({ env: 'MASC_DASHBOARD_CTX_PREPARING', description: 'Context preparing', displayValue: '0.70', defaultValue: '0.70', source: 'default', sourceDetail: 'compiled default value' }),

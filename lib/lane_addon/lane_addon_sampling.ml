@@ -164,7 +164,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
            | Ok _ when String.trim answer.S.model = "" ->
                Invalid_response (answer, "host response has no model identity")
            | Ok _ -> Answer answer)
-      | outcome -> outcome in
+      | (Host_error _ | Invalid_response (_, _) | Invocation_exception _) as outcome -> outcome in
     let fields = ["kind",`String "model_outcome";"instance_id",`String instance_id;
       "route",`String route;"request",Types.evidence_to_json request] in
     let identity = fields in
@@ -182,7 +182,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
           | Error detail ->
               let outcome = match outcome with
                 | Answer answer -> Invalid_response (answer, detail)
-                | outcome -> outcome in
+                | (Host_error _ | Invalid_response (_, _) | Invocation_exception _) as outcome -> outcome in
               let status = match outcome with
                 | Answer _ -> "answered" | Host_error _ -> "host_error"
                 | Invalid_response _ -> "invalid_response"

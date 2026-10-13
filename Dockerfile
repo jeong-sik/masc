@@ -65,11 +65,10 @@ RUN chmod +x \
 # Create non-root user for runtime
 RUN groupadd --system appgroup && useradd --system --gid appgroup appuser
 
-# Runtime state lives under MASC_BASE_PATH=/app. Identity/config state resolves
-# under /app/.masc, while RFC-0121 bulk tool data resolves to sibling /app/data.
-# Both must be writable by the non-root runtime user.
-RUN mkdir -p /app/.masc /app/data \
-    && chown -R appuser:appgroup /app/.masc /app/data
+# Runtime state lives under MASC_BASE_PATH=/app. The server's stores are in
+# /app/.masc, which must be writable by the non-root runtime user.
+RUN mkdir -p /app/.masc \
+    && chown -R appuser:appgroup /app/.masc
 
 # Copy all config files. CI may generate additional JSON alongside tracked files.
 # MASC_CONFIG_DIR points here, so this is the image-baked config root, not
@@ -88,7 +87,7 @@ ENV MASC_CONFIG_DIR=/app/config
 ENV MASC_BASE_PATH_LEASE_DIR=/app/.masc/runtime/base-path-lease
 ENV OCAML_RUNTIME_EVENTS_DIR=/app/.masc/runtime/events
 
-VOLUME ["/app/.masc", "/app/data"]
+VOLUME ["/app/.masc"]
 
 EXPOSE 8080
 

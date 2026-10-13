@@ -644,7 +644,22 @@ let summary_of_masc_internal_error = function
          (nonempty_or_unknown scope)
          shape
          (short_accept_rejection_reason reason))
-  | Accept_rejected { scope; reason_kind; response_shape; reason; _ } ->
+  | Accept_rejected
+      { scope
+      ; reason_kind = (None | Some Accept_no_usable_progress) as reason_kind
+      ; response_shape
+      ; stop_reason =
+          ( None
+          | Some
+              ( Agent_core.Types.EndTurn | Agent_core.Types.StopToolUse
+              | Agent_core.Types.MaxTokens | Agent_core.Types.StopSequence
+              | Agent_core.Types.Refusal | Agent_core.Types.ContentFilter
+              | Agent_core.Types.RepetitionTruncation | Agent_core.Types.PauseTurn
+              | Agent_core.Types.Compaction | Agent_core.Types.ContextWindowExceeded
+              | Agent_core.Types.UnmatchedToolCalls | Agent_core.Types.Unknown _ ) )
+      ; reason
+      ; _
+      } ->
     let reason_kind = accept_rejection_kind_display reason_kind in
     let response_shape = accept_response_shape_display response_shape in
     Some
@@ -888,7 +903,19 @@ let accept_no_progress_retry_kind = function
       ; _
       } ->
     Some `Truncated_no_progress
-  | Accept_rejected _
+  | Accept_rejected
+      { reason_kind = None | Some (Accept_no_usable_progress | Accept_predicate_rejected)
+      ; stop_reason =
+          ( None
+          | Some
+              ( Agent_core.Types.EndTurn | Agent_core.Types.StopToolUse
+              | Agent_core.Types.MaxTokens | Agent_core.Types.StopSequence
+              | Agent_core.Types.Refusal | Agent_core.Types.ContentFilter
+              | Agent_core.Types.RepetitionTruncation | Agent_core.Types.PauseTurn
+              | Agent_core.Types.Compaction | Agent_core.Types.ContextWindowExceeded
+              | Agent_core.Types.UnmatchedToolCalls | Agent_core.Types.Unknown _ ) )
+      ; _
+      }
   | Official_client_recovery_required _
   | Runtime_exhausted _
   | Resumable_cli_session _
@@ -1082,7 +1109,9 @@ and parse_masc_internal_error_json (json : Yojson.Safe.t) :
                Some
                  (Terminal_effect_failed
                     { failure_class; effect_disposition; detail })
-             | _ -> None)
+             | (None, _, (Ok _ | Error _))
+             | (Some _, None, (Ok _ | Error _))
+             | (Some _, Some _, Error _) -> None)
           | _ -> None)
       | Some (`String kind)
         when String.equal kind provider_attempt_effect_fenced_kind
@@ -1238,4 +1267,7 @@ let classify_masc_internal_error (err : Agent_core.Error.t) :
       (Agent_core.Error.TerminalToolDurabilityFailed
         { effect_disposition; detail; _ }) ->
     terminal_effect_failed ~effect_disposition ~detail
-  | _ -> None
+  | Agent_core.Error.Agent (Agent_core.Error.UnrecognizedStopReason _ | (Agent_core.Error.ToolRoundLimitExceeded _ | (Agent_core.Error.HookExecutionFailed _ | (Agent_core.Error.GuardrailViolation _ | (Agent_core.Error.TripwireViolation _ | Agent_core.Error.InputRequired _)))))
+  | Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ -> None

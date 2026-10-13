@@ -198,7 +198,11 @@ let catalog_identity config =
          (Unix.error_message cause))
   | { Unix.st_kind = Unix.S_DIR; st_dev; st_ino; _ } ->
     Ok (Catalog_directory { device = st_dev; inode = st_ino })
-  | _ -> Error ("retained Keeper catalog is not a directory: " ^ path)
+  | { Unix.st_kind =
+        ( Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+        | Unix.S_SOCK )
+    ; _
+    } -> Error ("retained Keeper catalog is not a directory: " ^ path)
 ;;
 
 let catalog_snapshot config =

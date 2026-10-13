@@ -36,9 +36,10 @@ let listen_key = "\025"
 
 (* Ctrl-A. The same reasoning as [listen_key]: a focused row spends every
    printable key on draft text. Ctrl-K was the other candidate and is taken —
-   it cancels a queued line (masc_tui.ml checks Char.code 11). Ctrl-A appears
-   nowhere in this TUI, and the composer binds no line-editing shortcuts that
-   would claim it by convention. *)
+   it cancels a queued line (masc_tui.ml checks Char.code 11). Board new-post
+   compose binds Ctrl-A too, for its attach-file input; the two never meet
+   because [text_input_target] gates the composer key path off while board
+   compose owns text input. *)
 let continuous_key = "\001"
 
 let prompt composer =

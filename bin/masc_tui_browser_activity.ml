@@ -136,7 +136,11 @@ let apply desired lane (document : document) =
              Toml_line_editor.edit_nested_bool document.source_text
                ~path:(path lane) ~key:"enabled" ~value:desired
              |> Result.map_error (fun _ -> "Browser activity requires the Runtime source editor.")
-         | Some _ | None ->
+         | Some (Otoml.TomlString _) | None | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+         | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+         | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
+         | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _) | Some (Otoml.TomlInlineTable _)
+         | Some (Otoml.TomlTableArray _) ->
              Ok (Toml_line_editor.edit_table_bool document.source_text
                ~path:(table lane) ~key:"enabled" ~value:desired)) in
   match configuration {document with source_text} with

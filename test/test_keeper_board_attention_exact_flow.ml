@@ -122,10 +122,10 @@ let reserved_non_listening_loopback_base_url ~sw =
   | Unix.ADDR_UNIX _ -> assert false
 ;;
 
-let publish_lane ?(api_key_envs = []) ?(cli_slot_ids = []) fixtures =
+let publish_lane ?(requires_api_keys = []) ?(cli_slot_ids = []) fixtures =
   let snapshot =
     Fixture.resolver_snapshot
-      ~api_key_envs
+      ~requires_api_keys
       ~supports_response_format_json:true
       ~supports_structured_output:false
       ~source:"Board attention exact-flow conformance"
@@ -210,8 +210,7 @@ let test_explicit_lane_failover_and_success_provenance () =
       in
       let third = target "board-attention-success" success_server.base_url in
       publish_lane
-        ~api_key_envs:
-          [ second.id, "MASC_TEST_MISSING_BOARD_ATTENTION_KEY" ]
+        ~requires_api_keys:[ second.id, true ]
         [ first; second; third ];
       (match
          Worker.For_testing.process_next_exact

@@ -494,8 +494,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
                  ();
                Log.Keeper.info "%s: restarted (attempt %d)" old_entry.name attempt);
             ))
-       | _ ->
-         Otel_metric_store.inc_counter
+       | Ok (None) | Error _ -> Otel_metric_store.inc_counter
            Keeper_metrics.(to_string RestartOutcomes)
            ~labels:[ "keeper", old_entry.name; "outcome", "meta_unavailable" ]
          ();

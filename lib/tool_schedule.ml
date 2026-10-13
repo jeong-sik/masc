@@ -746,21 +746,25 @@ let handle_write ~action ~tool_name ~start_time ctx args =
       plain (Schedule_payload_projection.creation_keeper_wake_target ~payload)
     in
     let* source = plain (source_of_arg args) in
+    let* stored = match action with
+      | Create_schedule -> Ok None
+      | Update_schedule ->
+        let* schedule_id = plain (required_string args "schedule_id") in
+        let* stored = authorize_row_change ctx ~schedule_id in
+        (match stored with
+         | Some _ -> Ok stored
+         | None -> Error (Refusal "schedule not found"))
+    in
+    let* supplied_kind = strict_string args "recurrence_kind" in
     let* recurrence =
       match action with
       | Create_schedule -> plain (recurrence_of_arg args)
       | Update_schedule ->
-        let* supplied_kind = strict_string args "recurrence_kind" in
         (match supplied_kind with
          | Some _ -> plain (recurrence_of_arg args)
          | None ->
-           let* schedule_id = plain (required_string args "schedule_id") in
-           let* stored = authorize_row_change ctx ~schedule_id in
            (match stored with
             | Some request ->
-              Log.Tool_validation.warn ~category:Log.Tool
-                "schedule %s update omitted recurrence_kind; next version requires recurrence_kind"
-                schedule_id;
               Ok request.recurrence
             | None ->
               (* An absent row has no recurrence to preserve. Never let the
@@ -775,7 +779,17 @@ let handle_write ~action ~tool_name ~start_time ctx args =
       | None -> Ok dispatched_at
       | Some requested_at -> Ok requested_at
     in
-    let* due_at = resolve_due_at ~dispatched_at recurrence args in
+    let* due_inputs = due_inputs_of_args args in
+    let* due_at, timing_update =
+      match action, stored, supplied_kind, due_inputs with
+      | Update_schedule, Some request, None, [] ->
+        (* The observed time validates the replacement definition; the
+           mutation re-reads its current value under the ledger lock. *)
+        Ok (request.due_at, Schedule_store.Keep_timing)
+      | (Create_schedule | Update_schedule), _, _, _ ->
+        let* due_at = resolve_due_at ~dispatched_at recurrence args in
+        Ok (due_at, Schedule_store.Replace_timing)
+    in
     let* schedule_id =
       match action, string_opt args "schedule_id" with
       | Create_schedule, schedule_id -> Ok schedule_id
@@ -792,7 +806,6 @@ let handle_write ~action ~tool_name ~start_time ctx args =
     let* requested_by, scheduled_by, payload =
       match action, schedule_id with
       | Update_schedule, Some schedule_id ->
-        let* stored = authorize_row_change ctx ~schedule_id in
         (match stored with
          | Some stored ->
            let* () =
@@ -841,7 +854,7 @@ let handle_write ~action ~tool_name ~start_time ctx args =
           ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
       | Update_schedule, Some schedule_id ->
         Schedule_service.update
-          ctx.config ~now:dispatched_at ~runner_tick_sec ~schedule_id ~requested_at ?expires_at
+          ctx.config ~now:dispatched_at ~runner_tick_sec ~timing_update ~schedule_id ~requested_at ?expires_at
           ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
       | Update_schedule, None ->
         Error (Schedule_service.Invalid_request "schedule_id is required")

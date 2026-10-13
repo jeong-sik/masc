@@ -25,7 +25,12 @@ let summary_attempt_allows_exact_bind = function
   | Summary_attempt_in_flight
   | Summary_attempt_identity_unbound
   | Summary_attempt_persistence_uncertain
-  | Summary_attempt_pre_worker_unavailable _
+  | Summary_attempt_pre_worker_unavailable
+      { reason_code =
+          ( Summary_pre_worker_auto_judge_unavailable
+          | Summary_pre_worker_mode_state_invalid )
+      ; _
+      }
   | Summary_attempt_settled ->
     false
 ;;
@@ -65,12 +70,10 @@ let delta_rows ~before_pending ~before_deliveries ~after_pending ~after_deliveri
 
 let classify_restarted_entry (entry : pending_approval) =
   match entry.exact_attempt, entry.summary_status with
-  | Exact_bound
-      ( { status =
-            Exact_dispatch_uncertain
-        ; _
-        } as binding ),
-    _ ->
+  | (Exact_bound ({ status = Exact_dispatch_uncertain;_} as binding), Summary_not_requested)
+  | (Exact_bound ({ status = Exact_dispatch_uncertain;_} as binding), Summary_pending)
+  | (Exact_bound ({ status = Exact_dispatch_uncertain;_} as binding), Summary_available _)
+  | (Exact_bound ({ status = Exact_dispatch_uncertain;_} as binding), Summary_failed _) ->
     ( { entry with
         exact_attempt =
           Exact_bound
@@ -97,17 +100,10 @@ let classify_restarted_entry (entry : pending_approval) =
           Summary_attempt_persistence_uncertain
       }
     , true )
-  | Exact_unbound, _
-  | Exact_bound
-      { status =
-          ( Exact_released_before_dispatch
-          | Exact_released_recovery_required
-          | Exact_quarantined _
-          | Exact_restart_quarantined
-          | Exact_completed )
-      ; _
-      },
-    _ ->
+  | (Exact_unbound, Summary_not_requested)
+  | (Exact_bound { status = (Exact_released_before_dispatch | Exact_released_recovery_required | Exact_quarantined _ | Exact_restart_quarantined | Exact_completed);_}, _)
+  | (Exact_unbound, Summary_pending) | (Exact_unbound, Summary_available _)
+  | (Exact_unbound, Summary_failed _) ->
     entry, false
 ;;
 

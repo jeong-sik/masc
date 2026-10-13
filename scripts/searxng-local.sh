@@ -42,10 +42,12 @@ die() {
 # Only `start` reads the config directory, so the other commands run
 # without MASC_BASE_PATH.
 config_dir() {
-  if [ -n "${MASC_SEARXNG_CONFIG_DIR:-}" ]; then
-    printf '%s\n' "$MASC_SEARXNG_CONFIG_DIR"
-  elif [ -n "${MASC_BASE_PATH:-}" ]; then
-    printf '%s\n' "$MASC_BASE_PATH/.local/share/masc-searxng"
+  local named="${MASC_SEARXNG_CONFIG_DIR:-}" base="${MASC_BASE_PATH:-}"
+  # A value of only spaces names nothing.
+  if [ -n "${named//[[:space:]]/}" ]; then
+    printf '%s\n' "$named"
+  elif [ -n "${base//[[:space:]]/}" ]; then
+    printf '%s\n' "$base/.local/share/masc-searxng"
   else
     die "MASC_SEARXNG_CONFIG_DIR or MASC_BASE_PATH is required"
   fi

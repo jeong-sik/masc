@@ -1270,6 +1270,20 @@
  (private_modules masc_tui_mermaid_grammar)
  (libraries masc_tui_message_layout))
 
+;; alphaTex text → score: measures of beats on their counts, or why the text
+;; is not a score. No pane and no drawing; the tab below is its reader.
+(library
+ (name masc_tui_alphatex_score)
+ (wrapped false)
+ (modules masc_tui_alphatex_score))
+
+;; Score → ASCII tablature laid across a pane.
+(library
+ (name masc_tui_alphatex)
+ (wrapped false)
+ (modules masc_tui_alphatex)
+ (libraries masc_tui_alphatex_score))
+
 (library
  (name masc_tui_memo)
  (wrapped false)
@@ -1280,7 +1294,7 @@
  (name masc_tui_markdown)
  (wrapped false)
  (modules masc_tui_markdown)
- (libraries masc_tui_code_lexer masc_tui_mermaid masc_tui_message_layout))
+ (libraries masc_tui_alphatex masc_tui_code_lexer masc_tui_mermaid masc_tui_message_layout))
 
 (library
  (name masc_tui_composer)
@@ -1336,6 +1350,23 @@
  (name masc_tui_board_detail)
  (wrapped false)
  (modules masc_tui_board_detail))
+
+;; A board post attachment's one-line label. Own library so a test can
+;; call it without drawing a screen.
+(library
+ (name masc_tui_board_attachments)
+ (wrapped false)
+ (modules masc_tui_board_attachments)
+ (libraries masc_tui_types masc_tui_context_inspector))
+
+;; The write side: raw artifact uploads and the staged-file sequencing the
+;; compose send runs. Own library so the flow can be driven without the
+;; executable around it.
+(library
+ (name masc_tui_board_upload)
+ (wrapped false)
+ (modules masc_tui_board_upload)
+ (libraries masc.masc_tool_blob_store masc.http_client masc_tui_types yojson eio unix))
 
 (library
  (name masc_tui_magnitude)
@@ -2225,6 +2256,8 @@
   masc_tui_operator_projection
   masc_tui_approval_authority
   masc_tui_board_detail
+  masc_tui_board_attachments
+  masc_tui_board_upload
   masc_tui_board_read_layout
   masc_tui_browser_lane_layout
   masc_tui_fetched
@@ -2499,7 +2532,7 @@
  (wrapped false)
  (modules masc_tui_queue_inspection)
  (libraries masc masc.keeper_runtime masc.keeper_chat_operations masc.keeper_operation_identity
-  masc.masc_schedule masc.masc_types masc_tui_message_layout unix yojson))
+  masc.masc_schedule masc.masc_types masc_tui_command masc_tui_message_layout unix yojson))
 
 ;; Offline replay of the Librarian read rules over a live workspace (RFC
 ;; librarian-lifecycle §9). Reads the turn-boundary logs and the checkpoints

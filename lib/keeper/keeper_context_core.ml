@@ -243,7 +243,15 @@ let patch_checkpoint_last_assistant
           in
           patch_content true acc rest
       | Agent_core.Types.Text _ :: rest -> patch_content replaced acc rest
-      | block :: rest -> patch_content replaced (block :: acc) rest
+      | (Agent_core.Types.Thinking _
+         | Agent_core.Types.ReasoningDetails _
+         | Agent_core.Types.RedactedThinking _
+         | Agent_core.Types.ToolUse _
+         | Agent_core.Types.ToolResult _
+         | Agent_core.Types.Image _
+         | Agent_core.Types.Document _
+         | Agent_core.Types.Audio _ as block) :: rest ->
+          patch_content replaced (block :: acc) rest
     in
     let content = patch_content false [] msg.Agent_core.Types.content in
     let rec content_unchanged left right =
@@ -256,15 +264,35 @@ let patch_checkpoint_last_assistant
       | left_block :: left_rest, right_block :: right_rest
         when left_block == right_block ->
         content_unchanged left_rest right_rest
-      | _ -> false
+      | [], _ :: _ | _ :: _, [] -> false
+      | ( Agent_core.Types.Text _
+        | Agent_core.Types.Thinking _
+        | Agent_core.Types.ReasoningDetails _
+        | Agent_core.Types.RedactedThinking _
+        | Agent_core.Types.ToolUse _
+        | Agent_core.Types.ToolResult _
+        | Agent_core.Types.Image _
+        | Agent_core.Types.Document _
+        | Agent_core.Types.Audio _ ) :: _
+      , ( Agent_core.Types.Text _
+        | Agent_core.Types.Thinking _
+        | Agent_core.Types.ReasoningDetails _
+        | Agent_core.Types.RedactedThinking _
+        | Agent_core.Types.ToolUse _
+        | Agent_core.Types.ToolResult _
+        | Agent_core.Types.Image _
+        | Agent_core.Types.Document _
+        | Agent_core.Types.Audio _ ) :: _ -> false
     in
     if content_unchanged content msg.Agent_core.Types.content
        && Option.is_none msg.name
        && Option.is_none msg.tool_call_id
-       && msg.metadata = []
     then msg
     else
+      (* The reconstruction keeps metadata only: name/tool_call_id stay
+         dropped because assistant messages never carry them in practice. *)
       Agent_core.Types.make_message
+        ~metadata:msg.metadata
         ~role:Agent_core.Types.Assistant
         content
   in

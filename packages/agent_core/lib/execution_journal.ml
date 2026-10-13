@@ -340,7 +340,31 @@ let commit_error_disposition = function
   | Stale_batch _
   | Cursor_scope_mismatch
   | Cursor_ahead _
-  | Persistence_failure _
+  | Persistence_failure
+      ( Store.Invalid_argument _
+        | Store.Identity_failure _
+        | Store.Io_failure _
+        | Store.Codec_failure _
+        | Store.Writer_already_active
+        | Store.Store_already_attached
+        | Store.Store_released
+        | Store.Store_release_forbidden
+        | Store.Resource_cleanup_failed _
+        | Store.Construction_cleanup_failed _
+        | Store.Store_already_exists
+        | Store.Store_not_found
+        | Store.Store_initialization_incomplete
+        | Store.Store_initialization_conflict
+        | Store.Unsupported_store_version _
+        | Store.Corrupt_store _
+        | Store.Correlation_mismatch
+        | Store.Sequence_conflict _
+        | Store.Committed_content_conflict _
+        | Store.Cursor_scope_mismatch
+        | Store.Cursor_ahead _
+        | Store.Commit_authority_identity_changed
+        | Store.Commit_authority_regressed _
+        | Store.Store_poisoned _ )
   | Invariant_violation _ -> Final_failure
 ;;
 
@@ -690,12 +714,15 @@ module Reducer = struct
         (fun key -> Occurrence_map.find_opt key parent_record.occurrences)
     in
     match existing, child_kind with
-    | None, _ -> Ok ()
+    | (None, Event.Agent_run _) | (None, Event.Agent_turn _) | (None, Event.Provider_attempt _)
+    | (None, Event.Output_block _) | (None, Event.Tool_invocation _) | (None, Event.Tool_attempt) -> Ok ()
     | Some existing, Event.Tool_invocation { schedule; _ } ->
       Error
         (Tool_occurrence_conflict
            { parent = parent_id; planned_index = schedule.planned_index; existing })
-    | Some existing, _ -> Error (Occurrence_already_opened existing)
+    | (Some existing, Event.Agent_run _) | (Some existing, Event.Agent_turn _)
+    | (Some existing, Event.Provider_attempt _) | (Some existing, Event.Output_block _)
+    | (Some existing, Event.Tool_attempt) -> Error (Occurrence_already_opened existing)
   ;;
 
   let validate_update (record : node_record) node_id update =
@@ -768,13 +795,14 @@ module Reducer = struct
             | Llm_provider.Types.Audio _ )
           , _ ) -> Error (Tool_result_snapshot_not_tool_result node_id))
     | Event.Tool_attempt, Event.Tool_progress _ -> Ok ()
-    | ( ( Event.Agent_run _
-        | Event.Agent_turn _
-        | Event.Provider_attempt _
-        | Event.Output_block _
-        | Event.Tool_invocation _
-        | Event.Tool_attempt )
-      , _ ) -> Error (Invalid_update_for_node node_id)
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), Event.Provider_event _)
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), Event.Provider_response_snapshot _)
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Tool_invocation _ | Event.Tool_attempt), Event.Output_delta _)
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Tool_invocation _ | Event.Tool_attempt), Event.Output_snapshot _)
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_attempt), Event.Tool_input_delta _)
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_attempt), Event.Tool_input_snapshot _)
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_invocation _), Event.Tool_progress _)
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_attempt), Event.Tool_result _) -> Error (Invalid_update_for_node node_id)
   ;;
 
   let add_node state node event =
@@ -847,7 +875,8 @@ module Reducer = struct
               | Event.Tool_attempt ->
                 let+ () = validate_parent_event event parent_record.last_event_id in
                 Some parent_id
-              | _ -> Error (Child_run_parent_not_tool_attempt parent_id)))
+              | Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _
+              | Event.Output_block _ | Event.Tool_invocation _ -> Error (Child_run_parent_not_tool_attempt parent_id)))
       in
       let run = { id = run_id; root = node_id } in
       let run_record =
@@ -1647,13 +1676,15 @@ let stage_open_tool_invocation
           && String.equal existing_id tool_use_id
           && String.equal input_name tool_name
           && Yojson.Safe.equal existing_input input
-        | ( ( Event.Agent_run _
-            | Event.Agent_turn _
-            | Event.Provider_attempt _
-            | Event.Output_block _
-            | Event.Tool_attempt )
-          , _ )
-        | Event.Tool_invocation _, (None | Some _) -> false
+        | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_attempt), _)
+        | (Event.Tool_invocation _, (None | Some (Llm_provider.Types.Text _)))
+        | (Event.Tool_invocation _, Some (Llm_provider.Types.Thinking _))
+        | (Event.Tool_invocation _, Some (Llm_provider.Types.ReasoningDetails _))
+        | (Event.Tool_invocation _, Some (Llm_provider.Types.RedactedThinking _))
+        | (Event.Tool_invocation _, Some (Llm_provider.Types.ToolResult _))
+        | (Event.Tool_invocation _, Some (Llm_provider.Types.Image _))
+        | (Event.Tool_invocation _, Some (Llm_provider.Types.Document _))
+        | (Event.Tool_invocation _, Some (Llm_provider.Types.Audio _)) -> false
       in
       if exact_duplicate
       then Error (Invariant_violation (Occurrence_already_opened existing))
@@ -2015,7 +2046,17 @@ let stage : type value. batch -> value Transaction.t -> (batch * value, error) r
          ~agent_name)
   | Transaction.Open_node { kind = Event.Tool_invocation _; _ } ->
     Error (Invariant_violation Tool_invocation_requires_atomic_open)
-  | Transaction.Open_node { causes; run; parent; kind } ->
+  | Transaction.Open_node
+      { causes
+      ; run
+      ; parent
+      ; kind =
+          ( Event.Agent_run _
+          | Event.Agent_turn _
+          | Event.Provider_attempt _
+          | Event.Output_block _
+          | Event.Tool_attempt) as kind
+      } ->
     stage_mutation
       (stage_open_node ~causes batch.journal batch.staged_state ~run ~parent ~kind)
   | Transaction.Update_node { causes; node; update } ->
@@ -2167,7 +2208,31 @@ let reconcile_durable_batch (writer : durable_writer) (batch : batch) =
                   { first_seq = base_seq + 1; last_seq = final_seq })
            | Error (Store.Committed_content_conflict { first_seq; last_seq }) ->
              Error (Reconciliation_content_conflict { first_seq; last_seq })
-           | Error error -> Error (Persistence_failure error)))
+           | Error
+               (( Store.Invalid_argument _
+                 | Store.Identity_failure _
+                 | Store.Io_failure _
+                 | Store.Codec_failure _
+                 | Store.Writer_already_active
+                 | Store.Store_already_attached
+                 | Store.Store_released
+                 | Store.Store_release_forbidden
+                 | Store.Resource_cleanup_failed _
+                 | Store.Construction_cleanup_failed _
+                 | Store.Store_already_exists
+                 | Store.Store_not_found
+                 | Store.Store_initialization_incomplete
+                 | Store.Store_initialization_conflict
+                 | Store.Unsupported_store_version _
+                 | Store.Corrupt_store _
+                 | Store.Correlation_mismatch
+                 | Store.Sequence_conflict _
+                 | Store.Cursor_scope_mismatch
+                 | Store.Cursor_ahead _
+                 | Store.Commit_authority_identity_changed
+                 | Store.Commit_authority_regressed _
+                 | Store.Store_poisoned _
+                 | Store.Commit_outcome_unknown _ ) as error) -> Error (Persistence_failure error)))
       else Error (Reconciliation_conflict { base_seq; final_seq; current_seq })))
 ;;
 

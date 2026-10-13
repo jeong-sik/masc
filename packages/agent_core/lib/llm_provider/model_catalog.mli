@@ -80,9 +80,8 @@ type provider_entry = Model_provider_catalog.entry =
   ; kind : Provider_kind.t
   ; identity_kinds : Provider_kind.t list
   ; base_url : string
-  ; base_url_env : string option
   ; request_path : string
-  ; api_key_env : string
+  ; requires_api_key : bool
   ; default_model : string option
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
@@ -178,8 +177,8 @@ val lookup_for_provider
 (** Return the catalog-declared provider identity for a concrete endpoint.
 
     Matching is exact and declaration-driven: [base_url] matches either the
-    provider row's canonical [base_url], its optional [base_url_env] override,
-    or one of its exact [identity_hosts]. No model id is consulted. *)
+    provider row's canonical [base_url] or one of its exact [identity_hosts].
+    No model id is consulted. *)
 val provider_label_for_base_url
   :  ?getenv:(string -> string option)
   -> t

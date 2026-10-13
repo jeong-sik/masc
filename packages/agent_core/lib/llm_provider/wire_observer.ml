@@ -92,7 +92,7 @@ let%test "caller rejection remains exact typed evidence" =
       ; model = "exact-model"
       ; cause = Observer_rejected actual
       } -> actual = rejection
-  | Ok () | Error _ -> false
+  | Error { cause = Observer_rejected _ | Observer_raised _; _ } | Ok () -> false
 ;;
 
 let%test "ordinary observer exception becomes typed evidence" =
@@ -106,7 +106,7 @@ let%test "ordinary observer exception becomes typed evidence" =
   with
   | Error { cause = Observer_raised { message; _ }; _ } ->
     String.equal message "Failure(\"observer unavailable\")"
-  | Ok () | Error _ -> false
+  | Error { cause = Observer_rejected _; _ } | Ok () -> false
 ;;
 
 let%test "reserved observer exception preserves propagation" =

@@ -314,7 +314,7 @@ let is_retryable = function
   | Provider err -> Llm_provider.Error.is_retryable err
   | Mcp (InitializeFailed _ | ToolListFailed _ | ToolCallFailed _ | HttpTransportFailed _)
     -> true
-  | Mcp _ -> false
+  | Mcp (ServerStartFailed _) -> false
   | Agent _ | Config _ | Serialization _ | Io _ | Orchestration _ | Internal _
   | Internal_carried _ -> false
 ;;

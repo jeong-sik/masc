@@ -1075,7 +1075,21 @@ let test_response_cache_does_not_restamp_cached_reasoning () =
   let cached = run () in
   check int "unchanged effective body reuses the stored response" 1 (List.length !bodies);
   check bool "cached signed content is unchanged" true (cached.content = original.content);
-  check bool "cache retains original telemetry" true (cached.telemetry = original.telemetry);
+  (* A hit replays the original call's telemetry, including its reasoning
+     source, but not the three latency figures: they describe a network round
+     trip this call never made (#42728). *)
+  let without_latency (t : Types.inference_telemetry) =
+    { t with request_latency_ms = None; ttfrc_ms = None; prefill_ms = None } in
+  check bool "the stored call measured a network latency" true
+    (match original.telemetry with
+     | Some t -> Option.is_some t.request_latency_ms
+     | None -> false);
+  check bool "a hit carries no latency of its own" true
+    (match cached.telemetry with
+     | Some t -> t = without_latency t
+     | None -> false);
+  check bool "cache retains original telemetry apart from latency" true
+    (cached.telemetry = Option.map without_latency original.telemetry);
   let original_source = Option.bind original.telemetry (fun telemetry -> telemetry.reasoning_source)
       |> Option.get in
   check bool "fixture changed the current source" false

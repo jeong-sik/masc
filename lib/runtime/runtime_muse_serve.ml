@@ -240,8 +240,14 @@ let emit_stream_event on_stream_event event =
   match on_stream_event with
   | None -> ()
   | Some callback ->
+    (* The same reserved set the RAW-trace observer re-raises: a timeout or
+       process-control signal from secondary observation must abort the turn
+       rather than let it continue after a logged warning. *)
     (try callback event with
+     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+     | Eio.Time.Timeout as exn -> raise exn
      | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | (Out_of_memory | Stack_overflow | Sys.Break) as exn -> raise exn
      | exn ->
        Log.Runtime_agent.warn
          "Muse Code stream callback raised: %s"

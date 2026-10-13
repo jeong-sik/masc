@@ -11,6 +11,13 @@
 val runtime_label : string
 (** The client's name in the Keeper's errors and logs. *)
 
+val compaction_observation_to_json :
+  runtime_id:string -> Runtime_muse_msp.compaction -> Yojson.Safe.t
+(** Provider-reported metadata from a completed native compaction item. This
+    does not certify complete model input, semantic preservation, or independently
+    measured token counts. Missing fields remain null; unknown enum values stay
+    explicitly unrecognized. Free-form reason and compaction text are excluded. *)
+
 val resolve_native_posture :
   base_path:string ->
   keeper_name:string ->

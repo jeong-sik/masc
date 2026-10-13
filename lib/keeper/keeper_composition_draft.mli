@@ -53,4 +53,7 @@ val record_invocation
   -> t
   -> (Tool_output.artifact_ref, error) result
 (** Persist the draft and source invocation binding before dispatch. This
-    records one attempted run and does not execute or replay any plan node. *)
+    records one attempted run and does not execute or replay any plan node.
+    The caller passes this same [composition_run_id] to the executor and
+    observers, so the durable binding and actual leaf invocations identify
+    one attempted run. *)

@@ -890,10 +890,14 @@ let test_draft_prepare_and_exact_run_binding () =
       ~completion:Agent_core.Tool_contract.Continue_after_success in
   let run = match Draft.record_invocation ~base_path ~composition_run_id:(Plan.Composition_run_id.fresh ()) ~invocation loaded with
     | Ok reference -> reference | Error error -> fail (Yojson.Safe.to_string (Draft.error_to_json error)) in
-  match Masc.Tool_blob_store.fetch (Masc.Tool_blob_store.create ~base_path) ~sha256:run.sha256 with
+  match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:run.sha256 with
   | Ok (Some raw) ->
-    check string "source invocation durably bound before execution" "draft-run-fixture"
-      Yojson.Safe.Util.(Yojson.Safe.from_string raw |> member "tool_use_id" |> to_string)
+    (match Tool_output.artifact_manifest_of_json (Yojson.Safe.from_string raw) with
+     | Tool_output.Decoded_artifact_manifest { structured_content; _ } ->
+       check string "source invocation durably bound before execution" "draft-run-fixture"
+         Yojson.Safe.Util.(structured_content |> member "tool_use_id" |> to_string)
+     | Tool_output.Not_artifact_manifest -> fail "run binding is not a canonical manifest"
+     | Tool_output.Invalid_artifact_manifest { detail } -> fail detail)
   | Ok None | Error _ -> fail "pre-dispatch run binding is not durable"
 ;;
 
@@ -913,11 +917,116 @@ let test_draft_rejects_effects_and_bad_fixed_inputs () =
   | Error _ | Ok _ -> fail "invalid fixed input survived prepare"
 ;;
 
+let test_public_draft_run_preserves_one_execution_identity () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_draft_base @@ fun base_path ->
+  let module Surface = Masc.Keeper_tool_composition_surface in
+  let module Call_log = Masc.Keeper_tool_call_log in
+  let module T = Agent_core.Types in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "fixture"; "activation_mode", `String "manual" ])
+    |> Result.get_ok in
+  let capability_surface = draft_surface () in
+  let ctx_snapshot = Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"draft identity fixture" in
+  let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
+    { provider = Masc.Keeper_publication_recovery_availability.non_runtime_provider
+    ; keeper_name = meta.name } in
+  Call_log.reset_for_testing ();
+  Fun.protect ~finally:Call_log.reset_for_testing @@ fun () ->
+  Call_log.init ~base_path ();
+  let turn_ctx_cell = Call_log.create_turn_ctx_cell () in
+  Call_log.set_turn_context ~cell:turn_ctx_cell ~agent_name:meta.name
+    ~turn:7 ~keeper_turn_id:1 ();
+  let tools = Surface.make_tools ~capability_surface ~config ~meta ~publication_recovery
+      ~ctx_snapshot ~turn_ctx_cell () in
+  let find name =
+    match List.find_opt (fun (tool, _, _) ->
+      String.equal tool.Agent_core.Tool.schema.name name) tools with
+    | Some (tool, _, _) -> tool | None -> failf "public draft control missing: %s" name in
+  let invoke id name input =
+    let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:id ~turn:7
+        ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1
+                  ; execution_mode = Agent_core.Tool_contract.Serial }
+        ~completion:Agent_core.Tool_contract.Continue_after_success in
+    let output = match Agent_core.Tool.execute ~invocation (find name) input with
+      | Ok output -> output | Error error -> fail error.Agent_core.Types.message in
+    let message : T.message =
+      { role = T.Tool
+      ; content = [ T.ToolResult { tool_use_id = id; content = output.content
+                                ; outcome = T.Tool_succeeded; json = None; content_blocks = None } ]
+      ; name = None; tool_call_id = Some id; metadata = [] } in
+    let content = match Llm_provider.Backend_openai_serialize.openai_messages_of_message message with
+      | [ wire ] -> Yojson.Safe.Util.(wire |> member "content" |> to_string)
+      | _ -> fail "provider did not serialize one public draft result" in
+    check string "provider carries exact public tool result" output.content content;
+    check bool "small draft result is immediately readable" false (Tool_output.is_marker content);
+    let envelope = Yojson.Safe.from_string content in
+    check bool "readable provider result retains its manifest root" true
+      Yojson.Safe.Util.(envelope |> member "artifact_manifest" <> `Null);
+    Yojson.Safe.Util.(envelope |> member "structured_content") in
+  let decode_reference value = match Tool_output.normalized_artifact_ref_of_json value with
+    | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+    | Tool_output.Not_normalized_artifact_ref | Tool_output.Invalid_normalized_artifact_ref _ ->
+      fail "public control lost its normalized reference" in
+  let document reference =
+    match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:reference.Tool_output.sha256 with
+    | Ok (Some raw) ->
+      (match Tool_output.artifact_manifest_of_json (Yojson.Safe.from_string raw) with
+       | Tool_output.Decoded_artifact_manifest { structured_content; _ } -> structured_content
+       | Tool_output.Not_artifact_manifest -> fail "public draft artifact is not a canonical manifest"
+       | Tool_output.Invalid_artifact_manifest { detail } -> fail detail)
+    | Ok None -> fail "advertised public draft artifact is absent"
+    | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
+  let prepared = invoke "prepare-fixture" Draft.prepare_tool_name
+      (match draft_request with
+       | `Assoc fields -> `Assoc (("execution", `String "inline") :: fields)
+       | _ -> fail "fixture plan is not an object") in
+  let open Yojson.Safe.Util in
+  let draft_reference = prepared |> member "draft" |> decode_reference in
+  let run_parent = "public-draft-run" in
+  let result = invoke run_parent Draft.run_tool_name
+      (`Assoc [ "sha256", `String draft_reference.sha256 ]) in
+  let run_reference = result |> member "run_artifact" |> decode_reference in
+  let binding = document run_reference in
+  let run_id = binding |> member "composition_run_id" |> to_string in
+  check string "result names the persisted pre-dispatch run" run_id
+    (result |> member "composition_run_id" |> to_string);
+  check string "pre-dispatch binding names the original public invocation" run_parent
+    (binding |> member "tool_use_id" |> to_string);
+  check string "run binds the exact prepared draft" draft_reference.sha256
+    (binding |> member "draft" |> decode_reference).sha256;
+  check bool "public run exposes its selected profile" true
+    (result |> member "exports" |> member "profile" |> member "available" |> to_bool);
+  let execution_reference = result |> member "execution_artifact" |> decode_reference in
+  let raw_execution = document execution_reference in
+  let leaf = match raw_execution |> member "nodes" |> to_list with
+    | [ leaf ] -> leaf | _ -> fail "public run did not execute its single leaf" in
+  let expected_leaf_id = Printf.sprintf "composition:%d:%s:%d:%s:4:lane"
+      (String.length run_id) run_id (String.length run_parent) run_parent in
+  check string "actual leaf invocation belongs to the pre-dispatch run" expected_leaf_id
+    (leaf |> member "tool_use_id" |> to_string);
+  Call_log.flush_now ();
+  let rows = Call_log.read_recent ~keeper_name:meta.name () |> Result.get_ok in
+  let row name = match List.find_opt (fun row -> member "tool_name" row = `String name) rows with
+    | Some row -> row | None -> failf "missing actual composition observation: %s" name in
+  let observed_leaf = row "keeper_lane_status" in
+  check string "observer preserves the actual leaf invocation" expected_leaf_id
+    (observed_leaf |> member "tool_use_id" |> to_string);
+  check string "leaf observation names the same durable run" run_id
+    (observed_leaf |> member "composition_run_id" |> to_string);
+  check string "run summary names the same durable run" run_id
+    (row Surface.composition_run_summary_tool_name |> member "composition_run_id" |> to_string)
+;;
+
 let () =
   run
     "keeper_tool_composition_catalog"
     [ ( "catalog"
       , [ test_case "draft prepare and exact run binding" `Quick test_draft_prepare_and_exact_run_binding
+        ; test_case "public draft run keeps one execution identity and readable references" `Quick
+            test_public_draft_run_preserves_one_execution_identity
         ; test_case "draft rejects effects and bad fixed inputs" `Quick test_draft_rejects_effects_and_bad_fixed_inputs
         ; test_case "export contract survives binding and durable encoding" `Quick test_export_contract_survives_public_authoring_and_binding
         ; test_case

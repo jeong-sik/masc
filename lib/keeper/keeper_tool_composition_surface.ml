@@ -1978,7 +1978,7 @@ let make_tools_with_authority
                       ~parent_invocation ~config ~meta ~capability_authority ~publication_recovery
                       ~ctx_snapshot ~turn_context ?clock ()
                   | Catalog.Inline ->
-                    let execution = execute_keeper_plan ~capability_authority ~plan
+                    let execution = execute_keeper_plan ~capability_authority ~plan ~composition_run_id
                         ~run_id:(Keeper_tool_plan.Run_id.fresh ()) ~parent_invocation ~config ~meta
                         ~publication_recovery ~ctx_snapshot ~keeper_turn_id:(keeper_turn_id_of turn_context)
                         ?turn_sandbox_factory ?clock ?continuation_channel ?gate_context ?gate_grant ?record_gate_result

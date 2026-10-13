@@ -4048,7 +4048,14 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomple
         | Ok () -> ()
         | Error (Private_jsonl_operation_failed failure) ->
           Printexc.raise_with_backtrace failure.exception_ failure.backtrace
-        | Error error -> raise (Sys_error (private_jsonl_transaction_error_to_string error))
+        | Error ((Stable_lock_contended _ | Unexpected_stable_lock_permissions _
+            | Invalid_stable_lock_state _ | Cursor_mismatch _
+            | Unexpected_transaction_file_kind _ | Ambiguous_transaction_file_identity _
+            | Transaction_path_binding_changed _ | Incomplete_transaction_tail _
+            | Invalid_transaction_suffix | Rewrite_stage_failed _
+            | Rewrite_published_durability_unknown _ | Transaction_settlement_failed _
+            | Transaction_append_failed _) as error) ->
+          raise (Sys_error (private_jsonl_transaction_error_to_string error))
       in
       (* A pathname cannot authorize bytes read from a different opened inode.
          Keep the creating updater's setup/read exception contract, while

@@ -1,5 +1,5 @@
 import { normalizeKeeperConversationDetails } from './keeper-message'
-import { ownerFromUnknown, keeperResponseStateFromUnknown, unavailableKeeperResponseState, type KeeperResponseState } from './lib/keeper-response-state'
+import { ownerFromUnknown, keeperResponseStateFromUnknown, keeperResponseStateMayReplace, unavailableKeeperResponseState, type KeeperResponseState } from './lib/keeper-response-state'
 import type {
   ChatTraceStep,
   KeeperConversationAttachment,
@@ -298,6 +298,13 @@ export function trackedKeeperChatOperationsForKeeper(keeperName: string): Tracke
   return readAll().filter(request => request.keeperName === name)
 }
 
+function preserveNewerDraft(
+  stored: TrackedKeeperChatAssistantDraft | undefined,
+  incoming: TrackedKeeperChatAssistantDraft | undefined,
+): TrackedKeeperChatAssistantDraft | undefined {
+  return keeperResponseStateMayReplace(stored?.responseState, incoming?.responseState) ? incoming : stored
+}
+
 export function upsertTrackedKeeperChatOperation(request: TrackedKeeperChatOperation): void {
   const operationId = request.operationId.trim()
   const keeperName = request.keeperName.trim()
@@ -313,7 +320,11 @@ export function upsertTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
     ...(request.attachments && request.attachments.length > 0 ? { attachments: request.attachments } : {}),
     ...(assistantDraft ? { assistantDraft } : {}),
   }
-  const next = readAll().filter(existing => existing.operationId !== operationId)
+  const existingRequests = readAll()
+  const previous = existingRequests.find(existing => existing.operationId === operationId)
+  const retainedDraft = preserveNewerDraft(previous?.assistantDraft, normalized.assistantDraft)
+  if (retainedDraft) normalized.assistantDraft = retainedDraft
+  const next = existingRequests.filter(existing => existing.operationId !== operationId)
   next.push(normalized)
   writeAll(next)
 }
@@ -330,7 +341,7 @@ export function updateTrackedKeeperChatAssistantDraft(
   const next = requests.map(request => {
     if (request.operationId !== id) return request
     found = true
-    return { ...request, assistantDraft }
+    return { ...request, assistantDraft: preserveNewerDraft(request.assistantDraft, assistantDraft) }
   })
   if (!found) return
   writeAll(next)

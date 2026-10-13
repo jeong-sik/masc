@@ -4,6 +4,7 @@ import {
   initialKeeperResponseState,
   keeperResponseEventOf,
   keeperResponseStateFromUnknown,
+  keeperResponseStateMayReplace,
   ownerFromUnknown,
   reduceKeeperResponse,
   sameKeeperResponseOwner,
@@ -497,5 +498,28 @@ describe('keeperResponseEventOf', () => {
     expect(keeperResponseEventOf(custom('KEEPER_STREAM_PING', null))).toBeNull()
     expect(keeperResponseEventOf(custom('KEEPER_FUTURE_EVENT', null))).toBeNull()
     expect(keeperResponseEventOf({ ...base, type: 'TOOL_CALL_START' } as never)).toBeNull()
+  })
+})
+
+describe('keeperResponseStateMayReplace', () => {
+  const at = (sequence: number | null): KeeperResponseState => (
+    sequence === null ? initialKeeperResponseState : acknowledgeKeeperResponseSequence(initialKeeperResponseState, sequence)!
+  )
+  it('lets any write replace a snapshot with no applied sequence', () => {
+    expect(keeperResponseStateMayReplace(undefined, undefined)).toBe(true)
+    expect(keeperResponseStateMayReplace(at(null), at(null))).toBe(true)
+    expect(keeperResponseStateMayReplace(unavailableKeeperResponseState, at(2))).toBe(true)
+  })
+
+  it('keeps a snapshot against older, unsequenced and unavailable writes', () => {
+    expect(keeperResponseStateMayReplace(at(5), at(4))).toBe(false)
+    expect(keeperResponseStateMayReplace(at(5), at(null))).toBe(false)
+    expect(keeperResponseStateMayReplace(at(5), undefined)).toBe(false)
+    expect(keeperResponseStateMayReplace(at(5), unavailableKeeperResponseState)).toBe(false)
+  })
+
+  it('lets an equal or newer sequence replace the snapshot', () => {
+    expect(keeperResponseStateMayReplace(at(5), at(5))).toBe(true)
+    expect(keeperResponseStateMayReplace(at(5), at(6))).toBe(true)
   })
 })

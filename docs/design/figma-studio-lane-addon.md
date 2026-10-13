@@ -3,6 +3,9 @@
 Status: implementation design, 2026-10-13. This document does not claim an
 installed Plugin, a connected `leader`, or a completed design-to-code run.
 
+Tracking: [feature scope](https://github.com/jeong-sik/masc/issues/42735),
+[first Plugin repair](https://github.com/jeong-sik/figma-mcp/pull/191).
+
 ## Product contract
 
 One optional Lane Addon supports two connected workflows:

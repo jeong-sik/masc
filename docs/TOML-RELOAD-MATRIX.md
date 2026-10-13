@@ -127,6 +127,7 @@ Operational meaning:
   prune. Retention edits therefore take effect on the next prune without a
   restart; process env still wins over the key, and a broken table falls
   back to the default with a warning instead of blocking the prune.
+  (Tool-metrics hydration reads a different store and stays env-only.)
 
 ## Rules for New TOML Files
 

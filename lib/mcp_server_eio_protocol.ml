@@ -249,12 +249,9 @@ let capabilities_for_profile = function
 ;;
 
 let handle_initialize_eio ?(profile = Full) id params =
-  match Mcp_transport_protocol.validate_initialize_params params with
+  match Mcp_transport_protocol.initialize_protocol_version params with
   | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
-  | Ok () ->
-    let protocol_version =
-      params |> Mcp_transport_protocol.protocol_version_from_params
-    in
+  | Ok protocol_version ->
     (match Mcp_transport_protocol.validate_protocol_version protocol_version with
      | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
      | Ok protocol_version ->

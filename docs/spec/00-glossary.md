@@ -3790,6 +3790,10 @@ status: reference
   `page`는 쓰는 쪽이 정하는 이름이다. 소문자 `a-z`, 숫자, `-`만 쓰고 `index`와 `log`는
   쓸 수 없다. 규칙에 안 맞는 이름은 고쳐 주지 않고 거절한다. 제목(`title`)에는 아무
   글자나 쓸 수 있다.
+  같은 디렉터리에 페이지가 아닌 파일 둘이 있다. `index.md`는 페이지마다 제목·파일·한 줄
+  요약을 적은 목록으로, 쓸 때마다 서버가 페이지에서 다시 만들므로 손으로 고치지 않는다.
+  `log.md`는 만들기·고치기마다 한 줄(시각·create 또는 update·revision·page·author·note)을
+  끝에 덧붙이는 기록이고, 줄은 지우거나 고치지 않는다.
   각 페이지는 YAML frontmatter
   (`title`·`summary`·`source`·`author`·`created`·`updated`·`revision`·`tags`)를 갖는다.
   한 층의 평평한 디렉터리라 페이지는 들어 있거나 없거나 둘 중 하나다. `source`는 닫힌

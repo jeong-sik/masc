@@ -152,7 +152,7 @@ let pad_to width text =
 let tool_name_display_cap = 64
 
 let display_tool_name wire_name =
-  let name = Masc.Tool_display.label wire_name in
+  let name = Masc.Tool_display.list_label wire_name in
   let length = String.length name in
   if length <= tool_name_display_cap then name
   else String.sub name 0 48 ^ ".." ^ String.sub name (length - 14) 14
@@ -753,7 +753,9 @@ let skill_full_rows (activity : skill_activity) =
     let actions =
       List.map
         (fun action ->
-          Printf.sprintf "  \xe2\x86\xb3 **%s** \xc2\xb7 %s" action observed_action_word)
+          Printf.sprintf "  \xe2\x86\xb3 **%s** \xc2\xb7 %s"
+            (display_tool_name action)
+            observed_action_word)
         activity.actions
     in
     let proof_parts =

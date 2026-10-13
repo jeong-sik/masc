@@ -113,7 +113,7 @@ otherwise human."""
 [[params]]
 name = "ttl_hours"
 type = "integer"
-description = "Hours until the post expires. Omit it or pass 0 and the post does not expire. A negative value is refused."
+description = "Time-to-live in hours (default: 0, permanent; negative is rejected; no maximum)"
 
 [[params]]
 name = "hearth"

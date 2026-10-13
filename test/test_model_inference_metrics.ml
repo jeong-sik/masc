@@ -440,6 +440,7 @@ let test_single_model_success () =
     check (option int) "total_output_tokens" (Some 180) s.total_output_tokens;
     check int "usage samples" 2 s.usage_sample_count;
     check int "telemetry samples" 2 s.telemetry_sample_count;
+    check string "coverage status" "full" (M.coverage_status_to_string s.coverage_status);
     check int "total_tool_calls" 3 s.total_tool_calls;
     check bool "cost > 0" true
       (Option.value ~default:0.0 s.total_cost_usd > 0.0);
@@ -538,6 +539,10 @@ let test_error_turns_counted () =
     let em = Option.get error_model in
     check int "error_count" 1 em.error_count;
     check int "success_count" 0 em.success_count;
+    (* No successful turn leaves nothing missing, so the error-only arm has
+       to come before the full one. *)
+    check string "error-only coverage" "error_only"
+      (M.coverage_status_to_string em.coverage_status);
     check (option (float 0.001)) "error model latency unknown" None em.avg_latency_ms;
     check (option int) "error model input unknown" None em.total_input_tokens;
     check (option (float 0.001)) "error model cost unknown" None em.total_cost_usd)

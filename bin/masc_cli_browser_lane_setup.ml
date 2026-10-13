@@ -9,10 +9,6 @@ let observation ~base_path =
     ~base_path
     ~server:Masc.Browser_lane_launcher.Not_serving
 
-let command_line ~base_path =
-  Printf.sprintf "masc browser-lane-setup --mode extension --base-path %s"
-    (Filename.quote base_path)
-
 (* The command is offered where the lane is not installed as an installation
    wrote it. A lane that is installed already has its sentence from
    {!Masc.Browser_lane_launcher.message}, which names what is left to do. *)
@@ -25,7 +21,7 @@ let show ~base_path =
    | Not_installed | Undeclared | Unreadable | Describes_another_launcher ->
      print_endline "";
      print_endline "To connect Firefox through the MASC extension, run:";
-     Printf.printf "  %s\n" (command_line ~base_path));
+     Printf.printf "  %s\n" (Masc.Browser_lane_launcher.install ~base_path));
   0
 
 let manifest_directory ~manifest_dir =

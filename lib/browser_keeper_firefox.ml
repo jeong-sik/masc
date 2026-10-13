@@ -76,7 +76,7 @@ type host_step =
   | Launcher_not_ready of launcher_missing
 
 let launcher_missing_message missing =
-  Printf.sprintf "the browser lane is %s; run connectors/browser/install-host.sh for this workspace"
+  Printf.sprintf "the browser lane is %s; run masc browser-lane-setup --mode extension for this workspace"
     (match missing with
      | Not_installed -> "not installed"
      | Needs_reinstall -> "not as its installation wrote it")

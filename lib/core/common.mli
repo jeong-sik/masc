@@ -28,12 +28,12 @@ val browser_lane_dirname : string
 (** The browser lane's directory under the MASC directory: its token, the
     BiDi host's record and lock, the launcher, the automation drivers'
     records and profiles. Value is ["browser-lane"].
-    [connectors/browser/install-host.sh] writes the token and the launcher
-    under the same name, so the two change together. *)
+    [masc browser-lane-setup] writes the token and the launcher under the
+    same name, so the two change together. *)
 
 val browser_lane_token_name : string
 (** The lane token's file name in {!browser_lane_dirname}. Value is
-    ["token"]. [install-host.sh] writes it under the same name. *)
+    ["token"]. [masc browser-lane-setup] writes it under the same name. *)
 
 val masc_dir_from_base_path : base_path:string -> string
 (** [masc_dir_from_base_path ~base_path] is

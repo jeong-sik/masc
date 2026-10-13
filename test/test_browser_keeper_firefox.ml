@@ -105,7 +105,7 @@ let launcher base = Filename.concat (lane base) "host/launch"
    cleanup tells it from a process that later got the same pid. *)
 let sleeper_command name = Printf.sprintf "python3 -c 'import time; time.sleep(30)' %s" (Filename.quote name)
 
-(* What install-host.sh leaves, with a launcher that records what it was
+(* What masc browser-lane-setup leaves, with a launcher that records what it was
    given. [declared:false] leaves out launch.json, which reads as a launcher
    to install again. *)
 (* The pid a host record written for a launcher names, which that launcher

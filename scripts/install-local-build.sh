@@ -5,8 +5,8 @@
 # too, so the preflight an operator runs there is the one this build produced
 # (#39224).
 #
-# install-host.sh copies the host executable into <workspace>/.masc/browser-lane/host
-# so a moved checkout cannot break it. That copy is what Firefox starts, and
+# masc browser-lane-setup copies the host executable into
+# <workspace>/.masc/browser-lane/host so a moved checkout cannot break it. That copy is what Firefox starts, and
 # nothing else replaces it, so a local install that only refreshed the prefix
 # left the lane on whatever build was copied first. Every native messaging
 # manifest whose launcher lives under a workspace's browser-lane/host is
@@ -329,7 +329,7 @@ else
   echo "installed masc, masc-tui, masc-browser-host into $prefix (no deployment preflight pair: $build_dir/deployment_preflight_helper.exe is missing)"
 fi
 
-python3 - "$repo/connectors/browser/install-host.sh" "$prefix/masc-browser-host" "$manifest_dir" <<'PY'
+python3 - "$prefix/masc" "$prefix/masc-browser-host" "$manifest_dir" <<'PY'
 import fcntl
 import json
 import os
@@ -339,7 +339,7 @@ import struct
 import subprocess
 import sys
 
-installer, binary, manifest_dir = sys.argv[1], sys.argv[2], Path(sys.argv[3])
+masc, binary, manifest_dir = sys.argv[1], sys.argv[2], Path(sys.argv[3])
 launcher_suffix = Path(".masc/browser-lane/host/launch")
 
 registered = []
@@ -393,8 +393,11 @@ def bidi_host_pid(base):
 running = subprocess.run(["ps", "-ww", "-axo", "pid=,command="], capture_output=True, text=True, check=True).stdout
 stopped_pids = set()
 for name, base in registered:
-    subprocess.run(["bash", installer, "--binary", binary, "--base-path", str(base),
-                    "--host-name", name, "--manifest-dir", str(manifest_dir)],
+    # The masc just installed, so the lane is written by the build it is
+    # being brought to.
+    subprocess.run([masc, "browser-lane-setup", "--mode", "extension", "--binary", binary,
+                    "--base-path", str(base), "--host-name", name,
+                    "--manifest-dir", str(manifest_dir)],
                    check=True, stdout=subprocess.DEVNULL)
     host = str(base / ".masc/browser-lane/host/masc-browser-host")
     bidi_host = bidi_host_pid(base)

@@ -7,27 +7,17 @@ file, long-polls `/browser-lane/poll`, and forwards `browser.info`, `tabs.list`,
 frames. It posts correlated replies to `/browser-lane/result`. These cover
 browser metadata, tab listing, page text/elements, screenshots, and page interactions.
 
-After installing MASC, register its native host separately. The commands take
-the host installer and the extension from the tag of the installed `masc`
-binary. No source checkout or local build is required:
+After installing MASC, register its native host with one command. The installed
+`masc` carries the extension and finds the `masc-browser-host` installed beside
+it, so the host and the extension are always the same build. No source checkout,
+download or local build is required:
 
 ```sh
-TAG="v$("$HOME/.local/bin/masc" --version 2>/dev/null)"
-BASE_PATH="$HOME/masc-workspace"
-curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/$TAG/connectors/browser/install-host.sh" \
-  -o /tmp/masc-install-host.sh
-less /tmp/masc-install-host.sh
-bash /tmp/masc-install-host.sh \
-  --binary "$HOME/.local/bin/masc-browser-host" \
-  --base-path "$BASE_PATH"
-
-EXTENSION_DIR="$BASE_PATH/.masc/browser-lane/extension"
-mkdir -p "$EXTENSION_DIR"
-for file in manifest.json background.js; do
-  curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/$TAG/connectors/browser/extension/$file" \
-    -o "$EXTENSION_DIR/$file"
-done
+masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
 ```
+
+Without `--mode` the command writes nothing and prints what is installed. It
+starts no browser.
 
 From a source checkout, `scripts/install-local-build.sh` builds `masc`,
 `masc-tui` and `masc-browser-host`, installs them into `~/.local/bin`, and
@@ -36,21 +26,23 @@ reinstalls every host registered under a workspace's
 stops the running hosts from those workspaces; the extension reconnects after
 five seconds and starts the new copy.
 
-Adjust `--binary` for a custom installation prefix. Start the MASC server with
-the same base path. In Firefox, open `about:debugging#/runtime/this-firefox`,
-choose **Load Temporary Add-on**, and select `manifest.json` in the extension
-directory above. Firefox removes temporary add-ons on restart; load it again
-for a later browser session. Keep both extension files together and update
-them from the same tag when upgrading the native host.
+Pass `--binary` to install a `masc-browser-host` that is not beside `masc` (the
+first one on `PATH` is used otherwise). Start the MASC server with the same base
+path. In Firefox, open `about:debugging#/runtime/this-firefox`, choose **Load
+Temporary Add-on**, and select `manifest.json` in
+`<base-path>/.masc/browser-lane/extension/`. Firefox removes temporary add-ons on
+restart; load it again for a later browser session. Running the command again
+after upgrading `masc` replaces the extension files with the upgraded ones.
 
-The installer copies the executable into
+The command copies the executable into
 `<base-path>/.masc/browser-lane/host/` and registers the launcher there.
 Deleting or moving the source checkout therefore cannot break the installed
 host. Rerun installation to promote another built executable. The token is
 created with mode `0600` if absent; an existing nonempty token is preserved.
 The launcher carries file paths, never the token value.
 
-`--base-path` defaults to the existing `MASC_BASE_PATH` setting. The launcher
+`--base-path` is resolved as it is for every `masc` command (`MASC_BASE_PATH`,
+then the current directory when it holds `.masc/config`). The launcher
 names no server address. The host reads the port from
 `<base-path>/.masc/config/connection.toml`, which the MASC server rewrites each
 time it starts listening and `masc workspace-connection --save` also writes.
@@ -62,23 +54,23 @@ does; otherwise it retries where it is. `MASC_HTTP_BASE_URL` or
 `masc-browser-host --server URL` does for a manual run; neither is re-read.
 A result is sent again only when its request may not have reached the server;
 a result the server answered with any status is logged and the host returns to
-polling. The installer also writes `launch.json` beside the launcher with the
+polling. The command also writes `launch.json` beside the launcher with the
 launcher's SHA-256, which the onboarding check and the browser tools read to
 say where the host takes its address from; a launcher edited afterwards no
 longer matches it. If a host was installed before `launch.json` existed, its
-launcher may fix a port: run the installer again for that workspace and reload
+launcher may fix a port: run the command again for that workspace and reload
 the extension. To point a running host at a server on another port, save that
 port with `masc workspace-connection --port PORT --save` and reload the
 extension; a host that is still connected to a server answering on its old
 address stays there.
 `--token-file` defaults to `<base-path>/.masc/browser-lane/token`; relative
 paths resolve against the base path. For a browser launched by the desktop,
-use explicit installer arguments so its shell environment is unnecessary.
-The installer requires a custom `--token-file` to exist already. It must
+use explicit arguments so its shell environment is unnecessary.
+The command requires a custom `--token-file` to exist already. It must
 match the canonical server token; if the canonical file does not exist yet,
-the installer initializes it from that provisioned token.
+the command initializes it from that provisioned token.
 An isolated Firefox profile may pass `--host-name` with a unique lowercase
-name. The installer writes that exact name to both the manifest filename and
+name. The command writes that exact name to both the manifest filename and
 the manifest name; the matching extension must use the same host name.
 Remove only that exact manifest after the owned profile and native host stop.
 The host accepts only HTTP origins at `127.0.0.1`, `localhost`, or `::1`.

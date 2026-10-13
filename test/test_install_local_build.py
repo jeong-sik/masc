@@ -11,13 +11,43 @@ import unittest
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts/install-local-build.sh"
-HOST_INSTALLER = REPO / "connectors/browser/install-host.sh"
 
 
 def executable(path, text):
     path.write_text("#!/bin/sh\necho " + text + "\n")
     path.chmod(0o755)
     return path
+
+
+# Stands in for the masc the script installs. A browser-lane-setup call is
+# recorded, one line per call, in lane-calls beside it and does nothing else:
+# what that command writes is the command's own suite's to prove. Any other
+# call only says which binary it is.
+def fake_masc(path):
+    path.write_text("#!/bin/sh\n"
+                    "if [ \"$1\" = browser-lane-setup ]; then\n"
+                    "  printf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/lane-calls\"\n"
+                    "  exit 0\n"
+                    "fi\n"
+                    "echo masc\n")
+    path.chmod(0o755)
+    return path
+
+
+def lane_calls(prefix):
+    calls = prefix / "lane-calls"
+    return calls.read_text().splitlines() if calls.exists() else []
+
+
+# A workspace whose lane is registered with Firefox under [name]: the native
+# messaging manifest whose launcher lives under the workspace's
+# .masc/browser-lane/host, which is what the script looks for.
+def register(manifests, base, name):
+    host_directory = base / ".masc/browser-lane/host"
+    host_directory.mkdir(parents=True)
+    manifests.mkdir(exist_ok=True)
+    (manifests / f"{name}.json").write_text(
+        json.dumps({"name": name, "path": str(host_directory / "launch")}))
 
 
 # Stands in for the new build's deployment preflight helper and records every
@@ -243,14 +273,11 @@ class LocalBuildInstall(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
             root = Path(temporary).resolve()
             manifests = root / "native manifests"
-            old_host = executable(root / "old-host", "old")
-            # Two workspaces registered the way install-host.sh registers them,
-            # one under the default host name and one under an isolated name.
+            # Two workspaces registered with Firefox, one under the default
+            # host name and one under an isolated name.
             first, second = root / "workspace one", root / "workspace two"
             for base, name in ((first, "masc_browser_host"), (second, "masc_browser_host_second")):
-                subprocess.run(["bash", str(HOST_INSTALLER), "--binary", str(old_host), "--base-path", str(base),
-                                "--host-name", name, "--manifest-dir", str(manifests)],
-                               check=True, capture_output=True)
+                register(manifests, base, name)
             # A host that is not a workspace browser lane must be left alone.
             unrelated = manifests / "com.example.password.json"
             unrelated.write_text(json.dumps({"name": "com.example.password", "path": str(root / "elsewhere/launch")}))
@@ -258,7 +285,7 @@ class LocalBuildInstall(unittest.TestCase):
 
             build = root / "build"
             build.mkdir()
-            executable(build / "main_eio.exe", "masc")
+            fake_masc(build / "main_eio.exe")
             executable(build / "masc_tui.exe", "tui")
             executable(build / "masc_browser_host.exe", "new")
             preflight_helper(build)
@@ -271,13 +298,14 @@ class LocalBuildInstall(unittest.TestCase):
 
             for name, marker in (("masc", "masc"), ("masc-tui", "tui"), ("masc-browser-host", "new")):
                 self.assertIn(marker, (prefix / name).read_text())
+            # Each registered workspace is brought to the new host by the masc
+            # that was just installed, under the host name it was registered
+            # with; the unrelated host is not asked about.
+            self.assertEqual(sorted(lane_calls(prefix)), sorted(
+                f"browser-lane-setup --mode extension --binary {prefix / 'masc-browser-host'} "
+                f"--base-path {base} --host-name {name} --manifest-dir {manifests}"
+                for base, name in ((first, "masc_browser_host"), (second, "masc_browser_host_second"))))
             for base, name in ((first, "masc_browser_host"), (second, "masc_browser_host_second")):
-                copy = base / ".masc/browser-lane/host/masc-browser-host"
-                self.assertIn("new", copy.read_text(), f"{base} still starts the old host")
-                manifest = json.loads((manifests / f"{name}.json").read_text())
-                self.assertEqual(manifest["name"], name)
-                self.assertEqual(Path(manifest["path"]), base / ".masc/browser-lane/host/launch")
-                self.assertTrue((base / ".masc/browser-lane/host/launch.json").is_file())
                 self.assertIn(f"refreshed browser lane host {name} for {base}", result.stdout)
             self.assertEqual(unrelated.read_text(), before_unrelated)
             self.assertFalse((root / "elsewhere").exists())
@@ -288,10 +316,7 @@ class LocalBuildInstall(unittest.TestCase):
             root = Path(temporary).resolve()
             manifests = root / "native manifests"
             base = root / "workspace one"
-            subprocess.run(["bash", str(HOST_INSTALLER), "--binary", str(executable(root / "old-host", "old")),
-                            "--base-path", str(base), "--host-name", "masc_browser_host",
-                            "--manifest-dir", str(manifests)],
-                           check=True, capture_output=True)
+            register(manifests, base, "masc_browser_host")
             host = base / ".masc/browser-lane/host/masc-browser-host"
             lock = base / ".masc/browser-lane/bidi-host.lock"
             lock.touch()

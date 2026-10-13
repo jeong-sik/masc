@@ -174,8 +174,8 @@ let a_load_failure_says_what_failed () = with_workspace @@ fun base ->
        (message Onboarding_status.Runtime_configuration dangling)
        "ollama_cloud.deepseek-v4.1-flash")
 
-(* The launcher and, when [declared], the launch.json install-host.sh writes
-   beside it. *)
+(* The launcher and, when [declared], the launch.json masc browser-lane-setup
+   writes beside it. *)
 let browser_lane_fixture ?(declared=true) ?(connection_port="") () f =
   with_workspace @@ fun base ->
   let root = Filename.concat base ".masc" in
@@ -213,7 +213,7 @@ let browser_lane_undeclared_launcher_is_invalid_and_says_reinstall () =
     (String_util.contains_substring (message Onboarding_status.Browser_lane observed) "launch.json");
   check bool "the operator is told to run the installer again" true
     (String_util.contains_substring (message Onboarding_status.Browser_lane observed)
-       "install-host.sh")
+       "masc browser-lane-setup --mode extension")
 
 (* masc doctor serves no lane, so it cannot see whether a host reaches the
    port the file names: a declared launcher is unverified here, not aligned. *)
@@ -311,7 +311,7 @@ let a_lane_with_no_bidi_host_says_how_one_is_attached () =
     ; "starts Firefox on a profile kept for this with --remote-debugging-port PORT"
     ; "then runs " ^ launch_command base
     ; "docs/design/browser-bidi-live-host.md" ];
-  lacks (bidi_message observed) [ "install-host.sh" ]
+  lacks (bidi_message observed) [ "browser-lane-setup" ]
 
 (* The command is only good where its launcher is. The line above this one
    says to install the lane again when the launcher is not as an
@@ -322,7 +322,7 @@ let a_launcher_that_cannot_be_run_as_it_is_is_installed_first () =
    says observed
      [ "then runs " ^ launch_command base
      ; "The launcher there is not as an installation wrote it: the operator first installs the \
-        lane again by running the MASC browser host installer, install-host.sh" ]);
+        lane again by running masc browser-lane-setup --mode extension" ]);
   (* A host started from an executable on the PATH leaves a record in a
      workspace that has no launcher. *)
   (with_workspace @@ fun base ->
@@ -334,8 +334,7 @@ let a_launcher_that_cannot_be_run_as_it_is_is_installed_first () =
    says (inspect ~base_path:(Some base))
      [ "The operator " ^ run_again base
      ; "No browser lane is installed in this workspace, so that launcher is not there yet: the \
-        operator first installs the lane by running the MASC browser host installer, \
-        install-host.sh"
+        operator first installs the lane by running masc browser-lane-setup --mode extension"
      ; "--base-path " ^ Filename.quote base ]);
   List.iter (fun (name, launcher, standing) ->
       check bool name true

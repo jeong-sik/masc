@@ -533,7 +533,15 @@ let purge_current_unlocked config ~keeper_name ~apply =
                       | Keeper_checkpoint_store.Not_installed
                           { cause = Source_changed _; _ } ->
                         Error Purge_source_changed
-                      | Not_installed { cause; _ } ->
+                      | Not_installed
+                          { cause =
+                              ( Keeper_checkpoint_store.Source_unavailable _
+                              | Keeper_checkpoint_store.Candidate_identity_invalid _
+                              | Keeper_checkpoint_store.Candidate_session_mismatch _
+                              | Keeper_checkpoint_store.Candidate_turn_regressed _
+                              | Keeper_checkpoint_store.Commit_not_installed _ ) as cause
+                          ; _
+                          } ->
                         Error
                           (Purge_install_failed
                              (checkpoint_cas_error_to_string cause))

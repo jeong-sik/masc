@@ -427,7 +427,11 @@ let input_capacity_refusal = function
      | Some (`String "input_too_large"), Some (`Int actual_chars), Some (`Int max_chars)
        when max_chars > 0 && actual_chars > max_chars -> Some {actual_chars; max_chars}
      | _ -> None)
-  | _ -> None
+  | Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
+  | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _ | Subscription_required _
+  | Unsupported_server_request _ | Context_window_exceeded _ | Turn_failed _
+  | Stopped_by_host _ | Turn_interrupted | Runtime_shutting_down | Process_exited _
+  | Timeout _ -> None
 ;;
 
 let error_to_string = function
@@ -2646,7 +2650,8 @@ let context_fragments method_ json payload =
       selected Dynamic_tools value
     | Thread_inject_items,"items",`List values -> list (fun index -> selected (Injected_item index)) values
     | (Turn_start | Turn_steer),"input",`List values -> list turn_item values
-    | _ -> ordinary value in
+    | (Thread_start | Thread_resume | Thread_inject_items | Turn_start | Turn_steer
+      | Dynamic_tool_response), _, _ -> ordinary value in
   match
     (match json with
      | `Assoc fields -> assoc (fun key value -> match key,value with
@@ -3087,7 +3092,12 @@ let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mod
      Log.Runtime_agent.info
        "Codex app-server turn stopped by host: %s"
        (error_to_string stopped)
-   | Error error ->
+   | Error
+       (( Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
+        | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
+        | Subscription_required _ | Unsupported_server_request _
+        | Context_window_exceeded _ | Turn_failed _ | Stopped_by_host _
+        | Turn_interrupted | Runtime_shutting_down | Process_exited _ | Timeout _ ) as error) ->
      Log.Runtime_agent.warn
        "Codex app-server subscription turn failed (kind=%s): %s"
        (error_kind error)

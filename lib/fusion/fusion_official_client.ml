@@ -252,14 +252,82 @@ let panel_failure ~runtime_id = function
   | Missing_reply -> provider_error ~runtime_id "completed turn has no assistant reply"
   | Setup_failure detail -> provider_error ~runtime_id detail
   | Codex_failure (Runtime_codex_app_server.Timeout _) -> Fusion_types.Timeout
-  | Codex_failure error -> provider_error ~runtime_id (Runtime_codex_app_server.error_to_string error)
+  | Codex_failure
+      (( Runtime_codex_app_server.Invalid_config _
+       | Runtime_codex_app_server.Spawn_failed _
+       | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+       | Runtime_codex_app_server.Turn_input_write_failed _
+       | Runtime_codex_app_server.Protocol_error _
+       | Runtime_codex_app_server.Rpc_error _
+       | Runtime_codex_app_server.Subscription_required _
+       | Runtime_codex_app_server.Unsupported_server_request _
+       | Runtime_codex_app_server.Context_window_exceeded _
+       | Runtime_codex_app_server.Turn_failed _
+       | Runtime_codex_app_server.Stopped_by_host _
+       | Runtime_codex_app_server.Turn_interrupted
+       | Runtime_codex_app_server.Runtime_shutting_down
+       | Runtime_codex_app_server.Process_exited _ ) as error) ->
+    provider_error ~runtime_id (Runtime_codex_app_server.error_to_string error)
   | Claude_failure (Runtime_claude_code.Timeout _)
   | Claude_admission_failure (Runtime_claude_code.Timeout _) -> Fusion_types.Timeout
-  | Claude_failure error | Claude_admission_failure error -> provider_error ~runtime_id (Runtime_claude_code.error_to_string error)
+  | Claude_failure
+      (( Runtime_claude_code.Invalid_config _
+       | Runtime_claude_code.Spawn_failed _
+       | Runtime_claude_code.Protocol_error _
+       | Runtime_claude_code.Subscription_required _
+       | Runtime_claude_code.Unsupported_control_request _
+       | Runtime_claude_code.Turn_transport_interrupted _
+       | Runtime_claude_code.Context_window_exceeded _
+       | Runtime_claude_code.Turn_failed _
+       | Runtime_claude_code.Turn_failed_with_observation _
+       | Runtime_claude_code.Stopped_by_host _
+       | Runtime_claude_code.Quota_blocked _
+       | Runtime_claude_code.Process_exited _
+       | Runtime_claude_code.Unhandled_exception _ ) as error)
+  | Claude_admission_failure
+      (( Runtime_claude_code.Invalid_config _
+       | Runtime_claude_code.Spawn_failed _
+       | Runtime_claude_code.Protocol_error _
+       | Runtime_claude_code.Subscription_required _
+       | Runtime_claude_code.Unsupported_control_request _
+       | Runtime_claude_code.Turn_transport_interrupted _
+       | Runtime_claude_code.Context_window_exceeded _
+       | Runtime_claude_code.Turn_failed _
+       | Runtime_claude_code.Turn_failed_with_observation _
+       | Runtime_claude_code.Stopped_by_host _
+       | Runtime_claude_code.Quota_blocked _
+       | Runtime_claude_code.Process_exited _
+       | Runtime_claude_code.Unhandled_exception _ ) as error) ->
+    provider_error ~runtime_id (Runtime_claude_code.error_to_string error)
   | Antigravity_failure (Runtime_antigravity.Timeout _) -> Fusion_types.Timeout
-  | Antigravity_failure error -> provider_error ~runtime_id (Runtime_antigravity.error_to_string error)
+  | Antigravity_failure
+      (( Runtime_antigravity.Invalid_config _
+       | Runtime_antigravity.Spawn_failed _
+       | Runtime_antigravity.Protocol_error _
+       | Runtime_antigravity.State_callback_failed _
+       | Runtime_antigravity.Turn_failed _
+       | Runtime_antigravity.Process_exited _
+       | Runtime_antigravity.Unhandled_exception _ ) as error) ->
+    provider_error ~runtime_id (Runtime_antigravity.error_to_string error)
   | Muse_failure (Runtime_muse_serve.Timeout _) -> Fusion_types.Timeout
-  | Muse_failure error -> provider_error ~runtime_id (Runtime_muse_serve.error_to_string error)
+  | Muse_failure
+      (( Runtime_muse_serve.Invalid_config _
+       | Runtime_muse_serve.Spawn_failed _
+       | Runtime_muse_serve.Turn_input_write_failed _
+       | Runtime_muse_serve.Protocol_error _
+       | Runtime_muse_serve.Rpc_error _
+       | Runtime_muse_serve.Capability_not_granted _
+       | Runtime_muse_serve.Session_not_durable
+       | Runtime_muse_serve.Session_model_mismatch _
+       | Runtime_muse_serve.Session_workspace_mismatch _
+       | Runtime_muse_serve.Session_approval_mode_mismatch _
+       | Runtime_muse_serve.Auth_required _
+       | Runtime_muse_serve.Turn_failed _
+       | Runtime_muse_serve.Turn_cancelled
+       | Runtime_muse_serve.Unsupported_server_request _
+       | Runtime_muse_serve.Runtime_shutting_down
+       | Runtime_muse_serve.Process_exited _ ) as error) ->
+    provider_error ~runtime_id (Runtime_muse_serve.error_to_string error)
 
 
 (* A Muse Code panelist starts in an empty temporary directory rather than

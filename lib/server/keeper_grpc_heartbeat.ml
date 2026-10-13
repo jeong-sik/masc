@@ -231,7 +231,9 @@ let start_keeper_grpc_heartbeat
       ();
     Log.Keeper.warn "keeper %s: gRPC transport requested but no client configured" m.name;
     None
-  | _ -> None
+  | ( Masc_grpc_transport.Http
+    | Masc_grpc_transport.Ws
+    | Masc_grpc_transport.Local ), (Some _ | None) -> None
 ;;
 
 let () =

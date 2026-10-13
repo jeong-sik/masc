@@ -278,7 +278,7 @@ let git_rev_parse_short_probe dir =
          argv
      with
      | Unix.WEXITED 0, output -> String_util.trim_nonempty output
-     | _ -> None)
+     | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None)
 ;;
 
 let git_rev_parse_short_refresh dir =
@@ -371,7 +371,7 @@ let git_probe_trimmed dir args =
       argv
   with
   | Unix.WEXITED 0, output -> String_util.trim_nonempty output
-  | _ -> None
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None
 ;;
 
 let parse_ahead_behind raw =

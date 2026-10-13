@@ -684,11 +684,38 @@ let held_answer ~now_s ~presented ~previously_rejected = function
     when Option.equal rejected_token_equal previously_rejected (Some presented) -> Some held
   | Pulls_failed { failure = Rate_limited { reset_at = Some reset_at }; _ } as held
     when now_s < reset_at -> Some held
-  | Pulls_not_read | Pulls_not_github | Pulls_read _ | Pulls_failed _ -> None
+  | Pulls_not_read
+  | Pulls_not_github
+  | Pulls_read _
+  | Pulls_failed
+      { failure =
+          ( Repository_not_visible
+          | Token_rejected
+          | Rate_limited _
+          | Forbidden _
+          | Http_status _
+          | Graphql_errors _
+          | Transport_failed _
+          | Response_unreadable _ )
+      ; _
+      } -> None
 
 let is_token_rejected = function
   | Pulls_failed { failure = Token_rejected; _ } -> true
-  | Pulls_not_read | Pulls_not_github | Pulls_read _ | Pulls_failed _ -> false
+  | Pulls_not_read
+  | Pulls_not_github
+  | Pulls_read _
+  | Pulls_failed
+      { failure =
+          ( Repository_not_visible
+          | Rate_limited _
+          | Forbidden _
+          | Http_status _
+          | Graphql_errors _
+          | Transport_failed _
+          | Response_unreadable _ )
+      ; _
+      } -> false
 
 (* Listing the Keepers creates their directory when it is missing, and a
    failed mkdir raises. The raise is this list's failure, not the refresh's:

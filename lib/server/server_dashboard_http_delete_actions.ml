@@ -583,7 +583,7 @@ let purge_keeper_root_logs config keeper_name =
       | Keeper_runtime_root_entry.Keeper { keeper_name = owner;
           artifact = (Decision_log | Feedback_log | Tla_trace_log); _ } ->
         String.equal owner keeper_name
-      | Keeper _ -> false)
+      | Keeper { artifact = Metadata; _ } -> false)
   in
   let rec remove = function
     | [] -> Ok ()
@@ -598,7 +598,8 @@ let purge_keeper_root_logs config keeper_name =
         (match remove_path_strict path with
          | Error _ as error -> error
          | Ok _ -> remove rest)
-      | Ok (Some _) -> Error ("Keeper log path is not a file: " ^ path)
+      | Ok (Some { Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK); _ }) ->
+        Error ("Keeper log path is not a file: " ^ path)
   in
   Result.bind entries remove
 ;;
@@ -662,7 +663,29 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
            ~base_path:config.Workspace.base_path ~keeper_name with
          | Error _ as error -> error
          | Ok () -> remove rest)
-      | artifact :: rest ->
+      | (( Keeper_metrics_store_artifact
+         | Keeper_runtime_directory_artifact
+         | Keeper_memory_current_artifact
+         | Keeper_librarian_range_receipt_artifact
+         | Keeper_memory_admission_queue_artifact
+         | Keeper_memory_publication_artifact
+         | Keeper_memory_retraction_plan_artifact
+         | Keeper_memory_source_current_artifact
+         | Keeper_working_context_recall_artifact
+         | Keeper_working_context_artifact
+         | Keeper_memory_journal_artifact
+         | Keeper_memory_journal_lock_artifact
+         | Keeper_memory_absorbed_artifact
+         | Keeper_memory_events_artifact
+         | Keeper_turn_boundaries_artifact
+         | Keeper_librarian_progress_artifact
+         | Keeper_external_read_cursor_artifact
+         | Keeper_librarian_official_progress_artifact
+         | Keeper_configuration_artifact
+         | Keeper_chat_store_artifact
+         | Keeper_antigravity_home_artifact _
+         | Keeper_antigravity_prepare_lock_artifact _
+         | Keeper_muse_home_artifact _ ) as artifact) :: rest ->
         (match keeper_artifact_path config keeper_name artifact with
          | None ->
            Error "dashboard Keeper purge artifact plan lost its typed projection"

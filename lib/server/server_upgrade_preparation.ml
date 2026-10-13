@@ -101,5 +101,7 @@ let replacement_readiness ~run_dir ~base_path ~port =
          with Unix.Unix_error (Unix.EADDRINUSE, _, _) -> Ok Port_busy)
      with Unix.Unix_error _ -> Error Port_unavailable)
   | Error (Server_startup_takeover.Owner_lease_rejected _)
-  | Error (Server_startup_takeover.Owner_identity_unavailable _)
+  | Error
+      (Server_startup_takeover.Owner_identity_unavailable
+         (Owner_changed | Unsupported | Unavailable | Closed))
   | Error (Server_startup_takeover.Current_process_owner) -> Error Owner_unavailable

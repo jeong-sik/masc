@@ -108,9 +108,9 @@ let response_content (response : L.api_response) =
         (match Base64.decode data with
          | Ok bytes when bytes <> "" -> Ok (S.Image {type_="image";data;mime_type=media_type})
          | Ok _ | Error _ -> Error (Invalid_response "MCP sampling image must contain valid nonempty base64"))
-    | [L.Image _] -> Error (Invalid_response "MCP sampling requires a base64 image response")
+    | [L.Image {source_type=(L.Url | L.File_id);_}] -> Error (Invalid_response "MCP sampling requires a base64 image response")
     | (L.Text _)::_ | (L.Thinking _)::_ | (L.ReasoningDetails _)::_ | (L.RedactedThinking _)::_
-    | (L.ToolUse _)::_ | (L.ToolResult _)::_ | (L.Image _)::_ | (L.Document _)::_ | (L.Audio _)::_ -> Error (Invalid_response "MCP sampling cannot carry multiple or unsupported content blocks")
+    | (L.ToolUse _)::_ | (L.ToolResult _)::_ | (L.Image {source_type=(L.Base64 | L.Url | L.File_id);_})::_ | (L.Document _)::_ | (L.Audio _)::_ -> Error (Invalid_response "MCP sampling cannot carry multiple or unsupported content blocks")
     | [] -> Error (Provider_error (Llm_provider.Http_client.empty_completion_error
         ~stop_reason:response.stop_reason))
 
@@ -186,7 +186,20 @@ let invoke ~sw ~net ~store ~route ~request params =
               | Provider_error (Llm_provider.Http_client.TimeoutError _)
               | Provider_error (Llm_provider.Http_client.AcceptRejected _)
               | Provider_error (Llm_provider.Http_client.ProviderTerminal _)
-              | Provider_error (Llm_provider.Http_client.ProviderFailure _) -> [] in
+              | Provider_error (Llm_provider.Http_client.ProviderFailure
+                  {kind=(Llm_provider.Http_client.Capacity_exhausted _
+                        | Llm_provider.Http_client.Hard_quota _
+                        | Llm_provider.Http_client.Capability_mismatch _
+                        | Llm_provider.Http_client.Cli_policy_invalid _
+                        | Llm_provider.Http_client.Cli_startup_failed _
+                        | Llm_provider.Http_client.Provider_parse_error _
+                        | Llm_provider.Http_client.Provider_wire_error _
+                        | Llm_provider.Http_client.Provider_reported_error _
+                        | Llm_provider.Http_client.Provider_interrupted
+                        | Llm_provider.Http_client.Response_body_too_large _
+                        | Llm_provider.Http_client.Context_overflow _
+                        | Llm_provider.Http_client.Repeating_generation _
+                        | Llm_provider.Http_client.Unknown_provider_failure _);_}) -> [] in
             let diagnostic = Eio_unix.run_in_systhread (fun () ->
               Lane_addon_store.write_blob store (Yojson.Safe.to_string (`Assoc (
                 ["kind",`String "model_attempt_failure";"runtime_id",`String runtime_id;

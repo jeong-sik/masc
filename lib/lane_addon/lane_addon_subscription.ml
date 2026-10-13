@@ -45,12 +45,20 @@ let load config =
       let* document = Otoml.Parser.from_string_result bytes in
       let* rows = match document with
         | Otoml.TomlTable ["subscriptions",(Otoml.TomlArray rows | Otoml.TomlTableArray rows)] -> Ok rows
-        | _ -> Error "subscription TOML requires only subscriptions array" in
+        | Otoml.TomlTable _ | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+        | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+        | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+        | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ->
+            Error "subscription TOML requires only subscriptions array" in
       let parse = function
         | Otoml.TomlTable fields | Otoml.TomlInlineTable fields ->
             let rec pairs = function [] -> Ok []
               | (key,Otoml.TomlString value)::rest -> let* rest=pairs rest in Ok ((key,`String value)::rest)
-              | _ -> Error "subscription fields must be strings" in
+              | (_,(Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+                   | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+                   | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
+                   | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _))::_ ->
+                  Error "subscription fields must be strings" in
             let* fields = pairs fields in decode (`Assoc fields)
         | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
         | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
@@ -139,7 +147,7 @@ let select_subscription ~caller args subscriptions =
 let producer ~access bindings s =
   let matches value = match get "run_id" text value,field "configuration" value with
     | Ok run,Ok owner when run=s.run_id -> get "id" text owner=Ok s.installation_id
-    | _ -> false in
+    | Ok _,Ok _ | Ok _,Error _ | Error _,Ok _ | Error _,Error _ -> false in
   let rec live = function
     | [] -> Ok []
     | value::rest ->

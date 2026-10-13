@@ -2350,7 +2350,19 @@ let plan_exact_output_commit ~config_path ~runtimes ~lanes =
        Ok (Commit_with_registry (prepared, Exact_output_registry_replaced { origin }))
      | Runtime_exact_output_registry.Registry_unpublished ->
        Ok (Commit_with_registry (prepared, Exact_output_registry_unpublished)))
-  | Error reason ->
+  | Error
+      (( Runtime_exact_output_registry.Publication_busy
+       | Runtime_exact_output_registry.Replacement_base_changed
+       | Runtime_exact_output_registry.Blank_lane_id _
+       | Runtime_exact_output_registry.Duplicate_lane_id _
+       | Runtime_exact_output_registry.Empty_lane _
+       | Runtime_exact_output_registry.Blank_lane_slot _
+       | Runtime_exact_output_registry.Duplicate_lane_slot _
+       | Runtime_exact_output_registry.Invalid_lane_slot _
+       | Runtime_exact_output_registry.Lane_thinking_not_encodable _
+       | Runtime_exact_output_registry.Required_lane_unavailable _
+       | Runtime_exact_output_registry.Required_lane_disabled _
+       | Runtime_exact_output_registry.Resolver_snapshot_rejected _ ) as reason) ->
     if on_disk_text_rebuilds_exact_output_registry ~config_path
     then
       Error

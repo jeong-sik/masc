@@ -1498,7 +1498,24 @@ let run_blocks_internal
         ; runtime_observation = Some runtime_observation
         ; stop_reason
         }
-    | Error err ->
+    | Error
+        (( Agent_core.Error.Api _
+         | Agent_core.Error.Provider _
+         | Agent_core.Error.Agent
+             ( Agent_core.Error.UnrecognizedStopReason _
+             | Agent_core.Error.ToolRoundLimitExceeded _
+             | Agent_core.Error.HookExecutionFailed _
+             | Agent_core.Error.TerminalToolEffectFailed _
+             | Agent_core.Error.TerminalToolDurabilityFailed _
+             | Agent_core.Error.GuardrailViolation _
+             | Agent_core.Error.TripwireViolation _ )
+         | Agent_core.Error.Mcp _
+         | Agent_core.Error.Config _
+         | Agent_core.Error.Serialization _
+         | Agent_core.Error.Io _
+         | Agent_core.Error.Orchestration _
+         | Agent_core.Error.Internal _
+         | Agent_core.Error.Internal_carried _ ) as err) ->
       let detail = Agent_core.Error.to_string err in
       let error_response =
         partial_response_of_stop ~session_id ~text:detail

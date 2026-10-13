@@ -109,7 +109,15 @@ let classify_entry ~is_live
     | Q.Exact_bound
         { status = (Q.Exact_completed | Q.Exact_released_before_dispatch); _ }
       -> true
-    | Q.Exact_unbound | Q.Exact_bound _ -> false
+    | Q.Exact_unbound
+    | Q.Exact_bound
+        { status =
+            ( Q.Exact_dispatch_uncertain
+            | Q.Exact_released_recovery_required
+            | Q.Exact_quarantined _
+            | Q.Exact_restart_quarantined )
+        ; _
+        } -> false
   in
   match entry.summary_attempt_disposition with
   | Q.Summary_attempt_ready ->

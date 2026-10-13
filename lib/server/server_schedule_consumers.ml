@@ -506,7 +506,10 @@ let read_owner_meta config keeper_name =
          ("durable keeper metadata read failed: "
           ^ Executor_pool_ref.strict_submit_error_to_string
               (Executor_pool_ref.Work_failed failure)))
-  | Error error ->
+  | Error
+      ((Executor_pool_ref.Pool_unavailable
+       | Executor_pool_ref.Caller_not_in_eio
+       | Executor_pool_ref.Submission_failed _) as error) ->
     Ok
       (Owner_meta_unavailable
          ("durable keeper metadata read unavailable: "

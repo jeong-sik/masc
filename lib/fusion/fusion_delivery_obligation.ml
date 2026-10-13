@@ -478,7 +478,16 @@ let prepare ~base_path ~request_id ~payload ~accepted_at =
                else Not_published)
           ; detail = Keeper_fs.durable_write_error_to_string error
           })
-    | Error error -> Error error)
+    | Error
+        (( Invalid_base_path _
+         | Invalid_keeper_name _
+         | Invalid_request_id _
+         | Invalid_payload _
+         | Read_failed _
+         | Decode_failed _
+         | Identity_conflict _
+         | Persistence_failed _
+         | Removal_failed _ ) as error) -> Error error)
 ;;
 
 let load ~base_path ~request_id =
@@ -497,7 +506,16 @@ let remove_delivered ~base_path ~identity =
   with_operation_lock path (fun () ->
     match load_path_unlocked ~base_path path with
     | Error (Not_found _) -> Ok ()
-    | Error error -> Error error
+    | Error
+        (( Invalid_base_path _
+         | Invalid_keeper_name _
+         | Invalid_request_id _
+         | Invalid_payload _
+         | Read_failed _
+         | Decode_failed _
+         | Identity_conflict _
+         | Persistence_failed _
+         | Removal_failed _ ) as error) -> Error error
     | Ok existing when not (same_record existing identity) ->
       Error (Identity_conflict "delivery removal identity changed")
     | Ok _ ->

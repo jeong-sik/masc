@@ -93,7 +93,7 @@ let transition record json =
           (match List.assoc "seq" f,record.workspace with
            | `Int seq,Uncommitted when seq>0 -> Ok {record with workspace=Committed seq}
            | `Int seq,Committed previous when seq=previous -> Ok record
-           | _ -> Error (Corrupt "contradictory workspace commit"))
+           | _,(Uncommitted | Committed _) -> Error (Corrupt "contradictory workspace commit"))
       | Some (`String "recipient") ->
           let* f = exact ["event";"recipient";"state";"error"] json in
           let* recipient=text f "recipient" in let* state=text f "state" in

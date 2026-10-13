@@ -347,7 +347,7 @@ let read_runtime_manifest_scan ~config ~keeper_name ~trace_id ?turn_id ~limit ()
             | Ok (Keeper_runtime_manifest.Unsupported_row (identity, unsupported))
               when manifest_identity_matches ?turn_id keeper_name trace_id identity ->
               record_manifest_scan_diagnostic scan (Unsupported_event_row unsupported)
-            | Ok _ -> scan
+            | Ok (Keeper_runtime_manifest.Active_row _ | Keeper_runtime_manifest.Unsupported_row _) -> scan
             | Error detail ->
               record_manifest_scan_diagnostic scan (Invalid_manifest_row detail)
           with

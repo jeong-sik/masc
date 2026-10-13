@@ -13,12 +13,21 @@ let output_ports world =
           let rec read acc = function
             | [] -> Ok (List.rev acc)
             | Otoml.TomlString lane :: rest when String.trim lane <> "" -> read (lane :: acc) rest
-            | _ -> Error ("world.outputs." ^ id ^ ".lanes requires non-blank lane IDs") in
+            | ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+              | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+              | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+              | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _
+              | Otoml.TomlTableArray _ ) :: _ ->
+                Error ("world.outputs." ^ id ^ ".lanes requires non-blank lane IDs") in
           let* lanes = read [] values in
           if lanes = [] || List.length lanes <> List.length (List.sort_uniq String.compare lanes)
           then Error ("world.outputs." ^ id ^ ".lanes requires a non-empty list of unique lane IDs")
           else Ok (Selected_lanes (List.sort String.compare lanes))
-      | _ -> Error ("world.outputs." ^ id ^ " requires only lanes or all_lanes = true") in
+      | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+      | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+      | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
+      | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ->
+          Error ("world.outputs." ^ id ^ " requires only lanes or all_lanes = true") in
     Ok (id, selection) in
   match List.assoc_opt "outputs" world with
   | None -> Ok []
@@ -80,7 +89,11 @@ let load ~path =
       | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields)
         when List.for_all (fun (key,_) -> List.mem key ["export";"invocation"]) fields
           && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok fields
-      | Some _ -> Error "world.tools accepts export and invocation only" in
+      | Some ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+             | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+             | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+             | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _
+             | Otoml.TomlTableArray _ ) -> Error "world.tools accepts export and invocation only" in
     let* tool_invocation = match List.assoc_opt "invocation" tool_fields with
       | None | Some (Otoml.TomlString "direct") -> Ok Direct
       | Some (Otoml.TomlString "host_context") -> Ok Host_context
@@ -100,7 +113,12 @@ let load ~path =
             | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
             | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ -> Error "world.tools.export requires tool names") (Ok []) values in
           validate_exported_tools ~action_tool names
-      | _ -> Error "world.tools requires an export array" in
+      | None
+      | Some ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+             | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+             | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+             | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ) ->
+          Error "world.tools requires an export array" in
     let* state_storage = match List.assoc_opt "state" world with
       | None -> Ok Ephemeral
       | Some (Otoml.TomlTable [("mode", Otoml.TomlString "persistent")]
@@ -117,7 +135,12 @@ let load ~path =
       | None -> Ok []
       | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields)
         when List.for_all (fun (key,_) -> List.mem key ["binding_schema";"presentation";"refresh_policy";"model_access"]) fields -> Ok fields
-      | Some _ -> Error "interface accepts binding_schema, presentation, refresh_policy and model_access" in
+      | Some ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+             | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+             | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+             | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _
+             | Otoml.TomlTableArray _ ) ->
+          Error "interface accepts binding_schema, presentation, refresh_policy and model_access" in
     let* model_access = match List.assoc_opt "model_access" interface with
       | None | Some (Otoml.TomlString "disabled") -> Ok Model_disabled
       | Some (Otoml.TomlString "host_sampling") -> Ok Host_sampling

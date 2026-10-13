@@ -385,7 +385,7 @@ let checkpoint_operation_response ~(config : Workspace.config) ~restore ~body =
                state=Unknown (Executor_pool_ref.strict_submit_error_to_string failure)})
         | Ok (Error Checkpoint_receipt.Binding_conflict) ->
             `Conflict,write_error_json "checkpoint operation identity is bound to another action or slot"
-        | Ok (Error error) ->
+        | Ok (Error ((Invalid_binding _ | Store_unavailable _) as error)) ->
             (* A failed lookup may hide an already-running duplicate. Failure
                to acquire admission is not proof this operation had no effect. *)
             `Service_unavailable, `Assoc (receipt_json ~config
@@ -433,7 +433,7 @@ let checkpoint_operation_response ~(config : Workspace.config) ~restore ~body =
                     leaves pending evidence; the direct answer still proves this
                     request did not dispatch its effect. *)
                  refused binding "MSX checkpoint worker is unavailable"
-             | Error failure ->
+             | Error ((Work_failed _ | Submission_failed _) as failure) ->
                  `Internal_server_error,write_error_json (Executor_pool_ref.strict_submit_error_to_string failure))
 
 let checkpoint_status_response ~(config : Workspace.config) ~body =

@@ -872,7 +872,7 @@ type inference_telemetry =
   ; reasoning_effort : string option
   ; canonical_model_id : string option
   ; reasoning_source : Reasoning_source.t option
-  ; reasoning_prefix : Reasoning_prefix.t option
+  ; reasoning_prefix : Reasoning_prefix.t option [@default None]
   ; effective_context_window : int option
   ; provider_internal_action_count : int option
   ; ttfrc_ms : float option

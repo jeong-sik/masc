@@ -125,20 +125,62 @@ let encode_events t events =
   loop [] events
 ;;
 
+(* Telemetry gained [reasoning_prefix] while stored events already existed, and
+   its encoding is now "omit when [None]". A stored event may therefore spell
+   the field as an absent key (written before the field existed) or as an
+   explicit [null] (written by a binary that always emitted it); both decode to
+   the same value, and the current encoder writes neither. Canonical equality
+   ignores that one spelling difference on both sides. Any other byte
+   difference is still non-canonical. *)
+let legacy_null_field = "\"reasoning_prefix\":null,"
+
+let without_legacy_null_field text =
+  let length = String.length text in
+  let pattern_length = String.length legacy_null_field in
+  let matches_at index =
+    index + pattern_length <= length
+    &&
+    let rec loop offset =
+      offset >= pattern_length
+      || (Char.equal (String.unsafe_get text (index + offset))
+            (String.unsafe_get legacy_null_field offset)
+          && loop (offset + 1))
+    in
+    loop 0
+  in
+  let buffer = Buffer.create length in
+  let rec copy index =
+    if index < length
+    then
+      if matches_at index
+      then copy (index + pattern_length)
+      else (
+        Buffer.add_char buffer (String.unsafe_get text index);
+        copy (index + 1))
+  in
+  copy 0;
+  Buffer.contents buffer
+;;
+
+let equal_canonical_bytes left right =
+  String.equal left right
+  || String.equal (without_legacy_null_field left) (without_legacy_null_field right)
+;;
+
 let decode_canonical_event t payload =
   check_worker_cancellation t;
   match Event.of_json_string payload with
   | Error detail -> Error (Invalid_event { detail })
   | Ok event ->
     check_worker_cancellation t;
-    if String.equal payload (Event.to_json_string event)
+    if equal_canonical_bytes payload (Event.to_json_string event)
     then Ok event
     else Error Noncanonical_event
 ;;
 
 let compare_canonical_payload t ~expected ~actual =
   check_worker_cancellation t;
-  let identical = String.equal expected actual in
+  let identical = equal_canonical_bytes expected actual in
   check_worker_cancellation t;
   identical
 ;;

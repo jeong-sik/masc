@@ -1986,16 +1986,16 @@ let test_scope_uncertain_rename_requires_durability_confirmation () =
     let primary = Filename.concat
       (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
       Persistence.snapshot_filename in
-    let fail_after_rename path json =
+    let fail_after_rename path state =
       match Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
         ~sync_file:(fun _ -> ())
         ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO, "fsync", "parent")))
-        path (Yojson.Safe.to_string json) with
+        path (Keeper_event_queue_snapshot_codec.encode_state state) with
       | Error ({ stage = Fs_compat.After_rename; _ } as error) ->
           Error (Fs_compat.atomic_replace_failure_to_string error)
       | Error _ -> Alcotest.fail "fixture failed before rename"
       | Ok () -> Alcotest.fail "fixture unexpectedly synced parent" in
-    expect_binding_error "uncertain write succeeded" (fail_after_rename primary (State.to_yojson bound));
+    expect_binding_error "uncertain write succeeded" (fail_after_rename primary bound);
     Persistence.For_testing.reset_snapshot_cache_for_testing ();
     let visible = read () in
     let selections = State.pending_selections visible in
@@ -2006,7 +2006,7 @@ let test_scope_uncertain_rename_requires_durability_confirmation () =
       expect_binding_error "strict no-op skipped failing durability confirmation"
         (Persistence.For_testing.bind_pending_repetition_scope_with_confirmation
           ~confirm_snapshot:(fun path state ->
-            incr confirmations; fail_after_rename path (State.to_yojson state))
+            incr confirmations; fail_after_rename path state)
           ~base_path ~keeper_name ~selections ~scope ()));
     Alcotest.(check int) "same binding retried the barrier" 1 !confirmations;
     Alcotest.(check int) "failed durability confirmation does not notify" 0 !failed_notifications;

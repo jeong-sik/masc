@@ -406,6 +406,27 @@ let rec observe_runtime_repository () =
     else observe_runtime_repository ()
 ;;
 
+(* The package managers a dashboard build receipt may name. *)
+type package_manager_kind =
+  | Pnpm
+  | Corepack
+
+let package_manager_kind_to_string = function
+  | Pnpm -> "pnpm"
+  | Corepack -> "corepack"
+
+let package_manager_kind_of_string = function
+  | "pnpm" -> Some Pnpm
+  | "corepack" -> Some Corepack
+  | _ -> None
+
+(* The one build mode and the one producer a dashboard build receipt may name.
+   The receipt check refuses any other value, so a verified identity has no
+   field for them: these constants are what it verified. *)
+let dashboard_build_mode = "production"
+let dashboard_build_producer =
+  "scripts/build-dashboard-if-needed.sh --prepare-exact + --build-exact"
+
 type executable_provenance =
   { binary_commit : string
   ; build_input_fingerprint : string
@@ -437,19 +458,17 @@ and dashboard_assets_provenance =
   ; build_input_file_count : int
   ; build_input_matches_head : bool
   ; build_lock_sha256 : string
-  ; build_mode : string
   ; build_environment_path : string
   ; build_environment_path_identity_sha256 : string
   ; build_environment_path_executable_sha256 : string
   ; build_environment_path_executable_count : int
   ; build_environment_profile_sha256 : string
-  ; build_producer : string
   ; build_node_executable : string
   ; build_node_executable_sha256 : string
   ; build_node_version : string
   ; build_node_platform : string
   ; build_node_arch : string
-  ; build_package_manager_kind : string
+  ; build_package_manager_kind : package_manager_kind
   ; build_package_manager_executable : string
   ; build_package_manager_executable_sha256 : string
   ; build_pnpm_version : string
@@ -491,37 +510,9 @@ type dashboard_asset_resolution =
       ; launch_source_inode : int
       ; expected_size : int
       ; expected_sha256 : string
-      ; tree_sha256 : string
       ; snapshot_root : string
       ; snapshot_device : int
       ; snapshot_inode : int
-      ; file_count : int
-      ; build_source_commit : string
-      ; build_head_tree : string
-      ; build_index_tree : string
-      ; build_input_sha256 : string
-      ; build_input_file_count : int
-      ; build_input_matches_head : bool
-      ; build_lock_sha256 : string
-      ; build_mode : string
-      ; build_environment_path : string
-      ; build_environment_path_identity_sha256 : string
-      ; build_environment_path_executable_sha256 : string
-      ; build_environment_path_executable_count : int
-      ; build_environment_profile_sha256 : string
-      ; build_producer : string
-      ; build_node_executable : string
-      ; build_node_executable_sha256 : string
-      ; build_node_version : string
-      ; build_node_platform : string
-      ; build_node_arch : string
-      ; build_package_manager_kind : string
-      ; build_package_manager_executable : string
-      ; build_package_manager_executable_sha256 : string
-      ; build_pnpm_version : string
-      ; build_vite_version : string
-      ; build_installed_graph_metadata_sha256 : string
-      ; build_installed_graph_metadata_count : int
       }
 
 
@@ -779,9 +770,9 @@ let parse_executable_provenance
     then Error "executable provenance dashboard assets schema is unsupported"
     else if not (String.equal build_schema "masc.run-local-dashboard-build.v1")
     then Error "executable provenance dashboard build receipt schema is unsupported"
-    else if not (String.equal build_producer "scripts/build-dashboard-if-needed.sh --prepare-exact + --build-exact")
+    else if not (String.equal build_producer dashboard_build_producer)
     then Error "executable provenance dashboard build producer is unsupported"
-    else if not (String.equal build_mode "production")
+    else if not (String.equal build_mode dashboard_build_mode)
     then Error "executable provenance dashboard build mode is unsupported"
     else if not environment_paths_are_valid
     then Error "executable provenance dashboard build environment path is invalid"
@@ -815,10 +806,11 @@ let parse_executable_provenance
               ; build_vite_version
               ]
     then Error "executable provenance dashboard toolchain identity is blank"
-    else if not (String.equal build_package_manager_kind "pnpm"
-                 || String.equal build_package_manager_kind "corepack")
-    then Error "executable provenance dashboard package-manager kind is invalid"
-    else if not (valid_lower_hex ~length:40 build_head_tree)
+    else
+    match package_manager_kind_of_string build_package_manager_kind with
+    | None -> Error "executable provenance dashboard package-manager kind is invalid"
+    | Some build_package_manager_kind ->
+    if not (valid_lower_hex ~length:40 build_head_tree)
             || not (valid_lower_hex ~length:40 build_index_tree)
     then Error "executable provenance dashboard source tree identity is invalid"
     else if not (String.equal source_root (Filename.concat launch_source_root "assets/dashboard"))
@@ -854,13 +846,11 @@ let parse_executable_provenance
         ; build_input_file_count
         ; build_input_matches_head
         ; build_lock_sha256
-        ; build_mode
         ; build_environment_path
         ; build_environment_path_identity_sha256
         ; build_environment_path_executable_sha256
         ; build_environment_path_executable_count
         ; build_environment_profile_sha256
-        ; build_producer
         ; build_node_executable
         ; build_node_executable_sha256
         ; build_node_version
@@ -1203,37 +1193,9 @@ let resolve_dashboard_asset_in_binding binding relative_path =
                     ; launch_source_inode = binding.provenance.source_root_inode
                     ; expected_size = file.size
                     ; expected_sha256 = file.sha256
-                    ; tree_sha256 = dashboard_assets.tree_sha256
                     ; snapshot_root
                     ; snapshot_device = dashboard_assets.snapshot_device
                     ; snapshot_inode = dashboard_assets.snapshot_inode
-                    ; file_count = String_map.cardinal binding.dashboard_asset_index
-                    ; build_source_commit = dashboard_assets.build_source_commit
-                    ; build_head_tree = dashboard_assets.build_head_tree
-                    ; build_index_tree = dashboard_assets.build_index_tree
-                    ; build_input_sha256 = dashboard_assets.build_input_sha256
-                    ; build_input_file_count = dashboard_assets.build_input_file_count
-                    ; build_input_matches_head = dashboard_assets.build_input_matches_head
-                    ; build_lock_sha256 = dashboard_assets.build_lock_sha256
-                    ; build_mode = dashboard_assets.build_mode
-                    ; build_environment_path = dashboard_assets.build_environment_path
-                    ; build_environment_path_identity_sha256 = dashboard_assets.build_environment_path_identity_sha256
-                    ; build_environment_path_executable_sha256 = dashboard_assets.build_environment_path_executable_sha256
-                    ; build_environment_path_executable_count = dashboard_assets.build_environment_path_executable_count
-                    ; build_environment_profile_sha256 = dashboard_assets.build_environment_profile_sha256
-                    ; build_producer = dashboard_assets.build_producer
-                    ; build_node_executable = dashboard_assets.build_node_executable
-                    ; build_node_executable_sha256 = dashboard_assets.build_node_executable_sha256
-                    ; build_node_version = dashboard_assets.build_node_version
-                    ; build_node_platform = dashboard_assets.build_node_platform
-                    ; build_node_arch = dashboard_assets.build_node_arch
-                    ; build_package_manager_kind = dashboard_assets.build_package_manager_kind
-                    ; build_package_manager_executable = dashboard_assets.build_package_manager_executable
-                    ; build_package_manager_executable_sha256 = dashboard_assets.build_package_manager_executable_sha256
-                    ; build_pnpm_version = dashboard_assets.build_pnpm_version
-                    ; build_vite_version = dashboard_assets.build_vite_version
-                    ; build_installed_graph_metadata_sha256 = dashboard_assets.build_installed_graph_metadata_sha256
-                    ; build_installed_graph_metadata_count = dashboard_assets.build_installed_graph_metadata_count
                     }
               with
               | Sys_error _ | Unix.Unix_error _ ->

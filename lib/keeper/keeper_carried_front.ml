@@ -198,7 +198,21 @@ let current_generation_floor ~config ~keeper_name ~trace_id =
                 rest
             | Keeper_turn_boundaries.History_restarted _ ->
               loop latest_turn latest_turn rest)
-         | (_, Ok _) :: rest -> loop latest_turn floor rest
+         | (_, Ok record) :: rest ->
+           (match record.Keeper_turn_boundaries.event with
+            | Keeper_turn_boundaries.Turn_ended { turn_ref; _ }
+              when String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id ->
+              (* A restart is fenced by the last turn that ended before it,
+                 and that turn is the running latest. A turn that merely
+                 continues the history leaves [floor] alone, but it still
+                 moves the latest, so a restart marker written without a
+                 fresh-history end line can name its own boundary. *)
+              let turn = Ids.Turn_ref.absolute_turn turn_ref in
+              loop
+                (Some (Option.fold ~none:turn ~some:(Int.max turn) latest_turn))
+                floor
+                rest
+            | _ -> loop latest_turn floor rest)
        in
        loop None None lines)
 ;;

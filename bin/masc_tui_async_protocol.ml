@@ -473,6 +473,7 @@ type async_msg =
   | Board_new_post_done of {
       reply_to : string option;
       sent_draft : string;
+      sent_attachments : board_staged_attachment list;
       result : (string, string) result;
     }
   | Board_vote_done of (string, string) result

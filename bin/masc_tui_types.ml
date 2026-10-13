@@ -1882,6 +1882,99 @@ let decode_board_attachments json : board_attachment_entry list =
   | _ -> []
 ;;
 
+(** {1 Board attachments: the write side}
+
+    The compose pane stages local files, uploads them to the artifact store
+    at send time, and names the returned digests in the post payload's
+    [attachments] field. The wire form written here is the bare [sha256]
+    entry; the server handler turns it into the [artifact] wrapper the read
+    side above decodes. *)
+
+(** What a local file can be attached as. Narrower than
+    {!board_attachment_kind} on purpose: a staged file is never a youtube
+    link or a kind this build does not know, and the server refuses both for
+    a stored file. *)
+type board_upload_kind =
+  | Uk_image
+  | Uk_audio
+  | Uk_score
+  | Uk_midi
+  | Uk_file
+
+let board_upload_kind_to_wire = function
+  | Uk_image -> "image"
+  | Uk_audio -> "audio"
+  | Uk_score -> "score"
+  | Uk_midi -> "midi"
+  | Uk_file -> "file"
+;;
+
+(* Case-insensitive -- tab editors and macOS saves routinely write uppercase
+   extensions, and the kind describes the file, not the case of its name. A
+   bare dotfile (".gp5") or a trailing dot ("notes.") is not an extension. *)
+let extension_of_path path =
+  let base = Filename.basename path in
+  match String.rindex_opt base '.' with
+  | Some dot when dot > 0 && dot < String.length base - 1 ->
+      Some
+        (String.lowercase_ascii
+           (String.sub base (dot + 1) (String.length base - dot - 1)))
+  | Some _ | None -> None
+;;
+
+(* The file's name decides its kind: the store keeps no media type per file,
+   so the name is the only signal a client has. A name that says nothing is
+   a plain file. *)
+let upload_kind_of_path path =
+  match extension_of_path path with
+  | None -> Uk_file
+  | Some extension -> (
+      match extension with
+      | "gp" | "gp3" | "gp4" | "gp5" | "gpx" | "cap" | "capx" | "atex"
+      | "musicxml" | "mxl" ->
+          Uk_score
+      | "mid" | "midi" -> Uk_midi
+      | "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" -> Uk_image
+      | "mp3" | "wav" | "ogg" | "flac" | "m4a" | "aac" -> Uk_audio
+      | _ -> Uk_file)
+;;
+
+(** A local file the operator staged in board compose. [sa_path] is read at
+    send time, so a file replaced on disk since staging posts its current
+    bytes. *)
+type board_staged_attachment = {
+  sa_path: string;
+  sa_name: string;  (** Basename, sent as the entry's [name]. *)
+  sa_kind: board_upload_kind;
+}
+
+(** One uploaded attachment ready for the post payload. *)
+type board_outbound_attachment = {
+  oa_kind: board_upload_kind;
+  oa_sha256: string;
+  oa_name: string;
+}
+
+(* The payload field for a post's staged uploads. [None] -- the field absent
+   from the payload -- when nothing was staged, so a plain post's payload is
+   exactly what it was before attachments existed. *)
+let board_outbound_attachments_field attachments =
+  match attachments with
+  | [] -> None
+  | _ ->
+      Some
+        ( "attachments"
+        , `List
+            (List.map
+               (fun { oa_kind; oa_sha256; oa_name } ->
+                  `Assoc
+                    [ "kind", `String (board_upload_kind_to_wire oa_kind)
+                    ; "sha256", `String oa_sha256
+                    ; "name", `String oa_name
+                    ])
+               attachments) )
+;;
+
 (** Board post (light projection for list view) *)
 type board_post = {
   bp_id: string;
@@ -7007,6 +7100,14 @@ type state = {
   mutable board_compose_armed: bool;
   mutable board_compose_reply_to: string option;
   mutable board_compose_hearth: string option;
+  (* Files staged with Ctrl-A, read and uploaded at send time so a file
+     replaced since staging posts its current bytes. The list shares the
+     draft's lifecycle: leaving compose keeps it, discard clears it. Comments
+     have no attachment wire, so staged files wait for a new post. *)
+  mutable board_compose_attachments: board_staged_attachment list;
+  (* The path being typed after Ctrl-A. [Some] routes every compose key to
+     the path input instead of the draft. *)
+  mutable board_compose_attach_input: Buffer.t option;
   (* One send at a time: the gate a slow server needs so s-s cannot post
      the same draft twice, and the completion knows it owns the clear. *)
   mutable board_post_inflight: bool;
@@ -8467,6 +8568,7 @@ type text_input_target =
   | Text_goal_drop_reason
   | Text_github_token
   | Text_board_draft
+  | Text_board_attach_path
 
 (* The order is the key dispatch's order, which is what an operator already
    experiences: a preset name being typed holds every letter, and the two
@@ -8577,7 +8679,11 @@ let text_input_target (state : state) ~compact_viewport =
   else if github_surface && Option.is_some state.github_token_input then
     Some Text_github_token
   else if state.view = Board && state.board_mode = Board_compose then
-    Some Text_board_draft
+    (* The attach path is typed over the draft: while it is open, keys and
+       pastes are path text, not post text. *)
+    match state.board_compose_attach_input with
+    | Some _ -> Some Text_board_attach_path
+    | None -> Some Text_board_draft
   else None
 ;;
 
@@ -8600,7 +8706,7 @@ let quit_key_allowed_for = function
       | Text_voice_wizard | Text_palette | Text_row_search
       | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
-      | Text_board_draft | Text_goal_drop_reason ) ->
+      | Text_board_draft | Text_board_attach_path | Text_goal_drop_reason ) ->
       false
   | None -> true
 ;;
@@ -10909,6 +11015,8 @@ let create_state
   board_compose_armed = false;
   board_compose_reply_to = None;
   board_compose_hearth = None;
+  board_compose_attachments = [];
+  board_compose_attach_input = None;
   board_post_inflight = false;
   board_post_error = None;
   board_vote_armed = None;

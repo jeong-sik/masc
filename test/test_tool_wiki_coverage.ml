@@ -1155,6 +1155,9 @@ let test_lint_reports_and_does_not_write () =
     write_wiki_page ctx ~filename:"torn.md" "no header at all";
     let before = tree_snapshot ctx in
     let json = lint_json ctx (`Assoc []) in
+    Alcotest.(check string) "a second run is byte-identical"
+      (Yojson.Safe.to_string json)
+      (Yojson.Safe.to_string (lint_json ctx (`Assoc [])));
     Alcotest.(check string) "schema" "masc.wiki_lint.v1"
       Yojson.Safe.Util.(to_string (lint_member json "schema"));
     Alcotest.(check int) "pages_total" 3

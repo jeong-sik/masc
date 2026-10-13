@@ -55,8 +55,7 @@ let decide_and_record
     Keeper_turn_helpers.record_pre_dispatch_terminal_observation
       ~config
       ~meta
-      ~runtime_id:
-        (           (runtime_id_of_meta meta))
+      ~runtime_id:(runtime_id_of_meta meta)
       ~outcome:`Cancelled
       ~terminal_reason_code:"supervisor_stop"
       ~activity_kind:"keeper.turn_cancelled"
@@ -84,8 +83,7 @@ let decide_and_record
     Keeper_turn_helpers.record_pre_dispatch_terminal_observation
       ~config
       ~meta
-      ~runtime_id:
-        (             (runtime_id_of_meta meta))
+      ~runtime_id:(runtime_id_of_meta meta)
       ~outcome:`Skipped
       ~terminal_reason_code
       ~activity_kind:"keeper.turn_skipped"
@@ -113,8 +111,7 @@ let decide_and_record
     Keeper_turn_helpers.record_pre_dispatch_terminal_observation
       ~config
       ~meta
-      ~runtime_id:
-        (             (runtime_id_of_meta meta))
+      ~runtime_id:(runtime_id_of_meta meta)
       ~outcome:`Error
       ~terminal_reason_code
       ~activity_kind:"keeper.turn_blocked"

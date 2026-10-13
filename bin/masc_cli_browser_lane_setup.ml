@@ -32,19 +32,15 @@ let manifest_directory ~manifest_dir =
   match manifest_dir with
   | Some directory -> Ok directory
   | None ->
-    (match Sys.getenv_opt "HOME" with
-     | None | Some "" ->
+    (match Sys.getenv_opt "HOME", Masc.Browser_lane_setup.current_platform () with
+     | (None | Some ""), _ ->
        Error "HOME is not set, so Firefox's manifest directory is unknown. Name it with --manifest-dir."
-     | Some home ->
-       let host =
-         Masc.Sandbox_readiness.detect_host ~run:Masc.Sandbox_readiness.system_runner
-       in
-       (match Masc.Browser_lane_setup.default_manifest_directory ~home host with
-        | Some directory -> Ok directory
-        | None ->
-          Error
-            "This installer supports macOS and Linux. Name Firefox's native messaging \
-             directory with --manifest-dir."))
+     | Some _, None ->
+       Error
+         "This installer supports macOS and Linux. Name Firefox's native messaging \
+          directory with --manifest-dir."
+     | Some home, Some platform ->
+       Ok (Masc.Browser_lane_setup.default_manifest_directory ~home platform))
 
 let host_name = function
   | None -> Ok Masc.Browser_lane_setup.Host_name.default
@@ -54,7 +50,7 @@ let host_name = function
 
 let after_install ~base_path (installed : Masc.Browser_lane_setup.installed) =
   Printf.printf "Installed the browser lane host for %s\n" base_path;
-  Printf.printf "  host        %s\n" installed.host;
+  Printf.printf "  host        %s (copied from %s)\n" installed.host installed.host_source;
   Printf.printf "  launcher    %s\n" installed.launcher;
   Printf.printf "  manifest    %s\n" installed.manifest;
   Printf.printf "  extension   %s\n" installed.extension_directory;

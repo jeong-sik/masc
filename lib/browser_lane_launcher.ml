@@ -34,14 +34,17 @@ let launcher_path ~base_path = Filename.concat (host_directory base_path) launch
 let declaration_name = "launch.json"
 let declaration_path ~base_path = Filename.concat (host_directory base_path) declaration_name
 let host_directory_path ~base_path = host_directory base_path
-let declaration_fields = [ "destination"; "launcher_sha256" ]
+let destination_field = "destination"
+let launcher_digest_field = "launcher_sha256"
+let workspace_connection_destination = "workspace_connection"
+let declaration_fields = List.sort String.compare [ destination_field; launcher_digest_field ]
 let launcher_digest script = Digestif.SHA256.(to_hex (digest_string script))
 
 let declaration ~launcher_script =
   Yojson.Safe.to_string
     (`Assoc
-       [ "destination", `String "workspace_connection"
-       ; "launcher_sha256", `String (launcher_digest launcher_script)
+       [ destination_field, `String workspace_connection_destination
+       ; launcher_digest_field, `String (launcher_digest launcher_script)
        ])
   ^ "\n"
 
@@ -51,11 +54,12 @@ let declared_launcher_digest = function
   | `Assoc fields ->
       (match
          List.sort String.compare (List.map fst fields),
-         List.assoc_opt "destination" fields,
-         List.assoc_opt "launcher_sha256" fields
+         List.assoc_opt destination_field fields,
+         List.assoc_opt launcher_digest_field fields
        with
-       | names, Some (`String "workspace_connection"), Some (`String digest)
-         when names = declaration_fields -> Some digest
+       | names, Some (`String destination), Some (`String digest)
+         when names = declaration_fields
+              && String.equal destination workspace_connection_destination -> Some digest
        | _ -> None)
   | _ -> None
 

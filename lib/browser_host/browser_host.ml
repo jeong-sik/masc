@@ -222,11 +222,10 @@ let resolve_config ~base_path ~server ~token_file =
 
 let read_token path =
   try
-    let token = In_channel.with_open_bin path In_channel.input_all |> String.trim in
-    if String.length token < 16
-       || not (String.for_all (fun c -> Char.code c >= 33 && Char.code c <= 126) token)
-    then Error "lane token file is empty or invalid"
-    else Ok token
+    match Browser_lane.Lane_token.of_text (In_channel.with_open_bin path In_channel.input_all) with
+    | Ok token -> Ok (Browser_lane.Lane_token.to_string token)
+    | Error (Browser_lane.Lane_token.Too_short | Browser_lane.Lane_token.Not_printable) ->
+      Error "lane token file is empty or invalid"
   with Sys_error _ -> Error "cannot read lane token file"
 
 let endpoint server path =

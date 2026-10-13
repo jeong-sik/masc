@@ -609,7 +609,6 @@
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
   test_run_local_script
-  test_start_masc_mcp_script
   test_keeper_state_machine
   test_keeper_state_machine_mermaid
   test_keeper_state_machine_preconditions
@@ -967,7 +966,6 @@
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
   test_run_local_script
-  test_start_masc_mcp_script
   test_keeper_state_machine
   test_keeper_state_machine_mermaid
   test_keeper_state_machine_preconditions

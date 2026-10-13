@@ -917,7 +917,7 @@ let test_draft_rejects_effects_and_bad_fixed_inputs () =
   | Error _ | Ok _ -> fail "invalid fixed input survived prepare"
 ;;
 
-let test_public_draft_run_preserves_one_execution_identity () =
+let test_public_draft_run_preserves_one_execution_identity ?(observe = true) () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_draft_base @@ fun base_path ->
@@ -936,11 +936,11 @@ let test_public_draft_run_preserves_one_execution_identity () =
   Call_log.reset_for_testing ();
   Fun.protect ~finally:Call_log.reset_for_testing @@ fun () ->
   Call_log.init ~base_path ();
-  let turn_ctx_cell = Call_log.create_turn_ctx_cell () in
-  Call_log.set_turn_context ~cell:turn_ctx_cell ~agent_name:meta.name
-    ~turn:7 ~keeper_turn_id:1 ();
+  let turn_ctx_cell = if observe then Some (Call_log.create_turn_ctx_cell ()) else None in
+  Option.iter (fun cell -> Call_log.set_turn_context ~cell ~agent_name:meta.name
+    ~turn:7 ~keeper_turn_id:1 ()) turn_ctx_cell;
   let tools = Surface.make_tools ~capability_surface ~config ~meta ~publication_recovery
-      ~ctx_snapshot ~turn_ctx_cell () in
+      ~ctx_snapshot ?turn_ctx_cell () in
   let find name =
     match List.find_opt (fun (tool, _, _) ->
       String.equal tool.Agent_core.Tool.schema.name name) tools with
@@ -1011,11 +1011,12 @@ let test_public_draft_run_preserves_one_execution_identity () =
   let rows = Call_log.read_recent ~keeper_name:meta.name () |> Result.get_ok in
   let row name = match List.find_opt (fun row -> member "tool_name" row = `String name) rows with
     | Some row -> row | None -> failf "missing actual composition observation: %s" name in
-  let observed_leaf = row "keeper_lane_status" in
-  check string "observer preserves the actual leaf invocation" expected_leaf_id
-    (observed_leaf |> member "tool_use_id" |> to_string);
-  check string "leaf observation names the same durable run" run_id
-    (observed_leaf |> member "composition_run_id" |> to_string);
+  if observe then (
+    let observed_leaf = row "keeper_lane_status" in
+    check string "observer preserves the actual leaf invocation" expected_leaf_id
+      (observed_leaf |> member "tool_use_id" |> to_string);
+    check string "leaf observation names the same durable run" run_id
+      (observed_leaf |> member "composition_run_id" |> to_string));
   check string "run summary names the same durable run" run_id
     (row Surface.composition_run_summary_tool_name |> member "composition_run_id" |> to_string)
 ;;
@@ -1026,7 +1027,9 @@ let () =
     [ ( "catalog"
       , [ test_case "draft prepare and exact run binding" `Quick test_draft_prepare_and_exact_run_binding
         ; test_case "public draft run keeps one execution identity and readable references" `Quick
-            test_public_draft_run_preserves_one_execution_identity
+            (test_public_draft_run_preserves_one_execution_identity ~observe:true)
+        ; test_case "public draft run records its summary without optional turn context" `Quick
+            (test_public_draft_run_preserves_one_execution_identity ~observe:false)
         ; test_case "draft rejects effects and bad fixed inputs" `Quick test_draft_rejects_effects_and_bad_fixed_inputs
         ; test_case "export contract survives binding and durable encoding" `Quick test_export_contract_survives_public_authoring_and_binding
         ; test_case

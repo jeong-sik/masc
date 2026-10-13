@@ -1995,12 +1995,12 @@ let make_tools_with_authority
                       | Error { message; _ } -> Tool_result.make_err ~tool_name:Draft.run_tool_name
                           ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Effect_outcome_unknown
                           ~start_time message in
-                    Option.iter (fun turn_context -> observe_composition_run_summary
+                    observe_composition_run_summary
                       ~composition_tool:Draft.run_tool_name ~composition_execution:Catalog.Inline
                       ~composition_tool_kind:Keeper_tool_descriptor.Composition_tool ~composition_run_id
                       ~parent_invocation ~meta ~turn_context ~input ~output_text:(Tool_result.message result)
                       ~success:(Tool_result.is_success result) ~duration_ms:(Tool_result.duration_ms result)
-                      ~typed_result:result ()) turn_context;
+                      ~typed_result:result ();
                     result
                 in
                 let binding =

@@ -46,6 +46,7 @@ type decode_error =
   | Empty_task_ids
   | Duplicate_task_id of string
   | Invalid_tool_name of string
+  | Invalid_nested_composition_scope of string
   | Invalid_turn_ref of string
   | Turn_ref_session_mismatch
   | Invalid_runtime_id
@@ -121,6 +122,7 @@ let decode_error_code = function
   | Empty_task_ids -> "empty_task_ids"
   | Duplicate_task_id _ -> "duplicate_task_id"
   | Invalid_tool_name _ -> "invalid_tool_name"
+  | Invalid_nested_composition_scope _ -> "invalid_nested_composition_scope"
   | Invalid_turn_ref _ -> "invalid_turn_ref"
   | Turn_ref_session_mismatch -> "turn_ref_session_mismatch"
   | Invalid_runtime_id -> "invalid_runtime_id"
@@ -279,6 +281,24 @@ let validate_served_content = function
       |> Result.map_error (fun error -> Invalid_served_content_sha256 error)
 ;;
 
+let nested_composition_scope ~parent_tool_use_id ~composition_run_id ~alias =
+  let* () = if String.equal (String.trim parent_tool_use_id) "" then
+      Error (Invalid_nested_composition_scope "empty parent invocation ID") else Ok () in
+  let* () = if String.equal alias "" then
+      Error (Invalid_nested_composition_scope "empty child alias") else Ok () in
+  let* composition_run_id = Random_id.parse_uuid_v7 composition_run_id
+      |> Result.map_error (fun detail -> Invalid_nested_composition_scope detail) in
+  Ok { parent_tool_use_id; composition_run_id; alias }
+;;
+
+let validate_nested_scope ~skill_tool_use_id scope =
+  let* _ = nested_composition_scope ~parent_tool_use_id:scope.parent_tool_use_id
+      ~composition_run_id:scope.composition_run_id ~alias:scope.alias in
+  if String.equal skill_tool_use_id scope.parent_tool_use_id then
+    Error (Invalid_nested_composition_scope "child and parent invocation IDs must differ")
+  else Ok ()
+;;
+
 let make_activation_evidence
       ~(identity : Skill_reference.identity)
       ~content_revision
@@ -305,9 +325,10 @@ let make_activation_evidence
     | Instruction_invocation { served_content; _ } ->
       validate_served_content served_content
     | Composition_invocation { tool_name; _ } ->
-      if Safe_identifier.is_portable_name tool_name
-      then Ok ()
-      else Error (Invalid_tool_name tool_name)
+      if Safe_identifier.is_portable_name tool_name then Ok () else Error (Invalid_tool_name tool_name)
+    | Nested_composition_invocation { tool_name; scope; _ } ->
+      let* () = if Safe_identifier.is_portable_name tool_name then Ok () else Error (Invalid_tool_name tool_name) in
+      validate_nested_scope ~skill_tool_use_id scope
   in
   let* () = invocation_valid in
   let* () =
@@ -476,6 +497,14 @@ let invocation_to_yojson = function
       [ "kind", `String "composition"
       ; "origin", composition_origin_to_yojson origin
       ; "tool_name", `String tool_name
+      ]
+  | Nested_composition_invocation { origin; tool_name; scope } ->
+    `Assoc
+      [ "kind", `String "nested_composition"
+      ; "origin", composition_origin_to_yojson origin
+      ; "tool_name", `String tool_name
+      ; "scope", `Assoc [ "parent_tool_use_id", `String scope.parent_tool_use_id
+          ; "composition_run_id", `String scope.composition_run_id; "alias", `String scope.alias ]
       ]
 ;;
 
@@ -950,6 +979,8 @@ let decode_invocation json =
         ~object_name:"invocation"
         ~allowed:[ "kind"; "origin"; "tool_name" ]
         fields
+    | "nested_composition" ->
+      exact_fields ~object_name:"invocation" ~allowed:[ "kind"; "origin"; "tool_name"; "scope" ] fields
     | observed -> Error (Invalid_served_content_kind observed)
   in
   let* origin_json =
@@ -973,6 +1004,19 @@ let decode_invocation json =
     if Safe_identifier.is_portable_name tool_name
     then Ok (Composition_invocation { origin; tool_name })
     else Error (Invalid_tool_name tool_name)
+  | "nested_composition" ->
+    let* origin = decode_composition_origin origin_json in
+    let* tool_name = string_field "tool_name" fields in
+    let* () = if Safe_identifier.is_portable_name tool_name then Ok () else Error (Invalid_tool_name tool_name) in
+    let* json = required_field ~field:"scope" fields in
+    let* fields = object_field "scope" json in
+    let* () = exact_fields ~object_name:"scope"
+        ~allowed:[ "parent_tool_use_id"; "composition_run_id"; "alias" ] fields in
+    let* parent_tool_use_id = string_field "parent_tool_use_id" fields in
+    let* composition_run_id = string_field "composition_run_id" fields in
+    let* alias = string_field "alias" fields in
+    let* scope = nested_composition_scope ~parent_tool_use_id ~composition_run_id ~alias in
+    Ok (Nested_composition_invocation { origin; tool_name; scope })
   | observed -> Error (Invalid_served_content_kind observed)
 ;;
 
@@ -2057,16 +2101,19 @@ let observe_delivery
       if not (Ids.Turn_ref.equal activation.turn_ref turn_ref)
       then None
       else
+        let result_tool_use_id = match activation.invocation with
+          | Instruction_invocation _ | Composition_invocation _ -> activation.skill_tool_use_id
+          | Nested_composition_invocation { scope; _ } -> scope.parent_tool_use_id in
         match
           List.find_opt
             (fun (receipt : tool_result_receipt) ->
-               String.equal receipt.tool_use_id activation.skill_tool_use_id)
+               String.equal receipt.tool_use_id result_tool_use_id)
             tool_results
         with
         | None -> None
         | Some receipt ->
           (match activation.invocation with
-           | Composition_invocation _ -> Some receipt
+           | Composition_invocation _ | Nested_composition_invocation _ -> Some receipt
            | Instruction_invocation { served_content; _ } ->
              let expected_bytes, expected_sha256 =
                match served_content with

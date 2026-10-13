@@ -59,6 +59,12 @@ type served_content =
       ; sha256 : string
       }
 
+type nested_composition_scope =
+  { parent_tool_use_id : string
+  ; composition_run_id : string
+  ; alias : string
+  }
+
 type invocation =
   | Instruction_invocation of
       { origin : instruction_origin
@@ -67,6 +73,12 @@ type invocation =
   | Composition_invocation of
       { origin : composition_origin
       ; tool_name : string
+      }
+
+  | Nested_composition_invocation of
+      { origin : composition_origin
+      ; tool_name : string
+      ; scope : nested_composition_scope
       }
 
 type transition_rejection =

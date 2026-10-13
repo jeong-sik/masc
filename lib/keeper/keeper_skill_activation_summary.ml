@@ -45,7 +45,7 @@ let summarize ~activations ~transition_rejections =
          ; instruction_actions_observed =
              summary.instruction_actions_observed + actions
          }
-       | Composition_invocation _ ->
+       | Composition_invocation _ | Nested_composition_invocation _ ->
          { summary with
            composition_invocations = summary.composition_invocations + 1
          ; composition_provider_deliveries =

@@ -67,3 +67,29 @@ references, escaped IDs and export names, parameter contracts, unavailable exact
 references, expansion cycles and whole-child failure with retained independent
 results. Parser checks do not establish its types or execution. Runtime activation,
 public authoring and latency measurements remain outside this layer's evidence.
+
+## Nested invocation and delivery evidence
+
+The activation journal has a distinct `nested_composition` invocation carrying
+an immutable scope: the exact enclosing `parent_tool_use_id`, UUIDv7
+`composition_run_id`, and the source node alias. It keeps the child's own unique
+`skill_tool_use_id`, source identity/revision, turn, runtime and origin. Recording
+this invocation at dispatch admission is separate from preparing a draft. A child
+that never reaches dispatch admission has no activation.
+
+`Keeper_skill_activation_recorder.record_nested_composition` supplies this journal
+boundary. Public draft/executor integration still follows separately. The journal
+feature scenario records invocations directly; it does not prove leaf dispatch or
+model latency. Parent scopes reject blank parent IDs, empty aliases, invalid run
+IDs and using the parent ID as the child invocation ID. Reusing a child ID with
+changed parent/run/alias is an invocation collision.
+
+A child result is carried by its enclosing Tool result. The later actual provider
+request or official-client handoff therefore delivers that child's activation by
+matching its exact parent's receipt, in the same Keeper turn scope and under the
+existing delivery-order and conflict rules. Two children of one parent retain two
+identities and share the observed parent result digest. A receipt under a child ID,
+a different parent, or another Keeper turn does not mark the child delivered.
+Durable readback preserves both the nested scope and the delivery chain. The web
+API readers decode this variant explicitly so one valid nested row cannot make the
+whole activation panel unavailable; its label retains child and parent identity.

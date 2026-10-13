@@ -1311,11 +1311,107 @@ let test_store_error_decode_detail_is_kept () =
        (Ledger.Decode_failed (Ledger.Missing_string { field = "skill_name" })))
 ;;
 
+let nested_scope ~parent_tool_use_id ~composition_run_id ~alias =
+  match Ledger.nested_composition_scope ~parent_tool_use_id ~composition_run_id ~alias with
+  | Ok scope -> scope | Error error -> fail (Ledger.decode_error_code error)
+;;
+
+let test_nested_dispatch_identity_and_parent_delivery_survive_reload () =
+  with_session @@ fun config trace_id _session_dir ->
+  let composition_run_id = Random_id.uuid_v7 () in
+  let make ~id ~parent ~alias =
+    let scope = nested_scope ~parent_tool_use_id:parent ~composition_run_id ~alias in
+    activation ~skill_tool_use_id:id ~invocation:(Ledger.Nested_composition_invocation
+        { origin = Ledger.Session_composition; tool_name = "keeper_compose_review"; scope }) () in
+  let values = [ make ~id:"child-left" ~parent:"outer-run" ~alias:"left/~name"
+               ; make ~id:"child-right" ~parent:"outer-run" ~alias:"right"
+               ; make ~id:"child-unrelated" ~parent:"different-outer-run" ~alias:"left/~name" ] in
+  List.iter (fun value -> match Ledger.record ~config ~trace_id value with
+    | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error)) values;
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
+  let deliver ?(turn_ref = turn_ref) ids = match Ledger.observe_delivery ~config ~trace_id ~turn_ref
+      ~tool_results:(List.map receipt ids) ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
+      ~runtime_id:"runtime-delivery" ~delivered_at:"2026-08-26T00:00:01Z" with
+    | Ok value -> value | Error error -> fail (Ledger.store_error_to_string error) in
+  let _, ids = deliver [ "child-left"; "child-right"; "unrelated" ] in
+  check (list string) "child IDs are not independently delivered Tool results" [] ids;
+  let _, ids = deliver ~turn_ref:(Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:2) [ "outer-run" ] in
+  check (list string) "cross-turn parent replay is ignored" [] ids;
+  let delivered, ids = deliver [ "outer-run" ] in
+  check (list string) "one actual parent result delivers its two attempted children"
+    [ "child-left"; "child-right" ] (List.sort String.compare ids);
+  let _, repeated = deliver [ "outer-run" ] in
+  check (list string) "parent result delivery is idempotent"
+    [ "child-left"; "child-right" ] (List.sort String.compare repeated);
+  let reloaded = match Ledger.load ~config ~trace_id with
+    | Ok ledger -> ledger | Error error -> fail (Ledger.store_error_to_string error) in
+  check bool "reload preserves canonical result-delivery chain" true
+    (Yojson.Safe.equal (Ledger.to_yojson delivered) (Ledger.to_yojson reloaded));
+  List.iter (fun (value : Ledger.activation) ->
+    match value.invocation with
+    | Ledger.Nested_composition_invocation { scope; _ } ->
+      check string "exact composition run retained" composition_run_id scope.composition_run_id;
+      check bool "unrelated parent has no delivery" true
+        (Option.is_some value.delivery = (scope.parent_tool_use_id = "outer-run"));
+      check bool "exact source identity survives restart" true
+        (Skill_reference.equal_identity value.identity (List.hd values).identity)
+    | Ledger.Instruction_invocation _ | Ledger.Composition_invocation _ -> fail "nested origin was erased")
+    (Ledger.activations reloaded);
+  let summary = Ledger.summarize reloaded in
+  check int "three actual invocation evidence rows" 3 summary.composition_invocations;
+  check int "two children delivered by one parent receipt" 2 summary.composition_provider_deliveries;
+  Printf.printf "composition_nested_activation_trial child_invocations=3 delivered_with_parent=2 unrelated_deliveries=0 ledger_reloaded=true model_latency_measured=false\n%!"
+;;
+
+let test_nested_scope_integrity_and_invocation_conflict () =
+  with_session @@ fun config trace_id _session_dir ->
+  let composition_run_id = Random_id.uuid_v7 () in
+  List.iter (fun (parent_tool_use_id, run, alias) ->
+    match Ledger.nested_composition_scope ~parent_tool_use_id ~composition_run_id:run ~alias with
+    | Error (Ledger.Invalid_nested_composition_scope _) -> ()
+    | Error _ | Ok _ -> fail "invalid nested provenance accepted")
+    [ "", composition_run_id, "child"; "outer", "not-a-run", "child"; "outer", composition_run_id, "" ];
+  let scope = nested_scope ~parent_tool_use_id:"outer" ~composition_run_id ~alias:"child" in
+  let invocation scope = Ledger.Nested_composition_invocation
+      { origin = Ledger.Session_composition; tool_name = "keeper_compose_review"; scope } in
+  (match activation_result ~skill_tool_use_id:"outer" ~invocation:(invocation scope) () with
+   | Error (Ledger.Invalid_nested_composition_scope _) -> ()
+   | Error _ | Ok _ -> fail "child invocation was allowed to alias its parent");
+  let original = activation ~skill_tool_use_id:"child-call" ~invocation:(invocation scope) () in
+  (match Ledger.record ~config ~trace_id original with
+   | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error));
+  let changed_scope = nested_scope ~parent_tool_use_id:"another-parent" ~composition_run_id ~alias:"child" in
+  let changed = activation ~skill_tool_use_id:"child-call" ~invocation:(invocation changed_scope) () in
+  (match Ledger.record ~config ~trace_id changed with
+   | Error (Ledger.Invocation_id_collision "child-call") -> ()
+   | Error _ | Ok _ -> fail "changed nested scope was rebound to an existing invocation");
+  let encoded = Ledger.activation_to_yojson original in
+  let with_scope_field extra = match encoded with
+    | `Assoc fields ->
+      let invocation = match List.assoc "invocation" fields with
+        | `Assoc fields -> fields | _ -> fail "invocation object" in
+      let scope = match List.assoc "scope" invocation with
+        | `Assoc fields -> fields | _ -> fail "scope object" in
+      `Assoc (("invocation", `Assoc (("scope", `Assoc (extra :: scope)) :: List.remove_assoc "scope" invocation))
+        :: List.remove_assoc "invocation" fields)
+    | _ -> fail "activation object" in
+  List.iter (fun (extra, accepts) ->
+    match Ledger.activation_of_yojson ~expected_trace_id:trace_id (with_scope_field extra) with
+    | Error error when accepts error -> ()
+    | Error _ | Ok _ -> fail "nested scope decoder lost its closed contract")
+    [ (("alias", `String "another"), (function Ledger.Duplicate_field { object_name = "scope"; field = "alias" } -> true | _ -> false))
+    ; (("unknown", `Bool true), (function Ledger.Unexpected_field { object_name = "scope"; field = "unknown" } -> true | _ -> false)) ]
+;;
+
 let () =
   run
     "keeper skill activation ledger"
     [ ( "session ledger"
-      , [ test_case "empty, durable record, idempotent readback" `Quick
+      , [ test_case "nested dispatch identities use exact parent result delivery" `Quick
+            test_nested_dispatch_identity_and_parent_delivery_survive_reload
+        ; test_case "nested provenance rejects tampering and invocation rebinding" `Quick
+            test_nested_scope_integrity_and_invocation_conflict
+        ; test_case "empty, durable record, idempotent readback" `Quick
             test_empty_record_and_idempotent_readback
         ; test_case "exact identities and revisions remain distinct" `Quick
             test_same_name_different_identity_or_revision_is_distinct

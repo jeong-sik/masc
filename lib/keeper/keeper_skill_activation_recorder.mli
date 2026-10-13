@@ -43,6 +43,16 @@ val record_composition :
   Skill_reference.t ->
   (Keeper_skill_activation_ledger.record_outcome, error) result
 
+val record_nested_composition :
+  config:Workspace.config -> t ->
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  tool_name:string -> scope:Keeper_skill_activation_ledger.nested_composition_scope ->
+  Skill_reference.t ->
+  (Keeper_skill_activation_ledger.record_outcome, error) result
+(** Record one attempted child invocation at dispatch admission, with a unique
+    child invocation ID. The enclosing Tool result carries its delivery. Never
+    call this merely because a draft was prepared or a child was selected. *)
+
 val observe_delivery :
   config:Workspace.config ->
   t ->

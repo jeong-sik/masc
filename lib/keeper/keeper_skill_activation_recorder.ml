@@ -152,6 +152,12 @@ let record_composition ~config context ~invocation ~tool_name reference =
     reference
 ;;
 
+let record_nested_composition ~config context ~invocation ~tool_name ~scope reference =
+  let origin = composition_origin context reference in
+  record ~config context ~tool_invocation:invocation
+    ~invocation:(Ledger.Nested_composition_invocation { origin; tool_name; scope }) reference
+;;
+
 let observe_delivery ~config context ~tool_results ~boundary ~runtime_id =
   Ledger.observe_delivery
     ~config

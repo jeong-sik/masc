@@ -318,6 +318,39 @@ const activationEvidence = {
 }
 
 describe('skill evidence contract', () => {
+  it('preserves nested activation scope in exact Skill evidence and rejects invalid correlation', () => {
+    const scope = {
+      parent_tool_use_id: 'outer-run',
+      composition_run_id: '019ffc2b-0a41-7ba2-bf58-598e0e7f711b',
+      alias: 'child/~quoted',
+    }
+    const invocation = {
+      kind: 'nested_composition', origin: { kind: 'session_composition' },
+      tool_name: 'keeper_compose_review', scope,
+    }
+    const response = {
+      schema: 'masc.skill-evidence/v5', status: 'observed', reference,
+      activation: { selection: 'most_recent_observed', evidence: {
+        ...activationEvidence, activation: { ...activationPayload, invocation },
+      } },
+      composition: null, coverage,
+    }
+    expect(decodeSkillEvidenceResponse(response).activation).toEqual(response.activation)
+    for (const badScope of [
+      { ...scope, composition_run_id: 'not-a-run' },
+      { ...scope, parent_tool_use_id: 'skill-call-1' },
+      { ...scope, alias: '' },
+      { ...scope, unknown: true },
+    ]) {
+      const bad = { ...response, activation: { ...response.activation, evidence: {
+        ...response.activation.evidence, activation: { ...response.activation.evidence.activation,
+          invocation: { ...invocation, scope: badScope },
+        },
+      } } }
+      expect(() => decodeSkillEvidenceResponse(bad)).toThrow(SkillsContractError)
+    }
+  })
+
   it('rejects the retired bounded-evidence schema', () => {
     expect(() => decodeSkillEvidenceResponse({
       schema: 'masc.skill-evidence/v2',

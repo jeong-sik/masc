@@ -15,7 +15,7 @@ type t = {
   surface : string;
   entity_kind : string;
   entity_id : string option;
-  cause_code : string;
+  cause : tool_host_cause;
   severity : severity;
   summary : string;
   recoverability : recoverability;
@@ -73,7 +73,7 @@ let tool_host_failure ~agent_name ~client_name ~tool_name ~transport ?phase
     surface = "tool_host";
     entity_kind = "tool_call";
     entity_id = first_non_empty [ request_id; session_id; trace_id ];
-    cause_code = tool_host_cause_code cause;
+    cause;
     severity = Bad;
     summary = summary_for_tool_host ~client_name ~tool_name ~transport phase;
     recoverability =
@@ -105,7 +105,7 @@ let to_yojson (envelope : t) =
       ("surface", `String envelope.surface);
       ("entity_kind", `String envelope.entity_kind);
       ("entity_id", Json_util.option_to_yojson (fun value -> `String value) envelope.entity_id);
-      ("cause_code", `String envelope.cause_code);
+      ("cause_code", `String (tool_host_cause_code envelope.cause));
       ("severity", `String (severity_to_string envelope.severity));
       ("summary", `String envelope.summary);
       ("recoverability", `String (recoverability_to_string envelope.recoverability));
@@ -137,9 +137,12 @@ let of_yojson json =
           match required_string json "entity_kind" with
           | Error _ as err -> err
           | Ok entity_kind -> (
-              match required_string json "cause_code" with
+              match
+                Result.bind (required_string json "cause_code")
+                  tool_host_cause_of_code
+              with
               | Error _ as err -> err
-              | Ok cause_code -> (
+              | Ok cause -> (
                   match required_string json "severity" with
                   | Error _ as err -> err
                   | Ok severity_raw -> (
@@ -163,7 +166,7 @@ let of_yojson json =
                                           entity_kind;
                                           entity_id =
                                             optional_string json "entity_id";
-                                          cause_code;
+                                          cause;
                                           severity;
                                           summary;
                                           recoverability;

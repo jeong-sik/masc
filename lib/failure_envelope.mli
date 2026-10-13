@@ -15,7 +15,9 @@ type t = {
   surface : string;
   entity_kind : string;
   entity_id : string option;
-  cause_code : string;
+  cause : tool_host_cause;
+      (** Written as [cause_code] ({!tool_host_cause_code}). Decoding refuses a
+          code that is not a tool host cause. *)
   severity : severity;
   summary : string;
   recoverability : recoverability;

@@ -209,6 +209,16 @@ val node
   -> unit
   -> node
 
+type export = private
+  { name : string
+  ; node_id : Node_id.t
+  ; pointer : Json_pointer.t
+  }
+
+val export : name:string -> node_id:Node_id.t -> pointer:Json_pointer.t -> export
+(** A requested model-facing field. {!create} checks its name, producer and
+    pointer against the same descriptor-owned schema as a node output edge. *)
+
 (** Why a descriptor that exists is absent from the Keeper model surface.
     [Unknown_tool] means no descriptor owns the name at all; these mean one
     does, and the Keeper model still cannot call it. The two need opposite
@@ -220,6 +230,16 @@ type off_surface_reason =
 
 type error =
   | Empty_plan
+  | Empty_export_name
+  | Duplicate_export_name of string
+  | Unknown_export_node of { name : string; node_id : Node_id.t }
+  | Opaque_export of { name : string; node_id : Node_id.t; tool_name : string }
+  | Invalid_export_pointer of
+      { name : string
+      ; node_id : Node_id.t
+      ; pointer : Json_pointer.t
+      ; error : Json_pointer.schema_error
+      }
   | Unknown_descriptor_id of string
   | Duplicate_node_id of Node_id.t
   | Duplicate_tool_name of string
@@ -270,16 +290,20 @@ type branch_failure_policy =
   | Continue_independent
 
 val default_branch_failure_policy : branch_failure_policy
+val branch_failure_policy_to_string : branch_failure_policy -> string
+val branch_failure_policy_of_string : string -> branch_failure_policy option
 
 val branch_failure_policy : t -> branch_failure_policy
 
 val create
   :  descriptors:Keeper_tool_descriptor.t list
   -> ?branch_failure_policy:branch_failure_policy
+  -> ?exports:export list
   -> node list
   -> (t, error) result
 
 val nodes : t -> node list
+val exports : t -> export list
 val dependencies : node -> Node_id.t list
 
 (** Stable topological layers only. This is not an execution schedule: serial,
@@ -332,6 +356,21 @@ val validate_output
   -> (output, execution_error) result
 
 val output_node_id : output -> Node_id.t
+
+type export_resolution_error =
+  | Producer_unavailable of Node_id.t
+  | Producer_invalid of execution_error
+  | Export_pointer_unavailable of Json_pointer.resolution_error
+
+val resolve_exports
+  :  t
+  -> lookup:(Node_id.t -> Yojson.Safe.t option)
+  -> (export * (Yojson.Safe.t, export_resolution_error) result) list
+(** Resolve declared exports from completed producer data. Each value is
+    revalidated against this exact plan before selection. Missing producers,
+    invalid output and absent optional fields remain explicit per-field
+    errors; a legitimate JSON null is an available value. No I/O or effect
+    replay occurs here. The caller keeps execution dispositions separately. *)
 
 (** Resolve a canonical plan node's input from already validated producer
     outputs, then validate the resolved value against the consumer's exact

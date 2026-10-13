@@ -600,6 +600,15 @@ let async_worker_result
       ~start_time
       execution
   in
+  let result =
+    match Result.bind
+            (Keeper_composition_result.project ~base_path:config.base_path ~plan ~execution result)
+            (Tool_bridge.attach_artifact_manifest ~base_path:config.base_path) with
+    | Ok result -> result
+    | Error { message; _ } ->
+      Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure
+        ~effect_disposition:Tool_result.Effect_outcome_unknown ~start_time message
+  in
   Option.iter
     (fun reference ->
        record_skill_composition_evidence
@@ -1782,9 +1791,9 @@ let make_tools_with_authority
              in
              let result =
                match
-                 Tool_bridge.attach_artifact_manifest
-                   ~base_path:config.base_path
-                   executor_result
+                 Result.bind
+                   (Keeper_composition_result.project ~base_path:config.base_path ~plan ~execution executor_result)
+                   (Tool_bridge.attach_artifact_manifest ~base_path:config.base_path)
                with
                | Ok result -> result
                | Error { message; _ } ->
@@ -1803,7 +1812,7 @@ let make_tools_with_authority
                    ~tool_name
                    ~class_:Tool_result.Runtime_failure
                    ~start_time
-                   "composition result manifest persistence failed"
+                   message
              in
              record_skill_composition_evidence
                ~on_publication_failure:(fun detail ->

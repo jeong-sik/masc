@@ -1,4 +1,9 @@
 (** Pure composition result and failure projection. *)
+val schedule_to_json : Agent_core.Tool_contract.schedule -> Yojson.Safe.t
+val failure_effect_disposition_to_json : Tool_result.failure_effect_disposition option -> Yojson.Safe.t
+val deferred_kind_to_json : Keeper_tool_execution.deferred_kind option -> Yojson.Safe.t
+val plan_execution_error_to_json : Keeper_tool_plan.execution_error -> Yojson.Safe.t
+val pointer_resolution_error_to_json : Keeper_tool_plan.Json_pointer.resolution_error -> Yojson.Safe.t
 val tool_kind_field : Keeper_tool_descriptor.tool_kind -> string * Yojson.Safe.t
 val with_tool_kind_field : Keeper_tool_descriptor.tool_kind -> Yojson.Safe.t -> Yojson.Safe.t
 val node_observation_result : Keeper_tool_plan_executor.node_result -> Tool_result.result

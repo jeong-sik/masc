@@ -48,7 +48,7 @@ module Line : sig
 
   val of_string : string -> (t, problem) result
 
-  val of_date : Unix.tm -> t
+  val of_calendar_date : year:int -> month:int -> day:int -> t
   (** [YYYY-MM-DD]. *)
 end = struct
   type t = string
@@ -68,8 +68,7 @@ end = struct
     then Error Outer_whitespace
     else Ok value
 
-  let of_date (date : Unix.tm) =
-    sprintf "%04d-%02d-%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday
+  let of_calendar_date ~year ~month ~day = sprintf "%04d-%02d-%02d" year month day
 end
 
 (* The tags line is [tags: \[a, b\]]. A tag is a header value with no comma:

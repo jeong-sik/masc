@@ -15,8 +15,11 @@ type page_name_error =
   | Dash_at_edge
   | Reserved_page_name
 
-(* [index] and [log] are the wiki's own files. *)
-let reserved_page_names = [ "index"; "log" ]
+(* [index] and [log] are the wiki's own files. This is the one place their
+   names are spelled; [Wiki_journal] derives the file names from here. *)
+let index_name = "index"
+let log_name = "log"
+let reserved_page_names = [ index_name; log_name ]
 
 let validate_page_name raw =
   let allowed c =

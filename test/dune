@@ -2352,6 +2352,9 @@
 
 (include stanzas/coverage_tests.inc)
 (include stanzas/test_web_dashboard_coverage.inc)
+(include stanzas/test_wiki_core_purity.inc)
+(include stanzas/test_wiki_link.inc)
+(include stanzas/test_wiki_lint.inc)
 
 ; PR-MASC-3: SSE registration token+session validation.
 ; Runs with a tiny session max age so the expired-session regression case

@@ -196,7 +196,11 @@ let page_path ~base_path page =
 let today () =
   (* Local, not UTC: the header dates are read by the people and Keepers on
      this machine. *)
-  Line.of_date (Time_compat.now () |> Unix.localtime)
+  let date = Time_compat.now () |> Unix.localtime in
+  Line.of_calendar_date
+    ~year:(date.tm_year + 1900)
+    ~month:(date.tm_mon + 1)
+    ~day:date.tm_mday
 
 (* One lock for the whole wiki directory. Create and update check the file and
    then write it; without the lock two writers both pass the check. The lock

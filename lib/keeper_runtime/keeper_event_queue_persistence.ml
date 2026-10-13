@@ -1083,10 +1083,8 @@ let commit_transform_unlocked
          (* Visible bytes can follow a failed parent fsync. A same-binding
             retry must cross the durability barrier again before admission.
             Re-publish the authoritative state without a logical mutation. *)
-         let path = snapshot_path_of_owner owner in
-         let confirmed = confirm_snapshot path current in
-         forget_snapshot path;
-         Result.map (fun () -> value) confirmed
+         save_state_unlocked_with ~save_snapshot:confirm_snapshot owner current
+         |> Result.map (fun () -> after_commit (State.pending current); value)
      | Ok (next, value) ->
        (match bump_revision next with
         | Error _ as error -> error

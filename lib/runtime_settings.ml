@@ -528,6 +528,7 @@ let surfaces =
         "keeper.hitl.thinking_blocks";
         "keeper.hitl.observation_stderr_bytes";
         "keeper.hitl.max_concurrent_per_keeper";
+        "keeper.hitl.tool_approval_timeout_sec";
       ];
     };
     {

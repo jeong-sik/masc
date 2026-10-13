@@ -262,6 +262,59 @@ let transport_returning response =
   }
 ;;
 
+let test_anthropic_context_survives_next_request () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let captured = ref [] in
+  let response = pipeline_response Types.EndTurn in
+  let transport =
+    { (transport_returning response) with
+      Llm_provider.Llm_transport.complete_sync =
+        (fun request ->
+           captured := request.messages :: !captured;
+           { Llm_provider.Llm_transport.response = Ok response; latency_ms = Some 0 }) }
+  in
+  let hooks =
+    { Hooks.empty with before_turn_params = Some (function
+        | Hooks.BeforeTurnParams { turn = 0; current_params; _ } ->
+          Hooks.AdjustParams
+            { current_params with extra_system_context = Some "first request context" }
+        | _ -> Hooks.Continue) }
+  in
+  let options =
+    { Internal_agent.default_options with transport = Some transport; hooks;
+      provider_config = Some
+        { (Provider_mock.to_provider_config ()) with kind = Anthropic } }
+  in
+  let agent = Internal_agent.create ~net:env#net
+      ~config:(Types.default_config ~model:"test-model") ~options () in
+  Internal_agent.set_state agent
+    { (Internal_agent.state agent) with messages = [Types.user_msg "first"] };
+  let run () =
+    match run_pipeline_turn ~sw ~api_strategy:Internal_pipeline.Sync agent with
+    | Ok _ -> ()
+    | Error error -> Alcotest.fail (Error.to_string error)
+  in
+  run ();
+  let saved = (Internal_agent.state agent).messages in
+  let saved = List.map (fun message ->
+      Checkpoint.message_to_json message |> Checkpoint.message_of_json |> Result.get_ok) saved in
+  (match saved with
+   | [_; context; { role = Assistant; _ }] ->
+     Alcotest.(check bool) "context retained as history" true
+       (Types.Extra_system_context_provenance.classify context.metadata = Historical)
+   | _ -> Alcotest.fail "expected input, retained context, assistant");
+  Internal_agent.set_state agent
+    { (Internal_agent.state agent) with messages = saved @ [Types.user_msg "next"] };
+  run ();
+  match !captured with
+  | second :: first :: [] ->
+    let content messages = List.map (fun (m : Types.message) -> m.role, m.content) messages in
+    Alcotest.(check bool) "previous request is an unchanged prefix" true
+      (List.take (List.length first) (content second) = content first)
+  | _ -> Alcotest.fail "expected exactly two provider requests"
+;;
+
 let make_pipeline_test_agent ~net ~response =
   let transport = transport_returning response in
   let options =
@@ -3887,6 +3940,10 @@ let () =
             "provider receives exact supplied tools"
             `Quick
             test_pipeline_sends_exact_supplied_tools
+        ; Alcotest.test_case
+            "Anthropic context survives the next request"
+            `Quick
+            test_anthropic_context_survives_next_request
         ; Alcotest.test_case
             "effective provider config drives lifecycle and pricing"
             `Quick

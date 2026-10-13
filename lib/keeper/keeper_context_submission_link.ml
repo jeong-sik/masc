@@ -77,7 +77,7 @@ let source assembly selected_blocks (message : Agent_core.Types.message) =
     | _ -> Unavailable Issuer_has_no_carrier
   in
   match Agent_core.Types.Extra_system_context_provenance.classify message.metadata with
-  | Absent -> Not_applicable
+  | Absent | Historical -> Not_applicable
   | Invalid | Duplicate -> Unavailable Invalid_provenance
   | Present ->
     (match message.role, message.content, assembly with

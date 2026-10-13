@@ -315,12 +315,19 @@ module Extra_system_context_provenance = struct
   type classification =
     | Absent
     | Present
+    | Historical
     | Invalid
     | Duplicate
 
   let key = "agent_core.extra_system_context.v1"
   let entry = key, `Bool true
   let metadata = [ entry ]
+  let historical_metadata = [ key, `String "historical" ]
+  let as_historical metadata =
+    List.map (fun (name, value) ->
+      if String.equal name key then name, `String "historical" else name, value)
+      metadata
+  ;;
 
   let classify metadata =
     let values =
@@ -332,6 +339,7 @@ module Extra_system_context_provenance = struct
     match values with
     | [] -> Absent
     | [ `Bool true ] -> Present
+    | [ `String "historical" ] -> Historical
     | [ _ ] -> Invalid
     | _ -> Duplicate
   ;;

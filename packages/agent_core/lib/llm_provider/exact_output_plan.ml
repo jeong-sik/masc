@@ -510,6 +510,12 @@ let preflight
                      ; "Content-Length", string_of_int (String.length body)
                      ]
                  in
+                 let headers =
+                   match config.kind with
+                   | Provider_config.Anthropic ->
+                     Backend_anthropic.request_headers ~body headers
+                   | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> headers
+                 in
                  let url = request_url config in
                  (* The URL and headers are parsed here, once, so a binding
                     whose endpoint or header cannot be sent is refused before

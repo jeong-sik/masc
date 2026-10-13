@@ -490,7 +490,8 @@ let rec atomic_prepend target value =
   then atomic_prepend target value
 ;;
 
-let with_counted_server ?measurement_delay_s ~measurement_reply ~response f =
+let with_counted_server ?measurement_delay_s ?(check_request = fun _ _ -> ())
+    ~measurement_reply ~response f =
   let measurement_posts = Atomic.make 0 in
   let generation_posts = Atomic.make 0 in
   let journal_posts = Atomic.make 0 in
@@ -506,6 +507,7 @@ let with_counted_server ?measurement_delay_s ~measurement_reply ~response f =
     let port = fresh_port () in
     let handler _conn request body =
       let request_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+      check_request request request_body;
       let path = Uri.path (Cohttp.Request.uri request) in
       match path with
       | path
@@ -3037,14 +3039,24 @@ let test_exact_anthropic_frozen_artifact_parity () =
     {|{"id":"msg-flow","type":"message","role":"assistant","model":"thinking-parity-model","content":[{"type":"text","text":"{\"name\":\"accepted\"}"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}|}
   in
   let successes, posts =
-    with_counted_server ~measurement_reply:(Measurement_tokens 1) ~response
+    with_counted_server
+      ~check_request:(fun request body ->
+        let open Yojson.Safe.Util in
+        let thinking = Yojson.Safe.from_string body |> member "thinking" in
+        match thinking with
+        | `Assoc fields when List.mem_assoc "block_binding" fields ->
+          let beta = Cohttp.Header.get (Cohttp.Request.headers request) "anthropic-beta" in
+          check (option string) "frozen generation includes required beta"
+            (Some "thinking-binding-controls-2026-08-01") beta
+        | _ -> ())
+      ~measurement_reply:(Measurement_tokens 1) ~response
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry
           ~kind:"anthropic"
           ~request_path:"/v1/messages"
           ~model_id:"thinking-parity-model"
-          ~anthropic_thinking_control:"adaptive_preferred"
+          ~anthropic_thinking_control:"adaptive_between_tools"
           ~enable_thinking:true
           ~id:"thinking-unmeasured"
           ~base_url
@@ -3055,7 +3067,7 @@ let test_exact_anthropic_frozen_artifact_parity () =
           ~kind:"anthropic"
           ~request_path:"/v1/messages"
           ~model_id:"thinking-parity-model"
-          ~anthropic_thinking_control:"adaptive_preferred"
+          ~anthropic_thinking_control:"adaptive_between_tools"
           ~enable_thinking:true
           ~serving_constraint:true
           ~serving_accepted_through_tokens:10
@@ -3153,7 +3165,9 @@ let test_exact_anthropic_frozen_artifact_parity () =
     bool
     "catalog thinking control reaches actual generation bytes"
     true
-    (thinking measured_json = `Assoc [ "type", `String "adaptive" ]);
+    (thinking measured_json = `Assoc [
+       "block_binding", `Assoc ["prefix_mismatch_behavior", `String "drop_block"];
+       "type", `String "adaptive" ]);
   check
     bool
     "measured and unmeasured generation use the same frozen thinking control"
@@ -3163,7 +3177,7 @@ let test_exact_anthropic_frozen_artifact_parity () =
     bool
     "count request derives thinking from the frozen generation artifact"
     true
-    (thinking measurement_json = thinking measured_json);
+    (thinking measurement_json = `Assoc [ "type", `String "adaptive" ]);
   check
     bool
     "unset target thinking policy emits no thinking control"
@@ -3192,7 +3206,10 @@ let test_exact_anthropic_frozen_artifact_parity () =
                 (List.mem
                    name
                    [ "max_tokens"; "stream"; "temperature"; "top_p"; "top_k" ]))
-           fields)
+           fields
+         |> List.map (function
+           | "thinking", `Assoc fields -> "thinking", `Assoc (List.remove_assoc "block_binding" fields)
+           | field -> field))
     | _ -> fail "Anthropic generation request must be a JSON object"
   in
   check

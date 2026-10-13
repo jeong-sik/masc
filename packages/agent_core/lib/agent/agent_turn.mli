@@ -15,6 +15,11 @@
 type turn_preparation =
   { tools_json : Yojson.Safe.t list option
   ; effective_messages : Types.message list
+  ; context_message : Types.message option
+    (** The fresh carrier as actually transmitted after projection, or [None]
+        if no carrier was generated or the projection removed it. Anthropic
+        retains it with a successful response; projected history never
+        replaces the canonical transcript. *)
   ; visible_tool_names : string list
     (** Names of the caller-supplied tools. This is exactly the list the LLM
         sees this turn. Useful for [Event_bus.TurnReady] subscribers and

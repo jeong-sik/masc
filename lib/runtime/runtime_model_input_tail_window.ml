@@ -123,7 +123,8 @@ let is_extra_context (msg : Agent_core.Types.message) =
   match
     Agent_core.Types.Extra_system_context_provenance.classify msg.metadata
   with
-  | Agent_core.Types.Extra_system_context_provenance.Absent -> false
+  | Agent_core.Types.Extra_system_context_provenance.Absent
+  | Agent_core.Types.Extra_system_context_provenance.Historical -> false
   | Agent_core.Types.Extra_system_context_provenance.Present
   | Agent_core.Types.Extra_system_context_provenance.Invalid
   | Agent_core.Types.Extra_system_context_provenance.Duplicate -> true

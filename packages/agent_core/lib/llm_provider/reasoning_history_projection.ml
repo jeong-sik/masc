@@ -187,6 +187,7 @@ let is_extra_system_context_carrier (message : Types.message) =
   match Types.Extra_system_context_provenance.classify message.metadata with
   | Types.Extra_system_context_provenance.Absent -> false
   | Types.Extra_system_context_provenance.Present
+  | Types.Extra_system_context_provenance.Historical
   | Types.Extra_system_context_provenance.Invalid
   | Types.Extra_system_context_provenance.Duplicate -> true
 ;;

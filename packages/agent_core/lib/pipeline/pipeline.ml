@@ -181,7 +181,7 @@ let admission_refusal_message names : Types.message =
 
 (** Accumulate usage, invoke AfterTurn hook, emit events, append
     assistant message, and increment turn_count. *)
-let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
+let stage_collect ?raw_trace_run ?clock ~turn ~provider_config ~context_message agent response =
   Tracing.with_span
     agent.options.tracer
     { kind = Hook_invoke
@@ -316,8 +316,17 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
           stops the turn here but never leaves live state behind a snapshot
           the sink has already seen. *)
        update_state agent (fun state ->
+         let messages =
+           match provider_config.Llm_provider.Provider_config.kind, context_message with
+           | Anthropic, Some message ->
+             Util.snoc state.messages
+               { message with
+                 metadata = Extra_system_context_provenance.as_historical message.metadata }
+           | Anthropic, None
+           | (Kimi | OpenAI_compat | Ollama | Gemini | Glm), _ -> state.messages
+         in
          { state with
-           messages = collected_messages state.messages
+           messages = collected_messages messages
          ; turn_count = next_turn
          ; usage
          });
@@ -783,7 +792,8 @@ let run_new_turn
              |> tag_error "response"
            in
            let* response, rejected_tool_calls =
-             stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response
+             stage_collect ?raw_trace_run ?clock ~turn ~provider_config
+               ~context_message:prep.Agent_turn.context_message agent response
              |> tag_error "collect"
            in
            (match Pipeline_execution_scope.provider execution with

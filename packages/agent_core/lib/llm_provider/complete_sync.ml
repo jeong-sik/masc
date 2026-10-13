@@ -75,7 +75,9 @@ let parse_sync_response
   try
     match http_codec with
     | Provider_http_codec.Anthropic_messages ->
-      Ok (Backend_anthropic.parse_response (Yojson.Safe.from_string body))
+      let json = Yojson.Safe.from_string body in
+      Backend_anthropic.observe_input_transformations json;
+      Ok (Backend_anthropic.parse_response json)
     | Provider_http_codec.Ollama_chat ->
       (match Backend_ollama.parse_ollama_response ~content_inline_reasoning body with
        | Ok response -> Ok response
@@ -483,7 +485,12 @@ let complete_http
           | Error reason -> Error (Http_client.AcceptRejected { reason }), None
         in
         let* auth_headers = Provider_config.resolve_auth_headers config in
-        let base_headers = config.headers @ auth_headers in
+        let base_headers =
+          match config.kind with
+          | Provider_config.Anthropic ->
+            Backend_anthropic.request_headers ~body:body_str config.headers @ auth_headers
+          | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> config.headers @ auth_headers
+        in
         let request_headers =
           ("content-length", string_of_int body_len)
           :: (match connection_cache with

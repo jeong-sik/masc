@@ -34,6 +34,7 @@ module Keeper_name = struct
 
   let to_string s = s
   let equal = String.equal
+  let compare = String.compare
 end
 
 let is_valid_trace_id s =

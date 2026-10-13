@@ -43,7 +43,7 @@ let emit_tool_exec
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Keeper_callback_failure.record
-      ~base_dir:config.base_path
+      ~masc_root:(Workspace.masc_dir config)
       ~meta
       ~callback:"keeper_tool_activity_emit"
       exn

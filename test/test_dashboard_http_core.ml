@@ -7274,9 +7274,11 @@ let test_config_post_rolls_back_missing_runtime_assignment () =
   check (option string) "TOML is rolled back" (Some "manual")
     (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
 
-(* The route's own validation lets an unknown network_mode through, and the
-   update refuses it before writing anything. Nothing changed and no lane was
-   touched, so the refusal must say so. *)
+(* A network_mode the keeper's profile cannot hold passes the route and
+   [parse] (both read the value, neither knows the profile) and the update
+   refuses the pair before writing anything: this docker keeper cannot take
+   "policy". Nothing changed and no lane was touched, so the refusal must say
+   so. An unparseable spelling never gets this far; [parse] refuses it. *)
 let test_config_post_refused_before_write_says_not_applied () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-refused-before-write" in
@@ -7292,7 +7294,7 @@ let test_config_post_refused_before_write_says_not_applied () =
   let raw, json =
     post_config ~sw ~clock:(Eio.Stdenv.clock env)
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-      ~name {|{"activation_mode":"autonomous","network_mode":"not-a-mode"}|}
+      ~name {|{"activation_mode":"autonomous","network_mode":"policy"}|}
   in
   expect_http_status "a profile the update cannot resolve is HTTP 400" 400 raw;
   let open Yojson.Safe.Util in
@@ -7303,10 +7305,10 @@ let test_config_post_refused_before_write_says_not_applied () =
   check string "refusal names the profile, not a runtime sync failure"
     "keeper_config_profile_refused"
     (json |> member "error" |> member "code" |> to_string);
-  check bool "refusal names the rejected value" true
+  check bool "refusal names the rejected pair" true
     (String_util.contains_substring
        (json |> member "error" |> member "detail" |> to_string)
-       "not-a-mode");
+       "docker_no_network_policy");
   check string "keeper TOML is untouched" toml_before (read toml_path);
   check string "runtime.toml is untouched" runtime_before (read runtime_path)
 

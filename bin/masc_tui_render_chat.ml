@@ -673,7 +673,10 @@ let render_chat_row ~theme ~origin ~tool_visibility buf cols (row : Message_layo
          made a busy turn look like a table. *)
       let text = row.text in
       let context = Chat_theme.body_context theme row.style in
-      let is_tool = match row.style with Message_layout.Tool -> true | _ -> false in
+      let is_tool = match row.style with
+        | Message_layout.Tool -> true
+        | Message_layout.User | Inbound | Keeper | Status | Local | Journal | Error | Skill _
+        | Thinking _ -> false in
       let dress rest =
         if is_tool && tool_visibility <> Tools_results then
           dress_tool_summary rest
@@ -3038,7 +3041,10 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
               | Keeper_chat_transcript.Drawn_error text ->
                   entry Message_layout.Error (label "ERROR") text)
            (preludes @ List.filter (fun (item : Keeper_chat_transcript.drawn_item) ->
-                match item.origin with Admission_of_request _ -> false | _ -> true)
+                match item.origin with
+                  | Admission_of_request _ -> false
+                  | Text_stretch _ | Thinking_stretch _ | Tool_stretch _ | Unstreamed_skills
+                  | Reply_of_segment _ | Error_of_segment _ -> true)
               (Keeper_chat_transcript.drawn transcript))
     in
     { lb_log = turn_log; lb_request_id = request_id; lb_member_ids = member_ids; lb_insertion = insertion; lb_timeline_at = timeline_at;

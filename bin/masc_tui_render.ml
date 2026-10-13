@@ -8993,7 +8993,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
          | None when Option.is_some view.scene ->
              (match List.nth_opt (scene_targets view) view.scene_cursor with
               | Some node ->
-                  let label = match node.kind with Region _ -> "Region" | _ -> "Element" in
+                  let label = match node.kind with
+                    | Region _ -> "Region"
+                    | Text | Raster | Control _ -> "Element" in
                   Printf.sprintf "  %s %d/%d: %s • n/p:select • y:copy context"
                     label (view.scene_cursor + 1) (List.length (scene_targets view)) (Terminal_text.single_line node.text)
               | None -> "  No observed elements in this viewport • Ctrl-O:image")

@@ -133,7 +133,9 @@ let copy_tables lines ~from ~into =
     match if structural then Edit_text.header_of_line line else None with
     | Some (Edit_text.Table parts) | Some (Edit_text.Table_array parts) as header ->
       if prefix parts then
-        let array = match header with Some (Edit_text.Table_array _) -> true | _ -> false in
+        let array = match header with
+          | Some (Edit_text.Table_array _) -> true
+          | Some (Edit_text.Table _) | None -> false in
         let new_parts = into @ List.drop (List.length from) parts in
         let line = (if array then "[[" else "[") ^ path new_parts ^ (if array then "]]" else "]")
           ^ Option.value ~default:"" (Edit_text.header_trailing_comment line) in

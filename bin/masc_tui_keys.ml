@@ -1409,7 +1409,9 @@ let footer_hints_code ~pane =
   visible
   |> List.map (fun b ->
        if String.equal b.key "j/k" then
-         { b with label = (match pane with Code_tree -> "move" | _ -> "scroll") }
+         { b with label = (match pane with
+           | Code_tree -> "move"
+           | Code_file | Code_diff | Code_notes | Code_history -> "scroll") }
        else b)
   |> hints_of_bindings
   |> fun hints ->

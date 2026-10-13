@@ -590,7 +590,9 @@ let subscription_targets view =
         | Some installation_id,Some id when declaration.issues=[] ->
             (match List.find_opt (fun (instance:instance) -> instance.id=id
                 && instance.source_path=Some declaration.source_path
-                && (match instance.phase with Row.Attached | Row.Observing -> true | _ -> false)) instances with
+                && (match instance.phase with
+                  | Row.Attached | Row.Observing -> true
+                  | Row.Failed _ | Detaching | Detached -> false)) instances with
              | None -> []
              | Some instance -> List.map (fun (output_id,_) ->
                  ({installation_id;run_id=instance.run_id;output_id;instance_id=instance.id;title=instance.title}
@@ -1213,7 +1215,9 @@ let overview_lines ~width view =
                   | Some _ | None -> "" in
                 let lead = marker ^ instance_heading snapshot item ^ " · " ^
                   activity ^
-                  (match item.phase with Row.Failed _ -> "failed" | _ -> phase_label item.phase) ^
+                  (match item.phase with
+                    | Row.Failed _ -> "failed"
+                    | Row.Attached | Observing | Detaching | Detached -> phase_label item.phase) ^
                   " · " ^ count_text in
                 let controls = "    Enter:open  " ^ instance_controls view item in
                 let detail = match item.phase with

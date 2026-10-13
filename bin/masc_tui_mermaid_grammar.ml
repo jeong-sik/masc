@@ -755,7 +755,9 @@ let parse_sequence ?on_label lines =
                  if !depth = 0 then () else decr depth
              | Block_else _ | Message _ | Note _ -> ());
             (match event with
-             | Block_close when !depth = 0 && not (List.exists (function Block_open _ -> true | _ -> false) !events) ->
+             | Block_close when !depth = 0 && not (List.exists (function
+               | Block_open _ -> true
+               | Message _ | Note _ | Block_else _ | Block_close -> false) !events) ->
                  Error (Parse_error { line = number; what = "end closes no block" })
              | Block_close | Block_open _ | Block_else _ | Message _ | Note _ ->
                  events := event :: !events;

@@ -42,7 +42,9 @@ let output_image ~name ~src =
 let inline_svg ~name svg = Output_image { name; source = Inline_svg svg }
 
 let in_message ~text ~attachments =
-  match List.find_opt (function No_image -> false | _ -> true) (List.rev attachments) with
+  match List.find_opt (function
+    | No_image -> false
+    | Named_path _ | Staged _ | Stored_attachment _ | Output_image _ | Unavailable_image _ -> true) (List.rev attachments) with
   | Some image -> image
   | None ->
       match List.rev (Masc_tui_image_ref.paths text) with

@@ -5364,7 +5364,9 @@ module Browser_lane_view = struct
   let region_observed (target : Browser_lane.node_ref) (scene : scene) =
     scene.content.document_id = target.document_id
     && List.exists (fun (node : Masc.Browser_scene.node) ->
-      node.node_id = target.node_id && match node.kind with Region _ -> true | _ -> false)
+      node.node_id = target.node_id && match node.kind with
+        | Region _ -> true
+        | Text | Raster | Control _ -> false)
       scene.content.nodes
 
   let publish_scene (scene : scene) t =
@@ -9363,7 +9365,10 @@ let same_skill_invocation ~inventory
 
 let skills_drawn_by_items items =
   List.concat_map (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
-    match item.drawn with Drawn_skill skills -> skills | _ -> []) items
+    match item.drawn with
+      | Drawn_skill skills -> skills
+      | Drawn_thinking _ | Drawn_tools _ | Drawn_text _ | Drawn_reply _ | Drawn_status _
+      | Drawn_error _ -> []) items
 
 let skills_in_source_rows ~keeper_name source rows =
   List.concat_map (fun (row : msg_entry) ->
@@ -9592,7 +9597,11 @@ let retain_preflight_inputs (state : state) entries =
         state.msg_history <- List.filter (fun row ->
           not (String.equal row.me_keeper_name request.keeper_name
                && String.equal row.me_request_id request.request_id
-               && match row.me_role with Message_user _ -> true | _ -> false))
+               && match row.me_role with
+                 | Message_user _ -> true
+                 | Message_keeper | Message_autonomous | Message_status | Message_local
+                 | Message_error | Message_tool | Message_skill _ | Message_thinking
+                 | Message_memory -> false))
           state.msg_history;
         Masc_tui_message_input.insert state.msg_input request.message;
         state.msg_attachments <- request.attachments;
@@ -12550,7 +12559,11 @@ type memory_fact_row =
 (* Memory already trims its filter; count and cursor search must use that
    same query. Other surfaces keep their literal-space search semantics. *)
 let surface_search_query surface query =
-  match surface with Memory -> String.trim query | _ -> query
+  match surface with
+    | Memory -> String.trim query
+    | Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Board | Approvals | Planning
+    | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+    | Runtime | Config | Resources | Tools | System_logs -> query
 
 let memory_fact_search_text = function
   | Memory_row_fact f ->
@@ -13243,7 +13256,9 @@ let runtime_exact_picker_page (state : state) ~terminal_rows ~cols =
       lanes_action_error_row_count ~cols state.lanes_action_error
       + runtime_lane_notice_lines ~cols state.runtime_lane_notice
       + List.length (runtime_lane_stale_lines state)
-      + (match state.runtime_lane_write with Lane_write_idle -> 0 | _ -> 1) in
+      + (match state.runtime_lane_write with
+        | Lane_write_idle -> 0
+        | Lane_write_posting | Lane_write_rereading _ -> 1) in
     (* Two lines per model, after the frame, search, selected ID and keys. *)
     max 1 ((surface_body_rows state ~terminal_rows - 10 - extra) / 2)
   | _ -> runtime_picker_page
@@ -14765,7 +14780,9 @@ let keeper_observed_interrupt_action (state : state) keeper_name =
   let previous = List.find_opt (fun item -> item.oi_keeper = keeper_name)
     state.keeper_observed_interrupts
     |> Option.map (fun item -> item.oi_token, item.oi_sent_ns,
-      match item.oi_status with Interrupt_declined _ | Interrupt_failed _ -> true | _ -> false) in
+      match item.oi_status with
+        | Interrupt_declined _ | Interrupt_failed _ -> true
+        | Interrupt_sending | Interrupt_signalled -> false) in
   Masc_tui_esc_interrupt.observed_action ~now_ns:(Mtime_clock.elapsed_ns ()) ~current_token ~previous
 ;;
 

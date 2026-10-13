@@ -4181,7 +4181,9 @@ let sandbox_install_apple_verified_cmd =
         let output = Fun.protect
           ~finally:(fun () -> status := Some (Unix.close_process_in channel))
           (fun () -> In_channel.input_all channel) in
-        (match !status with Some (Unix.WEXITED 0) -> Ok output | _ -> Error ())
+        (match !status with
+         | Some (Unix.WEXITED 0) -> Ok output
+         | Some (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) | None -> Error ())
       with Unix.Unix_error _ | Sys_error _ -> Error () in
   let execute source sha256 size =
     match Masc.Apple_container_install.install_privileged ~run ~source ~sha256 ~size with

@@ -865,7 +865,10 @@ let visible_lines ~height ~width t =
   let notice = match Masc_tui_message_layout.wrap_words ~max_cells:width t.notice with
     | [] -> [Text ""]
     | wrapped -> List.map (fun line -> Text line) wrapped in
-  let results = match t.phase with Finished _ | Failed -> true | _ -> false in
+  let results = match t.phase with
+    | Finished _ | Failed -> true
+    | Loading | Providers _ | Logging | Models | Documented_context _ | Saving | Removing
+    | Removal _ -> false in
   let body = if results then
     List.concat_map (function
       | Text text -> List.map (fun line -> Text line)

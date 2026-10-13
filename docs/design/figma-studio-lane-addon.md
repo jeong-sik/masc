@@ -43,11 +43,14 @@ Dashboard menu. The package uses existing rows, presentation, tool exports and
 Skills. No model runs inside the Plugin or a second orchestration loop inside
 `figma-mcp`. Detaching the Addon does not close Figma, undo edits or delete code.
 
-The existing Keeper Figma OAuth Identity and a local Plugin session are distinct
-capabilities. Plugin-backed work does not pretend that `leader` has a REST token.
-REST fallback is available only after that Identity is actually connected. The
-Plugin can serve an open document without depending on a remote-MCP client
-registration or on a REST file key.
+The requested Keeper owner is `leader`; its Figma Identity is not assumed to be
+configured. A REST credential and a local Plugin session are distinct
+capabilities. The Plugin can serve an open document without remote-MCP client
+registration or a REST file key. Authorized REST calls complement that session
+with server files, versions, comments, libraries and eligible variable writes;
+REST is not a fallback for native canvas edits. See the
+[Plugin/REST capability reference](figma-platform-capabilities.md) for scopes,
+editor/plan restrictions and the source of each observation.
 
 ## Transport with the current Lane runtime
 
@@ -95,8 +98,12 @@ ports remain discoverable under the current export contract, so secrecy of tool
 names must not be used as access control. The unexported `lane_call` envelope
 continues to be callable only over host-owned stdio.
 
-Pairing binds installation, worker incarnation, relay identity and Plugin session.
-A new worker or Plugin session requires an explicit new pairing. Secrets are not
+Pairing binds the configured logical installation, a package-generated worker
+boot ID, relay identity and Plugin session. This boot ID is not a MASC host
+incarnation: the current non-`act` observation path supplies binding and sources,
+but no host instance/incarnation envelope. The package must not invent one or
+declare a dummy `act` contribution to obtain it. A new worker or Plugin session
+requires an explicit new pairing. Secrets are not
 included in observation rows. The package may show relay and Plugin connection
 states independently. Transport disconnect does not cancel or replay an accepted
 operation. The relay never substitutes the last connected Plugin as the target.
@@ -136,7 +143,7 @@ happens to be selected when delivery completes.
 A persistent package ledger is required: `[world.state] mode = "persistent"`.
 Its authoritative operation records reside in the package's owned `/state`
 volume, scoped to the logical installation. Durable transactions record normalized
-input, target Plugin session, originating worker incarnation, dispatch and
+input, target Plugin session, originating package boot ID, dispatch and
 outcome before acknowledging those transitions. Read failure refuses mutation;
 an empty recovery view is not permission to replay. The relay holds transport
 delivery state, not a second independent authority for operation completion.
@@ -146,7 +153,7 @@ under that ID is refused. Queue removal is not execution acknowledgement. Retain
 dispatched operations until their outcome is recorded. Reconnect queries the
 original operation; an unknown outcome is not automatically sent as a new edit.
 Plugin/session restart cannot infer success from an empty in-memory result cache.
-After worker replacement, the new incarnation can read old operation records but
+After worker replacement, the new boot can read old operation records but
 cannot rebind them to its new pairing. Submitted/dispatched operations with an
 unestablished outcome require reconciliation against their original session;
 closing that session may leave the outcome unknown indefinitely.
@@ -166,12 +173,16 @@ fails after an edit. A user-requested undo/recovery targets the recorded operati
 
 Both workflows use one versioned, retained artifact contract:
 
+- Source: `plugin_live` for an editor observation or `rest_version` for a server
+  capture at an explicit version; never silently merge their freshness claims.
 - Origin: Plugin session, page and root node IDs; file key only when actually
   available, never guessed from a document name or the root's ID.
 - Capture: operation/readback references, observation time, supported capabilities
   and an explicit consistency/coverage result.
 - Native design: ordered hierarchy, geometry, auto layout, text content and styled
   runs, component/instance relationships, styles, variable IDs/modes/bindings.
+  Prefer the Plugin's native `JSON_REST_V1` export and supplement missing fields
+  explicitly instead of maintaining a second incomplete node serializer.
 - Assets: exact preview and export bytes with MIME type and content hash. An
   expired export URL alone is not retained evidence.
 - Coverage: unsupported or unavailable fields/assets, inaccessible nodes, truncated

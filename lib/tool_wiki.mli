@@ -36,7 +36,12 @@
 
     A page reads only when its frontmatter is closed and carries [title],
     [summary], [source], [author], [created], [revision] and [tags], with
-    [source] inside the vocabulary and [revision] a whole number from 1. Any other page is printed by filename with the reason —
+    [source] inside the vocabulary and [revision] a whole number from 1. [tags]
+    must be a list the tags line can hold: no tag carries a bracket.
+
+    The writers refuse any header value that would read back as something
+    else: a title, summary or note that is blank or spans lines, and a tag
+    with a comma, a bracket, a line break or outer spaces. Any other page is printed by filename with the reason —
     by the tools here and by the [masc://wiki] resources, which read
     through {!parse_frontmatter} and {!list_pages} — instead of passing a
     raw or empty value through.
@@ -75,7 +80,8 @@ type frontmatter = {
 type frontmatter_error
 (** Why a page does not read: no frontmatter, a block with no closing
     delimiter, a required field absent or empty, a [source] outside
-    {!wiki_source}, or a [revision] that is not a whole number from 1. *)
+    {!wiki_source}, a [revision] that is not a whole number from 1, or a
+    [tags] value that is not a list of tags. *)
 
 val parse_frontmatter : string -> (frontmatter, frontmatter_error) result
 

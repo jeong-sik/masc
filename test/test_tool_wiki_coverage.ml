@@ -661,6 +661,97 @@ let test_header_that_does_not_read_names_its_reason () =
       (msg_contains ~needle:"- zero-revision.md (revision \"0\" is not a whole number from 1)" listing))
 
 (* ============================================================
+   Header values that would not read back
+   ============================================================
+
+   A header value is one line, [key: value], read back trimmed. The tags line
+   is [tags: \[a, b\]]. A value that would come back as something else is
+   refused when it is written, not cut down when it is read. *)
+
+let unstorable_tags =
+  [ "x\n---\nINJECTED"; "two\nlines"; "a,b"; "a]"; "[a"; " lead"; "trail " ]
+
+let test_create_refuses_a_tag_that_would_not_read_back () =
+  List.iter
+    (fun tag ->
+       with_temp_base_path (fun ctx ->
+         let (ok, msg) = create ctx (create_args ~tags:[ "ok"; tag ] ()) in
+         Alcotest.(check bool) (Printf.sprintf "tag %S is refused" tag) false ok;
+         Alcotest.(check bool) "says the tag cannot be stored" true
+           (msg_contains ~needle:"cannot be stored" msg);
+         Alcotest.(check (list string)) "no page written" [] (wiki_pages ctx)))
+    unstorable_tags
+
+let test_update_refuses_a_tag_that_would_not_read_back () =
+  List.iter
+    (fun tag ->
+       with_temp_base_path (fun ctx ->
+         create_ok ctx (create_args ~page:"notes" ~tags:[ "kept" ] ());
+         let before = read_file ctx "notes" in
+         let (ok, _) =
+           update ctx (update_args ~page:"notes" ~base_revision:1 ~body:"b" ~tags:[ tag ] ())
+         in
+         Alcotest.(check bool) (Printf.sprintf "tag %S is refused" tag) false ok;
+         Alcotest.(check string) "the page is untouched" before (read_file ctx "notes")))
+    unstorable_tags
+
+(* What was accepted reads back as what was sent: tags, and the body that
+   follows the header. *)
+let test_accepted_tags_read_back_unchanged () =
+  with_temp_base_path (fun ctx ->
+    let tags = [ "band"; "한글 태그"; "space inside"; "a:b"; "dash-ed" ] in
+    create_ok ctx (create_args ~page:"tagged" ~tags ~body:"the body" ());
+    Alcotest.(check (list string)) "tags after create" tags (frontmatter_of ctx "tagged").tags;
+    let (ok, msg) =
+      update ctx
+        (update_args ~page:"tagged" ~base_revision:1 ~body:"the second body"
+           ~tags:[ "song"; "두 번째" ] ())
+    in
+    Alcotest.(check bool) ("update succeeds: " ^ msg) true ok;
+    Alcotest.(check (list string)) "tags after update" [ "song"; "두 번째" ]
+      (frontmatter_of ctx "tagged").tags;
+    let (_, read) =
+      dispatch_exn ctx ~name:"masc_wiki_read" ~args:(`Assoc [ "topic", `String "tagged" ])
+    in
+    Alcotest.(check bool) "the body follows the header" true
+      (String_util.contains_substring read "---\n\nthe second body\n"))
+
+(* A value that is only spaces would be written and then read as a missing
+   field. *)
+let test_blank_header_values_are_refused () =
+  with_temp_base_path (fun ctx ->
+    let (ok, msg) = create ctx (create_args ~title:"   " ()) in
+    Alcotest.(check bool) "blank title fails" false ok;
+    Alcotest.(check bool) "names the title" true (msg_contains ~needle:"title is required" msg);
+    let (ok, msg) = create ctx (create_args ~summary:" \t " ()) in
+    Alcotest.(check bool) "blank summary fails" false ok;
+    Alcotest.(check bool) "names the summary" true
+      (msg_contains ~needle:"summary is required" msg);
+    Alcotest.(check (list string)) "no page written" [] (wiki_pages ctx);
+    create_ok ctx (create_args ~page:"notes" ());
+    let before = read_file ctx "notes" in
+    let (ok, _) = update ctx (update_args ~page:"notes" ~base_revision:1 ~body:"b" ~title:"  " ()) in
+    Alcotest.(check bool) "blank new title fails" false ok;
+    let (ok, msg) = update ctx (update_args ~page:"notes" ~base_revision:1 ~body:"b" ~note:"   " ()) in
+    Alcotest.(check bool) "blank note fails" false ok;
+    Alcotest.(check bool) "names the note" true (msg_contains ~needle:"note is required" msg);
+    Alcotest.(check string) "the page is untouched" before (read_file ctx "notes"))
+
+(* A page written by hand whose tags line is not a list is named with that
+   reason. It is not listed with the pieces that happen to parse. *)
+let test_a_tags_line_that_is_not_a_list_does_not_read () =
+  with_temp_base_path (fun ctx ->
+    write_wiki_page ctx ~filename:"open-bracket.md"
+      "---\ntitle: Open Bracket\nsummary: s\nsource: research\nauthor: codex\n\
+       created: 2026-10-13\nrevision: 1\ntags: [a, b\n---\n\nbody\n";
+    let (ok, listing) = dispatch_exn ctx ~name:"masc_wiki_list" ~args:(`Assoc []) in
+    Alcotest.(check bool) "list ok" true ok;
+    Alcotest.(check bool) "named with the reason" true
+      (msg_contains ~needle:"- open-bracket.md (tags \"[a, b\" is not a list of tags)" listing);
+    Alcotest.(check bool) "not listed as a page" false
+      (msg_contains ~needle:"[Open Bracket]" listing))
+
+(* ============================================================
    index.md and log.md
    ============================================================ *)
 
@@ -822,6 +913,13 @@ let () =
       Alcotest.test_case "the index lists pages in name order with unreadable files" `Quick test_index_lists_pages_in_name_order_with_unreadable_files;
       Alcotest.test_case "the wiki's own files are not pages" `Quick test_the_wikis_own_files_are_not_pages;
       Alcotest.test_case "refused writes leave no log line" `Quick test_refused_writes_leave_no_log_line;
+    ]);
+    ("header_values", [
+      Alcotest.test_case "create refuses a tag that would not read back" `Quick test_create_refuses_a_tag_that_would_not_read_back;
+      Alcotest.test_case "update refuses a tag that would not read back" `Quick test_update_refuses_a_tag_that_would_not_read_back;
+      Alcotest.test_case "accepted tags read back unchanged" `Quick test_accepted_tags_read_back_unchanged;
+      Alcotest.test_case "blank header values are refused" `Quick test_blank_header_values_are_refused;
+      Alcotest.test_case "a tags line that is not a list does not read" `Quick test_a_tags_line_that_is_not_a_list_does_not_read;
     ]);
     ("unreadable", [
       Alcotest.test_case "unknown source is named, not passed through" `Quick test_unknown_source_is_named_not_passed_through;

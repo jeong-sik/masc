@@ -40,6 +40,31 @@ let source_of_string_opt raw =
 
 let string_contains = String_util.string_contains_substring
 
+(* Header values. Each is written on one line as [key: value] and read back
+   trimmed, so the writer refuses any value that would come back as something
+   else: a page that was accepted must read as what was sent. *)
+
+(* Blank once trimmed: it would read back as a missing field. *)
+let blank value = String.equal (String.trim value) ""
+
+let one_line value = not (String.contains value '\n' || String.contains value '\r')
+
+(* The tags line is [tags: \[a, b\]]. A comma splits one tag into two, a
+   bracket or a line break ends the list or the header early, and outer
+   spaces are trimmed on the way back. *)
+let tag_reads_back tag =
+  (not (blank tag))
+  && String.equal (String.trim tag) tag
+  && not
+       (Stdlib.String.exists
+          (fun c ->
+             match c with
+             | '\n' | '\r' | ',' | '[' | ']' -> true
+             | _ -> false)
+          tag)
+
+let first_bad_tag tags = List.find_opt (fun tag -> not (tag_reads_back tag)) tags
+
 type context = {
   base_path: string;
   agent_name: string;
@@ -89,6 +114,7 @@ type frontmatter_error =
   | Missing_field of frontmatter_field
   | Unknown_source of string
   | Bad_revision of string
+  | Bad_tags of string
 
 let parse_frontmatter content =
   match Frontmatter.read content with
@@ -122,7 +148,11 @@ let parse_frontmatter content =
     in
     let* tags =
       match lookup Tags with
-      | Some value -> Ok (Frontmatter.list_value value)
+      | Some value ->
+        (* A list the tags line cannot hold, such as one with no closing
+           bracket, is not cut down to the pieces that happen to parse. *)
+        let tags = Frontmatter.list_value value in
+        if List.for_all tag_reads_back tags then Ok tags else Error (Bad_tags value)
       | None -> Error (Missing_field Tags)
     in
     Ok { title; summary; source; author; created; revision; tags }
@@ -137,6 +167,7 @@ let frontmatter_error_to_string = function
   | Unknown_source raw ->
     sprintf "source \"%s\" is not one of: %s" raw (String.concat ", " valid_source_strings)
   | Bad_revision raw -> sprintf "revision \"%s\" is not a whole number from 1" raw
+  | Bad_tags raw -> sprintf "tags \"%s\" is not a list of tags" raw
 
 (* The one line list, read and search print for a page whose header does
    not read: its filename and the reason. *)
@@ -313,8 +344,6 @@ let page_name_error_to_string raw = function
 let page_path ~base_path page =
   Filename.concat (wiki_root ~base_path) (page ^ ".md")
 
-let one_line value = not (String.contains value '\n' || String.contains value '\r')
-
 let today () =
   (* Local, not UTC: the header dates are read by the people and Keepers on
      this machine. *)
@@ -397,6 +426,13 @@ let write_page ~tool_name ~start_time ctx ~path ~content ~action ~revision ~page
             (sprintf "%s, but index.md could not be rebuilt: %s" written message)
         | Ok () -> text_ok ~tool_name ~start_time written))
 
+(* The tag is quoted as written, line breaks included. *)
+let bad_tag_message tag =
+  sprintf
+    "tag \"%s\" cannot be stored: a tag may not contain a comma, a bracket or a line \
+     break, or start or end with a space"
+    tag
+
 (* A field the schema does not offer but a caller sent anyway. *)
 let has_field args name =
   match args with
@@ -413,23 +449,26 @@ let handle_create ~tool_name ~start_time ctx args : Tool_result.result =
   let summary = text "summary" in
   let body = text "body" in
   let tags = Json_util.get_string_list args "tags" in
-  match validate_page_name raw_page with
-  | Error error ->
+  match validate_page_name raw_page, first_bad_tag tags with
+  | Error error, _ ->
     workflow_err ~tool_name ~start_time (page_name_error_to_string raw_page error)
-  | Ok page ->
-    if String.equal title "" then missing_required ~tool_name ~start_time "title"
+  | Ok _, Some tag -> workflow_err ~tool_name ~start_time (bad_tag_message tag)
+  | Ok page, None ->
+    if blank title then missing_required ~tool_name ~start_time "title"
     else if not (one_line title)
     then workflow_err ~tool_name ~start_time "title must be one line"
-    else if String.equal summary "" then missing_required ~tool_name ~start_time "summary"
+    else if blank summary then missing_required ~tool_name ~start_time "summary"
     else if not (one_line summary)
     then workflow_err ~tool_name ~start_time "summary must be one line"
     else if String.equal body "" then missing_required ~tool_name ~start_time "body"
-    else if String.equal (String.trim ctx.agent_name) ""
+    else if blank ctx.agent_name
     then
       (* The reader requires [author]; a page this handler writes must read
          back through it, so a caller with no name is refused here rather than
          leaving a header the wiki then reports as unreadable. *)
       workflow_err ~tool_name ~start_time "the caller has no agent name to write as author"
+    else if not (one_line ctx.agent_name)
+    then workflow_err ~tool_name ~start_time "the caller's agent name must be one line"
     else begin
       (* The schema requires [source]. A missing or unknown value is refused,
          never filled in: the frontmatter records what kind of work the writer
@@ -496,13 +535,15 @@ let handle_update ~tool_name ~start_time ctx args : Tool_result.result =
     | Some base_revision ->
     let note = Json_util.get_string args "note" |> Option.value ~default:"" in
     if String.equal body "" then missing_required ~tool_name ~start_time "body"
-    else if String.equal note "" then missing_required ~tool_name ~start_time "note"
+    else if blank note then missing_required ~tool_name ~start_time "note"
     else if not (one_line note)
     then workflow_err ~tool_name ~start_time "note must be one line"
-    else if String.equal (String.trim ctx.agent_name) ""
+    else if blank ctx.agent_name
     then
       (* The log line names who made the change. *)
       workflow_err ~tool_name ~start_time "the caller has no agent name to write in the log"
+    else if not (one_line ctx.agent_name)
+    then workflow_err ~tool_name ~start_time "the caller's agent name must be one line"
     else if has_field args "source"
     then
       (* [source] says what kind of work the page first came from. *)
@@ -512,14 +553,23 @@ let handle_update ~tool_name ~start_time ctx args : Tool_result.result =
       let new_summary = Json_util.get_string args "summary" in
       let one_line_field name = function
         | None -> Ok ()
-        | Some "" -> Error (sprintf "%s may not be empty; omit it to keep the current one" name)
+        | Some value when blank value ->
+          Error (sprintf "%s may not be empty; omit it to keep the current one" name)
         | Some value when not (one_line value) -> Error (sprintf "%s must be one line" name)
         | Some _ -> Ok ()
       in
-      match one_line_field "title" new_title, one_line_field "summary" new_summary with
-      | Error message, _ | Ok (), Error message ->
+      let new_tags =
+        if has_field args "tags" then Some (Json_util.get_string_list args "tags") else None
+      in
+      match
+        ( one_line_field "title" new_title
+        , one_line_field "summary" new_summary
+        , Option.bind new_tags first_bad_tag )
+      with
+      | Error message, _, _ | Ok (), Error message, _ ->
         workflow_err ~tool_name ~start_time message
-      | Ok (), Ok () ->
+      | Ok (), Ok (), Some tag -> workflow_err ~tool_name ~start_time (bad_tag_message tag)
+      | Ok (), Ok (), None ->
         with_wiki_lock ~tool_name ~start_time ctx (fun () ->
           let path = page_path ~base_path:ctx.base_path page in
           if not (Sys.file_exists path)
@@ -545,11 +595,7 @@ let handle_update ~tool_name ~start_time ctx args : Tool_result.result =
                    ~current_revision:current.revision ~body:(page_body content)
                | Ok current ->
                  let revision = current.revision + 1 in
-                 let tags =
-                   if has_field args "tags"
-                   then Json_util.get_string_list args "tags"
-                   else current.tags
-                 in
+                 let tags = Option.value new_tags ~default:current.tags in
                  let content =
                    render_page
                      ~title:(Option.value new_title ~default:current.title)

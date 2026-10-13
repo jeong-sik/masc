@@ -305,17 +305,6 @@ let patch_telemetry
   patched
 ;;
 
-(** Internal helper: canonical provider name for metric labels.
-    Kept in sync with the log tag used by the [WARN Complete] line. *)
-let provider_name_of_kind : Provider_config.provider_kind -> string = function
-  | Ollama -> "ollama"
-  | Anthropic -> "anthropic"
-  | Kimi -> "kimi"
-  | OpenAI_compat -> "openai"
-  | Gemini -> "gemini"
-  | Glm -> "glm"
-;;
-
 let tool_use_count (content : Types.content_block list) =
   List.fold_left
     (fun acc block ->

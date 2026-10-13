@@ -11,5 +11,7 @@ val project
 (** With no exports, return the original result unchanged. Otherwise persist
     the full result and every settled node before returning selected fields,
     node dispositions, failure cause and a normalized artifact reference.
+    The execution document uses the canonical artifact-manifest MIME/schema
+    so its intermediate retained artifacts remain transitive retention roots.
     A storage failure returns [Error] without advertising an unpersisted
     reference. Cancellation propagates. *)

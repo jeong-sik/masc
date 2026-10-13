@@ -130,6 +130,17 @@ type model_projection =
   | Store_above of { threshold_bytes : int }
   | Inline_up_to of { maximum_bytes : int }
 
+(** Producer-owned presentation of an already durable result manifest.
+    This never widens the descriptor's {!model_projection} ceiling. *)
+type artifact_projection =
+  | Reference_only
+  | Inline_with_reference
+
+val artifact_projection_to_json : artifact_projection -> Yojson.Safe.t
+val artifact_projection_of_json :
+  Yojson.Safe.t -> (artifact_projection, string) result
+(** Strict metadata codec; unknown presentations fail visibly. *)
+
 val default_model_projection : model_projection
 (** Store results larger than the canonical MASC tool-output budget. *)
 

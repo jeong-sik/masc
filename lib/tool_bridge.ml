@@ -46,20 +46,24 @@ type externalization_error =
   }
 
 let artifact_manifest_metadata_key = "masc.artifact_manifest"
+let artifact_projection_metadata_key = "masc.artifact_projection"
 
-let metadata_with_artifact_manifest metadata reference =
+let metadata_with_artifact_manifest metadata reference projection =
   let manifest = Tool_output.normalized_artifact_ref_to_json reference in
+  let owned_fields =
+    [ artifact_manifest_metadata_key, manifest
+    ; artifact_projection_metadata_key, Tool_output.artifact_projection_to_json projection ]
+  in
   match metadata with
-  | None -> `Assoc [ artifact_manifest_metadata_key, manifest ]
+  | None -> `Assoc owned_fields
   | Some (`Assoc fields) ->
     `Assoc
-      ((artifact_manifest_metadata_key, manifest)
-       :: List.remove_assoc artifact_manifest_metadata_key fields)
+      (owned_fields
+       @ (fields |> List.remove_assoc artifact_manifest_metadata_key
+                 |> List.remove_assoc artifact_projection_metadata_key))
   | Some payload ->
     `Assoc
-      [ artifact_manifest_metadata_key, manifest
-      ; "masc.payload", payload
-      ]
+      (owned_fields @ [ "masc.payload", payload ])
 ;;
 
 let artifact_manifest_from_metadata metadata =
@@ -70,7 +74,12 @@ let artifact_manifest_from_metadata metadata =
        (match Tool_output.normalized_artifact_ref_of_json json with
         | Tool_output.Decoded_normalized_artifact_ref reference
           when String.equal reference.mime Tool_output.artifact_manifest_mime ->
-          Ok reference
+          let projection =
+            match List.assoc_opt artifact_projection_metadata_key fields with
+            | None -> Ok Tool_output.Reference_only
+            | Some json -> Tool_output.artifact_projection_of_json json
+          in
+          Result.map (fun projection -> reference, projection) projection
         | Tool_output.Decoded_normalized_artifact_ref _ ->
           Error "artifact manifest metadata has the wrong media type"
         | Tool_output.Not_normalized_artifact_ref ->
@@ -91,7 +100,7 @@ let artifact_manifest_from_metadata metadata =
   | None -> Error "typed artifact result is missing its durable manifest"
 ;;
 
-let attach_artifact_manifest ~base_path (result : Tool_result.result) =
+let attach_artifact_manifest ?(projection = Tool_output.Reference_only) ~base_path (result : Tool_result.result) =
   match
     Tool_output.normalized_artifact_refs_in_json_strict
       (Tool_result.data result)
@@ -115,7 +124,7 @@ let attach_artifact_manifest ~base_path (result : Tool_result.result) =
        in
        Ok
          (Tool_result.with_metadata
-            (metadata_with_artifact_manifest (Tool_result.metadata result) reference)
+            (metadata_with_artifact_manifest (Tool_result.metadata result) reference projection)
             result)
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -307,6 +316,7 @@ let project_result
       ?base_path
       ?stored_preview
       ?answer_fingerprint
+      ?inline_message
       ?on_externalization_error
       ~model_projection
       ~structured_content
@@ -328,7 +338,7 @@ let project_result
        | Ok [] -> Error { kind = Artifact_storage_failure; message = "typed artifact result lost its normalized references" }
        | Ok (_ :: _) ->
          (match artifact_manifest_from_metadata metadata with
-          | Ok reference ->
+          | Ok (reference, artifact_projection) ->
             let reference =
               Option.fold ~none:reference
                 ~some:(Tool_output.with_preview reference) stored_preview
@@ -340,7 +350,32 @@ let project_result
                execution time included — differ between runs. *)
             (match Tool_output.with_answer_fingerprint reference answer_fingerprint with
              | Ok reference ->
-               Ok (Tool_output.encode_for_agent_core (Tool_output.Stored reference))
+               let marker () =
+                 Tool_output.encode_for_agent_core (Tool_output.Stored reference)
+               in
+               (match artifact_projection with
+                | Tool_output.Reference_only -> Ok (marker ())
+                | Tool_output.Inline_with_reference ->
+                  let envelope =
+                    Yojson.Safe.to_string
+                      (`Assoc
+                        ([ "structured_content", structured_content
+                         ; "artifact_manifest", Tool_output.normalized_artifact_ref_to_json reference ]
+                         @ (match inline_message with
+                            | None -> []
+                            | Some message -> [ "content", `String message ])))
+                  in
+                  let ceiling = Tool_output.inline_ceiling_bytes model_projection in
+                  if String.length envelope <= ceiling
+                  then Ok envelope
+                  else
+                    let content = marker () in
+                    if String.length content <= ceiling then Ok content
+                    else Error
+                      { kind = Inline_budget_exceeded
+                      ; message = Printf.sprintf
+                          "artifact reference exceeds descriptor budget (%d > %d bytes)"
+                          (String.length content) ceiling })
              | Error error ->
                Error
                  { kind = Artifact_storage_failure
@@ -511,6 +546,7 @@ let to_agent_core_typed_result
     | _ ->
     project_result
       ~stored_preview
+      ~inline_message:message
       ?base_path
       ?on_externalization_error
       ~model_projection

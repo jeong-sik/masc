@@ -69,6 +69,8 @@ val observations_for_absorption : input -> Yojson.Safe.t list
     Conversation entries retain local position, role and host speaker provenance;
     runtime context carriers retain their positions with an explicit attribution
     and omitted body, so recalled content is not absorbed as a new observation.
+    Invalid or duplicate carrier provenance is attributed as such and its body
+    is also omitted; malformed context does not become ordinary conversation.
     tool entries report execution outcome only, not payload or domain success.
     When present, historical task contexts are a separate observation whose
     [ranges] preserve the original source spans, attributions and local offsets.

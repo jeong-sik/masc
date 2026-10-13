@@ -172,7 +172,11 @@ let message_to_text ~position_label ~position (m : Agent_core.Types.message) : s
     match Agent_core.Types.Extra_system_context_provenance.classify m.metadata with
     | Present | Historical ->
       " source=runtime_context", "[runtime context omitted]"
-    | Absent | Invalid | Duplicate ->
+    | Invalid ->
+      " source=runtime_context provenance=invalid", "[runtime context omitted]"
+    | Duplicate ->
+      " source=runtime_context provenance=duplicate", "[runtime context omitted]"
+    | Absent ->
       let parts = List.filter_map text_of_content m.content in
       speaker_header_field m, String.concat "\n" parts |> String.trim
   in

@@ -1,15 +1,8 @@
 (** What a finished process's exit status means for the answer.
 
-    The values below used to be computed inline where the dispatch result was
-    unpacked, and every one of them is a function of the status the child
-    exited with. Pinning the contract they carry therefore needed a real
-    child: to ask whether [ls] on a missing path is reported as a completed
-    result, a test had to run [ls]. That worked while a keeper could execute
-    on the host and stopped when the [Local] profile was removed (#32078), and
-    the suite went red for a reason that was never about the boundary.
-
-    So the reading moves here, where a synthesized {!Unix.process_status} is
-    enough to ask the question.
+    Every value below is a function of the status the child exited with, so
+    a synthesized {!Unix.process_status} is enough to ask what an exit means;
+    no test has to run a real child.
 
     The contract itself is masc#28983: a process that ran and exited nonzero,
     or died to a signal, is an observed tool result the model reads and reacts

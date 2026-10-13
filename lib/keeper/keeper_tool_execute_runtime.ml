@@ -482,8 +482,7 @@ let handle_tool_execute_typed
         let base_host_env = dispatch_bundle.base_host_env in
         let dispatched_location_fields () =
           (* [Host] is unreachable on this lane: every profile a keeper may
-             declare builds a guest or SSH target, and the builder that made
-             a host one went with the [Local] profile. The arm stays because
+             declare builds a guest or SSH target. The arm stays because
              [Sandbox_target.t] is the general execution type and other
              callers do run on this host; it answers with the same fields the
              other targets do rather than describing a keeper that cannot

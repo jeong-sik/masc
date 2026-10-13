@@ -37,16 +37,12 @@ let profile_overlay_error detail =
    overlaid. Durable keeper JSON does not carry the config half of
    [keeper_meta] at all -- [Keeper_meta_json_parse] fills those eleven fields
    with placeholders and the store never writes them back -- so
-   [entry.meta.sandbox_profile] is always the decoder's [Local] and the TOML
-   is the only thing that can say [docker].
+   [entry.meta.sandbox_profile] is the decoder's [Docker] placeholder and only
+   the TOML says which profile the keeper declared.
 
-   Both turn entry points used to spell the overlay themselves, and
-   [Keeper_unified_turn.run_keeper_cycle] spelled only the first half: it
-   loaded [profile_defaults] for the runtime builder and then ran the turn on
-   the un-overlaid [entry.meta]. Every heartbeat turn therefore dispatched
-   [Execute] to the host while its keeper TOML declared [docker] (#30982).
-   Returning both halves together is what makes that omission unspellable --
-   a caller cannot hold the defaults without the meta they belong to. *)
+   Returning both halves together means a caller cannot hold the profile
+   defaults without the meta they belong to, so no turn entry point can load
+   the defaults and then run the turn on the un-overlaid [entry.meta]. *)
 let turn_profile_and_meta ~base_path ~(entry_meta : keeper_meta) :
     (Keeper_types_profile.keeper_profile_defaults * keeper_meta, Agent_core.Error.t) result =
   match load_profile_defaults ~base_path ~keeper_name:entry_meta.name with

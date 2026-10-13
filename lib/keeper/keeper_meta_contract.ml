@@ -371,13 +371,8 @@ let effective_meta_of_profile_defaults
   let target_sandbox_profile =
     match defaults.sandbox_profile, defaults.manifest_path with
     | Some profile, _ -> Ok profile
-    (* No manifest and no declared profile used to fall through to
-       [meta.sandbox_profile], which the JSON decoder fills with a
-       placeholder it documents as never-decoded. That placeholder was
-       [Local], and the thing that stopped it from becoming host execution
-       was a feature flag defaulting to off. With no host arm left there is
-       nothing to fall through to: a keeper with no profile source has no
-       profile, and that is the answer. *)
+    (* [meta.sandbox_profile] is the JSON decoder's placeholder, not a
+       declaration, so a keeper with no declared profile has no profile. *)
     | None, None | None, Some _ ->
       Error
         (missing_required_sandbox_profile_error

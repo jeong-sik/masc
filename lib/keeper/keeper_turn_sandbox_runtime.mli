@@ -319,7 +319,7 @@ val teardown_keeper_sandbox_by_name :
   (unit, string) result
 (** {!teardown_keeper_sandbox} for callers that hold the keeper's name and
     typed backend -- shutdown finalization, which runs after the registry
-    entry is gone. Local and remote-SSH Keepers own no local container;
+    entry is gone. A remote-SSH Keeper owns no local container;
     Docker and microVM teardown target only their declared runtime.
     Apple teardown also removes the stable trim helper and verifies absence.
     An explicit [timeout_sec] applies to helper deletion and inventory too;

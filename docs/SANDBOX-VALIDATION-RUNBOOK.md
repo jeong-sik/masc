@@ -14,7 +14,7 @@ silent host-fallback bypass:
 | ID | Defect | Closed by |
 |----|--------|-----------|
 | A  | Native dispatch route ignored sandbox carrier | #11627 (PR-2) |
-| B  | `keeper_meta.json` parsing fell back to `local` on missing `sandbox_profile` | #11594 (PR-1) |
+| B  | `keeper_meta.json` parsing filled in a profile when `sandbox_profile` was missing | #11594 (PR-1) |
 | C  | Two profile resolvers (`meta.sandbox_profile` direct vs `effective_sandbox_profile`) disagreed | #11610 (PR-3) |
 | —  | `make_tool_bundle` cold-started a new container per tool call | #11679 (PR-3b) |
 

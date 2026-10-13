@@ -279,6 +279,112 @@ let test_kimi_shared_projection () =
     [ "max_tokens"; "stream"; "temperature"; "top_p"; "top_k" ]
 ;;
 
+let tool_result_projection_cases =
+  [ "signed thinking", Thinking { content = "signed tool data"; signature = Some "fixture-signature" }
+  ; "unsigned thinking", Thinking { content = "unsigned tool data"; signature = None }
+  ; "redacted thinking", RedactedThinking "opaque-redacted-tool-data"
+  ; "foreign opaque reasoning",
+    ReasoningDetails
+      { reasoning_content = Some "foreign tool data"
+      ; details =
+          [ { raw = `Assoc [ "type", `String "reasoning.encrypted"
+                          ; "data", `String "foreign-opaque-tool-data" ]
+            ; text = None
+            } ]
+      }
+  ; "nested tool call",
+    ToolUse { id = "nested-call"; name = "inspect"; input = `Assoc [ "path", `String "nested" ] }
+  ; "nested tool result",
+    ToolResult
+      { tool_use_id = "nested-call"; content = "nested fallback"
+      ; outcome = Tool_succeeded; json = None
+      ; content_blocks = Some [ Text "nested result"
+                              ; Thinking { content = "nested signed data"; signature = Some "nested-signature" } ]
+      }
+  ; "audio", Audio { media_type = "audio/wav"; data = "YXVkaW8="; source_type = Base64 }
+  ]
+;;
+
+let messages_with_tool_result_data block =
+  [ msg User [ Text "Inspect the artifact" ]
+  ; msg Assistant [ ToolUse { id = "tool-1"; name = "inspect"; input = `Assoc [] } ]
+  ; msg Tool
+      [ ToolResult
+          { tool_use_id = "tool-1"; content = "fallback"
+          ; outcome = Tool_failed { failure_kind = Reported_tool_error; error_class = None }
+          ; json = None
+          ; content_blocks = Some
+              [ Text "before"
+              ; Image { media_type = "image/png"; data = "AAAA"; source_type = Base64 }
+              ; Image { media_type = "image/png"; data = "https://example.test/tool.png"; source_type = Url }
+              ; Image { media_type = "image/png"; data = "file_tool_image"; source_type = File_id }
+              ; block
+              ; Document { media_type = "application/pdf"; data = "UERG"; source_type = Base64 }
+              ; Text "after"
+              ]
+          }
+      ]
+  ]
+;;
+
+let test_anthropic_tool_result_content_projection () =
+  let open Yojson.Safe.Util in
+  let cfg = config "https://api.anthropic.com" in
+  List.iter (fun (label, block) ->
+    let messages = messages_with_tool_result_data block in
+    let canonical_before = List.map Api_common.message_to_json messages in
+    List.iter (fun body ->
+      let tool_result = Yojson.Safe.from_string body |> member "messages" |> to_list
+        |> List.rev |> List.hd |> member "content" |> to_list |> List.hd in
+      check string (label ^ " result still answers its tool call") "tool-1"
+        (tool_result |> member "tool_use_id" |> to_string);
+      check bool (label ^ " result keeps its failure outcome") true
+        (tool_result |> member "is_error" |> to_bool);
+      let content = tool_result |> member "content" |> to_list in
+      check (list string) (label ^ " uses only legal nested blocks in original order")
+        [ "text"; "image"; "image"; "image"; "text"; "document"; "text" ]
+        (List.map (fun item -> item |> member "type" |> to_string) content);
+      check string (label ^ " keeps leading text") "before"
+        (List.nth content 0 |> member "text" |> to_string);
+      check bool (label ^ " keeps base64 image") true
+        (List.nth content 1 |> member "source"
+         = `Assoc [ "type", `String "base64"; "media_type", `String "image/png"; "data", `String "AAAA" ]);
+      check bool (label ^ " keeps URL image") true
+        (List.nth content 2 |> member "source"
+         = `Assoc [ "type", `String "url"; "url", `String "https://example.test/tool.png" ]);
+      check bool (label ^ " keeps file image") true
+        (List.nth content 3 |> member "source"
+         = `Assoc [ "type", `String "file"; "file_id", `String "file_tool_image" ]);
+      check bool (label ^ " survives as exact canonical JSON inside text") true
+        (List.nth content 4 |> member "text" |> to_string |> Yojson.Safe.from_string
+         = Api_common.content_block_to_json block);
+      check bool (label ^ " keeps document source") true
+        (List.nth content 5 |> member "source"
+         = `Assoc [ "type", `String "base64"; "media_type", `String "application/pdf"; "data", `String "UERG" ]);
+      check string (label ^ " keeps trailing text") "after"
+        (List.nth content 6 |> member "text" |> to_string))
+      [ Backend_anthropic.build_request ~config:cfg ~messages ~tools:[ tool ] ()
+      ; Backend_anthropic.build_count_tokens_request ~config:cfg ~messages ~tools:[ tool ] ()
+      ];
+    check bool (label ^ " leaves canonical history unchanged") true
+      (canonical_before = List.map Api_common.message_to_json messages))
+    tool_result_projection_cases
+;;
+
+let test_kimi_tool_result_content_unchanged () =
+  let open Yojson.Safe.Util in
+  let cfg = kimi_config "https://api.kimi.com/coding" in
+  List.iter (fun (label, block) ->
+    let messages = messages_with_tool_result_data block in
+    let expected = `List (List.map Api_common.kimi_message_to_json messages) in
+    List.iter (fun body ->
+      check bool (label ^ " keeps the existing Kimi message wire") true
+        (Yojson.Safe.from_string body |> member "messages" = expected))
+      [ Backend_anthropic.build_request ~config:cfg ~messages ~tools:[ tool ] ()
+      ; Backend_anthropic.build_count_tokens_request ~config:cfg ~messages ~tools:[ tool ] ()
+      ]) tool_result_projection_cases
+;;
+
 let combinator_tool =
   `Assoc
     [ "name", `String "tool_execute"
@@ -1595,6 +1701,10 @@ let () =
     [ ( "request"
       , [ test_case "shared canonical projection" `Quick test_shared_projection
         ; test_case "Kimi shared canonical projection" `Quick test_kimi_shared_projection
+        ; test_case "Anthropic tool result data stays inside legal nested blocks" `Quick
+            test_anthropic_tool_result_content_projection
+        ; test_case "Kimi tool result content remains unchanged" `Quick
+            test_kimi_tool_result_content_unchanged
         ; test_case
             "anthropic strips top-level schema combinators"
             `Quick

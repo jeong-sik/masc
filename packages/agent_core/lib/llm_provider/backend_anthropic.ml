@@ -385,12 +385,24 @@ let rec anthropic_content_block_to_json = function
     `Assoc
       [ "type", `String "tool_result"
       ; "tool_use_id", `String tool_use_id
-      ; "content", `List (List.map anthropic_content_block_to_json blocks)
+      ; "content", `List (List.map anthropic_tool_result_content_block_to_json blocks)
       ; "is_error", `Bool (tool_result_outcome_is_error outcome)
       ]
   | ( Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
     | ToolUse _ | ToolResult { content_blocks = None; _ }
     | Document _ | Audio _ ) as block -> Api_common.content_block_to_json block
+and anthropic_tool_result_content_block_to_json = function
+  | (Text _ | Image _ | Document _) as block -> anthropic_content_block_to_json block
+  | (Thinking _ | ReasoningDetails _ | RedactedThinking _
+    | ToolUse _ | ToolResult _ | Audio _) as block ->
+    (* Tool output is data, not a nested assistant turn. Messages accepts
+       text, image, document, and search_result here; the other canonical
+       variants remain visible as text without becoming protocol blocks.
+       https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls *)
+    `Assoc
+      [ "type", `String "text"
+      ; "text", `String (Yojson.Safe.to_string (Api_common.content_block_to_json block))
+      ]
 ;;
 
 let anthropic_message_to_json (msg : message) =

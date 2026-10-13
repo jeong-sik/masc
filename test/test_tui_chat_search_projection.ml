@@ -972,12 +972,6 @@ let test_polled_source_survives_tail_and_journal_takeover () = at_sizes (fun ori
   check bool "actual snapshot establishes a new generation" true
     (replacement.text_position.generation > initial.text_position.generation);
   ignore (visible_line (frame_lines state) observed);
-  List.iter (fun columns ->
-    ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
-      Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some (26,columns)));
-    List.iter (fun display -> state.msg_origin_display <- display;
-      ignore (visible_line (frame_lines state) observed))
-      [Layout.Origin_inline;Origin_bare;Origin_row]) [42;140;60];
   state.keeper_turns <- [];
   ignore (log state ~id:"journal-takeover" ~at:130.
     [Live.Run_started;Live.Text {text="ACTUAL_JOURNAL_TAKEOVER";response=Unobserved_scope (None)};

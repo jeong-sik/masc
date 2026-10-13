@@ -677,15 +677,23 @@ let plan_of_fields ~descriptors ~path ~name fields nodes =
   | Error error -> Error (Plan_rejected { name; error })
 ;;
 
-let parse_plan ~descriptors ~path ~name fields =
+let plan_json_of_fields ~path fields =
   let ( let* ) = Result.bind in
   let* encoded = optional_string ~path "plan_json" fields in
   match encoded with
-  | Some source ->
+  | Some _ ->
     let* () = List.fold_left (fun acc field ->
       let* () = acc in
       if List.mem_assoc field fields then Error (Conflicting_plan_field { path; field })
       else Ok ()) (Ok ()) [ "nodes"; "params"; "exports"; "branch_failure_policy" ] in
+    Ok encoded
+  | None -> Ok None
+;;
+
+let parse_plan ~descriptors ~path ~name ~encoded fields =
+  let ( let* ) = Result.bind in
+  match encoded with
+  | Some source ->
     let* json = match Yojson.Safe.from_string source with
       | json -> Ok json
       | exception Yojson.Json_error detail -> Error (Plan_json_syntax { name; detail }) in
@@ -725,8 +733,9 @@ let parse_composition ~descriptors ~index value =
   let* execution = match raw_execution with
     | "inline" -> Ok Inline | "async" -> Ok Async
     | mode -> Error (Invalid_execution_mode { path; mode }) in
+  let* encoded = plan_json_of_fields ~path fields in
   let* params = parse_params ~path fields in
-  let* plan = parse_plan ~descriptors ~path ~name fields in
+  let* plan = parse_plan ~descriptors ~path ~name ~encoded fields in
   let* () = validate_declared_params ~name ~params plan in
   let* () = match execution with
     | Inline -> Ok ()

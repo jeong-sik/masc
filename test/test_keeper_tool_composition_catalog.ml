@@ -1272,11 +1272,18 @@ let test_frozen_plan_json_preserves_values_and_rejects_mixed_forms () =
   let restored = match Catalog.entries catalog with [ entry ] -> entry.plan | _ -> fail "one entry" in
   check bool "null, mixed arrays and escaped UTF-8 preserve exact JSON" true
     (Yojson.Safe.equal canonical (Masc.Keeper_tool_plan_request.to_yojson restored |> Result.get_ok));
-  List.iter (fun extra -> match Catalog.parse ~descriptors (document ^ extra) with
-    | Error (Catalog.Conflicting_plan_field _) -> ()
+  List.iter (fun (field, extra) -> match Catalog.parse ~descriptors (document ^ extra) with
+    | Error (Catalog.Conflicting_plan_field { field = found; path }) ->
+      check string "mixed form identifies its forbidden field" field found;
+      check (list string) "mixed form identifies its composition" [ "compositions"; "0" ] path
     | Error error -> fail (Catalog.error_to_string error)
     | Ok _ -> fail "mixed plan accepted")
-    [ "nodes = []\n"; "params = []\n"; "exports = []\n"; "branch_failure_policy = \"fail_fast\"\n" ];
+    [ "nodes", "nodes = []\n"; "params", "params = []\n"; "params", "params = \"invalid\"\n"
+    ; "exports", "exports = []\n"; "branch_failure_policy", "branch_failure_policy = \"fail_fast\"\n" ];
+  (match Catalog.parse ~descriptors (header ^ "params = []\n") with
+   | Error (Catalog.Wrong_value_kind { field = "params"; expected = Catalog.Table_array_value; _ }) -> ()
+   | Error error -> fail (Catalog.error_to_string error)
+   | Ok _ -> fail "ordinary TOML parameter validation was bypassed");
   (match Catalog.parse ~descriptors (header ^ "plan_json = \"invalid\"\n") with
    | Error (Catalog.Plan_json_syntax _) -> () | _ -> fail "invalid encoded JSON accepted");
   (match Catalog.parse ~descriptors (header ^ "plan_json = \"{}\"\n") with

@@ -177,7 +177,9 @@ val parse : ?descriptors:Keeper_tool_descriptor.t list -> string -> (t, error) r
     [continue_independent], and is retained when parameters are bound. *)
 (* [plan_json] carries a parameter-free canonical structured plan instead of
    [nodes]/[params]/[exports]/[branch_failure_policy]. The two forms cannot be
-   mixed; both revalidate through the same Plan authority. *)
+   mixed; a string [plan_json] rejects the presence of any of those fields
+   before their values are parsed. The ordinary TOML form retains its parameter
+   validation before plan validation. Both forms use the same Plan authority. *)
 
 val entries : t -> entry list
 val find : t -> string -> entry option

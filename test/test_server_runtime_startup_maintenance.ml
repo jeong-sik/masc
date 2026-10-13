@@ -53,6 +53,25 @@ let test_broken_link_is_skipped () =
   ignore (SM.prune_children_dirs ~prune_dir:record_prune root : int);
   Alcotest.(check int) "prune called for the folder and the linked folder" 2 !counter
 
+(* The flat pass reads and unlinks on a system thread, so another fiber runs
+   while it is in flight (#42935). *)
+let test_flat_prune_leaves_the_fiber_free () =
+  Eio_main.run @@ fun _env ->
+  let dir = fresh_dir "masc_prune_flat_off_fiber" in
+  let old_file = Filename.concat dir "trace-old.jsonl" in
+  Out_channel.with_open_text old_file (fun oc -> output_string oc "{}\n");
+  let old_ts = Unix.gettimeofday () -. (40. *. 86400.) in
+  Unix.utimes old_file old_ts old_ts;
+  let finished = ref false in
+  let ran_during_prune = ref false in
+  Eio.Fiber.both
+    (fun () ->
+       ignore (SM.prune_flat_jsonl_older_than ~days:30 dir : int);
+       finished := true)
+    (fun () -> ran_during_prune := not !finished);
+  Alcotest.(check bool) "another fiber ran during the prune" true !ran_during_prune;
+  Alcotest.(check bool) "old file removed" false (Sys.file_exists old_file)
+
 let test_prune_flat_jsonl_removes_old_files () =
   (* Regression guard for the trajectories no-op: populated
      trajectories/<keeper>/ layout must yield pruned > 0. *)
@@ -285,6 +304,8 @@ let () =
           Alcotest.test_case "missing root counts zero" `Quick
             test_missing_root_counts_zero;
           Alcotest.test_case "broken link skipped" `Quick test_broken_link_is_skipped;
+          Alcotest.test_case "flat prune leaves the fiber free" `Quick
+            test_flat_prune_leaves_the_fiber_free;
           Alcotest.test_case "subdirs pruned, stray files skipped" `Quick
             test_subdirs_pruned_and_stray_files_skipped;
         ] );

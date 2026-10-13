@@ -1228,6 +1228,27 @@ let test_prune_counts_only_removed_files () =
   check bool "the folder stays" true (Sys.file_exists unremovable);
   List.iter (fun path -> check bool path false (Sys.file_exists path)) removable
 
+(* The pass reads and unlinks on a system thread, so another fiber runs while
+   it is in flight. On the fiber, prune would finish before the second
+   fiber of [Fiber.both] started (#42935). *)
+let test_prune_leaves_the_fiber_free () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let location = temp_store "dated_jsonl_prune_off_fiber" in
+  let old_month = Filename.concat (Dated_jsonl.Store.dir location) "2020-01" in
+  Fs_compat.mkdir_p old_month;
+  Fs_compat.append_file (Filename.concat old_month "15.jsonl") "{\"old\":true}\n";
+  let store = Dated_jsonl.open_store location in
+  let finished = ref false in
+  let ran_during_prune = ref false in
+  Eio.Fiber.both
+    (fun () ->
+       ignore (Dated_jsonl.prune store ~days:30 : int);
+       finished := true)
+    (fun () -> ran_during_prune := not !finished);
+  check bool "another fiber ran during the prune" true !ran_during_prune;
+  check bool "old file removed" false (Sys.file_exists (Filename.concat old_month "15.jsonl"))
+
 let test_prune_zero_days () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1673,6 +1694,8 @@ let () =
           test_case "zero days safe" `Quick test_prune_zero_days;
           test_case "counts only removed files" `Quick
             test_prune_counts_only_removed_files;
+          test_case "leaves the fiber free" `Quick
+            test_prune_leaves_the_fiber_free;
           test_case "boundary follows the writer layout" `Quick
             test_prune_boundary_follows_the_writer_layout;
           test_case "cutoff day itself is kept" `Quick

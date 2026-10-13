@@ -252,9 +252,12 @@ def main() -> None:
     args = parser.parse_args()
 
     # The keeper store path is deployment-specific: --masc-root, or .masc
-    # under MASC_BASE_PATH, and nothing else.
-    if not args.masc_root:
+    # under MASC_BASE_PATH, and nothing else. An empty --masc-root names
+    # nothing; it does not hand the choice back to the environment.
+    if args.masc_root is None:
         args.masc_root = str(masc_base_path.require(parser, None, "--masc-root") / ".masc")
+    elif not args.masc_root.strip():
+        parser.error(masc_base_path.required("--masc-root"))
 
     repo = args.repo_root
     reports_dir = args.reports_dir or os.path.join(repo, "reports")

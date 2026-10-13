@@ -20,8 +20,8 @@ being scheduled and the run says nothing about the code; the report marks such
 a run STARVED and prints the load average it ran under. A run whose chat never
 loaded is marked EMPTY. Neither is a measurement to compare against another.
 
-Usage:
-  scripts/tui-frame-latency.py --rows 80 --cols 240 --scenario chat
+Usage (the base path is --base-path, or MASC_BASE_PATH when the flag is absent):
+  scripts/tui-frame-latency.py --base-path /srv/masc --rows 80 --cols 240 --scenario chat
   scripts/tui-frame-latency.py --scenario all --exe _build/default/bin/masc_tui.exe
 """
 

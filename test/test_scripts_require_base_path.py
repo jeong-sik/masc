@@ -508,7 +508,9 @@ class MsxCarts(Workdir):
     def test_a_dry_run_names_the_base_the_flag_names(self):
         flagged = self.root / "flagged"
         result = self.run_shell(self.SCRIPT, "--dry-run", "--base-path", str(flagged), base=self.root / "base")
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(f"would get {flagged}/.masc/msx/carts/", result.stdout)
+        self.assertEqual(self.created(), [])
 
 
 class DashboardCapture(Workdir):
@@ -643,6 +645,11 @@ class ProgressExtract(Workdir):
 
     def test_a_named_masc_root_needs_no_base(self):
         self.assert_went_on(self.extract("--masc-root", str(self.root / "named")))
+
+    def test_an_empty_masc_root_does_not_fall_back_to_the_environment(self):
+        for empty in ("", "  "):
+            result = self.extract("--masc-root", empty, base=self.root / "base")
+            self.assert_stops_unnamed(result, "--masc-root")
 
 
 if __name__ == "__main__":

@@ -55,7 +55,7 @@ author's release page, verifies the digest, and refuses a file that differs.
 ```bash
 scripts/msx-fetch-homebrew-carts.sh --base-path /path/to/project
 scripts/msx-fetch-homebrew-carts.sh --list      # the pinned table
-scripts/msx-fetch-homebrew-carts.sh --dry-run   # what would be fetched
+scripts/msx-fetch-homebrew-carts.sh --base-path /path/to/project --dry-run   # what would be fetched
 ```
 
 A file already present with the pinned digest is left alone, so the script

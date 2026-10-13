@@ -90,12 +90,20 @@ val context_shrink_of_patch :
     only -- a non-blank string, or null to detach it; whether the name is
     declared under [exec.ssh.endpoints] and whether the profile admits an
     endpoint at all are decided by [Keeper_turn_up_args.parse] on the apply
-    path. [Ok ()] means {!handle_keeper_config_post} would proceed to apply
-    it. *)
+    path. [Ok patch] means {!handle_keeper_config_post} would proceed to
+    apply [patch.config_fields]. [confirm_context_shrink] defaults to [false];
+    [expected_config_revision] is parsed and required by the handler before
+    this check and is only kept out of [config_fields] here. *)
+type dashboard_config_patch = {
+  confirm_context_shrink : bool;
+  config_fields : (string * Yojson.Safe.t) list;
+      (** The patch without its two control fields, in request order. *)
+}
+
 val validate_dashboard_config_patch :
   meta:Keeper_meta_contract.keeper_meta ->
   (string * Yojson.Safe.t) list ->
-  (unit, string) result
+  (dashboard_config_patch, string) result
 
 val handle_keeper_config_post :
   sw:Eio.Switch.t ->

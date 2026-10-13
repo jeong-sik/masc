@@ -28,6 +28,9 @@ description = "Exact fixture query."
 [[compositions.nodes]]
 id = "lane/~profile"
 tool = "keeper_lane_status"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
 
 [[compositions.nodes]]
 id = "evidence"

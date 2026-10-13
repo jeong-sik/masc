@@ -2,30 +2,63 @@
 
 There is no home-directory or cwd default. A script that guesses a base path
 reads or edits a workspace nobody named and reports confident numbers about
-it, so a caller with neither a flag nor ``MASC_BASE_PATH`` gets ``None`` and
-must stop.
+it, so a caller with neither a flag nor ``MASC_BASE_PATH`` must stop.
+
+The value is taken as written and made absolute against the caller's cwd, so
+a child process started elsewhere reads the same directory. Nothing else of
+the server's own normalisation is repeated here: a second reading of what
+``~`` or a trailing ``.masc`` means could disagree with the server the script
+is measuring. A shell expands a tilde before argv and before ``export``, so
+one that reaches this module was quoted; it is reported, not interpreted.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 ENV_KEY = "MASC_BASE_PATH"
 
 
-def resolve(flag_value: str | None) -> Path | None:
+@dataclass(frozen=True, slots=True)
+class Unexpanded:
+    """A value that starts with a tilde the shell did not expand."""
+
+    raw: str
+
+    def message(self) -> str:
+        return f"{self.raw!r} starts with a tilde the shell did not expand; pass the directory itself"
+
+
+def resolve(flag_value: str | None) -> Path | Unexpanded | None:
     """The base path named by the flag; without a flag, by ``MASC_BASE_PATH``.
 
-    A blank value names nothing. A flag that was passed is never replaced by
-    the environment, so ``--base-path ""`` is ``None`` rather than a silent
-    switch to another workspace.
+    ``None`` when nothing is named. A blank value names nothing, and a flag
+    that was passed is never replaced by the environment, so
+    ``--base-path ""`` is ``None`` rather than a silent switch to another
+    workspace.
     """
     raw = os.environ.get(ENV_KEY, "") if flag_value is None else flag_value
     raw = raw.strip()
-    return Path(raw).expanduser() if raw else None
+    if not raw:
+        return None
+    if raw.startswith("~"):
+        return Unexpanded(raw)
+    return Path(os.path.abspath(raw))
 
 
 def required(flag: str) -> str:
-    """The message for a caller that got ``None`` from :func:`resolve`."""
+    """The message for a caller whose :func:`resolve` named nothing."""
     return f"{flag} or {ENV_KEY} is required"
+
+
+def require(parser: argparse.ArgumentParser, flag_value: str | None, flag: str) -> Path:
+    """The base path, or the parser's usage error (exit 2) when there is none."""
+    base = resolve(flag_value)
+    if base is None:
+        parser.error(required(flag))
+    if isinstance(base, Unexpanded):
+        parser.error(base.message())
+    return base

@@ -249,9 +249,7 @@ def main() -> int:
     # SSOT-R6 (#31902): the runtime root comes from --config or MASC_BASE_PATH,
     # never from a path under the home directory.
     if args.config is None:
-        base = masc_base_path.resolve(None)
-        if base is None:
-            parser.error(masc_base_path.required("--config"))
+        base = masc_base_path.require(parser, None, "--config")
         args.config = str(base / ".masc" / "config" / "runtime.toml")
 
     targets = load_targets(args.config)

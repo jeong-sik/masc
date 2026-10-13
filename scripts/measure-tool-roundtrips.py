@@ -435,9 +435,7 @@ def main() -> int:
     )
     options = parser.parse_args()
 
-    base = masc_base_path.resolve(options.base_path)
-    if base is None:
-        parser.error(masc_base_path.required("--base-path"))
+    base = masc_base_path.require(parser, options.base_path, "--base-path")
     year_month, _, day = options.date.rpartition("-")
     log_path = (
         base

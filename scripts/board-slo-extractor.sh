@@ -14,8 +14,10 @@ readonly REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # --- basepath SSOT resolution -------------------------------------------------
 resolve_basepath() {
-  if [[ -n "${MASC_BASE_PATH:-}" ]]; then
-    printf '%s' "$MASC_BASE_PATH"
+  local base="${MASC_BASE_PATH:-}"
+  # A value of only spaces names nothing.
+  if [[ -n "${base//[[:space:]]/}" ]]; then
+    printf '%s' "$base"
     return 0
   fi
   echo "ERROR: MASC_BASE_PATH unset. Set it explicitly; there is no default." >&2

@@ -162,7 +162,7 @@ let source_of_json json =
    wire codec deliberately omits ToolResult.json, so this typed sidecar retains
    that optional value and recursively restores nested result blocks. *)
 let rec block_json block =
-  let checkpoint = match Agent_core.Checkpoint_codec.checkpoint_content_block_to_json_result ~scope:"composition journal content" block with
+  let checkpoint = match Agent_core.Checkpoint.content_block_to_json_result ~scope:"composition journal content" block with
     | Ok json -> json | Error error -> refuse (Agent_core.Error.to_string error) in
   let parsed_json, children = match block with
     | Llm_provider.Types.ToolResult {json; content_blocks; _} -> json, content_blocks
@@ -173,7 +173,7 @@ let rec block_json block =
 
 let rec block_of_json json =
   let fields = object_fields ["checkpoint"; "tool_result_json"; "children"] json in
-  let block = match Agent_core.Checkpoint_codec.content_block_of_json_strict (field "checkpoint" fields) with
+  let block = match Agent_core.Checkpoint.content_block_of_json (field "checkpoint" fields) with
     | Ok block -> block | Error error -> refuse (Agent_core.Error.to_string error) in
   let parsed_json = optional Fun.id (field "tool_result_json" fields) in
   let children = optional (list block_of_json) (field "children" fields) in

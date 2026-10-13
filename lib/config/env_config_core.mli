@@ -271,11 +271,10 @@ val resolve_against_base_path : string -> string
 
 val orchestrator_enabled_env_key : string
 
-(** {1 Config / data dir} *)
+(** {1 Config dir} *)
 
 val config_dir_env_key : string
 
-val data_dir_env_key : string
 (** {1 Auth} *)
 
 val jsonl_retention_days_env_key : string

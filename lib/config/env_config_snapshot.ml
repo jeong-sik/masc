@@ -343,8 +343,6 @@ let path_entries =
       "Fail-fast on base path resolution issues";
     entry ~default:"(none)" Env_config_core.config_dir_env_key
       "Config directory override; None when unset";
-    entry ~default:"(none)" Env_config_core.data_dir_env_key
-      "Data directory override; None=<base_path>/data";
     entry ~default:"(host temp directory)" "MASC_BASE_PATH_LEASE_DIR"
       "Cross-process BasePath ownership lease directory";
   ]

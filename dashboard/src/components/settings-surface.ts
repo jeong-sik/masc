@@ -1732,7 +1732,6 @@ export function SettingsSurface() {
   const mcpUrlEntry = configEntry(dashboardConfig, 'MASC_URL')
   const httpBaseUrlEntry = configEntry(dashboardConfig, 'MASC_HTTP_BASE_URL')
   const basePathEntry = configEntry(dashboardConfig, 'MASC_BASE_PATH')
-  const dataDirEntry = configEntry(dashboardConfig, 'MASC_DATA_DIR')
   const configDirEntry = configEntry(dashboardConfig, 'MASC_CONFIG_DIR')
   const ctxPreparingEntry = configEntry(dashboardConfig, 'MASC_DASHBOARD_CTX_PREPARING')
   const ctxHandoffEntry = configEntry(dashboardConfig, 'MASC_DASHBOARD_CTX_HANDOFF_IMMINENT')
@@ -2082,7 +2081,7 @@ export function SettingsSurface() {
                       <${PathTruthRow} label="Base path" item=${runtimeResolution?.base_path ?? null} fallback=${concreteConfigValue(basePathEntry)} />
                       <${PathTruthRow} label="Resolved base path" item=${runtimeResolution?.resolved_base_path ?? null} />
                       <${PathTruthRow} label="Workspace path" item=${runtimeResolution?.workspace_path ?? null} />
-                      <${PathTruthRow} label="Data root" item=${runtimeResolution?.data_root ?? null} fallback=${concreteConfigValue(dataDirEntry)} />
+                      <${PathTruthRow} label="Data root" item=${runtimeResolution?.data_root ?? null} />
                       <${PathTruthRow} label="Prompt markdown dir" item=${runtimeResolution?.prompt_markdown_dir ?? null} />
                     `
                     : null}
@@ -2100,7 +2099,6 @@ export function SettingsSurface() {
                       <div class="set-sub-h">Config env inputs</div>
                       <${ConfigTruthRow} label="MASC_BASE_PATH" entry=${basePathEntry} />
                       <${ConfigTruthRow} label="MASC_CONFIG_DIR" entry=${configDirEntry} />
-                      <${ConfigTruthRow} label="MASC_DATA_DIR" entry=${dataDirEntry} />
                       <${ConfigTruthRow} label="MCP endpoint" entry=${mcpUrlEntry} fallback=${mcpEndpoint} />
                     `
                     : null}

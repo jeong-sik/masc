@@ -3109,7 +3109,7 @@
  (libraries masc_test_deps))
 
 ; RFC-0085 PR-6 — Host_config exposes env-derived path fields
-; (base_path / config_dir / data_dir) + from_env alias.
+; (base_path / config_dir) + from_env alias.
 
 (test
  (name test_rfc_0085_pr6_host_config_from_env)

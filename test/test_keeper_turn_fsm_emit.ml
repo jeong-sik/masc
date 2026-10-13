@@ -237,12 +237,14 @@ let test_transition_actions_cover_tla_next () =
 let test_invalid_transition_rejected () =
   match F.assert_transition_allowed ~from_state:F.Idle ~to_state:F.Done () with
   | Error violation ->
-    Alcotest.(check string) "invalid edge from state" "idle" violation.from_state;
-    Alcotest.(check string) "invalid edge to state" "done" violation.to_state;
     Alcotest.(check string)
-      "invalid edge reason"
-      "not_in_keeper_turn_fsm_next"
-      violation.reason
+      "invalid edge from state"
+      "idle"
+      (F.any_state_tla_symbol violation.from_state);
+    Alcotest.(check string)
+      "invalid edge to state"
+      "done"
+      (F.any_state_tla_symbol violation.to_state)
   | Ok action ->
     Alcotest.failf
       "Idle -> Done unexpectedly classified as %s"

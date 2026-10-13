@@ -78,7 +78,15 @@ let note_cause ~resolved ~slot_id (cause : Exact.execution_error_cause) =
     Option.iter
       (fun candidate -> Backpressure.note_rate_limit ~candidate ~retry_after:retry_after_s)
       (candidate_of_slot ~resolved slot_id)
-  | Exact.Provider_response_refused _
+  | Exact.Provider_response_refused
+      { refusal =
+          ( Exact.Request_body_refused | Exact.Refusal_body_not_received | Exact.Overloaded
+          | Exact.Server_error | Exact.Auth_failed | Exact.Authorization_refused
+          | Exact.Payment_required | Exact.Invalid_request | Exact.Not_found
+          | Exact.Context_overflow | Exact.Input_capacity | Exact.Network_error
+          | Exact.Timeout )
+      ; _
+      }
   | Exact.Completion_failed _
   | Exact.Response_body_deadline_exceeded
   | Exact.Output_limit_reached

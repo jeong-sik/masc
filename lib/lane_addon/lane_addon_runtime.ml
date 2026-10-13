@@ -1566,7 +1566,7 @@ let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
             | Operator_configuration | Unauthenticated -> authorize_document m ~access current in
           Ok (Some current)
       | Error {Lane_addon_declaration.code=Not_found;_} -> Ok None
-      | Error error -> Error error in
+      | Error ({Lane_addon_declaration.code=Invalid_request | Revision_conflict | Invalid_declaration | Io_error;_} as error) -> Error error in
     let* candidate_owner = match access with
       | Lane_addon_sources.Operator_configuration -> Ok None
       | Keeper _ | Unauthenticated ->
@@ -2072,7 +2072,8 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
       Eio.Mutex.use_ro m.configuration_mutex (fun () ->
       let source_access = match caller, access with
         | None, Lane_addon_sources.Operator_configuration -> Lane_addon_sources.Unauthenticated
-        | _, access -> access in
+        | None, ((Keeper _ | Unauthenticated) as access)
+        | Some _, ((Operator_configuration | Keeper _ | Unauthenticated) as access) -> access in
       let* () = request_result (Lane_addon_sources.authorize ~access:source_access binding) in
       let* visibility = request_result (binding_visibility m ~access:source_access binding) in
       (* A private attachment keeps its source owner for every later wake.

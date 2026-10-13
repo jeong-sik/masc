@@ -116,7 +116,8 @@ let read db binding =
              | None -> Error (Store_unavailable "invalid checkpoint receipt state")
              | Some (Committed completed) when not (valid_completion completed) ->
                  Error (Store_unavailable "invalid persisted checkpoint completion evidence")
-             | Some state -> Ok (Some {binding;epoch=Sqlite3.column_text stmt 2;state}))
+             | Some ((Pending | Committed _ | Refused _ | Unknown _) as state) ->
+                 Ok (Some {binding;epoch=Sqlite3.column_text stmt 2;state}))
       | Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT
       | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY
       | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND
@@ -163,7 +164,8 @@ let settle_once ~path ~epoch binding state =
         statement db
           "UPDATE receipts SET state=?,detail=?,incarnation=?,change_count=?,checkpoint_sha256=? WHERE operation_id=?"
           [text state_name;detail;incarnation;count;digest;text (Keeper_operation_id.to_string binding.operation_id)] (done_ db)
-    | Some _ | None -> Error (Store_unavailable "checkpoint receipt is not pending in this server epoch"))
+    | Some {state=(Pending | Committed _ | Refused _ | Unknown _);_} | None ->
+        Error (Store_unavailable "checkpoint receipt is not pending in this server epoch"))
 
 
 (* The effect worker has finished, but SQLite may temporarily refuse its

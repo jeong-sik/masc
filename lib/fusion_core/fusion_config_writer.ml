@@ -167,7 +167,8 @@ let find_region kinds name =
     else (
       match kinds.(index) with
       | Header (E.Table path) when List.equal String.equal path prefix -> Some index
-      | Header _ | Key _ | Comment | Blank | Data -> find_header (index + 1))
+      | Header (E.Table _ | E.Table_array _) | Key _ | Comment | Blank | Data ->
+        find_header (index + 1))
   in
   match find_header 0 with
   | None -> None
@@ -952,7 +953,8 @@ let rename_preset content ~from ~target =
                  keep_comment line (table_header (renamed path))
                | Header (E.Table_array path) when has_prefix ~prefix:old_prefix path ->
                  keep_comment line (table_array_header (renamed path))
-               | Header _ | Key _ | Comment | Blank | Data -> line))
+               | Header (E.Table _ | E.Table_array _) | Key _ | Comment | Blank | Data ->
+                 line))
           source.line_list
       in
       let renamed_content = join source line_list in

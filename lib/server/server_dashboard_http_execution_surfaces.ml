@@ -966,7 +966,20 @@ let lifecycle_display_for_row row event =
         { verb = Keeper_lifecycle_events.Reconciled; _ }
     , Some Keeper_status_runtime.Cp_paused ) ->
     display_of_phase_event Keeper_state_machine.Paused
-  | (Keeper_lifecycle_events.Custom_event _ | Keeper_lifecycle_events.Phase_event _), _ ->
+  | ( ( Keeper_lifecycle_events.Custom_event
+          { verb =
+              ( Keeper_lifecycle_events.Started
+              | Keeper_lifecycle_events.Restarted
+              | Keeper_lifecycle_events.Supervisor_cleaned
+              | Keeper_lifecycle_events.Purged
+              | Keeper_lifecycle_events.Admission_denied )
+          ; _
+          }
+      | Keeper_lifecycle_events.Phase_event _ )
+    , _ )
+  | ( Keeper_lifecycle_events.Custom_event
+        { verb = Keeper_lifecycle_events.Reconciled; _ }
+    , (None | Some (Keeper_status_runtime.Cp_surface _)) ) ->
     lifecycle_display_of_event event
 ;;
 

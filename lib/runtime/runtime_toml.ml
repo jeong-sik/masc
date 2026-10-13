@@ -673,7 +673,10 @@ let parse_usage_read
      with
      | [], Ok shape, Ok url, Ok refresh_s ->
        Ok (Some { Runtime_schema.shape; url; refresh_s })
-     | errors, shape, url, refresh ->
+     | ( ([] | _ :: _) as errors
+       , ((Ok _ | Error _) as shape)
+       , ((Ok _ | Error _) as url)
+       , ((Ok _ | Error _) as refresh) ) ->
        let field_errors = function
          | Ok _ -> []
          | Error errors -> errors
@@ -1865,7 +1868,20 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
          }
      (* [field_errors] is non-empty exactly when some field result is [Error],
         so this arm always carries at least one error. *)
-     | _ -> Error field_errors)
+     | ( (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _) ) -> Error field_errors)
 ;;
 
 (* [exec] owns exactly [ssh] and [exec.ssh] owns exactly [endpoints]: the
@@ -3159,12 +3175,12 @@ let parse_typesafeai_destination ~(path : string) (entry : Otoml.t)
              (Printf.sprintf
                 "api_key_env %S must name an environment variable without whitespace"
                 name))
-      | other -> other
+      | (Ok _ | Error _) as other -> other
     in
     (match unknown, endpoint, model, api_key_env with
      | [], Ok endpoint, Ok model, Ok api_key_env ->
        Ok { Runtime_schema.endpoint; model; api_key_env }
-     | _ ->
+     | ([] | _ :: _), (Ok _ | Error _), (Ok _ | Error _), (Ok _ | Error _) ->
        Error
          (unknown @ result_errors endpoint @ result_errors model @ result_errors api_key_env))
   | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
@@ -3320,7 +3336,17 @@ let parse_typesafeai (toml : Otoml.t)
          ; workspace_memory_selection_enabled
          ; excluded_keepers
          }
-     | _ ->
+     | ( ([] | _ :: _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _) ) ->
        Error
          (unknown
           @ result_errors enabled

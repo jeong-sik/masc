@@ -680,7 +680,13 @@ let add_routes router =
                   (json_error ~code:"invalid_ask"
                      (Workspace_task.add_task_error_to_string error))
                   reqd
-              | Error error ->
+              | Error
+                  ((Workspace_task.Goal_source_unavailable _
+                   | Workspace_task.Goal_lock_failed _
+                   | Workspace_task.Backlog_read_failed _
+                   | Workspace_task.Goal_link_write_failed _
+                   | Workspace_task.Backlog_write_failed _
+                   | Workspace_task.Unexpected_error _) as error) ->
                 Http.Response.json_value
                   ~status:`Internal_server_error ~request:req
                   (json_error ~code:"ask_store_unavailable"

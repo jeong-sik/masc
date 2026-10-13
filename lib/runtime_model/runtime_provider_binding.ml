@@ -37,7 +37,11 @@ let provider_endpoint_label_of_config (cfg : Llm_provider.Provider_config.t) =
     if base_url = ""
     then provider_label_of_config cfg
     else Printf.sprintf "%s:%s@%s" (provider_label_of_config cfg) cfg.model_id base_url
-  | _ -> provider_label_of_config cfg
+  | Llm_provider.Provider_config.Anthropic
+  | Llm_provider.Provider_config.Kimi
+  | Llm_provider.Provider_config.Ollama
+  | Llm_provider.Provider_config.Gemini
+  | Llm_provider.Provider_config.Glm -> provider_label_of_config cfg
 ;;
 
 let binding_auth_is_no_auth (binding : Runtime_binding.t) =

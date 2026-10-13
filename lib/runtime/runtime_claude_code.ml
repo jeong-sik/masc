@@ -1317,7 +1317,21 @@ let root_native_agent_parent registry ~call_id : native_agent_parent_witness opt
       Some {invocation=registry.invocation;call_id;
         call_envelope_uuid=envelope_uuid;call_ordinal=ordinal}
   | (Native_full | Native_read | Native_none),
-    (Some (Native_open _ | Native_closed _ | Native_ambiguous) | None) -> None
+    ( Some
+        ( Native_open
+            { observation = { identity = Some _ | None
+                            ; tool_name = Some _ | None
+                            ; origin = Built_in | Mcp_wrapper }
+            ; scope = Root_response | Child_response _
+            ; envelope_uuid = _; ordinal = _ }
+        | Native_closed
+            { observation = { identity = Some _ | None
+                            ; tool_name = Some _ | None
+                            ; origin = Built_in | Mcp_wrapper }
+            ; scope = Root_response | Child_response _
+            ; envelope_uuid = _; ordinal = _ }
+        | Native_ambiguous )
+    | None ) -> None
 ;;
 
 type heartbeat_ignored =
@@ -1366,7 +1380,8 @@ let project_native_heartbeat registry ~expected_session_id fields =
   | Ok heartbeat ->
     match Hashtbl.find_opt registry.progress_uuids heartbeat.uuid with
     | Some (Heartbeat_frame previous) when same_heartbeat previous heartbeat -> Heartbeat_ignored Replayed_heartbeat
-    | Some _ -> Heartbeat_ignored Conflicting_heartbeat
+    | Some (Heartbeat_frame _ | Agent_retry_frame _ | Task_frame _) ->
+      Heartbeat_ignored Conflicting_heartbeat
     | None ->
       Hashtbl.add registry.progress_uuids heartbeat.uuid (Heartbeat_frame heartbeat);
       match Hashtbl.find_opt registry.calls heartbeat.parent_id with
@@ -1374,7 +1389,21 @@ let project_native_heartbeat registry ~expected_session_id fields =
           observation={origin=Runtime_native_tools.Built_in; tool_name=Some name; _}; _})
         when name=heartbeat.tool_name ->
           Heartbeat_observed (Runtime_native_tools.Call_id heartbeat.parent_id, heartbeat.elapsed_seconds)
-      | Some (Native_open _ | Native_closed _ | Native_ambiguous) | None ->
+      | Some
+          ( Native_open
+              { observation = { identity = Some _ | None
+                              ; tool_name = Some _ | None
+                              ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+              ; scope = Root_response | Child_response _
+              ; envelope_uuid = _; ordinal = _ }
+          | Native_closed
+              { observation = { identity = Some _ | None
+                              ; tool_name = Some _ | None
+                              ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+              ; scope = Root_response | Child_response _
+              ; envelope_uuid = _; ordinal = _ }
+          | Native_ambiguous )
+      | None ->
           Heartbeat_ignored No_active_root_call
 ;;
 
@@ -1408,7 +1437,7 @@ let parse_agent_retry ~expected_session_id fields =
            | Ok (Runtime_native_tools.Output_observed _) | Error _
            | Ok (Runtime_native_tools.Message_reported _)
            | Ok (Runtime_native_tools.Heartbeat_reported _)
-           | Ok (Runtime_native_tools.Retry_observed _) -> None)
+           | Ok (Runtime_native_tools.Retry_observed (Runtime_native_tools.Retry_cleared _)) -> None)
       | [_] | _::_ -> None in
     Some {retry_uuid;progress_id;parent_id;subagent_type;note}
 ;;
@@ -1441,7 +1470,22 @@ let project_agent_retry registry ~expected_session_id fields =
              | None, Some binding when matches binding && binding.pending ->
                  binding.pending <- false; report (Runtime_native_tools.Retry_cleared binding.agent)
              | Some _, Some _ | None, (Some _ | None) -> Retry_ignored)
-        | (Native_full | Native_read | Native_none), _ -> Retry_ignored
+        | (Native_full | Native_read | Native_none),
+          ( Some
+              ( Native_open
+                  { observation = { identity = Some _ | None
+                                  ; tool_name = Some _ | None
+                                  ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+                  ; scope = Root_response | Child_response _
+                  ; envelope_uuid = _; ordinal = _ }
+              | Native_closed
+                  { observation = { identity = Some _ | None
+                                  ; tool_name = Some _ | None
+                                  ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+                  ; scope = Root_response | Child_response _
+                  ; envelope_uuid = _; ordinal = _ }
+              | Native_ambiguous )
+          | None ) -> Retry_ignored
       end
 ;;
 
@@ -3104,7 +3148,12 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
      Log.Runtime_agent.info
        "Claude Code turn stopped by host: %s"
        (error_to_string stopped)
-   | Error error ->
+   | Error
+       (( Invalid_config _ | Spawn_failed _ | Protocol_error _ | Subscription_required _
+        | Unsupported_control_request _ | Turn_transport_interrupted _
+        | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+        | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+        | Unhandled_exception _ | Timeout _ ) as error) ->
      (* The sibling branches above pass [error_to_string]; this one passed only
         the kind, so every failure that does not stop at a host boundary landed
         in the log as a bare "kind=turn_failed". [Turn_failed] carries its

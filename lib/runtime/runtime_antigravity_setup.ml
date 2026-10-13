@@ -90,7 +90,7 @@ let discover_models ~cli_path ~timeout_s home =
     ~env:(environment home) ~cwd:(home_dir home)
     [cli_path; "--output-format"; "json"; "models"] with
   | Ok (Unix.WEXITED 0, body, _) -> parse_models body
-  | Ok _ | Error _ -> Error Command_failed
+  | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) | Error _ -> Error Command_failed
 let models_json models = `Assoc [
   "source", `String "antigravity_cli_models";
   "account_availability_verified", `Bool false;

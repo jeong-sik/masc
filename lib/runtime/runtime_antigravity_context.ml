@@ -212,7 +212,7 @@ let measure ~python_path ~cli_path ~timeout_s ~oauth_source ~model runtime_root 
     with
     | Ok (Unix.WEXITED 0, stdout, _) when String.trim stdout <> "" ->
       Ok (String.trim stdout)
-    | Ok (status, _, stderr) ->
+    | Ok (((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), _, stderr) ->
       Error (command_failed ~phase:Version_probe ~status:(Some status) ~stderr)
     | Error refusal -> Error (command_refused ~phase:Version_probe refusal)
   in

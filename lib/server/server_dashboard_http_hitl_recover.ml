@@ -140,7 +140,8 @@ let parse_rearm_fields fields =
           "recover request.exact_attempt must repeat the request's \
            approval identity (id, input_hash, sequence, slot_id, call_id, \
            plan_fingerprint, request_body_sha256)"
-    | _ ->
+    | Keeper_approval_queue_rules_types.Exact_unbound
+    | Keeper_approval_queue_rules_types.Exact_bound _ ->
       Error
         "recover rearm targets a released-recovery-required exact attempt \
          (the only restart latch the queue's CAS admits)"
@@ -306,7 +307,16 @@ let rearm_json ~base_path ~requested_by ~approval_id ~input_hash ~sequence
            409."
           detail )
   | Error (Retry_mode_unreadable _ | Retry_cas_rejected (Keeper_approval_queue_result.Exact_attempt_storage_error _) as error)
-  | Error (Retry_cas_rejected (Keeper_approval_queue_result.Exact_attempt_rejected _) as error) ->
+  | Error (Retry_cas_rejected
+             (Keeper_approval_queue_result.Exact_attempt_rejected
+                (Keeper_approval_queue_result.Exact_attempt_invalid_identity _
+                | Keeper_approval_queue_result.Exact_attempt_summary_not_pending _
+                | Keeper_approval_queue_result.Exact_attempt_unbound_state _
+                | Keeper_approval_queue_result.Exact_attempt_disposition_conflict _
+                | Keeper_approval_queue_result.Exact_attempt_identity_conflict _
+                | Keeper_approval_queue_result.Exact_attempt_status_conflict _
+                | Keeper_approval_queue_result.Exact_attempt_provenance_mismatch _
+                | Keeper_approval_queue_result.Exact_attempt_content_conflict _)) as error) ->
     Error
       ( `Unavailable
       , Keeper_gate.auto_judge_retry_error_to_string error )

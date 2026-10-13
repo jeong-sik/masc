@@ -92,7 +92,7 @@ let enqueue ~workspace ~actor ~login_id command =
        else (
          (match command with
           | Input (Key Eof) when not (Atomic.get t.terminal) -> Atomic.set t.pipe_input_closed true
-          | Input (Text _ | Key _) | Cancel -> ());
+          | Input (Text _ | Key (Enter | Up | Down | Tab | Eof)) | Cancel -> ());
          Eio.Stream.add t.commands command; Ok ()))
   | Some _ | None -> Error Not_found
 let submit ~workspace ~actor ~login_id input = enqueue ~workspace ~actor ~login_id (Input input)

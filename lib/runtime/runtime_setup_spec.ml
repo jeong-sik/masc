@@ -149,7 +149,8 @@ let of_json ?home_dir = function
         | Messages,Some "anthropic" -> Ok Anthropic | Messages,Some "kimi" -> Ok Kimi
         | (Llama_cpp | Vllm | Openai_compatible),(None | Some "openai_compat") -> Ok Openai_compat
         | (Llama_cpp | Vllm | Openai_compatible),Some "glm" -> Ok Glm
-        | _ -> invalid "provider_kind" in
+        | (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex
+          | Antigravity | Muse), _ -> invalid "provider_kind" in
       let* request_path = match List.assoc_opt "request_path" fields with
         | None -> Ok None
         | Some (`String value) when safe_text value ->
@@ -253,7 +254,14 @@ let connection_matches spec (provider : Runtime_schema.provider) =
     | None, None, None -> true
     | None, Some (Env_reference name), Some (Runtime_schema.Env configured) -> name=configured
     | None, Some (File_reference path), Some (Runtime_schema.File configured) -> path=configured
-    | _ -> false in
+    | Some _, None, (None | Some (Runtime_schema.Env _ | Runtime_schema.File _))
+    | Some _, Some (Env_reference _ | File_reference _),
+      (None | Some (Runtime_schema.Env _ | Runtime_schema.File _ | Runtime_schema.Inline _))
+    | None, None,
+      Some (Runtime_schema.Env _ | Runtime_schema.File _ | Runtime_schema.Inline _)
+    | None, Some (Env_reference _), (None | Some (Runtime_schema.File _ | Runtime_schema.Inline _))
+    | None, Some (File_reference _), (None | Some (Runtime_schema.Env _ | Runtime_schema.Inline _))
+      -> false in
   let connection_matches = match spec.transport, provider.transport with
     | Client client, Runtime_schema.Cli command ->
       client.command=command && account_home_matches spec.choice client.account_home provider.account_home

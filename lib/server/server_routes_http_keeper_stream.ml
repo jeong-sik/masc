@@ -3480,7 +3480,9 @@ let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~ex
        Log.Keeper.error
          "keeper chat terminal broadcast skipped after journal failure keeper=%s operation=%s: %s"
          keeper_name operation_id journal_error
-     | (Some Wire_started | None), Ok receipt ->
+     | (Some Wire_started | None),
+       Ok ((Keeper_chat_event_log.Existing_terminal_error _
+           | Keeper_chat_event_log.Recorded_terminal_error _) as receipt) ->
        let seq, timestamp, message = match receipt with
          | Keeper_chat_event_log.Existing_terminal_error { seq; ts; message } ->
            Some seq, ts, message
@@ -3658,7 +3660,24 @@ let restart_terminal_after_replay ~base_path ~keeper_name
         ~run_id:(Some ("keeper-operation-run-" ^ operation_id))
         ~message:(Some (Keeper_request_failure.summary {cause=Keeper_request_failure.Server_restarted}))
         ~code:(Some (Keeper_chat_operation.failure_kind_to_string Interrupted_by_restart)) Ag_ui.Run_error)
-  | Queued | Running _ | Succeeded _ | Failed _ | Cancelled _ -> None
+  | Queued
+  | Running _
+  | Succeeded _
+  | Failed
+      { failure =
+          { kind =
+              ( Keeper_chat_operation.Turn_cancelled
+              | Keeper_chat_operation.Turn_exception
+              | Keeper_chat_operation.Store_unavailable
+              | Keeper_chat_operation.No_queued_operation
+              | Keeper_chat_operation.Invalid_input
+              | Keeper_chat_operation.Turn_invariant
+              | Keeper_chat_operation.Delivery_failed )
+          ; _
+          }
+      ; _
+      }
+  | Cancelled _ -> None
 ;;
 
 let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payload =

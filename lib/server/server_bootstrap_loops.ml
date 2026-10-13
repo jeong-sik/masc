@@ -1337,7 +1337,22 @@ let handle_keeper_lifecycle_event ~refresh (evt : Agent_core.Event_bus.event) =
          Otel_metric_store.metric_keeper_lifecycle_malformed
          ();
        Lifecycle_undecodable)
-  | _ ->
+  | Agent_core.Event_bus.Custom (_, _)
+  | Agent_core.Event_bus.AgentStarted _
+  | Agent_core.Event_bus.AgentCompleted _
+  | Agent_core.Event_bus.AgentYielded _
+  | Agent_core.Event_bus.AgentInputRequired _
+  | Agent_core.Event_bus.AgentFailed _
+  | Agent_core.Event_bus.ToolCalled _
+  | Agent_core.Event_bus.ToolCompleted _
+  | Agent_core.Event_bus.TurnStarted _
+  | Agent_core.Event_bus.TurnReady _
+  | Agent_core.Event_bus.TurnCompleted _
+  | Agent_core.Event_bus.HandoffRequested _
+  | Agent_core.Event_bus.HandoffCompleted _
+  | Agent_core.Event_bus.ElicitationCompleted _
+  | Agent_core.Event_bus.ToolApprovalCompleted _
+  | Agent_core.Event_bus.InferenceTelemetry _ ->
     Log.Dashboard.debug "ignored non-lifecycle event";
     Lifecycle_ignored
 ;;
@@ -1985,7 +2000,11 @@ let start_keeper_loops_owned
        let base_path = (Mcp_server.workspace_config state).base_path in
        (match Keeper_owner_registry.begin_stopping_all ~base_path with
         | Error Keeper_owner_registry.Inventory_stopping -> ()
-        | Error error ->
+        | Error
+            (( Keeper_owner_registry.Inventory_not_installed _
+             | Keeper_owner_registry.Owner_not_found _
+             | Keeper_owner_registry.Owner_unavailable _
+             | Keeper_owner_registry.Owner_initialization_failed _ ) as error) ->
           Log.Keeper.error
             "keeper_owner: shutdown inventory fence failed error=%s"
             (Keeper_owner_registry.lookup_error_to_string error)

@@ -97,7 +97,7 @@ let run ~phase ~env ~cwd argv =
       argv
   with
   | Ok (Unix.WEXITED 0, stdout, _) -> Ok stdout
-  | Ok (status, _, stderr) ->
+  | Ok (((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), _, stderr) ->
     Error
       (Command_failed
          { phase

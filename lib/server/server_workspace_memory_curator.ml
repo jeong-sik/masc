@@ -43,7 +43,15 @@ let size_execution_failure (error : Exact.execution_error) =
   match error.cause with
   | Exact.Provider_response_refused
       { refusal = (Exact.Context_overflow | Exact.Request_body_refused | Exact.Input_capacity); _ } -> true
-  | Exact.Provider_response_refused _ | Exact.Completion_failed _
+  | Exact.Provider_response_refused
+      { refusal =
+          ( Exact.Refusal_body_not_received | Exact.Rate_limited | Exact.Overloaded
+          | Exact.Server_error | Exact.Auth_failed | Exact.Authorization_refused
+          | Exact.Payment_required | Exact.Invalid_request | Exact.Not_found
+          | Exact.Network_error | Exact.Timeout )
+      ; _
+      }
+  | Exact.Completion_failed _
   | Exact.Response_body_deadline_exceeded | Exact.Incomplete_output | Exact.Output_limit_reached
   | Exact.Missing_output | Exact.Ambiguous_output _ | Exact.Unexpected_output_content
   | Exact.Invalid_json_output -> false

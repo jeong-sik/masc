@@ -139,7 +139,10 @@ let remove text ~id =
     match D.parse text with
     | Ok declaration -> Ok declaration
     | Error (D.Unparsable detail) -> Error (Unparsable ("runtime.toml does not parse: " ^ detail))
-    | Error other -> Error (Unparsable (D.error_message other))
+    | Error
+        (( D.Unknown_base _ | D.Nothing_to_bind _ | D.Id_taken _ | D.Invalid_location _
+         | D.Location_taken _ | D.Unsupported_layout _ | D.Rejected _ ) as other) ->
+      Error (Unparsable (D.error_message other))
   in
   let* () =
     if List.exists (fun (base : D.base) -> String.equal base.id id) (D.bases declaration)

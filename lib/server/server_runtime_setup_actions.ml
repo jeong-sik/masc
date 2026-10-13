@@ -121,7 +121,8 @@ let source_template ?(use=Observe_source) ~sw ~pending ~workspace config request
        | Some (Runtime_setup_accounts.Antigravity_account selected), None
          when provider.credentials <> Some (Runtime_schema.File selected.credential_file) -> Ok ()
        | None, Some (`String _) when http -> Ok ()
-       | _ -> Error Disabled_connection)
+       | Some (Runtime_setup_accounts.Native_home _ | Antigravity_account _), (None | Some _)
+       | None, (None | Some _) -> Error Disabled_connection)
     | Some _ | None -> Ok () in
   let existing_inline = match use, account, List.assoc_opt "api_key" request,
       declared_provider config id with
@@ -182,7 +183,8 @@ let native_json ~binary args =
   match Process_eio.run_argv_with_status_split_or_refusal (binary::args) with
   | Ok (Unix.WEXITED 0,body,_) ->
     (try Ok (Yojson.Safe.from_string body) with Yojson.Json_error _ -> Error Unsupported_connection)
-  | Ok _ | Error _ -> Error Unsupported_connection
+  | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) | Error _ ->
+    Error Unsupported_connection
 let positive = function `Int n when n>0 -> Some n | _ -> None
 type reasoning_efforts = { supported : string list; default : string }
 type client_model = { id : string; label : string; context : int option; reasoning_efforts : reasoning_efforts option; supports_image_input : bool option }
@@ -372,7 +374,8 @@ let bound_model_names (config : Runtime_schema.config) template id choice =
       (match value "account_home" template with `String home -> Some home | _ -> None) in
   let selected_credential = match choice, value "credential_file" template with
     | Runtime_setup_spec.Antigravity, `String path -> Some path
-    | _ -> None in
+    | ( Runtime_setup_spec.Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
+      | Claude_code | Codex | Antigravity | Muse ), _ -> None in
   let same_account (provider : Runtime_schema.provider) =
     provider.enabled
     && (match choice_of_api_format provider.api_format with
@@ -463,7 +466,7 @@ let context ~binary ~net ~base_path request =
       | _ -> None in
     (match observed with
        | Ok json when verified json<>None -> Ok json
-       | _ ->
+       | Ok _ | Error _ ->
          (* API catalog metadata is provider-scoped. Local transports and CLI
             windows must be observed; they never inherit model architecture. *)
          let declared = match choice with

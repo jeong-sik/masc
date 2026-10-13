@@ -427,17 +427,32 @@ let handle_update_priority ~tool_name ~start_time ctx args =
 let handle_tasks ~tool_name ~start_time ctx args =
   let include_done = get_bool args "include_done" false in
   let include_cancelled = get_bool args "include_cancelled" false in
-  let status =
-    match args |> Json_util.assoc_member_opt "status" |> Option.value ~default:`Null with
-    | `String s when not (String.equal s "") -> Some s
-    | _ -> None
+  let list ?status () =
+    Tool_result.ok ~tool_name ~start_time
+      (Workspace.list_tasks
+         ctx.config
+         ~include_done
+         ~include_cancelled
+         ?status)
   in
-  Tool_result.ok ~tool_name ~start_time
-    (Workspace.list_tasks
-       ctx.config
-       ~include_done
-       ~include_cancelled
-       ?status)
+  let refuse message =
+    Tool_result.error
+      ~failure_class:Tool_result.Workflow_rejection
+      ~tool_name ~start_time message
+  in
+  match args |> Json_util.assoc_member_opt "status" |> Option.value ~default:`Null with
+  | `Null | `String "" -> list ()
+  | `String raw ->
+    (match Masc_domain.Task_status_tag.of_string raw with
+     | Some status -> list ~status ()
+     | None ->
+       (* RFC-0189: caller passed an unknown status enum value. Answering
+          "No tasks." would read as an empty board. *)
+       refuse
+         (Printf.sprintf "unknown status %S; expected one of: %s" raw
+            (String.concat ", " Masc_domain.valid_task_status_strings)))
+  | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
+    refuse "status must be a string"
 
 (* Walks newest-first and stops once [limit] events satisfy [keep], so [limit]
    counts the events a caller asked for. Counting raw lines instead made the

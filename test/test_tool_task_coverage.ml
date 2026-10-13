@@ -519,6 +519,24 @@ let () = test "dispatch_tasks" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+(* An unknown status is refused: answering "No tasks." would read as an empty
+   board. *)
+let () = test "dispatch_tasks_refuses_an_unknown_status" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [ ("status", `String "in-progress") ] in
+  match Task.Tool.dispatch ctx ~name:"masc_tasks" ~args with
+  | Some result -> assert (not (Tool_result.is_success result))
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_tasks_accepts_a_known_status" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [ ("status", `String "in_progress") ] in
+  match Task.Tool.dispatch ctx ~name:"masc_tasks" ~args with
+  | Some result -> assert (Tool_result.is_success result)
+  | None -> failwith "dispatch returned None"
+)
+
 let () = test "task_history_events_json_filters_by_task_id" (fun () ->
   let ctx = make_test_ctx () in
   let rec mkdir_p path =

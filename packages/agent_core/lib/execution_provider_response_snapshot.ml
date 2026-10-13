@@ -20,13 +20,7 @@ let content_of_yojson json =
       Error ("provider response content decoding failed: " ^ Printexc.to_string exn)
   in
   let* block = decoded in
-  let canonical =
-    try Ok (content_to_yojson block) with
-    | exn ->
-      Llm_provider.Reserved_exn.reraise_if_reserved exn;
-      Error ("provider response content encoding failed: " ^ Printexc.to_string exn)
-  in
-  let* canonical = canonical in
+  let canonical = content_to_yojson block in
   if Yojson.Safe.equal json canonical
   then Ok block
   else Error "provider response content is not in canonical closed form"
@@ -94,13 +88,7 @@ let of_yojson json =
 ;;
 
 let validate response =
-  let encoded =
-    try Ok (to_yojson response) with
-    | exn ->
-      Llm_provider.Reserved_exn.reraise_if_reserved exn;
-      Error ("provider response snapshot encoding failed: " ^ Printexc.to_string exn)
-  in
-  let* encoded = encoded in
+  let encoded = to_yojson response in
   let* () = validate_json ~context:"provider response snapshot" encoded in
   let* decoded = of_yojson encoded in
   if response = decoded

@@ -2334,16 +2334,22 @@ let test_autonomous_operator_interrupt_is_a_typed_outcome () =
      fail "the Owner did not admit the next autonomous turn")
 ;;
 
-(* A refused settle leaves the durable row Running after the child released
-   the slot. A later autonomous cycle then holds the slot while the operation
-   id still reads as running. The operation-id stop must not cancel that cycle;
-   the observed-turn stop, which names the slot's own occupant, still does. *)
+(* A turn that fails while its native call is still Active leaves the durable
+   row Running after the child released the slot: the Owner leaves the call
+   for restart recovery instead of settling the row. A later autonomous cycle
+   then holds the slot while the operation id still reads as running. The
+   operation-id stop must not cancel that cycle; the observed-turn stop, which
+   names the slot's own occupant, still does.
+   The failure kind must not be [Turn_cancelled]: with the Owner not stopping,
+   that kind closes the Active call and settles the row, so no Running row
+   would be left behind. *)
 let test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone () =
   Eio_main.run @@ fun env ->
   let clock = env#clock in
   Eio.Switch.run @@ fun sw ->
   let owner_ref = ref None in
   let stuck_id = operation_id "kmsg-refused-settle" in
+  let executor_returned = ref false in
   let operation_executor ~sw:_ ~keeper_name:_ ~claim =
     match claim (), !owner_ref with
     | Ok (Some (operation : Chat_operation.t)), Some owner ->
@@ -2359,10 +2365,12 @@ let test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone () =
       Owner.bind_direct_native_call owner ~operation_id:operation.operation_id
         ~execution_digest:operation.execution_digest ~observed:Keeper_native_call.No_native_call ~call
         |> owner_ok;
-      (* Active native call and no terminal receipt: the store refuses the
-         Failed settle, so the row stays Running. *)
+      (* Active native call and no terminal receipt: a [Turn_exception]
+         failure leaves the call for restart recovery, so the row stays
+         Running. *)
+      executor_returned := true;
       Owner.Operation_failed
-        { kind = Chat_operation.Turn_cancelled; detail = "no receipt"; outcome_ref = None }
+        { kind = Chat_operation.Turn_exception; detail = "no receipt"; outcome_ref = None }
     | _ ->
       Owner.Operation_failed
         { kind = Chat_operation.Store_unavailable; detail = "claim did not yield an operation"
@@ -2384,22 +2392,24 @@ let test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone () =
        (Owner.submit_operation owner ~operation_id:stuck_id ~source:operation_source
           ~input:(operation_input "stuck")));
   let deadline = Eio.Time.now clock +. fixture_start_deadline_s in
-  let rec await_refused_settle () =
+  let rec await_left_running_row () =
     let projection = Owner.operation_projection owner in
-    if Option.is_none (Owner.turn_in_flight owner) && projection.store_unavailable
+    if !executor_returned
+       && Option.is_none (Owner.turn_in_flight owner)
+       && Option.is_some projection.running_operation_id
     then ()
     else if Eio.Time.now clock > deadline
-    then fail "the refused settle was not observed within the fixture deadline"
+    then fail "the left-running row was not observed within the fixture deadline"
     else (
       Eio.Time.sleep clock slot_release_poll_s;
-      await_refused_settle ())
+      await_left_running_row ())
   in
-  await_refused_settle ();
+  await_left_running_row ();
   (match (Owner.operation_projection owner).running_operation_id with
    | Some running ->
-     check bool "the refused settle leaves the row running" true
+     check bool "the failed turn leaves the row running" true
        (Chat_operation.Operation_id.equal running stuck_id)
-   | None -> fail "the refused settle cleared the running id");
+   | None -> fail "the failed turn cleared the running id");
   let autonomous_started, resolve_autonomous_started = Eio.Promise.create () in
   let release_autonomous, resolve_release_autonomous = Eio.Promise.create () in
   let autonomous_result = Eio.Stream.create 1 in

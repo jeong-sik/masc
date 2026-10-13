@@ -34,35 +34,26 @@ let fleet_fsm_message_payload ~keeper_name ~reason ~snapshot ~execution =
 let composite_recommended_actions_json ~keeper_name ~snapshot ~execution ~attention =
   let idle_attention = attention.cra_idle_attention in
   let reason = Option.value ~default:"runtime_attention" attention.cra_reason in
-  let make action_type severity reason suggested_payload =
-    let action : Operator_digest_types.recommended_action =
-      { action_type
-      ; target_type = "keeper"
-      ; target_id = Some keeper_name
-      ; severity
-      ; reason
-      ; suggested_payload
-      }
-    in
-    action
+  let make action severity reason suggested_payload : Operator_digest_types.recommended_action =
+    { action; target_id = Some keeper_name; severity; reason; suggested_payload }
   in
   let probe action_reason =
     make
-      "keeper_probe"
+      Operator_action_catalog.Keeper_probe
       Operator_digest_types.Sev_warn
       action_reason
       (fleet_fsm_action_payload ~keeper_name ~kind:"probe" ~reason ~snapshot ~execution)
   in
   let message action_reason =
     make
-      "keeper_message"
+      Operator_action_catalog.Keeper_message
       Operator_digest_types.Sev_warn
       action_reason
       (fleet_fsm_message_payload ~keeper_name ~reason:action_reason ~snapshot ~execution)
   in
   let recover action_reason =
     make
-      "keeper_recover"
+      Operator_action_catalog.Keeper_recover
       Operator_digest_types.Sev_bad
       action_reason
       (fleet_fsm_action_payload

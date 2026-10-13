@@ -120,11 +120,6 @@ let make_registry_config
   then None
   else
     let headers = Binding.default_headers_for_kind defaults.kind in
-    (* Discovery is keyed on the entry's name, not on [defaults.kind]: several
-       entries can share a kind. In the embedded catalog ollama_cloud also has
-       kind "ollama" (packages/agent_core/models.toml, [[providers]]), and
-       keying on the kind would ask its remote base_url for a model list,
-       changing what "auto" resolves to. *)
     let discover =
       if Binding.provider_name_matches_kind_default provider_name Ollama
       then

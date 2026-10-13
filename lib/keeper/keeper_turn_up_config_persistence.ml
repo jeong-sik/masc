@@ -699,7 +699,9 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
          in
          let finish_commit publication_warnings after_commit =
            match List.find_opt
-               (function Runtime_config_parent_sync_unconfirmed _ -> true | _ -> false)
+               (function
+                 | Runtime_config_parent_sync_unconfirmed _ -> true
+                 | Lock_release_unconfirmed _ | Runtime_config_lock_release_unconfirmed _ -> false)
                publication_warnings with
            | Some (Runtime_config_parent_sync_unconfirmed detail) ->
              rollback (Io_error ("runtime assignment durability unconfirmed: " ^ detail))

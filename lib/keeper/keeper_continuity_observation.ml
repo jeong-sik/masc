@@ -138,6 +138,13 @@ let synthesis_of_json json =
         Ok (Some {start_atom; end_atom; completed_end_atom})
       | _ -> Error "invalid synthesis atom range" in
   if (Option.is_some range && Option.is_none trace_id)
-     || (match state, range with (Running | Committed), None -> true | _ -> false)
+     || (match state, range with
+         | (Running | Committed), None -> true
+         | (Running | Committed), Some _ -> false
+         (* The range payload (a single-shape atom record) does not take part
+            in this decision, so [Some _] stands: the option itself is fully
+            enumerated. *)
+         | ( Checking | No_source | Disabled | Source_unavailable | Input_unavailable
+           | Not_committed | Capacity_refused | Cancelled ), (None | Some _) -> false)
   then Error "synthesis state lacks source evidence"
   else Ok {observed_at; trace_id; state; stop_reason; range}

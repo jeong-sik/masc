@@ -415,7 +415,9 @@ let entries m = Hashtbl.to_seq_values m.entries |> List.of_seq
 let status_coverage e = {
   source_id = e.instance_id; incarnation = e.instance_id;
   cursor = Some (string_of_int e.seq);
-  complete = (match e.phase with Attached | Detached -> e.seq > 0 | _ -> false);
+  complete = (match e.phase with
+    | Attached | Detached -> e.seq > 0
+    | Observing | Failed _ | Detaching -> false);
   detail = (match e.phase with
     | Attached when e.seq > 0 -> None
     | Attached -> Some "no completed observation"

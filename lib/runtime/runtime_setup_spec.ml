@@ -20,7 +20,9 @@ let protocol = function Ollama -> "ollama-http" | Messages -> "messages-http"
   | Claude_code -> "claude-code" | Codex -> "codex-app-server" | Antigravity -> "antigravity-cli"
   | Muse -> "muse-serve"
   | Llama_cpp | Vllm | Openai_compatible -> "openai-compatible-http"
-let http = function Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> true | _ -> false
+let http = function
+  | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> true
+  | Claude_code | Codex | Antigravity | Muse -> false
 let safe_text value = value <> "" && String.trim value = value
   && not (String.exists (function '\000'..'\031' | '\127' -> true | _ -> false) value)
 let required fields key = match List.assoc_opt key fields with
@@ -119,7 +121,9 @@ let of_json ?home_dir = function
       | _ -> invalid "choice" in
     let allowed = ["choice";"model";"max_context";"tools";"streaming";"supports_image_input";"existing_provider_id"]
       @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind";"request_path"] else ["command"])
-      @ (match choice with Claude_code | Codex | Muse -> ["account_home"] | _ -> [])
+      @ (match choice with
+        | Claude_code | Codex | Muse -> ["account_home"]
+        | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity -> [])
       @ (if choice = Antigravity then ["credential_file";"timeout_s"] else []) in
     let* () = if List.for_all (fun (key,_) -> List.mem key allowed) fields then Ok () else invalid "unexpected fields" in
     let* requested_provider_id = optional fields "existing_provider_id" in
@@ -163,7 +167,15 @@ let of_json ?home_dir = function
       Ok (Http {endpoint;credential;kind;request_path}))
     else (
       let* command = if List.mem_assoc "command" fields then required fields "command"
-        else Ok (match choice with Claude_code -> "claude" | Codex -> "codex" | Muse -> "muse" | _ -> "agy") in
+        else (match choice with
+          | Claude_code -> Ok "claude"
+          | Codex -> Ok "codex"
+          | Muse -> Ok "muse"
+          | Antigravity -> Ok "agy"
+          (* The five http-guarded choices return above, so this arm is
+             unreachable; it stays to keep the match exhaustive over future
+             choices instead of silently defaulting them. *)
+          | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> invalid "command") in
       let* account_home =
         if List.mem_assoc "account_home" fields
         then required fields "account_home" |> Result.map Option.some

@@ -56,7 +56,7 @@ let connection_of_json = function
   | _ -> Error Invalid_connection
 let model protocol = function
   | `Assoc fields ->
-    let id = string fields (match protocol with Ollama -> "name" | _ -> "id") in
+    let id = string fields (match protocol with Ollama -> "name" | Openai | Anthropic | Kimi -> "id") in
     (match id with
      | None -> Error Invalid_response
      | Some id ->
@@ -83,7 +83,7 @@ let model protocol = function
 let parse_page protocol body =
   try match Yojson.Safe.from_string body with
   | `Assoc fields ->
-    let* rows = match List.assoc_opt (match protocol with Ollama -> "models" | _ -> "data") fields with
+    let* rows = match List.assoc_opt (match protocol with Ollama -> "models" | Openai | Anthropic | Kimi -> "data") fields with
       | Some (`List rows) -> Ok rows | _ -> Error Invalid_response in
     let* reversed = List.fold_left (fun result row ->
       let* models = result in let* row = model protocol row in Ok (row :: models)) (Ok []) rows in

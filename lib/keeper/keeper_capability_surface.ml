@@ -71,7 +71,16 @@ let skill_capability ~skill_names ~skill_projection = function
       valid_skill_availability ~skill_names ~skill_projection valid
     in
     { identity = Exact_skill item
-    ; exposure = (match availability with Active -> Model_visible | _ -> Operator_only)
+    ; exposure =
+        (match availability with
+         | Active -> Model_visible
+         | Outside_skill_surface
+         | Not_model_invocable
+         | Denied_by_profile
+         | Refused_by_sandbox _
+         | Node_tools_outside_surface _
+         | Invalid_definition
+         | Missing_configured_skill -> Operator_only)
     ; availability
     }
   | Keeper_skill_inventory.Invalid _ as item ->

@@ -91,7 +91,9 @@ let read ~root ~source_path = protect (fun () ->
   | Fs_compat.Private_file_succeeded Fs_compat.Private_jsonl_rows.Rows_missing -> Ok None
   | Private_file_succeeded (Rows_present {rows;rows_end;end_offset}) ->
       if rows_end <> end_offset then Error "incomplete declaration ownership journal"
-      else Result.map (function Some Revoked -> None | value -> value) (decode ~root ~source_path rows)
+      else Result.map (function
+        | Some Revoked -> None
+        | (Some (Pending _ | Owned _ | Reassigned _) | None) as value -> value) (decode ~root ~source_path rows)
   | Private_file_failed error -> Error (Fs_compat.Private_jsonl_rows.error_to_string error)
   | Private_file_succeeded_with_cleanup_failure {cleanup_failure;_}
   | Private_file_failed_with_cleanup_failure {cleanup_failure;_} -> Error (cleanup cleanup_failure))

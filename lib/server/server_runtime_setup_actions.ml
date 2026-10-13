@@ -518,16 +518,17 @@ let save ~binary ~base_path request =
         let* template,provider_id,choice,existing_inline=source_template ~use:Save_source ~sw ~pending ~workspace:base_path config (value "source" row) in
         let* models=list (value "models" row) in
         let* ()=if models=[] then Error Invalid_request else Ok () in
+        let native_client_models client =
+          let* catalog = native_client_catalog ~binary client in
+          (* A refreshed CLI model may be absent from the installed catalog;
+             preserve unknown capability without accepting a browser assertion. *)
+          let* selected = client_models ~catalog:false (`Assoc ["models",`List models]) in
+          Ok (Some (with_catalog_image_capabilities selected catalog)) in
         let* reported_models=match choice with
           | Runtime_setup_spec.Muse ->
             let* _,models=muse_catalog ~binary template in Ok (Some models)
-          | Claude_code | Codex ->
-            let client = match choice with Claude_code -> "claude-code" | _ -> "codex" in
-            let* catalog = native_client_catalog ~binary client in
-            (* A refreshed CLI model may be absent from the installed catalog;
-               preserve unknown capability without accepting a browser assertion. *)
-            let* selected = client_models ~catalog:false (`Assoc ["models",`List models]) in
-            Ok (Some (with_catalog_image_capabilities selected catalog))
+          | Claude_code -> native_client_models "claude-code"
+          | Codex -> native_client_models "codex"
           | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
           | Antigravity -> Ok None in
         let rec specs = function [] -> Ok [] | model::tail ->

@@ -96,14 +96,37 @@ let toml_value_kind = function
 
 let keeper_toml_field_kind_expectation = function
   | Field_string ->
-    "string", (function Keeper_toml_loader.Toml_string _ -> true | _ -> false)
+    ( "string"
+    , Keeper_toml_loader.(
+        function
+        | Toml_string _ -> true
+        | Toml_int _ | Toml_float _ | Toml_bool _ | Toml_string_array _ | Toml_array _
+        | Toml_table _ | Toml_inline_table _ | Toml_table_array _ | Toml_offset_datetime _
+        | Toml_local_datetime _ | Toml_local_date _ | Toml_local_time _ -> false) )
   | Field_bool ->
-    "boolean", (function Keeper_toml_loader.Toml_bool _ -> true | _ -> false)
+    ( "boolean"
+    , Keeper_toml_loader.(
+        function
+        | Toml_bool _ -> true
+        | Toml_string _ | Toml_int _ | Toml_float _ | Toml_string_array _ | Toml_array _
+        | Toml_table _ | Toml_inline_table _ | Toml_table_array _ | Toml_offset_datetime _
+        | Toml_local_datetime _ | Toml_local_date _ | Toml_local_time _ -> false) )
   | Field_int ->
-    "integer", (function Keeper_toml_loader.Toml_int _ -> true | _ -> false)
+    ( "integer"
+    , Keeper_toml_loader.(
+        function
+        | Toml_int _ -> true
+        | Toml_string _ | Toml_float _ | Toml_bool _ | Toml_string_array _ | Toml_array _
+        | Toml_table _ | Toml_inline_table _ | Toml_table_array _ | Toml_offset_datetime _
+        | Toml_local_datetime _ | Toml_local_date _ | Toml_local_time _ -> false) )
   | Field_string_array ->
     ( "string array"
-    , function Keeper_toml_loader.Toml_string_array _ -> true | _ -> false )
+    , Keeper_toml_loader.(
+        function
+        | Toml_string_array _ -> true
+        | Toml_string _ | Toml_int _ | Toml_float _ | Toml_bool _ | Toml_array _
+        | Toml_table _ | Toml_inline_table _ | Toml_table_array _ | Toml_offset_datetime _
+        | Toml_local_datetime _ | Toml_local_date _ | Toml_local_time _ -> false) )
 ;;
 
 let validate_known_keeper_field_types doc =

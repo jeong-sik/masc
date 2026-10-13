@@ -79,7 +79,9 @@ let initial json =
         | `String name -> Ok (name::rest) | _ -> Error (Corrupt "recipient must be text")) names (Ok [])
     | _ -> Error (Corrupt "recipients must be a list") in
   let payload = {sender_authority;caller;operation_id;artifact_sha256;content;recipients} in
-  let* () = validate payload |> Result.map_error (function Invalid_input e -> Corrupt e | e -> e) in
+  let* () = validate payload |> Result.map_error (function
+    | Invalid_input e -> Corrupt e
+    | (Conflict | Unknown_operation | Corrupt _ | Io_error _ | Settlement_failed _) as e -> e) in
   let* workspace_request_id = request_id payload in
   Ok {payload;workspace_request_id;workspace=Uncommitted;
       recipients=List.map (fun name -> name,Pending None) recipients}
@@ -145,7 +147,10 @@ let settle_marker t filename receipt =
   match remove_marker t filename with
   | Ok () -> receipt
   | Error error ->
-      let detail=match error with Io_error detail -> detail | _ -> "pending index cleanup failed" in
+      let detail=match error with
+        | Io_error detail -> detail
+        | Invalid_input _ | Conflict | Unknown_operation | Corrupt _ | Settlement_failed _ ->
+          "pending index cleanup failed" in
       {receipt with settlement_error=Some (match receipt.settlement_error with
         | None -> detail | Some previous -> previous ^ "; " ^ detail)}
 type transaction_mode = Admit_operation | Update_operation

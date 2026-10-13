@@ -477,7 +477,9 @@ let surface_status_json_for_selection
           (match installed, asset_resolution with
            | Installed_dashboard.Bound _, _ -> "installed_manifest"
            | _, Build_identity.Dashboard_asset_bound _ -> "source_manifest"
-           | _ -> (match freshness with Unknown_identity -> "unknown" | _ -> "declared_build_source")))
+           | _ -> (match freshness with
+             | Unknown_identity -> "unknown"
+             | Fresh | Mismatched _ -> "declared_build_source")))
      ; ("index_present", `Bool index_present)
      ; ("assets_root", Json_util.string_opt_to_json surface_assets_root)
      ; ("dashboard_asset_root", Json_util.string_opt_to_json surface_dashboard_root)

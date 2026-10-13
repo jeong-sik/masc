@@ -165,6 +165,8 @@ Alternatively, `scripts/install-local-build.sh` builds and copies `masc`,
 shell where `eval "$(opam env)"` has been applied. It also reinstalls every
 registered Firefox browser-lane host from the new build and stops the host
 processes those workspaces started; the extension reconnects to the new copy.
+A workspace that holds a release guest shim for microVM Keepers gets the shim
+of the release the build names (`docs/MICROVM-REMOTE-RUNBOOK.md`).
 
 `./quickstart.sh` seeds a workspace under `~/masc-quickstart`, starts the
 server, and writes an MCP bearer to `.masc/config/mcp-client.env`. It starts

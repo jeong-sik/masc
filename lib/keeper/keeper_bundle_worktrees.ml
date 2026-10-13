@@ -42,8 +42,12 @@ let worktree_list_argv ~repo_path =
 ;;
 
 let worktree_remove_argv ~repo_path ~worktree_path =
+  (* [--force] is what keeps the host from evaluating the keeper's repo
+     configuration: without it [git worktree remove] spawns [git status] in
+     the worktree to prove it clean, and that child runs the clone's
+     filter.<name>.clean/.process commands, which [-c] cannot enumerate. *)
   [ "git"; "-c"; "core.fsmonitor=false"; "-C"; repo_path; "worktree"; "remove"
-  ; worktree_path
+  ; "--force"; worktree_path
   ]
 ;;
 

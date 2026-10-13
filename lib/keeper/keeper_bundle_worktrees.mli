@@ -9,9 +9,12 @@
     keeper is gone, so nothing here guesses ownership from a registry scan.
 
     Only what [git worktree list --porcelain] of those clones names is
-    removed, through [git worktree remove] without [--force]. A dirty
-    worktree refuses removal and stays, since an uncommitted change may be
-    the only copy of someone's work. A worktree whose resolved path is
+    removed, through [git worktree remove --force]. The keeper is gone for
+    good, so uncommitted changes in its worktrees go with it; [--force] is
+    also what stops git from running [git status] inside the worktree, which
+    would execute the clone's own [filter.<name>.clean] and [.process]
+    commands on the host. A locked worktree still refuses (it needs [--force]
+    twice) and stays, named in a warning. A worktree whose resolved path is
     outside the bundle is reported, never removed. The clones themselves are
     kept. *)
 
@@ -49,8 +52,8 @@ val prune_repo_worktrees
 (** List one clone's worktrees and remove every linked one inside
     [bundle_root]. A listing that fails or does not parse is reported under
     [skipped] and removes nothing; paths outside the bundle are reported
-    under [skipped] and never removed; removals git refuses (a dirty tree)
-    land in [failed] and do not stop the rest. *)
+    under [skipped] and never removed; removals git refuses (a locked
+    worktree) land in [failed] and do not stop the rest. *)
 
 val remove_keeper_worktrees
   :  run_argv:(timeout_sec:float -> string list -> Unix.process_status * string)

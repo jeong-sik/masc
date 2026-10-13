@@ -1,7 +1,7 @@
 (* A removed keeper's worktrees are reclaimed at shutdown finalization by
    name: only what [git worktree list --porcelain] of the keeper's clones
    names, contained to the keeper's bundle by realpath on both sides, through
-   [git worktree remove] without [--force]. These pin the porcelain reading,
+   [git worktree remove --force]. These pin the porcelain reading,
    the containment and the commands sent, with an injected [run_argv]. *)
 
 open Alcotest
@@ -99,14 +99,14 @@ let with_repo_dirs f =
   Unix.mkdir repo_path 0o755;
   let wt_clean = Filename.concat bundle_root "app-wt" in
   Unix.mkdir wt_clean 0o755;
-  let wt_dirty = Filename.concat bundle_root "app-wt2" in
-  Unix.mkdir wt_dirty 0o755;
+  let wt_locked = Filename.concat bundle_root "app-wt2" in
+  Unix.mkdir wt_locked 0o755;
   Fun.protect
     ~finally:(fun () -> remove_tree bundle_root)
-    (fun () -> f ~bundle_root ~repo_path ~wt_clean ~wt_dirty)
+    (fun () -> f ~bundle_root ~repo_path ~wt_clean ~wt_locked)
 
 let test_prune_removes_only_porcelain_named_worktrees () =
-  with_repo_dirs (fun ~bundle_root ~repo_path ~wt_clean ~wt_dirty ->
+  with_repo_dirs (fun ~bundle_root ~repo_path ~wt_clean ~wt_locked ->
     let calls = ref [] in
     let run_argv ~timeout_sec:_ argv =
       calls := argv :: !calls;
@@ -116,12 +116,12 @@ let test_prune_removes_only_porcelain_named_worktrees () =
       , String.concat "\n"
           [ "worktree " ^ repo_path; "HEAD abc"; ""
           ; "worktree " ^ wt_clean; "HEAD def"; ""
-          ; "worktree " ^ wt_dirty; "HEAD 123"; ""
+          ; "worktree " ^ wt_locked; "HEAD 123"; ""
           ]
-      | [ _; _; _; _; _; "worktree"; "remove"; path ] when String.equal path wt_dirty ->
-        (* git refuses a dirty worktree without --force; the failure is
+      | [ _; _; _; _; _; "worktree"; "remove"; "--force"; path ] when String.equal path wt_locked ->
+        (* a single --force still refuses a locked worktree; the failure is
            recorded and the remaining removals still run *)
-        Unix.WEXITED 1, Printf.sprintf "fatal: '%s' contains modified or untracked files" path
+        Unix.WEXITED 128, Printf.sprintf "fatal: cannot remove a locked working tree: '%s'" path
       | _ -> Unix.WEXITED 0, ""
     in
     let outcome =
@@ -130,24 +130,24 @@ let test_prune_removes_only_porcelain_named_worktrees () =
     check (list string) "the clean linked worktree is removed"
       [ wt_clean ]
       outcome.W.removed;
-    check (list string) "the dirty one is reported, not forced"
-      [ wt_dirty ]
+    check (list string) "the locked one is reported, not unlocked"
+      [ wt_locked ]
       (List.map fst outcome.W.failed);
     check string "nothing was skipped" "" outcome.W.skipped;
     let removed_paths =
       List.filter_map
         (function
-          | [ _; _; _; _; _; "worktree"; "remove"; path ] -> Some path
+          | [ _; _; _; _; _; "worktree"; "remove"; "--force"; path ] -> Some path
           | _ -> None)
         !calls
     in
     check (list string) "remove argv named exactly the porcelain paths, the \
                          main checkout never"
-      [ wt_clean; wt_dirty ]
+      [ wt_clean; wt_locked ]
       (sorted removed_paths))
 
 let test_prune_leaves_foreign_worktrees_untouched () =
-  with_repo_dirs (fun ~bundle_root ~repo_path ~wt_clean ~wt_dirty:_ ->
+  with_repo_dirs (fun ~bundle_root ~repo_path ~wt_clean ~wt_locked:_ ->
     let outside = make_temp_dir "masc-wt-outside" in
     Fun.protect
       ~finally:(fun () -> remove_tree outside)
@@ -185,7 +185,7 @@ let test_prune_leaves_foreign_worktrees_untouched () =
          let removed_paths =
            List.filter_map
              (function
-               | [ _; _; _; _; _; "worktree"; "remove"; path ] -> Some path
+               | [ _; _; _; _; _; "worktree"; "remove"; "--force"; path ] -> Some path
                | _ -> None)
              !calls
          in
@@ -285,9 +285,13 @@ let test_argv_spellings () =
     [ "git"; "-c"; "core.fsmonitor=false"; "-C"; repo_path; "worktree"; "list"
     ; "--porcelain" ]
     (W.worktree_list_argv ~repo_path);
-  check (list string) "remove names the porcelain path"
+  (* Without --force git runs [git status] in the worktree to prove it clean,
+     and that child executes the clone's own filter.<name>.clean/.process
+     commands. --force skips the status check, so the host never evaluates
+     the keeper's repo configuration on removal. *)
+  check (list string) "remove is forced, so git never runs status in the worktree"
     [ "git"; "-c"; "core.fsmonitor=false"; "-C"; repo_path; "worktree"; "remove"
-    ; "/base/.masc/playground/gone/app-wt" ]
+    ; "--force"; "/base/.masc/playground/gone/app-wt" ]
     (W.worktree_remove_argv ~repo_path
        ~worktree_path:"/base/.masc/playground/gone/app-wt")
 

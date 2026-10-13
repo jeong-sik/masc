@@ -975,7 +975,8 @@ let complete_cleanup
                   "keeper removed but its volumes were not: %s"
                   detail);
              (* The worktrees its clones registered stay on disk the same
-                way. A dirty one is refused by git and named in a warning. *)
+                way. A dirty one is removed with it; a locked one is refused by git
+                and named in a warning. *)
              (match effective_meta with
               | Error detail ->
                 Log.Keeper.warn

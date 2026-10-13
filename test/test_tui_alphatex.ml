@@ -198,6 +198,24 @@ let test_a_measure_the_pane_cannot_hold () =
   | Error other -> Alcotest.failf "not Too_wide: %s" (Alphatex.failure_text other)
   | Ok _ -> Alcotest.fail "a measure wider than the pane was drawn"
 
+let repeated_riff =
+  "\\ro :4 0.6 3.6 5.6 3.6 | :8 5.6 3.6 :4 0.5 \\rc 2 | \\ae 1 :4 5.5 3.5 | \\ae 2 :4 5.5 \
+   \\rc 2"
+
+let test_a_repeated_tab_stays_inside_the_pane () =
+  match Alphatex.render_tab ~max_width:40 repeated_riff with
+  | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+  | Ok lines ->
+      Alcotest.(check bool) "something is drawn" true (not (List.is_empty lines));
+      Alcotest.(check bool) "no line is wider than the pane" true
+        (List.for_all (fun line -> String.length line <= 40) lines)
+
+let test_a_repeated_measure_the_pane_cannot_hold () =
+  match Alphatex.render_tab ~max_width:20 "\\ro :1 0.6 0.6 \\rc 12" with
+  | Error (Too_wide _) -> ()
+  | Error other -> Alcotest.failf "not Too_wide: %s" (Alphatex.failure_text other)
+  | Ok _ -> Alcotest.fail "a measure wider than the pane was drawn"
+
 (* {1 Failures -- each is the fence arm's reason to show the source} *)
 
 let test_what_never_closes () =
@@ -339,6 +357,10 @@ let () =
             test_a_drawn_tab_stays_inside_the_pane
         ; Alcotest.test_case "a measure the pane cannot hold" `Quick
             test_a_measure_the_pane_cannot_hold
+        ; Alcotest.test_case "a repeated tab stays inside the pane" `Quick
+            test_a_repeated_tab_stays_inside_the_pane
+        ; Alcotest.test_case "a repeated measure the pane cannot hold" `Quick
+            test_a_repeated_measure_the_pane_cannot_hold
         ] )
     ; ( "failures"
       , [ Alcotest.test_case "what never closes" `Quick test_what_never_closes

@@ -53,6 +53,23 @@ let cells_per_unit (measure : Score.measure) =
 let name_width (score : Score.t) =
   List.fold_left (fun widest name -> max widest (String.length name)) 0 score.tuning
 
+(* The barlines a measure brings. The left edge adds past the bar line the
+   measure shares with the one before it -- a [:] for an [\ro], an ending
+   tag, or both -- and the right edge is whole, a [:|xN] for an [\rc N].
+   A plain measure adds nothing on the left and one [|] on the right, as
+   before. *)
+let left_marks (measure : Score.measure) =
+  let start = if measure.repeat_start then ":" else "" in
+  match measure.endings with
+  | [] -> start
+  | _ :: _ as endings ->
+      start ^ String.concat "," (List.map string_of_int endings) ^ "|"
+
+let right_marks (measure : Score.measure) =
+  match measure.repeat_end with
+  | None -> "|"
+  | Some count -> ":|x" ^ string_of_int count
+
 let systems ~max_width (score : Score.t) =
   let lead = name_width score + 1 in
   let rec fill systems current used = function
@@ -63,7 +80,11 @@ let systems ~max_width (score : Score.t) =
               | [] -> systems
               | _ :: _ -> List.rev current :: systems))
     | (measure : Score.measure) :: rest ->
-        let width = (cells_per_unit measure * measure.units) + 1 in
+        let width =
+          String.length (left_marks measure)
+          + (cells_per_unit measure * measure.units)
+          + String.length (right_marks measure)
+        in
         if lead + width > max_width then
           Error (Too_wide { needed = lead + width; available = max_width })
         else (
@@ -96,6 +117,8 @@ let draw (score : Score.t) systems =
   let strings = List.length score.tuning in
   let name_width = name_width score in
   let system_lines system =
+    (* The drawn rows keep the measures' order, one block of rows per
+       measure, so the barlines below join the measure they belong to. *)
     let drawn = List.map (draw_measure ~strings) system in
     List.mapi
       (fun line name ->
@@ -103,11 +126,12 @@ let draw (score : Score.t) systems =
         Buffer.add_string text name;
         Buffer.add_string text (String.make (name_width - String.length name) ' ');
         Buffer.add_char text '|';
-        List.iter
-          (fun rows ->
+        List.iter2
+          (fun (measure : Score.measure) rows ->
+            Buffer.add_string text (left_marks measure);
             Buffer.add_bytes text rows.(line);
-            Buffer.add_char text '|')
-          drawn;
+            Buffer.add_string text (right_marks measure))
+          system drawn;
         Buffer.contents text)
       score.tuning
   in

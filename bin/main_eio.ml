@@ -1394,7 +1394,9 @@ let routine_skill_report = function
   | Builtin_skill_package.Bundled
       { result = Ok (Builtin_skill_package.Up_to_date
                     | Builtin_skill_package.Install_missing); _ } -> true
-  | _ -> false
+  | Builtin_skill_package.Bundled { result = Ok (Builtin_skill_judgement.Adopt_identical | (Builtin_skill_judgement.Adopt_with_release_permissions | (Builtin_skill_judgement.Permissions_pending _ | (Builtin_skill_judgement.Replace_recorded _ | (Builtin_skill_judgement.Replace_pending _ | (Builtin_skill_judgement.Keep_modified _ | (Builtin_skill_judgement.Keep_untracked_different _ | Builtin_skill_judgement.Keep_uninspectable _)))))));_}
+  | Builtin_skill_package.Bundled { result = Error _;_} | Builtin_skill_package.Interrupted _
+  | Builtin_skill_package.Retired _ | Builtin_skill_package.Unfinished _ -> false
 
 let print_skill_report ~report skill_report =
   match report with
@@ -3901,7 +3903,11 @@ let setup_validate_runtime base_path =
           (match result.failure, runtime.provider.credentials with
            | Some (Runtime_verification.Unavailable (Missing_credential _)), Some (Runtime_schema.Env key) ->
              Printf.eprintf "Missing model credential: %s. Set this variable in the shell that starts MASC.\n" key
-           | _ -> ());
+           | (Some (Runtime_verification.Unavailable (Runtime_verification.Missing_credential _)), Some (Runtime_schema.File _ | Runtime_schema.Inline _))
+           | (Some (Runtime_verification.Unavailable (Runtime_verification.Missing_credential _)), None)
+           | (Some (Runtime_verification.Unavailable (Runtime_verification.Unsupported_runtime | (Runtime_verification.Tools_not_declared | (Runtime_verification.Invalid_credential _ | (Runtime_verification.Invalid_configuration _ | (Runtime_verification.Client_not_authenticated _ | Runtime_verification.Client_not_started _)))))), _)
+           | (Some (Runtime_verification.Timed_out | (Runtime_verification.Tool_not_called | (Runtime_verification.Tool_result_not_consumed | (Runtime_verification.Empty_response | (Runtime_verification.Model_unreported | (Runtime_verification.Rate_limited _ | (Runtime_verification.Quota_exhausted _ | (Runtime_verification.Provider_overloaded _ | (Runtime_verification.Provider_auth_refused _ | (Runtime_verification.Provider_unreachable _ | (Runtime_verification.Model_not_found _ | Runtime_verification.Provider_rejected _))))))))))), _)
+           | (None, _) -> ());
           (* Name the cause: a refused key needs a new one, a missing model
              another choice, and the operator cannot tell them apart from the
              sentence below alone. *)

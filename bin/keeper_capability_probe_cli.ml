@@ -239,7 +239,8 @@ let probe_for_lane ~sw ~net ~secure_random ~clock ~mgr ~fs ~base_path ~runtime_i
     Probe.probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs
       ~base_path ~now:Unix.gettimeofday ~runtime_id ~tool ~prompt ()
   else if (match Runtime.get_runtime_by_id runtime_id with
-    | Some {execution=Runtime_execution.Muse_serve _; _} -> true | _ -> false)
+    | Some {execution=Runtime_execution.Muse_serve _; _} -> true | Some { execution = (Runtime_execution.Agent_core _ | (Runtime_execution.Codex_app_server _ | (Runtime_execution.Antigravity_cli _ | Runtime_execution.Claude_code _)));_}
+                                                                 | None -> false)
   then Probe.probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path
     ~now:Unix.gettimeofday ~runtime_id ~tool ~prompt ()
   else
@@ -448,7 +449,8 @@ let () =
            (fun (_, v) ->
              match v with
              | Probe.Projected _ -> true
-             | _ -> false)
+             | Probe.Not_a_descriptor | Probe.Operator_only | Probe.Aliased _
+             | Probe.Withheld_by_schema_error _ -> false)
            surface)
     in
     Printf.eprintf

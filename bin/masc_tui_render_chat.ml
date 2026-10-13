@@ -130,9 +130,23 @@ let bare_urls_for_entry entry =
 let chat_body_with_previews_internal ?on_field ~preview ~mode ~(entry : Message_layout.entry) ~width () =
   let body = entry.body in
   match entry.style, entry.markdown_source with
-  | (Message_layout.Tool | Skill _), _
-  | _, (Message_layout.Markdown_growing _ | Markdown_streaming) -> body
-  | _, Message_layout.Markdown_stable _ ->
+  | ((Message_layout.Tool | Skill _), _)
+  | (Message_layout.User, (Message_layout.Markdown_growing _ | Markdown_streaming))
+  | (Message_layout.Inbound, (Message_layout.Markdown_growing _ | Markdown_streaming))
+  | (Message_layout.Keeper, (Message_layout.Markdown_growing _ | Markdown_streaming))
+  | (Message_layout.Status, (Message_layout.Markdown_growing _ | Markdown_streaming))
+  | (Message_layout.Local, (Message_layout.Markdown_growing _ | Markdown_streaming))
+  | (Message_layout.Journal, (Message_layout.Markdown_growing _ | Markdown_streaming))
+  | (Message_layout.Error, (Message_layout.Markdown_growing _ | Markdown_streaming))
+  | (Message_layout.Thinking _, (Message_layout.Markdown_growing _ | Markdown_streaming)) -> body
+  | (Message_layout.User, Message_layout.Markdown_stable _)
+  | (Message_layout.Inbound, Message_layout.Markdown_stable _)
+  | (Message_layout.Keeper, Message_layout.Markdown_stable _)
+  | (Message_layout.Status, Message_layout.Markdown_stable _)
+  | (Message_layout.Local, Message_layout.Markdown_stable _)
+  | (Message_layout.Journal, Message_layout.Markdown_stable _)
+  | (Message_layout.Error, Message_layout.Markdown_stable _)
+  | (Message_layout.Thinking _, Message_layout.Markdown_stable _) ->
     let cards = match mode with
       | `Off -> []
       | (`Compact | `Rich) -> List.mapi (fun index url -> index,url) (bare_urls_for_entry entry)
@@ -321,7 +335,9 @@ let thinking_height_cache = Markdown_cache.create ~capacity:chat_markdown_cache_
 let fold_thinking_entry (state : state) ~chat_cols (entry : Message_layout.entry) =
   let is_thinking = match entry.style with
     | Message_layout.Thinking _ -> true
-    | _ -> false in
+    | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper | Message_layout.Status
+    | Message_layout.Local | Message_layout.Journal | Message_layout.Error | Message_layout.Tool
+    | Message_layout.Skill _ -> false in
   if is_thinking && entry.body_presentation=Message_layout.Source_body
      && state.msg_reasoning_visibility = Reasoning_folded then
     let context = Chat_theme.body_context (Chat_theme.snapshot ()) entry.style in
@@ -1115,7 +1131,9 @@ let tool_outcome_label_with_call outcome association =
   | Keeper_chat_transcript.Never_returned, Call_execution_exact call
     when Option.is_some call.kc_output ->
       "RESULT IN CALL LOG · NOT SEEN IN TURN"
-  | _ -> tool_outcome_label outcome
+  | (Keeper_chat_transcript.Never_returned, (Call_log_not_loaded | (Call_log_loading | (Call_execution_unrecorded | (Call_execution_missing | (Call_log_unavailable _ | (Call_execution_coverage_gap _ | Call_execution_ambiguous _)))))))
+  | ((Keeper_chat_transcript.Started | (Keeper_chat_transcript.Awaiting_result | (Keeper_chat_transcript.Returned | (Keeper_chat_transcript.Native_running | (Keeper_chat_transcript.Native_ended | (Keeper_chat_transcript.Native_failed | (Keeper_chat_transcript.Failed | Keeper_chat_transcript.Outcome_unrecorded))))))), _)
+  | (Never_returned, Call_execution_exact _) -> tool_outcome_label outcome
 
 
 let tool_outcome_tone_with_call outcome association =
@@ -1745,7 +1763,8 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
         | Masc_tui_types.Turn_continues | Masc_tui_types.Turn_closes
         | Masc_tui_types.Turn_outside ->
             base_role_label_of message)
-    | _ -> base_role_label_of message
+    | Message_keeper | Message_status | Message_local | Message_error | Message_tool
+    | Message_thinking | Message_memory | Message_user _ | Message_skill _ -> base_role_label_of message
   in
   let projected_tool_rows =
     keeper_message_tool_rows state ~keeper_name ~chat_cols
@@ -1933,7 +1952,9 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
                             .Masc_tui_gate_text.fa_held_cells
                           > 0 ->
                     Message_layout.Action_unfold_argument
-                | _ -> Message_layout.Action_none);
+                | (Masc_tui_types.Message_status, Tools_full)
+                | ((Message_keeper | (Message_autonomous | (Message_local | (Message_error | (Message_tool | (Message_thinking | (Message_memory | (Message_user _ | Message_skill _)))))))), _)
+                | (Message_status, (Tools_compact|Tools_results)) -> Message_layout.Action_none);
            }
             : Message_layout.entry)
         |> fold_thinking_entry state ~chat_cols)
@@ -2971,7 +2992,12 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                      turn_rail =
                        (match item.origin with
                         | Keeper_chat_transcript.Admission_of_request _ -> Message_layout.Rail_none
-                        | _ -> turn_rail_of ~siding:None
+                        | Keeper_chat_transcript.Unstreamed_skills
+                        | Keeper_chat_transcript.Text_stretch _
+                        | Keeper_chat_transcript.Thinking_stretch _
+                        | Keeper_chat_transcript.Tool_stretch _
+                        | Keeper_chat_transcript.Reply_of_segment _
+                        | Keeper_chat_transcript.Error_of_segment _ -> turn_rail_of ~siding:None
                             ~edge:Masc_tui_types.Turn_continues ~style);
                      (* A live turn draws its Gate steps as status text the
                         transcript composed, not as the store's argument, so
@@ -3500,7 +3526,12 @@ let projection_index_of_anchor projection =
               (match origin with
                | Some (Keeper_chat_transcript.Admission_of_request request_id) ->
                    add (Admission_request request_id) at
-               | Some _ | None -> ());
+               | None | Some (Keeper_chat_transcript.Text_stretch _)
+               | Some (Keeper_chat_transcript.Thinking_stretch _)
+               | Some (Keeper_chat_transcript.Tool_stretch _)
+               | Some (Keeper_chat_transcript.Unstreamed_skills)
+               | Some (Keeper_chat_transcript.Reply_of_segment _)
+               | Some (Keeper_chat_transcript.Error_of_segment _) -> ());
               if canonical then add (Journal_reply source) at) projection.tagged_entries;
         search_index_memo := Some (projection.tagged_entries, index);
         index in
@@ -3642,7 +3673,14 @@ let source_body_key state ~width ~theme ~preview ~polled_input ~unavailable
     | (Message_layout.Tool | Skill _), _, _
     | _, (Message_layout.Markdown_growing _ | Markdown_streaming), _
     | _, _, `Off -> []
-    | _, Message_layout.Markdown_stable _, (`Compact | `Rich) -> bare_urls_for_entry entry in
+    | (Message_layout.User, Message_layout.Markdown_stable _, (`Compact | `Rich))
+    | (Message_layout.Inbound, Message_layout.Markdown_stable _, (`Compact | `Rich))
+    | (Message_layout.Keeper, Message_layout.Markdown_stable _, (`Compact | `Rich))
+    | (Message_layout.Status, Message_layout.Markdown_stable _, (`Compact | `Rich))
+    | (Message_layout.Local, Message_layout.Markdown_stable _, (`Compact | `Rich))
+    | (Message_layout.Journal, Message_layout.Markdown_stable _, (`Compact | `Rich))
+    | (Message_layout.Error, Message_layout.Markdown_stable _, (`Compact | `Rich))
+    | (Message_layout.Thinking _, Message_layout.Markdown_stable _, (`Compact | `Rich)) -> bare_urls_for_entry entry in
   {source_width=width;source_palette_generation=context.palette_generation;
    source_origin=state.msg_origin_display;source_preview_mode=state.link_previews_mode;
    source_previews=List.map preview urls;source_polled_input=polled_input;
@@ -4012,7 +4050,14 @@ let freeze_search_previews plan (entry : Message_layout.entry) =
   | (Message_layout.Tool | Skill _),_,_
   | _,(Message_layout.Markdown_growing _ | Markdown_streaming),_
   | _,_,`Off -> ()
-  | _,Message_layout.Markdown_stable _,(`Compact | `Rich) ->
+  | (Message_layout.User, Message_layout.Markdown_stable _, (`Compact | `Rich))
+  | (Message_layout.Inbound, Message_layout.Markdown_stable _, (`Compact | `Rich))
+  | (Message_layout.Keeper, Message_layout.Markdown_stable _, (`Compact | `Rich))
+  | (Message_layout.Status, Message_layout.Markdown_stable _, (`Compact | `Rich))
+  | (Message_layout.Local, Message_layout.Markdown_stable _, (`Compact | `Rich))
+  | (Message_layout.Journal, Message_layout.Markdown_stable _, (`Compact | `Rich))
+  | (Message_layout.Error, Message_layout.Markdown_stable _, (`Compact | `Rich))
+  | (Message_layout.Thinking _, Message_layout.Markdown_stable _, (`Compact | `Rich)) ->
       List.iter (fun url -> ignore (plan.search_preview url)) (bare_urls_for_entry entry)
 
 let search_candidate_builds = ref 0
@@ -4170,7 +4215,14 @@ let admit_keeper_message_search state work ({matched;unavailable_entries} as ans
             | (Message_layout.Tool | Skill _),_,_
             | _,(Message_layout.Markdown_growing _ | Markdown_streaming),_
             | _,_,`Off -> []
-            | _,Message_layout.Markdown_stable _,(`Compact | `Rich) -> bare_urls_for_entry current in
+            | (Message_layout.User, Message_layout.Markdown_stable _, (`Compact | `Rich))
+            | (Message_layout.Inbound, Message_layout.Markdown_stable _, (`Compact | `Rich))
+            | (Message_layout.Keeper, Message_layout.Markdown_stable _, (`Compact | `Rich))
+            | (Message_layout.Status, Message_layout.Markdown_stable _, (`Compact | `Rich))
+            | (Message_layout.Local, Message_layout.Markdown_stable _, (`Compact | `Rich))
+            | (Message_layout.Journal, Message_layout.Markdown_stable _, (`Compact | `Rich))
+            | (Message_layout.Error, Message_layout.Markdown_stable _, (`Compact | `Rich))
+            | (Message_layout.Thinking _, Message_layout.Markdown_stable _, (`Compact | `Rich)) -> bare_urls_for_entry current in
           if not (List.for_all (fun url -> match List.assoc_opt url work.search_previews with
               | Some value -> Masc_tui_link_preview.get_preview url=value | None -> false) urls)
           then None else

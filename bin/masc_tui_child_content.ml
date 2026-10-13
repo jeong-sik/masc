@@ -220,7 +220,9 @@ let read ~mode ~keeper_name ~fetch ~previous =
               | Some store ->
                   let primary = match store.error with
                     | Some (History_rewritten _ as retained) -> retained
-                    | Some _ | None -> error in
+                    | Some (Transport _) | None | Some (Http_refused _) | Some (Invalid_json _)
+                    | Some (Invalid_response _) | Some (Service _) | Some (Persistence (_, _))
+                    | Some (Receiver_read (_, _, _)) -> error in
                   {store with error=Some primary;attempted=Some advertised;cleanup_failures}
               | None -> {receiver;store_id=advertised.store_id;cursor=None;history=history_of_records [];error=Some error;
                   attempted=Some advertised;cleanup_failures;coverage=inventory.coverage}) in

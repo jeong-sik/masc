@@ -261,8 +261,7 @@ let () =
       | Some (Error detail) ->
           Printf.eprintf "token file: %s\n%!" detail;
           exit 2
-      | token_result ->
-          let token =
+      | (Some (Ok _) | None) as token_result -> let token =
             match token_result with
             | Some (Ok token) -> Some token
             | Some (Error _) | None -> None

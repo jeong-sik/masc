@@ -574,12 +574,13 @@ let selected_source_path view =
           if d.instance_id=Some instance.id && Some d.source_path=instance.source_path
           then Some d.source_path else None) config.declarations) in
       let path = match view.focus, view.screen with
-        | Configurations, _ -> Option.map (fun (d : declaration) -> d.source_path) (selected_declaration view)
+        | (Configurations, Overview) | (Configurations, Detail (_, _)) -> Option.map (fun (d : declaration) -> d.source_path) (selected_declaration view)
         | Instances, Overview ->
             (match at_cursor (selectable_overview_entries view snapshot) view.instance_cursor with
              | Some (`Declaration (_, declaration)) -> Some declaration.source_path
              | Some (`Instance _) | None -> instance_path)
-        | (Timeline | Connections | Instances | Rows), _ -> instance_path in
+        | ((Timeline | Connections | Rows), Overview)
+        | ((Timeline | Connections | Instances | Rows), Detail (_, _)) -> instance_path in
       Option.bind path (fun path ->
         if Document.editable_source_path ~directory:config.directory path then Some path else None)))
 let subscription_targets view =
@@ -1225,7 +1226,7 @@ let overview_lines ~width view =
                       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 4))
                         ("D:full · " ^ detail)
                       |> List.map (fun line -> "    " ^ line)
-                  | _ -> [] in
+                  | Row.Attached | Row.Observing | Row.Detaching | Row.Detached -> [] in
                 group_header @ [lead]
                 @ (match view.overview_mode, snapshot.configuration with
                    | Current_installations, Some config ->

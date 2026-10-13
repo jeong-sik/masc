@@ -869,7 +869,8 @@ let retired_operation_observation state ~authority ~reading message =
            when current = generation && state.browser_lane_generation = generation ->
              Option.map (fun read -> Browser_scene_observation (generation, view, read))
                (Browser_lane_view.observation_after_effect operation)
-         | _ -> None)
+         | Some { load = (Browser_lane_view.Idle | (Browser_lane_view.No_browser | Browser_lane_view.Failed _));_}
+         | None | Some {load=Loading (_, _); _ } -> None)
     | Lane_subscriptions_loaded (generation, Ok _) ->
         (match state.lane_addons with
          | Some view when view.generation = generation

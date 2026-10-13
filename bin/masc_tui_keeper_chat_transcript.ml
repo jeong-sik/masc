@@ -1940,7 +1940,8 @@ let apply_delta ~now t (delta : Live.delta) =
          t.phase <- Waiting;
          t.ended_at <- None;
          t.settled_at <- None
-       | _, (Some _ | None) ->
+       | (Waiting, (Some _ | None)) | (Working, (Some _ | None)) | (Stream_ended, (Some _ | None))
+       | (Stream_failed _, (Some _ | None)) ->
          t.phase <- Stream_ended;
          t.ending_source <- Ending_heard_in_stream;
          t.ended_at <- Some now;
@@ -2323,7 +2324,8 @@ let compute_drawn t =
             let last =
               match item.superseded, item.drawn with
               | None, (Drawn_tools _ | Drawn_skill _) -> None
-              | _ -> if current_text item then Some index else last
+              | (None, (Drawn_thinking _ | (Drawn_text _ | (Drawn_reply _ | (Drawn_status _ | Drawn_error _)))))
+              | (Some _, _) -> if current_text item then Some index else last
             in
             (index + 1, last))
       (0, None) projected

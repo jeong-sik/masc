@@ -78,7 +78,9 @@ let decode_confirmation ~goal_id json =
        is how the operator finishes it. *)
     | Goal_phase.Awaiting_confirmation, Goal_verification.Human_confirmed (verdict, _)
     | Goal_phase.Completed, Goal_verification.Human_confirmed (verdict, _) -> Ok verdict
-    | _ -> Error "goal confirmation: no current proven completion to confirm"
+    | (Goal_phase.Awaiting_confirmation, (Goal_verification.Completion_idle | (Goal_verification.Proof_pending _ | Goal_verification.Proof_refuted _)))
+    | (Goal_phase.Completed, (Goal_verification.Completion_idle | (Goal_verification.Proof_pending _ | (Goal_verification.Proof_proven _ | Goal_verification.Proof_refuted _))))
+    | ((Goal_phase.Executing | (Goal_phase.Verifying | (Goal_phase.Dropped | (Goal_phase.Paused _ | Goal_phase.Blocked _)))), _) -> Error "goal confirmation: no current proven completion to confirm"
   in
   let* revision = field "criterion_revision" goal in
   let* title = field "title" goal in

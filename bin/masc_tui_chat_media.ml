@@ -76,7 +76,11 @@ let newest_image media =
           (match retained, attachment.data, attachment.src with
            | Masc_tui_image_preview.Unavailable_image _, None, Some src ->
              Masc_tui_image_preview.output_image ~name:attachment.name ~src
-           | _, _, _ -> retained) in
+           | (Masc_tui_image_preview.Named_path _, _, _) | (Masc_tui_image_preview.Staged _, _, _)
+           | (Masc_tui_image_preview.Stored_attachment _, _, _)
+           | (Masc_tui_image_preview.Output_image _, _, _)
+           | (Masc_tui_image_preview.Unavailable_image _, _, _)
+           | (Masc_tui_image_preview.No_image, _, _) -> retained) in
       (match preview with
         | Masc_tui_image_preview.No_image -> None
         | Masc_tui_image_preview.Named_path _ | Staged _ | Stored_attachment _ | Output_image _

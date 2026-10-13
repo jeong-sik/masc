@@ -1865,7 +1865,10 @@ let help_sections ?current () =
                    (fun (key, help) -> (key, "in the fact detail: " ^ help))
                    (entries bindings_memory_fact_detail)
            | Lanes -> entries [preflight_detail_binding]
-           | _ -> []
+           | Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick))))
+           | Overview | Acting | Metrics | Clients | Board | Approvals | Planning | Schedules
+           | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
+           | Config | Resources | Tools | System_logs -> []
          in
          (surface, (title, entries (sheet_bindings surface) @ tab_entries)))
       help_surfaces

@@ -496,8 +496,7 @@ let custom_deltas_unvalidated fields =
                   { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref; terminal_stream_scope }
               ]
           | _, _, _, Error detail -> [Undecodable detail]
-          | _ ->
-              [ Undecodable
+          | (Some _, Some _, None, Ok _) | (Some _, None, _, Ok _) | (None, _, _, Ok _) -> [ Undecodable
                   "KEEPER_REPLY_DETAILS needs reply, a known turn_outcome and \
                    a well-formed turn_ref"
               ]))

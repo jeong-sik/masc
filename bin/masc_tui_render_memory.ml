@@ -384,7 +384,7 @@ let memory_context_lines ~cols ~detail ~unit ~input (k : Masc.Tui_decode_memory_
         let module O = Masc.Keeper_continuity_observation in
         let state = match value.state with
           | O.No_source -> "no new completed source (coverage not inferred)"
-          | state -> O.synthesis_state_to_string state in
+          | (O.Checking | O.Running | O.Committed | O.Disabled | O.Source_unavailable | O.Input_unavailable | O.Not_committed | O.Capacity_refused | O.Cancelled) as state -> O.synthesis_state_to_string state in
         let range = match value.range with
           | None -> " · atom range unavailable"
           | Some range -> Printf.sprintf " · last selected atoms [%d,%d) / observed completed %d"
@@ -1381,13 +1381,13 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
           match snapshot.mfs_ordinary with
           | Memory_store_present store ->
               (List.length store.mos_facts, store.mos_facts)
-          | _ -> (0, [])
+          | Memory_store_absent | Memory_store_read_error _ -> (0, [])
         in
         let store_source, store_dropped =
           match snapshot.mfs_source with
           | Memory_store_present store ->
               (List.length store.mss_facts, List.length store.mss_invalidations)
-          | _ -> (0, 0)
+          | Memory_store_absent | Memory_store_read_error _ -> (0, 0)
         in
         let grand_total = store_ordinary + store_source + store_dropped in
         let stats =
@@ -1494,8 +1494,10 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
          empty_page_of ~snapshot:(memory_facts_snapshot state) ~error:(memory_facts_failure state),
          state.memory_facts_category
        with
-       | Page_failed, _ -> page_failed_note
-       | Page_unread, _ -> page_unread_note
+       | (Page_failed, Category_all) | (Page_failed, Category_ordinary _)
+       | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> page_failed_note
+       | (Page_unread, Category_all) | (Page_unread, Category_ordinary _)
+       | (Page_unread, Category_source) | (Page_unread, Category_dropped) -> page_unread_note
        | Page_empty, Category_all ->
            (* [total] counts rows filtered by [memory_search_query], so the
               note reads the same value; the store is not empty just because

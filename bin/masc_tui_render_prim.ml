@@ -766,7 +766,9 @@ let surface_strip (state : state) ~cols =
          | Some snapshot when snapshot.Masc.Tui_decode.vs_total > 0 ->
              Printf.sprintf "\xc2\xb7%d" snapshot.Masc.Tui_decode.vs_total
          | Some _ | None -> "")
-    | _ -> ""
+    | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals | Schedules
+    | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
+    | Config | Resources | Tools | System_logs | Keepers _ -> ""
   in
   let label i =
     let surface, name = ring.(i) in
@@ -4506,7 +4508,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
           (fun acc (index, (item : Inspector.exact_input_item)) ->
              match item.kind with
              | Inspector.Message _ -> Some index
-             | _ -> acc)
+             | Inspector.System_prompt | Inspector.Tool_schema _ -> acc)
           None
           (List.mapi (fun index item -> (index, item)) items)
       in
@@ -5006,7 +5008,9 @@ let keeper_deletions_lines (state : state) ~cols =
               | Finalized { completion = Completion_pending _; _ } -> "파일·설정 정리 대기"
               | Blocked failure -> "종료 작업 중단: " ^ failure.detail
               | Reconciliation_required _ -> "진행 중이던 도구 실행 결과 확인 필요"
-              | _ -> if row.completed then "삭제·정리 완료" else phase_to_string operation.phase in
+              | Finalized { completion = (Completion_not_requested | Completion_delivered _);_}
+              | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _
+              | Owner_absent _ | Operator_absence_acknowledged _ | Superseded _ -> if row.completed then "삭제·정리 완료" else phase_to_string operation.phase in
           [Printf.sprintf "%d / %d · %s · %s"
              (state.keeper_deletions_cursor + 1) (List.length inventory.operations)
              (Keeper_control.deletion_keeper_name row) status]

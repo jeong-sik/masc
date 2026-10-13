@@ -936,6 +936,51 @@ let api_retry_observation_candidate fields =
   && List.for_all (fun (key,_) -> List.mem key api_retry_fields) fields
 ;;
 
+(* The [type] tag of a stream-json frame, parsed once. Both dispatch loops and
+   the progress-observation gate match on this value without a wildcard, so a
+   tag this client learns to read is a compile error in each of them until it
+   has an arm. A tag no arm decodes stays [Frame_other] and fails closed. *)
+type frame_kind =
+  | Frame_control_request
+  | Frame_control_response
+  | Frame_stream_event
+  | Frame_assistant
+  | Frame_rate_limit_event
+  | Frame_result
+  | Frame_user
+  | Frame_system
+  | Frame_tool_progress
+  | Frame_command_lifecycle
+  | Frame_other of string
+
+let frame_kind_of_tag = function
+  | "control_request" -> Frame_control_request
+  | "control_response" -> Frame_control_response
+  | "stream_event" -> Frame_stream_event
+  | "assistant" -> Frame_assistant
+  | "rate_limit_event" -> Frame_rate_limit_event
+  | "result" -> Frame_result
+  | "user" -> Frame_user
+  | "system" -> Frame_system
+  | "tool_progress" -> Frame_tool_progress
+  | "command_lifecycle" -> Frame_command_lifecycle
+  | other -> Frame_other other
+;;
+
+let frame_kind_to_tag = function
+  | Frame_control_request -> "control_request"
+  | Frame_control_response -> "control_response"
+  | Frame_stream_event -> "stream_event"
+  | Frame_assistant -> "assistant"
+  | Frame_rate_limit_event -> "rate_limit_event"
+  | Frame_result -> "result"
+  | Frame_user -> "user"
+  | Frame_system -> "system"
+  | Frame_tool_progress -> "tool_progress"
+  | Frame_command_lifecycle -> "command_lifecycle"
+  | Frame_other tag -> tag
+;;
+
 let parse_wire_line line =
   let stage = "stream-json message" in
   let* json = parse_json_value ~stage line in
@@ -956,14 +1001,25 @@ let parse_wire_line line =
           fields
       in
       (match type_values with
-       | [ `String "tool_progress" ] ->
-         List.exists (function `Bool true -> true | _ -> false) heartbeat_values
-         || (heartbeat_values = []
-             && List.exists (function "tool_name", `String "Agent" -> true | _ -> false) fields
-             && List.mem_assoc "subagent_type" fields
-             && List.for_all (fun (key,_) -> List.mem key agent_retry_fields) fields)
-       | [ `String "system" ] ->
-           task_observation_candidate fields || api_retry_observation_candidate fields
+       | [ `String tag ] ->
+         (match frame_kind_of_tag tag with
+          | Frame_tool_progress ->
+            List.exists (function `Bool true -> true | _ -> false) heartbeat_values
+            || (heartbeat_values = []
+                && List.exists (function "tool_name", `String "Agent" -> true | _ -> false) fields
+                && List.mem_assoc "subagent_type" fields
+                && List.for_all (fun (key,_) -> List.mem key agent_retry_fields) fields)
+          | Frame_system ->
+            task_observation_candidate fields || api_retry_observation_candidate fields
+          | Frame_control_request
+          | Frame_control_response
+          | Frame_stream_event
+          | Frame_assistant
+          | Frame_rate_limit_event
+          | Frame_result
+          | Frame_user
+          | Frame_command_lifecycle
+          | Frame_other _ -> false)
        | _ -> false)
     | _ -> false
   in
@@ -978,8 +1034,8 @@ let parse_wire_line line =
 let wire_fields json =
   let stage = "stream-json message" in
   let* fields = assoc_at stage json in
-  let* type_ = required_string stage "type" fields in
-  Ok (type_, fields)
+  let* tag = required_string stage "type" fields in
+  Ok (frame_kind_of_tag tag, fields)
 ;;
 
 let initialize_request request_id =
@@ -1018,11 +1074,11 @@ let parse_control_response ~expected_request_id fields =
 let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id
     ~on_stream_event =
   let* json = io.receive () in
-  let* type_, fields = wire_fields json in
-  match type_ with
-  | "control_response" ->
+  let* kind, fields = wire_fields json in
+  match kind with
+  | Frame_control_response ->
     parse_control_response ~expected_request_id:request_id fields
-  | "control_request" ->
+  | Frame_control_request ->
     let* () =
       handle_control_request
         io
@@ -1036,7 +1092,7 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usag
     in
     await_initialize
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id ~on_stream_event
-  | "system" | "rate_limit_event" | "command_lifecycle" ->
+  | Frame_system | Frame_rate_limit_event | Frame_command_lifecycle ->
     (* Informational frames before the control response. The admission
        deadline bounds a client that never answers; a count of these frames
        does not change what
@@ -1049,10 +1105,12 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usag
       ~assistant_usage
       ~request_id
       ~on_stream_event
-  | other ->
+  | Frame_stream_event | Frame_assistant | Frame_result | Frame_user | Frame_tool_progress | Frame_other _ ->
     protocol_error
       "initialize"
-      (Printf.sprintf "unexpected message type %S before control response" other)
+      (Printf.sprintf
+         "unexpected message type %S before control response"
+         (frame_kind_to_tag kind))
 ;;
 
 (* The stream-json user message always carries a content-block array, never the
@@ -2165,9 +2223,9 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
     ~input_observer ~partial_stream ~stream_started ~response_emitted =
   let* json = io.receive () in
-  let* type_, fields = wire_fields json in
-  match type_ with
-  | "control_request" ->
+  let* kind, fields = wire_fields json in
+  match kind with
+  | Frame_control_request ->
     let* () =
       handle_control_request
         io
@@ -2185,9 +2243,9 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
-  | "control_response" ->
+  | Frame_control_response ->
     protocol_error "turn" "received an unsolicited control response"
-  | "stream_event" ->
+  | Frame_stream_event ->
     let* scope = partial_stream_scope fields in
     let* () = match scope with
       | Root_response ->
@@ -2199,7 +2257,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~expected_session_id ~subscription ~resumed ~rate_limit ~assistant_model
       ~assistant_texts ~native_tool_calls ~native_tool_attempted ~on_turn_started
       ~on_stream_event ~input_observer ~partial_stream ~stream_started ~response_emitted
-  | "assistant" ->
+  | Frame_assistant ->
     let* scope, origin, uuid, model, blocks, message_id, usage =
       parse_assistant ~expected_session_id ~tools fields
     in
@@ -2271,7 +2329,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~assistant_texts:(assistant_texts @ texts)
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
       ~input_observer ~partial_stream ~stream_started ~response_emitted
-  | "rate_limit_event" ->
+  | Frame_rate_limit_event ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
     (* The usage windows ride the same event. They are an observation for
        operators: a shape this client cannot read is logged and the turn goes
@@ -2289,7 +2347,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
       ~input_observer ~partial_stream ~stream_started ~response_emitted
-  | "result" ->
+  | Frame_result ->
     (* The result frame is the only place the turn's spend is reported, and
        it arrives on failures too (a quota refusal, a provider error after
        tool calls). Once the frame is known to be this session's turn, the
@@ -2385,7 +2443,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ; resumed
       ; usage
       }
-  | "user" ->
+  | Frame_user ->
     let* finished = native_tool_results ~expected_session_id fields in
     let scope = Result.to_option (assistant_scope ~stage:"native result scope" fields) in
     List.iter (fun (call_id, completion) ->
@@ -2398,7 +2456,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
       ~native_tool_attempted ~on_turn_started ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
-  | "system" ->
+  | Frame_system ->
     (* [compact_boundary] is the client's own record that it summarised the
        conversation: what the session held as sent before it is now a
        summary. Exact task edge kinds have their own observation registry;
@@ -2421,7 +2479,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
-  | "tool_progress" ->
+  | Frame_tool_progress ->
     (* An observation cannot fail a healthy turn. Only the exact open root
        call owns this heartbeat; the progress id is opaque, not a call id. *)
     (match project_native_heartbeat native_tool_calls ~expected_session_id fields with
@@ -2441,7 +2499,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
-  | "command_lifecycle" ->
+  | Frame_command_lifecycle ->
     (* Claude Code reports the fate of a queued inbound command
        (queued/started/completed/cancelled/discarded/refused). The frame also
        names commands this client never sent, and [completed] can arrive
@@ -2453,10 +2511,10 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
-  | other ->
+  | Frame_other tag ->
     protocol_error
       "turn"
-      (Printf.sprintf "unsupported stream message type %S" other)
+      (Printf.sprintf "unsupported stream message type %S" tag)
 ;;
 
 let mcp_config tools =

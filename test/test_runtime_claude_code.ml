@@ -1208,6 +1208,50 @@ let test_command_lifecycle_frames_do_not_fail_the_turn () =
        | Ok turn -> check string "turn completes" "MASC_CLAUDE_OK" turn.text)
 ;;
 
+(* A tag no dispatch arm decodes fails closed, before admission and inside the
+   turn, and a tag this client does read but does not accept in that phase is
+   reported under its own name. The details are compared whole: they come from
+   the parsed frame kind, so a wrong round trip of any tag shows here. *)
+let unknown_frame = {|{"type":"brand_new_frame","session_id":"__SESSION__"}|}
+
+let expect_protocol_error ~stage ~detail = function
+  | Error (Runtime_claude_code.Protocol_error { stage = actual_stage; detail = actual; _ }) ->
+    check string "protocol error stage" stage actual_stage;
+    check string "protocol error detail" detail actual
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+  | Ok _ -> fail "the frame was accepted"
+;;
+
+let test_unknown_frame_types_fail_closed_in_both_phases () =
+  with_fixture
+    ~before_initialize_response:[ Emit unknown_frame ]
+    [ Emit assistant; Emit result ]
+    (fun path ->
+       expect_protocol_error
+         ~stage:"initialize"
+         ~detail:
+           (Printf.sprintf "unexpected message type %S before control response" "brand_new_frame")
+         (run_fixture path));
+  with_fixture
+    [ Emit unknown_frame; Emit assistant; Emit result ]
+    (fun path ->
+       expect_protocol_error
+         ~stage:"turn"
+         ~detail:(Printf.sprintf "unsupported stream message type %S" "brand_new_frame")
+         (run_fixture path))
+;;
+
+let test_a_known_frame_out_of_phase_is_named_by_its_own_tag () =
+  with_fixture
+    ~before_initialize_response:[ Emit assistant ]
+    [ Emit assistant; Emit result ]
+    (fun path ->
+       expect_protocol_error
+         ~stage:"initialize"
+         ~detail:(Printf.sprintf "unexpected message type %S before control response" "assistant")
+         (run_fixture path))
+;;
+
 let test_quota_is_structurally_classified () =
   with_fixture [ Emit rate_limit_rejected; Emit quota_result ] (fun path ->
     match run_fixture path with
@@ -4516,6 +4560,10 @@ let () =
             test_usage_windows_are_reported_without_changing_the_turn
         ; test_case "command_lifecycle frames do not fail the turn" `Quick
             test_command_lifecycle_frames_do_not_fail_the_turn
+        ; test_case "unknown frame types fail closed in both phases" `Quick
+            test_unknown_frame_types_fail_closed_in_both_phases
+        ; test_case "a known frame out of phase is named by its own tag" `Quick
+            test_a_known_frame_out_of_phase_is_named_by_its_own_tag
         ; test_case
             "rejected rate limit overrides success flag"
             `Quick

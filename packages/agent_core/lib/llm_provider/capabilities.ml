@@ -333,7 +333,7 @@ let anthropic_thinking_control_from_sources ~catalog ~manifest model_id =
     | None -> None
     | Some manifest ->
       (match
-         Capability_manifest.lookup manifest (Model_identifiers.Model_id.to_string model_id)
+         Capability_manifest.lookup manifest model_id
        with
        | Some entry ->
          Option.map
@@ -1469,7 +1469,7 @@ let for_model_id_catalog model_id =
     falling back to the catalog lookup ({!for_model_id_catalog}) when no
     manifest entry matches. *)
 let for_model_id_with_manifest_from_catalog ~catalog manifest model_id =
-  match Capability_manifest.lookup manifest (Model_identifiers.Model_id.to_string model_id) with
+  match Capability_manifest.lookup manifest model_id with
   | Some entry -> Some (apply_manifest_entry entry)
   | None -> for_model_id_from_catalog catalog model_id
 ;;
@@ -1785,7 +1785,7 @@ let test_catalog_entry id_prefix : Model_catalog.model_entry =
 ;;
 
 let[@warning "-32"] test_manifest_entry id_prefix : Capability_manifest.entry =
-  { id_prefix
+  { id_prefix = Model_identifiers.Id_prefix.of_string_exn id_prefix
   ; base_label = None
   ; max_context_tokens = None
   ; max_output_tokens = None

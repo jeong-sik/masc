@@ -23,8 +23,11 @@ one of these ten rounds.
 
 ## Round 1: malformed context cannot become new user evidence
 
-Counterexample: a User-role checkpoint message contains the typed runtime
-context key with an invalid value or more than one occurrence. The memory-search
+Counterexample: a User-role Librarian input contains the typed runtime
+context key with an invalid value or more than one occurrence. A unique invalid
+value survives checkpoint metadata decoding. Duplicate keys are rejected by that
+checkpoint decoder, but can occur in typed in-memory or alternate History input.
+The memory-search
 repair excludes it, but `Keeper_librarian.message_to_text` treated both cases as
 ordinary conversation. Thus its injected body reached both the Librarian prompt
 and `observations_for_absorption` under an ordinary speaker header.

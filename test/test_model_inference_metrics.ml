@@ -1642,6 +1642,7 @@ let test_prompt_feedback_redacts_provider_model_identity () =
   check bool "contains redacted lane label" true (String_util.contains_substring text lane);
   check bool "contains total turns" true (String_util.contains_substring text "total_turns=10");
   check bool "contains error rate" true (String_util.contains_substring text "error_rate=30.0%");
+  check bool "contains coverage" true (String_util.contains_substring text "coverage=partial");
   check bool "does not expose provider" false (String_util.contains_substring text "openrouter");
   check bool "does not expose raw model" false (String_util.contains_substring text "secret-model")
 

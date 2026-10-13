@@ -995,20 +995,31 @@ export function noteKeeperChatAppended(name: string, audio?: unknown, _blocks?: 
 /** Re-hydrate the chat transcript for the keeper whose conversation panel
  *  is currently open (`activeKeeperName`). No-op when no panel is open.
  *
- *  Two callers:
- *   - The `keepers` route refresh plan calls this WITHOUT `force`, so the
- *     once-per-page `hydratedChatKeepers` guard makes it a no-op while the
- *     transcript is already loaded (route visits and the periodic refresh
- *     must not poll the history endpoint). It only fetches when a prior
- *     hydration failed and left the keeper un-hydrated.
- *   - The SSE reconnect path calls this WITH `force` to recover
- *     `keeper_chat_appended` events that fell outside the server replay
- *     buffer while the connection was down — those are unrecoverable
- *     through the live stream, so the open panel must re-fetch the window. */
-export function refreshActiveKeeperChatHistory(options: { force?: boolean } = {}): void {
+ *  The route refresh plan calls this. A transcript that is already loaded
+ *  stays as it is, and only a failed hydration retries, so route visits and
+ *  periodic refreshes do not poll the history endpoint. */
+export function refreshActiveKeeperChatHistory(): void {
   const keeperName = activeKeeperName.value.trim()
   if (!keeperName) return
-  void hydrateKeeperChatHistory(keeperName, options)
+  void hydrateKeeperChatHistory(keeperName)
+}
+
+/** Fetch the history of every Keeper this view knows again, loaded or not.
+ *  After a reconnect the server replay buffer may have dropped complete turns,
+ *  including turns of conversations that are not open. The known set is the
+ *  Keepers with a recorded hydration state, those with a request in flight,
+ *  and the open panel. A Keeper whose fetch failed is named in the error. */
+export async function refreshKnownKeeperChatHistories(): Promise<void> {
+  const names = new Set([
+    ...Object.keys(keeperChatHistoryHydration.value),
+    ...chatHistoryHydrationRequests.keys(),
+  ])
+  const active = activeKeeperName.value.trim()
+  if (active) names.add(active)
+  const known = Array.from(names)
+  await Promise.all(known.map(name => hydrateKeeperChatHistory(name, { force: true })))
+  const failed = known.filter(name => keeperChatHistoryErrors.value[name] != null)
+  if (failed.length > 0) throw new Error(`Known Keeper history refresh incomplete: ${failed.join(', ')}`)
 }
 
 export async function loadFullKeeperHistory(name: string): Promise<void> {

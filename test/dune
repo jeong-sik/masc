@@ -2439,6 +2439,7 @@
  (modules test_verification_presentation)
  (libraries masc_test_deps))
 (include stanzas/test_verification_collaboration_evidence.inc)
+(include stanzas/test_verification_operator_evidence.inc)
 (include stanzas/test_keeper_microvm_backend.inc)
 (include stanzas/test_keeper_microvm_guest_size.inc)
 (include stanzas/test_keeper_paste_delivery.inc)
@@ -4495,6 +4496,7 @@
 (include stanzas/test_tui_image_ref.inc)
 (include stanzas/test_tui_emblem_screen.inc)
 (include stanzas/test_tui_portrait_view.inc)
+(include stanzas/test_tui_evidence_picture.inc)
 (include stanzas/test_tui_keeper_portrait.inc)
 (include stanzas/test_tui_chat_portrait.inc)
 

@@ -44,6 +44,7 @@
   workspace_task_transitions
   workspace_task_verification
   workspace_verification_store
+  workspace_verification_operator_evidence
   event_kind
   mention
   workspace_resilience

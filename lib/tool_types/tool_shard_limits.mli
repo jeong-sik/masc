@@ -28,3 +28,12 @@ val verification_evidence_max_bytes : int
     completion authority reads files live through [Read] and an operator later
     reviews the snapshot, so a verdict must not be able to rest on bytes the
     snapshot did not keep (#27397). *)
+
+val verification_operator_preview_max_images : int
+(** How many images of {!verification_evidence_max_bytes} one operator
+    evidence response may carry inline. *)
+
+val verification_operator_preview_budget_bytes : int
+(** Total raw image bytes one operator evidence response may carry inline:
+    {!verification_operator_preview_max_images} images at the per-image
+    ceiling. An image past it is withheld with a typed reason, never dropped. *)

@@ -59,6 +59,8 @@ type submitted_evidence_access =
 val request_header_of_yojson :
   Yojson.Safe.t -> (request_header, string) result
 
+val request_header_to_yojson : request_header -> Yojson.Safe.t
+
 val submitted_evidence_access_to_yojson :
   submitted_evidence_access -> Yojson.Safe.t
 

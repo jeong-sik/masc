@@ -7251,6 +7251,12 @@ let verification_evidence_lines (state : state) ~width task_id =
                          (Terminal_text.single_line ev_reference) ev_bytes
                          (if ev_truncated then ", truncated" else "") )
                      :: wrap ~prefix:"      " ev_content)
+                | Masc.Tui_decode.Ev_binary
+                    { ev_b_reference; ev_b_bytes; ev_b_sha256; ev_b_format; ev_b_preview } ->
+                    wrap ~prefix:"    - "
+                      (Masc_tui_evidence_picture.caption ~reference:ev_b_reference
+                         ~bytes:ev_b_bytes ~sha256:ev_b_sha256 ~format:ev_b_format
+                         ev_b_preview)
                 | Masc.Tui_decode.Ev_artifact_unreadable
                     { ev_u_reference; ev_u_reason } ->
                     wrap

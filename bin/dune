@@ -2048,6 +2048,7 @@
   masc_tui_keeper_items
   masc.keeper_portrait
   masc_tui_portrait_view
+  masc_tui_evidence_picture
   masc_tui_hit
   masc_tui_press
   masc_tui_pick_list
@@ -2389,6 +2390,15 @@
   masc_tui_message_layout
   masc_tui_portrait_view
   masc_tui_terminal_palette))
+
+;; What the operator evidence section says about a binary artifact: image,
+;; other binary, or an image that cannot be shown and why. Apart from the TUI
+;; so the decision is tested without a terminal.
+(library
+ (name masc_tui_evidence_picture)
+ (wrapped false)
+ (modules masc_tui_evidence_picture)
+ (libraries masc))
 
 ;; A Keeper's own still portrait beside the Identity facts of its detail,
 ;; with the cache that keeps a roster walk from re-rendering it. Apart from

@@ -13,3 +13,12 @@ let read_file_default_max_bytes = 20_000
    happen to agree are not the same as one value. *)
 let read_file_max_max_bytes = 200_000
 let verification_evidence_max_bytes = read_file_max_max_bytes
+
+(* How many images of the per-image ceiling one operator evidence response
+   may carry inline. The response is one JSON body the TUI holds in memory
+   until the operator leaves the task, so the count of full-size images is the
+   unit the cost is reasoned in; the byte budget below is derived from it. *)
+let verification_operator_preview_max_images = 4
+
+let verification_operator_preview_budget_bytes =
+  verification_operator_preview_max_images * verification_evidence_max_bytes

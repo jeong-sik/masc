@@ -329,7 +329,7 @@ let run ~repo_root ~output_dir ~head_sha =
             ensure (int64 "NanoCpus"=Int64.of_float (Float.round (package.resources.cpus *. 1_000_000_000.))) "Docker CPU limit differs from the installed package";
             ensure (int64 "Memory"=package.resources.memory_bytes
               && int64 "MemorySwap"=package.resources.memory_bytes
-              && int64 "PidsLimit"=Int64.of_int package.resources.pids) "Docker memory or PID limits differ from the installed package";
+              && Some (int64 "PidsLimit")=Option.map Int64.of_int package.resources.pids) "Docker memory or PID limits differ from the installed package";
             (match list "Mounts" data with
              | [mount] -> ensure (member "RW" mount=`Bool false
                  && text "Destination" mount="/addon" && text "Source" mount=package.directory)

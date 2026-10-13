@@ -168,7 +168,8 @@ val load_context_from_checkpoint :
 (** {1 Checkpoint patching} *)
 
 (** Patch the last assistant message in [cp] with a unified [session_id] and
-    visible response text. *)
+    visible response text. Preserve message metadata, including the producing
+    source required to replay its reasoning artifacts. *)
 val patch_checkpoint_last_assistant :
   Agent_core.Checkpoint.t ->
   session_id:string ->

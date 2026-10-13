@@ -261,10 +261,10 @@ let patch_checkpoint_last_assistant
     if content_unchanged content msg.Agent_core.Types.content
        && Option.is_none msg.name
        && Option.is_none msg.tool_call_id
-       && msg.metadata = []
     then msg
     else
       Agent_core.Types.make_message
+        ~metadata:msg.metadata
         ~role:Agent_core.Types.Assistant
         content
   in

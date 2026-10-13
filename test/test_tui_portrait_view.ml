@@ -195,6 +195,86 @@ let test_a_second_request_replaces_the_first () =
     (frame [ first; second ]);
   ignore (frame [])
 
+(* An evidence picture is a PNG file, placed by the same bookkeeping as a
+   candle: transmitted when new or changed, put when moved, retransmitted
+   after a clear screen, deleted when a frame stops asking. *)
+let evidence_id = Masc_tui_graphics.image_id Masc_tui_graphics.Evidence_image_1
+
+let png ?(row = 6) ?(column = 8) ?(key = "key-a") ?(data = "png-file-bytes-a") () =
+  { View.png_image_id = evidence_id; png_row = row; png_column = column; png_cols = 30
+  ; png_rows = 10; png_key = key; png_data = data }
+
+let frame_png ?(presented = Presenter.Unchanged) pngs =
+  View.begin_frame ();
+  List.iter View.request_png pngs;
+  let written = Buffer.create 4096 in
+  View.flush presented ~write:(Buffer.add_string written);
+  Buffer.contents written
+
+let evidence_deleted = Masc_tui_graphics.delete_image ~image_id:evidence_id
+
+let test_a_png_file_is_placed_kept_moved_and_deleted () =
+  ignore (frame_png []);
+  let p = png () in
+  let first = frame_png [ p ] in
+  check bool "a new picture is transmitted as a PNG file" true (contains ~sub:"f=100" first);
+  check bool "under its slot's id" true (contains ~sub:(Printf.sprintf "i=%d," evidence_id) first);
+  check bool "at the 1-based corner" true (contains ~sub:"\027[7;9H" first);
+  check bool "as many rows as laid out" true (contains ~sub:"r=10," first);
+  check string "the same picture on an unchanged frame is left alone" "" (frame_png [ p ]);
+  check string "a clear screen took it, so it is transmitted again" first
+    (frame_png ~presented:cleared [ p ]);
+  let moved = png ~row:7 () in
+  let put = frame_png [ moved ] in
+  check bool "a moved picture is put" true (contains ~sub:"a=p," put);
+  check bool "without its bytes" false (contains ~sub:"f=100" put);
+  let changed = png ~row:7 ~key:"key-b" ~data:"png-file-bytes-b" () in
+  check bool "a changed picture is transmitted" true
+    (contains ~sub:"f=100" (frame_png [ changed ]));
+  check string "a frame that no longer asks deletes it" evidence_deleted (frame_png []);
+  check string "and then there is nothing to delete" "" (frame_png [])
+
+(* The key is what stands for the bytes, so a 200 KB file is not compared on
+   every frame; two files under one key are the same picture. *)
+let test_a_png_file_is_compared_by_its_key () =
+  ignore (frame_png []);
+  ignore (frame_png [ png ~key:"same" ~data:"first bytes" () ]);
+  check string "same key, same picture" ""
+    (frame_png [ png ~key:"same" ~data:"other bytes" () ]);
+  ignore (frame_png [])
+
+let test_a_rewritten_row_puts_back_only_the_png_it_crosses () =
+  ignore (frame_png []);
+  let p = png () in
+  let top = p.View.png_row and bottom = p.View.png_row + p.View.png_rows - 1 in
+  ignore (frame_png [ p ]);
+  check string "a row above leaves it alone" ""
+    (frame_png ~presented:(rows_written [ top - 1 ]) [ p ]);
+  check string "a row below leaves it alone" ""
+    (frame_png ~presented:(rows_written [ bottom + 1 ]) [ p ]);
+  check bool "its top row puts it back" true
+    (contains ~sub:"a=p," (frame_png ~presented:(rows_written [ top ]) [ p ]));
+  check bool "its bottom row puts it back" true
+    (contains ~sub:"a=p," (frame_png ~presented:(rows_written [ bottom ]) [ p ]));
+  ignore (frame_png [])
+
+(* A candle and a PNG share the bookkeeping and nothing else: taking one
+   down leaves the other where it is. *)
+let test_a_png_and_a_candle_are_kept_apart () =
+  ignore (frame []);
+  let candle = placement 6 in
+  View.begin_frame ();
+  View.request candle;
+  View.request_png (png ());
+  let written = Buffer.create 4096 in
+  View.flush Presenter.Unchanged ~write:(Buffer.add_string written);
+  check bool "both were transmitted" true
+    (contains ~sub:(Printf.sprintf "i=%d," mascot_id) (Buffer.contents written)
+     && contains ~sub:(Printf.sprintf "i=%d," evidence_id) (Buffer.contents written));
+  check string "dropping the PNG deletes only the PNG" evidence_deleted (frame [ candle ]);
+  check string "dropping the candle deletes only the candle" deleted (frame []);
+  check string "nothing left" "" (frame_png [])
+
 let () =
   run "tui_portrait_view"
     [ ( "display"
@@ -215,5 +295,13 @@ let () =
             test_a_row_rewritten_every_step_never_resends_the_pixels
         ; test_case "a second request replaces the first" `Quick
             test_a_second_request_replaces_the_first
+        ; test_case "a PNG file is placed, kept, moved and deleted" `Quick
+            test_a_png_file_is_placed_kept_moved_and_deleted
+        ; test_case "a PNG file is compared by its key" `Quick
+            test_a_png_file_is_compared_by_its_key
+        ; test_case "a rewritten row puts back only the PNG it crosses" `Quick
+            test_a_rewritten_row_puts_back_only_the_png_it_crosses
+        ; test_case "a PNG and a candle are kept apart" `Quick
+            test_a_png_and_a_candle_are_kept_apart
         ] )
     ]

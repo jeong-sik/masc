@@ -6685,7 +6685,7 @@ type state = {
   mutable task_history:
     (string * (Tui_decode.task_history_event list, string) result) option;
   mutable verification_evidence:
-    (string * (Tui_decode.verification_evidence, Verification_evidence_read.failure) result) option;
+    (string * (Masc_tui_evidence_picture.evidence, Verification_evidence_read.failure) result) option;
   (* One cache is shared by the calls surface and chat full-detail mode. The
      scope and generation are the authority: cursor position is not, because
      palette/Answering can open a chat without moving the roster cursor. *)

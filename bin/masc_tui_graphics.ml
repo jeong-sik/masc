@@ -26,6 +26,7 @@ type image =
   | Mascot
   | Keeper_portrait
   | About_keeper_1 | About_keeper_2 | About_keeper_3 | About_keeper_4
+  | Evidence_image_1 | Evidence_image_2 | Evidence_image_3 | Evidence_image_4
 [@@deriving enumerate]
 
 (* Fixed, so a query reply arriving late -- after the deadline, into the key
@@ -39,6 +40,13 @@ let image_id = function
   | About_keeper_2 -> 44
   | About_keeper_3 -> 45
   | About_keeper_4 -> 46
+  | Evidence_image_1 -> 51
+  | Evidence_image_2 -> 52
+  | Evidence_image_3 -> 53
+  | Evidence_image_4 -> 54
+
+let evidence_images =
+  [ Evidence_image_1; Evidence_image_2; Evidence_image_3; Evidence_image_4 ]
 
 let query_id = image_id Graphics_query
 
@@ -195,6 +203,12 @@ let replace_rgba ~image_id ~placement_id ~data ~pixel_width ~pixel_height ~rows 
   match Rgb_png.encode_rgba ~width:pixel_width ~height:pixel_height ~rgba:data with
   | Error _ -> ""
   | Ok png -> place_png ~identity:(identity ~image_id ~placement_id) ~data:png ~rows
+
+(* [data] is a PNG file's bytes, sent as they are. The caller identifies the
+   bytes first ([payload_media_type]): a terminal drops what it cannot decode
+   and says nothing. *)
+let replace_png ~image_id ~placement_id ~data ~rows =
+  place_png ~identity:(identity ~image_id ~placement_id) ~data ~rows
 
 let delete_all = Printf.sprintf "%sa=d%s" apc st
 

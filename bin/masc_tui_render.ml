@@ -7144,12 +7144,7 @@ let render_verification_list (state : state) =
 
 (* Complete judgement metadata is a physical document. Rows that fit keep
    their field alignment; longer rows remain literal and reachable by scroll. *)
-let judgement_detail_rows ~width lines =
-  List.concat_map
-    (fun (style, text) ->
-       if Message_layout.display_width text <= width then [style, text]
-       else Message_layout.wrap_words ~max_cells:(max 1 width) text
-            |> List.map (fun row -> style, row)) lines
+let judgement_detail_rows = Masc_tui_render_evidence.wrap_rows
 
 let verification_detail_lines ~width
     (request : Masc.Tui_decode.verification_request) =
@@ -7217,82 +7212,9 @@ let verification_detail_lines ~width
       [ Ansi.dim, "" ]
       @ wrapped_block "Evidence projection error" detail
 
-(* What the verifier can actually inspect: the operator evidence bundle,
-   lazily fetched on detail entry. The snapshot above lists references; this
-   carries artifact content prefixes (server-capped, truncation marked) and
-   the typed reason when an artifact could not be read — the judge's actual
-   input, drawn beside the verdict keys so approval is not blind. *)
-let verification_evidence_lines (state : state) ~width task_id =
-  let wrap ~prefix text =
-    Message_layout.wrap_body ~max_cells:(max 1 (width - 6))
-      ~sanitize:Keeper_chat.terminal_safe_text text
-    |> List.mapi (fun index line ->
-           Ansi.reset, (if index = 0 then prefix else "      ") ^ line)
-  in
-  (* The links an item carries, one row each under it. Printed as text: an
-     OSC 8 hyperlink would be counted as printable cells by the wrap and
-     truncation code, which treats only CSI as zero-width. *)
-  let link_rows item =
-    Masc_tui_evidence_link.of_item item
-    |> List.concat_map (fun link ->
-           wrap ~prefix:"      link: " (Masc_tui_evidence_link.text link))
-  in
-  let rows =
-    match state.verification_evidence with
-    | Some (id, result) when String.equal id task_id -> (
-        match result with
-        | Ok (Masc.Tui_decode.Evidence_items []) ->
-            [ Ansi.dim, "    (no inspectable evidence)" ]
-        | Ok (Masc.Tui_decode.Evidence_items items) ->
-            List.concat_map
-              (fun (item : Masc.Tui_decode.verification_evidence_item) ->
-                (match item with
-                | Masc.Tui_decode.Ev_collaboration {ev_reference; ev_content; ev_sha256} ->
-                    ((Ansi.reset, Printf.sprintf "    - submitted source %s (sha256 %s)"
-                        (Terminal_text.single_line ev_reference) ev_sha256)
-                     :: wrap ~prefix:"      " ev_content)
-                | Masc.Tui_decode.Ev_note note -> wrap ~prefix:"    - note: " note
-                | Masc.Tui_decode.Ev_artifact
-                    { ev_reference; ev_content; ev_bytes; ev_truncated } ->
-                    (( Ansi.reset
-                     , Printf.sprintf "    - artifact %s (%dB%s)"
-                         (Terminal_text.single_line ev_reference) ev_bytes
-                         (if ev_truncated then ", truncated" else "") )
-                     :: wrap ~prefix:"      " ev_content)
-                | Masc.Tui_decode.Ev_binary
-                    { ev_b_reference; ev_b_bytes; ev_b_sha256; ev_b_format; ev_b_preview } ->
-                    wrap ~prefix:"    - "
-                      (Masc_tui_evidence_picture.caption ~reference:ev_b_reference
-                         ~bytes:ev_b_bytes ~sha256:ev_b_sha256 ~format:ev_b_format
-                         ev_b_preview)
-                | Masc.Tui_decode.Ev_artifact_unreadable
-                    { ev_u_reference; ev_u_reason } ->
-                    wrap
-                      ~prefix:"    - artifact unreadable: "
-                      (Printf.sprintf "%s %s"
-                         (Option.value ev_u_reference ~default:"(no reference)")
-                         ev_u_reason))
-                @ link_rows item)
-              items
-        | Ok (Masc.Tui_decode.Evidence_access_unavailable reason) ->
-            (* The producer's reason is already the evidence access verdict. *)
-            wrap ~prefix:"    " reason
-        | Error (Masc_tui_types.Verification_evidence_read.Transport detail) ->
-            (* The transport boundary already says "GET failed". *)
-            wrap ~prefix:"    " detail
-        | Error (Masc_tui_types.Verification_evidence_read.Http_error detail) ->
-            wrap ~prefix:"    Read failed: " detail
-        | Error (Masc_tui_types.Verification_evidence_read.Invalid_json detail) ->
-            wrap ~prefix:"    Invalid JSON: " detail
-        | Error (Masc_tui_types.Verification_evidence_read.Invalid_payload detail) ->
-            wrap ~prefix:"    Decode failed: " detail
-        | Error (Masc_tui_types.Verification_evidence_read.Launch_failure detail) ->
-            wrap ~prefix:"    Read failed: " detail)
-    | _ -> [ Ansi.dim, "    loading..." ]
-  in
-  (Ansi.dim, "") :: (Ansi.bold, "  EVIDENCE CONTENT") :: rows
-
-let verification_detail_pane (state : state) ~rows ~cols request buf =
+let verification_detail_pane (state : state) ~rows ~cols
+    ~origin:(origin_row, origin_col) request buf =
+  let pane_start = Buffer.length buf in
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s"
@@ -7303,6 +7225,12 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
         ^ " \xe2\x96\xb8 details")
        (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id));
   box_divider buf cols;
+  (* The frame cell of the first content row, counted from what was drawn
+     above it, for the pictures placed over the rows under it. *)
+  let content_origin =
+    ( origin_row + lines_ended_since buf ~start:pane_start
+    , origin_col + framed_content_column )
+  in
   let width = max 1 (framed_inner_width cols) in
   let armed_note =
     match state.verification_verdict_armed with
@@ -7313,15 +7241,6 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
           (Terminal_text.single_line task_id)
           (Terminal_text.single_line request_id))
     | Some _ | None -> None
-  in
-  let lines =
-    verification_detail_lines ~width request
-    @ verification_evidence_lines state ~width request.Masc.Tui_decode.vr_task_id
-    @ (match armed_note with None -> [] | Some note -> [Theme.warn (), note])
-    @ (match state.verification_verdict_error with
-       | None -> []
-       | Some detail -> [Theme.bad (), "  Verdict action failed: " ^ Terminal_text.single_line detail])
-    |> judgement_detail_rows ~width
   in
   let verdict_action = "  a twice: approve; x: reject with reason" in
   let verdict_action_rows =
@@ -7337,6 +7256,29 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
       + (if Option.is_some state.verification_verdict_error then 1 else 0)
   in
   let content_height = max 1 (rows - framed_chrome_rows - fixed_rows) in
+  (* The three parts are wrapped apart so the evidence section's row index is
+     known: wrapping is per row, so this is the same rows as wrapping once. *)
+  let before = judgement_detail_rows ~width (verification_detail_lines ~width request) in
+  (* What the verifier can actually inspect: the operator evidence bundle,
+     lazily fetched on detail entry. The snapshot above lists references; this
+     carries artifact content prefixes (server-capped, truncation marked), the
+     pictures of image artifacts, and the typed reason when an artifact could
+     not be read — the judge's actual input, drawn beside the verdict keys so
+     approval is not blind. *)
+  let evidence, pictures =
+    Masc_tui_render_evidence.section ~evidence:state.verification_evidence
+      ~task_id:request.Masc.Tui_decode.vr_task_id ~width ~content_height
+      ~display:(Masc_tui_portrait_view.current_display ())
+  in
+  let after =
+    ((match armed_note with None -> [] | Some note -> [Theme.warn (), note])
+     @ (match state.verification_verdict_error with
+        | None -> []
+        | Some detail -> [Theme.bad (), "  Verdict action failed: " ^ Terminal_text.single_line detail]))
+    |> judgement_detail_rows ~width
+  in
+  let evidence_first = List.length before in
+  let lines = before @ evidence @ after in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.verification_detail_scroll max_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
@@ -7345,6 +7287,21 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
+  (* A picture is requested only while every row of its area is in view; one
+     the window has moved off is not requested, and the next flush takes it
+     off the terminal. *)
+  List.iter
+    (fun ((slot : Masc_tui_evidence_picture.slot), pixels) ->
+       match
+         Masc_tui_evidence_picture.plan
+           { slot with first = evidence_first + slot.first }
+           ~scroll ~content_height ~content_origin
+       with
+       | Masc_tui_evidence_picture.Place { row; column } ->
+           Masc_tui_portrait_view.request_png
+             (Masc_tui_evidence_picture.png_placement pixels slot.box ~row ~column)
+       | Masc_tui_evidence_picture.Hidden -> ())
+    pictures;
   Option.iter
     (fun note -> box_line_styled buf cols ~style:(Theme.warn ())
       (fit_width note (cols - 4)))
@@ -7375,7 +7332,7 @@ let render_verification_detail (state : state) request =
   let buf = Buffer.create 4096 in
   let scroll =
     if cols < keeper_split_threshold_cols then
-      verification_detail_pane state ~rows ~cols request buf
+      verification_detail_pane state ~rows ~cols ~origin:(strip_rows, 0) request buf
     else begin
       let left_cols = keeper_roster_pane_cols in
       let labels =
@@ -7406,8 +7363,8 @@ let render_verification_detail (state : state) request =
              state.verification)
         ~labels ~selected:state.verification_cursor;
       let answer =
-        verification_detail_pane state ~rows ~cols:(cols - left_cols) request
-          right_buf
+        verification_detail_pane state ~rows ~cols:(cols - left_cols)
+          ~origin:(strip_rows, left_cols) request right_buf
       in
       write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf;
       answer

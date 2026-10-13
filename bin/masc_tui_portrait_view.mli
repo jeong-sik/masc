@@ -89,6 +89,29 @@ val put_bytes : placement -> string
     already holds under the placement's id ({!Masc_tui_graphics.put}),
     restore the cursor. No pixels travel. *)
 
+(** {2 Pictures that arrive as PNG files}
+
+    An evidence picture is a PNG file as the server sent it, not a frame this
+    process drew. It goes through the same {!request}, {!send} and {!flush}
+    bookkeeping as a candle portrait, so a clear screen, a moved or rewritten
+    row and a view that no longer asks for it are handled once. *)
+
+type png_placement = {
+  png_image_id : int;  (** the picture's {!Masc_tui_graphics.image_id} *)
+  png_row : int;  (** 0-based frame line of the picture's top edge *)
+  png_column : int;  (** 0-based cell of its left edge *)
+  png_cols : int;  (** cells across, as laid out; the terminal derives its own *)
+  png_rows : int;  (** cells down; the terminal fits the picture into these *)
+  png_key : string;
+      (** equal keys mean equal bytes (a digest), so the bytes are not
+          compared on every frame *)
+  png_data : string;  (** a PNG file's bytes *)
+}
+
+val request_png : png_placement -> unit
+(** The frame being built wants this picture on screen. Like {!request}, a
+    second request under one image id replaces the first. *)
+
 val set_display : display -> unit
 (** What this terminal draws. Set once, after the start-up probe. Until then
     {!No_picture}. *)

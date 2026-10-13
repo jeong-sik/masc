@@ -3513,6 +3513,25 @@ let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
         (Task_cancel_done (task_id, expected_workspace, Error "Eio switch is unavailable"))
 
 
+let ensure_img_cache_dir () =
+  let dir = Filename.concat (Filename.get_temp_dir_name ()) "masc_img_cache" in
+  (try Unix.mkdir dir 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  dir
+
+(* An evidence image that is not a PNG, made into one. Kitty takes PNG
+   (f=100) and drops anything else without saying so, so the converters the
+   link preview already uses (sips, ImageMagick, ffmpeg) run first. They block
+   on child processes: only the evidence loader's systhread calls this. A
+   converter that cannot start is that image's failure, not the bundle's. *)
+let convert_evidence_image bytes =
+  match
+    Masc_tui_image_cache.prepare_payload ~run:Unix.system
+      ~cache_dir:(ensure_img_cache_dir ()) bytes
+  with
+  | result -> result
+  | exception ((Unix.Unix_error _ | Sys_error _) as failure) ->
+      Error (Printexc.to_string failure)
+
 (* The operator evidence bundle for the verification detail, over HTTP.
    Keyed by task id so a stale answer for a request the operator already
    left is discarded, not drawn under another one. *)
@@ -3524,7 +3543,14 @@ let launch_verification_evidence_load state ~mailbox task_id =
     ~boundary_error:(fun detail ->
       Masc_tui_types.Verification_evidence_read.Launch_failure detail)
     ~deliver:(fun result -> Verification_evidence_loaded (task_id, result))
-    (fun () -> Masc_tui_http.fetch_verification_evidence ~host ~port ~task_id)
+    (fun () ->
+      Masc_tui_http.fetch_verification_evidence ~host ~port ~task_id
+      |> Result.map (fun evidence ->
+             (* Decoding the bytes is done; making them drawable runs
+                converters, so it leaves the fiber the render loop shares. *)
+             Eio_guard.run_in_systhread ~label:"tui-evidence-pictures" (fun () ->
+                 Masc_tui_evidence_picture.prepare ~convert:convert_evidence_image
+                   evidence)))
 
 (* The detail pane's two non-Info tabs. Same discipline as the call log:
    the answer names the keeper it is for, so a stale load cannot be drawn
@@ -9449,11 +9475,6 @@ let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~titl
             (Message_layout.fit_width footer (max 1 (columns - 1))));
       state.image_open <- true
   end
-
-let ensure_img_cache_dir () =
-  let dir = Filename.concat (Filename.get_temp_dir_name ()) "masc_img_cache" in
-  (try Unix.mkdir dir 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  dir
 
 let download_remote_image url =
   Masc_tui_image_cache.download ~run:Unix.system

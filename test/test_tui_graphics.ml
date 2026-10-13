@@ -368,6 +368,52 @@ let test_image_pointer_geometry () =
     check bool "captions and unused margins never target page" true
       (point ~row ~column = None)) [(3,1);(24,1);(4,81);(4,0)]
 
+(* An evidence picture arrives as a PNG file. It travels as it is, under the
+   image id of its own slot, so replacing one slot's picture never touches
+   another's. *)
+let test_a_png_file_replaces_under_its_slots_identity () =
+  let slot = Masc_tui_graphics.Evidence_image_2 in
+  let id = Masc_tui_graphics.image_id slot in
+  let data = String.init 9000 (fun index -> Char.chr ((index * 7) mod 256)) in
+  let escapes =
+    Masc_tui_graphics.replace_png ~image_id:id ~placement_id:1 ~data ~rows:9
+  in
+  let all = bodies escapes in
+  check bool "chunked like every other placement" true (List.length all > 1);
+  let keys, _ = keys_and_payload (List.hd all) in
+  let says key = List.exists (String.equal key) keys in
+  check bool "a PNG file" true (says "f=100");
+  check bool "transmitted and displayed" true (says "a=T");
+  check bool "under the slot's image id" true (says (Printf.sprintf "i=%d" id));
+  check bool "and one placement" true (says "p=1");
+  check bool "as many rows as asked" true (says "r=9");
+  check bool "the terminal is asked not to answer" true (says "q=2");
+  check string "the file's bytes arrive whole" data
+    (all
+     |> List.map (fun body -> snd (keys_and_payload body))
+     |> String.concat ""
+     |> Base64.decode_exn);
+  check string "no bytes, no escape" ""
+    (Masc_tui_graphics.replace_png ~image_id:id ~placement_id:1 ~data:"" ~rows:9)
+;;
+
+let test_the_evidence_slots_are_four_distinct_ids () =
+  let ids = List.map Masc_tui_graphics.image_id Masc_tui_graphics.evidence_images in
+  check int "four slots" 4 (List.length ids);
+  check int "each its own id" 4 (List.length (List.sort_uniq Int.compare ids));
+  List.iter
+    (fun id ->
+      check bool "and not one a candle or the probe uses" false
+        (List.exists
+           (fun other -> other = id)
+           (List.filter_map
+              (fun image ->
+                if List.mem image Masc_tui_graphics.evidence_images then None
+                else Some (Masc_tui_graphics.image_id image))
+              Masc_tui_graphics.all_of_image)))
+    ids
+;;
+
 let () =
   run
     "tui_graphics"
@@ -403,6 +449,10 @@ let () =
             test_rgba_png_replaces_under_its_identity
         ; test_case "a put places held pixels without sending them" `Quick
             test_a_put_places_held_pixels_without_sending_them
+        ; test_case "a PNG file replaces under its slot's identity" `Quick
+            test_a_png_file_replaces_under_its_slots_identity
+        ; test_case "the evidence slots are four distinct ids" `Quick
+            test_the_evidence_slots_are_four_distinct_ids
         ] )
     ; ( "tmux"
       , [ test_case "passthrough doubles every escape" `Quick

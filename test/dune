@@ -4498,6 +4498,7 @@
 (include stanzas/test_tui_portrait_view.inc)
 (include stanzas/test_tui_evidence_picture.inc)
 (include stanzas/test_tui_evidence_link.inc)
+(include stanzas/test_tui_render_evidence.inc)
 (include stanzas/test_tui_keeper_portrait.inc)
 (include stanzas/test_tui_chat_portrait.inc)
 

@@ -2651,6 +2651,20 @@
 
 (include stanzas/test_docker_playground_gc_script.inc)
 
+; nofile-status reads the process table: which finds scan the caller's home,
+; which lock waiters lost their parent, which dune runs outside a wrapper.
+(rule
+ (alias runtest-test_nofile_status)
+ (deps
+  test_nofile_status.py
+  ../scripts/nofile-status.sh)
+ (action
+  (run python3 %{dep:test_nofile_status.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_nofile_status)))
+
 (include stanzas/test_env_config_dashboard_compute_timeouts.inc)
 
 (include stanzas/test_env_config_dashboard_execution_timeouts.inc)

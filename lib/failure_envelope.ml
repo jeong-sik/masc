@@ -143,59 +143,40 @@ let optional_string json key =
   | _ -> None
 
 let of_yojson json =
+  let ( let* ) = Result.bind in
   match json with
-  | `Assoc _ -> (
-      match
+  | `Assoc _ ->
+      let* () =
         Result.bind (required_string json "surface")
           (require_constant ~field:"surface" tool_host_surface)
-      with
-      | Error _ as err -> err
-      | Ok () -> (
-          match
-            Result.bind (required_string json "entity_kind")
-              (require_constant ~field:"entity_kind" tool_call_entity_kind)
-          with
-          | Error _ as err -> err
-          | Ok () -> (
-              match
-                Result.bind (required_string json "cause_code")
-                  tool_host_cause_of_code
-              with
-              | Error _ as err -> err
-              | Ok cause -> (
-                  match required_string json "severity" with
-                  | Error _ as err -> err
-                  | Ok severity_raw -> (
-                      match severity_of_string severity_raw with
-                      | Error _ as err -> err
-                      | Ok severity -> (
-                          match required_string json "summary" with
-                          | Error _ as err -> err
-                          | Ok summary -> (
-                              match required_string json "recoverability" with
-                              | Error _ as err -> err
-                              | Ok recoverability_raw -> (
-                                  match
-                                    recoverability_of_string recoverability_raw
-                                  with
-                                  | Error _ as err -> err
-                                  | Ok recoverability ->
-                                      Ok
-                                        {
-                                          entity_id =
-                                            optional_string json "entity_id";
-                                          cause;
-                                          severity;
-                                          summary;
-                                          recoverability;
-                                          operator_action =
-                                            optional_string json
-                                              "operator_action";
-                                          evidence_ref =
-                                            Option.value ~default:`Null
-                                              (Json_util.assoc_member_opt
-                                                 "evidence_ref" json);
-                                        }))))))))
+      in
+      let* () =
+        Result.bind (required_string json "entity_kind")
+          (require_constant ~field:"entity_kind" tool_call_entity_kind)
+      in
+      let* cause =
+        Result.bind (required_string json "cause_code") tool_host_cause_of_code
+      in
+      let* severity =
+        Result.bind (required_string json "severity") severity_of_string
+      in
+      let* summary = required_string json "summary" in
+      let* recoverability =
+        Result.bind (required_string json "recoverability")
+          recoverability_of_string
+      in
+      Ok
+        {
+          entity_id = optional_string json "entity_id";
+          cause;
+          severity;
+          summary;
+          recoverability;
+          operator_action = optional_string json "operator_action";
+          evidence_ref =
+            Option.value ~default:`Null
+              (Json_util.assoc_member_opt "evidence_ref" json);
+        }
   | other ->
       Error
         (Printf.sprintf "failure envelope must be a JSON object (received %s)"

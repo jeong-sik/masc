@@ -56,6 +56,18 @@ def bundle(session="plugin-1", root="frame:1"):
     }
 
 
+MALFORMED_EXPORTS = (
+    '{"document":"x"}',
+    '{"document":null}',
+    '{"document":{"id":"frame:1","children":"x"}}',
+    '{"document":{"id":"frame:1","children":[null]}}',
+    '{"document":{"id":"frame:1","children":[{"id":false}]}}',
+    '{"document":{"id":"frame:1","children":[{"id":"frame:1"}]}}',
+    '{"document":{"id":"frame:1","width":NaN}}',
+    "{",
+)
+
+
 class StudioTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -495,6 +507,108 @@ class StudioTests(unittest.TestCase):
         self.assertEqual(
             self.call("masc_figma_relay", args, RELAY)["decoded"], response
         )
+
+    def test_malformed_edit_readback_retains_raw_unknown_without_replay(self):
+        previous = self.capture()["result"]["snapshot_id"]
+        for index, tree in enumerate(MALFORMED_EXPORTS):
+            with self.subTest(tree=tree):
+                identity = f"malformed-edit-{index}"
+                self.submit(
+                    identity,
+                    kind="apply",
+                    snapshot_id=previous,
+                    ops=[
+                        {
+                            "op": "rename",
+                            "params": {"node_id": "frame:1", "name": "Changed"},
+                        }
+                    ],
+                )
+                self.assertEqual(self.relay("poll")["command"]["id"], identity)
+                payload = {**bundle(), "tree_json": tree}
+                response = self.relay(
+                    "result", operation_id=identity, ok=True, payload=payload
+                )
+                self.assertEqual(response["state"], "outcome_unknown")
+                retained = self.worker.store.operation(identity)["result"]
+                self.assertEqual(
+                    retained["relay_result"], {"ok": True, "payload": payload}
+                )
+                self.assertIn("Unusable readback", retained["reason"])
+                self.assertNotIn("snapshot_id", retained)
+                self.assertEqual(
+                    self.relay(
+                        "result", operation_id=identity, ok=True, payload=payload
+                    ),
+                    response,
+                )
+                self.assertIsNone(self.relay("poll")["command"])
+                self.assertEqual(
+                    self.observe()["rows"][0]["fields"]["latest_snapshot"], previous
+                )
+        self.submit("after-malformed-edit")
+        self.assertEqual(self.relay("poll")["command"]["id"], "after-malformed-edit")
+        self.assertEqual(
+            self.relay(
+                "result", operation_id="after-malformed-edit", ok=True, payload=bundle()
+            )["state"],
+            "captured",
+        )
+
+    def test_malformed_rest_readback_retains_raw_unknown_without_replay(self):
+        previous = self.capture()["result"]["snapshot_id"]
+        boot = {"worker_boot_id": self.worker.store.boot_id}
+        for index, tree in enumerate(MALFORMED_EXPORTS):
+            with self.subTest(tree=tree):
+                identity = f"malformed-rest-{index}"
+                self.call(
+                    "masc_figma_rest_capture",
+                    {
+                        "operation_id": identity,
+                        "file_key": "file-1",
+                        "root_id": "frame:1",
+                    },
+                )
+                self.assertEqual(
+                    self.call("masc_figma_relay", {"kind": "rest_poll", **boot}, RELAY)[
+                        "decoded"
+                    ]["command"]["id"],
+                    identity,
+                )
+                payload = bundle()
+                del payload["session_id"], payload["page_id"]
+                payload.update(
+                    source="rest_version",
+                    file_key="file-1",
+                    version="v9",
+                    tree_json=tree,
+                )
+                args = {
+                    "kind": "rest_result",
+                    **boot,
+                    "operation_id": identity,
+                    "ok": True,
+                    "payload": payload,
+                }
+                response = self.call("masc_figma_relay", args, RELAY)["decoded"]
+                self.assertEqual(response["state"], "outcome_unknown")
+                retained = self.worker.rest.get(identity)["result"]
+                self.assertEqual(
+                    retained["relay_result"], {"ok": True, "payload": payload}
+                )
+                self.assertIn("Unusable REST capture", retained["reason"])
+                self.assertNotIn("snapshot_id", retained)
+                self.assertEqual(
+                    self.call("masc_figma_relay", args, RELAY)["decoded"], response
+                )
+                self.assertIsNone(
+                    self.call("masc_figma_relay", {"kind": "rest_poll", **boot}, RELAY)[
+                        "decoded"
+                    ]["command"]
+                )
+                self.assertEqual(
+                    self.observe()["rows"][0]["fields"]["latest_snapshot"], previous
+                )
 
     def test_oversized_report_does_not_replace_a_readable_observation(self):
         identity = self.capture()["result"]["snapshot_id"]

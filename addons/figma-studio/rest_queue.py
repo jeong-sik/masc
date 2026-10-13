@@ -130,7 +130,7 @@ class RestQueue:
                         payload, None, request["root_id"], check=check_snapshot
                     )
                     state = State.CAPTURED
-                except (ValueError, TypeError, KeyError) as error:
+                except Refused as error:
                     result["reason"] = f"Unusable REST capture: {error}"
             self.db.execute(
                 "UPDATE rest_requests SET state=?,result=? WHERE id=?",

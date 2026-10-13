@@ -1,21 +1,18 @@
 """Evaluate explicit structural expectations against one retained snapshot."""
 
-import json
 from typing import Any
 
-from store import Json, Refused, encode, fields, text
+from store import Json, Refused, encode, fields, native_document, text
 
 
 def validate(snapshot_id: str, snapshot: Json, checks: list[Json]) -> Json:
     if not isinstance(checks, list) or not checks:
         raise Refused("Provide explicit structural checks")
-    pending = [json.loads(snapshot["tree_json"])["document"]]
+    pending = [native_document(snapshot["tree_json"])]
     nodes: dict[str, Json] = {}
     while pending:
         node = pending.pop()
         identity = text(node.get("id"))
-        if identity in nodes:
-            raise Refused("Ambiguous duplicate node IDs in snapshot")
         nodes[identity] = node
         pending.extend(node.get("children", []))
     results = []

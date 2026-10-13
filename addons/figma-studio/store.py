@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import sqlite3
 import time
 import uuid
@@ -63,6 +64,46 @@ def fields(value: Any, required: set[str], optional: set[str] | None = None) -> 
     return value
 
 
+def native_document(tree_json: Any) -> Json:
+    """Parse the native tree shape used by snapshot identity and validation."""
+
+    def reject_constant(value: str) -> Any:
+        raise Refused(f"Non-finite number in native export: {value}")
+
+    def finite_float(value: str) -> float:
+        number = float(value)
+        if not math.isfinite(number):
+            raise Refused("Non-finite number in native export")
+        return number
+
+    try:
+        tree = json.loads(
+            text(tree_json), parse_constant=reject_constant, parse_float=finite_float
+        )
+    except Refused:
+        raise
+    except (ValueError, RecursionError) as error:
+        raise Refused("Invalid native export JSON") from error
+    if not isinstance(tree, dict) or not isinstance(tree.get("document"), dict):
+        raise Refused("Native export requires a document object")
+    document = tree["document"]
+    pending = [document]
+    identities = set()
+    while pending:
+        node = pending.pop()
+        identity = text(node.get("id"))
+        if identity in identities:
+            raise Refused("Ambiguous duplicate node IDs in native export")
+        identities.add(identity)
+        children = node.get("children", [])
+        if not isinstance(children, list) or any(
+            not isinstance(child, dict) for child in children
+        ):
+            raise Refused("Native node children must be an array of objects")
+        pending.extend(children)
+    return document
+
+
 def png_bytes(preview: Json | None) -> bytes | None:
     if preview is None:
         return None
@@ -70,7 +111,10 @@ def png_bytes(preview: Json | None) -> bytes | None:
     if preview["mime_type"] != "image/png":
         raise Refused("Preview must be PNG")
     encoded = text(preview["data_base64"])
-    data = base64.b64decode(encoded, validate=True)
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except ValueError as error:
+        raise Refused("Invalid canonical PNG encoding") from error
     if base64.b64encode(data).decode() != encoded or not data.startswith(
         b"\x89PNG\r\n\x1a\n"
     ):
@@ -365,7 +409,7 @@ class Store:
                         if operation["request"]["kind"] == "capture"
                         else State.APPLIED
                     )
-                except (ValueError, TypeError, KeyError) as error:
+                except Refused as error:
                     result["reason"] = f"Unusable readback: {error}"
                     state = State.UNKNOWN
             self.db.execute(
@@ -409,8 +453,8 @@ class Store:
             or value["root_id"] != root
         ):
             raise Refused("Snapshot identity mismatch")
-        tree = json.loads(text(value["tree_json"]))
-        if not isinstance(tree, dict) or tree.get("document", {}).get("id") != root:
+        document = native_document(value["tree_json"])
+        if document["id"] != root:
             raise Refused("Native export root mismatch")
         coverage = fields(value["coverage"], {"stable", "missing"})
         if (
@@ -433,8 +477,11 @@ class Store:
             if data
             else None,
         }
-        encoded = encode(metadata)
-        identity = hashlib.sha256(encoded.encode()).hexdigest()
+        try:
+            encoded = encode(metadata)
+            identity = hashlib.sha256(encoded.encode()).hexdigest()
+        except (ValueError, TypeError, UnicodeError) as error:
+            raise Refused("Snapshot must contain valid UTF-8 JSON values") from error
         # Validate both read and observation projections before publishing a
         # latest pointer. A rejected readback remains only in its operation.
         check(identity, metadata, data)

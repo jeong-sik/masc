@@ -138,11 +138,14 @@ let check_preserved ~base_path ~keeper_name ~expected error =
                ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) observed with
            | Some surface ->
              Alcotest.(check string) "public local recovery class"
-               "official_client_recovery_required" surface.blocker_class;
+               "official_client_recovery_required"
+               (Masc.Keeper_status_bridge.runtime_blocker_class_to_string surface.blocker_class);
              Alcotest.(check string) "public recovery identity"
                (I.official_client_recovery_summary expected) (Lazy.force surface.summary);
              `Assoc
-               [ "runtime_blocker_class", `String surface.blocker_class
+               [ "runtime_blocker_class",
+                 `String
+                   (Masc.Keeper_status_bridge.runtime_blocker_class_to_string surface.blocker_class)
                ; "runtime_blocker_summary", `String (Lazy.force surface.summary) ]
            | None -> Alcotest.fail "registry failure has no public blocker"
          in

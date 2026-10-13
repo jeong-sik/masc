@@ -111,6 +111,39 @@ let test_the_tuning_names_the_lines () =
   Alcotest.(check (list string)) "the names as written, highest first"
     [ "E"; "B"; "G"; "D"; "A"; "D" ] (tuning "\\tuning E4 B3 G3 D3 A2 D2 :4 0.6")
 
+(* {1 Repeats}
+
+   The signs each bar carried: whether an [\ro] opened it, the [\rc] count
+   that closed it, and the [\ae] numbers it plays on. *)
+
+let signs_per_bar (score : Score.t) =
+  List.map
+    (fun (measure : Score.measure) -> (measure.repeat_start, measure.repeat_end, measure.endings))
+    score.measures
+
+let signs = Alcotest.(result (list (triple bool (option int) (list int))) failure)
+
+let check_signs label source expected =
+  Alcotest.check signs label (Ok expected) (Result.map signs_per_bar (Score.read source))
+
+let test_a_repeat_opens_and_closes () =
+  check_signs "open, then close with the count" "\\ro :4 0.6 3.6 | :4 5.6 3.6 \\rc 2"
+    [ true, None, []; false, Some 2, [] ];
+  check_signs "a sign stands anywhere in its bar" ":4 0.6 \\ro 3.6 | :4 \\rc 3 5.6"
+    [ true, None, []; false, Some 3, [] ];
+  check_signs "before the dot that ends the directives" "\\title \"riff\" \\ro . :4 0.6"
+    [ true, None, [] ]
+
+let test_a_second_close_says_the_count_again () =
+  check_signs "the latest count wins" ":4 0.6 \\rc 2 \\rc 3" [ false, Some 3, [] ];
+  check_signs "an opener twice is still open" "\\ro \\ro :4 0.6" [ true, None, [] ]
+
+let test_endings_gather_across_the_bar () =
+  check_signs "two directives, one set" ":4 0.6 \\ae 1 \\ae 2 3" [ false, None, [ 1; 2; 3 ] ];
+  check_signs "ascending, no two alike" ":4 0.6 \\ae 3 1 3 2" [ false, None, [ 1; 2; 3 ] ];
+  check_signs "each bar keeps its own" ":4 0.6 \\ae 1 | :4 3.6 \\ae 2"
+    [ false, None, [ 1 ]; false, None, [ 2 ] ]
+
 (* {1 The pane}
 
    Where the measures break and how wide a cell is are not compared: those
@@ -197,6 +230,40 @@ let test_notes_that_cannot_be_placed () =
     (String_past_tuning { string = 7; strings = 6 });
   check_failure "string zero" ":4 0.0" (String_past_tuning { string = 0; strings = 6 })
 
+let test_repeat_signs_outside_the_subset () =
+  check_failure "a close with no count" ":4 0.6 \\rc" (Missing_argument Repeat_count);
+  check_failure "a close with no number" ":4 0.6 \\rc x" (Missing_argument Repeat_count);
+  check_failure "a close at the bar line" ":4 0.6 \\rc | 3.6" (Missing_argument Repeat_count);
+  check_failure "a count of nothing" ":4 0.6 \\rc 0" (Repeat_count_out_of_range "0");
+  check_failure "a count past counting" ":4 0.6 \\rc 99999999999999999999"
+    (Repeat_count_out_of_range "99999999999999999999");
+  check_failure "endings with no numbers" ":4 0.6 \\ae" (Missing_argument Alternate_ending_numbers);
+  check_failure "endings with no number" ":4 0.6 \\ae x" (Missing_argument Alternate_ending_numbers);
+  check_failure "an ending of nothing" ":4 0.6 \\ae 0" (Alternate_ending_out_of_range "0");
+  check_failure "an ending past 31" ":4 0.6 \\ae 32" (Alternate_ending_out_of_range "32");
+  check_failure "the second ending past 31" ":4 0.6 \\ae 1 32" (Alternate_ending_out_of_range "32")
+
+let test_a_sign_with_no_bar () =
+  check_failure "an opener after the last bar" ":4 0.6 | \\ro" Repeat_without_bar;
+  check_failure "a closer after the last bar" ":4 0.6 | \\rc 2" Repeat_without_bar;
+  check_failure "endings after the last bar" ":4 0.6 | \\ae 1" Repeat_without_bar;
+  check_failure "an opener on an empty bar" "\\ro | :4 0.6" Repeat_without_bar;
+  check_failure "a closer on an empty bar" ":4 0.6 | \\rc 2 | 3.6" Repeat_without_bar
+
+(* A failure's sentence is printed, so the author's text in it never reaches
+   the terminal as control bytes. *)
+let test_a_failure_sentence_holds_no_control_bytes () =
+  List.iter
+    (fun word ->
+      String.iter
+        (fun char ->
+          Alcotest.(check bool)
+            (Printf.sprintf "no control byte for %S" word)
+            true
+            (Char.code char >= 0x20 && char <> '\x7f'))
+        (Score.failure_text (Score.Not_a_note word)))
+    [ "a\000b"; "a\x01b"; "a\x7fb"; "a\nb"; "tab\there" ]
+
 let () =
   Alcotest.run "tui-alphatex"
     [ ( "music"
@@ -213,6 +280,14 @@ let () =
             test_what_is_read_and_not_played
         ; Alcotest.test_case "the tuning names the lines" `Quick
             test_the_tuning_names_the_lines
+        ] )
+    ; ( "repeats"
+      , [ Alcotest.test_case "a repeat opens and closes" `Quick
+            test_a_repeat_opens_and_closes
+        ; Alcotest.test_case "a second close says the count again" `Quick
+            test_a_second_close_says_the_count_again
+        ; Alcotest.test_case "endings gather across the bar" `Quick
+            test_endings_gather_across_the_bar
         ] )
     ; ( "the pane"
       , [ Alcotest.test_case "a drawn tab stays inside the pane" `Quick
@@ -232,5 +307,10 @@ let () =
             test_markup_that_changes_length
         ; Alcotest.test_case "notes that cannot be placed" `Quick
             test_notes_that_cannot_be_placed
+        ; Alcotest.test_case "repeat signs outside the subset" `Quick
+            test_repeat_signs_outside_the_subset
+        ; Alcotest.test_case "a sign with no bar" `Quick test_a_sign_with_no_bar
+        ; Alcotest.test_case "a failure sentence holds no control bytes" `Quick
+            test_a_failure_sentence_holds_no_control_bytes
         ] )
     ]

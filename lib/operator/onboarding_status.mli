@@ -47,14 +47,33 @@ type t =
     metadata, whichever Keepers they are, and every file passes the check the
     server's boot reconcile applies. No metadata is Needs_setup; any file that
     fails it is Invalid, because the server refuses to boot on it. Persistence
-    does not establish model, sandbox or running health. *)
-val inspect : base_path:string option -> t
+    does not establish model, sandbox or running health.
+
+    [sandbox_run] is the runner the declared sandbox backend is probed with:
+    the host's {!Sandbox_readiness.system_runner} in the CLI and the server, a
+    fixture in tests. The probe issues read-only commands only (host detection,
+    then the backend's inventory and, for Apple Container, Rosetta and kernel
+    settings), at most seven per inspection. A workspace with no readable imp
+    declaration issues none. *)
+val inspect : sandbox_run:Sandbox_readiness.runner -> base_path:string option -> t
 
 (** {!inspect} for a running server: who starts the Keeper Firefox is read
     from the browser configuration it loaded, which its other answers use,
     and not from the file. {!inspect} reads the workspace's [runtime.toml]
     and uses its browser tables only when the whole file loads. *)
-val inspect_loaded : configuration:Browser_configuration.t option -> base_path:string option -> t
+val inspect_loaded :
+  sandbox_run:Sandbox_readiness.runner -> configuration:Browser_configuration.t option ->
+  base_path:string option -> t
+
+(** How the doctor reports one probed sandbox backend. [Service_ready] is
+    [Needs_verification]: the service answered and no guest was booted.
+    [Missing_prerequisite], [Unsupported_host], [Unsupported_capability] and
+    [Probe_failed] are [Needs_setup] carrying the probe's reason, so a backend
+    that cannot be used now is never read as one that merely was not verified.
+    [Needs_configuration] is [Needs_verification]: it is raised for remote SSH,
+    which the probe cannot observe, and the declaration already names the
+    endpoint it asks for. *)
+val sandbox_check_of_entry : Sandbox_readiness.entry -> check
 
 (** The wire name of a check, as serialized in [id]. *)
 val check_id_name : check_id -> string

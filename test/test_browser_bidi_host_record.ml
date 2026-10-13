@@ -11,7 +11,7 @@ module Status = Masc.Browser_bidi_host_status
 (* What masc doctor says of the BiDi host for this workspace, and how it
    rates it. The doctor is another process than the host, as this one is. *)
 let doctor base =
-  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  let observed = Onboarding_status.inspect ~sandbox_run:(fun _ -> Error Masc.Sandbox_readiness.Missing_command) ~base_path:(Some base) in
   match
     List.find_opt
       (fun (c : Onboarding_status.check) -> c.id = Onboarding_status.Browser_bidi_host)

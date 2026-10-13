@@ -18,6 +18,42 @@ let condition id state =
 let message id state =
   (List.find (fun (c : Onboarding_status.check) -> c.id = id) state.Onboarding_status.checks).message
 
+module Readiness = Masc.Sandbox_readiness
+
+(* Commands the sandbox probe may issue, answered from a table. A command the
+   table does not list is a missing executable, as on a host without it. The
+   calls are kept so a test can bound how many commands one inspection spends. *)
+let fixture_runner responses =
+  let calls = ref [] in
+  let run argv =
+    calls := argv :: !calls;
+    match List.assoc_opt argv responses with
+    | Some reply -> reply
+    | None -> Error Readiness.Missing_command in
+  run, (fun () -> List.rev !calls)
+
+let linux_host = [ ["uname"; "-s"], Ok "Linux\n"; ["uname"; "-m"], Ok "x86_64\n" ]
+let macos26_arm64_host =
+  [ ["uname"; "-s"], Ok "Darwin\n"; ["uname"; "-m"], Ok "arm64\n";
+    ["sw_vers"; "-productVersion"], Ok "26.0\n" ]
+let docker_info = ["docker"; "info"; "--format"; "{{json .}}"]
+let healthy_docker =
+  linux_host @ [ docker_info, Ok {|{"OSType":"linux","SecurityOptions":[]}|} ]
+let apple_inventory = ["container"; "list"; "-a"; "--format"; "json"]
+let apple_properties = ["container"; "system"; "property"; "list"; "--format"; "json"]
+let rosetta_receipt = ["pkgutil"; "--pkg-info"; "com.apple.pkg.RosettaUpdateAuto"]
+let rosetta_installed = rosetta_receipt, Ok "package-id: com.apple.pkg.RosettaUpdateAuto\n"
+let rosetta_absent = rosetta_receipt, Error Readiness.Command_failed
+let apple_settings ~rosetta ~kernel =
+  apple_properties,
+  Ok (Printf.sprintf {|{"build":{"rosetta":%b},"kernel":%s}|} rosetta
+        (if kernel then {|{"binaryPath":"opt/kata/vmlinux"}|} else "{}"))
+
+(* The sandbox check of a workspace the other tests build, answered by a host
+   with a healthy Docker engine, which is the default imp declaration. *)
+let inspect = Onboarding_status.inspect
+  ~sandbox_run:(fst (fixture_runner healthy_docker))
+
 (* Drops a TOML table and its body, so a fixture can lose one declaration while
    the binding that names it stays. *)
 let without_table prefix text =
@@ -32,12 +68,12 @@ let without_table prefix text =
   String.concat "\n" (go [] false (String.split_on_char '\n' text))
 
 let absent_workspace () =
-  let observed = Onboarding_status.inspect ~base_path:None in
+  let observed = inspect ~base_path:None in
   check bool "offers a workspace without requiring MASC_BASE_PATH" true
     (condition Onboarding_status.Workspace observed = Onboarding_status.Needs_setup)
 
 let new_location_stays_untouched () = with_workspace @@ fun base ->
-  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  let observed = inspect ~base_path:(Some base) in
   check bool "location needs initialization" true
     (condition Onboarding_status.Workspace observed = Onboarding_status.Needs_setup);
   check int "inspection writes nothing" 0 (Array.length (Sys.readdir base))
@@ -52,7 +88,7 @@ let declared_is_not_verified () = with_workspace @@ fun base ->
   write runtime_path (read "../scripts/fixtures/release-evidence/runtime.toml");
   write keeper_path (read "../config/keepers-default/imp.toml");
   let runtime_before = read runtime_path and keeper_before = read keeper_path in
-  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  let observed = inspect ~base_path:(Some base) in
   check bool "declaration appears before any keeper metadata" true
     (condition Onboarding_status.Keeper_declaration observed = Onboarding_status.Satisfied);
   check bool "declaration is not a verified model call" true
@@ -75,7 +111,7 @@ let declared_is_not_verified () = with_workspace @@ fun base ->
   ] in
   List.iter (fun invalid ->
     write runtime_path invalid;
-    let state = Onboarding_status.inspect ~base_path:(Some base) in
+    let state = inspect ~base_path:(Some base) in
     check bool "invalid runtime references are not merely unverified" true
       (condition Onboarding_status.Runtime_configuration state = Onboarding_status.Invalid);
     check string "invalid config preserved" invalid (read runtime_path)) invalid_configs;
@@ -84,7 +120,7 @@ let declared_is_not_verified () = with_workspace @@ fun base ->
      unverified, not as a load failure. *)
   write runtime_path
     (runtime_before ^ "\n[runtime.lanes.only_lane]\ncandidates = [\"ollama_cloud.deepseek-v4.1-flash\"]\n[runtime.assignments]\nimp = \"only_lane\"\n");
-  let lane_named = Onboarding_status.inspect ~base_path:(Some base) in
+  let lane_named = inspect ~base_path:(Some base) in
   check bool "an assignment naming a declared lane is not a load failure" true
     (condition Onboarding_status.Model_connection lane_named = Onboarding_status.Needs_verification);
   write runtime_path runtime_before;
@@ -93,19 +129,19 @@ let declared_is_not_verified () = with_workspace @@ fun base ->
   let metadata_path = Filename.concat metadata_dir "imp.json" in
   let valid_meta = Yojson.Safe.to_string (Masc_test_deps.current_meta_json_fixture ~name:"imp" ()) in
   write metadata_path valid_meta;
-  let persisted = Onboarding_status.inspect ~base_path:(Some base) in
+  let persisted = inspect ~base_path:(Some base) in
   check bool "canonical metadata records history" true
     (condition Onboarding_status.Keeper_persistence persisted = Onboarding_status.Satisfied);
   check bool "persisted history is not sandbox proof" true
     (condition Onboarding_status.Sandbox persisted = Onboarding_status.Needs_verification);
   check string "metadata observation is read-only" valid_meta (read metadata_path);
   write metadata_path "{broken";
-  let corrupt = Onboarding_status.inspect ~base_path:(Some base) in
+  let corrupt = inspect ~base_path:(Some base) in
   check bool "corrupt metadata is invalid, not absent" true
     (condition Onboarding_status.Keeper_persistence corrupt = Onboarding_status.Invalid);
   check string "read does not repair metadata" "{broken" (read metadata_path);
   write runtime_path "[providers.secret]\napi_key = \"DO_NOT_PROJECT\"\ninvalid = [";
-  let broken = Onboarding_status.inspect ~base_path:(Some base) in
+  let broken = inspect ~base_path:(Some base) in
   check bool "bad config remains inspectable" true
     (condition Onboarding_status.Runtime_configuration broken = Onboarding_status.Invalid);
   let serialized = Yojson.Safe.to_string (Onboarding_status.to_json broken) in
@@ -123,14 +159,14 @@ let a_load_failure_says_what_failed () = with_workspace @@ fun base ->
   let fixture = read "../scripts/fixtures/release-evidence/runtime.toml" in
 
   write runtime_path (fixture ^ "\n[runtime.assignments]\nimp = \"ollama_cloud.absent\"\n");
-  let assignment = Onboarding_status.inspect ~base_path:(Some base) in
+  let assignment = inspect ~base_path:(Some base) in
   check bool "an unresolved assignment names the site it was written at" true
     (String_util.contains_substring
        (message Onboarding_status.Runtime_configuration assignment)
        "[runtime.assignments]");
 
   write runtime_path (without_table "[models.\"deepseek-v4.1-flash\"]" fixture);
-  let dangling = Onboarding_status.inspect ~base_path:(Some base) in
+  let dangling = inspect ~base_path:(Some base) in
   check bool "a binding without its declaration needs the file edited" true
     (condition Onboarding_status.Runtime_configuration dangling = Onboarding_status.Invalid);
   check bool "the message names the binding that cannot resolve" true
@@ -160,7 +196,7 @@ let browser_lane_fixture ?(declared=true) ?(connection_port="") () f =
 
 let browser_lane_absent_launcher_is_unobserved () = with_workspace @@ fun base ->
   Unix.mkdir (Filename.concat base ".masc") 0o700;
-  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  let observed = inspect ~base_path:(Some base) in
   check bool "an uninstalled lane reports no browser_lane observation" true
     (List.find_opt (fun (c : Onboarding_status.check) -> c.id = Onboarding_status.Browser_lane)
        observed.Onboarding_status.checks = None)
@@ -170,7 +206,7 @@ let browser_lane_absent_launcher_is_unobserved () = with_workspace @@ fun base -
    to install it again. *)
 let browser_lane_undeclared_launcher_is_invalid_and_says_reinstall () =
   browser_lane_fixture ~declared:false ~connection_port:"64850" () @@ fun base ->
-  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  let observed = inspect ~base_path:(Some base) in
   check bool "a launcher with no declaration is invalid" true
     (condition Onboarding_status.Browser_lane observed = Onboarding_status.Invalid);
   check bool "the missing declaration is named" true
@@ -183,7 +219,7 @@ let browser_lane_undeclared_launcher_is_invalid_and_says_reinstall () =
    port the file names: a declared launcher is unverified here, not aligned. *)
 let browser_lane_declared_launcher_follows_the_workspace () =
   browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
-  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  let observed = inspect ~base_path:(Some base) in
   check bool "a declared launcher outside a server needs verification" true
     (condition Onboarding_status.Browser_lane observed = Onboarding_status.Needs_verification);
   check bool "the workspace port is named" true
@@ -263,11 +299,11 @@ let record_file base = Filename.concat base ".masc/browser-lane/bidi-host.json"
 let a_workspace_without_a_browser_lane_says_nothing_of_a_bidi_host () = with_workspace @@ fun base ->
   Unix.mkdir (Filename.concat base ".masc") 0o700;
   check bool "no lane and no host record: no BiDi check" true
-    (bidi_check (Onboarding_status.inspect ~base_path:(Some base)) = None)
+    (bidi_check (inspect ~base_path:(Some base)) = None)
 
 let a_lane_with_no_bidi_host_says_how_one_is_attached () =
   browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
-  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  let observed = inspect ~base_path:(Some base) in
   check bool "a host that never ran is something to set up" true
     (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Needs_setup);
   says observed
@@ -282,7 +318,7 @@ let a_lane_with_no_bidi_host_says_how_one_is_attached () =
    installation wrote it; this one says to install it first, then run it. *)
 let a_launcher_that_cannot_be_run_as_it_is_is_installed_first () =
   (browser_lane_fixture ~declared:false ~connection_port:"64850" () @@ fun base ->
-   let observed = Onboarding_status.inspect ~base_path:(Some base) in
+   let observed = inspect ~base_path:(Some base) in
    says observed
      [ "then runs " ^ launch_command base
      ; "The launcher there is not as an installation wrote it: the operator first installs the \
@@ -295,7 +331,7 @@ let a_launcher_that_cannot_be_run_as_it_is_is_installed_first () =
    written (Record.ended held ~because:Record.Reason_only ~reason:"stopped by SIGINT" ~session:Record.No_session_left
               ~now:1_791_000_060.);
    released held;
-   says (Onboarding_status.inspect ~base_path:(Some base))
+   says (inspect ~base_path:(Some base))
      [ "The operator " ^ run_again base
      ; "No browser lane is installed in this workspace, so that launcher is not there yet: the \
         operator first installs the lane by running the MASC browser host installer, \
@@ -327,7 +363,7 @@ let a_bidi_host_that_ended_says_why_and_what_comes_first () =
   written (Record.attached held ~now:1_791_000_002.);
   let ended_with ~reason session =
     written (Record.ended held ~because:Record.Reason_only ~reason ~session ~now:1_791_000_060.);
-    Onboarding_status.inspect ~base_path:(Some base)
+    inspect ~base_path:(Some base)
   in
   let run = run_again base in
   let observed = ended_with ~reason:"stopped by SIGINT" Record.No_session_left in
@@ -382,13 +418,13 @@ let a_bidi_host_that_ended_says_why_and_what_comes_first () =
     [ {|with this reason: "could not read C:\x5C".|} ];
   (* No acknowledgement reaching the host is not the server refusing one. *)
   written (Record.note_unacknowledged held unacknowledged);
-  let one = Onboarding_status.inspect ~base_path:(Some base) in
+  let one = inspect ~base_path:(Some base) in
   says one
     [ "Its record, " ^ record_file base
       ^ ", lists one result the host holds no acknowledgement for, and whether the server refused \
          it, the host could not send it, or no acknowledgement came." ];
   written (Record.note_unacknowledged held unacknowledged);
-  let two = Onboarding_status.inspect ~base_path:(Some base) in
+  let two = inspect ~base_path:(Some base) in
   says two
     [ "lists 2 results the host holds no acknowledgement for, and for each whether the server \
        refused it, the host could not send it, or no acknowledgement came." ];
@@ -410,7 +446,7 @@ let a_bidi_host_that_met_another_profile_names_both_profiles () =
       (Record.ended held ~reason:"this Firefox runs the profile elsewhere" ~session:Record.No_session_left
          ~because:(Record.Profile_not_kept { expected; found }) ~now:1_791_000_060.);
     released held;
-    Onboarding_status.inspect ~base_path:(Some base)
+    inspect ~base_path:(Some base)
   in
   let next_host = Status.firefox_profile_flag ^ " " ^ Filename.quote expected in
   says (ended_on (Some found)) [ found; expected; next_host ];
@@ -505,11 +541,11 @@ let doctor_reads_who_starts_the_firefox_from_runtime_toml () =
   let profile = "/keeper/profile" in
   let table = "\n[browser.live.bidi]\nfirefox = \"/Apps/firefox\"\nprofile = \"" ^ profile ^ "\"\n" in
   write runtime (read "../scripts/fixtures/release-evidence/runtime.toml" ^ table);
-  says (Onboarding_status.inspect ~base_path:(Some base)) [ profile ];
+  says (inspect ~base_path:(Some base)) [ profile ];
   (* A server refuses a file that does not load, and so has no browser
      configuration either: doctor does not read its table. *)
   write runtime table;
-  lacks (bidi_message (Onboarding_status.inspect ~base_path:(Some base))) [ profile ]
+  lacks (bidi_message (inspect ~base_path:(Some base))) [ profile ]
 
 (* At the limit, earlier history is unknown. A valid longer record retains
    all listed results; the reader must not pretend it was already trimmed. *)
@@ -518,7 +554,7 @@ let a_record_at_the_limit_says_the_newest_are_kept () =
   let held = take_record base in
   written (Record.attached held ~now:1_791_000_002.);
   repeat_note held Record.unacknowledged_limit;
-  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  let observed = inspect ~base_path:(Some base) in
   says observed
     [ "lists 64 results the host holds no acknowledgement for"
     ; "at the 64-result snapshot window; it may omit older results"
@@ -541,7 +577,7 @@ let a_bidi_host_that_never_got_a_session_says_what_the_next_one_needs () =
   written (Record.ended held ~because:Record.Reason_only ~reason:"BiDi connection failed: Connection refused"
              ~session:Record.No_session_left ~now:1_791_000_060.);
   released held;
-  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  let observed = inspect ~base_path:(Some base) in
   says observed
     [ "It ended before Firefox gave it a session and left none there"
     ; "The next host needs a Firefox that answers at that address, one started with \
@@ -558,7 +594,7 @@ let a_bidi_host_that_died_says_the_session_may_be_left () =
   written (Record.attached held ~now:1_791_000_002.);
   written (Record.note_unacknowledged held unacknowledged);
   released held;
-  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  let observed = inspect ~base_path:(Some base) in
   check bool "a host that died is something to set up again" true
     (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Needs_setup);
   says observed
@@ -577,7 +613,7 @@ let a_bidi_host_record_that_cannot_be_read_is_invalid () =
   browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
   let record = record_file base in
   write record "{\"pid\": 1";
-  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  let observed = inspect ~base_path:(Some base) in
   check bool "a record that is not one is invalid" true
     (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Invalid);
   says observed
@@ -588,7 +624,7 @@ let a_bidi_host_record_that_cannot_be_read_is_invalid () =
     ; "then runs " ^ launch_command base ];
   let held = take_record base in
   write record "{\"pid\": 1";
-  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  let observed = inspect ~base_path:(Some base) in
   check bool "it is invalid while a host runs too" true
     (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Invalid);
   says observed
@@ -882,7 +918,7 @@ let a_stale_browser_lane_does_not_hold_imp_history_closed () =
   write (Filename.concat config "runtime.toml")
     (read "../scripts/fixtures/release-evidence/runtime.toml");
   write (Filename.concat keepers "imp.toml") (read "../config/keepers-default/imp.toml");
-  let not_booted = Onboarding_status.inspect ~base_path:(Some base) in
+  let not_booted = inspect ~base_path:(Some base) in
   check bool "imp that never booted still needs the journey" true
     (Onboarding_status.opening not_booted = Onboarding_status.Needs_journey);
   let metadata_dir = Filename.concat root "keepers" in
@@ -890,7 +926,7 @@ let a_stale_browser_lane_does_not_hold_imp_history_closed () =
   let metadata_path = Filename.concat metadata_dir "imp.json" in
   write metadata_path
     (Yojson.Safe.to_string (Masc_test_deps.current_meta_json_fixture ~name:"imp" ()));
-  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  let observed = inspect ~base_path:(Some base) in
   check bool "the lane drift is still reported" true
     (condition Onboarding_status.Browser_lane observed = Onboarding_status.Invalid);
   check bool "the lane is advisory" true
@@ -902,14 +938,14 @@ let a_stale_browser_lane_does_not_hold_imp_history_closed () =
     "open_existing_history"
     (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "opening" json));
   write metadata_path "{broken";
-  let unreadable = Onboarding_status.inspect ~base_path:(Some base) in
+  let unreadable = inspect ~base_path:(Some base) in
   check bool "unreadable imp history still needs the journey" true
     (Onboarding_status.opening unreadable = Onboarding_status.Needs_journey);
   write metadata_path
     (Yojson.Safe.to_string (Masc_test_deps.current_meta_json_fixture ~name:"imp" ()));
   write (Filename.concat config "runtime.toml")
     "[providers.secret]\napi_key = \"x\"\ninvalid = [";
-  let unresolved_model = Onboarding_status.inspect ~base_path:(Some base) in
+  let unresolved_model = inspect ~base_path:(Some base) in
   check bool "imp history is readable again, so only runtime.toml can hold it closed" true
     (condition Onboarding_status.Keeper_persistence unresolved_model
      = Onboarding_status.Satisfied);
@@ -932,7 +968,7 @@ let a_workspace_without_imp_opens_its_keepers_history () =
       (Yojson.Safe.to_string (Masc_test_deps.current_meta_json_fixture ~name ())) in
   persist "geek-scout";
   persist "glossary-maniac";
-  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  let observed = inspect ~base_path:(Some base) in
   check bool "imp is still undeclared" true
     (condition Onboarding_status.Keeper_declaration observed = Onboarding_status.Needs_setup);
   check bool "other Keepers' history is persisted history" true
@@ -944,7 +980,7 @@ let a_workspace_without_imp_opens_its_keepers_history () =
   let keepers = Filename.concat root "config/keepers" in
   Unix.mkdir keepers 0o700;
   write (Filename.concat keepers "imp.toml") "[keeper\nbroken";
-  let broken_imp = Onboarding_status.inspect ~base_path:(Some base) in
+  let broken_imp = inspect ~base_path:(Some base) in
   check bool "a broken imp declaration is reported" true
     (condition Onboarding_status.Keeper_declaration broken_imp = Onboarding_status.Invalid);
   check bool "and does not close the other Keepers' history" true
@@ -955,7 +991,7 @@ let a_workspace_without_imp_opens_its_keepers_history () =
   let runtime_path = Filename.concat root "config/runtime.toml" in
   let runtime_text = read runtime_path in
   Sys.remove runtime_path;
-  let no_runtime = Onboarding_status.inspect ~base_path:(Some base) in
+  let no_runtime = inspect ~base_path:(Some base) in
   check bool "a missing runtime.toml needs setup" true
     (condition Onboarding_status.Runtime_configuration no_runtime = Onboarding_status.Needs_setup);
   check bool "and keeps the journey" true
@@ -964,7 +1000,7 @@ let a_workspace_without_imp_opens_its_keepers_history () =
   (* The server's boot reconcile refuses every Keeper when one metadata file
      cannot be read, so the readable ones do not make the workspace openable. *)
   write (Filename.concat metadata_dir "broken-one.json") "{broken";
-  let one_broken = Onboarding_status.inspect ~base_path:(Some base) in
+  let one_broken = inspect ~base_path:(Some base) in
   check bool "one unreadable Keeper is invalid history" true
     (condition Onboarding_status.Keeper_persistence one_broken = Onboarding_status.Invalid);
   check bool "and keeps the journey, as boot would refuse" true
@@ -992,8 +1028,185 @@ let only_shared_checks_hold_history_closed () =
                         Model_connection; Keeper_declaration; Sandbox; Browser_lane;
                         Browser_bidi_host ];
   check bool "no workspace never opens history" true
-    (Onboarding_status.opening (Onboarding_status.inspect ~base_path:None)
+    (Onboarding_status.opening (inspect ~base_path:None)
      = Onboarding_status.Needs_journey)
+
+(* A workspace whose imp declares [keeper_toml]; the doctor reads the sandbox
+   backend from it and probes that backend only. *)
+let imp_workspace base keeper_toml =
+  let root = Filename.concat base ".masc" in
+  let config = Filename.concat root "config" in
+  let keepers = Filename.concat config "keepers" in
+  List.iter (fun path -> Unix.mkdir path 0o700) [root; config; keepers];
+  write (Filename.concat config "runtime.toml") (read "../scripts/fixtures/release-evidence/runtime.toml");
+  write (Filename.concat keepers "imp.toml") keeper_toml
+
+let microvm_imp backend =
+  Printf.sprintf
+    "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"microvm\"\nmicrovm_backend = \"%s\"\nsandbox_image = \"base\"\nnetwork_mode = \"inherit\"\ninstructions = \"Respond to the operator.\"\n"
+    backend
+
+let sandbox_of state = Onboarding_status.sandbox_check_of_entry
+  { Readiness.backend = Readiness.Apple_container; state; guest_verification = Readiness.Not_run }
+
+let sandbox_check_of observed =
+  List.find (fun (c : Onboarding_status.check) -> c.id = Onboarding_status.Sandbox)
+    observed.Onboarding_status.checks
+
+(* The doctor's answer for imp's declared sandbox, with the commands it spent. *)
+let doctor_sandbox ~keeper_toml responses = with_workspace @@ fun base ->
+  imp_workspace base keeper_toml;
+  let run, calls = fixture_runner responses in
+  let observed = Onboarding_status.inspect ~sandbox_run:run ~base_path:(Some base) in
+  sandbox_check_of observed, calls ()
+
+(* What the probe itself answers for Apple Container on the same fixture. *)
+let apple_probe responses =
+  let run, _ = fixture_runner responses in
+  (Readiness.probe ~host:(Readiness.Macos {architecture = Readiness.Arm64; major = 26}) ~run
+     ~require_rootless:false ~require_userns:false Readiness.Apple_container).state
+
+(* masc doctor used to print one fixed sentence for every declared sandbox.
+   The four situations below are different facts about the same declaration:
+   each one must reach the check as its own condition and its own reason. *)
+let a_declared_apple_container_is_probed_not_assumed () =
+  let keeper_toml = microvm_imp "apple_container" in
+  let healthy = macos26_arm64_host
+    @ [ apple_inventory, Ok "[]"; rosetta_installed; apple_settings ~rosetta:true ~kernel:true ] in
+  let ready, ready_calls = doctor_sandbox ~keeper_toml healthy in
+  check bool "a service that answers is declared but unverified" true
+    (ready = sandbox_of Readiness.Service_ready);
+  check bool "an answering service is Needs_verification" true
+    (ready.condition = Onboarding_status.Needs_verification);
+
+  (* The builder VM starts with Rosetta unless build.rosetta is false, and does
+     not start on a Mac without it. *)
+  let no_rosetta = macos26_arm64_host
+    @ [ apple_inventory, Ok "[]"; rosetta_absent; apple_settings ~rosetta:true ~kernel:true ] in
+  let rosetta, rosetta_calls = doctor_sandbox ~keeper_toml no_rosetta in
+  let rosetta_state = apple_probe no_rosetta in
+  check bool "the probe says a prerequisite is missing" true
+    (match rosetta_state with Readiness.Missing_prerequisite _ -> true | _ -> false);
+  check bool "that is the Rosetta question, not the kernel one" true
+    (rosetta_state <> Readiness.Missing_prerequisite Readiness.kernel_missing_reason);
+  check bool "the doctor carries the probe's own Rosetta reason" true
+    (rosetta = sandbox_of rosetta_state);
+  check bool "a builder that cannot start needs setup" true
+    (rosetta.condition = Onboarding_status.Needs_setup);
+  check bool "the setup action is offered" true
+    (rosetta.actions = [Onboarding_status.Configure_sandbox]);
+  check bool "Rosetta is what the CLI's own question names" true
+    (Readiness.apple_container_needs_rosetta
+       ~run:(fst (fixture_runner no_rosetta)));
+
+  let no_kernel = macos26_arm64_host
+    @ [ apple_inventory, Ok "[]"; rosetta_installed; apple_settings ~rosetta:true ~kernel:false ] in
+  let kernel, kernel_calls = doctor_sandbox ~keeper_toml no_kernel in
+  check bool "a missing default kernel names the kernel" true
+    (kernel = sandbox_of (Readiness.Missing_prerequisite Readiness.kernel_missing_reason));
+  check bool "a missing default kernel needs setup" true
+    (kernel.condition = Onboarding_status.Needs_setup);
+  check bool "Rosetta and kernel are told apart" true (kernel.message <> rosetta.message);
+  check bool "the CLI's kernel question agrees" true
+    (Readiness.apple_container_needs_default_kernel
+       ~run:(fst (fixture_runner no_kernel)));
+
+  let stopped = macos26_arm64_host
+    @ [ apple_inventory, Error Readiness.Command_failed; rosetta_installed;
+        apple_settings ~rosetta:true ~kernel:true ] in
+  let stopped_check, stopped_calls = doctor_sandbox ~keeper_toml stopped in
+  check bool "a service that refuses its inventory needs setup" true
+    (stopped_check.condition = Onboarding_status.Needs_setup);
+  check bool "the probe calls that Probe_failed" true
+    (match apple_probe stopped with Readiness.Probe_failed _ -> true | _ -> false);
+  check bool "a stopped service is not an answering one" true
+    (stopped_check <> ready);
+  let absent, absent_calls = doctor_sandbox ~keeper_toml macos26_arm64_host in
+  check bool "a missing container command needs setup" true
+    (absent.condition = Onboarding_status.Needs_setup);
+  check bool "a missing command and a stopped service say different things" true
+    (absent.message <> stopped_check.message);
+  List.iter (fun (what, calls) ->
+    check bool (what ^ " stays within a handful of read-only commands") true
+      (List.length calls <= 7))
+    [ "healthy", ready_calls; "no Rosetta", rosetta_calls; "no kernel", kernel_calls;
+      "stopped", stopped_calls; "absent", absent_calls ];
+  check int "a healthy Apple Container costs six commands" 6 (List.length ready_calls)
+
+let a_declared_docker_is_probed_as_docker () =
+  let docker_toml = read "../config/keepers-default/imp.toml" in
+  let ready, calls = doctor_sandbox ~keeper_toml:docker_toml healthy_docker in
+  check bool "a Docker engine that answers is declared but unverified" true
+    (ready.condition = Onboarding_status.Needs_verification);
+  check bool "the Docker probe asks the Docker engine" true
+    (List.mem docker_info calls);
+  check bool "no Apple Container command is issued for a Docker declaration" false
+    (List.exists (fun argv -> List.mem argv [apple_inventory; apple_properties; rosetta_receipt]) calls);
+  let down, _ = doctor_sandbox ~keeper_toml:docker_toml
+    (linux_host @ [ docker_info, Error Readiness.Command_failed ]) in
+  check bool "a Docker daemon that refuses to answer needs setup" true
+    (down.condition = Onboarding_status.Needs_setup);
+  check bool "a stopped daemon is not rated like a healthy one" true (down <> ready);
+  let no_docker, _ = doctor_sandbox ~keeper_toml:docker_toml linux_host in
+  check bool "a host without docker needs setup" true
+    (no_docker.condition = Onboarding_status.Needs_setup);
+  let unknown_host, no_commands = doctor_sandbox ~keeper_toml:docker_toml [] in
+  check bool "a host that cannot be identified needs setup" true
+    (unknown_host.condition = Onboarding_status.Needs_setup);
+  check bool "host detection alone is what a failed host spends" true (List.length no_commands <= 3)
+
+(* Every state the probe can return, once, so a new variant breaks this table
+   and the mapping together. *)
+let every_probe_state_has_one_condition () =
+  let condition state = (sandbox_of state).condition in
+  let setup = Onboarding_status.Needs_setup and verify = Onboarding_status.Needs_verification in
+  check bool "Service_ready" true (condition Readiness.Service_ready = verify);
+  check bool "Needs_configuration" true (condition (Readiness.Needs_configuration "r") = verify);
+  check bool "Missing_prerequisite" true (condition (Readiness.Missing_prerequisite "r") = setup);
+  check bool "Unsupported_host" true (condition (Readiness.Unsupported_host "r") = setup);
+  check bool "Unsupported_capability" true (condition (Readiness.Unsupported_capability "r") = setup);
+  check bool "Probe_failed" true (condition (Readiness.Probe_failed "r") = setup);
+  List.iter (fun state ->
+    check bool "a probe reason reaches the operator whole" true
+      (String_util.contains_substring (sandbox_of state).message "the one reason"))
+    Readiness.[ Missing_prerequisite "the one reason"; Unsupported_host "the one reason";
+                Unsupported_capability "the one reason"; Probe_failed "the one reason";
+                Needs_configuration "the one reason" ]
+
+(* The Keeper declaration loads, but its sandbox names no backend, so there is
+   nothing to probe. The doctor carries the declaration's own reason. *)
+let a_declaration_that_names_no_backend_is_not_probed () = with_workspace @@ fun base ->
+  imp_workspace base
+    "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"microvm\"\nsandbox_image = \"base\"\nnetwork_mode = \"inherit\"\ninstructions = \"Respond to the operator.\"\n";
+  let run, calls = fixture_runner macos26_arm64_host in
+  let observed = Onboarding_status.inspect ~sandbox_run:run ~base_path:(Some base) in
+  let sandbox = sandbox_check_of observed in
+  check bool "the Keeper declaration itself loads" true
+    (condition Onboarding_status.Keeper_declaration observed = Onboarding_status.Satisfied);
+  check bool "an unnamed microvm backend needs setup" true
+    (sandbox.condition = Onboarding_status.Needs_setup);
+  (match Readiness.declaration ~base_path:base with
+   | Error { Readiness.kind = Readiness.Declaration_invalid; detail } ->
+     check string "the declaration's reason is the message" detail sandbox.message
+   | Error { Readiness.kind = Readiness.Declaration_unreadable; _ } | Ok _ ->
+     fail "the declaration should be invalid");
+  check bool "setup is the action" true (sandbox.actions = [Onboarding_status.Configure_sandbox]);
+  check int "nothing is probed without a backend" 0 (List.length (calls ()))
+
+(* A selected remote SSH backend cannot be observed from here: the probe says
+   Needs_configuration whatever the declaration holds. The doctor reaches the
+   probe only after the declaration named an endpoint, so it does not tell the
+   operator to choose one again. *)
+let a_declared_remote_ssh_backend_is_unverified_not_unconfigured () = with_workspace @@ fun base ->
+  imp_workspace base
+    "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"remote_ssh\"\nremote_endpoint = \"builder\"\nnetwork_mode = \"inherit\"\ninstructions = \"Respond to the operator.\"\n";
+  let run, _ = fixture_runner linux_host in
+  let observed = Onboarding_status.inspect ~sandbox_run:run ~base_path:(Some base) in
+  match Readiness.declaration ~base_path:base with
+  | Ok { Readiness.backend = Readiness.Remote_ssh; _ } ->
+    check bool "a declared endpoint is unverified" true
+      (condition Onboarding_status.Sandbox observed = Onboarding_status.Needs_verification)
+  | Ok _ | Error _ -> fail "the fixture should declare remote_ssh"
 
 let () = run "Onboarding observations"
   ["first use", [test_case "missing environment is an actionable state" `Quick absent_workspace;
@@ -1013,6 +1226,16 @@ let () = run "Onboarding observations"
                    a_workspace_without_imp_opens_its_keepers_history;
                  test_case "only checks every Keeper shares hold history closed" `Quick
                    only_shared_checks_hold_history_closed];
+   "sandbox probe", [test_case "a declared Apple Container is probed, not assumed" `Quick
+                       a_declared_apple_container_is_probed_not_assumed;
+                     test_case "a declared Docker is probed as Docker" `Quick
+                       a_declared_docker_is_probed_as_docker;
+                     test_case "every probe state has one condition" `Quick
+                       every_probe_state_has_one_condition;
+                     test_case "a declaration that names no backend is not probed" `Quick
+                       a_declaration_that_names_no_backend_is_not_probed;
+                     test_case "a declared remote SSH backend is unverified, not unconfigured" `Quick
+                       a_declared_remote_ssh_backend_is_unverified_not_unconfigured];
    "BiDi host", [test_case "a workspace without a browser lane says nothing of a BiDi host" `Quick
                    a_workspace_without_a_browser_lane_says_nothing_of_a_bidi_host;
                  test_case "a lane with no BiDi host says how one is attached" `Quick

@@ -162,7 +162,56 @@ let persistence_check base_path =
          ^ ". This does not verify that any of them is running or that its model and sandbox are ready.")
         []
 
-let keeper_checks base_path =
+(* What the doctor says of imp's declared sandbox backend, from the one answer
+   [Sandbox_readiness.probe] gave for it. The reason text is the probe's own,
+   so a Mac whose Apple Container builder cannot start reads as that, and one
+   whose builder starts but has no default kernel reads as that, instead of
+   both reading as a service that merely answered.
+
+   Service_ready is Needs_verification: the service answered, no guest was
+   booted. Probe_failed is Needs_setup, not Needs_verification: the probe did
+   ask and got no usable answer (a stopped service, a refused command, a reply
+   that is not the expected JSON), and a backend that cannot be used now is not
+   the same state as one nobody has asked. Reading it as Needs_verification
+   would make a stopped daemon indistinguishable, by condition, from a healthy
+   one. Needs_configuration comes only from a backend the probe cannot observe
+   from here (remote SSH); it is reached after [Sandbox_readiness.declaration]
+   accepted the selection, so the choice it asks for already exists and what
+   remains is verification. *)
+let sandbox_check_of_entry (entry : Sandbox_readiness.entry) =
+  let message = Sandbox_readiness.backend_id entry.Sandbox_readiness.backend ^ ": "
+    ^ Sandbox_readiness.state_message entry.Sandbox_readiness.state in
+  match entry.Sandbox_readiness.state with
+  | Sandbox_readiness.Service_ready ->
+    check Sandbox Needs_verification message [Configure_sandbox; Start_imp]
+  | Sandbox_readiness.Needs_configuration _ ->
+    check Sandbox Needs_verification message [Configure_sandbox; Start_imp]
+  | Sandbox_readiness.Missing_prerequisite _ ->
+    check Sandbox Needs_setup message [Configure_sandbox]
+  | Sandbox_readiness.Unsupported_host _ ->
+    check Sandbox Needs_setup message [Configure_sandbox]
+  | Sandbox_readiness.Unsupported_capability _ ->
+    check Sandbox Needs_setup message [Configure_sandbox]
+  | Sandbox_readiness.Probe_failed _ ->
+    check Sandbox Needs_setup message [Configure_sandbox]
+
+(* A declaration that names no usable backend cannot be probed. The detail is
+   the declaration's own reason, so the operator sees which line to repair. *)
+let sandbox_check ~sandbox_run ~base_path =
+  match Sandbox_readiness.declaration ~base_path with
+  | Error { Sandbox_readiness.kind = Declaration_unreadable; detail } ->
+    check Sandbox Needs_setup detail [Inspect_configuration; Configure_sandbox]
+  | Error { Sandbox_readiness.kind = Declaration_invalid; detail } ->
+    check Sandbox Needs_setup detail [Configure_sandbox]
+  | Ok selection ->
+    let host = Sandbox_readiness.detect_host ~run:sandbox_run in
+    sandbox_check_of_entry
+      (Sandbox_readiness.probe ~host ~run:sandbox_run
+         ~require_rootless:(Env_config_sandbox.Hardening.require_rootless ())
+         ~require_userns:(Env_config_sandbox.Hardening.require_userns ())
+         selection.Sandbox_readiness.backend)
+
+let keeper_checks ~sandbox_run base_path =
   let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
   if not (Sys.file_exists path) then
     [check Keeper_declaration Needs_setup "Your first Keeper, imp, has not been created."
@@ -178,9 +227,7 @@ let keeper_checks base_path =
   | Ok _ ->
     [check Keeper_declaration Satisfied "imp is declared. Its running state is observed separately."
        [Start_imp];
-     check Sandbox Needs_verification
-       "Check the selected sandbox service and prepare imp's isolated workspace."
-       [Configure_sandbox; Start_imp]]
+     sandbox_check ~sandbox_run ~base_path]
 
 (* The BiDi host is read from its own record on disk, so this answers with
    no server running. A workspace with no browser lane installed and no host
@@ -226,7 +273,7 @@ let browser_lane_check ~configuration base_path =
    | Browser_lane_launcher.Misconfigured -> [check Browser_lane Invalid message [Inspect_configuration]])
   @ browser_bidi_host_check host
 
-let inspected ~browser ~base_path =
+let inspected ~sandbox_run ~browser ~base_path =
   match base_path with
   | None ->
     { base_path = None; selected_runtime = None; selected_model = None;
@@ -245,12 +292,14 @@ let inspected ~browser ~base_path =
       let selected_runtime, selected_model, models = model_checks config_path in
       { base_path = Some base_path; selected_runtime; selected_model;
         checks = check Workspace Satisfied "Workspace found." [Choose_workspace]
-          :: (models @ keeper_checks base_path @ [persistence_check base_path]
+          :: (models @ keeper_checks ~sandbox_run base_path @ [persistence_check base_path]
               @ browser_lane_check ~configuration:(browser config_path) base_path) }
 
-let inspect ~base_path = inspected ~browser:browser_configuration ~base_path
+let inspect ~sandbox_run ~base_path =
+  inspected ~sandbox_run ~browser:browser_configuration ~base_path
 
-let inspect_loaded ~configuration ~base_path = inspected ~browser:(fun _ -> configuration) ~base_path
+let inspect_loaded ~sandbox_run ~configuration ~base_path =
+  inspected ~sandbox_run ~browser:(fun _ -> configuration) ~base_path
 
 let optional_string = function None -> `Null | Some value -> `String value
 

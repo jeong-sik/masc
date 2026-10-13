@@ -1267,5 +1267,8 @@ let%test "terminal sentinel without stop semantics remains incomplete" =
   match finalize (transition empty Types.MessageStop) with
   | Failed (Types.Stream_incomplete { reason }) ->
     reason = "stream_terminal_without_stop_reason"
-  | Failed _ | Completed _ -> false
+  | Failed (Types.Stream_provider_error _) | Completed _ | Failed (Types.Stream_parse_failed _)
+  | Failed (Types.Stream_ndjson_parse_failed _) | Failed (Types.Stream_repeating _)
+  | Failed (Types.Stream_unknown_event _) | Failed (Types.Stream_unsupported_part _)
+  | Failed (Types.Stream_unsupported_response _) -> false
 ;;

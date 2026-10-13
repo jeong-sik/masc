@@ -232,7 +232,10 @@ let%test "overflow_of_empty_completion: ContextWindowExceeded yields ContextOver
          { message = "empty completion (stop_reason=model_context_window_exceeded): X"
          ; limit = None
          }) -> true
-  | Some _ | None -> false
+  | Some (RateLimited _) | None | Some (Overloaded _) | Some (ServerError _) | Some (AuthError _)
+  | Some (AuthorizationError _) | Some (PaymentRequired _) | Some (InvalidRequest _)
+  | Some (NotFound _) | Some (ContextOverflow _) | Some (InputCapacity _) | Some (NetworkError _)
+  | Some (Timeout _) -> false
 ;;
 
 let%test "overflow_of_empty_completion: non-overflow stop_reason yields None" =

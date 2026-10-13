@@ -644,7 +644,17 @@ let fence_store store error =
   with_state_write store (fun () ->
     match store.health with
     | Fenced (Commit_outcome_unknown _) -> ()
-    | Writable | Fenced _ -> store.health <- Fenced error)
+    | Writable | Fenced (Invalid_argument _) | Fenced (Identity_failure _) | Fenced (Io_failure _)
+    | Fenced (Codec_failure _) | Fenced (Writer_already_active) | Fenced (Store_already_attached)
+    | Fenced (Store_released) | Fenced (Store_release_forbidden)
+    | Fenced (Resource_cleanup_failed _) | Fenced (Construction_cleanup_failed _)
+    | Fenced (Store_already_exists) | Fenced (Store_not_found)
+    | Fenced (Store_initialization_incomplete) | Fenced (Store_initialization_conflict)
+    | Fenced (Unsupported_store_version _) | Fenced (Corrupt_store _)
+    | Fenced (Correlation_mismatch) | Fenced (Sequence_conflict _)
+    | Fenced (Committed_content_conflict _) | Fenced (Cursor_scope_mismatch)
+    | Fenced (Cursor_ahead _) | Fenced (Commit_authority_identity_changed)
+    | Fenced (Commit_authority_regressed _) | Fenced (Store_poisoned _) -> store.health <- Fenced error)
 ;;
 
 let require_reconciliation store error =
@@ -1977,7 +1987,13 @@ let poison_after_corrupt_read store error =
   | Corrupt_store _ ->
     let detail = error_to_string error in
     fence_store store (Store_poisoned detail)
-  | _ -> ()
+  | Writer_already_active | Store_already_attached | Store_released | Store_release_forbidden
+  | Store_already_exists | Store_not_found | Store_initialization_incomplete
+  | Store_initialization_conflict | Correlation_mismatch | Cursor_scope_mismatch
+  | Commit_authority_identity_changed | Invalid_argument _ | Identity_failure _ | Io_failure _
+  | Codec_failure _ | Resource_cleanup_failed _ | Construction_cleanup_failed _
+  | Unsupported_store_version _ | Sequence_conflict _ | Committed_content_conflict _
+  | Cursor_ahead _ | Commit_authority_regressed _ | Store_poisoned _ | Commit_outcome_unknown _ -> ()
 ;;
 
 let protect_corrupt_read store result =
@@ -2093,7 +2109,7 @@ let verify_write_fence_locked store =
   | Error (Corrupt_store _ as error) ->
     poison_after_corrupt_read store error;
     Error error
-  | result -> result
+  | (Error (Writer_already_active | (Store_already_attached | (Store_released | (Store_release_forbidden | (Store_already_exists | (Store_not_found | (Store_initialization_incomplete | (Store_initialization_conflict | (Correlation_mismatch | (Cursor_scope_mismatch | (Commit_authority_identity_changed | (Invalid_argument _ | (Identity_failure _ | (Io_failure _ | (Codec_failure _ | (Resource_cleanup_failed _ | (Construction_cleanup_failed _ | (Unsupported_store_version _ | (Sequence_conflict _ | (Committed_content_conflict _ | (Cursor_ahead _ | (Commit_authority_regressed _ | ( Store_poisoned _ | Commit_outcome_unknown _))))))))))))))))))))))) | Ok _) as result -> result
 ;;
 
 let rollback_storage store ~offset =

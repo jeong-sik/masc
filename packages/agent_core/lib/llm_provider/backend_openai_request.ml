@@ -123,7 +123,7 @@ let effective_tool_choice (config : Provider_config.t) =
 let effective_tools (config : Provider_config.t) tools =
   match config.tool_choice with
   | Some None_ -> []
-  | _ -> tools
+  | Some (Auto | (Any | Tool _)) | None -> tools
 ;;
 
 let structured_schema_of_config (config : Provider_config.t) =

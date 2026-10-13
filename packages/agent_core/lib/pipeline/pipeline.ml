@@ -257,8 +257,7 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config ~context_message 
                 ~tool_name:None
                 ~tool_use_id:None
                 ~detail)
-         | decision ->
-           Error
+         | (Hooks.AdjustParams _ | Hooks.ElicitInput _ | Hooks.ElicitToolApproval _ | Hooks.Nudge _ | Hooks.Block _) as decision -> Error
              (Pipeline_common.illegal_hook_decision_core_error
                 ~hook_name:"after_turn"
                 ~stage:Hooks.After_turn

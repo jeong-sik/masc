@@ -381,7 +381,9 @@ let%test "embedded catalog declares exact image providers" =
 let%test "request requires an exact image-generation task" =
   match validate_request (test_config Provider_config.Glm None) "draw" with
   | Error (Http_client.AcceptRejected _) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.ProviderTerminal _)
+  | Error (Http_client.ProviderFailure _) -> false
 ;;
 
 let%test "Gemini image interaction is explicitly stateless" =
@@ -452,7 +454,9 @@ let%test "non-object 2xx body is a typed parse failure" =
          { kind = Http_client.Provider_parse_error { parser = Some "image_generation" }
          ; _
          }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _) | Error (Http_client.ProviderFailure _) -> false
 ;;
 
 let%test "ambiguous image source fails closed" =
@@ -462,7 +466,9 @@ let%test "ambiguous image source fails closed" =
       {|{"data":[{"url":"https://x","b64_json":"eA=="}]}|}
   with
   | Error (Http_client.ProviderFailure _) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _) -> false
 ;;
 
 let%test "Gemini interaction preserves image, identity, time, and usage" =
@@ -498,7 +504,9 @@ let%test "Gemini non-object 2xx body is a typed parse failure" =
          { kind = Http_client.Provider_parse_error { parser = Some "image_generation" }
          ; _
          }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _) | Error (Http_client.ProviderFailure _) -> false
 ;;
 
 let%test "Gemini non-completed status is a provider failure, not a parse error" =
@@ -511,7 +519,9 @@ let%test "Gemini non-completed status is a provider failure, not a parse error" 
       (Http_client.ProviderFailure
          { kind = Http_client.Unknown_provider_failure { reason = Some reason }; _ }) ->
     String.equal reason "gemini interaction status failed"
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _) | Error (Http_client.ProviderFailure _) -> false
 ;;
 
 let%test "Gemini image-only response rejects text output" =
@@ -521,7 +531,9 @@ let%test "Gemini image-only response rejects text output" =
       {|{"id":"ix-2","status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"not an image"}]}]}|}
   with
   | Error (Http_client.ProviderFailure _) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _) -> false
 ;;
 
 let%test "Gemini optional usage fields stay absent rather than becoming zero" =

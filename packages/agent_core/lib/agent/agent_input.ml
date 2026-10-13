@@ -10,7 +10,7 @@ let base_messages agent =
 let sanitize_user_input_blocks =
   List.map (function
     | Text s -> Text (Llm_provider.Utf8_sanitize.sanitize s)
-    | block -> block)
+    | (Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _) as block -> block)
 ;;
 
 let trace_prompt_of_blocks blocks =

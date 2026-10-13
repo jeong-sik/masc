@@ -220,7 +220,8 @@ let last_tool_results_from messages =
       when List.for_all
              (function
                | ToolResult _ -> true
-               | _ -> false)
+               | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _
+               | Document _ | Audio _ -> false)
              content ->
       List.filter_map
         (fun (block : content_block) ->

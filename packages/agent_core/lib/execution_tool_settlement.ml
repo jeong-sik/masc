@@ -73,14 +73,12 @@ let rebind ~writer ~invocation_node =
         , completion
         , tool_name
         , input )
-    | ( ( Event.Agent_run _
-        | Event.Agent_turn _
-        | Event.Provider_attempt _
-        | Event.Output_block _
-        | Event.Tool_invocation _
-        | Event.Tool_attempt )
-      , (None | Some _)
-      , _ ) -> Error Invocation_identity_mismatch
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), (None | Some _), Journal.Agent_run_state)
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), (None | Some _), Journal.Agent_turn_state)
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), (None | Some _), Journal.Provider_attempt_state _)
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), (None | Some _), Journal.Output_block_state _)
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), (None | Some _), Journal.Tool_invocation_state _)
+    | ((Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt), (None | Some _), Journal.Tool_attempt_state) -> Error Invocation_identity_mismatch
   in
   let* provider_view = read_node writer provider_attempt in
   let* turn_node =

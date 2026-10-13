@@ -67,7 +67,8 @@ module Behavioral = struct
         List.filter_map
           (function
             | Text s -> Some s
-            | _ -> None)
+            | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+            | Image _ | Document _ | Audio _ -> None)
           resp.content
         |> String.concat "\n"
       | Error _ -> ""
@@ -78,7 +79,8 @@ module Behavioral = struct
            List.filter_map
              (function
                | ToolUse { name; _ } -> Some name
-               | _ -> None)
+               | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolResult _
+               | Image _ | Document _ | Audio _ -> None)
              msg.content)
         (Agent.state agent).messages
     in

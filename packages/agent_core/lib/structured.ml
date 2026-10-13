@@ -283,7 +283,7 @@ let%test "text_extractor parses text content" =
   in
   match extractor resp with
   | Ok true -> true
-  | _ -> false
+  | Ok false | Error _ -> false
 ;;
 
 let%test "text_extractor returns error when parse returns None" =

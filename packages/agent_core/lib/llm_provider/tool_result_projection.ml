@@ -278,7 +278,9 @@ let%test "duplicate identity in one assistant batch is rejected" =
       [ message Assistant [ tool_use "call-1" "lookup"; tool_use "call-1" "lookup" ] ]
   with
   | Error (Duplicate_tool_use_id { tool_use_id = "call-1"; tool_name = "lookup" }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Duplicate_tool_use_id _) | Error (Conflicting_tool_use_id _)
+  | Error (Duplicate_tool_result_id _) | Error (Missing_tool_use_id _)
+  | Error (Invalid_tool_use_role _) | Error (Invalid_tool_result_role _) -> false
 ;;
 
 let%test "conflicting identity in one assistant batch is rejected" =
@@ -290,7 +292,9 @@ let%test "conflicting identity in one assistant batch is rejected" =
       (Conflicting_tool_use_id
          { tool_use_id = "call-1"; first_name = "lookup"; conflicting_name = "write" }) ->
     true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Duplicate_tool_use_id _) | Error (Conflicting_tool_use_id _)
+  | Error (Duplicate_tool_result_id _) | Error (Missing_tool_use_id _)
+  | Error (Invalid_tool_use_role _) | Error (Invalid_tool_result_role _) -> false
 ;;
 
 let%test "duplicate result in one active batch is rejected" =
@@ -301,11 +305,15 @@ let%test "duplicate result in one active batch is rejected" =
       ]
   with
   | Error (Duplicate_tool_result_id { tool_use_id = "call-1" }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Duplicate_tool_use_id _) | Error (Conflicting_tool_use_id _)
+  | Error (Duplicate_tool_result_id _) | Error (Missing_tool_use_id _)
+  | Error (Invalid_tool_use_role _) | Error (Invalid_tool_result_role _) -> false
 ;;
 
 let%test "missing active tool identity is explicit" =
   match of_messages [ message Tool [ tool_result "absent" ] ] with
   | Error (Missing_tool_use_id { tool_use_id = "absent" }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Duplicate_tool_use_id _) | Error (Conflicting_tool_use_id _)
+  | Error (Duplicate_tool_result_id _) | Error (Missing_tool_use_id _)
+  | Error (Invalid_tool_use_role _) | Error (Invalid_tool_result_role _) -> false
 ;;

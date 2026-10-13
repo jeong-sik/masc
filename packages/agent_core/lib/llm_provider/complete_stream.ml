@@ -243,7 +243,10 @@ let%test "Ollama done without reason finalizes typed incomplete" =
   match Complete_stream_acc.finalize_stream_acc acc with
   | Error (Types.Stream_incomplete { reason = "stream_terminal_without_stop_reason" })
     -> true
-  | Error _ | Ok _ -> false
+  | Error (Types.Stream_provider_error _) | Ok _ | Error (Types.Stream_parse_failed _)
+  | Error (Types.Stream_ndjson_parse_failed _) | Error (Types.Stream_incomplete _)
+  | Error (Types.Stream_repeating _) | Error (Types.Stream_unknown_event _)
+  | Error (Types.Stream_unsupported_part _) | Error (Types.Stream_unsupported_response _) -> false
 ;;
 
 let%test "Responses terminal event without status finalizes typed incomplete" =
@@ -259,7 +262,10 @@ let%test "Responses terminal event without status finalizes typed incomplete" =
   match Complete_stream_acc.finalize_stream_acc acc with
   | Error (Types.Stream_incomplete { reason = "stream_terminal_without_stop_reason" }) ->
     true
-  | Error _ | Ok _ -> false
+  | Error (Types.Stream_provider_error _) | Ok _ | Error (Types.Stream_parse_failed _)
+  | Error (Types.Stream_ndjson_parse_failed _) | Error (Types.Stream_incomplete _)
+  | Error (Types.Stream_repeating _) | Error (Types.Stream_unknown_event _)
+  | Error (Types.Stream_unsupported_part _) | Error (Types.Stream_unsupported_response _) -> false
 ;;
 
 let%test "truncated stream (no terminal stop_reason) finalizes Error, not phantom Ok" =
@@ -289,7 +295,10 @@ let%test "OpenAI-compat [DONE] without finish_reason fails closed" =
   match Complete_stream_acc.finalize_stream_acc acc with
   | Error (Types.Stream_incomplete { reason = "stream_terminal_without_stop_reason" }) ->
     true
-  | Error _ | Ok _ -> false
+  | Error (Types.Stream_provider_error _) | Ok _ | Error (Types.Stream_parse_failed _)
+  | Error (Types.Stream_ndjson_parse_failed _) | Error (Types.Stream_incomplete _)
+  | Error (Types.Stream_repeating _) | Error (Types.Stream_unknown_event _)
+  | Error (Types.Stream_unsupported_part _) | Error (Types.Stream_unsupported_response _) -> false
 ;;
 
 (* The [DONE] sentinel must not overwrite a real stop_reason that already
@@ -930,8 +939,7 @@ let complete_stream_http
                          in
                          continue_unless_failed ())
                        ()
-                   | _non_ollama_kind ->
-                     Http_client.read_sse
+                   | (Provider_http_codec.Anthropic_messages | Provider_http_codec.Openai_chat | Provider_http_codec.Openai_responses | Provider_http_codec.Gemini_generate_content | Provider_http_codec.Glm_chat) as _non_ollama_kind -> Http_client.read_sse
                        ?clock
                        ?idle_timeout:stream_idle_timeout_s
                        ?first_event_timeout:first_event_timeout_s
@@ -1166,7 +1174,9 @@ let complete_stream_http
             body_logic ())
           ()
       with
-      | Error _ as e ->
+      | (Error (Http_client.HttpError _) as e) | (Error (Http_client.NetworkError _) as e)
+      | (Error (Http_client.TimeoutError _) as e) | (Error (Http_client.AcceptRejected _) as e)
+      | (Error (Http_client.ProviderTerminal _) as e) | (Error (Http_client.ProviderFailure _) as e) ->
         (* Agent Core contract: transport-level error before body_logic ran (or
            before its publish). Idempotent via summary_published. *)
         publish_summary ~terminal:(Telemetry_event.Terminal_error "transport_error") ();

@@ -482,14 +482,14 @@ let%test "missing finish reason is not synthesized as stop" =
       {|{"id":"chat-1","model":"m","choices":[{"message":{"content":"ok"}}]}|}
   with
   | Error (Unreadable_response "malformed_openai_response:missing_finish_reason") -> true
-  | Error _ | Ok _ -> false
+  | Error (Provider_error _) | Ok _ | Error (Unreadable_response _) | Error (Empty_completion _) -> false
 ;;
 
 let%test "a top-level error that is neither an object nor a string is unreadable" =
   match parse_openai_response_result {|{"error":502}|} with
   | Error (Unreadable_response "malformed_openai_response:error_not_object_or_string") ->
     true
-  | Error _ | Ok _ -> false
+  | Error (Provider_error _) | Ok _ | Error (Unreadable_response _) | Error (Empty_completion _) -> false
 ;;
 
 let%test "an error finish with no object says the generation was interrupted" =
@@ -499,7 +499,7 @@ let%test "an error finish with no object says the generation was interrupted" =
   with
   | Error (Provider_error { report = Types.Unstated_errored_choice; provider_status = None; _ })
     -> true
-  | Error _ | Ok _ -> false
+  | Error (Provider_error _) | Ok _ | Error (Unreadable_response _) | Error (Empty_completion _) -> false
 ;;
 
 let%test "an error finish carries the envelope's type and provider condition" =
@@ -519,7 +519,7 @@ let%test "an error finish carries the envelope's type and provider condition" =
               }
         ; report = Types.Provider_stated
         }) -> true
-  | Error _ | Ok _ -> false
+  | Error (Provider_error _) | Ok _ | Error (Unreadable_response _) | Error (Empty_completion _) -> false
 ;;
 
 let%test "usage_of_openai_json supports mlx_vlm input/output token fields" =

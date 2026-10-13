@@ -403,7 +403,10 @@ let%test "a choice-level 429 is a rate limit classified from its error object al
         with
         | Retry.RateLimited { retry_after = Some retry_after; message } ->
           Float.equal retry_after 7.0 && String.equal message "slow down"
-        | _ -> false)
+        | Retry.RateLimited { retry_after = None; message = _ } | Retry.Overloaded _
+        | Retry.ServerError _ | Retry.AuthError _ | Retry.AuthorizationError _
+        | Retry.PaymentRequired _ | Retry.InvalidRequest _ | Retry.NotFound _
+        | Retry.ContextOverflow _ | Retry.InputCapacity _ | Retry.NetworkError _ | Retry.Timeout _ -> false)
      | _ -> false)
   | Streaming.Openai_chunk _
   | Streaming.Openai_done
@@ -464,7 +467,8 @@ let%test "provider error diagnostic uses the active wire format" =
   with
   | Http_client.ProviderFailure { message; _ } ->
     message = "NDJSON stream error: provider refused raw=\"{}\""
-  | _ -> false
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
 
 (* Inline-test-only; the release profile strips the tests that call it. *)
@@ -499,7 +503,11 @@ let%test "semantic parse failure uses the active NDJSON wire format" =
             { format = Http_client.Ndjson; kind = Http_client.Malformed_payload }
       ; message
       } -> message = "NDJSON parse failed: bad shape raw=\"{}\""
-  | _ -> false
+  | Http_client.ProviderFailure { kind = Http_client.Provider_wire_error { format = Http_client.Ndjson; kind = (Http_client.Unknown_event | (Http_client.Incomplete_stream | Http_client.Oversized_payload)) }; message = _ }
+  | Http_client.ProviderFailure { kind = Http_client.Provider_wire_error { format = Http_client.Sse; kind = _ }; message = _ }
+  | Http_client.ProviderFailure { kind = (Http_client.Provider_interrupted | (Http_client.Capacity_exhausted _ | (Http_client.Hard_quota _ | (Http_client.Capability_mismatch _ | (Http_client.Cli_policy_invalid _ | (Http_client.Cli_startup_failed _ | (Http_client.Provider_parse_error _ | (Http_client.Provider_reported_error _ | (Http_client.Response_body_too_large _ | (Http_client.Empty_completion _ | (Http_client.Context_overflow _ | (Http_client.Repeating_generation _ | Http_client.Unknown_provider_failure _)))))))))))); message = _ }
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
 
 let%test "stream incompleteness remains distinct from malformed payload" =
@@ -513,7 +521,11 @@ let%test "stream incompleteness remains distinct from malformed payload" =
             { format = Http_client.Sse; kind = Http_client.Incomplete_stream }
       ; message
       } -> message = "SSE stream incomplete: terminal marker missing"
-  | _ -> false
+  | Http_client.ProviderFailure { kind = Http_client.Provider_wire_error { format = Http_client.Sse; kind = (Http_client.Malformed_payload | (Http_client.Unknown_event | Http_client.Oversized_payload)) }; message = _ }
+  | Http_client.ProviderFailure { kind = Http_client.Provider_wire_error { format = Http_client.Ndjson; kind = _ }; message = _ }
+  | Http_client.ProviderFailure { kind = (Http_client.Provider_interrupted | (Http_client.Capacity_exhausted _ | (Http_client.Hard_quota _ | (Http_client.Capability_mismatch _ | (Http_client.Cli_policy_invalid _ | (Http_client.Cli_startup_failed _ | (Http_client.Provider_parse_error _ | (Http_client.Provider_reported_error _ | (Http_client.Response_body_too_large _ | (Http_client.Empty_completion _ | (Http_client.Context_overflow _ | (Http_client.Repeating_generation _ | Http_client.Unknown_provider_failure _)))))))))))); message = _ }
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
 
 let%test "parse failure echoes the offending raw buffer for diagnosis" =
@@ -522,7 +534,8 @@ let%test "parse failure echoes the offending raw buffer for diagnosis" =
   match http_error_of_stream_error (Types.Stream_parse_failed { reason; raw }) with
   | Http_client.ProviderFailure { message; _ } ->
     message = Printf.sprintf "SSE parse failed: %s raw=%S" reason raw
-  | _ -> false
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
 
 let%test "parse failure raw excerpt is bounded" =
@@ -531,7 +544,8 @@ let%test "parse failure raw excerpt is bounded" =
   match http_error_of_stream_error (Types.Stream_parse_failed { reason; raw }) with
   | Http_client.ProviderFailure { message; _ } ->
     String.length message < String.length raw
-  | _ -> false
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
 
 let%test "parse failure redacts authorization values in the echoed raw buffer" =
@@ -544,7 +558,8 @@ let%test "parse failure redacts authorization values in the echoed raw buffer" =
         "SSE parse failed: %s raw=%S"
         reason
         {|{"auth":"Bearer [REDACTED]"}{}|}
-  | _ -> false
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
 
 let%test "stream unknown event is wire evidence" =
@@ -566,7 +581,10 @@ let%test "unsupported content part is a capability mismatch" =
     && message
        = "provider emitted an unsupported content part: gemini.part.executableCode \
           raw=\"{}\""
-  | _ -> false
+  | Http_client.ProviderFailure { kind = Http_client.Capability_mismatch { capability = None }; message = _ }
+  | Http_client.ProviderFailure { kind = (Http_client.Provider_interrupted | (Http_client.Capacity_exhausted _ | (Http_client.Hard_quota _ | (Http_client.Cli_policy_invalid _ | (Http_client.Cli_startup_failed _ | (Http_client.Provider_parse_error _ | (Http_client.Provider_wire_error _ | (Http_client.Provider_reported_error _ | (Http_client.Response_body_too_large _ | (Http_client.Empty_completion _ | (Http_client.Context_overflow _ | (Http_client.Repeating_generation _ | Http_client.Unknown_provider_failure _)))))))))))); message = _ }
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
 
 let%test "unsupported response is a capability mismatch" =
@@ -581,5 +599,8 @@ let%test "unsupported response is a capability mismatch" =
     capability = "gemini.response.candidates"
     && message
        = "provider emitted an unsupported response: gemini.response.candidates raw=\"{}\""
-  | _ -> false
+  | Http_client.ProviderFailure { kind = Http_client.Capability_mismatch { capability = None }; message = _ }
+  | Http_client.ProviderFailure { kind = (Http_client.Provider_interrupted | (Http_client.Capacity_exhausted _ | (Http_client.Hard_quota _ | (Http_client.Cli_policy_invalid _ | (Http_client.Cli_startup_failed _ | (Http_client.Provider_parse_error _ | (Http_client.Provider_wire_error _ | (Http_client.Provider_reported_error _ | (Http_client.Response_body_too_large _ | (Http_client.Empty_completion _ | (Http_client.Context_overflow _ | (Http_client.Repeating_generation _ | Http_client.Unknown_provider_failure _)))))))))))); message = _ }
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;

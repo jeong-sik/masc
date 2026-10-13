@@ -516,14 +516,10 @@ let invocation_progress invocation =
     (match view.materialized, view.children, view.status with
      | Journal.Tool_invocation_state { result = None; _ }, [], Journal.Open ->
        Ok Invocation_unattempted
-     | Journal.Tool_invocation_state _, _, _ -> Ok Invocation_attempted_or_settled
-     | ( ( Journal.Agent_run_state
-         | Journal.Agent_turn_state
-         | Journal.Provider_attempt_state _
-         | Journal.Output_block_state _
-         | Journal.Tool_attempt_state )
-       , _
-       , _ ) -> Error (Resume_topology_mismatch "invocation changed node kind"))
+     | (Journal.Tool_invocation_state _, _, Journal.Open)
+     | (Journal.Tool_invocation_state _, _, Journal.Closed _) -> Ok Invocation_attempted_or_settled
+     | ((Journal.Agent_run_state | Journal.Agent_turn_state | Journal.Provider_attempt_state _ | Journal.Output_block_state _ | Journal.Tool_attempt_state), _, Journal.Open)
+     | ((Journal.Agent_run_state | Journal.Agent_turn_state | Journal.Provider_attempt_state _ | Journal.Output_block_state _ | Journal.Tool_attempt_state), _, Journal.Closed _) -> Error (Resume_topology_mismatch "invocation changed node kind"))
 ;;
 
 let settle_unattempted_invocation invocation ~content ~outcome =

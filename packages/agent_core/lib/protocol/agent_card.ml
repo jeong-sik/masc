@@ -187,7 +187,7 @@ let to_json (card : agent_card) : Yojson.Safe.t =
              @
              match a.credential_ref with
              | No_credential -> []
-             | _ -> [ "credential_ref", credential_json ]) )
+             | Env _ | File _ -> [ "credential_ref", credential_json ]) )
       ]
   in
   let interfaces_json =

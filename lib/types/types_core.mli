@@ -134,6 +134,7 @@ module Task_status_tag : sig
     | Cancelled
 
   val all : t list
+  val equal : t -> t -> bool
   val to_string : t -> string
 
   val of_string : string -> t option

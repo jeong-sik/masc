@@ -98,6 +98,31 @@ let test_defaults_survive () =
     (default "masc_tasks" "include_cancelled" = Some (`Bool false))
 ;;
 
+(* masc_tasks refuses a status outside [Masc_domain.valid_task_status_strings],
+   so the schema the model is handed names the same list. A TOML literal cannot
+   derive from the variant; this case is the derivation, read back through the
+   published schema. *)
+let test_status_enum_names_every_task_status () =
+  let declared =
+    match member (schema "masc_tasks").input_schema "properties" with
+    | Some (`Assoc props) ->
+      (match Option.bind (List.assoc_opt "status" props) (fun spec -> member spec "enum") with
+       | Some (`List values) ->
+         List.map
+           (function
+             | `String value -> value
+             | other -> failf "status enum holds a non-string: %s" (Yojson.Safe.to_string other))
+           values
+       | _ -> fail "masc_tasks status carries no enum")
+    | _ -> fail "masc_tasks has no properties object"
+  in
+  check
+    (list string)
+    "config/tools/masc_tasks.toml status enum vs Masc_domain.valid_task_status_strings"
+    Masc_domain.valid_task_status_strings
+    declared
+;;
+
 let () =
   run
     "task_tool_toml_parity"
@@ -107,6 +132,10 @@ let () =
             `Quick
             test_properties_keep_their_order_and_requirement
         ; test_case "defaults survive" `Quick test_defaults_survive
+        ; test_case
+            "status enum names every task status"
+            `Quick
+            test_status_enum_names_every_task_status
         ] )
     ]
 ;;

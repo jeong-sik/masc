@@ -93,10 +93,7 @@ let page_key_of_yojson json =
 ;;
 
 let filter_equal left right =
-  Option.equal
-    (fun (left : Masc_domain.Task_status_tag.t) right -> left = right)
-    left.status
-    right.status
+  Option.equal Masc_domain.Task_status_tag.equal left.status right.status
   && Bool.equal left.include_done right.include_done
   && String.equal left.projection right.projection
   && Keeper_tasks_list_query.equal left.selection right.selection

@@ -410,7 +410,10 @@ let handle_keeper_task_tool_with_outcome
      | Ok goal_task_ids, Ok { Workspace.observed_backlog = backlog; recovered_from } ->
        let visible (task : Masc_domain.task) =
          match status_filter with
-         | Some status -> Masc_domain.task_status_tag task.task_status = status
+         | Some status ->
+           Masc_domain.Task_status_tag.equal
+             (Masc_domain.task_status_tag task.task_status)
+             status
          | None ->
            let is_cancelled =
              match task.task_status with

@@ -234,7 +234,7 @@ type task_status =
    statuses map to it exhaustively; neither boundary needs placeholder tasks. *)
 module Task_status_tag = struct
   type t = Todo | Claimed | In_progress | Awaiting_verification | Done | Cancelled
-  [@@deriving enumerate]
+  [@@deriving enumerate, eq]
 
   let to_string = function
     | Todo -> "todo"

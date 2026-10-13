@@ -519,6 +519,99 @@ let test_tasks_list_pages_with_cursor () =
          "cursor_unparseable")
 ;;
 
+(* keeper_tasks_list reads status once. A value outside the six, the empty
+   string and a non-string are refused with the accepted list; none of them
+   comes back as an empty page. A cursor whose filter names a status no
+   constructor spells is one this server never issued, so it is unparseable
+   rather than a cursor from another filter. *)
+let test_tasks_list_refuses_a_status_it_does_not_know () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = keeper_meta () in
+       List.iter
+         (fun title ->
+            ignore
+              (Task.handle_keeper_task_tool
+                 ~config
+                 ~meta
+                 ~name:"keeper_task_create"
+                 ~args:
+                   (`Assoc
+                     [ "title", `String title
+                     ; "description", `String "status fixture"
+                     ; "priority", `Int 2
+                     ])))
+         [ "a"; "b"; "c" ];
+       let list_exec args =
+         Task.handle_keeper_task_tool_with_outcome
+           ~config
+           ~meta
+           ~name:"keeper_tasks_list"
+           ~args:(`Assoc args)
+       in
+       let refused label execution =
+         (match execution.Masc.Keeper_tool_execution.disposition with
+          | Tool_result.Failed Tool_result.Policy_rejection -> ()
+          | Tool_result.Failed other ->
+            fail (label ^ ": wrong class " ^ Tool_result.tool_failure_class_to_string other)
+          | Tool_result.Completed () | Tool_result.Deferred () ->
+            fail (label ^ ": must not return a page"));
+         Yojson.Safe.from_string execution.Masc.Keeper_tool_execution.raw_output
+       in
+       let error_of label execution =
+         U.(refused label execution |> member "error" |> to_string)
+       in
+       let accepted =
+         "todo, claimed, in_progress, awaiting_verification, done, cancelled"
+       in
+       check string "a misspelled status"
+         (Printf.sprintf "status must be one of %s, got \"in-progress\"" accepted)
+         (error_of "a misspelled status" (list_exec [ "status", `String "in-progress" ]));
+       check string "the empty string"
+         (Printf.sprintf "status must be one of %s, got \"\"" accepted)
+         (error_of "the empty string" (list_exec [ "status", `String "" ]));
+       check string "a non-string"
+         "status must be a string"
+         (error_of "a non-string" (list_exec [ "status", `Int 1 ]));
+       let call cursor =
+         list_exec [ "status", `String "todo"; "limit", `Int 1; "cursor", `String cursor ]
+       in
+       let issued =
+         match (list_exec [ "status", `String "todo"; "limit", `Int 1 ]).data with
+         | Some data -> U.(data |> member "next_cursor" |> to_string)
+         | None -> fail "expected a first page"
+       in
+       (match (call issued).Masc.Keeper_tool_execution.disposition with
+        | Tool_result.Completed () -> ()
+        | Tool_result.Failed _ | Tool_result.Deferred () ->
+          fail "the issued cursor must read back");
+       let replace key value = function
+         | `Assoc fields ->
+           `Assoc (List.map (fun (k, v) -> if String.equal k key then k, value else k, v) fields)
+         | _ -> fail ("no object around " ^ key)
+       in
+       let forged =
+         match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet issued with
+         | Error (`Msg message) -> fail message
+         | Ok text ->
+           let json = Yojson.Safe.from_string text in
+           let filter = replace "status" (`String "in-progress") (U.member "filter" json) in
+           Base64.encode_string
+             ~pad:false
+             ~alphabet:Base64.uri_safe_alphabet
+             (Yojson.Safe.to_string (replace "filter" filter json))
+       in
+       let payload = refused "a cursor naming an unknown status" (call forged) in
+       check string "the cursor is the field" "cursor"
+         U.(payload |> member "field" |> to_string);
+       check string "an unknown status is unparseable" "cursor_unparseable"
+         U.(payload |> member "error_kind" |> to_string))
+;;
+
 let test_tasks_list_targeted_queries () =
   let base_path = temp_dir () in
   Fun.protect
@@ -1523,6 +1616,10 @@ let () =
             "keeper_tasks_list pages with a cursor"
             `Quick
             test_tasks_list_pages_with_cursor
+        ; test_case
+            "keeper_tasks_list refuses a status it does not know"
+            `Quick
+            test_tasks_list_refuses_a_status_it_does_not_know
         ; test_case "keeper_broadcast forwards typed cache signal" `Quick
             test_keeper_broadcast_forwards_typed_cache_signal
         ; test_case "keeper_broadcast rejects partial typed cache signal" `Quick

@@ -441,7 +441,7 @@ let handle_tasks ~tool_name ~start_time ctx args =
       ~tool_name ~start_time message
   in
   match args |> Json_util.assoc_member_opt "status" |> Option.value ~default:`Null with
-  | `Null | `String "" -> list ()
+  | `Null -> list ()
   | `String raw ->
     (match Masc_domain.Task_status_tag.of_string raw with
      | Some status -> list ~status ()

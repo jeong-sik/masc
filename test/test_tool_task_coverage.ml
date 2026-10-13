@@ -519,15 +519,28 @@ let () = test "dispatch_tasks" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-(* An unknown status is refused: answering "No tasks." would read as an empty
-   board. *)
-let () = test "dispatch_tasks_refuses_an_unknown_status" (fun () ->
+(* A status that is not one of the six is refused: answering "No tasks."
+   would read as an empty board. The empty string is not a status either. *)
+let check_tasks_status_refused status expected_message =
   let ctx = make_test_ctx () in
-  let args = `Assoc [ ("status", `String "in-progress") ] in
+  let args = `Assoc [ ("status", status) ] in
   match Task.Tool.dispatch ctx ~name:"masc_tasks" ~args with
-  | Some result -> assert (not (Tool_result.is_success result))
+  | Some result ->
+    assert (not (Tool_result.is_success result));
+    assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+    assert (str_contains (Tool_result.message result) expected_message)
   | None -> failwith "dispatch returned None"
-)
+
+let () = test "dispatch_tasks_refuses_an_unknown_status" (fun () ->
+  check_tasks_status_refused (`String "in-progress")
+    "unknown status \"in-progress\"; expected one of: todo, claimed")
+
+let () = test "dispatch_tasks_refuses_an_empty_status" (fun () ->
+  check_tasks_status_refused (`String "")
+    "unknown status \"\"; expected one of: todo, claimed")
+
+let () = test "dispatch_tasks_refuses_a_non_string_status" (fun () ->
+  check_tasks_status_refused (`Int 1) "status must be a string")
 
 let () = test "dispatch_tasks_accepts_a_known_status" (fun () ->
   let ctx = make_test_ctx () in

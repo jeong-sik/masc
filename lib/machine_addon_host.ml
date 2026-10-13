@@ -77,6 +77,56 @@ let require_activity machine =
       else Error (Lane_addon_call_context.Host_refusal (Activity_disabled
         ("machines." ^ Machine_lane.to_wire machine ^ " is off; enable it before new machine work")))
 
+(* The refusal text an attached worker answers with when activity is on but no
+   machine is loaded. The [machine] is known not to be running: an attached
+   worker would answer from its own lane state, and the shell below answers
+   with the same sentence without one. *)
+let activity_refusal_message = function
+  | Machine_lane.Msx -> "no MSX machine is loaded: call masc_msx_load first"
+  | Machine_lane.Dos -> "no DOS machine is loaded: call masc_dos_load first"
+
+(* The typed admission answer a fresh workspace -- no declaration file, so no
+   attached worker -- gives a machine-tool call. [Some] carries the same
+   sentence the attached worker would have produced; [None] leaves the
+   endpoint-level unknown-tool refusal to the caller for names that are not
+   machine tools. *)
+let shared_admission_refusal ~config ~name =
+  let access = Lane_addon_sources.Unauthenticated in
+  let reserved = List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+    Config.raw_all_tool_schemas in
+  match Lane_addon_runtime.tool_exports ~config ~access ~reserved with
+  | Ok exports when List.exists (fun (export : Lane_addon_tool_export.t) ->
+      String.equal export.tool.name name) exports -> None
+  | _ ->
+    let operation = Tool_schemas_misc.misc_operation_of_tool_name name in
+    let machine =
+      match operation with
+      | None -> None
+      | Some misc_operation -> execution_machine (Some misc_operation) `Null
+    in
+    match machine with
+    | Some machine -> (
+        match require_activity machine with
+        | Error (Lane_addon_call_context.Host_refusal refusal) ->
+            (match refusal with
+             | Lane_addon_call_context.Activity_disabled detail
+             | Lane_addon_call_context.Activity_unobserved detail ->
+                 Some detail
+             | Lane_addon_call_context.Rejected detail
+             | Lane_addon_call_context.Unavailable detail ->
+                 Some detail)
+        | Error (Lane_addon_call_context.Transport_error detail) ->
+            Some detail
+        | Ok () -> Some (activity_refusal_message machine))
+    | None ->
+        (* Misc_dos_pass only names its machine when a handoff target is
+           present; without one the shell still owes the caller a typed
+           no-worker refusal when a declaration exists but this name is not
+           exported. *)
+        match operation with
+        | Some _ -> Some ("No attached shared Add-on provides " ^ name)
+        | None -> None
+
 let call ~principal ~config ~access ~reserved ~(export : Lane_addon_tool_export.t) ~arguments =
   let name = export.tool.name in
   let operation = Tool_schemas_misc.misc_operation_of_tool_name name in
@@ -111,7 +161,20 @@ let call_shared ~principal ~config ~name ~arguments =
   | Ok exports ->
       match List.find_opt (fun (export : Lane_addon_tool_export.t) ->
         String.equal export.tool.name name) exports with
-      | None -> Error (Lane_addon_runtime.Unavailable ("No attached shared Add-on provides " ^ name))
+      | None ->
+          (* No attached worker provides the tool. Before the worker attaches
+             (a fresh workspace has no lane-addons declaration yet) the call
+             still owes the admission answer the attached worker would give --
+             the activity-off or no-machine-loaded sentence -- instead of the
+             endpoint-level "tool does not exist" the protocol gate would
+             produce from an export miss (#41199 stdio contract,
+             docs/guides/machine-activity.md). The shell is typed and
+             pre-effect: it starts no machine, container, or emulator. *)
+          (match shared_admission_refusal ~config ~name with
+           | Some detail -> Error (Lane_addon_runtime.Unavailable detail)
+           | None ->
+               Error (Lane_addon_runtime.Unavailable
+                        ("No attached shared Add-on provides " ^ name)))
       | Some export -> call ~principal ~config ~access ~reserved ~export ~arguments
 
 let release_shared_controller ~events ~config ~holder ~by ~reason =

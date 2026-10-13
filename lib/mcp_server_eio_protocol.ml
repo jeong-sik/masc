@@ -1144,6 +1144,47 @@ let handle_request
                                   String.equal export.tool.name name) exports)) in
                       match addon with
                       | Error detail -> failed_tool_call_error ~tool_name:name Mcp_error_code.Invalid_request detail
+                      | Ok (None) when call_profile = Full ->
+                          (* The name is not a host schema and no attached
+                             Add-on exports it. For a machine tool this is the
+                             fresh-workspace state -- no declaration file means
+                             no worker -- and the caller must still read the
+                             admission refusal (#41199 stdio contract,
+                             docs/guides/machine-activity.md) instead of the
+                             endpoint-level -32601 that says the tool does not
+                             exist. Managed-agent and operator-remote clients
+                             keep the plain unknown-tool refusal: those profiles
+                             never carry machine tools in the first place. The
+                             refusal rides the regular [handle_call_tool_eio]
+                             path below as a typed pre-effect tool_result, so
+                             the trace, audit and telemetry see the call; it
+                             never starts a container or emulator. *)
+                          let admission_refusal =
+                            Machine_addon_host.shared_admission_refusal
+                              ~config:(Mcp_server.workspace_config state) ~name in
+                          let wire_result = ref None in
+                          let execute ~sw:_ ~clock:_ ~workspace_scope:_ ?profile:_ ?mcp_session_id:_
+                              ?invocation_ref:_ ?auth_token:_ ?(internal_keeper_runtime=false)
+                              ?on_caller_resolved:_ state ~name ~arguments:_ =
+                            let _ = state in
+                            let _ = internal_keeper_runtime in
+                            let start_time = Tool_timing.start () in
+                            match admission_refusal with
+                            | Some detail ->
+                                Tool_result.make_err ~tool_name:name ~start_time
+                                  ~class_:Tool_result.Workflow_rejection
+                                  ~effect_disposition:Tool_result.Proven_pre_effect detail
+                            | None ->
+                                Tool_result.make_err ~tool_name:name ~start_time
+                                  ~class_:Tool_result.Workflow_rejection
+                                  ~effect_disposition:Tool_result.Proven_pre_effect
+                                  (unavailable_tool_message name)
+                          in
+                          Mcp_server_eio_call_tool.handle_call_tool_eio
+                            ~execute_tool_eio:execute ~maybe_emit_resource_notifications
+                            ~broadcast_tools_list_changed ~wire_result:(fun () -> !wire_result)
+                            ~sw ~clock ~profile:call_profile ?mcp_session_id ?auth_token
+                            ~internal_keeper_runtime state id call
                       | Ok (Some (access, principal, reserved, export)) ->
                           let wire_result = ref None in
                           let execute ~sw:_ ~clock:_ ~workspace_scope ?profile:_ ?mcp_session_id

@@ -14,6 +14,14 @@ val call_shared :
     installation on invocation. The caller must already have authorized this
     tool and principal. This never grants access to Keeper-private exports. *)
 
+val shared_admission_refusal : config:Workspace.config -> name:string -> string option
+(** The admission refusal for a machine tool when no worker is attached:
+    the activity-off sentence when the published configuration has the machine
+    disabled, the no-machine-loaded sentence when it is enabled, and [None]
+    when [name] is not a machine tool at all -- the caller then owns the
+    endpoint-level unknown-tool refusal. Typed and pre-effect: this starts no
+    machine, no container, and no emulator. *)
+
 val release_shared_controller :
   events:Machine_addon_events.batch -> config:Workspace.config -> holder:string -> by:string ->
   reason:Machine_controller_contract.holder_departure ->

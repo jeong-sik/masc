@@ -2,6 +2,212 @@
 
 ## [Unreleased]
 
+
+## [0.53.0] - 2026-10-13
+
+### Upgrade notes
+
+- The Library is now the Wiki. Pages are read from `<base_path>/docs/wiki`; files left in `<base_path>/docs/library` are no longer read, so move the ones you keep. Tools `masc_library_*` and `keeper_library_*` are now `masc_wiki_*` and `keeper_wiki_*`, and the resources moved from `masc://library` to `masc://wiki`. The old names are not accepted (#42703).
+- `masc_wiki_add` is gone. Use `masc_wiki_create` to make a page under a name you choose (`page`, `title`, `summary`, `source`, `body`) and `masc_wiki_update` to replace the body of an existing page against the `base_revision` you read. A wiki page needs `summary` and `revision` in its header to read; a page written by hand without them is listed by file name with the reason (#42704).
+
+### Added
+
+- `GET /api/v1/keepers/<name>/chat/history/page` takes a `limit` query parameter that scales the window (default and maximum 400 rows), and the TUI asks for 100 older rows at a time so one page no longer holds the UI loop for about 18 ms; a server without the parameter ignores it (#42202).
+- exact-lane run completions now record provider usage on the run row: mark_completed takes optional usage, the wire schema gains an optional usage field, and existing v6 logs replay as None without a version bump (#42272). The curator, librarian, board attention, HITL, and candle runners pass usage from Exact_output successes.
+- Run one archive-first workspace GC pass from the 24h maintenance loop, at the same cadence as the schedule retention prune: terminal tasks older than the new `task.archive_retention_days` runtime setting (default 30) move to `tasks-archive.json` without waiting for an operator to run the manual `masc_gc` tool. Non-terminal tasks are never archived, and the archive takes each task before the backlog commit drops it (#42282).
+- merge-guard reads the `leader-selected-ci` commit status on member heads and refuses to merge while a leader-selected run is pending or failed (#42294).
+- leader-ci answers a pending `leader-selected-ci` status when dispatch pins selected member heads and settles it to success/failure with `if: always()` (#42294).
+- Retain scoped Child observation histories in the TUI reader and require full prefix validation to recover from known history rewrites. (#42306)
+- Connect retained Child observations to TUI workspace read epochs and preserve running full-Audit intent through temporary identity loss. (#42307)
+- Report the linked MSX core's own Git commit in machine metadata when the core build can establish it; unknown identity remains null (#42330).
+- Preserve the local continuity synthesis stop branch in memory-health observations, with strict dashboard and TUI decoding and cleared reasons when execution resumes; this diagnostic evidence does not itself retire history (#42566).
+- Add a glossary entry for Keeper Call Association, the TUI chat transcript-to-call-log join verdict (`Masc_tui_keeper_call_evidence.keeper_call_association`): its closed eight-value contract and the missing (proven absence) vs coverage_gap (unproven absence) boundary (#42569).
+- Record the selected continuity snapshot fingerprint and successful bounded history projection alongside prepared-request capture identity. Summary bodies and raw unknown-origin errors are excluded; this evidence does not certify delivery or history retirement (#42602).
+- Add glossary entries for Accept Rejection and Rotate-now Evidence Asymmetry: the `Accept_rejected` closed vocabularies (`accept_rejection_kind` pair, seven `accept_response_shape` values, three `accept_no_progress_retry_kind` values) with their mapping to the `No_progress_*` Failure Route rotations and receipt `degraded_retry_reason` strings, and the intentional evidence asymmetry among the 17 `Rotate_now` branches where only `Server_error_not_transient` leaves cross-turn candidate evidence (#42617).
+- Add a glossary entry for Native Tool Completion, the provider-fact vocabulary for a native tool end (`Runtime_native_tools.completion_outcome`, seven constructors), distinct from Recorded Call Outcome (ledger record) and Tool Call Outcome (wire projection), and naming the `End_observed` vs `Completion_unrecorded` boundary with its TUI live-event consumption (`Native_tool_ended`, `Undecodable`) (#42631).
+- Provider retry observations now travel from the Claude runtime through the journal, AG-UI projection, SSE schema, and TUI/decoder layers, with dashboard retry progress and response-state admission reconciled against the ownership machine (#42634).
+- The web dashboard labels tool names with the shared display rule from `lib/tool_display.ml`: journey waterfall bars, session trace rows and Gate approval cards read `keeper_task_done` as `KeeperTaskDone`, while skill slugs like `browser-lanes` keep their readable name; `identity_call` keeps its `provider · remote` form (#42649).
+  - Usage: always on, nothing to enable — open any run's journey, session trace or pending approvals in the dashboard and every tool name renders the label form; nothing changes if the label pipeline fails silently, entries fall back to the raw wire name.
+- Wiki pages have a fixed name and a revision. `masc_wiki_create` refuses a name that exists, and `masc_wiki_update` refuses a stale `base_revision` and returns the current revision and body so the writer can merge and send again (#42704).
+- The wiki keeps two files of its own beside the pages: `index.md` (one line per page with its title, file and summary, rebuilt after every write) and `log.md` (one line per create or update, appended). `masc_wiki_list` returns the index, and `masc_wiki_update` requires a one-line `note` that becomes the change's log line (#42705).
+- Show image evidence inline on Kitty-style terminals and its links in the TUI verification detail, and stop the pane failing on binary evidence items (#42743).
+
+### Changed
+
+- Native stacks land whole, once, through `merge-async` on their top PR; a lower PR is never selected to merge the layers below it first, and a stack that conflicts with `main` is restacked whole with `gh stack rebase` and pushed once. The constitution, contributor guides, Native GitHub Stacks guide, CI review doc, glossary, Keeper prompt, PR patrol skill and review README now say this (#42183).
+- Runtime configuration data and pure diagnostic projection moved into a private canonical owner, preserving public contracts and keeping configuration effects in Runtime (#42308).
+- Exact durable tool-call evidence is separated from chat rendering, and Results-mode status decoration is derived from typed receipt/transcript decisions instead of literal tool-name text (#42320).
+- Teach the DOS Sangokushi III skill the observed gate breach, deferred-battle reinforcement, and confirmed city-capture flow (#42329).
+- Document verified Sangokushi II monthly battle continuation, reinforcement arrival and short-frame manual combat observation in the MSX add-on guide (#42345).
+- Document observed Sangokushi II ruler succession, marriage-event progression, and inspection of a surviving officer after defeat (#42402).
+- Document the observed Sangokushi II recruitment food anomaly, checkpoint comparison, and merchant rice resupply (#42404).
+- Show human-facing tool display labels (PascalCase) on the approval card, chat activity rows and approval rows via one pure `Masc.Tool_display.label` hub; wire names, keys and schemas are unchanged (#42624).
+- Test-only repair for the chat handoff row: the assertion now expects the shared display label (`ReadHandoffEvidence` case-correct as drawn) instead of the raw wire name `read_handoff_evidence`, and pins that the wire name stays off the screen (#42647).
+- The TUI tools list (effective surface and registered catalog) shows the shared `Tool_display` labels instead of raw wire tool names; skill slugs pass through unchanged. (#42648)
+- Order the TUI Plan usage view by what can be used now and draw one line per window, with the unusable windows first (#42691).
+- TUI chat skill rows draw the tools a skill used through the shared display rule: a Fusion lens row now reads `↳ **MascFusion** · observed action` instead of the raw wire name, and slug names like `browser-lanes` keep their readable form. Stored records keep the wire names (#42697).
+  - Usage: always on — open a keeper chat's activity pane and read the `observed action` rows under a skill; nothing to enable. If a name still reads raw, it is a name the server sent that is not a wire tool name, shown as-is.
+- `keeper_wiki_search` describes what it returns: one line per matching page with its title and file name. The old description promised relevance scores and snippets that the tool never returned (#42703).
+
+### Removed
+
+- Deploy-time env-file sourcing: `scripts/deploy.sh` no longer reads `config/keeper.env` or `.env`, and the readonly freeze, the `preserve/restore_env_override` helpers, the env-file preflight cases and the seed-list row for the file are gone. Deploys take every variable from the invoking shell (#42513).
+- The retired `config/keeper.env` credential file is rejected from fresh config-root seeding, so a gitignored copy left in an upgraded checkout cannot ride the embedded config tree into new workspaces (#42513).
+- Drop two declared-but-unread tool parameters: `think_policy` on `masc_runtime_ollama_probe` and `session_name` on `keeper_voice_session_start`. No handler or test reads either key (#42608; #42527, #42528).
+
+### Fixed
+
+- An official client keeper no longer writes a `history_restarted` line every
+  turn when the turn boundary log already states an empty history, so the range
+  seed is no longer emptied at each start (#42206).
+- The carried-front generation floor now also advances on the end line of a
+  turn that began from an empty history, so a transiently unwritten restart
+  marker no longer lets pre-restart response observations seed a carried range
+  again (#42206).
+- The per-turn read of the turn boundary log is tail-bounded with a full-read
+  fallback instead of decoding the whole append-only store on every fresh turn
+  (#42206).
+- A Task Skill pin whose Skill was edited or deleted is listed as unavailable
+  instead of failing every turn of the Keeper that holds the Task. A Skill
+  configuration that is rejected or unreadable still fails the turn with a
+  typed error, because every pin would otherwise read as deleted (#42208).
+- A pin into a source that was not read successfully, or whose package
+  document could not be read, also fails the turn with a typed error instead
+  of reading as deleted (#42208).
+- A restart of the Keeper Firefox for a session the last BiDi host left keeps `.masc/browser-lane/keeper-firefox.json` until the stopped Firefox's port no longer answers, and removes it just before the new Firefox starts. A restart that gives up because the port still answers after 5 seconds now leaves the record, so the next start reads it as a Keeper Firefox that has ended instead of one MASC never started; the give-up message says that what holds the port is outside that Firefox's process group, with no window to close, and names the `lsof` command that finds it. A recorded Keeper Firefox whose process group keeps no live member now counts as ended even while its first process is not yet reaped, and the warning for a Firefox that is not restarted names the same `lsof` command (#42223).
+- Show complete Child text and exposed thinking with separate sender attribution. (#42309)
+- Keep Child search and scroll anchored to durable receiver and observation identities. (#42309)
+- Preserve a running Native Task Audit across observation read retirement. (#42310)
+- Keep server observation reads independent of new-message eligibility. (#42310)
+- Retain queued input until dispatch or explicit operator edit or cancellation. (#42311)
+- Remove the roster-based bulk deletion fallback from chat queue draining. (#42311)
+- Retire previous response metadata when newer scoped content survives a missing start. (#42312)
+- Preserve newer metadata when intermediate content activity arrives late. (#42312)
+- Preserve captured response generation across durable, SSE, TUI and dashboard contracts. (#42314)
+- Refuse malformed supplied response generations without inventing missing ownership. (#42314)
+- Bind TUI model and content activity admission to supplied generation and scope. (#42315)
+- Preserve known admission authority across unknown headers and partial metadata facts. (#42315)
+- Carry captured response identity on stop events; ignore stale or unowned stops over known TUI responses. (#42322)
+- Preserve supplied generation on response Details and prevent stale counters, scope rewinds and terminal metadata changes. (#42323)
+- Preserve complete response identity on Thinking bytes and retain response closure across tool activity and retries. (#42324)
+- Distinguish observed Text response identity from unobserved scope and share stale-response admission across chat events. (#42325)
+- Gate appended text on response ownership in every consumer: the dashboard stream reducer and Copilot dock admit a delta's `textResponse` identity before appending, and the Slack and Discord adapters drop `Text_delta` bytes owned by a superseded response instead of accumulating them into the delivered reply (#42325 review).
+- Retire the admitted response owner to the stale floor when a runtime attempt advances, so a delayed delta from the unfinished prior response — equal rather than preceding — cannot repopulate the new attempt's text or metadata (#42325 review).
+- Pin the MSX native worker dependency to the merged core build identity repairs, keeping the installer and opam lock aligned (#42328).
+- Dashboard chat keeps one reducer for response ownership across direct SSE, broadcasts and restored drafts. A delayed delta, header or stop from an older response, and a replayed text message, no longer change the reply, and the Copilot dock follows the same rules (#42331).
+- A reply whose stream dropped a frame ends as failed with the reason and its partial text instead of as a delivered reply, and the direct stream accepts the empty continuation checkpoint message and unknown custom events the server sends (#42331).
+- Keep full exposed reasoning in scheduled dashboard snapshots and restored continuation, and keep the newer applied journal snapshot against older observer and receipt-only writes (#42332).
+- Dashboard reload preserves settled chat delivery, authored content and exposed reasoning. A lookup or history failure cannot revoke a confirmed terminal receipt, and saved observations remain until canonical operation history replaces them (#42333).
+- Preserve current speech when tool starts are replayed. Late tool observations on completed, failed or interrupted dashboard responses keep their execution facts without reopening the response or replacing authored content (#42334).
+- Dashboard history convergence retains observed response ownership and journal replay protection across exact delivery identities. Duplicate rows share the reconciled frontier, and contradictory ownership stays unavailable instead of being chosen by row order (#42335).
+- Preserve typed tool occurrence ownership, quarantine and trace references when Keeper history replaces live dashboard rows (#42336).
+- Converge execution history that arrives before a streamed result using the explicit server binding and the same delivery ordinal, and reject conflicting correlations (#42336).
+- Validate provider correlation and recorded execution ownership before accepting a replayed result for an already-bound Keeper tool occurrence (#42337).
+- leader-ci no longer leaves a `leader-selected-ci` pending status pinned forever: the member-head pin now runs only after the local scope/suites validation passes, and the always()-settle resolves the union of the raw dispatch receipt and the verified artifact, so a refused run (whose verified artifact was never uploaded) still settles every pinned head (#42379).
+- Document verified Sangokushi III defensive reinforcement arrival and control, per-officer retreat arrival checks, and the observed enemy-information cost and exit confirmation. Preserve the limits of failed and restored defense branches. (#42410)
+- Expand the Sangokushi II addon guide with verified enemy lookup, fire and direct combat observations, ongoing-war checks, and retreat destination garrison recovery. Distinguish strategic totals, deployed troops, requests and confirmed arrivals. (#42410)
+- Admission queue coverage ordering is fixed and consumption authority is reobserved after concurrent acknowledgement, preserving deferred inputs and rejecting missing receipts (#42506).
+- Require strict file and parent-directory synchronization for Memory snapshots and matching prepared-receipt recovery; distinguish pre-replacement failure from unconfirmed post-replacement durability. (#42508)
+- Report memory admission queue capacity refusals as known pre-write rejections, while preserving uncertain outcomes for storage failures. (#42511)
+- Keep recurring Keeper schedules active after an absent-owner occurrence fails, preserving its failed wake receipt and allowing the next occurrence to run. (#42516)
+- Plan aged tool-result demotion using the exact sanitized blob preview, so smaller retrievable references are selected without overestimating marker size. (#42524)
+- Preserve ordinary memory publication evidence before snapshot replacement and recover its exact journal, companion receipts and pending revision wake after interruption; sync retraction targets before retiring their recovery evidence. (#42546)
+- Report prepared history projection through its own event so it cannot overwrite memory injection evidence; expose projection observations in the dashboard agent-core lane. (#42547)
+- Preserve otherwise valid reported Choice judgments when their values do not sum exactly to one, preventing rounded Librarian responses from deferring memory absorption. Preserve raw values and expose their sum without certifying a normalized distribution (#42558).
+- Keep a history restart pending when its append failed but a later empty official-client turn-end record succeeded. Only a stored restart witness settles the generation boundary; ordinary empty turns after that witness still avoid redundant restarts (#42583).
+- Keep previously hydrated inactive Keepers eligible for append-triggered history recovery after a transient refresh failure (#42601).
+- Decode each Librarian range receipt entry independently so one legacy entry no longer fails the whole ledger and freezes continuity; undecodable bytes move aside with their reason and the ledger rewrites itself clean (#42611).
+- Point the README install target, release-assets link and `TAG=` example at v0.52.0 in `README.md` and `README.ko.md`; the v0.52.0 tag still named v0.51.0 (#42621).
+- On Linux, a process group whose members are all unreaped zombies no longer counts as still occupied, so a stopped Keeper Firefox\x27s record is removed instead of being kept after its stop (#42623).
+- The play seat HTTP surface tests attach the machine worker fixture and load the runtime seed, so current-holder recovery and authority cases exercise the routes instead of the 503 unattached refusal (#42638).
+- Chat history keeps what the turn actually did: tool rows stay visible until every settled call has an exact receipt, reasoning text survives when stream coverage is unproven, display names wait for the speaker authority decode, and malformed reasoning visibility flags are rejected instead of read as permission to expose (#42650).
+- Persist tool ownership and quarantine across cold restore and decode stored provenance without a schema library (#42653).
+- Reject stored tool rows whose ordinal conflicts with an existing slot (#42654).
+- Publish tool commit events only for calls with an execution identity, and read the commit frame in the TUI (#42655).
+- Ignore callbacks that arrive after the autonomous stream closed (#42656).
+- Clear checkpoint control status once the continuation produces a visible reply (#42657).
+- Rebuild the final reply prose from authoritative text and release body authority on lifecycle invalidation (#42658).
+- Persist the visible caption with generated media blocks (#42659).
+- Reject journal pages whose events and cursors disagree (#42661).
+- Fold acknowledged tool rows into the canonical history row without reordering the thread (#42662).
+- A response stop for a generation older than the established floor no longer finalizes the live response after an attempt or checkpoint boundary cleared the current owner (#42663).
+- Refetch the history of every known Keeper after a reconnect and name the Keepers that failed (#42664).
+- The keeper's generation floor tracks the latest turn of the trace again, so a `History_restarted` marker written without a fresh-history end line fences the cleared history: `current_generation_floor` no longer hands back a seed from a response the restart had dropped (#42669).
+- Keeper chat rows written before RFC-0232 retired the label-only `source` field are read back instead of being dropped: the strict reader tolerates the retired key and keeps the row with `surface = None` (#42680).
+- The held-tool-call approval timeout is filed under the `keeper_hitl` runtime settings surface, so `keeper.hitl.tool_approval_timeout_sec` is no longer a registered parameter without a surface (#42684).
+- Retain the absolute turn sequence from autonomous history markers in the TUI chat history (#42692).
+- Keep operation and autonomous turn batch memberships distinct by typed execution source in the TUI chat (#42693).
+- Preserve the explicit turn source of workspace message, fusion run and approval lifecycle rows in TUI chat history instead of dropping it (#42699).
+- Reject MASC tool argument and end events that name a provider-native tool call in the TUI keeper chat transcript (#42700).
+- Preserve provider-native and superseded-attempt tool call arguments when an approval request carries arguments (#42701).
+- Reject repeated metadata field names in the TUI live keeper stream decoder, matching the strict reader (#42702).
+- Two wiki pages whose titles had no ASCII letters, written on the same day, no longer land in one file where the second silently replaced the first: the file is named by `page`, not by the title and the date (#42704).
+- The MCP server instructions name the `wiki` resource. They still said `library` after the Library became the Wiki (#42708).
+- `masc_board_post` describes `ttl_hours` as the code handles it: omitted or 0 means the post does not expire. The description claimed a 168-hour default and a 720-hour cap that the code does not have (#42709).
+- `masc_wiki_create` and `masc_wiki_update` refuse a header value that would read back as something else. A title, summary, update note, caller name or tag has to be one line, not blank, with no whitespace at either end; a tag also may not hold a comma. A tag holding a line break and `---` used to close the page header early, so the write succeeded and the page read with different tags and a different body. A blank tag, or one that is not a string, is refused instead of dropped: an update that sent only a blank tag used to empty the page's tags (#42715).
+- A page whose `tags` line is not the list the wiki writes (`[a, b]`) is named with that reason in the list, by read and by a refused update, whether a person or an earlier tool call wrote it. Such a page is repaired by editing the file; no tool rewrites it (#42715).
+- fix(tools): correct `masc_board_post` `ttl_hours` description (default 0/permanent, no maximum) (#42721, #42688).
+- The `remote_shim_outdated` WARN names the repair for the endpoint's
+  transport. It told a microVM guest to run `masc-exec-ssh-bootstrap`, which
+  installs a shim on an SSH host; a guest's shim is the host's copy under
+  `<base>/.masc/microvm/shim`, and the line now names that path. For a Docker
+  container it names the path the server execs (#42732).
+- `scripts/install-local-build.sh` brings a workspace's release guest exec
+  shim to the release the built server names: the same asset the sidecar
+  records, checked against that release's `SHA256SUMS`. Only
+  `scripts/install.sh` placed the shim, so a workspace deployed from local
+  builds kept the shim of its last release install. A workspace with no shim
+  is given none, a hand-built shim (no sidecar) is left alone, a release that
+  cannot be read leaves the shim and continues with one WARN, and an asset
+  that fails its checksum installs nothing. `--no-guest-shim` skips the step
+  (#42733).
+- `scripts/install-local-build.sh --help` prints the whole usage block
+  (#42733).
+
+### Performance
+
+- The TUI loop applies queued async results for at most about one frame per pass and returns to the keyboard, instead of applying a whole burst in one pass; passes over 20ms in a 20 second PageUp run fell from 38 to 15 (#42284).
+- perf(chat): keeper-chat page rows omit `stream_contract` (about a quarter of page bytes; the page route serves only the TUI) (#42719, #42200).
+
+### Documentation
+
+- Added the 2026-10-10 week feature matrix audit, a per-feature verdict table with the P1 list and ID legend (#42205).
+- Add RFC `keeper-chat-page-row-content-bound` for bounding tool row content in the keeper chat history page response; measurement showed no improvement, so the RFC lands as Dropped (#42217).
+- Glossary defines Committed Revision Lineage and Demand Retrieval across Revisions (#42234).
+- Add a draft RFC for a TUI-only lean mode of the keeper chat history page that omits the row fields the TUI does not read (#42277).
+- Glossary defines the Keeper Firefox Start Record and its boundaries: the record is read only by status sentences, MASC restarts only a Firefox its own record says it started, and a Firefox on another port does not stop MASC's start (#42285).
+- Add RFC `tui-pin-source-index-lazy`, a performance investigation into building the TUI scroll pin's source index only when read; the index is read every frame under `Hold_scroll`, so the proposal lands as Dropped (#42287).
+- Add `docs/RUNTIME-TOML-REFERENCE.md`, a key-by-key reference for the provider/model/binding/lane tables of `runtime.toml`: the AGENT_CORE catalog division of labor, protocol inventory, provider/model/binding key tables, lane and exact-output-lane rules, and a load-time refusal summary, each rule citing its enforcing source (#42297).
+- Explain how to inspect another MSX Sangokushi II officer with the battle information cursor, including position-dependent inputs and display-unit limits (#42356).
+- Document verified MSX Sangokushi II battle defection inputs, numeric confirmation and the distinction between payment and successful faction transfer (#42378).
+- Document the observed Sangokushi II merchant weapon purchase inputs, gold change, and verified weapon value change from 1 to 51 (#42387).
+- Explain the observed Sangokushi III field counterattack, joint reinforcement arrival, post-victory return and subsequent city capture, with separate evidence for victory and occupation. (#42410)
+- Add measured Sangokushi II battle armament verification and pre-sortie loyalty reward checks, preserving uncertain battle faction changes as observations. (#42410)
+- Explain observed Sangokushi II defensive deployment and per-officer retreat destination handling, with destination-roster verification and a measured counterexample to lossless retreat. (#42410)
+- Document measured Sangokushi II rice sales, existing troop reorganization, and supply transport verified at both provinces. (#42410)
+- Document observed Sangokushi II waiting to gain movement mobility and verify captured province ownership, keeping enemy-phase results separate from player attack damage. (#42410)
+- Document cancelling an undersupplied expedition with resource restoration and buying food through the native merchant flow. (#42410)
+- Clarify Sangokushi III battle control: after a successful partial move, Enter can finish the active officer turn. Read the bottom command to identify the next officer; the upper-right commander name stays unchanged. The deployment placement key 0 did not close the movement prompt in the observed battle. (#42410)
+- Document waiting for combat animation completion before recording attack losses, using a restored-state charge/joint comparison. (#42410)
+- Document replaying short observations to identify an enemy surprise attack during movement. (#42410)
+- Document observed Sangokushi III training assignment, month completion report, and officer training before/after verification. (#42410)
+- Correct the Sangokushi II prepared second officer name to Deng Ai (鄧艾), as labeled in the original personal information screens. Add the April deployed-unit inspection showing Sun Quan army membership, without attributing an unverified cause to the change. (#42410)
+- Document investigating the lost province to verify the survival and current faction of officers absent from a retreat destination. (#42410)
+- Explain Sangokushi III recruitment in hundreds, final officer troop allocation, and the observed month-end training recovery after recruitment (#42448).
+- Document verified six-officer month-end training results and observing castle capture before forced retreat, defeat, and destination arrival (#42560).
+- Record the operator's explicit approval to retain the existing daily full behavior test schedule and failure reporting (#42604).
+- Draft RFC: the Library becomes a Wiki. Pages get a fixed name and revision-checked updates, every write appends one line to `log.md` and regenerates `index.md`, and the old Library names are removed without aliases (#42687).
+- Explain in the glossary Wiki entry what the wiki's two own files are: `index.md` (rebuilt by the server after every write, never hand-edited) and `log.md` (one append-only line per create or update) (#42712).
+- The `Msx_lane` and `Machine_lane` module docs say the machines live in their attached add-on workers, not in the server process (#42724).
+
+### Internal
+
+- Record failed real Codex CLI startup probes separately from unverified model streaming and installed TUI behavior. (#42483)
+- Preserve typed world-layer byte spans in context assembly receipts so delivered and locally held context can be attributed without changing layer selection. (#42507)
+- Record the first request's history projection counts, carried front and bytes in runtime manifests, distinguishing preparation from delivery without changing selection. (#42519)
+- Add an isolated filesystem regression fixture for a refused history restart append followed by a successful end record, stored retry, and ordinary next turn (#42587).
+- Cover terminal response state under late reasoning (#42660).
+
 ## [0.52.0] - 2026-10-12
 
 ### Added

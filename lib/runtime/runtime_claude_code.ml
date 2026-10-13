@@ -1036,7 +1036,7 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usag
     in
     await_initialize
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id ~on_stream_event
-  | "system" | "rate_limit_event" ->
+  | "system" | "rate_limit_event" | "command_lifecycle" ->
     (* Informational frames before the control response. The admission
        deadline bounds a client that never answers; a count of these frames
        does not change what
@@ -2435,6 +2435,18 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
          emit_stream_event on_stream_event (Native_tool_progress
            {identity;progress=Runtime_native_tools.Retry_observed retry})
      | Retry_ignored -> ());
+    await_terminal
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
+      ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
+      ~response_emitted
+  | "command_lifecycle" ->
+    (* Claude Code reports the fate of a queued inbound command
+       (queued/started/completed/cancelled/discarded/refused). The frame also
+       names commands this client never sent, and [completed] can arrive
+       after the result frame, so no decision here may depend on it: the
+       turn still ends with its own result frame. *)
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed

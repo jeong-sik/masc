@@ -1060,6 +1060,18 @@ let config_write_fields = function
     ; "authoritative_reload_required", `Bool true
     ]
 
+(* A config POST refused before the update runs: nothing was written and the
+   lane was not touched. The answer says so with the fields an update
+   refusal that wrote nothing carries. *)
+let respond_config_refused_before_write
+    ?(status : [ `Bad_request | `Not_found ] = `Bad_request) reqd message =
+  Http.Response.json_value
+    ~status:(status :> Httpun.Status.t)
+    (`Assoc
+      (("error", `String message)
+       :: config_write_fields Keeper_turn_up_update.Config_unchanged))
+    reqd
+
 (* A refused config POST. Status, [code] and the write fields all come from
    the typed refusal; nothing here reads the tool result's JSON back. *)
 let config_refusal_status = function
@@ -1090,26 +1102,24 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_post req_path keeper_suffix_config in
   if String.length name = 0 then
-    respond_error reqd "keeper name is required"
+    respond_config_refused_before_write reqd "keeper name is required"
   else
     let workspace_scope = Mcp_server.workspace_scope state in
     let config = workspace_scope.config in
     match Keeper_meta_store.read_meta config name with
-    | Error msg -> respond_error ~status:`Not_found reqd msg
+    | Error msg -> respond_config_refused_before_write ~status:`Not_found reqd msg
     | Ok None ->
-        respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
+        respond_config_refused_before_write ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
     | Ok (Some meta0) ->
-        (try
-           let args = Yojson.Safe.from_string body_str in
-           let fields_opt =
-             match args with
-             | `Assoc fields -> Some fields
-             | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
-             | `String _ | `List _ ->
-                 None
-           in
-           match fields_opt with
-           | Some fields ->
+        (* Only the body parse is guarded: a [Json_error] raised after the write
+           must not come back as a refusal that says nothing was written. *)
+        (match Yojson.Safe.from_string body_str with
+           | exception Yojson.Json_error e ->
+               respond_config_refused_before_write reqd (Printf.sprintf "invalid json: %s" e)
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+           | `String _ | `List _ ->
+               respond_config_refused_before_write reqd "request body must be a JSON object"
+           | `Assoc fields ->
                let expected_config_revision =
                  match List.assoc_opt expected_config_revision_field fields with
                  | None -> Error "expected_config_revision is required"
@@ -1117,7 +1127,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                    Keeper_turn_up_config_persistence.config_revision_of_yojson value
                in
                (match expected_config_revision with
-                | Error detail -> respond_error reqd detail
+                | Error detail -> respond_config_refused_before_write reqd detail
                 | Ok expected_config_revision ->
                let body_name =
                  match List.assoc_opt "name" fields with
@@ -1129,16 +1139,16 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                if Option.is_some body_name
                   && body_name <> Some name
                then
-                 respond_error reqd
+                 respond_config_refused_before_write reqd
                    (Printf.sprintf "keeper name mismatch: route=%S body=%S" name
                       (Option.value ~default:"" body_name))
                else
                  (match validate_dashboard_config_patch fields with
-                  | Error msg -> respond_error reqd msg
+                  | Error msg -> respond_config_refused_before_write reqd msg
                   | Ok ({ confirm_context_shrink; config_fields = fields; _ } as patch) ->
                       (match context_shrink_of_patch ~meta:meta0 patch with
                        | Some (previous, new_v) when not confirm_context_shrink ->
-                           respond_error reqd
+                           respond_config_refused_before_write reqd
                              (Printf.sprintf
                                 "reducing max_context_override (%s -> %d) can push \
                                  this keeper's existing context past the new window \
@@ -1165,7 +1175,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                          Keeper_turn_up_args.parse keeper_ctx args_with_name
                        with
                        | Error result ->
-                           respond_error reqd
+                           respond_config_refused_before_write reqd
                              (Keeper_types_profile.tool_result_body result)
                        | Ok parsed ->
                            (
@@ -1240,11 +1250,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                                reqd
                                ~name
                                ~refusal
-                               ~receipt:(config_write_receipt result))))))
-           | None ->
-               respond_error reqd "request body must be a JSON object"
-         with Yojson.Json_error e ->
-           respond_error reqd (Printf.sprintf "invalid json: %s" e))
+                               ~receipt:(config_write_receipt result)))))))
 
 let secret_projection_response_json config name =
   `Assoc

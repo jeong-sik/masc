@@ -6278,10 +6278,11 @@ let write_config_sync_toml config name =
 
 let post_config ?(inject_revision = true) ~sw ~clock ~state ~name body =
   let body =
+    if not inject_revision then body
+    else
     match Yojson.Safe.from_string body with
     | `Assoc fields
-      when inject_revision
-           && not (List.mem_assoc "expected_config_revision" fields) ->
+      when not (List.mem_assoc "expected_config_revision" fields) ->
       let config = Lib.Mcp_server.workspace_config state in
       let revision =
         match
@@ -6555,12 +6556,43 @@ let test_config_post_requires_expected_revision () =
   let name = "config-sync-revision-required" in
   prepare_config_sync_keeper ~sw config name;
   ignore (write_config_sync_toml config name);
-  let raw, _ =
+  let raw, json =
     post_config ~inject_revision:false ~sw ~clock:(Eio.Stdenv.clock env)
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
       ~name {|{"activation_mode":"autonomous"}|}
   in
   expect_http_status "missing revision HTTP 400" 400 raw;
+  let open Yojson.Safe.Util in
+  check bool "a refusal before the update says nothing was written" false
+    (json |> member "config_applied" |> to_bool);
+  check string "and that the lane was not touched" "not_attempted"
+    (json |> member "runtime_sync" |> to_string);
+  ignore
+    (Masc.Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:config.base_path name)
+
+let test_config_post_refuses_invalid_json_without_a_write () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-invalid-json-refused" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let before = In_channel.with_open_bin toml_path In_channel.input_all in
+  let raw, json =
+    post_config ~inject_revision:false ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name "{"
+  in
+  expect_http_status "invalid json HTTP 400" 400 raw;
+  let open Yojson.Safe.Util in
+  check bool "the refusal names the body parse" true
+    (String.starts_with ~prefix:"invalid json: "
+       (json |> member "error" |> to_string));
+  check bool "an unparsable body says nothing was written" false
+    (json |> member "config_applied" |> to_bool);
+  check string "and that the lane was not touched" "not_attempted"
+    (json |> member "runtime_sync" |> to_string);
+  check string "the keeper TOML is unchanged" before
+    (In_channel.with_open_bin toml_path In_channel.input_all);
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
@@ -6588,6 +6620,11 @@ let test_config_post_refuses_an_unreadable_input_policy_without_a_write () =
      "(received string)"; its absence is what shows parse refused. *)
   check bool "the refusal is parse's, not the dashboard's" false
     (String_util.contains_substring body "(received");
+  (let open Yojson.Safe.Util in
+   check bool "a parse refusal says nothing was written" false
+     (json |> member "config_applied" |> to_bool);
+   check string "and that the lane was not touched" "not_attempted"
+     (json |> member "runtime_sync" |> to_string));
   check string "keeper TOML unchanged" before (read_file toml_path);
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
@@ -8217,6 +8254,8 @@ let () =
             test_config_post_mid_turn_policy_needs_the_lanes_proxy;
           test_case "config POST requires expected revision" `Quick
             test_config_post_requires_expected_revision;
+          test_case "config POST refuses invalid json without a write" `Quick
+            test_config_post_refuses_invalid_json_without_a_write;
           test_case "config POST refuses an unreadable input_policy without a write" `Quick
             test_config_post_refuses_an_unreadable_input_policy_without_a_write;
           test_case "stale config POST loses with typed 409" `Quick

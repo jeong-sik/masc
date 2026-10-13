@@ -296,7 +296,7 @@ let test_provider_context_retention () =
       provider_config = Some
         { (Provider_mock.to_provider_config ()) with kind } }
   in
-  let projection messages =
+  let projection (messages : Types.message list) =
     match duplicate_context, List.rev messages with
     | true, last :: _ when
         Types.Extra_system_context_provenance.classify last.metadata = Present ->

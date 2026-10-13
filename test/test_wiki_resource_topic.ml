@@ -267,6 +267,32 @@ let test_unreadable_page_is_listed_by_file_with_reason () =
       check string "described by the reason" beta_reason resource.description)
 ;;
 
+(* A file whose name is not a valid page topic would resolve to a different
+   page or to nothing, so it must not become a listing row: every listed page
+   URI reads back as the file it was made from. *)
+let test_only_round_trippable_pages_are_listed () =
+  let bad_name_documents =
+    [ "notes.json.md", "# not a page\n"
+    ; "release notes.md", "# not a page\n"
+    ; "a?b.md", "# not a page\n"
+    ; "a#b.md", "# not a page\n" ]
+  in
+  with_wiki ~documents:(bad_name_documents @ contract_documents) (fun state ->
+    let resources = listed state in
+    List.iter
+      (fun file ->
+        let uri = "masc://wiki/" ^ Filename.chop_suffix file ".md" in
+        check bool (file ^ " is not listed") true
+          (Option.is_none (find_listed uri resources)))
+      [ "notes.json.md"; "release notes.md"; "a?b.md"; "a#b.md" ];
+    List.iter
+      (fun (resource : Lib.Mcp_server.mcp_resource) ->
+        match served_text (read_resource state resource.uri) with
+        | None -> fail ("listed uri does not serve: " ^ resource.uri)
+        | Some _ -> ())
+      resources)
+;;
+
 let test_log_is_listed_and_served_once_it_exists () =
   let log = "## [2026-10-13 10:00] create r1 | alpha | codex | first\n" in
   with_wiki ~documents:(("log.md", log) :: contract_documents) (fun state ->
@@ -352,6 +378,10 @@ let () =
             "an unreadable page is listed by file with the reason"
             `Quick
             test_unreadable_page_is_listed_by_file_with_reason
+        ; test_case
+            "only round-trippable pages are listed"
+            `Quick
+            test_only_round_trippable_pages_are_listed
         ; test_case
             "the log is listed and served once it exists"
             `Quick

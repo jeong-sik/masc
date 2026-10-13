@@ -44,7 +44,10 @@ end
    through the [masc://wiki/{topic}] template, which a client that lists
    resources cannot expand, so it could not open a page. A page whose header
    does not read is listed by file name with the reason, as the index resource
-   does. The log is listed once it exists. *)
+   does. A file whose name is not a valid page topic is not listed: its URI
+   would not read back as the same file ([notes.json.md] reads as a JSON
+   request for [notes]; [?] and [#] fall to URI parsing), and the index
+   resource still shows it with its reason. The log is listed once it exists. *)
 let wiki_resources ~base_path : Mcp_server.mcp_resource list =
   run_blocking_resource_io (fun () ->
     let uri_of_topic topic = "masc://" ^ wiki_topic_prefix ^ topic in
@@ -56,6 +59,9 @@ let wiki_resources ~base_path : Mcp_server.mcp_resource list =
         | content ->
           let file = Filename.basename path in
           let topic = Filename.chop_suffix file ".md" in
+          match Tool_wiki.validate_page_name topic with
+          | Error _ -> None
+          | Ok _ ->
           let uri = uri_of_topic topic in
           let size = String.length content in
           (match Tool_wiki.parse_frontmatter content with

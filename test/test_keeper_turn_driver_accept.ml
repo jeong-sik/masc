@@ -1829,7 +1829,7 @@ let test_official_failure_observation_reaches_receipt () =
   | Some observed ->
     Alcotest.(check string) "runtime identity" "antigravity.test" observed.runtime_id;
     Alcotest.(check bool) "no model response invented" true
-      (Option.is_none observed.selected_model_raw);
+      (Option.is_none observed.selected_model);
     match observed.attempts with
     | [attempt] ->
       Alcotest.(check (option int)) "measured duration" (Some 2000) attempt.latency_ms;
@@ -1841,7 +1841,7 @@ let test_official_success_observation_is_preserved () =
   let open Masc in
   let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates () in
   let observed = Runtime_observation.runtime_observation_with_metrics
-    ~runtime_id:"official.test" ~selected_model_raw:None ~capture () in
+    ~runtime_id:"official.test" ~selected_model:None ~capture () in
   let result = { (run_result ()) with Runtime_agent.runtime_observation = Some observed } in
   let actual = Masc.Keeper_turn_driver.For_testing.official_client_observation
     ~runtime_id:"official.test" ~model_id:"test-model"

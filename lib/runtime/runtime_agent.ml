@@ -261,7 +261,7 @@ let runtime_observation_for_terminal_config ~total_duration_ms ?error
     ~latency_ms ~error;
   Runtime_observation.runtime_observation_with_metrics
     ~runtime_id:(runtime_id_of_config config)
-    ~selected_model_raw:(Some config.model_id)
+    ~selected_model:(Some config.model_id)
     ~capture
     ~attempt_details_source:
       (match error with

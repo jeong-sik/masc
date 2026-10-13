@@ -1946,11 +1946,8 @@ let () =
 
 let () =
   check
-    "observability artifacts all have consumer and retention owners"
+    "observability artifacts all have a producer, an authority source and a consumer"
     (KOAR.validate () = []);
-  check
-    "observability inventory covers the six audited stores"
-    (List.length KOAR.entries = 6);
   check
     "observability artifacts never claim command authority"
     (match KOAR.to_yojson () with

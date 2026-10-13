@@ -16,20 +16,27 @@ type artifact =
   | Metrics_snapshot
   | Raw_trace
 
+(** Who prunes an artifact and by which rule. *)
+type retention =
+  | Dated_jsonl_operator_window
+  | Startup_flat_file_mtime
+  | Raw_trace_reachability_window
+
 type entry =
-  { artifact : artifact
-  ; producer : string
+  { producer : string
   ; authority_source : string
   ; truth_role : truth_role
   ; consumers : string list
-  ; retention_owner : string
-  ; retention_policy : string
+  ; retention : retention
   }
 
-val entries : entry list
+val entry : artifact -> entry
+(** The registry row of [artifact]. A match over the variant, so every
+    artifact has exactly one row and a new artifact does not compile until it
+    has one. *)
 
 val validate : unit -> string list
-(** Empty means every artifact has one unique identity, at least one consumer,
-    and an explicit retention owner/policy. *)
+(** Empty means every artifact names a producer, an authority source and at
+    least one consumer. *)
 
 val to_yojson : unit -> Yojson.Safe.t

@@ -117,41 +117,6 @@ check_serve_port_available() {
   exit 1
 }
 
-maybe_prune_trpg_workspace() {
-  if [[ "${TRUNK_ARGS[0]:-}" != "serve" ]]; then
-    return
-  fi
-
-  if [[ "${MASC_TRPG_PRUNE_DEFAULT_WORKSPACE:-0}" != "1" ]]; then
-    return
-  fi
-
-  local prune_script="$SCRIPT_DIR/trpg-workspace-prune.sh"
-  if [[ ! -x "$prune_script" ]]; then
-    echo "viewer-trunk: skip TRPG prune (script not executable): $prune_script" >&2
-    return
-  fi
-
-  local workspace_id="${MASC_TRPG_PRUNE_WORKSPACE_ID:-default}"
-  local default_base_path="$PWD"
-  local base_path="${MASC_TRPG_PRUNE_BASE_PATH:-${MASC_BASE_PATH:-$default_base_path}}"
-  local keep_sessions="${MASC_TRPG_PRUNE_KEEP_SESSIONS:-1}"
-  local -a prune_args=(
-    --workspace-id "$workspace_id"
-    --base-path "$base_path"
-    --keep-sessions "$keep_sessions"
-    --apply
-  )
-  if [[ "${MASC_TRPG_PRUNE_VACUUM:-0}" == "1" ]]; then
-    prune_args+=(--vacuum)
-  fi
-
-  echo "viewer-trunk: running TRPG prune for workspace '$workspace_id' (keep=$keep_sessions)" >&2
-  if ! "$prune_script" "${prune_args[@]}"; then
-    echo "viewer-trunk: TRPG prune failed; continue serving" >&2
-  fi
-}
-
 acquire_lock() {
   if mkdir "$LOCK_DIR" 2>/dev/null; then
     echo "$$" > "$LOCK_DIR/pid"
@@ -180,7 +145,6 @@ acquire_lock
 trap release_lock EXIT INT TERM
 maybe_isolate_build_dist
 check_serve_port_available
-maybe_prune_trpg_workspace
 
 # Mitigate intermittent trunk stage-dir creation races.
 DIST_DIR="$(resolve_dist_dir)"

@@ -41,6 +41,10 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "lib"))
+
+import masc_base_path  # noqa: E402
+
 FRAME_MARK = b"\x1b[?7l"  # disable_autowrap, written once per presented frame
 TAIL_BYTES = 1 << 20
 # What the chat pane draws instead of a transcript. Every run passes through
@@ -270,8 +274,8 @@ def main() -> int:
     # it measured whatever happened to be at a path they had never named.
     parser.add_argument(
         "--base-path",
-        default=os.environ.get("MASC_BASE_PATH"),
-        help="MASC base path; falls back to $MASC_BASE_PATH, and one of the two is required",
+        default=None,
+        help="MASC base path (default: MASC_BASE_PATH); one of the two is required",
     )
     parser.add_argument("--rows", type=int, default=80)
     parser.add_argument("--cols", type=int, default=240)
@@ -284,8 +288,7 @@ def main() -> int:
     parser.add_argument("--chat-wait", type=float, default=6.0, help="seconds for the chat history to load")
     parser.add_argument("--timing-file", default=None, help="where the TUI appends its frame histogram")
     args = parser.parse_args()
-    if not args.base_path:
-        parser.error("--base-path or MASC_BASE_PATH is required")
+    base_path = str(masc_base_path.require(parser, args.base_path, "--base-path"))
 
     timing = args.timing_file or os.path.join(os.getcwd(), ".tmp", "tui-frame-timing.txt")
     os.makedirs(os.path.dirname(timing), exist_ok=True)
@@ -293,7 +296,7 @@ def main() -> int:
         os.remove(timing)
 
     load_before = os.getloadavg()
-    session = Session(args.exe, args.base_path, args.rows, args.cols, timing)
+    session = Session(args.exe, base_path, args.rows, args.cols, timing)
     time.sleep(args.boot_wait)
     phases: list[Phase] = []
     if args.scenario in ("overview", "all"):

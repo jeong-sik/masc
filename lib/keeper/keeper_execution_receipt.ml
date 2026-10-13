@@ -138,7 +138,14 @@ let operator_disposition (receipt : t)
   let provider_runtime_failure =
     match terminal_reason with
     | Keeper_terminal_reason.Provider_runtime_failure _ -> true
-    | _ -> false
+    | Keeper_terminal_reason.Runtime_exhausted _ | Keeper_terminal_reason.Config_invalid _
+    | Keeper_terminal_reason.Authorization_refused _
+    | Keeper_terminal_reason.Transcript_corruption _
+    | Keeper_terminal_reason.Official_client_recovery_required _
+    | Keeper_terminal_reason.Provider_attempt_effect_fenced _
+    | Keeper_terminal_reason.Tool_correction_lost _ | Keeper_terminal_reason.Accept_rejected _
+    | Keeper_terminal_reason.Terminal_effect_failed _ | Keeper_terminal_reason.Internal_error _
+    | Keeper_terminal_reason.Pre_dispatch_success _ | Keeper_terminal_reason.Unknown _ -> false
   in
   (* Either half puts this turn on a degraded-retry lane: it dispatched on a
      lane an earlier turn deferred to, or it deferred one itself. The

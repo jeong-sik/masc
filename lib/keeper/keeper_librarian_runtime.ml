@@ -648,7 +648,12 @@ let flow_has_invalid_output error =
     | Exact_output.Flow_advance_candidate_rejected _ -> false in
   let invalid_final = match error with
     | Exact_output.Flow_exact_execution_failed { cause; _ } -> invalid_json cause.Exact_output.cause
-    | _ -> false in
+    | Exact_output.Flow_attempt_already_started _ | Exact_output.Flow_attempt_start_failed _
+    | Exact_output.Flow_measurement_start_failed _
+    | Exact_output.Flow_before_measurement_dispatch_callback_failed _
+    | Exact_output.Flow_measurement_terminal_callback_failed _
+    | Exact_output.Flow_before_dispatch_callback_failed _
+    | Exact_output.Flow_before_advance_callback_failed _ | Exact_output.Flow_candidates_exhausted _ -> false in
   invalid_final || List.exists invalid_advance evidence.Exact_output.advances
 ;;
 
@@ -727,7 +732,8 @@ let rec extraction_has_invalid_output = function
     List.exists (function
       | Keeper_lane_cli_oneshot.Invalid_json_output _
       | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> true
-      | _ -> false) failures
+      | Keeper_lane_cli_oneshot.Unknown_runtime _ | Keeper_lane_cli_oneshot.Not_an_official_client _
+      | Keeper_lane_cli_oneshot.Execution_failed _ -> false) failures
     || Option.fold ~none:false ~some:extraction_has_invalid_output prior_error
   | Cli_prompt_unavailable { prior_error } ->
     Option.fold ~none:false ~some:extraction_has_invalid_output prior_error
@@ -1453,6 +1459,23 @@ let commit_continuity ~commit ~observe =
   observed
 ;;
 
+(* The judgment run_best_effort applies to its optional admission arguments.
+   The wildcard-expansion codemod folded the accepting arm
+   [Some _, Memory_maintenance, None, None, None -> true] into the rejecting
+   one, so a standalone Memory maintenance pass carrying an explicit admission
+   batch was refused. Restored here as a named function so tests can pin the
+   accepted and rejected shapes. *)
+let admission_mode_valid ~has_admission ~write_scope ~has_continuity
+      ~has_durable_range_id ~has_official_range_id
+  =
+  (not has_admission)
+  ||
+  match write_scope with
+  | Memory_maintenance ->
+    not (has_continuity || has_durable_range_id || has_official_range_id)
+  | Context_only | Context_and_memory -> false
+;;
+
 let run_best_effort
       ?(write_scope = Context_and_memory)
       ?admission
@@ -1473,9 +1496,13 @@ let run_best_effort
       (inp : Keeper_librarian.input)
   =
   let trace_id = input_trace_id inp in
-  let admission_mode_valid = match admission, write_scope, continuity, durable_range_id, official_range_id with
-    | None, _, _, _, _ | Some _, Memory_maintenance, None, None, None -> true
-    | Some _, _, _, _, _ -> false in
+  let admission_mode_valid =
+    admission_mode_valid
+      ~has_admission:(Option.is_some admission)
+      ~write_scope
+      ~has_continuity:(Option.is_some continuity)
+      ~has_durable_range_id:(Option.is_some durable_range_id)
+      ~has_official_range_id:(Option.is_some official_range_id) in
   if not admission_mode_valid then
     on_not_committed {detail = "explicit admission requires a standalone Memory maintenance pass";
                       walk_shows_size = false; input_capacity_evidence = No_input_capacity_refusal; smaller_range_meets_same_failure = false}
@@ -1493,7 +1520,11 @@ let run_best_effort
            let detail = "Librarian is off; pending input remains unconsumed" in
            on_not_committed {detail; walk_shows_size=false; input_capacity_evidence=No_input_capacity_refusal; smaller_range_meets_same_failure = false};
            Log.Keeper.info ~keeper_name:keeper_id "%s" detail
-         | Ok _ | Error _ ->
+         | Ok _ | Error (Prompt_render_failed _) | Error (Exact_setup_failed _)
+         | Error (Exact_execution_failed _) | Error (Cli_slots_exhausted _)
+         | Error (Cli_prompt_unavailable _) | Error (No_transport_declared)
+         | Error (Domain_output_invalid _) | Error (Absorb_judgment_failed _)
+         | Error (Memory_snapshot_write_failed _) ->
         let registry = Exact_lane_run_registry.global () in
         let run_id = Random_id.prefixed ~prefix:"librarian-exact-" ~bytes:16 in
         let started_at = Time_compat.now () in

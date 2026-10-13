@@ -28,7 +28,8 @@ let judgment_of_not_committed (reason : Keeper_librarian_runtime.not_committed) 
 let keep_strongest_judgment current reason =
   match current, judgment_of_not_committed reason with
   | Input_size_refused _, Deferred _ -> current
-  | _, next -> next
+  | (Committed, next) | (Awaiting_evidence, next) | (Deferred _, next)
+  | (Input_size_refused _, next) -> next
 
 let run_with ~keepers_dir ~keeper_name ~judge =
   let read () = io (fun () -> Queue.read_pending ~keepers_dir ~keeper_id:keeper_name) in

@@ -500,7 +500,7 @@ let session_full ~config ~keeper_name admission =
 let finish_run ~config ~keeper_name ~operation_id admission run_result =
   match admission.authority, run_result with
   | Agent_core _, Error _ -> run_result
-  | (Agent_core _ | Official_client _), _ ->
+  | ((Agent_core _ | Official_client _), Ok _) | (Official_client _, Error _) ->
     match complete_native ~config ~keeper_name ~operation_id admission with
     | Error detail ->
       (match run_result with

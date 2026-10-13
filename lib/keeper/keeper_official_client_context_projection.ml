@@ -245,7 +245,9 @@ let block_text item =
 ;;
 
 let block_id item = match item.held.Session_store.context with
-  | Session_store.Context_block id -> Some id | _ -> None
+  | Session_store.Context_block id -> Some id | Session_store.Context_carrier
+                                              | Session_store.Librarian_working_state
+                                              | Session_store.Historical_task_reference -> None
 
 let rec rendered_messages = function
   | [] -> []
@@ -324,7 +326,10 @@ let last_tool_results messages =
            (function
              | Agent_core.Types.ToolResult { content; content_blocks; outcome; _ } ->
                Some (Agent_core.Types.tool_result_of_outcome ?content_blocks ~content outcome)
-             | _ -> None)
+             | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+             | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+             | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
+             | Agent_core.Types.Audio _ -> None)
            message.content)
     | System | User | Assistant -> None)
   |> Option.value ~default:[]

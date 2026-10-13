@@ -129,7 +129,7 @@ let proactive_outcome_repair_value raw =
     (match proactive_cycle_outcome_of_string raw with
      | Proactive_unknown ->
        Some (proactive_cycle_outcome_to_string Proactive_never_started)
-     | outcome -> Some (proactive_cycle_outcome_to_string outcome))
+     | (Proactive_never_started | Proactive_silent | Proactive_text_response | Proactive_tool_use | Proactive_mixed_response | Proactive_error) as outcome -> Some (proactive_cycle_outcome_to_string outcome))
 ;;
 
 (* Persisted enumerated fields repairable in place.  A field belongs here

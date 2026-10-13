@@ -1056,8 +1056,7 @@ let claim_ready_exact
             | Error (Fs_compat.Cursor_mismatch _) ->
               Atomic.set entry.cached None;
               Ok None
-            | append_result ->
-              let* cursor = cursor_result ~ledger_path append_result in
+            | (Error (Fs_compat.Invalid_transaction_suffix | (Fs_compat.Stable_lock_contended _ | (Fs_compat.Unexpected_stable_lock_permissions _ | (Fs_compat.Invalid_stable_lock_state _ | (Fs_compat.Unexpected_transaction_file_kind _ | (Fs_compat.Ambiguous_transaction_file_identity _ | (Fs_compat.Transaction_path_binding_changed _ | (Fs_compat.Incomplete_transaction_tail _ | (Fs_compat.Private_jsonl_operation_failed _ | (Fs_compat.Rewrite_stage_failed _ | (Fs_compat.Rewrite_published_durability_unknown _ | (Fs_compat.Transaction_settlement_failed _ | Fs_compat.Transaction_append_failed _)))))))))))) | Ok _) as append_result -> let* cursor = cursor_result ~ledger_path append_result in
               Atomic.set entry.cached (Some { updated with cursor });
               Ok (Some claimed))
          | Running _ | Completed _ | Settled _ | Abandoned _ | Blocked _ -> Ok None)
@@ -1348,8 +1347,7 @@ let update_requeue_exact_or_observe ~base_path ~keeper_name decide =
                    (Observe_cursor_conflict
                       (Fs_compat.private_jsonl_transaction_error_to_string
                          conflict)))
-            | append_result ->
-              (match exact_cursor_result ~ledger_path append_result with
+            | (Error (Fs_compat.Invalid_transaction_suffix | (Fs_compat.Stable_lock_contended _ | (Fs_compat.Unexpected_stable_lock_permissions _ | (Fs_compat.Invalid_stable_lock_state _ | (Fs_compat.Unexpected_transaction_file_kind _ | (Fs_compat.Ambiguous_transaction_file_identity _ | (Fs_compat.Transaction_path_binding_changed _ | (Fs_compat.Incomplete_transaction_tail _ | (Fs_compat.Private_jsonl_operation_failed _ | (Fs_compat.Rewrite_stage_failed _ | (Fs_compat.Rewrite_published_durability_unknown _ | (Fs_compat.Transaction_settlement_failed _ | Fs_compat.Transaction_append_failed _)))))))))))) | Ok _) as append_result -> (match exact_cursor_result ~ledger_path append_result with
                | Error error -> Error error
                | Ok (cursor, write_outcome) ->
                  Atomic.set entry.cached (Some { updated with cursor });

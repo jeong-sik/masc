@@ -15,8 +15,7 @@ type rollback =
 let release_owned token =
   match Keeper_lifecycle_reservation.release token with
   | Keeper_lifecycle_reservation.Released -> ()
-  | outcome ->
-    Log.Keeper.warn
+  | (Keeper_lifecycle_reservation.Release_missing | Keeper_lifecycle_reservation.Release_not_owner _) as outcome -> Log.Keeper.warn
       "keepalive launch lifecycle reservation release was not clean: %s"
       (Keeper_lifecycle_reservation.release_outcome_to_string outcome)
 ;;

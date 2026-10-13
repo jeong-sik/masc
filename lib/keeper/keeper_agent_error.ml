@@ -35,7 +35,17 @@ let core_termination_semantics err =
   | Agent_core.Error.Agent (Agent_core.Error.TerminalToolDurabilityFailed _) ->
     Core_error_failure
   | Agent_core.Error.Provider _ -> Core_error_failure
-  | Agent_core.Error.Api _ -> Core_error_failure
+  | Agent_core.Error.Api (Agent_core.Retry.RateLimited _)
+  | Agent_core.Error.Api (Agent_core.Retry.Overloaded _)
+  | Agent_core.Error.Api (Agent_core.Retry.ServerError _)
+  | Agent_core.Error.Api (Agent_core.Retry.AuthError _)
+  | Agent_core.Error.Api (Agent_core.Retry.AuthorizationError _)
+  | Agent_core.Error.Api (Agent_core.Retry.PaymentRequired _)
+  | Agent_core.Error.Api (Agent_core.Retry.InvalidRequest _)
+  | Agent_core.Error.Api (Agent_core.Retry.NotFound _)
+  | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)
+  | Agent_core.Error.Api (Agent_core.Retry.InputCapacity _)
+  | Agent_core.Error.Api (Agent_core.Retry.NetworkError _) -> Core_error_failure
   | Agent_core.Error.Mcp _ -> Core_error_failure
   | Agent_core.Error.Config _ -> Core_error_failure
   | Agent_core.Error.Serialization _ -> Core_error_failure
@@ -230,7 +240,12 @@ let agent_core_timeout_observation :
       (Llm_provider.Error.NetworkError
          { kind = Llm_provider.Http_client.Timeout; timeout_phase = None; _ }) ->
     Some { Keeper_turn_terminal_code.source = Agent_core_provider; phase = None }
-  | _ -> None
+  | Agent_core.Error.Provider (Llm_provider.Error.NetworkError { kind = (Llm_provider.Http_client.Connection_refused | (Llm_provider.Http_client.Dns_failure | (Llm_provider.Http_client.Tls_error | (Llm_provider.Http_client.Local_resource_exhaustion | (Llm_provider.Http_client.Connection_reset | (Llm_provider.Http_client.End_of_file | Llm_provider.Http_client.Unknown)))))); timeout_phase = None;_})
+  | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _ | (Llm_provider.Error.InvalidConfig _ | (Llm_provider.Error.ParseError _ | (Llm_provider.Error.ProviderWireError _ | (Llm_provider.Error.ProviderReportedError _ | (Llm_provider.Error.UnknownVariant _ | (Llm_provider.Error.ProviderUnavailable _ | (Llm_provider.Error.EmptyCompletion _ | (Llm_provider.Error.RepeatingGeneration _ | (Llm_provider.Error.RateLimit _ | (Llm_provider.Error.HardQuota _ | (Llm_provider.Error.CapacityExhausted _ | (Llm_provider.Error.AuthError _ | (Llm_provider.Error.AuthorizationError _ | (Llm_provider.Error.ServerError _ | (Llm_provider.Error.InvalidRequest _ | (Llm_provider.Error.NotFound _ | Llm_provider.Error.ProviderTerminal _)))))))))))))))))
+  | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _ | (Llm_provider.Retry.Overloaded _ | (Llm_provider.Retry.ServerError _ | (Llm_provider.Retry.AuthError _ | (Llm_provider.Retry.AuthorizationError _ | (Llm_provider.Retry.PaymentRequired _ | (Llm_provider.Retry.InvalidRequest _ | (Llm_provider.Retry.NotFound _ | (Llm_provider.Retry.ContextOverflow _ | (Llm_provider.Retry.InputCapacity _ | Llm_provider.Retry.NetworkError _))))))))))
+  | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _ | Agent_core.Error.Io _ | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _ -> None
 ;;
 
 let terminal_reason_code_of_core_error_typed err =

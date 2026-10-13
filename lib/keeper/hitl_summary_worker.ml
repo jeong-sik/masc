@@ -1374,7 +1374,13 @@ let execute_prepared_flow_with_queue_ops_current
            match cause with
            | Exact_output.Flow_exact_execution_failed { candidate; _ } ->
              Some (exact_identity_of_candidate candidate)
-           | _ -> Option.map exact_identity_of_candidate !bound_candidate
+           | Exact_output.Flow_attempt_already_started _ | Exact_output.Flow_attempt_start_failed _
+           | Exact_output.Flow_measurement_start_failed _
+           | Exact_output.Flow_before_measurement_dispatch_callback_failed _
+           | Exact_output.Flow_measurement_terminal_callback_failed _
+           | Exact_output.Flow_before_dispatch_callback_failed _
+           | Exact_output.Flow_before_advance_callback_failed _
+           | Exact_output.Flow_candidates_exhausted _ -> Option.map exact_identity_of_candidate !bound_candidate
          in
          (match try_cli_slots ~queue_ops ~cli_runner ~bound prepared ~on_summary with
           | Cli_summary | Cli_settled -> ()
@@ -1384,7 +1390,8 @@ let execute_prepared_flow_with_queue_ops_current
                record_outcome Domain_invalid_output;
                quarantine_candidate ~queue_ops prepared.entry candidate
                  Exact_domain_invalid_output
-             | _ -> handle_flow_error ~queue_ops prepared cause)));
+             | (Exact_output.Flow_candidates_exhausted _, None)
+             | ((Exact_output.Flow_attempt_already_started _ | (Exact_output.Flow_attempt_start_failed _ | (Exact_output.Flow_measurement_start_failed _ | (Exact_output.Flow_before_measurement_dispatch_callback_failed _ | (Exact_output.Flow_measurement_terminal_callback_failed _ | (Exact_output.Flow_before_dispatch_callback_failed _ | (Exact_output.Flow_before_advance_callback_failed _ | Exact_output.Flow_exact_execution_failed _))))))), _) -> handle_flow_error ~queue_ops prepared cause)));
       Executed
     | Error
         (Exact_output.Flow_semantic_candidates_exhausted

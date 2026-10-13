@@ -2171,7 +2171,7 @@ let check_publication_companions ~keepers_dir ~keeper_id receipt =
                | Some _, _ -> false)
            && (match receipt.journal with `Assoc fields ->
                  journal_revision_links fields = Ok (Some removal.revision_links) | _ -> false) -> Ok ()
-       | _ -> Error "publication and removal receipts conflict; stores preserved") in
+       | Journal_failed _ | Journal_quarantined _ | Journal_committed _ -> Error "publication and removal receipts conflict; stores preserved") in
   let* ranges, skipped = read_durable_range_receipts ~keepers_dir ~keeper_id in
   (* Unreadable legacy rows are refused the same way validate_durable_range_
      receipts reports them: recovery must wait until the consume path has
@@ -2253,7 +2253,7 @@ let recover_publication_locked ~keepers_dir ~keeper_id =
           | Journal_committed entry when current.revision = receipt.target_revision
               && current.updated_at = entry.recorded_at && current.source = entry.source
               && current.change = entry.change -> Ok ()
-          | _ -> Error "publication target metadata conflicts; stores preserved" in
+          | Journal_failed _ | Journal_quarantined _ | Journal_committed _ -> Error "publication target metadata conflicts; stores preserved" in
         let* () = Fs_compat.sync_file_and_parent_strict path in
         let* pending = finalize_publication_journal ~keepers_dir ~keeper_id receipt in
         let snapshot = Some (current, text) in

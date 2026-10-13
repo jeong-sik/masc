@@ -1469,7 +1469,7 @@ let project_canonical_integrity_failure_locked ~ops key transition_lock
       ; durability = Durable
       ; origin = Canonical_reconciliation
       }
-  | poll_result -> Settlement_projection_error { attempted_entry; poll_result }
+  | (Absent | Unreadable _ | Rejected _ | Found _) as poll_result -> Settlement_projection_error { attempted_entry; poll_result }
 ;;
 
 let persist_failure_locked ~ops key transition_lock (attempted_entry : entry) reason =

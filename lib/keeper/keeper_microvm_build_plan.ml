@@ -99,7 +99,8 @@ let build_link_actions rows =
     (fun { checkout; target; plan } ->
       match plan, target with
       | (Link_create _ | Link_retarget _), Some target -> Some (checkout, target)
-      | _ -> None)
+      | ((Link_create _ | Link_retarget _), None)
+      | ((Link_already_correct | (Link_refused_real_directory | Link_refused_invalid_path _)), _) -> None)
     rows
 ;;
 

@@ -320,4 +320,4 @@ let retry ~config ~keeper_name ~operation_id ~cleanup =
     if receipt.keeper_name <> keeper_name then Error (Conflict "configuration removal Keeper identity mismatch")
     else match receipt.state with
       | Removed -> Ok receipt
-      | _ -> finish config receipt ~cleanup)
+      | Prepared | Artifacts_removed | Cleanup_required _ -> finish config receipt ~cleanup)

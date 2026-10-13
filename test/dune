@@ -5978,6 +5978,8 @@
 
 (include stanzas/test_keeper_event_genealogy_capture.inc)
 
+(include stanzas/test_keeper_librarian_admission_mode.inc)
+
 (test
  (name test_tui_keeper_call_evidence)
  (modules test_tui_keeper_call_evidence)

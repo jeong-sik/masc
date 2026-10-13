@@ -40,7 +40,10 @@ let tool_result_history_fields (block : Agent_core.Types.content_block) =
       (match json with
        | Some payload -> ("tool_result_json", payload) :: outcome_field
        | None -> outcome_field)
-  | _ -> []
+  | Llm_provider.Types.Text _ | Llm_provider.Types.Thinking _
+  | Llm_provider.Types.ReasoningDetails _ | Llm_provider.Types.RedactedThinking _
+  | Llm_provider.Types.ToolUse _ | Llm_provider.Types.Image _ | Llm_provider.Types.Document _
+  | Llm_provider.Types.Audio _ -> []
 
 let content_block_to_history_json block =
   match
@@ -87,7 +90,7 @@ let content_block_of_history_json json =
       Some
         (Agent_core.Types.ToolResult
            { result with outcome; json = json_payload })
-  | other -> other
+  | (Some (Llm_provider.Types.Text _ | (Llm_provider.Types.Thinking _ | (Llm_provider.Types.ReasoningDetails _ | (Llm_provider.Types.RedactedThinking _ | (Llm_provider.Types.ToolUse _ | (Llm_provider.Types.Image _ | (Llm_provider.Types.Document _ | Llm_provider.Types.Audio _))))))) | None) as other -> other
 
 let content_blocks_to_json
     (blocks : Agent_core.Types.content_block list) : Yojson.Safe.t =

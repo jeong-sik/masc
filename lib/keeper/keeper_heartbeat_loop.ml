@@ -618,7 +618,13 @@ let retain_connector_attention_sources ~base_path ~keeper_name selections =
             Log.Keeper.error
               "turn exit: connector attention retention failed event_id=%s keeper=%s: %s"
               selection.source.post_id keeper_name detail)
-       | _ -> ())
+       | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+       | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+       | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
+       | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
+       | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+       | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+       | Keeper_event_queue.Task_outcome _ -> ())
     selections
 ;;
 
@@ -1158,7 +1164,14 @@ let run_keepalive_unified_turn
                 (fun (stim : Keeper_event_queue.stimulus) ->
                   match stim.Keeper_event_queue.payload with
                   | Keeper_event_queue.Hitl_resolved resolution -> Some resolution
-                  | _ -> None)
+                  | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+                  | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+                  | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
+                  | Keeper_event_queue.Ask_answered _
+                  | Keeper_event_queue.Completion_authority_rejected _
+                  | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+                  | Keeper_event_queue.Delegate_completed _
+                  | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Task_outcome _ -> None)
                 (Keeper_heartbeat_source_batch.stimuli !source_batch)
             with
             | Some resolution -> Some resolution
@@ -1331,7 +1344,14 @@ let run_keepalive_unified_turn
                match selection.Keeper_event_queue_state.source.payload with
                | Keeper_event_queue.Hitl_resolved _ ->
                  !hitl_continuation_projection_ok
-               | _ -> true
+               | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+               | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+               | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
+               | Keeper_event_queue.Ask_answered _
+               | Keeper_event_queue.Completion_authority_rejected _
+               | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+               | Keeper_event_queue.Delegate_completed _
+               | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Task_outcome _ -> true
              in
              let selections_to_ack, retained_selections =
                List.partition should_ack selections
@@ -1361,7 +1381,14 @@ let run_keepalive_unified_turn
                ~should_ack:(fun selection ->
                  match selection.Keeper_event_queue_state.source.payload with
                  | Keeper_event_queue.Connector_attention _ -> false
-                 | _ -> true)
+                 | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+                 | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+                 | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
+                 | Keeper_event_queue.Ask_answered _
+                 | Keeper_event_queue.Completion_authority_rejected _
+                 | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+                 | Keeper_event_queue.Delegate_completed _
+                 | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Task_outcome _ -> true)
            | Batch_no_action -> ());
       { meta = meta_after_cycle
       ; cycle_status =

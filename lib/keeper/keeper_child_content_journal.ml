@@ -132,7 +132,7 @@ let done_ db stmt operation =
 let scalar db cleanup sql = statement db cleanup "scalar" sql (fun stmt ->
   match Sqlite3.step stmt with
   | Sqlite3.Rc.ROW -> let value = Sqlite3.column stmt 0 in let* () = done_ db stmt "scalar end" in Ok value
-  | rc -> Error (sqlite_failure db "scalar" rc))
+  | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.DONE | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_failure db "scalar" rc))
 let integer = function
   | Sqlite3.Data.INT value -> Ok value
   | Sqlite3.Data.NONE | Sqlite3.Data.NULL | Sqlite3.Data.FLOAT _ | Sqlite3.Data.TEXT _
@@ -148,7 +148,7 @@ let schema_objects db cleanup = statement db cleanup "schema"
     | Sqlite3.Rc.ROW ->
         let* name = text (Sqlite3.column stmt 0) in
         let* sql = text (Sqlite3.column stmt 1) in loop ((name,sql)::acc)
-    | rc -> Error (sqlite_failure db "schema" rc) in loop [])
+    | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_failure db "schema" rc) in loop [])
 let validate_schema db cleanup =
   let* id = scalar db cleanup "PRAGMA application_id" |> fun result -> Result.bind result integer in
   let* version = scalar db cleanup "PRAGMA user_version" |> fun result -> Result.bind result integer in
@@ -202,7 +202,7 @@ let metadata db cleanup expected = statement db cleanup "scope"
       else if next<1L || next>Int64.succ max_sequence then corrupt "invalid next sequence"
       else Ok (store_id,next)
   | Sqlite3.Rc.DONE -> corrupt "missing store metadata"
-  | rc -> Error (sqlite_failure db "scope" rc))
+  | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_failure db "scope" rc))
 let decode_row (scope : scope) stmt =
   let* seq64 = integer (Sqlite3.column stmt 0) in
   let* seq =
@@ -214,7 +214,8 @@ let decode_row (scope : scope) stmt =
   let* key = text (Sqlite3.column stmt 1) in
   let* recorded_at = match Sqlite3.column stmt 2 with
     | Sqlite3.Data.FLOAT f when Float.is_finite f -> Ok f
-    | _ -> corrupt ~seq:seq "invalid timestamp" in
+    | Sqlite3.Data.NONE | Sqlite3.Data.NULL | Sqlite3.Data.INT _ | Sqlite3.Data.TEXT _
+    | Sqlite3.Data.BLOB _ | FLOAT _ -> corrupt ~seq:seq "invalid timestamp" in
   let* payload = text (Sqlite3.column stmt 3) in
   let* observation =
     try Child.of_json (Yojson.Safe.from_string payload)
@@ -241,7 +242,7 @@ let full_audit db cleanup scope next =
             if Int64.of_int row.seq<>expected || Hashtbl.mem keys (observation_key row.observation) then
               corrupt ~seq:row.seq "noncontiguous sequence or duplicate observation key"
             else (Hashtbl.add keys (observation_key row.observation) (); loop (Int64.succ expected) (row::acc))
-        | rc -> Error (sqlite_failure db "audit history" rc) in loop 1L [])
+        | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_failure db "audit history" rc) in loop 1L [])
 let tail_boundary db cleanup next =
   let* highest = scalar db cleanup "SELECT COALESCE(MAX(seq),0) FROM observations" |> fun result -> Result.bind result integer in
   if Int64.succ highest=next then Ok () else corrupt "metadata does not follow last row"
@@ -301,7 +302,7 @@ let append_with_io io publication = protect_io (fun () ->
             | Sqlite3.Rc.DONE -> Ok None
             | Sqlite3.Rc.ROW -> let* record = decode_row reader.scope stmt in
                 let* () = done_ db stmt "observation uniqueness" in Ok (Some record)
-            | rc -> Error (sqlite_failure db "lookup observation key" rc)) in
+            | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_failure db "lookup observation key" rc)) in
         let* result = match previous with
           | Some record when record.observation=publication.observation -> Ok (Replayed record)
           | Some _ -> Error (Conflicting_observation (observation_key publication.observation))

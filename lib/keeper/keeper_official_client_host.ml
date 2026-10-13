@@ -96,8 +96,7 @@ let invoke_turn_completion_hooks ~runtime_label ~keeper_name ~turn_count ~hooks
     | Continue -> Ok ()
     | HookFailed { stage; detail } ->
       Error (hook_error ~runtime_label ~hook_name:"after_turn" ~stage detail)
-    | decision ->
-      Error (illegal_hook_decision ~runtime_label ~hook_name:"after_turn" decision)
+    | (Agent_core.Hooks.AdjustParams _ | Agent_core.Hooks.ElicitInput _ | Agent_core.Hooks.ElicitToolApproval _ | Agent_core.Hooks.Nudge _ | Agent_core.Hooks.Block _) as decision -> Error (illegal_hook_decision ~runtime_label ~hook_name:"after_turn" decision)
   in
   match
     invoke_turn_hook
@@ -110,8 +109,7 @@ let invoke_turn_completion_hooks ~runtime_label ~keeper_name ~turn_count ~hooks
   | Continue -> Ok ()
   | HookFailed { stage; detail } ->
     Error (hook_error ~runtime_label ~hook_name:"on_stop" ~stage detail)
-  | decision ->
-    Error (illegal_hook_decision ~runtime_label ~hook_name:"on_stop" decision)
+  | (Agent_core.Hooks.AdjustParams _ | Agent_core.Hooks.ElicitInput _ | Agent_core.Hooks.ElicitToolApproval _ | Agent_core.Hooks.Nudge _ | Agent_core.Hooks.Block _) as decision -> Error (illegal_hook_decision ~runtime_label ~hook_name:"on_stop" decision)
 ;;
 
 let lifecycle_outcome = function
@@ -901,8 +899,7 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     | Nudge text -> Ok (initial_messages @ [ user_message text ])
     | HookFailed { stage; detail } ->
       Error (hook_error ~runtime_label ~hook_name:"before_turn" ~stage detail)
-    | decision ->
-      Error (illegal_hook_decision ~runtime_label ~hook_name:"before_turn" decision)
+    | (Agent_core.Hooks.AdjustParams _ | Agent_core.Hooks.ElicitInput _ | Agent_core.Hooks.ElicitToolApproval _ | Agent_core.Hooks.Block _) as decision -> Error (illegal_hook_decision ~runtime_label ~hook_name:"before_turn" decision)
   in
   (* Seed the params the hook sees rather than overwriting its answer: an
      operator declaration is a default for the turn, not an override of a
@@ -935,8 +932,7 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     | AdjustParams params -> Ok params
     | HookFailed { stage; detail } ->
       Error (hook_error ~runtime_label ~hook_name:"before_turn_params" ~stage detail)
-    | decision ->
-      Error
+    | (Agent_core.Hooks.ElicitInput _ | Agent_core.Hooks.ElicitToolApproval _ | Agent_core.Hooks.Nudge _ | Agent_core.Hooks.Block _) as decision -> Error
         (illegal_hook_decision
            ~runtime_label
            ~hook_name:"before_turn_params"
@@ -1792,7 +1788,8 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                    })
              in
              match final_result.abort_turn, boundary with
-             | Some _, _ | None, None -> final_result
+             | (Some (Repeated_tool_call _), _) | (None, None)
+             | (Some (Terminal_tool_boundary _), _) -> final_result
              | None, Some (Terminal_tool_boundary
                  { outcome = Terminal_failed _; _ } as stop) ->
                { final_result with success = false; abort_turn = Some stop }

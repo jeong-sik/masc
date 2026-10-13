@@ -56,7 +56,7 @@ val base_label_to_string : base_label -> string
     All other fields are optional overrides: a [None] value means
     "inherit from the base", a [Some v] value replaces the base value. *)
 type entry =
-  { id_prefix : string
+  { id_prefix : Model_identifiers.Id_prefix.t
   ; base_label : base_label option
     (** Provider preset label, e.g. ["openai_chat"] or ["anthropic"]. *)
   ; max_context_tokens : int option (** [None] = inherit from base. *)
@@ -155,9 +155,9 @@ val of_json : Yojson.Safe.t -> (t, string) result
 val load_file : string -> (t, string) result
 
 (** [lookup t model_id] returns the first entry whose [id_prefix] is a
-    case-insensitive prefix of [model_id].  Returns [None] when no
-    entry matches. *)
-val lookup : t -> string -> entry option
+    case-insensitive prefix of [model_id] ({!Model_identifiers.Model_id.starts_with}).
+    Returns [None] when no entry matches. *)
+val lookup : t -> Model_identifiers.Model_id.t -> entry option
 
 (** The currently active manifest.
 

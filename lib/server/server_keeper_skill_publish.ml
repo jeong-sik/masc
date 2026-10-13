@@ -96,7 +96,7 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
                { reference = preview.profile.reference
                ; snapshot_revision =
                    Skill_catalog_snapshot.snapshot_revision_to_string snapshot_revision
-               ; kind = preview.profile.kind
+               ; kind = Keeper_skill_observability.kind_label preview.profile.surface
                ; diagnostics = preview.diagnostics
                } )
          | Created_but_shadowed { preview; snapshot_revision; winner } ->
@@ -111,7 +111,7 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
                ; snapshot_revision =
                    Skill_catalog_snapshot.snapshot_revision_to_string snapshot_revision
                ; winner
-               ; kind = preview.profile.kind
+               ; kind = Keeper_skill_observability.kind_label preview.profile.surface
                ; diagnostics = preview.diagnostics
                } )
          | Created_but_unpublished { preview; reason } ->
@@ -121,7 +121,7 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
            , Publish.Created_but_unpublished
                { reference = preview.profile.reference
                ; reason
-               ; kind = preview.profile.kind
+               ; kind = Keeper_skill_observability.kind_label preview.profile.surface
                ; diagnostics = preview.diagnostics
                } )
        in

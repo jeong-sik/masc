@@ -27,9 +27,9 @@ type error_kind =
   | Ek_internal
 
 val error_kind_of_string : string -> error_kind option
-(** Parse a wire label. [None] on unknown so JSON read paths fail
-    closed (CLAUDE.md anti-pattern #2 — Unknown → Permissive Default
-    forbidden). *)
+(** Parse one of the four labels {!error_kind_to_string} writes. Anything
+    else is [None], including [""]: the status JSON writes [""] when there is
+    no failure, and that is not a kind. *)
 
 val error_kind_to_string : error_kind -> string
 (** The JSON/status label: [validation], [keeper], [dispatch_unavailable]

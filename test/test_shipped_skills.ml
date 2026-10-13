@@ -133,7 +133,10 @@ let test_run_and_read_preserves_a_failed_pipeline () =
         (`Assoc [ "command", `String "printf 'capture failed\\n'; (exit 23) | cat";
                   "timeout_sec", `Float 5.0 ]) in
     let result, calls = run_plan plan ~answer:(function
-      | "keeper_spawn" -> `Assoc [ "handle", `String "pipeline" ]
+      | "keeper_spawn" ->
+        (* The descriptor declares both fields required; the executor
+           validates a producer's output before a consumer may read it. *)
+        `Assoc [ "status", `String "running"; "handle", `String "pipeline" ]
       | "keeper_spawn_wait" | "keeper_spawn_read" -> `Assoc []
       | tool -> fail ("unexpected tool: " ^ tool)) in
     (match result with Ok _ -> () | Error _ -> fail "invalid shipped plan");

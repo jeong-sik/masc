@@ -8,6 +8,7 @@ module Workspace = Masc.Workspace
 module Descriptor = Masc.Keeper_tool_descriptor
 module Bundle = Masc.Keeper_tools_agent_core_bundle
 module Store = Masc.Keeper_owned_job_store
+module Invocation = Masc.Keeper_owned_job_invocation
 module Call_log = Masc.Keeper_tool_call_log
 
 let keeper = "owned-job-feature"
@@ -33,7 +34,7 @@ let rec remove_tree path =
 (* The protocol peer builds inspect receipts from the production create argv.
    It never constructs a Store record or calls a job helper on the test's
    behalf. State remains external to the OCaml process-local transport state. *)
-let docker_peer = {|import csv, json, pathlib, sys, time
+let docker_peer = {|import csv, hashlib, json, pathlib, sys, time
 root = pathlib.Path(__file__).parent
 state_path = root / "daemon.json"
 control_path = root / "control.json"
@@ -67,6 +68,14 @@ def require_intent(job_id, phase, expected_container=None):
     rows = [json.loads(line) for line in owner.read_text().splitlines() if line.strip()]
     record = rows[-1]
     assert record["job_id"] == job_id and record["phase"]["kind"] == phase
+    bindings = [json.loads(path.read_text()) for path in
+        (root / ".masc" / "keeper_msg_requests" / "owned_job_invocations").glob("*.json")]
+    binding = next(value for value in bindings if value["job_id"] == job_id)
+    assert binding["base_path"] == str(root) and binding["keeper_name"] == record["keeper_name"]
+    assert binding["source"] == record["source"]
+    request = {"argv": record["preparation"]["spec"]["argv"], "inputs": record["inputs"]}
+    digest = hashlib.sha256(json.dumps(request, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+    assert binding["request_sha256"] == digest
     if expected_container is not None:
         assert record["phase"]["container_id"] == expected_container
 image_id = "sha256:" + "b" * 64
@@ -138,6 +147,10 @@ elif args[:2] == ["container", "start"]:
         sys.exit(18)
     state["container"]["State"].update(Status="running", Running=True)
     save()
+    if control.get("mode") == "start_blocked":
+        (root / "start-entered").write_text(args[2])
+        while True:
+            time.sleep(1)
     print(container_id)
 elif args[:2] == ["container", "kill"]:
     assert state["container"] is not None and args[2] == state["container"]["Id"]
@@ -297,7 +310,7 @@ let result_document ~base_path content =
   | Tool_output.Not_artifact_manifest ->
       (match json |> member "structured_content" with `Null -> json | structured -> structured)
 
-let invoke fixture bundle ~tool_use_id ~turn name input =
+let invoke_raw bundle ~tool_use_id ~turn name input =
   let tool = List.find_opt (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) bundle.Masc.Keeper_tools_agent_core.tools
     |> function Some tool -> tool | None -> failf "public job tool unavailable: %s" name in
   check bool "job tool remains ordinary Serial" true
@@ -305,7 +318,10 @@ let invoke fixture bundle ~tool_use_id ~turn name input =
   let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn
       ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Agent_core.Tool_contract.Serial}
       ~completion:Agent_core.Tool_contract.Continue_after_success in
-  match Agent_core.Tool.execute ~invocation tool input with
+  Agent_core.Tool.execute ~invocation tool input
+
+let invoke fixture bundle ~tool_use_id ~turn name input =
+  match invoke_raw bundle ~tool_use_id ~turn name input with
   | Ok output -> result_document ~base_path:fixture.base_path output.content
   | Error error -> failf "public job handler failed: %s" error.Agent_core.Types.message
 
@@ -483,6 +499,8 @@ let test_unknown_create_absence_never_replays () = with_fixture @@ fun _env _ini
   let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
   let id = job_id started in
   check string "create uncertainty preserves durable intent" "create_requested" (started |> member "phase" |> to_string);
+  let repeated = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
+  check string "original source recovers the unknown create handle" id (job_id repeated);
   List.iter (fun turn -> with_bundle fixture (fun bundle ->
       let status = invoke fixture bundle ~tool_use_id:("inspect-create-" ^ string_of_int turn) ~turn
           "keeper_job_status" (argument id) in
@@ -497,6 +515,8 @@ let test_unknown_start_absence_never_replays () = with_fixture @@ fun _env _init
   let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
   let id = job_id started in
   check string "start uncertainty preserves durable intent" "start_requested" (started |> member "phase" |> to_string);
+  let repeated = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
+  check string "original source recovers the unknown start handle" id (job_id repeated);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"inspect-start" ~turn:42
       "keeper_job_status" (argument id)));
   check int "unknown start never recreates" 1 (effect_count fixture "create");
@@ -681,6 +701,100 @@ let test_large_streams_publish_complete_original_artifacts () = with_fixture @@ 
   check int "large result never restarts job" 1 (effect_count fixture "start");
   check int "one real output capture command" 1 (effect_count fixture "logs")
 
+let original_invocation fixture =
+  let trace_id = Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id in
+  let source : Store.source =
+    {task_id=Some "task-A";keeper_turn_id=Some 41;trace_id=Some trace_id;
+     turn_ref=Some (Ids.Turn_ref.make ~trace_id ~absolute_turn:41);
+     tool_use_id=Some "start-original"} in
+  match Invocation.invocation_of_source source with
+  | Ok (Some invocation) -> invocation
+  | Ok None | Error _ -> fail "original invocation identity unavailable"
+
+let lookup_original fixture =
+  match Invocation.lookup ~base_path:fixture.base_path ~keeper_name:keeper (original_invocation fixture) with
+  | Ok (Some reservation) -> reservation
+  | Ok None -> fail "original invocation reservation missing"
+  | Error error -> fail (Store.error_to_string error.Invocation.cause)
+
+let test_lost_start_reply_recovers_original_job () = with_fixture @@ fun env initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  control fixture (`Assoc ["mode", `String "start_blocked"]);
+  let marker = Filename.concat fixture.base_path "start-entered" in
+  (* Fixture deadlock guard only; no timeout is added to the producer. *)
+  let interrupted = with_bundle fixture (fun bundle ->
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 15. (fun () ->
+        Eio.Fiber.first
+          (fun () -> ignore (start fixture bundle ["fixture-program"]); false)
+          (fun () ->
+            let rec wait () = if Sys.file_exists marker then ()
+              else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.01; wait ()) in
+            wait (); true))) in
+  check bool "start reply was interrupted after the actual backend effect" true interrupted;
+  let calls_before_lookup = List.length (calls fixture) in
+  let reservation = lookup_original fixture in
+  let id = Store.Job_id.to_string reservation.job_id in
+  check int "source lookup consults no backend or job inventory" calls_before_lookup (List.length (calls fixture));
+  (match (load fixture id).phase with Store.Start_requested _ -> ()
+    | _ -> fail "lost reply did not retain the original start intention");
+  set_source fixture ~task_id:"task-B" ~turn:52;
+  let found_again = lookup_original fixture in
+  check string "original source lookup survives current Task change" id (Store.Job_id.to_string found_again.job_id);
+  check (option string) "source lookup keeps original Task" (Some "task-A") found_again.source.task_id;
+  Process_eio.reset_for_testing (); initialize ();
+  control fixture (`Assoc []);
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let recovered = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
+  check string "same logical invocation recovers the original handle" id (job_id recovered);
+  check string "original already-running backend is reconciled" "running" (recovered |> member "phase" |> to_string);
+  check_original_source fixture recovered;
+  check int "lost reply recovery never recreates the job" 1 (effect_count fixture "create");
+  check int "lost reply recovery never restarts the program" 1 (effect_count fixture "start")
+
+let assert_start_rejected fixture argv = with_bundle fixture (fun bundle ->
+    match invoke_raw bundle ~tool_use_id:"start-original" ~turn:41 "keeper_job_start"
+        (`Assoc ["argv", `List (List.map (fun value -> `String value) argv); "inputs", `List []]) with
+    | Error _ -> ()
+    | Ok _ -> fail "changed or corrupt invocation authority was accepted")
+
+let test_original_invocation_rejects_rebinding () = with_fixture @@ fun _env _initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let original = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
+  let id = job_id original in
+  let calls_before = List.length (calls fixture) in
+  assert_start_rejected fixture ["different-program"];
+  check int "changed argv is rejected before any backend call" calls_before (List.length (calls fixture));
+  set_source fixture ~task_id:"task-B" ~turn:41;
+  assert_start_rejected fixture ["fixture-program"];
+  check int "current Task cannot rebind original source" calls_before (List.length (calls fixture));
+  let retained = lookup_original fixture in
+  check string "conflict keeps the original handle" id (Store.Job_id.to_string retained.job_id);
+  check (option string) "conflict keeps original Task authority" (Some "task-A") retained.source.task_id;
+  check int "conflict never recreates" 1 (effect_count fixture "create");
+  check int "conflict never restarts" 1 (effect_count fixture "start")
+
+let test_corrupt_invocation_binding_cannot_launch () = with_fixture @@ fun _env _initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  ignore (with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]));
+  let directory = Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path:fixture.base_path) "keeper_msg_requests")
+      "owned_job_invocations" in
+  let names = Sys.readdir directory |> Array.to_list
+    |> List.filter (fun name -> Filename.extension name = ".json") in
+  let location = match names with [name] -> Filename.concat directory name
+    | _ -> fail "expected the original invocation binding" in
+  let fields = read location |> Yojson.Safe.from_string |> function
+    | `Assoc fields -> fields | _ -> fail "expected binding object" in
+  write location (Yojson.Safe.to_string (`Assoc (("version", `Int 1) :: fields)) ^ "\n");
+  let calls_before = List.length (calls fixture) in
+  assert_start_rejected fixture ["fixture-program"];
+  check int "corrupt source authority never touches backend" calls_before (List.length (calls fixture));
+  (match Invocation.lookup ~base_path:fixture.base_path ~keeper_name:keeper (original_invocation fixture) with
+   | Error {cause=Store.Corrupt _;_} -> ()
+   | Ok _ | Error _ -> fail "corrupt authority became an absent or reusable binding");
+  check int "corrupt authority never recreates" 1 (effect_count fixture "create");
+  check int "corrupt authority never restarts" 1 (effect_count fixture "start")
+
 let () =
   Printf.printf "owned_job_feature_transport=synthetic_docker_cli actual_public_handler=true actual_docker_execution=false\n%!";
   run "Keeper owned jobs"
@@ -692,4 +806,7 @@ let () =
       ; test_case "late same-label container stays an orphan" `Quick test_cancelled_unconfirmed_launch_treats_late_container_as_orphan
       ; test_case "interrupted cancellation retains exact intent" `Quick test_cancel_in_flight_retains_exact_intent
       ; test_case "changed mount or cloned identity cannot authorize a kill" `Quick test_changed_mount_cannot_authorize_cancel
-      ; test_case "large stdout and stderr preserve complete original artifacts" `Quick test_large_streams_publish_complete_original_artifacts ]]
+      ; test_case "large stdout and stderr preserve complete original artifacts" `Quick test_large_streams_publish_complete_original_artifacts
+      ; test_case "lost start reply recovers the original job" `Quick test_lost_start_reply_recovers_original_job
+      ; test_case "original invocation rejects request and source rebinding" `Quick test_original_invocation_rejects_rebinding
+      ; test_case "corrupt invocation authority cannot launch" `Quick test_corrupt_invocation_binding_cannot_launch ]]

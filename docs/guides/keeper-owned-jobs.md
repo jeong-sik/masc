@@ -37,6 +37,16 @@ are inventoried and replaced by recorded job-private tmpfs mounts.
 
 Create and start intentions are committed before their corresponding backend
 calls. An unconfirmed create/start keeps that intention and the same handle.
+When the original trace, turn and tool invocation are available, the producer
+also commits that invocation's job binding before preparing its workspace.
+Re-entering that exact invocation reconciles the original job; it does not
+resolve a fresh image or create a replacement. Different arguments or source
+task metadata cannot overwrite the binding. A caller with a new tool-use ID
+is a new invocation, so repeating a command is not lost-reply recovery.
+The typed source lookup can recover a reserved handle even when its job journal
+is not available yet. That absence remains unconfirmed and never permits a
+replacement. Calls without complete invocation identity retain an explicit
+job handle but cannot use this source lookup.
 Status inspects the saved daemon, image, command, labels and private mount
 authority. An absent container, empty local process registry or transport error
 does not authorize another create/start. A confirmed created container whose

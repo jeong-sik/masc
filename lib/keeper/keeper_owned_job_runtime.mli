@@ -1,5 +1,7 @@
 (** Actual descriptor-backed isolated job producer. Launch/start intent is
     durable before effects; status reconciles the exact saved backend handle.
+    With complete original invocation identity, repeated starts reconcile the
+    already-bound job instead of preparing or launching a replacement.
     Published output references retain their typed artifacts and a durable
     manifest, with the job result available under the existing inline ceiling. *)
 val handle :

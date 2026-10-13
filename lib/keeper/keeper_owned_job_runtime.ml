@@ -1,5 +1,6 @@
 module Store = Keeper_owned_job_store
 module Backend = Keeper_owned_job_backend
+module Invocation = Keeper_owned_job_invocation
 let ( let* ) = Result.bind
 
 let save (record : Store.record) ~phase ~cancel_requested ~outputs ~detail =
@@ -179,7 +180,6 @@ let handle ~config ~meta ~source_context ~tool_use_id ~turn_ref ~trace_id ~name 
       (match start_arguments args with
        | Error detail -> invalid detail
        | Ok (argv,inputs) ->
-           let job_id = Store.Job_id.fresh () in
            let trace_id = match source_context with
              | Some context -> context.Keeper_tool_call_log_context.trace_id
              | None -> trace_id in
@@ -194,7 +194,7 @@ let handle ~config ~meta ~source_context ~tool_use_id ~turn_ref ~trace_id ~name 
              { task_id = Option.bind source_context (fun context -> context.Keeper_tool_call_log_context.task_id)
              ; keeper_turn_id = Option.bind source_context (fun context -> context.Keeper_tool_call_log_context.keeper_turn_id)
              ; turn_ref; tool_use_id; trace_id } in
-           let prepare () =
+           let prepare job_id =
              let* base_path = Store.canonical_base_path config.Workspace.base_path in
              let* paths = Store.prepare_workspace ~base_path job_id inputs in
              let spec = Backend.{job_id=Store.Job_id.to_string job_id;keeper_name=meta.Keeper_meta_contract.name;
@@ -202,10 +202,34 @@ let handle ~config ~meta ~source_context ~tool_use_id ~turn_ref ~trace_id ~name 
              let* preparation = Backend.prepare ~config ~meta ~docker_config_path:paths.cli_config_dir spec
                  |> Result.map_error (fun error -> Store.Invalid_authority (Backend.error_to_string error)) in
              Store.create ~base_path ~keeper_name:meta.name ~job_id ~source ~preparation ~inputs in
-           (match prepare () with
-            | Error error -> failure ~job_id ~effect_disposition:Tool_result.Proven_pre_effect
-                Tool_result.Runtime_failure (Store.error_to_string error)
-            | Ok record -> finish ~tool_name:name ~start_time ~job_id (launch record)))
+           let start_new job_id = match prepare job_id with
+             | Error error -> failure ~job_id ~effect_disposition:Tool_result.Proven_pre_effect
+                 Tool_result.Runtime_failure (Store.error_to_string error)
+             | Ok record -> finish ~tool_name:name ~start_time ~job_id (launch record) in
+           (match Invocation.invocation_of_source source with
+            | Error detail -> invalid detail
+            | Ok None -> start_new (Store.Job_id.fresh ())
+            | Ok (Some invocation) ->
+                (match Invocation.reserve ~base_path:config.base_path ~keeper_name:meta.name
+                    ~invocation ~source ~argv ~inputs with
+                 | Error error -> failure ?job_id:error.Invocation.job_id
+                     ~effect_disposition:Tool_result.Effect_outcome_unknown
+                     Tool_result.Policy_rejection (Store.error_to_string error.cause)
+                 | Ok (Invocation.Fresh reservation) -> start_new reservation.job_id
+                 | Ok (Invocation.Existing reservation) ->
+                     let job_id = reservation.job_id in
+                     let result =
+                       let* record = Store.load ~base_path:reservation.base_path
+                           ~keeper_name:reservation.keeper_name job_id in
+                       let spec = Backend.specification record.preparation in
+                       if Store.source_to_json record.source <> Store.source_to_json reservation.source
+                          || spec.argv <> argv || record.inputs <> inputs
+                       then Error (Store.Invalid_authority "invocation binding differs from its original job journal")
+                       else match record.phase with
+                         | Store.Prepared when not record.cancel_requested -> launch record
+                         | Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
+                         | Store.Running _ | Store.Exited _ | Store.Cancelled_before_start _ -> reconcile record in
+                     finish ~tool_name:name ~start_time ~job_id result)))
   | Some {action=(Tool_schemas_owned_job.Status | Tool_schemas_owned_job.Cancel) as action;_} ->
       (match job_argument args with
        | Error detail -> invalid detail

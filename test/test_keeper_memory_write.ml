@@ -3967,33 +3967,37 @@ let test_dropped_originals_are_historical_and_searchable () =
         ~memory_id:(Masc.Keeper_memory_os_types.memory_id retired) ~reason () with
     | Ok _ -> () | Error _ -> Alcotest.fail "retraction failed" in
   retract "deployment rule superseded";
+  let pending_receipts =
+    [ Current.publication_receipt_path ~keepers_dir ~keeper_id:meta.name
+    ; Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:meta.name
+    ] in
+  List.iter (fun path ->
+    Alcotest.(check bool) "journal failure preserves pending evidence" true
+      (Sys.file_exists path)) pending_receipts;
   let search source =
     Runtime.keeper_memory_search_json ~config ~meta ~ctx_work:(empty_ctx ())
       ~args:(`Assoc ["query",`String "canary deployment";
                     "source",`String source;"limit",`Int 10])
     |> Yojson.Safe.from_string in
-  Alcotest.(check string) "pending archive is an explicit search failure"
-    "dropped_read_failed" (string_field "error_kind" (search "dropped"));
-  let partial = search "all" in
-  Alcotest.(check bool) "pending archive does not report a clean miss" false
-    (Yojson.Safe.Util.member "no_match" partial = `Bool true);
-  Alcotest.(check bool) "pending archive is exposed in all search" true
-    (Yojson.Safe.Util.member "dropped_store_unavailable" partial <> `Null);
+  List.iter (fun source ->
+    let result = search source in
+    Alcotest.(check string) "pending publication prevents an authoritative snapshot read"
+      "snapshot_read_failed" (string_field "error_kind" result);
+    Alcotest.(check bool) "pending publication does not report a clean miss" false
+      (Yojson.Safe.Util.member "no_match" result = `Bool true)) ["dropped";"all"];
   Unix.rmdir journal;
-  Alcotest.(check string) "missing journal cannot hide pending archive evidence"
-    "dropped_read_failed" (string_field "error_kind" (search "dropped"));
-  (match Current.upsert_fact ~keepers_dir ~keeper_id:meta.name ~now:3.5
-      ~source:{kind=Current.Explicit_write;trace_id="resume"} current with
-   | Ok _ -> () | Error _ -> Alcotest.fail "pending archive recovery failed");
-  Alcotest.(check (list string)) "default current corpus has no retired body"
-    [] (match_texts (search "current"));
   let result = search "dropped" in
-  Alcotest.(check (list string)) "archive recalls exact original"
+  Alcotest.(check (list string)) "first public read recovers the exact archived original"
     [retired.claim] (match_texts result);
   let row = Yojson.Safe.Util.(member "matches" result |> to_list |> List.hd) in
   Alcotest.(check bool) "explicitly non-current" true (json_field "current" row = `Bool false);
   Alcotest.(check string) "reason travels with original" "deployment rule superseded"
     (string_field "reason" row);
+  List.iter (fun path ->
+    Alcotest.(check bool) "public read clears finalized publication and removal evidence" false
+      (Sys.file_exists path)) pending_receipts;
+  Alcotest.(check (list string)) "default current corpus has no retired body"
+    [] (match_texts (search "current"));
   Alcotest.(check (list string)) "all includes removed originals"
     [retired.claim] (match_texts (search "all"));
   Alcotest.(check int) "search does not restore memory" 1

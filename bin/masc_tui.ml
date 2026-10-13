@@ -1122,6 +1122,25 @@ let clear_staged_attachments (state : state) =
   state.msg_attachments_since <- None
 ;;
 
+(* One unsent line leaves the local queue: its place there, the edit that was
+   replacing it, and its row. Nothing was dispatched, so this is the whole
+   cancel. [false] when the queue no longer holds it. Ctrl-K, /queue cancel ID
+   and /queue clear all drop a line through here. *)
+let drop_unsent_request (state : state) (request : Keeper_chat.request) =
+  match Chat_queue.take state.msg_queued ~request_id:request.Keeper_chat.request_id with
+  | None -> false
+  | Some (_, rest) ->
+    state.msg_queued <- rest;
+    (match state.msg_recall_replaces with
+     | Some editing
+       when Keeper_chat.same_request_identity editing.Chat_queue.request request ->
+         state.msg_recall_replaces <- None;
+         clear_staged_attachments state
+     | Some _ | None -> ());
+    forget_queued_history state request;
+    true
+;;
+
 (* The chat pane's Enter: the draft goes to the keeper, the pane returns to
    the newest row, and a line held while the operator was composing may go
    too. Named because two things end a draft this way -- the Enter key on this
@@ -1438,21 +1457,14 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
            Chat_queue.take_newest_for_keeper state.msg_queued ~keeper_name)
        with
        | None -> () (* nothing waits; consume quietly like Ctrl-U on empty *)
-       | Some (item, rest) ->
+       | Some (item, _) ->
          let request = item.Chat_queue.request in
-         state.msg_queued <- rest;
-         (match state.msg_recall_replaces with
-          | Some editing
-            when String.equal editing.Chat_queue.request.request_id
-                   request.request_id ->
-              state.msg_recall_replaces <- None;
-              clear_staged_attachments state
-          | Some _ | None -> ());
-         forget_queued_history state request;
-         report_action state "info"
-           (Printf.sprintf "Cancelled queued message to %s"
-              (Keeper_chat.terminal_safe_text request.Keeper_chat.keeper_name));
-         drain_queue ());
+         if drop_unsent_request state request then begin
+           report_action state "info"
+             (Printf.sprintf "Cancelled queued message to %s"
+                (Keeper_chat.terminal_safe_text request.Keeper_chat.keeper_name));
+           drain_queue ()
+         end);
       true
     end else if c = Some 16 then begin
       (* Ctrl-P: pull the newest waiting line back into the composer. That is
@@ -7977,6 +7989,16 @@ let drop_inflight state request =
       state.msg_inflight
 ;;
 
+(* Take back a request whose first POST never started. The pane stops showing
+   it as a live turn and its owner goes. Its dispatch job is still running; when
+   that job asks to start the first POST, [Keeper_chat_dispatch_started] finds no
+   owner and answers no, and the job's result then finds no owner either
+   ([apply_keeper_chat_result]). Nothing durable exists for the request. *)
+let withdraw_undispatched_request state (request : Keeper_chat.request) =
+  settle_live_turn state request ~record:None;
+  drop_inflight state request
+;;
+
 (* POST the request. There is no durable claim to take first: the server keys
    every chat operation by this request's id and refuses a second submission of
    it ([Keeper_chat_operation_store.submit] answers [Existing] for a repeat and
@@ -8739,9 +8761,15 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
         Some (begin_keeper_chat_control ~preserve_input_holds:local_resume
                 ~preserve_priority_requests:local_resume state keeper_name)
     | _ -> None in
-  (* Read here, on the fiber that owns [state]: the job below only sends. *)
-  let clear_accepted = match action with
-    | Inbox.Clear -> (keeper_queue_clearing state ~keeper_name).kqc_accepted
+  (* The lines /queue clear asks the server to cancel. Read here, on the fiber
+     that owns [state]; the job below only sends. No other action names any. *)
+  let clear_targets = match action with
+    | Inbox.Clear ->
+      List.filter_map (fun (request, position) ->
+        match keeper_queue_clear_treatment position with
+        | Cancel_on_server -> Some request
+        | Drop_from_local_queue | Withdraw_before_post | Leave_waiting -> None)
+        (keeper_message_waiting_positions state ~keeper_name)
     | Inbox.Inspect | Inbox.Pause | Inbox.Resume | Inbox.Cancel _ | Inbox.Move_to_end _
     | Inbox.Edit _ | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> [] in
   let check_control () =
@@ -8753,6 +8781,11 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   let operator_operation_id = "tui-queue-" ^ Random_id.uuid_v7 () in
   let host = server_peer_host and port = state.port in
   let root = "/api/v1/keepers/" ^ Masc_tui_http.percent_encode_path_segment keeper_name in
+  (* One queued message on the server, and the verb that cancels it. Both the
+     single cancel and /queue clear post to this address. *)
+  let operation_path id =
+    root ^ "/chat/operations/" ^ Masc_tui_http.percent_encode_path_segment id in
+  let cancel_suffix = "cancel" in
   let local_lines () =
     let pending = Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name in
     (Printf.sprintf "Local unsent messages: %d (same Keeper input joins: %s)"
@@ -8827,16 +8860,15 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
           | Error detail -> "Cancel not sent for " ^ id ^ ": " ^ detail
           | Ok () ->
             (match Masc_tui_http.post_json ~host ~port
-                     ~path:(root ^ "/chat/operations/"
-                            ^ Masc_tui_http.percent_encode_path_segment id ^ "/cancel")
+                     ~path:(operation_path id ^ "/" ^ cancel_suffix)
                      ~body:(Yojson.Safe.to_string (`Assoc [])) with
              | Ok _ -> "Server confirmed cancel: " ^ id
              | Error detail -> "Cancel not confirmed for " ^ id ^ ": " ^ detail))
-          clear_accepted)
+          clear_targets)
       | Inbox.Cancel id | Inbox.Move_to_end id | Inbox.Edit (id, _) ->
-        let path = root ^ "/chat/operations/" ^ Masc_tui_http.percent_encode_path_segment id in
+        let path = operation_path id in
         let* suffix, body = match action with
-          | Inbox.Cancel _ -> Ok ("cancel", `Assoc [])
+          | Inbox.Cancel _ -> Ok (cancel_suffix, `Assoc [])
           | Inbox.Move_to_end _ -> Ok ("move-to-end", `Assoc [])
           | Inbox.Edit (_, message) ->
             let* operation = get_json ~host ~port ~path in
@@ -8870,8 +8902,14 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn) in
     enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, action, result)) in
+  (* Said here, past both refusals above, so the row appears only when the
+     cancels are really about to be sent. *)
+  let cancelling = match clear_targets with
+    | [] -> []
+    | _ :: _ ->
+      [Printf.sprintf "Cancelling %d in the server queue…" (List.length clear_targets)] in
   chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
-    (String.concat "\n" (local_lines () @ ["Reading server queue…"]));
+    (String.concat "\n" (local_lines () @ cancelling @ ["Reading server queue…"]));
   match Eio_context.get_switch_opt () with
   | Some sw -> fork_workspace_job state ~sw run
   | None -> enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, action, Error "Eio switch is unavailable"))
@@ -10514,30 +10552,31 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
        | None, _ -> notice ~kind:Notice_failure "Select a Keeper first"
        | _, Error detail -> notice ~kind:Notice_failure detail
        | Some keeper_name, Ok Masc_tui_queue_inspection.Clear ->
-         (* Every unsent line for this Keeper is dropped the way Ctrl-K drops
-            one. That needs no server, so it is done first and holds even when
-            the request below is refused. This row states what this client
-            holds; whether a cancel was sent and how the server answered is
-            the queue request's own report, which follows it. The request is
-            made even with nothing to cancel: its snapshot is where a line
-            this client no longer tracks is still visible. *)
-         let clearing = keeper_queue_clearing state ~keeper_name in
-         let dropped = List.fold_left (fun dropped (item : Chat_queue.item) ->
-           match Chat_queue.take state.msg_queued ~request_id:item.request.request_id with
-           | Some (_, rest) ->
-             state.msg_queued <- rest;
-             forget_queued_history state item.request;
-             dropped + 1
-           | None -> dropped) 0 clearing.kqc_unsent in
+         (* The part that needs no server. A line that exists only in this
+            client is withdrawn here, so it is gone even when the queue request
+            below is refused. What that request cancels on the server, and how
+            the server answers, is its own report. It is made even when this
+            client holds nothing to cancel: its snapshot is the one place a
+            line this client no longer tracks is still listed. *)
+         let withdrawn, left =
+           List.fold_left (fun (withdrawn, left) (request, position) ->
+             match keeper_queue_clear_treatment position with
+             | Drop_from_local_queue ->
+               if drop_unsent_request state request then (withdrawn + 1, left)
+               else (withdrawn, left + 1)
+             | Withdraw_before_post ->
+               withdraw_undispatched_request state request;
+               forget_queued_history state request;
+               withdrawn + 1, left
+             | Cancel_on_server -> withdrawn, left
+             | Leave_waiting -> withdrawn, left + 1)
+             (0, 0) (keeper_message_waiting_positions state ~keeper_name) in
          let clause count what =
            if count = 0 then None else Some (Printf.sprintf "%d %s" count what) in
          (match List.filter_map Fun.id
-                  [ clause dropped "unsent cancelled"
-                  ; clause (List.length clearing.kqc_accepted) "waiting in the server queue"
-                  ; clause clearing.kqc_left "left as they are (being sent, or already started)" ] with
-          | [] ->
-            notice ~kind:Notice_reply
-              "/queue clear: no message sent from this session is waiting for this Keeper"
+                  [ clause withdrawn "unsent cancelled"
+                  ; clause left "left waiting (being posted, being rechecked, or already started)" ] with
+          | [] -> ()
           | _ :: _ as clauses ->
             notice ~kind:Notice_reply ("/queue clear: " ^ String.concat " · " clauses));
          drain_queued_message state ~base_path ~mailbox;
@@ -10552,16 +10591,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          | Some item ->
            (match action with
             | Masc_tui_queue_inspection.Cancel id ->
-              (match Chat_queue.take state.msg_queued ~request_id:id with
-               | Some (_, rest) -> state.msg_queued <- rest;
-                   forget_queued_history state item.request;
-                   (match state.msg_recall_replaces with
-                    | Some editing when editing.Chat_queue.request.request_id = id ->
-                      state.msg_recall_replaces <- None; clear_staged_attachments state
-                    | Some _ | None -> ());
-                   notice ~kind:Notice_reply ("Cancelled unsent message " ^ id);
-                   drain_queued_message state ~base_path ~mailbox
-               | None -> notice ~kind:Notice_failure "Local queue changed; inspect /queue again")
+              if drop_unsent_request state item.request then begin
+                notice ~kind:Notice_reply ("Cancelled unsent message " ^ id);
+                drain_queued_message state ~base_path ~mailbox
+              end
+              else notice ~kind:Notice_failure "Local queue changed; inspect /queue again"
             | Edit (id, message) ->
               let request = {item.request with Keeper_chat.message = message} in
               (match Chat_queue.replace_request state.msg_queued ~request_id:id request with
@@ -15280,7 +15314,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               | Error detail -> receipt @ ["Read unavailable: " ^ detail] in
             Notice_reply,
             ("Queue snapshot (refresh with /queue)" :: lines @
-             ["/queue pause · /queue resume · /queue clear · /queue cancel ID · /queue edit ID message · /queue last ID";
+             [Masc_tui_command.usage Masc_tui_command.queue_help;
               "Events: /queue cancel-event REF INCARNATION reason · /queue priority-event REF INCARNATION immediate|normal|low";
               "Enter queues your line in arrival order; Esc stops the current turn and pauses queue consumption."])
       in
@@ -17814,10 +17848,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Some entry when Keeper_chat.same_request_identity entry.sent_request request ->
            Masc_tui_types.retain_preflight_inputs state [entry]
        | Some _ | None -> ());
-      settle_live_turn state request ~record:None;
       (match inflight_by_request_id state request.Keeper_chat.request_id with
        | Some current when Keeper_chat.same_request_identity current request ->
-           drop_inflight state request;
+           withdraw_undispatched_request state request;
            report_action state "error"
              (Printf.sprintf "Keeper request %s was not dispatched: %s"
                 request.request_id detail)

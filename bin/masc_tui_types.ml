@@ -11327,7 +11327,30 @@ type keeper_message_pending_delivery =
   | Keeper_queued
   | Rechecking_delivery
 
-let keeper_message_waiting_requests (state : state) ~keeper_name =
+(* Where one waiting message stands. This is the fact; the delivery label
+   above and the treatment /queue clear gives a message are each a total
+   function of it, so neither reads the queue or the in-flight owners again. *)
+type keeper_message_waiting_position =
+  | In_local_queue
+      (** Waits in this client's queue; nothing was handed to a dispatch. *)
+  | Undispatched
+      (** Handed to a dispatch whose first POST has not started, and the
+          server has never answered for it. *)
+  | Resending
+      (** Handed to a dispatch again after the server had answered for it. *)
+  | Posting  (** The POST is out and unanswered. *)
+  | Queued_on_server  (** The server answered that it waits in the Keeper's queue. *)
+  | Started_on_server  (** The server answered that it had started. *)
+  | Rechecking  (** Its delivery is being read again. *)
+
+let pending_delivery_of_position = function
+  | In_local_queue | Undispatched | Resending -> Local_pending
+  | Posting -> Awaiting_receipt
+  | Queued_on_server | Started_on_server -> Keeper_queued
+  | Rechecking -> Rechecking_delivery
+;;
+
+let keeper_message_waiting_positions (state : state) ~keeper_name =
   let module Executions = Set.Make (String) in
   let remember_started executions log =
     if not (String.equal (turn_log_keeper_name log) keeper_name) then executions
@@ -11363,66 +11386,56 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
       then None
       else
         let transcript = entry.log.tl_transcript in
+        (* What an entry the server has answered for is doing now. *)
+        let answered when_streaming =
+          match entry.phase with
+          | Turn_preflight _ -> Resending
+          | Turn_streaming -> when_streaming
+          | Turn_reconciling -> Rechecking in
         match Masc_tui_keeper_chat_transcript.phase transcript,
               Masc_tui_keeper_chat_transcript.admission transcript with
         | Waiting, None
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
             (match entry.phase with
-             | Turn_preflight _ -> Some (entry.sent_request, Local_pending)
-             | Turn_reconciling -> Some (entry.sent_request, Rechecking_delivery)
-             | Turn_streaming -> Some (entry.sent_request, Awaiting_receipt))
-        | Waiting, Some ((Masc_tui_keeper_chat_live.Queued | Running), _)
+             | Turn_preflight _ -> Some (entry.sent_request, Undispatched)
+             | Turn_reconciling -> Some (entry.sent_request, Rechecking)
+             | Turn_streaming -> Some (entry.sent_request, Posting))
+        | Waiting, Some (Masc_tui_keeper_chat_live.Queued, _)
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
-            let delivery = match entry.phase with
-              | Turn_preflight _ -> Local_pending
-              | Turn_streaming -> Keeper_queued
-              | Turn_reconciling -> Rechecking_delivery in
-            Some (entry.sent_request, delivery)
-        | Stream_failed _, _ -> Some (entry.sent_request, Rechecking_delivery)
+            Some (entry.sent_request, answered Queued_on_server)
+        | Waiting, Some (Masc_tui_keeper_chat_live.Running, _)
+          when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
+            Some (entry.sent_request, answered Started_on_server)
+        | Stream_failed _, _ -> Some (entry.sent_request, Rechecking)
         | Waiting, (None | Some _) | (Working | Stream_ended), _ -> None)
   in
   submitted @ List.map (fun (item : Masc_tui_keeper_chat_queue.item) ->
-    item.request, Local_pending) local
+    item.request, In_local_queue) local
 ;;
 
-(* What /queue clear withdraws for one Keeper. An unsent line exists only in
-   the local queue, so dropping it is a local act. A line the server accepted
-   into its queue is the server's to cancel, under the id this client sent it
-   with. Every other waiting line is left: it was handed to a dispatch that
-   may already be posting it, its delivery is being re-read, or the server
-   answered that it had started.
+let keeper_message_waiting_requests (state : state) ~keeper_name =
+  List.map (fun (request, position) -> request, pending_delivery_of_position position)
+    (keeper_message_waiting_positions state ~keeper_name)
+;;
 
-   Only lines this client still tracks are seen here. One an earlier TUI
-   process sent is not, and stays for /queue cancel ID. *)
-type keeper_queue_clearing =
-  { kqc_unsent : Masc_tui_keeper_chat_queue.item list
-  ; kqc_accepted : Masc_tui_keeper_chat_projection.request list
-  ; kqc_left : int
-  }
+(* What /queue clear does with a waiting message, by where it stands. A line
+   still in the queue, or handed to a dispatch that has not posted it, exists
+   only in this client and is withdrawn here. One the server holds in its
+   queue is the server's to cancel, under the id this client sent it with.
+   The rest are left: the outcome of a POST that is out or being read again
+   is not known yet, a line the server started is stopped with Esc, and a
+   line being sent again reaches an operation the server already has. *)
+type keeper_queue_clear_treatment =
+  | Drop_from_local_queue
+  | Withdraw_before_post
+  | Cancel_on_server
+  | Leave_waiting
 
-let keeper_queue_clearing (state : state) ~keeper_name =
-  let unsent = Masc_tui_keeper_chat_queue.waiting_for_keeper
-      state.msg_queued ~keeper_name in
-  let is_unsent request =
-    List.exists (fun (item : Masc_tui_keeper_chat_queue.item) ->
-      Masc_tui_keeper_chat_projection.same_request_identity item.request request)
-      unsent in
-  let waits_in_server_queue request =
-    List.exists (fun (entry : inflight) ->
-      Masc_tui_keeper_chat_projection.same_request_identity entry.sent_request request
-      && match Masc_tui_keeper_chat_transcript.admission entry.log.tl_transcript with
-         | Some (Masc_tui_keeper_chat_live.Queued, _) -> true
-         | Some ((Masc_tui_keeper_chat_live.Running | Settled), _) | None -> false)
-      state.msg_inflight in
-  let accepted, left =
-    List.fold_left (fun (accepted, left) (request, delivery) ->
-      match delivery with
-      | Keeper_queued when waits_in_server_queue request -> request :: accepted, left
-      | Local_pending when is_unsent request -> accepted, left
-      | Keeper_queued | Local_pending | Awaiting_receipt | Rechecking_delivery ->
-          accepted, left + 1)
-      ([], 0) (keeper_message_waiting_requests state ~keeper_name) in
-  { kqc_unsent = unsent; kqc_accepted = List.rev accepted; kqc_left = left }
+let keeper_queue_clear_treatment = function
+  | In_local_queue -> Drop_from_local_queue
+  | Undispatched -> Withdraw_before_post
+  | Queued_on_server -> Cancel_on_server
+  | Resending | Posting | Started_on_server | Rechecking -> Leave_waiting
 ;;
 
 let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =

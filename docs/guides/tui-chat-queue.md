@@ -29,7 +29,7 @@ groups; the group count is not a total message count. Run `/queue` again to refr
 | --- | --- |
 | `/queue pause` | Pause new work; the current turn can finish. |
 | `/queue resume` | Resume queue consumption. |
-| `/queue clear` | Cancel the messages this session sent that are still waiting for this Keeper. |
+| `/queue clear` | Cancel the waiting messages this TUI is tracking for this Keeper. |
 | `/queue edit ID message` | Replace queued text while retaining attachments. |
 | `/queue cancel ID` | Cancel a waiting message. |
 | `/queue last ID` | Move a waiting message to the end of its queue. |
@@ -37,16 +37,25 @@ groups; the group count is not a total message count. Run `/queue` again to refr
 | `/queue priority-event REF INCARNATION urgency` | Change that event's priority. |
 
 `Esc` stops a turn; it does not remove waiting messages. `/queue clear` removes
-the ones this TUI session sent to the Keeper on screen. Unsent local messages are
-dropped at once. Each message waiting in the server queue gets its own cancel
-request, answered by ID: `confirmed`, `not sent`, or `not confirmed`. The queue
-snapshot that follows shows what is still waiting.
+the ones this TUI is tracking for the Keeper on screen, by where each one stands:
 
-`/queue clear` leaves alone a message already handed over for sending, one whose
-delivery is being rechecked, and one the server reported as started; `Esc` is
-what stops a started turn. It also does not see a message this session is not
-tracking, such as one sent before the TUI was restarted or one another sender
-queued. Those stay listed in `/queue`, and `/queue cancel ID` removes one.
+| Where the message stands | What `/queue clear` does |
+| --- | --- |
+| In the local queue | Drops it at once. |
+| Handed over for sending, first POST not started | Takes it back; it is not sent. |
+| Waiting in the server queue | Sends one cancel request for it. |
+| Being posted or posted again, or its delivery being rechecked | Leaves it; what the server holds is not known yet. |
+| Reported by the server as started | Leaves it; `Esc` stops a started turn. |
+
+The local part needs no server and happens first. The cancel requests go out with
+the queue request that follows, which is refused when the workspace identity is
+unconfirmed or another queue request is pending; the TUI says so and sends none.
+Each cancel is answered by ID as `confirmed`, `not sent`, or `not confirmed`, and
+the snapshot after them lists what is still waiting.
+
+A message this TUI is not tracking is not touched: one sent before the TUI was
+restarted or the workspace was reconnected, and one another sender queued. Those
+stay listed in `/queue`, and `/queue cancel ID` removes one.
 
 Copy message IDs and event references from `/queue`. An event reference identifies
 the displayed event, not every event in its group. Already running or changed

@@ -352,10 +352,10 @@ let test_open_request_between_segments_has_no_banner () =
     (texts (Tui.keeper_message_activity_rows state))
 ;;
 
-(* /queue clear decides per message, by where that message is. This is the
-   decision only: the drop and the cancel requests that act on it live in the
-   executable. *)
-let test_queue_clear_sorts_waiting_messages_by_where_they_are () =
+(* Where each waiting message stands decides what /queue clear does with it.
+   This is the decision only: the drop, the withdrawal and the cancel requests
+   that act on it live in the executable. *)
+let test_queue_clear_treats_a_message_by_where_it_stands () =
   let state = state () in
   let add keeper_name request_id =
     let request : Chat.request =
@@ -363,32 +363,44 @@ let test_queue_clear_sorts_waiting_messages_by_where_they_are () =
     match Queue.push state.msg_queued ~submitted_at:1. request with
     | Ok (queue, _) -> state.msg_queued <- queue
     | Error error -> fail error in
-  add "alpha" "unsent-1";
+  add "alpha" "queued-1";
   add "beta" "other-keeper";
-  add "alpha" "unsent-2";
+  add "alpha" "queued-2";
   let accept admission (entry : Tui.inflight) =
     Tui.turn_log_add ~now:3. entry.log ~seq:None
       (Live.Accepted {admission; queue_length=1; interactive=None});
     entry in
-  let accepted = accept Live.Queued (inflight ~request_id:"accepted" ~at:2. ()) in
-  let started = accept Live.Running (inflight ~request_id:"started" ~at:3. ()) in
-  let posting = inflight ~request_id:"posting" ~at:4. () in
+  let handed_over =
+    let entry : Tui.inflight = inflight ~request_id:"handed-over" ~at:2. () in
+    { entry with
+      phase = Tui.Turn_preflight
+        { Queue.request = entry.sent_request; submitted_at = 2.; submission_seq = 0
+        ; intent = Queue.Next; causal_parent_request_id = None } } in
+  let posting = inflight ~request_id:"posting" ~at:3. () in
+  let on_server = accept Live.Queued (inflight ~request_id:"on-server" ~at:4. ()) in
+  let started = accept Live.Running (inflight ~request_id:"started" ~at:5. ()) in
   let rechecking =
-    { (inflight ~request_id:"rechecking" ~at:5. ()) with phase = Tui.Turn_reconciling } in
+    { (inflight ~request_id:"rechecking" ~at:6. ()) with phase = Tui.Turn_reconciling } in
   let elsewhere =
-    accept Live.Queued (inflight ~keeper_name:"beta" ~request_id:"beta-accepted" ~at:6. ()) in
-  state.msg_inflight <- [elsewhere; rechecking; posting; started; accepted];
-  let clearing = Tui.keeper_queue_clearing state ~keeper_name:"alpha" in
-  check (list string) "only this Keeper's unsent lines are named for the local drop"
-    ["unsent-1"; "unsent-2"]
-    (List.map (fun (item : Queue.item) -> item.request.Chat.request_id)
-       clearing.Tui.kqc_unsent);
-  check (list string) "only a line waiting in the server queue is named for a cancel"
-    ["accepted"]
-    (List.map (fun (request : Chat.request) -> request.request_id)
-       clearing.Tui.kqc_accepted);
-  check int "a line being posted, being re-read, or already started is left" 3
-    clearing.Tui.kqc_left
+    accept Live.Queued (inflight ~keeper_name:"beta" ~request_id:"beta-on-server" ~at:7. ()) in
+  state.msg_inflight <- [elsewhere; rechecking; started; on_server; posting; handed_over];
+  let treatment = function
+    | Tui.Drop_from_local_queue -> "drop from the local queue"
+    | Tui.Withdraw_before_post -> "withdraw before the first POST"
+    | Tui.Cancel_on_server -> "cancel on the server"
+    | Tui.Leave_waiting -> "leave waiting" in
+  check (list (pair string string))
+    "this Keeper's waiting messages, each with the treatment its position allows"
+    [ "handed-over", "withdraw before the first POST"
+    ; "posting", "leave waiting"
+    ; "on-server", "cancel on the server"
+    ; "started", "leave waiting"
+    ; "rechecking", "leave waiting"
+    ; "queued-1", "drop from the local queue"
+    ; "queued-2", "drop from the local queue" ]
+    (Tui.keeper_message_waiting_positions state ~keeper_name:"alpha"
+     |> List.map (fun ((request : Chat.request), position) ->
+          request.request_id, treatment (Tui.keeper_queue_clear_treatment position)))
 ;;
 
 let () =
@@ -412,6 +424,6 @@ let () =
           test_only_the_uncovered_in_flight_rows_are_drawn
       ; test_case "a live turn elsewhere covers nothing here" `Quick
           test_a_live_turn_elsewhere_covers_nothing_here
-      ; test_case "queue clear sorts waiting messages by where they are" `Quick
-          test_queue_clear_sorts_waiting_messages_by_where_they_are
+      ; test_case "queue clear treats a message by where it stands" `Quick
+          test_queue_clear_treats_a_message_by_where_it_stands
       ] ]

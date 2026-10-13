@@ -32,7 +32,7 @@ let parse text =
     let* id = Keeper_chat_operation.Operation_id.of_string id in
     if message = "" then Error "/queue edit requires the new message"
     else Ok (Edit (Keeper_chat_operation.Operation_id.to_string id, message))
-  | _ -> Error "Use /queue, /queue pause, /queue resume, /queue clear, /queue cancel ID, /queue last ID, /queue edit ID message"
+  | _ -> Error ("Use " ^ Masc_tui_command.usage Masc_tui_command.queue_help)
 let field key = function
   | `Assoc fields -> (match List.assoc_opt key fields with Some value -> Ok value | None -> Error ("Queue response missing " ^ key))
   | _ -> Error "Queue response must be an object"

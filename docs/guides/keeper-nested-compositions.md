@@ -1,10 +1,13 @@
-# Exact inline composition compilation
+# Prepare and run exact inline Skill children
 
 `Keeper_composition_nested.compile` expands an exact, turn-frozen inline Skill
-into the existing typed plan. This layer supplies the compiler API. The public
-`keeper_composition_prepare` and installed Skill catalog do not yet accept this
-node alternative; exposing it also requires durable draft provenance and actual
-Skill activation at the dispatch boundary. Compilation is never activation.
+into the existing typed plan. The source `keeper_composition_prepare` schema now
+accepts this node alternative for task-specific inline drafts. Prepare freezes
+the original recipe, flattened plan, exact child references, normalized arguments,
+leaf/export mappings and tool contracts in one owned immutable manifest. Run
+recompiles the recipe against its current frozen surface and compares all recorded
+provenance before dispatch. Compilation is never activation. This source change
+does not update an installed server or its Skill catalog.
 
 The compiler consumes the same closed outer request grammar as ordinary plans.
 A node can name one complete pinned inventory reference and fixed arguments:
@@ -38,6 +41,14 @@ extra fields. This API admits fixed arguments only. Feeding upstream output into
 a child parameter requires a runtime contract barrier before any child leaf runs;
 that separate integration is pending.
 
+Call `keeper_composition_prepare` with `execution: "inline"`, the ordinary outer
+`nodes`, `exports` and matching `branch_failure_policy`, and exact child nodes of
+the form above. Pass the returned `draft.sha256` to `keeper_composition_run`.
+Preparation records no child activation. Nested drafts currently omit `skill`
+publication metadata: publishing only their flattened plan would discard child
+identities. Named recursive catalog recipes and nested async outer execution
+need their own grammar and durable worker binding and are explicit refusals.
+
 A child output is its declared named export. `/profile` selects export `profile`;
 `/document/items/0` selects within export `document`. RFC 6901 escaping applies to
 export names too. The compiler maps the export to its exact leaf producer and
@@ -62,11 +73,14 @@ completion correlation and resumption, rather than flattening a worker as a norm
 inline leaf. Expanded leaves currently require static read-only ordinary Tool
 contracts; resource-aware effect admission remains a separate implementation unit.
 
-The focused `test_keeper_composition_nested` scenario checks repeated child
+The focused `test_keeper_composition_nested` scenarios check repeated child
 references, escaped IDs and export names, parameter contracts, unavailable exact
 references, expansion cycles and whole-child failure with retained independent
-results. Parser checks do not establish its types or execution. Runtime activation,
-public authoring and latency measurements remain outside this layer's evidence.
+results, public prepare/run through the ordinary Keeper handler, owned frozen
+drafts, actual dispatch admission and parent receipt delivery. Parser checks do
+not establish types or execution. Record an actual suite run and head before
+claiming these scenarios pass; model latency and installed behavior remain
+separate evidence.
 
 ## Nested invocation and delivery evidence
 
@@ -78,9 +92,13 @@ this invocation at dispatch admission is separate from preparing a draft. A chil
 that never reaches dispatch admission has no activation.
 
 `Keeper_skill_activation_recorder.record_nested_composition` supplies this journal
-boundary. Public draft/executor integration still follows separately. The journal
-feature scenario records invocations directly; it does not prove leaf dispatch or
-model latency. Parent scopes reject blank parent IDs, empty aliases, invalid run
+boundary. Public inline run invokes it immediately before a child's first ready
+leaf handler, after dependency and input validation. A per-run mutex shares that
+durable admission across concurrent sibling leaves. Missing recorder authority or
+failed journal admission refuses the leaf before its Tool effect; independently
+ready branches still follow the plan's failure policy. The direct journal feature
+scenario alone does not prove leaf dispatch or model latency. Parent scopes reject
+blank parent IDs, empty aliases, invalid run
 IDs and using the parent ID as the child invocation ID. Reusing a child ID with
 changed parent/run/alias is an invocation collision.
 
@@ -93,3 +111,13 @@ a different parent, or another Keeper turn does not mark the child delivered.
 Durable readback preserves both the nested scope and the delivery chain. The web
 API readers decode this variant explicitly so one valid nested row cannot make the
 whole activation panel unavailable; its label retains child and parent identity.
+
+Public results expose `nested_scopes` with each exact prepared scope, actual
+admission identity or rejection, own mapped node dispositions and selected child
+exports. `not_started`, `admission_rejected`, `completed`, `failed`, `deferred` and
+`partially_settled` are distinct. A child whose dependency failed has no activation.
+An available export does not imply the child or parent completed successfully.
+The full execution artifact preserves this provenance and every raw leaf result;
+the pre-dispatch run artifact retains the original public invocation and all
+prepared mappings. Original Task attribution comes from the canonical turn
+recorder and survives the parent's result delivery.

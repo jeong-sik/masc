@@ -105,6 +105,7 @@ val make_tools
         ( Keeper_skill_activation_ledger.record_outcome
         , Keeper_skill_activation_recorder.error )
           result)
+  -> ?record_nested_composition_activation:Keeper_composition_nested_run.record_activation
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:
@@ -159,6 +160,7 @@ module Compatibility : sig
           ( Keeper_skill_activation_ledger.record_outcome
           , Keeper_skill_activation_recorder.error )
             result)
+    -> ?record_nested_composition_activation:Keeper_composition_nested_run.record_activation
     -> config:Workspace.config
     -> meta:Keeper_meta_contract.keeper_meta
     -> publication_recovery:

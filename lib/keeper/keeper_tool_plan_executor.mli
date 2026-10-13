@@ -41,6 +41,12 @@ type node_result = private
 
 type dispatch_result
 
+type admission_rejection =
+  { detail : string
+  ; data : Yojson.Safe.t
+  }
+(** A runtime admission failure before the ordinary handler is called. *)
+
 (** Construct a low-level dispatch settlement. Callers that own more precise
     producer evidence must supply it; absent failure evidence is conservatively
     treated as an unknown effect outcome. *)
@@ -119,7 +125,10 @@ val execute
 
 (** Runtime adapter through the ordinary Keeper Agent-Core handler. This keeps
     descriptor input translation, Gate, Shell IR routing, tool-call telemetry,
-    and per-action I/O previews on the same boundary as a direct Keeper call. *)
+    and per-action I/O previews on the same boundary as a direct Keeper call.
+    [admit_node], if present, runs after dependency/input validation and before
+    the handler. A rejection settles the leaf as a runtime failure with
+    [Proven_pre_effect], preserving the normal branch failure policy. *)
 val execute_keeper
   :  capability_surface:Keeper_capability_surface.t
   -> plan:Keeper_tool_plan.t
@@ -142,6 +151,8 @@ val execute_keeper
   -> ?on_deferred:(unit -> unit)
   -> ?on_external_effect_deferred:(approval_id:string option -> unit)
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
+  -> ?admit_node:
+       (node:Keeper_tool_plan.node -> (unit, admission_rejection) result)
   -> ?observe_node_result:(node_result -> (unit, string) result)
   -> unit
   -> (node_result list, failure) result
@@ -169,6 +180,8 @@ module Compatibility : sig
     -> ?on_deferred:(unit -> unit)
     -> ?on_external_effect_deferred:(approval_id:string option -> unit)
     -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
+    -> ?admit_node:
+         (node:Keeper_tool_plan.node -> (unit, admission_rejection) result)
     -> ?observe_node_result:(node_result -> (unit, string) result)
     -> unit
     -> (node_result list, failure) result

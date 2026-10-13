@@ -73,7 +73,19 @@ let selected_fields plan nodes =
   |> fun fields -> `Assoc fields
 ;;
 
-let project ~base_path ~plan ~execution result =
+let project ?nested_scopes ~base_path ~plan ~execution result =
+  let metadata = match nested_scopes with None -> [] | Some scopes -> [ "nested_scopes", scopes ] in
+  let result = match metadata with
+    | [] -> result
+    | _ ->
+      let data = match Tool_result.data result with
+        | `Assoc fields -> `Assoc (metadata @ fields)
+        | data -> `Assoc (metadata @ [ "result", data ]) in
+      match result with
+      | Tool_result.Completed payload -> Tool_result.Completed { payload with data }
+      | Tool_result.Deferred payload -> Tool_result.Deferred { payload with data }
+      | Tool_result.Failed payload -> Tool_result.Failed
+          { payload with data_source = Tool_result.Explicit_data data; message = Yojson.Safe.to_string data } in
   match Plan.exports plan with
   | [] -> Ok result
   | _ :: _ ->
@@ -83,9 +95,9 @@ let project ~base_path ~plan ~execution result =
       @ List.concat_map (fun (node : Executor.node_result) -> Tool_result.retained_artifacts node.result) nodes
     in
     let raw_document =
-      `Assoc [ "result", Tool_result.to_json result
+      `Assoc (metadata @ [ "result", Tool_result.to_json result
              ; "nodes", `List (List.map Projection.node_result_to_json nodes)
-             ; "retained_artifacts", `List (List.map Tool_output.normalized_artifact_ref_to_json retained) ]
+             ; "retained_artifacts", `List (List.map Tool_output.normalized_artifact_ref_to_json retained) ])
     in
     let raw =
       Tool_output.artifact_manifest_to_json
@@ -116,7 +128,7 @@ let project ~base_path ~plan ~execution result =
           [ "cause", cause_summary failure.cause
           ; "effect_disposition", `String (Tool_result.failure_effect_disposition_to_string failure.effect_disposition) ]
       in
-      let data = `Assoc (original_fields @ failure
+      let data = `Assoc (original_fields @ failure @ metadata
         @ [ "exports", selected_fields plan (settled execution)
           ; "nodes", `List nodes
           ; "execution_artifact", Tool_output.normalized_artifact_ref_to_json reference ]) in

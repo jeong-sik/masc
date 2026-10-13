@@ -2,9 +2,14 @@ name = "keeper_composition_prepare"
 description = """
 Validate and inspect a task-specific read-only composition without publishing a Skill. \
 Use canonical tool names, explicit dependencies and tagged literal/output/object/array \
-input templates. Select final fields with exports. Returns a durable draft reference \
+input templates, or child nodes {id, skill_reference, args, after?} with an exact \
+admitted reference copied from Skill inventory and fixed args checked against \
+that child's parameter schema. Inline children must share the parent's failure \
+policy. Read child exports with /export-name/subpath; dependencies wait for the \
+whole child. Select final fields with exports. Returns a durable draft reference \
 bound to this Keeper, execution mode, inputs and frozen tool/Skill contracts; pass \
-its sha256 to keeper_composition_run. No node executes during prepare. Choose async \
+its sha256 to keeper_composition_run. No node executes or activates during prepare. \
+Child recipes currently require inline mode without publication metadata. Choose async \
 for a long independent read that should let the Keeper continue other work; it \
 does not speed up the underlying read. Optional skill metadata freezes the \
 reusable SKILL.md in this same draft. Validate and publish it by draft_sha256 \
@@ -25,7 +30,7 @@ type = "array"
 items = { type = "object" }
 min_items = 1
 required = true
-description = "Plan nodes: {id, tool, after, input}. A node input is a tagged template, one of {kind:literal,value}, {kind:output,node,pointer}, {kind:object,fields:[{name,value}]} or {kind:array,items:[template]}; each value and item is itself a template. The advertised schema is not recursive (some providers refuse recursive JSON Schemas); the grammar is validated when the plan is prepared."
+description = "Ordinary Tool nodes or exact admitted inline Skill child nodes. A node input is a tagged template: {kind:literal,value}, {kind:output,node,pointer}, {kind:object,fields:[{name,value}]} or {kind:array,items:[template]}; each value and item is itself a template. The advertised schema is not recursive; the grammar and exact child references are validated when the plan is prepared."
 
 [[params]]
 name = "exports"

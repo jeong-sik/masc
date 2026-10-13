@@ -1438,23 +1438,21 @@ type export_resolution_error =
   | Producer_invalid of execution_error
   | Export_pointer_unavailable of Json_pointer.resolution_error
 
-let resolve_exports plan ~lookup =
+let resolve_export plan ~lookup (export : export) =
   let run_id = Run_id.fresh () in
-  List.map
-    (fun (export : export) ->
-       let value =
-         match lookup export.node_id with
-         | None -> Error (Producer_unavailable export.node_id)
-         | Some value ->
-           match validate_output plan ~run_id ~node_id:export.node_id value with
-           | Error error -> Error (Producer_invalid error)
-           | Ok output ->
-             match Json_pointer.resolve export.pointer output.value with
-             | Ok value -> Ok value
-             | Error error -> Error (Export_pointer_unavailable error)
-       in
-       export, value)
-    plan.exports
+  match lookup export.node_id with
+  | None -> Error (Producer_unavailable export.node_id)
+  | Some value ->
+    match validate_output plan ~run_id ~node_id:export.node_id value with
+    | Error error -> Error (Producer_invalid error)
+    | Ok output ->
+      match Json_pointer.resolve export.pointer output.value with
+      | Ok value -> Ok value
+      | Error error -> Error (Export_pointer_unavailable error)
+;;
+
+let resolve_exports plan ~lookup =
+  List.map (fun export -> export, resolve_export plan ~lookup export) plan.exports
 ;;
 
 let validate_node_input plan (node : node) input =

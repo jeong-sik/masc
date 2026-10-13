@@ -365,6 +365,14 @@ type export_resolution_error =
   | Producer_invalid of execution_error
   | Export_pointer_unavailable of Json_pointer.resolution_error
 
+val resolve_export
+  :  t
+  -> lookup:(Node_id.t -> Yojson.Safe.t option)
+  -> export
+  -> (Yojson.Safe.t, export_resolution_error) result
+(** Resolve a mapped child export through this plan's authoritative producer
+    descriptor and pointer. A child export need not be an outer selected field. *)
+
 val resolve_exports
   :  t
   -> lookup:(Node_id.t -> Yojson.Safe.t option)

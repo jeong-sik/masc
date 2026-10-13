@@ -9,6 +9,7 @@ type call =
   ; reference : Skill_reference.t
   ; args : Yojson.Safe.t
   ; node_mapping : (Plan.Node_id.t * Plan.Node_id.t) list
+  ; exports : Plan.export list
   }
 
 type t = { plan : Plan.t; calls : call list }
@@ -154,7 +155,10 @@ let expand ~capability_surface ~policy = function
     let* plan = Catalog.instantiate ~descriptors:(Surface.descriptors capability_surface) ~args entry
         |> Result.map_error (fun error -> Binding_rejected (node.alias, error)) in
     let node_mapping = List.map (fun (leaf : Plan.node) -> leaf.id, namespace [ node.alias; leaf.id ]) (Plan.nodes plan) in
-    let call = { alias = node.alias; reference = node.reference; args; node_mapping } in
+    let exports = List.map (fun (export : Plan.export) ->
+        Plan.export ~name:export.name ~node_id:(List.assoc export.node_id node_mapping)
+          ~pointer:export.pointer) (Plan.exports plan) in
+    let call = { alias = node.alias; reference = node.reference; args; node_mapping; exports } in
     Ok (Child (node, plan, call))
 ;;
 
@@ -271,12 +275,18 @@ let compile ~capability_surface json =
   Ok { plan; calls }
 ;;
 
-let calls_to_json compiled = `List (List.map (fun (call : call) -> `Assoc
+let call_to_json (call : call) = `Assoc
     [ "alias", id_json call.alias
     ; "reference", Skill_reference.to_yojson call.reference
     ; "args", call.args
     ; "node_mapping", `List (List.map (fun (source, expanded) -> `Assoc
-        [ "source", id_json source; "expanded", id_json expanded ]) call.node_mapping) ]) compiled.calls)
+        [ "source", id_json source; "expanded", id_json expanded ]) call.node_mapping)
+    ; "exports", `List (List.map (fun (export : Plan.export) -> `Assoc
+        [ "name", `String export.name; "node", id_json export.node_id
+        ; "pointer", `String (Plan.Json_pointer.to_string export.pointer) ]) call.exports) ]
+;;
+
+let calls_to_json compiled = `List (List.map call_to_json compiled.calls)
 ;;
 
 let error_to_json error =

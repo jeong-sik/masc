@@ -2,7 +2,10 @@ name = "keeper_composition_run"
 description = """
 Run the exact read-only draft returned by keeper_composition_prepare. Rechecks \
 the preparing Keeper and frozen contracts before effects. Inline drafts return \
-execution results; async drafts return a durable request id and deliver completion \
+execution results, including child scope/admission/disposition/exports in nested_scopes; \
+only children reaching an actual ready leaf activate. Blocked or refused children \
+remain visible, and independent exports may be available while the whole run fails. \
+Async ordinary drafts return a durable request id and deliver completion \
 later. Use valid selected exports from the completion projection. When results \
 are referenced or required detail is missing, read keeper_composition_status \
 with the exact request_id in result_reference. Do not repeatedly poll while \

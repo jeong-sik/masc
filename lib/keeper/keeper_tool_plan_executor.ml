@@ -130,6 +130,11 @@ type dispatch_result =
   ; truncated_to : int option
   }
 
+type admission_rejection =
+  { detail : string
+  ; data : Yojson.Safe.t
+  }
+
 (* TEL-OK: pure smart constructor for the [dispatch_result] record above; it
    performs no action and emits no effect, so there is nothing to instrument. *)
 let dispatch_result
@@ -788,6 +793,7 @@ let execute_keeper_with_authority
       ?on_deferred
       ?on_external_effect_deferred
       ?on_failed
+      ?admit_node
       ?observe_node_result
       ()
   =
@@ -812,7 +818,7 @@ let execute_keeper_with_authority
   else
   (* TEL-OK: [handler] below is Keeper_tools_agent_core_handler, which
      already records telemetry (Otel_metric_store.inc_counter). *)
-  let dispatch ~tool_use_id ~(node : Keeper_tool_plan.node) ~descriptor ~schedule ~input =
+  let dispatch_admitted ~tool_use_id ~(node : Keeper_tool_plan.node) ~descriptor ~schedule ~input =
     let terminal_on_completed, terminal_on_failed =
       match descriptor.Keeper_tool_descriptor.execution with
       | Keeper_tool_descriptor.Terminal -> on_completed, on_failed
@@ -884,6 +890,15 @@ let execute_keeper_with_authority
         ~result_bytes
         ?truncated_to
         result
+  in
+  let dispatch ~tool_use_id ~node ~descriptor ~schedule ~input =
+    match (match admit_node with None -> Ok () | Some admit -> admit ~node) with
+    | Ok () -> dispatch_admitted ~tool_use_id ~node ~descriptor ~schedule ~input
+    | Error rejection ->
+      dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect
+        (Tool_result.make_err ~tool_name:node.Keeper_tool_plan.tool_name
+           ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
+           ~start_time:(Tool_timing.start ()) ~data:rejection.data rejection.detail)
   in
   let tool_use_id_for_node ~execution_id:_ node =
     nested_tool_use_id ~composition_run_id parent_invocation node.Keeper_tool_plan.id

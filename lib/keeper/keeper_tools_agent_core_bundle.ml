@@ -515,11 +515,16 @@ let make_tool_bundle_for_descriptors_with_policy
         skill_activation_context
     in
     let make_composition_tools =
+      let record_nested_composition_activation = Option.map
+          (fun context ~invocation ~tool_name ~scope ~reference ->
+             Keeper_skill_activation_recorder.record_nested_composition
+               ~config context ~invocation ~tool_name ~scope reference)
+          skill_activation_context in
       match capability_surface with
       | Some capability_surface ->
-        Keeper_tool_composition_surface.make_tools ~capability_surface
+        Keeper_tool_composition_surface.make_tools ~capability_surface ?record_nested_composition_activation
       | None ->
-        Keeper_tool_composition_surface.Compatibility.make_tools ~descriptors
+        Keeper_tool_composition_surface.Compatibility.make_tools ~descriptors ?record_nested_composition_activation
     in
     make_composition_tools
         ~instruction_skills

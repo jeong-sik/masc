@@ -64,10 +64,14 @@ type worker_response = {
   message : string;
   data : Yojson.Safe.t;
   code : string option;
+  machine_absent : bool;
+      (** The worker answered that no machine is loaded. Typed: read from the
+          worker's [errorCode] metadata, never from the message text. *)
 }
 
 let worker_response ~config ~principal ~(schema : Masc_domain.tool_schema) ~arguments =
-  let failed status message = {status;ok=false;message;data=`Null;code=None} in
+  let failed status message =
+    {status;ok=false;message;data=`Null;code=None;machine_absent=false} in
   match Tool_input_validation.validate_args ~schema:schema.input_schema ~name:schema.name ~args:arguments () with
   | Error refusal -> failed `Bad_request (Tool_result.message refusal)
   | Ok arguments ->
@@ -90,12 +94,14 @@ let worker_response ~config ~principal ~(schema : Masc_domain.tool_schema) ~argu
           let code = match field "io.github.jeong-sik/masc.machine.errorCode" with
             | Some (`String ("activity_disabled" | "activity_unobserved" as code)) -> Some code
             | _ -> None in
+          let machine_absent =
+            (not ok) && field "io.github.jeong-sik/masc.machine.errorCode" = Some (`String "no_machine") in
           let status = if ok then `OK else match code with
             | Some _ -> `Conflict
             | None -> match field "io.github.jeong-sik/masc.machine.failure" with
               | Some (`String "rejected") -> `Bad_request
               | _ -> `Internal_server_error in
-          {status;ok;code;message=Agent_core.Mcp.text_of_tool_result result;
+          {status;ok;code;machine_absent;message=Agent_core.Mcp.text_of_tool_result result;
            data=Option.value ~default:`Null result.structured_content}
 
 let press_response ~config ~who ~body =
@@ -225,6 +231,10 @@ let tick_response ~config ~body =
         ~schema:Tool_schemas_misc_toml.msx_step
         ~arguments:(`Assoc (["frames", `Int frames; "include_frame", `Bool true] @ pixels)) in
       if result.ok then result.status, result.data
+      else if result.machine_absent then
+        (* The spectator polls before anything is loaded: an absent machine is
+           an empty observation the poller can draw, not a failed request. *)
+        `OK, `Assoc ["loaded", `Bool false]
       else result.status, `Assoc (["ok", `Bool false; "message", `String result.message]
         @ match result.code with None -> [] | Some code -> ["code", `String code])
 ;;

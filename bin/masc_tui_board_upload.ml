@@ -75,7 +75,8 @@ let inspect ~max_bytes path =
       Error (too_large ~max_bytes st_size)
   | { Unix.st_kind = Unix.S_REG; st_dev; st_ino; _ } ->
       Ok { device = st_dev; inode = st_ino }
-  | _ -> Error "not a regular file"
+  | { Unix.st_kind = (Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK); _ } ->
+    Error "not a regular file"
 ;;
 
 (** Whether [path] can be attached: a regular file, not a link to one, that
@@ -118,7 +119,11 @@ let read_file ~max_bytes path =
                           Error (Unix.error_message error)
                   in
                   fill ()
-              | _ -> Error "the file changed while it was being opened"))
+              | { Unix.st_kind = Unix.S_REG; _ } ->
+                Error "the file changed while it was being opened"
+              | { Unix.st_kind =
+                    (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _ } ->
+                Error "the file changed while it was being opened"))
 ;;
 
 (** Read and upload each staged file in staging order, stopping at the first

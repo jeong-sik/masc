@@ -3747,13 +3747,13 @@ max_context_tokens = 1048576
 # Earlier comment here claimed "a prefix match covers the pair from one row" --
 # false for the provider-scoped path a runtime binding actually resolves
 # through: Exact_output_catalog_binding.resolve_exact and
-# Model_catalog.lookup_for_provider_result both compare id_prefix with exact
+# Model_catalog.lookup_for_provider both compare id_prefix with exact
 # (case-folded) equality, never a prefix test, so a deployment whose runtime
 # binding names the ":cloud" spelling resolved to no catalog row and was
 # excluded from librarian_exact/hitl_auto_judge/board_attention_exact (#37074,
 # 2026-09-19 live deployment). A separate provider_name-agnostic path
-# (Model_catalog.lookup/lookup_result/lookup_entries_result, model_catalog.ml
-# :853-887) does longest-prefix-first matching, but it filters to rows
+# (Model_catalog.lookup/lookup_entries in model_catalog.ml) does
+# longest-prefix-first matching, but it filters to rows
 # declaring no provider_name at all -- both deepseek-v4.1-flash rows below set
 # provider_name = "ollama_cloud", so that path never sees either of them. One
 # row per exact spelling, not a shared prefix.

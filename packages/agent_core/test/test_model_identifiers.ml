@@ -101,73 +101,48 @@ let test_three_modules_share_one_rule () =
 ;;
 
 (* Catalog lookup path: the row keeps its declared spelling; comparison folds
-   ASCII case. Both lookup paths reject a padded model id at the opaque
-   constructor boundary; [lookup_for_provider] still normalizes its separate
-   provider-name input. *)
+   ASCII case. A padded model id never reaches either lookup: the opaque
+   constructor refuses it, so the lookups take a parsed id and a padded query
+   cannot become a catalog miss. [lookup_for_provider] still normalizes its
+   separate provider-name input. *)
 let test_lookup_folds_case_and_rejects_padding () =
   let catalog =
     Model_catalog_test_support.load_repo_model_catalog
       ~suite:"model_identifiers lookup case properties"
   in
-  match Model_catalog.lookup catalog "CLAUDE-OPUS-5-5" with
-  | None -> Alcotest.fail "case-different query must still find its row"
-  | Some (entry : Model_catalog.model_entry) ->
-    Alcotest.(check string) "row bytes come back as declared" "claude-opus-5-5"
-      (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix);
-  Alcotest.(check bool) "padded query is rejected" true
-    (Option.is_none (Model_catalog.lookup catalog "  gpt-5.6-sol\t"));
-  (match Model_catalog.lookup_result catalog "  gpt-5.6-sol\t" with
-   | Error (Model_catalog.Malformed_model_id _) -> ()
-   | Error Model_catalog.No_such_row ->
-     Alcotest.fail "padded query must not become a valid catalog miss"
-   | Ok _ -> Alcotest.fail "padded query must not resolve");
+  (match Model_catalog.lookup catalog (Model_identifiers.Model_id.of_string_exn "CLAUDE-OPUS-5-5") with
+   | None -> Alcotest.fail "case-different query must still find its row"
+   | Some (entry : Model_catalog.model_entry) ->
+     Alcotest.(check string) "row bytes come back as declared" "claude-opus-5-5"
+       (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix));
+  Alcotest.(check bool) "padded query is not a model id" true
+    (Result.is_error (Model_identifiers.Model_id.of_string "  gpt-5.6-sol\t"));
   (match
      Model_catalog.lookup_for_provider
        catalog
        ~provider_name:"openai-responses"
-       ~model_id:"GPT-5.6-TERRA"
+       ~model_id:(Model_identifiers.Model_id.of_string_exn "GPT-5.6-TERRA")
    with
    | None -> Alcotest.fail "provider-scoped query must fold the model_id case"
    | Some entry ->
      Alcotest.(check string) "provider-scoped row found through case" "gpt-5.6-terra"
        (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix));
-  Alcotest.(check bool) "provider-scoped padded query is rejected" true
-    (Option.is_none
-       (Model_catalog.lookup_for_provider
-          catalog
-          ~provider_name:"openai-responses"
-          ~model_id:"  GPT-5.6-TERRA\t"));
-  match
-    Model_catalog.lookup_for_provider_result
-      catalog
-      ~provider_name:"openai-responses"
-      ~model_id:"  GPT-5.6-TERRA\t"
-  with
-  | Error (Model_catalog.Malformed_model_id _) -> ()
-  | Error Model_catalog.No_such_row ->
-    Alcotest.fail "provider-scoped padded query must not become a valid catalog miss"
-  | Ok _ -> Alcotest.fail "provider-scoped padded query must not resolve"
+  Alcotest.(check bool) "provider-scoped padded query is not a model id" true
+    (Result.is_error (Model_identifiers.Model_id.of_string "  GPT-5.6-TERRA\t"))
 ;;
 
+(* A valid id that no row prefixes is a miss ([None]); an empty query is not an
+   id at all, so it is the constructor's error rather than a miss. *)
 let test_lookup_misses_stay_misses () =
   let catalog =
     Model_catalog_test_support.load_repo_model_catalog
       ~suite:"model_identifiers lookup misses"
   in
   Alcotest.(check bool) "query no row prefixes" true
-    (Option.is_none (Model_catalog.lookup catalog "xclaude-opus-5-5"));
-  (match Model_catalog.lookup_result catalog "xclaude-opus-5-5" with
-   | Error Model_catalog.No_such_row -> ()
-   | Error (Model_catalog.Malformed_model_id detail) ->
-     Alcotest.failf "valid miss was called malformed: %s" detail
-   | Ok _ -> Alcotest.fail "valid miss unexpectedly resolved");
-  Alcotest.(check bool) "empty query matches nothing" true
-    (Option.is_none (Model_catalog.lookup catalog ""));
-  match Model_catalog.lookup_result catalog "" with
-  | Error (Model_catalog.Malformed_model_id _) -> ()
-  | Error Model_catalog.No_such_row ->
-    Alcotest.fail "empty query must not become a valid catalog miss"
-  | Ok _ -> Alcotest.fail "empty query unexpectedly resolved"
+    (Option.is_none
+       (Model_catalog.lookup catalog (Model_identifiers.Model_id.of_string_exn "xclaude-opus-5-5")));
+  Alcotest.(check bool) "empty query is not a model id" true
+    (Result.is_error (Model_identifiers.Model_id.of_string ""))
 ;;
 
 (* #37074: ollama.com serves "deepseek-v4.1-flash" under both the bare name
@@ -290,26 +265,26 @@ let test_scoped_lookup_matches_a_scan_of_the_rows () =
          (fun (provider_name, model_id) ->
             let label = Printf.sprintf "%s / %s" provider_name model_id in
             match
-              ( Model_catalog.lookup_for_provider_result catalog ~provider_name ~model_id
+              ( Model_catalog.lookup_for_provider catalog ~provider_name
+                  ~model_id:(Model_identifiers.Model_id.of_string_exn model_id)
               , scan_scoped_rows rows ~provider_name ~model_id )
             with
-            | Ok found, Some expected ->
+            | Some found, Some expected ->
               Alcotest.(check bool) (label ^ " answers with the scanned row") true
                 (found == expected)
-            | Ok _, None -> Alcotest.failf "%s: the index found a row the scan does not" label
-            | Error _, _ -> Alcotest.failf "%s: the row's own provider and id miss" label)
+            | Some _, None -> Alcotest.failf "%s: the index found a row the scan does not" label
+            | None, _ -> Alcotest.failf "%s: the row's own provider and id miss" label)
          [ provider, id; String.uppercase_ascii provider, String.uppercase_ascii id ])
     scoped;
   match scoped with
   | [] -> Alcotest.fail "the catalog has no row that names a provider"
   | (provider, _) :: _ ->
     (match
-       Model_catalog.lookup_for_provider_result catalog ~provider_name:provider
-         ~model_id:"no-row-declares-this-model"
+       Model_catalog.lookup_for_provider catalog ~provider_name:provider
+         ~model_id:(Model_identifiers.Model_id.of_string_exn "no-row-declares-this-model")
      with
-     | Error Model_catalog.No_such_row -> ()
-     | Error (Model_catalog.Malformed_model_id detail) -> Alcotest.fail detail
-     | Ok _ -> Alcotest.fail "a model id no row declares must miss")
+     | None -> ()
+     | Some _ -> Alcotest.fail "a model id no row declares must miss")
 ;;
 
 (* Two rows with one provider and one id: the lookup answers with the first,
@@ -336,11 +311,12 @@ let test_scoped_lookup_answers_with_the_first_of_equal_rows () =
     let model_id = Model_identifiers.Id_prefix.to_string first.id_prefix in
     let answer entries =
       match
-        Model_catalog.lookup_for_provider_result
-          (Model_catalog.of_model_entries entries) ~provider_name ~model_id
+        Model_catalog.lookup_for_provider
+          (Model_catalog.of_model_entries entries) ~provider_name
+          ~model_id:(Model_identifiers.Model_id.of_string_exn model_id)
       with
-      | Ok entry -> entry
-      | Error _ -> Alcotest.fail "the lookup missed a row that names its provider and id"
+      | Some entry -> entry
+      | None -> Alcotest.fail "the lookup missed a row that names its provider and id"
     in
     Alcotest.(check bool) "the first row answers" true (answer [ first; second ] == first);
     Alcotest.(check bool) "order decides, not the row" true
@@ -361,10 +337,13 @@ let catalog_of_toml ~source toml =
 (* Which row a provider-scoped lookup answers with: [Ok] with the row's
    provider label and [max_context_tokens], or the miss. *)
 let scoped_answer catalog ~provider_name ~model_id =
-  match Model_catalog.lookup_for_provider_result catalog ~provider_name ~model_id with
-  | Ok (entry : Model_catalog.model_entry) -> Ok (entry.provider_name, entry.max_context_tokens)
-  | Error Model_catalog.No_such_row -> Error "no such row"
-  | Error (Model_catalog.Malformed_model_id detail) -> Error detail
+  match Model_identifiers.Model_id.of_string model_id with
+  | Error detail -> Error detail
+  | Ok model_id ->
+    (match Model_catalog.lookup_for_provider catalog ~provider_name ~model_id with
+     | Some (entry : Model_catalog.model_entry) ->
+       Ok (entry.provider_name, entry.max_context_tokens)
+     | None -> Error "no such row")
 ;;
 
 let scoped_answer_t =

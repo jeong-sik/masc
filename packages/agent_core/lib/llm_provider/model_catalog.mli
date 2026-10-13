@@ -123,24 +123,17 @@ val load_file : string -> (t, string) result
     silently. *)
 val load_default : unit -> (t, string) result
 
-(** Why a typed model lookup did not return a row. *)
-type lookup_failure =
-  | Malformed_model_id of string
-  | No_such_row
-
-(** Typed longest-prefix lookup across provider-independent rows using the
+(** Longest-prefix lookup across provider-independent rows using the
     catalog's exact declared [id_prefix] syntax. Provider-scoped rows are
-    excluded. Malformed ids and valid misses remain distinct. *)
-val lookup_result : t -> string -> (model_entry, lookup_failure) result
-
-(** Compatibility option projection of {!lookup_result}. A malformed id is
-    logged before it becomes [None]; decision code should use the typed API. *)
-val lookup : t -> string -> model_entry option
+    excluded. The id is already parsed ({!Model_identifiers.Model_id.of_string}),
+    so a malformed id is the caller's parse error, not a lookup outcome; [None]
+    is a valid id with no matching row. *)
+val lookup : t -> Model_identifiers.Model_id.t -> model_entry option
 
 (** Exact normalized lookup across provider-scoped rows. [provider_name] is
-    trimmed and ASCII case-folded. The complete [model_id] must have no leading
-    or trailing whitespace and equals the row's declared [id_prefix] after
-    ASCII case-folding. There is no family/prefix match on the model identity. The
+    trimmed and ASCII case-folded. The parsed [model_id] (no leading or
+    trailing whitespace, by {!Model_identifiers.Model_id.of_string}) equals the
+    row's declared [id_prefix] after ASCII case-folding. There is no family/prefix match on the model identity. The
     provider and model remain separate values; AGENT_CORE never synthesizes slash,
     colon, or dot-qualified model ids.
 
@@ -158,20 +151,11 @@ val lookup : t -> string -> model_entry option
     config of that wire kind.
 
     Provider-independent family matching remains exclusively in
-    {!lookup_result}. *)
-val lookup_for_provider_result
-  :  t
-  -> provider_name:string
-  -> model_id:string
-  -> (model_entry, lookup_failure) result
-
-(** Compatibility option projection of {!lookup_for_provider_result}. A
-    malformed id is logged before it becomes [None]; decision code should use
-    the typed API. *)
+    {!lookup}. *)
 val lookup_for_provider
   :  t
   -> provider_name:string
-  -> model_id:string
+  -> model_id:Model_identifiers.Model_id.t
   -> model_entry option
 
 (** Return the catalog-declared provider identity for a concrete endpoint.

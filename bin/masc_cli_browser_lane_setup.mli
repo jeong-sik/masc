@@ -5,8 +5,10 @@
     extension] installs the native host, its launcher and manifest, and writes
     the extension for Firefox to load. [--mode bidi] installs the host and its
     launcher and writes the [\[browser.live.bidi\]] table of runtime.toml, so
-    the MASC server starts a Firefox of its own. It starts no browser and loads
-    no extension.
+    the MASC server starts a Firefox of its own. [--mode host] installs the host
+    and its launcher and nothing else: no browser is connected, and no
+    runtime.toml is needed or written. It starts no browser and loads no
+    extension.
 
     An option that the chosen modes do not use is refused, not ignored. *)
 

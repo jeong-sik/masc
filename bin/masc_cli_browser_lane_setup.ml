@@ -154,6 +154,11 @@ let print_bidi_state ~base_path ~runtime_config_path =
     (Masc.Browser_bidi_host_status.message
        (Masc.Browser_bidi_host_status.observe ~base_path ~configuration))
 
+let print_host_only =
+  "--mode host connects no browser: the host and its launcher are in place for one you \
+   attach yourself. --mode extension loads the MASC extension in Firefox, and --mode bidi \
+   has the MASC server start a Firefox of its own."
+
 let print_both_routes =
   "With both routes connected the live lane has two browsers, and a request that names no \
    connection is refused as ambiguous_browser_clients."
@@ -202,9 +207,12 @@ let install
                print_table ~runtime_config_path plan applied;
                print_bidi_steps plan)
             tabled;
-          if List.length modes > 1 then (print_endline ""; print_endline print_both_routes);
+          if modes = [ Launcher.Host ] then (print_endline ""; print_endline print_host_only);
+          if List.mem Launcher.Extension modes && List.mem Launcher.Bidi modes
+          then (print_endline ""; print_endline print_both_routes);
           print_endline "";
-          if Option.is_some installed.extension then print_lane_state ~base_path;
+          if Option.is_some installed.extension || List.mem Launcher.Host modes
+          then print_lane_state ~base_path;
           if Option.is_some tabled then print_bidi_state ~base_path ~runtime_config_path;
           0))
 

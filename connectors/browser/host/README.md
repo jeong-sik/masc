@@ -35,15 +35,24 @@ them the command uses the first Firefox that answers `--version`, the profile
 table that is already there keeps its values, because its profile holds the
 logins the Keepers use, and a table written inline or with dotted keys is not
 edited. The table goes into the `runtime.toml` the server reads, which
-`MASC_CONFIG_DIR` overrides. Give `--mode` twice to connect both routes. An option the
-chosen modes do not use is refused.
+`MASC_CONFIG_DIR` overrides. Give `--mode` twice to connect both routes. An option
+the chosen modes do not use is refused.
+
+`--mode host` installs the host and the launcher and nothing else: no extension,
+no manifest, no `runtime.toml` (the workspace needs none yet). It connects no
+browser. It is for a browser you attach by hand, and for bringing an installed
+lane's host up to the build you are running; running it again keeps the token.
 
 From a source checkout, `scripts/install-local-build.sh` builds `masc`,
 `masc-tui` and `masc-browser-host`, installs them into `~/.local/bin`, and
 reinstalls every host registered under a workspace's
 `.masc/browser-lane/host` from the new binary under its own host name, with the
 `masc` it just installed. That also rewrites the extension files in each of those
-workspaces. It then stops the running hosts from those workspaces; the
+workspaces. It also brings the host of the workspace it works with (`--base-path`,
+or the one `masc` would use) up to the new build when that workspace's lane is
+installed and no manifest is registered for it, which is how a lane set up with
+`--mode bidi` or `--mode host` is found; that refresh writes the host and the
+launcher only. It then stops the running hosts from those workspaces; the
 extension reconnects after five seconds and starts the new copy. A workspace
 that cannot be refreshed is named on stderr and the script exits with status 1
 after the others have been refreshed.

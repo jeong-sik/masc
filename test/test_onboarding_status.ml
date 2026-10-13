@@ -322,7 +322,7 @@ let a_launcher_that_cannot_be_run_as_it_is_is_installed_first () =
    says observed
      [ "then runs " ^ launch_command base
      ; "The launcher there is not as an installation wrote it: the operator first installs the \
-        lane again by running masc browser-lane-setup --mode extension" ]);
+        lane again by running masc browser-lane-setup --mode host" ]);
   (* A host started from an executable on the PATH leaves a record in a
      workspace that has no launcher. *)
   (with_workspace @@ fun base ->
@@ -334,7 +334,7 @@ let a_launcher_that_cannot_be_run_as_it_is_is_installed_first () =
    says (inspect ~base_path:(Some base))
      [ "The operator " ^ run_again base
      ; "No browser lane is installed in this workspace, so that launcher is not there yet: the \
-        operator first installs the lane by running masc browser-lane-setup --mode extension"
+        operator first installs the lane by running masc browser-lane-setup --mode host"
      ; "--base-path " ^ Filename.quote base ]);
   List.iter (fun (name, launcher, standing) ->
       check bool name true
@@ -455,7 +455,8 @@ let a_bidi_host_that_met_another_profile_names_both_profiles () =
    MASC does, the table is in runtime.toml already and the BiDi installation
    leaves it. Where the operator does there is no table, and the BiDi
    installation would write one and hand the start to MASC, so the paragraph
-   names the extension's, which writes no runtime.toml. *)
+   names the one that installs the host and the launcher and writes no
+   runtime.toml. *)
 let the_installation_a_paragraph_names_follows_who_starts_the_firefox () =
   let masc =
     Status.Masc_starts
@@ -477,11 +478,11 @@ let the_installation_a_paragraph_names_follows_who_starts_the_firefox () =
       List.iter (fun (state, record) ->
           let said keeper = Status.message (observation ~launcher ~keeper record) in
           has (said masc) [ lead ^ install "bidi" ];
-          lacks (said masc) [ "--mode extension" ];
+          lacks (said masc) [ "--mode extension"; "--mode host" ];
           List.iter (fun keeper ->
-              check bool (state ^ ": names the extension installation where the operator starts it")
-                true (String_util.contains_substring (said keeper) (lead ^ install "extension"));
-              lacks (said keeper) [ "--mode bidi" ])
+              check bool (state ^ ": names the host installation where the operator starts it")
+                true (String_util.contains_substring (said keeper) (lead ^ install "host"));
+              lacks (said keeper) [ "--mode bidi"; "--mode extension" ])
             [ Status.Not_configured; Status.Not_known ])
         records)
     [ Launcher.Not_installed, "the operator first installs the lane by running "

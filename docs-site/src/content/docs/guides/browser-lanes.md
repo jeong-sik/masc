@@ -52,7 +52,9 @@ This installs the host and writes `[browser.live.bidi]` into the workspace's
 that is already there keeps its values. Restart the MASC server so it reads the
 table, then log in once in that Firefox: its profile keeps the login. The port
 has no authentication, so any program on the computer can drive that Firefox.
-Give `--mode` twice for both routes.
+Give `--mode` twice for both routes. `--mode host` installs only the host and
+its launcher, for a browser you attach yourself or to bring an installed lane's
+host up to the running build; it writes no extension, manifest or `runtime.toml`.
 
 The `--mode extension` command supports macOS and Linux and registers a Mozilla native-messaging
 manifest. `--manifest-dir` selects a different manifest directory when needed.

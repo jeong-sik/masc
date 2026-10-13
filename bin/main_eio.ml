@@ -2221,9 +2221,11 @@ let browser_lane_setup_cmd =
           ~doc:
             "How to connect Firefox: extension installs the native host and writes the \
              MASC extension for Firefox to load; bidi installs the host and writes the \
-             [browser.live.bidi] table so the MASC server starts a Firefox of its own. \
-             Give it twice for both. Without a mode nothing is written and the current \
-             state is printed.")
+             [browser.live.bidi] table so the MASC server starts a Firefox of its own; \
+             host installs the host and its launcher only, for a browser you attach \
+             yourself or to bring an installed lane's host up to date. Give it twice \
+             for two. Without a mode nothing is written and the current state is \
+             printed.")
   in
   let binary =
     Arg.(

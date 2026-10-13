@@ -110,10 +110,10 @@ let verdict t =
   | Serving { port; polling = [] }, Follows_workspace, Ok workspace when workspace = port -> Aligned
   | Serving { polling = []; _ }, Follows_workspace, Ok _ -> Misconfigured
 
-type route = Extension | Bidi
+type route = Extension | Bidi | Host
 
-let routes = [ Extension; Bidi ]
-let route_name = function Extension -> "extension" | Bidi -> "bidi"
+let routes = [ Extension; Bidi; Host ]
+let route_name = function Extension -> "extension" | Bidi -> "bidi" | Host -> "host"
 
 let install ~route ~base_path =
   Printf.sprintf "masc browser-lane-setup --mode %s --base-path %s" (route_name route)

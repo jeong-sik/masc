@@ -46,6 +46,12 @@ if "fails" in str(base):
     sys.exit(3)
 if "stale" in str(base):
     sys.exit(0)
+if options["--mode"] == "host":
+    # The host and the launcher only: no registration to read or write.
+    host = base / ".masc/browser-lane/host/masc-browser-host"
+    host.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(options["--binary"], host)
+    sys.exit(0)
 registration = Path(options["--manifest-dir"]) / (options["--host-name"] + ".json")
 if "moves" in str(base):
     registration.write_text(json.dumps({{"name": options["--host-name"],
@@ -66,6 +72,20 @@ def fake_masc(path):
 def lane_calls(prefix):
     calls = prefix / "lane-calls"
     return [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
+
+
+def host_call(prefix, base):
+    return ["browser-lane-setup", "--mode", "host", "--binary", str(prefix / "masc-browser-host"),
+            "--base-path", str(base)]
+
+
+# A lane installed for a workspace: the declaration is what marks it installed,
+# and the host copy beside it is what an older build left.
+def install_lane(base, host_text="old"):
+    host_directory = base / ".masc/browser-lane/host"
+    host_directory.mkdir(parents=True, exist_ok=True)
+    (host_directory / "launch.json").write_text("{}")
+    (host_directory / "masc-browser-host").write_text(host_text)
 
 
 def lane_call(prefix, base, name, manifests):
@@ -470,6 +490,86 @@ class LocalBuildInstall(unittest.TestCase):
                         process.wait()
                     process.stdin.close()
                 bidi.stdout.close()
+
+    # A lane set up with --mode bidi or --mode host registers no manifest, so
+    # the manifests cannot lead to it; the workspace the install works with is
+    # looked at as well.
+    def run_script_for_workspace(self, root, base, lanes=()):
+        manifests = root / "native manifests"
+        for lane_base, name in lanes:
+            register(manifests, lane_base, name)
+        build = root / "build"
+        build.mkdir()
+        fake_masc(build / "main_eio.exe")
+        executable(build / "masc_tui.exe", "tui")
+        executable(build / "masc_browser_host.exe", "new")
+        preflight_helper(build)
+        prefix = root / "prefix"
+        result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                 "--prefix", str(prefix), "--manifest-dir", str(manifests),
+                                 "--base-path", str(base)],
+                                capture_output=True, text=True)
+        return result, prefix
+
+    def test_the_selected_workspaces_lane_with_no_manifest_gets_the_new_host(self):
+        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
+            root = Path(temporary).resolve()
+            base = workspace(root)
+            install_lane(base)
+            result, prefix = self.run_script_for_workspace(root, base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(lane_calls(prefix), [host_call(prefix, base)])
+            self.assertIn("new", (base / ".masc/browser-lane/host/masc-browser-host").read_text())
+            self.assertIn(f"refreshed browser lane host for {base} (no host running)", result.stdout)
+            self.assertNotIn("no browser lane host is registered", result.stdout)
+
+    def test_a_selected_workspace_that_is_registered_is_refreshed_once_by_its_manifest(self):
+        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
+            root = Path(temporary).resolve()
+            base = workspace(root)
+            install_lane(base)
+            result, prefix = self.run_script_for_workspace(root, base, lanes=((base, "masc_browser_host"),))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(lane_calls(prefix),
+                             [lane_call(prefix, base, "masc_browser_host", root / "native manifests")])
+
+    def test_registered_lanes_and_the_selected_workspace_are_all_refreshed(self):
+        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
+            root = Path(temporary).resolve()
+            base, other = workspace(root), root / "other workspace"
+            install_lane(base)
+            result, prefix = self.run_script_for_workspace(root, base, lanes=((other, "masc_other"),))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(sorted(lane_calls(prefix)),
+                             sorted([host_call(prefix, base),
+                                     lane_call(prefix, other, "masc_other", root / "native manifests")]))
+
+    def test_a_selected_workspace_with_no_installed_lane_is_left_alone(self):
+        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
+            root = Path(temporary).resolve()
+            base = workspace(root)
+            # A host copy with no declaration is not an installed lane.
+            host = base / ".masc/browser-lane/host/masc-browser-host"
+            host.parent.mkdir(parents=True)
+            host.write_text("old")
+            result, prefix = self.run_script_for_workspace(root, base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(lane_calls(prefix), [])
+            self.assertEqual(host.read_text(), "old")
+            self.assertIn("no browser lane host is registered", result.stdout)
+
+    def test_a_host_refresh_that_leaves_the_old_copy_is_reported_and_fails_the_install(self):
+        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
+            root = Path(temporary).resolve()
+            base = root / "stale workspace"
+            base.mkdir()
+            install_lane(base)
+            result, prefix = self.run_script_for_workspace(root, base)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn(f"could not refresh browser lane host for {base}", result.stderr)
+            self.assertIn("is not the host just installed", result.stderr)
+            self.assertNotIn("refreshed browser lane host", result.stdout)
+            self.assertTrue((prefix / "masc-browser-host").is_file(), "the binaries were installed first")
 
     def test_no_registered_host_installs_binaries_and_says_so(self):
         with tempfile.TemporaryDirectory() as temporary:

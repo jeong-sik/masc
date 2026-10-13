@@ -88,10 +88,13 @@ val host_directory_path : base_path:string -> string
     the reader and the writer cannot disagree on the fields. *)
 val declaration : launcher_script:string -> string
 
-(** How a browser reaches the lane: the MASC extension Firefox loads, or the
-    Firefox MASC starts itself with a BiDi host. [masc browser-lane-setup]
-    sets up one or both, by {!route_name}. *)
-type route = Extension | Bidi
+(** What [masc browser-lane-setup] sets up, by {!route_name}: the MASC extension
+    Firefox loads, the Firefox MASC starts itself with a BiDi host, or the host
+    and its launcher alone. The last connects no browser. It is for a browser
+    the operator attaches by hand, and for bringing an installed lane's host up
+    to the build that is running. It writes no extension, no manifest and no
+    [runtime.toml]. *)
+type route = Extension | Bidi | Host
 
 val routes : route list
 

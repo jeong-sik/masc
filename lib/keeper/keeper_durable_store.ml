@@ -659,7 +659,10 @@ let turn_fragment_store =
                                 | Ok _ -> count_row report (Ok ())
                                 | Error Keeper_turn_fragments.Incomplete_line ->
                                   report
-                                | Error error ->
+                                | Error
+                                    (( Keeper_turn_fragments.Not_json _
+                                     | Keeper_turn_fragments.Malformed _
+                                     | Keeper_turn_fragments.Message_rejected _ ) as error) ->
                                   count_row
                                     report
                                     (Error

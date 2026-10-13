@@ -755,7 +755,22 @@ let content_event_allowed state (evt : Agent_core.Types.sse_event) =
   | (Agent_core.Types.ContentBlockStart _ | Agent_core.Types.ContentBlockDelta _
     | Agent_core.Types.ContentBlockStop _),
     (Stop_reason_seen _ | Message_stopped) -> false
-  | _ -> true
+  | (Agent_core.Types.MessageStart _
+    | Agent_core.Types.MessageDelta _
+    | Agent_core.Types.MessageStop
+    | Agent_core.Types.Ping
+    | Agent_core.Types.SSEError _
+    | Agent_core.Types.NDJSONError _
+    | Agent_core.Types.SSEParseFailed _
+    | Agent_core.Types.NDJSONParseFailed _
+    | Agent_core.Types.SSEUnknownEventType _
+    | Agent_core.Types.SSEUnsupportedPart _
+    | Agent_core.Types.SSEUnsupportedResponse _
+    | Agent_core.Types.Connected
+    | Agent_core.Types.Timeout _
+    | Agent_core.Types.StreamIncomplete _
+    | Agent_core.Types.StreamRepeating _),
+    (Accepting_content | Stop_reason_seen _ | Message_stopped) -> true
 ;;
 
 let reject_quarantined_content_event ~stream_scope state
@@ -808,12 +823,47 @@ let event_channel_conflicts state = function
       | InputJsonDelta _ | InputJsonSnapshot _ | MediaDelta _ -> None in
     (match stream_block_for_index state index, incoming with
      | Some (Occupied_non_tool_block (Some expected)), Some actual -> expected <> actual
-     | _ -> false)
+     | Some (Occupied_non_tool_block (Some _)), None
+     | ( Some
+           ( Active_tool _
+           | Active_native_tool _
+           | Ended_native_tool _
+           | Occupied_non_tool_block None
+           | Invalid_tool_block _
+           | Invalid_media_block
+           | Active_media _ )
+       | None )
+       , _ -> false)
   | Agent_core.Types.ContentBlockStart {index; content_type; _} ->
     (match stream_block_for_index state index, declared_channel content_type with
      | Some (Occupied_non_tool_block (Some expected)), Some actual -> expected <> actual
-     | _ -> false)
-  | _ -> false
+     | Some (Occupied_non_tool_block (Some _)), None
+     | ( Some
+           ( Active_tool _
+           | Active_native_tool _
+           | Ended_native_tool _
+           | Occupied_non_tool_block None
+           | Invalid_tool_block _
+           | Invalid_media_block
+           | Active_media _ )
+       | None )
+       , _ -> false)
+  | Agent_core.Types.MessageStart _
+  | Agent_core.Types.MessageDelta _
+  | Agent_core.Types.MessageStop
+  | Agent_core.Types.Ping
+  | Agent_core.Types.SSEError _
+  | Agent_core.Types.NDJSONError _
+  | Agent_core.Types.SSEParseFailed _
+  | Agent_core.Types.NDJSONParseFailed _
+  | Agent_core.Types.SSEUnknownEventType _
+  | Agent_core.Types.SSEUnsupportedPart _
+  | Agent_core.Types.SSEUnsupportedResponse _
+  | Agent_core.Types.Connected
+  | Agent_core.Types.Timeout _
+  | Agent_core.Types.StreamIncomplete _
+  | Agent_core.Types.StreamRepeating _
+  | Agent_core.Types.ContentBlockStop _ -> false
 
 (* Progress cannot reopen a native occurrence or set an execution outcome. *)
 let progress_native_tool ~redact_text ~stream_scope ~block_index ~tool_call_id progress state =
@@ -823,7 +873,16 @@ let progress_native_tool ~redact_text ~stream_scope ~block_index ~tool_call_id p
          && Option.equal String.equal tool.tool_call_id tool_call_id ->
       {bridge_state=state; chat_events=[Keeper_chat_events.Native_tool_progress
         (tool, Runtime_native_tools.redact_progress redact_text progress)]}
-  | _ ->
+  | (Some _ | None), (Scope_live | Scope_cut | Scope_poisoned),
+    (None
+    | Some
+        ( Active_tool _
+        | Active_native_tool _
+        | Ended_native_tool _
+        | Occupied_non_tool_block _
+        | Invalid_tool_block _
+        | Invalid_media_block
+        | Active_media _ )) ->
       {bridge_state=state; chat_events=[protocol_error ~index:block_index ?tool_call_id
         ~reason:"native progress has no matching active provider occurrence"
         Keeper_chat_events.Tool_occurrence_mapping_invalid]}
@@ -849,7 +908,16 @@ let finish_native_tool ~redact_text ~stream_scope ~block_index ~tool_call_id com
   | (Scope_live | Scope_cut), Some (Ended_native_tool tool)
     when Option.equal String.equal tool.tool_call_id tool_call_id ->
       {bridge_state=state; chat_events=[]}
-  | (Scope_live | Scope_cut), _ -> reject ()
+  | (Scope_live | Scope_cut),
+    (None
+    | Some
+        ( Active_tool _
+        | Active_native_tool _
+        | Ended_native_tool _
+        | Occupied_non_tool_block _
+        | Invalid_tool_block _
+        | Invalid_media_block
+        | Active_media _ )) -> reject ()
 ;;
 
 (* On a keeper chat request, text, thinking and tool-argument deltas and

@@ -528,7 +528,17 @@ let log_cli_slot_failure (entry : pending_approval) failure =
 let exact_attempt_source_resolved (entry : pending_approval) = function
   | Exact_attempt_rejected (Exact_attempt_not_found approval_id) ->
     String.equal approval_id entry.id
-  | Exact_attempt_storage_error _ | Exact_attempt_rejected _ -> false
+  | Exact_attempt_storage_error _
+  | Exact_attempt_rejected
+      ( Exact_attempt_key_mismatch _
+      | Exact_attempt_invalid_identity _
+      | Exact_attempt_summary_not_pending _
+      | Exact_attempt_unbound_state _
+      | Exact_attempt_disposition_conflict _
+      | Exact_attempt_identity_conflict _
+      | Exact_attempt_status_conflict _
+      | Exact_attempt_provenance_mismatch _
+      | Exact_attempt_content_conflict _ ) -> false
 ;;
 
 exception Exact_terminalization_persistence_failed of string
@@ -701,7 +711,19 @@ let settle_current ~queue_ops (entry : pending_approval) ~reason ~cause =
       }) ->
     record_outcome Source_resolved;
     Ok ()
-  | Ok (Some { exact_attempt = Exact_bound binding; _ }) ->
+  | Ok
+      (Some
+        { exact_attempt =
+            Exact_bound
+              ({ status =
+                   ( Exact_dispatch_uncertain
+                   | Exact_released_before_dispatch
+                   | Exact_released_recovery_required
+                   | Exact_restart_quarantined )
+               ; _
+               } as binding)
+        ; _
+        }) ->
     quarantine_identity_result
       ~queue_ops
       entry

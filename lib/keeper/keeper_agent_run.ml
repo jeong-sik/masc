@@ -58,7 +58,11 @@ let response_policy_for_turn ~turn_kind ~input_speaker
        && List.for_all reminder_only observation.pending_board_events
     then Allow_quiet_final
     else Require_progress
-  | ((Direct | Autonomous), Keeper_input_speaker.Host_prompt _, _, _)
+  | ( (Direct | Autonomous)
+    , Keeper_input_speaker.Host_prompt
+        (Keeper_input_speaker.Autonomous_wake _ | Keeper_input_speaker.Official_client_resume)
+    , _
+    , _ )
   | ((Direct | Autonomous), Keeper_input_speaker.Person _, _, _) -> Require_progress
 ;;
 
@@ -1682,7 +1686,9 @@ let run_turn
            | Ok (Some (Keeper_official_client_host.Repeated_tool_call _)) as stop ->
              record_repetition_judged ();
              stop
-           | (Ok (Some _) | Ok None | Error _) as other -> other
+           | ( Ok (Some (Keeper_official_client_host.Terminal_tool_boundary _))
+             | Ok None
+             | Error _ ) as other -> other
          in
          let cooperative_yield_probe =
            Some
@@ -1705,8 +1711,14 @@ let run_turn
                    | Ok (Runtime_agent.Yield (Runtime_agent.Repeated_tool_call _)) as decision ->
                      record_repetition_judged ();
                      decision
-                   | (Ok (Runtime_agent.Yield _) | Ok Runtime_agent.Continue | Error _) as other
-                     -> other)
+                   | ( Ok
+                         (Runtime_agent.Yield
+                            ( Runtime_agent.Operation_queued
+                            | Runtime_agent.Durable_stimulus_waiting
+                            | Runtime_agent.Repeated_assistant_text _
+                            | Runtime_agent.Terminal_tool_completed ))
+                     | Ok Runtime_agent.Continue
+                     | Error _ ) as other -> other)
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn ->
@@ -2172,7 +2184,15 @@ let run_turn
                        Some context.Runtime_observation.input_tokens
                      | Some { usage_scope = Runtime_usage_scope.Per_request; _ }
                        when usage.input_tokens > 0 -> Some usage.input_tokens
-                     | Some _ | None -> None
+                     | Some
+                         { usage_scope =
+                             ( Runtime_usage_scope.Per_request
+                             | Runtime_usage_scope.Turn_total
+                             | Runtime_usage_scope.Conversation_cumulative
+                             | Runtime_usage_scope.Usage_scope_unavailable )
+                         ; _
+                         }
+                     | None -> None
                    in
                    (* Absent evidence and unresolved provenance are recorded
                       as what they are. Writing a zero here is what let a
@@ -2444,7 +2464,15 @@ let run_turn
                ; _
                } as result) ->
             Some result.usage.output_tokens
-          | Ok _ | Error (Agent_core.Error.Api _) | Error (Agent_core.Error.Provider _)
+          | Ok
+              { usage_scope =
+                  ( Runtime_usage_scope.Per_request
+                  | Runtime_usage_scope.Turn_total
+                  | Runtime_usage_scope.Conversation_cumulative
+                  | Runtime_usage_scope.Usage_scope_unavailable )
+              ; _
+              }
+          | Error (Agent_core.Error.Api _) | Error (Agent_core.Error.Provider _)
           | Error (Agent_core.Error.Agent _) | Error (Agent_core.Error.Mcp _)
           | Error (Agent_core.Error.Config _) | Error (Agent_core.Error.Serialization _)
           | Error (Agent_core.Error.Io _) | Error (Agent_core.Error.Orchestration _)

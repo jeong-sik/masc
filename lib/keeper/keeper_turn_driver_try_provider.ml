@@ -1433,7 +1433,7 @@ let bounded_model_input_projection
       && (match ctx.turn_boundary with
           | Keeper_carried_front.Turn_boundary { end_atom } -> end_atom > 0
           | Keeper_carried_front.Turn_boundary_unknown _ -> false)
-    | _ -> false in
+    | Keeper_input_policy.Wide -> false in
   let demotion_base_path = if references_enabled then ctx.base_path else "" in
   (* The current turn's results leave as markers only for a Keeper that can
      open them again: the marker names a body [artifact_read] reads back. *)
@@ -3011,7 +3011,29 @@ let max_tokens_truncation_error error =
          }) ->
     true
   | Some
-      ( Keeper_internal_error.Accept_rejected _
+      ( Keeper_internal_error.Accept_rejected
+          { reason_kind =
+              (None | Some Keeper_internal_error.Accept_predicate_rejected)
+          ; _
+          }
+      | Keeper_internal_error.Accept_rejected
+          { reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
+          ; stop_reason =
+              ( None
+              | Some
+                  ( Agent_core.Types.EndTurn
+                  | Agent_core.Types.StopToolUse
+                  | Agent_core.Types.StopSequence
+                  | Agent_core.Types.Refusal
+                  | Agent_core.Types.ContentFilter
+                  | Agent_core.Types.RepetitionTruncation
+                  | Agent_core.Types.PauseTurn
+                  | Agent_core.Types.Compaction
+                  | Agent_core.Types.ContextWindowExceeded
+                  | Agent_core.Types.UnmatchedToolCalls
+                  | Agent_core.Types.Unknown _ ) )
+          ; _
+          }
       | Keeper_internal_error.Runtime_exhausted _
       | Keeper_internal_error.Resumable_cli_session _
       | Keeper_internal_error.Internal_unhandled_exception _

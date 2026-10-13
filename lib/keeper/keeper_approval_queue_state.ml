@@ -25,7 +25,12 @@ let summary_attempt_allows_exact_bind = function
   | Summary_attempt_in_flight
   | Summary_attempt_identity_unbound
   | Summary_attempt_persistence_uncertain
-  | Summary_attempt_pre_worker_unavailable _
+  | Summary_attempt_pre_worker_unavailable
+      { reason_code =
+          ( Summary_pre_worker_auto_judge_unavailable
+          | Summary_pre_worker_mode_state_invalid )
+      ; _
+      }
   | Summary_attempt_settled ->
     false
 ;;

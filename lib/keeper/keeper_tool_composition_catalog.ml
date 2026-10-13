@@ -230,7 +230,12 @@ let required_field ~path field fields =
 
 let string_value ~path ~field = function
   | Toml.Toml_string value -> Ok value
-  | _ -> Error (Wrong_value_kind { path; field; expected = String_value })
+  | Toml.Toml_bool _ | Toml.Toml_int _ | Toml.Toml_float _
+  | Toml.Toml_string_array _ | Toml.Toml_array _ | Toml.Toml_table _
+  | Toml.Toml_inline_table _ | Toml.Toml_table_array _
+  | Toml.Toml_offset_datetime _ | Toml.Toml_local_datetime _
+  | Toml.Toml_local_date _ | Toml.Toml_local_time _ ->
+    Error (Wrong_value_kind { path; field; expected = String_value })
 ;;
 
 let required_string ~path field fields =
@@ -268,19 +273,32 @@ let optional_bool ~path field fields =
 
 let table_fields ~path ~field = function
   | Toml.Toml_table fields | Toml.Toml_inline_table fields -> Ok fields
-  | _ -> Error (Wrong_value_kind { path; field; expected = Table_value })
+  | Toml.Toml_bool _ | Toml.Toml_string _ | Toml.Toml_int _ | Toml.Toml_float _
+  | Toml.Toml_string_array _ | Toml.Toml_array _ | Toml.Toml_table_array _
+  | Toml.Toml_offset_datetime _ | Toml.Toml_local_datetime _
+  | Toml.Toml_local_date _ | Toml.Toml_local_time _ ->
+    Error (Wrong_value_kind { path; field; expected = Table_value })
 ;;
 
 let table_array ~path ~field = function
   | Toml.Toml_table_array values -> Ok values
-  | _ -> Error (Wrong_value_kind { path; field; expected = Table_array_value })
+  | Toml.Toml_bool _ | Toml.Toml_string _ | Toml.Toml_int _ | Toml.Toml_float _
+  | Toml.Toml_string_array _ | Toml.Toml_array _ | Toml.Toml_table _
+  | Toml.Toml_inline_table _ | Toml.Toml_offset_datetime _
+  | Toml.Toml_local_datetime _ | Toml.Toml_local_date _
+  | Toml.Toml_local_time _ ->
+    Error (Wrong_value_kind { path; field; expected = Table_array_value })
 ;;
 
 let array_values ~path ~field = function
   | Toml.Toml_array values | Toml.Toml_table_array values -> Ok values
   | Toml.Toml_string_array values ->
     Ok (List.map (fun value -> Toml.Toml_string value) values)
-  | _ -> Error (Wrong_value_kind { path; field; expected = Array_value })
+  | Toml.Toml_bool _ | Toml.Toml_string _ | Toml.Toml_int _ | Toml.Toml_float _
+  | Toml.Toml_table _ | Toml.Toml_inline_table _ | Toml.Toml_offset_datetime _
+  | Toml.Toml_local_datetime _ | Toml.Toml_local_date _
+  | Toml.Toml_local_time _ ->
+    Error (Wrong_value_kind { path; field; expected = Array_value })
 ;;
 
 let string_array ~path ~field = function
@@ -289,11 +307,20 @@ let string_array ~path ~field = function
     let rec strings parsed = function
       | [] -> Ok (List.rev parsed)
       | Toml.Toml_string value :: rest -> strings (value :: parsed) rest
-      | _ :: _ ->
+      | ( Toml.Toml_bool _ | Toml.Toml_int _ | Toml.Toml_float _
+        | Toml.Toml_string_array _ | Toml.Toml_array _ | Toml.Toml_table _
+        | Toml.Toml_inline_table _ | Toml.Toml_table_array _
+        | Toml.Toml_offset_datetime _ | Toml.Toml_local_datetime _
+        | Toml.Toml_local_date _ | Toml.Toml_local_time _ )
+        :: _ ->
         Error (Wrong_value_kind { path; field; expected = String_array_value })
     in
     strings [] values
-  | _ -> Error (Wrong_value_kind { path; field; expected = String_array_value })
+  | Toml.Toml_bool _ | Toml.Toml_string _ | Toml.Toml_int _ | Toml.Toml_float _
+  | Toml.Toml_table _ | Toml.Toml_inline_table _ | Toml.Toml_table_array _
+  | Toml.Toml_offset_datetime _ | Toml.Toml_local_datetime _
+  | Toml.Toml_local_date _ | Toml.Toml_local_time _ ->
+    Error (Wrong_value_kind { path; field; expected = String_array_value })
 ;;
 
 let rec json_of_toml = function

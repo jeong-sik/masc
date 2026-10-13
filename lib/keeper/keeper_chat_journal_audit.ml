@@ -549,7 +549,14 @@ let sweep ~base_dir ~lookback_sec ~liveness ~audited () =
                 | Leave -> results, audited
                 | Report (Liveness_unknown _ as verdict) ->
                   (keeper_name, operation_id, verdict) :: results, audited
-                | Report verdict ->
+                | Report
+                    (( Match
+                     | Mismatch _
+                     | Journal_missing
+                     | Journal_unreadable _
+                     | Journal_truncated
+                     | Journal_corrupt _
+                     | Store_unreadable _ ) as verdict) ->
                   ( (keeper_name, operation_id, verdict) :: results
                   , Audited.add (keeper_name, operation_id) audited )
               end)

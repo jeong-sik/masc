@@ -34,7 +34,26 @@ let core_termination_semantics err =
   | Agent_core.Error.Agent (Agent_core.Error.TerminalToolEffectFailed _)
   | Agent_core.Error.Agent (Agent_core.Error.TerminalToolDurabilityFailed _) ->
     Core_error_failure
-  | Agent_core.Error.Provider _ -> Core_error_failure
+  | Agent_core.Error.Provider
+      ( Llm_provider.Error.MissingApiKey _
+      | Llm_provider.Error.InvalidConfig _
+      | Llm_provider.Error.ParseError _
+      | Llm_provider.Error.ProviderWireError _
+      | Llm_provider.Error.ProviderReportedError _
+      | Llm_provider.Error.UnknownVariant _
+      | Llm_provider.Error.ProviderUnavailable _
+      | Llm_provider.Error.EmptyCompletion _
+      | Llm_provider.Error.RepeatingGeneration _
+      | Llm_provider.Error.RateLimit _
+      | Llm_provider.Error.HardQuota _
+      | Llm_provider.Error.CapacityExhausted _
+      | Llm_provider.Error.AuthError _
+      | Llm_provider.Error.AuthorizationError _
+      | Llm_provider.Error.ServerError _
+      | Llm_provider.Error.NetworkError _
+      | Llm_provider.Error.InvalidRequest _
+      | Llm_provider.Error.NotFound _
+      | Llm_provider.Error.ProviderTerminal _ ) -> Core_error_failure
   | Agent_core.Error.Api (Agent_core.Retry.RateLimited _)
   | Agent_core.Error.Api (Agent_core.Retry.Overloaded _)
   | Agent_core.Error.Api (Agent_core.Retry.ServerError _)

@@ -1445,7 +1445,11 @@ let run_keepalive_unified_turn
     ; stimuli_acked = false
     ; after_failure = None
     }
-  | Ok (`Busy block) ->
+  | Ok
+      (`Busy
+        (( Keeper_owner.Turn_busy None
+         | Keeper_owner.Admission_paused
+         | Keeper_owner.Shutdown_requested _ ) as block)) ->
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_busy block
     ; stimuli_acked = false

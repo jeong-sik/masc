@@ -783,7 +783,46 @@ let cli_refuses_input_capacity failure =
       {cause=Fusion_official_client.Claude_failure
         (Runtime_claude_code.Context_window_exceeded
           {tool_effect_attempted=false; response_emitted=false; _}); _} -> true
-  | Execution_failed _ -> Option.is_some (Keeper_lane_cli_oneshot.input_capacity failure)
+  | Execution_failed
+      { cause =
+          ( Fusion_official_client.Missing_reply
+          | Fusion_official_client.Setup_failure _
+          | Fusion_official_client.Codex_failure
+              ( Runtime_codex_app_server.Invalid_config _
+              | Runtime_codex_app_server.Spawn_failed _
+              | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+              | Runtime_codex_app_server.Turn_input_write_failed _
+              | Runtime_codex_app_server.Protocol_error _
+              | Runtime_codex_app_server.Rpc_error _
+              | Runtime_codex_app_server.Subscription_required _
+              | Runtime_codex_app_server.Unsupported_server_request _
+              | Runtime_codex_app_server.Context_window_exceeded _
+              | Runtime_codex_app_server.Turn_failed _
+              | Runtime_codex_app_server.Stopped_by_host _
+              | Runtime_codex_app_server.Turn_interrupted
+              | Runtime_codex_app_server.Runtime_shutting_down
+              | Runtime_codex_app_server.Process_exited _
+              | Runtime_codex_app_server.Timeout _ )
+          | Fusion_official_client.Claude_failure
+              ( Runtime_claude_code.Invalid_config _
+              | Runtime_claude_code.Spawn_failed _
+              | Runtime_claude_code.Protocol_error _
+              | Runtime_claude_code.Subscription_required _
+              | Runtime_claude_code.Unsupported_control_request _
+              | Runtime_claude_code.Turn_transport_interrupted _
+              | Runtime_claude_code.Context_window_exceeded _
+              | Runtime_claude_code.Turn_failed _
+              | Runtime_claude_code.Turn_failed_with_observation _
+              | Runtime_claude_code.Stopped_by_host _
+              | Runtime_claude_code.Quota_blocked _
+              | Runtime_claude_code.Process_exited _
+              | Runtime_claude_code.Unhandled_exception _
+              | Runtime_claude_code.Timeout _ )
+          | Fusion_official_client.Claude_admission_failure _
+          | Fusion_official_client.Antigravity_failure _
+          | Fusion_official_client.Muse_failure _ )
+      ; _
+      } -> Option.is_some (Keeper_lane_cli_oneshot.input_capacity failure)
   | Unknown_runtime _ | Not_an_official_client _ | Invalid_json_output _
   | Invalid_domain_output _ -> false
 
@@ -929,7 +968,21 @@ let cli_prompt_of_messages ~keeper_id (messages : Agent_core.Types.message list)
   match messages with
   | [ { Agent_core.Types.content = [ Agent_core.Types.Text prompt ]; _ } ] ->
     Some prompt
-  | messages ->
+  | ( []
+    | _ :: _ :: _
+    | [ { Agent_core.Types.content = []; _ } ]
+    | [ { Agent_core.Types.content = _ :: _ :: _; _ } ]
+    | [ { Agent_core.Types.content =
+            [ ( Agent_core.Types.Thinking _
+              | Agent_core.Types.ReasoningDetails _
+              | Agent_core.Types.RedactedThinking _
+              | Agent_core.Types.ToolUse _
+              | Agent_core.Types.ToolResult _
+              | Agent_core.Types.Image _
+              | Agent_core.Types.Document _
+              | Agent_core.Types.Audio _ ) ]
+      ; _
+      } ] ) as messages ->
     Log.Keeper.warn
       ~keeper_name:keeper_id
       "librarian cli fallback skipped: fitted prompt is not one text message \
@@ -1520,7 +1573,16 @@ let run_best_effort
            let detail = "Librarian is off; pending input remains unconsumed" in
            on_not_committed {detail; walk_shows_size=false; input_capacity_evidence=No_input_capacity_refusal; smaller_range_meets_same_failure = false};
            Log.Keeper.info ~keeper_name:keeper_id "%s" detail
-         | Ok _ | Error (Prompt_render_failed _) | Error (Exact_setup_failed _)
+         | Ok _ | Error (Prompt_render_failed _)
+         | Error
+             (Exact_setup_failed
+               ( Exact_registry_unavailable _
+               | Exact_lane_unavailable (Exact_lane_unconfigured _ | No_admitted_lane_slots _)
+               | Exact_lane_preference_unavailable _
+               | Exact_candidate_invalid _
+               | Exact_flow_snapshot_failed _
+               | Exact_flow_start_failed _
+               | Exact_request_projection_failed _ ))
          | Error (Exact_execution_failed _) | Error (Cli_slots_exhausted _)
          | Error (Cli_prompt_unavailable _) | Error (No_transport_declared)
          | Error (Domain_output_invalid _) | Error (Absorb_judgment_failed _)

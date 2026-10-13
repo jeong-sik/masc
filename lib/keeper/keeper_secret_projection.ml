@@ -767,7 +767,7 @@ let read_file_entry ~base_path ~keeper_name ~scope ~container_path =
     (* Absent is not an error: a Keeper that never attached has no file, and
        reading that as a failure would make "not set up" look like "broken". *)
     | Error _ when not (Sys.file_exists path) -> Ok None
-    | other -> other
+    | (Ok _ | Error _) as other -> other
 ;;
 
 let delete_file_entry ~base_path ~keeper_name ~scope ~container_path =

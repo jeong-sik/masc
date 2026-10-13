@@ -339,7 +339,11 @@ let project_owner_result ~base_path ~keeper_name =
   | Ok outcome -> outcome
   | Error (Executor_pool_ref.Work_failed failure) ->
     Error (Unexpected_projection_failure failure)
-  | Error error -> Error (Executor_unavailable error)
+  | Error
+      ((Executor_pool_ref.Pool_unavailable
+       | Executor_pool_ref.Caller_not_in_eio
+       | Executor_pool_ref.Submission_failed _) as error) ->
+    Error (Executor_unavailable error)
 ;;
 
 let ordered_owner_page ~budget:(Owner_budget max_owners) ~cursor:(Sweep_cursor cursor) names =
@@ -413,7 +417,14 @@ let project_discovery_inline
            { report with claim_busy = report.claim_busy + 1 }
          | Error (Owner_shutdown_reserved _) ->
            { report with shutdown_reserved = report.shutdown_reserved + 1 }
-         | Error error ->
+         | Error
+             (( Owner_unavailable _
+              | Executor_unavailable _
+              | Outbox_unavailable _
+              | Target_transfer_projection_failed _
+              | Paused_transfer_target_projection_failed _
+              | Ledger_projection_failed _
+              | Unexpected_projection_failure _ ) as error) ->
            { report with
              failures = { keeper_name; error } :: report.failures
            })

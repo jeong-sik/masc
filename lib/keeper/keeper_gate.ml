@@ -240,7 +240,10 @@ let resolve_judgment (entry : Keeper_approval_queue_rules_types.pending_approval
      | Ok _ -> Ok Judgment_finalized
      | Error (Keeper_approval_queue.Not_found _ | Keeper_approval_queue.Already_resolved _) ->
        Ok Judgment_skipped
-     | Error error -> Error (Keeper_approval_queue.resolve_error_to_string error))
+     | Error
+         (( Keeper_approval_queue.Delivery_failed _
+          | Keeper_approval_queue.Persistence_failed _ ) as error) ->
+       Error (Keeper_approval_queue.resolve_error_to_string error))
 ;;
 
 type auto_judge_start_outcome =
@@ -1493,7 +1496,15 @@ let finalize_recovered_judgment
        Error
          ( Resume_completion_rejected rejection
          , completion_rejection_operator_detail rejection ))
-  | Keeper_approval_queue_rules_types.Exact_bound _ ->
+  | Keeper_approval_queue_rules_types.Exact_bound
+      { status =
+          ( Keeper_approval_queue_rules_types.Exact_dispatch_uncertain
+          | Keeper_approval_queue_rules_types.Exact_released_before_dispatch
+          | Keeper_approval_queue_rules_types.Exact_released_recovery_required
+          | Keeper_approval_queue_rules_types.Exact_quarantined _
+          | Keeper_approval_queue_rules_types.Exact_restart_quarantined )
+      ; _
+      } ->
     Error
       ( Resume_exact_state_not_completed
       , "Recovered Auto Judge entry is not a completed exact judgment." )

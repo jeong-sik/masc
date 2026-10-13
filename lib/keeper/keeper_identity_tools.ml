@@ -406,7 +406,13 @@ let tool_result_of_call ~read_only answer =
     failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
       "this keeper's credential for that service is no longer accepted; attach \
        it again"
-  | Error (Mcp { error; _ } as call_error) ->
+  | Error
+      (Mcp
+         { error =
+             ( Mcp_client.Transport _ | Mcp_client.Rpc _ | Mcp_client.Http _
+             | Mcp_client.Malformed _ ) as error
+         ; _
+         } as call_error) ->
     let detail = Mcp_client.error_to_string error in
     let error_class =
       match error with
@@ -521,7 +527,13 @@ let force_refresh ~token_post ~discover ~base_path ~keeper_name
        later. *)
     | Error (Keeper_oauth_discovery.Transport _ as err) ->
       Error (Renew_transient (Keeper_oauth_discovery.error_to_string err))
-    | Error err -> Error (Renew_permanent (Keeper_oauth_discovery.error_to_string err))
+    | Error
+        (( Keeper_oauth_discovery.Bad_mcp_url _
+         | Keeper_oauth_discovery.Not_published _
+         | Keeper_oauth_discovery.Rejected _
+         | Keeper_oauth_discovery.Malformed _
+         | Keeper_oauth_discovery.No_authorization_server _ ) as err) ->
+      Error (Renew_permanent (Keeper_oauth_discovery.error_to_string err))
   in
   let* configured_client_id =
     match
@@ -559,7 +571,11 @@ let force_refresh ~token_post ~discover ~base_path ~keeper_name
     | Error (Keeper_oauth_flow.Provider_rejected { status; _ } as err)
       when status = 429 || status >= 500 ->
       Error (Renew_transient (Keeper_oauth_flow.exchange_error_to_string err))
-    | Error err -> Error (Renew_permanent (Keeper_oauth_flow.exchange_error_to_string err))
+    | Error
+        (( Keeper_oauth_flow.Provider_rejected _
+         | Keeper_oauth_flow.Malformed_response _
+         | Keeper_oauth_flow.State_mismatch ) as err) ->
+      Error (Renew_permanent (Keeper_oauth_flow.exchange_error_to_string err))
   in
   let* () =
     match store_tokens ~base_path ~keeper_name ~provider tokens with

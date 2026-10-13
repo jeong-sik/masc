@@ -295,7 +295,17 @@ let endpoint_witnessed ~trace_id ~end_atom ~last_atom_digest ~end_boundary_line 
             String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
             && Int.equal boundary.end_atom end_atom
             && String.equal boundary.last_atom_digest last_atom_digest
-          | Ok _ | Error _ -> false)
+          | Ok
+              { B.event =
+                  B.Turn_ended
+                    { position =
+                        (B.Empty_atom_history | B.No_atom_history | B.Stale_noop)
+                    ; _
+                    }
+              ; _
+              }
+          | Ok { B.event = B.History_restarted _; _ }
+          | Error _ -> false)
        lines
 ;;
 
@@ -631,7 +641,17 @@ let official_cursor_recorded_at ~lines (cursor : Keeper_librarian_official_progr
                ({ recorded_at
                 ; event = B.Turn_ended { position = B.No_atom_history; _ }
                 } : B.record) -> Some recorded_at
-           | Ok _ | Error _ -> None)
+           | Ok
+               { B.event =
+                   B.Turn_ended
+                     { position =
+                         (B.Atom_history _ | B.Empty_atom_history | B.Stale_noop)
+                     ; _
+                     }
+               ; _
+               }
+           | Ok { B.event = B.History_restarted _; _ }
+           | Error _ -> None)
       lines
   with
   | Some recorded_at -> Ok recorded_at
@@ -777,7 +797,10 @@ let unread_turns ~config ~keeper_name =
       else match load_current_checkpoint ~config ~trace_id:current_trace_id with
       | Error Keeper_checkpoint_store.Not_found when Option.is_none positions.progress ->
         Ok (Some 0)
-      | Error error ->
+      | Error
+          (( Keeper_checkpoint_store.Not_found | Keeper_checkpoint_store.Store_error _ | Keeper_checkpoint_store.Parse_error _
+            | Keeper_checkpoint_store.Superseded_version _ | Keeper_checkpoint_store.Newer_version _ | Keeper_checkpoint_store.Io_error _
+            | Keeper_checkpoint_store.Read_failed _ | Keeper_checkpoint_store.Agent_core_error _ ) as error) ->
         Error (Checkpoint_unreadable { trace_id = current_trace_id; error })
       | Ok checkpoint ->
         Ok
@@ -850,7 +873,11 @@ let consume_one_with_extent
     else match load_checkpoint trace_id, progress with
     | Error Keeper_checkpoint_store.Not_found, None ->
       Ok (trace_id, None, [], R.Nothing_to_read)
-    | Error error, _ -> Error (Checkpoint_unreadable { trace_id; error })
+    | Error
+        (( Keeper_checkpoint_store.Not_found | Keeper_checkpoint_store.Store_error _ | Keeper_checkpoint_store.Parse_error _
+          | Keeper_checkpoint_store.Superseded_version _ | Keeper_checkpoint_store.Newer_version _ | Keeper_checkpoint_store.Io_error _
+          | Keeper_checkpoint_store.Read_failed _ | Keeper_checkpoint_store.Agent_core_error _ ) as error), _ ->
+      Error (Checkpoint_unreadable { trace_id; error })
     | Ok checkpoint, progress ->
       let messages = checkpoint.Agent_core.Checkpoint.messages in
       Ok (trace_id, progress, messages, R.select ~trace_id ~lines ~progress ~messages extent)
@@ -878,7 +905,19 @@ let consume_one_with_extent
                 && retired_checkpoint_never_becomes_readable error ->
            say_passed_trace ~trace_id error;
            walk later
-         | Error error -> Error error
+         | Error
+             (( Keeper_meta_absent | Keeper_meta_unreadable _
+              | Boundary_log_unreadable _ | Progress_unreadable _
+              | Checkpoint_unreadable _ | Position_in_other_trace _
+              | Position_not_in_history _ | Range_stopped _
+              | Range_end_boundary_missing _ | Progress_boundary_missing _
+              | Memory_snapshot_unreadable _ | Counterpart_interval_non_monotone _
+              | Counterpart_observations_unreadable _ | Progress_write_failed _
+              | Official_progress_unreadable _ | Official_progress_write_failed _
+              | Official_progress_boundary_missing _
+              | Committed_official_range_mismatch | Official_range_stopped _
+              | Fragment_store_unreadable _ | Fragment_line_unreadable _ ) as error) ->
+           Error error
          | Ok ((_, _, _, selection) as chosen) ->
            (match selection with
             | R.Nothing_to_read when not (String.equal trace_id current_trace_id) ->
@@ -928,7 +967,10 @@ let consume_one_with_extent
        | Error Keeper_checkpoint_store.Not_found ->
          (* A removed owner/session cannot finish its old trace. *)
          Result.map (with_counterpart (Some previous)) (after_prior previous)
-       | Error error ->
+       | Error
+           (( Keeper_checkpoint_store.Store_error _ | Keeper_checkpoint_store.Parse_error _
+             | Keeper_checkpoint_store.Superseded_version _ | Keeper_checkpoint_store.Newer_version _ | Keeper_checkpoint_store.Io_error _
+             | Keeper_checkpoint_store.Read_failed _ | Keeper_checkpoint_store.Agent_core_error _ ) as error) ->
          (* The trace the position names is retired too, so it takes the same
             decision as a trace the walk opens. *)
          if retired_checkpoint_never_becomes_readable error
@@ -1174,7 +1216,8 @@ let consume_one_with_extent
              let attribution = match Line_map.find_opt line boundaries with
                | Some {B.event=B.Turn_ended {turn_ref;task_context;_};_} ->
                  Historical.Observed {turn_ref;task_context}
-               | Some _ | None -> Historical.Unattributed in
+               | Some { B.event = B.History_restarted _; _ } | None ->
+                 Historical.Unattributed in
              let context : Historical.t =
                {scope={source=Historical.Official_turn;attribution};
                 first_message=message_count;after_message=count;

@@ -761,7 +761,15 @@ let stream_start_has_tool_name (evt : Agent_core.Types.sse_event) =
   | Agent_core.Types.ContentBlockStart
       { tool_id = Some id; tool_name = Some name; _ } ->
     String.trim id <> "" && String.trim name <> ""
-  | _ -> false
+  | Agent_core.Types.ContentBlockStart _
+  | Llm_provider.Types.MessageStop | Llm_provider.Types.Ping | Llm_provider.Types.Connected
+  | Llm_provider.Types.MessageStart _ | Llm_provider.Types.ContentBlockDelta _
+  | Llm_provider.Types.ContentBlockStop _ | Llm_provider.Types.MessageDelta _
+  | Llm_provider.Types.SSEError _ | Llm_provider.Types.NDJSONError _
+  | Llm_provider.Types.SSEParseFailed _ | Llm_provider.Types.NDJSONParseFailed _
+  | Llm_provider.Types.SSEUnknownEventType _ | Llm_provider.Types.SSEUnsupportedPart _
+  | Llm_provider.Types.SSEUnsupportedResponse _ | Llm_provider.Types.Timeout _
+  | Llm_provider.Types.StreamIncomplete _ | Llm_provider.Types.StreamRepeating _ -> false
 
 let stream_start_is_tool evt =
   stream_start_is_tool_progress evt && stream_start_has_tool_name evt
@@ -781,7 +789,17 @@ let content_event_allowed t (evt : Agent_core.Types.sse_event) =
   | (Agent_core.Types.ContentBlockStart _ | Agent_core.Types.ContentBlockDelta _
     | Agent_core.Types.ContentBlockStop _),
     (Stop_reason_seen _ | Message_stopped) -> false
-  | _ -> true
+  | ( Llm_provider.Types.MessageStop | Llm_provider.Types.Ping
+    | Llm_provider.Types.Connected | Llm_provider.Types.MessageStart _
+    | Llm_provider.Types.MessageDelta _ | Llm_provider.Types.SSEError _
+    | Llm_provider.Types.NDJSONError _ | Llm_provider.Types.SSEParseFailed _
+    | Llm_provider.Types.NDJSONParseFailed _
+    | Llm_provider.Types.SSEUnknownEventType _
+    | Llm_provider.Types.SSEUnsupportedPart _
+    | Llm_provider.Types.SSEUnsupportedResponse _ | Llm_provider.Types.Timeout _
+    | Llm_provider.Types.StreamIncomplete _
+    | Llm_provider.Types.StreamRepeating _ ),
+    _ -> true
 ;;
 
 let on_event t (evt : Agent_core.Types.sse_event) =

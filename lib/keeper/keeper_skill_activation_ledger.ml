@@ -1795,7 +1795,21 @@ let replay_session_log ~ownership_root ~expected_trace_id path =
        | Ok (Some _ | None) ->
          snapshot_result ~path (Fs_compat.recover_private_jsonl_durable_locked_result path)
          |> Result.map_error (fun error -> Event_log_failed error))
-    | Error error -> Error (Event_log_failed error)
+    | Error
+        (( Fs_compat.Stable_lock_contended _
+         | Fs_compat.Unexpected_stable_lock_permissions _
+         | Fs_compat.Invalid_stable_lock_state _
+         | Fs_compat.Cursor_mismatch _
+         | Fs_compat.Unexpected_transaction_file_kind _
+         | Fs_compat.Ambiguous_transaction_file_identity _
+         | Fs_compat.Transaction_path_binding_changed _
+         | Fs_compat.Invalid_transaction_suffix
+         | Fs_compat.Private_jsonl_operation_failed _
+         | Fs_compat.Rewrite_stage_failed _
+         | Fs_compat.Rewrite_published_durability_unknown _
+         | Fs_compat.Transaction_settlement_failed _
+         | Fs_compat.Transaction_append_failed _ ) as error) ->
+      Error (Event_log_failed error)
   in
   let* ledger, header_written =
     replay_store
@@ -1828,7 +1842,19 @@ let read_locked ~ownership_root ~expected_trace_id session_dir =
      | Error (Fs_compat.Cursor_mismatch _ | Fs_compat.Incomplete_transaction_tail _) ->
        forget_session_log path;
        replay_session_log ~ownership_root ~expected_trace_id path
-     | Error error ->
+     | Error
+         (( Fs_compat.Stable_lock_contended _
+          | Fs_compat.Unexpected_stable_lock_permissions _
+          | Fs_compat.Invalid_stable_lock_state _
+          | Fs_compat.Unexpected_transaction_file_kind _
+          | Fs_compat.Ambiguous_transaction_file_identity _
+          | Fs_compat.Transaction_path_binding_changed _
+          | Fs_compat.Invalid_transaction_suffix
+          | Fs_compat.Private_jsonl_operation_failed _
+          | Fs_compat.Rewrite_stage_failed _
+          | Fs_compat.Rewrite_published_durability_unknown _
+          | Fs_compat.Transaction_settlement_failed _
+          | Fs_compat.Transaction_append_failed _ ) as error) ->
        forget_session_log path;
        Error (Event_log_failed error)
      | Ok (snapshot : Fs_compat.private_jsonl_snapshot) ->

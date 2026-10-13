@@ -89,7 +89,9 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
   let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
   match C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id with
   | Error C.Ref_not_found -> Ok (No_source Source_unreadable)
-  | Error error -> Error (match error with
+  | Error
+      ((C.Ref_read_failed _ | C.Ref_identity_invalid _ | C.Ref_session_mismatch _
+       | C.Ref_lock_failed _) as error) -> Error (match error with
       | C.Ref_not_found -> "continuity checkpoint absent"
       | C.Ref_read_failed error -> C.checkpoint_load_error_to_string error
       | C.Ref_identity_invalid _ -> "continuity checkpoint identity invalid"

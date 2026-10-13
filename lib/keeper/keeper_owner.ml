@@ -1404,7 +1404,7 @@ let start
             | None -> Interrupt_not_current
             | Some _ when not holds -> Interrupt_not_current
             | Some { lane = Maintenance; _ } -> Interrupt_maintenance_running
-            | Some _ ->
+            | Some { lane = Autonomous | Chat_operation; _ } ->
               (match Atomic.get t.child_cancel with
                | Some cancel -> Interrupt_now cancel.interrupt
                | None -> Interrupt_settling)
@@ -1559,7 +1559,7 @@ let start
           (match response with
            | Ok _ when continuation.Keeper_semantic_execution.not_before = None ->
              rearm_transient_retry_wake ()
-           | _ -> ());
+           | Ok _ | Error _ -> ());
           rearm_cooling_retry_wake ();
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
@@ -1649,7 +1649,11 @@ let start
              Eio.Promise.resolve resolve (Ok
                (Interrupt_result (Operation_not_current { running_operation_id = (Atomic.get t.operation_projection).running_operation_id }), chat_control_token t));
              loop state shutdown_operation_id
-           | Ok (interrupt, _) ->
+           | Ok
+               ( ( Interrupt_now _ | Interrupt_settling
+                 | Interrupt_maintenance_running | Interrupt_not_current )
+                 as interrupt
+               , _ ) ->
              Atomic.set t.chat_control_token (Random_id.uuid_v7 ());
              let result = match interrupt with
                | Interrupt_not_current -> Pending_admission_paused
@@ -2058,7 +2062,8 @@ let start
                           Eio.Promise.resolve
                             resolve
                             (Ok (Autonomous_busy (Turn_busy (Some chat))))
-                        | Some _ | None -> run_admitted_turn ())))));
+                        | Some { lane = Autonomous | Maintenance; _ } | None ->
+                          run_admitted_turn ())))));
           loop state shutdown_operation_id
         | Command (Child_finished completion, resolve) ->
           let result =

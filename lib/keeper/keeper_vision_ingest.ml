@@ -340,7 +340,14 @@ let fallback_projector_with_read ?(exclude_runtime_ids = []) ~read ~keeper_name 
                 ; content_blocks = Some projected.blocks }
               :: reversed
             , count + projected.delegated_images )
-          | other -> other :: reversed, count)
+          | ( Agent_core.Types.Text _
+            | Agent_core.Types.Thinking _
+            | Agent_core.Types.ReasoningDetails _
+            | Agent_core.Types.RedactedThinking _
+            | Agent_core.Types.ToolUse _
+            | Agent_core.Types.ToolResult { content_blocks = None; _ }
+            | Agent_core.Types.Document _
+            | Agent_core.Types.Audio _ ) as other -> other :: reversed, count)
         ([], 0) blocks
     in
     { blocks = List.rev reversed; delegated_images }

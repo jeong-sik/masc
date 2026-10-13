@@ -264,11 +264,11 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           , str "remote_endpoint" )
         with
         | Some Remote_ssh, _ -> Ok ()
-        | _, Some _ ->
+        | (None | Some (Docker | Micro_vm)), Some _ ->
             Error
               "remote_endpoint_requires_remote_ssh: keeper.remote_endpoint is \
                only valid with sandbox_profile = \"remote_ssh\""
-        | _, None -> Ok ())
+        | (None | Some (Docker | Micro_vm)), None -> Ok ())
   in
   (* [microvm_backend] names which runtime supplies the guest, so it is only
      meaningful under sandbox_profile = "microvm". Set anywhere else it is a
@@ -283,7 +283,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           ( Option.bind (str "sandbox_profile") sandbox_profile_of_string
           , str "microvm_backend" )
         with
-        | _, None -> Ok ()
+        | (None | Some (Docker | Micro_vm | Remote_ssh)), None -> Ok ()
         | Some Micro_vm, Some raw ->
             (match Keeper_microvm_backend.of_string raw with
             | Some _ -> Ok ()
@@ -294,7 +294,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                       one of: %s"
                      raw
                      (String.concat ", " Keeper_microvm_backend.valid_strings)))
-        | _, Some _ ->
+        | (None | Some (Docker | Remote_ssh)), Some _ ->
             Error
               "microvm_backend_requires_microvm: keeper.microvm_backend is only \
                valid with sandbox_profile = \"microvm\"")

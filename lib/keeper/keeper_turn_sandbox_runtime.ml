@@ -798,7 +798,7 @@ let inspect_container_exists ?timeout_sec ~microvm_backend container_name =
   in
   match inspect_st with
   | Unix.WEXITED 0 -> Ok ()
-  | _ -> Error inspect_out
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error inspect_out
 ;;
 
 (* [container] has no [--format] template; state comes back as JSON and a
@@ -815,7 +815,8 @@ let probe_microvm_container_state ?timeout_sec ~backend container_name =
      | Ok true -> Ok Keeper_sandbox_runtime.Docker_container_running
      | Ok false -> Ok Keeper_sandbox_runtime.Docker_container_stopped
      | Error _ as err -> err)
-  | _ -> Ok Keeper_sandbox_runtime.Docker_container_absent
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+    Ok Keeper_sandbox_runtime.Docker_container_absent
 ;;
 
 let inspect_container_running ?timeout_sec ~microvm_backend container_name =
@@ -1109,7 +1110,7 @@ let reclaim_work_volume_space ~backend ~keeper_name ~image ~volume_name ~timeout
      | Ok (Unix.WEXITED 0, out) ->
        Log.Keeper.info "microvm work volume %s trimmed: %s" volume_name (String.trim out);
        Ok ()
-     | Ok (status, out) ->
+     | Ok (((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), out) ->
        Log.Keeper.warn
          "microvm work volume %s not trimmed, booting without reclaim: %s (%s)"
          volume_name
@@ -1772,7 +1773,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                take_down_after_boot
                  ~check:Inspect_cannot_see
                  ~detail:inspect_out)
-          | _ ->
+          | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
             (* Two turns of one keeper can race to boot the shared name;
                the loser's run fails on the name and the guest the winner
                booted is the one both wanted. *)
@@ -2141,7 +2142,7 @@ let start_container ?timeout_sec (t : t) =
                      (Printf.sprintf
                         "docker_container_inspect_failed (existence check): %s"
                         (Exec_policy.truncate_for_log inspect_out)))
-              | _ ->
+              | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
                 (match probe_state () with
                  | Ok Keeper_sandbox_runtime.Docker_container_running ->
                    (* Another turn or server of this keeper booted the shared
@@ -2485,7 +2486,7 @@ let stop_container_for_github_identity_refresh ?timeout_sec t =
     let status, output = run_argv_with_status ~timeout_sec argv in
       (match status with
        | Unix.WEXITED 0 -> retire ()
-       | _ ->
+       | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
          (match
             Keeper_sandbox_runtime.probe_container_state_optional
               ~container_name
@@ -2725,7 +2726,8 @@ let run_exec_with_optional_output_files
             ~status
             ~output:(output_for_status ~stdout ~stderr)
             detail))
-  | Ok other -> Ok other
+  | Ok (((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _, _) as other) ->
+    Ok other
 ;;
 
 let run_exec_with_status_split
@@ -2874,7 +2876,8 @@ let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec
             ~status
             ~output:(output_for_status ~stdout ~stderr)
             detail))
-  | Ok other -> Ok other
+  | Ok (((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) as other) ->
+    Ok other
 ;;
 
 let run_command_with_status
@@ -2940,7 +2943,7 @@ let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
                 argv))
         | Failed_exec_state_probe_error detail ->
           Error (failed_exec_state_probe_error ~status ~output:out detail))
-     | _ -> Ok (st, out))
+     | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Ok (st, out))
 ;;
 
 let cleanup (t : t) =
@@ -3010,7 +3013,13 @@ let cleanup_attached_builds ~(config : Workspace.config) ~(meta : keeper_meta)
                Error ("Keeper guest cleanup transport failed: " ^ reason)
              | _, Keeper_sandbox_remote.Execution_unavailable _ ->
                Error "Keeper guest cleanup exit receipt missing"
-             | _ -> Error "Keeper guest cleanup command failed"))
+             | Masc_exec.Sandbox_target.Ran
+                 { status =
+                     (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _)
+                 ; _
+                 },
+               Keeper_sandbox_remote.Execution_observed _ ->
+               Error "Keeper guest cleanup command failed"))
      | Ok (Keeper_sandbox_runtime.Docker_container_stopped
           | Keeper_sandbox_runtime.Docker_container_absent) -> Ok None
      | Error detail -> Error detail)

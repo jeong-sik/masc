@@ -93,7 +93,20 @@ let tool_row_already_under ~base_dir ~keeper_name ~delivery_key =
            }
          when Keeper_chat_delivery_identity.delivery_key_equal key delivery_key ->
          Some row.id
-       | Some _ | None -> None)
+       | Some
+           { Keeper_chat_delivery_identity.transcript_slot =
+               ( Keeper_chat_delivery_identity.Accepted_user
+               | Keeper_chat_delivery_identity.Tool_call _
+               | Keeper_chat_delivery_identity.Tool_delivery _
+               | Keeper_chat_delivery_identity.Terminal_result
+               | Keeper_chat_delivery_identity.Approval_request
+               | Keeper_chat_delivery_identity.Approval_resolution
+               | Keeper_chat_delivery_identity.Approval_replay
+               | Keeper_chat_delivery_identity.Approval_replay_correction
+               | Keeper_chat_delivery_identity.Approval_continuation )
+           ; _
+           }
+       | None -> None)
 ;;
 
 let persist_continuation t ~base_dir ~keeper_name ~approval_id ~turn_ref ~turn_failed =

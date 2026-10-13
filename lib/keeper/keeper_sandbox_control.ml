@@ -728,7 +728,11 @@ let repository_checkouts_json_with_budget_impl
              | Ok _, Ok (Keeper_playground_checkouts.Partial { limit = Checkout_budget_exhausted _; _ }) ->
                "inspection_budget_exhausted"
              | (Ok _, Ok (Keeper_playground_checkouts.Complete _))
-             | (Ok _, Ok (Keeper_playground_checkouts.Partial _)) -> "available"
+             | ( Ok _
+               , Ok
+                   (Keeper_playground_checkouts.Partial
+                     { limit = Entry_budget_exhausted _ | Directory_unreadable _; _ }) )
+               -> "available"
              | Error _, _ -> "catalog_unavailable"
              | Ok _, Error _ -> "filesystem_unavailable") )
       ; "scan", Keeper_playground_checkouts.scan_json scan
@@ -1171,7 +1175,7 @@ let logs_json ~(config : Workspace.config) ~keeper_name ~timeout_sec ~tail () =
                let error =
                  match status with
                  | Unix.WEXITED 0 -> `Null
-                 | status ->
+                 | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status ->
                    `String
                      (Printf.sprintf "log command failed (%s)"
                         (Keeper_sandbox_exec_failure.status_label status))

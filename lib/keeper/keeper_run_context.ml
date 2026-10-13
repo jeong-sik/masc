@@ -106,7 +106,15 @@ let prepare_run_context
     | Keeper_context_runtime.Checkpoint_absent -> Ok (None, Saved_history_absent)
     | Keeper_context_runtime.Checkpoint_unread (Keeper_checkpoint_store.Superseded_version _) ->
       Ok (None, Saved_history_superseded)
-    | Keeper_context_runtime.Checkpoint_unread error -> Error (Checkpoint_unread error)
+    | Keeper_context_runtime.Checkpoint_unread
+        (( Keeper_checkpoint_store.Not_found
+         | Keeper_checkpoint_store.Store_error _
+         | Keeper_checkpoint_store.Parse_error _
+         | Keeper_checkpoint_store.Newer_version _
+         | Keeper_checkpoint_store.Io_error _
+         | Keeper_checkpoint_store.Read_failed _
+         | Keeper_checkpoint_store.Agent_core_error _ ) as error) ->
+      Error (Checkpoint_unread error)
   in
   let loaded_checkpoint_present = Option.is_some ctx_opt in
   (* 3. Build base system prompt from meta *)

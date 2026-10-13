@@ -164,7 +164,12 @@ let require_configuration_only config keeper_name =
   let* () = match Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name with
     | Error (Keeper_owner_registry.Owner_not_found _) -> Ok ()
     | Ok _ -> Error (Conflict "Keeper owner still exists; configuration-only removal refused")
-    | Error error -> Error (Storage_error (Keeper_owner_registry.lookup_error_to_string error)) in
+    | Error
+        (( Keeper_owner_registry.Inventory_not_installed _
+         | Keeper_owner_registry.Owner_unavailable _
+         | Keeper_owner_registry.Owner_initialization_failed _
+         | Keeper_owner_registry.Inventory_stopping ) as error) ->
+      Error (Storage_error (Keeper_owner_registry.lookup_error_to_string error)) in
   let* backlog = Workspace_backlog.read_backlog_r config
     |> Result.map_error (fun error -> Storage_error error) in
   let owned = List.exists (fun (task : Masc_domain.task) ->
@@ -251,8 +256,11 @@ let finish config receipt ~cleanup =
   let* source = read_regular receipt.source_path in
   let* () = match source, receipt.state with
     | None, Artifacts_removed -> Ok ()
-    | Some source, _ when Digestif.SHA256.(digest_string source |> to_hex) = receipt.source_sha256 -> Ok ()
-    | _ -> Error (Conflict "configuration source changed since deletion was requested") in
+    | Some source, (Prepared | Cleanup_required _ | Artifacts_removed | Removed)
+      when Digestif.SHA256.(digest_string source |> to_hex) = receipt.source_sha256 -> Ok ()
+    | None, (Prepared | Cleanup_required _ | Removed)
+    | Some _, (Prepared | Cleanup_required _ | Artifacts_removed | Removed) ->
+      Error (Conflict "configuration source changed since deletion was requested") in
   let* receipt = match receipt.state with
     | Prepared | Cleanup_required _ ->
       (match protect (fun () -> cleanup receipt.keeper_name |> Result.map_error (fun detail -> Storage_error detail)) with

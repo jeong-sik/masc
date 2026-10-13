@@ -132,7 +132,12 @@ let drop_trailing_assistants messages =
         | _ -> rest
       in
       drop true rest
-    | reversed -> List.rev reversed, dropped
+    | ([]
+      | { Agent_core.Types.role =
+            ( Agent_core.Types.System | Agent_core.Types.User | Agent_core.Types.Tool )
+        ; _
+        }
+        :: _) as reversed -> List.rev reversed, dropped
   in
   drop false (List.rev messages)
 ;;

@@ -574,7 +574,11 @@ let carried_start_range
        runtime_id
        librarian_end
        first_atom
-   | Absorbed_through _ | Plain _ -> ());
+   | Absorbed_through _
+   | Plain
+       ( _
+       , ( Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _
+         | Librarian_snapshot _ | Librarian_progress _ ) ) -> ());
   Log.Keeper.info
     ~keeper_name
     "model input carried range runtime=%s origin=%s first_atom=%d atoms=%d/%d \
@@ -1615,7 +1619,12 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                       Tool_guidance.to_string Tool_guidance.Post_execution_hook_failed
                   ; content_blocks = None; abort_turn = None
                   }
-                | Agent_core.Agent_tools.Hook_execution_failed _ ->
+                | Agent_core.Agent_tools.Hook_execution_failed
+                    { stage =
+                        ( Before_turn | Before_turn_params | After_turn
+                        | Pre_tool_use | On_stop | On_error | On_tool_error )
+                    ; _
+                    } ->
                   { success = false; content = detail; content_blocks = None; abort_turn = None }))
         in
         match execute () with
@@ -1720,7 +1729,14 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                           { model_tool_name = tool_name; message }
                     }
                 })
-            | None, _ | Some _, _ -> terminal_boundary
+            | None, _
+            | Some _,
+              ( None
+              | Some
+                  ( Repeated_tool_call _
+                  | Terminal_tool_boundary
+                      { outcome = Durable_stimulus_deferred | Terminal_failed _; _ }
+                  ) ) -> terminal_boundary
           in
           let result =
             match terminal_boundary with
@@ -1728,7 +1744,11 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                 (Terminal_tool_boundary
                   { outcome = Terminal_failed _; _ } as abort_turn) ->
               { result with success = false; abort_turn = Some abort_turn }
-            | Some abort_turn -> { result with abort_turn = Some abort_turn }
+            | Some
+                (( Repeated_tool_call _
+                 | Terminal_tool_boundary
+                     { outcome = Terminal_completed | Durable_stimulus_deferred; _ } )
+                 as abort_turn) -> { result with abort_turn = Some abort_turn }
             | None -> result
           in
           let final_result =
@@ -1793,7 +1813,12 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
              | None, Some (Terminal_tool_boundary
                  { outcome = Terminal_failed _; _ } as stop) ->
                { final_result with success = false; abort_turn = Some stop }
-             | None, Some stop -> { final_result with abort_turn = Some stop })
+             | None,
+               Some
+                 (( Repeated_tool_call _
+                  | Terminal_tool_boundary
+                      { outcome = Terminal_completed | Durable_stimulus_deferred; _ } )
+                  as stop) -> { final_result with abort_turn = Some stop })
         | exception exn -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. This arm ends by re-throwing with the original backtrace nine lines down. The site is correct; the marker exists only because the guard reads eight lines. *)
           let backtrace = Printexc.get_raw_backtrace () in
           Eio.Cancel.protect (fun () ->
@@ -1867,7 +1892,14 @@ let persist_pre_tool_rejects ~session_dir ~session_id rejects =
   | rejects ->
     (match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id with
      | Error Keeper_checkpoint_store.Not_found -> Ok 0
-     | Error error ->
+     | Error
+         (( Keeper_checkpoint_store.Store_error _
+          | Keeper_checkpoint_store.Parse_error _
+          | Keeper_checkpoint_store.Superseded_version _
+          | Keeper_checkpoint_store.Newer_version _
+          | Keeper_checkpoint_store.Io_error _
+          | Keeper_checkpoint_store.Read_failed _
+          | Keeper_checkpoint_store.Agent_core_error _ ) as error) ->
        Error
          (Printf.sprintf
             "reject round-trip persistence could not load the checkpoint: %s"

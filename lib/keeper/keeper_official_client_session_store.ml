@@ -919,10 +919,12 @@ let stored_bindings ~base_path =
        | { Unix.st_kind = Unix.S_LNK; _ } ->
          (match Unix.stat keeper_dir with
           | { Unix.st_kind = Unix.S_DIR; _ } -> Ok (Some state_path)
-          | _ -> Error ("linked Keeper entry is not a directory: " ^ keeper_dir)
+          | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } ->
+            Error ("linked Keeper entry is not a directory: " ^ keeper_dir)
           | exception Unix.Unix_error (cause, _, _) ->
             filesystem_error keeper_dir "failed to follow" cause)
-       | _ -> Ok None)
+       | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_FIFO | S_SOCK); _ } ->
+         Ok None)
   in
   let inspect_binding keeper_name state_path =
     let state_dir = Filename.dirname state_path in
@@ -935,10 +937,12 @@ let stored_bindings ~base_path =
       | { Unix.st_kind = Unix.S_LNK; _ } ->
         (match Unix.stat state_dir with
          | { Unix.st_kind = Unix.S_DIR; _ } -> Ok true
-         | _ -> Error ("linked official-client session entry is not a directory: " ^ state_dir)
+         | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } ->
+           Error ("linked official-client session entry is not a directory: " ^ state_dir)
          | exception Unix.Unix_error (cause, _, _) ->
            filesystem_error state_dir "failed to follow" cause)
-      | _ -> Error ("official-client session entry is not a directory: " ^ state_dir)
+      | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_FIFO | S_SOCK); _ } ->
+        Error ("official-client session entry is not a directory: " ^ state_dir)
     in
     if not state_dir_exists
     then Ok None
@@ -1101,7 +1105,21 @@ let commit_if_input_recovery_current
            && reason = expected.reason ->
       commit ();
       Ok Committed
-    | Some _ | None -> Ok Recovery_already_resolved)
+    | Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Settled _; _ }
+    | Some
+        { phase =
+            Recovery_required
+              { failure =
+                  ( Pre_dispatch_failed | Transient_spawn_failed
+                  | Owner_stopped_turn | Retryable_turn_failed
+                  | Transport_interrupted | Protocol_failed | Provider_rejected
+                  | Input_rejected _ | Host_hook_failed | State_persistence_failed
+                  | Process_restarted | Vendor_session_full _ )
+              ; _
+              }
+        ; _
+        }
+    | None -> Ok Recovery_already_resolved)
 ;;
 
 let transition ~base_path ~keeper_name ~expected next =
@@ -1189,7 +1207,19 @@ let plan_claim ~expected ~client_kind ~runtime_id =
       Error Active_unsettled
     | Some { phase = Turn_inflight _; _ } ->
       Error Turn_already_inflight
-    | Some { phase = Recovery_required _; _ } -> Ok (None, 1, None)
+    | Some
+        { phase =
+            Recovery_required
+              { failure =
+                  ( Pre_dispatch_failed | Transient_spawn_failed
+                  | Owner_stopped_turn | Retryable_turn_failed
+                  | Transport_interrupted | Protocol_failed | Provider_rejected
+                  | Host_hook_failed | State_persistence_failed
+                  | Process_restarted | Vendor_session_full _ )
+              ; _
+              }
+        ; _
+        } -> Ok (None, 1, None)
   in
   Ok { previous_settlement; turn_count; required_tool_surface_sha256 }
 ;;
@@ -1231,7 +1261,7 @@ let validate_continuation ~(checkpoint : Keeper_semantic_execution.official_clie
       && settled.turn_id = checkpoint.turn_id
       && tool_surface_sha256 = checkpoint.tool_surface_sha256
       && stored_surface = checkpoint.tool_surface_sha256 -> Ok ()
-  | Some _ | None -> Error "original official-client Gate session is not resumable with this runtime and tool surface"
+  | Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _; _ } | None -> Error "original official-client Gate session is not resumable with this runtime and tool surface"
 
 
 let validate_completed_continuation
@@ -1243,7 +1273,7 @@ let validate_completed_continuation
       && settled.session_id = checkpoint.session_id
       && settled.turn_id <> checkpoint.turn_id
       && tool_surface_sha256 = checkpoint.tool_surface_sha256 -> Ok ()
-  | Some _ | None -> Error "official-client Gate input has not settled in a later turn of its original session"
+  | Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _; _ } | None -> Error "official-client Gate input has not settled in a later turn of its original session"
 
 let validate_unchanged_context ~expected ~snapshot_sha256 =
   match expected with
@@ -1251,13 +1281,13 @@ let validate_unchanged_context ~expected ~snapshot_sha256 =
       when settled = receipt ->
     if String.equal frontier.snapshot_sha256 snapshot_sha256 then Ok ()
     else Error Canonical_context_changed
-  | Some _ | None -> Error Context_frontier_missing
+  | Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _; _ } | None -> Error Context_frontier_missing
 
 let held_context_for_resume plan ~expected =
   match plan.previous_settlement, expected with
   | Some resumed, Some {phase=Settled settled; context_frontier=Some ({acknowledged_turn=Some receipt; _} as frontier); _}
       when resumed = settled && settled = receipt -> frontier.held_context
-  | Some _, _ | None, _ -> []
+  | Some _, Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ | Settled _; _ } | Some _, None | None, _ -> []
 
 let reconcile_context plan ~expected ~snapshot_sha256 =
   match plan.previous_settlement with
@@ -1317,7 +1347,8 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
        recovery.recovery_id
        (recovery_failure_to_string recovery.failure)
        owner_epoch
-   | Some _ | None -> ());
+   | Some { phase = Ready | Start _ | Active _ | Turn_inflight _ | Settled _; _ }
+   | None -> ());
   Ok claimed
 ;;
 
@@ -1536,7 +1567,9 @@ let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
          Retain its durable history even when this was the first failed turn;
          the release record preserves the failure while the caller returns it. *)
       Ok (Some {session_id; turn_id}, expected.turn_count)
-    | Retryable_turn_failed, _ ->
+    | Retryable_turn_failed,
+      ( Ready | Start _ | Active _ | Recovery_required _ | Settled _
+      | Turn_inflight { turn_id = None; _ } ) ->
       Error "retryable official-client terminal requires an acknowledged turn identity"
     | (Pre_dispatch_failed, _) | (Transient_spawn_failed, _) | (Owner_stopped_turn, _)
     | (Transport_interrupted, _) | (Protocol_failed, _) | (Provider_rejected, _)
@@ -1685,7 +1718,11 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
         (match replay current with
          | Ok replayed -> Ok replayed
          | Error Recovery_not_required -> Error Session_changed
-         | Error error -> Error error)
+         | Error
+             (( Invalid_resolved_by | Invalid_resolved_at | Session_missing
+              | Session_changed | Recovery_id_changed
+              | Retry_previous_unavailable | Resolution_conflict
+              | Store_unavailable _ ) as error) -> Error error)
       | Some current ->
         (match current.phase with
          | Recovery_required recovery

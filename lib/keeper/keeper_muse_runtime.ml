@@ -1225,7 +1225,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let require_recovery detail =
       match !session_state with
       | { Session_store.phase = Ready | Settled _ | Recovery_required _; _ } -> Ok ()
-      | expected ->
+      | ({ Session_store.phase = Start _ | Active _ | Turn_inflight _; _ } as expected) ->
         Session_store.require_recovery
           ~base_path
           ~keeper_name
@@ -1240,7 +1240,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       | Session_store.Transient ->
         (match !session_state with
          | { phase = Ready | Settled _ | Recovery_required _; _ } -> Ok ()
-         | expected ->
+         | ({ phase = Start _ | Active _ | Turn_inflight _; _ } as expected) ->
            Session_store.release_transient
              ~base_path
              ~keeper_name
@@ -1556,7 +1556,14 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                 | Runtime_provider_usage_read.Scheduling_failed ->
                   Log.Keeper.warn ~keeper_name
                     "Muse usage not read after model error: background scheduling failed")
-             | Serve.Turn_failed _
+             | Serve.Turn_failed
+                 { Msp.kind =
+                     ( Msp.Step_limit | Msp.Config_error | Msp.Projection_error
+                     | Msp.Log_error | Msp.Workflow_launch_error
+                     | Msp.Environment_error | Msp.Model_error | Msp.Launch_error
+                     | Msp.Auth_required | Msp.Unrecognized_error_kind _ )
+                 ; _
+                 }
              | Serve.Invalid_config _ | Serve.Spawn_failed _
              | Serve.Turn_input_write_failed _ | Serve.Protocol_error _
              | Serve.Rpc_error _ | Serve.Capability_not_granted _
@@ -1582,7 +1589,15 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             | Some Msp.Terminal_completed -> !recovery_failure
             | Some (Msp.Terminal_failed {kind=Msp.Auth_required; message; _}) ->
               terminal_failure (Serve.Auth_required message)
-            | Some (Msp.Terminal_failed error) -> terminal_failure (Serve.Turn_failed error)
+            | Some
+                (Msp.Terminal_failed
+                  ({ kind =
+                       ( Msp.Step_limit | Msp.Config_error | Msp.Projection_error
+                       | Msp.Log_error | Msp.Workflow_launch_error
+                       | Msp.Environment_error | Msp.Model_error | Msp.Launch_error
+                       | Msp.Unrecognized_error_kind _ )
+                   ; _
+                   } as error)) -> terminal_failure (Serve.Turn_failed error)
             | Some Msp.Terminal_cancelled -> terminal_failure Serve.Turn_cancelled
             | Some (Msp.Unrecognized_terminal terminal) ->
               terminal_failure (Serve.Protocol_error
@@ -1611,8 +1626,10 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
           (match stop, !terminal_error with
            | Host.Terminal_tool_boundary _, _
              when Option.is_some on_official_client_tool_boundary -> settle_host_stop stop
-           | _, Some detail -> Error (internal_error detail)
-           | _, None -> settle_host_stop stop)
+           | (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _), Some detail ->
+             Error (internal_error detail)
+           | (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _), None ->
+             settle_host_stop stop)
         | Ok (`Completed (turn : Serve.turn_result)) ->
           recovery_failure := Session_store.Protocol_failed;
           let* () =

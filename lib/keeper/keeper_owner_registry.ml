@@ -219,7 +219,17 @@ let record_restart_interruptions pool ~keeper_name owner =
         | Failed {completed_at;failure={kind=Interrupted_by_restart;_}} ->
             record_restart_terminal ~base_dir ~keeper_name
               ~settlement:{Keeper_chat_event_log.operation_id=operation.operation_id;completed_at}
-        | Queued | Running _ | Succeeded _ | Failed _ | Cancelled _ -> ());
+        | Queued | Running _ | Succeeded _ | Cancelled _
+        | Failed
+            { failure =
+                { kind =
+                    ( Turn_cancelled | Turn_exception | Store_unavailable
+                    | No_queued_operation | Invalid_input | Turn_invariant
+                    | Delivery_failed )
+                ; _
+                }
+            ; _
+            } -> ());
        let surface, conversation_id, broadcast_source =
          match Keeper_chat_operation_payload.source_of_json operation.source with
          | Ok source ->

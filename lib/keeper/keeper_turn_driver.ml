@@ -705,7 +705,26 @@ let attempt_runtime_candidates
   let repeated_generation (error : Agent_core.Error.t) =
     match error with
     | Agent_core.Error.Provider (Llm_provider.Error.RepeatingGeneration _) -> true
-    | Agent_core.Error.Provider _
+    | Agent_core.Error.Provider
+        ( Llm_provider.Error.MissingApiKey _
+        | Llm_provider.Error.InvalidConfig _
+        | Llm_provider.Error.ParseError _
+        | Llm_provider.Error.ProviderWireError _
+        | Llm_provider.Error.ProviderReportedError _
+        | Llm_provider.Error.UnknownVariant _
+        | Llm_provider.Error.ProviderUnavailable _
+        | Llm_provider.Error.EmptyCompletion _
+        | Llm_provider.Error.RateLimit _
+        | Llm_provider.Error.HardQuota _
+        | Llm_provider.Error.CapacityExhausted _
+        | Llm_provider.Error.AuthError _
+        | Llm_provider.Error.AuthorizationError _
+        | Llm_provider.Error.ServerError _
+        | Llm_provider.Error.NetworkError _
+        | Llm_provider.Error.Timeout _
+        | Llm_provider.Error.InvalidRequest _
+        | Llm_provider.Error.NotFound _
+        | Llm_provider.Error.ProviderTerminal _ )
     | Agent_core.Error.Api _
     | Agent_core.Error.Agent _
     | Agent_core.Error.Mcp _
@@ -892,7 +911,39 @@ let attempt_runtime_candidates
          | Agent_core.Error.Provider
              (Llm_provider.Error.Timeout { timeout_phase; provider = _; detail = _ }) ->
            admission timeout_phase
-         | Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Agent _
+         | Agent_core.Error.Api
+             ( Llm_provider.Retry.RateLimited _
+             | Llm_provider.Retry.Overloaded _
+             | Llm_provider.Retry.ServerError _
+             | Llm_provider.Retry.AuthError _
+             | Llm_provider.Retry.AuthorizationError _
+             | Llm_provider.Retry.PaymentRequired _
+             | Llm_provider.Retry.InvalidRequest _
+             | Llm_provider.Retry.NotFound _
+             | Llm_provider.Retry.ContextOverflow _
+             | Llm_provider.Retry.InputCapacity _
+             | Llm_provider.Retry.NetworkError _ )
+         | Agent_core.Error.Provider
+             ( Llm_provider.Error.MissingApiKey _
+             | Llm_provider.Error.InvalidConfig _
+             | Llm_provider.Error.ParseError _
+             | Llm_provider.Error.ProviderWireError _
+             | Llm_provider.Error.ProviderReportedError _
+             | Llm_provider.Error.UnknownVariant _
+             | Llm_provider.Error.ProviderUnavailable _
+             | Llm_provider.Error.EmptyCompletion _
+             | Llm_provider.Error.RepeatingGeneration _
+             | Llm_provider.Error.RateLimit _
+             | Llm_provider.Error.HardQuota _
+             | Llm_provider.Error.CapacityExhausted _
+             | Llm_provider.Error.AuthError _
+             | Llm_provider.Error.AuthorizationError _
+             | Llm_provider.Error.ServerError _
+             | Llm_provider.Error.NetworkError _
+             | Llm_provider.Error.InvalidRequest _
+             | Llm_provider.Error.NotFound _
+             | Llm_provider.Error.ProviderTerminal _ )
+         | Agent_core.Error.Agent _
          | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
          | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
          | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _
@@ -1704,11 +1755,47 @@ let provider_attempt_dispatch ~request_serialized result =
             | Llm_provider.Retry.ContextOverflow _ )
         | Agent_core.Error.Config (Agent_core.Error.InvalidConfig _) ) ) ->
     Keeper_attempt_dispatch.Rejected_before_dispatch
-  | ((true | false), (Ok _ | Error (Agent_core.Error.Api _)))
+  | ( (true | false)
+    , ( Ok _
+      | Error
+          (Agent_core.Error.Api
+             ( Llm_provider.Retry.RateLimited _
+             | Llm_provider.Retry.Overloaded _
+             | Llm_provider.Retry.ServerError _
+             | Llm_provider.Retry.AuthError _
+             | Llm_provider.Retry.AuthorizationError _
+             | Llm_provider.Retry.PaymentRequired _
+             | Llm_provider.Retry.NotFound _
+             | Llm_provider.Retry.NetworkError _
+             | Llm_provider.Retry.Timeout _ )) ) )
+  | ( true
+    , Error
+        (Agent_core.Error.Api
+           ( Llm_provider.Retry.InvalidRequest _
+           | Llm_provider.Retry.InputCapacity _
+           | Llm_provider.Retry.ContextOverflow _ )) )
+  | ( false
+    , Error
+        (Agent_core.Error.Api
+           (Llm_provider.Retry.InvalidRequest
+              { reason =
+                  ( Llm_provider.Retry.Json_parse_error
+                  | Llm_provider.Retry.Request_body_refused_by_provider _
+                  | Llm_provider.Retry.Refusal_body_not_received
+                  | Llm_provider.Retry.Unknown_invalid_request )
+              ; _
+              })) )
   | ((true | false), Error (Agent_core.Error.Provider _))
   | ((true | false), Error (Agent_core.Error.Agent _))
   | ((true | false), Error (Agent_core.Error.Mcp _))
-  | ((true | false), Error (Agent_core.Error.Config _))
+  | ( (true | false)
+    , Error
+        (Agent_core.Error.Config
+           ( Agent_core.Error.MissingEnvVar _
+           | Agent_core.Error.UnsupportedProvider _
+           | Agent_core.Error.CredentialUnavailable _
+           | Agent_core.Error.SensitiveValueInConfig _ )) )
+  | (true, Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig _)))
   | ((true | false), Error (Agent_core.Error.Serialization _))
   | ((true | false), Error (Agent_core.Error.Io _))
   | ((true | false), Error (Agent_core.Error.Orchestration _))
@@ -2662,7 +2749,23 @@ let run_named
                | Runtime_agent.Completed, [ Agent_core.Types.Text text ]
                  when String.trim text = "" ->
                  Ok run_result
-               | _ ->
+               | ( Runtime_agent.Completed
+                 | Runtime_agent.Yielded_to_operation_queued _
+                 | Runtime_agent.Yielded_to_durable_stimulus _
+                 | Runtime_agent.Yielded_after_repeated_tool_call _
+                 | Runtime_agent.Yielded_after_repeated_assistant_text _
+                 | Runtime_agent.InputRequired _ ),
+                 ([]
+                 | Agent_core.Types.Text _ :: _
+                 | ( Agent_core.Types.Thinking _
+                   | Agent_core.Types.ReasoningDetails _
+                   | Agent_core.Types.RedactedThinking _
+                   | Agent_core.Types.ToolUse _
+                   | Agent_core.Types.ToolResult _
+                   | Agent_core.Types.Image _
+                   | Agent_core.Types.Document _
+                   | Agent_core.Types.Audio _ )
+                   :: _) ->
                  apply_official_client_accept
                    ~runtime_id:attempt_runtime_id
                    ~accept

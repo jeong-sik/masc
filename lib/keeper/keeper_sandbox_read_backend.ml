@@ -549,7 +549,11 @@ let read_file ?turn_sandbox_factory ?(start_line = 1) ~config ~(meta : keeper_me
                 "%s_read_failed: path_is_directory: %s (Read requires a file; to \
                  list a directory use Execute with ls, e.g. argv=['ls','-la','%s'])"
                 profile_label host_path host_path))
-      | _ -> read ()
+      | { Unix.st_kind =
+            ( Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+            | Unix.S_SOCK )
+        ; _
+        } -> read ()
       | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
         Error
           (Missing_file

@@ -397,7 +397,45 @@ let stimulus_identity_equal a b =
        first committed row owns the payload, so comparing the payload again
        would turn that representation upgrade into a second execution. *)
     true
-  | _ -> identity_payload a.payload = identity_payload b.payload
+  | ( ( Board_signal
+          { kind =
+              ( Post_created | Post_updated _ | Comment_added _
+              | Reaction_changed _ | Vote_cast _ )
+          ; _
+          }
+      | Board_attention
+          { signal =
+              { kind =
+                  ( Post_created | Post_updated _ | Comment_added _
+                  | Reaction_changed _ | Vote_cast _ )
+              ; _
+              }
+          ; _
+          }
+      | Bootstrap | Fusion_completed _
+      | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+      | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
+      | Delegate_completed _ | Composition_completed _ | Task_outcome _ )
+    , ( Board_signal
+          { kind =
+              ( Post_created | Post_updated _ | Comment_added _
+              | Reaction_changed _ | Vote_cast _ )
+          ; _
+          }
+      | Board_attention
+          { signal =
+              { kind =
+                  ( Post_created | Post_updated _ | Comment_added _
+                  | Reaction_changed _ | Vote_cast _ )
+              ; _
+              }
+          ; _
+          }
+      | Bootstrap | Fusion_completed _
+      | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+      | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
+      | Delegate_completed _ | Composition_completed _ | Task_outcome _ ) ) ->
+    identity_payload a.payload = identity_payload b.payload
 
 let to_list (queue : t) : stimulus list =
   match queue.back_rev with

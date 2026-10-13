@@ -79,7 +79,7 @@ let content_block_of_history_json json =
             match kind with
             | Some (Ok failure_kind) ->
                 Agent_core.Types.Tool_failed { failure_kind; error_class }
-            | _ -> result.outcome)
+            | Some (Error _) | None -> result.outcome)
         | _ -> result.outcome
       in
       let json_payload =

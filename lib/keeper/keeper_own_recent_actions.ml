@@ -120,7 +120,9 @@ let rows_with_turn_keys rows =
             (match !previous with
              | Some (prior_keeper, (Unattributed_occurrence _ as identity), prior_turn)
                when prior_keeper = keeper && prior_turn = turn_id -> identity
-             | _ -> Unattributed_occurrence position) in
+             | None
+             | Some (_, (Recorded_trace _ | Unattributed_occurrence _), _) ->
+               Unattributed_occurrence position) in
         Some (execution, turn_id) in
     previous := Option.map (fun (execution, turn) -> keeper, execution, turn) key;
     position, key, row) rows

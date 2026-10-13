@@ -97,6 +97,27 @@ class RepoWideScans(NofileStatus):
     def test_a_path_that_only_starts_like_the_home_is_not_under_it(self):
         self.assertEqual(self.scans([(101, 1, "find /home/tester2/src -name x")]), [])
 
+    # A copy of the home under another root is not the home.
+    def test_a_path_that_only_ends_like_the_home_is_not_under_it(self):
+        rows = [
+            (101, 1, "find /mnt/backup/home/tester/photos -type f"),
+            (102, 1, "find /Volumes/disk/home/tester -name x"),
+        ]
+        self.assertEqual(self.scans(rows), [])
+
+    def test_the_home_after_a_quote_an_equals_sign_or_a_colon_is_a_scan(self):
+        rows = [
+            (101, 1, "sh -c find '/home/tester' -name x"),
+            (102, 1, 'sh -c find "/home/tester/src" -name x'),
+            (103, 1, "find --root=/home/tester -name x"),
+            (104, 1, "find -path /srv/a:/home/tester/b"),
+        ]
+        self.assertEqual(self.scans(rows), [101, 102, 103, 104])
+
+    def test_a_later_mention_of_the_home_counts_after_an_earlier_false_one(self):
+        rows = [(101, 1, "find /mnt/backup/home/tester /home/tester/src -name x")]
+        self.assertEqual(self.scans(rows), [101])
+
     def test_a_find_elsewhere_is_not_a_scan(self):
         rows = [(101, 1, "find /var/log -name x"), (102, 1, "ls -R /home/tester")]
         self.assertEqual(self.scans(rows), [])

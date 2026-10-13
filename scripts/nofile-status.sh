@@ -227,20 +227,32 @@ if [[ "${ps_available}" -eq 1 ]]; then
   scan_rows="$(
     ps ax -o pid=,ppid=,stat=,etime=,command= 2>/dev/null \
       | awk -v home="${HOME:-}" '
-          # The home directory itself or a path under it, as a whole
-          # path component. An unset or root home names nothing.
-          function names_home(line, rest, at) {
+          # The home directory itself or a path under it: the match starts
+          # a path (line start, space, quote, = or :) and ends a path
+          # component (line end, space, quote or /), so neither
+          # /backup<home>/x nor <home>2/x counts.
+          # An unset or root home names nothing.
+          function names_home(line, rest, at, consumed, before) {
             if (length(home) < 2) {
               return 0
             }
             rest = line
+            consumed = 0
             while ((at = index(rest, home)) > 0) {
+              before = (consumed + at == 1) ? " " : substr(line, consumed + at - 1, 1)
               rest = substr(rest, at + length(home))
-              if (rest == "" || rest ~ /^[[:space:]\/]/) {
+              consumed += at + length(home) - 1
+              if (index(path_starts, before) > 0 &&
+                  (rest == "" || index(path_ends, substr(rest, 1, 1)) > 0)) {
                 return 1
               }
             }
             return 0
+          }
+
+          BEGIN {
+            path_starts = sprintf(" \t=:\"%c", 39)
+            path_ends = sprintf(" \t/\"%c", 39)
           }
 
           /(^|[[:space:]])(bfs|find)[[:space:]]/ &&

@@ -89,16 +89,9 @@ let parse_trace_id raw =
     | Error detail -> invalidf "trace_id is invalid: %s" detail
 ;;
 
-let canonical_proactive_outcome_opt raw =
-  let outcome = proactive_cycle_outcome_of_string raw in
-  if String.equal raw (proactive_cycle_outcome_to_string outcome)
-  then Some outcome
-  else None
-;;
-
 let parse_proactive_outcome fields =
   let* raw = string_field fields "last_proactive_outcome" in
-  match canonical_proactive_outcome_opt raw with
+  match proactive_cycle_outcome_of_string raw with
   | Some outcome -> Ok outcome
   | None -> invalidf "last_proactive_outcome has non-canonical value %S" raw
 ;;
@@ -111,25 +104,23 @@ type enum_field_repair =
 
 (* Issue #28844: repair target for one non-canonical enumerated value.
    [None] means already canonical (no repair).  [Some repaired] is the
-   canonical spelling of the recognized value when the field's [of_string]
-   accepts [raw] — both parsers trim and lowercase, so a case/whitespace
-   misspelling keeps the operator's intent.  Only a value the parser does
-   not recognize at all falls back to the field's canonical default (the
-   value the create path writes for a keeper that never exercised the
-   corresponding machinery), which is the lossless reset. *)
+   canonical label when [raw] is a label in other case or with surrounding
+   whitespace, so the operator's intent is kept.  Any other value falls back
+   to the field's canonical default (the value the create path writes for a
+   keeper that never exercised the corresponding machinery), which is the
+   lossless reset. *)
 let proactive_outcome_repair_value raw =
-  match canonical_proactive_outcome_opt raw with
+  match proactive_cycle_outcome_of_string raw with
   | Some _ -> None
   | None ->
-    (* [proactive_cycle_outcome_of_string] is total: unrecognized garbage
-       lands on [Proactive_unknown], so a recognized misspelling is exactly
-       a parse to any other variant.  A misspelled ["unknown"] is
-       indistinguishable from garbage through the total parser and resets
-       with it. *)
-    (match proactive_cycle_outcome_of_string raw with
-     | Proactive_unknown ->
-       Some (proactive_cycle_outcome_to_string Proactive_never_started)
-     | (Proactive_never_started | Proactive_silent | Proactive_text_response | Proactive_tool_use | Proactive_mixed_response | Proactive_error) as outcome -> Some (proactive_cycle_outcome_to_string outcome))
+    let outcome =
+      match
+        proactive_cycle_outcome_of_string (String.lowercase_ascii (String.trim raw))
+      with
+      | Some outcome -> outcome
+      | None -> Proactive_never_started
+    in
+    Some (proactive_cycle_outcome_to_string outcome)
 ;;
 
 (* Persisted enumerated fields repairable in place.  A field belongs here

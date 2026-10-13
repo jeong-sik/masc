@@ -23,12 +23,7 @@ type proactive_cycle_outcome =
   | Proactive_tool_use
   | Proactive_mixed_response
   | Proactive_error
-(** Outcome variants for a single proactive (autonomous) cycle.
-    Round-trip enforced at module load time
-    ([proactive_cycle_outcome_to_string] +
-    [proactive_cycle_outcome_of_string] must form a bijection)
-    via an [assert_roundtrip] block — adding a variant fails
-    compile until both directions are wired. *)
+(** Outcome variants for a single proactive (autonomous) cycle. *)
 
 (** {1 Runtime state types} *)
 
@@ -297,12 +292,13 @@ val proactive_cycle_outcome_to_string :
     ["mixed_response"], ["error"]. *)
 
 val proactive_cycle_outcome_of_string :
-  string -> proactive_cycle_outcome
-(** Permissive parser (case-insensitive after trim).  Unknown
-    labels fall back to [Proactive_unknown] — but module-load
-    [assert_roundtrip] guarantees every variant produced by
-    [_to_string] is parsed back identically, so unknown means
-    operator error, not silent variant drift. *)
+  string -> proactive_cycle_outcome option
+(** The variant whose {!proactive_cycle_outcome_to_string} label is
+    exactly [raw]. [None] for anything else, including a label in other
+    case or with surrounding whitespace. *)
+
+val all_proactive_cycle_outcomes : proactive_cycle_outcome list
+(** Every variant, in declaration order. *)
 
 (** {1 Updater helpers} *)
 

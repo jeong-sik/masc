@@ -278,26 +278,25 @@ let test_non_enumerated_corruption_reads_as_absent () =
   check string "corrupt file is not rewritten" before (Masc_test_deps.read_file path)
 ;;
 
-let test_recognized_misspelling_repairs_to_canonical_spelling () =
+(* The repair trims and lowercases before it looks for a label, so [raw] is a
+   recognized value with a spelling defect — the operator intent is
+   unambiguous and repair must keep it, not reset to the field default. *)
+let check_misspelling_repairs_to ~name ~raw ~expected =
   with_temp_workspace @@ fun config ->
-  let name = "meta-spelling-canary" in
   write_keeper_toml config name;
-  (* The of_string parser trims and lowercases, so this is a recognized value
-     with a spelling defect — the operator intent is unambiguous and repair must
-     keep it, not reset to the field default. *)
   let path =
     write_corrupted_meta
       config
       name
       ~field:"last_proactive_outcome"
-      ~value:(`String "SILENT")
+      ~value:(`String raw)
   in
   (match Keeper_meta_store.read_meta config name with
    | Ok (Some meta) ->
      check
        string
        "last_proactive_outcome keeps recognized intent"
-       "silent"
+       expected
        (Keeper_meta_contract.proactive_cycle_outcome_to_string
           meta.runtime.proactive_rt.last_outcome)
    | Ok None -> fail "read_meta lost the keeper"
@@ -307,11 +306,23 @@ let test_recognized_misspelling_repairs_to_canonical_spelling () =
      check
        string
        "persisted outcome is the canonical spelling"
-       "silent"
+       expected
        (match List.assoc "last_proactive_outcome" fields with
         | `String value -> value
         | other -> Yojson.Safe.to_string other)
    | _ -> fail "repaired meta file is not a JSON object")
+;;
+
+let test_recognized_misspelling_repairs_to_canonical_spelling () =
+  check_misspelling_repairs_to ~name:"meta-spelling-canary" ~raw:"SILENT"
+    ~expected:"silent"
+;;
+
+(* ["unknown"] is a label like the others, so its misspelling is kept too
+   rather than reset to the field default. *)
+let test_misspelled_unknown_repairs_to_unknown () =
+  check_misspelling_repairs_to ~name:"meta-spelling-unknown" ~raw:" UNKNOWN"
+    ~expected:"unknown"
 ;;
 
 (* The deployment gate and the runtime read share one decode decision
@@ -477,10 +488,31 @@ let test_retired_fields_dropped_reported_once_and_not_saved () =
     (List.length (retired_field_rows path))
 ;;
 
+(* The parser reads a label back as its outcome only while every outcome has
+   its own label: with two outcomes on one label, the second would read back
+   as the first. *)
+let test_every_outcome_label_reads_back_as_its_outcome () =
+  List.iter
+    (fun outcome ->
+       let label = Keeper_meta_contract.proactive_cycle_outcome_to_string outcome in
+       check
+         bool
+         (Printf.sprintf "%S reads back as its own outcome" label)
+         true
+         (Keeper_meta_contract.proactive_cycle_outcome_of_string label = Some outcome))
+    Keeper_meta_contract.all_proactive_cycle_outcomes
+;;
+
 let () =
   run
     "keeper_meta_invalid_recovery"
-    [ ( "issue-28844"
+    [ ( "outcome-labels"
+      , [ test_case
+            "every outcome label reads back as its outcome"
+            `Quick
+            test_every_outcome_label_reads_back_as_its_outcome
+        ] )
+    ; ( "issue-28844"
       , [ test_case
             "non-canonical enumerated field is auto-repaired and keeper rejoins keepalive"
             `Quick
@@ -489,6 +521,10 @@ let () =
             "recognized misspelling repairs to its canonical spelling"
             `Quick
             test_recognized_misspelling_repairs_to_canonical_spelling
+        ; test_case
+            "misspelled unknown repairs to unknown"
+            `Quick
+            test_misspelled_unknown_repairs_to_unknown
         ; test_case
             "scan WARN is emitted on state transitions only"
             `Quick

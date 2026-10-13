@@ -1964,7 +1964,7 @@ describe('fetchTelemetrySummary', () => {
       entries_truncated_to: 50,
       entry_details: [
         {
-          key: 'telemetry:/Users/dancer/me/.masc:src=tool_metric:n=100',
+          key: 'telemetry:/Users/worker/ws/.masc:src=tool_metric:n=100',
           kind: 'fresh',
           ttl_remaining_ms: 750,
           stale_remaining_ms: 10_000,
@@ -1991,7 +1991,7 @@ describe('fetchTelemetrySummary', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/cache-stats')
     expect(result.hit_ratio).toBe(0.8)
     expect(result.entry_details[0]).toMatchObject({
-      key: 'telemetry:/Users/dancer/me/.masc:src=tool_metric:n=100',
+      key: 'telemetry:/Users/worker/ws/.masc:src=tool_metric:n=100',
       kind: 'fresh',
       ttl_remaining_ms: 750,
       stale_remaining_ms: 10_000,

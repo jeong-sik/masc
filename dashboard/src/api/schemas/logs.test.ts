@@ -28,10 +28,10 @@ function currentWire(entries: readonly Record<string, unknown>[] = []) {
     source: 'masc_log_ring',
     retention: {
       scope: 'dashboard_logs',
-      workspace_root: '/Users/dancer/me/.masc',
+      workspace_root: '/Users/worker/ws/.masc',
       buffer: 'Log.Ring',
       capacity: 50000,
-      durable_store: '/Users/dancer/me/.masc/logs/system_log_2026-05-15.jsonl',
+      durable_store: '/Users/worker/ws/.masc/logs/system_log_2026-05-15.jsonl',
       file_pattern: 'system_log_YYYY-MM-DD.jsonl',
       keep_days: 7,
       cache_policy: 'uncached',

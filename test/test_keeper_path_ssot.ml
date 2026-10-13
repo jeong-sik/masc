@@ -189,7 +189,7 @@ let test_projection_docker_maps_root_and_subpath () =
 let test_projection_docker_rejects_outside_root () =
   let config = make_config () in
   let sandbox, _meta = docker_sandbox ~config ~name:"alpha" in
-  let outside = "/Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper" in
+  let outside = "/Users/worker/ws/workspace/yousleepwhen/masc/lib/keeper" in
   match
     Keeper_sandbox.visible_path_of_host
       sandbox

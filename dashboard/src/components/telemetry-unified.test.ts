@@ -63,13 +63,13 @@ const baseCacheStats: DashboardCacheStatsResponse = {
   entries_truncated_to: 50,
   entry_details: [
     {
-      key: 'telemetry:/Users/dancer/me/.masc:src=tool_metric:n=100',
+      key: 'telemetry:/Users/worker/ws/.masc:src=tool_metric:n=100',
       kind: 'fresh',
       ttl_remaining_ms: 750,
       stale_remaining_ms: 10_000,
     },
     {
-      key: 'telemetry:/Users/dancer/me/.masc:all:n=100',
+      key: 'telemetry:/Users/worker/ws/.masc:all:n=100',
       kind: 'stale',
       ttl_remaining_ms: 0,
       stale_remaining_ms: 4_000,

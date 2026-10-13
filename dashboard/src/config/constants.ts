@@ -2,7 +2,6 @@
 // Change a value here to adjust behavior across the entire dashboard.
 
 // --- MASC server defaults ---
-// SSOT: ~/me/instructions/workspaces.md Infrastructure Endpoints
 export const DEFAULT_MASC_HOST = 'localhost'
 export const DEFAULT_MASC_PORT = 8935
 export const DEFAULT_MASC_ORIGIN = `http://${DEFAULT_MASC_HOST}:${DEFAULT_MASC_PORT}`

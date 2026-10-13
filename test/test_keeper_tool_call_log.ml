@@ -1345,9 +1345,9 @@ let test_route_evidence_redacts_wrapped_git_push () =
 let test_route_evidence_command_redaction_fails_closed () =
   let commands =
     [
-      "git push --repo /Users/dancer/private origin feature/private-proof";
-      "git push --repo=/Users/dancer/private origin feature/private-proof";
-      "git -c safe.directory=/Users/dancer/private push origin feature/private-proof";
+      "git push --repo /Users/worker/private origin feature/private-proof";
+      "git push --repo=/Users/worker/private origin feature/private-proof";
+      "git -c safe.directory=/Users/worker/private push origin feature/private-proof";
       "env FOO=bar git push origin 'feature/private proof'";
     ]
   in
@@ -1374,7 +1374,7 @@ let test_route_evidence_command_redaction_fails_closed () =
            Alcotest.(check bool)
              "absolute path is absent"
              false
-             (String_util.contains_substring evidence_text "/Users/dancer");
+             (String_util.contains_substring evidence_text "/Users/worker");
            Alcotest.(check bool)
              "private branch marker is absent"
              false

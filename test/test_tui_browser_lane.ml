@@ -709,14 +709,14 @@ let test_bidi_host_rows () =
      @ ["Could not ask Firefox to end the session · restart it if it still runs";
         "Reason: stopped without learning whether Firefox still holds its BiDi";
         "        session"] @ attach_again);
-  let long_launcher = "/Users/someone/me/workspace/yousleepwhen/masc/.masc/browser-lane/host/launch" in
+  let long_launcher = "/Users/someone/ws/workspace/yousleepwhen/masc/.masc/browser-lane/host/launch" in
   let wide_launcher = "/Users/상수/文書/画面/masc/.masc/browser-lane/host/launch" in
   let launched_from launcher =
     Host_reported { (host_report Record.Never_started) with attach = { host_attach with launcher } } in
   says "a launcher path longer than the row breaks before a slash, with every name whole"
     (launched_from long_launcher)
     ["BiDi host: none has run for this workspace";
-     "Attach: '/Users/someone/me/workspace/yousleepwhen/masc/.masc/browser-lane";
+     "Attach: '/Users/someone/ws/workspace/yousleepwhen/masc/.masc/browser-lane";
      "        /host/launch'";
      "        --bidi-url ws://127.0.0.1:PORT/session";
      "        PORT: the --remote-debugging-port Firefox was started with"; setup];

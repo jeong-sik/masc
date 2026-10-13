@@ -4653,7 +4653,7 @@ let repository_json ?(keepers = [ "keeper.one" ]) ?(auto_sync = `Bool true)
      ; ("url", `String "https://github.com/jeong-sik/masc")
      ; ("local_path", `String "workspace/yousleepwhen/masc")
      ; ( "resolved_local_path"
-       , `String "/Users/dancer/me/workspace/yousleepwhen/masc" )
+       , `String "/Users/worker/ws/workspace/yousleepwhen/masc" )
      ; ("aliases", `List [])
      ; ("default_branch", `String "main")
      ; ("keepers", `List (List.map (fun k -> `String k) keepers))
@@ -4683,7 +4683,7 @@ let test_decode_repository_snapshot_reads_the_live_shape () =
            Alcotest.(check string) "stored path"
              "workspace/yousleepwhen/masc" r.Tui_decode.rp_local_path;
            Alcotest.(check string) "server-resolved absolute path"
-             "/Users/dancer/me/workspace/yousleepwhen/masc"
+             "/Users/worker/ws/workspace/yousleepwhen/masc"
              r.Tui_decode.rp_resolved_local_path;
            Alcotest.(check (list string)) "who works in it" [ "keeper.one" ]
              r.Tui_decode.rp_keepers;
@@ -9209,9 +9209,9 @@ let health_probe =
         ("binary_commit_age_seconds", `Float 1106.0);
       ]);
       ("paths", `Assoc [
-        ("cwd", `String "/Users/dancer/me");
-        ("effective_base_path", `String "/Users/dancer/me");
-        ("effective_masc_root", `String "/Users/dancer/me/.masc");
+        ("cwd", `String "/Users/worker/ws");
+        ("effective_base_path", `String "/Users/worker/ws");
+        ("effective_masc_root", `String "/Users/worker/ws/.masc");
       ]);
     ]
 
@@ -9223,9 +9223,9 @@ let test_decode_server_identity_reads_a_probe () =
     Alcotest.(check string) "binary commit"
       "030fa9043aafc5c2003f830c86720afff8e8e2ff"
       identity.Tui_decode.sid_binary_commit;
-    Alcotest.(check string) "base path" "/Users/dancer/me"
+    Alcotest.(check string) "base path" "/Users/worker/ws"
       identity.Tui_decode.sid_base_path;
-    Alcotest.(check string) "masc root" "/Users/dancer/me/.masc"
+    Alcotest.(check string) "masc root" "/Users/worker/ws/.masc"
       identity.Tui_decode.sid_masc_root;
     Alcotest.(check (option (float 0.001))) "binary age" (Some 1106.0)
       identity.Tui_decode.sid_binary_commit_age_s
@@ -11170,7 +11170,7 @@ let decoded_execute_rows ~preview ~input =
    sat off the right edge of the row at every terminal width. This is the
    shape and the preview text observed on screen with seven rows waiting. *)
 let observed_execute_preview =
-  "{\"schema\":\"masc.keeper_gate.request.v1\",\"input\":{\"cwd\":\"/Users/dancer/me/.masc/playground/docker/rw-e0-r9-20260820-review/.\",\"argv\":[\"git\",\"clone\"]}}"
+  "{\"schema\":\"masc.keeper_gate.request.v1\",\"input\":{\"cwd\":\"/Users/worker/ws/.masc/playground/docker/rw-e0-r9-20260820-review/.\",\"argv\":[\"git\",\"clone\"]}}"
 
 let test_decode_execute_gate_row_leads_with_the_command () =
   let preview =
@@ -11180,13 +11180,13 @@ let test_decode_execute_gate_row_leads_with_the_command () =
            [ ("schema", `String "masc.keeper_gate.request.v1");
              ( "input",
                `Assoc
-                 [ ("cwd", `String "/Users/dancer/me/.masc/playground/docker/rw-e0-r9-20260820-review/.");
+                 [ ("cwd", `String "/Users/worker/ws/.masc/playground/docker/rw-e0-r9-20260820-review/.");
                    ( "argv",
                      `List
                        [ `String "git"; `String "clone"; `String "--depth";
                          `String "1"; `String "https://github.com/jeong-sik/masc" ] );
                  ] );
-             ("cwd", `String "/Users/dancer/me/.masc/playground/docker/rw-e0-r9-20260820-review/.");
+             ("cwd", `String "/Users/worker/ws/.masc/playground/docker/rw-e0-r9-20260820-review/.");
              ("sandbox_profile", `String "docker");
              ("sandbox_target", `String "docker:masc-playground");
            ])

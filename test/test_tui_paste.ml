@@ -145,10 +145,10 @@ let test_the_cap_still_finds_the_marker () =
 
 let test_a_dropped_path_loses_its_escapes () =
   match
-    Masc_tui_paste.unescaped_path "/Users/dancer/Desktop/screen\\ shot\\ 1.png"
+    Masc_tui_paste.unescaped_path "/Users/worker/Desktop/screen\\ shot\\ 1.png"
   with
   | Some path ->
-    check string "spaces are spaces" "/Users/dancer/Desktop/screen shot 1.png" path
+    check string "spaces are spaces" "/Users/worker/Desktop/screen shot 1.png" path
   | None -> fail "an escaped path was not recognised"
 ;;
 
@@ -156,10 +156,10 @@ let test_a_hangul_path_survives () =
   (* The bytes that made this worth fixing. Multi-byte characters are copied
      through untouched; only the escapes go. *)
   match
-    Masc_tui_paste.unescaped_path "/Users/dancer/Desktop/스크린샷\\ 2026-08-25.png"
+    Masc_tui_paste.unescaped_path "/Users/worker/Desktop/스크린샷\\ 2026-08-25.png"
   with
   | Some path ->
-    check string "hangul intact" "/Users/dancer/Desktop/스크린샷 2026-08-25.png" path
+    check string "hangul intact" "/Users/worker/Desktop/스크린샷 2026-08-25.png" path
   | None -> fail "an escaped hangul path was not recognised"
 ;;
 

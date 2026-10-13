@@ -47,8 +47,8 @@ describe('normalizeNamespaceTruth', () => {
       source: 'namespace_truth_read_model',
       retention: {
         scope: 'dashboard_namespace_truth',
-        workspace_root: '/Users/dancer/me',
-        workspace_path: '/Users/dancer/me',
+        workspace_root: '/Users/worker/ws',
+        workspace_path: '/Users/worker/ws',
         shell_input: '/api/v1/dashboard/shell',
         execution_input: '/api/v1/dashboard/execution',
         cache_policy: 'proactive_execution_cache_last_good_shell_fallback',

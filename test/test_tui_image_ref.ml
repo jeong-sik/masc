@@ -25,8 +25,8 @@ let test_a_wrapper_does_not_change_the_path () =
     ]
 
 let test_the_case_of_the_extension_does_not_matter () =
-  check_paths "found, and spelled as it was written" [ "~/me/B.PNG" ]
-    (paths "`~/me/B.PNG`")
+  check_paths "found, and spelled as it was written" [ "~/ws/B.PNG" ]
+    (paths "`~/ws/B.PNG`")
 
 (* A URL has no bytes on this disk. Left alone, the expansion stops at the
    colon and hands back "//host/y.png" -- which reads as an absolute path and

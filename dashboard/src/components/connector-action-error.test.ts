@@ -11,7 +11,7 @@ import { ToastContainer, _testGetToasts, _testResetToasts } from './common/toast
 
 const RAW_SERVER_ERROR =
   'POST /api/v1/sidecar/stop?name=discord: sidecar directory not found for discord; '
-  + 'looked under /Users/op/me/sidecars/discord-bot. Set MASC_SIDECAR_ROOT=/path/to/masc.'
+  + 'looked under /Users/op/ws/sidecars/discord-bot. Set MASC_SIDECAR_ROOT=/path/to/masc.'
 
 describe('rawErrorText', () => {
   it('unwraps Error message', () => {

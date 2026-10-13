@@ -993,8 +993,8 @@ let test_keeper_up_rejects_undeclared_field () =
 let test_keeper_down_rejects_undeclared_field () =
   assert_rejects_undeclared_field ~tool:"masc_keeper_down" ~field:"remove_metaa"
 
-(* Regression guard for the closure itself: every field observed in live
-   ~/me/.masc tool-call logs must still be accepted. Closing a schema turns
+(* Regression guard for the closure itself: every field observed in a live
+   workspace's tool-call logs must still be accepted. Closing a schema turns
    a silent drop into a hard rejection, so an under-declared property breaks
    a working call — the same failure the missing [compact] declaration
    produced above. *)

@@ -129,9 +129,9 @@ let test_sanitize_inherited_test_base_path_opt_drops_captured_home_path () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_base_path_opt
       ~running_under_test_executable:true ~allow_inherited:false
-      ~initial:(Some "/tmp/captured-home/me")
-      ~current:(Some "/tmp/captured-home/me")
-      ~home:(Some "/tmp/captured-home/me")
+      ~initial:(Some "/tmp/captured-home/ws")
+      ~current:(Some "/tmp/captured-home/ws")
+      ~home:(Some "/tmp/captured-home/ws")
   in
   check (option string) "same captured MASC_BASE_PATH ignored" None actual
 
@@ -139,12 +139,12 @@ let test_sanitize_inherited_test_base_path_opt_keeps_sibling_prefix_path () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_base_path_opt
       ~running_under_test_executable:true ~allow_inherited:false
-      ~initial:(Some "/tmp/captured-home/me2")
-      ~current:(Some "/tmp/captured-home/me2")
-      ~home:(Some "/tmp/captured-home/me")
+      ~initial:(Some "/tmp/captured-home/ws2")
+      ~current:(Some "/tmp/captured-home/ws2")
+      ~home:(Some "/tmp/captured-home/ws")
   in
   check (option string) "sibling path preserved"
-    (Some "/tmp/captured-home/me2") actual
+    (Some "/tmp/captured-home/ws2") actual
 
 let test_sanitize_inherited_test_base_path_opt_keeps_process_temp_path () =
   let actual =
@@ -152,7 +152,7 @@ let test_sanitize_inherited_test_base_path_opt_keeps_process_temp_path () =
       ~running_under_test_executable:true ~allow_inherited:false
       ~initial:(Some "/tmp/test-agent_core-worker-base")
       ~current:(Some "/tmp/test-agent_core-worker-base")
-      ~home:(Some "/tmp/captured-home/me")
+      ~home:(Some "/tmp/captured-home/ws")
   in
   check (option string) "process temp base preserved"
     (Some "/tmp/test-agent_core-worker-base") actual

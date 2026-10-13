@@ -357,7 +357,7 @@ let format_current_task_with_heading ?skill_surfaces ~heading
        ]
      ^ "\n");
   (match task.Masc_domain.handoff_context with
-   | Some h when h.Masc_domain.summary <> "" ->
+   | Some h ->
        (* RFC-0365: a handoff can now come from a previous owner, so the note
           must say whose it is. Without this the model reads another agent's
           first-person account ("I already verified the spec") as its own
@@ -385,19 +385,20 @@ let format_current_task_with_heading ?skill_surfaces ~heading
        | None, None ->
          " " ^ render_fragment Prompt_names.keeper_world_current_task_attribution_none []
      in
-     Buffer.add_string
-       buf
-       (render_fragment
-          Prompt_names.keeper_world_current_task_handoff
-          [ "attribution", attribution; "summary", h.Masc_domain.summary ]
-        ^ "\n");
+     if h.Masc_domain.summary <> "" then
+       Buffer.add_string
+         buf
+         (render_fragment
+            Prompt_names.keeper_world_current_task_handoff
+            [ "attribution", attribution; "summary", h.Masc_domain.summary ]
+          ^ "\n");
      (match h.Masc_domain.next_step with
       | Some step when step <> "" ->
         Buffer.add_string
           buf
           (render_fragment
              Prompt_names.keeper_world_current_task_handoff_next_step
-             [ "step", step ]
+             [ "attribution", attribution; "step", step ]
            ^ "\n")
       | Some _ | None -> ());
      (* The refs are where the previous owner's work actually is. Dropping
@@ -411,9 +412,9 @@ let format_current_task_with_heading ?skill_surfaces ~heading
           buf
           (render_fragment
              Prompt_names.keeper_world_current_task_handoff_evidence
-             [ "refs", String.concat ", " refs ]
+             [ "attribution", attribution; "refs", String.concat ", " refs ]
            ^ "\n"))
-   | Some _ | None -> ());
+   | None -> ());
   (* RFC skills-declared-not-discovered: the task names its skills, so this
      block does not list what is available and let the model match — there is
      nothing to choose between by the time the turn starts.

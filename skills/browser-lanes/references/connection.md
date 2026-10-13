@@ -24,7 +24,10 @@
     `bidiHost`가 있다. `state`는 BiDi host의 상태(`never_started`·`running`·`ended`·
     `died`·`unreadable`)다. `message`는 host가 지금 떠 있는지, 마지막 host가 언제 왜
     끝났는지, 다음 host를 띄우기 전에 운영자가 할 일(예: 그 Firefox를 다시 띄우기)을
-    말한다. 이 `message`도 운영자에게 그대로 전한다. host를 띄우는 일은 운영자가 한다.
+    말한다. 요청에 따라 서버가 자기 Keeper용 연결을 시작한 경우 `bidiConnection`과
+    `started`가 그 결과다. 그 연결의 탭을 새로 읽고 해당 clientId를 쓴다.
+    `bidiStartFailed.kind=operator_needed`이면 메시지를 운영자에게 전하고,
+    `start_failed`나 `not_listed_in_time`이면 반환된 원인과 재시도 안내를 따른다.
     `servingClients`에 연결이 있으면 `bidiHost`는 없다. `bidiHost`가 `ended`나 `died`면
     그 `message`가 마지막 host가 언제 왜 끝났는지와 다음 host 전에 운영자가 할 일을
     담는다.
@@ -38,6 +41,11 @@
   작업인지 확인하고, 확인할 수 없다면 takeover나 close 후 reopen을 하지 않는다.
 - 특정 탭의 확장 권한이 없으면 그 권한 문제를 알린다. 요청된 탭 대신 무관한
   다른 탭을 읽어 같은 작업을 완료했다고 하지 않는다.
+
+탭 목록이 `complete=false`이면 일부 탭의 메타데이터를 읽지 못한 것이다.
+`unavailableTabs`의 ID와 오류를 남기고 읽을 수 있는 요청 대상 탭에서 계속한다.
+요청 대상 자체가 그 목록에 있으면 다른 탭으로 대신 완료하지 않는다. 시간 초과는
+업무 규칙의 거절이 아니며, 조작이 적용됐는지 불확실하므로 현재 페이지부터 읽는다.
 
 ## 운영자가 automation을 설정할 때
 

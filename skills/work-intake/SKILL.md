@@ -1,11 +1,12 @@
 ---
 name: work-intake
-description: "Before you pick work, after a wake or after waiting on someone, reads in one call: tasks in progress or claimed with who holds them, the 10 board posts with the latest activity, your questions still waiting for an answer, and the schedules listed for you that are scheduled, due or running. Claimable todo tasks are already in your turn frame. Broadcasts are not read here. Read the result this way. A question you were waiting on that is no longer listed was answered or withdrawn: read it with masc_ask_status ask_id and include_resolved=true, and act on it first. A question still listed keeps that work blocked, so pick other work. A listed schedule that does what you are about to do means doing it now does it twice. A task another Keeper holds is not yours to start. If no post moved since you last read the board, go back to your work. Lists page at 10 rows; a tasks list with truncated=true has more, read with next_cursor. If one read fails, the call fails and names it, and later reads do not run."
+description: "Reads task ownership, recent Board activity, open questions and your unfinished schedules when choosing new work or checking a changed dependency. If the current Task and next step are already known, continue them directly; this is not a prerequisite on every wake. For missing scope or acceptance criteria, use keeper_tasks_list with task_ids and projection=full. An open question blocks only the work depending on its answer; check an answered or withdrawn question by its exact ID with include_resolved=true. Respect existing owners and avoid duplicating scheduled work. A failed node is named in the result; use its settled results before repeating reads. Task pages with truncated=true continue with next_cursor."
 ---
 
 # work-intake
 
-`keeper_compose_work-intake` 는 일을 고르기 전에 보는 네 가지를 한 번에 읽는다.
+`keeper_compose_work-intake` 는 새 일을 고르거나 바뀐 의존성을 확인할 때 일곱 노드로 현황을 읽는다.
+진행할 Task와 다음 단계가 이미 있으면 이 호출 없이 그 단계부터 이어간다.
 
 Keeper 에게 보이는 설명은 아래 fence 의 `description` 뿐이다. 이 본문은 사람이 읽는다.
 읽는 법(답이 왔나, 예약이 겹치나, 남이 잡았나, 보드가 움직였나)은 그 `description` 에 있다.
@@ -33,8 +34,8 @@ Keeper 에게 보이는 설명은 아래 fence 의 `description` 뿐이다. 이 
   예약으로 찬다. 2026-09-15 저장소에서 `code-reviewer` 는 자기 행 256건 중 `due` 가 1건이었다.
 - claim 할 수 있는 todo 는 턴 프레임이 "next to claim / Newly added" 로 이미 보여 준다.
 - `masc_ask_status` 는 `include_resolved = true` 면 답이 끝난 질문 기록 전체를 돌려주고,
-  개수를 줄이는 인자가 없다. 그래서 열린 질문만 읽고, 목록에서 사라진 질문을 답이 온
-  것으로 읽는다.
+  개수를 줄이는 인자가 없다. 이 조합은 열린 질문만 읽는다. 목록에서 사라진 질문은
+  답변과 철회를 구분할 수 없으므로, 확인이 필요하면 해당 ID로 `include_resolved = true`를 쓴다.
 - 샌드박스·체크아웃 상태(`keeper_context_status`)는 넣지 않는다. 크기를 줄이는 입력이 없고
   체크아웃 수에 따라 결과가 달라진다.
 - 브로드캐스트는 이 호출이 읽지 않는다.
@@ -71,7 +72,7 @@ Keeper 에게 보이는 설명은 아래 fence 의 `description` 뿐이다. 이 
 ```toml composition
 [[compositions]]
 name = "work-intake"
-description = "Before you pick work, after a wake or after waiting on someone, reads in one call: tasks in progress or claimed with who holds them, the 10 board posts with the latest activity, your questions still waiting for an answer, and the schedules listed for you that are scheduled, due or running. Claimable todo tasks are already in your turn frame. Broadcasts are not read here. Read the result this way. A question you were waiting on that is no longer listed was answered or withdrawn: read it with masc_ask_status ask_id and include_resolved=true, and act on it first. A question still listed keeps that work blocked, so pick other work. A listed schedule that does what you are about to do means doing it now does it twice. A task another Keeper holds is not yours to start. If no post moved since you last read the board, go back to your work. Lists page at 10 rows; a tasks list with truncated=true has more, read with next_cursor. If one read fails, the call fails and names it, and later reads do not run."
+description = "Reads task ownership, recent Board activity, open questions and your unfinished schedules when choosing new work or checking a changed dependency. If the current Task and next step are already known, continue them directly; this is not a prerequisite on every wake. For missing scope or acceptance criteria, use keeper_tasks_list with task_ids and projection=full. An open question blocks only the work depending on its answer; check an answered or withdrawn question by its exact ID with include_resolved=true. Respect existing owners and avoid duplicating scheduled work. A failed node is named in the result; use its settled results before repeating reads. Task pages with truncated=true continue with next_cursor."
 execution = "inline"
 
 [[compositions.nodes]]

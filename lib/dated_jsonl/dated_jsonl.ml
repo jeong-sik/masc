@@ -1894,9 +1894,14 @@ let read_range_recent ?offset t ~since ~until n =
   filter_map_range_recent ?offset t ~since ~until n ~f:(fun json -> Some json)
 ;;
 
+(* The store's lock is taken on the fiber; the directory reads and unlinks
+   run on a system thread, so a pass over large day files does not hold the
+   domain (#42935). *)
 let prune t ~days =
   let mutex = Atomic.get t.mutex in
-  Eio.Mutex.use_ro mutex (fun () -> prune_unlocked t ~days)
+  Eio.Mutex.use_ro mutex (fun () ->
+    Eio_guard.run_in_systhread ~label:"dated-jsonl-prune" (fun () ->
+      prune_unlocked t ~days))
 
 let days_to_keep ~operator_window_days store =
   match Store.retention store with

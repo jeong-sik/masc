@@ -28,34 +28,44 @@ let is_flat_jsonl_file name =
     && String.for_all (fun c -> c >= '0' && c <= '9') rot
     && Filename.check_suffix (String.sub name 0 dot) ".jsonl"
 
+(* Remove the regular files in [dir] whose name [matches] and whose mtime is
+   older than [days]. A missing [dir] counts 0. The directory read and the
+   unlinks run on a system thread (#42935). *)
+let prune_flat_files_older_than ~matches ~days dir =
+  if days <= 0
+  then 0
+  else
+    Eio_guard.run_in_systhread ~label:"flat-file-prune" (fun () ->
+      if not (Sys.file_exists dir)
+      then 0
+      else (
+        let cutoff =
+          (* NDT-OK: wall clock is the retention boundary for mtime pruning; idempotent cleanup, never feeds deterministic replay. *)
+          Unix.gettimeofday () -. (float_of_int days *. Masc_time_constants.day)
+        in
+        Array.fold_left
+          (fun acc name ->
+            if matches name
+            then
+              let path = Filename.concat dir name in
+              match (try Some (Unix.stat path) with Unix.Unix_error _ -> None) with
+              | Some (stat : Unix.stats)
+                when stat.st_kind = Unix.S_REG && stat.st_mtime < cutoff ->
+                (try
+                   Sys.remove path;
+                   acc + 1
+                 with Sys_error _ -> acc)
+              | _ -> acc
+            else acc)
+          0
+          (Sys.readdir dir)))
+
 (* Trajectory stores are flat [<trace_id>.jsonl] files under
    [trajectories/<keeper>/] — no [YYYY-MM] month dirs — so
    [Dated_jsonl.prune] is a provable no-op on them.  Prune by file mtime
    instead, folded keeper-scoped via [prune_children_dirs]. *)
 let prune_flat_jsonl_older_than ~days dir =
-  if days <= 0 || not (Sys.file_exists dir)
-  then 0
-  else
-    let cutoff =
-      (* NDT-OK: wall clock is the retention boundary for mtime pruning; idempotent cleanup, never feeds deterministic replay. *)
-      Unix.gettimeofday () -. (float_of_int days *. Masc_time_constants.day)
-    in
-    Array.fold_left
-      (fun acc name ->
-        if is_flat_jsonl_file name
-        then
-          let path = Filename.concat dir name in
-          match (try Some (Unix.stat path) with Unix.Unix_error _ -> None) with
-          | Some (stat : Unix.stats)
-            when stat.st_kind = Unix.S_REG && stat.st_mtime < cutoff ->
-            (try
-               Sys.remove path;
-               acc + 1
-             with Sys_error _ -> acc)
-          | _ -> acc
-        else acc)
-      0
-      (Sys.readdir dir)
+  prune_flat_files_older_than ~matches:is_flat_jsonl_file ~days dir
 
 (* Keeper-scoped flat-JSONL stores ([keepers/<name>/<store>] holding
    [<id>.jsonl] files plus numeric rotation siblings, no month dirs).
@@ -75,32 +85,10 @@ let prune_keeper_scoped_flat_stores ~days ~masc_root =
     (Filename.concat masc_root Common.keepers_runtime_dirname)
 
 (* messages/: flat [<seq>_<agent>_<id>_broadcast.json] files — one JSON per
-   message, no month dirs. Prune by file mtime, mirroring [prune_flat_jsonl_older_than] for the [.json]
-   suffix. Any other extension is never removed. *)
+   message, no month dirs. Prune by file mtime like the [.jsonl] stores.
+   Any other extension is never removed. *)
 let prune_flat_json_older_than ~days dir =
-  if days <= 0 || not (Sys.file_exists dir)
-  then 0
-  else
-    let cutoff =
-      (* NDT-OK: wall clock is the retention boundary for mtime pruning; idempotent cleanup, never feeds deterministic replay. *)
-      Unix.gettimeofday () -. (float_of_int days *. Masc_time_constants.day)
-    in
-    Array.fold_left
-      (fun acc name ->
-        if Filename.check_suffix name ".json"
-        then
-          let path = Filename.concat dir name in
-          match (try Some (Unix.stat path) with Unix.Unix_error _ -> None) with
-          | Some (stat : Unix.stats)
-            when stat.st_kind = Unix.S_REG && stat.st_mtime < cutoff ->
-            (try
-               Sys.remove path;
-               acc + 1
-             with Sys_error _ -> acc)
-          | _ -> acc
-        else acc)
-      0
-      (Sys.readdir dir)
+  prune_flat_files_older_than ~matches:(fun name -> Filename.check_suffix name ".json") ~days dir
 
 (* Every retention-covered JSONL store in one fold. Both the startup pass
    and the 24h periodic pass call exactly this function, so the covered-store

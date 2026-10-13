@@ -1627,19 +1627,10 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
          "dashboard execution force refresh timed out: %s (%.0fs)"
          execution_default_light_cache_key
          timeout_sec;
-       `Assoc
-         [ "error", `String "computation_timeout"
-         ; "message",
-           `String
-             (Printf.sprintf
-                "Dashboard %s timed out after %.0fs"
-                execution_default_light_cache_key
-                timeout_sec)
-         ; "generated_at", `String (Masc_domain.now_iso ())
-         ; "timeout_kind", `String "owner"
-         ; "timeout_sec", `Float timeout_sec
-         ; "key", `String execution_default_light_cache_key
-         ])
+       Dashboard_cache.timeout_envelope_json
+         ~kind:Dashboard_cache.Timeout_owner
+         ~key:execution_default_light_cache_key
+         ~timeout_sec)
     |> with_execution_metadata
          ~config
          ~cache_key:execution_default_light_cache_key

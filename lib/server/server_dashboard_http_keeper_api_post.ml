@@ -684,27 +684,10 @@ let refresh_keeper_execution_surfaces =
 let invalidate_keeper_execution_surfaces =
   Server_dashboard_http_keeper_api_lifecycle_post.invalidate_keeper_execution_surfaces
 
-let dashboard_config_string_fields =
-  [
-    "runtime_id";
-    "instructions";
-    "sandbox_profile";
-    "network_mode";
-    "activation_mode";
-    "input_policy";
-  ]
-
-let dashboard_config_string_list_fields =
-  [
-    "mention_targets";
-    "board_interests";
-  ]
-
-(* Accepts a string or an explicit null, so it cannot join
-   [dashboard_config_string_fields] -- that list's check demands a string and
-   would refuse the clear. Null is how an operator detaches the endpoint when
-   moving off remote_ssh; omitting the field instead carries the keeper TOML's
-   value forward into a profile that refuses it
+(* Accepts a string or an explicit null, unlike the plain string fields, which
+   refuse the clear. Null is how an operator detaches the endpoint when moving
+   off remote_ssh; omitting the field instead carries the keeper TOML's value
+   forward into a profile that refuses it
    ([remote_endpoint_requires_remote_ssh]). *)
 let remote_endpoint_field = "remote_endpoint"
 
@@ -714,19 +697,50 @@ let remote_endpoint_field = "remote_endpoint"
 let confirm_context_shrink_field = "confirm_context_shrink"
 let expected_config_revision_field = "expected_config_revision"
 
-let dashboard_config_patch_allowed_fields =
-  [ "name"
-  ; "tools"
-  ; "skills"
-  ; "max_context_override"
-  ; confirm_context_shrink_field
-  ; expected_config_revision_field
-  ; remote_endpoint_field
-  ; "sandbox_image"
-  ]
-  @
-  dashboard_config_string_fields
-  @ dashboard_config_string_list_fields
+(* Every field a dashboard config POST may carry. A key outside this set is
+   refused, and each field has exactly one check in
+   [validate_dashboard_config_field]. *)
+type dashboard_config_field =
+  | Field_name
+  | Field_tools
+  | Field_skills
+  | Field_max_context_override
+  | Field_confirm_context_shrink
+  | Field_expected_config_revision
+  | Field_remote_endpoint
+  | Field_sandbox_image
+  | Field_runtime_id
+  | Field_instructions
+  | Field_sandbox_profile
+  | Field_network_mode
+  | Field_activation_mode
+  | Field_input_policy
+  | Field_mention_targets
+  | Field_board_interests
+[@@deriving enumerate]
+
+let dashboard_config_field_key = function
+  | Field_name -> "name"
+  | Field_tools -> "tools"
+  | Field_skills -> "skills"
+  | Field_max_context_override -> "max_context_override"
+  | Field_confirm_context_shrink -> confirm_context_shrink_field
+  | Field_expected_config_revision -> expected_config_revision_field
+  | Field_remote_endpoint -> remote_endpoint_field
+  | Field_sandbox_image -> "sandbox_image"
+  | Field_runtime_id -> "runtime_id"
+  | Field_instructions -> "instructions"
+  | Field_sandbox_profile -> "sandbox_profile"
+  | Field_network_mode -> "network_mode"
+  | Field_activation_mode -> "activation_mode"
+  | Field_input_policy -> "input_policy"
+  | Field_mention_targets -> "mention_targets"
+  | Field_board_interests -> "board_interests"
+
+let dashboard_config_field_of_key key =
+  List.find_opt
+    (fun field -> String.equal (dashboard_config_field_key field) key)
+    all_of_dashboard_config_field
 
 let dedupe_keep_order_strings values =
   let rec loop seen acc = function
@@ -851,33 +865,35 @@ let validate_dashboard_max_context_override = function
       Keeper_config.validate_max_context_override_value value |> Result.map ignore
   | other -> dashboard_field_type_error "max_context_override" "an integer or null" other
 
-let validate_dashboard_config_field key value =
-  if key = "name" then
-    match value with
-    | `String _ -> Ok ()
-    | other -> dashboard_field_type_error key "a string" other
-  else if key = "tools" then
+let validate_dashboard_config_field field value =
+  let key = dashboard_config_field_key field in
+  match field with
+  | Field_name
+  | Field_runtime_id
+  | Field_instructions
+  | Field_sandbox_profile
+  | Field_network_mode
+  | Field_activation_mode ->
+    (match value with
+     | `String _ -> Ok ()
+     | other -> dashboard_field_type_error key "a string" other)
+  | Field_tools | Field_skills ->
     (match value with
      | `Assoc _ -> Ok ()
      | other -> dashboard_field_type_error key "an object" other)
-  else if key = "skills" then
-    (match value with
-     | `Assoc _ -> Ok ()
-     | other -> dashboard_field_type_error key "an object" other)
-  else if key = "input_policy" then
+  | Field_input_policy ->
     (match value with
      | `String raw when Option.is_some (Keeper_input_policy.of_string raw) -> Ok ()
      | other -> dashboard_field_type_error key "small or wide" other)
-  else if key = "max_context_override" then
-    validate_dashboard_max_context_override value
-  else if key = confirm_context_shrink_field then
+  | Field_max_context_override -> validate_dashboard_max_context_override value
+  | Field_confirm_context_shrink ->
     (match value with
      | `Bool _ -> Ok ()
      | other -> dashboard_field_type_error key "a boolean" other)
-  else if key = expected_config_revision_field then
+  | Field_expected_config_revision ->
     Keeper_turn_up_config_persistence.config_revision_of_yojson value
     |> Result.map ignore
-  else if key = "sandbox_image" then
+  | Field_sandbox_image ->
     (match value with
      | `Null -> Ok ()
      | `String image ->
@@ -885,7 +901,7 @@ let validate_dashboard_config_field key value =
         | None -> Ok ()
         | Some detail -> Error detail)
      | other -> dashboard_field_type_error key "an image catalog name or null" other)
-  else if key = remote_endpoint_field then
+  | Field_remote_endpoint ->
     (* Shape only. Whether the name is declared under [exec.ssh.endpoints], and
        whether the profile admits an endpoint at all, are decided by
        [Keeper_turn_up_args.parse] on the apply path. *)
@@ -896,13 +912,8 @@ let validate_dashboard_config_field key value =
          else Ok ()
      | `Null -> Ok ()
      | other -> dashboard_field_type_error key "a string or null" other)
-  else if List.mem key dashboard_config_string_fields then
-    match value with
-    | `String _ -> Ok ()
-    | other -> dashboard_field_type_error key "a string" other
-  else if List.mem key dashboard_config_string_list_fields then
+  | Field_mention_targets | Field_board_interests ->
     validate_dashboard_string_list_field key value
-  else Ok ()
 
 let validate_dashboard_config_patch ~meta:_ fields =
   match duplicate_assoc_keys fields with
@@ -911,28 +922,28 @@ let validate_dashboard_config_patch ~meta:_ fields =
         (Printf.sprintf "duplicate dashboard config field(s): %s"
            (String.concat ", " duplicates))
   | [] ->
-      let unknown =
-        fields
-        |> List.filter_map (fun (key, _) ->
-             if List.mem key dashboard_config_patch_allowed_fields then None
-             else Some key)
-        |> dedupe_keep_order_strings
+      let known, unknown =
+        List.fold_right
+          (fun (key, value) (known, unknown) ->
+             match dashboard_config_field_of_key key with
+             | Some field -> ((field, value) :: known, unknown)
+             | None -> (known, key :: unknown))
+          fields ([], [])
       in
-      if unknown <> [] then
-        Error
-          (Printf.sprintf "unsupported dashboard config field(s): %s"
-             (String.concat ", " unknown))
-      else
-        let rec validate_types = function
-          | [] -> Ok ()
-          | (key, value) :: rest ->
-              (match validate_dashboard_config_field key value with
-               | Error msg -> Error msg
-               | Ok () -> validate_types rest)
-        in
-        (match validate_types fields with
-         | Error msg -> Error msg
-         | Ok () -> Ok ())
+      (match dedupe_keep_order_strings unknown with
+       | _ :: _ as unknown ->
+           Error
+             (Printf.sprintf "unsupported dashboard config field(s): %s"
+                (String.concat ", " unknown))
+       | [] ->
+           let rec validate_types = function
+             | [] -> Ok ()
+             | (field, value) :: rest ->
+                 (match validate_dashboard_config_field field value with
+                  | Error msg -> Error msg
+                  | Ok () -> validate_types rest)
+           in
+           validate_types known)
 
 (* [Some (previous_display, new_value)] when the patch reduces the keeper's
    context window below its current setting — introducing a cap where there was

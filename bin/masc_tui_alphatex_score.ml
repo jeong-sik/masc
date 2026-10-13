@@ -581,20 +581,22 @@ let read source =
   let rec step state tokens =
     match tokens with
     | [] ->
-        (* A bar line with nothing between it and the next -- a leading or a
-           doubled [|] -- holds no beat and is no measure. *)
-        let measures =
-          List.rev ((state.b_marks, state.b_beats) :: state.b_measures)
-          |> List.filter_map (function
-               | _, [] -> None
-               | marks, soundings -> Some (place_beats marks (List.rev soundings)))
-        in
-        let tuning = Option.value state.b_tuning ~default:default_tuning in
-        (match measures with
-         | [] -> Error No_music
-         | _ :: _ when List.is_empty state.b_beats && marks_pending state.b_marks ->
-             Error Repeat_without_bar
-         | _ :: _ -> Ok { tuning; measures })
+        (* A sign with no bar of its own fails before the music is counted:
+           with no bar it marks nothing, whether or not earlier bars sang. *)
+        if List.is_empty state.b_beats && marks_pending state.b_marks then Error Repeat_without_bar
+        else
+          (* A bar line with nothing between it and the next -- a leading or a
+             doubled [|] -- holds no beat and is no measure. *)
+          let measures =
+            List.rev ((state.b_marks, state.b_beats) :: state.b_measures)
+            |> List.filter_map (function
+                 | _, [] -> None
+                 | marks, soundings -> Some (place_beats marks (List.rev soundings)))
+          in
+          let tuning = Option.value state.b_tuning ~default:default_tuning in
+          (match measures with
+           | [] -> Error No_music
+           | _ :: _ -> Ok { tuning; measures })
     | Tk_directive Title :: rest ->
         (match rest with
          | Tk_quoted :: after -> step state after

@@ -12,6 +12,8 @@
     passes the bar plays on. A second [\rc] says the count again; [\ae]
     numbers gather across the bar. A sign with no bar of its own -- on a bar
     with no beat, or after the last bar -- fails rather than being dropped.
+    Open and close are not paired: a close without an open, or an open
+    without a close, reads fine.
 
     Technique markup in braces -- a [{…}] after a beat or on a chord member --
     marks its note and changes nothing else. Markup that changes a beat's

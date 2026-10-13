@@ -144,6 +144,26 @@ let test_endings_gather_across_the_bar () =
   check_signs "each bar keeps its own" ":4 0.6 \\ae 1 | :4 3.6 \\ae 2"
     [ false, None, [ 1 ]; false, None, [ 2 ] ]
 
+(* The endings stop where the music resumes: the note after them still
+   sounds on its count. *)
+let test_endings_stop_where_music_resumes () =
+  check_music "the note after the endings keeps its beat" ":4 0.6 \\ae 1 3.6"
+    [ 8, [ 0, 4, [ "0@6" ]; 4, 4, [ "3@6" ] ] ];
+  check_signs "and the bar keeps its ending" ":4 0.6 \\ae 1 3.6" [ false, None, [ 1 ] ]
+
+let test_all_marks_on_one_bar () =
+  check_signs "open, endings and close together" "\\ro \\ae 1 :4 0.6 \\rc 2"
+    [ true, Some 2, [ 1 ] ];
+  (match Alphatex.render_tab ~max_width:40 "\\ro \\ae 1 :4 0.6 \\rc 2" with
+   | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+   | Ok lines ->
+       Alcotest.(check bool) "no line is wider than the pane" true
+         (List.for_all (fun line -> String.length line <= 40) lines))
+
+let test_counts_at_their_edges () =
+  check_signs "a count of one plays once" ":4 0.6 \\rc 1" [ false, Some 1, [] ];
+  check_signs "the thirty-first ending" ":4 0.6 \\ae 31" [ false, None, [ 31 ] ]
+
 (* {1 The pane}
 
    Where the measures break and how wide a cell is are not compared: those
@@ -233,6 +253,8 @@ let test_notes_that_cannot_be_placed () =
 let test_repeat_signs_outside_the_subset () =
   check_failure "a close with no count" ":4 0.6 \\rc" (Missing_argument Repeat_count);
   check_failure "a close with no number" ":4 0.6 \\rc x" (Missing_argument Repeat_count);
+  check_failure "a close with hex for a count" ":4 0.6 \\rc 0x2" (Missing_argument Repeat_count);
+  check_failure "a close with a signed count" ":4 0.6 \\rc -1" (Missing_argument Repeat_count);
   check_failure "a close at the bar line" ":4 0.6 \\rc | 3.6" (Missing_argument Repeat_count);
   check_failure "a count of nothing" ":4 0.6 \\rc 0" (Repeat_count_out_of_range "0");
   check_failure "a count past counting" ":4 0.6 \\rc 99999999999999999999"
@@ -244,11 +266,15 @@ let test_repeat_signs_outside_the_subset () =
   check_failure "the second ending past 31" ":4 0.6 \\ae 1 32" (Alternate_ending_out_of_range "32")
 
 let test_a_sign_with_no_bar () =
+  check_failure "an opener and nothing else" "\\ro" Repeat_without_bar;
+  check_failure "a closer and nothing else" "\\rc 2" Repeat_without_bar;
+  check_failure "endings and nothing else" "\\ae 1" Repeat_without_bar;
   check_failure "an opener after the last bar" ":4 0.6 | \\ro" Repeat_without_bar;
   check_failure "a closer after the last bar" ":4 0.6 | \\rc 2" Repeat_without_bar;
   check_failure "endings after the last bar" ":4 0.6 | \\ae 1" Repeat_without_bar;
   check_failure "an opener on an empty bar" "\\ro | :4 0.6" Repeat_without_bar;
-  check_failure "a closer on an empty bar" ":4 0.6 | \\rc 2 | 3.6" Repeat_without_bar
+  check_failure "a closer on an empty bar" ":4 0.6 | \\rc 2 | 3.6" Repeat_without_bar;
+  check_failure "endings on an empty bar" "\\ae 1 | :4 0.6" Repeat_without_bar
 
 (* A failure's sentence is printed, so the author's text in it never reaches
    the terminal as control bytes. *)
@@ -288,6 +314,10 @@ let () =
             test_a_second_close_says_the_count_again
         ; Alcotest.test_case "endings gather across the bar" `Quick
             test_endings_gather_across_the_bar
+        ; Alcotest.test_case "endings stop where music resumes" `Quick
+            test_endings_stop_where_music_resumes
+        ; Alcotest.test_case "all marks on one bar" `Quick test_all_marks_on_one_bar
+        ; Alcotest.test_case "counts at their edges" `Quick test_counts_at_their_edges
         ] )
     ; ( "the pane"
       , [ Alcotest.test_case "a drawn tab stays inside the pane" `Quick

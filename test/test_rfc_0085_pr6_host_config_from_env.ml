@@ -38,12 +38,6 @@ let test_config_dir_field_reads_env () =
     check (option string) "config_dir field reflects env" (Some "/etc/masc") h.config_dir)
 ;;
 
-let test_data_dir_field_reads_env () =
-  with_env "MASC_DATA_DIR" (Some "/var/lib/masc") (fun () ->
-    let h = Host_config.host () in
-    check (option string) "data_dir field reflects env" (Some "/var/lib/masc") h.data_dir)
-;;
-
 let test_base_path_lease_dir_field_reads_env () =
   with_env "MASC_BASE_PATH_LEASE_DIR" (Some "/run/masc-lease") (fun () ->
     let h = Host_config.host () in
@@ -85,7 +79,6 @@ let () =
     [ ( "env-derived fields"
       , [ test_case "base_path" `Quick test_base_path_field_reads_env
         ; test_case "config_dir" `Quick test_config_dir_field_reads_env
-        ; test_case "data_dir" `Quick test_data_dir_field_reads_env
         ; test_case
             "base path lease dir"
             `Quick

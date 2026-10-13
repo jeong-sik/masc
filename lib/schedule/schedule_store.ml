@@ -846,7 +846,20 @@ let update_request config ~now ~runner_tick_sec ?(timing_update = Replace_timing
       then (
         let request = match timing_update with
           | Replace_timing -> request
-          | Keep_timing -> { request with due_at = current.due_at; recurrence = current.recurrence }
+          | Keep_timing ->
+            (* The expiry is part of the timing a content edit keeps: a
+               replacement that carries none must not turn an expiring
+               schedule into one that never reaches [Expired]. An explicit
+               expiry on the call still wins. *)
+            let expires_at = match request.expires_at with
+              | Some _ as given -> given
+              | None -> current.expires_at
+            in
+            { request with
+              due_at = current.due_at
+            ; recurrence = current.recurrence
+            ; expires_at
+            }
         in
         let* () = validate_initial_request request in
         let* () = changed_due_not_past ~now ~current request in

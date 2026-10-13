@@ -188,12 +188,12 @@ let check_refusal label expected result =
       (Tool_result.message result)
 ;;
 
-let create_service_exn config ~schedule_id ~due_at ~payload ?recurrence () =
+let create_service_exn config ~schedule_id ~due_at ~payload ?recurrence ?expires_at () =
   match
     Schedule_service.create config ~runner_tick_sec ~now:100.0 ~schedule_id ~requested_at:100.0
       ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent")
-      ~due_at ~payload ~source:Schedule_domain.Operator_request ?recurrence ()
+      ~due_at ~payload ~source:Schedule_domain.Operator_request ?recurrence ?expires_at ()
   with
   | Ok request -> request
   | Error err -> fail (Schedule_service.service_error_to_string err)
@@ -510,6 +510,47 @@ let test_content_edit_preserves_due_and_recurrence () =
     ; "content-overdue", 200., Schedule_domain.One_shot
     ; "content-daily", future_due_at,
         Schedule_domain.Daily {hour=9; minute=0; second=0; timezone="UTC"} ]
+;;
+
+(* The expiry is part of the timing a content edit keeps. A content edit that
+   dropped it would turn an expiring schedule into one that never reaches
+   [Expired]. An expiry sent on the call wins, and an update that also sends a
+   due input is a full replacement, so omitting the expiry there still clears
+   it, as the tool description says. *)
+let test_content_edit_keeps_expiry () =
+  with_config @@ fun config ->
+  let schedule_id = "content-edit-expiring" in
+  let expires_at = future_due_at +. 3600. in
+  let stored_expiry () =
+    match Schedule_store.get_schedule config ~schedule_id with
+    | Some request -> request.expires_at
+    | None -> fail "expiring schedule missing"
+  in
+  let update extra =
+    dispatch_exn config Tool_schemas_schedule.Update_request
+      (`Assoc
+        ([ "schedule_id", `String schedule_id
+         ; "keeper_name", `String "schedule-keeper"
+         ; "message", `String "after" ] @ extra))
+  in
+  ignore
+    (create_service_exn config ~schedule_id ~due_at:future_due_at ~expires_at
+       ~payload:(keeper_wake_payload "before") ());
+  check bool "content-only update succeeds" true
+    (Tool_result.is_success (update []));
+  check (option (float 0.)) "content edit keeps the stored expiry"
+    (Some expires_at) (stored_expiry ());
+  let later_expiry = expires_at +. 60. in
+  check bool "content edit with an expiry succeeds" true
+    (Tool_result.is_success
+       (update [ "expires_at_unix", `Float later_expiry ]));
+  check (option (float 0.)) "an expiry on the call replaces the stored one"
+    (Some later_expiry) (stored_expiry ());
+  check bool "retiming update succeeds" true
+    (Tool_result.is_success
+       (update [ "due_at_unix", `Float (future_due_at +. 7200.) ]));
+  check (option (float 0.)) "a full replacement without an expiry clears it"
+    None (stored_expiry ())
 ;;
 
 let test_content_edit_preserves_concurrently_changed_due () =
@@ -2096,6 +2137,8 @@ let () =
             test_update_requires_id_and_active_row
         ; test_case "content edit preserves time and recurrence" `Quick
             test_content_edit_preserves_due_and_recurrence
+        ; test_case "content edit keeps the stored expiry" `Quick
+            test_content_edit_keeps_expiry
         ; test_case "content edit keeps a concurrent retime" `Quick
             test_content_edit_preserves_concurrently_changed_due
         ; test_case "results survive the checkpoint encoder" `Quick

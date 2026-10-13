@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -61,4 +62,17 @@ def require(parser: argparse.ArgumentParser, flag_value: str | None, flag: str) 
         parser.error(required(flag))
     if isinstance(base, Unexpanded):
         parser.error(base.message())
+    return base
+
+
+def require_or_exit(flag_value: str | None, flag: str) -> Path:
+    """:func:`require` for a caller with no parser at hand: the same message
+    on stderr and exit 2."""
+    base = resolve(flag_value)
+    if base is None:
+        print(f"error: {required(flag)}", file=sys.stderr)
+        sys.exit(2)
+    if isinstance(base, Unexpanded):
+        print(f"error: {base.message()}", file=sys.stderr)
+        sys.exit(2)
     return base

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import re
 import sys
@@ -23,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
+import masc_base_path  # noqa: E402
 from keeper_store_layout import (  # noqa: E402
     StoreLayoutUnavailable,
     load_store_layout,
@@ -79,12 +79,6 @@ PR_CREATED_NUMBER_RE = re.compile(
     re.IGNORECASE,
 )
 ERROR_STATUSES = {"error", "failed", "failure", "timeout", "cancelled", "canceled"}
-
-
-def default_base_path() -> str | None:
-    # RFC-0121: MASC_BASE_PATH is the sole canonical source.
-    value = os.environ.get("MASC_BASE_PATH", "").strip()
-    return value or None
 
 
 @dataclass
@@ -1158,11 +1152,7 @@ def audit_keeper(
 
 
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
-    if args.base_path is None:
-        raise SystemExit(
-            "Error: MASC_BASE_PATH is required (or pass --base-path PATH)."
-        )
-    base_path = Path(args.base_path).expanduser().resolve()
+    base_path = masc_base_path.require_or_exit(args.base_path, "--base-path").resolve()
     config_dir = base_path / ".masc" / "config" / "keepers"
     if not config_dir.is_dir():
         raise SystemExit(f"keeper config dir not found: {config_dir}")
@@ -1297,8 +1287,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--base-path",
-        default=default_base_path(),
-        help="MASC base path containing .masc (required; reads MASC_BASE_PATH)",
+        default=None,
+        help="MASC base path containing .masc (default: MASC_BASE_PATH)",
     )
     parser.add_argument(
         "--expected-keepers",

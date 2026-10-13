@@ -18,7 +18,7 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/msx-fetch-homebrew-carts.sh [--base-path DIR] [--list] [--dry-run]
 
-  --base-path DIR  Workspace root holding .masc (default: $MASC_BASE_PATH, then cwd)
+  --base-path DIR  Workspace root holding .masc (default: $MASC_BASE_PATH)
   --list           Print the pinned table and exit
   --dry-run        Say what would be downloaded; write nothing
 USAGE
@@ -33,7 +33,7 @@ transball        1.3.2  GPL-3.0  35d1cd9b7f2c25cdc38eb160b2fa71473c1b68b2ce713ac
 noborunoca       1.0.2  MIT      57a3be2fe5c3190daa3e69cf23cd262cdc8af98c60993ea941d43c815cbb25f6  https://github.com/h1romas4/noborunoca/releases/download/v1.0.2/noborunoca.rom
 '
 
-base_path="${MASC_BASE_PATH:-$PWD}"
+base_path="${MASC_BASE_PATH:-}"
 list_only=0
 dry_run=0
 while [[ $# -gt 0 ]]; do
@@ -63,6 +63,11 @@ if [[ $list_only -eq 1 ]]; then
   exit 0
 fi
 
+# A value of only spaces names nothing, and nothing is written under the cwd.
+if [[ -z "${base_path//[[:space:]]/}" ]]; then
+  echo "error: --base-path or MASC_BASE_PATH is required" >&2
+  exit 2
+fi
 carts_dir="$base_path/.masc/msx/carts"
 [[ $dry_run -eq 1 ]] || mkdir -p "$carts_dir"
 
@@ -78,7 +83,7 @@ while read -r name version licence sha url; do
     continue
   fi
   if [[ $dry_run -eq 1 ]]; then
-    echo "would get $name.rom <- $url"
+    echo "would get $dest <- $url"
     continue
   fi
   tmp="$(mktemp "$carts_dir/.$name.XXXXXX")"

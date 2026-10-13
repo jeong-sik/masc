@@ -91,7 +91,10 @@ let parse_page protocol body =
       | (Anthropic | Kimi), Some (`Bool true) ->
         (match string fields "last_id" with Some id -> Ok (Some id) | None -> Error Invalid_response)
       | _, (None | Some (`Bool false)) -> Ok None
-      | _ -> Error Invalid_response in
+      | (Anthropic, Some (`Assoc _ | (`Null | (`List _ | (`Float _ | (`Int _ | (`Intlit _ | `String _)))))))
+      | (Kimi, Some (`Assoc _ | (`Null | (`List _ | (`Float _ | (`Int _ | (`Intlit _ | `String _)))))))
+      | ((Openai | Ollama), Some (`Bool true))
+      | ((Openai | Ollama), Some (`Assoc _ | (`Null | (`List _ | (`Float _ | (`Int _ | (`Intlit _ | `String _))))))) -> Error Invalid_response in
     Ok (List.rev reversed, next)
   | _ -> Error Invalid_response
   with Yojson.Json_error _ -> Error Invalid_response

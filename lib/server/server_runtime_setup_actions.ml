@@ -127,14 +127,18 @@ let source_template ?(use=Observe_source) ~sw ~pending ~workspace config request
       declared_provider config id with
     | Save_source, None, None, Some ({credentials=Some (Runtime_schema.Inline _); _} as provider)
       when http -> Some provider
-    | _ -> None in
+    | (Save_source, None, None, Some { credentials = Some (Runtime_schema.Env _ | Runtime_schema.File _);_})
+    | (Save_source, None, None, Some { credentials = None;_}) | (Save_source, None, None, None)
+    | (Save_source, None, Some _, _) | (Save_source, Some _, _, _) | (Observe_source, _, _, _)
+    | (Save_source, None, None, Some {credentials=Some (Inline _); _ }) -> None in
   let* credentials = match account,List.assoc_opt "api_key" request with
     | Some (Runtime_setup_accounts.Antigravity_account account),None
       when choice=Runtime_setup_spec.Antigravity -> Ok ["credential_file",`String account.credential_file]
     | Some (Runtime_setup_accounts.Native_home _),None
       when choice<>Runtime_setup_spec.Antigravity -> Ok []
     | Some _,None -> Error Invalid_request
-    | Some _,Some _ -> Error Invalid_request
+    | (Some (Runtime_setup_accounts.Antigravity_account _), Some _)
+    | (Some (Runtime_setup_accounts.Native_home _), Some _) -> Error Invalid_request
 
     | None,Some (`String secret) when http -> private_key ~sw pending secret
     | None,Some _ -> Error Invalid_request
@@ -377,7 +381,8 @@ let bound_model_names (config : Runtime_schema.config) template id choice =
         | Some selected, _ -> Option.equal String.equal (Some selected)
             (effective_home provider.account_home)
         | None, Some selected -> (match provider.credentials with
-            | Some (Runtime_schema.File path) -> String.equal selected path | _ -> false)
+            | Some (Runtime_schema.File path) -> String.equal selected path | Some (Runtime_schema.Env _ | Runtime_schema.Inline _)
+                                                                            | None -> false)
         | None, None -> String.equal provider.id id) in
   List.filter_map (fun (binding : Runtime_schema.binding) ->
     if binding.enabled

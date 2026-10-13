@@ -464,14 +464,20 @@ let keeper_phase_snapshot ?base_path () =
               , Some (Keeper_registry.Turn_configuration_error _) )
               when capacity_eligible ->
               true
-            | _ -> false
+            | (Keeper_state_machine.Failing, Some (Keeper_registry_types.Operator_interrupt | (Keeper_registry_types.Heartbeat_consecutive_failures _ | (Keeper_registry_types.Turn_consecutive_failures _ | (Keeper_registry_types.Provider_runtime_error _ | (Keeper_registry_types.Official_client_recovery_required _ | (Keeper_registry_types.Fiber_unresolved _ | Keeper_registry_types.Exception _)))))))
+            | (Keeper_state_machine.Failing, None)
+            | ((Keeper_state_machine.Offline | (Keeper_state_machine.Running | (Keeper_state_machine.Draining | (Keeper_state_machine.Paused | (Keeper_state_machine.Stopped | (Keeper_state_machine.Crashed | Keeper_state_machine.Restarting)))))), _)
+            | (Failing, Some (Turn_configuration_error _)) -> false
           in
           let requires_session_recovery =
             match entry.phase, entry.last_failure_reason with
             | ( Keeper_state_machine.Failing
               , Some (Keeper_registry.Official_client_recovery_required _) )
               when capacity_eligible -> true
-            | _ -> false
+            | (Keeper_state_machine.Failing, Some (Keeper_registry_types.Operator_interrupt | (Keeper_registry_types.Heartbeat_consecutive_failures _ | (Keeper_registry_types.Turn_consecutive_failures _ | (Keeper_registry_types.Provider_runtime_error _ | (Keeper_registry_types.Turn_configuration_error _ | (Keeper_registry_types.Fiber_unresolved _ | Keeper_registry_types.Exception _)))))))
+            | (Keeper_state_machine.Failing, None)
+            | ((Keeper_state_machine.Offline | (Keeper_state_machine.Running | (Keeper_state_machine.Draining | (Keeper_state_machine.Paused | (Keeper_state_machine.Stopped | (Keeper_state_machine.Crashed | Keeper_state_machine.Restarting)))))), _)
+            | (Failing, Some (Official_client_recovery_required _)) -> false
           in
           (* Phase inventory is not execution truth. Executability is projected
              separately through the shared closed owner-execution ADT. A
@@ -486,7 +492,10 @@ let keeper_phase_snapshot ?base_path () =
               when capacity_eligible && not is_configuration_blocked
                    && not requires_session_recovery ->
               true
-            | _ -> false
+            | Keeper_state_machine.Offline | Keeper_state_machine.Running
+            | Keeper_state_machine.Draining | Keeper_state_machine.Paused
+            | Keeper_state_machine.Stopped | Keeper_state_machine.Crashed
+            | Keeper_state_machine.Restarting | Failing -> false
           in
           let recovering =
             if is_recovering then counts.recovering + 1 else counts.recovering
@@ -854,8 +863,7 @@ let active_task_assignment (task : Masc_domain.task) =
       Some
         (Completion_authority_pending
            { producer_agent_name = assignee; submitted_at; verification_id })
-  | task_status ->
-      Masc_domain.task_assignee_of_status task_status
+  | (Types_core.Todo | Types_core.Claimed _ | Types_core.InProgress _ | Types_core.Done _ | Types_core.Cancelled _) as task_status -> Masc_domain.task_assignee_of_status task_status
       |> Option.map (fun assignee ->
              Keeper_task_owner
                {

@@ -80,7 +80,8 @@ let rec json_of_toml ~path : Otoml.t -> (Yojson.Safe.t, string) result = functio
 let text fields key =
   match List.assoc_opt key fields with
   | Some (Otoml.TomlString value) when String.trim value <> "" -> Ok value
-  | _ -> Error (key ^ " requires a non-blank string")
+  | Some (Otoml.TomlInteger _ | (Otoml.TomlFloat _ | (Otoml.TomlBoolean _ | (Otoml.TomlOffsetDateTime _ | (Otoml.TomlLocalDateTime _ | (Otoml.TomlLocalDate _ | (Otoml.TomlLocalTime _ | (Otoml.TomlArray _ | (Otoml.TomlTable _ | (Otoml.TomlInlineTable _ | Otoml.TomlTableArray _))))))))))
+  | None | Some (TomlString _) -> Error (key ^ " requires a non-blank string")
 
 let resolve_snapshot_paths ~directory = function
   | `Assoc fields ->
@@ -108,7 +109,10 @@ let decode ~source_path ~source_revision ~id fields =
   let* enabled = match List.assoc_opt "enabled" fields with
     | None -> Ok true (* Accepting deployment stage; existing declarations still run. *)
     | Some (Otoml.TomlBoolean enabled) -> Ok enabled
-    | Some _ -> Error "enabled requires a boolean" in
+    | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+    | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+    | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+    | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error "enabled requires a boolean" in
   let* run_id = text fields "run_id" in
   let* manifest_path = text fields "manifest_path" in
   let directory = Filename.dirname source_path in
@@ -118,7 +122,8 @@ let decode ~source_path ~source_revision ~id fields =
   let* binding = match List.assoc_opt "binding" fields with
     | Some (Otoml.TomlTable _ | Otoml.TomlInlineTable _ as value) ->
         json_of_toml ~path:"binding" value
-    | _ -> Error "binding requires a table" in
+    | Some (Otoml.TomlString _ | (Otoml.TomlInteger _ | (Otoml.TomlFloat _ | (Otoml.TomlBoolean _ | (Otoml.TomlOffsetDateTime _ | (Otoml.TomlLocalDateTime _ | (Otoml.TomlLocalDate _ | (Otoml.TomlLocalTime _ | (Otoml.TomlArray _ | Otoml.TomlTableArray _)))))))))
+    | None -> Error "binding requires a table" in
   let binding = resolve_snapshot_paths ~directory binding in
   let* () = Lane_addon_sources.validate binding in
   let* () = match package.binding_schema with
@@ -154,7 +159,10 @@ let parse_declaration ~source_path bytes =
                   | Error message -> failure ~id ~unreadable:false message
                 with (Sys_error _ | Unix.Unix_error _) as exn ->
                   failure ~id ~unreadable:true (io_message exn))
-       | Ok _ -> failure ~unreadable:false "declaration requires a TOML table")
+       | Ok (Otoml.TomlString _) | Ok (Otoml.TomlInteger _) | Ok (Otoml.TomlFloat _)
+       | Ok (Otoml.TomlBoolean _) | Ok (Otoml.TomlOffsetDateTime _) | Ok (Otoml.TomlLocalDateTime _)
+       | Ok (Otoml.TomlLocalDate _) | Ok (Otoml.TomlLocalTime _) | Ok (Otoml.TomlArray _)
+       | Ok (Otoml.TomlInlineTable _) | Ok (Otoml.TomlTableArray _) -> failure ~unreadable:false "declaration requires a TOML table")
   with Otoml.Duplicate_key message -> failure ~unreadable:false message
 
 let load_source ~source_path ~source_text =
@@ -184,7 +192,7 @@ let load ~directory =
          match may authorize removal of an existing installation. *)
       (match (Unix.stat directory).Unix.st_kind with
        | Unix.S_DIR -> Error message
-       | _ -> Error "configuration path is not a directory"
+       | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> Error "configuration path is not a directory"
        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
        | exception Unix.Unix_error _ -> Error message)
   in

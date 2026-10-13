@@ -106,7 +106,10 @@ let field key table = List.assoc_opt key (entries table)
 let string_field key table =
   match field key table with
   | Some (Toml.TomlString value) -> Some value
-  | Some _ | None -> None
+  | None | Some (Toml.TomlInteger _) | Some (Toml.TomlFloat _) | Some (Toml.TomlBoolean _)
+  | Some (Toml.TomlOffsetDateTime _) | Some (Toml.TomlLocalDateTime _) | Some (Toml.TomlLocalDate _)
+  | Some (Toml.TomlLocalTime _) | Some (Toml.TomlArray _) | Some (Toml.TomlTable _)
+  | Some (Toml.TomlInlineTable _) | Some (Toml.TomlTableArray _) -> None
 ;;
 
 let providers_table = Runtime_toml_namespace.(key Providers)
@@ -409,7 +412,10 @@ let declare ?home_dir ~inherited_home t ~base ~id ~location =
       Error
         (Unsupported_layout
            "providers is one inline table, so a provider cannot be added after it")
-    | Some _ | None -> Ok ()
+    | Some (Toml.TomlString _) | None | Some (Toml.TomlInteger _) | Some (Toml.TomlFloat _)
+    | Some (Toml.TomlBoolean _) | Some (Toml.TomlOffsetDateTime _) | Some (Toml.TomlLocalDateTime _)
+    | Some (Toml.TomlLocalDate _) | Some (Toml.TomlLocalTime _) | Some (Toml.TomlArray _)
+    | Some (Toml.TomlTable _) | Some (Toml.TomlTableArray _) -> Ok ()
   in
   let* table =
     match List.assoc_opt base.id (providers t) with

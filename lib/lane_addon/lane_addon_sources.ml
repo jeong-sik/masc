@@ -251,7 +251,7 @@ let refresh_fingerprint interest captured =
 let dependencies binding =
   let* sources = parse binding in
   Ok (List.filter_map (function Lane_output {installation_id;_} -> Some installation_id
-    | _ -> None) sources |> List.sort_uniq String.compare)
+    | Fusion_run _ | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Browser_document _ -> None) sources |> List.sort_uniq String.compare)
 let validate binding =
   let* sources = parse binding in
   let ids = List.map source_id sources in

@@ -561,7 +561,10 @@ let endpoint_of_entries entries =
     match List.assoc_opt github_host_key entries with
     | None -> Ok default_github_host
     | Some (Otoml.TomlString raw) -> github_host_of_string raw
-    | Some _ ->
+    | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _) | Some (Otoml.TomlBoolean _)
+    | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+    | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+    | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) ->
       Error
         (Printf.sprintf "[%s] %s must be a hostname string" repositories_table github_host_key)
   in
@@ -569,7 +572,10 @@ let endpoint_of_entries entries =
     match List.assoc_opt graphql_url_key entries with
     | None -> Ok default_graphql_url
     | Some (Otoml.TomlString raw) -> graphql_url_of_string raw
-    | Some _ ->
+    | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _) | Some (Otoml.TomlBoolean _)
+    | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+    | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+    | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) ->
       Error
         (Printf.sprintf "[%s] %s must be a URL string" repositories_table graphql_url_key)
   in
@@ -630,7 +636,10 @@ let reader_of_table ~config entries =
        (match endpoint_of_entries entries with
         | Error reason -> Error (Reader_declaration_invalid reason)
         | Ok endpoint -> reader_of_declaration ~config ~endpoint keeper)
-     | Some _ ->
+     | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _) | Some (Otoml.TomlBoolean _)
+     | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+     | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+     | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) ->
        declaration_invalid "[%s] %s must be a Keeper name string" repositories_table pr_reader_key)
 
 let resolve_reader ~(config : Workspace.config) =
@@ -649,7 +658,10 @@ let resolve_reader ~(config : Workspace.config) =
           | None -> Error Reader_not_declared
           | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
             reader_of_table ~config entries
-          | Some _ -> declaration_invalid "[%s] must be a table" repositories_table)))
+          | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+          | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+          | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
+          | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> declaration_invalid "[%s] must be a table" repositories_table)))
 
 (* A digest, so the snapshot can tell a new token from the refused one without
    holding either. *)

@@ -1238,4 +1238,7 @@ let classify_masc_internal_error (err : Agent_core.Error.t) :
       (Agent_core.Error.TerminalToolDurabilityFailed
         { effect_disposition; detail; _ }) ->
     terminal_effect_failed ~effect_disposition ~detail
-  | _ -> None
+  | Agent_core.Error.Agent (Agent_core.Error.UnrecognizedStopReason _ | (Agent_core.Error.ToolRoundLimitExceeded _ | (Agent_core.Error.HookExecutionFailed _ | (Agent_core.Error.GuardrailViolation _ | (Agent_core.Error.TripwireViolation _ | Agent_core.Error.InputRequired _)))))
+  | Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ -> None

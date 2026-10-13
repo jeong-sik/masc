@@ -409,7 +409,7 @@ let add_routes ~sw router =
                  List.filter_map (fun name ->
                    match Keeper_meta_store.read_meta config name with
                    | Ok (Some m) -> Some m
-                   | _ -> None
+                   | Ok (None) | Error _ -> None
                  ) keeper_names
                in
                Dashboard_http_keeper.keeper_decisions_json ~config ~keepers
@@ -440,7 +440,7 @@ let add_routes ~sw router =
                  List.filter_map (fun name ->
                    match Keeper_meta_store.read_meta config name with
                    | Ok (Some m) -> Some m
-                   | _ -> None
+                   | Ok (None) | Error _ -> None
                  ) keeper_names
                in
                Dashboard_http_keeper.keeper_decisions_log_json ~config
@@ -471,7 +471,7 @@ let add_routes ~sw router =
                  List.filter_map (fun name ->
                    match Keeper_meta_store.read_meta config name with
                    | Ok (Some m) -> Some m
-                   | _ -> None
+                   | Ok (None) | Error _ -> None
                  ) keeper_names
                in
                Dashboard_http_keeper_practice.fleet_json ~config ~keepers

@@ -29,7 +29,10 @@ let output_ports world =
       else List.fold_left (fun result field ->
         let* ports = result in let* port = parse_port field in Ok (port :: ports)) (Ok []) fields
         |> Result.map (List.sort (fun (a, _) (b, _) -> String.compare a b))
-  | Some _ -> Error "world.outputs must be a table"
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error "world.outputs must be a table"
 let load ~path =
   let parse () =
     let path = Unix.realpath path in
@@ -52,13 +55,20 @@ let load ~path =
           if List.length names <> List.length (List.sort_uniq String.compare names)
              || List.exists (fun key -> key <> "skills" && key <> "actions" && key <> "outputs" && key <> "tools" && key <> "state") names
           then Error "world accepts skills, actions, outputs, tools and state tables" else Ok fields
-      | Some _ -> Error "world must be a table" in
+      | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+      | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+      | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
+      | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error "world must be a table" in
     let nested_text section key = match List.assoc_opt section world with
       | None -> Ok None
       | Some (Otoml.TomlTable [field, Otoml.TomlString value]
           | Otoml.TomlInlineTable [field, Otoml.TomlString value])
           when field = key && String.trim value <> "" -> Ok (Some value)
-      | Some _ -> Error ("world." ^ section ^ " requires only a non-blank " ^ key ^ " string") in
+      | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+      | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+      | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
+      | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _) | Some (Otoml.TomlTable _)
+      | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error ("world." ^ section ^ " requires only a non-blank " ^ key ^ " string") in
     let* skills = nested_text "skills" "directory" in
     let* skills_directory = match skills with
       | None -> Ok None
@@ -74,14 +84,21 @@ let load ~path =
     let* tool_invocation = match List.assoc_opt "invocation" tool_fields with
       | None | Some (Otoml.TomlString "direct") -> Ok Direct
       | Some (Otoml.TomlString "host_context") -> Ok Host_context
-      | Some _ -> Error "world.tools.invocation requires direct or host_context" in
+      | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+      | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+      | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
+      | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _) | Some (Otoml.TomlTable _)
+      | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error "world.tools.invocation requires direct or host_context" in
     let* exported_tools = match List.assoc_opt "export" tool_fields with
       | None when tool_fields = [] -> Ok []
       | Some (Otoml.TomlArray values) ->
           let* names = List.fold_left (fun result value ->
             let* names = result in match value with
             | Otoml.TomlString name -> Ok (name :: names)
-            | _ -> Error "world.tools.export requires tool names") (Ok []) values in
+            | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+            | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+            | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
+            | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ -> Error "world.tools.export requires tool names") (Ok []) values in
           validate_exported_tools ~action_tool names
       | _ -> Error "world.tools requires an export array" in
     let* state_storage = match List.assoc_opt "state" world with
@@ -90,7 +107,11 @@ let load ~path =
              | Otoml.TomlInlineTable [("mode", Otoml.TomlString "persistent")]) -> Ok Persistent
       | Some (Otoml.TomlTable [("mode", Otoml.TomlString "ephemeral")]
              | Otoml.TomlInlineTable [("mode", Otoml.TomlString "ephemeral")]) -> Ok Ephemeral
-      | Some _ -> Error "world.state requires only mode = persistent or ephemeral" in
+      | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+      | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+      | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
+      | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _) | Some (Otoml.TomlTable _)
+      | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error "world.state requires only mode = persistent or ephemeral" in
     let* outputs = output_ports world in
     let* interface = match Otoml.find_opt document Fun.id ["interface"] with
       | None -> Ok []
@@ -100,16 +121,27 @@ let load ~path =
     let* model_access = match List.assoc_opt "model_access" interface with
       | None | Some (Otoml.TomlString "disabled") -> Ok Model_disabled
       | Some (Otoml.TomlString "host_sampling") -> Ok Host_sampling
-      | Some _ -> Error "interface.model_access requires disabled or host_sampling" in
+      | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+      | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+      | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
+      | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _) | Some (Otoml.TomlTable _)
+      | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error "interface.model_access requires disabled or host_sampling" in
     let* refresh_policy = match List.assoc_opt "refresh_policy" interface with
       | None | Some (Otoml.TomlString "every_hint") -> Ok Every_hint
       | Some (Otoml.TomlString "source_changes") -> Ok Source_changes
-      | Some _ -> Error "interface.refresh_policy requires every_hint or source_changes" in
+      | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+      | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+      | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
+      | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _) | Some (Otoml.TomlTable _)
+      | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error "interface.refresh_policy requires every_hint or source_changes" in
     let json name = match List.assoc_opt name interface with
       | None -> Ok None
       | Some (Otoml.TomlString bytes) ->
           (try Ok (Some (Yojson.Safe.from_string bytes)) with Yojson.Json_error error -> Error error)
-      | Some _ -> Error ("interface." ^ name ^ " must contain JSON text") in
+      | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _) | Some (Otoml.TomlBoolean _)
+      | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+      | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+      | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error ("interface." ^ name ^ " must contain JSON text") in
     let* binding_schema = json "binding_schema" in
     let* () = match binding_schema with
       | None -> Ok ()

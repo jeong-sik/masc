@@ -953,7 +953,7 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
             ; open_tool_items = state.open_tool_items + 1
             ; tool_calls = state.tool_calls + 1
             }
-        | kind -> continue { state with open_items = (item.Msp.item_id, kind) :: state.open_items })
+        | (Msp.User_message | Msp.Agent_message | Msp.Reasoning | Msp.User_shell | Msp.Subagent | Msp.Workflow | Msp.Reminder_child | Msp.Compaction | Msp.Unrecognized_item_kind _) as kind -> continue { state with open_items = (item.Msp.item_id, kind) :: state.open_items })
      | Msp.Item_delta { session_id = sid; item_id; field = Msp.Delta_text; delta }
        when ours sid ->
        (match List.assoc_opt item_id state.open_items with
@@ -963,7 +963,9 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
              items are still open. *)
           io.set_receive_phase Model_turn;
           continue state
-        | Some _ | None -> continue state)
+        | Some (Msp.User_message) | None | Some (Msp.Reasoning) | Some (Msp.Tool_call)
+        | Some (Msp.User_shell) | Some (Msp.Subagent) | Some (Msp.Workflow)
+        | Some (Msp.Reminder_child) | Some (Msp.Compaction) | Some (Msp.Unrecognized_item_kind _) -> continue state)
      | Msp.Item_completed { session_id = sid; item } when ours sid && item_in_turn ~turn_id item
        ->
        let was_open = List.mem_assoc item.Msp.item_id state.open_items in
@@ -998,7 +1000,8 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
           Option.iter (fun compaction -> emit (Compaction_observed compaction))
             item.Msp.compaction;
           continue { state with open_items }
-        | _ -> continue { state with open_items })
+        | Msp.User_message | Msp.Reasoning | Msp.User_shell | Msp.Subagent | Msp.Workflow
+        | Msp.Reminder_child | Msp.Unrecognized_item_kind _ -> continue { state with open_items })
      | Msp.Usage_changed usage ->
        emit (Subscription_usage_observed usage);
        continue state
@@ -1310,7 +1313,7 @@ let run_protocol
     | Error (Timeout { seconds; turn_accepted = _ }) ->
       Error (Timeout { seconds; turn_accepted = true })
     | Error (Process_exited exited) -> Error (Process_exited { exited with turn_accepted = true })
-    | outcome -> outcome
+    | (Error (Session_not_durable | (Turn_cancelled | (Runtime_shutting_down | (Invalid_config _ | (Spawn_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Capability_not_granted _ | (Session_model_mismatch _ | (Session_workspace_mismatch _ | (Session_approval_mode_mismatch _ | (Auth_required _ | (Turn_failed _ | Unsupported_server_request _)))))))))))))) | Ok _) as outcome -> outcome
   in
   let text = state.final_text in
   (* The stream terminal closes presentation; durable consumers retain the

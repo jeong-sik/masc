@@ -1405,7 +1405,10 @@ let parse_agent_retry ~expected_session_id fields =
           (match Runtime_native_tools.progress_of_json
             (`Assoc (("kind",`String "retry_reported")::("subagent_type",`String subagent_type)::note_fields)) with
            | Ok (Runtime_native_tools.Retry_observed (Retry_reported note)) -> Some (Some note)
-           | Ok _ | Error _ -> None)
+           | Ok (Runtime_native_tools.Output_observed _) | Error _
+           | Ok (Runtime_native_tools.Message_reported _)
+           | Ok (Runtime_native_tools.Heartbeat_reported _)
+           | Ok (Runtime_native_tools.Retry_observed _) -> None)
       | [_] | _::_ -> None in
     Some {retry_uuid;progress_id;parent_id;subagent_type;note}
 ;;
@@ -2383,7 +2386,10 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       | Ok _ -> Some Input_attribution.Provider_success
       | Error (Quota_blocked _ | Context_window_exceeded _
           | Turn_failed _ | Turn_failed_with_observation _) -> Some Input_attribution.Provider_error
-      | Error _ -> None in
+      | Error (Invalid_config _) | Error (Spawn_failed _) | Error (Protocol_error _)
+      | Error (Subscription_required _) | Error (Unsupported_control_request _)
+      | Error (Turn_transport_interrupted _) | Error (Stopped_by_host _) | Error (Process_exited _)
+      | Error (Unhandled_exception _) | Error (Timeout _) -> None in
     observe_input input_observer ~session_id:expected_session_id
       ~frame:(Input_attribution.Result {uuid=Some turn_id;outcome}) fields;
     let* turn_id, result, usage =
@@ -2394,7 +2400,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
         if !stream_started
         then emit_stream_event on_stream_event (Turn_finished { text = "" });
         Error error
-      | result -> result
+      | (Error (Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_}) | Error (Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_}) | Error (Invalid_config _ | (Spawn_failed _ | (Protocol_error _ | (Subscription_required _ | (Unsupported_control_request _ | (Turn_transport_interrupted _ | (Turn_failed _ | (Turn_failed_with_observation _ | (Stopped_by_host _ | (Quota_blocked _ | (Process_exited _ | (Unhandled_exception _ | Timeout _)))))))))))) | Ok _) as result -> result
     in
     let* () =
       invoke_state_callback ~stage:"turn started callback" (fun () ->

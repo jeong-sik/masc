@@ -109,7 +109,8 @@ let response_content (response : L.api_response) =
          | Ok bytes when bytes <> "" -> Ok (S.Image {type_="image";data;mime_type=media_type})
          | Ok _ | Error _ -> Error (Invalid_response "MCP sampling image must contain valid nonempty base64"))
     | [L.Image _] -> Error (Invalid_response "MCP sampling requires a base64 image response")
-    | _ :: _ -> Error (Invalid_response "MCP sampling cannot carry multiple or unsupported content blocks")
+    | (L.Text _)::_ | (L.Thinking _)::_ | (L.ReasoningDetails _)::_ | (L.RedactedThinking _)::_
+    | (L.ToolUse _)::_ | (L.ToolResult _)::_ | (L.Image _)::_ | (L.Document _)::_ | (L.Audio _)::_ -> Error (Invalid_response "MCP sampling cannot carry multiple or unsupported content blocks")
     | [] -> Error (Provider_error (Llm_provider.Http_client.empty_completion_error
         ~stop_reason:response.stop_reason))
 
@@ -179,8 +180,13 @@ let invoke ~sw ~net ~store ~route ~request params =
               | Provider_error (Llm_provider.Http_client.ProviderFailure
                   {kind=Empty_completion {stop_reason};message=_}) ->
                   ["provider_stop_reason", `String (L.stop_reason_to_string stop_reason)]
-              | Runtime_unavailable _ | Unsupported_controls _ | Invalid_request _ | Invalid_response _
-              | Provider_error _ -> [] in
+              | Runtime_unavailable _ | Unsupported_controls _ | Invalid_request _
+              | Invalid_response _ | Provider_error (Llm_provider.Http_client.HttpError _)
+              | Provider_error (Llm_provider.Http_client.NetworkError _)
+              | Provider_error (Llm_provider.Http_client.TimeoutError _)
+              | Provider_error (Llm_provider.Http_client.AcceptRejected _)
+              | Provider_error (Llm_provider.Http_client.ProviderTerminal _)
+              | Provider_error (Llm_provider.Http_client.ProviderFailure _) -> [] in
             let diagnostic = Eio_unix.run_in_systhread (fun () ->
               Lane_addon_store.write_blob store (Yojson.Safe.to_string (`Assoc (
                 ["kind",`String "model_attempt_failure";"runtime_id",`String runtime_id;

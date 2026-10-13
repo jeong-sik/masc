@@ -258,8 +258,7 @@ let validate_setting_value key row value =
          ~severity:Error
          (match row.value_kind with
           | Keeper_runtime_setting_registry.Float -> "expected a numeric TOML value"
-          | kind ->
-            Printf.sprintf
+          | (Keeper_runtime_setting_registry.Boolean | Keeper_runtime_setting_registry.Integer | Keeper_runtime_setting_registry.String) as kind -> Printf.sprintf
               "expected a %s TOML value"
               (Keeper_runtime_setting_registry.value_kind_label kind)))
   else if range_matches row.value_range value

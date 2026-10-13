@@ -144,7 +144,9 @@ let make_registry_config
         Binding.normalize_openai_compat_request_path
           ~base_url
           ~request_path:defaults.request_path
-      | _ -> defaults.request_path
+      | Llm_provider.Provider_kind.Anthropic | Llm_provider.Provider_kind.Kimi
+      | Llm_provider.Provider_kind.Ollama | Llm_provider.Provider_kind.Gemini
+      | Llm_provider.Provider_kind.Glm -> defaults.request_path
     in
     let max_context =
       let caps =

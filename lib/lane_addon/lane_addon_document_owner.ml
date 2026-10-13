@@ -144,4 +144,4 @@ let reassign ~root ~source_path ~keeper:caller ~source_revision =
 
 let revoke ~root ~source_path = update ~root ~source_path (function
   | None | Some Revoked -> Ok None
-  | Some _ -> Ok (Some Revoked))
+  | Some (Pending _) | Some (Owned _) | Some (Reassigned _) -> Ok (Some Revoked))

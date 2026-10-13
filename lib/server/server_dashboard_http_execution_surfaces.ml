@@ -1632,17 +1632,16 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
      with
      | Ok json -> json
      | Error `Timeout ->
-       let exn =
-         Dashboard_cache.Compute_timeout
-           { key = execution_default_light_cache_key; role = Dashboard_cache.Compute_owner }
-       in
-       publish_failure exn;
+       let role = Dashboard_cache.Compute_owner in
+       publish_failure
+         (Dashboard_cache.Compute_timeout
+            { key = execution_default_light_cache_key; role });
        Log.Dashboard.warn
          "dashboard execution force refresh timed out: %s (%.0fs)"
          execution_default_light_cache_key
          timeout_sec;
        Dashboard_cache.timeout_envelope_json
-         ~kind:Dashboard_cache.Timeout_owner
+         ~kind:(Dashboard_cache.timeout_kind_of_role role)
          ~key:execution_default_light_cache_key
          ~timeout_sec)
     |> with_execution_metadata

@@ -101,6 +101,9 @@ type timeout_kind =
   | Timeout_compute (** a computing slot yielded no result in time *)
   | Timeout_circuit_open (** repeated timeouts for the key: failing fast *)
 
+val timeout_kind_of_role : compute_timeout_role -> timeout_kind
+(** The kind an envelope reports for a {!Compute_timeout} with this role. *)
+
 val timeout_envelope_json
   :  kind:timeout_kind
   -> key:string

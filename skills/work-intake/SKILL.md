@@ -24,15 +24,19 @@ Keeper 에게 보이는 설명은 아래 fence 의 `description` 뿐이다. 이 
 - 일곱 노드는 모두 `Concurrent` 이고 서로의 출력을 쓰지 않으므로 `after` 가 없다.
   executor가 독립된 read-only 노드를 함께 실행한다. `continue_independent`로 한 조회가
   실패해도 다른 조회를 마친다. 전체 결과에는 실패 원인과 이미 끝난 노드 결과가 함께 남는다.
-- 두 목록 도구의 `status` 는 값 하나와 정확히 같은 행만 고른다. 담당자로 좁히는 인자도 없다.
-  그래서 상태마다 노드를 하나씩 둔다.
-  - task: claim 은 보통 곧바로 `in_progress` 로 넘어가지만, 시작에 실패하면 `claimed` 에
-    남는다(`keeper_tool_task_runtime.ml` auto-start). 둘 다 봐야 "누가 잡고 있나"가 된다.
-  - 예약: 아직 끝나지 않은 상태는 `scheduled`·`due`·`running` 셋이다. 다시 시도하거나
-    재기동 뒤 되살린 실행은 `running` 에서 `due` 로 돌아온다(`schedule_store.ml`
-    `retry_running`, `recover_running_on_startup`).
-- `status` 없이 `owner = "self"` 만 주면 `schedule_id` 순서로 잘려서 첫 페이지가 이미 끝난
-  예약으로 찬다. 2026-09-15 저장소에서 `code-reviewer` 는 자기 행 256건 중 `due` 가 1건이었다.
+- `keeper_tasks_list`의 `status`는 정확한 상태 하나를 고른다. `assignee`·`task_ids`·`goal_id`·
+  `query`로도 좁힐 수 있고, 주어진 필터는 페이지를 나누기 전에 모두 함께 적용한다.
+  이 조합은 다른 담당자의 작업도 보려고 `assignee`를 지정하지 않는다. claim은 보통 곧바로
+  `in_progress`로 넘어가지만 시작에 실패하면 `claimed`에 남으므로 둘 다 읽는다
+  (`keeper_tool_task_runtime.ml` auto-start).
+- `masc_schedule_list`의 `owner = "self"`는 내가 만든 예약 또는 나를 깨우는 예약이다.
+  특정 생성자나 대상 Keeper는 `owner = "scheduled_by"` 또는 `"wake_target"`와
+  `owner_name`으로 고른다(`self`·`all`에는 `owner_name`을 받지 않는다).
+  `status = "active"`는 모든 비종료 상태이며 현재 `scheduled`·`due`·`running`을 포함한다.
+  이 조합은 셋의 첫 페이지를 각각 읽도록 정확한 상태를 명시했다. 재시도와 재기동 복구는
+  `running`을 `due`로 돌린다(`schedule_store.ml` `retry_running`, `recover_running_on_startup`).
+- `status` 없이 `owner = "self"`만 주면 종료된 예약도 `schedule_id` 순서의 첫 페이지에
+  포함될 수 있다. 2026-09-15 저장소에서 `code-reviewer`는 자기 행 256건 중 `due`가 1건이었다.
 - claim 할 수 있는 todo 는 턴 프레임이 "next to claim / Newly added" 로 이미 보여 준다.
 - `masc_ask_status` 는 `include_resolved = true` 면 답이 끝난 질문 기록 전체를 돌려주고,
   개수를 줄이는 인자가 없다. 이 조합은 열린 질문만 읽는다. 목록에서 사라진 질문은
@@ -49,9 +53,12 @@ Keeper가 받은 wire bytes나 토큰 수로 계산하지 않는다. CLI의 결�
 inline 결과 경계는 별도 계약이며, 한쪽 값을 다른 레인의 기준으로 쓰지 않는다.
 결과가 artifact reference로 오면 필요한 원본만 그 reference로 읽는다.
 
-진행 중 task 가 10건을 넘으면 `tasks` 페이지는 잘리고 `truncated = true`,
-`next_cursor`, 전체 건수 `matching_count` 가 실린다. 가장 최근 10건은 `new_tasks` 에 따로
-실린다. 예약 목록도 더 있으면 `next_cursor` 를 싣는다. 보드 목록에는 잘렸다는 표시가 없다.
+`tasks`·`claimed`는 각각 priority·created_at·id 순서로 첫 10건을 읽는다. 더 있으면
+`truncated = true`, `next_cursor`, 전체 건수 `matching_count`가 실린다. `new_tasks`는
+첫 페이지 밖의 최근 행을 최대 10건 보여 주고 다음 페이지에서는 반복하지 않는다.
+예약은 각 상태별로 `schedule_id` 순서로 읽으며 더 있으면 `next_cursor`를 싣는다.
+두 도구 모두 다음 조회의 `cursor`에 `next_cursor`를 넣고 기존 필터를 유지한다.
+보드 목록에는 잘렸다는 표시가 없다.
 
 ```toml composition
 [[compositions]]

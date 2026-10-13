@@ -241,3 +241,8 @@ export function keeperResponseStateMayReplace(
 export function keeperResponseIsTerminal(state: KeeperResponseState | undefined): boolean {
   return state?.kind === 'known' && state.phase === 'terminal'
 }
+
+/** Tool execution facts can arrive after the response's activity has ended. */
+export function keeperResponseIsRunning(state: KeeperResponseState = initialKeeperResponseState): boolean {
+  return state.kind === 'known' && state.phase === 'running'
+}

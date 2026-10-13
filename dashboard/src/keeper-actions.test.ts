@@ -86,7 +86,7 @@ import {
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from './tool-call-output-store'
-import { _resetKeeperStreamBuffersForTests } from './keeper-stream'
+import { _resetKeeperStreamBuffersForTests, applyKeeperOperationTurnEvent } from './keeper-stream'
 import type { KeeperChatStreamEvent } from './api'
 import type { ToolCallEntry } from './api/dashboard'
 import type { KeeperStatusDetail } from './types'
@@ -566,6 +566,53 @@ describe('sendKeeperThreadMessage operation stream', () => {
     }))
     expect(keeperThreads.value.echo?.filter(entry => entry.role === 'user').at(-1)?.text).toBe(text)
     expect(keeperThreads.value.echo?.filter(entry => entry.role === 'assistant').at(-1)?.text).toBe(text)
+  })
+
+  it('admits a post-terminal broadcast tool event instead of losing it to live-send ownership', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        operationId: string
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
+      })
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'answer' })
+      opts.onEvent({ type: 'RUN_FINISHED' })
+      // The server broadcasts every operation event before publishing it to
+      // the direct sink, so a post-terminal tool frame can land on the
+      // observer connection while the send tail has not reached
+      // clearActiveStream yet. It must not be discarded by live-send
+      // ownership: the canceled direct reader will never carry it.
+      applyKeeperOperationTurnEvent('echo', {
+        operationId: opts.operationId,
+        event: {
+          type: 'TOOL_CALL_START',
+          toolStreamScope: 0,
+          toolCallBlockIndex: 4,
+          toolCallName: 'Read',
+          toolCallId: 'late-tool',
+        },
+      })
+      return { terminal: true }
+    })
+
+    await sendKeeperThreadMessage('echo', '질문')
+
+    expect(keeperThreads.value.echo?.find(entry => entry.toolCallId === 'late-tool')).toMatchObject({
+      role: 'tool',
+      label: 'Read',
+      delivery: 'streaming',
+    })
+    expect(keeperThreads.value.echo?.filter(entry => entry.role === 'assistant').at(-1)).toMatchObject({
+      text: 'answer',
+      delivery: 'delivered',
+    })
   })
 
   it('preserves text when user blocks supply the message fallback', async () => {

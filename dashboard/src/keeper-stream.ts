@@ -530,7 +530,24 @@ export interface KeeperOperationTurnEvent {
 
 type KeeperStreamEventSource =
   | { kind: 'direct' }
-  | { kind: 'operation'; operationId: string; sequence?: number }
+  | { kind: 'operation'; operationId: string; sequence?: number; observationOnly?: true }
+
+function isToolObservation(event: KeeperChatStreamEvent): boolean {
+  switch (event.type) {
+    case 'TOOL_CALL_START':
+    case 'TOOL_CALL_ARGS':
+    case 'TOOL_CALL_END': return true
+    case 'CUSTOM':
+      if (event.name === 'KEEPER_TOOL_RESULT_READY') return true
+      // An occurrence-scoped quarantine is authoritative evidence about one
+      // tool occurrence; admitting it for a converged turn lets the
+      // protocol-error handler mark that occurrence's trace and row errored
+      // instead of leaving a replayed late start pending forever.
+      return event.name === 'KEEPER_STREAM_PROTOCOL_ERROR'
+        && event.value.quarantined_occurrence !== undefined
+    default: return false
+  }
+}
 
 /** Apply a server-pushed operation event only to the assistant bubble carrying
  * the exact operation id. Another browser can synthesize the bubble and later
@@ -576,15 +593,13 @@ export function applyKeeperOperationTurnEvent(
         'terminal_result',
       ),
   )
-  if (
-    matched
+  const outsideLiveDelivery = matched !== undefined
     && matched.delivery !== 'queued'
     && matched.delivery !== 'sending'
     && matched.delivery !== 'streaming'
-    && matched.delivery !== 'interrupted'
-  ) {
-    return null
-  }
+  const observationOnly = outsideLiveDelivery && isToolObservation(operation.event)
+  if (outsideLiveDelivery && matched.delivery !== 'interrupted' && !observationOnly) return null
+  if (observationOnly && matched.role !== 'assistant') return null
   // A protocol-error diagnostic carries no stream content. When it is the
   // only or final frame for an operation this session has no bubble for —
   // e.g. a terminal event rejected as malformed during version skew — there
@@ -634,9 +649,11 @@ export function applyKeeperOperationTurnEvent(
     keeperName,
     entryId,
     operation.event,
-    { kind: 'operation', operationId, sequence: operation.sequence },
+    { kind: 'operation', operationId, sequence: operation.sequence, ...(observationOnly ? { observationOnly: true as const } : {}) },
   )
-  if (error) {
+  if (error && observationOnly) {
+    recordStreamProtocolError(keeperName, entryId, error)
+  } else if (error) {
     finalizeAssistantEntry(keeperName, entryId, {
       text: `Keeper request failed: ${error}`,
       rawText: error,
@@ -849,9 +866,6 @@ export function applyKeeperStreamEvent(
         )
         return null
       }
-      promoteAssistantTextToProgress(keeperName, assistantEntryId, {
-        agentCoreBlockIndex: takeAgentCoreTextBlockIndex(keeperName, assistantEntryId),
-      })
       const assistantEntry = (keeperThreads.value[keeperName] ?? [])
         .find(entry => entry.id === assistantEntryId)
       const existingOccurrence = (keeperThreads.value[keeperName] ?? [])
@@ -870,6 +884,24 @@ export function applyKeeperStreamEvent(
         }
         return null
       }
+      if (source.kind === 'operation' && source.observationOnly && toolCallId) {
+        // A journal replay can re-deliver the start of an occurrence the
+        // server already persisted: REST history mints its own row ids, so
+        // the generated occurrence id above cannot see the durable row and
+        // would insert a second streaming occurrence next to it. Correlate
+        // on the operation's durable tool-call provenance first.
+        const persistedOccurrence = (keeperThreads.value[keeperName] ?? [])
+          .find(entry => entry.role === 'tool'
+            && entry.toolCallId === toolCallId
+            && entry.deliveryProvenance?.delivery_key.kind === 'operation'
+            && entry.deliveryProvenance.delivery_key.operation_id === source.operationId)
+        if (persistedOccurrence) return null
+      }
+      if (!(source.kind === 'operation' && source.observationOnly)) {
+        promoteAssistantTextToProgress(keeperName, assistantEntryId, {
+          agentCoreBlockIndex: takeAgentCoreTextBlockIndex(keeperName, assistantEntryId),
+        })
+      }
       const agentCoreBlockIndex = event.toolCallBlockIndex
       const toolSteps = assistantEntry?.traceSteps?.filter(step => step.kind === 'tool') ?? []
       const toolOrdinal = toolSteps.length
@@ -882,7 +914,7 @@ export function applyKeeperStreamEvent(
         toolOccurrenceId,
         name: toolName,
         agentCoreBlockIndex,
-      })
+      }, source.kind === 'operation' && source.observationOnly ? 'observation' : 'active')
       // Insert above the live assistant bubble so the final reply text
       // stays the last entry in the transcript.
       insertThreadEntryBefore(keeperName, assistantEntryId, {

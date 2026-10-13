@@ -172,6 +172,9 @@ let of_json ?home_dir = function
           | Codex -> Ok "codex"
           | Muse -> Ok "muse"
           | Antigravity -> Ok "agy"
+          (* The five http-guarded choices return above, so this arm is
+             unreachable; it stays to keep the match exhaustive over future
+             choices instead of silently defaulting them. *)
           | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> invalid "command") in
       let* account_home =
         if List.mem_assoc "account_home" fields

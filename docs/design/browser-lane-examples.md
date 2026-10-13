@@ -59,6 +59,10 @@ Live lane 의 BiDi 연결(hover·drag)을 쓰려면 `[browser.live.bidi]` 를 �
 `[browser.live] enabled = false` 이면 아무것도 띄우지 않는다.
 자세한 것은 [BiDi host](browser-bidi-live-host.md)에 있다.
 
+`masc browser-lane-setup --mode bidi --base-path /path/to/workspace` 가 lane 을
+설치하고 이 표를 쓴다. 표가 이미 있으면 값을 바꾸지 않고, 값을 지정한 옵션
+(`--firefox`, `--profile`, `--port`)만 바꾼다. 서버를 다시 띄워야 표를 읽는다.
+
 ```toml
 [browser.live.bidi]
 firefox = "/Applications/Firefox.app/Contents/MacOS/firefox"

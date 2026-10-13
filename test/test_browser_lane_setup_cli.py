@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """`masc browser-lane-setup`, run as the install script and the docs run it.
 
-test_browser_lane_setup.ml proves the library; this runs the real executable,
-so a flag that is renamed, a mode that is dropped or an argument that is not
-passed on fails here. Every case works in a scratch workspace and a scratch
-manifest directory under a scratch HOME.
+test_browser_lane_setup.ml and test_browser_lane_bidi_setup.ml prove the
+libraries; this runs the real executable, so a flag that is renamed, a mode
+that is dropped or an argument that is not passed on fails here. Every case
+works in a scratch workspace and a scratch manifest directory under a scratch
+HOME.
 """
 import json
 import os
@@ -27,6 +28,41 @@ def masc(root, *args):
 
 def lane(base):
     return base / ".masc/browser-lane"
+
+
+# A runtime.toml the server would load: [runtime].default is required.
+RUNTIME_TOML = """# Operator notes: kept as they are.
+[providers."deepseek"]
+display-name = "Fixture HTTP (deepseek)"
+protocol = "openai-compatible-http"
+endpoint = "https://fixture.invalid/v1"
+[providers."deepseek".credentials]
+type = "inline"
+value = "previous-fixture-key"
+[models.chat]
+api-name = "deepseek-v4-pro"
+["deepseek".chat]
+[runtime]
+default = "deepseek.chat"
+"""
+
+
+def runtime_toml(base):
+    return base / ".masc/config/runtime.toml"
+
+
+def workspace(root, name="workspace"):
+    base = root / name
+    runtime_toml(base).parent.mkdir(parents=True)
+    runtime_toml(base).write_text(RUNTIME_TOML)
+    return base
+
+
+def fake_firefox(root):
+    path = root / "fake firefox"
+    path.write_text("#!/bin/sh\necho 'Mozilla Firefox 0.0 (fixture)'\n")
+    path.chmod(0o755)
+    return path
 
 
 class BrowserLaneSetupCommand(unittest.TestCase):
@@ -104,11 +140,132 @@ class BrowserLaneSetupCommand(unittest.TestCase):
                 self.assertFalse(base.exists(), "nothing was written to the workspace")
                 self.assertFalse(manifests.exists(), "nothing was registered")
 
-    def test_only_the_extension_mode_exists(self):
+    def test_a_mode_that_does_not_exist_is_refused(self):
         root = self.scratch()
-        result = masc(root, "--mode", "bidi", "--base-path", str(root / "workspace"))
+        result = masc(root, "--mode", "automation", "--base-path", str(root / "workspace"))
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((root / "workspace").exists())
+
+    # --mode bidi: the host and the launcher, and the table the server reads.
+    def test_bidi_writes_the_table_and_the_host_and_no_extension(self):
+        root = self.scratch()
+        base = workspace(root)
+        firefox, profile = fake_firefox(root), root / "keeper profile"
+        result = masc(root, "--mode", "bidi", "--binary", str(HOST), "--base-path", str(base),
+                      "--firefox", str(firefox), "--profile", str(profile), "--port", "9333")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = runtime_toml(base).read_text()
+        self.assertTrue(text.startswith(RUNTIME_TOML), "what was there is kept, then the table follows")
+        for line in (f'firefox = "{firefox}"', f'profile = "{profile}"', "port = 9333"):
+            self.assertIn(line, text.splitlines())
+        self.assertIn("[browser.live.bidi]", text.splitlines())
+        self.assertEqual(os.stat(profile).st_mode & 0o777, 0o700)
+        self.assertEqual((lane(base) / "host/masc-browser-host").read_bytes(), HOST.read_bytes())
+        self.assertTrue((lane(base) / "host/launch.json").is_file())
+        self.assertFalse((lane(base) / "extension").exists(), "no extension is written")
+        for directory in ("Library", ".mozilla"):
+            self.assertFalse((root / "home" / directory).exists(), "no manifest is registered")
+        self.assertIn("Restart the MASC server", result.stdout)
+        self.assertIn(str(profile), result.stdout)
+
+    def test_an_existing_table_is_left_as_it_is_unless_a_value_is_named(self):
+        root = self.scratch()
+        base = workspace(root)
+        firefox, profile = fake_firefox(root), root / "operator profile"
+        profile.mkdir()
+        table = (f'\n# the profile the Keepers are logged in to\n[browser.live.bidi]\n'
+                 f'firefox = "{firefox}"\nprofile = "{profile}"\nport = 9300\n')
+        runtime_toml(base).write_text(RUNTIME_TOML + table)
+        before = runtime_toml(base).read_text()
+        arguments = ("--mode", "bidi", "--binary", str(HOST), "--base-path", str(base))
+        result = masc(root, *arguments)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(runtime_toml(base).read_text(), before)
+        self.assertIn("left as it is", result.stdout)
+        changed = masc(root, *arguments, "--port", "9444")
+        self.assertEqual(changed.returncode, 0, changed.stderr)
+        self.assertEqual(runtime_toml(base).read_text(), before.replace("port = 9300", "port = 9444"))
+
+    def test_both_routes_install_once_and_a_second_run_changes_nothing(self):
+        root = self.scratch()
+        base = workspace(root)
+        firefox, manifests = fake_firefox(root), root / "native manifests"
+        arguments = ("--mode", "extension", "--mode", "bidi", "--binary", str(HOST),
+                     "--base-path", str(base), "--manifest-dir", str(manifests),
+                     "--firefox", str(firefox), "--profile", str(root / "keeper profile"))
+        first = masc(root, *arguments)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertTrue((manifests / "masc_browser_host.json").is_file())
+        self.assertTrue((lane(base) / "extension/manifest.json").is_file())
+        self.assertIn("[browser.live.bidi]", runtime_toml(base).read_text().splitlines())
+        self.assertIn("ambiguous_browser_clients", first.stdout)
+        files = [runtime_toml(base), manifests / "masc_browser_host.json",
+                 lane(base) / "host/launch", lane(base) / "token"]
+        before = [path.read_bytes() for path in files]
+        second = masc(root, *arguments)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual([path.read_bytes() for path in files], before)
+
+    def test_an_option_the_chosen_modes_do_not_use_is_refused(self):
+        root = self.scratch()
+        base = workspace(root)
+        before = runtime_toml(base).read_text()
+        for arguments in (("--mode", "bidi", "--manifest-dir", str(root / "manifests")),
+                          ("--mode", "bidi", "--host-name", "masc.other"),
+                          ("--mode", "extension", "--firefox", str(fake_firefox(root))),
+                          ("--mode", "extension", "--profile", str(root / "profile")),
+                          ("--mode", "extension", "--port", "9333"),
+                          ("--binary", str(HOST))):
+            with self.subTest(arguments):
+                result = masc(root, "--base-path", str(base), *arguments)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("only applies with", result.stderr)
+                self.assertFalse(lane(base).exists(), "nothing was installed")
+                self.assertEqual(runtime_toml(base).read_text(), before)
+
+    def test_a_bidi_refusal_leaves_the_workspace_as_it_was(self):
+        root = self.scratch()
+        base = workspace(root)
+        before = runtime_toml(base).read_text()
+        for label, arguments, sentence in (
+            ("a Firefox that is not a path", ("--firefox", "firefox", "--profile", str(root)),
+             "absolute path"),
+            ("a port out of range", ("--firefox", str(fake_firefox(root)), "--profile", str(root),
+                                     "--port", "70000"), "1 to 65535"),
+            ("a Firefox that is not there", ("--firefox", str(root / "absent"),
+                                             "--profile", str(root)), "executable file"),
+        ):
+            with self.subTest(label):
+                result = masc(root, "--mode", "bidi", "--binary", str(HOST),
+                              "--base-path", str(base), *arguments)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn(sentence, result.stderr)
+                self.assertFalse(lane(base).exists(), "the host was not installed first")
+                self.assertEqual(runtime_toml(base).read_text(), before)
+
+    def test_a_profile_that_cannot_be_made_leaves_the_host_and_no_table(self):
+        root = self.scratch()
+        base = workspace(root)
+        before = runtime_toml(base).read_text()
+        locked = root / "locked"
+        locked.mkdir(mode=0o500)
+        self.addCleanup(locked.chmod, 0o700)
+        result = masc(root, "--mode", "bidi", "--binary", str(HOST), "--base-path", str(base),
+                      "--firefox", str(fake_firefox(root)), "--profile", str(locked / "profile"))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("Could not create the profile directory", result.stderr)
+        # The host is installed first and the table last, so what a failure
+        # leaves is an installed lane and no table, never a table with no lane.
+        self.assertTrue((lane(base) / "host/launch.json").is_file())
+        self.assertEqual(runtime_toml(base).read_text(), before)
+
+    def test_bidi_without_a_runtime_toml_creates_nothing(self):
+        root = self.scratch()
+        base = root / "workspace"
+        result = masc(root, "--mode", "bidi", "--binary", str(HOST), "--base-path", str(base))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("masc init", result.stderr)
+        self.assertFalse(base.exists())
 
     # --base-path names the workspace that holds .masc, as for every command.
     def test_a_trailing_dot_masc_in_the_workspace_path_is_dropped(self):

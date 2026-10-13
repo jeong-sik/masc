@@ -88,9 +88,19 @@ val host_directory_path : base_path:string -> string
     the reader and the writer cannot disagree on the fields. *)
 val declaration : launcher_script:string -> string
 
-(** The command that installs the lane for this workspace, as the words that
-    follow "the operator runs". *)
-val install : base_path:string -> string
+(** How a browser reaches the lane: the MASC extension Firefox loads, or the
+    Firefox MASC starts itself with a BiDi host. [masc browser-lane-setup]
+    sets up one or both, by {!route_name}. *)
+type route = Extension | Bidi
+
+val routes : route list
+
+(** The [--mode] value that names the route. *)
+val route_name : route -> string
+
+(** The command that installs the lane for this workspace for a route, as the
+    words that follow "the operator runs". *)
+val install : route:route -> base_path:string -> string
 
 (** [launcher], [workspace_port], [workspace_port_error], [serving_port],
     [polling_hosts], [verdict] and [message], for a tool result a Keeper

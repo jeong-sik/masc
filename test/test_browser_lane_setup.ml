@@ -55,9 +55,17 @@ let request ?token_file ?(host_name = S.Host_name.default) fixture =
   { S.base_path = fixture.base_path
   ; binary = Some fixture.source
   ; token_file
-  ; manifest_dir = fixture.manifests
-  ; host_name
+  ; extension = Some { S.manifest_dir = fixture.manifests; host_name }
   }
+
+(* The BiDi route: the host and the launcher, no extension and no manifest. *)
+let host_only fixture = { (request fixture) with S.extension = None }
+
+(* What the extension route wrote, for a test that asked for it. *)
+let extension (installed : S.installed) =
+  match installed.S.extension with
+  | Some extension -> extension
+  | None -> Alcotest.fail "the extension route was asked for and wrote none"
 
 let install_ok request =
   match S.install request with
@@ -100,7 +108,7 @@ let installs_paths_that_outlive_the_source_and_keeps_the_token fixture =
     Sys.remove fixture.source;
     check bool "the copied host is the installed one" true
       (Sys.file_exists first.S.host && (Unix.stat first.S.host).Unix.st_perm = 0o755);
-    let manifest = Yojson.Safe.from_string (read first.S.manifest) in
+    let manifest = Yojson.Safe.from_string (read (extension first).S.native_manifest) in
     check string "manifest points at the launcher" first.S.launcher (json_string "path" manifest);
     check string "manifest name" "masc_browser_host" (json_string "name" manifest);
     check string "stdio" "stdio" (json_string "type" manifest);
@@ -111,7 +119,7 @@ let installs_paths_that_outlive_the_source_and_keeps_the_token fixture =
       (String_util.contains_substring (read first.S.launcher) (String.trim token));
     (* Firefox appends the manifest path and the extension id; the launcher
        must hand them to the host after its own arguments. *)
-    let manifest_arg = first.S.manifest in
+    let manifest_arg = (extension first).S.native_manifest in
     let channel =
       Unix.open_process_args_in first.S.launcher [| first.S.launcher; manifest_arg; extension_id |]
     in
@@ -149,9 +157,9 @@ let test_extension_files_are_written_for_the_id_the_manifest_grants () =
   with_fixture (fun fixture ->
     let installed = install_ok (request fixture) in
     check string "the file to choose in about:debugging"
-      (Filename.concat installed.S.extension_directory "manifest.json")
-      installed.S.extension_manifest;
-    let extension_manifest = Yojson.Safe.from_string (read installed.S.extension_manifest) in
+      (Filename.concat (extension installed).S.directory "manifest.json")
+      (extension installed).S.load;
+    let extension_manifest = Yojson.Safe.from_string (read (extension installed).S.load) in
     let id =
       Yojson.Safe.Util.(
         extension_manifest
@@ -162,9 +170,9 @@ let test_extension_files_are_written_for_the_id_the_manifest_grants () =
     in
     check string "the id the host binary accepts" extension_id id;
     check bool "the background script is written" true
-      (Sys.file_exists (Filename.concat installed.S.extension_directory "background.js"));
+      (Sys.file_exists (Filename.concat (extension installed).S.directory "background.js"));
     check int "extension files are not executable" 0o644
-      (Unix.stat installed.S.extension_manifest).Unix.st_perm)
+      (Unix.stat (extension installed).S.load).Unix.st_perm)
 
 let test_host_names_are_segments_of_lowercase_words () =
   List.iter
@@ -190,8 +198,8 @@ let test_an_isolated_host_name_names_its_own_manifest () =
     let installed = install_ok (request ~host_name fixture) in
     check string "manifest file"
       (Filename.concat fixture.manifests "masc_public_reddit_a1.json")
-      installed.S.manifest;
-    let manifest = Yojson.Safe.from_string (read installed.S.manifest) in
+      (extension installed).S.native_manifest;
+    let manifest = Yojson.Safe.from_string (read (extension installed).S.native_manifest) in
     check string "name" "masc_public_reddit_a1" (json_string "name" manifest);
     check string "launcher" "launch" (Filename.basename (json_string "path" manifest)))
 
@@ -451,6 +459,48 @@ let test_a_token_file_may_be_relative_or_the_canonical_file_itself () =
     check string "the canonical file named explicitly" canonical again.S.token;
     check string "and left as it was" "relative-provisioned-token\n" (read canonical))
 
+(* --- the BiDi route installs the host alone ------------------------------ *)
+
+let test_the_bidi_route_installs_the_host_and_no_extension () =
+  with_fixture (fun fixture ->
+    let installed = install_ok (host_only fixture) in
+    check bool "no extension is reported" true (Option.is_none installed.S.extension);
+    check bool "no extension files" false (exists (Filename.concat (lane_directory fixture) "extension"));
+    check bool "no manifest directory was made" false (exists fixture.manifests);
+    check int "the host is the installed one" 0o755 (Unix.stat installed.S.host).Unix.st_perm;
+    check int "the token is private" 0o600 (Unix.stat installed.S.token).Unix.st_perm;
+    let observed = L.observe ~base_path:fixture.base_path ~server:L.Not_serving in
+    check bool "the lane reads as installed" true (observed.L.launcher = L.Follows_workspace);
+    let channel = Unix.open_process_args_in installed.S.launcher [| installed.S.launcher |] in
+    let received = In_channel.input_all channel in
+    ignore (Unix.close_process_in channel);
+    check string "the host is given the workspace and the token"
+      (String.concat "\n" [ "--base-path"; fixture.base_path; "--token-file"; installed.S.token; "" ])
+      received)
+
+(* A manifest directory is the extension route's. A path that cannot be one
+   stops that route and not the other. *)
+let test_a_manifest_directory_that_is_a_file_does_not_stop_the_bidi_route () =
+  with_fixture (fun fixture ->
+    write fixture.manifests "not a directory";
+    ignore (install_ok (host_only fixture));
+    check bool "the lane is installed" true
+      ((L.observe ~base_path:fixture.base_path ~server:L.Not_serving).L.launcher
+       = L.Follows_workspace);
+    check string "the file there was left alone" "not a directory" (read fixture.manifests))
+
+let test_the_bidi_route_after_the_extension_route_leaves_what_the_extension_wrote () =
+  with_fixture (fun fixture ->
+    let first = install_ok (request fixture) in
+    let manifest = (extension first).S.native_manifest and load = (extension first).S.load in
+    let manifest_text = read manifest and load_text = read load in
+    let token = read first.S.token in
+    let again = install_ok (host_only fixture) in
+    check bool "it writes no extension this time" true (Option.is_none again.S.extension);
+    check string "the manifest is as it was" manifest_text (read manifest);
+    check string "the extension is as it was" load_text (read load);
+    check string "the token is the one that was there" token (read again.S.token))
+
 let () =
   run "browser lane setup"
     [ ( "installation"
@@ -492,5 +542,13 @@ let () =
             test_an_install_that_stops_after_the_launcher_does_not_read_as_installed
         ; test_case "a token file may be relative or the canonical file" `Quick
             test_a_token_file_may_be_relative_or_the_canonical_file_itself
+        ] )
+    ; ( "the BiDi route"
+      , [ test_case "installs the host and no extension" `Quick
+            test_the_bidi_route_installs_the_host_and_no_extension
+        ; test_case "a manifest directory that is a file does not stop it" `Quick
+            test_a_manifest_directory_that_is_a_file_does_not_stop_the_bidi_route
+        ; test_case "leaves what the extension route wrote" `Quick
+            test_the_bidi_route_after_the_extension_route_leaves_what_the_extension_wrote
         ] )
     ]

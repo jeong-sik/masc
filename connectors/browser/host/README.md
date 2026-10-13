@@ -19,6 +19,23 @@ masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
 Without `--mode` the command writes nothing and prints what is installed. It
 starts no browser.
 
+`--mode bidi` is the other route. It installs the host and the launcher, with no
+extension and no native messaging manifest, and writes `[browser.live.bidi]` into
+the workspace's `runtime.toml`, so the MASC server starts a Firefox of its own
+and attaches the host to it when the server starts
+(`docs/design/browser-bidi-live-host.md`):
+
+```sh
+masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
+```
+
+`--firefox FILE`, `--profile DIR` and `--port N` name the table's values; without
+them the command uses the first Firefox that answers `--version`, the profile
+`masc-keeper-firefox-profile` in the home directory, and the default port. A
+table that is already there keeps its values, because its profile holds the
+logins the Keepers use. Give `--mode` twice to connect both routes. An option the
+chosen modes do not use is refused.
+
 From a source checkout, `scripts/install-local-build.sh` builds `masc`,
 `masc-tui` and `masc-browser-host`, installs them into `~/.local/bin`, and
 reinstalls every host registered under a workspace's

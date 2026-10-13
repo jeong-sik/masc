@@ -21,6 +21,16 @@ profile = "/Users/you/masc-keeper-firefox-profile"
 # port = 9222
 ```
 
+`masc browser-lane-setup --mode bidi --base-path DIR` installs the lane's host
+and launcher and writes this table. It names the first Firefox that answers
+`--version` (`firefox` on `PATH`, then the macOS application bundle) unless
+`--firefox` names one, opens `masc-keeper-firefox-profile` in the home
+directory unless `--profile` names another, and writes no `port` unless `--port`
+names one. A table that is already in `runtime.toml` keeps its values: each one
+changes only when its option is given, and the line it is rewritten on loses its
+trailing comment. Every other line stays as it was. The server reads the table
+when it starts, so restart it afterwards.
+
 - It starts only what is missing. A port that already answers gets no second
   Firefox, and a host holding the host lock gets no second host.
 - It starts Firefox only together with a host. It starts neither when the
@@ -163,7 +173,8 @@ Without the table the operator does both steps.
    above is an example.
 
    The browser lane has to be installed for that workspace first.
-   `masc browser-lane-setup --mode extension` writes the lane token the host and the
+   `masc browser-lane-setup --mode extension` (or `--mode bidi`, which writes the
+   table above as well and no extension) writes the lane token the host and the
    server share (`<base-path>/.masc/browser-lane/token`), a copy of the host
    executable, and the `launch` script used here. The launcher runs that copy
    with this workspace's `--base-path` and token file and passes on what

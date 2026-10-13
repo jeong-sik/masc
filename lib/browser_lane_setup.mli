@@ -1,12 +1,12 @@
 (** Installs the browser lane for one workspace: the lane token, the native
-    host and the launcher Firefox runs, and the native messaging manifest that
-    lets the MASC extension start it. [masc browser-lane-setup] is this
-    module's command.
+    host and the launcher, and, for the MASC extension route, the extension
+    and the native messaging manifest that lets Firefox start the host for it.
+    [masc browser-lane-setup] is this module's command.
 
     Installing writes only files: it starts no browser, edits no
     [runtime.toml] and loads no extension, because Firefox loads a temporary
-    add-on only from [about:debugging]. What the operator does in the browser
-    is the last thing {!install} tells them. *)
+    add-on only from [about:debugging]. The BiDi route's table in
+    [runtime.toml] is {!Browser_lane_bidi_setup}'s. *)
 
 module Host_name : sig
   (** The native messaging host's name: lowercase letters, digits and
@@ -19,6 +19,13 @@ module Host_name : sig
   val to_string : t -> string
 end
 
+(** What only the extension route needs. *)
+type extension_route =
+  { manifest_dir : string
+        (** Where Firefox looks for native messaging manifests. *)
+  ; host_name : Host_name.t
+  }
+
 type request =
   { base_path : string
         (** The workspace root, absolute. The lane lives under
@@ -30,9 +37,16 @@ type request =
         (** A lane token already provisioned. It must exist and hold a token
             ({!Browser_lane.Lane_token}), and equal the workspace's own token
             when that exists. A relative path is taken from [base_path]. *)
-  ; manifest_dir : string
-        (** Where Firefox looks for native messaging manifests. *)
-  ; host_name : Host_name.t
+  ; extension : extension_route option
+        (** [Some] also writes the extension and the manifest for it. [None]
+            writes the host and the launcher alone, which is all the BiDi
+            route starts. *)
+  }
+
+type extension_installed =
+  { native_manifest : string  (** The native messaging manifest. *)
+  ; directory : string  (** Where the extension files were written. *)
+  ; load : string  (** The file to choose in [about:debugging]. *)
   }
 
 type installed =
@@ -40,10 +54,8 @@ type installed =
   ; host_source : string  (** The executable that was copied. *)
   ; launcher : string  (** The [launch] script Firefox runs. *)
   ; declaration : string  (** The [launch.json] beside it. *)
-  ; manifest : string  (** The native messaging manifest. *)
   ; token : string  (** The workspace's canonical lane token file. *)
-  ; extension_directory : string  (** Where the extension files were written. *)
-  ; extension_manifest : string  (** The file to choose in [about:debugging]. *)
+  ; extension : extension_installed option
   }
 
 type error =
@@ -78,7 +90,8 @@ val install : request -> (installed, error) result
     the token, and each directory (it must exist as a directory and be
     writable). Then it writes, in this order: the token (once, mode [0600],
     published whole and never replaced), the host, the launcher, the extension
-    files, the manifest, and last [launch.json]. [launch.json] is what makes
+    files and the manifest when the extension route is asked for, and last
+    [launch.json]. [launch.json] is what makes
     the launcher count as installed, so an install that stops part way reads
     as not installed, not as installed.
 

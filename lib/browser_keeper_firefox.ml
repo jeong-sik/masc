@@ -80,7 +80,7 @@ let launcher_missing_message ~base_path missing =
     (match missing with
      | Not_installed -> "not installed"
      | Needs_reinstall -> "not as its installation wrote it")
-    (Browser_lane_launcher.install ~base_path)
+    (Browser_lane_launcher.install ~route:Browser_lane_launcher.Bidi ~base_path)
 
 let host_on_another_port_message ~port address =
   Printf.sprintf

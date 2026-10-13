@@ -75,9 +75,14 @@ let run_host (t : Launcher.t) ~address =
 
 (* What closes a paragraph that named the host command: the installation the
    launcher needs when it is not there or not as one wrote it, and where the
-   steps are written. *)
-let steps (t : Launcher.t) =
-  let installer = Launcher.install ~base_path:t.base_path in
+   steps are written. [route] is the installation the sentence names. Where
+   MASC starts Firefox the table is already in runtime.toml, so the BiDi route
+   installs the lane and leaves the table as it is. Where the operator starts
+   it there is no table, and the BiDi route would write one and hand the start
+   to MASC, so the sentence names the other route, the one that writes no
+   runtime.toml. *)
+let steps ~route (t : Launcher.t) =
+  let installer = Launcher.install ~route ~base_path:t.base_path in
   let launcher_first =
     match (attach_for t).standing with
     | Launcher_installed -> ""
@@ -304,7 +309,7 @@ let by_operator t record =
       Printf.sprintf
         "No BiDi browser host has run for this workspace. Hover and drag on the live lane need \
          one. The operator starts Firefox on a profile kept for this with %s PORT, then %s.%s%s"
-        firefox_flag (run_host t ~address:None) (listed_beside t) (steps t)
+        firefox_flag (run_host t ~address:None) (listed_beside t) (steps ~route:Launcher.Extension t)
   | Record.Record_missing_but_locked ->
       "A BiDi browser host holds this workspace's lock, but its record is missing. It may be \
        starting or the record may have been removed while it ran; its status is unverified. \
@@ -333,7 +338,7 @@ let by_operator t record =
          reason: %s.%s%s%s%s"
         entry.pid entry.bidi_url (at ending.at) (quoted ending.reason)
         (unacknowledged t entry) (next_host t entry ending) (listed_beside t)
-        (steps t)
+        (steps ~route:Launcher.Extension t)
   | Record.Died entry ->
       Printf.sprintf
         "No BiDi browser host is running. The last one (pid %d, given %s, started at %s) left no \
@@ -343,7 +348,7 @@ let by_operator t record =
          before the host is run again.%s%s"
         entry.pid entry.bidi_url (at entry.started_at) (unacknowledged t entry)
         (run_host t ~address:(Some entry.bidi_url)) (firefox_at entry.bidi_url) (listed_beside t)
-        (steps t)
+        (steps ~route:Launcher.Extension t)
   | Record.Unreadable { detail; held = Some true } ->
       Printf.sprintf
         "A BiDi browser host holds this workspace's lock, so one is running, and its record \
@@ -359,7 +364,7 @@ let by_operator t record =
          load beside it and writes a new one in its place. It does not start while the record \
          cannot be read at all, or a new one cannot be written. The operator starts Firefox on a \
          profile kept for this with %s PORT, unless it runs already, then %s.%s%s"
-        detail firefox_flag (run_host t ~address:None) (listed_beside t) (steps t)
+        detail firefox_flag (run_host t ~address:None) (listed_beside t) (steps ~route:Launcher.Extension t)
   | Record.Unreadable { detail; held = None } ->
       Printf.sprintf
         "Whether a BiDi browser host runs for this workspace could not be checked (%s)." detail
@@ -491,14 +496,14 @@ let by_masc t record ~port ~profile ~last_start =
       Printf.sprintf
         "No BiDi browser host has run for this workspace. Hover and drag on the live lane need \
          one. %s.%s%s%s"
-        starts last (listed_beside t) (steps t)
+        starts last (listed_beside t) (steps ~route:Launcher.Bidi t)
   | Record.Ended (entry, ending) ->
       Printf.sprintf
         "No BiDi browser host is running. The last one (pid %d, given %s) ended at %s with this \
          reason: %s.%s%s%s%s%s"
         entry.pid entry.bidi_url (at ending.at) (quoted ending.reason)
         (unacknowledged t entry) (next_host_by_masc t entry ending ~port ~profile)
-        last (listed_beside t) (steps t)
+        last (listed_beside t) (steps ~route:Launcher.Bidi t)
   | Record.Died entry ->
       Printf.sprintf
         "No BiDi browser host is running. The last one (pid %d, given %s, started at %s) left no \
@@ -506,14 +511,14 @@ let by_masc t record ~port ~profile ~last_start =
          may be left in the Firefox at that address. %s; %s.%s%s%s"
         entry.pid entry.bidi_url (at entry.started_at) (unacknowledged t entry) starts
         refused_then_restarted
-        last (listed_beside t) (steps t)
+        last (listed_beside t) (steps ~route:Launcher.Bidi t)
   | Record.Unreadable { detail; held = Some false } ->
       Printf.sprintf
         "The BiDi browser host's record cannot be read (%s). No host holds this workspace's \
          lock, so none is running. The next host keeps a copy of a record it read and cannot \
          load beside it and writes a new one in its place. It does not start while the record \
          cannot be read at all, or a new one cannot be written. %s.%s%s%s"
-        detail starts last (listed_beside t) (steps t)
+        detail starts last (listed_beside t) (steps ~route:Launcher.Bidi t)
   | Record.Running _ -> by_operator t record ^ last
   | Record.Record_missing_but_locked | Record.Unreadable { held = Some true | None; _ } ->
       by_operator t record ^ last

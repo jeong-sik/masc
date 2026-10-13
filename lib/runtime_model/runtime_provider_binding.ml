@@ -22,28 +22,6 @@ let provider_name_of_kind (kind : Llm_provider.Provider_config.provider_kind) =
   Llm_provider.Provider_registry.provider_name_of_config cfg
 ;;
 
-let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
-  match Runtime_binding.binding_for_provider_config cfg with
-  | Some binding -> binding.Runtime_binding.id
-  | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
-;;
-
-(* Two bindings can share a provider, so the model and base URL come along:
-   the label has to say which endpoint a call actually reached. *)
-let provider_endpoint_label_of_config (cfg : Llm_provider.Provider_config.t) =
-  match cfg.kind with
-  | Llm_provider.Provider_config.OpenAI_compat ->
-    let base_url = String.trim cfg.base_url in
-    if base_url = ""
-    then provider_label_of_config cfg
-    else Printf.sprintf "%s:%s@%s" (provider_label_of_config cfg) cfg.model_id base_url
-  | Llm_provider.Provider_config.Anthropic
-  | Llm_provider.Provider_config.Kimi
-  | Llm_provider.Provider_config.Ollama
-  | Llm_provider.Provider_config.Gemini
-  | Llm_provider.Provider_config.Glm -> provider_label_of_config cfg
-;;
-
 let binding_auth_is_no_auth (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true

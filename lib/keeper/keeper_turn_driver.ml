@@ -16,8 +16,6 @@ include Runtime_agent_core_runner
 include Keeper_internal_error
 include Keeper_turn_driver_helpers
 
-include Keeper_turn_driver_provider_attempt
-
 let positive_modality_counts counts =
   counts
   |> List.filter (fun (_, n) -> n > 0)
@@ -3406,7 +3404,6 @@ module For_testing = struct
   ;;
 
   let checkpoint_after_attempt = checkpoint_after_attempt
-  let success_selected_model_raw = success_selected_model_raw
   let apply_accept = Keeper_turn_driver_try_provider.For_testing.apply_accept
   let log_modality_reroute = log_modality_reroute
 

@@ -608,7 +608,7 @@ let test_delivery_keys_do_not_invent_turn_ownership () =
         ~transcript_slot:(tool_transcript_slot "approval-exec" 0)
         ~tool_call_name:"Read" "{}";
       row ~id:"assistant-row" ~role:"assistant" ~delivery_key:key ~turn_ref:"trace-1#54"
-        ~transcript_slot:(transcript_slot "terminal_assistant") "done";
+        ~transcript_slot:(transcript_slot "terminal_result") "done";
       row ~id:"operator-row" ~role:"user" ~delivery_key:(operation_key "shared-id")
         ~transcript_slot:(transcript_slot "accepted_user") "operator request"])
     in
@@ -618,6 +618,14 @@ let test_delivery_keys_do_not_invent_turn_ownership () =
     check (list (option string)) "only the actual operation names its journal"
       [None;None;None;Some "shared-id"]
       (List.map (fun r -> r.History.operation_id) decoded.History.rows);
+    let autonomous_source =
+      Option.map (fun reference -> Masc_tui_keeper_chat_log.Autonomous_turn reference)
+        (Ids.Turn_ref.of_string "trace-1#54")
+    in
+    check bool "explicit nonoperation turn source retained without passive ownership" true
+      (List.map (fun r -> r.History.execution_source) decoded.History.rows =
+         [None; autonomous_source; autonomous_source;
+          Some (Masc_tui_keeper_chat_log.Operation "shared-id")]);
     List.iter (fun (r:History.row) -> check bool "append row identity remains available" true
       (Option.is_some r.structural_id)) decoded.History.rows;
     let context = List.hd decoded.History.rows

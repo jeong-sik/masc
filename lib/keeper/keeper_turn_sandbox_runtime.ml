@@ -1951,6 +1951,51 @@ let teardown_keeper_sandbox_by_name
          | Ok (), trim_cleanup -> trim_cleanup))
 ;;
 
+(* Separate from the teardown because a paused keeper is torn down too and
+   must come back to its work volume. Only dissolution calls this, after the
+   teardown has removed the guest that held the volumes. *)
+let remove_keeper_volumes_by_name
+      ?timeout_sec
+      ~(keeper_name : string)
+      ~(backend : Keeper_sandbox.backend)
+      ?microvm_backend
+      ()
+  =
+  let timeout_sec =
+    match timeout_sec with
+    | Some seconds -> seconds
+    | None -> Env_config_sandbox.Runtime.microvm_remove_timeout_sec ()
+  in
+  match backend with
+  | Keeper_sandbox.Docker | Keeper_sandbox.Remote_ssh -> Ok ()
+  | Keeper_sandbox.Micro_vm ->
+    (match microvm_backend with
+     | None ->
+       Error
+         (Printf.sprintf
+            "microvm_volume_removal_backend_unresolved: keeper %s's volumes \
+             cannot be removed without the runtime that created them"
+            keeper_name)
+     | Some Keeper_microvm_backend.Apple_container ->
+       with_microvm_lifecycle_lock (fun () ->
+         Keeper_sandbox_microvm.remove_apple_keeper_volumes
+           ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
+           ~timeout_sec
+           ~keeper_name)
+     | Some
+         ((Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata) as
+          microvm_backend) ->
+       (* Both create the work volume as a host directory, but no removal
+          spelling is established for either. Name what is left instead of
+          reporting a removal that did not happen. *)
+       Error
+         (Printf.sprintf
+            "microvm_volume_removal_not_established: keeper %s's work volume \
+             on %s was left on the host; remove it with that runtime's CLI"
+            keeper_name
+            (Keeper_microvm_backend.to_string microvm_backend)))
+;;
+
 let teardown_keeper_sandbox
       ?timeout_sec
       ~(config : Workspace.config)

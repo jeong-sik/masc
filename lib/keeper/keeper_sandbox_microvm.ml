@@ -1401,6 +1401,10 @@ let volume_names_of_json = function
   | _ -> Error "container volume list did not return a JSON array"
 ;;
 
+let apple_volume_list_argv () =
+  command_argv_for Backend.Apple_container @ [ "volume"; "list"; "--format"; "json" ]
+;;
+
 type volume_probe_outcome =
   | Volume_present
   | Volume_absent
@@ -1466,8 +1470,7 @@ let apple_volume_probe ~volume_name ~timeout_sec =
   let listing =
     match inspect with
     | Unix.WEXITED 1, _, _ ->
-      let list_argv = cli @ [ "volume"; "list"; "--format"; "json" ] in
-      Some (Process_eio.run_argv_with_status_split ~timeout_sec list_argv)
+      Some (Process_eio.run_argv_with_status_split ~timeout_sec (apple_volume_list_argv ()))
     | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _ -> None
   in
   classify_volume_probe ~volume_name ~inspect ~listing
@@ -1685,8 +1688,62 @@ let build_volume_mount_args ~volume_name =
   [ "--volume"; volume_name ^ ":" ^ build_volume_guest_root ]
 ;;
 
-let apple_build_volume_delete_argv ~volume_name =
+let apple_volume_delete_argv ~volume_name =
   command_argv_for Backend.Apple_container @ [ "volume"; "delete"; volume_name ]
+;;
+
+(* Both volumes are named by the same functions that created them, so the
+   removal reaches exactly this keeper's volumes and nothing that merely
+   shares a prefix. Each delete is attempted whatever the other returned. A
+   delete's exit code cannot prove absence: an already-absent volume and one
+   a guest still holds can both exit non-zero. One listing after both deletes
+   settles it, the same way the trim helper's removal is settled. *)
+let remove_apple_keeper_volumes ~run ~timeout_sec ~keeper_name =
+  match work_volume_name ~keeper_name, build_volume_name ~keeper_name with
+  | Error detail, _ | _, Error detail -> Error detail
+  | Ok work, Ok build ->
+    let deletions =
+      List.map
+        (fun volume_name ->
+           volume_name, run ~timeout_sec (apple_volume_delete_argv ~volume_name))
+        [ work; build ]
+    in
+    (match run ~timeout_sec (apple_volume_list_argv ()) with
+     | Unix.WEXITED 0, listing, _ ->
+       (match Yojson.Safe.from_string listing with
+        | exception Yojson.Json_error detail ->
+          Error ("keeper volume inventory is invalid JSON: " ^ detail)
+        | json ->
+          (match volume_names_of_json json with
+           | Error _ as error -> error
+           | Ok names ->
+             (match
+                List.filter
+                  (fun (volume_name, _) -> List.exists (String.equal volume_name) names)
+                  deletions
+              with
+              | [] -> Ok ()
+              | remaining ->
+                Error
+                  (String.concat
+                     "; "
+                     (List.map
+                        (fun (volume_name, (status, stdout, stderr)) ->
+                           Printf.sprintf
+                             "volume %s remains after removal (%s): %s"
+                             volume_name
+                             (Keeper_sandbox_exec_failure.status_label status)
+                             (output_for_log ~stdout ~stderr))
+                        remaining)))))
+     | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), stdout, stderr ->
+       Error
+         (Printf.sprintf
+            "cannot verify keeper %s's volumes %s and %s were removed (%s): %s"
+            keeper_name
+            work
+            build
+            (Keeper_sandbox_exec_failure.status_label status)
+            (output_for_log ~stdout ~stderr)))
 ;;
 
 (** Recreate the build volume fresh on every boot rather than reusing one
@@ -1705,7 +1762,7 @@ let recreate_apple_build_volume ~volume_name ~size ~timeout_sec =
     Error (Printf.sprintf "%s_probe_failed: %s" error_code message)
   | Volume_absent -> ensure_apple_volume Build_volume ~volume_name ~size ~timeout_sec
   | Volume_present ->
-    let argv = apple_build_volume_delete_argv ~volume_name in
+    let argv = apple_volume_delete_argv ~volume_name in
     (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
      | Unix.WEXITED 0, _, _ ->
        ensure_apple_volume Build_volume ~volume_name ~size ~timeout_sec

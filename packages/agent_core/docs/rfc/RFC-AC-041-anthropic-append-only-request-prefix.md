@@ -7,7 +7,7 @@
 | Created | 2026-10-13 |
 | Updated | 2026-10-13 (독립 검토 반영. #42677 이 들어간 main 기준으로 문제 진술과 인용을 다시 읽음) |
 | Target | `agent_core` — `lib/agent/agent_turn.ml`, `lib/llm_provider/{retry,reasoning_dialect,reasoning_history_projection,backend_anthropic,types}.ml`, 카탈로그(`models.toml`). masc — `lib/keeper/keeper_turn_driver_try_provider.ml`, `lib/runtime/runtime_model_input_tail_window.ml`, `lib/keeper/keeper_model_input_demotion.mli`, `lib/keeper/keeper_run_tools_hooks.ml` |
-| Related | #42636, #42632, #42671, #42677, RFC-AC-029 §S3, RFC-AC-040, `docs/rfc/RFC-keeper-context-window-in-tokens.md` §1·§13.4, `docs/rfc/RFC-librarian-lifecycle.md` §4.10, `docs/rfc/RFC-0363-historical-tool-result-demotion.md` |
+| Related | #42636, #42632, #42671, #42677, #42713, #42729, RFC-AC-029 §S3, RFC-AC-040, `docs/rfc/RFC-keeper-context-window-in-tokens.md` §1·§13.4, `docs/rfc/RFC-librarian-lifecycle.md` §4.10, `docs/rfc/RFC-0363-historical-tool-result-demotion.md` |
 | 측정 기준 | `파일:줄` 은 `origin/main` `4cc7ed1ebf`(2026-10-13 조회)에서 다시 읽은 값이다. 처음 쓴 기준 `361883ee64` 와 줄이 다른 곳은 부록 A 에 두 열로 적었다. 측정 수치는 2026-10-12T16:04Z(2026-10-13 01:04 KST)에 `~/.masc` 에서 잰 값이고, 센 방법을 각 곳에 적었다 |
 | 디렉터리 | `packages/agent_core/docs/rfc/`. 이유는 부록 B |
 
@@ -18,6 +18,7 @@
 - 바꾸는 곳은 코드로 확인한 것이 넷이다. (1) 턴별 문맥을 요청 끝에 붙였다가 다음 라운드에서 뺀다. (2) 보내는 이력 창의 시작점이 움직인다. (3) 오래된 도구 결과를 마커로 줄이는 경계(강등)가 턴마다 움직인다. (4) 다시 보내는 서명 블록에 앞부분 비교가 없다. 현 main 은 #42677 때문에 최신 턴의 도구 루프 thinking 만 다시 보내지만, 그 블록이 만들어진 때와 앞부분이 같은지는 보지 않는다(§1.3-4). system·tools 가 라운드 사이에 바뀌는 경로도 코드에서 둘 찾았다(§1.3).
 - 같은 400 이 `Unknown_invalid_request` 로 읽히고 `boundary_resend_on` 이 이 값에 true 를 돌려준다. 크기와 상관없는 400 에도 짧은 창으로 한 번 더 보낸다.
 - 이 RFC 는 다섯 가지를 정한다. (a) Anthropic 요청은 앞부분을 이어 붙이기만 한다. (b) 턴별 문맥은 만든 뒤 바꾸지 않는 메시지로 이력에 남긴다. (c) 서명 블록은 앞부분 지문이 맞을 때만 다시 보내고, 아니면 빼며 이유를 타입으로 남긴다. (d) system·tools 는 고정하지 않고 바뀐 것을 지문으로 알아낸다. (e) 크기 때문이라는 증거가 있는 400 에만 짧은 창으로 다시 보낸다.
+- 서명 블록은 앞부분 지문이 맞는 것 말고도, 보내는 thinking 블록이 원래 순서의 끊기지 않는 구간일 때만 다시 보낸다. 문서가 thinking 블록마다 바로 앞 thinking 블록을 기록한다고 적기 때문이다(§1.2-14, §3.4 의 서명 사슬 확인).
 - #42677(병합 `c72b91bc99`)과 이 RFC 는 층이 다르고 둘 다 남는다. #42677 은 어느 블록이 다시 보낼 후보인지를 정하고, 이 RFC 의 지문은 후보 블록의 앞부분이 그대로인지를 정한다. #42677 의 강제를 풀지는 이 RFC 가 정하지 않고 운영자 결정으로 둔다(§1.3-4, Q13).
 - 이 RFC 가 해 주지 못하는 것: 턴 사이의 thinking 이어짐. 현 main 은 #42677 의 정책으로 이미 새 턴에서 지난 턴 thinking 을 뺀다. 그 정책을 풀어도 강등과 창 이동은 그대로이므로 그 둘이 일어나는 턴 경계에서는 끊긴다. 턴 안(도구 라운드 사이)의 이어짐만 지킨다(§3.5).
 - 범위는 Anthropic 요청 경로다. 다른 공급자의 요청과 재전송 규칙은 지금 그대로 둔다(§2).
@@ -72,6 +73,7 @@
 11. 그 메시지의 제약(Limitations): 첫 메시지가 될 수 없다. 반드시 `user` 턴(도구 결과만 있는 user 턴 포함) 바로 뒤에 오고 `assistant` 턴 앞이거나 배열 끝이어야 한다. `tool_use` 와 `tool_result` 사이에는 못 둔다. 턴 범위 메시지는 text 만 되고 `cache_control` 을 못 단다. "Not a place for untrusted content": 도구 출력·검색 문서 같은 바깥 글을 system 메시지에 넣으면 운영자 권한이 된다.
 12. 계정이 다르면: "Thinking blocks that Claude Sonnet 5.5 or Claude Haiku 5.5 produces work only in the account that produced them". 다른 계정이 보내면 서버가 조용히 버린다. 헤더가 있으면 `input_transformations` 에 `organization_binding_mismatch` 로 나온다.
 13. 문서의 처리 안내: 도구 사용을 끄려면 `tools` 를 빼지 말고 `tool_choice: {"type": "none"}` 를 보낸다.
+14. thinking 블록끼리의 순서 규칙. `preserved-thinking` 페이지(121,909자 중 처음 100,000자를 다시 읽었고 나머지 21,909자는 이 항목을 위해 읽지 않았다)의 문장이다: "Earlier thinking blocks aren't in the prefix, but each thinking block records which thinking block came before it, across turns. You can remove thinking blocks from the start of the history (oldest first), from the end, or all of them. What fails is a gap: the thinking blocks you keep must be an unbroken run of the original sequence, so removing one from the middle invalidates the thinking blocks after it. Once you remove a block, leave it out. Putting it back invalidates the thinking blocks produced while it was gone." 같은 페이지의 "What counts as an edit" 표: 앞에서, 끝에서, 전부 빼기는 "Valid (the model loses that reasoning)", 중간에서 빼고 뒤를 남기기는 "Invalid for every later thinking block", 뺐던 블록을 되돌리기는 "Invalid for thinking blocks produced while it was gone" 이다. 이 문장들은 `redacted_thinking` 이 순서에 드는지 말하지 않는다. 확인하지 못했다.
 
 ### 1.3 앞부분을 바꾸는 곳
 
@@ -196,6 +198,7 @@
 - 이어 붙이기만 하는 것: `system` 값, `tools` 값, `messages` 의 `R_n` 길이까지의 항목. thinking·redacted_thinking 블록은 비교에서 뺀다(§1.2-5). 비교는 JSON 값으로 한다. 문서가 "JSON formatting and key order don't matter; the values do" 라고 적는다.
 - 바뀌어도 되는 것: `messages` 끝에 덧붙인 항목, `effort`, `max_tokens`, `output_config`, `tool_choice`, `metadata`, `thinking.display`, `cache_control`.
 - 앞부분이 바뀐 요청은 그 앞부분에 묶인 서명 블록을 담지 않는다(§3.4).
+- 보내는 thinking·redacted_thinking 블록은 원래 순서의 끊기지 않는 구간이다(§1.2-14). 빼는 것은 오래된 쪽 끝이나 새 쪽 끝에서만 한다. 뺐던 블록을 다시 넣으면 그동안 만든 블록은 보내지 않는다(§3.4 의 서명 사슬 확인).
 
 이 불변식은 우리가 보내는 JSON 에 대한 것이다. 우리 쪽 값이 다르면 Anthropic 쪽 앞부분도 다르다. 반대는 성립하지 않는다. 우리 쪽 값이 같아도 계정이 다르거나 서버가 다르게 읽으면 거절될 수 있다. 그 경우는 §3.4 의 계정 라벨과 §3.6 의 라이브 증명이 다룬다.
 
@@ -296,6 +299,8 @@ type signed_thinking_disposition =
 - 정책이 후보로 보지 않는 블록은 `Omit_replay_policy_excluded` 다. 이 블록은 지문을 계산하지 않는다. 앞부분이 바뀐 것이 아니라 정책이 보내지 않기로 한 것이어서 `prefix_change` 가 아니다. 판정 순서는 출처(`rotation_admits`, 지금 그대로), 정책, 그다음 새 검사(키 있음, 계정, 지문)다. 정책을 먼저 보는 이유는 보내지 않을 블록 때문에 `Omit_prefix_changed` 기록이 늘어 끊김 횟수가 부풀려지는 것을 막기 위해서다.
 - 재생할 블록은 이렇게 고른다. 가장 새 서명 블록부터 거슬러 올라가며 `Replay` 인 블록을 모은다. `Replay` 가 아닌 블록(`Omit_replay_policy_excluded` 포함)을 처음 만나면 멈춘다. 그 블록과 그보다 오래된 서명 블록은 전부 뺀다(앞쪽부터 빼기만 한다). 문서가 유효하다고 적은 방식이다(§1.2-5). 정책이 중간 블록만 제외하는 설정(`Tool_call_assistant_messages_all_history` 등)에서도 빠지는 구간은 이 규칙 때문에 시작부터 이어진다.
 - 모은 열로 서명 사슬을 확인한다. 보낼 열의 각 서명 블록에 대해 `thinking_predecessor` 가 실제로 바로 앞에 보내는 블록의 서명 해시와 같은지 본다. 맨 앞(오래된) 블록의 선행자는 `none` 이든 무엇이든 시작부터 빼기라 유효하다. 뒤에서 앞으로 링크를 확인해 끊긴 링크를 찾으면 그 오래된 쪽과 그 앞 전부를 뺀다(`Omit_chain_mismatch`). 정책 제외로 한 번 빠진 블록을 나중에 되살리는 전이가 지문에는 보이지 않는데(지문 재료가 thinking 을 빼므로), 이 검사가 그 전이를 닫는다. 문서의 "Once you remove a block, leave it out" 을 기록된 사실로 지키는 규칙이다(§1.2-5).
+- 사슬이 끊기면 새 구간을 남기고 오래된 구간을 뺀다. 근거 셋. 첫째, 두 쪽 모두 문서가 유효하다고 적은 모양이다. 오래된 쪽을 빼면 "시작부터 빼기"이고 새 쪽을 빼면 "끝에서 빼기"다(§1.2-14 표). 둘째, 새 쪽은 열린 도구 라운드의 마지막 assistant 메시지를 포함할 수 있고, 문제 해결 문서는 그 메시지의 thinking 을 고치면 400 이라고 적는다(아래 열린 도구 라운드 항목). 셋째, 지금 코드도 같은 쪽을 남긴다. `replay_selected` 는 가장 새 user 메시지 뒤의 블록을 남기고 앞의 블록을 뺀다. 둘을 함께 남기는 길은 없다. 되돌린 `T1` 과 그동안 만든 `T2` 는 함께 보낼 수 없기 때문이다(§1.2-14).
+- `redacted_thinking` 이 사슬에 드는지는 문서가 말하지 않는다(확인 못 함). 위 정의는 드는 것으로 센다. 실제로 들지 않는 블록이라면 우리 규칙이 필요 이상으로 블록을 뺄 뿐 요청은 거절되지 않는다. 라이브 증명이 확인한다(§3.6).
 - 이 규칙은 한 번 앞부분이 바뀐 뒤에 새로 만든 블록을 영구히 잃지 않는다. 바뀐 뒤의 요청은 새 앞부분으로 지문을 붙이고, 그 블록은 이후 요청이 바뀌지 않는 한 재생된다. 앞쪽의 안 맞는 블록만 계속 빠진다. 안 맞는 블록과 같은 앞부분에 묶인 오래된 블록 중 맞는 것까지 빠지는 것은 보수적인 선택의 비용이다. 맞는 블록만 남기고 중간 블록만 빼는 쪽은 문서가 gap 으로 무효라고 적었다(§1.2-5). 그래서 앞쪽부터 빼기만 한다.
 - 창 시작점이 움직이면 모든 지문이 달라져 서명 블록이 전부 빠진다. 강등도 마커로 바뀐 도구 결과 뒤의 모든 서명 블록을 뺀다.
 - 열린 도구 라운드(마지막 assistant 메시지가 `tool_use` 를 가졌고 답이 오는 중)에서 그 마지막 메시지의 서명 블록을 빼야 하는 경우가 있다. 문서의 두 곳이 어긋나 보인다. 앞부분 문서는 끝에서 빼는 것이 유효하다고 하고, 문제 해결 문서는 마지막 assistant 메시지의 thinking 을 고치면 400 이라고 한다. 어느 쪽이 맞는지 확인하지 못했다. 라이브 증명이 이 경우를 시험한다. 400 이 나면 이 경우는 조용히 빼지 않고 타입 있는 턴 실패(`Open_tool_round_cannot_drop_signed_thinking`)로 만든다.
@@ -306,7 +311,7 @@ type signed_thinking_disposition =
 이 RFC 가 서명 블록을 빼는 것은 `drop_block` 이 블록을 버리는 것과 같은 비용을 낸다. 모델이 지난 추론을 잃어 출력 토큰이 늘 수 있다. 비목표에서 `drop_block` 을 거부한 이유가 이 설계에도 해당한다. 다른 점은 빈도다. `drop_block` 을 쓰면 앞부분이 바뀌는 모든 요청에서 버리고, 이 설계는 바뀌지 않는 요청에서는 보낸다.
 
 - 지키는 것: 같은 턴의 라운드 사이. 2026-10-12 에 같은 턴의 두 번째 이후 라운드가 전체 라운드의 85%(6,883/8,071)다(§1.3-1). 이 라운드들은 문맥 메시지를 고정하고(§3.2) 강등 경계가 턴 안에서 고정되어 있으므로(§1.3-3), 도구가 안 바뀌고 창이 안 움직이면 앞부분이 이어 붙이기만 한다.
-- 못 지키는 것: 턴 사이. 현 main 에서는 #42677 의 정책이 새 턴의 첫 요청에서 지난 턴 thinking 을 모두 뺀다. 이 RFC 의 지문 층은 그 빠짐을 되돌리지 않는다. 정책을 풀면(Q13) 지난 턴 thinking 이 후보가 되고, 그다음부터는 지문이 가른다. 새 턴의 첫 요청에서 지난 턴의 도구 결과가 마커로 바뀌면(강등) 그 뒤 서명 블록이 전부 빠진다. 창이 움직일 때도 같다. `Small`(기본값) 정책에서 지난 턴에 마커보다 큰 도구 결과가 있으면 해당한다. 마커보다 작은 결과만 있는 턴은 해당하지 않는다. 해당하는 턴이 얼마나 되는지는 재지 않았다.
+- 못 지키는 것: 턴 사이. 현 main 에서는 #42677 의 정책이 새 턴의 첫 요청에서 지난 턴 thinking 을 모두 뺀다. 이 RFC 의 지문 층은 그 빠짐을 되돌리지 않는다. 정책을 풀면(Q13) 지난 턴 thinking 이 후보가 되고, 그다음부터는 지문과 서명 사슬 확인이 가른다. 정책 제외 중에 만든 블록이 있는 이력에서는 사슬 확인이 없으면 정책을 푸는 순간 400 이 난다(시나리오 12). 그래서 푸는 일은 사슬 확인이 들어간 지문 층 뒤에만 한다. 새 턴의 첫 요청에서 지난 턴의 도구 결과가 마커로 바뀌면(강등) 그 뒤 서명 블록이 전부 빠진다. 창이 움직일 때도 같다. `Small`(기본값) 정책에서 지난 턴에 마커보다 큰 도구 결과가 있으면 해당한다. 마커보다 작은 결과만 있는 턴은 해당하지 않는다. 해당하는 턴이 얼마나 되는지는 재지 않았다.
 - 턴 사이 손실의 비용은 잰 적이 없다. Anthropic 의 수치(첫 턴 이후 매 턴 버리면 4.6~67.1%)는 다른 하네스의 값이라 상한을 가늠하는 참고일 뿐이다. 우리 하네스에서 재는 방법: 실제 체크포인트 하나에 요청 본문 생성기를 돌려 턴 경계마다 빠지는 서명 블록 수와 그 블록들이 가진 추론 크기를 센다. 정책을 적용한 값과 적용하지 않은 값을 나란히 낸다. 둘의 차이가 #42677 이 이미 잃게 한 양이고, 정책을 껐을 때 지문이 맞는 블록의 비율이 Q13 의 근거다. 공급자를 부르지 않으므로 비용이 들지 않고 결정적이다. 값은 아직 없다(미측정).
 
 강등 경계를 안정시키는 선택지와 비교는 다음과 같다.
@@ -367,7 +372,7 @@ type signed_thinking_disposition =
 
 - 기존 `packages/agent_core/test/anthropic_live_proof.ml` 은 두 턴 도구 왕복에서 서명 블록 재생을 확인한다(296-321줄). 어느 test alias 에도 걸려 있지 않고 `ANTHROPIC_LIVE=1` 과 키가 있어야 하며 비용이 든다. 여기에 턴별 문맥이 있는 두 라운드와 라운드 사이에 문맥 값을 바꾸는 경우를 더한다.
 - 요청에 beta 헤더와 `thinking.block_binding.prefix_mismatch_behavior: "error"` 를 명시한다. 문서는 `"error"` 를 회귀를 크게 실패시키는 용도로 권한다. 이 값이 있으면 계정 나이와 상관없이 검사가 켜진다(문서 FAQ). Sonnet 5.5 와 Haiku 5.5 에서는 `thinking: {"type": "adaptive"}` 일 때만 동작하므로 증명도 adaptive 로 보낸다. 이 필드와 헤더를 보내는 코드가 지금 없으므로 요청 옵션을 타입으로 새로 만든다(`prefix_mismatch_behavior = Provider_default | Error_on_mismatch`). 운영 요청은 `Provider_default`(보내지 않음)다. 테스트 전용 뒷문이 아니라 증명이 쓰는 같은 옵션이다.
-- 추가로 확인할 것 셋. (1) 열린 도구 라운드에서 마지막 assistant 메시지의 thinking 을 빼면 400 이 나는가(§3.4). (2) 우리의 앞쪽부터 빼기가 문서의 사슬 규칙과 일치하는지. 문서가 gap 을 무효로 적었으므로(§1.2-5) 유효성 질문이 아니라 일치 확인이다. (3) 지문 층 없이 #42677 만 있는 빌드에서, 턴별 문맥이 첫 라운드에만 붙는 도구 루프의 둘째 라운드가 400 을 받는가(§1.3-4, Q14).
+- 추가로 확인할 것 셋. (1) 열린 도구 라운드에서 마지막 assistant 메시지의 thinking 을 빼면 400 이 나는가(§3.4). (2) 우리의 앞쪽부터 빼기가 문서의 사슬 규칙과 일치하는지. 문서가 gap 을 무효로 적었으므로(§1.2-5) 유효성 질문이 아니라 일치 확인이다. 그리고 `redacted_thinking` 이 사슬에 드는가. 문서가 말하지 않아 확인하지 못했다(§3.4). 라이브 증명에서 두 가지를 모두 본다. (3) 지문 층 없이 #42677 만 있는 빌드에서, 턴별 문맥이 첫 라운드에만 붙는 도구 루프의 둘째 라운드가 400 을 받는가(§1.3-4, Q14).
 - 현재 실행 제약: MASC 는 push 마다 CI 를 돌리지 않고 Release/Tag 에서 Full CI 를 돌린다(`instructions/masc-workflow.md`). 라이브 증명은 수동 실행이고 결과는 PR 본문에 실행 명령과 모델 이름·날짜로 남긴다. 실행하지 않은 증명의 통과를 적지 않는다.
 - 모델이 thinking 블록을 아예 안 낼 수 있다(문서: 단순한 요청에는 생략). 블록이 없는 실행은 아무것도 증명하지 않으므로 실패가 아니라 "증명 못 함" 으로 보고한다.
 
@@ -395,7 +400,7 @@ MASC 규칙에 따라 gh stack 으로 쌓고 맨 위 PR 로 스택째 병합한�
 | 층 | 결과 | 주요 파일 |
 |---|---|---|
 | 1 | 앞부분 대조 함수와 그 단위 테스트. 실제 체크포인트에 돌려 턴 경계마다 빠질 서명 블록 수를 정책 적용 전후로 세는 읽기 전용 보고 명령(§3.5 의 측정) | 새 순수 함수, 보고 명령 |
-| 2 | 서명 블록은 지문이 맞을 때만 재생한다 (400 이 없어지는 층). 별도 키, 요청 객체의 지문, 재생 판정 `match`(정책 제외 `Omit_replay_policy_excluded` 포함), 카탈로그 `thinking_binding`. 시나리오 3, 4, 6, 7, 9, 10, 11 | `backend_anthropic.ml`, `types.ml`, `reasoning_dialect.ml`, `reasoning_history_projection.ml`, `models.toml` |
+| 2 | 서명 블록은 지문이 맞을 때만 재생한다 (400 이 없어지는 층). 별도 키, 요청 객체의 지문, 재생 판정 `match`(정책 제외 `Omit_replay_policy_excluded`, 사슬 `Omit_chain_mismatch` 포함), 서명 사슬 필드 `thinking_predecessor`, 카탈로그 `thinking_binding`. 시나리오 3, 4, 6, 7, 9, 10, 11, 12 | `backend_anthropic.ml`, `types.ml`, `reasoning_dialect.ml`, `reasoning_history_projection.ml`, `models.toml` |
 | 3 | 크기 증거가 있을 때만 짧은 창으로 다시 보낸다 (측정할 수 있는 공급자). 거절 뒤 `count_tokens`, `Size_refusal_measured`, `boundary_resend_on`. 측정할 수 있는 공급자의 `Unknown_invalid_request` 를 다시 보내지 않게 바꾸는 곳은 이 층뿐이고, Q1 의 답이 이 층의 동작을 정한다 | `retry.ml`, `keeper_turn_driver_try_provider.ml` |
 | 4 | 알 수 없는 400 의 실패 값에 보낸 요청의 사실을 붙인다. 재전송 규칙은 바꾸지 않는다 | `retry.ml` 또는 오류 값, 실패 기록 |
 | 5 | 턴별 문맥을 이력에 남기고(A, `Persisted_user_message`) 다른 공급자는 `Latest_at_tail` 로 그대로 둔다. 문맥 개수 점검을 고친다. 시나리오 1, 2, 5, 8 | `agent_turn.ml`, `keeper_agent_prompt_metrics.ml`, 창의 고정 규칙 |
@@ -406,6 +411,38 @@ MASC 규칙에 따라 gh stack 으로 쌓고 맨 위 PR 로 스택째 병합한�
 순서의 이유: 2층이 가장 먼저 400 을 없앤다. 문맥이 아직 끝에 붙고 사라지므로 이 시점에는 매 라운드 서명 블록이 빠지지만 요청은 거절되지 않는다. 5층이 라운드 사이 이어짐을 되살린다. 3·4층은 2층과 독립이라 앞서도 되고 뒤에도 된다. 4층을 3층보다 먼저 쌓아도 Q1 이 열려 있는 동안 안전하다. 4층은 실패 값에 사실을 붙일 뿐 재전송을 바꾸지 않고, 재전송 규칙이 바뀌는 곳은 3층뿐이다. Q1 에 아니라고 답하면 3층에서 `Unknown_invalid_request` 변경을 빼고, 4층은 그대로 남는다. 7층은 5·6층 뒤다.
 
 system·tools 가 라운드마다 바뀌는 경로를 없애는 일은 이 스택에 넣지 않는다. 후속 이슈로 남긴다(§3.3).
+
+### 4.4 열린 PR 과의 관계 (#42713, #42729)
+
+읽은 곳: #42713 의 head `8b94bb037199d62655f376a8b6542fcbb4795a7f`, #42729 의 head `280d4ee9400cdca8d658bacb4a601cb48efe0f5b`. 2026-10-13 에 PR 의 파일 변경(`git diff`)을 읽었다. 둘 다 병합 전이다. 아래 줄 번호는 각 PR head 의 파일 기준이다. 두 PR 의 빌드·테스트 실행 결과는 읽지 않았다.
+
+층별로 어디에 코드가 있고 어디가 정의하는가.
+
+| 층 | 코드 | 정의 |
+|---|---|---|
+| 1, 3, 4, 6, 7, 8 | 아직 없음 | 이 RFC |
+| 2 (지문과 재생 판정) | #42729: 기록 `backend_anthropic.ml:861-907`, 검증 `reasoning_history_projection.ml` 의 `verify_prefix_binding` | 이유 타입의 확장(`prefix_change`, `Omit_*`)과 서명 사슬 필드(`thinking_predecessor`)는 이 RFC 가 정의한다 |
+| 5 (문맥을 이력에 남기기, A안) | #42713: `agent_turn.ml:35-57`, `pipeline.ml:276-286`·`:337`, `types.ml:325-342` | #42713 이 정본이다. 이 RFC 의 5층은 아래 표의 차이를 #42713 에 맞춘다 |
+
+두 PR 의 순서: #42729 만 먼저 병합하면 안 된다. #42729 가 기록하는 요청 digest 는 첫 라운드에만 붙던 턴별 문맥을 포함한다(`backend_anthropic.ml:898-900` 의 `request_digest` 는 요청 메시지 전체의 마지막 digest 다). 둘째 라운드 요청에는 문맥이 없어서 `Prefix_request_mismatch` 가 되고 같은 턴 둘째 라운드부터 thinking 이 빠진다. 문맥을 이력에 남기는 #42713 이 먼저 들어가야 한다. 이것은 코드 읽기 추론이고 실행으로 확인하지 못했다.
+
+이 RFC 와 두 PR 의 차이.
+
+| 항목 | 이 RFC | #42713 | #42729 |
+|---|---|---|---|
+| 턴별 문맥을 이력에 남기는 때 | 문맥이 있을 때마다(§3.2) | Anthropic 응답에 서명 thinking 이나 redacted_thinking 이 있을 때만. 값을 `historical` 로 바꿔 남긴다(`pipeline.ml:276-286`, `:337`) | 하지 않음 |
+| 서버 쪽 `drop_block` | 기본값으로 쓰지 않는다(§5) | adaptive Sonnet/Haiku 5.5 의 completion 요청마다 `block_binding.prefix_mismatch_behavior = "drop_block"` 과 beta 헤더를 보낸다(`backend_anthropic.ml:14-37`, `:665-682`) | 쓰지 않음 |
+| 지문 재료 | system, tools, 메시지. thinking 블록은 뺀다(§3.4) | 해당 없음 | head(system 텍스트, tools 목록)와 모든 메시지 블록. 남아 있는 thinking 블록도 digest 에 든다(`reasoning_history_projection.ml:478-481`, `backend_anthropic.ml:421-435`) |
+| 생성 뒤 앞쪽 thinking 을 빼는 경우 | 문서가 유효하다고 적으므로 남은 블록을 재생한다(§3.4 서명 사슬 확인) | 해당 없음 | 앞쪽 thinking 이 뒤 블록의 digest 에 들어 있어, 빼면 뒤 블록의 digest 가 달라져 `Prefix_request_mismatch` 로 빠진다. 코드 읽기 결과이고 실행 확인은 못 했다 |
+| thinking 끼리의 순서(서명 사슬) | 있음(`thinking_predecessor`) | 해당 없음 | 없음 |
+| 이유 타입 | `prefix_change` 6종과 `Omit_*` 갈래(§3.4) | 해당 없음 | `Prefix_source_not_present`, `Prefix_digest_absent`, `Prefix_request_mismatch`, `Prefix_reasoning_mismatch` 4종(`reasoning_history_projection.ml:366-369`) |
+| 계정 라벨 | `credential_scope`(§3.4) | 해당 없음 | 없음 |
+| 저장 태그가 손상된 경우 | 정하지 않았다 | 해당 없음 | `Malformed_prefix_entry` 면 `invalid_arg` 를 던진다(`backend_anthropic.ml:531-536`). 기존 `Reasoning_source` 투영 오류도 같은 방식이다(`backend_anthropic.ml:506-510`). 그 예외가 턴 전체를 실패시키는지는 따라가지 않았다 |
+| tools 해시 | 정하지 않았다(Q16) | 해당 없음 | 순서 있는 목록 그대로 넣는다(`backend_anthropic.ml:421-435`). 문서는 tools 를 집합이라고 적는다. 순서가 바뀐 요청을 서버가 받아 주는지는 확인 못 함 |
+| 메타데이터 키 | `agent_core.prefix_binding.v1`(§3.4) | `agent_core.extra_system_context.v1` 의 값만 바꿈 | `agent_core.reasoning_prefix.v1`, 필드 `request_digest`, `message_digest`(`types.ml` 의 `Reasoning_prefix`) |
+
+- #42713 의 상시 `drop_block` 은 이 RFC §5 가 "긴급 완화용 `WORKAROUND:` 로만 허용"한 것과 다르다. 어느 쪽으로 정할지는 운영자 결정이다(Q15).
+- 키 이름과 필드 이름은 #42729 의 코드가 이미 정했다. 이 RFC 의 이름과 맞추는 방법은 Q17 이다.
 
 ## 5. 검토한 대안
 
@@ -421,6 +458,7 @@ system·tools 가 라운드마다 바뀌는 경로를 없애는 일은 이 스�
 | 요청 전에 `count_tokens` 로 매번 크기를 잰다 | 크기 거절을 미리 안다 | `RFC-keeper-context-window-in-tokens` §1 결정 2 와 충돌한다. 매 요청에 호출이 하나 더 든다 |
 | 이력 창을 없애 앞부분을 안 바꾼다 | 앞부분이 항상 안정된다 | 컨텍스트 한계가 있다. 창은 `RFC-keeper-context-window-in-tokens` 의 설계다 |
 | 강등 경계를 바꿔 턴 사이 이어짐을 지킨다 | 턴 사이 추론을 지킨다 | 입력 토큰과 맞바꾼다. 얻는 이득을 아직 재지 못했다(§3.5). 측정 뒤 다시 연다 |
+| 정책이 thinking 을 뺄 때 이력에 "뺐다" 표식을 남겨 사슬을 지킨다 | 뺀 사실이 이력에 남는다 | 정책이 제외한 시점에 그 요청이 실제로 나가지 않았으면 표식이 사실과 다르다. 투영이 이력을 쓰게 되어 순수 함수가 아니게 된다. 정책을 풀어도 표식을 되돌릴 수 없다. 대신 만든 때의 `thinking_predecessor` 를 기록하고 보낼 때 비교한다(§3.4) |
 | system·tools 값을 저장해 세션 동안 고정한다 | 바뀔 일이 없다 | 운영자의 `base_system_prompt` 수정이 숨는다. 저장 위치와 갱신 규칙이 새로 필요하다(§3.3) |
 
 ## 6. 열린 질문과 위험
@@ -430,6 +468,7 @@ system·tools 가 라운드마다 바뀌는 경로를 없애는 일은 이 스�
 - **Q1.** 크기 거절이 문장만 있는 400 으로 오고 `count_tokens` 로도 가려지지 않으면, 측정할 수 있는 공급자에서 그 거절이 보이게 실패한다. 받아들이는가, 아니면 다른 증거를 찾는가.
 - **Q2.** 측정할 수 없는 공급자(OpenAI 호환, Ollama, Gemini, GLM)의 `Unknown_invalid_request` 재전송을 지금 그대로 둔다(§2). 이 공급자들의 문제를 별도 RFC 로 낼 것인가.
 - **Q13.** 지문 층이 들어간 뒤에도 #42677 의 재생 강제를 Anthropic 행에 유지할 것인가. (a) 유지한다. 이전 턴 thinking 은 계속 빠지고, 입력 토큰이 줄며, 추론 이어짐은 턴 안에만 남는다. (b) 행마다 `reasoning_replay = "preserve_always"` 를 적어 푼다. 지문이 맞는 이전 턴 thinking 만 다시 가고, 모델이 이전 추론을 다시 본다. 출력 토큰이 얼마나 줄지는 잰 값이 없다. 추천은 (a) 로 시작하는 것이다. 1층의 보고 명령이 "정책을 껐을 때 지문이 맞는 서명 블록의 비율"을 내고 8층 라이브 증명이 통과하면 행 하나(`claude-sonnet-5-5`)부터 (b) 로 연다. 이유: 지금은 앞부분이 유지되는 비율을 모르고(§3.5), #42677 은 품질과 비용 영향을 재지 않았다. 푸는 일은 카탈로그 한 줄이라 되돌리기도 쉽다. 단, (b) 전환은 서명 사슬 확인(§3.4 의 선행자 검사)이 구현되기 전에는 정책 해제로 되살아난 오래된 블록이 그 사이 만든 블록을 무효로 만들어 400 을 낼 수 있다(§3.6 시나리오 12).
+- **Q15.** #42713 은 adaptive Sonnet/Haiku 5.5 요청마다 서버 쪽 `drop_block` 을 보낸다. 이 RFC §5 와 비목표는 `drop_block` 을 기본값으로 쓰지 않고, 긴급 완화에만 `WORKAROUND:` 라벨과 대체 RFC 번호를 달아 허용한다. 상시 `drop_block` 을 받아들일지는 운영자 결정이다.
 
 조사로 닫을 것:
 
@@ -444,6 +483,8 @@ system·tools 가 라운드마다 바뀌는 경로를 없애는 일은 이 스�
 - **Q11.** `clear_at` 메시지가 도구 결과 user 메시지 앞에 오는 위치 제약(§1.2-11)이 우리 문맥 위치(user 입력 바로 뒤)에서 지켜지는지 실제 요청으로 확인한다.
 - **Q12.** 지문 비교의 요청당 비용(직렬화·해시). 이력이 클 때 얼마인지 재지 않았다.
 - **Q14.** #42677 만 적용된 빌드에서 같은 턴 둘째 라운드가 400 을 받는가(§1.3-4 의 추론). 지문 층 없이 `prefix_mismatch_behavior: "error"` 로 턴별 문맥이 있는 두 라운드 도구 루프를 보내 확인한다. 400 이 나면 2·5층의 우선순위가 올라간다. 안 나면 §1.3-1 의 설명을 다시 읽어야 한다. 요청 본문 쪽 증거는 #42713 의 `docs/evidence/2026-10-13-anthropic-thinking-prefix/diagnosis.json`(glossary-maniac 요청 #2326/#2327: system·tools 동일, 이전 문맥 블록이 다음 요청에서 사라짐)에 이미 있어 라이브 호출 없이 반쯤 닫혀 있다.
+- **Q16.** tools 를 지문 재료로 넣을 때 순서를 어떻게 다루는가. 문서는 tools 를 집합이라고 적고, #42729 는 목록 순서 그대로 해시한다. 순서만 바뀐 요청을 서버가 받는지는 확인하지 못했다. 받는다면 정렬해서 넣는 쪽이 불필요한 지문 변화를 줄인다.
+- **Q17.** 메타데이터 키와 필드 이름을 어떻게 맞추는가. #42729 는 `agent_core.reasoning_prefix.v1`(`request_digest`, `message_digest`)을 쓰고 이 RFC 는 `agent_core.prefix_binding.v1`(`prefix_fingerprint`, `credential_scope`, `thinking_predecessor`)을 쓴다. 구현 때 한쪽으로 맞춘다.
 
 위험:
 
@@ -458,8 +499,8 @@ system·tools 가 라운드마다 바뀌는 경로를 없애는 일은 이 스�
 |---|---|---|
 | 1 | 대조 함수가 `Append_only`·`Broke` 를 낸다. 같은 JSON 은 키 순서와 공백이 달라도 `Append_only` 다 | 단위 테스트 |
 | 1 | 보고 명령이 실제 체크포인트에서 턴 경계마다 빠질 서명 블록 수를 출력한다 | 수동 실행. 출력값은 §3.5 의 미측정 칸을 채운다 |
-| 2 | 시나리오 3, 4, 6, 7, 9, 11 에서 끊긴 지점 앞에 묶인 서명 블록이 없고 이유가 기록된다. 시나리오 10 에서는 `Omit_replay_policy_excluded` 만 기록되고 `prefix_change` 는 없다 | 오프라인 하네스 |
-| 2 | 속성: 이력이 같으면 한 번 뺀 앞쪽 블록이 되살아나지 않는다 | 속성 테스트 |
+| 2 | 시나리오 3, 4, 6, 7, 9, 11 에서 끊긴 지점 앞에 묶인 서명 블록이 없고 이유가 기록된다. 시나리오 10 에서는 `Omit_replay_policy_excluded` 만 기록되고 `prefix_change` 는 없다. 시나리오 12 에서는 `T1` 이 `Omit_chain_mismatch` 로 빠지고 `T2` 가 재생된다 | 오프라인 하네스 |
+| 2 | 속성: 정책을 요청마다 바꿔도 보내는 thinking 블록은 원래 순서의 끊기지 않는 구간이다. 정책과 이력이 같으면 한 번 뺀 앞쪽 블록이 되살아나지 않는다 | 속성 테스트 |
 | 2 | 재생 판정의 `match` 에 `_ ->` 갈래가 없다. 새 변형을 더하면 컴파일이 깨진다 | 컴파일 |
 | 2 | 일부러 지문 비교를 빼면 시나리오 3 이 실패한다 | 되돌려 보는 검사 |
 | 3 | 측정할 수 있는 공급자에서 `Unknown_invalid_request` 는 `boundary_resend_on` 이 false 다. 측정할 수 없는 공급자에서는 지금처럼 true 다 | 공급자마다 값을 넣는 표 기반 테스트. 새 변형을 더하면 컴파일이 깨진다 |

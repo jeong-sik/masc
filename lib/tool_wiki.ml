@@ -143,18 +143,37 @@ let frontmatter_error_to_string = function
 let describe_unreadable path error =
   sprintf "%s (%s)" (Filename.basename path) (frontmatter_error_to_string error)
 
-(* Every Markdown file in the wiki, in name order. Nothing is skipped by
-   name: a file that is not a wiki page shows up as one whose header
-   does not read. *)
+(* Every page file in the wiki, in name order. Only the wiki's own two files
+   ([index.md], [log.md]) are left out: any other Markdown file that is not a
+   wiki page shows up as one whose header does not read. *)
 let list_pages ~base_path =
   let dir = wiki_root ~base_path in
   if Sys.file_exists dir && Sys.is_directory dir then
     Sys.readdir dir
     |> Array.to_list
-    |> List.filter (fun f -> Filename.check_suffix f ".md")
+    |> List.filter (fun f ->
+      Filename.check_suffix f ".md" && not (Wiki_journal.is_own_file f))
     |> List.sort String.compare
     |> List.map (fun f -> Filename.concat dir f)
   else []
+
+(* What the index says about each file: a page gives its title and summary,
+   a file whose header does not read gives the reason. A file that vanishes
+   between the listing and the read is left out. *)
+let index_entries ~base_path =
+  list_pages ~base_path
+  |> List.filter_map (fun path ->
+    let file = Filename.basename path in
+    match In_channel.with_open_text path In_channel.input_all with
+    | exception Sys_error _ -> None
+    | content ->
+      (match parse_frontmatter content with
+       | Ok fm ->
+         Some (Wiki_journal.Page { file; title = fm.title; summary = fm.summary })
+       | Error error ->
+         Some
+           (Wiki_journal.Unreadable
+              { file; reason = frontmatter_error_to_string error })))
 
 (* RFC-0189 PR-1b.7 — handlers in this module return typed
    [Tool_result.result]. Boundary back to [Tool_result.result option] in
@@ -188,22 +207,8 @@ let text_ok ~tool_name ~start_time body : Tool_result.result =
    log line here would restate an outcome the caller already holds.
    TEL-OK *)
 let handle_list ~tool_name ~start_time ctx _args : Tool_result.result =
-  let docs = list_pages ~base_path:ctx.base_path in
-  let entries = List.filter_map (fun path ->
-    try
-      let content = In_channel.with_open_text path In_channel.input_all in
-      match parse_frontmatter content with
-      | Ok fm ->
-          Some (sprintf "- **%s** (%s, %s, %s)\n  tags: %s"
-            fm.title (source_to_string fm.source) fm.author fm.created
-            (String.concat ", " fm.tags))
-      | Error error -> Some (sprintf "- %s" (describe_unreadable path error))
-    with Sys_error _ -> None
-  ) docs in
-  let output = if Stdlib.List.length entries = 0 then "No pages in the wiki"
-    else sprintf "## Wiki Pages (%d)\n\n%s" (List.length entries) (String.concat "\n" entries)
-  in
-  text_ok ~tool_name ~start_time output
+  text_ok ~tool_name ~start_time
+    (Wiki_journal.render_index (index_entries ~base_path:ctx.base_path))
 
 (* Read page *)
 let handle_read ~tool_name ~start_time ctx args : Tool_result.result =
@@ -360,12 +365,37 @@ let with_wiki_lock ~tool_name ~start_time ctx f : Tool_result.result =
        runtime_err ~tool_name ~start_time
          (sprintf "Wiki lock error: %s" (File_lock_eio.durable_lock_error_to_string error)))
 
-let write_page ~tool_name ~start_time path content ~written : Tool_result.result =
+(* Page, then one log line, then the index, all under the wiki lock. The page
+   is already on disk when the other two are written, so a failure there is
+   reported as one: the caller learns that the page changed and which file did
+   not follow. *)
+let write_page ~tool_name ~start_time ctx ~path ~content ~action ~revision ~page ~note
+    ~written
+  : Tool_result.result
+  =
   match Fs_compat.save_file_atomic_strict_staged path content with
-  | Ok () -> text_ok ~tool_name ~start_time written
   | Error failure ->
     runtime_err ~tool_name ~start_time
       (sprintf "Write error: %s" (Fs_compat.atomic_replace_failure_to_string failure))
+  | Ok () ->
+    let wiki_root = wiki_root ~base_path:ctx.base_path in
+    let line =
+      Wiki_journal.log_line
+        ~time:(Time_compat.now () |> Unix.localtime)
+        ~action ~revision ~page ~author:ctx.agent_name ~note
+    in
+    (match Wiki_journal.append_log ~wiki_root line with
+     | Error message ->
+       runtime_err ~tool_name ~start_time
+         (sprintf "%s, but its line could not be appended to log.md: %s" written message)
+     | Ok () ->
+       (match
+          Wiki_journal.write_index ~wiki_root (index_entries ~base_path:ctx.base_path)
+        with
+        | Error message ->
+          runtime_err ~tool_name ~start_time
+            (sprintf "%s, but index.md could not be rebuilt: %s" written message)
+        | Ok () -> text_ok ~tool_name ~start_time written))
 
 (* A field the schema does not offer but a caller sent anyway. *)
 let has_field args name =
@@ -373,7 +403,9 @@ let has_field args name =
   | `Assoc fields -> List.mem_assoc name fields
   | _ -> false
 
-(* Create page *)
+(* Create page.
+   TEL-OK: the change is written to log.md by [write_page] and handed back to
+   the caller; a second line here would restate it. *)
 let handle_create ~tool_name ~start_time ctx args : Tool_result.result =
   let text name = Json_util.get_string args name |> Option.value ~default:"" in
   let raw_page = text "page" in
@@ -427,7 +459,8 @@ let handle_create ~tool_name ~start_time ctx args : Tool_result.result =
               render_page ~title ~summary ~source ~author:ctx.agent_name ~created:day
                 ~updated:day ~revision:1 ~tags ~body
             in
-            write_page ~tool_name ~start_time path content
+            write_page ~tool_name ~start_time ctx ~path ~content
+              ~action:Wiki_journal.Created ~revision:1 ~page ~note:summary
               ~written:(sprintf "Created wiki page %s at revision 1: %s" page path)
           end)
     end
@@ -448,7 +481,9 @@ let stale_revision ~tool_name ~start_time ~page ~base_revision ~current_revision
         body below and call again with base_revision %d.\n\n%s"
        page current_revision base_revision current_revision body)
 
-(* Update page *)
+(* Update page.
+   TEL-OK: as [handle_create]; a refused update is returned to the caller with
+   the current revision. *)
 let handle_update ~tool_name ~start_time ctx args : Tool_result.result =
   let raw_page = Json_util.get_string args "page" |> Option.value ~default:"" in
   let body = Json_util.get_string args "body" |> Option.value ~default:"" in
@@ -459,7 +494,15 @@ let handle_update ~tool_name ~start_time ctx args : Tool_result.result =
     match Json_util.get_int args "base_revision" with
     | None -> missing_required ~tool_name ~start_time "base_revision"
     | Some base_revision ->
+    let note = Json_util.get_string args "note" |> Option.value ~default:"" in
     if String.equal body "" then missing_required ~tool_name ~start_time "body"
+    else if String.equal note "" then missing_required ~tool_name ~start_time "note"
+    else if not (one_line note)
+    then workflow_err ~tool_name ~start_time "note must be one line"
+    else if String.equal (String.trim ctx.agent_name) ""
+    then
+      (* The log line names who made the change. *)
+      workflow_err ~tool_name ~start_time "the caller has no agent name to write in the log"
     else if has_field args "source"
     then
       (* [source] says what kind of work the page first came from. *)
@@ -514,7 +557,8 @@ let handle_update ~tool_name ~start_time ctx args : Tool_result.result =
                      ~source:current.source ~author:current.author
                      ~created:current.created ~updated:(today ()) ~revision ~tags ~body
                  in
-                 write_page ~tool_name ~start_time path content
+                 write_page ~tool_name ~start_time ctx ~path ~content
+                   ~action:Wiki_journal.Updated ~revision ~page ~note
                    ~written:(sprintf "Updated wiki page %s to revision %d" page revision)))
     end
 

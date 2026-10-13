@@ -2,7 +2,7 @@ name = "masc_wiki_list"
 description = """
 List every page in the wiki.
 
-Each row carries title, source, author, created date, and tags; one whose header does not read is listed by filename and reason. Pair with masc_wiki_read to fetch one or masc_wiki_search to query by content."""
+Returns the wiki index: one line per page with its title, its file (<page>.md) and its one-line summary; a file whose header does not read is listed by filename and reason. Pair with masc_wiki_read to fetch one or masc_wiki_search to query by content."""
 
 # Held back from the request until the model asks for it by name.
 # 2026-08-25..08-31 across the fleet: called 3 times in 3 turns, 293 bytes of
@@ -15,7 +15,7 @@ defer_loading = true
 # those. The catalog row above names the MCP surface's masc_wiki_* names.
 [keeper_projection]
 description = """
-Lists the wiki pages with title, source, author, created \
-date, and tags; one whose header does not read is listed by filename and \
-reason. Use keeper_wiki_read to fetch one or keeper_wiki_search to \
-query by content."""
+Returns the wiki index: one line per page with its title, its file \
+(<page>.md) and its one-line summary; a file whose header does not read is \
+listed by filename and reason. Use keeper_wiki_read to fetch one or \
+keeper_wiki_search to query by content."""

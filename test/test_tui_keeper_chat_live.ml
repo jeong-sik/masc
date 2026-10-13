@@ -548,6 +548,23 @@ let test_protocol_error_carries_only_the_quarantined_occurrence () =
     ]
     (sse (custom "KEEPER_STREAM_PROTOCOL_ERROR" value) |> feed_whole)
 
+let test_duplicate_quarantined_occurrence_does_not_acquire_tool_authority () =
+  let occurrence =
+    `Assoc
+      (("toolStreamScope", `Int 9)
+       :: occurrence_fields ~scope:4 ~block_index:7 ~call_id:None ())
+  in
+  let value =
+    `Assoc
+      [ "kind", `String "tool_replay_mismatch"
+      ; "reason", `String "replayed arguments changed"
+      ; "quarantined_occurrence", occurrence
+      ]
+  in
+  match sse (custom "KEEPER_STREAM_PROTOCOL_ERROR" value) |> feed_whole with
+  | [ Live.Undecodable _ ] -> ()
+  | _ -> fail "repeated quarantined occurrence acquired live tool authority"
+
 let test_args_snapshot_replaces_rather_than_appends () =
   let body =
     sse
@@ -883,10 +900,40 @@ let test_unknown_custom_event_is_reported () =
     [ Live.Undecodable "unknown CUSTOM event name: KEEPER_FUTURE_EVENT" ]
     (feed_whole body)
 
+let approval_fixture_text = "019a0000-0000-7000-8000-000000000001"
+
+let test_duplicate_live_metadata_does_not_acquire_identity () =
+  let tool = event "TOOL_CALL_START"
+    (["runId", `String run_id; "toolCallName", `String "Read"] @ occurrence_fields ()) in
+  let duplicate field = function
+    | `Assoc fields -> `Assoc (field :: fields)
+    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      fail "fixture must be an object" in
+  let approval = `Assoc ["approval_id", `String approval_fixture_text;
+    "tool_call_id", `String "call-1"; "outcome", `String "approve"] in
+  let cases =
+    [ duplicate ("type", `String "RUN_FINISHED") tool
+    ; duplicate ("toolStreamScope", `Int 9) tool
+    ; duplicate ("toolCallBlockIndex", `Int 9) tool
+    ; duplicate ("toolCallId", `String "foreign") tool
+    ; custom "KEEPER_TOOL_APPROVAL_SETTLED"
+        (duplicate ("tool_call_id", `String "foreign") approval)
+    ; custom "KEEPER_TOOL_APPROVAL_SETTLED"
+        (duplicate ("approval_id", `String approval_fixture_text) approval)
+    ] in
+  List.iter (fun json -> match feed_whole (sse json) with
+    | [Live.Undecodable _] -> ()
+    | _ -> fail "repeated metadata acquired live stream authority") cases;
+  match feed_whole (sse tool) with
+  | [Live.Tool_started _] -> ()
+  | _ -> fail "unique canonical tool event was refused"
+;;
+
 let () =
   run "tui_keeper_chat_live"
     [ ( "deltas"
-      , [ test_case "interactive acceptance reports authority" `Quick test_interactive_acceptance_reports_authority
+      , [ test_case "duplicate live metadata refuses authority" `Quick test_duplicate_live_metadata_does_not_acquire_identity
+        ; test_case "interactive acceptance reports authority" `Quick test_interactive_acceptance_reports_authority
         ; test_case "coding turn, whole body" `Quick test_coding_turn_whole_body
         ; test_case "chunk size does not change the deltas" `Quick
             test_chunk_boundaries_do_not_matter
@@ -945,6 +992,8 @@ let () =
             test_tool_transcript_commit_reads_without_a_view
         ; test_case "protocol error carries quarantined occurrence" `Quick
             test_protocol_error_carries_only_the_quarantined_occurrence
+        ; test_case "duplicate quarantined occurrence refuses authority" `Quick
+            test_duplicate_quarantined_occurrence_does_not_acquire_tool_authority
         ; test_case "a run error with no message still fails" `Quick
             test_run_error_is_a_failure_even_with_no_message
         ; test_case "undrawn events stay silent" `Quick

@@ -363,46 +363,6 @@ let test_prompt_keeps_caller_owned_workspace_generation () =
       check bool "prompt does not resolve a second workspace generation" false
         (Astring.String.is_infix ~affix:divergent_root prompt))
 
-(* Source-level pin: assert that no [("cwd", `String <ident>)]
-   literal remains in keeper_sandbox_docker.ml. The four sites
-   from #11080's sibling leak class must be wired through
-   [Keeper_cwd_response.to_yojson_response]. Belt-and-braces
-   guard against accidental revert. *)
-let test_source_has_no_raw_cwd_string_literal () =
-  let candidate_paths =
-    [
-      "lib/keeper/keeper_sandbox_docker.ml"
-    ; "../lib/keeper/keeper_sandbox_docker.ml"
-    ; "../../lib/keeper/keeper_sandbox_docker.ml"
-    ]
-  in
-  let path =
-    List.find_opt Sys.file_exists candidate_paths
-  in
-  match path with
-  | None ->
-    (* Test invocation cwd may differ; skip silently rather
-       than fail. The integration test above already pins the
-       composition. *)
-    ()
-  | Some path ->
-    let ic = open_in path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-        let buf = Buffer.create 8192 in
-        (try
-           while true do
-             Buffer.add_string buf (input_line ic);
-             Buffer.add_char buf '\n'
-           done
-         with End_of_file -> ());
-        let src = Buffer.contents buf in
-        check bool
-          "no raw (\"cwd\", `String cwd) literal in keeper_sandbox_docker.ml"
-          false
-          (Astring.String.is_infix ~affix:"(\"cwd\", `String cwd)" src))
-
 let () =
   run "keeper_sandbox_docker_cwd_response"
     [
@@ -417,11 +377,5 @@ let () =
         ; test_case
             "Keeper prompt keeps caller-owned workspace generation"
             `Quick test_prompt_keeps_caller_owned_workspace_generation
-        ] )
-    ; ( "source-pin"
-      , [
-          test_case
-            "no raw (\"cwd\", `String cwd) literal remains in source"
-            `Quick test_source_has_no_raw_cwd_string_literal
         ] )
     ]

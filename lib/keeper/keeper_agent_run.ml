@@ -1588,7 +1588,6 @@ let run_turn
         ~turn_id:manifest_keeper_turn_id
     in
     ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
-    let _keeper_sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
     let keeper_visible_sandbox_root =
       Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
     in

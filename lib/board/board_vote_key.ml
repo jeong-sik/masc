@@ -22,13 +22,18 @@ let target_kind vote = vote.target_kind
 let target_id vote = vote.target_id
 let voter vote = vote.voter
 
+let target_kind_to_string = function
+  | Post -> "post"
+  | Comment -> "comment"
+;;
+
 let to_string vote =
-  let kind =
-    match vote.target_kind with
-    | Post -> "post"
-    | Comment -> "comment"
-  in
-  String.concat ":" [ kind; vote.target_id; Agent_id.to_string vote.voter ]
+  String.concat
+    ":"
+    [ target_kind_to_string vote.target_kind
+    ; vote.target_id
+    ; Agent_id.to_string vote.voter
+    ]
 ;;
 
 let of_string raw =

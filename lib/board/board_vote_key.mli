@@ -6,6 +6,10 @@ type target_kind =
   | Post
   | Comment
 
+val target_kind_to_string : target_kind -> string
+(** ["post"] or ["comment"]: the first segment of {!to_string}, and the
+    karma ledger's [target_kind]. *)
+
 type t
 
 val post : post_id:Post_id.t -> voter:Agent_id.t -> t

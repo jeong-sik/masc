@@ -98,7 +98,8 @@ let test_upvote_produces_one_event () =
   let (ev : Board.karma_event) = List.hd events in
   Alcotest.(check string) "recipient is author" "alice" ev.recipient;
   Alcotest.(check string) "voter is voter" "bob" ev.voter;
-  Alcotest.(check string) "target_kind is post" "post" ev.target_kind;
+  Alcotest.(check string) "target_kind is post" "post"
+    (Masc_board_handlers.Board_vote_key.target_kind_to_string ev.target_kind);
   Alcotest.(check string) "target_id matches post" pid ev.target_id;
   Alcotest.(check int) "delta is +1" 1 ev.delta
 
@@ -147,7 +148,8 @@ let test_comment_upvote_produces_event () =
   Alcotest.(check int) "comment upvote → one karma event" 1 (List.length events);
   let (ev : Board.karma_event) = List.hd events in
   Alcotest.(check string) "recipient is comment author" "charlie" ev.recipient;
-  Alcotest.(check string) "target_kind is comment" "comment" ev.target_kind;
+  Alcotest.(check string) "target_kind is comment" "comment"
+    (Masc_board_handlers.Board_vote_key.target_kind_to_string ev.target_kind);
   Alcotest.(check string) "target_id matches comment" cid ev.target_id
 
 (** {1 Comment self-upvotes do NOT produce karma} *)

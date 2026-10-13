@@ -1038,6 +1038,26 @@ let karma_score_for_direction = function
   | Up -> 1
   | Down -> 0
 
+(** A single attributed karma event.  One event is generated per upvote
+    received by an agent.  Downvotes do not generate karma events
+    (scoring rule: [Up] = +1, [Down] = 0). *)
+type karma_event = {
+  recipient : string;
+  (** Agent who earned the karma — author of the upvoted post or comment. *)
+  voter : string;
+  (** Agent who cast the upvote. *)
+  target_kind : Board_vote_key.target_kind;
+  (** The upvoted content's kind, read off the vote key. *)
+  target_id : string;
+  (** Identifier of the upvoted post or comment. *)
+  delta : int;
+  (** Karma delta.  Always [+1] per upvote under the current scoring
+      contract.  Stored explicitly so future rule changes are backward
+      compatible — older events keep their original delta value. *)
+  ts : float;
+  (** Unix timestamp at which the upvote was cast (seconds since epoch). *)
+}
+
 let karma_event_of_vote store key (direction, ts) =
   let delta = karma_score_for_direction direction in
   if delta = 0 then None
@@ -1047,18 +1067,17 @@ let karma_event_of_vote store key (direction, ts) =
     | Some vote ->
         let target_id = Board_vote_key.target_id vote in
         let voter = Board_vote_key.voter vote |> Agent_id.to_string in
-        let kind, recipient_opt =
-          match Board_vote_key.target_kind vote with
+        let target_kind = Board_vote_key.target_kind vote in
+        let recipient_opt =
+          match target_kind with
           | Board_vote_key.Post ->
-            ( "post"
-            , match Hashtbl.find_opt store.posts target_id with
-              | Some (p : post) -> Some (Agent_id.to_string p.author)
-              | None -> None )
+            (match Hashtbl.find_opt store.posts target_id with
+             | Some (p : post) -> Some (Agent_id.to_string p.author)
+             | None -> None)
           | Board_vote_key.Comment ->
-            ( "comment"
-            , match Hashtbl.find_opt store.comments target_id with
-              | Some (c : comment) -> Some (Agent_id.to_string c.author)
-              | None -> None )
+            (match Hashtbl.find_opt store.comments target_id with
+             | Some (c : comment) -> Some (Agent_id.to_string c.author)
+             | None -> None)
         in
         match recipient_opt with
         | None -> None
@@ -1067,7 +1086,7 @@ let karma_event_of_vote store key (direction, ts) =
                peer recognition; self-upvotes do not mint reputation. *)
             None
         | Some recipient ->
-            Some { recipient; voter; target_kind = kind; target_id; delta; ts }
+            Some { recipient; voter; target_kind; target_id; delta; ts }
 
 (** Rebuild the karma ledger from the in-memory vote log and
     post/comment author tables.
@@ -1123,7 +1142,7 @@ let karma_event_to_yojson (e : karma_event) : Yojson.Safe.t =
   `Assoc [
     ("recipient",   `String e.recipient);
     ("voter",       `String e.voter);
-    ("target_kind", `String e.target_kind);
+    ("target_kind", `String (Board_vote_key.target_kind_to_string e.target_kind));
     ("target_id",   `String e.target_id);
     ("delta",       `Int    e.delta);
     ("ts",          `Float  e.ts);

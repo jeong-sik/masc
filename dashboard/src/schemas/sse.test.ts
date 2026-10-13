@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   _testResetSseSchemaDriftLog,
   AttributionSchema,
+  KeeperChatStreamEventSchema,
   parseSSEMessage,
   SSEMessageSchema,
   SSEEventTypeSchema,
@@ -406,6 +407,27 @@ describe('SSEMessageSchema', () => {
       value,
       timestamp: 1_712_000_000,
     },
+  })
+
+  it('accepts the checkpoint frame the server projects, whose message is empty', () => {
+    const value = { message: '', request_id: 'kmsg-operation-1' }
+    const broadcast = SSEMessageSchema.safeParse(customEvent('KEEPER_CONTINUATION_CHECKPOINT', value))
+    expect(broadcast.success).toBe(true)
+    expect(KeeperChatStreamEventSchema.safeParse(
+      customEvent('KEEPER_CONTINUATION_CHECKPOINT', value).ag_ui_event,
+    ).success).toBe(true)
+    expect(KeeperChatStreamEventSchema.safeParse(
+      customEvent('KEEPER_CONTINUATION_CHECKPOINT', { message: 3 }).ag_ui_event,
+    ).success).toBe(false)
+  })
+
+  it('lets only the direct stream decoder pass an unknown custom event name', () => {
+    const future = customEvent('KEEPER_FUTURE_EVENT', { anything: true })
+    expect(KeeperChatStreamEventSchema.safeParse(future.ag_ui_event).success).toBe(true)
+    expect(SSEMessageSchema.safeParse(future).success).toBe(false)
+    expect(KeeperChatStreamEventSchema.safeParse({ ...future.ag_ui_event, name: '' }).success).toBe(false)
+    expect(KeeperChatStreamEventSchema.safeParse({ ...future.ag_ui_event, threadId: '' }).success).toBe(false)
+    expect(KeeperChatStreamEventSchema.safeParse({ ...future.ag_ui_event, type: 'STEP_STARTED' }).success).toBe(false)
   })
 
   it.each([

@@ -314,6 +314,35 @@ describe('streamKeeperMessage', () => {
     expect(events).toEqual(['RUN_FINISHED'])
   })
 
+  it('delivers server-shaped frames the decoder must not drop', async () => {
+    // The checkpoint is the exact projection of a journaled
+    // continuation_checkpoint row: the server sends an empty message on every
+    // checkpoint turn. The unknown CUSTOM name stands for an event a newer
+    // server adds before this build learns it.
+    const frames = [
+      { type: 'CUSTOM', threadId: 'keeper:code-reviewer', timestamp: 1791696157.730874,
+        runId: 'keeper-operation-run-kmsg-stream-frames', name: 'KEEPER_FUTURE_EVENT', value: { anything: true } },
+      { type: 'CUSTOM', threadId: 'keeper:code-reviewer', timestamp: 1791696157.730874,
+        runId: 'keeper-operation-run-kmsg-stream-frames', name: 'KEEPER_CONTINUATION_CHECKPOINT',
+        value: { message: '', request_id: 'kmsg-stream-frames' } },
+      { type: 'RUN_FINISHED', runId: 'keeper-operation-run-kmsg-stream-frames', threadId: 'keeper:code-reviewer', timestamp: 1791696157.8 },
+    ]
+    const body = frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join('')
+    vi.stubGlobal('fetch', vi.fn((url: string) => url === '/api/v1/dashboard/dev-token'
+      ? Promise.resolve(devTokenResponse())
+      : Promise.resolve(new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))))
+    const names: string[] = []
+    const decodeErrors: string[] = []
+    const outcome = await streamKeeperMessage('sangsu', 'ping', {
+      operationId: 'kmsg-stream-frames',
+      onEvent: event => { names.push(event.type === 'CUSTOM' ? event.name : event.type) },
+      onDecodeError: reason => { decodeErrors.push(reason) },
+    })
+    expect(decodeErrors).toEqual([])
+    expect(names).toEqual(['KEEPER_FUTURE_EVENT', 'KEEPER_CONTINUATION_CHECKPOINT', 'RUN_FINISHED'])
+    expect(outcome.terminal).toBe(true)
+  })
+
   it('forwards copilot context fields to the stream endpoint', async () => {
     const fetchMock = vi.fn((url: string) => url === '/api/v1/dashboard/dev-token'
       ? Promise.resolve(devTokenResponse())

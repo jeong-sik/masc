@@ -10,6 +10,7 @@ import {
   clearActiveStream,
   markLiveSendRequestAccepted,
   setActiveStream,
+  updateThreadEntry,
 } from './keeper-state'
 import { keeperThreads, keeperToolApprovals } from './keeper-state'
 import {
@@ -19,6 +20,7 @@ import {
   abortKeeperThreadMessage,
   applyKeeperOperationTurnEvent,
   applyKeeperStreamEvent,
+  failKeeperStreamOperation,
 } from './keeper-stream'
 import { parseSSEMessage } from './schemas/sse'
 import {
@@ -273,6 +275,151 @@ describe('Keeper operation stream projection', () => {
     } finally { release() }
   })
 
+  it('deduplicates owned sequenced reasoning across transport replay and restores its prefix', () => {
+    assistantEntry()
+    const owner = { content_generation: 4, stream_scope: 2 }
+    const thinking = (delta: string): KeeperChatStreamEvent => ({
+      type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta, response: owner },
+    })
+    const source = (sequence: number) => ({ kind: 'operation' as const, operationId: 'op-1', sequence })
+    applyKeeperStreamEvent('sangsu', 'reply-1', thinking('first'), source(10))
+    owner.content_generation = 99
+    expect(keeperThreads.value.sangsu![0]!.traceSteps?.[0]).toMatchObject({ responseOwner: { content_generation: 4, stream_scope: 2 } })
+    owner.content_generation = 4
+    expect(keeperThreads.value.sangsu![0]!.responseState).toMatchObject({ lastSequence: 10 })
+    expect(keeperThreads.value.sangsu![0]!.traceSteps).toMatchObject([{ kind: 'think', text: 'first', responseOwner: owner }])
+    // In-memory batching is lost on reload; the restored entry is authoritative.
+    _resetKeeperStreamBuffersForTests()
+    applyKeeperStreamEvent('sangsu', 'reply-1', thinking('first'), source(10))
+    applyKeeperStreamEvent('sangsu', 'reply-1', thinking(' second'), source(11))
+    expect(keeperThreads.value.sangsu![0]!.traceSteps).toMatchObject([{ kind: 'think', text: 'first second' }])
+  })
+
+  it('keeps reused reasoning block indices separate across owned responses', () => {
+    assistantEntry()
+    for (const generation of [4, 5]) {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+        value: { index: 0, delta: `generation ${generation}`, response: { content_generation: generation, stream_scope: 0 } },
+      }, { kind: 'operation', operationId: 'op-1', sequence: generation })
+    }
+    _flushPendingKeeperStreamDeltasForTests()
+    expect(keeperThreads.value.sangsu?.[0]?.traceSteps).toMatchObject([
+      { text: 'generation 4', responseOwner: { content_generation: 4, stream_scope: 0 } },
+      { text: 'generation 5', responseOwner: { content_generation: 5, stream_scope: 0 } },
+    ])
+  })
+
+  it('rejects stale owned text even when its stream scope is larger', () => {
+    assistantEntry()
+    for (const [generation, scope, delta] of [[5, 0, 'current'], [4, 99, 'stale']] as const) {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'TEXT_MESSAGE_CONTENT', delta,
+        textResponse: { content_generation: generation, stream_scope: scope },
+      })
+    }
+    expect(keeperThreads.value.sangsu![0]!.rawText).toBe('current')
+  })
+
+  it('does not reopen an owned stop for transport and unowned media notices', () => {
+    assistantEntry()
+    const owner = { content_generation: 3, stream_scope: 0 }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'answer', textResponse: owner })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_STOP', value: owner })
+    const before = keeperThreads.value.sangsu![0]!
+    expect(before.responseState).toMatchObject({ closed: owner })
+    expect(before.streamState).toBe('finalizing')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_CONNECTED', value: null })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_MEDIA_DELTA', value: { index: 0, media_type: 'image/png' } })
+    expect(keeperThreads.value.sangsu![0]!.streamState).toBe(before.streamState)
+    expect(keeperThreads.value.sangsu![0]!.delivery).toBe(before.delivery)
+  })
+
+  it('keeps an operation failed when a frame was dropped and the stream still finishes', () => {
+    assistantEntry('op-1')
+    const operation = { kind: 'operation', operationId: 'op-1' } as const
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'a' }, { ...operation, sequence: 1 })
+    failKeeperStreamOperation('sangsu', 'reply-1', 'A Keeper stream frame does not match the protocol.')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'c' }, { ...operation, sequence: 3 })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED', threadId: 't', runId: 'r', timestamp: 1 } as never, { ...operation, sequence: 4 })
+    const entry = keeperThreads.value.sangsu![0]!
+    expect(entry.rawText).toBe('a')
+    expect(entry.delivery).toBe('error')
+    expect(entry.error).toBe('A Keeper stream frame does not match the protocol.')
+    expect(entry.responseState).toMatchObject({ phase: 'failed', lastSequence: 4 })
+  })
+
+  it('keeps a finished response delivered when a frame fails to decode afterwards', () => {
+    assistantEntry('op-1')
+    const operation = { kind: 'operation', operationId: 'op-1' } as const
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'done' }, operation)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED', threadId: 't', runId: 'r', timestamp: 1 } as never, operation)
+    failKeeperStreamOperation('sangsu', 'reply-1', 'late undecodable frame')
+    expect(keeperThreads.value.sangsu![0]!).toMatchObject({ delivery: 'delivered', error: null, rawText: 'done' })
+  })
+
+  it('treats a server-sent sse_parse_failed protocol error as a diagnostic, not a failure', () => {
+    assistantEntry('op-matched')
+    const operation = { kind: 'operation', operationId: 'op-matched' } as const
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'a' }, operation)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+      value: { kind: 'sse_parse_failed', reason: 'provider chunk could not be parsed' } }, operation)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'b' }, operation)
+    const entry = keeperThreads.value.sangsu![0]!
+    expect(entry).toMatchObject({ rawText: 'ab', delivery: 'streaming' })
+    expect(entry.responseState).not.toMatchObject({ phase: 'failed' })
+    expect(entry.error).toContain('sse_parse_failed')
+  })
+
+  it('keeps content-activity metadata from reopening a stopped owned response', () => {
+    appendThreadEntry('sangsu', {
+      id: 'reply-1',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '',
+      rawText: '',
+      timestamp: null,
+      delivery: 'sending',
+      streamState: 'opening',
+      details: null,
+    })
+    const owner = { content_generation: 3, stream_scope: 0 }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'answer', textResponse: owner })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_STOP', value: owner })
+    const stopped = keeperThreads.value.sangsu?.[0]
+    expect(stopped?.responseState).toMatchObject({ closed: owner })
+    expect(stopped?.streamState).toBe('finalizing')
+    // Settle the provider/usage details the authoritative reply event stamps
+    // after the response body has advanced.
+    updateThreadEntry('sangsu', 'reply-1', entry => ({
+      ...entry,
+      details: {
+        providerMessageId: 'msg-1',
+        modelUsed: 'model-x',
+        stopReason: 'stop_sequence',
+        usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+        costUsd: 0.01,
+      },
+    }))
+    // A newer-generation activity notice is side metadata with no authored
+    // body: it raises the ownership floor but must not reopen the response
+    // or wipe the settled provider/usage details.
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_MODEL_CONTENT_ACTIVITY',
+      value: { generation: 4, stream_scope: 0, block_index: 2, channel: 'text', state: 'observed' },
+    })
+    const after = keeperThreads.value.sangsu?.[0]
+    expect(after?.responseState).toMatchObject({ floor: { content_generation: 4, stream_scope: 0 } })
+    expect(after?.streamState).toBe(stopped?.streamState)
+    expect(after?.details?.providerMessageId).toBe('msg-1')
+    expect(after?.details?.modelUsed).toBe('model-x')
+    expect(after?.details?.stopReason).toBe('stop_sequence')
+    expect(after?.details?.usage).toMatchObject({ totalTokens: 3 })
+    expect(after?.details?.costUsd).toBe(0.01)
+  })
+
   it.each(['observed', 'ended'] as const)('keeps content %s metadata outside model progress and body state', state => {
     assistantEntry()
     for (const hasBody of [false, true]) {
@@ -289,6 +436,11 @@ describe('Keeper operation stream projection', () => {
       // model progress nor finalize a live response or append authored bytes.
       expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).rawText).toBe(before.rawText)
       expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).delivery).not.toBe('ok')
+      const after = keeperThreads.value.sangsu![0]!
+      expect({ ...after, responseState: undefined }).toEqual({ ...before, responseState: undefined })
+      // Observed activity raises the ownership floor; ended activity names no response.
+      if (state === 'observed') expect(after.responseState).toMatchObject({ floor: { content_generation: 17, stream_scope: 0 } })
+      else expect(after.responseState).toEqual(before.responseState)
     }
   })
 
@@ -432,7 +584,8 @@ describe('Keeper operation stream projection', () => {
     const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
     expect(reply?.streamState).toBe('finalizing')
     expect(reply?.traceSteps).toEqual([
-      { kind: 'think', text: 'current', ts: expect.any(String), agentCoreBlockIndex: 0 },
+      { kind: 'think', text: 'current', ts: expect.any(String), agentCoreBlockIndex: 0,
+        responseOwner: { content_generation: 2, stream_scope: 0 } },
     ])
   })
 
@@ -2078,6 +2231,160 @@ describe('applyKeeperStreamEvent tool calls', () => {
     const thread = keeperThreads.value.sangsu ?? []
     expect(thread.filter(entry => entry.toolCallId === 'tc-end-replay')).toHaveLength(1)
     expect(thread.find(entry => entry.id === 'reply-1')?.error).toBeUndefined()
+  })
+})
+
+describe('refused response events leave the entry unchanged', () => {
+  beforeEach(() => {
+    _resetKeeperStreamBuffersForTests()
+    keeperThreads.value = {}
+  })
+  const custom = (name: string, value: unknown) => ({ type: 'CUSTOM', name, value }) as unknown as KeeperChatStreamEvent
+  const header = (generation: number, extra: Record<string, unknown> = {}) => custom('KEEPER_STREAM_MESSAGE_START', {
+    content_generation: generation, stream_scope: 0, provider_message_id: `provider-${generation}`, model: `model-${generation}`, ...extra,
+  })
+  const owner = (generation: number) => ({ content_generation: generation, stream_scope: 0 })
+  const text = (delta: string, generation: number): KeeperChatStreamEvent => ({ type: 'TEXT_MESSAGE_CONTENT', delta, textResponse: owner(generation) })
+  const finished = { type: 'RUN_FINISHED', runId: 'run-1' } as unknown as KeeperChatStreamEvent
+  const entry = () => keeperThreads.value.sangsu![0]!
+  const apply = (event: KeeperChatStreamEvent) => applyKeeperStreamEvent('sangsu', 'reply-1', event)
+
+  it('keeps provider details when an older response header arrives', () => {
+    assistantEntry()
+    apply(header(5, { usage: { input_tokens: 7, output_tokens: 1 } }))
+    const before = entry()
+    expect(before.details).toMatchObject({ providerMessageId: 'provider-5', modelUsed: 'model-5' })
+    apply(header(4, { usage: { input_tokens: 99 } }))
+    expect(entry()).toEqual(before)
+  })
+
+  it('keeps provider details and activity when an older response reports its details', () => {
+    assistantEntry()
+    apply(header(5))
+    const before = entry()
+    apply(custom('KEEPER_STREAM_MESSAGE_DELTA', { content_generation: 4, stream_scope: 0, stop_reason: 'end_turn', usage: { input_tokens: 99 } }))
+    expect(entry()).toEqual(before)
+  })
+
+  it('keeps a finished response unchanged against later lifecycle frames', () => {
+    assistantEntry()
+    apply(text('answer', 5))
+    apply(finished)
+    const before = entry()
+    expect(before.responseState).toMatchObject({ phase: 'terminal' })
+    const later: KeeperChatStreamEvent[] = [
+      custom('KEEPER_RUNTIME_ATTEMPT_STARTED', null),
+      { type: 'RUN_STARTED', runId: 'run-2' } as unknown as KeeperChatStreamEvent,
+      custom('KEEPER_CONTINUATION_CHECKPOINT', { message: 'checkpoint' }),
+      { type: 'TEXT_MESSAGE_START', messageId: 'm2', role: 'assistant' } as unknown as KeeperChatStreamEvent,
+      { type: 'TEXT_MESSAGE_END', messageId: 'm2' } as unknown as KeeperChatStreamEvent,
+      custom('KEEPER_STREAM_MESSAGE_STOP', owner(5)),
+      header(6),
+      text('LATE', 5),
+    ]
+    for (const event of later) {
+      apply(event)
+      expect(entry()).toEqual(before)
+    }
+  })
+
+  it('ends admission for the response after RUN_ERROR', () => {
+    assistantEntry()
+    apply(text('a', 5))
+    expect(apply({ type: 'RUN_ERROR', message: 'provider failed' } as unknown as KeeperChatStreamEvent)).toBe('provider failed')
+    apply(text('b', 5))
+    expect(entry().rawText).toBe('a')
+  })
+
+  it('refuses RUN_STARTED once a response is being observed', () => {
+    assistantEntry()
+    apply(text('a', 5))
+    const before = entry()
+    apply({ type: 'RUN_STARTED', runId: 'run-1' } as unknown as KeeperChatStreamEvent)
+    expect(entry()).toEqual(before)
+  })
+
+  describe('when a newer response begins', () => {
+    it.each([
+      ['a header', header(5)],
+      ['content activity alone', custom('KEEPER_MODEL_CONTENT_ACTIVITY', { generation: 5, stream_scope: 0, block_index: 0, channel: 'text', state: 'observed' })],
+    ])('commits buffered reasoning under the response that produced it (%s)', (_label, newer) => {
+      assistantEntry()
+      apply(custom('KEEPER_THINKING_DELTA', { index: 0, delta: 'old thought', response: owner(4) }))
+      expect(entry().traceSteps ?? []).toHaveLength(0)
+      apply(newer)
+      expect(entry().traceSteps).toMatchObject([{ kind: 'think', text: 'old thought', responseOwner: owner(4) }])
+    })
+
+    it('forgets the text block index of the response it replaces', () => {
+      assistantEntry()
+      apply(text('lead-in', 4))
+      apply(custom('KEEPER_CONTENT_BLOCK_START', { index: 7, content_type: 'text' }))
+      apply(header(5))
+      apply(text('tail', 5))
+      apply({ type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallName: 'Read' } as unknown as KeeperChatStreamEvent)
+      const reply = keeperThreads.value.sangsu!.find(row => row.id === 'reply-1')
+      const progress = reply?.traceSteps?.find(step => step.kind === 'progress')
+      expect(progress).toMatchObject({ kind: 'progress', text: 'lead-intail' })
+      expect(progress?.agentCoreBlockIndex).toBeUndefined()
+    })
+
+    it('accepts a message id that ended in the response it replaces', () => {
+      assistantEntry()
+      const unowned = (delta: string): KeeperChatStreamEvent => ({ type: 'TEXT_MESSAGE_CONTENT', messageId: 'm1', delta })
+      apply(unowned('old'))
+      apply({ type: 'TEXT_MESSAGE_END', messageId: 'm1' } as unknown as KeeperChatStreamEvent)
+      apply(header(5))
+      apply(unowned('new'))
+      expect(entry().rawText).toBe('oldnew')
+    })
+  })
+})
+
+describe('owned text message replay', () => {
+  beforeEach(() => {
+    _resetKeeperStreamBuffersForTests()
+    keeperThreads.value = {}
+  })
+  const owner = { content_generation: 5, stream_scope: 0 }
+  const start = { type: 'TEXT_MESSAGE_START', messageId: 'm1', role: 'assistant' } as unknown as KeeperChatStreamEvent
+  const content = (delta: string): KeeperChatStreamEvent => ({ type: 'TEXT_MESSAGE_CONTENT', messageId: 'm1', delta, textResponse: owner })
+  const end = { type: 'TEXT_MESSAGE_END', messageId: 'm1' } as unknown as KeeperChatStreamEvent
+  const text = () => keeperThreads.value.sangsu![0]!.rawText
+
+  it('does not append an owned message again when its content is replayed without a sequence', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', start)
+    applyKeeperStreamEvent('sangsu', 'reply-1', content('abc'))
+    applyKeeperStreamEvent('sangsu', 'reply-1', start)
+    applyKeeperStreamEvent('sangsu', 'reply-1', content('abc'))
+    expect(text()).toBe('abc')
+  })
+
+  it.each([undefined, 3])('does not append an owned message again after its END (replay sequence %s)', sequence => {
+    assistantEntry('op-1')
+    const source = (n?: number) => ({ kind: 'operation' as const, operationId: 'op-1', ...(n === undefined ? {} : { sequence: n }) })
+    applyKeeperStreamEvent('sangsu', 'reply-1', start, source(sequence === undefined ? undefined : 0))
+    applyKeeperStreamEvent('sangsu', 'reply-1', content('abc'), source(sequence === undefined ? undefined : 1))
+    applyKeeperStreamEvent('sangsu', 'reply-1', end, source(sequence === undefined ? undefined : 2))
+    applyKeeperStreamEvent('sangsu', 'reply-1', content('abc'), source(sequence))
+    expect(text()).toBe('abc')
+  })
+
+  it('marks an owned message finalizing at its END', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', start)
+    applyKeeperStreamEvent('sangsu', 'reply-1', content('abc'))
+    applyKeeperStreamEvent('sangsu', 'reply-1', end)
+    expect(keeperThreads.value.sangsu![0]!.streamState).toBe('finalizing')
+  })
+
+  it('accepts the same message id again for a newer response', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', content('old'))
+    applyKeeperStreamEvent('sangsu', 'reply-1', end)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { ...content('new'), textResponse: { content_generation: 6, stream_scope: 0 } } as KeeperChatStreamEvent)
+    expect(text()).toBe('oldnew')
   })
 })
 

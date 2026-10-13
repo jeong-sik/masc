@@ -10,12 +10,7 @@ import { DASHBOARD_NAV_ITEMS } from '../config/navigation'
 import { isSubmitEnter } from '../lib/keyboard'
 import { streamKeeperMessage } from '../api/keeper'
 import { newKeeperChatOperationId } from '../keeper-delivery-provenance'
-import {
-  admitKeeperTextOwner,
-  createKeeperTextOwnership,
-  observeKeeperTextScope,
-  retireKeeperTextOwnershipAttempt,
-} from '../keeper-stream'
+import { initialKeeperResponseState, keeperResponseEventOf, reduceKeeperResponse, type KeeperResponseEvent, type KeeperResponseState } from '../lib/keeper-response-state'
 import { currentDashboardActor } from '../api/core'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
@@ -40,6 +35,8 @@ interface DockMessage {
   role: 'user' | 'assistant'
   ts: string
   text: string
+  /** The reason a frame of this reply could not be read; the text is partial. */
+  incomplete?: string
   sug?: string[]
 }
 
@@ -270,27 +267,28 @@ export function useCopilotDock() {
       const abortController = new AbortController()
       dockStreaming.value = { keeperId: kid, shown: '', full: '', sug: [] }
       let replyText = ''
-      const textOwnership = createKeeperTextOwnership()
+      let responseState: KeeperResponseState = initialKeeperResponseState
+      let droppedFrame: string | null = null
+      const admit = (response: KeeperResponseEvent): boolean => {
+        const decision = reduceKeeperResponse(responseState, response)
+        responseState = decision.state
+        return decision.accepted
+      }
       streamKeeperMessage(kid, text.trim(), {
         operationId: newKeeperChatOperationId(),
         signal: abortController.signal,
         channel: 'copilot',
         channelWorkspaceId: currentDashboardActor(),
         surfaceContext: ctx,
+        onDecodeError: reason => { droppedFrame ??= reason },
         onEvent: (event) => {
-          if (event.type === 'CUSTOM' && event.name === 'KEEPER_RUNTIME_ATTEMPT_STARTED') {
-            retireKeeperTextOwnershipAttempt(textOwnership)
-            return
-          }
+          // Every frame that names a response goes through the same mapping and
+          // reducer as the thread stream, so a delayed delta from a superseded
+          // or stopped response is refused here for the same reasons. The dock
+          // keeps only the reply text, so it reads no other state.
+          const response = keeperResponseEventOf(event)
+          if (response && !admit(response)) return
           if (event.type === 'TEXT_MESSAGE_CONTENT' && typeof event.delta === 'string') {
-            // The delta names the response it belongs to; a delayed delta from
-            // a superseded response shares the message id, so ownership is
-            // what keeps stale bytes out of the fresh reply.
-            if (event.textResponse) {
-              if (!admitKeeperTextOwner(textOwnership, event.textResponse)) return
-            } else if (typeof event.textStreamScope === 'number') {
-              observeKeeperTextScope(textOwnership, event.textStreamScope)
-            }
             replyText += event.delta
             const current = dockStreaming.value
             if (current && current.keeperId === kid) {
@@ -301,10 +299,14 @@ export function useCopilotDock() {
       })
         .then((outcome) => {
           dockStreaming.value = null
-          const finalText = replyText.trim() || (outcome.terminal ? '(empty reply)' : '(stream ended unexpectedly)')
+          let finalText = replyText.trim()
+          if (!finalText && droppedFrame === null) finalText = outcome.terminal ? '(empty reply)' : '(stream ended unexpectedly)'
           dockThreads.value = {
             ...dockThreads.value,
-            [kid]: [...(dockThreads.value[kid] ?? []), { role: 'assistant', ts: nowHM(), text: finalText }],
+            [kid]: [...(dockThreads.value[kid] ?? []), {
+              role: 'assistant', ts: nowHM(), text: finalText,
+              ...(droppedFrame !== null ? { incomplete: droppedFrame } : {}),
+            }],
           }
         })
         .catch((err) => {
@@ -384,6 +386,9 @@ function DockMessageRow({ m, keeper, onPick }: { m: DockMessage; keeper: DockKee
           <span class="ts mono">${m.ts}</span>
         </div>
         <div class=${`dbubble ${isUser ? 'user' : ''}`}><${Para} text=${m.text} /></div>
+        ${m.incomplete !== undefined
+          ? html`<div class="dmsg-note" data-dock-incomplete=${m.incomplete}>${m.incomplete}</div>`
+          : null}
         ${!isUser && m.sug
           ? html`
               <div class="dsug">

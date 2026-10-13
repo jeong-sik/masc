@@ -1,4 +1,5 @@
 import { keeperStreamContract } from './keeper-stream-contract'
+import { keeperResponseIsFailed } from './lib/keeper-response-state'
 import {
   newKeeperChatOperationId,
   operationDeliveryProvenance,
@@ -69,12 +70,12 @@ import {
   setStatusDetail,
   settleKeeperToolApproval,
   updateKeeperToolApproval,
-  updateThreadEntry,
   upsertKeeperToolApproval,
 } from './keeper-state'
 import {
   abortKeeperThreadMessage,
   applyKeeperStreamEvent,
+  failKeeperStreamOperation,
   flushPendingKeeperStreamDeltas,
 } from './keeper-stream'
 import {
@@ -616,6 +617,7 @@ let localIdCounter = 0
 
 const hydratingKeeperChatOperations = new Set<string>()
 const sendingKeeperThreadMessages = new Set<string>()
+const INCOMPLETE_KEEPER_REPLY_MESSAGE = '응답 일부를 받지 못했고 저장된 대화도 읽지 못했습니다.'
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 
 function keeperThreadMessageSendKey(
@@ -700,7 +702,24 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
       })
       const assistantStillLocal = (keeperThreads.value[request.keeperName] ?? [])
         .some(entry => entry.id === assistantId)
-      if (assistantStillLocal) {
+      const localAssistant = (keeperThreads.value[request.keeperName] ?? [])
+        .find(entry => entry.id === assistantId)
+      if (assistantStillLocal && !isCancelled && !failure && keeperResponseIsFailed(localAssistant?.responseState)) {
+        // The server finished the operation, but this copy lost a frame and
+        // the stored transcript could not replace it. Keep the recorded
+        // failure and the partial text instead of showing a delivered reply.
+        const incomplete = localAssistant?.error ?? INCOMPLETE_KEEPER_REPLY_MESSAGE
+        finalizeAssistantEntry(request.keeperName, assistantId, {
+          delivery: 'error',
+          streamState: null,
+          error: incomplete,
+          streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
+            requestId: request.operationId,
+            reason: incomplete,
+          }),
+        })
+        setRecordValue(keeperActionErrors, request.keeperName, incomplete)
+      } else if (assistantStillLocal) {
         const terminalText = isCancelled ? 'Cancelled' : errorMessage ?? ''
         finalizeAssistantEntry(request.keeperName, assistantId, {
           text: terminalText,
@@ -1048,6 +1067,7 @@ export async function sendKeeperThreadMessage(
   setActiveStream(keeperName, operationId, assistantId, controller)
   let operationAccepted = false
   let toolCallEnded = false
+  let droppedFrame: string | null = null
   // #20849/#25898 Gap B: after ACCEPTED, the live-send SSE feed is silent
   // while the operation sits queued behind a running turn. [lastEventAt]
   // would otherwise cross STREAM_STALL_THRESHOLD_S and the composer would
@@ -1089,7 +1109,8 @@ export async function sendKeeperThreadMessage(
       userBlocks,
       surfaceContext: options.surfaceContext,
       onDecodeError: reason => {
-        updateThreadEntry(keeperName, assistantId, entry => ({ ...entry, error: reason }))
+        droppedFrame ??= reason
+        failKeeperStreamOperation(keeperName, assistantId, reason)
       },
       onEvent: (event, sequence) => {
         markKeeperStreamSignal(keeperName)
@@ -1150,25 +1171,34 @@ export async function sendKeeperThreadMessage(
     const finalText = finalEntry?.text ?? ''
     const hasFinalText = finalText.trim().length > 0
 
-    if (!outcome.terminal) {
+    // A stream that dropped a frame is as incomplete as one that was cut: the
+    // finished operation, not this partial text, is the reply.
+    if (!outcome.terminal || droppedFrame !== null) {
       if (operationAccepted) {
-        removeThreadEntries(keeperName, [localId, assistantId])
-        // Hand off to resume: release ownership FIRST so our own resume
-        // call below is not blocked by the guard we just set.
-        releaseLiveSendRequest(operationId)
-        await hydrateTrackedKeeperChatOperation({
+        const handoff: TrackedKeeperChatOperation = {
           operationId,
           keeperName,
           message,
           submittedAt: Date.now(),
           ...(attachments ? { attachments } : {}),
-        })
+        }
+        // A dropped frame keeps its partial reply and failure with the
+        // handoff: if the stored transcript cannot replace them, they are
+        // all the panel has, and they must not read as a delivered reply.
+        const request = droppedFrame !== null
+          ? withCurrentTrackedOperationAssistantDraft(handoff, assistantId)
+          : handoff
+        removeThreadEntries(keeperName, [localId, assistantId])
+        // Hand off to resume: release ownership FIRST so our own resume
+        // call below is not blocked by the guard we just set.
+        releaseLiveSendRequest(operationId)
+        await hydrateTrackedKeeperChatOperation(request)
         return
       }
       // The SSE connection closed without RUN_FINISHED / RUN_ERROR —
       // keep the partial text but mark the entry so the operator can
       // tell a cut stream from a completed reply.
-      const cutMessage = '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.'
+      const cutMessage = droppedFrame ?? '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.'
       finalizeAssistantEntry(keeperName, assistantId, {
         text: finalText,
         delivery: 'interrupted',

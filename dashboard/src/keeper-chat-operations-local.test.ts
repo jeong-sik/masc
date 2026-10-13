@@ -114,4 +114,50 @@ describe('keeper chat operation tracking', () => {
         runtimeAttempt: { runtimeId: 'claude', index: -1 } } }]))
     expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.runtimeAttempt).toBeUndefined()
   })
+
+  it('restores persisted camel-case conversation details instead of nulling them', () => {
+    // trackedKeeperChatAssistantDraftFromEntry persists the already-normalized
+    // KeeperConversationDetails object (camel-case fields). A decoder that only
+    // reads the snake-case wire keys would replace every value with null.
+    upsertTrackedKeeperChatOperation({
+      operationId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      message: 'status?',
+      submittedAt: 1_780_000_000,
+      assistantDraft: {
+        text: '부분 응답',
+        rawText: '부분 응답',
+        delivery: 'streaming',
+        streamState: 'thinking',
+        details: {
+          traceId: 'trace-1',
+          turnRef: 'turn-1',
+          providerMessageId: 'msg-1',
+          modelUsed: 'model-x',
+          stopReason: 'stop_sequence',
+          latencyMs: 12,
+          costUsd: 0.5,
+          usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+          replyText: '부분 응답',
+          turnOutcome: 'visible_reply',
+          externalEffectTarget: { kind: 'slack', channelId: 'C1', threadTs: 'T1' },
+        },
+      },
+    })
+
+    const [operation] = trackedKeeperChatOperationsForKeeper('echo')
+    expect(operation?.assistantDraft?.details).toMatchObject({
+      traceId: 'trace-1',
+      turnRef: 'turn-1',
+      providerMessageId: 'msg-1',
+      modelUsed: 'model-x',
+      stopReason: 'stop_sequence',
+      latencyMs: 12,
+      costUsd: 0.5,
+      usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+      replyText: '부분 응답',
+      turnOutcome: 'visible_reply',
+      externalEffectTarget: { kind: 'slack', channelId: 'C1', threadTs: 'T1' },
+    })
+  })
 })

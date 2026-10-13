@@ -330,10 +330,10 @@ describe('CopilotDock', () => {
 
   it('sends a message and shows a streaming reply', async () => {
     const fetchMock = dockFetchMock([
-      { type: 'TEXT_MESSAGE_START', role: 'Assistant', messageId: 'm1' },
-      { type: 'TEXT_MESSAGE_CONTENT', delta: '안녕하세요' },
-      { type: 'TEXT_MESSAGE_END' },
-      { type: 'RUN_FINISHED' },
+      { type: 'TEXT_MESSAGE_START', threadId: 'keeper-consumer:sangsu', timestamp: 1, role: 'assistant', messageId: 'm1' },
+      { type: 'TEXT_MESSAGE_CONTENT', threadId: 'keeper-consumer:sangsu', timestamp: 2, messageId: 'm1', delta: '안녕하세요' },
+      { type: 'TEXT_MESSAGE_END', threadId: 'keeper-consumer:sangsu', timestamp: 3, messageId: 'm1' },
+      { type: 'RUN_FINISHED', threadId: 'keeper-consumer:sangsu', timestamp: 4, runId: 'run-1' },
     ])
     vi.stubGlobal('fetch', fetchMock)
 
@@ -359,6 +359,89 @@ describe('CopilotDock', () => {
         .toContain('안녕하세요'),
       { timeout: 3000 },
     )
+  })
+
+  async function sendDockMessageAndReadReply(events: unknown[]): Promise<string> {
+    vi.stubGlobal('fetch', dockFetchMock(events))
+    const dock = renderDock()
+    dock.open()
+    await waitFor(() => expect(container.querySelector('[data-testid="copilot-dock-textarea"]')).not.toBeNull())
+    const textarea = container.querySelector('[data-testid="copilot-dock-textarea"]') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: '요약해줘' } })
+    const replies = () => Array.from(container.querySelectorAll('[data-dock-message="assistant"]'))
+    const before = replies().length
+    ;(container.querySelector('[aria-label="메시지 전송"]') as HTMLButtonElement).click()
+    await waitFor(() => {
+      expect(replies().length).toBeGreaterThan(before)
+      expect(replies().some(reply => reply.textContent?.includes('작성 중'))).toBe(false)
+    }, { timeout: 3000 })
+    return replies().at(-1)?.textContent ?? ''
+  }
+
+  const dockContent = (timestamp: number, delta: unknown, extra: Record<string, unknown> = {}) => (
+    { type: 'TEXT_MESSAGE_CONTENT', threadId: 'keeper-consumer:sangsu', timestamp, messageId: 'm1', delta, ...extra }
+  )
+  const dockFinished = { type: 'RUN_FINISHED', threadId: 'keeper-consumer:sangsu', timestamp: 9, runId: 'run-1' }
+
+  it('drops a delayed delta from a superseded response', async () => {
+    const reply = await sendDockMessageAndReadReply([
+      dockContent(1, 'current', { textResponse: { content_generation: 5, stream_scope: 0 } }),
+      dockContent(2, 'STALE', { textResponse: { content_generation: 4, stream_scope: 3 } }),
+      dockFinished,
+    ])
+    expect(reply).toContain('current')
+    expect(reply).not.toContain('STALE')
+  })
+
+  const dockCustom = (timestamp: number, name: string, value: unknown) => (
+    { type: 'CUSTOM', threadId: 'keeper-consumer:sangsu', timestamp, runId: 'run-1', name, value }
+  )
+  const dockOwner = (generation: number) => ({ content_generation: generation, stream_scope: 0 })
+
+  it('refuses a delayed delta of an older response after a newer header', async () => {
+    const reply = await sendDockMessageAndReadReply([
+      dockContent(1, 'second', { textResponse: dockOwner(2) }),
+      dockCustom(2, 'KEEPER_STREAM_MESSAGE_START', { ...dockOwner(3), provider_message_id: '', model: '' }),
+      dockContent(3, 'LATE-FROM-2', { textResponse: dockOwner(2) }),
+      dockContent(4, 'third', { textResponse: dockOwner(3) }),
+      dockFinished,
+    ])
+    expect(reply).toContain('secondthird')
+    expect(reply).not.toContain('LATE-FROM-2')
+  })
+
+  it('refuses a delta of a response after its stop', async () => {
+    const reply = await sendDockMessageAndReadReply([
+      dockContent(1, 'done', { textResponse: dockOwner(2) }),
+      dockCustom(2, 'KEEPER_STREAM_MESSAGE_STOP', dockOwner(2)),
+      dockContent(3, 'AFTER-STOP', { textResponse: dockOwner(2) }),
+      dockFinished,
+    ])
+    expect(reply).toContain('done')
+    expect(reply).not.toContain('AFTER-STOP')
+  })
+
+  it('refuses a delta older than an observed content-activity generation', async () => {
+    const reply = await sendDockMessageAndReadReply([
+      dockContent(1, 'three', { textResponse: dockOwner(3) }),
+      dockCustom(2, 'KEEPER_MODEL_CONTENT_ACTIVITY', { generation: 4, stream_scope: 0, block_index: 0, channel: 'text', state: 'observed' }),
+      dockContent(3, 'LATE-FROM-3', { textResponse: dockOwner(3) }),
+      dockFinished,
+    ])
+    expect(reply).toContain('three')
+    expect(reply).not.toContain('LATE-FROM-3')
+  })
+
+  it('does not present a reply with a dropped frame as complete', async () => {
+    const reply = await sendDockMessageAndReadReply([
+      dockContent(1, 'first half'),
+      dockContent(2, 42),
+      dockContent(3, 'second half'),
+      dockFinished,
+    ])
+    expect(reply).toContain('first halfsecond half')
+    const note = container.querySelector('[data-dock-incomplete]')
+    expect(note?.getAttribute('data-dock-incomplete')).toBe('A Keeper stream frame does not match the protocol.')
   })
 
   it('posts copilot channel and surface context to the keeper stream', async () => {

@@ -35,8 +35,9 @@ module Line : sig
 
   val of_string : string -> (t, problem) result
 
-  val of_date : Unix.tm -> t
-  (** [YYYY-MM-DD]. *)
+  val of_calendar_date : year:int -> month:int -> day:int -> t
+  (** [YYYY-MM-DD], from a calendar date as people write it (year 2026, month
+      10, day 13). *)
 end
 
 (** One tag: a {!Line.t} with no comma. *)

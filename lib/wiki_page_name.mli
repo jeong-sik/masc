@@ -6,8 +6,15 @@ type page_name_error =
   | Dash_at_edge
   | Reserved_page_name
 
+val index_name : string
+(** ["index"]: the name of the wiki's index file, without [.md]. *)
+
+val log_name : string
+(** ["log"]: the name of the wiki's log file, without [.md]. *)
+
 val reserved_page_names : string list
-(** The names the wiki keeps for its own files: [index] and [log]. *)
+(** The names the wiki keeps for its own files: {!index_name} and
+    {!log_name}. *)
 
 val validate_page_name : string -> (string, page_name_error) result
 (** Whether [raw] can serve as a page topic: lowercase letters, digits and

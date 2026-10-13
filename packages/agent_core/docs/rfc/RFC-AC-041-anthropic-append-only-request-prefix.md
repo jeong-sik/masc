@@ -98,7 +98,8 @@
 
 **(4) 앞부분이 달라졌는데 서명 블록을 그대로 다시 보낸다.**
 
-- Anthropic 쪽 재생 규칙은 `All_assistant_messages` 다(`reasoning_dialect.ml:521`). 이력의 모든 assistant thinking 을 보낸다. 서명 블록은 글자 그대로 직렬화한다(`api_common.ml:364-379`).
+- (base 시절) Anthropic 쪽 재생 규칙은 `All_assistant_messages` 였다(`reasoning_dialect.ml:521`). 이력의 모든 assistant thinking 을 보냈다. (현 main) #42677(병합 `c72b91bc99`) 이후 런타임은 wire 가 Anthropic 이고 모델 행이 재생 규칙을 적지 않은(`Default_reasoning_replay`) 경우 최신 턴의 도구 루프 thinking 만 재생하도록 강제한다(`lib/runtime/runtime_adapter.ml:608` `with_client_history_replay`, `:635`). bare `claude-*` 행은 `models.toml` 1~300줄에 `reasoning_replay` 선언이 없어 전부 이 강제 경로를 탄다. 스스로 규칙을 적은 행(예: `kimi-k3` 행의 `latest_user_turn_tool_calls`, `kimi-k2.7-code` 행의 `preserve_always`)은 그 규칙이 우선한다. 서명 블록은 글자 그대로 직렬화한다(`api_common.ml:364-379`). "앞부분이 달라졌는데 서명 블록을 그대로 다시 보낸다" 는 이제 문자 그대로는 성립하지 않는다. #42677 이 정책 문(어느 thinking 이 재생 대상인지)을 좁혔고, 남은 결함은 대상 블록에 앞부분 비교가 없다는 것이다.
+- #42677 과 이 RFC 는 공존한다. 어느 층도 다른 층을 대체하지 않는다. #42677 만으로는 최신 턴 앞부분 자체가 다시 쓰이면(system·tools·메시지 편집) 여전히 400 이고, 이 RFC 의 지문만으로는 정책이 부적격으로 보는 블록까지 검증하게 된다. 구현 순서는 정책 문(#42677, 이미 병합) 뒤에 지문 문(이 RFC)을 두는 것이다.
 - 저장된 블록의 출처 검사는 `Reasoning_source` 가 한다(`types.ml:341-420`). 비교하는 값은 provider 종류, 엔드포인트(`base_url` + `request_path` 해시), 모델 id, 재생 규칙이다. Anthropic 은 `Require_identical_source` 다(`reasoning_dialect.ml:635-651`, 643줄). 앞 내용이 같은지는 보지 않는다. 판정 코드는 `reasoning_history_projection.ml:204-217`(`replay_selected`)과 258줄(`rotation_admits`)이다.
 - 같은 엔드포인트에 키만 다른 런타임(`claude`, `claude_vincent`)은 같은 `Reasoning_source` 로 보인다. 계정이 다른 블록을 걸러 낼 수 없다.
 
@@ -134,7 +135,7 @@
 | 앞부분 규칙, `drop_block` 비용, 도구 결과 변경의 효과 | 공식 문서를 읽음 |
 | 턴별 문맥이 이력에 남지 않고 첫 라운드에만 붙는다 | 코드와 manifest 로 확인 |
 | 강등 경계가 턴마다 움직인다 | 코드로 확인. 움직이는 빈도는 못 쟀다 |
-| 서명 블록을 앞부분 비교 없이 모두 재생한다 | 코드로 확인 |
+| 서명 블록을 앞부분 비교 없이 (정책이 허용한 만큼) 재생한다 | 코드로 확인. #42677 이후 Default 행은 최신 턴 도구 루프만 대상 |
 | 창 시작점이 움직여 맨 앞 메시지가 바뀐다 | 코드로 확인. 빈도는 못 쟀다 |
 | tools 가 라운드마다 바뀌는 경로 | 코드로 둘 확인. 52↔175 캡처와 연결은 못 했다 |
 | system prompt 가 턴 사이에 바뀐다 | wire-capture 인용. 코드 경로 미확인 |
@@ -247,6 +248,7 @@ type prefix_change =
   | History_rewritten of { first_index : int }
   | Tool_result_demoted of { first_index : int }
   | Context_message_changed
+  | Replay_policy_rewritten of { first_index : int }
 
 type signed_thinking_disposition =
   | Replay
@@ -258,6 +260,7 @@ type signed_thinking_disposition =
 ```
 
 - `reasoning_history_projection.project` 는 `disposition` 을 `match` 로 다루고 `_ ->` 갈래를 두지 않는다. 지금의 `replay_drop_reason` 에 `Prefix_not_preserved of prefix_change` 와 계정·지문 부재 갈래를 더하는 방향이다.
+- `Replay_policy_rewritten` 은 재생 정책의 투영이 지문 기록 시점과 달라져 투영 뒤 메시지 목록이 바뀐 경우다. 정책 설정 자체가 바뀐 경우(기록은 `All_assistant_messages` 시절에 하고 검증은 #42677 강제 이후에 하는 경우 등)와 설정은 같으나 최신 턴 창이 움직여 "최신"이던 블록이 "이전"이 된 경우가 둘 다 여기 속한다. 지문 재료에서 thinking 블록을 빼므로(§3.4 앞부분) thinking 만 빠지고 메시지가 남으면 지문은 그대로라 이 변형이 붙지 않는다. 메시지가 통째로 빠졌을 때만 붙는다. `History_rewritten` 으로 흡수하지 않는 근거: 바이트 편집과 정책 투영은 층이 다르고 증거(투영 드롭 기록 대 메시지 diff)가 달라, 운영자가 omit 사유로 둘을 가를 수 있어야 한다. 2층의 `match` 는 이 변형을 `History_rewritten` 과 같이 취급한다(해당 블록과 그보다 오래된 블록을 뺀다). 로그 표식만 다르게 둔다.
 - 재생할 블록은 이렇게 고른다. 가장 새 서명 블록부터 거슬러 올라가며 `Replay` 인 블록을 모은다. `Replay` 가 아닌 블록을 처음 만나면 멈춘다. 그 블록과 그보다 오래된 서명 블록은 전부 뺀다(앞쪽부터 빼기만 한다). 문서가 유효하다고 적은 방식이다(§1.2-5).
 - 이 규칙은 한 번 앞부분이 바뀐 뒤에 새로 만든 블록을 영구히 잃지 않는다. 바뀐 뒤의 요청은 새 앞부분으로 지문을 붙이고, 그 블록은 이후 요청이 바뀌지 않는 한 재생된다. 앞쪽의 안 맞는 블록만 계속 빠진다. 안 맞는 블록과 같은 앞부분에 묶인 오래된 블록 중 맞는 것까지 빠지는 것은 보수적인 선택의 비용이다. 맞는 블록만 남기고 중간 블록만 빼는 쪽이 유효한지는 문서의 문장으로 단정할 수 없어 라이브 증명 항목에 둔다(§3.6).
 - 창 시작점이 움직이면 모든 지문이 달라져 서명 블록이 전부 빠진다. 강등도 마커로 바뀐 도구 결과 뒤의 모든 서명 블록을 뺀다.
@@ -452,6 +455,8 @@ system·tools 가 라운드마다 바뀌는 경로를 없애는 일은 이 스�
 | `runtime_model_input_tail_window.ml:4` | 그대로 (`atoms_per_window = 60`) | 맞음 |
 | `keeper_carried_front.mli` | 있음 | 맞음 |
 
+현 main 추기(base 이후 변경): `reasoning_dialect.ml:521` 행은 base 기준이라 맞지만, #42677(병합 `c72b91bc99`)이 `lib/runtime/runtime_adapter.ml:608`(`with_client_history_replay`)에서 Anthropic wire + `Default_reasoning_replay` 행에 `Force_latest_user_turn_tool_calls` 를 강제한다(`:635`). bare `claude-*` 행은 `models.toml` 에 `reasoning_replay` 선언이 없어 이 경로를 탄다. §1.3-4 와 §3.4 는 이 현 main 기준으로 다시 썼다.
+
 버린 인용은 없다. 다시 확인하는 명령:
 
 ```
@@ -459,6 +464,7 @@ rg -n "messages @ \[ system_msg \]" packages/agent_core/lib/agent/agent_turn.ml
 rg -n "Unknown_invalid_request" packages/agent_core/lib/llm_provider/retry.ml | head -3
 rg -n "let boundary_resend_on|restore_front before" lib/keeper/keeper_turn_driver_try_provider.ml
 rg -n "replay_policy = All_assistant_messages" packages/agent_core/lib/llm_provider/reasoning_dialect.ml
+rg -n "with_client_history_replay|Force_latest_user_turn_tool_calls" lib/runtime/runtime_adapter.ml
 rg -n "supports_completion_request_measurement" packages/agent_core/lib/llm_provider/count_tokens_sync.ml
 rg -n "Keeper_agent_tool_surface.for_request" lib/keeper/keeper_run_tools_hooks.ml
 ```

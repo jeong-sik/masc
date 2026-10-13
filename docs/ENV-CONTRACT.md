@@ -167,6 +167,10 @@ are loaded into the process-local boot override store at startup, so
 `runtime.toml` edits require a process restart. Changing the process env inside
 the running process is still picked up on the next WebSearch call.
 
+`masc web-search-setup` prints which provider has its credential and what to
+export for the rest, and writes the `[web_search]` keys below. It never writes an
+API key: those stay in the environment of the process that starts the server.
+
 Precedence:
 
 1. Process env var

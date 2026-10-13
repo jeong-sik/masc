@@ -1,0 +1,16 @@
+(include_subdirs no)
+
+(library
+ (name web_search_setup)
+ (public_name masc.web_search_setup)
+ (wrapped false)
+ (modules web_search_setup)
+ (preprocess
+  (pps ppx_enumerate))
+ (libraries
+  masc.config
+  masc.keeper_runtime
+  masc.keeper_toml
+  masc.runtime
+  masc.toml_line_editor
+  uri))

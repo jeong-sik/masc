@@ -2403,6 +2403,83 @@ let voice_local_setup_cmd =
       $ model
       $ list_voices)
 
+(* [masc web-search-setup]. The behaviour is in Masc_cli_web_search_setup; this
+   is the option table. *)
+let web_search_setup_cmd =
+  let provider_names = Masc_cli_web_search_setup.provider_names in
+  let searxng_url =
+    Arg.(value & opt (some string) None
+         & info [ "searxng-url" ] ~docv:"URL"
+             ~doc:"Address of a SearXNG instance, http or https with a host. Written as \
+                   web_search.searxng_url, which also admits the searxng provider.")
+  in
+  let provider =
+    Arg.(value & opt (some string) None
+         & info [ "provider" ] ~docv:"NAME"
+             ~doc:("The provider tried first; the others follow it. One of: "
+                   ^ provider_names ^ "."))
+  in
+  let provider_order =
+    Arg.(value & opt (some string) None
+         & info [ "provider-order" ] ~docv:"NAMES"
+             ~doc:"Comma separated providers, the whole chain in order. A provider named \
+                   here without its credential fails on every call, because only the \
+                   default order filters by credential. SearXNG is the exception: it \
+                   falls back to its default address.")
+  in
+  let fallbacks =
+    Arg.(value & opt (some string) None
+         & info [ "fallbacks" ] ~docv:"NAMES"
+             ~doc:"Comma separated providers tried after --provider.")
+  in
+  let timeout_sec =
+    Arg.(value & opt (some int) None
+         & info [ "timeout-sec" ] ~docv:"SECONDS" ~doc:"Request timeout, 1 to 60.")
+  in
+  let cache_ttl_sec =
+    Arg.(value & opt (some float) None
+         & info [ "cache-ttl-sec" ] ~docv:"SECONDS"
+             ~doc:"How long a result is reused, 0 or more.")
+  in
+  let unset =
+    let dashed key = String.map (function '_' -> '-' | c -> c) (Web_search_setup.key_name key) in
+    Arg.(value
+         & opt_all (enum (List.map (fun key -> dashed key, key) Web_search_setup.all_of_key)) []
+         & info [ "unset" ] ~docv:"KEY"
+             ~doc:"Remove this key so its default applies again. Repeat for several.")
+  in
+  Cmd.v
+    (Cmd.info
+       "web-search-setup"
+       ~doc:"Show what each web search provider needs and write the [web_search] settings."
+       ~man:
+         [ `S Manpage.s_description
+         ; `P
+             "With no option it writes nothing and prints each provider's state, the \
+              search order a call would use now, and the variable to export for a \
+              provider that is missing."
+         ; `P
+             "Writes only the [web_search] section of runtime.toml, through the same \
+              locked writer as voice-local-setup, keeping comments and other tables as \
+              they are. An API key is never written: it is read from the environment \
+              of the process that starts the server."
+         ])
+    Term.(
+      const (fun base_path searxng_url provider provider_order fallbacks timeout_sec
+                 cache_ttl_sec unset ->
+        let base_path = Env_config.normalize_masc_base_path_input base_path in
+        Masc_cli_web_search_setup.run ~base_path
+          ~searxng_url ~provider ~provider_order ~fallbacks ~timeout_sec ~cache_ttl_sec
+          ~unset)
+      $ base_path
+      $ searxng_url
+      $ provider
+      $ provider_order
+      $ fallbacks
+      $ timeout_sec
+      $ cache_ttl_sec
+      $ unset)
+
 let runtime_probe_cmd_exit base_path runtime_id =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   match Runtime.load_list ~config_path:runtime_config_path with
@@ -4453,6 +4530,7 @@ let cmd =
     ; voice_verify_cmd
     ; browser_lane_setup_cmd
     ; voice_local_setup_cmd
+    ; web_search_setup_cmd
     ; runtime_model_list_cmd
     ; runtime_codex_models_cmd
     ; runtime_muse_models_cmd

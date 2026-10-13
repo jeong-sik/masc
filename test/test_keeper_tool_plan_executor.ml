@@ -1132,6 +1132,7 @@ let export_pointer value =
 ;;
 
 let export_measurement = ref None
+let provider_trial_corpus = ref []
 
 let with_export_base f =
   let base = Filename.temp_file "masc-composition-exports-" "" in
@@ -1193,6 +1194,52 @@ let provider_content ~base_path result =
   | _ -> fail "provider did not serialize one tool result"
 ;;
 
+(* Keep the real provider projection and real bounded artifact-reader pages.
+   A later external model trial replays these immutable observations; it does
+   not synthesize a smaller result or reexecute the producer. *)
+let record_provider_trial ~base_path ~scenario ~task ~expected original projected =
+  let baseline = provider_content ~base_path original in
+  let selected = provider_content ~base_path projected in
+  let references =
+    List.filter_map (fun content ->
+      match Tool_output.decode_from_agent_core content with
+      | Tool_output.Decoded reference -> Some reference
+      | Tool_output.Not_marker -> None
+      | Tool_output.Invalid_marker { detail } -> fail detail) [ baseline; selected ]
+    @ Tool_result.retained_artifacts projected
+    @ Tool_output.normalized_artifact_refs_in_json (Tool_result.data projected)
+    |> List.sort_uniq (fun left right -> String.compare left.Tool_output.sha256 right.Tool_output.sha256)
+  in
+  let pages = List.concat_map (fun (reference : Tool_output.artifact_ref) ->
+    let rec read offset =
+      let args = `Assoc [ "sha256", `String reference.sha256; "offset", `Int offset ] in
+      let execution, observation = Masc.Keeper_artifact_read.handle_with_page ~base_path ~args in
+      match observation, execution.Masc.Keeper_tool_execution.data with
+      | Some page, Some data ->
+        let content = provider_content ~base_path
+            (completed ~tool_name:"keeper_artifact_read" ~data) in
+        check bool "captured artifact page is immediately readable" false (Tool_output.is_marker content);
+        let entry = `Assoc [ "args", args; "content", `String content ] in
+        if page.eof then [ entry ]
+        else (
+          check bool "artifact paging advances" true (page.next_offset > offset);
+          entry :: read page.next_offset)
+      | None, _ | Some _, None -> fail "real artifact reader could not capture a stored result"
+    in
+    read 0) references in
+  let reader = canonical_descriptor "keeper_artifact_read" in
+  let schema = `Assoc [ "name", `String reader.public_name; "description", `String reader.description
+                      ; "input_schema", reader.input_schema ] in
+  let reader_tool = Llm_provider.Backend_openai_serialize.build_openai_tool_json schema in
+  provider_trial_corpus :=
+    `Assoc [ "scenario", `String scenario; "task", `String task; "expected", expected
+           ; "tool_name", `String (Tool_result.tool_name original)
+           ; "baseline_content", `String baseline; "selected_content", `String selected
+           ; "reader_tool", reader_tool
+           ; "reader_default_max_bytes", `Int Masc.Keeper_artifact_read.default_max_bytes
+           ; "pages", `List pages ] :: !provider_trial_corpus
+;;
+
 let execution_document ~base_path reference =
   match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:reference.Tool_output.sha256 with
   | Ok (Some raw) ->
@@ -1243,6 +1290,9 @@ let test_export_success_preserves_durable_original () =
   check bool "provider content roots the complete manifest" true
     (wire |> member "artifact_manifest" <> `Null);
   let baseline_wire = provider_content ~base_path original in
+  record_provider_trial ~base_path ~scenario:"selected_path"
+    ~task:"Return JSON containing only the exact path field returned by the completed read: {\"path\":\"...\"}. Use the composition result or its artifact; do not guess the path. If you read artifacts, use default full pages and omit max_bytes."
+    ~expected:(`Assoc [ "path", `String "probe.txt" ]) original projected;
   export_measurement := Some
     (`Assoc [ "scope", `String "controlled Read composition through attach_artifact_manifest, AGENT_CORE, OpenAI serializer"
             ; "raw_result_bytes", `Int (String.length (Tool_result.message original))
@@ -1308,7 +1358,12 @@ let test_export_failure_preserves_independent_branch () =
       (wire_data |> member "exports" |> member "independent" |> member "available" |> to_bool);
     check string "unknown effect reaches provider" "effect_outcome_unknown"
       (wire_data |> member "effect_disposition" |> to_string);
-    check bool "provider keeps failed node and cause" true (wire_data |> member "cause" <> `Null)
+    check bool "provider keeps failed node and cause" true (wire_data |> member "cause" <> `Null);
+    record_provider_trial ~base_path ~scenario:"partial_unknown_effect"
+      ~task:"Return JSON with the independent branch's post_count as independent, availability of the failed branch as failed_available, aggregate disposition as disposition, and effect disposition as effect_disposition. Preserve the failure and never replay the producer. If you read artifacts, use default full pages and omit max_bytes."
+      ~expected:(`Assoc [ "independent", `Int 0; "failed_available", `Bool false
+                        ; "disposition", `String "failed"; "effect_disposition", `String "effect_outcome_unknown" ])
+      original projected
 ;;
 
 let run_exported_read ~base_path ?(pointer = "/path") ?(retained = []) () =
@@ -1550,5 +1605,9 @@ let () =
         ] )
     ]
  ;
-  Option.iter (fun measurement -> Printf.printf "composition_export_measurement=%s\n%!" (Yojson.Safe.to_string measurement)) !export_measurement
+  Option.iter (fun measurement -> Printf.printf "composition_export_measurement=%s\n%!" (Yojson.Safe.to_string measurement)) !export_measurement;
+  Printf.printf "composition_provider_trial_corpus=%s\n%!"
+    (Yojson.Safe.to_string (`Assoc [ "schema_version", `Int 1
+      ; "scope", `String "fixture producer, production executor/projection/reader and OpenAI tool-result serialization; no live Keeper or model execution"
+      ; "scenarios", `List (List.rev !provider_trial_corpus) ]))
 ;;

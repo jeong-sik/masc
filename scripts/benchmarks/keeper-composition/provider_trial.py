@@ -147,7 +147,8 @@ def request_body(args, options, scenario, messages):
 
 def run_sample(args, options, key, scenario, condition, directory):
     directory.mkdir()
-    initial_content = scenario[condition + "_content"]
+    initial_content = scenario[("previous_selected_content" if condition == "baseline" and
+                                args.baseline_projection == "previous_selected" else condition + "_content")]
     messages = [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": scenario["task"]},
@@ -273,6 +274,7 @@ def main():
     parser.add_argument("--corpus", type=Path, required=True)
     parser.add_argument("--producer-head", required=True)
     parser.add_argument("--producer-run", required=True)
+    parser.add_argument("--baseline-projection", choices=("original", "previous_selected"), default="original")
     parser.add_argument("--endpoint", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--api-key-env", required=True)
@@ -291,9 +293,13 @@ def main():
     if not isinstance(options, dict) or set(options) & {"model", "messages", "stream", "tools"}:
         parser.error("request options must be an object without experiment-owned fields")
     corpus, digest = read_corpus(args.corpus)
+    if args.baseline_projection == "previous_selected" and any(
+            "previous_selected_content" not in scenario for scenario in corpus["scenarios"]):
+        parser.error("previous_selected comparison requires captured legacy presentation")
     args.output.mkdir(mode=0o700)
     write_json(args.output / "corpus.json", corpus)
     manifest = dict(schema_version=1, started_at_unix=time.time(), producer_head=args.producer_head,
+                    baseline_projection=args.baseline_projection,
                     producer_run=args.producer_run, corpus_input_sha256=digest, model=args.model,
                     runner_source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                     endpoint=args.endpoint, request_options=options, pairs=args.pairs,

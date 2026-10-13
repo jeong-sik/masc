@@ -237,6 +237,41 @@ let test_opt_in_artifact_inline_respects_projection () =
     | Some { B.kind = B.Artifact_storage_failure; _ } | None ->
       Alcotest.fail "projection ceiling did not produce its typed refusal")
 
+let test_structured_failure_and_opaque_diagnostic_are_distinct () =
+  with_temp_base_path (fun base_path ->
+    let child = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
+        ~bytes:"complete fixture failure evidence" ~mime:"text/plain" in
+    let message = "The fixture transaction was refused by its producer." in
+    let data = `Assoc [ "reason", `String message; "effect_disposition", `String "effect_outcome_unknown"
+                     ; "original", O.normalized_artifact_ref_to_json child ] in
+    let original = Tool_result.make_err ~tool_name:"fixture-failure" ~class_:Tool_result.Runtime_failure
+        ~effect_disposition:Tool_result.Effect_outcome_unknown ~start_time:(Tool_timing.start ()) ~data message in
+    let project projection =
+      let result = B.attach_artifact_manifest ~projection ~base_path original |> Result.get_ok in
+      match B.to_agent_core_typed_result ~base_path result with
+      | Ok _ -> Alcotest.fail "failed projection became a success"
+      | Error error -> Yojson.Safe.from_string error.Agent_core.Types.message in
+    let open Yojson.Safe.Util in
+    let opaque = project O.Inline_with_reference in
+    Alcotest.(check string) "opaque diagnostic remains exact" message
+      (opaque |> member "content" |> to_string |> Yojson.Safe.from_string |> member "message" |> to_string);
+    let structured = project O.Inline_with_structured_diagnostic in
+    Alcotest.(check bool) "complete structured diagnostic remains exact" true
+      (Yojson.Safe.equal data (structured |> member "structured_content"));
+    Alcotest.(check string) "failed disposition remains explicit" "failed"
+      (structured |> member "content" |> to_string |> Yojson.Safe.from_string |> member "masc.tool_disposition" |> to_string);
+    let manifest = match O.normalized_artifact_ref_of_json (structured |> member "artifact_manifest") with
+      | O.Decoded_normalized_artifact_ref reference -> reference
+      | O.Not_normalized_artifact_ref | O.Invalid_normalized_artifact_ref _ -> Alcotest.fail "missing failure manifest" in
+    let raw = match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:manifest.sha256 with
+      | Ok (Some bytes) -> bytes
+      | Ok None | Error _ -> Alcotest.fail "missing complete failure evidence" in
+    match O.artifact_manifest_of_json (Yojson.Safe.from_string raw) with
+    | O.Decoded_artifact_manifest { content; structured_content; _ } ->
+      Alcotest.(check string) "original message remains durable" message content;
+      Alcotest.(check bool) "original data remains durable" true (Yojson.Safe.equal data structured_content)
+    | O.Not_artifact_manifest | O.Invalid_artifact_manifest _ -> Alcotest.fail "invalid complete failure manifest")
+
 let test_manifest_producer_rejects_mixed_malformed_reference () =
   with_temp_base_path (fun base_path ->
     let child =
@@ -936,6 +971,8 @@ let () =
             test_typed_artifact_result_becomes_durable_manifest;
           Alcotest.test_case "opt-in artifact inline keeps the descriptor ceiling" `Quick
             test_opt_in_artifact_inline_respects_projection;
+          Alcotest.test_case "structured failure and opaque diagnostics retain their contracts" `Quick
+            test_structured_failure_and_opaque_diagnostic_are_distinct;
           Alcotest.test_case "manifest producer rejects malformed child" `Quick
             test_manifest_producer_rejects_mixed_malformed_reference;
           Alcotest.test_case "bounded inline rejects oversize" `Quick

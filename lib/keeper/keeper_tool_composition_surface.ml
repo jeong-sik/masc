@@ -464,7 +464,7 @@ let project_execution_result ~base_path ~plan ~execution result =
   let projection =
     match Keeper_tool_plan.exports plan with
     | [] -> Tool_output.Reference_only
-    | _ :: _ -> Tool_output.Inline_with_reference
+    | _ :: _ -> Tool_output.Inline_with_structured_diagnostic
   in
   Result.bind
     (Keeper_composition_result.project ~base_path ~plan ~execution result)
@@ -1956,7 +1956,7 @@ let make_tools_with_authority
         Tool_result.make_err ~tool_name ~class_ ~effect_disposition:Tool_result.Proven_pre_effect
           ~start_time ~data (Yojson.Safe.to_string data)
       in
-      let make (schema : Masc_domain.tool_schema) ~call_effect handle =
+      let make (schema : Masc_domain.tool_schema) ~artifact_projection ~call_effect handle =
         let model_projection = Tool_output.default_model_projection in
         (Tool_bridge.agent_core_tool_of_masc_with_execution_env
            ~descriptor:(Agent_core.Tool.ordinary_descriptor ~call_effect Agent_core.Tool_contract.Serial)
@@ -1971,7 +1971,7 @@ let make_tools_with_authority
               | Ok _ ->
                 let result = handle ~start_time execution_env input in
                 match Tool_bridge.attach_artifact_manifest
-                        ~projection:Tool_output.Inline_with_reference ~base_path:config.base_path result with
+                        ~projection:artifact_projection ~base_path:config.base_path result with
                 | Ok result -> result
                 | Error { message; _ } ->
                   Tool_result.make_err ~tool_name:schema.name ~class_:Tool_result.Runtime_failure
@@ -1979,7 +1979,8 @@ let make_tools_with_authority
         , Tool_loading_declarations.loading_of_tool schema.name
         , model_projection)
       in
-      let prepare = make Draft.prepare_schema ~call_effect:(fun _ -> Agent_core.Tool.Read_only)
+      let prepare = make Draft.prepare_schema ~artifact_projection:Tool_output.Inline_with_reference
+        ~call_effect:(fun _ -> Agent_core.Tool.Read_only)
         (fun ~start_time _execution_env input ->
           match input with
           | `Assoc fields ->
@@ -1998,7 +1999,8 @@ let make_tools_with_authority
                  Tool_result.make_ok ~tool_name:Draft.prepare_tool_name ~start_time ~data:(Keeper_composition_draft_preview.preview draft) ()
                  |> Tool_result.with_retained_artifacts [ Draft.reference draft ])
           | _ -> rejection ~tool_name:Draft.prepare_tool_name ~start_time (Draft.Malformed_draft "expected object")) in
-      let run = make Draft.run_schema ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)
+      let run = make Draft.run_schema ~artifact_projection:Tool_output.Inline_with_structured_diagnostic
+        ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)
         (fun ~start_time execution_env input ->
           match Agent_core.Tool.Execution_env.invocation execution_env,
                 (match input with `Assoc fields -> List.assoc_opt "sha256" fields | _ -> None) with

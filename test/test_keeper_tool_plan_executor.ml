@@ -1197,6 +1197,12 @@ let provider_content ~base_path result =
 (* Keep the real provider projection and real bounded artifact-reader pages.
    A later external model trial replays these immutable observations; it does
    not synthesize a smaller result or reexecute the producer. *)
+let previous_provider_content ~base_path result =
+  match Tool_bridge.attach_artifact_manifest ~projection:Tool_output.Inline_with_reference ~base_path result with
+  | Ok result -> provider_content ~base_path result
+  | Error error -> fail error.Tool_bridge.message
+;;
+
 let record_provider_trial ~base_path ~scenario ~task ~expected original projected =
   let baseline = provider_content ~base_path original in
   let selected = provider_content ~base_path projected in
@@ -1243,6 +1249,7 @@ let record_provider_trial ~base_path ~scenario ~task ~expected original projecte
     `Assoc [ "scenario", `String scenario; "task", `String task; "expected", expected
            ; "tool_name", `String (Tool_result.tool_name original)
            ; "baseline_content", `String baseline; "selected_content", `String selected
+           ; "previous_selected_content", `String (previous_provider_content ~base_path projected)
            ; "reader_tool", reader_tool
            ; "reader_default_max_bytes", `Int Masc.Keeper_artifact_read.default_max_bytes
            ; "pages", `List pages ] :: !provider_trial_corpus
@@ -1367,6 +1374,24 @@ let test_export_failure_preserves_independent_branch () =
     check string "unknown effect reaches provider" "effect_outcome_unknown"
       (wire_data |> member "effect_disposition" |> to_string);
     check bool "provider keeps failed node and cause" true (wire_data |> member "cause" <> `Null);
+    let diagnostic = wire |> member "content" |> to_string |> Yojson.Safe.from_string in
+    check string "canonical failure class remains model-visible"
+      (Tool_result.tool_failure_class_to_string Tool_result.Runtime_failure)
+      (diagnostic |> member "failure_class" |> to_string);
+    check string "canonical failed disposition remains model-visible" "failed"
+      (diagnostic |> member "masc.tool_disposition" |> to_string);
+    let selected_wire = provider_content ~base_path projected in
+    let previous_wire = previous_provider_content ~base_path projected in
+    check bool "structured failure avoids repeated selected payload" true
+      (String.length selected_wire < String.length previous_wire);
+    let full_reference = data |> member "execution_artifact" in
+    let full_reference = match Tool_output.normalized_artifact_ref_of_json full_reference with
+      | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+      | Tool_output.Not_normalized_artifact_ref | Tool_output.Invalid_normalized_artifact_ref _ ->
+        fail "full failure artifact reference is malformed" in
+    check string "full original failure evidence is unchanged"
+      (Tool_result.to_json original |> Yojson.Safe.to_string)
+      (execution_document ~base_path full_reference |> member "result" |> Yojson.Safe.to_string);
     record_provider_trial ~base_path ~scenario:"partial_unknown_effect"
       ~task:"Return JSON with the independent branch's post_count as independent, availability of the failed branch as failed_available, aggregate disposition as disposition, and effect disposition as effect_disposition. Preserve the failure and never replay the producer. If you read artifacts, use default full pages and omit max_bytes."
       ~expected:(`Assoc [ "independent", `Int 0; "failed_available", `Bool false

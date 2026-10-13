@@ -240,15 +240,18 @@ type model_projection =
 type artifact_projection =
   | Reference_only
   | Inline_with_reference
+  | Inline_with_structured_diagnostic
 
 let artifact_projection_to_json = function
   | Reference_only -> `String "reference_only"
   | Inline_with_reference -> `String "inline_with_reference"
+  | Inline_with_structured_diagnostic -> `String "inline_with_structured_diagnostic"
 ;;
 
 let artifact_projection_of_json = function
   | `String "reference_only" -> Ok Reference_only
   | `String "inline_with_reference" -> Ok Inline_with_reference
+  | `String "inline_with_structured_diagnostic" -> Ok Inline_with_structured_diagnostic
   | _ -> Error "unknown artifact manifest projection"
 ;;
 

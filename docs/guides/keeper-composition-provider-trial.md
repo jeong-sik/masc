@@ -64,6 +64,12 @@ Check each condition's reported model identities as well as the requested model:
 an endpoint may resolve a requested alias to another model. Mixed or missing
 reported identities prevent a claim that both conditions used the same model.
 
+For a failure-presentation comparison, select
+`--baseline-projection previous_selected`. A newer corpus records the previous
+`Inline_with_reference` presentation and the new structured diagnostic from the
+same already executed result. The runner uses those exact captured bytes rather
+than rebuilding either envelope. The original baseline remains the default.
+
 For Z.AI, the [official Chat Completion reference](https://docs.z.ai/api-reference/llm/chat-completion)
 defines request fields and usage. Supply endpoint/model/options explicitly so this
 experiment introduces no provider choice or configuration knob in Keeper runtime.

@@ -13,8 +13,6 @@ type tool_host_cause =
 [@@deriving enumerate]
 
 type t = {
-  surface : string;
-  entity_kind : string;
   entity_id : string option;
   cause : tool_host_cause;
   severity : severity;
@@ -25,6 +23,17 @@ type t = {
 }
 
 let tool_host_log_module_name = "ToolHost"
+
+(* Every envelope is a tool-host failure on one tool call. The JSON still
+   names both, so a reader of the log does not have to know that. *)
+let tool_host_surface = "tool_host"
+let tool_call_entity_kind = "tool_call"
+
+let require_constant ~field expected value =
+  if String.equal value expected then Ok ()
+  else
+    Error
+      (Printf.sprintf "failure %s must be %S (received %S)" field expected value)
 
 let severity_to_string = function
   | Warn -> "warn"
@@ -77,8 +86,6 @@ let summary_for_tool_host ~client_name ~tool_name ~transport = function
 let tool_host_failure ~agent_name ~client_name ~tool_name ~transport ?phase
     ?request_id ?session_id ?trace_id ?timeout_ms ~cause ~message () =
   {
-    surface = "tool_host";
-    entity_kind = "tool_call";
     entity_id = first_non_empty [ request_id; session_id; trace_id ];
     cause;
     severity = Bad;
@@ -109,8 +116,8 @@ let tool_host_failure ~agent_name ~client_name ~tool_name ~transport ?phase
 let to_yojson (envelope : t) =
   `Assoc
     [
-      ("surface", `String envelope.surface);
-      ("entity_kind", `String envelope.entity_kind);
+      ("surface", `String tool_host_surface);
+      ("entity_kind", `String tool_call_entity_kind);
       ("entity_id", Json_util.option_to_yojson (fun value -> `String value) envelope.entity_id);
       ("cause_code", `String (tool_host_cause_code envelope.cause));
       ("severity", `String (severity_to_string envelope.severity));
@@ -138,12 +145,18 @@ let optional_string json key =
 let of_yojson json =
   match json with
   | `Assoc _ -> (
-      match required_string json "surface" with
+      match
+        Result.bind (required_string json "surface")
+          (require_constant ~field:"surface" tool_host_surface)
+      with
       | Error _ as err -> err
-      | Ok surface -> (
-          match required_string json "entity_kind" with
+      | Ok () -> (
+          match
+            Result.bind (required_string json "entity_kind")
+              (require_constant ~field:"entity_kind" tool_call_entity_kind)
+          with
           | Error _ as err -> err
-          | Ok entity_kind -> (
+          | Ok () -> (
               match
                 Result.bind (required_string json "cause_code")
                   tool_host_cause_of_code
@@ -169,8 +182,6 @@ let of_yojson json =
                                   | Ok recoverability ->
                                       Ok
                                         {
-                                          surface;
-                                          entity_kind;
                                           entity_id =
                                             optional_string json "entity_id";
                                           cause;

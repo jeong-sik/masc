@@ -11,8 +11,8 @@
 #   scripts/analyze-keeper-execute-failures.sh [base_path] [window_hours]
 #
 # Examples:
-#   scripts/analyze-keeper-execute-failures.sh /Users/dancer/me 240
-#   MASC_BASE_PATH=/Users/dancer/me scripts/analyze-keeper-execute-failures.sh
+#   scripts/analyze-keeper-execute-failures.sh /srv/masc 240
+#   MASC_BASE_PATH=/srv/masc scripts/analyze-keeper-execute-failures.sh
 
 set -euo pipefail
 

@@ -27,13 +27,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from collections import Counter
 from pathlib import Path
 
-DEFAULT_BASE = Path(os.environ.get("MASC_BASE_PATH", Path.home() / "me"))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+
+import masc_base_path  # noqa: E402
 
 # A tool call that produced no result and reported an error. The trajectory
 # entry carries `error` exactly when the call failed, and the shape is the same
@@ -130,14 +131,17 @@ def scan(trajectory_dir: Path, since: float):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base", default=str(DEFAULT_BASE))
+    parser.add_argument("--base", default=None, help="MASC base path (default: MASC_BASE_PATH)")
     parser.add_argument("--keeper", action="append", default=[])
     parser.add_argument("--window", type=float, default=24.0, help="hours")
     parser.add_argument("--top", type=int, default=5)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
-    root = Path(args.base) / ".masc" / "trajectories"
+    base = masc_base_path.resolve(args.base)
+    if base is None:
+        parser.error(masc_base_path.required("--base"))
+    root = base / ".masc" / "trajectories"
     if not root.is_dir():
         print(f"no trajectories under {root}", file=sys.stderr)
         return 2

@@ -18,7 +18,7 @@
 #   bash scripts/migrate-keeper-meta-sandbox.sh             # --dry-run (default)
 #   bash scripts/migrate-keeper-meta-sandbox.sh --apply     # write backup + edit
 #   bash scripts/migrate-keeper-meta-sandbox.sh --apply --quiet
-#   bash scripts/migrate-keeper-meta-sandbox.sh --base-path ~/me --apply
+#   bash scripts/migrate-keeper-meta-sandbox.sh --base-path "$MASC_BASE_PATH" --apply
 #
 # Exit codes
 #   0   normalized 0 or more files cleanly

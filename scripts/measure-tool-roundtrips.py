@@ -51,7 +51,7 @@ same lane read every blob in one call. A tool-level number cannot tell those
 apart; the keeper tables can.
 
 Usage:
-    scripts/measure-tool-roundtrips.py --date 2026-09-01
+    scripts/measure-tool-roundtrips.py --base-path /srv/masc --date 2026-09-01
     MASC_BASE_PATH=/srv/masc scripts/measure-tool-roundtrips.py --date 2026-09-01 --top 10
 """
 
@@ -60,11 +60,12 @@ from __future__ import annotations
 import argparse
 import collections
 import json
-import os
 import pathlib
 import sys
 
-DEFAULT_BASE = pathlib.Path(os.environ.get("MASC_BASE_PATH", pathlib.Path.home() / "me"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
+
+import masc_base_path  # noqa: E402
 
 # Mirrors Common.max_tool_result_wire_bytes, the artifact_read page bound (both
 # the max_bytes default/maximum and the response-envelope budget). It was
@@ -415,10 +416,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument(
         "--base-path",
-        default=str(DEFAULT_BASE),
+        default=None,
         help=(
             "MASC base path; logs are read from <base-path>/.masc/tool_calls "
-            "(default: MASC_BASE_PATH or the home workspace)"
+            "(default: MASC_BASE_PATH)"
         ),
     )
     parser.add_argument(
@@ -434,9 +435,12 @@ def main() -> int:
     )
     options = parser.parse_args()
 
+    base = masc_base_path.resolve(options.base_path)
+    if base is None:
+        parser.error(masc_base_path.required("--base-path"))
     year_month, _, day = options.date.rpartition("-")
     log_path = (
-        pathlib.Path(options.base_path).expanduser()
+        base
         / ".masc"
         / "tool_calls"
         / year_month

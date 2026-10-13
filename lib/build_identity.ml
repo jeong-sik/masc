@@ -150,8 +150,9 @@ let observe_probe_failure ~site exn =
     executable_dir first so the binary's own source tree wins over
     whatever cwd the user started the process from.
 
-    Rationale: running `cd ~/me && ~/.../masc/_build/.../main_eio.exe`
-    used to report ~/me's git HEAD instead of masc's because the old
+    Rationale: running the binary from inside another repository
+    (`cd <other-repo> && <masc>/_build/.../main_eio.exe`) used to report
+    that repository's git HEAD instead of masc's because the old
     implementation sorted candidates with [List.sort_uniq String.compare]
     and cwd happened to sort first alphabetically.
 

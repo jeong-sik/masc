@@ -4,8 +4,7 @@
 #
 # Wraps start-masc.sh with continuous auto-restart.  Satisfies the
 # operator durability requirement described in issue #10828 while
-# respecting the <launchd> policy from ~/me/CLAUDE.md (script-based,
-# no system-level daemon registration).
+# staying script-based: no system-level daemon is registered.
 #
 # Usage:
 #   scripts/start-masc-supervised.sh [args forwarded to start-masc.sh]

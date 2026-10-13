@@ -683,6 +683,14 @@ type node =
 
 let node ~id ~tool_name ?(after = []) ~input () = { id; tool_name; input; after }
 
+type export =
+  { name : string
+  ; node_id : Node_id.t
+  ; pointer : Json_pointer.t
+  }
+
+let export ~name ~node_id ~pointer = { name; node_id; pointer }
+
 (* Why a real descriptor is absent from the Keeper model surface. Kept apart
    from [Unknown_tool] because the two need opposite answers: a misspelled name
    is fixed by correcting it, while an off-surface name is spelled correctly and
@@ -697,6 +705,16 @@ type off_surface_reason =
 
 type error =
   | Empty_plan
+  | Empty_export_name
+  | Duplicate_export_name of string
+  | Unknown_export_node of { name : string; node_id : Node_id.t }
+  | Opaque_export of { name : string; node_id : Node_id.t; tool_name : string }
+  | Invalid_export_pointer of
+      { name : string
+      ; node_id : Node_id.t
+      ; pointer : Json_pointer.t
+      ; error : Json_pointer.schema_error
+      }
   | Unknown_descriptor_id of string
   | Duplicate_node_id of Node_id.t
   | Duplicate_tool_name of string
@@ -738,6 +756,16 @@ type error =
 
 let error_to_string = function
   | Empty_plan -> "plan has no nodes"
+  | Empty_export_name -> "export name is empty"
+  | Duplicate_export_name name -> Printf.sprintf "duplicate export name %S" name
+  | Unknown_export_node { name; node_id } ->
+    Printf.sprintf "export %S names missing node %S" name (Node_id.to_string node_id)
+  | Opaque_export { name; node_id; tool_name } ->
+    Printf.sprintf "export %S references opaque output from node %S (%s)"
+      name (Node_id.to_string node_id) tool_name
+  | Invalid_export_pointer { name; node_id; pointer; _ } ->
+    Printf.sprintf "export %S has invalid pointer %s for node %S"
+      name (Json_pointer.to_string pointer) (Node_id.to_string node_id)
   | Unknown_descriptor_id id -> Printf.sprintf "descriptor id %S is not canonical" id
   | Duplicate_node_id node_id ->
     Printf.sprintf "duplicate node id %S" (Node_id.to_string node_id)
@@ -860,6 +888,18 @@ let error_to_json error =
   let tag kind fields = `Assoc (("kind", `String kind) :: fields) in
   match error with
   | Empty_plan -> tag "empty_plan" []
+  | Empty_export_name -> tag "empty_export_name" []
+  | Duplicate_export_name name -> tag "duplicate_export_name" [ "name", `String name ]
+  | Unknown_export_node { name; node_id } ->
+    tag "unknown_export_node" [ "name", `String name; "node_id", node_id_to_json node_id ]
+  | Opaque_export { name; node_id; tool_name } ->
+    tag "opaque_export"
+      [ "name", `String name; "node_id", node_id_to_json node_id; "tool_name", `String tool_name ]
+  | Invalid_export_pointer { name; node_id; pointer; error } ->
+    tag "invalid_export_pointer"
+      [ "name", `String name; "node_id", node_id_to_json node_id
+      ; "pointer", `String (Json_pointer.to_string pointer)
+      ; "error", pointer_schema_error_to_json error ]
   | Unknown_descriptor_id descriptor_id ->
     tag "unknown_descriptor_id" [ "descriptor_id", `String descriptor_id ]
   | Duplicate_node_id node_id ->
@@ -924,16 +964,30 @@ type branch_failure_policy =
 
 let default_branch_failure_policy = Fail_fast
 
+let branch_failure_policy_to_string = function
+  | Fail_fast -> "fail_fast"
+  | Continue_independent -> "continue_independent"
+;;
+
+let branch_failure_policy_of_string = function
+  | "fail_fast" -> Some Fail_fast
+  | "continue_independent" -> Some Continue_independent
+  | _ -> None
+;;
+
 type t =
   { identity : int
   ; nodes : node list
   ; descriptors : (string * Keeper_tool_descriptor.t) list
   ; branch_failure_policy : branch_failure_policy
+  ; exports : export list
   }
 
 let next_plan_identity = Atomic.make 0
 
 let nodes plan = plan.nodes
+
+let exports plan = plan.exports
 
 let branch_failure_policy plan = plan.branch_failure_policy
 
@@ -1144,6 +1198,32 @@ let validate_output_schemas descriptors nodes =
     nodes
 ;;
 
+let validate_exports descriptors nodes exports =
+  match first_duplicate String.equal (List.map (fun (export : export) -> export.name) exports) with
+  | Some name -> Some (Duplicate_export_name name)
+  | None ->
+    List.find_map
+      (fun (export : export) ->
+         if String.equal export.name "" then Some Empty_export_name
+         else
+           match node_for_id nodes export.node_id with
+           | None -> Some (Unknown_export_node { name = export.name; node_id = export.node_id })
+           | Some node ->
+             match descriptor_for_name descriptors node.tool_name with
+             | None -> Some (Unknown_tool { node_id = node.id; tool_name = node.tool_name })
+             | Some descriptor ->
+               match descriptor.Keeper_tool_descriptor.composable_output with
+               | Keeper_tool_descriptor.Opaque_output ->
+                 Some (Opaque_export
+                   { name = export.name; node_id = node.id; tool_name = node.tool_name })
+               | Keeper_tool_descriptor.Json_output { schema } ->
+                 match Json_pointer.resolve_schema export.pointer schema with
+                 | Ok _ -> None
+                 | Error error -> Some (Invalid_export_pointer
+                     { name = export.name; node_id = node.id; pointer = export.pointer; error }))
+      exports
+;;
+
 let dependency_cycle nodes =
   let rec cycle_members target = function
     | [] -> []
@@ -1220,7 +1300,7 @@ let validate_terminal_dependency_boundary descriptors nodes =
       nodes
 ;;
 
-let create ~descriptors ?(branch_failure_policy = default_branch_failure_policy) nodes =
+let create ~descriptors ?(branch_failure_policy = default_branch_failure_policy) ?(exports = []) nodes =
   match nodes with
   | [] -> Error Empty_plan
   | _ ->
@@ -1255,12 +1335,16 @@ let create ~descriptors ?(branch_failure_policy = default_branch_failure_policy)
                              with
                              | Some error -> Error error
                              | None ->
-                               Ok
-                                 { identity = Atomic.fetch_and_add next_plan_identity 1
-                                 ; nodes
-                                 ; descriptors
-                                 ; branch_failure_policy
-                                 })))))))))
+                               (match validate_exports descriptors nodes exports with
+                                | Some error -> Error error
+                                | None ->
+                                  Ok
+                                    { identity = Atomic.fetch_and_add next_plan_identity 1
+                                    ; nodes
+                                    ; descriptors
+                                    ; branch_failure_policy
+                                    ; exports
+                                    }))))))))))
 ;;
 
 let dependency_layers plan =
@@ -1343,6 +1427,30 @@ let validate_output plan ~run_id ~node_id value =
              Error
                (Output_validation_failed
                   { node_id; tool_name = node.tool_name; error }))))
+;;
+
+type export_resolution_error =
+  | Producer_unavailable of Node_id.t
+  | Producer_invalid of execution_error
+  | Export_pointer_unavailable of Json_pointer.resolution_error
+
+let resolve_exports plan ~lookup =
+  let run_id = Run_id.fresh () in
+  List.map
+    (fun (export : export) ->
+       let value =
+         match lookup export.node_id with
+         | None -> Error (Producer_unavailable export.node_id)
+         | Some value ->
+           match validate_output plan ~run_id ~node_id:export.node_id value with
+           | Error error -> Error (Producer_invalid error)
+           | Ok output ->
+             match Json_pointer.resolve export.pointer output.value with
+             | Ok value -> Ok value
+             | Error error -> Error (Export_pointer_unavailable error)
+       in
+       export, value)
+    plan.exports
 ;;
 
 let validate_node_input plan (node : node) input =

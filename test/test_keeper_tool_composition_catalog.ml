@@ -790,11 +790,63 @@ let test_failure_payload_keeps_cause_under_truncation () =
     (contains "\"effect_disposition\"" kept)
 ;;
 
+let export_catalog_fixture = {|[[compositions]]
+name = "read-path"
+execution = "inline"
+branch_failure_policy = "continue_independent"
+
+[[compositions.params]]
+name = "file"
+type = "string"
+description = "File to read."
+
+[[compositions.exports]]
+name = "path"
+node = "read"
+pointer = "/path"
+
+[[compositions.nodes]]
+id = "read"
+tool = "Read"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "file_path"
+[compositions.nodes.input.fields.value]
+kind = "param"
+name = "file"
+|}
+
+let test_export_contract_survives_public_authoring_and_binding () =
+  let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
+  let catalog = match Catalog.parse ~descriptors export_catalog_fixture with
+    | Ok catalog -> catalog | Error error -> fail (Catalog.error_to_string error) in
+  let entry = match Catalog.entries catalog with
+    | [ entry ] -> entry | _ -> fail "expected one composition" in
+  let plan = match Catalog.instantiate ~descriptors ~args:(`Assoc [ "file", `String "probe.txt" ]) entry with
+    | Ok plan -> plan | Error error -> fail (Catalog.instantiation_error_to_string error) in
+  check bool "binding retains failure policy" true (Plan.branch_failure_policy plan = Plan.Continue_independent);
+  check int "binding retains exports" 1 (List.length (Plan.exports plan));
+  let encoded = match Masc.Keeper_tool_plan_request.to_yojson plan with
+    | Ok json -> json | Error _ -> fail "bound plan was not serializable" in
+  let decoded = match Masc.Keeper_tool_plan_request.plan_of_json ~descriptors encoded with
+    | Ok plan -> plan | Error error -> fail (Masc.Keeper_tool_plan_request.error_message error) in
+  check bool "durable recipe retains failure policy" true (Plan.branch_failure_policy decoded = Plan.Continue_independent);
+  check int "durable recipe retains selected fields" 1 (List.length (Plan.exports decoded));
+  let invalid = match encoded with
+    | `Assoc fields -> `Assoc (("exports", `List [ `Assoc [ "name", `String "missing"; "node", `String "read"; "pointer", `String "/undeclared" ] ]) :: List.remove_assoc "exports" fields)
+    | _ -> fail "encoded plan is not an object" in
+  match Masc.Keeper_tool_plan_request.plan_of_json ~descriptors invalid with
+  | Error (Masc.Keeper_tool_plan_request.Plan_rejected (Plan.Invalid_export_pointer _)) -> ()
+  | Error _ | Ok _ -> fail "invalid export survived public plan admission"
+;;
+
 let () =
   run
     "keeper_tool_composition_catalog"
     [ ( "catalog"
-      , [ test_case
+      , [ test_case "export contract survives binding and durable encoding" `Quick test_export_contract_survives_public_authoring_and_binding
+        ; test_case
             "builds executable typed plan"
             `Quick
             test_catalog_builds_executable_typed_plan

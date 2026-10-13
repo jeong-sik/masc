@@ -302,10 +302,10 @@ let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image
          | Sandbox.Needs_configuration _ when selection.backend = Sandbox.Remote_ssh
              && String.equal original staged ->
            print_endline "Remote SSH endpoint execution is verified by the server; no local guest readiness is claimed."
-         | state -> fail (Sandbox.state_message state));
+         | (Sandbox.Missing_prerequisite _ | Sandbox.Unsupported_host _ | Sandbox.Unsupported_capability _ | Sandbox.Probe_failed _ | Needs_configuration _) as state -> fail (Sandbox.state_message state));
         (match selection.backend with
          | Sandbox.Remote_ssh -> ()
-         | _ -> require_ok "Sandbox image preparation" (fun () -> prepare_image ~selection));
+         | Sandbox.Docker | Sandbox.Apple_container | Sandbox.Nerdctl_kata | Sandbox.Microsandbox -> require_ok "Sandbox image preparation" (fun () -> prepare_image ~selection));
         prepare_server ~base_path ~port ~owned;
         require_ok "Local operator sign-in" login;
         require_ok "Activating saved model settings" resume_models;

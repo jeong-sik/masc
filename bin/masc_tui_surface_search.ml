@@ -48,7 +48,9 @@ let surface_row_texts (state : state) : surface -> string list option =
                 (Masc_tui_context_inspector.exact_input_items input)
             in
             (match labels with [] -> None | _ -> Some labels)
-        | _ -> None
+        | Some (_, Masc_tui_context_inspector.Turn_read { provider_input = Error _;_})
+        | Some (_, (Masc_tui_context_inspector.Request_failed _ | Masc_tui_context_inspector.Turn_read_failed _))
+        | None -> None
       else None
   | Lanes ->
       (match state.lanes_mode with
@@ -318,8 +320,9 @@ let surface_search_count (state : state) surface ~query =
            Some (if String.equal query "" then 0 else code_file_search_count ~query rows)
        | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
        | None -> None)
-  | _ ->
-      Option.map
+  | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals | Planning
+  | Schedules | Verification | Harness | Fusion | Repositories | Changes | Connectors | Runtime
+  | Config | Resources | Tools | System_logs | Keepers _ | Code -> Option.map
         (fun rows ->
           if String.equal query "" then 0
           else List.fold_left (fun count text ->

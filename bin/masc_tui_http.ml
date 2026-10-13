@@ -1667,7 +1667,12 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
                              Some
                                (Masc_tui_context_inspector.Reasoning_lines
                                   lines)
-                         | _ -> None)
+                         | Masc_tui_keeper_chat_history.Addressed_to_keeper _
+                         | Masc_tui_keeper_chat_history.Delivery_failed _
+                         | Masc_tui_keeper_chat_history.Skill_activity _
+                         | Masc_tui_keeper_chat_history.Gate_activity _
+                         | Masc_tui_keeper_chat_history.Memory_activity _
+                         | Masc_tui_keeper_chat_history.Fusion_conclusion _ -> None)
                     page.Masc_tui_keeper_chat_history.decoded.rows
                 in
                 Ok

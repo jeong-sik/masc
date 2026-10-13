@@ -154,7 +154,8 @@ let generate ~sw ~net ~runtime_id ~provider_cfg (prompt : R.prompt) =
       let complete =
         match result.stop_reason, result.response.stop_reason with
         | Runtime_agent.Completed, (T.EndTurn | T.StopSequence) -> true
-        | _ -> false
+        | (Runtime_agent.Completed, (T.StopToolUse | (T.MaxTokens | (T.Refusal | (T.ContentFilter | (T.RepetitionTruncation | (T.PauseTurn | (T.Compaction | (T.ContextWindowExceeded | (T.UnmatchedToolCalls | T.Unknown _))))))))))
+        | ((Runtime_agent_context.Yielded_to_operation_queued _ | (Runtime_agent_context.Yielded_to_durable_stimulus _ | (Runtime_agent_context.Yielded_after_repeated_tool_call _ | (Runtime_agent_context.Yielded_after_repeated_assistant_text _ | Runtime_agent_context.InputRequired _)))), _) -> false
       in
       if complete && String.trim response.text <> "" then
         Ok ({ request = request (); response } : R.generation)

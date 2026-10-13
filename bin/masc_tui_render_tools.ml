@@ -299,7 +299,10 @@ let skill_source_lines ~config ~(sources : Masc.Tui_decode_tools.skill_catalog_s
          (fun (source : Masc.Tui_decode_tools.skill_catalog_source) ->
             match source.scso_observation with
             | Masc.Tui_decode_tools.Skill_source_ready count -> count > 0
-            | _ -> false)
+            | Masc.Tui_decode_tools.Skill_source_missing
+            | Masc.Tui_decode_tools.Skill_source_unresolved
+            | Masc.Tui_decode_tools.Skill_source_not_directory _
+            | Masc.Tui_decode_tools.Skill_source_unavailable _ -> false)
          sources)
   in
   let heading =

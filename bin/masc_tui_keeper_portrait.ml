@@ -70,8 +70,14 @@ let cached_image drawing c ~name ~equipment size =
                 equipment.Look.head, equipment.Look.hand with
           | Compact, Look.Bare_face, Look.Bare_neck, Look.Bare_head, Look.Empty_hand ->
               Draw.render_compact_posed body equipment Draw.still size
-          | Icon, _, _, _, _ -> Draw.render_icon body equipment size
-          | Full, _, _, _, _ | Compact, _, _, _, _ -> Draw.render body equipment size
+          | (Icon, Look.Bare_face, _, _, _) | (Icon, Look.Glasses, _, _, _)
+          | (Icon, Look.Shades, _, _, _) | (Icon, Look.Eye_patch, _, _, _)
+          | (Icon, Look.Plaster, _, _, _) | (Icon, Look.Freckles, _, _, _)
+          | (Icon, Look.Beard, _, _, _) -> Draw.render_icon body equipment size
+          | (Full, Look.Bare_face, _, _, _) | (Compact, _, _, _, _) | (Full, Look.Glasses, _, _, _)
+          | (Full, Look.Shades, _, _, _) | (Full, Look.Eye_patch, _, _, _)
+          | (Full, Look.Plaster, _, _, _) | (Full, Look.Freckles, _, _, _)
+          | (Full, Look.Beard, _, _, _) -> Draw.render body equipment size
         in
         { name; equipment_key; edge; drawing; picture }
   in

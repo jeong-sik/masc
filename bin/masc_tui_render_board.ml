@@ -646,8 +646,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
           Ansi.reset
           (Theme.info ())
           Ansi.reset
-    | _ ->
-        Printf.sprintf "%s@%s%s"
+    | Some (Post_by_system | Post_kind_unknown _) | None -> Printf.sprintf "%s@%s%s"
           (Masc_tui_theme.tone Masc_tui_theme.Accent)
           author_name
           Ansi.reset

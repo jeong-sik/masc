@@ -207,8 +207,10 @@ let home_continue_rows (state : state) =
                ^ Masc_tui_ansi.Terminal_text.single_line name ^ " unavailable"
            | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
                "Create a Keeper  · choose who will take the work") ]
-    | _ ->
-        [ Home_choose_keeper,
+    | (Workspace_identity_match, Local_workspace_read, None, _::_)
+    | (Workspace_identity_match, Local_workspace_read, Some _, _)
+    | (Workspace_identity_match, Local_workspace_unread, _, _)
+    | ((Workspace_identity_unread | (Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _)), _, _, _) -> [ Home_choose_keeper,
           (match resume with
            | [] ->
                (match state.home_last_chat, last with

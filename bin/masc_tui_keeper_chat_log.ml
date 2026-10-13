@@ -87,7 +87,8 @@ let observe_terminal_replay t replay =
     when Option.exists Keeper_chat_operation.is_terminal t.operation_state ->
       t.terminal_replay <- Replayed_after_terminal;
       bump t
-  | _ -> ()
+  | (Replayed_after_terminal, Replayed_after_terminal) | (Replay_pending, _)
+  | (Replayed_after_terminal, Replay_pending) -> ()
 
 
 let observe_operation_state t state =
@@ -160,8 +161,14 @@ let add ?at t ~seq (delta : Live.delta) =
       t.latest_acceptance <- Some entry;
       bump t;
       true
-  | _ ->
-  let duplicate =
+  | Live.Run_started | Live.Checkpoint | Live.External_effect_completed | Live.Run_finished
+  | Live.Batch_bound _ | Live.Runtime_attempt_started _ | Live.Provider_retry_observed _
+  | Live.Stream_model_started _ | Live.Model_content_activity _ | Live.Stream_model_stopped _
+  | Live.Stream_details _ | Live.Text _ | Live.Thinking _ | Live.Native_tool_started _
+  | Live.Native_tool_progress _ | Live.Native_tool_ended _ | Live.Tool_started _ | Live.Tool_args _
+  | Live.Tool_ended _ | Live.Tool_result _ | Live.Stream_protocol_error _
+  | Live.Approval_requested _ | Live.Approval_settled _ | Live.Reply_details _ | Live.Run_failed _
+  | Live.Undecodable _ -> let duplicate =
     match seq with
     | Some seq -> Hashtbl.mem t.held_seqs seq
     | None -> false

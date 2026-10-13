@@ -1293,8 +1293,7 @@ let evidence_fields (entry : entry) =
       ; field "Tool use ID" call.kt_tool_use_id
       ; some "Input/output" "producer-redacted observations below; full payload not guaranteed"
       ] @ schedule_fields
-  | event ->
-      let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
+  | (Observer.Internal_agent_runs_changed | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _) as event -> let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
       [ some "Source" "observer event"
       ; some "Event" row.label
       ; some "Detail" row.detail

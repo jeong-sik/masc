@@ -728,7 +728,9 @@ let project_gate_history ~visibility entries =
         | Message_status, Some gate
           when entry.me_keeper_name <> "" && gate.gs_approval_id <> "" ->
             Some (entry.me_keeper_name, gate.gs_approval_id)
-        | _ -> None
+        | (Message_status, None)
+        | ((Message_keeper | (Message_autonomous | (Message_local | (Message_error | (Message_tool | (Message_thinking | (Message_memory | (Message_user _ | Message_skill _)))))))), _)
+        | (Message_status, Some _) -> None
       in
       let _, groups = List.fold_left (fun (index, groups) (entry, _) ->
         let groups = match key entry, entry.me_gate with
@@ -2262,14 +2264,23 @@ type runtime_probe_annotation =
 let runtime_probe_status_label = function
   | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_cli -> "CLI not probed"
   | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_native_auth -> "ADC not probed"
-  | status -> Masc.Tui_decode_runtime_probe.runtime_provider_status_to_string status
+  | (Masc.Tui_decode_runtime_probe.Runtime_provider_reachable | Masc.Tui_decode_runtime_probe.Runtime_provider_missing_auth | Masc.Tui_decode_runtime_probe.Runtime_provider_auth_failed | Masc.Tui_decode_runtime_probe.Runtime_provider_network_error | Masc.Tui_decode_runtime_probe.Runtime_provider_server_error | Masc.Tui_decode_runtime_probe.Runtime_provider_endpoint_not_found | Masc.Tui_decode_runtime_probe.Runtime_provider_http_error | Masc.Tui_decode_runtime_probe.Runtime_provider_unknown_http_status | Masc.Tui_decode_runtime_probe.Runtime_provider_invalid_endpoint | Masc.Tui_decode_runtime_probe.Runtime_provider_invalid_execution_transport) as status -> Masc.Tui_decode_runtime_probe.runtime_provider_status_to_string status
 
 let runtime_probe_annotation ~status detail =
   Option.map (fun detail ->
     match status with
     | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_cli
     | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_native_auth -> Runtime_probe_note detail
-    | _ -> Runtime_probe_failure detail) detail
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_reachable
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_missing_auth
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_auth_failed
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_network_error
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_server_error
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_endpoint_not_found
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_http_error
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_unknown_http_status
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_invalid_endpoint
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_invalid_execution_transport -> Runtime_probe_failure detail) detail
 
 (** Planning surface sub-mode *)
 type planning_mode =
@@ -4817,7 +4828,7 @@ module Browser_lane_view = struct
              | Some _, _, _ when selected_client_available next ->
                  { next with client_picker = (match purpose with Choose_client -> Some 0 | Read_after_discovery -> None) },
                  purpose = Read_after_discovery
-             | _, _, _ ->
+             | (_, _, Read_after_discovery) | (_, _, Choose_client) ->
                  let load = match t.selected_client, clients with
                    | _, [] -> No_browser
                    | Some _, _ -> Failed "Selected browser disconnected; b:choose browser"
@@ -4990,7 +5001,13 @@ module Browser_lane_view = struct
         match node.kind with
         | Region Masc.Browser_scene.Article ->
             {counts with article_count = counts.article_count + 1}
-        | Region _ -> {counts with region_count = counts.region_count + 1}
+        | Region (Masc.Browser_scene.Main) | Region (Masc.Browser_scene.Navigation)
+        | Region (Masc.Browser_scene.Complementary) | Region (Masc.Browser_scene.Named_region)
+        | Region (Masc.Browser_scene.Section) | Region (Masc.Browser_scene.Header)
+        | Region (Masc.Browser_scene.Footer) | Region (Masc.Browser_scene.Search)
+        | Region (Masc.Browser_scene.Form) | Region (Masc.Browser_scene.Log)
+        | Region (Masc.Browser_scene.Banner) | Region (Masc.Browser_scene.Content_info)
+        | Region (Masc.Browser_scene.Scroll_area) | Region (Masc.Browser_scene.Unknown _) -> {counts with region_count = counts.region_count + 1}
         | Control {href = Some _; _} -> {counts with link_count = counts.link_count + 1}
         | Control _ -> {counts with control_count = counts.control_count + 1}
         | Raster -> {counts with raster_count = counts.raster_count + 1}
@@ -5201,26 +5218,40 @@ module Browser_lane_view = struct
           | Scene_click {scope;_} -> Browser_lane.Content, scope
           | Scene_follow _ -> Browser_lane.Content, None
           | Scene_follow_refresh {scene_view;_} -> scene_view, None
-          | _ -> Browser_lane.Content, None in
+          | Read | Open_session | Close_session | Read_refresh | Discover _ | Goto _ | Screenshot _
+          | Scene_read _ | Scene_refresh _ | Viewport_refresh _ | Viewport_cadence _
+          | Viewport_pointer _ -> Browser_lane.Content, None in
         (match result with
          | Ok scene when scene.source = t.source && scene.client_id = client_id t
                          && scene.tab_id = tab_id && t.selected_tab = Some tab_id
                          && scene.content.view = expected_view && scene.content.scope = expected_scope
                          && (match operation with
                              | Scene_scroll {document_id;_} -> scene.content.document_id = document_id
-                             | _ -> true) ->
+                             | Read | Open_session | Close_session | Read_refresh | Discover _
+                             | Goto _ | Screenshot _ | Scene_read _ | Scene_regions _
+                             | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _
+                             | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _
+                             | Viewport_pointer _ -> true) ->
              publish_scene scene t
          | Ok _ ->
              let scene_guard = match operation with
                | Scene_follow_refresh {guard;_} -> Some guard
-               | _ -> t.scene_guard in
+               | Read | Open_session | Close_session | Read_refresh | Discover _ | Goto _
+               | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _
+               | Scene_focus _ | Scene_click _ | Scene_follow _ | Viewport_refresh _
+               | Viewport_cadence _ | Viewport_pointer _ -> t.scene_guard in
              {t with scene = None; scene_scope = None; scene_delta = None; scene_guard; load = Failed "scene source, client or tab mismatch"}
          | Error detail ->
              let scene_guard = match operation with
                | Scene_follow_refresh {guard;_} -> Some guard
-               | _ -> t.scene_guard in
+               | Read | Open_session | Close_session | Read_refresh | Discover _ | Goto _
+               | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _
+               | Scene_focus _ | Scene_click _ | Scene_follow _ | Viewport_refresh _
+               | Viewport_cadence _ | Viewport_pointer _ -> t.scene_guard in
              {t with scene = None; scene_scope = None; scene_delta = None; scene_guard; load = Failed detail})
-    | _ -> t
+    | Loading (_, (Read | (Open_session | (Close_session | (Read_refresh | (Discover _ | (Goto _ | (Screenshot _ | (Viewport_refresh _ | (Viewport_cadence _ | Viewport_pointer _))))))))))
+    | Idle | No_browser | Failed _
+    | Loading (_, (Scene_read _|Scene_regions _|Scene_refresh _|Scene_scroll _| Scene_focus _|Scene_click _|Scene_follow _|Scene_follow_refresh _)) -> t
 
   let accept_follow ~generation ~(guard : navigation_guard)
       (result : (scene, string) result) t =
@@ -5587,7 +5618,9 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
            | Masc.Browser_scene.Heading left, Masc.Browser_scene.Heading right ->
                left = right && (not (block_tag node.tag) || node.node_id = anchor.node_id)
            | _ -> false)
-      | _ -> false in
+      | (Masc.Browser_scene.Text, (Masc.Browser_scene.Raster | (Masc.Browser_scene.Region _ | Masc.Browser_scene.Control _)))
+      | ((Masc.Browser_scene.Raster | (Masc.Browser_scene.Region _ | Masc.Browser_scene.Control _)), _)
+      | (Text, Text) -> false in
     (* A group is the block fragment that opened it and the fragments joined
        after it, newest first. The row closes at the block's last observed
        fragment: everything up to it is one paragraph by the observed id, and
@@ -7728,7 +7761,8 @@ let suspend_workspace_readings state =
     | Browser_lane_view.Loading (generation, operation) when Browser_lane_view.operation_is_read operation ->
         state.browser_lane_read_resume <- Some (generation, view, operation);
         {view with load=Browser_lane_view.Idle; refresh_pending=None}
-    | _ -> view) state.browser_lane;
+    | Browser_lane_view.Idle | Browser_lane_view.No_browser | Browser_lane_view.Failed _
+    | Loading (_, _) -> view) state.browser_lane;
   let suspend_lane (view : Masc_tui_lane_addons.t) =
     if state.lane_addons_reading = Some view.generation then begin
       Option.iter (fun read -> state.lane_installer_read_resume <- Some (view.generation, read))
@@ -8183,7 +8217,17 @@ let accept_measurement_artifact state ~sha256 ~generation result =
 let browser_lane_on_screen (state : state) =
   match state.view, state.browser_lane_visibility with
   | Connectors, Browser_lane_shown _ -> state.browser_lane
-  | _, Browser_lane_hidden | _, Browser_lane_shown _ -> None
+  | (Overview, Browser_lane_hidden) | (_, Browser_lane_shown _) | (Acting, Browser_lane_hidden)
+  | (Metrics, Browser_lane_hidden) | (Keepers _, Browser_lane_hidden)
+  | (Memory, Browser_lane_hidden) | (Lanes, Browser_lane_hidden) | (Clients, Browser_lane_hidden)
+  | (Board, Browser_lane_hidden) | (Approvals, Browser_lane_hidden)
+  | (Planning, Browser_lane_hidden) | (Schedules, Browser_lane_hidden)
+  | (Verification, Browser_lane_hidden) | (Harness, Browser_lane_hidden)
+  | (Fusion, Browser_lane_hidden) | (Repositories, Browser_lane_hidden)
+  | (Code, Browser_lane_hidden) | (Changes, Browser_lane_hidden) | (Connectors, Browser_lane_hidden)
+  | (Runtime, Browser_lane_hidden) | (Config, Browser_lane_hidden)
+  | (Resources, Browser_lane_hidden) | (Tools, Browser_lane_hidden)
+  | (System_logs, Browser_lane_hidden) -> None
 
 let browser_history_on_screen state =
   Option.bind (browser_lane_on_screen state) (fun _ -> state.browser_history)
@@ -9833,7 +9877,10 @@ let workspace_activity_context_height state ~surface_rows =
   let stale = match state.workspace_activity_repo with
     | None -> false
     | Some repo_id -> (match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
-                      | Masc_tui_fetched.Stale _ -> true | _ -> false) in
+                      | Masc_tui_fetched.Stale _ -> true | Masc_tui_fetched.Absent
+                                                         | Masc_tui_fetched.Loading
+                                                         | Masc_tui_fetched.Ready _
+                                                         | Masc_tui_fetched.Failed _ -> false) in
   max 1 (surface_rows - Masc_tui_frame.chrome_rows - (if stale then 1 else 0))
 
 let apply_workspace_activity_read state request result =
@@ -10224,7 +10271,7 @@ let dispatch_play_change state request =
   state.play_changes <- List.map (function
     | Preparing_invite_change held when held.change_ticket == request.change_ticket ->
         admitted := true; Sending_invite_change held
-    | change -> change) state.play_changes;
+    | (Sending_invite_change _ | Unknown_invite_change _ | Detached_invite_change _ | Preparing_invite_change _) as change -> change) state.play_changes;
   !admitted
 
 let play_change_dispatched state request =
@@ -11342,7 +11389,9 @@ let transcript_replaces_session_output ~(fresh : msg_entry list)
           && match entry.me_role, row.me_role with
              | Message_keeper, Message_keeper
              | Message_autonomous, Message_autonomous -> true
-             | _ -> false)))
+             | (Message_keeper, (Message_autonomous | (Message_status | (Message_local | (Message_error | (Message_tool | (Message_thinking | (Message_memory | (Message_user _ | Message_skill _)))))))))
+             | (Message_autonomous, (Message_keeper | (Message_status | (Message_local | (Message_error | (Message_tool | (Message_thinking | (Message_memory | (Message_user _ | Message_skill _)))))))))
+             | ((Message_status | (Message_local | (Message_error | (Message_tool | (Message_thinking | (Message_memory | (Message_user _ | Message_skill _))))))), _) -> false)))
     fresh
 ;;
 
@@ -11599,7 +11648,12 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
              (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
                match item.drawn with
                | Masc_tui_keeper_chat_transcript.Drawn_reply _ -> true
-               | _ -> false)
+               | Masc_tui_keeper_chat_transcript.Drawn_thinking _
+               | Masc_tui_keeper_chat_transcript.Drawn_skill _
+               | Masc_tui_keeper_chat_transcript.Drawn_tools _
+               | Masc_tui_keeper_chat_transcript.Drawn_text _
+               | Masc_tui_keeper_chat_transcript.Drawn_status _
+               | Masc_tui_keeper_chat_transcript.Drawn_error _ -> false)
              (Masc_tui_keeper_chat_transcript.drawn log.tl_transcript)
          then Some (turn_log_execution_source log)
          else None)
@@ -11611,7 +11665,8 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
         | Message_keeper | Message_autonomous
           when List.exists (fun source -> row.me_execution_source = Some source) partial_replies ->
             media_remainder row
-        | _ -> Some row)
+        | Message_status | Message_local | Message_error | Message_tool | Message_thinking
+        | Message_memory | Message_user _ | Message_skill _ | (Message_keeper|Message_autonomous) -> Some row)
       rows
   in
   (* Selected logs own the exact tool receipts already drawn, including after
@@ -11633,7 +11688,8 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
                match item.drawn with
                | Drawn_tools observed -> List.filter_map (fun (activity : Transcript.tool_activity) ->
                    activity.execution_id) observed.activities
-               | _ -> []) drawn in
+               | Transcript.Drawn_thinking _ | Transcript.Drawn_skill _ | Transcript.Drawn_text _
+               | Transcript.Drawn_reply _ | Transcript.Drawn_status _ | Transcript.Drawn_error _ -> []) drawn in
              let activities = List.filter (fun (activity : Transcript.tool_activity) ->
                not (Option.exists (fun id -> List.mem id executions) activity.execution_id)) block.activities in
              if activities = [] && block.omitted_steps = 0 then None
@@ -11650,7 +11706,8 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
         if skills = [] then None
         else Some {row with me_skill_block=skills;
           me_role=Message_skill (Transcript.skill_block_state skills)}
-    | _ -> Some row
+    | Message_keeper | Message_autonomous | Message_status | Message_local | Message_error
+    | Message_thinking | Message_memory | Message_user _ | Message_skill _ -> Some row
   in
   let loaded = List.filter_map remaining_activity loaded in
   let session = List.filter_map remaining_activity session in
@@ -12199,7 +12256,8 @@ let put_runtime_config_edit ?(preserve_view=false) (state : state) ~workspace se
   let view = match preserve_view, previous, session.current with
     | true, Some {rce_view=Config_edit_current _;_}, Some current ->
         Config_edit_current (runtime_config_source_rows ~path:current.path current.source_text)
-    | _ -> Config_edit_draft in
+    | (true, Some { rce_view = Config_edit_current _;_}, None)
+    | (true, Some { rce_view = Config_edit_draft;_}, _) | (true, None, _) | (false, _, _) -> Config_edit_draft in
   let edit = { rce_workspace = workspace; rce_session = session;
     rce_rows = runtime_config_source_rows ~path:session.Masc_tui_runtime_config_edit.base.path session.text;
     rce_view = view } in
@@ -12705,8 +12763,7 @@ let next_memory_category (current : memory_category_filter)
     (categories : memory_category_filter list) : memory_category_filter =
   match current with
   | Category_all -> (match categories with [] -> Category_all | first :: _ -> first)
-  | c ->
-      let rec after = function
+  | (Category_source | Category_dropped | Category_ordinary _) as c -> let rec after = function
         | [] -> Category_all
         | candidate :: rest ->
             if candidate = c then
@@ -12719,8 +12776,7 @@ let prev_memory_category (current : memory_category_filter)
     (categories : memory_category_filter list) : memory_category_filter =
   match current with
   | Category_all -> (match List.rev categories with [] -> Category_all | last :: _ -> last)
-  | c ->
-      let rev = List.rev categories in
+  | (Category_source | Category_dropped | Category_ordinary _) as c -> let rev = List.rev categories in
       let rec before = function
         | [] -> Category_all
         | candidate :: rest ->
@@ -12802,7 +12858,8 @@ let runtime_picker_label_for pick choice =
   match pick, choice with
   | (Pick_exact_lane _ | Pick_exact_lane_replacement _), Runtime_choice runtime ->
       runtime_model_picker_label runtime
-  | _ -> runtime_picker_label choice
+  | ((Pick_exact_lane _ | Pick_exact_lane_replacement (_, _, _)), Lane_choice _)
+  | ((Pick_media_failover | (Pick_route_default | (Pick_conversation_lane _ | Pick_new_lane _))), _) -> runtime_picker_label choice
 
 (* The picker opens on the first row. Exact lanes start typing a filter
    immediately; the other pickers wait for [/]. Closing drops both. *)
@@ -12810,7 +12867,7 @@ let open_runtime_lane_pick (state : state) pick =
   let list = match pick with
     | Pick_exact_lane _ | Pick_exact_lane_replacement _ ->
       Masc_tui_pick_list.type_text Masc_tui_pick_list.closed ""
-    | _ -> Masc_tui_pick_list.closed in
+    | Pick_media_failover | Pick_route_default | Pick_conversation_lane _ | Pick_new_lane _ -> Masc_tui_pick_list.closed in
   state.runtime_lane_pick <- Some (pick, list)
 
 (* A conversation lane's candidates as the runtime surface last resolved
@@ -12996,7 +13053,8 @@ let runtime_picker_empty_note picker =
       if picker.rlp_total = 0 then
         match picker.rlp_pick with
         | Pick_exact_lane_replacement _ -> "  (no eligible replacement in this candidate group)"
-        | _ -> Printf.sprintf "  (%s catalogue is empty)" noun
+        | Pick_media_failover | Pick_route_default | Pick_conversation_lane _ | Pick_exact_lane _
+        | Pick_new_lane _ -> Printf.sprintf "  (%s catalogue is empty)" noun
       else
         Printf.sprintf "  (no %s among %d matches the filter)" noun picker.rlp_total
 
@@ -13018,7 +13076,8 @@ let runtime_exact_picker_page (state : state) ~terminal_rows ~cols =
         | Lane_write_posting | Lane_write_rereading _ -> 1) in
     (* Two lines per model, after the frame, search, selected ID and keys. *)
     max 1 ((surface_body_rows state ~terminal_rows - 10 - extra) / 2)
-  | _ -> runtime_picker_page
+  | (Lanes, Some { se_target = Media_failover_slots;_}) | (Lanes, None)
+  | ((Overview | (Acting | (Metrics | (Memory | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | (System_logs | Keepers _))))))))))))))))))))), _) -> runtime_picker_page
 
 let runtime_model_picker_title (runtime : Tui_decode.runtime_option) =
   let effort = Option.fold ~none:"default" ~some:Tui_decode.runtime_reasoning_effort_label
@@ -14045,7 +14104,7 @@ let runtime_surface_base_chrome_with ~cols state ~route_rows =
     ~picker_rows:(Option.map (fun picker ->
       List.length picker.rlp_choices * (match picker.rlp_pick with
         | Pick_exact_lane _ | Pick_exact_lane_replacement _ -> 2
-        | _ -> 1))
+        | Pick_media_failover | Pick_route_default | Pick_conversation_lane _ | Pick_new_lane _ -> 1))
       (runtime_picker_projection state))
     ()
 
@@ -14480,7 +14539,8 @@ let keeper_message_visible_status_rows (state : state) live ~now =
         match kind with
         | Masc_tui_keeper_chat_transcript.Attention
           when state.msg_origin_display = Masc_tui_message_layout.Origin_bare -> true
-        | _ -> Masc_tui_keeper_chat_transcript.status_row_survives_folding kind)
+        | Masc_tui_keeper_chat_transcript.Progress | Masc_tui_keeper_chat_transcript.Answer_needed
+        | Masc_tui_keeper_chat_transcript.Approval _ | Attention -> Masc_tui_keeper_chat_transcript.status_row_survives_folding kind)
       rows
   else rows
 
@@ -14509,7 +14569,7 @@ let keeper_observed_turn (state : state) keeper_name =
     else match row.ktr_state with
       | Tui_decode.Keeper_turn_running { started_at_unix; interrupt_token; _ } ->
         Some (started_at_unix, interrupt_token)
-      | _ -> None) state.keeper_turns
+      | Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_unavailable _ -> None) state.keeper_turns
 ;;
 
 let keeper_message_draft_empty (state : state) =
@@ -15010,7 +15070,11 @@ let keeper_message_command_window ?scroll state ~terminal_rows ~terminal_cols =
        if max_rows = 0 || not (Masc_tui_message_layout.message_viewport_supported
            ~terminal_rows ~terminal_cols:chat_cols ~status_rows) then None
        else Some (menu, Masc_tui_command.menu_window ~max_rows menu))
-  | _ -> None
+  | (Keepers (Keeper_message), Right_pane, None, Some _)
+  | (Keepers (Keeper_message), Right_pane, Some _, _) | (Keepers (Keeper_message), Left_pane, _, _)
+  | (Keepers (Keeper_list | (Keeper_detail | (Keeper_logs | (Keeper_calls | Keeper_runtime_pick)))), _, _, _)
+  | ((Overview | (Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | System_logs))))))))))))))))))))), _, _, _)
+  | (Keepers Keeper_message, Right_pane, None, None) -> None
 
 (* Support cannot disappear merely because PgUp adds the reading-back notice.
    At the live edge, reserve that possible row only for the support threshold;

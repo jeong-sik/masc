@@ -93,7 +93,12 @@ let actions host dependency =
      | Prerequisites.Builder_unchecked -> Verified_apple_install :: standard)
   | Sandbox.Macos _, Prerequisites.Sandbox Docker ->
     Verified_docker_install :: Verified_docker_launch :: standard
-  | _ -> standard
+  | (Sandbox.Macos { architecture = Sandbox.Arm64; major = _ }, Prerequisites.Sandbox (Sandbox.Nerdctl_kata | (Sandbox.Microsandbox | Sandbox.Remote_ssh)))
+  | (Sandbox.Macos { architecture = Sandbox.Arm64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Muse_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _)))))))
+  | (Sandbox.Macos { architecture = Sandbox.X64; major = _ }, Prerequisites.Sandbox (Sandbox.Apple_container | (Sandbox.Nerdctl_kata | (Sandbox.Microsandbox | Sandbox.Remote_ssh))))
+  | (Sandbox.Macos { architecture = Sandbox.X64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Muse_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _)))))))
+  | ((Sandbox.Unsupported | Sandbox.Linux _), _)
+  | (Macos {architecture=Arm64; _ }, Sandbox Apple_container) -> standard
 let to_json actions =
   let standard = List.filter_map (function Standard action -> Some action
     | Verified_apple_install | Verified_docker_install | Verified_docker_launch -> None) actions in
@@ -220,7 +225,19 @@ let run ~base_path ~dependency:name ~action =
                ("dependency_readiness",Masc.Presentation_runtime_dependencies.to_json checks) :: fields),
              (match outcome with Prerequisites.Failed _ -> 1 | External_step_pending -> 0
               | Commands_completed_recheck_required -> if selected_component_ready then 0 else 1)
-           | _, Prerequisites.Failed _ -> receipt, 1
-           | _, (External_step_pending | Commands_completed_recheck_required) -> receipt, 0 in
+           | (Prerequisites.Sandbox _, Prerequisites.Failed _)
+           | (Prerequisites.Codex_cli, Prerequisites.Failed _)
+           | (Prerequisites.Claude_cli, Prerequisites.Failed _)
+           | (Prerequisites.Antigravity_cli, Prerequisites.Failed _)
+           | (Prerequisites.Muse_cli, Prerequisites.Failed _)
+           | (Prerequisites.Pdf_tools, Prerequisites.Failed _)
+           | (Prerequisites.Whisper_cli, Prerequisites.Failed _) -> receipt, 1
+           | (Prerequisites.Sandbox _, (External_step_pending | Commands_completed_recheck_required))
+           | (Prerequisites.Codex_cli, (External_step_pending | Commands_completed_recheck_required))
+           | (Prerequisites.Claude_cli, (External_step_pending | Commands_completed_recheck_required))
+           | (Prerequisites.Antigravity_cli, (External_step_pending | Commands_completed_recheck_required))
+           | (Prerequisites.Muse_cli, (External_step_pending | Commands_completed_recheck_required))
+           | (Prerequisites.Pdf_tools, External_step_pending)
+           | (Prerequisites.Whisper_cli, (External_step_pending | Commands_completed_recheck_required)) -> receipt, 0 in
          print_endline (Yojson.Safe.to_string receipt);
          code)

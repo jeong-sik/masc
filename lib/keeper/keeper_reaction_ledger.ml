@@ -1124,6 +1124,7 @@ type durable_event_queue_health =
   ; immediate_count : int
   ; oldest_source_arrived_at : float option
   ; newest_source_arrived_at : float option
+  ; selections : Keeper_event_queue_state.pending_selection list
   ; payload_kind_counts : (string * int) list
   ; read_errors : Keeper_event_queue_persistence.snapshot_read_error list
   }
@@ -1142,10 +1143,10 @@ let payload_kind_count_pairs stimuli =
 
 let durable_event_queue_health ~base_path ~keeper_name =
   let snapshot =
-    Keeper_event_queue_persistence.load_snapshot_with_errors ~base_path ~keeper_name
+    Keeper_event_queue_persistence.load_selections_with_errors ~base_path ~keeper_name
   in
-  let queue = snapshot.pending in
-  let stimuli = Keeper_event_queue.to_list queue in
+  let stimuli = List.map (fun (selection : Keeper_event_queue_state.pending_selection) ->
+    selection.source) snapshot.pending in
   let oldest_source_arrived_at, newest_source_arrived_at =
     List.fold_left
       (fun (oldest, newest) (stimulus : Keeper_event_queue.stimulus) ->
@@ -1169,11 +1170,12 @@ let durable_event_queue_health ~base_path ~keeper_name =
       stimuli
   in
   { keeper_name
-  ; durable_event_queue_count = Keeper_event_queue.length queue
-  ; durable_event_queue_pending_count = Keeper_event_queue.length snapshot.pending
+  ; durable_event_queue_count = List.length stimuli
+  ; durable_event_queue_pending_count = List.length snapshot.pending
   ; immediate_count
   ; oldest_source_arrived_at
   ; newest_source_arrived_at
+  ; selections = snapshot.pending
   ; payload_kind_counts = payload_kind_count_pairs stimuli
   ; read_errors = snapshot.read_errors
   }
@@ -1215,8 +1217,7 @@ let durable_event_queue_health_json ~now health =
     ; "newest_source_arrived_at_unix", float_opt_to_json health.newest_source_arrived_at
     ; "newest_source_age_seconds", age_opt_to_json health.newest_source_arrived_at
     ; "queue_residence", Keeper_event_queue_persistence.(queue_residence_to_yojson
-        (Unknown (if health.read_errors = [] then First_admission_not_recorded
-                  else Queue_observation_incomplete)))
+        (queue_residence_of_selections ~now ~complete:(health.read_errors = []) health.selections))
     ; "read_error_count", `Int (List.length health.read_errors)
     ; "read_errors", `List read_errors_json
     ; ( "payload_kind_counts"
@@ -1732,9 +1733,10 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; ( "durable_event_queue_discovery_error_count"
       , `Int durable_event_queue_discovery_error_count )
     ; "durable_event_queue_residence", Keeper_event_queue_persistence.(queue_residence_to_yojson
-        (Unknown (if durable_event_queue_discovery_error_count > 0
-                     || durable_event_queue_read_error_count > 0
-                  then Queue_observation_incomplete else First_admission_not_recorded)))
+        (queue_residence_of_selections ~now
+           ~complete:(durable_event_queue_discovery_error_count = 0
+                      && durable_event_queue_read_error_count = 0)
+           (List.concat_map (fun health -> health.selections) durable_event_queue_summaries)))
     ; "durable_event_queue_read_error_count", `Int durable_event_queue_read_error_count
     ; ( "durable_event_queue_read_errors_by_keeper"
       , `List durable_event_queue_read_errors_by_keeper )

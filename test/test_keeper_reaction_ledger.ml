@@ -511,9 +511,9 @@ let test_fleet_summary_follows_a_degraded_keeper () =
   check int "keeper immediate durable queue backlog counted" 2
     (keeper_queue |> member "immediate_count" |> to_int);
   let residence = keeper_queue |> member "queue_residence" in
-  check_member_string "durable queue residence is unknown" "unknown" "status" residence;
-  check bool "residence does not inherit source age" true
-    (residence |> member "oldest_age_seconds" = `Null);
+  check_member_string "durable queue residence is observed" "observed" "status" residence;
+  check bool "residence has its admission evidence" true
+    (residence |> member "oldest_admitted_at_unix" |> to_float > 0.0);
   check bool "original source age remains visible" true
     (keeper_queue |> member "oldest_source_age_seconds" |> to_int > 0);
   let payload_counts =
@@ -641,9 +641,15 @@ let test_fleet_summary_source_age_never_supplies_residence () =
     let observation = fleet |> member "durable_event_queue_by_keeper" |> to_list |> List.hd in
     check (float 0.001) "source timestamp is retained verbatim" source_at
       (observation |> member "oldest_source_arrived_at_unix" |> to_float);
-    check_member_string "unknown residence explains missing first admission"
-      "first_admission_not_recorded" "reason"
-      (observation |> member "queue_residence"))
+    let admission = before |> Keeper_event_queue_state.of_yojson |> Result.get_ok
+      |> Keeper_event_queue_state.pending_selections |> List.hd in
+    let expected_admission = match admission.first_admitted_at with
+      | Some time -> time | None -> Alcotest.fail "admission clock missing" in
+    check_member_string "observed residence has an admission clock"
+      "observed" "status" (observation |> member "queue_residence");
+    check (float 0.0) "residence retains actual admission, not source age"
+      expected_admission (observation |> member "queue_residence"
+        |> member "oldest_admitted_at_unix" |> to_float))
     [1.0; Unix.gettimeofday ()]
 ;;
 

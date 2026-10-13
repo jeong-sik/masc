@@ -592,7 +592,10 @@ let pending_entry_to_yojson entry =
     ([ "source", Keeper_event_queue.stimulus_to_yojson entry.source
      ; "admitted_revision", int64_json entry.admitted_revision
      ; "checkpoint_retentions", `Int entry.checkpoint_retentions
-     ] @ match entry.repetition_scope with
+     ] @ (match entry.first_admitted_at with
+       | None -> []
+       | Some time -> [ "first_admitted_at", `Float time ])
+     @ match entry.repetition_scope with
        | None -> []
        | Some scope -> [ "repetition_scope", Keeper_execution_scope_id.to_json scope ])
 ;;
@@ -604,7 +607,8 @@ let pending_entry_of_yojson json =
     exact_fields
       ~context
       ~expected:([ "source"; "admitted_revision"; "checkpoint_retentions" ]
-        @ if List.mem_assoc "repetition_scope" fields then [ "repetition_scope" ] else [])
+        @ (if List.mem_assoc "repetition_scope" fields then [ "repetition_scope" ] else [])
+        @ if List.mem_assoc "first_admitted_at" fields then [ "first_admitted_at" ] else [])
       fields
   in
   let* source_json = required_field ~context "source" fields in
@@ -623,7 +627,13 @@ let pending_entry_of_yojson json =
     let* repetition_scope = match List.assoc_opt "repetition_scope" fields with
       | None -> Ok None
       | Some json -> Keeper_execution_scope_id.of_json json |> Result.map Option.some in
-    Ok { source; admitted_revision; checkpoint_retentions; repetition_scope }
+    let* first_admitted_at = match List.assoc_opt "first_admitted_at" fields with
+      | None -> Ok None
+      | Some _ ->
+        let* time = float_field ~context "first_admitted_at" fields in
+        if Float.is_finite time then Ok (Some time)
+        else Error "event queue admission time must be finite" in
+    Ok { source; admitted_revision; checkpoint_retentions; repetition_scope; first_admitted_at }
 ;;
 
 let to_yojson state =

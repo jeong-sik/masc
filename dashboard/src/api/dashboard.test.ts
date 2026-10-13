@@ -1753,6 +1753,33 @@ describe('fetchDashboardFullHealth', () => {
     expect(result.keeper_event_queue?.work_liveness?.queue_residence).toBeNull()
   })
 
+  it.each([
+    { status: 'observed', oldest_admitted_at_unix: 100, oldest_age_seconds: 3, reason: null },
+    { status: 'empty', oldest_age_seconds: null, reason: null },
+    { status: 'unknown', oldest_age_seconds: null, reason: 'clock_observation_invalid' },
+  ])('preserves typed queue admission evidence $status', async (residence) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      keeper_event_queue: { status: 'warning', work_liveness: {
+        state: 'backlogged', runnable_backlog_count: 1, runnable_oldest_source_age_seconds: 6000,
+        queue_residence: residence,
+      } },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    const result = await fetchDashboardFullHealth()
+    expect(result.keeper_event_queue?.work_liveness?.queue_residence).toEqual(residence)
+  })
+
+  it.each([
+    { status: 'observed', oldest_admitted_at_unix: 100, oldest_age_seconds: -1, reason: null },
+    { status: 'observed', oldest_age_seconds: 3, reason: null },
+    { status: 'empty', oldest_age_seconds: 0, reason: null },
+  ])('rejects incoherent admission evidence %#', async (residence) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      keeper_event_queue: { work_liveness: { state: 'backlogged', queue_residence: residence } },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    const result = await fetchDashboardFullHealth()
+    expect(result.keeper_event_queue?.work_liveness?.queue_residence).toBeNull()
+  })
+
   it('preserves the backend blocked queue liveness state', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

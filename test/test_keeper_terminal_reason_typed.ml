@@ -2006,6 +2006,20 @@ let () =
     (member "operator_action_required" old_source = `Bool false);
   check "runnable backlog is never backlog-clean"
     (member "backlog_clean" old_source = `Bool false);
+  let measured_residence = Keeper_event_queue_persistence.(queue_residence_to_yojson
+    (Observed { oldest_admitted_at = 100.0; oldest_age_seconds = 3.0 })) in
+  let recorded_source = match queue ~count:2 ~oldest_age:(`Float 6000.0) with
+    | `Assoc fields -> `Assoc (("queue_residence", measured_residence) :: fields)
+    | _ -> Alcotest.fail "expected queue projection" in
+  let recorded_health = Health_fleet.keeper_event_queue_health_dimensions
+    ~source_unavailable:false recorded_source in
+  check "health carries actual queue admission evidence"
+    (member "queue_residence" recorded_health = measured_residence
+     && member "queue_residence" (member "work_liveness" recorded_health) = measured_residence);
+  check "measured duration does not change queue lifecycle or verdict"
+    (member "status" recorded_health = member "status" old_source
+     && member "state" (member "work_liveness" recorded_health) = `String "backlogged"
+     && member "operator_action_required" recorded_health = `Bool false);
   let fresh_backlog =
     Health_fleet.keeper_event_queue_health_dimensions
       ~source_unavailable:false

@@ -28,19 +28,83 @@ let age_seconds_json ~now = function
 type queue_residence_unknown_reason =
   | First_admission_not_recorded
   | Queue_observation_incomplete
+  | Clock_observation_invalid
 
-type queue_residence = Unknown of queue_residence_unknown_reason
+type queue_residence =
+  | Empty
+  | Observed of { oldest_admitted_at : float; oldest_age_seconds : float }
+  | Unknown of queue_residence_unknown_reason
 
-let queue_residence_to_yojson (Unknown reason) =
+let queue_residence_of_selections ~now ~complete selections =
+  if not complete then Unknown Queue_observation_incomplete
+  else if selections = [] then Empty
+  else if List.exists (fun (entry : State.pending_selection) ->
+    Option.is_none entry.first_admitted_at) selections
+  then Unknown First_admission_not_recorded
+  else if not (Float.is_finite now) || List.exists (fun (entry : State.pending_selection) ->
+    match entry.first_admitted_at with
+    | None -> false
+    | Some time -> not (Float.is_finite time) || time > now) selections
+  then Unknown Clock_observation_invalid
+  else
+    let oldest = List.fold_left (fun oldest (entry : State.pending_selection) ->
+      min_float_opt oldest entry.first_admitted_at) None selections in
+    match oldest with
+    | None -> Unknown First_admission_not_recorded
+    | Some oldest_admitted_at ->
+      let oldest_age_seconds = now -. oldest_admitted_at in
+      if Float.is_finite oldest_age_seconds
+      then Observed { oldest_admitted_at; oldest_age_seconds }
+      else Unknown Clock_observation_invalid
+;;
+
+let queue_residence_to_yojson = function
+  | Empty -> `Assoc [ "status", `String "empty"; "oldest_age_seconds", `Null; "reason", `Null ]
+  | Observed { oldest_admitted_at; oldest_age_seconds } ->
+    `Assoc [ "status", `String "observed"
+           ; "oldest_admitted_at_unix", `Float oldest_admitted_at
+           ; "oldest_age_seconds", `Float oldest_age_seconds; "reason", `Null ]
+  | Unknown reason ->
   let reason = match reason with
     | First_admission_not_recorded -> "first_admission_not_recorded"
     | Queue_observation_incomplete -> "queue_observation_incomplete"
+    | Clock_observation_invalid -> "clock_observation_invalid"
   in
   `Assoc
     [ "status", `String "unknown"
     ; "oldest_age_seconds", `Null
     ; "reason", `String reason
     ]
+;;
+
+let queue_residence_of_yojson json =
+  let fields = match json with `Assoc fields -> Some fields | _ -> None in
+  let number = function
+    | Some (`Float time) when Float.is_finite time -> Some time
+    | Some (`Int time) -> Some (float_of_int time)
+    | Some _ | None -> None in
+  match fields with
+  | None -> None
+  | Some fields ->
+    let field name = List.assoc_opt name fields in
+    let exact names = List.sort String.compare (List.map fst fields) = List.sort String.compare names in
+    match field "status", field "oldest_age_seconds", field "reason" with
+    | Some (`String "empty"), Some `Null, Some `Null
+      when exact [ "status"; "oldest_age_seconds"; "reason" ] -> Some Empty
+    | Some (`String "observed"), _, Some `Null
+      when exact [ "status"; "oldest_admitted_at_unix"; "oldest_age_seconds"; "reason" ] ->
+      (match number (field "oldest_admitted_at_unix"), number (field "oldest_age_seconds") with
+       | Some oldest_admitted_at, Some oldest_age_seconds when oldest_age_seconds >= 0.0 ->
+         Some (Observed { oldest_admitted_at; oldest_age_seconds })
+       | _ -> None)
+    | Some (`String "unknown"), Some `Null, Some (`String reason)
+      when exact [ "status"; "oldest_age_seconds"; "reason" ] ->
+      (match reason with
+       | "first_admission_not_recorded" -> Some (Unknown First_admission_not_recorded)
+       | "queue_observation_incomplete" -> Some (Unknown Queue_observation_incomplete)
+       | "clock_observation_invalid" -> Some (Unknown Clock_observation_invalid)
+       | _ -> None)
+    | _ -> None
 ;;
 
 type owner_lifecycle =
@@ -56,6 +120,7 @@ type keeper_summary =
   ; owner_lifecycle : owner_lifecycle
   ; pending_count : int
   ; pending_oldest_source : float option
+  ; pending_selections : State.pending_selection list
   ; outbox_count : int
   ; counts_complete : bool
   ; read_errors : string list
@@ -67,6 +132,7 @@ let keeper_summary_of_state ~keeper_name ~owner_lifecycle state =
   ; owner_lifecycle
   ; pending_count = Keeper_event_queue.length pending
   ; pending_oldest_source = queue_oldest_source_arrived_at pending
+  ; pending_selections = State.pending_selections state
   ; outbox_count = List.length (State.transition_outbox state)
   ; counts_complete = true
   ; read_errors = []
@@ -78,6 +144,7 @@ let keeper_summary_unavailable ~keeper_name ~owner_lifecycle ~read_errors =
   ; owner_lifecycle
   ; pending_count = 0
   ; pending_oldest_source = None
+  ; pending_selections = []
   ; outbox_count = 0
   ; counts_complete = false
   ; read_errors
@@ -98,6 +165,10 @@ let owner_lifecycle_detail_json = function
   | Runnable | Recoverable | Retained_disabled | Paused_dead | Shutdown_fenced -> `Null
 ;;
 
+let keeper_residence ~now (summary : keeper_summary) =
+  queue_residence_of_selections ~now ~complete:summary.counts_complete summary.pending_selections
+;;
+
 let keeper_summary_json ~now (summary : keeper_summary) =
   `Assoc
     [ "keeper_name", `String summary.keeper_name
@@ -108,8 +179,7 @@ let keeper_summary_json ~now (summary : keeper_summary) =
     ; "oldest_source_arrived_at_unix", Json_util.float_opt_to_json summary.pending_oldest_source
     ; "oldest_source_age_seconds", age_seconds_json ~now summary.pending_oldest_source
     ; "queue_residence", queue_residence_to_yojson
-        (Unknown (if summary.counts_complete then First_admission_not_recorded
-                  else Queue_observation_incomplete))
+        (keeper_residence ~now summary)
     ; "pending_oldest_source_arrived_at_unix", Json_util.float_opt_to_json summary.pending_oldest_source
     ; "pending_oldest_source_age_seconds", age_seconds_json ~now summary.pending_oldest_source
     ; "transition_outbox_count", `Int summary.outbox_count
@@ -124,8 +194,7 @@ let compact_pending_count_json ~now (summary : keeper_summary) =
     ; "pending_count", `Int summary.pending_count
     ; "oldest_source_age_seconds", age_seconds_json ~now summary.pending_oldest_source
     ; "queue_residence", queue_residence_to_yojson
-        (Unknown (if summary.counts_complete then First_admission_not_recorded
-                  else Queue_observation_incomplete))
+        (keeper_residence ~now summary)
     ]
 ;;
 
@@ -137,8 +206,7 @@ let compact_backlog_count_json ~now (summary : keeper_summary) =
     ; "total_count", `Int summary.pending_count
     ; "oldest_source_age_seconds", age_seconds_json ~now summary.pending_oldest_source
     ; "queue_residence", queue_residence_to_yojson
-        (Unknown (if summary.counts_complete then First_admission_not_recorded
-                  else Queue_observation_incomplete))
+        (keeper_residence ~now summary)
     ]
 ;;
 
@@ -284,8 +352,8 @@ let fleet_summary_json ~now ~base_path ~discovery_error summaries =
     ; "oldest_source_arrived_at_unix", Json_util.float_opt_to_json oldest
     ; "oldest_source_age_seconds", age_seconds_json ~now oldest
     ; "queue_residence", queue_residence_to_yojson
-        (Unknown (if counts_complete then First_admission_not_recorded
-                  else Queue_observation_incomplete))
+        (queue_residence_of_selections ~now ~complete:counts_complete
+           (List.concat_map (fun (summary : keeper_summary) -> summary.pending_selections) summaries))
     ; "runnable_backlog_count", `Int runnable.pending_count
     ; "runnable_oldest_source_arrived_at_unix", Json_util.float_opt_to_json runnable.oldest
     ; "runnable_oldest_source_age_seconds", age_seconds_json ~now runnable.oldest

@@ -567,15 +567,20 @@ val drop_by_post_id :
 type queue_residence_unknown_reason = Keeper_event_queue_fleet_projection.queue_residence_unknown_reason =
   | First_admission_not_recorded
   | Queue_observation_incomplete
+  | Clock_observation_invalid
       (** Queue storage observation is unavailable/incomplete. *)
 
-type queue_residence = Keeper_event_queue_fleet_projection.queue_residence = Unknown of queue_residence_unknown_reason
-(** Diagnostic evidence only. Persisted queue entries do not record their first
-    admission time. Source timestamps, revisions and file mtimes cannot supply
-    it, including for an empty queue or a newly observed pending entry. *)
+type queue_residence = Keeper_event_queue_fleet_projection.queue_residence =
+  | Empty
+  | Observed of { oldest_admitted_at : float; oldest_age_seconds : float }
+  | Unknown of queue_residence_unknown_reason
+(** Complete observed admission evidence, an empty queue, or explicit unknown
+    evidence. Source age does not supply missing admission clocks. *)
 
 val queue_residence_to_yojson : queue_residence -> Yojson.Safe.t
-(** The unknown residence duration is JSON null, with an explicit reason. *)
+val queue_residence_of_yojson : Yojson.Safe.t -> queue_residence option
+val queue_residence_of_selections :
+  now:float -> complete:bool -> Keeper_event_queue_state.pending_selection list -> queue_residence
 
 type owner_lifecycle = Keeper_event_queue_fleet_projection.owner_lifecycle =
   | Runnable

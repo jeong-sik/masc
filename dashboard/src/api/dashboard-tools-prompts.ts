@@ -815,11 +815,11 @@ export interface DashboardKeeperQueueStorageIntegrity {
   operator_action_required: boolean
 }
 
-export interface DashboardKeeperQueueResidence {
-  status: 'unknown'
-  oldest_age_seconds: null
-  reason: 'first_admission_not_recorded' | 'queue_observation_incomplete'
-}
+export type DashboardKeeperQueueResidence =
+  | { status: 'empty'; oldest_age_seconds: null; reason: null }
+  | { status: 'observed'; oldest_admitted_at_unix: number; oldest_age_seconds: number; reason: null }
+  | { status: 'unknown'; oldest_age_seconds: null;
+      reason: 'first_admission_not_recorded' | 'queue_observation_incomplete' | 'clock_observation_invalid' }
 
 export interface DashboardKeeperQueueWorkLiveness {
   schema?: string
@@ -1046,8 +1046,21 @@ function normalizeFullHealthSnapshot(raw: unknown): DashboardFullHealthSnapshot 
 
 function normalizeKeeperQueueResidence(raw: unknown): DashboardKeeperQueueResidence | null {
   const record = asRecord(raw)
-  if (!record || record.status !== 'unknown' || record.oldest_age_seconds !== null) return null
-  if (record.reason !== 'first_admission_not_recorded' && record.reason !== 'queue_observation_incomplete') return null
+  if (!record) return null
+  if (record.status === 'observed') {
+    if (record.reason !== null || typeof record.oldest_admitted_at_unix !== 'number'
+      || !Number.isFinite(record.oldest_admitted_at_unix)
+      || typeof record.oldest_age_seconds !== 'number' || !Number.isFinite(record.oldest_age_seconds)
+      || record.oldest_age_seconds < 0) return null
+    return { status: 'observed', oldest_admitted_at_unix: record.oldest_admitted_at_unix,
+      oldest_age_seconds: record.oldest_age_seconds, reason: null }
+  }
+  if (record.status === 'empty' && record.oldest_age_seconds === null && record.reason === null) {
+    return { status: 'empty', oldest_age_seconds: null, reason: null }
+  }
+  if (record.status !== 'unknown' || record.oldest_age_seconds !== null) return null
+  if (record.reason !== 'first_admission_not_recorded' && record.reason !== 'queue_observation_incomplete'
+    && record.reason !== 'clock_observation_invalid') return null
   return { status: 'unknown', oldest_age_seconds: null, reason: record.reason }
 }
 

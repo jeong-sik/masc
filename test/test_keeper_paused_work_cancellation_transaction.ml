@@ -264,11 +264,11 @@ let test_reinserted_source_rejects_old_pending_incarnation () =
     (fun config keeper_name request ->
        let base_path = config.Workspace.base_path in
        let old_selection : State.pending_selection =
-         { source = request.source
-         ; admitted_revision = request.source_incarnation
-         ; checkpoint_retentions = 0
-      ; repetition_scope = None
-         }
+      Persistence.pending_selections_result ~base_path ~keeper_name
+      |> require_ok "read exact pending selection"
+      |> List.find (fun (selection : State.pending_selection) ->
+        selection.source = request.source
+        && Int64.equal selection.admitted_revision request.source_incarnation)
        in
        Persistence.ack_pending_result
          ~base_path

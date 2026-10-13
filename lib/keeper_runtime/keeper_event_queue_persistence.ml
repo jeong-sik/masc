@@ -1151,7 +1151,9 @@ let update_checked_result ?(after_commit = fun () -> ()) ~base_path ~keeper_name
     (fun state ->
        match f (State.pending state) with
        | Error _ as error -> error
-       | Ok pending -> Ok (State.with_pending pending state, ()))
+       | Ok pending ->
+         State.with_pending_at ~admitted_at:(Unix.gettimeofday ()) pending state
+         |> Result.map (fun state -> state, ()))
 ;;
 
 let reprioritize_pending_result
@@ -1202,7 +1204,8 @@ let enqueue_stimulus_if_absent_result
       Ok (state, Already_present)
     else
       let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
-      Ok (State.with_pending pending state, Enqueued))
+      State.with_pending_at ~admitted_at:(Unix.gettimeofday ()) pending state
+      |> Result.map (fun state -> state, Enqueued))
 ;;
 
 let enqueue_stimulus_once_with
@@ -1231,7 +1234,8 @@ let enqueue_stimulus_once_with
         | Ok true -> Ok (state, Already_present)
         | Ok false ->
           let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
-          Ok (State.with_pending pending state, Enqueued))
+          State.with_pending_at ~admitted_at:(Unix.gettimeofday ()) pending state
+          |> Result.map (fun state -> state, Enqueued))
 ;;
 
 let enqueue_stimulus_once_result
@@ -1256,7 +1260,7 @@ let project_accepted_transfer_guarded_result
   then Error "target transfer projection owner does not match the durable queue owner"
   else
     commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-      match State.project_accepted_transfer transfer state with
+      match State.project_accepted_transfer ~admitted_at:(Unix.gettimeofday ()) transfer state with
       | Error _ as error -> error
       | Ok (next, result) when next == state ->
         after_commit (State.pending state);
@@ -1752,11 +1756,17 @@ type queue_residence_unknown_reason =
   Keeper_event_queue_fleet_projection.queue_residence_unknown_reason =
   | First_admission_not_recorded
   | Queue_observation_incomplete
+  | Clock_observation_invalid
 
 type queue_residence =
-  Keeper_event_queue_fleet_projection.queue_residence = Unknown of queue_residence_unknown_reason
+  Keeper_event_queue_fleet_projection.queue_residence =
+  | Empty
+  | Observed of { oldest_admitted_at : float; oldest_age_seconds : float }
+  | Unknown of queue_residence_unknown_reason
 
 let queue_residence_to_yojson = Keeper_event_queue_fleet_projection.queue_residence_to_yojson
+let queue_residence_of_yojson = Keeper_event_queue_fleet_projection.queue_residence_of_yojson
+let queue_residence_of_selections = Keeper_event_queue_fleet_projection.queue_residence_of_selections
 
 type owner_lifecycle = Keeper_event_queue_fleet_projection.owner_lifecycle =
   | Runnable

@@ -5,14 +5,26 @@ type queue_residence_unknown_reason =
   | First_admission_not_recorded
   | Queue_observation_incomplete
       (** Queue storage observation is unavailable/incomplete. *)
+  | Clock_observation_invalid
+      (** Non-finite clock or observation preceding a recorded admission. *)
 
-type queue_residence = Unknown of queue_residence_unknown_reason
-(** Diagnostic evidence only. Persisted queue entries do not record their first
-    admission time. Source timestamps, revisions and file mtimes cannot supply
-    it, including for an empty queue or a newly observed pending entry. *)
+type queue_residence =
+  | Empty
+  | Observed of { oldest_admitted_at : float; oldest_age_seconds : float }
+  | Unknown of queue_residence_unknown_reason
+(** Diagnostic evidence only. Observed duration requires complete finite
+    admission evidence and a clock not preceding any admission. Empty has no
+    duration; missing/incomplete evidence stays unknown. *)
+
+val queue_residence_of_selections :
+  now:float -> complete:bool -> Keeper_event_queue_state.pending_selection list -> queue_residence
+val queue_residence_of_yojson : Yojson.Safe.t -> queue_residence option
+(** Strict typed presentation decoder; malformed state/number combinations
+    return [None]. It does not establish measurement authority by itself. *)
 
 val queue_residence_to_yojson : queue_residence -> Yojson.Safe.t
-(** The unknown residence duration is JSON null, with an explicit reason. *)
+(** Empty/unknown duration is JSON null; observed duration has its admission
+    timestamp. These observations never authorize queue or Keeper transitions. *)
 
 type owner_lifecycle =
   | Runnable

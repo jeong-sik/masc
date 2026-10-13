@@ -1211,16 +1211,27 @@ let test_detached_unreadable_record_keeps_the_document_owner () =
   with_fixture (fun _ _ config directory packages state ->
     let manifest = package packages "ready" in
     let broken_visibility = replace_field "visibility" (`String "unreadable") in
-    ignore (seed_records config (fixture_records ~transform:broken_visibility ()));
     let path = Filename.concat directory "dos-counter.toml" in
     let source = declaration ~id:"dos-counter" ~manifest () in
     write path source;
+    (* The hold is for records that name this declaration: same id, source
+       file and revision. The fixture's own owner names a file elsewhere, so
+       seeded as it is the records would belong to no declaration here. *)
+    let declared = Lane_addon_config.load_file ~path |> unwrap in
+    let owned_by_declaration = replace_field "configuration"
+      (`Assoc [ "id", `String declared.id; "source_path", `String declared.source_path;
+                "revision", `String declared.revision ]) in
+    ignore (seed_records config
+      (fixture_records ~transform:(fun record -> owned_by_declaration (broken_visibility record)) ()));
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
     unwrap (Lane_addon_document_owner.prepare ~root ~source_path:path ~keeper:"owner"
       ~prior_revision:None ~proposed_revision:(Store.digest source));
     let result = reconcile config directory in
-    check bool "the declaration is held by its unreadable record" true
-      (issues_of "dos-counter" result <> []);
+    check bool "the declaration is refused for its unreadable visibility" true
+      (List.exists (fun issue ->
+         String_util.contains_substring (text "message" issue)
+           "declaration retains a binding whose read visibility cannot be read")
+         (issues_of "dos-counter" result));
     check (list string) "a held declaration starts no worker" [] (starts state);
     check bool "the document owner is not revoked" true
       (Result.is_ok (Lane_addon_document_owner.read ~root ~source_path:path));

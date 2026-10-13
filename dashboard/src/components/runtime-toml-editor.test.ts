@@ -1635,7 +1635,7 @@ describe('RuntimeTomlEditor', () => {
     expect(container.querySelector('[aria-label="새 provider credential 값"]')).toBeNull()
 
     fireEvent.input(container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement, {
-      target: { value: '/Users/dancer/.local/bin/codex' },
+      target: { value: '/Users/worker/.local/bin/codex' },
     })
     fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-account-home"]') as HTMLInputElement, {
       target: { value: '/tmp/codex-second' },
@@ -1646,7 +1646,7 @@ describe('RuntimeTomlEditor', () => {
       const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
       expect(source).toContain('[providers.codex_subscription]')
       expect(source).toContain('protocol = "codex-app-server"')
-      expect(source).toContain('command = "/Users/dancer/.local/bin/codex"')
+      expect(source).toContain('command = "/Users/worker/.local/bin/codex"')
       expect(source).toContain('account-home = "/tmp/codex-second"')
       expect(source).toContain('is-non-interactive = true')
       expect(source).not.toContain('[providers.codex_subscription.credentials]')
@@ -1722,7 +1722,7 @@ describe('RuntimeTomlEditor', () => {
       target: { value: '/opt/homebrew/bin/antigravity' },
     })
     fireEvent.input(container.querySelector('[aria-label="새 provider credential 값"]') as HTMLInputElement, {
-      target: { value: '/Users/dancer/.config/antigravity/oauth.json' },
+      target: { value: '/Users/worker/.config/antigravity/oauth.json' },
     })
     fireEvent.input(container.querySelector('[aria-label="새 Antigravity agent"]') as HTMLInputElement, {
       target: { value: 'gemini-3.1-pro' },
@@ -1745,7 +1745,7 @@ describe('RuntimeTomlEditor', () => {
       expect(source).toContain('timeout-s = 900')
       expect(source).toContain('[providers.antigravity_subscription.credentials]')
       expect(source).toContain('type = "file"')
-      expect(source).toContain('path = "/Users/dancer/.config/antigravity/oauth.json"')
+      expect(source).toContain('path = "/Users/worker/.config/antigravity/oauth.json"')
     })
   })
 

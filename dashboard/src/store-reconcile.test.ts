@@ -199,7 +199,7 @@ describe('isInitializingExecutionPayload', () => {
   })
 
   it('treats a real snapshot, even an empty one, as hydratable', () => {
-    expect(isInitializingExecutionPayload({ status: { project: 'me' }, keepers: [] })).toBe(false)
+    expect(isInitializingExecutionPayload({ status: { project: 'ws' }, keepers: [] })).toBe(false)
     expect(isInitializingExecutionPayload({ keepers: [] })).toBe(false)
   })
 })

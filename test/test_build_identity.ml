@@ -153,7 +153,7 @@ let test_repeated_current_does_not_rehash_the_executable () =
 (* `masc start` from the masc checkout produced five of these at every boot:
 
      build_identity: Unix.realpath failed for
-       /Users/dancer/me/workspace/yousleepwhen/masc/masc
+       /Users/worker/ws/workspace/yousleepwhen/masc/masc
 
    argv0 is "masc", which is relative -- but relative to PATH, not to the cwd,
    so joining it to the cwd names a file that does not exist. The cost is not
@@ -165,7 +165,7 @@ let test_bare_argv0_is_not_resolved_against_the_cwd () =
     "a PATH launch answers the runtime's own resolution"
     "/opt/homebrew/bin/masc"
     (Build_identity.executable_candidate
-       ~cwd:"/Users/dancer/me/workspace/yousleepwhen/masc"
+       ~cwd:"/Users/worker/ws/workspace/yousleepwhen/masc"
        ~executable_name:"/opt/homebrew/bin/masc"
        ~argv0:"masc")
 
@@ -668,16 +668,17 @@ let test_dashboard_resolution_is_bound_and_fails_closed_after_replacement () =
 ;;
 
 let test_pick_repo_candidates_exe_first_when_distinct () =
-  (* Regression for the bug where running `cd ~/me && .../masc/main_eio.exe`
-     reported ~/me's commit instead of masc's. exe_dir must come first. *)
+  (* Regression for the bug where running the binary from inside another
+     repository reported that repository's commit instead of masc's.
+     exe_dir must come first. *)
   let result =
     Build_identity.pick_repo_candidates
       ~exe_dir:"/Users/dev/masc/_build/default/bin"
-      ~cwd:"/Users/dev/me"
+      ~cwd:"/Users/dev/ws"
   in
   Alcotest.(check (list string))
     "exe_dir before cwd"
-    [ "/Users/dev/masc/_build/default/bin"; "/Users/dev/me" ]
+    [ "/Users/dev/masc/_build/default/bin"; "/Users/dev/ws" ]
     result
 
 let test_pick_repo_candidates_dedups_equal () =
@@ -693,20 +694,20 @@ let test_pick_repo_candidates_dedups_equal () =
 
 let test_pick_repo_candidates_not_sorted_alphabetically () =
   (* The old implementation used List.sort_uniq String.compare which
-     sorted alphabetically, causing /Users/dancer/me to win over
-     /Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin
+     sorted alphabetically, causing /Users/worker/ws to win over
+     /Users/worker/ws/workspace/yousleepwhen/masc/_build/default/bin
      because the shorter prefix is lexicographically smaller. Assert
      that we now preserve the logical order instead. *)
   let result =
     Build_identity.pick_repo_candidates
-      ~exe_dir:"/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin"
-      ~cwd:"/Users/dancer/me"
+      ~exe_dir:"/Users/worker/ws/workspace/yousleepwhen/masc/_build/default/bin"
+      ~cwd:"/Users/worker/ws"
   in
   match result with
   | first :: _ ->
       Alcotest.(check string)
         "exe_dir wins over shorter cwd prefix"
-        "/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin"
+        "/Users/worker/ws/workspace/yousleepwhen/masc/_build/default/bin"
         first
   | [] -> Alcotest.fail "pick_repo_candidates returned empty list"
 

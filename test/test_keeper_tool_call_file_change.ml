@@ -262,13 +262,13 @@ let absolute_location description target_path =
    [repos/] — the shape #28968 describes. *)
 let test_absolute_worktree_checkout () =
   absolute_location "worktree checkout"
-    "/Users/dancer/me/.masc/playground/polisher/masc-task238/lib/keeper/keeper_gate.ml"
+    "/Users/worker/ws/.masc/playground/polisher/masc-task238/lib/keeper/keeper_gate.ml"
 ;;
 
 (* A write into the operator's own tree, outside any playground. *)
 let test_absolute_outside_any_playground () =
   absolute_location "operator tree"
-    "/Users/dancer/me/workspace/yousleepwhen/masc/lib/dashboard/dashboard_events.ml"
+    "/Users/worker/ws/workspace/yousleepwhen/masc/lib/dashboard/dashboard_events.ml"
 ;;
 
 let test_metadata_round_trip () =

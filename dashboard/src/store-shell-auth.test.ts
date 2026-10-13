@@ -44,7 +44,7 @@ describe('refreshShell auth failure handling', () => {
       .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve }))
       .mockResolvedValueOnce({
         generated_at: '2026-07-11T11:00:01Z',
-        status: { project: 'me' },
+        status: { project: 'ws' },
         counts: { agents: 0, tasks: 0, keepers: 0, total_runtimes: 0 },
         auth: { enabled: true, require_token: true, token_present: false, token_valid: false },
       })
@@ -58,7 +58,7 @@ describe('refreshShell auth failure handling', () => {
     expect(apiMocks.fetchDashboardShell).toHaveBeenCalledTimes(1)
     resolveFirst?.({
       generated_at: '2026-07-11T11:00:00Z',
-      status: { project: 'me' },
+      status: { project: 'ws' },
       counts: { agents: 0, tasks: 0, keepers: 0, total_runtimes: 0 },
       auth: { enabled: true, require_token: true, token_present: true, token_valid: true },
     })
@@ -74,7 +74,7 @@ describe('refreshShell auth failure handling', () => {
   it('does not let a full waiter join a light follow-up', async () => {
     const shell = (light: boolean) => ({
       generated_at: light ? '2026-07-11T11:00:01Z' : '2026-07-11T11:00:02Z',
-      status: { project: 'me' },
+      status: { project: 'ws' },
       counts: { agents: 0, tasks: 0, keepers: 0, total_runtimes: 0 },
       auth: { enabled: false, require_token: false, token_present: false, token_valid: false },
     })
@@ -164,7 +164,7 @@ describe('refreshShell auth failure handling', () => {
     store.hydrateShellSnapshot(
       {
         generated_at: '2026-06-04T13:26:17Z',
-        status: { project: 'me' },
+        status: { project: 'ws' },
         counts: { agents: 0, tasks: 1, keepers: 1, total_runtimes: 1 },
         auth: {
           enabled: true,
@@ -213,7 +213,7 @@ describe('rejected shell credential recovery', () => {
   function shellBody(auth: Record<string, unknown>) {
     return {
       generated_at: '2026-08-12T14:02:00Z',
-      status: { project: 'me' },
+      status: { project: 'ws' },
       counts: { agents: 0, tasks: 0, keepers: 0, total_runtimes: 0 },
       auth,
     } as never

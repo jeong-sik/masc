@@ -36,11 +36,11 @@ describe('durable workspace message authority', () => {
     apiMocks.fetchDashboardWorkspaceMessages.mockResolvedValue([durableMessage])
 
     const store = await import('./store')
-    store.serverStatus.value = { project: 'me' }
-    await store.refreshDashboardWorkspaceMessages('me')
+    store.serverStatus.value = { project: 'ws' }
+    await store.refreshDashboardWorkspaceMessages('ws')
 
     store.hydrateExecutionSnapshot({
-      status: { project: 'me' },
+      status: { project: 'ws' },
       messages: [{
         seq: 7,
         from: 'claude',

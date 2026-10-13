@@ -66,8 +66,8 @@ describe('agentsToPresence', () => {
 
 describe('unwrapEnvelope', () => {
   it('unwraps the {ok,data} envelope returned by /api/v1/status', () => {
-    const raw = { ok: true, data: { cluster: 'default', project: 'me' } }
-    expect(unwrapEnvelope<ApiStatus>(raw)).toEqual({ cluster: 'default', project: 'me' })
+    const raw = { ok: true, data: { cluster: 'default', project: 'ws' } }
+    expect(unwrapEnvelope<ApiStatus>(raw)).toEqual({ cluster: 'default', project: 'ws' })
   })
 
   it('returns an already-unwrapped payload unchanged when no data key is present', () => {
@@ -83,7 +83,7 @@ describe('unwrapEnvelope', () => {
   // so cluster was always undefined -> permanent runtime_unknown even while the
   // server reported a live cluster. Unwrapping first must yield a live snapshot.
   it('feeds an enveloped status into agentsToPresence as a live runtime', () => {
-    const envelope = { ok: true, data: { cluster: 'default', project: 'me' } }
+    const envelope = { ok: true, data: { cluster: 'default', project: 'ws' } }
     const status = unwrapEnvelope<ApiStatus>(envelope) ?? {}
     const agent: ApiAgent = { name: 'nick0cave', status: 'active', current_task: null, model: null }
     const snap = agentsToPresence([agent], status)

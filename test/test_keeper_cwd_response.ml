@@ -171,7 +171,7 @@ let test_property_docker_response_never_leaks_host () =
     [
       ( "/tmp/HOST/repos/a"
       , "/home/keeper/playground/k/repos/a" )
-    ; ( "/Users/dancer/me/.masc/playground/docker/k/repos/long/path"
+    ; ( "/Users/worker/ws/.masc/playground/docker/k/repos/long/path"
       , "/home/keeper/playground/k/repos/long/path" )
     ; "/var/HOST_ROOT/x", "/home/keeper/playground/k/x"
     ; ( host_root_marker ^ "/edge/case/with spaces"

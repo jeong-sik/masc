@@ -35,7 +35,7 @@ function logData(
     source: 'masc_log_ring',
     retention: {
       scope: 'dashboard_logs',
-      durableStore: '/Users/dancer/me/.masc/logs/system_log_2026-05-15.jsonl',
+      durableStore: '/Users/worker/ws/.masc/logs/system_log_2026-05-15.jsonl',
     },
     ring: { startSeq: 0, total: entries.length, droppedBefore: false },
     total: entries.length,
@@ -107,7 +107,7 @@ describe('log diagnostics', () => {
         entry({
           level: 'WARN',
           message:
-            'registry: orphan threshold breached name=analyst base_path=/Users/dancer/me drops=5 window=60s',
+            'registry: orphan threshold breached name=analyst base_path=/Users/worker/ws drops=5 window=60s',
         }),
       ),
     ).toBeNull()

@@ -8,9 +8,9 @@ open Alcotest
 
 let test_parse_gitdir_worktree () =
   (* Standard worktree format *)
-  let line = "gitdir: /Users/dancer/me/.git/worktrees/masc-agent-meta" in
+  let line = "gitdir: /Users/worker/ws/.git/worktrees/masc-agent-meta" in
   let result = Workspace_utils.parse_gitdir_to_main_root line in
-  check (option string) "parses worktree path" (Some "/Users/dancer/me") result
+  check (option string) "parses worktree path" (Some "/Users/worker/ws") result
 
 let test_parse_gitdir_invalid () =
   let line = "invalid format" in
@@ -25,35 +25,35 @@ let test_parse_gitdir_not_worktree () =
 
 let test_find_git_root_main_repo () =
   (* Test with actual main repo path *)
-  let path = "/Users/dancer/me" in
+  let path = "/Users/worker/ws" in
   if Sys.file_exists path then begin
     let result = Workspace_utils.find_git_root path in
-    check (option string) "finds main repo root" (Some "/Users/dancer/me") result
+    check (option string) "finds main repo root" (Some "/Users/worker/ws") result
   end
 
 let test_find_git_root_worktree () =
   (* Test with actual worktree path *)
-  let path = "/Users/dancer/me/.worktrees/masc-agent-meta" in
+  let path = "/Users/worker/ws/.worktrees/masc-agent-meta" in
   if Sys.file_exists path then begin
     let result = Workspace_utils.find_git_root path in
     (* Worktree should resolve to main repo *)
-    check (option string) "worktree resolves to main repo" (Some "/Users/dancer/me") result
+    check (option string) "worktree resolves to main repo" (Some "/Users/worker/ws") result
   end
 
 let test_find_git_root_subdir () =
   (* Test from a subdirectory *)
-  let path = "/Users/dancer/me/.worktrees/masc-agent-meta/features/masc" in
+  let path = "/Users/worker/ws/.worktrees/masc-agent-meta/features/masc" in
   if Sys.file_exists path then begin
     let result = Workspace_utils.find_git_root path in
-    check (option string) "subdir resolves to main repo" (Some "/Users/dancer/me") result
+    check (option string) "subdir resolves to main repo" (Some "/Users/worker/ws") result
   end
 
 let test_resolve_masc_base_path () =
   (* Test the final resolve function *)
-  let worktree_path = "/Users/dancer/me/.worktrees/masc-agent-meta" in
+  let worktree_path = "/Users/worker/ws/.worktrees/masc-agent-meta" in
   if Sys.file_exists worktree_path then begin
     let result = Workspace_utils.resolve_masc_base_path worktree_path in
-    check string "worktree base resolves to main repo" "/Users/dancer/me" result
+    check string "worktree base resolves to main repo" "/Users/worker/ws" result
   end
 
 (* ============================================ *)

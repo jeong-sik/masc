@@ -266,7 +266,7 @@ let test_is_temp_scratch_dir () =
   check bool "path under /tmp is scratch" true
     (Workspace_utils.is_temp_scratch_dir "/tmp/foo/bar");
   check bool "production-like path is not scratch" false
-    (Workspace_utils.is_temp_scratch_dir "/Users/dancer/me")
+    (Workspace_utils.is_temp_scratch_dir "/Users/worker/ws")
 
 let test_resolved_base_escapes_temp_request () =
   let tmp = Filename.get_temp_dir_name () in
@@ -278,10 +278,10 @@ let test_resolved_base_escapes_temp_request () =
        (Filename.concat tmp "other"));
   check bool "temp request resolving to production escapes" true
     (Workspace_utils.resolved_base_escapes_temp_request scratch
-       "/Users/dancer/me");
+       "/Users/worker/ws");
   check bool "non-temp request is never an escape" false
-    (Workspace_utils.resolved_base_escapes_temp_request "/Users/dancer/me"
-       "/Users/dancer/me")
+    (Workspace_utils.resolved_base_escapes_temp_request "/Users/worker/ws"
+       "/Users/worker/ws")
 
 (* ============================================================
    env_opt Tests

@@ -34,6 +34,8 @@ related: ["browser-keeper-firefox", "browser-live-one-connection"]
 RFC 를 쓴 9/17 뒤에 두 번째 경로가 생겨서 다시 썼다. MASC 서버가 전용 Firefox 와
 host 를 직접 띄우는 BiDi 경로다(RFC browser-keeper-firefox, 10/09). 브라우저를
 연결하는 길이 이제 둘이므로, 명령은 어느 쪽인지 묻고 그 길에 필요한 것만 쓴다.
+웹 도구 지원 의존성(geckodriver, Firefox, SearXNG, Stagehand)은 기존 설치 카탈로그에
+더하고 운영자가 목록에서 고른다(§4.5).
 
 ## 1. 지금 일어나는 일
 
@@ -383,6 +385,54 @@ BiDi 길의 로그인은 마법사가 못 한다. 서버를 띄우기 전에는 
 설치하지 않은 사람에게 조언을 띄우기 시작하면 브라우저 레인을 쓸 생각이 없는
 사람에게 매번 같은 줄이 붙는다. 존재를 알리는 일은 마법사 단계와 README 가 맡는다.
 
+### 4.5 도구 지원 의존성을 카탈로그에 더한다
+
+운영자 결정(2026-10-13): 설치는 목록에서 고른다. 자동으로 깔지 않는다. 범위는 가능한
+한 넓게 가고 Stagehand 까지 넣는다.
+
+새 틀은 만들지 않는다. `Sandbox_prerequisites` 가 이미 그 틀이다. 의존성이 닫힌
+variant 이고, 동작은 운영자가 고르며, 쉘 문자열이 아니라 argv 로만 실행하고, 권한을
+몰래 올리지 않는다. `masc prerequisite-actions <의존성> [--execute <ID>]` 와
+`masc setup` 의 "Prepare imp's workspace" 가 이 카탈로그를 쓴다. 지금 카탈로그에는
+샌드박스, 구독 CLI, PDF 도구, 발표자료 도구, whisper 가 있고 웹 도구 지원은 하나도
+없다. 그래서 설치 직후 웹 검색도 브라우저도 안 된다.
+
+variant 에 더하는 의존성:
+
+| 의존성 | 켜주는 것 | macOS 동작 | Linux 동작 | 켜졌는지 보는 법 |
+|---|---|---|---|---|
+| `Geckodriver` | `[browser.automation]` | `brew install geckodriver` | 공식 릴리스 안내 열기 | 실행 파일이 `--version` 에 답한다 |
+| `Firefox` | automation 의 브라우저, BiDi 길 | `brew install --cask firefox` | 배포판 안내 열기 | 실행 파일이 `--version` 에 답한다 |
+| `Searxng` | 키 없는 웹 검색 | Docker 컨테이너를 띄운다 | 같음 | Docker 가 준비되어 있고 컨테이너가 답한다 |
+| `Chromium` | stagehand 레인의 브라우저 | `brew install --cask chromium` | 안내 열기 | 실행 파일이 `--version` 에 답한다 |
+| `Stagehand_extension` | stagehand 레인 | `install-stagehand-extension.sh` 가 하는 일(버전 고정, npm 무결성 검사) | 같음 | 확장 디렉터리가 있다 |
+
+Homebrew 의 `geckodriver` formula 와 `firefox`·`chromium` cask 가 있는 것은
+2026-10-13 에 `brew info` 로 확인했다. Linux 는 배포판마다 패키지 이름이 달라서
+카탈로그의 기존 방식대로 공식 안내를 열고 감지를 다시 한다.
+
+마법사는 이 카탈로그를 한 번에 감지해서 체크 목록으로 보여준다.
+
+- 한 줄에 이름, 켜주는 기능, 지금 상태, 실행될 명령 한 줄, 관리자 권한이 필요한지를
+  적는다. 기본은 모두 미선택이다.
+- 고른 것만 실행하고, 실행 뒤에 감지를 다시 한다(`Commands_completed_recheck_required`).
+  실행한 동작이 성공했다고 켜졌다고 말하지 않는다.
+- Homebrew 가 없으면 그 사실을 맨 앞에 적는다. Homebrew 를 설치하는 동작은 만들지
+  않는다. 지금 카탈로그가 그렇게 정했다.
+- API 키가 필요한 검색 공급자는 설치 대상이 아니다. 같은 목록에 "키 필요" 줄로
+  보여주고 `masc web-search-setup` 을 가리킨다.
+
+알려진 어려움 둘:
+
+- **SearXNG**: `scripts/searxng-local.sh` 는 JSON 출력을 켠 `settings.yml` 을 쓰고
+  컨테이너를 띄운다. 이 스크립트는 저장소 안에만 있어서 바이너리로 설치한 사람에게는
+  없다. 설정 파일 내용을 바이너리에 넣고, 카탈로그의 `writes` 필드로 쓰는 파일을
+  밝히는 쪽이 이 틀에 맞다. Docker 가 먼저 준비되어 있어야 한다.
+- **Stagehand**: `install-stagehand-extension.sh` 는 `npm` 과 `openssl` 을 요구한다.
+  바이너리 설치는 Node.js 를 요구하지 않으므로(INSTALL.md), 이 동작은 Node.js 가 없는
+  사람에게는 그 앞 단계가 막힌다. RFC browser-lane-stagehand 가 "아직 잰 적은
+  없다"고 적은 가설이므로 목록 맨 끝에 둔다.
+
 ## 5. 하지 않는 것
 
 - **서명 확장 배포(AMO).** 지금 확장은 temporary add-on 이라 브라우저를 껐다 켜면
@@ -457,11 +507,13 @@ BiDi 길과 두 길 선택을 더한다.
   browser-live-one-connection)에 맡긴다.
 - BiDi 길의 로그인은 사람이 한다. 서버가 뜬 뒤라야 그 Firefox 가 생기므로 설치
   마법사 안에서는 끝낼 수 없다.
-- 이 명령이 automation 도 설정할지(`--mode automation`)와, 마법사가 어느 길을 먼저
-  보여줄지는 정하지 않았다. automation 은 운영자에게 geckodriver 경로 하나만
-  요구하고 로그인이 필요 없는 조사를 한다. live 는 로그인된 사이트를 쓴다. 마법사가
-  한 길만 먼저 보여줘야 한다면, 첫 대화에서 어느 일이 필요한지로 정한다. 공개
-  페이지를 읽는 일이면 automation 이고, 로그인된 사이트를 쓰는 일이면 live 다.
+- 이 명령이 automation 도 설정할지(`--mode automation`)는 정하지 않았다.
+  automation 은 geckodriver 경로 하나만 요구하고 로그인이 필요 없는 조사를 한다.
+  live 는 로그인된 사이트를 쓴다. 둘은 대체 관계가 아니다. §4.5 의 체크 목록은 길을
+  하나로 좁히지 않으므로, 남는 것은 표시 순서와 이 모드를 둘지다.
+- §4.5 의 `Stagehand_extension` 은 Node.js 를 요구한다. 설치기가 Node.js 없이도
+  Stagehand 확장을 놓을 방법(확장을 릴리스에 넣을 수 있는지, 그 라이선스)은 확인하지
+  않았다.
 
 ## 8. 구현 순서
 
@@ -469,9 +521,12 @@ BiDi 길과 두 길 선택을 더한다.
 쌓는다.
 
 1. 웹 검색 명령: #42821. 구현됨.
-2. `Browser_lane_setup` 공통 부분과 `--mode extension`: host 설치를 바이너리로 옮기고
+2. 카탈로그에 의존성을 더한다(§4.5): `Geckodriver`, `Firefox`, `Searxng`. 감지와
+   동작만 더하고 마법사는 건드리지 않는다. `masc prerequisite-actions` 로 확인한다.
+3. `Browser_lane_setup` 공통 부분과 `--mode extension`: host 설치를 바이너리로 옮기고
    확장 파일을 내장하고 `install-host.sh` 를 지운다. 부르는 쪽(`install-local-build.sh`,
    launcher 문장, README)도 같이 바꾼다.
-3. `--mode bidi`: `[browser.live.bidi]` 를 쓴다. Firefox 탐색과 프로필 기본값.
-4. 마법사 단계: 두 명령을 자식 프로세스로 부르고, 브라우저는 설치된 것에 맞춰 길을
-   보여준다.
+4. `--mode bidi`: `[browser.live.bidi]` 를 쓴다. Firefox 탐색과 프로필 기본값.
+5. 마법사 단계: 카탈로그 체크 목록(§4.5)과 두 명령을 부른다. 브라우저는 설치된 것에
+   맞춰 길을 보여준다.
+6. `Chromium`, `Stagehand_extension`: 값이 측정되지 않았으므로 마지막에 한다.

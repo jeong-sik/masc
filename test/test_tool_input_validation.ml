@@ -1051,8 +1051,8 @@ let test_keeper_clear_accepts_live_traffic_fields () =
 
    This door checks declared-ness, type and enum membership. The advertised
    spellings are held to their typed owner by [test_enum_mirror_sync], and
-   [Keeper_turn_up_args.resolve_requested_network_mode] parses the member it
-   receives, with its own case. *)
+   [Keeper_turn_up_args.parse] reads the member it receives into the typed
+   mode, with its own case. *)
 let test_keeper_up_accepts_network_mode () =
   match
     Tool_input_validation.validate_args

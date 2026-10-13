@@ -30,7 +30,7 @@ type parsed_args =
             selects the parsed backend, only for a microvm profile. *)
   ; remote_endpoint_opt : string option
   ; remote_endpoint_present : bool
-  ; network_mode_opt : string option
+  ; network_mode_opt : network_mode option
   ; egress_allow_opt : string list option
         (** What this keeper may reach in the policy lane (RFC-0415), or
             [None] when the call did not say. Refused at parse time unless
@@ -127,14 +127,13 @@ val resolve_sandbox_profile :
     the field and the allowed values. *)
 
 val resolve_requested_network_mode :
-  requested:string option ->
+  requested:network_mode option ->
   sandbox_profile:sandbox_profile ->
   fallback:network_mode option ->
   (network_mode, string) result
-(** The network mode a keeper lands on. [requested] is the caller's raw
-    [network_mode] argument; an unparseable one is an [Error] naming every
-    accepted spelling, and [None] takes the keeper TOML's [fallback] first,
-    then the profile's own default.
+(** The network mode a keeper lands on. [requested] is the caller's
+    [network_mode] argument, already read by {!parse}; [None] takes the keeper
+    TOML's [fallback] first, then the profile's own default.
 
     A mode the profile cannot hold is an [Error] as well, from
     {!Keeper_types_profile_sandbox.network_mode_rejection}. Without it,

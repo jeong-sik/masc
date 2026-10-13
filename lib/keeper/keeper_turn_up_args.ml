@@ -23,7 +23,7 @@ type parsed_args = {
   microvm_backend_patch : Keeper_microvm_backend.t option option;
   remote_endpoint_opt : string option;
   remote_endpoint_present : bool;
-  network_mode_opt : string option;
+  network_mode_opt : network_mode option;
   egress_allow_opt : string list option;
   skill_names_opt : string list option;
   skill_names_present : bool;
@@ -215,9 +215,9 @@ let parse_max_context_override args =
    [network_mode] is the exception, and carries the empty string. "none"
    blocks the guest's network and "inherit" opens it; a form that suggests
    either makes that choice for an operator who is not reading it, which is
-   how a keeper built to search the web was created unable to. The empty
-   string is refused by name, so the form teaches the two spellings through
-   the rejection rather than deciding for the reader.
+   how a keeper built to search the web was created unable to. [parse]
+   refuses the empty string by name, so the form teaches every accepted
+   spelling through the rejection rather than deciding for the reader.
 
    [sandbox_image] follows the rule, not the exception (#37523): a docker
    keeper is refused without one, and the line the operator reads in the
@@ -318,6 +318,24 @@ let parse_sandbox_profile args =
   | Some _ -> Error "sandbox_profile must be a string"
 ;;
 
+(* An unparseable value is an error naming every accepted spelling, rendered
+   from [valid_network_mode_strings] rather than a hand-typed list, so a new
+   mode reaches the message without an edit here. *)
+let parse_network_mode args =
+  match Json_util.assoc_member_opt "network_mode" args with
+  | None -> Ok None
+  | Some (`String raw) ->
+    (match network_mode_of_string raw with
+     | Some mode -> Ok (Some mode)
+     | None ->
+       Error
+         (Printf.sprintf
+            "invalid network_mode: %S (expected: %s)"
+            raw
+            (String.concat ", " Keeper_types_profile.valid_network_mode_strings)))
+  | Some _ -> Error "network_mode must be a string"
+;;
+
 (* An explicit request wins over the TOML default. Neither source stating one
    returns [None]: omission is not a choice of isolation boundary, and callers
    report the missing field instead. *)
@@ -387,9 +405,11 @@ let parse
     match parse_sandbox_profile args with
     | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
     | Ok sandbox_profile_opt ->
+    match parse_network_mode args with
+    | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
+    | Ok network_mode_opt ->
     let max_context_override_res = parse_max_context_override args in
     let remote_endpoint_res = parse_remote_endpoint args in
-    let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
     let egress_allow_opt_res = parse_present_string_list_opt args "egress_allow" in
     let instructions_arg = get_string_opt args "instructions" in
     match
@@ -577,15 +597,13 @@ let parse
        the mode. *)
     let effective_network_mode =
       match network_mode_opt with
-      | Some mode -> Some (String.trim mode)
-      | None ->
-        Option.map
-          Keeper_types_profile_sandbox.network_mode_to_string
-          profile_defaults.network_mode
+      | Some _ -> network_mode_opt
+      | None -> profile_defaults.network_mode
     in
     (match egress_allow_opt, effective_network_mode with
-     | Some _, Some "policy" | None, _ -> Ok ()
-     | Some _, mode ->
+     | Some _, Some Network_policy
+     | None, (None | Some (Network_none | Network_inherit | Network_policy)) -> Ok ()
+     | Some _, ((None | Some (Network_none | Network_inherit)) as mode) ->
        Error
          (tool_result_error
             ~class_:Tool_result.Policy_rejection
@@ -593,7 +611,10 @@ let parse
                "egress_allow needs network_mode = \"policy\"; this keeper's mode \
                 is %s. An allowlist outside the policy lane is never consulted, \
                 so it is refused rather than stored."
-               (match mode with None -> "unset" | Some mode -> "\"" ^ mode ^ "\"")))
+               (match mode with
+                | None -> "unset"
+                | Some mode ->
+                  "\"" ^ Keeper_types_profile_sandbox.network_mode_to_string mode ^ "\"")))
      )
     |> Result.map (fun () ->
     {
@@ -642,19 +663,15 @@ let resolve_network_mode ~sandbox_profile ~fallback =
   |> Option.value ~default:(default_network_mode_for_profile sandbox_profile)
 
 
-(* Which network mode a keeper lands on, from the caller's raw argument, the
-   keeper TOML declaration, and the profile's own default. One function
+(* Which network mode a keeper lands on, from the caller's argument (read by
+   [parse]), the keeper TOML declaration, and the profile's own default. One function
    because create and update disagreed: update read the caller's value, create
    computed one from [profile_defaults] and dropped the caller's, so the same
    declaration produced a different keeper depending on whether the name
    already existed -- and the create side said nothing about the drop. A
    keeper created for web search landed on "none" and failed inside the guest.
 
-   An unparseable value is an error naming every accepted spelling, rendered
-   from [valid_network_mode_strings] rather than a hand-typed pair, so a third
-   mode reaches the message without an edit here.
-
-   A parseable value the profile cannot hold is an error too. Honouring the
+   A mode the profile cannot hold is an error too. Honouring the
    caller's mode without that check wrote [remote_ssh] with [network_mode =
    "none"] into a keeper TOML, which booted from the in-memory meta and
    reported success -- and was then refused by
@@ -669,12 +686,4 @@ let resolve_requested_network_mode ~requested ~sandbox_profile ~fallback =
   in
   match requested with
   | None -> accepted (resolve_network_mode ~sandbox_profile ~fallback)
-  | Some raw ->
-    (match network_mode_of_string raw with
-     | Some mode -> accepted mode
-     | None ->
-       Error
-         (Printf.sprintf
-            "invalid network_mode: %S (expected: %s)"
-            raw
-            (String.concat ", " Keeper_types_profile.valid_network_mode_strings)))
+  | Some mode -> accepted mode

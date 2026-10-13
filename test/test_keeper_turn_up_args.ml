@@ -2112,30 +2112,50 @@ let contains needle haystack =
 (* The form an operator edits and the parse that answers it drifted: the stem
    named two fields while [parse] required a third, so every keeper created
    through the TUI came back rejected and nothing failed until a human tried
-   it. Running the stem through [parse] moves that cost here. *)
-let test_the_creation_stem_is_a_declaration_parse_accepts () =
+   it. Running the stem through [parse] moves that cost here.
+
+   The stem leaves [network_mode] blank on purpose and [parse] refuses the
+   blank by name. So the check is that the blank is the only refusal: with a
+   mode filled in, [parse] accepts the rest of the stem. *)
+let test_the_creation_stem_is_refused_only_for_its_blank_network_mode () =
   with_test_context
   @@ fun ctx ->
-  let json =
+  let fields =
     match Yojson.Safe.from_string Keeper_turn_up_args.creation_stem with
-    | json -> json
+    | `Assoc fields -> fields
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      failf "the stem must be a JSON object"
     | exception Yojson.Json_error message ->
       failf "the stem must be JSON: %s" message
   in
-  match
-    Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx json
-  with
+  let parse fields =
+    Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx
+      (`Assoc fields)
+  in
+  (match parse fields with
+   | Ok _ -> failf "the stem's blank network_mode must be refused"
+   | Error result ->
+     check bool "the stem is refused for its network_mode" true
+       (contains "invalid network_mode"
+          (Keeper_types_profile.tool_result_body result)));
+  let filled =
+    List.map
+      (fun (key, value) ->
+         if String.equal key "network_mode" then key, `String "none" else key, value)
+      fields
+  in
+  match parse filled with
   | Ok _ -> ()
   | Error result ->
     failf
-      "the stem the form offers must be a declaration parse accepts: %s"
+      "the stem with a network_mode filled in must be a declaration parse accepts: %s"
       (Keeper_types_profile.tool_result_body result)
 ;;
 
 (* [network_mode] was resolved twice, and the two answers disagreed: update
    read the caller's argument, create computed one from [profile_defaults] and
    dropped the caller's. A keeper created for web search landed on "none" and
-   its operator edited the TOML by hand. The four cases below hold the shared
+   its operator edited the TOML by hand. The cases below hold the shared
    resolver to what both branches now need. *)
 let test_a_requested_network_mode_survives_the_fallback () =
   let module A = Keeper_turn_up_args in
@@ -2144,7 +2164,7 @@ let test_a_requested_network_mode_survives_the_fallback () =
     "the caller's inherit wins over a declared none"
     true
     (A.resolve_requested_network_mode
-       ~requested:(Some "inherit")
+       ~requested:(Some Keeper_types_profile_sandbox.Network_inherit)
        ~sandbox_profile:Keeper_types_profile_sandbox.Docker
        ~fallback:(Some Keeper_types_profile_sandbox.Network_none)
      = Ok Keeper_types_profile_sandbox.Network_inherit)
@@ -2172,24 +2192,38 @@ let test_an_absent_network_mode_takes_the_declared_fallback () =
      = Ok Keeper_types_profile_sandbox.Network_none)
 ;;
 
+(* [parse] reads the mode once and hands the typed value on, so create and
+   update never see a value it could not read. *)
 let test_a_network_mode_rejection_names_every_accepted_spelling () =
-  let module A = Keeper_turn_up_args in
-  match
-    A.resolve_requested_network_mode
-      ~requested:(Some "lan")
-      ~sandbox_profile:Keeper_types_profile_sandbox.Docker
-      ~fallback:None
-  with
-  | Ok _ -> failf "an unparseable network_mode must not resolve"
-  | Error message ->
-    List.iter
-      (fun spelling ->
-         check
-           bool
-           (Printf.sprintf "the rejection names %s" spelling)
-           true
-           (contains spelling message))
-      Keeper_types_profile_sandbox.valid_network_mode_strings
+  with_test_context
+  @@ fun ctx ->
+  let parse value =
+    parse_stating_a_profile ctx
+      (`Assoc [ "name", `String "network-mode-parse"; "network_mode", value ])
+  in
+  (match parse (`String "lan") with
+   | Ok _ -> failf "an unparseable network_mode must not resolve"
+   | Error result ->
+     let message = Keeper_types_profile.tool_result_body result in
+     check bool "the rejection says which field" true
+       (contains "invalid network_mode" message);
+     List.iter
+       (fun spelling ->
+          check
+            bool
+            (Printf.sprintf "the rejection names %s" spelling)
+            true
+            (contains spelling message))
+       Keeper_types_profile_sandbox.valid_network_mode_strings);
+  List.iter
+    (fun value ->
+       match parse value with
+       | Ok _ -> failf "a non-string network_mode must not be read as absent"
+       | Error result ->
+         check bool "the refusal says network_mode must be a string" true
+           (contains "network_mode must be a string"
+              (Keeper_types_profile.tool_result_body result)))
+    [ `Null; `Int 1 ]
 ;;
 
 (* The pair that a create wrote and the next config load refused. [remote_ssh]
@@ -2275,7 +2309,7 @@ let test_remote_ssh_refuses_a_network_mode_it_cannot_hold () =
   let module A = Keeper_turn_up_args in
   (match
      A.resolve_requested_network_mode
-       ~requested:(Some "none")
+       ~requested:(Some Keeper_types_profile_sandbox.Network_none)
        ~sandbox_profile:Keeper_types_profile_sandbox.Remote_ssh
        ~fallback:None
    with
@@ -2294,7 +2328,7 @@ let test_remote_ssh_refuses_a_network_mode_it_cannot_hold () =
     "remote_ssh with inherit resolves"
     true
     (A.resolve_requested_network_mode
-       ~requested:(Some "inherit")
+       ~requested:(Some Keeper_types_profile_sandbox.Network_inherit)
        ~sandbox_profile:Keeper_types_profile_sandbox.Remote_ssh
        ~fallback:None
      = Ok Keeper_types_profile_sandbox.Network_inherit);
@@ -2303,7 +2337,7 @@ let test_remote_ssh_refuses_a_network_mode_it_cannot_hold () =
     "docker with none resolves"
     true
     (A.resolve_requested_network_mode
-       ~requested:(Some "none")
+       ~requested:(Some Keeper_types_profile_sandbox.Network_none)
        ~sandbox_profile:Keeper_types_profile_sandbox.Docker
        ~fallback:None
      = Ok Keeper_types_profile_sandbox.Network_none)
@@ -2977,9 +3011,9 @@ let () =
             `Quick
             test_parse_requires_a_sandbox_profile
         ; test_case
-            "the creation stem is a declaration parse accepts"
+            "the creation stem is refused only for its blank network_mode"
             `Quick
-            test_the_creation_stem_is_a_declaration_parse_accepts
+            test_the_creation_stem_is_refused_only_for_its_blank_network_mode
         ; test_case
             "the schema does not promise a default parse refuses"
             `Quick

@@ -2647,6 +2647,34 @@ let test_provider_retry_progress_owner () =
     (Transcript.model_activity t = settled)
 ;;
 
+let test_terminal_reasoning_cannot_replace_response_state () =
+  List.iter (fun ending ->
+    let t = fresh () in
+    feed t [Live.Run_started;
+      Live.Stream_model_started { generation=Some 1; stream_scope=Some 0;
+        message_id=Some "response-one"; model="observed-model"; usage=None };
+      Live.Thinking { text="observed reasoning";
+        response=Some { Masc.Keeper_chat_events.response_generation=1; response_scope=0 } };
+      reply_details ~reply:"committed answer" (); ending];
+    let metadata = Transcript.response_metadata t in
+    let activity = Transcript.model_activity t in
+    let reply = Transcript.reply t in
+    let thinking = Transcript.thinking t in
+    check (option string) "initial observed model exists" (Some "observed-model") metadata.model;
+    check (option (pair int int)) "initial metadata owner exists" (Some (1, 0)) metadata.owner;
+    check (option string) "initial committed reply exists" (Some "committed answer")
+      (Option.map (fun (reply : Transcript.reply) -> reply.reply_text) reply);
+    check string "initial reasoning exists" "observed reasoning" thinking;
+    feed t [Live.Thinking { text="late newer reasoning";
+      response=Some { Masc.Keeper_chat_events.response_generation=2; response_scope=1 } };
+      Live.Thinking { text="late unowned reasoning"; response=None }];
+    check bool "terminal metadata ownership is unchanged" true (metadata = Transcript.response_metadata t);
+    check bool "terminal activity is unchanged" true (activity = Transcript.model_activity t);
+    check bool "committed reply is unchanged" true (reply = Transcript.reply t);
+    check string "reasoning bytes are unchanged" thinking (Transcript.thinking t)
+  ) [Live.Run_finished; Live.Run_failed { message="failed" }]
+;;
+
 let () =
   run "tui_keeper_chat_transcript"
     [ ( "provider retry ownership", [test_case "retry progress requires current runtime attempt" `Quick test_provider_retry_progress_owner] )
@@ -2778,7 +2806,9 @@ let () =
             test_a_fold_reports_the_outcome_its_marker_stands_for
         ;] )
     ; ( "terminal safety"
-      , [ test_case "control bytes never reach the pane" `Quick
+      , [ test_case "terminal reasoning preserves response state" `Quick
+            test_terminal_reasoning_cannot_replace_response_state
+        ; test_case "control bytes never reach the pane" `Quick
             test_control_bytes_never_reach_the_pane
         ] )
     ; ( "held calls"

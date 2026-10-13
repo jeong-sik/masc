@@ -303,7 +303,7 @@ let test_autonomous_progress_journal_matches_direct_projection () =
       let log = Log.create_for_source ~keeper_name:"fixture" ~source:(Log.Autonomous_turn turn_ref) ~started_at:0. in
       ignore (Log.add_journaled log before);
       match T.tool_calls (T.of_log ~now:2000. log) with
-      | [call] -> check (option int) "autonomous replay retains byte sum" (Some 6)
+      | [call] -> check (option int) "turn journal read-back retains byte sum" (Some 6)
           (Option.bind call.native_progress (fun value -> value.output_bytes))
       | _ -> fail "native autonomous row lost"))
 

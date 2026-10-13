@@ -25,7 +25,8 @@ let with_execution_surface f =
 (* A failure of the kind that ends an attempt. Only its string form reaches
    the surface, so the key inside it is not the production key under test. *)
 let a_failure_that_ends_an_attempt () =
-  Dashboard_cache.Compute_timeout ("the attempt's key", false)
+  Dashboard_cache.Compute_timeout
+    { key = "the attempt's key"; role = Dashboard_cache.Compute_owner }
 ;;
 
 let surface () = Server_dashboard_http_cache.snapshot Execution.execution_cache

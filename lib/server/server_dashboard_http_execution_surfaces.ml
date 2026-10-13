@@ -1633,7 +1633,8 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
      | Ok json -> json
      | Error `Timeout ->
        let exn =
-         Dashboard_cache.Compute_timeout (execution_default_light_cache_key, false)
+         Dashboard_cache.Compute_timeout
+           { key = execution_default_light_cache_key; role = Dashboard_cache.Compute_owner }
        in
        publish_failure exn;
        Log.Dashboard.warn

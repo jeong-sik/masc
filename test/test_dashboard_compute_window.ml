@@ -37,7 +37,7 @@ let test_a_compute_that_finished_as_the_window_closed_is_the_answer () =
   Eio.Promise.resolve finish "the payload";
   match Eio.Promise.await running with
   | Ok payload -> check string "the payload that was computed is the answer" "the payload" payload
-  | Error (Cache.Compute_timeout (key, _)) ->
+  | Error (Cache.Compute_timeout { key; _ }) ->
     failf "a payload computed as the window closed was reported as a timeout on %S" key
   | Error exn -> raise exn
 ;;
@@ -53,9 +53,11 @@ let test_a_compute_that_never_finishes_is_a_timeout () =
   in
   Eio_mock.Clock.set_time clock window_s;
   match Eio.Promise.await running with
-  | Error (Cache.Compute_timeout (timed_out_key, waiting)) ->
+  | Error (Cache.Compute_timeout { key = timed_out_key; role }) ->
     check string "the timeout names its key" key timed_out_key;
-    check bool "the owner timed out, not a waiter" false waiting
+    (match role with
+     | Cache.Compute_owner -> ()
+     | Cache.Compute_waiter -> fail "a waiter timed out, but the owner's own window closed")
   | Ok () -> fail "nothing was computed, yet the window did not end the compute"
   | Error exn -> raise exn
 ;;

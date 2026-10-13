@@ -1,7 +1,7 @@
 (** [masc://wiki/<topic>] resolves a topic against the wiki listing.
 
     The topic arrives from the client's URI. Before this suite it was
-    concatenated onto [docs/wiki] and read, so [wiki/../<name>]
+    concatenated onto the wiki directory and read, so [wiki/../<name>]
     reached a file outside the wiki directory. *)
 
 let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
@@ -55,14 +55,14 @@ let with_wiki ?(documents = []) f =
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
-       let wiki_dir = Filename.concat (Filename.concat dir "docs") "wiki" in
-       Unix.mkdir (Filename.concat dir "docs") 0o755;
+       let wiki_dir = Lib.Tool_wiki.wiki_root ~base_path:dir in
+       Unix.mkdir (Filename.dirname wiki_dir) 0o755;
        Unix.mkdir wiki_dir 0o755;
        write (Filename.concat wiki_dir "topic.md") "# Topic\n\nin the wiki.\n";
        List.iter
          (fun (name, body) -> write (Filename.concat wiki_dir name) body)
          documents;
-       (* A sibling of docs/, reachable only by climbing out of the wiki. *)
+       (* A sibling of .masc/, reachable only by climbing out of the wiki. *)
        write (Filename.concat dir "outside.md") "NOT-A-WIKI-PAGE\n";
        Eio_main.run
        @@ fun env ->
@@ -256,7 +256,7 @@ let () =
             `Quick
             test_blocking_resource_io_uses_systhread
         ; test_case
-            "a topic cannot climb out of docs/wiki"
+            "a topic cannot climb out of the wiki directory"
             `Quick
             test_topic_cannot_climb_out_of_the_wiki
         ; test_case

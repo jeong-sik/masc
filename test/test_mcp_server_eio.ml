@@ -2954,11 +2954,10 @@ let test_handle_request_resources_read_matrix () =
   let ensure_dir path =
     if not (Sys.file_exists path) then Unix.mkdir path 0o755
   in
-  let wiki_dir = Filename.concat base_path "docs/wiki" in
+  let wiki_dir = Masc.Tool_wiki.wiki_root ~base_path in
   let masc_dir = Filename.concat base_path Common.masc_dirname in
-  ensure_dir (Filename.concat base_path "docs");
-  ensure_dir wiki_dir;
   ensure_dir masc_dir;
+  ensure_dir wiki_dir;
   write_text_file (Filename.concat wiki_dir "alpha.md")
     {|---
 title: Alpha Doc

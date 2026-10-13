@@ -81,7 +81,7 @@ title = "Event Log (JSON)"
 description = "Recent valid JSON workspace event log entries"
 mime_type = "application/json"
 
-# Wiki - pages in <base_path>/docs/wiki
+# Wiki - pages in <base_path>/.masc/wiki
 [[resources]]
 uri = "masc://wiki"
 name = "Wiki Index"

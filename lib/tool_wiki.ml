@@ -1,6 +1,6 @@
 (** Tool_wiki - Wiki operations
 
-    Manages the pages at [<base>/docs/wiki/<page>.md]
+    Manages the pages at [<base>/.masc/wiki/<page>.md]
     - The writer names the page; the name is the file name and never changes
     - Every page carries a [source] from [wiki_source]
     - YAML frontmatter records who wrote the page, when, why, a one-line
@@ -135,8 +135,7 @@ type context = {
 
 (* Paths. [base_path] is the workspace the caller already resolved, the same
    one every other tool in the request reads. *)
-let wiki_root ~base_path =
-  Filename.concat base_path "docs/wiki"
+let wiki_root ~base_path = Config_dir_resolver.wiki_dir ~base_path
 
 (* YAML frontmatter parsing. Every field a writer sets and a reader projects
    is required: a page missing one does not read, rather than reading as an

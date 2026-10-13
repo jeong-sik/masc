@@ -136,12 +136,29 @@ let failure ?job_id ~effect_disposition class_ message =
   | Some job_id -> Keeper_tool_execution.failure_data ~class_ ~effect_disposition
       ~message (`Assoc ["job_id", `String (Store.Job_id.to_string job_id)])
 
-let finish ~job_id = function
-  | Ok record -> Keeper_tool_execution.success_data (Store.result_json record)
+let finish ~tool_name ~start_time ~job_id = function
+  | Ok (record : Store.record) ->
+      let retained_artifacts = match record.outputs with
+        | None -> []
+        | Some (stdout, stderr) -> [stdout; stderr] in
+      let result = Tool_result.make_ok ~tool_name ~start_time
+          ~data:(Store.result_json record) ()
+        |> Tool_result.with_retained_artifacts retained_artifacts in
+      (match Tool_bridge.attach_artifact_manifest
+          ~projection:Tool_output.Inline_with_structured_diagnostic
+          ~base_path:record.base_path result with
+       | Ok result -> Keeper_tool_execution.of_tool_result result
+       | Error error -> failure ~job_id
+           ~effect_disposition:Tool_result.Effect_outcome_unknown
+           Tool_result.Runtime_failure
+           ("Job result manifest publication failed; the durable job handle is retained. "
+            ^ "Read keeper_job_status for the same job_id; do not start a replacement job. "
+            ^ error.Tool_bridge.message))
   | Error error -> failure ~job_id ~effect_disposition:Tool_result.Effect_outcome_unknown
       Tool_result.Runtime_failure (Store.error_to_string error)
 
 let handle ~config ~meta ~source_context ~tool_use_id ~turn_ref ~trace_id ~name ~args =
+  let start_time = Tool_timing.start () in
   let invalid message = failure ~effect_disposition:Tool_result.Proven_pre_effect
       Tool_result.Policy_rejection message in
   match Tool_schemas_owned_job.find_definition name with
@@ -176,7 +193,7 @@ let handle ~config ~meta ~source_context ~tool_use_id ~turn_ref ~trace_id ~name 
            (match prepare () with
             | Error error -> failure ~job_id ~effect_disposition:Tool_result.Proven_pre_effect
                 Tool_result.Runtime_failure (Store.error_to_string error)
-            | Ok record -> finish ~job_id (launch record)))
+            | Ok record -> finish ~tool_name:name ~start_time ~job_id (launch record)))
   | Some {action=(Tool_schemas_owned_job.Status | Tool_schemas_owned_job.Cancel) as action;_} ->
       (match job_argument args with
        | Error detail -> invalid detail
@@ -191,4 +208,4 @@ let handle ~config ~meta ~source_context ~tool_use_id ~turn_ref ~trace_id ~name 
                         ~cancel_requested:true ~outputs:record.outputs ~detail:record.detail
                     | Tool_schemas_owned_job.Status -> Ok record
                     | Tool_schemas_owned_job.Start -> Error (Store.Invalid_authority "start is not reconciliation") in
-                  reconcile record in finish ~job_id result))
+                  reconcile record in finish ~tool_name:name ~start_time ~job_id result))

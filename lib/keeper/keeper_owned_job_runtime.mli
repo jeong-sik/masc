@@ -1,5 +1,7 @@
 (** Actual descriptor-backed isolated job producer. Launch/start intent is
-    durable before effects; status reconciles the exact saved backend handle. *)
+    durable before effects; status reconciles the exact saved backend handle.
+    Published output references retain their typed artifacts and a durable
+    manifest, with the job result available under the existing inline ceiling. *)
 val handle :
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
   source_context:Keeper_tool_call_log_context.turn_context option ->

@@ -497,6 +497,39 @@ let test_tool_result_requires_nonblank_canonical_identity () =
           (occurrence_fields ~call_id:(Some "call-9") ()
            @ [ "executionId", `String " " ])))
 
+let test_tool_transcript_commit_reads_without_a_view () =
+  (* The exact value Server_keeper_chat_agui_projection writes for
+     Tool_transcript_committed, and the shapes it never writes. *)
+  let commit value = sse (custom "KEEPER_TOOL_TRANSCRIPT_COMMITTED" value) |> feed_whole in
+  let delivery_key =
+    `Assoc [ "kind", `String "operation"; "operation_id", `String "kmsg-1" ]
+  in
+  let value ?(fields = []) () =
+    `Assoc
+      ([ "deliveryKey", delivery_key
+       ; "executionId", `String "exec-1"
+       ; "ordinal", `Int 0
+       ]
+       @ fields)
+  in
+  check (list delta) "the committed binding draws nothing and is not undecodable" []
+    (commit (value ()));
+  let rejected description value =
+    match commit value with
+    | [ Live.Undecodable _ ] -> ()
+    | other ->
+      failf "%s: expected one undecodable delta, got [%s]" description
+        (String.concat "; " (List.map delta_to_string other))
+  in
+  rejected "an extra field" (value ~fields:[ "extra", `Bool true ] ());
+  rejected "a null value" `Null;
+  rejected "a blank execution id"
+    (`Assoc [ "deliveryKey", delivery_key; "executionId", `String " "; "ordinal", `Int 0 ]);
+  rejected "a negative ordinal"
+    (`Assoc [ "deliveryKey", delivery_key; "executionId", `String "exec-1"; "ordinal", `Int (-1) ]);
+  rejected "an unreadable delivery key"
+    (`Assoc [ "deliveryKey", `String "kmsg-1"; "executionId", `String "exec-1"; "ordinal", `Int 0 ])
+
 let test_protocol_error_carries_only_the_quarantined_occurrence () =
   let value =
     `Assoc
@@ -908,6 +941,8 @@ let () =
             test_missing_field_names_the_event
         ; test_case "tool result requires canonical identity" `Quick
             test_tool_result_requires_nonblank_canonical_identity
+        ; test_case "tool transcript commit reads without a view" `Quick
+            test_tool_transcript_commit_reads_without_a_view
         ; test_case "protocol error carries quarantined occurrence" `Quick
             test_protocol_error_carries_only_the_quarantined_occurrence
         ; test_case "a run error with no message still fails" `Quick

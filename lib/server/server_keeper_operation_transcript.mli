@@ -4,6 +4,21 @@ type settlement =
   | Runtime_deferred
   | Reply of string
   | Request_failed of string
+val tool_delivery_key :
+  operation_id:Keeper_chat_delivery_identity.Request_id.t ->
+  resumed_from:Keeper_semantic_execution.gate_checkpoint option ->
+  (Keeper_chat_delivery_identity.delivery_key, string) result
+(** Same resolver for append ownership and post-append publication. *)
+
+val committed_tool_events :
+  operation_id:Keeper_chat_delivery_identity.Request_id.t ->
+  resumed_from:Keeper_semantic_execution.gate_checkpoint option ->
+  Keeper_chat_store.tool_call list ->
+  (Keeper_chat_events.keeper_chat_event list, string) result
+(** One commit event per call that has an execution identity, under the key
+    {!persist} appended those rows with. Call it only after {!persist}
+    succeeded for the same arguments. *)
+
 val persist : base_dir:string -> keeper_name:string ->
   operation_id:Keeper_chat_delivery_identity.Request_id.t ->
   resumed_from:Keeper_semantic_execution.gate_checkpoint option -> settlement:settlement ->

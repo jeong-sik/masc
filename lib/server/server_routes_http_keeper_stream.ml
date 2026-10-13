@@ -1913,13 +1913,16 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     match submission with
     | Owner_operation { extra_mentions; _ } -> extra_mentions
   in
-  let queue_delivery_key () =
+  let queue_operation_id () =
     match submission with
     | Owner_operation { operation_id; _ } ->
       Keeper_chat_delivery_identity.Request_id.of_string
         (Keeper_owner.Chat_operation.Operation_id.to_string operation_id)
-      |> Result.map (fun operation_id ->
-        Keeper_chat_delivery_identity.Operation operation_id)
+  in
+  let queue_delivery_key () =
+    queue_operation_id ()
+    |> Result.map (fun operation_id ->
+      Keeper_chat_delivery_identity.Operation operation_id)
   in
   let pending_direct_continuation () =
     match submission with
@@ -2148,6 +2151,16 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
   in
   (* [err] is [Keeper_request_failure.summary] of the cause its producer
      built. The row still carries text; RFC-0454 D3 gives it the value. *)
+  let publish_tool_transcript_bindings tool_calls =
+    let ( let* ) = Result.bind in
+    let* resumed_from = resumed_from in
+    let* operation_id = queue_operation_id () in
+    let* events =
+      Server_keeper_operation_transcript.committed_tool_events ~operation_id ~resumed_from tool_calls
+    in
+    List.iter (fun event -> push_worker_event (Stream_chat_event event)) events;
+    Ok ()
+  in
   let persist_failure_reply ?blocks ?turn_ref err =
     (* The failure marker is typed, not an utterance: it renders for the
        operator but does not advance the lane watermark, so the user
@@ -2171,14 +2184,14 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     let persisted =
       append_queued_request_failure_once ~tool_calls ?blocks ?turn_ref content
     in
-    Result.iter
-      (fun () ->
-         Keeper_chat_broadcast.chat_appended
-           ~keeper_name:payload.name ~source:chat_source
-           ~content:(persisted_error_reply err)
-           ())
-      persisted;
-    persisted
+    Result.bind persisted (fun () ->
+      Result.map
+        (fun () ->
+           Keeper_chat_broadcast.chat_appended
+             ~keeper_name:payload.name ~source:chat_source
+             ~content:(persisted_error_reply err)
+             ())
+        (publish_tool_transcript_bindings tool_calls))
   in
   let run_turn request_sw =
     let start_time = Tool_timing.start () in
@@ -2380,9 +2393,12 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                      committed_delivery_outcome ~turn_ref persisted
                    with
                    | Ok queued_outcome ->
-                       Keeper_chat_broadcast.chat_appended
-                         ~keeper_name:payload.name ~source:chat_source ?content ();
-                       Ok (Some queued_outcome)
+                       Result.map
+                         (fun () ->
+                            Keeper_chat_broadcast.chat_appended
+                              ~keeper_name:payload.name ~source:chat_source ?content ();
+                            Some queued_outcome)
+                         (publish_tool_transcript_bindings tool_calls)
                    | Error _ as error -> error
                  in
                  let turn_outcome = canonical_reply.turn_outcome in
@@ -2423,14 +2439,14 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                            Result.bind
                              (persist_tool_calls_only ())
                              (fun () ->
-                                Keeper_chat_broadcast.chat_appended
-                                  ~keeper_name:payload.name
-                                  ~source:chat_source
-                                  ();
-                                Ok
-                                  (Some
-                                     (queued_delivery_outcome_of_turn_ref
-                                        turn_ref))))
+                                Result.map
+                                  (fun () ->
+                                     Keeper_chat_broadcast.chat_appended
+                                       ~keeper_name:payload.name
+                                       ~source:chat_source
+                                       ();
+                                     Some (queued_delivery_outcome_of_turn_ref turn_ref))
+                                  (publish_tool_transcript_bindings tool_calls)))
                    | Keeper_turn_outcome.No_visible_reply, _
                    | Keeper_turn_outcome.Visible_reply, None ->
                        (match
@@ -2444,11 +2460,14 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                           Result.bind
                             (persist_tool_calls_only ())
                             (fun () ->
-                               Keeper_chat_broadcast.chat_appended
-                                 ~keeper_name:payload.name
-                                 ~source:chat_source
-                                 ();
-                               Ok (Some (queued_delivery_outcome_of_turn_ref turn_ref)))
+                               Result.map
+                                 (fun () ->
+                                    Keeper_chat_broadcast.chat_appended
+                                      ~keeper_name:payload.name
+                                      ~source:chat_source
+                                      ();
+                                    Some (queued_delivery_outcome_of_turn_ref turn_ref))
+                                 (publish_tool_transcript_bindings tool_calls))
                         | `Failure ->
                           let failure =
                             { Keeper_request_failure.cause =

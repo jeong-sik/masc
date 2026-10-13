@@ -269,3 +269,12 @@ export function decodeKeeperChatDeliveryProvenance(
     ? { status: 'valid', value: { delivery_key, transcript_slot } }
     : { status: 'invalid', value: null }
 }
+
+/** An operation's continuation slots retain their exact storage key while
+ * their live events are observed through that operation's journal. */
+export function toolDeliveryBelongsToProducer(producer: KeeperChatDeliveryKey, stored: KeeperChatDeliveryKey): boolean {
+  if (sameDeliveryKey(producer, stored)) return true
+  return producer.kind === 'operation'
+    && (stored.kind === 'operation_checkpoint' || stored.kind === 'operation_native')
+    && producer.operation_id === stored.operation_id
+}

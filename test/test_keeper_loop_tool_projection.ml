@@ -107,6 +107,8 @@ let test_continuation_rows_land_once () =
         ~turn_failed:false
     in
     check int "a clean stream quarantines nothing" 0 (List.length persisted.P.quarantined);
+    check int "a delivery-only row has no execution to commit" 0
+      (List.length persisted.P.committed_ownerships);
     (match persisted.P.outcome with
      | P.Projected (K.Appended _) -> ()
      | P.Projected (K.Already_present _) -> fail "first append reported as already present"
@@ -292,6 +294,65 @@ let test_a_second_turn_under_the_same_approval_is_not_interleaved () =
        fail (Printf.sprintf "expected the first turn's row only, got %d" (List.length rows))))
 ;;
 
+(* An approval turn whose call carries a producer-bound execution identity:
+   the row is owned by that execution, the append reports the ownership, and a
+   later turn under the same approval reads the owned row as already present
+   instead of appending beside it. *)
+let test_an_owned_row_is_reported_and_blocks_a_second_turn () =
+  with_base_dir "keeper-loop-projection-owned" (fun base_dir ->
+    let execution_id = Ids.Execution_id.of_string "exec-owned-1" in
+    let t = P.create () in
+    P.on_event t (start ~index:0 ~tool_id:"call-1" ~tool_name:"Edit");
+    P.on_event t (json_snapshot ~index:0 {|{"path":"lib/a.ml"}|});
+    P.on_event t (stop ~index:0);
+    P.on_tool_stream_observation t
+      (H.Official_tool_result { block_index = 0; tool_call_id = "call-1"; execution_id });
+    P.on_tool_stream_observation t (turn_collected [ 0 ]);
+    let key = approval_key "approval-8" in
+    let persisted =
+      P.persist_continuation t ~base_dir ~keeper_name ~approval_id:"approval-8" ~turn_ref
+        ~turn_failed:false
+    in
+    (match persisted.P.outcome with
+     | P.Projected (K.Appended _) -> ()
+     | P.Projected (K.Already_present _) -> fail "first append reported as already present"
+     | P.Nothing_to_project -> fail "an owned call projected nothing"
+     | P.Projection_dropped reason -> fail (P.drop_reason_to_string reason));
+    (match persisted.P.committed_ownerships with
+     | [ (delivery_key, ownership) ] ->
+       check bool "ownership is under the approval" true
+         (Keeper_chat_delivery_identity.delivery_key_equal key delivery_key);
+       check bool "ownership names the execution" true
+         (Ids.Execution_id.equal execution_id ownership.K.execution_id);
+       check int "ownership position" 0 ownership.K.ordinal
+     | other ->
+       fail (Printf.sprintf "expected one ownership, got %d" (List.length other)));
+    let second = P.create () in
+    P.on_event second (start ~index:0 ~tool_id:"call-2" ~tool_name:"Read");
+    P.on_event second (json_snapshot ~index:0 {|{"path":"lib/b.ml"}|});
+    P.on_event second (stop ~index:0);
+    P.on_tool_stream_observation second
+      (H.Official_tool_result
+         { block_index = 0
+         ; tool_call_id = "call-2"
+         ; execution_id = Ids.Execution_id.of_string "exec-owned-2"
+         });
+    P.on_tool_stream_observation second (turn_collected [ 0 ]);
+    let later =
+      P.persist_continuation second ~base_dir ~keeper_name ~approval_id:"approval-8"
+        ~turn_ref:(Ids.Turn_ref.make ~trace_id:"trace-fixture" ~absolute_turn:9)
+        ~turn_failed:false
+    in
+    (match later.P.outcome with
+     | P.Projected (K.Already_present _) -> ()
+     | P.Projected (K.Appended _) -> fail "a second turn appended beside an owned row"
+     | P.Nothing_to_project -> fail "the second turn reported no rows"
+     | P.Projection_dropped reason -> fail (P.drop_reason_to_string reason));
+    check int "a row that was not appended commits nothing" 0
+      (List.length later.P.committed_ownerships);
+    check int "still the first turn's row" 1 (List.length (K.load ~base_dir ~keeper_name)))
+;;
+
 let () =
   run
     "keeper_loop_tool_projection"
@@ -312,6 +373,8 @@ let () =
             test_a_quarantined_row_is_reported
         ; test_case "a second turn under the same approval is not interleaved" `Quick
             test_a_second_turn_under_the_same_approval_is_not_interleaved
+        ; test_case "an owned row is reported and blocks a second turn" `Quick
+            test_an_owned_row_is_reported_and_blocks_a_second_turn
         ] )
     ]
 ;;

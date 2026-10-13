@@ -313,9 +313,9 @@ let prepare_keeper_name fixture name =
     ignore (Generic.ensure_board_post fixture.generic);
   if
     List.mem name
-      [ "keeper_library_search"; "keeper_library_read" ]
+      [ "keeper_wiki_search"; "keeper_wiki_read" ]
   then
-    ignore (Generic.ensure_library_topic fixture.generic);
+    ignore (Generic.ensure_wiki_topic fixture.generic);
   if
     List.mem name
       [ "keeper_task_claim"; "keeper_tasks_list"; "keeper_tasks_audit";
@@ -464,10 +464,10 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       `Assoc [ ("timeout_seconds", `Float 1.0) ]
   | "keeper_voice_session_start" ->
       `Assoc [ ("session_name", `String "tool-matrix") ]
-  | "keeper_library_search" ->
+  | "keeper_wiki_search" ->
       `Assoc [ ("query", `String "tool matrix") ]
-  | "keeper_library_read" ->
-      `Assoc [ ("topic", `String (Generic.ensure_library_topic fixture.generic)) ]
+  | "keeper_wiki_read" ->
+      `Assoc [ ("topic", `String (Generic.ensure_wiki_topic fixture.generic)) ]
   | "keeper_surface_read" -> `Assoc [ ("surface", `String "dashboard") ]
   | "keeper_surface_post" ->
       `Assoc

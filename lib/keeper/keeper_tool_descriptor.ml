@@ -113,8 +113,8 @@ type runtime_handler =
   | Tool_constitution_write
   | Tool_constitution_read
   | Tool_constitution_remove
-  | Tool_library_search
-  | Tool_library_read
+  | Tool_wiki_search
+  | Tool_wiki_read
   | Tool_surface_read
   | Tool_surface_post
   | Tool_person_note_set
@@ -148,7 +148,7 @@ type runtime_handler =
   | Tool_masc_fusion_status
   | Tool_masc_fusion_decision
   | Tool_masc_file_dispatch
-  | Tool_masc_library_dispatch
+  | Tool_masc_wiki_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image
 
@@ -247,8 +247,8 @@ let runtime_handler_to_string = function
   | Tool_constitution_write -> "tool_constitution_write"
   | Tool_constitution_read -> "tool_constitution_read"
   | Tool_constitution_remove -> "tool_constitution_remove"
-  | Tool_library_search -> "tool_library_search"
-  | Tool_library_read -> "tool_library_read"
+  | Tool_wiki_search -> "tool_wiki_search"
+  | Tool_wiki_read -> "tool_wiki_read"
   | Tool_surface_read -> "tool_surface_read"
   | Tool_surface_post -> "tool_surface_post"
   | Tool_person_note_set -> "tool_person_note_set"
@@ -282,7 +282,7 @@ let runtime_handler_to_string = function
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
   | Tool_masc_fusion_decision -> "tool_masc_fusion_decision"
   | Tool_masc_file_dispatch -> "tool_masc_file_dispatch"
-  | Tool_masc_library_dispatch -> "tool_masc_library_dispatch"
+  | Tool_masc_wiki_dispatch -> "tool_masc_wiki_dispatch"
   | Tool_masc_local_runtime_dispatch -> "tool_masc_local_runtime_dispatch"
   | Tool_analyze_image -> "tool_analyze_image"
 ;;
@@ -503,8 +503,8 @@ let descriptor
       | Tool_workspace_memory_read
       | Tool_memory_search
       | Tool_memory_select
-      | Tool_library_search
-      | Tool_library_read
+      | Tool_wiki_search
+      | Tool_wiki_read
       | Tool_surface_read
       | Tool_person_note_set
       | Tool_ide_annotate
@@ -535,7 +535,7 @@ let descriptor
       | Tool_masc_fusion_status
       | Tool_masc_fusion_decision
       | Tool_masc_file_dispatch
-      | Tool_masc_library_dispatch
+      | Tool_masc_wiki_dispatch
       | Tool_masc_local_runtime_dispatch
       | Tool_analyze_image ) -> Ordinary ordinary_execution_mode
   in
@@ -1314,20 +1314,16 @@ let keeper_capability_search_schema =
   | None -> invalid_arg "missing base tool schema for keeper_capability_search"
 ;;
 
-(* Declared twice until now: here and in the library shard, whose file is
-   config/tools/keeper_library_*.toml. The parameters agreed to a full stop,
-   but the tool descriptions did not -- this side said "Search the keeper
-   library catalog." while the shard said what the tool returns (titles,
-   relevance scores, snippets) and what to pair it with. The model received
-   the thin one. The shard is now the one declaration. *)
-let shard_library_schema name =
-  match find_schema_opt Tool_shard_types.library_tools name with
+(* The keeper_wiki_* schemas are declared once, in the wiki shard
+   (config/tools/keeper_wiki_*.toml). This file reads them from there. *)
+let shard_wiki_schema name =
+  match find_schema_opt Tool_shard_types.wiki_tools name with
   | Some schema -> schema
-  | None -> failwith (Printf.sprintf "library shard is missing %s" name)
+  | None -> failwith (Printf.sprintf "wiki shard is missing %s" name)
 ;;
 
-let library_search = shard_library_schema "keeper_library_search"
-let library_read = shard_library_schema "keeper_library_read"
+let wiki_search = shard_wiki_schema "keeper_wiki_search"
+let wiki_read = shard_wiki_schema "keeper_wiki_read"
 
 let shard_surface_schema name =
   match find_schema_opt Tool_shard_types.surface_tools name with
@@ -2372,19 +2368,19 @@ let masc_keeper_descriptor
     ()
 ;;
 
-(* A library tool reaches the Keeper under the file's [keeper_projection]
-   when the file declares one (masc_library_list names its siblings by the
+(* A wiki tool reaches the Keeper under the file's [keeper_projection]
+   when the file declares one (masc_wiki_list names its siblings by the
    keeper_* names a Keeper can call) and under the catalog row otherwise. *)
-let masc_library_descriptor (definition : Tool_schemas_library.definition) =
+let masc_wiki_descriptor (definition : Tool_schemas_wiki.definition) =
   let schema = definition.schema in
   let keeper_model_projection =
     match definition.operation with
-    | Tool_schemas_library.List_documents -> Internal_name
-    | Tool_schemas_library.Read_document ->
-      Transport_alias { projected_by = "keeper_library_read" }
-    | Tool_schemas_library.Search_documents ->
-      Transport_alias { projected_by = "keeper_library_search" }
-    | Tool_schemas_library.Add_document -> Internal_name
+    | Tool_schemas_wiki.List_pages -> Internal_name
+    | Tool_schemas_wiki.Read_page ->
+      Transport_alias { projected_by = "keeper_wiki_read" }
+    | Tool_schemas_wiki.Search_pages ->
+      Transport_alias { projected_by = "keeper_wiki_search" }
+    | Tool_schemas_wiki.Add_page -> Internal_name
   in
   let input_schema_source, description, input_schema =
     match definition.keeper_projection with
@@ -2393,32 +2389,32 @@ let masc_library_descriptor (definition : Tool_schemas_library.definition) =
     | None -> Canonical_registry, schema.description, schema.input_schema
   in
   (* List, read and search are directory listing plus whole-file reads in
-     Tool_library, which holds no shared mutable state -- the same ground the
-     keeper_library_* pair already stands on. Matched on the closed operation
+     Tool_wiki, which holds no shared mutable state -- the same ground the
+     keeper_wiki_* pair already stands on. Matched on the closed operation
      so a new read stays Serial until it is audited like these were. *)
   let ordinary_execution_mode =
-    match (definition : Tool_schemas_library.definition).operation with
-    | Tool_schemas_library.List_documents
-    | Tool_schemas_library.Read_document
-    | Tool_schemas_library.Search_documents -> Concurrent
-    | Tool_schemas_library.Add_document -> Serial
+    match (definition : Tool_schemas_wiki.definition).operation with
+    | Tool_schemas_wiki.List_pages
+    | Tool_schemas_wiki.Read_page
+    | Tool_schemas_wiki.Search_pages -> Concurrent
+    | Tool_schemas_wiki.Add_page -> Serial
   in
   cluster_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection
     ~input_schema_source
     ~input_schema
-    ~id:("masc.library." ^ Tool_schemas_library.operation_id definition.operation)
+    ~id:("masc.wiki." ^ Tool_schemas_wiki.operation_id definition.operation)
     ~name:schema.name
     ~description
-    ~handler:Tool_masc_library_dispatch
+    ~handler:Tool_masc_wiki_dispatch
     ~ordinary_execution_mode
     ~readonly:definition.read_only
     ()
 ;;
 
-let masc_library_descriptors =
-  List.map masc_library_descriptor Tool_schemas_library.definitions
+let masc_wiki_descriptors =
+  List.map masc_wiki_descriptor Tool_schemas_wiki.definitions
 ;;
 
 let masc_local_runtime_descriptor
@@ -2666,28 +2662,28 @@ let internal_descriptors : t list =
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_constitution_read
       ()
-    (* ── library (RFC-0179 PR-3) ──────────────────────────────── *)
+    (* ── wiki ─────────────────────────────────────────────────── *)
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name
-      ~id:"keeper.library.search"
-      ~name:"keeper_library_search"
-      ~description:library_search.Masc_domain.description
-      ~input_schema:library_search.Masc_domain.input_schema
+      ~id:"keeper.wiki.search"
+      ~name:"keeper_wiki_search"
+      ~description:wiki_search.Masc_domain.description
+      ~input_schema:wiki_search.Masc_domain.input_schema
       (* Concurrent: directory listing + whole-file reads in
-         Tool_library; no shared mutable state on the search path. *)
+         Tool_wiki; no shared mutable state on the search path. *)
       ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
-      ~handler:Tool_library_search
+      ~handler:Tool_wiki_search
       ()
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name
-      ~id:"keeper.library.read"
-      ~name:"keeper_library_read"
-      ~description:library_read.Masc_domain.description
-      ~input_schema:library_read.Masc_domain.input_schema
+      ~id:"keeper.wiki.read"
+      ~name:"keeper_wiki_read"
+      ~description:wiki_read.Masc_domain.description
+      ~input_schema:wiki_read.Masc_domain.input_schema
       ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
-      ~handler:Tool_library_read
+      ~handler:Tool_wiki_read
       ()
     (* ── connector surfaces (RFC-0223 P3) ─────────────────────── *)
   ; (in_process_descriptor
@@ -3173,7 +3169,7 @@ let internal_descriptors : t list =
       ~readonly:false
   ]
   @ masc_board_descriptors
-  @ masc_library_descriptors
+  @ masc_wiki_descriptors
   @ masc_local_runtime_descriptors
 ;;
 

@@ -381,7 +381,7 @@ type module_tag =
   | Mod_agent | Mod_task | Mod_state
   | Mod_control | Mod_agent_timeline | Mod_schedule | Mod_spawn
   | Mod_code_query | Mod_misc
-  | Mod_library | Mod_external
+  | Mod_wiki | Mod_external
   | Mod_inline
   | Mod_keeper_task
 ```

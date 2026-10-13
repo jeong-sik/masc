@@ -17,7 +17,7 @@
  (wrapped false)
  (private_modules
   tool_shard_types_schemas_filesystem_toml
-  tool_shard_types_schemas_library_toml
+  tool_shard_types_schemas_wiki_toml
   tool_shard_types_schemas_execute_toml
   tool_shard_types_schemas_taskboard_toml
   tool_shard_types_schemas_base_toml
@@ -29,7 +29,7 @@
   tool_shard_types_board_keeper_projection
   tool_shard_types_schemas_execute
   tool_shard_types_schemas_filesystem
-  tool_shard_types_schemas_library
+  tool_shard_types_schemas_wiki
   tool_shard_types_schemas_surface
   tool_shard_types_schemas_search_files
   tool_shard_types_schemas_taskboard

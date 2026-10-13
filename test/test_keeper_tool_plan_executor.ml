@@ -613,11 +613,11 @@ let test_static_input_rejection_runs_no_node () =
       Plan.create
         ~descriptors:
           [ canonical_descriptor "keeper_memory_search"
-          ; canonical_descriptor "keeper_library_search"
+          ; canonical_descriptor "keeper_wiki_search"
           ; canonical_descriptor "masc_board_search"
           ]
         [ search ~id:"memory" ~tool:"keeper_memory_search" "EACCES"
-        ; search ~after ~id:"library" ~tool:"keeper_library_search" "EACCES"
+        ; search ~after ~id:"wiki" ~tool:"keeper_wiki_search" "EACCES"
         ; search ~after ~id:"board" ~tool:"masc_board_search" over_the_board_bound
         ]
     with
@@ -630,7 +630,7 @@ let test_static_input_rejection_runs_no_node () =
      check
        (list string)
        "the searches after it share the next batch"
-       [ "board"; "library" ]
+       [ "board"; "wiki" ]
        (List.map (fun (scheduled : Executor.scheduled_node) -> node_name scheduled.node)
           concurrent
         |> List.sort String.compare)

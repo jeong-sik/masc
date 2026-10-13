@@ -4,11 +4,11 @@
     Handles resources/read JSON-RPC method for MASC resources.
 *)
 
-(* The library resource ids. The topic form carries the separator so a name
-   like [libraryfoo] is not read as the topic [oo]. *)
-let library_index_id = "library"
-let library_index_json_id = "library.json"
-let library_topic_prefix = "library/"
+(* The wiki resource ids. The topic form carries the separator so a name
+   like [wikifoo] is not read as the topic [foo]. *)
+let wiki_index_id = "wiki"
+let wiki_index_json_id = "wiki.json"
+let wiki_topic_prefix = "wiki/"
 
 let make_response = Mcp_transport_protocol.make_response
 let make_error = Mcp_transport_protocol.make_error
@@ -193,12 +193,12 @@ let handle_read_resource_eio state id params =
               let json = read_events_json ~limit in
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
           | s
-            when s = library_index_id
-                 || s = library_index_json_id
-                 || String.starts_with s ~prefix:library_topic_prefix ->
+            when s = wiki_index_id
+                 || s = wiki_index_json_id
+                 || String.starts_with s ~prefix:wiki_topic_prefix ->
               run_blocking_resource_io (fun () ->
                 let base_path = config.base_path in
-                let library_dir = Tool_library.library_root ~base_path in
+                let wiki_dir = Tool_wiki.wiki_root ~base_path in
                 (* Trimmed here, not in the parser. The three readers this
                    replaced disagreed: prompt_registry kept the body verbatim
                    and this one trimmed it. Frontmatter.parse follows the
@@ -210,13 +210,13 @@ let handle_read_resource_eio state id params =
                   String.trim (Frontmatter.parse content).Frontmatter.body
                 in
                 let is_json, topic =
-                  if s = library_index_json_id then (true, "")
-                  else if s = library_index_id then (false, "")
+                  if s = wiki_index_json_id then (true, "")
+                  else if s = wiki_index_id then (false, "")
                   else
                     (* Past the prefix, not past a hardcoded 8: the guard above
-                       matched [library_topic_prefix], and the two lengths have
+                       matched [wiki_topic_prefix], and the two lengths have
                        to be the same number. *)
-                    let prefix_len = String.length library_topic_prefix in
+                    let prefix_len = String.length wiki_topic_prefix in
                     let rest =
                       String.sub s prefix_len (String.length s - prefix_len)
                     in
@@ -224,61 +224,61 @@ let handle_read_resource_eio state id params =
                       (true, Filename.chop_suffix rest ".json")
                     else (false, rest)
                 in
-                if not (Sys.file_exists library_dir) then
+                if not (Sys.file_exists wiki_dir) then
                   if topic <> "" then ("text/plain", None)
                   else if is_json then
                     ("application/json", Some (Yojson.Safe.to_string
                       (`Assoc [ ("documents", `List []); ("count", `Int 0) ])))
-                  else ("text/markdown", Some "Library is empty.")
+                  else ("text/markdown", Some "Wiki is empty.")
                 else begin
                 let topic_of path = Filename.chop_suffix (Filename.basename path) ".md" in
-                let uri_of path = "masc://library/" ^ topic_of path in
-                (* The same header rules as the library tools: a document that
+                let uri_of path = "masc://wiki/" ^ topic_of path in
+                (* The same header rules as the wiki tools: a document that
                    does not read is named with its reason, never given a title
                    or a source it does not have. A file that vanishes between
                    the listing and the read is left out, as the tools do. *)
                 let read_documents () =
-                  Tool_library.list_documents ~base_path
+                  Tool_wiki.list_pages ~base_path
                   |> List.filter_map (fun path ->
                     match Fs_compat.load_file path with
-                    | content -> Some (path, Tool_library.parse_frontmatter content)
+                    | content -> Some (path, Tool_wiki.parse_frontmatter content)
                     | exception Sys_error _ -> None)
                 in
-                let metadata_fields (fm : Tool_library.frontmatter) =
+                let metadata_fields (fm : Tool_wiki.frontmatter) =
                   [ ("title", `String fm.title)
-                  ; ("source", `String (Tool_library.source_to_string fm.source))
+                  ; ("source", `String (Tool_wiki.source_to_string fm.source))
                   ; ("author", `String fm.author)
                   ; ("created", `String fm.created)
                   ; ("tags", `List (List.map (fun t -> `String t) fm.tags))
                   ]
                 in
                 let unreadable_fields error =
-                  [ ("unreadable", `String (Tool_library.frontmatter_error_to_string error)) ]
+                  [ ("unreadable", `String (Tool_wiki.frontmatter_error_to_string error)) ]
                 in
                 (* [topic] arrives from the client's URI. Resolving it against
-                   the listing rather than concatenating it onto [library_dir]
+                   the listing rather than concatenating it onto [wiki_dir]
                    means a topic like [../../secrets] has nothing to match:
                    readdir never returns a name with a separator in it. *)
-                let library_doc_path topic =
+                let wiki_page_path topic =
                   let want = topic ^ ".md" in
                   List.find_opt
                     (fun path -> String.equal (Filename.basename path) want)
-                    (Tool_library.list_documents ~base_path)
+                    (Tool_wiki.list_pages ~base_path)
                 in
                 if topic = "" && not is_json then begin
                   let entries = List.map (fun (path, header) ->
                     match header with
-                    | Ok (fm : Tool_library.frontmatter) ->
+                    | Ok (fm : Tool_wiki.frontmatter) ->
                       let tag_str = if fm.tags = [] then ""
                         else " -- " ^ String.concat ", " (List.map (fun t -> "`" ^ t ^ "`") fm.tags) in
                       Printf.sprintf "- **%s** -- `%s` (%s)%s" fm.title (uri_of path)
-                        (Tool_library.source_to_string fm.source) tag_str
+                        (Tool_wiki.source_to_string fm.source) tag_str
                     | Error error ->
                       Printf.sprintf "- %s -- `%s`"
-                        (Tool_library.describe_unreadable path error) (uri_of path)
+                        (Tool_wiki.describe_unreadable path error) (uri_of path)
                   ) (read_documents ()) in
-                  let body = if entries = [] then "Library is empty."
-                    else "# Library Index\n\n" ^ String.concat "\n" entries ^ "\n"
+                  let body = if entries = [] then "Wiki is empty."
+                    else "# Wiki index\n\n" ^ String.concat "\n" entries ^ "\n"
                   in
                   ("text/markdown", Some body)
                 end else if topic = "" && is_json then begin
@@ -298,11 +298,11 @@ let handle_read_resource_eio state id params =
                   ] in
                   ("application/json", Some (Yojson.Safe.to_string json))
                 end else if is_json then begin
-                  match library_doc_path topic with
+                  match wiki_page_path topic with
                   | Some path -> begin
                     let raw = Fs_compat.load_file path in
                     let described =
-                      match Tool_library.parse_frontmatter raw with
+                      match Tool_wiki.parse_frontmatter raw with
                       | Ok fm -> metadata_fields fm
                       | Error error -> unreadable_fields error
                     in
@@ -315,7 +315,7 @@ let handle_read_resource_eio state id params =
                   end
                   | None -> ("application/json", None)
                 end else begin
-                  match library_doc_path topic with
+                  match wiki_page_path topic with
                   | Some path ->
                     let content = Fs_compat.load_file path in
                     ("text/markdown", Some content)

@@ -545,21 +545,21 @@ let handle_browser_act_with_outcome ~turn_sandbox_factory ~(config : Workspace.c
   | _ -> invoke ()
 ;;
 
-let handle_library_search_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
+let handle_wiki_search_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
   Keeper_tool_execution.of_tool_result
-    (Tool_library.handle_search
-       ~tool_name:"keeper_library_search"
+    (Tool_wiki.handle_search
+       ~tool_name:"keeper_wiki_search"
        ~start_time:(Tool_timing.start ())
-       Tool_library.{ base_path = config.base_path; agent_name = meta.name }
+       Tool_wiki.{ base_path = config.base_path; agent_name = meta.name }
        args)
 ;;
 
-let handle_library_read_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
+let handle_wiki_read_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
   Keeper_tool_execution.of_tool_result
-    (Tool_library.handle_read
-       ~tool_name:"keeper_library_read"
+    (Tool_wiki.handle_read
+       ~tool_name:"keeper_wiki_read"
        ~start_time:(Tool_timing.start ())
-       Tool_library.{ base_path = config.base_path; agent_name = meta.name }
+       Tool_wiki.{ base_path = config.base_path; agent_name = meta.name }
        args)
 ;;
 

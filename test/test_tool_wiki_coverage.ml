@@ -1,14 +1,14 @@
-(** Coverage tests for Tool_library — Knowledge library management
+(** Coverage tests for Tool_wiki — Wiki page management
 
     Tests dispatch routing, input validation, and handler integration
-    for 4 tools: masc_library_list, masc_library_read, masc_library_add,
-    masc_library_search
+    for 4 tools: masc_wiki_list, masc_wiki_read, masc_wiki_add,
+    masc_wiki_search
 
-    The library lives under the context's [base_path]; each test hands the
+    The wiki lives under the context's [base_path]; each test hands the
     tools a temp directory as that workspace.
 *)
 
-module Tool_library = Masc.Tool_library
+module Tool_wiki = Masc.Tool_wiki
 
 let msg_contains ~needle haystack =
   let lc = String.lowercase_ascii haystack in
@@ -20,7 +20,7 @@ let required_schema name =
   match
     List.find_opt
       (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
-      Tool_library.schemas
+      Tool_wiki.schemas
   with
   | Some schema -> schema
   | None -> Alcotest.failf "missing schema for %s" name
@@ -64,7 +64,7 @@ let test_counter = ref 0
 let temp_dir () =
   incr test_counter;
   let dir = Filename.temp_file
-    (Printf.sprintf "test_library_%d_" !test_counter) "" in
+    (Printf.sprintf "test_wiki_%d_" !test_counter) "" in
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
   dir
@@ -79,10 +79,10 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-(* The library takes its workspace from the context, never from the process
+(* The wiki takes its workspace from the context, never from the process
    environment. The suite still points MASC_BASE_PATH at a scratch directory of
    its own: a regression that reads the variable again then writes there, where
-   [test_library_follows_context_base_path] looks, and not into the live
+   [test_wiki_follows_context_base_path] looks, and not into the live
    workspace a developer's shell exports. *)
 let decoy_base_path =
   let dir = temp_dir () in
@@ -90,55 +90,55 @@ let decoy_base_path =
   at_exit (fun () -> cleanup_dir dir);
   dir
 
-(** Create the expected library directory structure under a temp base path. *)
-let setup_library_dirs base_path =
+(** Create the expected wiki directory structure under a temp base path. *)
+let setup_wiki_dirs base_path =
   let docs_dir = Filename.concat base_path "docs" in
-  let lib_dir = Filename.concat docs_dir "library" in
+  let lib_dir = Filename.concat docs_dir "wiki" in
   Unix.mkdir docs_dir 0o755;
   Unix.mkdir lib_dir 0o755;
   lib_dir
 
-(** Run a test function with a temporary workspace containing library dirs. *)
-let with_temp_base_path ?(prepare_library=true) f =
+(** Run a test function with a temporary workspace containing wiki dirs. *)
+let with_temp_base_path ?(prepare_wiki=true) f =
   let base_path = temp_dir () in
-  if prepare_library then ignore (setup_library_dirs base_path);
-  let ctx : Tool_library.context = { base_path; agent_name = "test-agent" } in
+  if prepare_wiki then ignore (setup_wiki_dirs base_path);
+  let ctx : Tool_wiki.context = { base_path; agent_name = "test-agent" } in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () -> f ctx)
 
-let library_documents (ctx : Tool_library.context) =
-  let root = Tool_library.library_root ~base_path:ctx.base_path in
+let wiki_pages (ctx : Tool_wiki.context) =
+  let root = Tool_wiki.wiki_root ~base_path:ctx.base_path in
   if Sys.file_exists root
   then
     Sys.readdir root |> Array.to_list
     |> List.filter (fun f -> Filename.check_suffix f ".md")
   else []
 
-let write_library_document (ctx : Tool_library.context) ~filename body =
+let write_wiki_page (ctx : Tool_wiki.context) ~filename body =
   let path =
-    Filename.concat (Tool_library.library_root ~base_path:ctx.base_path) filename
+    Filename.concat (Tool_wiki.wiki_root ~base_path:ctx.base_path) filename
   in
   Out_channel.with_open_text path (fun oc -> Out_channel.output_string oc body)
 
 let dispatch_exn ctx ~name ~args =
-  match Tool_library.dispatch ctx ~name ~args with
+  match Tool_wiki.dispatch ctx ~name ~args with
   | Some result -> ((Tool_result.is_success result), (Tool_result.message result))
   | None -> failwith ("dispatch returned None for " ^ name)
 
 let test_add_on_fresh_base () =
   List.iter (fun title ->
-    with_temp_base_path ~prepare_library:false (fun ctx ->
-      Alcotest.(check bool) "library initially absent" false
-        (Sys.file_exists (Tool_library.library_root ~base_path:ctx.base_path));
-      let ok, _ = dispatch_exn ctx ~name:"masc_library_add"
+    with_temp_base_path ~prepare_wiki:false (fun ctx ->
+      Alcotest.(check bool) "wiki initially absent" false
+        (Sys.file_exists (Tool_wiki.wiki_root ~base_path:ctx.base_path));
+      let ok, _ = dispatch_exn ctx ~name:"masc_wiki_add"
           ~args:(`Assoc ["title", `String title; "content", `String "fresh base evidence";
                          "source", `String "experiment"]) in
       Alcotest.(check bool) "first add succeeds" true ok;
-      let ok, content = dispatch_exn ctx ~name:"masc_library_read"
+      let ok, content = dispatch_exn ctx ~name:"masc_wiki_read"
           ~args:(`Assoc ["topic", `String title]) in
-      Alcotest.(check bool) "saved document readable" true ok;
+      Alcotest.(check bool) "saved page readable" true ok;
       Alcotest.(check bool) "exact content retained" true
         (String_util.contains_substring content "fresh base evidence")))
-    ["Fresh library"; "새 도서관"]
+    ["Fresh wiki"; "새 위키"]
 
 (* ============================================================
    Dispatch routing tests
@@ -146,40 +146,40 @@ let test_add_on_fresh_base () =
 
 let test_dispatch_unknown () =
   with_temp_base_path (fun ctx ->
-    let result = Tool_library.dispatch ctx ~name:"unknown_tool" ~args:(`Assoc []) in
+    let result = Tool_wiki.dispatch ctx ~name:"unknown_tool" ~args:(`Assoc []) in
     Alcotest.(check bool) "unknown returns None" true (result = None)
   )
 
 let test_dispatch_all_known () =
   with_temp_base_path (fun ctx ->
     let tools = [
-      "masc_library_list"; "masc_library_read"; "masc_library_add";
-      "masc_library_search";
+      "masc_wiki_list"; "masc_wiki_read"; "masc_wiki_add";
+      "masc_wiki_search";
     ] in
     List.iter (fun name ->
-      let result = Tool_library.dispatch ctx ~name ~args:(`Assoc []) in
+      let result = Tool_wiki.dispatch ctx ~name ~args:(`Assoc []) in
       Alcotest.(check bool) (name ^ " dispatches") true (result <> None)
     ) tools
   )
 
 (* ============================================================
-   library_list tests
+   wiki_list tests
    ============================================================ *)
 
 let test_list_empty () =
   with_temp_base_path (fun ctx ->
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_list" ~args:(`Assoc []) in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_list" ~args:(`Assoc []) in
     Alcotest.(check bool) "list ok" true ok;
-    Alcotest.(check bool) "response mentions library" true (msg_contains ~needle:"librar" msg)
+    Alcotest.(check bool) "response mentions the wiki" true (msg_contains ~needle:"wiki" msg)
   )
 
 (* ============================================================
-   library_read tests
+   wiki_read tests
    ============================================================ *)
 
 let test_read_empty_topic () =
   with_temp_base_path (fun ctx ->
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_read" ~args:(`Assoc []) in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_read" ~args:(`Assoc []) in
     Alcotest.(check bool) "empty topic fails" false ok;
     Alcotest.(check bool) "error mentions topic" true (msg_contains ~needle:"topic" msg)
   )
@@ -187,13 +187,13 @@ let test_read_empty_topic () =
 let test_read_nonexistent_topic () =
   with_temp_base_path (fun ctx ->
     let args = `Assoc [("topic", `String "nonexistent_topic")] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_read" ~args in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_read" ~args in
     Alcotest.(check bool) "nonexistent fails" false ok;
     Alcotest.(check bool) "error mentions not found" true
       (msg_contains ~needle:"not found" msg || msg_contains ~needle:"no" msg)
   )
 
-(* The list -> read contract: masc_library_list surfaces the frontmatter title,
+(* The list -> read contract: masc_wiki_list surfaces the frontmatter title,
    so reading back that exact title must resolve the document. Before the fix,
    read matched only the slug filename (which drops the title's spaces, colons,
    and case), so a title query never matched. *)
@@ -205,10 +205,10 @@ let test_read_by_title_roundtrip () =
       ("content", `String "Body of the document for round-trip.");
       ("source", `String "direct_experience");
     ] in
-    let (added, _) = dispatch_exn ctx ~name:"masc_library_add" ~args:add_args in
+    let (added, _) = dispatch_exn ctx ~name:"masc_wiki_add" ~args:add_args in
     Alcotest.(check bool) "add succeeds" true added;
     let read_args = `Assoc [("topic", `String title)] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_read" ~args:read_args in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_read" ~args:read_args in
     Alcotest.(check bool) "read by exact title succeeds" true ok;
     Alcotest.(check bool) "returns the body" true
       (msg_contains ~needle:"Body of the document" msg)
@@ -216,13 +216,13 @@ let test_read_by_title_roundtrip () =
 
 let test_read_by_title_case_insensitive_partial () =
   with_temp_base_path (fun ctx ->
-    let _ = dispatch_exn ctx ~name:"masc_library_add" ~args:(`Assoc [
+    let _ = dispatch_exn ctx ~name:"masc_wiki_add" ~args:(`Assoc [
       ("title", `String "Root Cause: Orphan Count Analysis");
       ("content", `String "details about orphan counting");
       ("source", `String "observation");
     ]) in
     let read_args = `Assoc [("topic", `String "root cause: orphan count")] in
-    let (ok, _) = dispatch_exn ctx ~name:"masc_library_read" ~args:read_args in
+    let (ok, _) = dispatch_exn ctx ~name:"masc_wiki_read" ~args:read_args in
     Alcotest.(check bool) "case-insensitive partial title match" true ok
   )
 
@@ -230,24 +230,24 @@ let test_read_by_title_case_insensitive_partial () =
    replace filename matching. *)
 let test_read_by_slug_still_works () =
   with_temp_base_path (fun ctx ->
-    let _ = dispatch_exn ctx ~name:"masc_library_add" ~args:(`Assoc [
+    let _ = dispatch_exn ctx ~name:"masc_wiki_add" ~args:(`Assoc [
       ("title", `String "Slug Query Doc");
       ("content", `String "slug body");
       ("source", `String "research");
     ]) in
     let read_args = `Assoc [("topic", `String "slug-query")] in
-    let (ok, _) = dispatch_exn ctx ~name:"masc_library_read" ~args:read_args in
+    let (ok, _) = dispatch_exn ctx ~name:"masc_wiki_read" ~args:read_args in
     Alcotest.(check bool) "slug substring still matches" true ok
   )
 
 (* ============================================================
-   library_add tests
+   wiki_add tests
    ============================================================ *)
 
 let test_add_missing_title () =
   with_temp_base_path (fun ctx ->
     let args = `Assoc [("content", `String "some content")] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_add" ~args in
     Alcotest.(check bool) "missing title fails" false ok;
     Alcotest.(check bool) "error mentions title" true (msg_contains ~needle:"title" msg)
   )
@@ -255,7 +255,7 @@ let test_add_missing_title () =
 let test_add_missing_content () =
   with_temp_base_path (fun ctx ->
     let args = `Assoc [("title", `String "test doc")] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_add" ~args in
     Alcotest.(check bool) "missing content fails" false ok;
     Alcotest.(check bool) "error mentions content" true (msg_contains ~needle:"content" msg)
   )
@@ -267,7 +267,7 @@ let test_add_invalid_source () =
       ("content", `String "some content");
       ("source", `String "invalid_source_type");
     ] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_add" ~args in
     Alcotest.(check bool) "invalid source fails" false ok;
     Alcotest.(check bool) "mentions source" true (msg_contains ~needle:"source" msg)
   )
@@ -281,36 +281,36 @@ let test_add_missing_source () =
       ("title", `String "unsourced doc");
       ("content", `String "some content");
     ] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_add" ~args in
     Alcotest.(check bool) "missing source fails" false ok;
     Alcotest.(check bool) "names the missing field" true
       (msg_contains ~needle:"source is required" msg);
-    Alcotest.(check (list string)) "no document written" [] (library_documents ctx)
+    Alcotest.(check (list string)) "no document written" [] (wiki_pages ctx)
   )
 
 (* The reader requires [author], so the writer refuses a caller with no name
-   instead of writing a document the library then reports as unreadable. *)
+   instead of writing a page the wiki then reports as unreadable. *)
 let test_add_with_blank_author_is_refused () =
   with_temp_base_path (fun ctx ->
-    let ctx = { ctx with Tool_library.agent_name = "  " } in
+    let ctx = { ctx with Tool_wiki.agent_name = "  " } in
     let args = `Assoc [
       ("title", `String "unsigned doc");
       ("content", `String "some content");
       ("source", `String "research");
     ] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_add" ~args in
     Alcotest.(check bool) "blank author fails" false ok;
     Alcotest.(check bool) "names the author" true
       (msg_contains ~needle:"no agent name" msg);
-    Alcotest.(check (list string)) "no document written" [] (library_documents ctx)
+    Alcotest.(check (list string)) "no document written" [] (wiki_pages ctx)
   )
 
-(* The library is the caller's workspace, not whatever MASC_BASE_PATH the
+(* The wiki is the caller's workspace, not whatever MASC_BASE_PATH the
    process happens to hold. *)
-let test_library_follows_context_base_path () =
+let test_wiki_follows_context_base_path () =
   with_temp_base_path (fun ctx ->
     let (ok, _) =
-      dispatch_exn ctx ~name:"masc_library_add"
+      dispatch_exn ctx ~name:"masc_wiki_add"
         ~args:(`Assoc [
           ("title", `String "Workspace Doc");
           ("content", `String "body");
@@ -319,20 +319,20 @@ let test_library_follows_context_base_path () =
     in
     Alcotest.(check bool) "add succeeds" true ok;
     Alcotest.(check int) "written under the context workspace" 1
-      (List.length (library_documents ctx));
+      (List.length (wiki_pages ctx));
     Alcotest.(check bool) "nothing under MASC_BASE_PATH" false
-      (Sys.file_exists (Tool_library.library_root ~base_path:decoy_base_path)))
+      (Sys.file_exists (Tool_wiki.wiki_root ~base_path:decoy_base_path)))
 
 let test_add_success () =
   with_temp_base_path (fun ctx ->
     let args = `Assoc [
       ("title", `String "test knowledge");
-      ("content", `String "This is test content for library.");
+      ("content", `String "This is test content for the wiki.");
       ("source", `String "direct_experience");
     ] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_add" ~args in
     Alcotest.(check bool) "add succeeds" true ok;
-    Alcotest.(check bool) "response confirms add" true (msg_contains ~needle:"added" msg || msg_contains ~needle:"success" msg || msg_contains ~needle:"librar" msg)
+    Alcotest.(check bool) "response confirms add" true (msg_contains ~needle:"added" msg || msg_contains ~needle:"success" msg || msg_contains ~needle:"wiki" msg)
   )
 
 let test_add_with_tags () =
@@ -343,24 +343,24 @@ let test_add_with_tags () =
       ("source", `String "direct_experience");
       ("tags", `List [`String "ocaml"; `String "testing"]);
     ] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_add" ~args in
     Alcotest.(check bool) "add with tags" true ok;
-    Alcotest.(check bool) "response confirms add" true (msg_contains ~needle:"added" msg || msg_contains ~needle:"success" msg || msg_contains ~needle:"librar" msg)
+    Alcotest.(check bool) "response confirms add" true (msg_contains ~needle:"added" msg || msg_contains ~needle:"success" msg || msg_contains ~needle:"wiki" msg)
   )
 
 (* ============================================================
-   library_search tests
+   wiki_search tests
    ============================================================ *)
 
 let test_search_empty_query () =
   with_temp_base_path (fun ctx ->
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_search" ~args:(`Assoc []) in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_search" ~args:(`Assoc []) in
     Alcotest.(check bool) "empty query fails" false ok;
     Alcotest.(check bool) "error mentions query" true (msg_contains ~needle:"query" msg)
   )
 
 let test_search_schema_allows_runtime_query_rejection () =
-  let schema = required_schema "masc_library_search" in
+  let schema = required_schema "masc_wiki_search" in
   Alcotest.(check bool)
     "query property remains documented"
     true
@@ -373,7 +373,7 @@ let test_search_schema_allows_runtime_query_rejection () =
 let test_search_with_query () =
   with_temp_base_path (fun ctx ->
     let args = `Assoc [("query", `String "test")] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_search" ~args in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_search" ~args in
     (* Succeeds even with no results *)
     Alcotest.(check bool) "search ok" true ok;
     Alcotest.(check bool) "response is substantive" true (String.length msg > 5)
@@ -381,7 +381,7 @@ let test_search_with_query () =
 
 
 let test_add_schema_has_no_confidence () =
-  let schema = required_schema "masc_library_add" in
+  let schema = required_schema "masc_wiki_add" in
   Alcotest.(check bool)
     "confidence is not an input property"
     false
@@ -396,7 +396,7 @@ let test_add_schema_has_no_confidence () =
 let test_added_frontmatter_carries_only_observable_fields () =
   with_temp_base_path (fun ctx ->
     let (added, _) =
-      dispatch_exn ctx ~name:"masc_library_add"
+      dispatch_exn ctx ~name:"masc_wiki_add"
         ~args:(`Assoc [
           ("title", `String "Frontmatter Shape");
           ("content", `String "body");
@@ -404,9 +404,9 @@ let test_added_frontmatter_carries_only_observable_fields () =
         ])
     in
     Alcotest.(check bool) "add succeeds" true added;
-    let root = Tool_library.library_root ~base_path:ctx.base_path in
+    let root = Tool_wiki.wiki_root ~base_path:ctx.base_path in
     let path =
-      match library_documents ctx with
+      match wiki_pages ctx with
       | [ single ] -> Filename.concat root single
       | other ->
         Alcotest.failf "expected exactly one document, got %d" (List.length other)
@@ -437,7 +437,7 @@ let unknown_source_note =
 let test_unknown_source_is_named_not_passed_through () =
   with_temp_base_path (fun ctx ->
     let (added, _) =
-      dispatch_exn ctx ~name:"masc_library_add"
+      dispatch_exn ctx ~name:"masc_wiki_add"
         ~args:(`Assoc [
           ("title", `String "Readable Doc");
           ("content", `String "shared marker");
@@ -445,11 +445,11 @@ let test_unknown_source_is_named_not_passed_through () =
         ])
     in
     Alcotest.(check bool) "add succeeds" true added;
-    write_library_document ctx ~filename:"hand-written.md"
+    write_wiki_page ctx ~filename:"hand-written.md"
       "---\ntitle: Hand Written\nsource: operation\nauthor: codex\n---\n\nshared marker\n";
-    write_library_document ctx ~filename:"no-source.md"
+    write_wiki_page ctx ~filename:"no-source.md"
       "---\ntitle: No Source\nauthor: codex\n---\n\nshared marker\n";
-    let (ok, listing) = dispatch_exn ctx ~name:"masc_library_list" ~args:(`Assoc []) in
+    let (ok, listing) = dispatch_exn ctx ~name:"masc_wiki_list" ~args:(`Assoc []) in
     Alcotest.(check bool) "list ok" true ok;
     Alcotest.(check bool) "readable document shows its source" true
       (msg_contains ~needle:"**Readable Doc** (research, test-agent" listing);
@@ -460,14 +460,14 @@ let test_unknown_source_is_named_not_passed_through () =
     Alcotest.(check bool) "absent source named" true
       (msg_contains ~needle:"- no-source.md (no source in frontmatter)" listing);
     let (ok, results) =
-      dispatch_exn ctx ~name:"masc_library_search"
+      dispatch_exn ctx ~name:"masc_wiki_search"
         ~args:(`Assoc [ ("query", `String "shared marker") ])
     in
     Alcotest.(check bool) "search ok" true ok;
     Alcotest.(check bool) "search names the unknown source" true
       (msg_contains ~needle:("- hand-written.md (" ^ unknown_source_note ^ ")") results);
     let (ok, body) =
-      dispatch_exn ctx ~name:"masc_library_read"
+      dispatch_exn ctx ~name:"masc_wiki_read"
         ~args:(`Assoc [ ("topic", `String "hand-written") ])
     in
     Alcotest.(check bool) "read by filename ok" true ok;
@@ -484,15 +484,15 @@ let test_unknown_source_is_named_not_passed_through () =
    non-ASCII source is quoted as written rather than as escaped bytes. *)
 let test_header_that_does_not_read_names_its_reason () =
   with_temp_base_path (fun ctx ->
-    write_library_document ctx ~filename:"no-title.md"
+    write_wiki_page ctx ~filename:"no-title.md"
       "---\nsource: research\nauthor: codex\ncreated: 2026-09-22\ntags: []\n---\n\nbody\n";
-    write_library_document ctx ~filename:"empty-author.md"
+    write_wiki_page ctx ~filename:"empty-author.md"
       "---\ntitle: Empty Author\nsource: research\nauthor:\ncreated: 2026-09-22\ntags: []\n---\n\nbody\n";
-    write_library_document ctx ~filename:"unclosed.md"
+    write_wiki_page ctx ~filename:"unclosed.md"
       "---\ntitle: Unclosed\nsource: research\nauthor: codex\n\nbody\n";
-    write_library_document ctx ~filename:"korean-source.md"
+    write_wiki_page ctx ~filename:"korean-source.md"
       "---\ntitle: Korean Source\nsource: 연구\nauthor: codex\ncreated: 2026-09-22\ntags: []\n---\n\nbody\n";
-    let (ok, listing) = dispatch_exn ctx ~name:"masc_library_list" ~args:(`Assoc []) in
+    let (ok, listing) = dispatch_exn ctx ~name:"masc_wiki_list" ~args:(`Assoc []) in
     Alcotest.(check bool) "list ok" true ok;
     Alcotest.(check bool) "missing title named" true
       (msg_contains ~needle:"- no-title.md (no title in frontmatter)" listing);
@@ -516,19 +516,19 @@ let test_full_workflow () =
       ("content", `String "Knowledge about OCaml testing patterns.");
       ("source", `String "direct_experience");
     ] in
-    let (ok1, _) = dispatch_exn ctx ~name:"masc_library_add" ~args:add_args in
+    let (ok1, _) = dispatch_exn ctx ~name:"masc_wiki_add" ~args:add_args in
     Alcotest.(check bool) "add succeeds" true ok1;
     (* Step 2: List documents *)
-    let (ok2, msg2) = dispatch_exn ctx ~name:"masc_library_list" ~args:(`Assoc []) in
+    let (ok2, msg2) = dispatch_exn ctx ~name:"masc_wiki_list" ~args:(`Assoc []) in
     Alcotest.(check bool) "list succeeds" true ok2;
     Alcotest.(check bool) "list has content" true (String.length msg2 > 0);
     (* Step 3: Search *)
     let search_args = `Assoc [("query", `String "OCaml")] in
-    let (ok3, _) = dispatch_exn ctx ~name:"masc_library_search" ~args:search_args in
+    let (ok3, _) = dispatch_exn ctx ~name:"masc_wiki_search" ~args:search_args in
     Alcotest.(check bool) "search succeeds" true ok3;
     (* Step 4: Read the document *)
     let read_args = `Assoc [("topic", `String "workflow-test")] in
-    let (ok4, msg4) = dispatch_exn ctx ~name:"masc_library_read" ~args:read_args in
+    let (ok4, msg4) = dispatch_exn ctx ~name:"masc_wiki_read" ~args:read_args in
     (* May fail if filename convention differs — just check dispatch *)
     ignore ok4;
     Alcotest.(check bool) "read has response" true (String.length msg4 > 0)
@@ -539,26 +539,26 @@ let test_full_workflow () =
    ============================================================ *)
 
 let () =
-  Alcotest.run "Tool_library" [
+  Alcotest.run "Tool_wiki" [
     ("dispatch", [
       Alcotest.test_case "unknown returns None" `Quick test_dispatch_unknown; Alcotest.test_case "all known tools dispatch" `Quick test_dispatch_all_known;
     ]);
-    ("library_list", [
+    ("wiki_list", [
       Alcotest.test_case "empty list" `Quick test_list_empty;
     ]);
-    ("library_read", [
+    ("wiki_read", [
       Alcotest.test_case "empty topic" `Quick test_read_empty_topic; Alcotest.test_case "nonexistent topic" `Quick test_read_nonexistent_topic; Alcotest.test_case "read by exact title (list->read contract)" `Quick test_read_by_title_roundtrip; Alcotest.test_case "read by case-insensitive partial title" `Quick test_read_by_title_case_insensitive_partial; Alcotest.test_case "read by slug still works" `Quick test_read_by_slug_still_works;
     ]);
-    ("library_add", [
-      Alcotest.test_case "fresh base creates library and reads document" `Quick test_add_on_fresh_base; Alcotest.test_case "missing title" `Quick test_add_missing_title; Alcotest.test_case "missing content" `Quick test_add_missing_content; Alcotest.test_case "invalid source" `Quick test_add_invalid_source; Alcotest.test_case "missing source" `Quick test_add_missing_source; Alcotest.test_case "blank author" `Quick test_add_with_blank_author_is_refused; Alcotest.test_case "success" `Quick test_add_success; Alcotest.test_case "with tags" `Quick test_add_with_tags; Alcotest.test_case "library follows the context base path" `Quick
-        test_library_follows_context_base_path;
+    ("wiki_add", [
+      Alcotest.test_case "fresh base creates the wiki and reads the page" `Quick test_add_on_fresh_base; Alcotest.test_case "missing title" `Quick test_add_missing_title; Alcotest.test_case "missing content" `Quick test_add_missing_content; Alcotest.test_case "invalid source" `Quick test_add_invalid_source; Alcotest.test_case "missing source" `Quick test_add_missing_source; Alcotest.test_case "blank author" `Quick test_add_with_blank_author_is_refused; Alcotest.test_case "success" `Quick test_add_success; Alcotest.test_case "with tags" `Quick test_add_with_tags; Alcotest.test_case "library follows the context base path" `Quick
+        test_wiki_follows_context_base_path;
     ]);
     ("unreadable_source", [
       Alcotest.test_case "unknown source is named, not passed through" `Quick
         test_unknown_source_is_named_not_passed_through; Alcotest.test_case "header that does not read names its reason" `Quick
         test_header_that_does_not_read_names_its_reason;
     ]);
-    ("library_search", [
+    ("wiki_search", [
       Alcotest.test_case "empty query" `Quick test_search_empty_query; Alcotest.test_case
         "schema lets runtime reject empty query"
         `Quick

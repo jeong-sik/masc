@@ -60,7 +60,7 @@ type fixture = {
   mutable keeper_name : string option;
   mutable verification_id : string option;
   mutable handover_id : string option;
-  mutable library_topic : string option;
+  mutable wiki_topic : string option;
   mutable code_file_path : string option;
   mutable goal_id : string option;
 }
@@ -96,8 +96,8 @@ let strict_success_names =
     "masc_heartbeat";
     "masc_keeper_down";
     "masc_keeper_list";
-    "masc_library_add";
-    "masc_library_list";
+    "masc_wiki_add";
+    "masc_wiki_list";
     "masc_messages";
     "masc_plan_set_task";
     "masc_start";
@@ -379,7 +379,7 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
       keeper_name = None;
       verification_id = None;
       handover_id = None;
-      library_topic = None;
+      wiki_topic = None;
       code_file_path = None;
       goal_id = None;
     }
@@ -502,23 +502,23 @@ let ensure_handover _fixture =
      stub for any transitional callers; returns a synthetic id. *)
   "handover-pruned-stub"
 
-let ensure_library_topic fixture =
-  match fixture.library_topic with
+let ensure_wiki_topic fixture =
+  match fixture.wiki_topic with
   | Some topic -> topic
   | None ->
-      mkdir_p (Filename.concat fixture.base_path "docs/library");
+      mkdir_p (Filename.concat fixture.base_path "docs/wiki");
       ignore
-        (execute_tool_ok fixture ~name:"masc_library_add"
+        (execute_tool_ok fixture ~name:"masc_wiki_add"
            ~arguments:
              (`Assoc
                [
-                 ("title", `String "Tool Matrix Library");
+                 ("title", `String "Tool Matrix Wiki");
                  ("content", `String "knowledge");
                  ("source", `String "direct_experience");
                  ("tags", `List [ `String "tool-matrix" ]);
                ]));
-      fixture.library_topic <- Some "tool-matrix-library";
-      "tool-matrix-library"
+      fixture.wiki_topic <- Some "tool-matrix-wiki";
+      "tool-matrix-wiki"
 
 let ensure_code_file fixture =
   match fixture.code_file_path with
@@ -587,10 +587,10 @@ let prepare_for_name fixture name =
     | Some task_id -> fixture.task_id <- Some task_id
     | None -> failwith ("failed to parse goalless task id from: " ^ body)
   end;
-  if name = "masc_library_add" then
-    mkdir_p (Filename.concat fixture.base_path "docs/library");
-  if List.mem name [ "masc_library_list"; "masc_library_read"; "masc_library_search" ] then
-    ignore (ensure_library_topic fixture);
+  if name = "masc_wiki_add" then
+    mkdir_p (Filename.concat fixture.base_path "docs/wiki");
+  if List.mem name [ "masc_wiki_list"; "masc_wiki_read"; "masc_wiki_search" ] then
+    ignore (ensure_wiki_topic fixture);
   (* masc_handover_* tools pruned from registry; no preparation needed. *)
   let _ = ensure_handover in
   ()
@@ -721,7 +721,7 @@ let field_value fixture ~tool_name field_name schema =
   | "decision_confidence" -> `Float 0.9
   | "output" -> `String "tool matrix output"
   | "criteria" -> `List []
-  | "topic" -> `String (ensure_library_topic fixture)
+  | "topic" -> `String (ensure_wiki_topic fixture)
   | "include_candidates" -> `Bool true
   | "mode" -> (
       match enum_choice with

@@ -18,7 +18,7 @@ type module_tag =
   | Mod_spawn
   | Mod_code_query
   | Mod_misc
-  | Mod_library
+  | Mod_wiki
   | Mod_external
   | Mod_inline
   | Mod_keeper_task

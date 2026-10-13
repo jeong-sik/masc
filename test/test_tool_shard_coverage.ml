@@ -34,7 +34,7 @@ let family_catalog =
   ; Tool_shard_types.search_files_tools
   ; Tool_shard_types.typed_execute_tools
   ; Tool_shard_types.voice_tools
-  ; Tool_shard_types.library_tools
+  ; Tool_shard_types.wiki_tools
   ; Tool_shard_types.surface_tools
   ; Tool_shard_types.taskboard_tools
   ]

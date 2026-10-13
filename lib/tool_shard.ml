@@ -12,7 +12,7 @@ let all_keeper_tool_schemas : Masc_domain.tool_schema list =
   ; search_files_tools
   ; typed_execute_tools
   ; voice_tools
-  ; library_tools
+  ; wiki_tools
   ; surface_tools
   ; taskboard_tools
   ]

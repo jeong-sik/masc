@@ -131,7 +131,7 @@ let test_prior_art_bounds_every_search () =
   Eio_main.run (fun _ ->
     let plan = instantiate "prior-art" (`Assoc [ "query", `String "EACCES" ]) in
     let answer = function
-      | "keeper_memory_search" | "keeper_library_search" | "masc_board_search" ->
+      | "keeper_memory_search" | "keeper_wiki_search" | "masc_board_search" ->
         `String "no match"
       | tool -> fail ("unexpected tool: " ^ tool)
     in
@@ -141,7 +141,7 @@ let test_prior_art_bounds_every_search () =
      | Error _ -> fail "prior-art did not complete against valid tool answers");
     let memory = input_of calls "memory" in
     let board = input_of calls "board" in
-    check string "library gets the query" "EACCES" (string_member "query" (input_of calls "library"));
+    check string "wiki gets the query" "EACCES" (string_member "query" (input_of calls "wiki"));
     check string "memory searches current facts" "current" (string_member "source" memory);
     check bool "memory names its limit" true
       (Yojson.Safe.Util.member "limit" memory <> `Null);

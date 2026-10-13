@@ -1,6 +1,6 @@
-name = "masc_library_add"
+name = "masc_wiki_add"
 description = """
-Add a new document to the agent knowledge library.
+Add a new page to the wiki.
 
 Use when recording a new \
 finding, experiment result, or pattern that other agents should know about."""
@@ -15,7 +15,7 @@ defer_loading = true
 name = "title"
 type = "string"
 required = true
-description = "Document title"
+description = "Page title"
 
 [[params]]
 name = "source"
@@ -35,4 +35,4 @@ description = "List of tags"
 name = "content"
 type = "string"
 required = true
-description = "Document body content (markdown)"
+description = "Page body (markdown)"

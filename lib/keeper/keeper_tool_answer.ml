@@ -27,8 +27,8 @@ let reader (handler : Keeper_tool_descriptor.runtime_handler) =
   | Tool_constitution_write
   | Tool_constitution_read
   | Tool_constitution_remove
-  | Tool_library_search
-  | Tool_library_read
+  | Tool_wiki_search
+  | Tool_wiki_read
   | Tool_surface_read
   | Tool_surface_post
   | Tool_person_note_set
@@ -62,7 +62,7 @@ let reader (handler : Keeper_tool_descriptor.runtime_handler) =
   | Tool_masc_fusion_status
   | Tool_masc_fusion_decision
   | Tool_masc_file_dispatch
-  | Tool_masc_library_dispatch
+  | Tool_masc_wiki_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image -> Whole_output
 ;;

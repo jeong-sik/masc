@@ -17,7 +17,7 @@
     A descriptor carrying its own literal is the defect this pins:
     the keeper_* tools of #32494, #32525 and #32528, Execute,
     whose literal still said a script line is not handed to a shell after
-    #32087 made it one (#32546, #32555), and masc_library_list, whose literal
+    #32087 made it one (#32546, #32555), and masc_wiki_list, whose literal
     named its siblings by the keeper_* names while the row named the masc_*
     ones — now the file's [keeper_projection]. The per-tool TOML parity suites
     compare the TOML with the decoded record and never reach the descriptor.
@@ -103,7 +103,7 @@ type authored_slot =
    descriptor list would let the walk above pass for nothing; these cannot. *)
 let pinned =
   [ "tool_execute", Top_level
-  ; "masc_library_list", Projection
+  ; "masc_wiki_list", Projection
   ]
 ;;
 

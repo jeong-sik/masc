@@ -613,7 +613,12 @@ let format_row_badge badge =
       | Badge_category (Memory_category.Custom _) ->
           Message_layout.take_cells label 4 ^ "\xe2\x80\xa6"
           ^ Message_layout.drop_cells label (Message_layout.display_width label - 5)
-      | Badge_category _ | Badge_source | Badge_dropped ->
+      | Badge_category
+          ( Memory_category.Blocker | Memory_category.Code_change
+          | Memory_category.Fact | Memory_category.Preference
+          | Memory_category.Goal | Memory_category.Constraint
+          | Memory_category.Validated_approach | Memory_category.Lesson )
+      | Badge_source | Badge_dropped ->
           Message_layout.take_cells label 9 ^ "\xe2\x80\xa6"
     else label
   in
@@ -1566,7 +1571,11 @@ let render_memory_facts_body ~cols ~budget (state : state)
           Some (List.length (List.filter (fun (fact : memory_fact) -> fact.mf_category = cat) facts))
         | Category_source, _, Some (count, _) | Category_dropped, _, Some (_, count) -> Some count
         | Category_all, Some facts, Some (source, dropped) -> Some (List.length facts + source + dropped)
-        | _ -> None
+        | Category_ordinary _, None, _
+        | Category_source, _, None
+        | Category_dropped, _, None
+        | Category_all, None, _
+        | Category_all, _, None -> None
     in
     let header = [Theme.info () ^ "CATEGORIES" ^ Ansi.reset ^ Ansi.dim ^ "  d:접기" ^ Ansi.reset; "c/C 순서 이동 · 클릭 선택"; ""] in
     let height = max 0 (budget - List.length header) in

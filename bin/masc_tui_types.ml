@@ -767,7 +767,17 @@ let project_gate_history ~visibility entries =
               Printf.sprintf "%s · %d steps · %s" text (List.length steps)
                 expand_hint)
               (Masc_tui_gate_text.fold_line ~phases ~tool:newest.gs_tool ~summary)
-        | _ -> None) groups
+        | ([] | [ _ ]), _, _
+        | _ :: _ :: _, true, _
+        | _ :: _ :: _, false,
+          ( None
+          | Some
+              Keeper_approval_lifecycle.(
+                Approval_requested | Approval_resolved_approved
+                | Approval_resolved_rejected | Approval_replay_applied_with_warning
+                | Approval_replay_failed | Approval_replay_indeterminate
+                | Approval_continuation_recorded | Approval_continuation_failed) )
+          -> None) groups
       in
       List.filter_mapi (fun index ((entry, extra) as row) ->
         match Option.bind (key entry) (fun key -> Approvals.find_opt key compact) with
@@ -4150,7 +4160,14 @@ module Browser_lane_view = struct
   let fail_action detail t =
     let url_draft = match t.load with
       | Loading (_, Goto url) -> Some url
-      | Loading _ | Idle | No_browser | Failed _ -> t.url_draft
+      | Loading
+          ( _
+          , ( Discover _ | Read | Open_session | Close_session | Screenshot _
+            | Read_refresh | Scene_read _ | Scene_regions _ | Scene_refresh _
+            | Scene_scroll _ | Scene_focus _ | Scene_click _ | Scene_follow _
+            | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _
+            | Viewport_pointer _ ) )
+      | Idle | No_browser | Failed _ -> t.url_draft
     in
     { t with load = Failed detail; url_draft }
   let awaiting_browser t = match t.load with
@@ -4515,7 +4532,12 @@ module Browser_lane_view = struct
     match t.bidi_host with
     | Host_reported { state = (Never_started | Ended _ | Died _); _ } when bidi_listed ->
         [host_line "A listed BiDi connection may be stale or belong to another host"]
-    | Host_not_reported | Host_report_unreadable _ | Host_reported _ -> []
+    | Host_not_reported | Host_report_unreadable _
+    | Host_reported
+        { state =
+            ( Never_started | Record_missing_but_locked | Running _ | Ended _
+            | Died _ | Unreadable _ )
+        ; _ } -> []
   (* Everything the picker says of the BiDi host: whether one runs, what
      stands in the way of the next one, how one is started, and, where MASC
      starts it, what MASC's last start left. A host that is running is not
@@ -4783,7 +4805,13 @@ module Browser_lane_view = struct
   let yield_refresh_to_input t =
     match t.load with
     | Loading (_, (Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _)) -> {t with load = Idle}
-    | Loading _ | Idle | No_browser | Failed _ -> t
+    | Loading
+        ( _
+        , ( Discover _ | Read | Open_session | Close_session | Goto _
+          | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _
+          | Scene_focus _ | Scene_click _ | Scene_follow _ | Viewport_refresh _
+          | Viewport_pointer _ ) )
+    | Idle | No_browser | Failed _ -> t
   let read_view_for_operation operation previous =
     match operation with
     | Read | Read_refresh | Open_session | Close_session | Goto _ -> Text_view
@@ -4836,7 +4864,14 @@ module Browser_lane_view = struct
                  in
                  { next with selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None; scroll = 0;
                    client_picker = Some 0; load }, false)
-    | Loading _ | Idle | No_browser | Failed _ -> t, false
+    | Loading
+        ( _
+        , ( Discover _ | Read | Open_session | Close_session | Goto _
+          | Screenshot _ | Read_refresh | Scene_read _ | Scene_regions _
+          | Scene_refresh _ | Scene_scroll _ | Scene_focus _ | Scene_click _
+          | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+          | Viewport_cadence _ | Viewport_pointer _ ) )
+    | Idle | No_browser | Failed _ -> t, false
   let ( let* ) = Result.bind
   let field name = function
     | `Assoc fields -> (match List.assoc_opt name fields with
@@ -5267,7 +5302,14 @@ module Browser_lane_view = struct
              load = Failed "follow destination source, client, tab or scope mismatch"}
          | Error detail -> {t with scene = None; scene_scope = None; scene_delta = None; scene_guard = Some guard;
              load = Failed detail})
-    | _ -> t
+    | Loading
+        ( _
+        , ( Discover _ | Read | Open_session | Close_session | Goto _
+          | Screenshot _ | Read_refresh | Scene_read _ | Scene_regions _
+          | Scene_refresh _ | Scene_scroll _ | Scene_focus _ | Scene_click _
+          | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+          | Viewport_cadence _ | Viewport_pointer _ ) )
+    | Idle | No_browser | Failed _ -> t
 
 
   type scene_action = Read_region | Follow_link | Click_control
@@ -5307,7 +5349,12 @@ module Browser_lane_view = struct
              List.filter_map (fun (index, (node : Masc.Browser_scene.node)) ->
                match node.kind with
                | Region Masc.Browser_scene.Article -> Some index
-               | Region _ | Text | Raster | Control _ -> None) targets
+               | Region
+                   Masc.Browser_scene.(
+                   Main | Navigation | Complementary | Named_region | Section
+                   | Header | Footer | Search | Form | Log | Banner
+                   | Content_info | Scroll_area | Unknown _)
+               | Text | Raster | Control _ -> None) targets
          | Browser_lane.Content ->
              let seen = Hashtbl.create 16 in
              List.filter_map (fun (index, (node : Masc.Browser_scene.node)) ->
@@ -5316,7 +5363,15 @@ module Browser_lane_view = struct
                  when not (Hashtbl.mem seen node_id) ->
                    Hashtbl.add seen node_id ();
                    Some index
-               | Some _ | None -> None) targets
+               | Some
+                   { role =
+                       Masc.Browser_scene.(
+                         Main | Navigation | Complementary | Named_region
+                         | Section | Article | Header | Footer | Search | Form
+                         | Log | Banner | Content_info | Scroll_area
+                         | Unknown _)
+                   ; _ }
+               | None -> None) targets
 
   let scene_has_articles t = scene_article_target_indices t <> []
 
@@ -5424,11 +5479,39 @@ module Browser_lane_view = struct
                               && t.selected_tab = Some requested_tab
                               && (match t.load with
                                   | Loading (_, (Viewport_refresh {expected_url;_} | Viewport_pointer {expected_url;action=Browser_lane.Scroll_at _;_})) -> screenshot.url = expected_url
-                                  | _ -> true) ->
+                                  | Loading
+                                      ( _
+                                      , Viewport_pointer
+                                          { action =
+                                              Browser_lane.(
+                                                Activate_tab | Click _ | Fill _
+                                                | Scroll _ | Hover_at _
+                                                | Click_at _ | Drag _
+                                                | Follow_link _ | Click_node _
+                                                | Fill_node _)
+                                          ; _ } )
+                                  | Loading
+                                      ( _
+                                      , ( Discover _ | Read | Open_session
+                                        | Close_session | Goto _ | Screenshot _
+                                        | Read_refresh | Scene_read _
+                                        | Scene_regions _ | Scene_refresh _
+                                        | Scene_scroll _ | Scene_focus _
+                                        | Scene_click _ | Scene_follow _
+                                        | Scene_follow_refresh _
+                                        | Viewport_cadence _ ) )
+                                  | Idle | No_browser | Failed _ -> true) ->
              { t with load = Idle }, Some screenshot
          | Ok _ -> { t with load = Failed "screenshot source, client, tab or expected URL mismatch" }, None
          | Error detail -> { t with load = Failed detail }, None)
-    | Loading _ | Idle | No_browser | Failed _ -> t, None
+    | Loading
+        ( _
+        , ( Discover _ | Read | Open_session | Close_session | Goto _
+          | Screenshot _ | Read_refresh | Scene_read _ | Scene_regions _
+          | Scene_refresh _ | Scene_scroll _ | Scene_focus _ | Scene_click _
+          | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+          | Viewport_cadence _ | Viewport_pointer _ ) )
+    | Idle | No_browser | Failed _ -> t, None
 
   let accept ~generation (result : (reading, string) result) t =
     let t = if t.refresh_pending = Some generation then {t with refresh_pending = None} else t in
@@ -5449,7 +5532,14 @@ module Browser_lane_view = struct
                selected_tab = Option.map (fun (page : page) -> page.tab_id) reading.page }
          | Ok _ -> { t with load = Failed "browser response source or client mismatch" }
          | Error detail -> { t with load = Failed detail })
-    | Loading _ | Idle | No_browser | Failed _ -> t
+    | Loading
+        ( _
+        , ( Discover _ | Read | Open_session | Close_session | Goto _
+          | Screenshot _ | Read_refresh | Scene_read _ | Scene_regions _
+          | Scene_refresh _ | Scene_scroll _ | Scene_focus _ | Scene_click _
+          | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+          | Viewport_cadence _ | Viewport_pointer _ ) )
+    | Idle | No_browser | Failed _ -> t
   let select_tab direction t =
     match t.reading with
     | None -> t
@@ -5513,7 +5603,7 @@ module Browser_history = struct
     | Listing -> {t with content=List_failed detail; resume=Some Reload_list}
     | Entries ({selection=Loading; _} as entries) ->
         {t with content=Entries {entries with selection=Failed detail}; resume=Some Reload_selection}
-    | List_failed _ | Entries _ -> t
+    | List_failed _ | Entries {selection=(Failed _ | Observed _); _} -> t
   let entries (snapshot : Tui_decode.keeper_calls_snapshot) =
     snapshot.kcs_entries |> List.rev |> List.concat_map (fun (call : Tui_decode.keeper_call) ->
       match call.kc_execution_id with
@@ -5537,7 +5627,7 @@ module Browser_history = struct
     | Listing | List_failed _ -> t
   let observation t = match t.content with
     | Entries {selection=Observed observation;_} -> Some observation
-    | Entries _ | Listing | List_failed _ -> None
+    | Entries {selection=(Loading | Failed _); _} | Listing | List_failed _ -> None
   let page_view t =
     let view = Browser_lane_view.create () in
     match observation t with
@@ -5617,7 +5707,8 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
                not (block_tag node.tag) || node.node_id = anchor.node_id
            | Masc.Browser_scene.Heading left, Masc.Browser_scene.Heading right ->
                left = right && (not (block_tag node.tag) || node.node_id = anchor.node_id)
-           | _ -> false)
+           | Masc.Browser_scene.Plain_text, Masc.Browser_scene.Heading _
+           | Masc.Browser_scene.Heading _, Masc.Browser_scene.Plain_text -> false)
       | (Masc.Browser_scene.Text, (Masc.Browser_scene.Raster | (Masc.Browser_scene.Region _ | Masc.Browser_scene.Control _)))
       | ((Masc.Browser_scene.Raster | (Masc.Browser_scene.Region _ | Masc.Browser_scene.Control _)), _)
       | (Text, Text) -> false in
@@ -5680,7 +5771,20 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
       | Region Masc.Browser_scene.Article, _ -> register_article node.node_id
       | _, Some {role = Masc.Browser_scene.Article; node_id; _} ->
           register_article node_id
-      | _ -> ()) scene.content.nodes;
+      | ( Text | Raster | Control _
+        | Region
+            Masc.Browser_scene.(
+                   Main | Navigation | Complementary | Named_region | Section
+                   | Header | Footer | Search | Form | Log | Banner
+                   | Content_info | Scroll_area | Unknown _) )
+        , ( None
+          | Some
+              { role =
+                  Masc.Browser_scene.(
+                   Main | Navigation | Complementary | Named_region | Section
+                   | Header | Footer | Search | Form | Log | Banner
+                   | Content_info | Scroll_area | Unknown _)
+              ; _ } ) -> ()) scene.content.nodes;
     let article_total = !article_count in
     let reversed, _, selected, _, _ = List.fold_left
       (fun (reversed, offset, selected, previous_block_bottom, previous_region)
@@ -8164,7 +8268,14 @@ let tools_skill_profiles (state : state) =
   | Some { Masc.Tui_decode_tools.ts_effective =
              Some (Masc.Tui_decode_tools.Effective_surface_available { ets_skill_profiles; _ }); _ } ->
       ets_skill_profiles
-  | Some _ | None -> []
+  | Some
+      { Masc.Tui_decode_tools.ts_effective =
+          ( None
+          | Some
+              ( Masc.Tui_decode_tools.Effective_surface_unavailable _
+              | Masc.Tui_decode_tools.Effective_surface_warming _ ) )
+      ; _ }
+  | None -> []
 
 let selected_tools_skill_profile (state : state) =
   List.nth_opt (tools_skill_profiles state) state.tools_skill_cursor
@@ -8426,7 +8537,8 @@ let text_input_target (state : state) ~compact_viewport =
     state.view = Planning && not compact_viewport
     && (match state.planning_mode, state.goal_action_pending with
         | Planning_detail goal_id, Some (Goal_drop_reason entry) -> String.equal goal_id entry.goal_id
-        | (Planning_detail _ | Planning_list), _ -> false)
+        | (Planning_detail _ | Planning_list),
+          (None | Some (Goal_action_armed _ | Goal_drop_reason _)) -> false)
   then Some Text_goal_drop_reason
   else if
     state.view = Config
@@ -9762,12 +9874,23 @@ let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
 let remember_keeper_detail_focus state =
-  match state.detail_focus_recovery, state.view, state.workspace_identity,
-        state.server_identity, selected_keeper state with
-  | None, Keepers Keeper_detail, Workspace_identity_match, Some origin, Some keeper
-    when state.detail_tab <> Detail_items ->
-      state.detail_focus_recovery <- Some (origin, keeper.k_name, state.detail_tab)
-  | _ -> ()
+  match state.view with
+  | Keepers Keeper_detail ->
+      (match state.detail_focus_recovery, state.workspace_identity,
+             state.server_identity, selected_keeper state with
+       | None, Workspace_identity_match, Some origin, Some keeper
+         when state.detail_tab <> Detail_items ->
+           state.detail_focus_recovery <- Some (origin, keeper.k_name, state.detail_tab)
+       | ( (None | Some _)
+         , ( Workspace_identity_unread | Workspace_identity_match
+           | Workspace_identity_match_unconfirmed _
+           | Workspace_identity_mismatch _ )
+         , (None | Some _)
+         , (None | Some _) ) -> ())
+  | Keepers (Keeper_list | Keeper_logs | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+  | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+  | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
+  | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ()
 
 let restore_keeper_detail_focus state =
   match state.detail_focus_recovery with
@@ -11572,7 +11695,9 @@ let keeper_message_waiting_positions (state : state) ~keeper_name =
             Some (entry.sent_request, Server_answered (Server_started, Reading_delivery_again))
         | Stream_failed _, (None | Some (Masc_tui_keeper_chat_live.Settled, _)) ->
             Some (entry.sent_request, Rechecking)
-        | Waiting, (None | Some _) | (Working | Stream_ended), _ -> None)
+        | Waiting,
+          (None | Some (Masc_tui_keeper_chat_live.(Queued | Running | Settled), _))
+        | (Working | Stream_ended), _ -> None)
   in
   submitted @ List.map (fun (item : Masc_tui_keeper_chat_queue.item) ->
     item.request, In_local_queue) local
@@ -11840,7 +11965,7 @@ let set_msg_scroll (state : state) rows =
      wheel/Home request become a deferred scroll against future arrivals. *)
   let rows = match state.msg_scroll_pin with
     | Some {pin_mode=Follow_live;pin_points=[];_} -> 0
-    | Some _ | None -> rows in
+    | Some {pin_mode=(Follow_live | Hold_scroll | Hold_search);_} | None -> rows in
   state.msg_scroll <- rows;
   state.msg_scroll_pin <- Option.map (fun pin ->
     if rows = 0 then
@@ -13025,7 +13150,11 @@ let runtime_picker_rows (state : state) pick =
           not (List.mem runtime.Tui_decode.ro_id already))
     | Pick_exact_lane_replacement _,
       (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _) -> []
-    | _ -> landing @ refused in
+    | ( ( Pick_conversation_lane _ | Pick_exact_lane _ | Pick_new_lane _
+        | Pick_media_failover | Pick_route_default )
+      , ( Runtime_catalog_unread | Runtime_catalog_loading
+        | Runtime_catalog_read | Runtime_catalog_failed _ ) ) ->
+        landing @ refused in
   let runtime_choices =
     rows
     |> List.filter (fun runtime ->
@@ -14371,7 +14500,11 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
      so it reports a [clamped_scroll] instead. Overview, Keepers, Board,
      Planning and Schedules move a cursor or a detail pane rather than a plain
      list. *)
-  | Overview | Acting | Metrics | Keepers _ | Board | Approvals | Planning | Schedules
+  | Overview | Acting | Metrics
+  | Keepers
+      ( Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
+      | Keeper_message | Keeper_runtime_pick )
+  | Board | Approvals | Planning | Schedules
   | Fusion | Resources | Code | Tools ->
       None
 

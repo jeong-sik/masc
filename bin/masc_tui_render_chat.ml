@@ -1426,7 +1426,15 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
           | Durable_output -> Theme.ok ()
           | Transcript_outcome (Keeper_chat_transcript.Failed | Native_failed) ->
               Ansi.reset ^ Ansi.bold ^ Theme.bad ()
-          | Transcript_outcome outcome -> tool_outcome_tone outcome
+          | Transcript_outcome
+              (( Keeper_chat_transcript.Started
+               | Keeper_chat_transcript.Awaiting_result
+               | Keeper_chat_transcript.Returned
+               | Keeper_chat_transcript.Native_running
+               | Keeper_chat_transcript.Native_ended
+               | Keeper_chat_transcript.Never_returned
+               | Keeper_chat_transcript.Outcome_unrecorded ) as outcome) ->
+              tool_outcome_tone outcome
         in
         let styled_prefix =
           Printf.sprintf "%s%s%s %s%s%s · %s%s%s"
@@ -2150,7 +2158,13 @@ let polled_turn_output_with_anchors (state : state) ~keeper_name ~role_label_col
               ~column:role_label_column ~style:status_style ();
             body = Printf.sprintf "%s · %s · 최근 출력 발췌"
               note (Masc_tui_answering.lane_word lane) } ]
-    | Some _ | None -> []
+    | Some
+        { ktr_state =
+            ( Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_running _
+            | Tui_decode.Keeper_turn_unavailable _ )
+        ; _
+        }
+    | None -> []
 
 let polled_turn_output_entries state ~keeper_name ~role_label_column =
   polled_turn_output_with_anchors state ~keeper_name ~role_label_column |> List.map snd
@@ -3346,7 +3360,17 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
           if request_id = "" then None else Some request_id
       | Tagged_child _ -> None
       | Tagged_block (_, Some (Keeper_chat_transcript.Admission_of_request _), _) -> None
-      | Tagged_block (log, _, _) -> Some (Masc_tui_types.turn_log_execution_id log)
+      | Tagged_block
+          ( log
+          , ( None
+            | Some
+                ( Keeper_chat_transcript.Text_stretch _
+                | Keeper_chat_transcript.Thinking_stretch _
+                | Keeper_chat_transcript.Tool_stretch _
+                | Keeper_chat_transcript.Unstreamed_skills
+                | Keeper_chat_transcript.Reply_of_segment _
+                | Keeper_chat_transcript.Error_of_segment _ ) )
+          , _ ) -> Some (Masc_tui_types.turn_log_execution_id log)
     in
     let edges = Hashtbl.create 16 in
     let close_run ~at_tail request_id indices =
@@ -3488,7 +3512,16 @@ let search_anchor_of_tag = function
       row_anchor = msg_anchor message; reply_source = search_reply_source message })
   | Tagged_block (_, Some (Keeper_chat_transcript.Admission_of_request request_id), _) ->
       Some (Search_admission request_id)
-  | Tagged_block (log, Some origin, canonical_reply) ->
+  | Tagged_block
+      ( log
+      , Some
+          (( Keeper_chat_transcript.Text_stretch _
+           | Keeper_chat_transcript.Thinking_stretch _
+           | Keeper_chat_transcript.Tool_stretch _
+           | Keeper_chat_transcript.Unstreamed_skills
+           | Keeper_chat_transcript.Reply_of_segment _
+           | Keeper_chat_transcript.Error_of_segment _ ) as origin)
+      , canonical_reply ) ->
       Some (Search_journal {
         source = Masc_tui_types.turn_log_execution_source log; origin; canonical_reply })
   | Tagged_block (_, None, _) -> None
@@ -3893,7 +3926,9 @@ let scroll_position_for_window state ~keeper_name projection ~markdown ~source_b
          | Some _ | None -> empty_follow_live ())
   in
   { scroll=(match pin with Some {pin_points=[];pin_mode=Follow_live;_} -> 0
-      | Some _ | None -> window.scroll); pin }
+      | Some {pin_points=[];pin_mode=(Hold_scroll | Hold_search);_}
+      | Some {pin_points=_ :: _;pin_mode=(Follow_live | Hold_scroll | Hold_search);_}
+      | None -> window.scroll); pin }
 
 (* Search uses exactly the projected speech/activity rows and measures every
    displayed suffix row, including polled notices and pending input. Pending

@@ -157,7 +157,8 @@ let load_fixtures path =
     let expected = match fixture with Extract -> "Extraction" | Progress -> "Metadata" | Act -> "Act" in
     match Model.parse_params params with
     | Ok {generation = Model.Structured {name; _}; _} when name = expected -> ()
-    | Ok _ | Error _ -> reject Fixture_protocol_invalid) params;
+    | Ok {generation = Model.Structured _ | Model.Text_generation | Model.Tool_generation _; _}
+    | Error _ -> reject Fixture_protocol_invalid) params;
   params
 
 let lane_pair () =

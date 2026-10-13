@@ -38,7 +38,12 @@ let fusion_detail_entry_index state =
       | Fusion_historical_detail reference, Masc.Tui_decode_fusion.Fusion_historical_evidence candidate ->
           String.equal reference.fhe_post_id candidate.fhe_post_id
           && String.equal reference.fhe_run_id candidate.fhe_run_id
-      | _ -> false)
+      | Fusion_list,
+        (Masc.Tui_decode_fusion.Fusion_retained_run _
+        | Masc.Tui_decode_fusion.Fusion_historical_evidence _)
+      | Fusion_detail _, Masc.Tui_decode_fusion.Fusion_historical_evidence _
+      | Fusion_historical_detail _, Masc.Tui_decode_fusion.Fusion_retained_run _ ->
+          false)
 
 let selected_keeper_runs (state : state) =
   match selected_keeper state, fusion_snapshot state with

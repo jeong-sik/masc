@@ -48,7 +48,7 @@ let row_summary (row : row) = match row.state with
       let declared = match declaration, instances with
         | None, _ -> "manual attachment"
         | Some (Valid {enabled=false;_}), _::_ -> "off requested"
-        | Some value, _ -> declaration_summary value in
+        | Some ((Valid _ | Invalid _ | Absent | Unobserved) as value), _ -> declaration_summary value in
       declared ^ " · " ^ (match instances with
         | [] -> "no worker observed"
         | values -> String.concat "; " (List.map instance_summary values))

@@ -74,7 +74,28 @@ let cached_image drawing c ~name ~equipment size =
           | (Icon, Look.Shades, _, _, _) | (Icon, Look.Eye_patch, _, _, _)
           | (Icon, Look.Plaster, _, _, _) | (Icon, Look.Freckles, _, _, _)
           | (Icon, Look.Beard, _, _, _) -> Draw.render_icon body equipment size
-          | (Full, Look.Bare_face, _, _, _) | (Compact, _, _, _, _) | (Full, Look.Glasses, _, _, _)
+          | ( Compact
+            , ( Look.Glasses | Look.Shades | Look.Eye_patch | Look.Plaster
+              | Look.Freckles | Look.Beard )
+            , ( Look.Bare_neck | Look.Scarf | Look.Bow_tie | Look.Medal )
+            , ( Look.Bare_head | Look.Bow | Look.Crown | Look.Beanie )
+            , ( Look.Empty_hand | Look.Book | Look.Mug | Look.Quill ) )
+          | ( Compact
+            , Look.Bare_face
+            , (Look.Scarf | Look.Bow_tie | Look.Medal)
+            , ( Look.Bare_head | Look.Bow | Look.Crown | Look.Beanie )
+            , ( Look.Empty_hand | Look.Book | Look.Mug | Look.Quill ) )
+          | ( Compact
+            , Look.Bare_face
+            , Look.Bare_neck
+            , (Look.Bow | Look.Crown | Look.Beanie)
+            , ( Look.Empty_hand | Look.Book | Look.Mug | Look.Quill ) )
+          | ( Compact
+            , Look.Bare_face
+            , Look.Bare_neck
+            , Look.Bare_head
+            , (Look.Book | Look.Mug | Look.Quill) )
+          | (Full, Look.Bare_face, _, _, _) | (Full, Look.Glasses, _, _, _)
           | (Full, Look.Shades, _, _, _) | (Full, Look.Eye_patch, _, _, _)
           | (Full, Look.Plaster, _, _, _) | (Full, Look.Freckles, _, _, _)
           | (Full, Look.Beard, _, _, _) -> Draw.render body equipment size

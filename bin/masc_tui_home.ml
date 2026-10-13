@@ -123,7 +123,13 @@ let reconcile_home_request_detail state =
         state.home_opened_request <- None;
         (match state.followed_from with
          | Some (Overview, _) -> state.followed_from <- None
-         | Some _ | None -> ())
+         | Some
+             ( ( Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
+               | Approvals | Planning | Schedules | Verification | Harness
+               | Fusion | Repositories | Code | Changes | Connectors | Runtime
+               | Config | Resources | Tools | System_logs )
+             , _ )
+         | None -> ())
       end else if
         (match request with
          | Home_question _ ->

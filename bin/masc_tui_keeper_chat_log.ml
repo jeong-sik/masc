@@ -645,7 +645,7 @@ let read_with_operation_state ~read_operation ~read_journal =
     match operation, journal with
     | Ok (Some state), Ok _ when Keeper_chat_operation.is_terminal state ->
         Replayed_after_terminal
-    | _ -> Replay_pending in
+    | (Ok (Some _) | Ok None | Error _), (Ok _ | Error _) -> Replay_pending in
   let operation = read_operation () in
   let journal = read_journal () in
   let reread refreshed =

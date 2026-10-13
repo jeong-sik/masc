@@ -2122,7 +2122,7 @@ let voice_local_setup_exit base_path speak_voice hear_model =
      below is decided against a configuration this command cannot write. *)
   | Ok (_, Some (Voice_setup.Standalone_json path, _)) ->
     refuse (Voice_setup.error_message (Voice_setup.Standalone_source_active path))
-  | Ok (revision, active) ->
+  | Ok (revision, ((None | Some (Voice_setup.Runtime_toml, _)) as active)) ->
     let existing = Option.map snd active in
     let tts = Option.bind existing (fun config -> config.Voice_config.tts) in
     if Option.is_some speak_voice
@@ -2729,7 +2729,18 @@ let keeper_lifecycle_post ~action ~base_path ~host ~port ~agent ~token ~keeper_n
   let text, code =
     match action, outcome with
     | `Boot, (Masc_cli_keeper_create.Created _ | Masc_cli_keeper_create.Reconfigured _) -> "imp is running.", 0
-    | _ -> Masc_cli_keeper_create.render outcome
+    | ( `Up
+      , ( Masc_cli_keeper_create.Created _
+        | Masc_cli_keeper_create.Reconfigured _
+        | Masc_cli_keeper_create.Revision_conflict
+        | Masc_cli_keeper_create.Unauthorized _
+        | Masc_cli_keeper_create.Refused _
+        | Masc_cli_keeper_create.Unreachable _ ) )
+    | ( `Boot
+      , ( Masc_cli_keeper_create.Revision_conflict
+        | Masc_cli_keeper_create.Unauthorized _
+        | Masc_cli_keeper_create.Refused _
+        | Masc_cli_keeper_create.Unreachable _ ) ) -> Masc_cli_keeper_create.render outcome
   in
   if code = 0 then print_endline text else prerr_endline text;
   code
@@ -3040,7 +3051,10 @@ let rec sandbox_image_remove_tree path =
       (fun entry -> sandbox_image_remove_tree (Filename.concat path entry))
       (Sys.readdir path);
     Unix.rmdir path
-  | _ -> Sys.remove path
+  | { Unix.st_kind =
+        ( Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK )
+    ; _
+    } -> Sys.remove path
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let sandbox_image_report_build ~cli ~tag status =
@@ -3593,7 +3607,7 @@ let wizard_model_entries client catalog =
         ~prefix:
           (Llm_provider.Model_identifiers.Id_prefix.of_string_exn "gpt-")
         entry.id_prefix
-    | _ -> false)
+    | (Wizard_claude_code | Wizard_codex), Some _ -> false)
 
 let wizard_exact_model_entries ~prefer_bare model entries =
   let exact_entries = entries
@@ -4101,7 +4115,7 @@ let setup_sandbox_selection sandbox_profile microvm_backend =
                 Printf.sprintf "--microvm-backend takes one of: %s"
                   (String.concat ", " Keeper_microvm_backend.valid_strings))
            | Some backend -> `Ok (Some Keeper_sandbox_config.Micro_vm, Some backend)))
-     | Some profile ->
+     | Some ((Keeper_sandbox_config.Docker | Keeper_sandbox_config.Remote_ssh) as profile) ->
        (match backend with
         | None -> `Ok (Some profile, None)
         | Some _ ->

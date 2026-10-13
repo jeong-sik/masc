@@ -522,7 +522,7 @@ let acknowledge_broadcast view receipt =
   | Ok (`String request_id), Ok (`String "committed") ->
       {view with pending_broadcasts=List.filter
         (fun (_,id) -> not (String.equal id request_id)) view.pending_broadcasts}
-  | _ -> view
+  | (Ok _ | Error _), (Ok _ | Error _) -> view
 let evidence_lines prompt =
   let choice index label = (if prompt.choice=index then "> " else "  ") ^ label in
   [Printf.sprintf "Preserve %d marked row%s from %s" prompt.row_count
@@ -950,7 +950,11 @@ let installation_detail_lines ~width view =
 let pending_action view =
   match view.last_action, view.action_receipt with
   | Some request, Some {Action.state=(Action.Queued | Action.Running);_} -> Some request
-  | _ -> None
+  | (None | Some _), None
+  | None, Some {Action.state=(Action.Queued | Action.Running | Action.Confirmed
+                              | Action.Failed_before_effect | Action.Outcome_unknown);_}
+  | Some _, Some {Action.state=(Action.Confirmed | Action.Failed_before_effect
+                                | Action.Outcome_unknown);_} -> None
 
 let action_target view = selected_instance view
 

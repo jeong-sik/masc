@@ -1905,7 +1905,8 @@ let collapse_repeated_body_rows ~inner_width rows =
 let split_before_first_body rows =
   let rec loop prefix = function
     | ({ kind = Body; _ } as opening) :: rest -> List.rev prefix, Some (opening, rest)
-    | row :: rest -> loop (row :: prefix) rest
+    | ({ kind = Metadata _ | Spacing | Viewport_gap _; _ } as row) :: rest ->
+      loop (row :: prefix) rest
     | [] -> List.rev prefix, None
   in
   loop [] rows

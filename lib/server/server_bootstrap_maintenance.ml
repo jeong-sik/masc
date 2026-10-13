@@ -878,11 +878,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            try
              let config = Mcp_server.workspace_config state in
              let outcome =
-               (* Window, store list and fold are shared with the startup
-                  pass in Server_runtime_startup_maintenance — the two inline
-                  sums this replaces had already drifted (this pass lacked
-                  resilience_audit; the startup pass lacked
-                  tool_calls/transition-audit). *)
+               (* Window and stores are shared with the startup pass in
+                  Server_runtime_startup_maintenance. *)
                Server_runtime_startup_maintenance.prune_jsonl_at_resolved_window
                  ~base_path:config.base_path
                  ~masc_root:(Workspace.masc_dir config)

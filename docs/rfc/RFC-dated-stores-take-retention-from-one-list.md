@@ -1,9 +1,9 @@
 ---
 rfc: "dated-stores-take-retention-from-one-list"
 title: "날짜별 store 는 보존 규칙을 한 목록에서 받는다"
-status: Draft
+status: Implemented
 created: 2026-10-13
-updated: 2026-10-13
+updated: 2026-10-14
 author: claude
 supersedes: []
 superseded_by: null
@@ -12,7 +12,7 @@ related: ["0103", "every-durable-store-has-one-boot-policy", "tool-librarian-act
 
 # RFC: 날짜별 store 는 보존 규칙을 한 목록에서 받는다
 
-- 상태: 초안. §9 의 물음은 운영자가 2026-10-13 에 모두 답했다.
+- 상태: 구현됨. Native Stack #42853 으로 2026-10-13 에 main 에 들어갔다. 구현과 이 문서의 차이는 §11 에 적었다.
 - 이슈: #42785. 운영자가 2026-10-13 에 "RFC 먼저"를 골랐다.
 - 구현: Native Stack #42853(#42847 → #42848 → #42849 → #42850 → #42878 → #42880 → #42884).
 - 근거: §2 의 크기와 날짜는 2026-10-13 라이브 base path 에서 파일 이름과 크기만 읽어 쟀다. tool events 는 하루치(2026-10-12)의 줄 수와 바이트만 셌다. §3 은 `origin/main` `0a7538661e` 의 코드다.
@@ -335,3 +335,26 @@ Native Stack 하나로 올린다.
    - 이 조건이 빠지면 옛 자리의 파일은 어느 정리도 맡지 않는다. `Kept` 로 두려는 verdicts 는 읽히지 않는 자리에 남는다.
 
 Q1 의 답이 (나)나 (다)면 그 일은 이 스택과 따로 한다.
+
+## 11. 구현 결과
+
+Native Stack #42853 의 일곱 층이 2026-10-13 에 한 번에 main 에 들어갔다.
+
+| PR | 한 일 | §10 의 단계 |
+|---|---|---|
+| #42847 | `Dated_jsonl.Store` 목록과 `location` 을 더했다 | 1 |
+| #42848, #42849, #42850 | base root, 클러스터 root, Keeper 별 호출처를 목록으로 옮겼다 | 2 |
+| #42878 | 정리가 목록의 규칙대로 지운다. `?retention_days` 와 자기 변수 넷, §4.3 의 손으로 적은 목록을 지웠다 | 4, 3 의 일부 |
+| #42880 | 빠진 6개 중 다섯을 `Operator_window` 로, verdicts 를 `Kept` 로 두었다 | 5 |
+| #42884 | `open_store` 만 남기고 옛 `create` 를 지웠다. `Jsonl_writer.dated_path*` 를 `Dated_jsonl.Store` 로 옮겼다. `Shared_audit` 를 지웠다(Q8) | 3 |
+
+이 문서와 다른 곳은 셋이다.
+
+- 순서. §10 은 3단계(옛 문 지우기)를 정리보다 먼저 두었다. 실제로는 `?retention_days` 만 정리 층(#42878)에서 지우고, 옛 `create` 와 `dated_path*` 는 맨 위 층(#42884)에서 지웠다. 스택이 한 번에 들어갔으므로 main 에서 보이는 결과는 같다.
+- `wire-capture` 는 서버가 뜰 때 한 번 지우던 코드를 지웠다. 이제 다른 store 와 함께 정리가 서버가 뜰 때와 24시간마다 자기 날수(`Own_days`)로 지운다.
+- 5단계의 선행 조건은 채우지 못했다. 병합 때 옛 자리 `<base>/data/{tool-events,keeper-wake-payload,verdicts}/2026-10/13.jsonl` 세 파일이 남아 있었다. 서버가 그 이름으로 새 자리에 쓰고 있어서, 서버를 멈춘 사이에 옛 파일을 새 파일 앞에 붙이고 지운다. 이 일은 #42880 이 든 빌드를 띄우기 전에 한다.
+
+이 RFC 밖에 남은 일:
+
+- #42891: 정리가 폴더 하나의 `Sys_error` 로 그날 정리를 멈춘다. 지우지 못한 파일도 지운 수에 센다. 둘 다 이 스택 전부터 있던 모양이다.
+- #42837: root 를 하나로 줄인다(Q6).

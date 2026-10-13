@@ -8739,6 +8739,11 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
         Some (begin_keeper_chat_control ~preserve_input_holds:local_resume
                 ~preserve_priority_requests:local_resume state keeper_name)
     | _ -> None in
+  (* Read here, on the fiber that owns [state]: the job below only sends. *)
+  let clear_accepted = match action with
+    | Inbox.Clear -> (keeper_queue_clearing state ~keeper_name).kqc_accepted
+    | Inbox.Inspect | Inbox.Pause | Inbox.Resume | Inbox.Cancel _ | Inbox.Move_to_end _
+    | Inbox.Edit _ | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> [] in
   let check_control () =
     Result.bind (check_authority ()) (fun () ->
       match control_generation with
@@ -8806,10 +8811,22 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
             :: ("operator_operation_id", `String operator_operation_id) :: fields
           | Inbox.Prioritize_event (_, _, urgency) ->
             ("action", `String "reprioritize") :: ("urgency", `String (Keeper_event_queue.urgency_to_string urgency)) :: fields
-          | Inspect | Pause | Resume | Cancel _ | Move_to_end _ | Edit _ -> assert false in
+          | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Edit _ -> assert false in
         let* _ = post_json ~host ~port ~path:(root ^ "/events/operator")
           ~body:(Yojson.Safe.to_string (`Assoc fields)) in
         Ok ["Server confirmed event update: " ^ reference]
+      | Inbox.Clear ->
+        (* Each line is its own operation on the server, so one refusal says
+           nothing about the next: every cancel is sent and answered by id. *)
+        Ok (List.map (fun (request : Keeper_chat.request) ->
+          let id = request.request_id in
+          match post_json ~host ~port
+                  ~path:(root ^ "/chat/operations/"
+                         ^ Masc_tui_http.percent_encode_path_segment id ^ "/cancel")
+                  ~body:(Yojson.Safe.to_string (`Assoc [])) with
+          | Ok _ -> "Server confirmed cancel: " ^ id
+          | Error detail -> "Server refused cancel " ^ id ^ ": " ^ detail)
+          clear_accepted)
       | Inbox.Cancel id | Inbox.Move_to_end id | Inbox.Edit (id, _) ->
         let path = root ^ "/chat/operations/" ^ Masc_tui_http.percent_encode_path_segment id in
         let* suffix, body = match action with
@@ -8819,7 +8836,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
             let* operation = get_json ~host ~port ~path in
             let* input = Inbox.edited_input ~message operation in
             Ok ("edit", `Assoc ["input", input])
-          | Inbox.Inspect | Inbox.Pause | Inbox.Resume | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> assert false in
+          | Inbox.Inspect | Inbox.Pause | Inbox.Resume | Inbox.Clear | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> assert false in
         let* _ = post_json ~host ~port ~path:(path ^ "/" ^ suffix)
           ~body:(Yojson.Safe.to_string body) in
         Ok ["Server confirmed " ^ suffix ^ ": " ^ id] in
@@ -10490,10 +10507,42 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       (match state.msg_target_keeper_name, Masc_tui_queue_inspection.parse input with
        | None, _ -> notice ~kind:Notice_failure "Select a Keeper first"
        | _, Error detail -> notice ~kind:Notice_failure detail
+       | Some keeper_name, Ok Masc_tui_queue_inspection.Clear ->
+         (* Every unsent line for this Keeper is dropped the way Ctrl-K drops
+            one, then each accepted line gets its own cancel. The unsent lines
+            go first and need no server: they are gone even when the request
+            below is refused or cannot be sent. *)
+         let clearing = keeper_queue_clearing state ~keeper_name in
+         let dropped = List.fold_left (fun dropped (item : Chat_queue.item) ->
+           match Chat_queue.take state.msg_queued ~request_id:item.request.request_id with
+           | Some (_, rest) ->
+             state.msg_queued <- rest;
+             forget_queued_history state item.request;
+             item :: dropped
+           | None -> dropped) [] clearing.kqc_unsent in
+         (match state.msg_recall_replaces with
+          | Some editing when List.exists (fun (item : Chat_queue.item) ->
+              Keeper_chat.same_request_identity item.request editing.Chat_queue.request)
+              dropped ->
+            state.msg_recall_replaces <- None; clear_staged_attachments state
+          | Some _ | None -> ());
+         let clause count what =
+           if count = 0 then None else Some (Printf.sprintf "%d %s" count what) in
+         (match List.filter_map Fun.id
+                  [ clause (List.length dropped) "unsent cancelled"
+                  ; clause (List.length clearing.kqc_accepted) "accepted, asking the server to cancel"
+                  ; clause clearing.kqc_undecided "still being delivered, left as they are" ] with
+          | [] -> notice ~kind:Notice_reply "None of your messages are waiting for this Keeper"
+          | _ :: _ as clauses ->
+            notice ~kind:Notice_reply ("/queue clear: " ^ String.concat " · " clauses));
+         (match clearing.kqc_accepted with
+          | [] -> drain_queued_message state ~base_path ~mailbox
+          | _ :: _ ->
+            launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Clear)
        | Some keeper_name, Ok action ->
          let local_id = match action with
            | Masc_tui_queue_inspection.Cancel id | Move_to_end id | Edit (id, _) -> Some id
-           | Inspect | Pause | Resume | Cancel_event _ | Prioritize_event _ -> None in
+           | Inspect | Pause | Resume | Clear | Cancel_event _ | Prioritize_event _ -> None in
          match Option.bind local_id (fun id -> Chat_queue.find state.msg_queued ~request_id:id) with
          | Some item when item.request.keeper_name <> keeper_name ->
            notice ~kind:Notice_failure "That message belongs to another Keeper"
@@ -10517,7 +10566,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                | Ok queue -> state.msg_queued <- queue; update_queued_history_text state request;
                    notice ~kind:Notice_reply ("Updated unsent message " ^ id))
             | Move_to_end _ -> notice ~kind:Notice_failure "Local input is already joined in submission order"
-            | Inspect | Pause | Resume | Cancel_event _ | Prioritize_event _ -> assert false)
+            | Inspect | Pause | Resume | Clear | Cancel_event _ | Prioritize_event _ -> assert false)
          | None -> launch_keeper_queue state ~mailbox ~keeper_name action)
   | Masc_tui_command.Run_next
     when state.workspace_identity <> Workspace_identity_match ->
@@ -15228,7 +15277,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               | Error detail -> receipt @ ["Read unavailable: " ^ detail] in
             Notice_reply,
             ("Queue snapshot (refresh with /queue)" :: lines @
-             ["/queue pause · /queue resume · /queue cancel ID · /queue edit ID message · /queue last ID";
+             ["/queue pause · /queue resume · /queue clear · /queue cancel ID · /queue edit ID message · /queue last ID";
               "Events: /queue cancel-event REF INCARNATION reason · /queue priority-event REF INCARNATION immediate|normal|low";
               "Enter queues your line in arrival order; Esc stops the current turn and pauses queue consumption."])
       in

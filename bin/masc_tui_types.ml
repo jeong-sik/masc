@@ -11385,6 +11385,35 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
     item.request, Local_pending) local
 ;;
 
+(* What /queue clear withdraws for one Keeper. An unsent line exists only in
+   the local queue, so dropping it is a local act. An accepted line that has
+   not started is the server's to cancel, under the id this client sent it
+   with. A line whose POST is still out, or whose delivery is being re-read,
+   is neither: whether the Keeper holds it is not known yet, so it stays. *)
+type keeper_queue_clearing =
+  { kqc_unsent : Masc_tui_keeper_chat_queue.item list
+  ; kqc_accepted : Masc_tui_keeper_chat_projection.request list
+  ; kqc_undecided : int
+  }
+
+let keeper_queue_clearing (state : state) ~keeper_name =
+  let unsent = Masc_tui_keeper_chat_queue.waiting_for_keeper
+      state.msg_queued ~keeper_name in
+  let is_unsent request =
+    List.exists (fun (item : Masc_tui_keeper_chat_queue.item) ->
+      Masc_tui_keeper_chat_projection.same_request_identity item.request request)
+      unsent in
+  let accepted, undecided =
+    List.fold_left (fun (accepted, undecided) (request, delivery) ->
+      match delivery with
+      | Keeper_queued -> request :: accepted, undecided
+      | Local_pending when is_unsent request -> accepted, undecided
+      | Local_pending | Awaiting_receipt | Rechecking_delivery ->
+          accepted, undecided + 1)
+      ([], 0) (keeper_message_waiting_requests state ~keeper_name) in
+  { kqc_unsent = unsent; kqc_accepted = List.rev accepted; kqc_undecided = undecided }
+;;
+
 let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
   let loaded =
     match state.msg_loaded_keeper with

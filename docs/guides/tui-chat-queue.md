@@ -29,11 +29,18 @@ groups; the group count is not a total message count. Run `/queue` again to refr
 | --- | --- |
 | `/queue pause` | Pause new work; the current turn can finish. |
 | `/queue resume` | Resume queue consumption. |
+| `/queue clear` | Cancel every message of yours that is waiting for this Keeper. |
 | `/queue edit ID message` | Replace queued text while retaining attachments. |
 | `/queue cancel ID` | Cancel a waiting message. |
 | `/queue last ID` | Move a waiting message to the end of its queue. |
 | `/queue cancel-event REF INCARNATION reason` | Cancel the exact event shown. |
 | `/queue priority-event REF INCARNATION urgency` | Change that event's priority. |
+
+`Esc` stops a turn; it does not empty the queue. `/queue clear` does, for the
+Keeper on screen: unsent local messages are dropped at once, and each message
+the server accepted but has not started gets its own cancel request, answered
+by ID. A message still being delivered is left alone, because whether the Keeper
+holds it is not known yet. Messages other senders queued are not touched.
 
 Copy message IDs and event references from `/queue`. An event reference identifies
 the displayed event, not every event in its group. Already running or changed

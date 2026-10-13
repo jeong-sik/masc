@@ -131,7 +131,7 @@ let catalog =
     ; args = ""
     ; summary = "open recorded file changes for this keeper"
     }
-  ; { word = "queue"; aliases = []; args = "[pause|resume|cancel ID|last ID|edit ID message]"; summary = "inspect local/server waiting work and manage queued messages" }
+  ; { word = "queue"; aliases = []; args = "[pause|resume|clear|cancel ID|last ID|edit ID message]"; summary = "inspect local/server waiting work and manage queued messages" }
   ; { word = "run-next"
     ; aliases = []
     ; args = ""

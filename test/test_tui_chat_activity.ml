@@ -352,6 +352,40 @@ let test_open_request_between_segments_has_no_banner () =
     (texts (Tui.keeper_message_activity_rows state))
 ;;
 
+(* /queue clear decides per message, by where that message is. *)
+let test_queue_clear_withdraws_only_what_can_be_withdrawn () =
+  let state = state () in
+  let add keeper_name request_id =
+    let request : Chat.request =
+      { request_id; keeper_name; message = "hello"; attachments = []; references = [] } in
+    match Queue.push state.msg_queued ~submitted_at:1. request with
+    | Ok (queue, _) -> state.msg_queued <- queue
+    | Error error -> fail error in
+  add "alpha" "unsent-1";
+  add "beta" "other-keeper";
+  add "alpha" "unsent-2";
+  let accept (entry : Tui.inflight) =
+    Tui.turn_log_add ~now:3. entry.log ~seq:None
+      (Live.Accepted {admission=Live.Queued; queue_length=1; interactive=None});
+    entry in
+  let accepted = accept (inflight ~request_id:"accepted" ~at:2. ()) in
+  let posting = inflight ~request_id:"posting" ~at:4. () in
+  let rechecking =
+    { (inflight ~request_id:"rechecking" ~at:5. ()) with phase = Tui.Turn_reconciling } in
+  let elsewhere = accept (inflight ~keeper_name:"beta" ~request_id:"beta-accepted" ~at:6. ()) in
+  state.msg_inflight <- [elsewhere; rechecking; posting; accepted];
+  let clearing = Tui.keeper_queue_clearing state ~keeper_name:"alpha" in
+  check (list string) "unsent lines for this Keeper are dropped locally"
+    ["unsent-1"; "unsent-2"]
+    (List.map (fun (item : Queue.item) -> item.request.Chat.request_id)
+       clearing.Tui.kqc_unsent);
+  check (list string) "an accepted line is cancelled on the server under its own id"
+    ["accepted"]
+    (List.map (fun (request : Chat.request) -> request.request_id)
+       clearing.Tui.kqc_accepted);
+  check int "a line still being delivered is left alone" 2 clearing.Tui.kqc_undecided
+;;
+
 let () =
   run "TUI chat activity"
     [ "request and lane states",
@@ -373,4 +407,6 @@ let () =
           test_only_the_uncovered_in_flight_rows_are_drawn
       ; test_case "a live turn elsewhere covers nothing here" `Quick
           test_a_live_turn_elsewhere_covers_nothing_here
+      ; test_case "queue clear withdraws only what can be withdrawn" `Quick
+          test_queue_clear_withdraws_only_what_can_be_withdrawn
       ] ]

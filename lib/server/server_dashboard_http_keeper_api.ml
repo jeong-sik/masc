@@ -651,8 +651,13 @@ let keeper_chat_history_page_json ?max_total config name ~before =
       None
       messages
   in
+  (* The page route's only client is the TUI, which never reads
+     [stream_contract]; leaving it out saves about a quarter of the page's
+     bytes on the parse-decode-fold path the UI runs per key held (#42200).
+     The transcript route above keeps it for the dashboard. *)
   let messages =
-    Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref messages
+    Keeper_chat_store.to_json_array ~omit_stream_contract:true ~base_dir
+      ?trace_block_by_turn_ref messages
     |> attach_keeper_chat_skill_activations ~config
   in
   `Assoc

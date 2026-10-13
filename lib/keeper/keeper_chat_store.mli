@@ -573,10 +573,12 @@ val load_page :
     only on rows persisted by the idempotent append-once paths, verbatim as the
     typed delivery identity object. When [base_dir] is supplied, the history
     endpoint marks audio clips as [expired] when the underlying MP3 file is
-    gone. *)
+    gone. [omit_stream_contract] drops the per-row [stream_contract] object
+    the page route's only client never reads (#42200). *)
 val to_json_array :
   ?base_dir:string ->
   ?trace_block_by_turn_ref:(Ids.Turn_ref.t -> chat_block option) ->
+  ?omit_stream_contract:bool ->
   chat_message list ->
   Yojson.Safe.t
 

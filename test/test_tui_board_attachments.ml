@@ -172,6 +172,61 @@ let test_only_the_handlers_wrapper_is_an_artifact () =
   broken "a bare digest" [ "sha256", `String sha256 ]
 ;;
 
+(* The read pane's one-line label. These check that the entry's own data
+   reaches the reader -- its name, its size, its kind, the wire's word for a
+   kind this build does not know, the reason an entry broke -- and leave the
+   wording around that data free to change. *)
+module Board_attachments = Masc_tui_board_attachments
+
+let contains ~part whole =
+  let part_length = String.length part in
+  let rec at index =
+    index + part_length <= String.length whole
+    && (String.equal (String.sub whole index part_length) part || at (index + 1))
+  in
+  at 0
+;;
+
+let artifact ?name ?(bytes = 42) kind : board_attachment_entry =
+  Ok
+    { ba_kind = kind
+    ; ba_source = As_artifact { sha256; bytes }
+    ; ba_name = name
+    }
+;;
+
+let test_label_carries_the_name_and_the_size () =
+  let small = Board_attachments.label (artifact ~name:"riff.gp" ~bytes:42 Ak_score) in
+  let large = Board_attachments.label (artifact ~name:"riff.gp" ~bytes:4096 Ak_score) in
+  Alcotest.(check bool) "the name is in the label" true
+    (contains ~part:"riff.gp" small);
+  Alcotest.(check bool) "the size is said" false (String.equal small large)
+;;
+
+let test_label_tells_the_kinds_apart () =
+  let labels =
+    List.map
+      (fun kind -> Board_attachments.label (artifact ~name:"a" kind))
+      [ Ak_image; Ak_video; Ak_youtube; Ak_external_link
+      ; Ak_file; Ak_audio; Ak_score; Ak_midi
+      ]
+  in
+  Alcotest.(check int) "eight kinds, eight labels" 8
+    (List.length (List.sort_uniq String.compare labels))
+;;
+
+let test_label_names_an_unknown_kind () =
+  let unknown = Board_attachments.label (artifact (Ak_unknown "hologram")) in
+  Alcotest.(check bool) "the wire's word for the kind is in the label" true
+    (contains ~part:"hologram" unknown)
+;;
+
+let test_label_says_why_an_entry_broke () =
+  let reason = "attachments[3] name must be a string" in
+  Alcotest.(check bool) "the reason is in the label" true
+    (contains ~part:reason (Board_attachments.label (Error reason)))
+;;
+
 let () =
   Alcotest.run "tui_board_attachments"
     [ ( "decode"
@@ -187,5 +242,15 @@ let () =
             test_non_list_attachments_is_one_broken_entry
         ; Alcotest.test_case "only the handler's wrapper is an artifact" `Quick
             test_only_the_handlers_wrapper_is_an_artifact
+        ] )
+    ; ( "label"
+      , [ Alcotest.test_case "the name and the size" `Quick
+            test_label_carries_the_name_and_the_size
+        ; Alcotest.test_case "the kinds are told apart" `Quick
+            test_label_tells_the_kinds_apart
+        ; Alcotest.test_case "an unknown kind is named" `Quick
+            test_label_names_an_unknown_kind
+        ; Alcotest.test_case "a broken entry says why" `Quick
+            test_label_says_why_an_entry_broke
         ] )
     ]

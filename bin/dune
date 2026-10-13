@@ -1337,6 +1337,14 @@
  (wrapped false)
  (modules masc_tui_board_detail))
 
+;; A board post attachment's one-line label. Own library so a test can
+;; call it without drawing a screen.
+(library
+ (name masc_tui_board_attachments)
+ (wrapped false)
+ (modules masc_tui_board_attachments)
+ (libraries masc_tui_types masc_tui_context_inspector))
+
 (library
  (name masc_tui_magnitude)
  (wrapped false)
@@ -2225,6 +2233,7 @@
   masc_tui_operator_projection
   masc_tui_approval_authority
   masc_tui_board_detail
+  masc_tui_board_attachments
   masc_tui_board_read_layout
   masc_tui_browser_lane_layout
   masc_tui_fetched

@@ -16,6 +16,7 @@ module Render_schedule = Masc_tui_render_schedule
 module Layout = Masc_tui_layout
 module Link = Masc_tui_link
 module Board_composer = Masc_tui_board_composer
+module Board_attachments = Masc_tui_board_attachments
 
 (* Board accepts ordinary Markdown, so JSON detection is deliberately the
    narrow whole-document case. Objects and arrays are operational payloads;
@@ -801,7 +802,29 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                         (max 8 (body_wrap_cols - 26)))
                      Ansi.reset))
       in
-      let body_lines = body_lines @ reference_lines @ related_lines in
+      (* The post's own attachments, ahead of the derived references: what
+         the author attached is content, what the body points at is relation.
+         [Board_attachments.label] owns the one-line wording; this only
+         fits it to the column. Appended like the sections above so the
+         surface's own scroll carries it. *)
+      let attachment_lines =
+        match post.bp_attachments with
+        | [] -> []
+        | attachments ->
+          (Ansi.dim ^ "" ^ Ansi.reset)
+          :: (Ansi.bold ^ "  ATTACHMENTS" ^ Ansi.reset)
+          :: List.map
+               (fun (entry : board_attachment_entry) ->
+                 Printf.sprintf "  %s%s%s" Ansi.reset
+                   (fit_width
+                      (Terminal_text.single_line (Board_attachments.label entry))
+                      (max 8 (body_wrap_cols - 8)))
+                   Ansi.reset)
+               attachments
+      in
+      let body_lines =
+        body_lines @ attachment_lines @ reference_lines @ related_lines
+      in
       let initial_comment_offset = ref None in
       let detail_lines =
         match detail with

@@ -28,15 +28,19 @@ type dispatch_credential_error =
       { provider_id : string
       ; carrier : Agent_core.Error.credential_carrier
       }
+  | Undeclared_credential of { provider_id : string }
+      (** The catalog row states [requires_api_key] and the runtime row declares
+          no credential, so the request would leave without an auth header. *)
 
 val dispatch_credential_error_to_string : dispatch_credential_error -> string
 
 val dispatch_credential_error_to_core_error :
   dispatch_credential_error -> Agent_core.Error.t
 (** Preserve a missing environment credential as the existing typed
-    [MissingEnvVar] configuration error. Other unavailable credential carriers
-    use the closed [CredentialUnavailable] variant, so consumers never infer
-    terminal configuration state from broad [InvalidConfig] text. *)
+    [MissingEnvVar] configuration error. Other unavailable credential carriers,
+    and an undeclared one, use the closed [CredentialUnavailable] variant, so
+    consumers never infer terminal configuration state from broad
+    [InvalidConfig] text. *)
 
 val validate_dispatch_credential :
   provider_config:Llm_provider.Provider_config.t ->

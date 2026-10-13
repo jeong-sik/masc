@@ -674,6 +674,98 @@ let test_events_query_spells_both_cursors () =
     (query ~since_seq:(Journal.After_seq 7) ~since_offset:(offset 212))
 ;;
 
+(* A last page whose events or cursor cannot follow the position it was asked
+   from is an error, never a shorter journal. *)
+let test_journal_final_page_rejects_invalid_event_frontiers () =
+  let event seq = line seq 1. (E.Text_delta {text="authored bytes"; response=Unobserved_scope None}) in
+  let offset = match Journal.page_start_of_wire (Some 100) with
+    | Some offset -> offset | None -> fail "fixture offset" in
+  List.iter (fun (events, next_since_seq) ->
+    let fetch ~since_seq:_ ~since_offset:_ = Ok {
+      Log.source=Log.Operation "op"; events; has_more=false;
+      next_since_seq; next_since_offset=offset } in
+    match Log.read_whole_journal ~since_seq:(Journal.After_seq 1) ~fetch with
+    | Error (Log.Events_undecodable _) -> ()
+    | Ok _ -> fail "invalid final page was accepted"
+    | Error error -> fail (Log.events_error_to_string error)
+  ) [ [event 3; event 2], Journal.After_seq 2;
+      [event 2; event 2], Journal.After_seq 2;
+      [event 1], Journal.After_seq 1;
+      [event 2], Journal.After_seq 9;
+      [], Journal.After_seq 2 ]
+;;
+
+let test_journal_final_page_accepts_valid_resume_and_sequence_gaps () =
+  let event seq = line seq 1. (E.Text_delta {text="authored bytes"; response=Unobserved_scope None}) in
+  let offset = match Journal.page_start_of_wire (Some 100) with
+    | Some offset -> offset | None -> fail "fixture offset" in
+  List.iter (fun (events, next_since_seq) ->
+    let fetch ~since_seq:_ ~since_offset:_ = Ok {
+      Log.source=Log.Operation "op"; events; has_more=false;
+      next_since_seq; next_since_offset=offset } in
+    match Log.read_whole_journal ~since_seq:(Journal.After_seq 1) ~fetch with
+    | Ok actual -> check bool "valid journal events retain exact bytes and order" true (actual = events)
+    | Error error -> fail (Log.events_error_to_string error)
+  ) [ [], Journal.After_seq 1;
+      [event 2; event 7], Journal.After_seq 7 ]
+;;
+
+let test_journal_empty_page_rejects_unserved_byte_advances () =
+  let offset value = match Journal.page_start_of_wire (Some value) with
+    | Some offset -> offset | None -> fail "fixture offset" in
+  let page ~events ~has_more ~next_since_seq ~next_since_offset = Ok {
+    Log.source=Log.Operation "op"; events; has_more;
+    next_since_seq; next_since_offset=offset next_since_offset } in
+  let whole_turn ~since_seq:_ ~since_offset:_ =
+    page ~events:[] ~has_more:false ~next_since_seq:Journal.Whole_turn ~next_since_offset:100 in
+  let calls = ref 0 in
+  let resumed ~since_seq:_ ~since_offset:_ =
+    incr calls;
+    if !calls = 1 then
+      page ~events:[line 2 1. (E.Text_delta {text="authored bytes"; response=Unobserved_scope None})]
+        ~has_more:true ~next_since_seq:(Journal.After_seq 2) ~next_since_offset:100
+    else page ~events:[] ~has_more:false ~next_since_seq:(Journal.After_seq 2) ~next_since_offset:200 in
+  List.iter (fun fetch ->
+    match Log.read_whole_journal ~since_seq:Journal.Whole_turn ~fetch with
+    | Error (Log.Events_undecodable _) -> ()
+    | Ok _ -> fail "empty page skipped unserved byte range"
+    | Error error -> fail (Log.events_error_to_string error)
+  ) [whole_turn; resumed]
+;;
+
+(* Each way a later page can disagree with the cursor it was asked from. The
+   first page is served normally so the second one is asked from a real
+   offset. *)
+let test_journal_page_rejects_cursor_disagreement () =
+  let event seq = line seq 1. (E.Text_delta {text="authored bytes"; response=Unobserved_scope None}) in
+  let offset value = match Journal.page_start_of_wire (Some value) with
+    | Some offset -> offset | None -> fail "fixture offset" in
+  let pages ~second =
+    let calls = ref 0 in
+    fun ~since_seq:_ ~since_offset:_ ->
+      incr calls;
+      if !calls = 1
+      then Ok { Log.source=Log.Operation "op"; events=[event 2]; has_more=true;
+                next_since_seq=Journal.After_seq 2; next_since_offset=offset 100 }
+      else Ok (second ()) in
+  let second ~events ~has_more ~next_since_seq ~next_since_offset () =
+    { Log.source=Log.Operation "op"; events; has_more; next_since_seq;
+      next_since_offset=offset next_since_offset } in
+  List.iter (fun (label, page) ->
+    match Log.read_whole_journal ~since_seq:Journal.Whole_turn ~fetch:(pages ~second:page) with
+    | Error (Log.Events_undecodable _) -> ()
+    | Ok _ -> fail (label ^ " was accepted")
+    | Error error -> fail (Log.events_error_to_string error))
+    [ "an empty last page that moves the offset back",
+      second ~events:[] ~has_more:false ~next_since_seq:(Journal.After_seq 2) ~next_since_offset:50;
+      "a last page with events whose offset did not move",
+      second ~events:[event 3] ~has_more:false ~next_since_seq:(Journal.After_seq 3) ~next_since_offset:100;
+      "a last page with events whose offset moved back",
+      second ~events:[event 3] ~has_more:false ~next_since_seq:(Journal.After_seq 3) ~next_since_offset:50;
+      "an empty page that claims more and advances only the sequence",
+      second ~events:[] ~has_more:true ~next_since_seq:(Journal.After_seq 9) ~next_since_offset:200 ]
+;;
+
 (* The pager follows has_more only while both cursors advance, starts where
    it is told from the first row, asks every later page from the byte offset
    the page before handed back, and stops at the first error. *)
@@ -782,7 +874,7 @@ let test_read_whole_journal_pages_until_the_position_stops_moving () =
   let failing ~since_seq ~since_offset:_ =
     match since_seq with
     | Journal.Whole_turn ->
-        page ~events:[] ~has_more:true ~next_since_seq:(Journal.After_seq 5)
+        page ~events:[l 5] ~has_more:true ~next_since_seq:(Journal.After_seq 5)
           ~next_since_offset:40
     | Journal.After_seq _ -> Error Log.Journal_pruned
   in
@@ -1144,8 +1236,16 @@ let () =
             test_hold_seq_counts_without_an_entry
         ; test_case "the events query spells both cursors" `Quick
             test_events_query_spells_both_cursors
+        ; test_case "final pages accept resumed offsets and sequence gaps" `Quick
+            test_journal_final_page_accepts_valid_resume_and_sequence_gaps
+        ; test_case "final pages reject invalid event frontiers" `Quick
+            test_journal_final_page_rejects_invalid_event_frontiers
+        ; test_case "a page that disagrees with its cursor is rejected" `Quick
+            test_journal_page_rejects_cursor_disagreement
         ; test_case "read_whole_journal pages until the position stops moving" `Quick
             test_read_whole_journal_pages_until_the_position_stops_moving
+        ; test_case "empty pages cannot skip unserved byte ranges" `Quick
+            test_journal_empty_page_rejects_unserved_byte_advances
         ] )
     ; ( "golden"
       , [ test_case "missing start retains scoped text through journal and live wire" `Quick

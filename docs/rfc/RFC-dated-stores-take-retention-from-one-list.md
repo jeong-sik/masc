@@ -58,7 +58,9 @@ masc 는 기록을 `<폴더>/YYYY-MM/DD.jsonl` 로 하루에 파일 하나씩 �
 
 같은 날 정리가 닿는 store 들(`tool_calls`, `agent-core-events`, `costs` 등)은 날짜 파일이 9개씩만 남아 있었다. 가장 오래된 날이 2026-10-05 다. 라이브에서는 기본 30일이 아니라 일주일쯤의 창이 듣고 있다. 그 값이 어디서 오는지는 확인하지 않았다.
 
-위 셋은 #42789 가 `<base>/data/` 에서 `.masc` 아래로 옮겼다. 라이브 서버는 옛 빌드라서 아직 옛 자리에 쓴다. 표의 크기는 옛 자리에서 쟀다.
+위 셋은 #42789 가 `<base>/data/` 에서 `.masc` 아래로 옮겼다. 코드는 옛 자리를 읽지 않는다. 옛 자리의 파일은 운영자가 손으로 옮겨야 새 자리에 온다. 표의 크기는 옛 자리에서 쟀다.
+
+라이브에서는 2026-10-13 20:49 에 새 빌드가 떴다. 21:10 에 운영자 답을 받아 지난 달 폴더와 전날까지의 날짜 파일을 새 자리로 옮겼다. 파일 수는 옮기기 전후가 같다(174, 50, 144). 옛 자리에는 그날 날짜 파일이 store 마다 하나씩 남아 있다. 새 서버가 같은 이름의 파일을 쓰고 있어서, 서버를 멈출 때 합친다.
 
 schedule signals 는 배포 preflight 도 읽는다. 남아 있는 줄을 모두 읽어 형식을 검사한다. 옛 줄이 있어야 하는 읽기는 아니다.
 
@@ -166,6 +168,12 @@ module Store : sig
     | Decision_audit    (* decision_audit/<keeper 폴더 이름>/ *)
   val all : t list   (* [@@deriving enumerate] *)
 
+  type root =
+    | Base_root      (* <base>/.masc *)
+    | Cluster_root   (* 클러스터별 root. 기본 클러스터에서는 위와 같다 *)
+
+  val root : t -> root   (* exhaustive *)
+
   type retention =
     | Operator_window            (* 운영자 창 *)
     | Fixed_days of int          (* 읽는 쪽 창이 정한 날수 *)
@@ -174,18 +182,21 @@ module Store : sig
 
   val retention : t -> retention   (* exhaustive *)
 
-  type location   (* 폴더 하나. 이 모듈만 만든다 *)
-  val workspace : masc_root:string -> Workspace.t -> location
-  val per_keeper : masc_root:string -> keeper:string -> Per_keeper.t -> location
-  val reaction_ledger :
-    masc_root:string -> keeper:string -> generation:string -> location
-  val decision_audit : masc_root:string -> keeper_dirname:string -> location
+  type roots      (* 두 root 를 함께 든다 *)
+  val roots : base_root:string -> cluster_root:string -> roots
 
-  val prune : masc_root:string -> now:float -> int
+  type location   (* 폴더 하나. 이 모듈만 만든다 *)
+  val workspace : roots -> Workspace.t -> location
+  val per_keeper : roots -> keeper:string -> Per_keeper.t -> location
+  val reaction_ledger : roots -> keeper:string -> generation:string -> location
+  val decision_audit : roots -> keeper_dirname:string -> location
+
+  val prune : roots -> now:float -> int
 end
 ```
 
-- 생성자를 더하면 폴더 자리와 보존 규칙을 채울 때까지 컴파일되지 않는다.
+- 생성자를 더하면 root, 폴더 자리, 보존 규칙을 채울 때까지 컴파일되지 않는다.
+- 항목은 어느 root 아래인지도 답한다. 지금은 호출자가 root 문자열을 넘긴다. 그래서 쓰는 root 와 정리가 보는 root 가 달라도 컴파일된다. 날짜별 store 가운데 적어도 7개가 그렇다(transition-audit, audit-approvals, tool-events, keeper-wake-payload, verdicts, reaction-ledger, decision_audit). 이들은 `<base>/.masc` 에 쓰는데 정리는 클러스터별 root 를 본다. `location` 을 만드는 함수가 두 root 를 든 값을 받고 항목이 답한 쪽을 쓰면 이 어긋남이 생기지 않는다. 기본 클러스터에서는 두 root 가 같아서 동작이 바뀌지 않는다. 라이브에는 `clusters` 폴더가 없다.
 - `all` 은 derive 라서 손으로 적는 목록이 없다. 지금 `Common.keeper_runtime_stores` 는 손으로 적는 목록이라, 생성자를 더하고 목록에서 빠뜨려도 컴파일된다.
 - 폴더 이름은 목록이 가진다. 위쪽 모듈이 따로 들고 있던 이름(`Audit_log.store_dirname` 등)은 목록의 것을 가리키게 한다.
 - `Common.keeper_runtime_store` 에도 있는 7개(`Per_keeper` 의 앞 6개와 reaction-ledger)의 폴더 이름은 `Common` 의 함수를 불러서 얻는다. 이름을 두 번 적지 않는다.
@@ -232,6 +243,8 @@ val dated_path_now : Store.location -> Jsonl_writer.dated_path
 
 `Operator_window` 는 지금처럼 0 이하면 아무것도 지우지 않는다.
 
+`provider_usage_history` 에 쓰는 프로세스는 서버뿐이다. 쓰는 observer 를 서버 bootstrap 만 건다. 그래서 지우는 때가 정리로 옮겨 가도 16일이 지켜진다.
+
 자기 변수 넷을 지우는 까닭은 셋이다.
 
 - 지금도 늘리는 쪽으로는 듣지 않는다. 창보다 긴 값과 0 은 정리가 덮는다(§2.4).
@@ -275,7 +288,7 @@ val dated_path_now : Store.location -> Jsonl_writer.dated_path
 - 용량 한도의 값과 동작.
 - `Keeper_durable_store` 와 합치기. 두 목록에 같이 나오는 store 는 둘(`Provider_inputs`, `Turn_records`)이고 나머지는 한쪽 질문에만 해당한다. 합치면 대부분의 항목이 "해당 없음"을 답해야 한다.
 - `Common.keeper_runtime_store` 나누기. 그 타입에는 날짜별이 아닌 store 가 셋 있어서 그대로 쓰면 날짜별이 아닌 것을 날짜별로 여는 코드가 컴파일된다. 그래서 날짜별 것만 담은 타입을 따로 둔다. 같은 store 를 가리키는 줄이 두 타입에 7개 생긴다. 이것을 없애려면 그 타입을 읽는 Python manifest 까지 바꿔야 한다.
-- 클러스터 root. 정리는 `Workspace.masc_dir`(클러스터별) 아래를 보는데, 날짜별 store 가운데 적어도 7개는 클러스터와 상관없이 `<base>/.masc` 에 쓴다(transition-audit, audit-approvals, tool-events, keeper-wake-payload, verdicts, reaction-ledger, decision_audit). 기본 클러스터가 아니면 정리가 거기에 닿지 않는다. 라이브에는 `clusters` 폴더가 없다. 이 RFC 는 호출자가 넘기는 root 를 바꾸지 않는다(Q6).
+- 옛 자리나 지운 환경 변수를 서버가 시작 때 살피는 코드. 넣으면 코드가 그 이름을 다시 갖게 된다. 헌법의 `legacy_residue` 항목대로, 옮기는 일과 지운 변수는 changelog 의 Upgrade notes 와 §10 의 선행 조건이 맡는다.
 
 ## 7. 검증
 
@@ -287,12 +300,12 @@ val dated_path_now : Store.location -> Jsonl_writer.dated_path
   - 등록되지 않은 Keeper 폴더도 정리된다.
   - reaction-ledger 의 옛 세대 폴더도 정리된다.
 - 변형. 항목 하나의 규칙을 `Kept` 로 바꾸면 위 테스트가 실패해야 한다. `Fixed_days 16` 을 17 로 바꾸면 16일 된 파일을 둔 케이스가 실패해야 한다.
-- 라이브. 배포 뒤 첫 시작 로그의 `startup prune: pruned N` 줄과, §2.1 여섯 폴더의 가장 오래된 날짜를 다시 잰다.
+- 라이브. 배포 뒤 첫 시작 로그의 `startup prune: pruned N` 줄과, §2.1 여섯 폴더의 가장 오래된 날짜를 다시 잰다. 옛 자리 세 폴더(`<base>/data/tool-events`, `keeper-wake-payload`, `verdicts`)도 같이 잰다. 거기에는 파일이 없어야 한다.
 
 ## 8. 확신도
 
 - 높다: §2.1 의 크기와 날짜, §2.2 의 하루치 숫자, verdicts 가 읽는 줄 수, schedule 의 중복 방지 파일, §2.4, §2.3 의 주석 내용, §2.5. §2.3~§6 의 코드 사실은 이 문서를 쓰지 않은 리뷰 에이전트가 따로 대조했고, 거기서 틀린 곳 셋(`tool_usage` 변수가 듣는 조건, handle 을 새로 만드는 곳 수, 테스트 호출 수)을 고쳤다.
-- 중간: `create` 43곳의 분류는 조사 에이전트가 읽은 표다. `masc_root` 를 인자로 받는 12곳이 실제로 어느 root 를 받는지는 끝까지 따라가지 않았다. `Assigned` 줄이 언제 쓰이는지(턴마다, `tools/list` 마다)는 호출 자리만 보았다.
+- 중간: `create` 43곳의 분류는 조사 에이전트가 읽은 표다. `masc_root` 를 인자로 받는 12곳이 실제로 어느 root 를 받는지는 끝까지 따라가지 않았다. 항목마다 `root` 를 답하려면 구현 전에 이 12곳을 따라가야 한다. `Assigned` 줄이 언제 쓰이는지(턴마다, `tools/list` 마다)는 호출 자리만 보았다.
 - 모른다: 테스트 123곳을 옮기는 데 드는 품. 날짜 경로를 직접 만드는 파일들이 `Dated_jsonl` 을 거치지 않는 까닭. 빌드와 테스트는 아무것도 돌리지 않았다. 이 문서는 설계뿐이다.
 
 ## 9. 열어 둔 물음
@@ -305,7 +318,7 @@ val dated_path_now : Store.location -> Jsonl_writer.dated_path
 - Q3. 운영자 창의 기본값. RFC-0103 은 기본을 끄자고 했고 지금 코드는 30일이다. 이 RFC 는 30일을 그대로 둔다. RFC-0103 을 닫을지 정해야 한다.
 - Q4. `tool_usage` 의 기본을 무엇으로 볼 것인가. `.ml` 은 "안 지움", `.mli` 는 30일, 실제 동작은 운영자 창이다. 이 RFC 는 실제 동작인 운영자 창으로 맞춘다.
 - Q5. `continuity-requests` 는 진단용이다. 며칠치가 있어야 진단에 쓸 수 있는가. 이 store 를 읽는 코드를 더하는 열린 PR 은 없다(2026-10-13 검색).
-- Q6. 기본이 아닌 클러스터를 실제로 쓰는가. 쓴다면 §6 의 root 문제를 따로 고쳐야 한다.
+- Q6. 기본이 아닌 클러스터를 실제로 쓰는가. 안 쓴다면 root 를 하나로 줄이고 `root` 답을 지우는 쪽이 더 단순하다.
 - Q7. telemetry, tool_calls, agent-core-events, tool_usage 의 자기 변수를 지워도 되는가. 이 RFC 는 지운다(§4.4).
   - 남기는 쪽을 고르면 그 store 는 자기 변수만 따른다. 이때 달라지는 것은 셋이다. 창보다 긴 값이 듣는다. 0 을 주면 지우지 않는다. 운영자가 창을 30일보다 짧게 줄여도 이 store 들은 자기 기본값 30일에 남는다.
   - 이 장비의 `~/.zshenv`, `~/.zshrc`, `~/.config/masc` 에는 네 변수가 없다. 서버가 다른 길로 받는 환경은 확인하지 않았다.
@@ -318,7 +331,9 @@ Native Stack 하나로 올린다.
 1. `Store` 목록과 `location` 을 더한다. `location` 을 받는 `create` 를 옛 `create` 옆에 둔다. 규칙은 §4.4 대로 적는다. 빠진 6개는 `Kept` 로 시작한다. #42625 가 먼저 병합되면 운영자 창은 그 PR 의 함수로 읽는다.
 2. `lib` 의 `create` 43곳과 날짜 경로를 직접 만드는 8개 파일, 테스트 123곳을 영역별로 나눠 옮긴다.
 3. 옛 `create` 와 `?retention_days` 를 지운다. `Jsonl_writer.dated_path*` 와 `append_dated_jsonl` 을 `lib/dated_jsonl` 안으로 옮긴다. 스택은 통째로 병합하므로 main 에는 문이 하나만 남는다.
-4. 정리가 `Store.prune` 을 부르게 하고 §4.3 의 목록들과 자기 변수 넷을 지운다. 여기서 §4.4 의 "달라지는 것"이 생긴다.
+4. 정리가 `Store.prune` 을 부르게 하고 §4.3 의 목록들과 자기 변수 넷을 지운다. 여기서 §4.4 의 "달라지는 것"이 생긴다. 지운 변수 넷과 달라지는 것을 changelog 의 Upgrade notes 에 적는다.
 5. 빠진 6개의 규칙을 운영자가 정한 값으로 바꾼다. 첫 시작 때 지워지는 양을 PR 본문에 적는다.
+   - 선행 조건: 옛 자리 세 폴더에 파일이 없다. `find <base>/data/tool-events <base>/data/keeper-wake-payload <base>/data/verdicts -type f` 가 아무것도 내지 않는 것을 PR 본문에 적는다.
+   - 이 조건이 빠지면 옛 자리의 파일은 어느 정리도 맡지 않는다. `Kept` 로 두려는 verdicts 는 읽히지 않는 자리에 남는다.
 
 Q1 의 답이 (나)나 (다)면 그 일은 이 스택과 따로 한다.

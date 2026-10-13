@@ -10,6 +10,7 @@ type recoverability =
 type tool_host_cause =
   | Tool_host_timeout
   | Tool_host_transport_unavailable
+[@@deriving enumerate]
 
 type t = {
   surface : string;
@@ -49,10 +50,16 @@ let tool_host_cause_code = function
   | Tool_host_timeout -> "tool_host_timeout"
   | Tool_host_transport_unavailable -> "tool_host_transport_unavailable"
 
-let tool_host_cause_of_code = function
-  | "tool_host_timeout" -> Ok Tool_host_timeout
-  | "tool_host_transport_unavailable" -> Ok Tool_host_transport_unavailable
-  | other -> Error (Printf.sprintf "unknown tool host cause_code: %S" other)
+(* Read off [tool_host_cause_code] and the derived list, so a new cause is
+   decoded as soon as it has a code. *)
+let tool_host_cause_of_code code =
+  match
+    List.find_opt
+      (fun cause -> String.equal (tool_host_cause_code cause) code)
+      all_of_tool_host_cause
+  with
+  | Some cause -> Ok cause
+  | None -> Error (Printf.sprintf "unknown tool host cause_code: %S" code)
 
 let first_non_empty values =
   List.find_map (fun value -> Option.bind value String_util.trim_nonempty) values

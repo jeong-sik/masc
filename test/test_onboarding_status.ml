@@ -52,7 +52,7 @@ let apple_settings ~rosetta ~kernel =
 (* The sandbox check of a workspace the other tests build, answered by a host
    with a healthy Docker engine, which is the default imp declaration. *)
 let inspect = Onboarding_status.inspect
-  ~sandbox_run:(fst (fixture_runner healthy_docker))
+  ~sandbox:(Onboarding_status.Probe_with (fst (fixture_runner healthy_docker)))
 
 (* Drops a TOML table and its body, so a fixture can lose one declaration while
    the binding that names it stays. *)
@@ -1060,7 +1060,7 @@ let sandbox_check_of observed =
 let doctor_sandbox ~keeper_toml responses = with_workspace @@ fun base ->
   imp_workspace base keeper_toml;
   let run, calls = fixture_runner responses in
-  let observed = Onboarding_status.inspect ~sandbox_run:run ~base_path:(Some base) in
+  let observed = Onboarding_status.inspect ~sandbox:(Onboarding_status.Probe_with run) ~base_path:(Some base) in
   sandbox_check_of observed, calls ()
 
 (* What the probe itself answers for Apple Container on the same fixture. *)
@@ -1195,7 +1195,7 @@ let a_declaration_that_names_no_backend_is_read_as_boot_reads_it () = with_works
   let healthy = macos26_arm64_host
     @ [ apple_inventory, Ok "[]"; rosetta_installed; apple_settings ~rosetta:true ~kernel:true ] in
   let run, calls = fixture_runner healthy in
-  let observed = Onboarding_status.inspect ~sandbox_run:run ~base_path:(Some base) in
+  let observed = Onboarding_status.inspect ~sandbox:(Onboarding_status.Probe_with run) ~base_path:(Some base) in
   let sandbox = sandbox_check_of observed in
   check bool "the Keeper declaration itself loads" true
     (condition Onboarding_status.Keeper_declaration observed = Onboarding_status.Satisfied);
@@ -1222,7 +1222,7 @@ let a_declaration_that_names_no_backend_is_read_as_boot_reads_it () = with_works
 let a_named_backend_is_not_replaced_by_the_host_default () = with_workspace @@ fun base ->
   imp_workspace base (microvm_imp "nerdctl_kata");
   let run, calls = fixture_runner macos26_arm64_host in
-  let observed = Onboarding_status.inspect ~sandbox_run:run ~base_path:(Some base) in
+  let observed = Onboarding_status.inspect ~sandbox:(Onboarding_status.Probe_with run) ~base_path:(Some base) in
   check bool "nerdctl_kata is read from the file" true
     (sandbox_check_of observed
      = Onboarding_status.sandbox_check_of_entry
@@ -1236,11 +1236,37 @@ let a_named_backend_is_not_replaced_by_the_host_default () = with_workspace @@ f
    Needs_configuration whatever the declaration holds. The doctor reaches the
    probe only after the declaration named an endpoint, so it does not tell the
    operator to choose one again. *)
+(* A server answering requests reads no backend state: its inspection is
+   [Not_probed], so a stopped service stays unverified there while the CLI
+   probe reads the same declaration as needing setup. *)
+let a_server_inspection_does_not_probe_the_backend () = with_workspace @@ fun base ->
+  imp_workspace base (microvm_imp "apple_container");
+  let stopped = macos26_arm64_host @ [ apple_inventory, Error Readiness.Command_failed ] in
+  let run, _ = fixture_runner stopped in
+  let probed = sandbox_check_of
+      (Onboarding_status.inspect ~sandbox:(Onboarding_status.Probe_with run) ~base_path:(Some base)) in
+  let served = sandbox_check_of
+      (Onboarding_status.inspect_loaded ~configuration:None ~base_path:(Some base)) in
+  check bool "the CLI probe reads a stopped service as needing setup" true
+    (probed.condition = Onboarding_status.Needs_setup);
+  check bool "the server answer is unverified, not setup" true
+    (served.condition = Onboarding_status.Needs_verification);
+  check bool "its actions are the unverified ones" true
+    (served.actions = [Onboarding_status.Configure_sandbox; Onboarding_status.Start_imp])
+
+(* [Not_probed] still reads the declaration, which is a file and no command. *)
+let an_unreadable_declaration_is_setup_even_when_not_probed () = with_workspace @@ fun base ->
+  imp_workspace base "[keeper]\nsandbox_profile = \"microvm\"\nmicrovm_backend = \"no_such_backend\"\n";
+  let served = sandbox_check_of
+      (Onboarding_status.inspect ~sandbox:Onboarding_status.Not_probed ~base_path:(Some base)) in
+  check bool "an invalid declaration is not called unverified" true
+    (served.condition = Onboarding_status.Needs_setup)
+
 let a_declared_remote_ssh_backend_is_unverified_not_unconfigured () = with_workspace @@ fun base ->
   imp_workspace base
     "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"remote_ssh\"\nremote_endpoint = \"builder\"\nnetwork_mode = \"inherit\"\ninstructions = \"Respond to the operator.\"\n";
   let run, _ = fixture_runner linux_host in
-  let observed = Onboarding_status.inspect ~sandbox_run:run ~base_path:(Some base) in
+  let observed = Onboarding_status.inspect ~sandbox:(Onboarding_status.Probe_with run) ~base_path:(Some base) in
   match Readiness.declaration ~base_path:base with
   | Ok { Readiness.backend = Readiness.Remote_ssh; _ } ->
     let sandbox = sandbox_check_of observed in
@@ -1289,7 +1315,11 @@ let () = run "Onboarding observations"
                      test_case "a named backend is not replaced by the host default" `Quick
                        a_named_backend_is_not_replaced_by_the_host_default;
                      test_case "a declared remote SSH backend is unverified, not unconfigured" `Quick
-                       a_declared_remote_ssh_backend_is_unverified_not_unconfigured];
+                       a_declared_remote_ssh_backend_is_unverified_not_unconfigured;
+                     test_case "a server inspection does not probe the backend" `Quick
+                       a_server_inspection_does_not_probe_the_backend;
+                     test_case "an unreadable declaration is setup even when not probed" `Quick
+                       an_unreadable_declaration_is_setup_even_when_not_probed];
    "BiDi host", [test_case "a workspace without a browser lane says nothing of a BiDi host" `Quick
                    a_workspace_without_a_browser_lane_says_nothing_of_a_bidi_host;
                  test_case "a lane with no BiDi host says how one is attached" `Quick

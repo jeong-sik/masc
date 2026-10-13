@@ -2202,7 +2202,7 @@ let add_routes ~sw ~clock router =
          (fun state _agent_name req reqd ->
            let config = Mcp_server.workspace_config state in
            let observed =
-             Onboarding_status.inspect_loaded ~sandbox_run:Sandbox_readiness.system_runner
+             Onboarding_status.inspect_loaded
                ~configuration:(Runtime.browser_configuration ())
                ~base_path:(Some config.base_path) in
            Http.Response.json_value ~request:req (Onboarding_status.to_json observed) reqd)

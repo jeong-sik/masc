@@ -43,27 +43,36 @@ type t =
   ; selected_model : string option
   }
 
+(** Whether an inspection reads the declared sandbox backend's state. A server
+    answering requests chooses [Not_probed]: probing spawns commands, and a
+    stopped daemon would then hold every answer for its timeout. *)
+type sandbox_observation =
+  | Probe_with of Sandbox_readiness.runner
+  (** Probe with this runner: the host's {!Sandbox_readiness.system_runner} in
+      the CLI, a fixture in tests. *)
+  | Not_probed
+  (** Issue no command. A declared backend is [Needs_verification]. *)
+
 (** [keeper_persistence] is Satisfied when the workspace holds Keeper
     metadata, whichever Keepers they are, and every file passes the check the
     server's boot reconcile applies. No metadata is Needs_setup; any file that
     fails it is Invalid, because the server refuses to boot on it. Persistence
     does not establish model, sandbox or running health.
 
-    [sandbox_run] is the runner the declared sandbox backend is probed with:
-    the host's {!Sandbox_readiness.system_runner} in the CLI and the server, a
-    fixture in tests. The probe issues read-only commands only (host detection,
-    then the backend's inventory and, for Apple Container, Rosetta and kernel
-    settings), at most seven per inspection. A workspace with no readable imp
-    declaration issues none. *)
-val inspect : sandbox_run:Sandbox_readiness.runner -> base_path:string option -> t
+    With [Probe_with] the declared sandbox backend is probed through that
+    runner. The probe issues read-only commands only (host detection, then the
+    backend's inventory and, for Apple Container, Rosetta and kernel settings),
+    at most seven per inspection. A workspace with no readable imp declaration
+    issues none. *)
+val inspect : sandbox:sandbox_observation -> base_path:string option -> t
 
 (** {!inspect} for a running server: who starts the Keeper Firefox is read
     from the browser configuration it loaded, which its other answers use,
     and not from the file. {!inspect} reads the workspace's [runtime.toml]
-    and uses its browser tables only when the whole file loads. *)
-val inspect_loaded :
-  sandbox_run:Sandbox_readiness.runner -> configuration:Browser_configuration.t option ->
-  base_path:string option -> t
+    and uses its browser tables only when the whole file loads. It never
+    probes the sandbox ([Not_probed]): the server answers requests, and
+    [masc doctor] is where the backend's state is read. *)
+val inspect_loaded : configuration:Browser_configuration.t option -> base_path:string option -> t
 
 (** How the doctor reports one probed sandbox backend. [Service_ready] is
     [Needs_verification]: the service answered and no guest was booted.

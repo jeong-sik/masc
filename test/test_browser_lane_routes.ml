@@ -211,7 +211,7 @@ let test_the_connection_list_says_where_the_bidi_host_stands () =
     match
       List.find_opt
         (fun (c : Onboarding_status.check) -> c.id = Onboarding_status.Browser_bidi_host)
-        (Onboarding_status.inspect ~sandbox_run:(fun _ -> Error Masc.Sandbox_readiness.Missing_command) ~base_path:(Some base)).checks
+        (Onboarding_status.inspect ~sandbox:Onboarding_status.Not_probed ~base_path:(Some base)).checks
     with
     | Some found -> found.condition
     | None -> fail "the doctor says nothing of the BiDi host"

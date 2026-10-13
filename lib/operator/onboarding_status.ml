@@ -31,6 +31,10 @@ type t =
   ; selected_model : string option
   }
 
+type sandbox_observation =
+  | Probe_with of Sandbox_readiness.runner
+  | Not_probed
+
 let action_name = function
   | Choose_workspace -> "choose_workspace"
   | Initialize_workspace -> "initialize_workspace"
@@ -182,6 +186,9 @@ let persistence_check base_path =
 let remote_endpoint_message =
   "The declared endpoint is verified by the server; this check boots no guest and reaches no remote host."
 
+let not_probed_message =
+  "This view does not probe the service. `masc doctor` reports its state."
+
 let sandbox_check_of_entry (entry : Sandbox_readiness.entry) =
   let backend_message sentence =
     Sandbox_readiness.backend_id entry.Sandbox_readiness.backend ^ ": " ^ sentence in
@@ -206,21 +213,27 @@ let sandbox_check_of_entry (entry : Sandbox_readiness.entry) =
    The backend is the one the server boots with: a microvm profile that names
    none takes the host's runtime there, so it is probed here as well instead
    of being reported as a choice the operator still owes. *)
-let sandbox_check ~sandbox_run ~base_path =
+let sandbox_check ~sandbox ~base_path =
   match Sandbox_readiness.boot_declaration ~base_path with
   | Error { Sandbox_readiness.kind = Declaration_unreadable; detail } ->
     check Sandbox Needs_setup detail [Inspect_configuration; Configure_sandbox]
   | Error { Sandbox_readiness.kind = Declaration_invalid; detail } ->
     check Sandbox Needs_setup detail [Configure_sandbox]
   | Ok selection ->
-    let host = Sandbox_readiness.detect_host ~run:sandbox_run in
-    sandbox_check_of_entry
-      (Sandbox_readiness.probe ~host ~run:sandbox_run
-         ~require_rootless:(Env_config_sandbox.Hardening.require_rootless ())
-         ~require_userns:(Env_config_sandbox.Hardening.require_userns ())
-         selection.Sandbox_readiness.backend)
+    (match sandbox with
+     | Probe_with run ->
+       let host = Sandbox_readiness.detect_host ~run in
+       sandbox_check_of_entry
+         (Sandbox_readiness.probe ~host ~run
+            ~require_rootless:(Env_config_sandbox.Hardening.require_rootless ())
+            ~require_userns:(Env_config_sandbox.Hardening.require_userns ())
+            selection.Sandbox_readiness.backend)
+     | Not_probed ->
+       check Sandbox Needs_verification
+         (Sandbox_readiness.backend_id selection.Sandbox_readiness.backend ^ ": " ^ not_probed_message)
+         [Configure_sandbox; Start_imp])
 
-let keeper_checks ~sandbox_run base_path =
+let keeper_checks ~sandbox base_path =
   let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
   if not (Sys.file_exists path) then
     [check Keeper_declaration Needs_setup "Your first Keeper, imp, has not been created."
@@ -236,7 +249,7 @@ let keeper_checks ~sandbox_run base_path =
   | Ok _ ->
     [check Keeper_declaration Satisfied "imp is declared. Its running state is observed separately."
        [Start_imp];
-     sandbox_check ~sandbox_run ~base_path]
+     sandbox_check ~sandbox ~base_path]
 
 (* The BiDi host is read from its own record on disk, so this answers with
    no server running. A workspace with no browser lane installed and no host
@@ -282,7 +295,7 @@ let browser_lane_check ~configuration base_path =
    | Browser_lane_launcher.Misconfigured -> [check Browser_lane Invalid message [Inspect_configuration]])
   @ browser_bidi_host_check host
 
-let inspected ~sandbox_run ~browser ~base_path =
+let inspected ~sandbox ~browser ~base_path =
   match base_path with
   | None ->
     { base_path = None; selected_runtime = None; selected_model = None;
@@ -301,14 +314,14 @@ let inspected ~sandbox_run ~browser ~base_path =
       let selected_runtime, selected_model, models = model_checks config_path in
       { base_path = Some base_path; selected_runtime; selected_model;
         checks = check Workspace Satisfied "Workspace found." [Choose_workspace]
-          :: (models @ keeper_checks ~sandbox_run base_path @ [persistence_check base_path]
+          :: (models @ keeper_checks ~sandbox base_path @ [persistence_check base_path]
               @ browser_lane_check ~configuration:(browser config_path) base_path) }
 
-let inspect ~sandbox_run ~base_path =
-  inspected ~sandbox_run ~browser:browser_configuration ~base_path
+let inspect ~sandbox ~base_path =
+  inspected ~sandbox ~browser:browser_configuration ~base_path
 
-let inspect_loaded ~sandbox_run ~configuration ~base_path =
-  inspected ~sandbox_run ~browser:(fun _ -> configuration) ~base_path
+let inspect_loaded ~configuration ~base_path =
+  inspected ~sandbox:Not_probed ~browser:(fun _ -> configuration) ~base_path
 
 let optional_string = function None -> `Null | Some value -> `String value
 

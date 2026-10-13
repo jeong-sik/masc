@@ -76,6 +76,32 @@ let test_excludes_other_keeper () =
       check int "no events for the queried handle" 0
         (summary_int json "total_events"))
 
+(* The summary adds up each turn's usage from the turn itself. A value a turn
+   did not carry adds nothing rather than failing the sum. *)
+let test_sums_turn_usage () =
+  with_config (fun config ->
+      let turn payload =
+        ignore
+          (Activity_graph.emit config ~kind:"keeper.turn_completed"
+             ~actor:(Activity_graph.entity ~kind:"agent" "testkeeper")
+             ~payload:(`Assoc payload)
+             ())
+      in
+      turn
+        [ ("input_tokens", `Int 10)
+        ; ("output_tokens", `Int 3)
+        ; ("cost_usd", `Float 0.5)
+        ];
+      turn [ ("input_tokens", `Int 5) ];
+      let json = build config ~agent_name:"testkeeper" in
+      check int "both turns counted" 2 (summary_int json "turns_completed");
+      check int "input tokens of both turns" 15
+        (summary_int json "total_input_tokens");
+      check int "output tokens of the turn that carried them" 3
+        (summary_int json "total_output_tokens");
+      check (float 0.0) "cost of the turn that carried it" 0.5
+        Yojson.Safe.Util.(json |> member "summary" |> member "total_cost_usd" |> to_number))
+
 (* Exposes [dir] as well as [config] so a test can drive the chat store,
    which is keyed by [base_dir] (= dir) rather than by the config. *)
 let with_dir_config f =
@@ -376,6 +402,7 @@ let () =
           test_case "turn_completed surfaces for short handle" `Quick
             test_surfaces_turn_completed_for_the_keeper_name;
           test_case "other keeper excluded" `Quick test_excludes_other_keeper;
+          test_case "summary sums each turn's usage" `Quick test_sums_turn_usage;
         ] );
       ( "keeper-chat-source",
         [

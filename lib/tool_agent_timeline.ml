@@ -20,11 +20,45 @@ type context = {
 
 let parse_iso_timestamp value = Time_codec.parse_rfc3339_opt value
 
+(* A completed turn's usage as its activity event carried it. [None] is a
+   value the event did not carry. *)
+type turn_usage = {
+  input_tokens : int option;
+  output_tokens : int option;
+  cost_usd : float option;
+}
+
+(* What a timeline row records. Every kind is produced in this module and the
+   summary counts by kind, so the set is closed here; a turn carries the
+   numbers the summary adds up. *)
+type event_kind =
+  | Session_bound
+  | Task_claimed
+  | Task_started
+  | Task_completed
+  | Task_cancelled
+  | Broadcast
+  | Tool_call
+  | Turn_completed of turn_usage
+  | Chat
+
+let event_kind_to_string = function
+  | Session_bound -> "session_bound"
+  | Task_claimed -> "task_claimed"
+  | Task_started -> "task_started"
+  | Task_completed -> "task_completed"
+  | Task_cancelled -> "task_cancelled"
+  | Broadcast -> "broadcast"
+  | Tool_call -> "tool_call"
+  | Turn_completed _ -> "turn_completed"
+  | Chat -> "chat"
+;;
+
 (* Event type for the unified timeline *)
 type timeline_event = {
   ts : float;
   ts_iso : string;
-  event_type : string;
+  kind : event_kind;
   detail : Yojson.Safe.t;
 }
 
@@ -64,7 +98,7 @@ let event_to_json (e : timeline_event) : Yojson.Safe.t =
   `Assoc
     [
       ("ts", `String e.ts_iso);
-      ("type", `String e.event_type);
+      ("type", `String (event_kind_to_string e.kind));
       ("detail", e.detail);
     ]
 
@@ -100,7 +134,7 @@ let agent_events (config : Workspace.config) ~agent_name :
                {
                  ts;
                  ts_iso = a.session_bound_at;
-                 event_type = "session_bound";
+                 kind = Session_bound;
                  detail =
                    `Assoc
                      [
@@ -127,7 +161,7 @@ let task_events (config : Workspace.config) ~agent_name :
                    {
                      ts;
                      ts_iso = claimed_at;
-                     event_type = "task_claimed";
+                     kind = Task_claimed;
                      detail =
                        `Assoc
                          [
@@ -145,7 +179,7 @@ let task_events (config : Workspace.config) ~agent_name :
                    {
                      ts;
                      ts_iso = started_at;
-                     event_type = "task_started";
+                     kind = Task_started;
                      detail =
                        `Assoc
                          [
@@ -163,7 +197,7 @@ let task_events (config : Workspace.config) ~agent_name :
                    {
                      ts;
                      ts_iso = completed_at;
-                     event_type = "task_completed";
+                     kind = Task_completed;
                      detail =
                        `Assoc
                          [
@@ -182,7 +216,7 @@ let task_events (config : Workspace.config) ~agent_name :
                    {
                      ts;
                      ts_iso = cancelled_at;
-                     event_type = "task_cancelled";
+                     kind = Task_cancelled;
                      detail =
                        `Assoc
                          [
@@ -214,7 +248,7 @@ let message_events (config : Workspace.config) ~agent_name ~limit :
                {
                  ts;
                  ts_iso = m.timestamp;
-                 event_type = "broadcast";
+                 kind = Broadcast;
                  detail =
                    `Assoc
                      [
@@ -276,7 +310,7 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
          {
            ts;
            ts_iso = e.ts_iso;
-           event_type = "tool_call";
+           kind = Tool_call;
            detail =
              `Assoc
                [
@@ -358,7 +392,7 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
          {
            ts;
            ts_iso = e.ts_iso;
-           event_type = "turn_completed";
+           kind = Turn_completed { input_tokens; output_tokens; cost_usd };
            detail =
              `Assoc
                ([
@@ -406,7 +440,7 @@ let chat_events (lines : chat_line list) : timeline_event list =
       {
         ts = l.cl_ts;
         ts_iso = Masc_domain.iso8601_of_unix_seconds l.cl_ts;
-        event_type = "chat";
+        kind = Chat;
         detail =
           `Assoc
             [
@@ -418,6 +452,57 @@ let chat_events (lines : chat_line list) : timeline_event list =
             ];
       })
     lines
+
+type summary = {
+  tasks_completed : int;
+  tasks_claimed : int;
+  messages_sent : int;
+  tool_calls : int;
+  chat_messages : int;
+  turns_completed : int;
+  total_input_tokens : int;
+  total_output_tokens : int;
+  total_cost_usd : float;
+}
+
+let empty_summary =
+  {
+    tasks_completed = 0;
+    tasks_claimed = 0;
+    messages_sent = 0;
+    tool_calls = 0;
+    chat_messages = 0;
+    turns_completed = 0;
+    total_input_tokens = 0;
+    total_output_tokens = 0;
+    total_cost_usd = 0.0;
+  }
+
+(* One match over the kind, so a new kind has to say what it adds.
+
+   A value a turn did not carry adds 0 (Task #28): the turn's own row in
+   ["events"] shows what was missing, and a sum of what was read beats an
+   invented value. *)
+let add_to_summary summary event =
+  match event.kind with
+  | Task_completed -> { summary with tasks_completed = summary.tasks_completed + 1 }
+  | Task_claimed -> { summary with tasks_claimed = summary.tasks_claimed + 1 }
+  | Broadcast -> { summary with messages_sent = summary.messages_sent + 1 }
+  | Tool_call -> { summary with tool_calls = summary.tool_calls + 1 }
+  | Chat -> { summary with chat_messages = summary.chat_messages + 1 }
+  | Turn_completed usage ->
+    {
+      summary with
+      turns_completed = summary.turns_completed + 1;
+      total_input_tokens =
+        summary.total_input_tokens + Option.value usage.input_tokens ~default:0;
+      total_output_tokens =
+        summary.total_output_tokens + Option.value usage.output_tokens ~default:0;
+      total_cost_usd =
+        summary.total_cost_usd +. Option.value usage.cost_usd ~default:0.0;
+    }
+  | Session_bound | Task_started | Task_cancelled -> summary
+;;
 
 (* Build the full timeline. [load_chat] is the keeper-aware chat reader
    injected by the caller (see [chat_line]); it defaults to producing no
@@ -470,68 +555,7 @@ let build_timeline ?(load_chat = fun ~agent_name:_ -> ([] : chat_line list))
       skip drop filtered
     else filtered
   in
-  (* Compute summary *)
-  let tasks_completed =
-    List.length
-      (List.filter
-         (fun e -> String.equal e.event_type "task_completed")
-         events)
-  in
-  let tasks_claimed =
-    List.length
-      (List.filter
-         (fun e -> String.equal e.event_type "task_claimed")
-         events)
-  in
-  let messages_sent =
-    List.length
-      (List.filter (fun e -> String.equal e.event_type "broadcast") events)
-  in
-  let tool_calls =
-    List.length
-      (List.filter (fun e -> String.equal e.event_type "tool_call") events)
-  in
-  let chat_messages =
-    List.length
-      (List.filter (fun e -> String.equal e.event_type "chat") events)
-  in
-  let turn_events =
-    List.filter (fun e -> String.equal e.event_type "turn_completed") events
-  in
-  let turns_completed = List.length turn_events in
-  (* Aggregation fold-semantic decision (Task #28):
-     Silent-zero on missing/malformed field is intentional and acceptable
-     because (a) per-event detail is rendered separately in the
-     ["events"] array below, so operators can drill down to find the
-     event with the malformed payload, (b) under-reporting is honest —
-     a sum of "what we could parse" beats inventing values, (c) using
-     [Safe_ops.json_int_opt] / [json_float_opt] removes the implicit
-     try/catch that previously could absorb non-Cancelled exceptions
-     (Yojson.Safe.Util.Type_error etc.) without distinguishing them
-     from a legitimately missing field. The new shape uses pure
-     pattern-matching accessors and no try/catch on the hot path. *)
-  let total_input_tokens =
-    List.fold_left
-      (fun acc e ->
-        acc + Option.value (Safe_ops.json_int_opt "input_tokens" e.detail) ~default:0)
-      0
-      turn_events
-  in
-  let total_output_tokens =
-    List.fold_left
-      (fun acc e ->
-        acc + Option.value (Safe_ops.json_int_opt "output_tokens" e.detail) ~default:0)
-      0
-      turn_events
-  in
-  let total_cost_usd =
-    List.fold_left
-      (fun acc e ->
-        acc
-        +. Option.value (Safe_ops.json_float_opt "cost_usd" e.detail) ~default:0.0)
-      0.0
-      turn_events
-  in
+  let summary = List.fold_left add_to_summary empty_summary events in
   (* Active duration: time between first and last event *)
   let active_duration_minutes =
     match (events, List.rev events) with
@@ -555,15 +579,15 @@ let build_timeline ?(load_chat = fun ~agent_name:_ -> ([] : chat_line list))
       ( "summary",
         `Assoc
           [
-            ("tasks_completed", `Int tasks_completed);
-            ("tasks_claimed", `Int tasks_claimed);
-            ("messages_sent", `Int messages_sent);
-            ("tool_calls", `Int tool_calls);
-            ("chat_messages", `Int chat_messages);
-            ("turns_completed", `Int turns_completed);
-            ("total_input_tokens", `Int total_input_tokens);
-            ("total_output_tokens", `Int total_output_tokens);
-            ("total_cost_usd", `Float total_cost_usd);
+            ("tasks_completed", `Int summary.tasks_completed);
+            ("tasks_claimed", `Int summary.tasks_claimed);
+            ("messages_sent", `Int summary.messages_sent);
+            ("tool_calls", `Int summary.tool_calls);
+            ("chat_messages", `Int summary.chat_messages);
+            ("turns_completed", `Int summary.turns_completed);
+            ("total_input_tokens", `Int summary.total_input_tokens);
+            ("total_output_tokens", `Int summary.total_output_tokens);
+            ("total_cost_usd", `Float summary.total_cost_usd);
             ("active_duration_minutes", `Float active_duration_minutes);
             ("total_events", `Int (List.length events));
           ] );

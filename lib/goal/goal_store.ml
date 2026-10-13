@@ -1230,13 +1230,10 @@ let snapshot_notification_recipients config notice ~recipients =
     Error (Rejected "invalid Goal notification recipient")
   else
     let names = List.filter_map Result.to_option parsed in
-    let by_name (a : Keeper_id.Keeper_name.t) (b : Keeper_id.Keeper_name.t) =
-      String.compare (a :> string) (b :> string)
-    in
     update_notification config notice (fun current -> match current.delivery with
       | Pending_recipients _ -> Ok (Some current)
       | Awaiting_recipients ->
-          Ok (Some {current with delivery=Pending_recipients (List.sort_uniq by_name names)}))
+          Ok (Some {current with delivery=Pending_recipients (List.sort_uniq Keeper_id.Keeper_name.compare names)}))
 
 let acknowledge_notification_recipient config notice ~recipient =
   let* () = match notice.delivery with

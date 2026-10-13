@@ -336,6 +336,16 @@ let parse_network_mode args =
   | Some _ -> Error "network_mode must be a string"
 ;;
 
+(* Free text, so only the shape is checked. A blank reads as absent, so the
+   keeper TOML's instructions stay; a non-string is refused rather than read
+   as absent. *)
+let parse_instructions args =
+  match Json_util.assoc_member_opt "instructions" args with
+  | None | Some (`String "") -> Ok None
+  | Some (`String text) -> Ok (Some text)
+  | Some _ -> Error "instructions must be a string"
+;;
+
 (* An explicit request wins over the TOML default. Neither source stating one
    returns [None]: omission is not a choice of isolation boundary, and callers
    report the missing field instead. *)
@@ -408,10 +418,12 @@ let parse
     match parse_network_mode args with
     | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
     | Ok network_mode_opt ->
+    match parse_instructions args with
+    | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
+    | Ok instructions_arg ->
     let max_context_override_res = parse_max_context_override args in
     let remote_endpoint_res = parse_remote_endpoint args in
     let egress_allow_opt_res = parse_present_string_list_opt args "egress_allow" in
-    let instructions_arg = get_string_opt args "instructions" in
     match
       load_declarative_materialization_defaults
         ~base_path:ctx.config.base_path

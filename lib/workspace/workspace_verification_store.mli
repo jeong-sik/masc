@@ -239,6 +239,11 @@ val verifications_dir : string -> string
 val request_path : string -> string -> string
 
 val collaboration_reference : string -> (collaboration_kind * string) option
+val submitted_evidence_item_fields :
+  submitted_evidence_item -> (string * Yojson.Safe.t) list
+(** The members of an item's JSON object, so a caller that adds a member does
+    not take the object apart again. *)
+
 val submitted_evidence_item_to_yojson : submitted_evidence_item -> Yojson.Safe.t
 val submitted_evidence_item_of_yojson : Yojson.Safe.t -> (submitted_evidence_item, string) result
 

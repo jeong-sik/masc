@@ -102,6 +102,31 @@ let test_a_missing_or_unfiled_body_is_named () =
       ]
       (previews_of ~base_path [ unfiled; vanished ]))
 
+let test_a_body_path_outside_the_evidence_directory_is_not_read () =
+  with_base_path (fun base_path ->
+    (* A real file next to the evidence directory and one at an absolute path:
+       the paths that would reach them are refused, and the bytes never reach
+       the response. *)
+    let masc_dir = Workspace_utils.masc_dir_from_base_path ~base_path in
+    let data = png_of_length 100 in
+    Fs_compat.mkdir_p masc_dir;
+    Fs_compat.save_file (Filename.concat masc_dir "secret.bin") data;
+    let outside = Filename.concat base_path "outside.bin" in
+    Fs_compat.save_file outside data;
+    let with_body body =
+      Store.Evidence_artifact_binary
+        { reference = "artifact:p.png"; bytes = 100; sha256 = sha256_of data
+        ; format = "png"; body = Some body }
+    in
+    let refused =
+      [ "evidence/../secret.bin"; "evidence/vr-e/../../secret.bin"; outside
+      ; "secret.bin"; "evidence/vr-e/0.png"; "evidence//0.bin"; "evidence/vr-e/0.bin/x" ]
+    in
+    Alcotest.(check (list preview_testable))
+      "every path that is not evidence/<request>/<n>.bin is unreadable"
+      (List.map (fun _ -> Operator.Withheld Operator.Body_unreadable) refused)
+      (previews_of ~base_path (List.map with_body refused)))
+
 let test_formats_that_never_show_are_not_read () =
   with_base_path (fun base_path ->
     (* The body is never filed: a format that cannot show must be decided
@@ -260,6 +285,8 @@ let () =
             test_the_ceiling_is_inclusive_and_one_more_byte_is_withheld
         ; Alcotest.test_case "a missing or unfiled body is named" `Quick
             test_a_missing_or_unfiled_body_is_named
+        ; Alcotest.test_case "a body path outside the evidence directory is not read" `Quick
+            test_a_body_path_outside_the_evidence_directory_is_not_read
         ; Alcotest.test_case "formats that never show are not read" `Quick
             test_formats_that_never_show_are_not_read
         ; Alcotest.test_case "the budget is spent in item order on exact bytes" `Quick

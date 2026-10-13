@@ -96,16 +96,11 @@ let previewed ~base_path items =
 
 let previews ~base_path items = List.map snd (previewed ~base_path items)
 
-let add_field name value = function
-  | `Assoc fields -> `Assoc (fields @ [ name, value ])
-  | other -> other
-;;
-
 let item_to_yojson (item, preview) =
-  let persisted = Store.submitted_evidence_item_to_yojson item in
+  let persisted = Store.submitted_evidence_item_fields item in
   match preview with
-  | Some preview -> add_field "preview" (preview_to_yojson preview) persisted
-  | None -> persisted
+  | Some preview -> `Assoc (persisted @ [ "preview", preview_to_yojson preview ])
+  | None -> `Assoc persisted
 ;;
 
 let access_to_yojson ~base_path = function

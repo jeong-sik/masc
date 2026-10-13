@@ -147,10 +147,15 @@ val insert_request :
   Schedule_domain.schedule_request ->
   (Schedule_domain.schedule_request, store_error) result
 
+type due_time_update = Replace_due_time | Keep_due_time
+(** [Keep_due_time] reads the current due time under the mutation lock. It
+    cannot restore a stale time carried by a content editor. *)
+
 val update_request :
   Workspace_utils.config ->
   now:float ->
   runner_tick_sec:float ->
+  ?due_time_update:due_time_update ->
   Schedule_domain.schedule_request ->
   (Schedule_domain.schedule_request, store_error) result
 (** Atomically replaces an existing [Scheduled] or [Due] request. The caller
@@ -160,7 +165,8 @@ val update_request :
     are immutable. [now] is the updating call's clock: a due time that
     changes and lands before the current whole second is
     [Changed_due_already_past]; the stored due time sent back unchanged is
-    accepted whatever the clock says. *)
+    accepted whatever the clock says. [due_time_update] defaults to
+    [Replace_due_time]; [Keep_due_time] retains the latest stored time. *)
 
 val cancel_request :
   Workspace_utils.config ->

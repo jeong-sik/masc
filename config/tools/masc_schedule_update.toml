@@ -2,8 +2,10 @@ name = "masc_schedule_update"
 description = """
 Atomically replace a scheduled or due Keeper wake. Keep schedule_id; issue a new
 schedule_instance_id to separate future evidence. Running and terminal requests
-cannot change. Inputs follow masc_schedule_create. Omitting recurrence_kind
-keeps the stored recurrence this version and warns; next version requires it.
+cannot change. If both due inputs and recurrence_kind are omitted, keep the
+latest stored due time; a content edit does not reschedule the wake. An explicit
+recurrence_kind follows masc_schedule_create's first-due rules. Omitting
+recurrence_kind keeps the stored recurrence.
 A changed due time before the current second is refused with error_kind
 due_already_past; resending the stored
 due time is accepted. You may update a schedule you made or one that wakes you;
@@ -81,7 +83,7 @@ description = "Optional expiry timestamp."
 [[params]]
 name = "recurrence_kind"
 type = "string"
-description = "Send one_shot to remove recurrence; omission keeps it this version."
+description = "Send one_shot to remove recurrence; omission keeps the stored recurrence."
 enum = ["one_shot", "interval", "daily", "cron"]
 
 [[params]]

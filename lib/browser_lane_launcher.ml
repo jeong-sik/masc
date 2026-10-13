@@ -26,12 +26,24 @@ type verdict = Absent | Connected | Aligned | Unverified | Misconfigured
 let host_directory base_path =
   List.fold_left Filename.concat base_path [ Common.masc_dirname; Common.browser_lane_dirname; "host" ]
 
-(* install-host.sh writes both files in one installation; the names and the
-   declaration's fields are the contract between that script and this reader. *)
+(* A lane installation writes both files in one step; the names and the
+   declaration's fields are the contract between the writer and this reader,
+   and {!declaration} below is the one place that spells the fields. *)
 let launcher_name = "launch"
 let launcher_path ~base_path = Filename.concat (host_directory base_path) launcher_name
 let declaration_name = "launch.json"
+let declaration_path ~base_path = Filename.concat (host_directory base_path) declaration_name
+let host_directory_path ~base_path = host_directory base_path
 let declaration_fields = [ "destination"; "launcher_sha256" ]
+let launcher_digest script = Digestif.SHA256.(to_hex (digest_string script))
+
+let declaration ~launcher_script =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "destination", `String "workspace_connection"
+       ; "launcher_sha256", `String (launcher_digest launcher_script)
+       ])
+  ^ "\n"
 
 (* The launcher digest a declaration carries, when the declaration is exactly
    the object the installer writes; see the interface for the refusal rule. *)
@@ -74,7 +86,7 @@ let observe ~base_path ~server =
         (match declared, read_file (path launcher_name) with
          | None, _ | _, None -> Unreadable
          | Some digest, Some script
-           when String.equal digest Digestif.SHA256.(to_hex (digest_string script)) ->
+           when String.equal digest (launcher_digest script) ->
              Follows_workspace
          | Some _, Some _ -> Describes_another_launcher)
   in

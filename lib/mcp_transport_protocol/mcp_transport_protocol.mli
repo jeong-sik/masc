@@ -65,11 +65,13 @@ val is_valid_request_id : Yojson.Safe.t -> bool
 (** MCP requests admit string or integer ids. Null and floating-point ids are
     rejected, as required by the MCP request contract. *)
 
-val validate_initialize_params : Yojson.Safe.t option -> (unit, string) result
+val initialize_protocol_version : Yojson.Safe.t option -> (string, string) result
 (** Checks that [params] for the MCP [initialize] method contain
     [protocolVersion : string], [clientInfo : { name; version }], and
-    [capabilities] objects. Returns a human-readable error string on
-    missing or wrong-typed fields. *)
+    [capabilities] objects, and returns the requested [protocolVersion].
+    Whether that version is supported is {!validate_protocol_version}'s
+    question. Returns a human-readable error string on missing or
+    wrong-typed fields. *)
 
 (** {1 subscriptions/listen (2026-07-28)} *)
 

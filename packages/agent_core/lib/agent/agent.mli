@@ -297,8 +297,9 @@ val read_execution_terminal :
     returned error or non-reserved exception fails the Agent call with
     [Error.Internal] after the terminal commit; the recovery locator must
     remain. If writer drain fails, the sink is not invoked and the locator must
-    likewise remain. Caller cancellation is protected through terminal
-    settlement, writer drain, and callback, then re-raised. If callback cleanup
+    likewise remain. Caller cancellation still reaches the provider and tools;
+    the writer is protected through terminal settlement, writer drain, and
+    callback before that cancellation is re-raised. If callback cleanup
     also fails, cancellation remains the primary exception and the cleanup
     failure is logged. *)
 val execution_store

@@ -29,8 +29,9 @@ without changing correlations, optional absence, evidence or typed refusal.
 
 The TUI does not draw this notice as an always-present health line. It adds
 the caveat that failure history lives only as long as the collector, next to a
-real failure (`Persistence`, `Receiver_read`, `cleanup failed`, retained
-history absent from the latest inventory).
+real failure (`Persistence`, `Receiver_read`, `Service`, `cleanup failed`,
+retained history absent from the latest inventory). Transport and decode
+errors get no caveat: the server's answer was not read.
 
 Provider completeness and liveness remain unknown. Collector-local persistence
 failure history is unavailable to this read surface. Empty discovery, a valid

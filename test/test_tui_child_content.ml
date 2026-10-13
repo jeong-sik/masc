@@ -151,6 +151,11 @@ let test_audit_redaction_disappearance_and_replacement () =
   check int "collector-lifetime caveat accompanies a real diagnostic" 2
     (List.length (Consumer.diagnostics absent));
   check (list string) "no caveat without a real failure" [] (Consumer.diagnostics fresh);
+  let service=Consumer.failed fresh (Consumer.Service (Read.failure Read.Store_corrupt)) in
+  check int "server failure code gets exactly one caveat line" 1
+    (List.length (Consumer.diagnostics service));
+  let unreadable=Consumer.failed fresh (Consumer.Transport "refused") in
+  check (list string) "unreadable server answer gets no caveat" [] (Consumer.diagnostics unreadable);
   let replacement,_=read Consumer.Poll absent [receiver,Ok ("replacement",1)] (fun uri ->
     check (option string) "new incarnation begins without old cursor" None (after uri);
     Ok (200,json (page "replacement" 1 [row 1 (observation "first")]))) in

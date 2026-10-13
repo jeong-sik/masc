@@ -95,9 +95,9 @@ let diagnostics state =
         | Read.Unavailable ->
             "failure history is kept only for the collector lifetime; provider completeness and liveness unknown" in
       let real_error = List.exists (function
-        | Persistence _ | Receiver_read _ -> true
+        | Persistence _ | Receiver_read _ | Service _ -> true
         | Transport _ | Http_refused _ | Invalid_json _ | Invalid_response _
-        | Service _ | History_rewritten _ -> false) (errors state) in
+        | History_rewritten _ -> false) (errors state) in
       let retained = List.filter_map (fun (store:store) ->
         if List.exists (fun (receiver,status) -> receiver=store.receiver &&
           match status with Ok cursor -> cursor.Read.store_id=store.store_id | Error _ -> true)

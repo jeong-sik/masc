@@ -1915,7 +1915,14 @@ let make_tools_with_authority
               match Tool_input_validation.validate_args ~schema:schema.input_schema
                       ~name:schema.name ~args:input () with
               | Error rejected -> rejected
-              | Ok _ -> handle ~start_time execution_env input)
+              | Ok _ ->
+                let result = handle ~start_time execution_env input in
+                match Tool_bridge.attach_artifact_manifest
+                        ~projection:Tool_output.Inline_with_reference ~base_path:config.base_path result with
+                | Ok result -> result
+                | Error { message; _ } ->
+                  Tool_result.make_err ~tool_name:schema.name ~class_:Tool_result.Runtime_failure
+                    ~effect_disposition:Tool_result.Effect_outcome_unknown ~start_time message)
         , Tool_loading_declarations.loading_of_tool schema.name
         , model_projection)
       in

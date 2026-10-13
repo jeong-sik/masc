@@ -157,7 +157,7 @@ let with_stmt db ~operation sql f =
 let step_done db ~operation stmt =
   match Sqlite3.step stmt with
   | Sqlite3.Rc.DONE -> Ok ()
-  | rc -> Error (sqlite_error db operation rc)
+  | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.ROW | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error db operation rc)
 ;;
 
 let single_int db ~operation sql =
@@ -166,8 +166,9 @@ let single_int db ~operation sql =
     | Sqlite3.Rc.ROW ->
       (match Sqlite3.column stmt 0 with
        | Sqlite3.Data.INT value -> Ok (Int64.to_int value)
-       | _ -> Error (operation ^ ": expected an integer"))
-    | rc -> Error (sqlite_error db operation rc))
+       | Sqlite3.Data.NONE | Sqlite3.Data.NULL | Sqlite3.Data.FLOAT _ | Sqlite3.Data.TEXT _
+       | Sqlite3.Data.BLOB _ -> Error (operation ^ ": expected an integer"))
+    | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.DONE | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error db operation rc))
 ;;
 
 let configure db =
@@ -175,7 +176,7 @@ let configure db =
     with_stmt db ~operation:"set WAL journal mode" "PRAGMA journal_mode=WAL" (fun stmt ->
       match Sqlite3.step stmt with
       | Sqlite3.Rc.ROW | Sqlite3.Rc.DONE -> Ok ()
-      | rc -> Error (sqlite_error db "set WAL journal mode" rc))
+      | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error db "set WAL journal mode" rc))
   in
   let* () = exec db ~operation:"set NORMAL synchronous" "PRAGMA synchronous=NORMAL" in
   let* () = exec db ~operation:"set busy timeout" "PRAGMA busy_timeout=5000" in
@@ -273,7 +274,7 @@ let read_cursors store =
               loop ((path, cursor) :: acc)
             | _ -> Error "read cursors: unexpected column types")
          | Sqlite3.Rc.DONE -> Ok acc
-         | rc -> Error (sqlite_error store.db "read cursors" rc)
+         | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error store.db "read cursors" rc)
        in
        loop [])
 ;;
@@ -640,13 +641,14 @@ let select_locations store ~keeper_name ~n =
            ; (Sqlite3.Data.TEXT _ | Sqlite3.Data.NULL as execution) ] ->
            let execution_id = match execution with
              | Sqlite3.Data.TEXT value -> Some value
-             | _ -> None
+             | Sqlite3.Data.NONE | Sqlite3.Data.NULL | Sqlite3.Data.INT _ | Sqlite3.Data.FLOAT _
+             | Sqlite3.Data.BLOB _ -> None
            in
            loop ((path, Int64.to_int offset, Int64.to_int length, keeper, ts,
                   execution_id) :: acc)
          | _ -> Error "select rows: unexpected column types")
       | Sqlite3.Rc.DONE -> Ok acc
-      | rc -> Error (sqlite_error store.db "select rows" rc)
+      | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error store.db "select rows" rc)
     in
     (* The query is newest first so the limit takes the newest [n]; the
        accumulator reverses it back to oldest first, which is the order the
@@ -686,7 +688,7 @@ let select_execution_locations store ~keeper_name ~execution_ids =
                        Some execution_id) :: acc)
            | _ -> Error "select execution rows: unexpected column types")
         | Sqlite3.Rc.DONE -> Ok acc
-        | rc -> Error (sqlite_error store.db "select execution rows" rc)
+        | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error store.db "select execution rows" rc)
       in
       let* batches =
         List.fold_left
@@ -802,7 +804,7 @@ let select_frontier store ~keeper_name =
              generation; offset = Int64.to_int offset} :: acc)
          | _ -> Error "select frontier: unexpected column types")
       | Sqlite3.Rc.DONE -> Ok (merge_frontiers [] acc)
-      | rc -> Error (sqlite_error store.db "select frontier" rc)
+      | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error store.db "select frontier" rc)
     in loop [])
 
 let current_frontier ~store ~keeper_name =
@@ -835,11 +837,12 @@ let rows_after ~store ~keeper_name ~after ~project =
                  let* execution_id = match execution with
                    | Sqlite3.Data.TEXT value -> Ok (Some value)
                    | Sqlite3.Data.NULL -> Ok None
-                   | _ -> Error "select after frontier: invalid execution identity" in
+                   | Sqlite3.Data.NONE | Sqlite3.Data.INT _ | Sqlite3.Data.FLOAT _
+                   | Sqlite3.Data.BLOB _ -> Error "select after frontier: invalid execution identity" in
                  loop ((path, Int64.to_int offset, Int64.to_int length, keeper, ts, execution_id) :: acc)
                | _ -> Error "select after frontier: unexpected column types")
             | Sqlite3.Rc.DONE -> Ok (List.rev acc)
-            | rc -> Error (sqlite_error index.db "select after frontier" rc)
+            | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error index.db "select after frontier" rc)
           in loop []) in
         let* positioned = map_locations locations ~f:(fun (_, offset, _, _, _, _) row ->
           Option.map (fun value -> { position = {head with offset}; value }) (project row)) in

@@ -571,8 +571,12 @@ let commit_verifier_decision ?before_proof_commit ~tool_name ~start_time config
                   && (match goal.phase, stored.outcome with
                       | (Goal_phase.Awaiting_confirmation | Goal_phase.Completed), Goal_verification.Proven
                       | Goal_phase.Executing, Goal_verification.Refuted _ -> true
-                      | _ -> false) -> Ok (goal, (record, false, stored))
-              | _ -> Error detail)
+                      | (Goal_phase.Awaiting_confirmation, Goal_verification.Refuted _)
+                      | (Goal_phase.Completed, Goal_verification.Refuted _)
+                      | (Goal_phase.Executing, Goal_verification.Proven)
+                      | ((Goal_phase.Verifying | (Goal_phase.Dropped | (Goal_phase.Paused _ | Goal_phase.Blocked _))), _) -> false) -> Ok (goal, (record, false, stored))
+              | Some { completion = (Goal_verification.Completion_idle | Goal_verification.Proof_pending _);_}
+              | None | Some {completion=(Proof_proven _|Proof_refuted _|Human_confirmed (_, _)); _ } -> Error detail)
         | Ok (Goal_phase.Already _) -> Error "proof verdict did not name a phase transition") in
     (match committed with
      | Error (Goal_store.Store_unavailable unavailable) ->
@@ -603,7 +607,8 @@ let reconcile_committed_proof config ~goal_id =
         let proof = match record with
           | Some { Goal_verification.completion = Goal_verification.Proof_proven verdict; _ }
           | Some { Goal_verification.completion = Goal_verification.Proof_refuted verdict; _ } -> Some verdict
-          | _ -> None in
+          | Some { completion = (Goal_verification.Completion_idle | (Goal_verification.Proof_pending _ | Goal_verification.Human_confirmed (_, _)));_}
+          | None -> None in
         match proof with
         | None -> Ok (goal, (No_committed_proof, None))
         | Some verdict when not (Goal_store.criterion_equal verdict.criterion (Goal_store.criterion_of_goal goal)) ->
@@ -775,7 +780,9 @@ let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context
       (match goal.phase, record with
        | Goal_phase.Verifying, Some { Goal_verification.completion = Goal_verification.Proof_pending _; _ } ->
            notify_goal_verification_pending ctx ~goal_id
-       | _ -> ());
+       | (Goal_phase.Verifying, Some { completion = (Goal_verification.Completion_idle | (Goal_verification.Proof_proven _ | (Goal_verification.Proof_refuted _ | Goal_verification.Human_confirmed (_, _))));_})
+       | (Goal_phase.Verifying, None)
+       | ((Goal_phase.Executing | (Goal_phase.Awaiting_confirmation | (Goal_phase.Completed | (Goal_phase.Dropped | (Goal_phase.Paused _ | Goal_phase.Blocked _))))), _) -> ());
       (match reconciled with
        | None -> already_goal_response ~tool_name ~start_time ~goal_id ~action
            ~phase:goal.phase goal record
@@ -965,7 +972,8 @@ let finish_goal_suspension ~tool_name ~start_time (ctx : context) ~goal_id ~acti
       (match action, goal.phase with
        | (Goal_phase.Resume | Goal_phase.Unblock), Goal_phase.Verifying ->
            notify_goal_verification_pending ctx ~goal_id
-       | _ -> ());
+       | ((Goal_phase.Resume | Goal_phase.Unblock), (Goal_phase.Executing | (Goal_phase.Awaiting_confirmation | (Goal_phase.Completed | (Goal_phase.Dropped | (Goal_phase.Paused _ | Goal_phase.Blocked _))))))
+       | ((Goal_phase.Request_complete | (Goal_phase.Drop | (Goal_phase.Reopen | (Goal_phase.Pause | (Goal_phase.Block | (Goal_phase.Record_proof_proven | (Goal_phase.Confirm_completion | Goal_phase.Record_proof_refuted))))))), _) -> ());
       let delivery = deliver_goal_effects ctx.config in
       ok_result ~tool_name ~start_time
         [ "goal_id", `String goal_id; "action", `String (Goal_phase.action_to_string action)
@@ -1102,12 +1110,14 @@ let confirm_completion ?after_confirmation config ~goal_id ~operator_id
           && String.equal goal.criterion_revision criterion_revision
           && String.equal verdict.request_id request_id
           && String.equal verdict.verification_run_id verification_run_id -> Ok verdict
-      | _ -> Error "confirmation must name the current proven criterion, request and verifier run" in
+      | Some { completion = (Goal_verification.Completion_idle | (Goal_verification.Proof_pending _ | Goal_verification.Proof_refuted _));_}
+      | None | Some {completion=(Proof_proven _|Human_confirmed (_, _)); _ } -> Error "confirmation must name the current proven criterion, request and verifier run" in
     let* transition = Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Confirm_completion in
     let* record = Goal_verification.record_human_confirmation config ~goal_id verdict ~operator_id in
     let* stored_verdict, confirmation = match record.Goal_verification.completion with
       | Goal_verification.Human_confirmed (stored, confirmation) -> Ok (stored, confirmation)
-      | _ -> Error "confirmation store did not retain operator authority" in
+      | Goal_verification.Completion_idle | Goal_verification.Proof_pending _
+      | Goal_verification.Proof_proven _ | Goal_verification.Proof_refuted _ -> Error "confirmation store did not retain operator authority" in
     let confirming_operator = confirmation.Goal_verification.operator_id in
     let* () = match after_confirmation with
       | Some step -> step goal stored_verdict confirmation

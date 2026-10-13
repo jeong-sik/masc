@@ -698,8 +698,10 @@ class fsm_guard_mapper =
           let action_str =
             match vb.pvb_pat.ppat_desc with
             | Ppat_var { txt } -> txt
-            | _ ->
-                Location.raise_errorf ~loc:vb.pvb_pat.ppat_loc
+            | Ppat_any | Ppat_alias (_, _) | Ppat_constant _ | Ppat_interval (_, _) | Ppat_tuple _
+            | Ppat_construct (_, _) | Ppat_variant (_, _) | Ppat_record (_, _) | Ppat_array _
+            | Ppat_or (_, _) | Ppat_constraint (_, _) | Ppat_type _ | Ppat_lazy _ | Ppat_unpack _
+            | Ppat_exception _ | Ppat_extension _ | Ppat_open (_, _) -> Location.raise_errorf ~loc:vb.pvb_pat.ppat_loc
                   "[@@fsm_guard]: expected a simple let-binding name so the guard metric has a stable action label"
           in
           let new_expr = inject_wrapped_body ~action_str assert_expr vb.pvb_expr in

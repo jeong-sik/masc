@@ -526,7 +526,8 @@ let audit_summary ~action ~details =
        (match extract_str "path" with
         | Some p -> Printf.sprintf "runtime.toml updated: %s" p
         | None -> "runtime.toml updated"))
-  | _ -> kind
+  | ClaimTask | StartTask | DoneTask | ReleaseTask | AuthSuccess | AuthFailure | CircuitOpen
+  | CircuitClose | SearchRefinement | Custom _ | Unknown _ -> kind
 
 (** Extract primary target from action + details, if any. *)
 let audit_target ~action ~details =

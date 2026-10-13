@@ -311,7 +311,10 @@ let evidence_posture_of_snapshot
                 size, and the filed body are the facts the verdict can rest
                 on (RFC-0436 §4.1). *)
              true
-           | _ -> false)
+           | Workspace_verification_store.Evidence_artifact { reference = _; content = _; bytes = _; truncated = true }
+           | Workspace_verification_store.Evidence_invalid_reference
+           | Workspace_verification_store.Evidence_note _
+           | Workspace_verification_store.Evidence_artifact_unreadable _ -> false)
       |> List.length
   in
   if usable = 0 then Task.Anti_rationalization.Note_only

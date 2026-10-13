@@ -78,4 +78,5 @@ let route_evidence_issues ~cases ~runs =
                             selector_labels;
                           })
                |> List.filter_map (fun issue -> issue)
-         | _ -> [])
+         | (Run_ok, None) | ((Run_unsupported | (Run_runtime_unreachable | Run_other _)), _)
+         | (Run_ok, Some _) -> [])

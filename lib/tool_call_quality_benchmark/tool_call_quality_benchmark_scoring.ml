@@ -127,7 +127,7 @@ let semantic_selectors_evaluable (benchmark_case : benchmark_case) (run : eviden
 let forbidden_tool_used (benchmark_case : benchmark_case) (run : evidence_run) =
   match benchmark_case.category with
   | Tool_forbidden -> Stdlib.List.length run.tool_calls > 0
-  | _ -> List.exists (forbidden_call_used_by_case benchmark_case) run.tool_calls
+  | Tool_use | Recovery_required | Multi_step -> List.exists (forbidden_call_used_by_case benchmark_case) run.tool_calls
 
 let task_pass_score (benchmark_case : benchmark_case) (run : evidence_run) =
   let reported = Option.value ~default:false run.task_success in
@@ -178,8 +178,7 @@ let unnecessary_tool_rate (benchmark_case : benchmark_case) (run : evidence_run)
   else
     match benchmark_case.category with
     | Tool_forbidden -> 1.0
-    | _ ->
-        let forbidden_count =
+    | Tool_use | Recovery_required | Multi_step -> let forbidden_count =
           run.tool_calls
           |> List.filter (forbidden_call_used_by_case benchmark_case)
           |> List.length
@@ -193,8 +192,7 @@ let efficiency_score (benchmark_case : benchmark_case) (run : evidence_run) =
   match benchmark_case.category with
   | Tool_forbidden ->
       if call_count = 0 then 1.0 else 0.0
-  | _ ->
-      if benchmark_case.max_tool_calls <= 0 then
+  | Tool_use | Recovery_required | Multi_step -> if benchmark_case.max_tool_calls <= 0 then
         if call_count = 0 then 1.0 else 0.0
       else
         let over_limit = max 0 (call_count - benchmark_case.max_tool_calls) in

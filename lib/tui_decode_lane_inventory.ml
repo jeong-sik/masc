@@ -237,8 +237,13 @@ let exact_matches snapshot (row : row) = match row.selection,row.state with
                && item.sl_cli_slots=c.cli_slots && item.sl_declared_slots=c.declared_slots
                && item.sl_declared_cli_slots=c.declared_cli_slots && item.sl_dropped_slots=c.dropped_slots
                && item.sl_admission_error=c.admission_error)
-  | (Browser _ | Machine _ | Declaration _ | Manual_instance _),_ -> true
-  | Exact _,_ -> false
+  | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Exact_state _)
+  | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Browser_clients (_, _))
+  | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Browser_executor (_, _))
+  | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Machine_state (_, _))
+  | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Package_state _) -> true
+  | (Exact _, Browser_clients (_, _)) | (Exact _, Browser_executor (_, _))
+  | (Exact _, Machine_state (_, _)) | (Exact _, Package_state _) -> false
 
 let decode json =
   let* () = unique_keys json in

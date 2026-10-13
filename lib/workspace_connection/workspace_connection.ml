@@ -20,8 +20,14 @@ let parse text =
       (match List.assoc_opt "http_port" fields with
        | None -> Ok None
        | Some (Otoml.TomlInteger n) -> port n |> Result.map Option.some |> Result.map_error (fun _ -> Invalid_configuration)
-       | Some _ -> Error Invalid_configuration)
-    | Some _ -> Error Invalid_configuration
+       | Some (Otoml.TomlString _) | Some (Otoml.TomlFloat _) | Some (Otoml.TomlBoolean _)
+       | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+       | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+       | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error Invalid_configuration)
+    | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+    | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+    | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+    | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error Invalid_configuration
 let snapshot file =
   try
     let _ = Unix.lstat file in

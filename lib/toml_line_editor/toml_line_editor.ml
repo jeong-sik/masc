@@ -517,7 +517,10 @@ let skip_value ~opening rest =
 let boolean_assignment ~key line =
   match Otoml.Parser.from_string_result (String.trim line) with
   | Ok (Otoml.TomlTable [(name, Otoml.TomlBoolean _)]) -> String.equal name key
-  | Ok _ | Error _ -> false
+  | Ok (Otoml.TomlString _) | Error _ | Ok (Otoml.TomlInteger _) | Ok (Otoml.TomlFloat _)
+  | Ok (Otoml.TomlBoolean _) | Ok (Otoml.TomlOffsetDateTime _) | Ok (Otoml.TomlLocalDateTime _)
+  | Ok (Otoml.TomlLocalDate _) | Ok (Otoml.TomlLocalTime _) | Ok (Otoml.TomlArray _)
+  | Ok (Otoml.TomlTable _) | Ok (Otoml.TomlInlineTable _) | Ok (Otoml.TomlTableArray _) -> false
 ;;
 
 let boolean_trailing_comment ~key opening =
@@ -628,7 +631,9 @@ let edit_nested_bool content ~path ~key ~value =
     let fields, rebuild, inline = match node with
       | T.TomlTable fields -> fields, (fun fields -> T.TomlTable fields), inline
       | T.TomlInlineTable fields -> fields, (fun fields -> T.TomlInlineTable fields), true
-      | _ -> [], (fun _ -> node), inline in
+      | T.TomlString _ | T.TomlInteger _ | T.TomlFloat _ | T.TomlBoolean _ | T.TomlOffsetDateTime _
+      | T.TomlLocalDateTime _ | T.TomlLocalDate _ | T.TomlLocalTime _ | T.TomlArray _
+      | T.TomlTableArray _ -> [], (fun _ -> node), inline in
     match node with
     | T.TomlTable _ | T.TomlInlineTable _ ->
       (match path with
@@ -645,14 +650,16 @@ let edit_nested_bool content ~path ~key ~value =
            Option.map (fun (child, inline) ->
              rebuild ((name, child) :: List.remove_assoc name fields), inline)
              (set ~create ~inline rest child)))
-    | _ -> None in
+    | T.TomlString _ | T.TomlInteger _ | T.TomlFloat _ | T.TomlBoolean _ | T.TomlOffsetDateTime _
+    | T.TomlLocalDateTime _ | T.TomlLocalDate _ | T.TomlLocalTime _ | T.TomlArray _
+    | T.TomlTableArray _ -> None in
   (* Compare maps without depending on the printer's field order. *)
   let rec ordered = function
     | T.TomlTable fields -> T.TomlTable (order_fields fields)
     | T.TomlInlineTable fields -> T.TomlInlineTable (order_fields fields)
     | T.TomlArray values -> T.TomlArray (List.map ordered values)
     | T.TomlTableArray values -> T.TomlTableArray (List.map ordered values)
-    | value -> value
+    | (T.TomlString _ | T.TomlInteger _ | T.TomlFloat _ | T.TomlBoolean _ | T.TomlOffsetDateTime _ | T.TomlLocalDateTime _ | T.TomlLocalDate _ | T.TomlLocalTime _) as value -> value
   and order_fields fields = List.map (fun (key, value) -> key, ordered value) fields
     |> List.sort (fun (left, _) (right, _) -> String.compare left right) in
   let parse = T.Parser.from_string_result in
@@ -719,7 +726,10 @@ let edit_nested_bool content ~path ~key ~value =
                   | Some (T.TomlBoolean _) -> Some
                       (path_text (remaining @ [key]) ^ " = " ^ string_of_bool value
                         ^ comment statement document)
-                  | Some _ | None -> None))
+                  | Some (T.TomlString _) | None | Some (T.TomlInteger _) | Some (T.TomlFloat _)
+                  | Some (T.TomlOffsetDateTime _) | Some (T.TomlLocalDateTime _)
+                  | Some (T.TomlLocalDate _) | Some (T.TomlLocalTime _) | Some (T.TomlArray _)
+                  | Some (T.TomlTable _) | Some (T.TomlInlineTable _) | Some (T.TomlTableArray _) -> None))
             | Some _, Error _ | None, _ -> None in
           (match changed with
            | Some replacement ->
@@ -735,7 +745,7 @@ let edit_nested_bool content ~path ~key ~value =
         match structural, header_of_line line with
         | true, Some (Table candidate) when List.length candidate > List.length best
             && Option.is_some (relative candidate path) -> candidate
-        | _ -> best) [] lines (structural_lines lines) in
+        | (true, Some (Table_array _)) | (true, None) | (false, _) | (true, Some (Table _)) -> best) [] lines (structural_lines lines) in
       let remaining = match relative ancestor path with Some path -> path | None -> path in
       let assignment = path_text (remaining @ [key]) ^ " = " ^ string_of_bool value in
       let candidate = if ancestor = [] then
@@ -853,7 +863,10 @@ let split_entry_body ~segments lines =
 let string_value_of_line line =
   match Otoml.Parser.from_string_result (String.trim line) with
   | Ok (Otoml.TomlTable [ (_key, Otoml.TomlString value) ]) -> Some value
-  | Ok _ | Error _ -> None
+  | Ok (Otoml.TomlString _) | Error _ | Ok (Otoml.TomlInteger _) | Ok (Otoml.TomlFloat _)
+  | Ok (Otoml.TomlBoolean _) | Ok (Otoml.TomlOffsetDateTime _) | Ok (Otoml.TomlLocalDateTime _)
+  | Ok (Otoml.TomlLocalDate _) | Ok (Otoml.TomlLocalTime _) | Ok (Otoml.TomlArray _)
+  | Ok (Otoml.TomlTable _) | Ok (Otoml.TomlInlineTable _) | Ok (Otoml.TomlTableArray _) -> None
 ;;
 
 let entry_id ~id_key body =

@@ -16,7 +16,10 @@ let enabled ~path value =
   match List.assoc_opt "enabled" entries with
   | None -> Ok true
   | Some (Otoml.TomlBoolean enabled) -> Ok enabled
-  | Some _ -> Error (path ^ ".enabled must be a boolean")
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+  | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+  | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error (path ^ ".enabled must be a boolean")
 let parse toml =
   let path = Runtime_toml_namespace.(key Machines) in
   let* entries = table ~path ~keys:["msx"; "dos"] (Otoml.find_opt toml Fun.id [path]) in

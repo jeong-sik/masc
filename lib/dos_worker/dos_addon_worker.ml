@@ -87,7 +87,7 @@ let create ~base_path () =
     let result = match result with
       | Tool_result.Failed failure when released_controller ->
           Tool_result.Failed {failure with effect_disposition=Tool_result.Proven_post_effect}
-      | result -> result in
+      | (Tool_result.Completed _ | Tool_result.Deferred _ | Failed _) as result -> result in
     response result in
   let screen ~arguments () =
     let tool_name = "masc_dos_screen" and start_time = Tool_timing.start () in

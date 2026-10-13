@@ -188,7 +188,7 @@ let load_dashboard_asset_for_selection installed relative_path =
   | Installed_dashboard.Bound binding ->
     Result.map_error (function
       | Installed_dashboard.Not_manifested -> Asset_not_manifested
-      | e -> Asset_installed_invalid e) (Installed_dashboard.load binding relative_path)
+      | (Installed_dashboard.Invalid_receipt | Installed_dashboard.Receipt_identity_mismatch | Installed_dashboard.Binary_commit_unavailable | Installed_dashboard.Root_identity_changed | Installed_dashboard.Binary_commit_mismatch _ | Installed_dashboard.Digest_mismatch _ | Installed_dashboard.Size_mismatch _ | Installed_dashboard.Exact_read_failed _) as e -> Asset_installed_invalid e) (Installed_dashboard.load binding relative_path)
   | Installed_dashboard.Not_installed ->
   match Build_identity.resolve_dashboard_asset relative_path with
   | Build_identity.Dashboard_asset_bound
@@ -258,7 +258,8 @@ let source_bundle_freshness ~binary_commit () =
   | Build_identity.Dashboard_asset_bound _ ->
     (match Build_identity.resolve_dashboard_asset ".build-stamp" with
      | Build_identity.Dashboard_asset_bound _ -> Fresh
-     | _ -> Unknown_identity)
+     | Build_identity.Dashboard_assets_unbound | Build_identity.Dashboard_assets_unavailable
+     | Build_identity.Dashboard_asset_not_manifested | Build_identity.Dashboard_assets_invalid _ -> Unknown_identity)
   | Build_identity.Dashboard_assets_invalid _
   | Build_identity.Dashboard_assets_unavailable
   | Build_identity.Dashboard_asset_not_manifested -> Unknown_identity
@@ -452,7 +453,8 @@ let surface_status_json_for_selection
     | Installed_stamp loaded_stamp ->
       let verified = match loaded_index with
         | Error (Asset_installed_invalid e) -> Error e
-        | Error _ -> Error Installed_dashboard.Not_manifested
+        | Error (Asset_binding_invalid _) | Error (Asset_build_unavailable)
+        | Error (Asset_not_manifested) | Error (Asset_exact_read_failed _) -> Error Installed_dashboard.Not_manifested
         | Ok _ -> loaded_stamp in
       (match verified with
        | Ok () -> "ok", No_recovery, Installed_dashboard.evidence installed

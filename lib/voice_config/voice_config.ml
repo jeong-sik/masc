@@ -323,7 +323,8 @@ let parse_endpoint ~ctx json =
   let base_url =
     match kind, base_url with
     | Elevenlabs_direct, None -> Some default_elevenlabs_base_url
-    | _ -> base_url
+    | (Elevenlabs_direct, Some _)
+    | ((Openai_compat | (Voice_mcp | (Macos_say | (Espeak_ng | Whisper_cli)))), _) -> base_url
   in
   let* () =
     match kind with

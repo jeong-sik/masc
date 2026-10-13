@@ -355,8 +355,9 @@ let rec param_of_pairs ~context pairs =
          in
          let* parsed = param_type_of_string declared_type in
          Ok (Some ("additionalProperties", `Assoc [ "type", `String (param_type_to_string parsed) ]))
-       | _ ->
-         Error
+       | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlOffsetDateTime _
+       | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+       | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error
            (sprintf "%s must be a boolean or a table, got %s" key_context (toml_shape value)))
     | "min_properties" ->
       let* () = only_for ~context:key_context ~declared Ptype_object in
@@ -407,7 +408,8 @@ let rec param_of_pairs ~context pairs =
             @ [ ( "required"
                 , `List (List.map (fun p -> `String p.param_name) needed) )
               ]))
-    | _ -> Ok fields
+    | (Ptype_object, None)
+    | ((Ptype_string | (Ptype_integer | (Ptype_number | (Ptype_boolean | Ptype_array)))), _) -> Ok fields
   in
   Ok { param_name = name; param_required = required; param_json = `Assoc fields }
 
@@ -499,8 +501,9 @@ and items_json ~context pairs =
          in
          let* parsed = param_type_of_string declared_type in
          Ok (Some ("additionalProperties", `Assoc [ "type", `String (param_type_to_string parsed) ]))
-       | _ ->
-         Error
+       | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlOffsetDateTime _
+       | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+       | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error
            (sprintf "%s must be a boolean or a table, got %s" key_context (toml_shape value)))
     | "min_properties" ->
       let* () = only_for ~context:key_context ~declared Ptype_object in
@@ -532,7 +535,8 @@ and items_json ~context pairs =
   let* params =
     match declared, List.assoc_opt "params" pairs with
     | Ptype_object, Some value -> params_of_value ~context value
-    | _ -> Ok []
+    | (Ptype_object, None)
+    | ((Ptype_string | (Ptype_integer | (Ptype_number | (Ptype_boolean | Ptype_array)))), _) -> Ok []
   in
   (* Same rule as a nested object: the item's required children are listed on
      the item, not marked on each child. *)

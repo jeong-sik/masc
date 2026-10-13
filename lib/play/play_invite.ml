@@ -163,7 +163,8 @@ let list ~base_path ~now =
           |> Result.join |> Result.map_error (fun error -> Credentials_unavailable error) in
         if current_error then Error (Invalid_expiry (Masc_domain.Credential_expiry.Invalid_timestamp timestamp))
         else invalid_named_player rest
-    | Ok _ :: rest | Error _ :: rest -> invalid_named_player rest
+    | (Ok _)::rest | (Error (Auth.Invalid_credential_expiry _))::rest
+    | (Error (Auth.Unreadable_credential _))::rest -> invalid_named_player rest
   in
   (* Batch the file reads without moving transaction admission to a blocking
      thread. A cancelled HTTP request must stop waiting for a publisher; the

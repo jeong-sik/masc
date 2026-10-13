@@ -175,7 +175,9 @@ let inspect_skill_package root directory =
          ~path:package_path
          "package path kind unavailable")
   | Ok (Fs_compat.Exact_kind Unix.S_LNK) -> inspect_package_link ~directory package_path
-  | Ok (Fs_compat.Exact_kind _) -> None
+  | Ok (Fs_compat.Exact_kind (Unix.S_REG)) | Ok (Fs_compat.Exact_kind (Unix.S_CHR))
+  | Ok (Fs_compat.Exact_kind (Unix.S_BLK)) | Ok (Fs_compat.Exact_kind (Unix.S_FIFO))
+  | Ok (Fs_compat.Exact_kind (Unix.S_SOCK)) -> None
 ;;
 
 let scan_resolved_source (resolved : Skill_source_config.resolved_source) =
@@ -242,8 +244,7 @@ let scan_resolved_source (resolved : Skill_source_config.resolved_source) =
              }
        ; candidates = []
        })
-  | resolution ->
-    { Skill_catalog_snapshot.source = resolved
+  | (Skill_source_config.Anchor_unavailable _ | Skill_source_config.Anchor_invalid _ | Skill_source_config.Path_rejected _) as resolution -> { Skill_catalog_snapshot.source = resolved
     ; observation = Source_unresolved resolution
     ; candidates = []
     }
@@ -270,7 +271,8 @@ let scan_additional_source ~base_path ~user_home addition =
            (match inspect () with
             | Ok (Ok (Owned_directory after))
               when before.Unix.st_dev = after.Unix.st_dev && before.Unix.st_ino = after.Unix.st_ino -> scan
-            | _ -> rejected "package Skill directory changed while scanning"))
+            | Ok (Ok (Fs_compat.Owned_directory_missing)) | Ok (Error _) | Error _
+            | Ok (Ok (Owned_directory _)) -> rejected "package Skill directory changed while scanning"))
   | Anchor_unavailable _ | Anchor_invalid _ | Path_rejected _ -> scan_resolved_source resolved
 ;;
 

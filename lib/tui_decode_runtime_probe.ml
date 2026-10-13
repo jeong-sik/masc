@@ -314,8 +314,8 @@ let decode_runtime_probe_snapshot json =
     match rps_refresh_state, rps_cache_hit with
     | (Runtime_probe_fresh | Runtime_probe_recent), true
     | (Runtime_probe_served_stale | Runtime_probe_warming_up), false -> Ok ()
-    | _ ->
-        Error
+    | (Runtime_probe_fresh, false) | (Runtime_probe_recent, false)
+    | (Runtime_probe_served_stale, true) | (Runtime_probe_warming_up, true) -> Error
           (Printf.sprintf "runtime probe refresh_state %S disagrees with cache_hit"
              refresh_state)
   in
@@ -395,11 +395,23 @@ let decode_runtime_probe_snapshot json =
   let* () =
     match rps_refresh_state, rps_status, rps_refreshed_at_unix with
     | Runtime_probe_warming_up, Runtime_probe_warming, None -> Ok ()
-    | Runtime_probe_warming_up, _, _ ->
+    | (Runtime_probe_warming_up, Runtime_probe_reachable, _)
+    | (Runtime_probe_warming_up, Runtime_probe_no_http_runtimes, _)
+    | (Runtime_probe_warming_up, Runtime_probe_degraded, _)
+    | (Runtime_probe_warming_up, Runtime_probe_unreachable, _)
+    | (Runtime_probe_warming_up, Runtime_probe_warming, _) ->
         Error "runtime probe warming_up refresh must carry a warming probe without a cache time"
-    | (Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), _, Some _ ->
+    | ((Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), Runtime_probe_reachable, Some _)
+    | ((Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), Runtime_probe_no_http_runtimes, Some _)
+    | ((Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), Runtime_probe_degraded, Some _)
+    | ((Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), Runtime_probe_unreachable, Some _)
+    | ((Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), Runtime_probe_warming, Some _) ->
         Ok ()
-    | (Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), _, None ->
+    | ((Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), Runtime_probe_reachable, None)
+    | ((Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), Runtime_probe_no_http_runtimes, None)
+    | ((Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), Runtime_probe_degraded, None)
+    | ((Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), Runtime_probe_unreachable, None)
+    | ((Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), Runtime_probe_warming, None) ->
         Error "runtime probe cached refresh is missing refreshed_at_unix"
   in
   Ok

@@ -314,7 +314,7 @@ let running_keeper_count (config : Workspace.config) : int =
        (fun count name ->
          match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) when runtime_keepalive_running config meta -> count + 1
-         | _ -> count)
+         | Ok (None) | Error _ | Ok (Some _) -> count)
        0
 
 (* #10710: bounded fiber pool for per-keeper dashboard enrichment. Each

@@ -289,7 +289,7 @@ let entry_kind path =
     match (Unix.stat path).Unix.st_kind with
     | Unix.S_DIR -> Directory
     | Unix.S_REG -> Regular
-    | _ -> Other
+    | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> Other
   with
   | Unix.Unix_error _ | Sys_error _ -> Unavailable
 ;;
@@ -666,7 +666,7 @@ let inventory_entry_kind inventory_root path =
     (match Fs_compat.owned_inventory_entry_kind inventory_root real with
      | Ok Unix.S_DIR -> Directory
      | Ok Unix.S_REG -> Regular
-     | Ok _ -> Other
+     | Ok (Unix.S_CHR) | Ok (Unix.S_BLK) | Ok (Unix.S_LNK) | Ok (Unix.S_FIFO) | Ok (Unix.S_SOCK) -> Other
      | Error _ -> Unavailable)
 ;;
 

@@ -141,7 +141,8 @@ let probe ~host ~run ~require_rootless ~require_userns backend =
   | Remote_ssh, _ -> Needs_configuration
       "Select a configured SSH endpoint and verify its remote execution; SSH is not a disposable guest"
   | _, Unsupported -> Unsupported_host "Supported hosts are macOS and Linux on ARM64 or x64"
-  | Apple_container, (Linux _ | Macos {architecture=X64; _}) ->
+  | (Apple_container, Linux (Arm64)) | (Apple_container, Linux (X64))
+  | (Apple_container, Macos { architecture = X64; _ }) ->
     Unsupported_host "Apple Container requires Apple Silicon and macOS 26 or newer"
   | Apple_container, Macos {major; _} when major < 26 ->
     Unsupported_host "Apple Container requires macOS 26 or newer"
@@ -153,15 +154,15 @@ let probe ~host ~run ~require_rootless ~require_userns backend =
          if apple_default_kernel_configured ~run then Service_ready
          else Missing_prerequisite kernel_missing_reason
        | Error reason -> Probe_failed reason)
-     | unanswered -> unanswered)
+     | (Missing_prerequisite _ | Unsupported_host _ | Unsupported_capability _ | Probe_failed _ | Needs_configuration _) as unanswered -> unanswered)
   | Nerdctl_kata, Macos _ -> Unsupported_host "Kata setup requires a Linux host with hardware virtualization"
-  | Nerdctl_kata, Linux _ ->
+  | (Nerdctl_kata, Linux (Arm64)) | (Nerdctl_kata, Linux (X64)) ->
     command ~run ["nerdctl"; "info"; "--format"; "{{json .}}"] (fun stdout ->
       json stdout (function
         | `Assoc fields when List.assoc_opt "OSType" fields = Some (`String "linux") ->
           command ~run ["kata-runtime"; "check"; "--no-network-checks"] (fun _ -> Service_ready)
         | _ -> Probe_failed "nerdctl did not report a Linux containerd service"))
-  | Docker, (Macos _ | Linux _) ->
+  | (Docker, (Macos _ | Linux (Arm64))) | (Docker, Linux (X64)) ->
     command ~run ["docker"; "info"; "--format"; "{{json .}}"] (fun stdout ->
       json stdout (function
         | `Assoc fields when List.assoc_opt "OSType" fields = Some (`String "linux") ->
@@ -183,7 +184,7 @@ let recommend ~host ~configured entries =
   | _ ->
     let candidates = match host with
       | Macos {architecture=Arm64; major} when major >= 26 -> [Apple_container; Docker]
-      | Macos _ | Linux _ -> [Docker]
+      | Macos _ | Linux (Arm64) | Linux (X64) -> [Docker]
       | Unsupported -> [] in
     List.find_opt ready candidates
 let state_id = function Service_ready -> "service_ready" | Missing_prerequisite _ -> "missing_prerequisite"

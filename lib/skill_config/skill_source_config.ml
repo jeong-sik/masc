@@ -189,7 +189,7 @@ let ignored_value_to_string = function
   | Toml_string value -> Printf.sprintf "%S" value
   | Toml_float value -> string_of_float value
   | Toml_bool value -> string_of_bool value
-  | value -> Printf.sprintf "<%s>" (value_kind_to_string (value_kind value))
+  | (Keeper_toml_loader.Toml_string_array _ | Keeper_toml_loader.Toml_array _ | Keeper_toml_loader.Toml_table _ | Keeper_toml_loader.Toml_inline_table _ | Keeper_toml_loader.Toml_table_array _ | Keeper_toml_loader.Toml_offset_datetime _ | Keeper_toml_loader.Toml_local_datetime _ | Keeper_toml_loader.Toml_local_date _ | Keeper_toml_loader.Toml_local_time _) as value -> Printf.sprintf "<%s>" (value_kind_to_string (value_kind value))
 ;;
 
 let notice_to_string = function

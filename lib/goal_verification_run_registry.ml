@@ -296,7 +296,8 @@ module Payload = struct
     in
     let* () = match outcome, evaluated_verdict with
       | (Reviewed | Committed), None -> Error "reviewed or committed run requires an evaluated verdict"
-      | _ -> Ok () in
+      | ((Reviewed | Committed), Some _)
+      | ((Superseded _ | (Deferred _ | (Raised _ | Review_cancelled _))), _) -> Ok () in
     Ok (Review_completion { outcome; evaluated_verdict; evaluator_runtime; elapsed_s; tools })
   ;;
 

@@ -468,7 +468,7 @@ let log_resolution ?(context = "ConfigDir") () =
             unset MASC_CONFIG_DIR to prefer the overlay)"
            overlay_path
        | _ -> "")
-    | _ -> ""
+    | Local_masc | Invalid_env | Missing -> ""
   in
   let signature =
     Printf.sprintf "source=%s path=%s%s" source item.path shadow_note

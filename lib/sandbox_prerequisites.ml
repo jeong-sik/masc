@@ -153,7 +153,7 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distributio
      rather than a link even where the transcriber is not. Written per
      distribution because naming one package manager for every Linux installs
      something else or nothing. *)
-  | Whisper_cli, Linux _ ->
+  | (Whisper_cli, Linux (Sandbox_readiness.Arm64)) | (Whisper_cli, Linux (Sandbox_readiness.X64)) ->
     let recorder =
       match distribution with
       | Debian | Ubuntu ->
@@ -191,7 +191,8 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distributio
         ~detail:"Follow the vendor instructions. Muse Code asks for its own sign-in the first time it runs."
         ~source_url:(Runtime_official_cli_install.source_url Muse)
         (Runtime_official_cli_install.source_url Muse)]
-  | Presentation_tools {base_path}, (Macos _ | Linux _) ->
+  | (Presentation_tools { base_path }, (Macos _ | Linux (Sandbox_readiness.Arm64)))
+  | (Presentation_tools { base_path }, Linux (Sandbox_readiness.X64)) ->
     let parser = commands ~id:"presentation_parser_install" ~label:"Install the presentation parser for this workspace"
       ~detail:"Create a Python virtual environment under this workspace's .masc/runtime-tools/presentation and install python-pptx from PyPI. Uses the current host python3; it must support venv and pip. System Python, immutable release files, and producer containers are not modified."
       ~source_url:"https://python-pptx.readthedocs.io/en/latest/user/install.html" ~requires_admin:false
@@ -215,7 +216,7 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distributio
        ~detail:"Install Poppler through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. Both PDF commands are checked after installation."
        ~source_url:"https://formulae.brew.sh/formula/poppler" ~requires_admin:false
        [[homebrew;"install";"poppler"]]]
-  | Pdf_tools, Linux _ ->
+  | (Pdf_tools, Linux (Sandbox_readiness.Arm64)) | (Pdf_tools, Linux (Sandbox_readiness.X64)) ->
     (match distribution with
      | Debian | Ubuntu ->
        let source_url = match distribution with
@@ -254,7 +255,8 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distributio
      commands ~id:"docker_desktop_start" ~label:"Open installed Docker Desktop"
        ~detail:"Launch Docker Desktop and finish its first-start prompts, then recheck the engine."
        ~source_url:docker_mac_source ~requires_admin:false [["open";"-a";"Docker"]]]
-  | Sandbox Docker, Linux _ ->
+  | (Sandbox (Docker), Linux (Sandbox_readiness.Arm64))
+  | (Sandbox (Docker), Linux (Sandbox_readiness.X64)) ->
     let install = match distribution with
       | Debian | Ubuntu ->
         let source_url = match distribution with

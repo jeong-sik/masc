@@ -249,8 +249,19 @@ let test_an_apple_builder_without_a_default_kernel_is_not_ready () =
        [probe mac [apple_inventory; rosetta_receipt, Ok "package-id: com.apple.pkg.RosettaUpdateAuto\n";
                    no_kernel ~rosetta:false] S.Apple_container;
         probe mac (docker []) S.Docker] = Some S.Docker)
+(* The wildcard-expansion codemod dropped the Macos {architecture = X64} arm,
+   so Intel hosts reached the live inventory probe instead of this refusal. *)
+let test_intel_mac_refused_before_probe () =
+  let entry = probe (S.Macos {architecture=S.X64; major=26}) [] S.Apple_container in
+  check bool "an Intel mac is refused before any service probe" true
+    (match entry.state with
+     | S.Unsupported_host reason ->
+       reason = "Apple Container requires Apple Silicon and macOS 26 or newer"
+     | _ -> false)
 let () = run "sandbox readiness" ["selection",[
   test_case "real service reply, not CLI presence" `Quick test_service_not_presence;
+  test_case "an Intel mac is refused before any service probe" `Quick
+    test_intel_mac_refused_before_probe;
   test_case "catalog selection boundary" `Quick test_catalog_selection_boundary;
   test_case "hardening requirements" `Quick test_hardening;
   test_case "OS recommendation and configured preference" `Quick test_recommendation;

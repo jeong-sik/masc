@@ -88,7 +88,7 @@ let ensure_keeper_credential_in_transaction
       (match find_token ~token:raw_token with
        | Ok credential when String.equal credential.agent_name agent_name -> Ok (raw_token, credential)
        | Ok _ | Error (Auth _) -> create_fresh_keeper_token transaction current
-       | Error _ as error -> error)
+       | (Error (Task _) as error) | (Error (Agent _) as error) | (Error (System _) as error) -> error)
     | Some _, Some _ | Some _, None | None, Some _ | None, None ->
       create_fresh_keeper_token transaction current
 ;;

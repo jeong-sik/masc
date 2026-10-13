@@ -607,7 +607,7 @@ let test_keeper_wake_for_absent_owner_preserves_recurrence () =
        (Keeper_registry_event_queue.snapshot ~base_path keeper_name));
   check int "the failed occurrence is not retried before the next due" 0
     (List.length (tick_ok config ~now:259.0).dispatches);
-  register_keeper config keeper_name;
+  let (_ : Keeper_registry_types.registry_entry) = register_keeper config keeper_name in
   let next = tick_ok config ~now:260.0 in
   check int "the next occurrence dispatches after the owner appears" 1
     (List.length next.dispatches);

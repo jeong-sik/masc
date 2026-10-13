@@ -361,6 +361,45 @@ let handle_goto ~tool_name ~start_time args : Tool_result.result =
       ~verb:(Browser_lane.Page_goto { url; tab_id = get_int_opt args "tabId" }) ~timeout_sec:45.0
 ;;
 
+(* The [mode] argument of [masc_browser_read], read once. The six top-level
+   reads take the page as a whole; [frames] and [dialog] read the automation
+   lane's page context. The tool schema's enum names the same values. *)
+type top_level_read =
+  [ `Text | `Elements | `Scene | `Regions | `Screenshot | `Downloads ]
+[@@deriving enumerate]
+
+type read_mode = [ top_level_read | `Frames | `Dialog ] [@@deriving enumerate]
+
+let read_mode_to_string : read_mode -> string = function
+  | `Text -> "text"
+  | `Elements -> "elements"
+  | `Scene -> "scene"
+  | `Regions -> "regions"
+  | `Screenshot -> "screenshot"
+  | `Downloads -> "downloads"
+  | `Frames -> "frames"
+  | `Dialog -> "dialog"
+;;
+
+let read_mode_of_args args : (read_mode, string) result =
+  let unknown () =
+    Error
+      ("mode must be one of "
+       ^ String.concat ", " (List.map read_mode_to_string all_of_read_mode))
+  in
+  match Json_util.assoc_member_opt "mode" args with
+  | None -> Ok `Text
+  | Some (`String raw) ->
+    (match
+       List.find_opt
+         (fun mode -> String.equal (read_mode_to_string mode) raw)
+         all_of_read_mode
+     with
+     | Some mode -> Ok mode
+     | None -> unknown ())
+  | Some _ -> unknown ()
+;;
+
 let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_result.result =
   let unknown_argument = match args with
     | `Assoc fields -> List.exists (fun (key,_) -> not (List.mem key ["lane";"tabId";"maxChars";"mode";"framePath";"clientId";"scope";"expectedUrl";"navigationSource"])) fields
@@ -376,30 +415,42 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
     match Browser_lane.Action.parse_frame_path args with
     | Error detail -> make_input_err ~tool_name ~start_time detail
     | Ok frame_path ->
-    let mode = get_string args "mode" "text" in
+    match read_mode_of_args args with
+    | Error detail -> make_input_err ~tool_name ~start_time detail
+    | Ok mode ->
+    let top_document_view = match mode with
+      | `Scene | `Regions -> frame_path = []
+      | `Text | `Elements | `Screenshot | `Downloads | `Frames | `Dialog -> false in
     let scope_present = match args with `Assoc fields -> List.mem_assoc "scope" fields | _ -> false in
     let destination_guard_present = match args with `Assoc fields -> (List.mem_assoc "expectedUrl" fields || List.mem_assoc "navigationSource" fields) | _ -> false in
-    if destination_guard_present && (frame_path <> [] || not (List.mem mode ["scene";"regions"])) then
+    if destination_guard_present && not top_document_view then
       make_input_err ~tool_name ~start_time "expectedUrl and navigationSource support top-document scene or regions only"
-    else if scope_present && (frame_path <> [] || not (List.mem mode ["scene";"regions"])) then
+    else if scope_present && not top_document_view then
       make_input_err ~tool_name ~start_time "scope supports top-document scene or regions only"
-    else if frame_path <> [] || mode = "frames" || mode = "dialog" then
+    else
+    let contextual_read () =
       if not automation then make_input_err ~tool_name ~start_time "frame and dialog reads require automation"
       else (match get_int_opt args "tabId" with
         | None -> make_input_err ~tool_name ~start_time "contextual read requires an observed tabId"
         | Some tab_id when tab_id < 0 -> make_input_err ~tool_name ~start_time "tabId must be nonnegative"
         | Some tab_id ->
           let mode = match mode with
-            | "text" -> Ok (`Text (get_int args "maxChars" Browser_page_script.default_text_chars))
-            | "elements" -> Ok `Elements | "frames" -> Ok `Frames
-            | "dialog" when frame_path = [] -> Ok `Dialog
-            | _ -> Error "framePath supports text, elements and frames; dialogs belong to the top-level tab" in
+            | `Text -> Ok (`Text (get_int args "maxChars" Browser_page_script.default_text_chars))
+            | `Elements -> Ok `Elements | `Frames -> Ok `Frames
+            | `Dialog when frame_path = [] -> Ok `Dialog
+            | `Dialog | `Scene | `Regions | `Screenshot | `Downloads ->
+              Error "framePath supports text, elements and frames; dialogs belong to the top-level tab" in
           match mode with
           | Error detail -> make_input_err ~tool_name ~start_time detail
           | Ok mode -> answer_to_result ~lane:Browser_lane.Lane_name.Automation ~tool_name ~start_time
               (Browser_lane.issue_automation
                 ~verb:(Browser_lane.Page_context {tab_id;frame_path;mode}) ~timeout_sec:default_timeout_sec))
+    in
+    if frame_path <> [] then contextual_read ()
     else
+    match mode with
+    | `Frames | `Dialog -> contextual_read ()
+    | #top_level_read as top ->
     (* One rule for the cap, the one every lane's executor applies: a value
        out of range is refused, not quietly clamped. *)
     match Browser_page_script.text_cap (get_int_opt args "maxChars") with
@@ -436,16 +487,25 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
               | Error failure -> read_failure ~base_path ~tool_name ~start_time failure)
        | _ -> make_input_err ~tool_name ~start_time "scene requires an observed tabId")
     in
-    match get_string args "mode" "text" with
-    | "scene" -> read_scene Browser_lane.Content
-    | "regions" -> read_scene Browser_lane.Regions
-    | "downloads" ->
+    let read_top_level verb =
+      match Browser_lane.resolve_target ~verb request.route with
+      | Error error -> selection_error ~base_path ~tool_name ~start_time error
+      | Ok target ->
+        match Browser_lane.issue_for ~target ~verb ~timeout_sec:default_timeout_sec with
+        | Error error -> selection_error ~base_path ~tool_name ~start_time error
+        | Ok answer ->
+          answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client target answer)
+    in
+    match top with
+    | `Scene -> read_scene Browser_lane.Content
+    | `Regions -> read_scene Browser_lane.Regions
+    | `Downloads ->
       if not automation then make_input_err ~tool_name ~start_time "downloads require automation"
       else (match get_int_opt args "tabId" with
         | Some tab_id when tab_id >= 0 -> answer_to_result ~lane:Browser_lane.Lane_name.Automation ~tool_name ~start_time
             (Browser_lane.issue_automation ~verb:(Browser_lane.Page_downloads {tab_id}) ~timeout_sec:default_timeout_sec)
         | _ -> make_input_err ~tool_name ~start_time "downloads require an observed nonnegative tabId")
-    | "screenshot" ->
+    | `Screenshot ->
       (match keeper_name, get_int_opt args "tabId" with
        | None, _ -> make_workflow_err ~tool_name ~start_time "screenshot requires an owning Keeper"
        | _, None -> make_input_err ~tool_name ~start_time "screenshot requires an observed tabId"
@@ -456,34 +516,18 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
          match Browser_screenshot.persist ~keeper_name data with
          | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
          | Error detail -> make_workflow_err ~tool_name ~start_time detail)
-    | mode ->
-      let verb = match mode with
-        | "text" -> Ok (Browser_lane.Page_read {tab_id=get_int_opt args "tabId";max_chars=Some max_chars})
-        | "elements" -> Ok (Browser_lane.Page_elements {tab_id=get_int_opt args "tabId"})
-        | _ -> Error "mode must be text, elements, scene, regions, screenshot, frames, dialog or downloads" in
-      match verb with
-      | Error detail -> make_input_err ~tool_name ~start_time detail
-      | Ok verb ->
-        (match Browser_lane.resolve_target ~verb request.route with
-         | Error error -> selection_error ~base_path ~tool_name ~start_time error
-         | Ok target ->
-           match Browser_lane.issue_for ~target ~verb ~timeout_sec:default_timeout_sec with
-           | Error error -> selection_error ~base_path ~tool_name ~start_time error
-           | Ok answer ->
-             answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client target answer))
+    | `Text ->
+      read_top_level
+        (Browser_lane.Page_read {tab_id=get_int_opt args "tabId";max_chars=Some max_chars})
+    | `Elements -> read_top_level (Browser_lane.Page_elements {tab_id=get_int_opt args "tabId"})
 ;;
 
 (* Retention requires an owner that will commit the observation receipt. *)
 let retain_read_result ~base_path ~tool_name ~start_time args result =
-  let retained = match args with
-    | `Assoc fields ->
-      (match List.assoc_opt "mode" fields with
-       | Some (`String "scene") -> Browser_observation.retain
-           ~base_path ~view:Browser_lane.Content result
-       | Some (`String "regions") -> Browser_observation.retain
-           ~base_path ~view:Browser_lane.Regions result
-       | _ -> Ok result)
-    | _ -> Ok result in
+  let retained = match read_mode_of_args args with
+    | Ok `Scene -> Browser_observation.retain ~base_path ~view:Browser_lane.Content result
+    | Ok `Regions -> Browser_observation.retain ~base_path ~view:Browser_lane.Regions result
+    | Ok (`Text | `Elements | `Screenshot | `Downloads | `Frames | `Dialog) | Error _ -> Ok result in
   match retained with
   | Ok result -> result
   | Error detail ->

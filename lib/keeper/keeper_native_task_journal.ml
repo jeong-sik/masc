@@ -130,11 +130,8 @@ let statement db cleanup operation sql f =
     ~on_cleanup:(cleanup_report cleanup) db ~operation sql f
 let bind db stmt values = Keeper_sqlite_observation_io.bind ~error:sql_error db stmt values
 let done_ db stmt operation =
-  (* Sqlite3.Rc.t is the C result-code enum (about 30 codes). Every code except
-  DONE is a failure and the code is reported as is, so the catch-all is the intent. *)
-  match[@warning "-4"] Sqlite3.step stmt with
-  | Sqlite3.Rc.DONE -> Ok ()
-  | rc -> Error (sqlite_failure db operation rc)
+  let rc = Sqlite3.step stmt in
+  if rc = Sqlite3.Rc.DONE then Ok () else Error (sqlite_failure db operation rc)
 let scalar db cleanup sql = statement db cleanup "scalar" sql (fun stmt ->
   match Sqlite3.step stmt with
   | Sqlite3.Rc.ROW -> let value = Sqlite3.column stmt 0 in let* () = done_ db stmt "scalar end" in Ok value

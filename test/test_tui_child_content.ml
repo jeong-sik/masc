@@ -86,7 +86,9 @@ let test_snapshots_suffix_identity_and_idle () =
   check int "unchanged Poll only hints" 0 (List.length requests);
   check bool "idle keeps actual immutable state identity" true (idle==second);
   check bool "idle keeps exact rows list" true (Consumer.records (one idle)==Consumer.records (one second));
-  check bool "coverage is explicitly unavailable" true ((one idle).coverage=Read.Unavailable)
+  check bool "coverage is explicitly unavailable" true ((one idle).coverage=Read.Unavailable);
+  check (list string) "constant coverage notice is not a health diagnostic" []
+    (Consumer.diagnostics idle)
 
 let test_newer_receipt_does_not_repeat_full_reads () =
   let first=initial () in

@@ -84,8 +84,14 @@ let diagnostics state =
   match state.inventory with
   | None -> []
   | Some inventory ->
-      let coverage = match inventory.coverage with Read.Unavailable ->
-        ["persistence failure history unavailable; provider completeness and liveness unknown"] in
+      (* [coverage] has a single constructor ([Read.Unavailable]): persistence
+         failure history, provider completeness and liveness are always
+         reported as unknown. A constant line in a health diagnostic reads as an
+         alarm and hides the real ones, so it is not emitted here. The notice
+         stays in the wire fields and docs/design/child-content-http-read.md.
+         When the server can collect failure history and [coverage] gains a
+         second constructor, match on it here and emit the line again. *)
+      let () = match inventory.coverage with Read.Unavailable -> () in
       let retained = List.filter_map (fun (store:store) ->
         if List.exists (fun (receiver,status) -> receiver=store.receiver &&
           match status with Ok cursor -> cursor.Read.store_id=store.store_id | Error _ -> true)
@@ -93,7 +99,7 @@ let diagnostics state =
         then None else Some "retained Child history absent from latest inventory; current redaction unknown") state.stores in
       let cleanup = inventory.cleanup_failures @ List.concat_map
           (fun (store:store) -> store.cleanup_failures) state.stores in
-      List.sort_uniq String.compare (coverage @ retained @
+      List.sort_uniq String.compare (retained @
         List.map (fun operation -> "cleanup failed: " ^ operation) cleanup)
 let decode ~fetch path =
   let* status,body=fetch path |> Result.map_error (fun detail -> Transport detail) in

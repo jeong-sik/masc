@@ -1978,7 +1978,8 @@ let make_tools_with_authority
                         ?turn_sandbox_factory ?clock ?continuation_channel ?gate_context ?gate_grant ?record_gate_result
                         ?on_deferred ?on_external_effect_deferred
                         ?observe_node_result:(Option.map (fun turn_context ->
-                          observe_node_result ~composition_tool:Draft.run_tool_name ~composition_execution:Catalog.Inline
+                          observe_node_result ?on_receipt_committed:None
+                            ~composition_tool:Draft.run_tool_name ~composition_execution:Catalog.Inline
                             ~composition_tool_kind:Keeper_tool_descriptor.Composition_tool ~composition_run_id
                             ~parent_invocation ~meta ~turn_context) turn_context) () in
                     let result = result_of_execution ~tool_name:Draft.run_tool_name

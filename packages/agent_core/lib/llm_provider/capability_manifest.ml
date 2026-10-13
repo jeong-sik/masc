@@ -155,7 +155,6 @@ let member_string_closed key json =
     Error (Printf.sprintf "entry field %S expected string, got %s" key (json_kind actual))
 ;;
 
-
 let member_string_list key json =
   match Yojson.Safe.Util.member key json with
   | `List values ->

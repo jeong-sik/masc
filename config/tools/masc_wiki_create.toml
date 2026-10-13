@@ -6,7 +6,8 @@ Use when recording a \
 finding, experiment result, or pattern that other agents should know about. \
 The page name stays fixed. A name that already exists is refused: read that \
 page and call masc_wiki_update to change it, rather than creating a second \
-page on the same subject."""
+page on the same subject. The summary becomes the page's line in the wiki \
+index (index.md)."""
 
 # Held back from the request until the model asks for it by name.
 defer_loading = true

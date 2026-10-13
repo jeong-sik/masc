@@ -3911,7 +3911,7 @@
 (test
  (name test_tui_markdown)
  (modules test_tui_markdown)
- (libraries alcotest masc_tui_code_lexer masc_tui_markdown masc_tui_message_layout masc_tui_render_prim masc_tui_theme)
+ (libraries alcotest masc_tui_alphatex masc_tui_code_lexer masc_tui_markdown masc_tui_message_layout masc_tui_render_prim masc_tui_theme)
  (action (setenv MASC_TUI_FORCE_COLOR 1 (run %{test}))))
 
 (test
@@ -4493,6 +4493,7 @@
 (include stanzas/test_tui_keys.inc)
 
 (include stanzas/test_workspace_git_log.inc)
+(include stanzas/test_tui_alphatex.inc)
 (include stanzas/test_tui_code_lexer.inc)
 (include stanzas/test_tui_overview_transport_item.inc)
 (include stanzas/test_tui_runtime_account_form.inc)

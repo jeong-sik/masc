@@ -354,6 +354,67 @@ let test_inline_raw_source_positions () =
     ["plain text"; "**strong** and _emphasis_"; "[한글](https://example.test)";
      "unpaired **marker"; "__styled__ snake_case"; "~~old~~ `code`"]
 
+(* {1 alphaTex fences}
+
+   What the fence arm does with what the renderer gave it. The checks follow
+   the renderer's own output, not the frame around it: the lines of the tab
+   are on the screen, a score that cannot be drawn says why, and a drawn tab
+   is not passed off as text that can be searched. *)
+
+let contains ~part whole =
+  let part_length = String.length part in
+  let rec at index =
+    index + part_length <= String.length whole
+    && (String.equal (String.sub whole index part_length) part || at (index + 1))
+  in
+  at 0
+
+let fence score = "```alphatex\n" ^ score ^ "\n```"
+
+let test_alphatex_fence_shows_the_renderers_tab () =
+  let score = ":4 0.6 3.6 5.6 3.6" in
+  match Masc_tui_alphatex.render_tab ~max_width:78 score with
+  | Error failure -> Alcotest.fail (Masc_tui_alphatex.failure_text failure)
+  | Ok tab_lines ->
+      let rows = render ~width:80 (fence score) in
+      List.iter
+        (fun line ->
+          Alcotest.(check bool) ("the screen has the line " ^ line) true
+            (List.exists (contains ~part:line) rows))
+        tab_lines
+
+let test_alphatex_fence_says_why_a_score_is_not_drawn () =
+  let score = ":4 0.6 (3.6" in
+  match Masc_tui_alphatex.render_tab ~max_width:78 score with
+  | Ok _ -> Alcotest.fail "the score was expected to fail"
+  | Error failure ->
+      let reason = Masc_tui_alphatex.failure_text failure in
+      List.iter
+        (fun (label, text) ->
+          Alcotest.(check bool) label true
+            (List.exists (contains ~part:reason) (render ~width:80 text)))
+        [ "a closed fence gives the reason", fence score
+        ; "an unclosed fence gives it too", "```alphatex\n" ^ score
+        ]
+
+let test_alphatex_tag_ignores_case () =
+  let score = ":4 0.6 3.6" in
+  check_rows "an upper-case tag draws the same rows"
+    (render ~width:80 (fence score))
+    (render ~width:80 ("```AlphaTex\n" ^ score ^ "\n```"))
+
+(* A drawn tab has no source position to offer, so the document says its
+   mapping is incomplete; the source shown for a score that fails is mapped
+   like any other code. *)
+let test_a_drawn_tab_is_not_a_searchable_document () =
+  let mapping text =
+    (Markdown.render_document_with_spans ~palette:tagged ~width:80 text).mapping
+  in
+  Alcotest.(check bool) "a drawn tab leaves the document incomplete" false
+    (mapping (fence ":4 0.6 3.6") = Markdown.Complete_document);
+  Alcotest.(check bool) "a score shown as source is a complete document" true
+    (mapping (fence ":4 0.6 (3.6") = Markdown.Complete_document)
+
 let () =
   Alcotest.run "tui-markdown"
     [ ( "inline"
@@ -378,6 +439,16 @@ let () =
       , [] )
     ; ( "fenced highlighting"
       , [] )
+    ; ( "alphatex fence"
+      , [ Alcotest.test_case "the renderer's tab is on the screen" `Quick
+            test_alphatex_fence_shows_the_renderers_tab
+        ; Alcotest.test_case "a score not drawn says why" `Quick
+            test_alphatex_fence_says_why_a_score_is_not_drawn
+        ; Alcotest.test_case "the tag ignores case" `Quick
+            test_alphatex_tag_ignores_case
+        ; Alcotest.test_case "a drawn tab is not a searchable document" `Quick
+            test_a_drawn_tab_is_not_a_searchable_document
+        ] )
     ; ( "width"
       , [] )
     ; ( "strike"

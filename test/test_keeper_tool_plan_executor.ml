@@ -1364,7 +1364,7 @@ let save_export_evidence config ~execution result =
           ~parent_invocation ~request_id:None ~keeper_name:"alpha"
           ~composition_tool:"keeper_compose_export-fixture"
           ~composition_execution:Masc.Keeper_tool_composition_catalog.Inline
-          ~result ~executor_settlements:(List.map Masc.Keeper_tool_composition_projection.node_result_to_json settlements) with
+          ~result ~executor_settlements:(List.map Masc.Keeper_tool_composition_surface.For_testing.node_result_to_json settlements) with
   | Error error -> fail (Evidence.error_to_string error)
   | Ok evidence ->
     (match Evidence.save_latest config evidence with
@@ -1381,10 +1381,9 @@ let save_async_export ~base_path result =
     ; request_context = None; submitted_at = 1.; completed_at = Some 2.
     ; status = Async.Done { ok = true; body = Tool_result.message result
                            ; data = Some (Tool_result.data result) } } in
-  let path = match Async.For_testing.terminal_record_path ~base_path ~request_id with
-    | Some path -> path | None -> fail "invalid terminal fixture identity" in
-  Fs_compat.mkdir_p (Filename.dirname path);
-  Fs_compat.save_file path (Masc.Keeper_msg_async_record.entry_record_to_json entry |> Yojson.Safe.to_string);
+  (match Async.For_testing.persist_terminal_record entry with
+   | Ok () -> ()
+   | Error error -> fail error);
   request_id
 ;;
 

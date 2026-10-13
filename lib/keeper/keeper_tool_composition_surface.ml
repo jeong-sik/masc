@@ -1367,6 +1367,7 @@ let make_instruction_skill_tool
 ;;
 
 module For_testing = struct
+  let node_result_to_json = node_result_to_json
   let project_execution_result = project_execution_result
   let result_of_execution = result_of_execution
   let observe_node_result = observe_node_result

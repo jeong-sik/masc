@@ -1,8 +1,10 @@
-type sandbox_profile =
+type sandbox_profile = Keeper_sandbox_config.sandbox_profile =
   | Docker
   | Micro_vm
   | Remote_ssh
-(** The profiles a keeper may run under.  There is no host arm. *)
+(** The profiles a keeper may run under.  There is no host arm. The config
+    layer's type, so a profile places the keeper's playground bundle
+    ({!Keeper_sandbox_config.host_root_rel_of_profile}) as it is. *)
 
 module Sandbox_profile_tla : sig
   type t = sandbox_profile =
@@ -53,10 +55,6 @@ val observation_run_rejection : sandbox_profile -> observation_run -> string opt
     shim, so it has no box to choose and refuses both. Whether a remote_ssh
     endpoint may take [Guest_local] is the endpoint's declaration, not the
     profile's, and is answered where the route is built. *)
-
-val sandbox_profile_to_config : sandbox_profile -> Keeper_sandbox_config.sandbox_profile
-(** The same profile in the config layer's type, which places the keeper's
-    playground bundle ({!Keeper_sandbox_config.host_root_rel_of_profile}). *)
 
 val sandbox_profile_to_string : sandbox_profile -> string
 val sandbox_profile_of_string : string -> sandbox_profile option

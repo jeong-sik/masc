@@ -2002,17 +2002,11 @@ let teardown_keeper_sandbox
       ~(meta : keeper_meta)
       ()
   =
-  let backend =
-    match meta.sandbox_profile with
-    | Docker -> Keeper_sandbox.Docker
-    | Micro_vm -> Keeper_sandbox.Micro_vm
-    | Remote_ssh -> Keeper_sandbox.Remote_ssh
-  in
   teardown_keeper_sandbox_by_name
     ?timeout_sec
     ~config
     ~keeper_name:meta.name
-    ~backend
+    ~backend:meta.sandbox_profile
     (* The meta is still here, so the runtime the guest was booted on travels
        with the removal. Without it a microsandbox guest would be sent
        [container delete --force] and survive its own teardown. *)

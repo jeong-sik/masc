@@ -231,7 +231,7 @@ let select ~unnamed_backend ~path ~contents ~profile:requested ~microvm_backend:
     |> Result.map_error Keeper_types_profile.keeper_toml_load_error_to_string in
   let* chosen_profile = match requested, defaults.sandbox_profile with
     | Some p, _ -> Ok p
-    | None, Some p -> Ok ((match p with Keeper_types_profile_sandbox.Docker -> Keeper_sandbox_config.Docker | Micro_vm -> Micro_vm | Remote_ssh -> Remote_ssh))
+    | None, Some p -> Ok p
     | None, None -> Error "No sandbox profile is configured" in
   let* backend = match chosen_profile with
     | Keeper_sandbox_config.Docker -> Ok Docker
@@ -248,16 +248,15 @@ let select ~unnamed_backend ~path ~contents ~profile:requested ~microvm_backend:
            | None -> Error ("microvm_backend_unresolved: sandbox_profile \"microvm\" has no runtime on this host. Set microvm_backend to one of: "
                ^ String.concat ", " Keeper_microvm_backend.valid_strings
                ^ ", or declare a sandbox_profile this host can serve")))) in
-  let sandbox_profile = match chosen_profile with Keeper_sandbox_config.Docker -> Keeper_types_profile_sandbox.Docker | Micro_vm -> Micro_vm | Remote_ssh -> Remote_ssh in
   (* #37523: the image, like the backend above, is named by the operator; the
      wizard does not write one on their behalf. Same rule as boot. *)
   let* () = match Keeper_meta_contract.missing_required_sandbox_image_error
-      ~keeper_name:"imp" sandbox_profile defaults with
+      ~keeper_name:"imp" chosen_profile defaults with
     | None -> Ok () | Some reason -> Error reason in
   let network_mode = match requested_network, defaults.network_mode with
     | Some mode, _ | None, Some mode -> mode
-    | None, None -> Keeper_types_profile_sandbox.default_network_mode_for_profile sandbox_profile in
-  let* () = match Keeper_types_profile_sandbox.network_mode_rejection sandbox_profile network_mode with
+    | None, None -> Keeper_types_profile_sandbox.default_network_mode_for_profile chosen_profile in
+  let* () = match Keeper_types_profile_sandbox.network_mode_rejection chosen_profile network_mode with
     | None -> Ok () | Some reason -> Error reason in
   let* () = if backend <> Microsandbox && not (List.mem network_mode (network_modes backend)) then
     Error (backend_id backend ^ " does not implement the selected network mode") else Ok () in

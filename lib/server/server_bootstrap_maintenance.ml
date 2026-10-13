@@ -798,7 +798,20 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       | Ok () -> ()
       | Error detail -> Log.Server.warn "goal effect outbox delivery deferred: %s" detail
     in
+    let reconcile_composition_completions () =
+      match Keeper_composition_completion_wake.reconcile ~base_path:config.base_path with
+      | Error error -> Log.Server.warn "composition completion outbox unavailable: %s"
+          (Keeper_composition_completion_outbox.error_to_string error)
+      | Ok report ->
+        List.iter (fun (identity, error) ->
+          Log.Server.warn "composition completion delivery retained request=%s error=%s"
+            identity (Keeper_composition_completion_outbox.error_to_string error)) report.failures;
+        if report.delivered > 0 then Log.Server.info
+          "composition completion recovery inspected=%d delivered=%d waiting=%d failures=%d"
+          report.inspected report.delivered report.waiting (List.length report.failures)
+    in
     reconcile_goal_events ();
+    reconcile_composition_completions ();
     project_transition_outboxes Startup_projection;
     (* Restore MCP transport sessions from disk before first cleanup cycle.
        Grace period timestamps survive server restart, so recently-active
@@ -818,6 +831,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       project_transition_outboxes Maintenance_projection;
       reconcile_broadcast_mentions ();
       reconcile_goal_events ();
+      reconcile_composition_completions ();
       (try
          let stale_sids = Sse.cleanup_stale () in
          List.iter Server_routes_http_common.stop_sse_session stale_sids;

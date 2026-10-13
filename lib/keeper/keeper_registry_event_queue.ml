@@ -436,9 +436,10 @@ type transfer_projection_result =
   | Transfer_projection_target_unavailable of transfer_target_error
   | Transfer_projection_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
-let enqueue_stimulus_durable_result_unfenced ~base_path name stimulus =
+let enqueue_stimulus_durable_result_unfenced ?already_delivered ~base_path name stimulus =
   match
     Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+      ?already_delivered
       ~base_path
       ~keeper_name:name
       ~after_commit:(publish_pending ~base_path name)
@@ -462,6 +463,19 @@ let enqueue_stimulus_durable_result
       ~keeper_name:name
       (fun () -> enqueue_stimulus_durable_result_unfenced ~base_path name stimulus)
   with
+  | Ok result -> result
+  | Error error -> Stimulus_storage_error (durable_intake_error_to_string error)
+;;
+
+let enqueue_stimulus_once_durable_result ~base_path name stimulus =
+  let already_delivered () =
+    Keeper_reaction_ledger.event_queue_delivery_seen_for_source_result
+      ~base_path ~keeper_name:name ~post_id:stimulus.Keeper_event_queue.post_id
+      ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus)
+    |> Result.map_error Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+  in
+  match with_durable_intake ~base_path ~keeper_name:name
+      (fun () -> enqueue_stimulus_durable_result_unfenced ~already_delivered ~base_path name stimulus) with
   | Ok result -> result
   | Error error -> Stimulus_storage_error (durable_intake_error_to_string error)
 ;;

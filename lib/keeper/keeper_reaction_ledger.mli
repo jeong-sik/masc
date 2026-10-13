@@ -84,6 +84,9 @@ val stimulus_id_of_event_queue : Keeper_event_queue.stimulus -> string
 (** Stable id derived from the event queue stimulus payload. Scheduled wakes
     preserve the enclosing schedule occurrence [post_id] exactly. *)
 
+val stimulus_kind_of_event_queue : Keeper_event_queue.stimulus -> stimulus_kind
+(** Canonical typed source kind for exact one-shot delivery evidence. *)
+
 val record_event_queue_stimulus :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus -> unit
 (** Append a [record_kind="stimulus"] row for an enqueued stimulus. *)

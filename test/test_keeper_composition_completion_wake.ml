@@ -458,12 +458,98 @@ let a_non_durable_settlement_is_not_announced () =
       (List.length (queued_results ~base_path ~keeper_name:submitter)))
 ;;
 
+let completion_delivery_recovers_without_replaying_or_reconsuming () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:submitter;
+    let module Outbox = Masc.Keeper_composition_completion_outbox in
+    let module Queue = Masc.Keeper_registry_event_queue in
+    let base_path = config.Workspace.base_path in
+    Eio.Switch.run @@ fun background_sw ->
+    let release_worker, release = Eio.Promise.create () in
+    let worker_settled, settled = Eio.Promise.create () in
+    let dispatched = Atomic.make 0 in
+    let accepted = Async.submit_with_request_id
+        ~request_context:[ "composition_tool", `String composition_tool
+                         ; "composition_run_id", `String "outbox-run"
+                         ; "parent_tool_use_id", `String "original-invocation" ]
+        ~on_accepted:(fun request_id ->
+          Outbox.prepare ~base_path ~keeper_name:submitter ~request_id ~composition_tool
+          |> Result.map_error Outbox.error_to_string)
+        ~on_worker_settled:(fun settlement ->
+          Wake.on_worker_settled ~base_path ~composition_tool settlement;
+          Eio.Promise.resolve settled ())
+        ~background_sw ~base_path ~caller:submitter ~keeper_name:submitter
+        ~f:(fun ~request_id:_ _request_sw ->
+          ignore (Atomic.fetch_and_add dispatched 1);
+          Eio.Promise.await release_worker;
+          Tool_result.make_ok ~tool_name:composition_tool ~start_time:(Tool_timing.start ())
+            ~data:(`Assoc [ "exports", `Assoc [ "answer", `String "original result" ] ]) ()) ()
+      |> Result.get_ok in
+    check bool "completion obligation precedes worker acceptance" true
+      (accepted.acceptance = Async.Durably_accepted);
+    let waiting = Wake.reconcile ~base_path |> Result.get_ok in
+    check int "active request keeps one delivery obligation" 1 waiting.waiting;
+    let queue_path = Filename.concat
+        (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) submitter)
+        Keeper_event_queue_persistence.snapshot_filename in
+    Fs_compat.mkdir_p (Filename.dirname queue_path);
+    Fs_compat.save_file queue_path "broken queue snapshot";
+    Eio.Promise.resolve release ();
+    Eio.Promise.await worker_settled;
+    let failed = Wake.reconcile ~base_path |> Result.get_ok in
+    check int "actual queue storage failure retains delivery" 1 (List.length failed.failures);
+    check int "failed delivery does not claim success" 0 failed.delivered;
+    check int "worker executed once" 1 (Atomic.get dispatched);
+    (match Async.load_canonical_durable_terminal ~base_path ~caller:submitter accepted.request_id with
+     | Ok proof ->
+       (match (Async.durable_terminal_entry proof).status with
+        | Async.Done { ok = true; data = Some data; _ } ->
+          check string "original result survives notification failure" "original result"
+            Yojson.Safe.Util.(data |> member "exports" |> member "answer" |> to_string)
+        | _ -> fail "canonical worker result was lost")
+     | Error error -> fail (Async.canonical_terminal_error_to_string error));
+    Sys.remove queue_path;
+    Async.For_testing.clear ();
+    let queued_but_unacknowledged = Outbox.flush ~base_path
+        ~deliver:(fun ~composition_tool entry ->
+          match Wake.deliver ~base_path ~keeper_name:entry.Async.submitted_by
+              ~request_id:entry.request_id ~composition_tool ~terminal:Event_queue.Composition_succeeded with
+          | Error _ as error -> error
+          | Ok () -> Error "injected interruption after durable enqueue, before producer acknowledgement")
+      |> Result.get_ok in
+    check int "enqueue-ack gap leaves the same obligation" 1 (List.length queued_but_unacknowledged.failures);
+    let source = match queued_results ~base_path ~keeper_name:submitter with
+      | [ source, completion ] ->
+        check string "recovery delivers the original request" accepted.request_id completion.cc_request_id;
+        source
+      | _ -> fail "recovery lost or duplicated completion" in
+    let selection = match Queue.select_when_result ~base_path submitter ~now:(Time_compat.now ()) ~ready:(fun _ -> true) with
+      | Ok (Some selection) -> selection
+      | _ -> fail "recovered completion was not admitted" in
+    Masc.Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name:submitter source;
+    (match Queue.terminalize_pending_turn_completed_result ~base_path submitter
+        ~applied_at:(Time_compat.now ()) ~selection with
+     | Ok (Queue.Turn_source_acked _) -> ()
+     | Ok Queue.Turn_selection_withdrawn -> fail "completion disappeared before consumption"
+     | Error detail -> fail detail);
+    let recovered = Wake.reconcile ~base_path |> Result.get_ok in
+    check int "consumed completion retires its pending obligation" 1 recovered.delivered;
+    check int "recovered completion is not consumed again" 0 (List.length (queued_results ~base_path ~keeper_name:submitter));
+    check int "delivery recovery never replays the worker" 1 (Atomic.get dispatched);
+    let empty = Wake.reconcile ~base_path |> Result.get_ok in
+    check int "retired obligations leave the pending partition" 0 empty.inspected;
+    Printf.printf "composition_completion_trial dispatches=%d initial_queue_failure=true restart_memory_cleared=true recovered_deliveries=%d duplicate_pending=0\n%!"
+      (Atomic.get dispatched) recovered.delivered)
+;;
+
 let () =
   run
     "keeper composition completion wake"
     [ ( "delivery"
       , [ test_case "the result reaches the submitter" `Quick
             the_result_reaches_the_submitter
+        ; test_case "delivery recovers without replay or repeated consumption" `Quick
+            completion_delivery_recovers_without_replaying_or_reconsuming
         ; test_case "a failure carries its detail" `Quick a_failure_carries_its_detail
         ; test_case "the same result arrives once" `Quick the_same_result_arrives_once
         ] )

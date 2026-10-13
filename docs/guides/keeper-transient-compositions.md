@@ -38,6 +38,14 @@ Retrieve its result explicitly with `keeper_composition_status`, and use
 cancellation acknowledgement are separate states. Async does not make the
 external read itself faster.
 
+Async admission records a completion-delivery obligation before a worker
+starts. If the result is saved but its queue delivery fails, startup and the
+existing maintenance pulse retry delivery from that exact canonical request.
+The worker is never restarted for notification recovery. Pending/terminal
+queue evidence prevents a completion from being admitted again after a crash
+between delivery and acknowledgement, including after the original event has
+already been consumed. Unreadable result or delivery evidence stays explicit.
+
 The initial transient execution contract admits static read-only ordinary nodes.
 Writes, builds and terminal actions use their direct tools until their resource
 and durable continuation contracts are implemented. The restriction is checked
@@ -55,6 +63,6 @@ turn still collects every completion for later judgments. A leaf that requires
 serial access keeps its enclosing composition serial. Transient run and async
 submission controls keep their serial admission contracts.
 
-Nested composition references, completion delivery
-recovery and effectful resource-aware jobs remain tracked in
+Completion result projection, nested composition references and effectful
+resource-aware jobs remain tracked in
 [issue #42799](https://github.com/jeong-sik/masc/issues/42799).

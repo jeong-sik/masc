@@ -503,13 +503,17 @@ type enqueue_stimulus_result =
   | Already_present
 
 val enqueue_stimulus_if_absent_result :
+  ?already_delivered:(unit -> (bool, string) result) ->
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
   Keeper_event_queue.stimulus ->
   (enqueue_stimulus_result, string) result
 (** Atomically enqueue only when the same typed stimulus is absent from the
-    full durable state: pending and transition outbox. *)
+    full durable state: pending and transition outbox. [already_delivered],
+    when supplied by a one-shot producer, checks its durable consumption
+    evidence under the queue owner lock before a new enqueue. Read errors
+    leave the queue unchanged. *)
 
 type 'authorization_error guarded_transfer_projection_result =
   | Transfer_projection_result of transfer_projection_result

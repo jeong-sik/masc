@@ -1193,6 +1193,7 @@ let state_accounts_for_stimulus state stimulus =
 ;;
 
 let enqueue_stimulus_if_absent_result
+      ?(already_delivered = fun () -> Ok false)
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
@@ -1202,8 +1203,12 @@ let enqueue_stimulus_if_absent_result
     if state_accounts_for_stimulus state stimulus then
       Ok (state, Already_present)
     else
-      let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
-      Ok (State.with_pending pending state, Enqueued))
+      match already_delivered () with
+      | Error _ as error -> error
+      | Ok true -> Ok (state, Already_present)
+      | Ok false ->
+        let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
+        Ok (State.with_pending pending state, Enqueued))
 ;;
 
 type 'authorization_error guarded_transfer_projection_result =

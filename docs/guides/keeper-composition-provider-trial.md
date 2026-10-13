@@ -58,6 +58,9 @@ conversation: exact serialized request body bytes, actual artifact calls, model
 round trips and complete reported usage. Wire byte counts include message/schema
 JSON but exclude HTTP headers; raw result bytes and prompt tokens are different
 measurements. Do not infer an end-to-end percentage from this isolated trial.
+Check each condition's reported model identities as well as the requested model:
+an endpoint may resolve a requested alias to another model. Mixed or missing
+reported identities prevent a claim that both conditions used the same model.
 
 For Z.AI, the [official Chat Completion reference](https://docs.z.ai/api-reference/llm/chat-completion)
 defines request fields and usage. Supply endpoint/model/options explicitly so this

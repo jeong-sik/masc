@@ -188,6 +188,10 @@ def summarize(samples):
             all_request_body_bytes=sum(s["request_body_bytes"] for s in selected),
             all_request_count=sum(s["request_count"] for s in selected),
             all_artifact_reads=sum(s["artifact_reads"] for s in selected),
+            reported_models=sorted({row["reported_model"] for s in selected for row in s["requests"]
+                                    if isinstance(row.get("reported_model"), str)}),
+            unreported_model_requests=sum(not isinstance(row.get("reported_model"), str)
+                                          for s in selected for row in s["requests"]),
             complete_usage_samples=sum(s["usage_complete"] for s in selected),
             correct_completion_seconds_median=(statistics.median(s["completion_seconds"] for s in correct) if correct else None),
             correct_first_useful_action_seconds_median=(statistics.median(s["first_useful_action_seconds"] for s in correct) if correct else None)))
@@ -221,6 +225,7 @@ def main():
     write_json(args.output / "corpus.json", corpus)
     manifest = dict(schema_version=1, started_at_unix=time.time(), producer_head=args.producer_head,
                     producer_run=args.producer_run, corpus_input_sha256=digest, model=args.model,
+                    runner_source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                     endpoint=args.endpoint, request_options=options, pairs=args.pairs,
                     max_requests=args.max_requests, timeout_seconds=args.timeout,
                     scope="Real provider requests over captured fixture results/default artifact pages; result recovery only. No live Keeper, preparation latency or effect execution.",

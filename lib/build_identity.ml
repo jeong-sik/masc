@@ -762,54 +762,58 @@ let parse_executable_provenance
       && List.length environment_paths
          = List.length (List.sort_uniq String.compare environment_paths)
     in
-    if not (has_exact_fields fields dashboard_asset_fields)
-    then Error "executable provenance dashboard assets has unsupported fields"
-    else if not (has_exact_fields build_receipt dashboard_build_receipt_fields)
-    then Error "executable provenance dashboard build receipt has unsupported fields"
-    else if not (String.equal schema dashboard_assets_schema)
-    then Error "executable provenance dashboard assets schema is unsupported"
-    else if not (String.equal build_schema "masc.run-local-dashboard-build.v1")
-    then Error "executable provenance dashboard build receipt schema is unsupported"
-    else if not (String.equal build_producer dashboard_build_producer)
-    then Error "executable provenance dashboard build producer is unsupported"
-    else if not (String.equal build_mode dashboard_build_mode)
-    then Error "executable provenance dashboard build mode is unsupported"
-    else if not environment_paths_are_valid
-    then Error "executable provenance dashboard build environment path is invalid"
-    else if Filename.is_relative source_root || Filename.is_relative snapshot_root
-    then Error "executable provenance dashboard asset root is not absolute"
-    else if not (valid_sha256 tree_sha256)
-    then Error "executable provenance dashboard tree digest is invalid"
-    else if not (String.equal canonical_tree_sha256 tree_sha256)
-    then Error "executable provenance dashboard tree digest differs from manifest"
-    else if not (valid_sha256 build_input_sha256)
-    then Error "executable provenance dashboard input digest is invalid"
-    else if not (valid_sha256 build_lock_sha256)
-            || not (valid_sha256 build_environment_path_identity_sha256)
-            || not (valid_sha256 build_environment_path_executable_sha256)
-            || not (valid_sha256 build_environment_profile_sha256)
-            || not (valid_sha256 build_node_executable_sha256)
-            || not (valid_sha256 build_package_manager_executable_sha256)
-            || not (valid_sha256 build_installed_graph_metadata_sha256)
-    then Error "executable provenance dashboard build identity digest is invalid"
-    else if Filename.is_relative build_node_executable
-            || Filename.is_relative build_package_manager_executable
-    then Error "executable provenance dashboard toolchain path is not absolute"
-    else if build_environment_path_executable_count = 0
-    then Error "executable provenance dashboard PATH executable inventory is empty"
-    else if List.exists
-              (fun value -> String_util.trim_nonempty value = None)
-              [ build_node_version
-              ; build_node_platform
-              ; build_node_arch
-              ; build_pnpm_version
-              ; build_vite_version
-              ]
-    then Error "executable provenance dashboard toolchain identity is blank"
-    else
-    match package_manager_kind_of_string build_package_manager_kind with
-    | None -> Error "executable provenance dashboard package-manager kind is invalid"
-    | Some build_package_manager_kind ->
+    let* () =
+      if not (has_exact_fields fields dashboard_asset_fields)
+      then Error "executable provenance dashboard assets has unsupported fields"
+      else if not (has_exact_fields build_receipt dashboard_build_receipt_fields)
+      then Error "executable provenance dashboard build receipt has unsupported fields"
+      else if not (String.equal schema dashboard_assets_schema)
+      then Error "executable provenance dashboard assets schema is unsupported"
+      else if not (String.equal build_schema "masc.run-local-dashboard-build.v1")
+      then Error "executable provenance dashboard build receipt schema is unsupported"
+      else if not (String.equal build_producer dashboard_build_producer)
+      then Error "executable provenance dashboard build producer is unsupported"
+      else if not (String.equal build_mode dashboard_build_mode)
+      then Error "executable provenance dashboard build mode is unsupported"
+      else if not environment_paths_are_valid
+      then Error "executable provenance dashboard build environment path is invalid"
+      else if Filename.is_relative source_root || Filename.is_relative snapshot_root
+      then Error "executable provenance dashboard asset root is not absolute"
+      else if not (valid_sha256 tree_sha256)
+      then Error "executable provenance dashboard tree digest is invalid"
+      else if not (String.equal canonical_tree_sha256 tree_sha256)
+      then Error "executable provenance dashboard tree digest differs from manifest"
+      else if not (valid_sha256 build_input_sha256)
+      then Error "executable provenance dashboard input digest is invalid"
+      else if not (valid_sha256 build_lock_sha256)
+              || not (valid_sha256 build_environment_path_identity_sha256)
+              || not (valid_sha256 build_environment_path_executable_sha256)
+              || not (valid_sha256 build_environment_profile_sha256)
+              || not (valid_sha256 build_node_executable_sha256)
+              || not (valid_sha256 build_package_manager_executable_sha256)
+              || not (valid_sha256 build_installed_graph_metadata_sha256)
+      then Error "executable provenance dashboard build identity digest is invalid"
+      else if Filename.is_relative build_node_executable
+              || Filename.is_relative build_package_manager_executable
+      then Error "executable provenance dashboard toolchain path is not absolute"
+      else if build_environment_path_executable_count = 0
+      then Error "executable provenance dashboard PATH executable inventory is empty"
+      else if List.exists
+                (fun value -> String_util.trim_nonempty value = None)
+                [ build_node_version
+                ; build_node_platform
+                ; build_node_arch
+                ; build_pnpm_version
+                ; build_vite_version
+                ]
+      then Error "executable provenance dashboard toolchain identity is blank"
+      else Ok ()
+    in
+    let* build_package_manager_kind =
+      Option.to_result
+        ~none:"executable provenance dashboard package-manager kind is invalid"
+        (package_manager_kind_of_string build_package_manager_kind)
+    in
     if not (valid_lower_hex ~length:40 build_head_tree)
             || not (valid_lower_hex ~length:40 build_index_tree)
     then Error "executable provenance dashboard source tree identity is invalid"

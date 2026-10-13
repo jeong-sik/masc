@@ -443,7 +443,8 @@ let execution_receipt_of_json json =
     | Effect, "unrestricted"
     | Observe, "filesystem_and_network_box"
     | Guest_local, "network_box" -> Ok ()
-    | _ -> transport_error "execution receipt mode and plan disagree"
+    | (Effect | Observe | Guest_local), _ ->
+      transport_error "execution receipt mode and plan disagree"
   in
   let* boundary = member ~what "boundary" fields >>= expect_string ~what "boundary" in
   let* boundary = match boundary with

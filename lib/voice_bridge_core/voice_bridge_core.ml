@@ -231,7 +231,7 @@ let audio_duration_seconds ~audio_file =
         argv
     with
     | Unix.WEXITED 0, output -> parse output
-    | _ -> None
+    | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception exn ->
       log_debug

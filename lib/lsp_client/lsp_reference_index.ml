@@ -12,7 +12,7 @@ type presence =
 let is_real_directory path =
   match Unix.lstat path with
   | { Unix.st_kind = Unix.S_DIR; _ } -> true
-  | _ -> false
+  | { Unix.st_kind = Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK; _ } -> false
   | exception Unix.Unix_error _ -> false
 ;;
 

@@ -680,7 +680,9 @@ let edit_nested_bool content ~path ~key ~value =
           | [] -> false
           | name :: rest -> Option.fold ~none:false ~some:(inline_ancestor rest)
               (List.assoc_opt name fields))
-      | _ -> false in
+      | T.TomlString _ | T.TomlInteger _ | T.TomlFloat _ | T.TomlBoolean _
+      | T.TomlOffsetDateTime _ | T.TomlLocalDateTime _ | T.TomlLocalDate _
+      | T.TomlLocalTime _ | T.TomlArray _ | T.TomlTableArray _ -> false in
     (* Dotted keys already declare their table: Otoml accepts a later header
        for it, but TOML does not. Only a real header or an absent path may use
        the ordinary section editor. *)

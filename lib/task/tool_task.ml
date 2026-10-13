@@ -373,7 +373,7 @@ and handle_transition ~tool_name ~start_time ctx args =
           ; "requested_agent", `String ctx.agent_name
           ]
         (Printf.sprintf "Invalid task state: %s" message)
-    | result -> result_to_response ~tool_name ~start_time result
+    | (Error (Masc_error.Task (Masc_error.Task_error.NotFound _ | (Masc_error.Task_error.AlreadyClaimed _ | (Masc_error.Task_error.NotClaimed _ | (Masc_error.Task_error.InvalidId _ | Masc_error.Task_error.VerificationSuperseded _))))) | Error (Masc_error.Agent _ | (Masc_error.Auth _ | Masc_error.System _)) | Ok _) as result -> result_to_response ~tool_name ~start_time result
   in
   transition_result_to_response result
 

@@ -92,7 +92,7 @@ let source_durable_store ~masc_root ~base_path = function
   | Execution_receipt -> Filename.concat masc_root "keepers/*/execution-receipts"
   | Goal_event -> Filename.concat masc_root "goal_events.jsonl"
   | Tool_metric -> Filename.concat masc_root "tool-metrics.sqlite3"
-  | source -> (
+  | (Agent_event | Tool_call_io | Tool_usage | Agent_core_event) as source -> (
       match fixed_store_dir ~masc_root ~base_path source with
       | Some dir -> dir
       | None -> "")

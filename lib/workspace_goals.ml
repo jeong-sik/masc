@@ -718,7 +718,13 @@ let request_current_proof ?evidence_refs config ~goal_id =
       Result.bind (capture_goal_evidence config evidence_refs) (fun submitted_evidence ->
         Result.map (fun record -> { goal with phase }, record)
           (mark_proof_pending ?submitted_evidence config ~goal_id goal))
-    | Ok (Goal_phase.Move_to _ | Goal_phase.Already _) | Error _ ->
+    | Ok (Goal_phase.Move_to
+            ( Goal_phase.Executing | Goal_phase.Awaiting_confirmation | Goal_phase.Completed
+            | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ )
+         | Goal_phase.Already
+             ( Goal_phase.Executing | Goal_phase.Awaiting_confirmation | Goal_phase.Completed
+             | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ ))
+    | Error _ ->
       Error (refuse Precondition_failed "goal is not requesting verification"))
 ;;
 
@@ -769,7 +775,15 @@ let answer_verifying_repeat ?evidence_refs ~tool_name ~start_time (ctx : context
                | Ok (Goal_phase.Already _) ->
                    Error (refuse Internal_error "proof reconciliation did not name a transition")
                | Error detail -> Error (refuse Conflict detail))
-          | Some _ | None ->
+          | Some
+              { Goal_verification.completion =
+                  ( Goal_verification.Completion_idle
+                  | Goal_verification.Proof_pending _
+                  | Goal_verification.Proof_proven _
+                  | Goal_verification.Proof_refuted _
+                  | Goal_verification.Human_confirmed _ )
+              ; _ }
+          | None ->
               Result.bind (capture_goal_evidence ctx.config evidence_refs) (fun submitted_evidence ->
                 Result.map (fun record -> goal, (Some record, None))
                   (mark_proof_pending ?submitted_evidence ctx.config ~goal_id goal)))) in
@@ -964,8 +978,9 @@ let finish_goal_suspension ~tool_name ~start_time (ctx : context) ~goal_id ~acti
             | Some text -> Some text, Some (Masc_domain.now_iso ()) in
           Ok ({ goal with phase; last_review_note; last_review_at }, true)) with
   | Error (Goal_store.Store_unavailable unavailable) -> unavailable_result ~tool_name ~start_time unavailable
-  | Error error -> error_result_typed ~tool_name ~start_time ~code:Conflict
-                     (Goal_store.write_error_to_string error)
+  | Error ((Goal_store.Goal_not_found _ | Goal_store.Rejected _ | Goal_store.Persist_failed _) as error) ->
+      error_result_typed ~tool_name ~start_time ~code:Conflict
+        (Goal_store.write_error_to_string error)
   | Ok (goal, changed) ->
       (* An explicit restore re-arms verification even on a repeated delivery.
          The daemon binds again under the Goal lock before admitting work. *)

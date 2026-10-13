@@ -301,7 +301,7 @@ let decode_fusion_stage ~status ~stage ~progress =
            { frs_expected; frs_answered; frs_failed })
   | Fusion_completed, "completed", `Null -> Ok Fusion_stage_completed
   | Fusion_failed _, "failed", `Null -> Ok Fusion_stage_failed
-  | _ ->
+  | (Fusion_running | Fusion_completed | Fusion_failed _), _, _ ->
       Error
         (Printf.sprintf "fusion status/stage/progress disagree: status=%s stage=%S"
            (fusion_run_status_to_string status) stage)

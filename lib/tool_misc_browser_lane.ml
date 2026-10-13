@@ -87,7 +87,9 @@ let add_client target = function
       | Some (`List tabs) -> `Assoc (Browser_lane.target_connection_fields target @ ["tabs", `List tabs])
       | Some other -> other | None -> `Null in
     Browser_lane.Answered (`Assoc (("data", data) :: List.remove_assoc "data" envelope))
-  | other -> other
+  | ( Browser_lane.Answered _ | Browser_lane.Timed_out
+    | Browser_lane.Rejected_before_effect _ | Browser_lane.Lane_absent
+    | Browser_lane.Refused _ ) as other -> other
 (* What a Keeper is told when no connected browser can take its command. The
    Keeper cannot start a browser or move a host, so the text names the cause
    the doctor reports for the same configuration and says the operator acts. *)
@@ -503,11 +505,23 @@ let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
   | _, Error detail -> make_input_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect
   | Ok _, Ok (Browser_lane.Action.On_tab {interaction=Upload _;_}) when upload_paths = None ->
     pre_error "upload requires an authoritative Keeper file context"
-  | Ok route, Ok action ->
+  | Ok route, Ok (( Browser_lane.Action.Open_tab _
+                  | Browser_lane.Action.On_tab
+                      { interaction =
+                          ( Click _ | Fill _ | Press _ | Select _ | Scroll _ | Upload _
+                          | Accept_dialog _ | Dismiss_dialog | Back | Forward | Reload
+                          | Close_tab )
+                      ; _ } ) as action) ->
     let action = match action, upload_paths with
       | Browser_lane.Action.On_tab ({interaction=Upload {selector;_};_} as target), Some paths ->
         Browser_lane.Action.On_tab {target with interaction=Upload {selector;paths}}
-      | _ -> action in
+      | Browser_lane.Action.Open_tab _, (None | Some _)
+      | Browser_lane.Action.On_tab { interaction = Upload _; _ }, None
+      | Browser_lane.Action.On_tab
+          { interaction =
+              ( Click _ | Fill _ | Press _ | Select _ | Scroll _ | Accept_dialog _
+              | Dismiss_dialog | Back | Forward | Reload | Close_tab )
+          ; _ }, (None | Some _) -> action in
     let verb = Browser_lane.Page_act action in
     let issued = Result.bind (Browser_lane.resolve_target ~verb route) (fun target ->
       Browser_lane.issue_for ~target ~verb ~timeout_sec:60.) in

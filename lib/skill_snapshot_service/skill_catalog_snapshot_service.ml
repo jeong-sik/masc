@@ -229,7 +229,10 @@ let scan_resolved_source (resolved : Skill_source_config.resolved_source) =
               Source_ready { resolved_path; candidates = List.length candidates }
           ; candidates
           })
-     | Ok (Fs_compat.Exact_kind kind) ->
+     | Ok
+         (Fs_compat.Exact_kind
+            (( Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+             | Unix.S_SOCK ) as kind)) ->
        { source = resolved
        ; observation = Source_not_directory { resolved_path; kind }
        ; candidates = []

@@ -1052,7 +1052,13 @@ let find_access_credential ~base_path ~token =
         Error (System (System_error.IoError ("OAuth credential store: " ^ detail)))
       | Error Temporarily_unavailable ->
         Error (System (System_error.IoError "OAuth credential store unavailable"))
-      | Error error ->
+      | Error
+          (( OAuth_disabled
+           | Invalid_request _
+           | Invalid_client
+           | Invalid_grant
+           | Invalid_scope
+           | Access_denied ) as error) ->
         Error
           (Auth
              (Auth_error.InvalidToken

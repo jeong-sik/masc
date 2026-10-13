@@ -318,7 +318,9 @@ let promote_keeper_tool_called_scope source fields =
           "operation_id";
           "worker_run_id";
         ]
-  | _ -> fields
+  | ( Keeper_metric | Tool_call_io | Trajectory_tool_call | Tool_usage
+    | Agent_core_event | Execution_receipt | Goal_event | Tool_metric ), _
+  | Agent_event, (None | Some _) -> fields
 
 let tag_entry source (json : Yojson.Safe.t) : Yojson.Safe.t =
   match json with

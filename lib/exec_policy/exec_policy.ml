@@ -183,7 +183,7 @@ let command_context_tool_execute
   | Reject { reason; _ } ->
     (match reason with
      | Pipes_not_allowed _ -> Error Pipes_not_allowed
-     | _ -> Error (block_reason_of_exec_reject reason))
+     | Redirect_disallowed_in_caller _ -> Error (block_reason_of_exec_reject reason))
   | Cannot_parse _ -> Error Injection
   | Too_complex { reason } -> Error (block_reason_of_exec_too_complex reason)
 ;;

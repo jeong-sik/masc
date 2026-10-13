@@ -682,7 +682,12 @@ let alternatives_of_pairs ~context pairs =
     match List.assoc_opt "one_of" pairs with
     | None -> []
     | Some (Otoml.TomlTableArray items) -> items
-    | Some other -> [ other ]
+    | Some
+        (( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+         | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+         | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+         | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
+         | Otoml.TomlInlineTable _ ) as other) -> [ other ]
   in
   let one index block =
     let ctx = sprintf "%s.one_of[%d]" context index in

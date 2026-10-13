@@ -71,7 +71,14 @@ let require_auth ~base_path ~requirement ~id ?auth_token () =
            Error (make_auth_error ~id (Token_expired agent))
          | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) ->
            Error (make_auth_error ~id Invalid_token)
-         | Error err ->
+         | Error
+             (( Masc_domain.Task _
+              | Masc_domain.Agent _
+              | Masc_domain.System _
+              | Masc_domain.Auth
+                  ( Masc_domain.Auth_error.Unauthorized _
+                  | Masc_domain.Auth_error.Forbidden _
+                  | Masc_domain.Auth_error.SameOriginBlocked ) ) as err) ->
            let cause = Masc_domain.masc_error_to_string err in
            Log.Auth.error
              "MCP credential-store lookup failed for request %s: %s"

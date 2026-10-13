@@ -5608,7 +5608,7 @@ let decode_librarian_preflight_attempt json =
           let* total_bytes = required_int_field body "total_bytes" in
           (match encoding, Base64.decode content with
            | "base64", Ok decoded when String.length decoded = total_bytes -> Ok decoded
-           | _ -> Error "invalid encoded preflight refusal body")
+           | _, (Ok _ | Error _) -> Error "invalid encoded preflight refusal body")
         | _ -> Error "preflight refusal body must be text or encoded bytes" in
       Ok (Typesafeai_client.Http_response_failure {status; destination_uri; body; detail})
     | _ -> Error ("unknown preflight refusal kind " ^ kind) in
@@ -5779,7 +5779,7 @@ let decode_librarian_preflight output =
           | Context_write, "withheld" -> Ok Side_withheld
           | Context_write, "answer_refused" ->
             let+ detail = required_string_field record "detail" in Side_answer_refused detail
-          | _ -> Error ("unknown " ^ key ^ " status " ^ status) in
+          | (Context_write | Continuity_write), _ -> Error ("unknown " ^ key ^ " status " ^ status) in
         Ok (Some (kind, status)) in
     let* context_write = decode_side_write Context_write "context_write" in
     let* continuity_write = decode_side_write Continuity_write "continuity_write" in
@@ -6034,20 +6034,41 @@ let decode_lane_run_detail json =
   let* () = match lrd_librarian_preflight, answer_succeeded with
     | Some {lp_generation_path = Generation_not_entered; _}, true ->
       Error "successful Librarian run cannot await preflight without entering generation"
-    | _, _ -> Ok () in
+    | Some {lp_generation_path = Generation_not_entered; _}, false
+    | Some {lp_generation_path = (Generation_full_lane | Generation_jev_no_change); _}, (true | false)
+    | None, (true | false) -> Ok () in
   let* () = match lrd_librarian_preflight, answer_succeeded, summary.lrs_selected_slot with
     | Some {lp_generation_path = Generation_full_lane; _}, true, None ->
       Error "successful Librarian generation requires its selected slot"
-    | _, _, _ -> Ok () in
+    | Some {lp_generation_path = Generation_full_lane; _}, true, Some _
+    | Some {lp_generation_path = Generation_full_lane; _}, false, (None | Some _)
+    | Some {lp_generation_path = (Generation_not_entered | Generation_jev_no_change); _}, _, _
+    | None, _, _ -> Ok () in
   let* () = match lrd_librarian_preflight, summary.lrs_selected_slot with
     | Some {lp_generation_path = (Generation_jev_no_change | Generation_not_entered); _}, Some _ ->
       Error "run without generation must not have a selected generation slot"
-    | _, _ -> Ok () in
+    | Some {lp_generation_path = (Generation_jev_no_change | Generation_not_entered); _}, None
+    | Some {lp_generation_path = Generation_full_lane; _}, (None | Some _)
+    | None, (None | Some _) -> Ok () in
   let* lrd_decision =
     match summary.lrs_run_kind, summary.lrs_status, lrd_output with
     | Lane_run_goal_verification, Lane_run_running, _ -> Ok Lane_run_decision_pending
-    | Lane_run_goal_verification, _, None -> Ok Lane_run_decision_unknown
-    | Lane_run_goal_verification, status, Some output ->
+    | Lane_run_goal_verification,
+      ( Lane_run_succeeded | Lane_run_cancelled | Lane_run_failed
+      | Lane_run_completion_persistence_failed | Lane_run_completion_durability_unknown
+      | Lane_run_approved | Lane_run_reviewed | Lane_run_committed | Lane_run_superseded
+      | Lane_run_rejected | Lane_run_deferred | Lane_run_review_cancelled
+      | Lane_run_infrastructure_unavailable | Lane_run_not_reviewed
+      | Lane_run_commit_failed | Lane_run_raised | Lane_run_other _ ),
+      None -> Ok Lane_run_decision_unknown
+    | Lane_run_goal_verification,
+      (( Lane_run_succeeded | Lane_run_cancelled | Lane_run_failed
+       | Lane_run_completion_persistence_failed | Lane_run_completion_durability_unknown
+       | Lane_run_approved | Lane_run_reviewed | Lane_run_committed | Lane_run_superseded
+       | Lane_run_rejected | Lane_run_deferred | Lane_run_review_cancelled
+       | Lane_run_infrastructure_unavailable | Lane_run_not_reviewed
+       | Lane_run_commit_failed | Lane_run_raised | Lane_run_other _ ) as status),
+      Some output ->
       let* raw = required_member output "evaluated_verdict" in
       let* verdict = Goal_verification_run_registry.evaluated_verdict_of_yojson raw in
       (match verdict, status with

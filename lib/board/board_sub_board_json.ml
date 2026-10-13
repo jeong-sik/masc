@@ -176,7 +176,8 @@ let sub_board_of_yojson (json : Yojson.Safe.t) : sub_board option =
                  ; post_count = 0
                  }
              | Ok _ | Error _ -> None)
-          | _ -> None)
+          | (Ok _ | Error _), (Ok _ | Error _), (Some _ | None), (Some _ | None) ->
+            None)
        | _ -> None)
   | _ -> None
 ;;

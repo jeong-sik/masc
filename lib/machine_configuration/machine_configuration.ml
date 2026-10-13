@@ -10,7 +10,11 @@ let table ~path ~keys = function
     (match List.find_opt (fun (key, _) -> not (List.mem key keys)) entries with
      | None -> Ok entries
      | Some (key, _) -> Error (path ^ "." ^ key ^ " is not a supported setting"))
-  | Some _ -> Error (path ^ " must be a TOML table")
+  | Some
+      ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+      | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+      | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) ->
+    Error (path ^ " must be a TOML table")
 let enabled ~path value =
   let* entries = table ~path ~keys:["enabled"] value in
   match List.assoc_opt "enabled" entries with

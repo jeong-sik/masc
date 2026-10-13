@@ -27,6 +27,11 @@ exact requested ticket and cursor; a refusal cannot become an empty success.
 The response applies one current redaction snapshot to human body/model leaves
 without changing correlations, optional absence, evidence or typed refusal.
 
+The TUI does not draw this notice as an always-present health line. It adds
+the caveat that failure history lives only as long as the collector, next to a
+real failure (`Persistence`, `Receiver_read`, `cleanup failed`, retained
+history absent from the latest inventory).
+
 Provider completeness and liveness remain unknown. Collector-local persistence
 failure history is unavailable to this read surface. Empty discovery, a valid
 suffix and an unchecked hint cannot prove that all events were received or

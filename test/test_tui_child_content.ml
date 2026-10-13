@@ -148,6 +148,9 @@ let test_audit_redaction_disappearance_and_replacement () =
   let absent,_=read Consumer.Poll fresh [] (fun _ -> fail "absent inventory must not invent store") in
   check int "disappeared history retained" 1 (records_count absent);
   check bool "last-observed absent body not claimed currently redacted" true (Consumer.diagnostics absent<>Consumer.diagnostics fresh);
+  check int "collector-lifetime caveat accompanies a real diagnostic" 2
+    (List.length (Consumer.diagnostics absent));
+  check (list string) "no caveat without a real failure" [] (Consumer.diagnostics fresh);
   let replacement,_=read Consumer.Poll absent [receiver,Ok ("replacement",1)] (fun uri ->
     check (option string) "new incarnation begins without old cursor" None (after uri);
     Ok (200,json (page "replacement" 1 [row 1 (observation "first")]))) in

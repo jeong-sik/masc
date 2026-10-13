@@ -28,22 +28,29 @@
 ; [Hashtbl.hash] counts as unread, because neither names the field; the
 ; compiler cannot see that participation, so such records compare field by
 ; field.
+;
+; Warning 4 (fragile match) joins them: a `| _ ->` over a variant we define
+; keeps compiling when a constructor is added, so the new case silently takes
+; the old default. With 4 on, the compiler names every match that has to
+; decide about the new constructor. Where the scrutinee is a foreign type with
+; far too many cases (Sqlite3.Rc.t), the match carries its own justified
+; [@warning "-4"]. Test directories switch it off in their own env stanza.
 (env
  (dev
   (flags
-   (:standard -w +32+69 -warn-error +a)))
+   (:standard -w +4+32+69 -warn-error +a)))
  (release
   (flags
-   (:standard -w +32+69 -warn-error +a))))
+   (:standard -w +4+32+69 -warn-error +a))))
 
 ; Vendored packages are local copies of external sources. Keep the repository's
-; strict warning policy for MASC code, but do not turn vendor warning 69 into a
+; strict warning policy for MASC code, but do not turn vendor warnings 4 and 69 into a
 ; project build error. The subdir stanza applies this override without editing
 ; the vendored dune files or weakening warning 32 in the rest of the tree.
 (subdir vendor
  (env
-  (dev (flags (:standard -w -69)))
-  (release (flags (:standard -w -69)))))
+  (dev (flags (:standard -w -4-69)))
+  (release (flags (:standard -w -4-69)))))
 
 (install
  (package masc)

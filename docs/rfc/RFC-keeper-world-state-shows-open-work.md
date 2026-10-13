@@ -283,7 +283,7 @@ figma-mcp·wkbl 의 실제 cost 는 재지 않았다.
 | 틀린 값 | 값 하나라도 틀리면 그 keeper 파일의 로드 오류다. 틀린 값을 빼고 나머지만 쓰지 않는다. 오류는 파일 경로, 키, 틀린 값을 말한다. 필드 종류 검사(`Field_string_array`, `keeper_types_profile_toml_parser.ml:23-58`)에도 올린다 |
 | 중복 | 같은 slug 두 번은 하나로 합친다(`board_interests` 의 `sort_uniq` 와 같다). 버리는 것이 아니다 |
 | 비교 | 스냅숏 저장소의 `Github_slug.t` 와 `Github_slug.equal` 로만 비교한다. 대소문자를 무시하거나 앞부분만 맞추지 않는다. 글자로 분류하지 않는다 |
-| 편집 | `POST /api/v1/keepers/<name>/config` 의 허용 칸(`dashboard_config_patch_allowed_fields`, `lib/server/server_dashboard_http_keeper_api_post.ml:717-729`)에 더한다. 요청은 문자열 배열로 받고, 저장하기 전에 같은 파서를 지난다. 하나라도 틀리면 400 과 틀린 값을 돌려주고 아무것도 저장하지 않는다. `GET` 은 `workspace.watch_repositories` 로 돌려준다. 저장 파일 쓰기는 `lib/keeper/keeper_turn_up_config_persistence.ml:345`, `:440` 의 `board_interests` 옆이다 |
+| 편집 | `POST /api/v1/keepers/<name>/config` 의 허용 칸(`lib/server/server_dashboard_http_keeper_api_post.ml` 의 `dashboard_config_field` variant)에 생성자를 더하고, `validate_dashboard_config_field` 에 그 갈래를 둔다. 요청은 문자열 배열로 받고, 저장하기 전에 같은 파서를 지난다. 하나라도 틀리면 400 과 틀린 값을 돌려주고 아무것도 저장하지 않는다. `GET` 은 `workspace.watch_repositories` 로 돌려준다. 저장 파일 쓰기는 `lib/keeper/keeper_turn_up_config_persistence.ml:345`, `:440` 의 `board_interests` 옆이다 |
 | 화면 | TUI Keeper 설정 편집 표(`bin/masc_tui_keeper_config.ml:19-30` 의 `editable_fields`)와 웹 대시보드 설정 패널(`dashboard/src/components/keeper-config-panel.ts`, `board_interests_text` 옆)에 같은 칸을 더한다. `masc_keeper_up` 도구(`config/tools/masc_keeper_up.toml:32` 근처의 `board_interests`)도 같은 칸을 받는다 |
 
 **실패 경로**

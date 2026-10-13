@@ -6164,9 +6164,9 @@ let test_config_patch_accepts_typed_skills () =
   check_error "skills must be an object" [ "skills", `List [] ]
 ;;
 
-(* [remote_endpoint] takes a string or an explicit null, so it cannot sit in
-   [dashboard_config_string_fields]: that list demands a string and would
-   refuse the null an operator sends to detach the endpoint. Whether the name
+(* [remote_endpoint] takes a string or an explicit null, unlike the plain
+   string fields, which refuse the null an operator sends to detach the
+   endpoint. Whether the name
    is declared under [exec.ssh.endpoints], and whether the profile admits an
    endpoint at all, are decided later by [Keeper_turn_up_args.parse]. *)
 let test_config_patch_remote_endpoint_shape () =

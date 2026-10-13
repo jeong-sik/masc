@@ -41,6 +41,18 @@ let test_subdirs_pruned_and_stray_files_skipped () =
   Alcotest.(check bool)
     "return sums prune_dir results" true (n = String.length keeper_a + String.length keeper_b)
 
+(* A broken link under the root is not a keeper folder and does not stop
+   the fold; a link to a folder is one (#42891). *)
+let test_broken_link_is_skipped () =
+  counter := 0;
+  let root = fresh_dir "masc_prune_children_links" in
+  let target = fresh_dir "masc_prune_children_target" in
+  Fs_compat.mkdir_p (Filename.concat root "keeper-a");
+  Unix.symlink target (Filename.concat root "keeper-b");
+  Unix.symlink (Filename.concat root "gone") (Filename.concat root "ghost");
+  ignore (SM.prune_children_dirs ~prune_dir:record_prune root : int);
+  Alcotest.(check int) "prune called for the folder and the linked folder" 2 !counter
+
 let test_prune_flat_jsonl_removes_old_files () =
   (* Regression guard for the trajectories no-op: populated
      trajectories/<keeper>/ layout must yield pruned > 0. *)
@@ -272,6 +284,7 @@ let () =
         [
           Alcotest.test_case "missing root counts zero" `Quick
             test_missing_root_counts_zero;
+          Alcotest.test_case "broken link skipped" `Quick test_broken_link_is_skipped;
           Alcotest.test_case "subdirs pruned, stray files skipped" `Quick
             test_subdirs_pruned_and_stray_files_skipped;
         ] );

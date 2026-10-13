@@ -1207,6 +1207,36 @@ let test_prune_keeps_the_cutoff_day_itself () =
     (Sys.file_exists dated.Dated_jsonl.Store.path)
 ;;
 
+(* Only removals that happened are counted. The month the test locks keeps
+   its two files; the other month's file goes and is the only one counted
+   (#42891). *)
+let test_prune_counts_only_removed_files () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let location = temp_store "dated_jsonl_prune_counts" in
+  let dir = Dated_jsonl.Store.dir location in
+  let locked = Filename.concat dir "2020-01" in
+  let open_month = Filename.concat dir "2020-02" in
+  List.iter Fs_compat.mkdir_p [ locked; open_month ];
+  List.iter
+    (fun path -> Fs_compat.append_file path "{\"old\":true}\n")
+    [ Filename.concat locked "14.jsonl"
+    ; Filename.concat locked "15.jsonl"
+    ; Filename.concat open_month "15.jsonl"
+    ];
+  Unix.chmod locked 0o555;
+  let store = Dated_jsonl.open_store location in
+  let deleted =
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod locked 0o755)
+      (fun () -> Dated_jsonl.prune store ~days:30)
+  in
+  check int "only the removed file counts" 1 deleted;
+  check bool "locked month keeps its files" true
+    (Sys.file_exists (Filename.concat locked "14.jsonl"));
+  check bool "open month file removed" false
+    (Sys.file_exists (Filename.concat open_month "15.jsonl"))
+
 let test_prune_zero_days () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1650,6 +1680,8 @@ let () =
         [
           test_case "removes old files" `Quick test_prune;
           test_case "zero days safe" `Quick test_prune_zero_days;
+          test_case "counts only removed files" `Quick
+            test_prune_counts_only_removed_files;
           test_case "boundary follows the writer layout" `Quick
             test_prune_boundary_follows_the_writer_layout;
           test_case "cutoff day itself is kept" `Quick

@@ -733,6 +733,14 @@ let find_latest_entry_in_file_result path f =
            Error (Io_error { operation = Read_file; path; detail }))
 ;;
 
+(* Only a removal that happened counts. A day file someone else already
+   removed is not counted; one that cannot be removed stays for the next
+   pass and is not counted either. *)
+let remove_day_file path =
+  match Unix.unlink path with
+  | () -> true
+  | exception Unix.Unix_error (_, _, _) -> false
+
 let prune_unlocked t ~days =
   if days <= 0 then 0
   else begin
@@ -752,18 +760,16 @@ let prune_unlocked t ~days =
         (* Entire month is before cutoff — remove all files *)
         let day_files = list_day_files month_path in
         List.iter (fun d ->
-          (try Sys.remove (Filename.concat month_path d) with Sys_error _ -> ());
-          incr deleted
+          if remove_day_file (Filename.concat month_path d) then incr deleted
         ) day_files;
         (try Unix.rmdir month_path with Unix.Unix_error _ -> ())
       end else if m = cutoff_month then begin
         let day_files = list_day_files month_path in
         List.iter (fun d ->
           let day_num = Filename.remove_extension d in
-          if String.compare day_num cutoff_day < 0 then begin
-            (try Sys.remove (Filename.concat month_path d) with Sys_error _ -> ());
-            incr deleted
-          end
+          if String.compare day_num cutoff_day < 0
+             && remove_day_file (Filename.concat month_path d)
+          then incr deleted
         ) day_files
       end
     ) months;

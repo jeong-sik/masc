@@ -1653,6 +1653,36 @@ let remove_tree (path : string) : unit =
     (fun _fs -> Eio_unix.run_in_systhread ~label:(labelled "fs-compat-remove-tree" path) (fun () -> remove_tree_unix path))
 ;;
 
+let subdirectory_names_unix dir =
+  let is_directory path =
+    match Unix.stat path with
+    | { Unix.st_kind = Unix.S_DIR; _ } -> true
+    | { Unix.st_kind =
+          Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+      ; _
+      } -> false
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false
+  in
+  let names =
+    match Sys.readdir dir with
+    | names -> Array.to_list names
+    | exception Sys_error _ when not (is_directory dir) -> []
+  in
+  names
+  |> List.filter (fun name -> is_directory (Filename.concat dir name))
+  |> List.sort String.compare
+;;
+
+let subdirectory_names (dir : string) : string list =
+  with_fs_or_fallback
+    ~path:dir
+    ~fallback:(fun () -> subdirectory_names_unix dir)
+    (fun _fs ->
+       Eio_unix.run_in_systhread
+         ~label:(labelled "fs-compat-subdirectory-names" dir)
+         (fun () -> subdirectory_names_unix dir))
+;;
+
 let realpath (path : string) : string =
   with_fs_or_fallback
     ~path

@@ -163,15 +163,6 @@ let retention = function
   | Keeper store -> keeper_retention store
   | Reaction_ledger | Decision_audit -> Operator_window
 
-let subdirectories root =
-  if Sys.file_exists root && Sys.is_directory root
-  then
-    Sys.readdir root
-    |> Array.to_list
-    |> List.sort String.compare
-    |> List.filter (fun name -> Sys.is_directory (Filename.concat root name))
-  else []
-
 let existing location = if Sys.file_exists location.dir then [ location ] else []
 
 let locations_on_disk ~base_path (Cluster_root root as cluster_root) store =
@@ -179,12 +170,12 @@ let locations_on_disk ~base_path (Cluster_root root as cluster_root) store =
   | Base store -> existing (base ~base_path store)
   | Cluster store -> existing (cluster cluster_root store)
   | Keeper store ->
-    subdirectories (Filename.concat root Common.keepers_runtime_dirname)
+    Fs_compat.subdirectory_names (Filename.concat root Common.keepers_runtime_dirname)
     |> List.concat_map (fun keeper_name ->
       existing (keeper cluster_root ~keeper:keeper_name store))
   | Reaction_ledger ->
     let keepers = Filename.concat (base_root ~base_path) Common.keepers_runtime_dirname in
-    subdirectories keepers
+    Fs_compat.subdirectory_names keepers
     |> List.concat_map (fun keeper_name ->
       let ledger =
         List.fold_left
@@ -194,11 +185,11 @@ let locations_on_disk ~base_path (Cluster_root root as cluster_root) store =
           ; Common.keeper_runtime_store_dirname Common.Keeper_reaction_ledger
           ]
       in
-      subdirectories ledger
+      Fs_compat.subdirectory_names ledger
       |> List.map (fun generation ->
         reaction_ledger ~base_path ~keeper:keeper_name ~generation))
   | Decision_audit ->
-    subdirectories (Filename.concat (base_root ~base_path) decision_audit_dirname)
+    Fs_compat.subdirectory_names (Filename.concat (base_root ~base_path) decision_audit_dirname)
     |> List.map (fun keeper_dirname -> decision_audit ~base_path ~keeper_dirname)
 type dated_path =
   { base_dir : string

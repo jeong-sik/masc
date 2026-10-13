@@ -889,6 +889,14 @@ val unlink_if_exists : string -> bool
     Missing paths are ignored.  Symlinks are unlinked, not followed. *)
 val remove_tree : string -> unit
 
+(** [subdirectory_names dir] names the entries of [dir] that are directories,
+    following symbolic links, in [String.compare] order. A missing [dir], or
+    one that is not a directory, has none. An entry that disappears while it
+    is read, or a symbolic link whose target is missing, is not a directory.
+    Other failures raise: [Unix.Unix_error] from a stat, [Sys_error] from
+    reading [dir]. *)
+val subdirectory_names : string -> string list
+
 (** Get realpath. *)
 val realpath : string -> string
 

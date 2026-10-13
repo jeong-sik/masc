@@ -519,10 +519,24 @@ let complete_lines rows =
   | _after_last_newline :: reversed -> List.rev reversed
 ;;
 
-(* [history_stated] sets its state outright at every line that decides it --
-   a line that cannot be decoded, or a record of the trace -- so the last
-   deciding line of the file carries the whole answer. Rows of other traces
-   never decide. *)
+(* A record that only preserves the state it found ([history_stated] returns
+   the running value for it) does not carry the answer by itself: the newest
+   deciding row has to set the state outright, or an older row inside the
+   window holds the answer the tail never reached. *)
+let preserves_stated (record : record) =
+  match record.event with
+  | History_restarted _ -> false
+  | Turn_ended { history_at_start; position; _ } ->
+    (match position, history_at_start with
+     | Empty_atom_history, (Fresh_history | Continued_history | Continued_history_from _)
+     | No_atom_history, Fresh_history -> true
+     | _ -> false)
+;;
+
+(* [history_stated] sets its state outright at a line that cannot be decoded,
+   at a restart of the trace, or at a record of the trace that does not only
+   preserve the running value; the last such line of the file carries the
+   whole answer. Rows of other traces never decide. *)
 let rec last_stated_by_rows ~trace_id = function
   | [] -> None
   | line :: older ->
@@ -531,7 +545,10 @@ let rec last_stated_by_rows ~trace_id = function
      | Error (_ : read_error) -> Some History_may_hold_atoms
      | Ok record ->
        if record_of_trace ~trace_id record
-       then Some (history_stated ~trace_id [ 1, decoded ])
+       then
+         if preserves_stated record
+         then last_stated_by_rows ~trace_id older
+         else Some (history_stated ~trace_id [ 1, decoded ])
        else last_stated_by_rows ~trace_id older)
 ;;
 

@@ -73,7 +73,7 @@ llm-wiki 의 작업은 ingest, query, lint 셋이다. promote 는 운영자 지�
 
 ### 4.2 입력과 출력 스키마
 
-아래 이름과 타입은 제안이다. 구현 PR 리뷰에서 바뀌면 이 절을 같은 PR 에서 고친다.
+아래 이름과 타입은 1c 구현에 맞춘 것이다(#42969, main `0a7b21f2f4` 의 `lib/wiki_lint_report.ml` 전체와 `lib/tool_wiki.ml:513-607` 직독). 구현이 바뀌면 이 절을 같은 PR 에서 고친다. 거절되는 입력: 타입이 틀린 값(`{"limit": "20"}`, `{"kind": 5}`), 모르는 `kind`, 1 미만의 `limit`, 이 도구가 내지 않은 모양의 `cursor`, 낡은 `cursor`, 이름 규칙을 어긴 `page`.
 
 입력:
 
@@ -81,32 +81,33 @@ llm-wiki 의 작업은 ingest, query, lint 셋이다. promote 는 운영자 지�
 |---|---|---|
 | `page` | string, 선택 | 페이지 이름 하나. 주면 그 페이지에서 나온 발견만 낸다. 고아 판정은 전체를 읽어야 하므로 읽는 범위는 줄지 않는다 |
 | `kind` | string, 선택 | 아래 `kind` 값 하나로 거른다 |
-| `limit` | int, 선택 | 한 번에 내는 발견 수. 기본값과 최댓값은 구현 PR 이 16,384 바이트 안에서 정한다(미확인) |
-| `cursor` | string, 선택 | 앞 응답의 `next_cursor` |
+| `limit` | int, 선택 | 한 번에 내는 발견 수. 기본 50, 최대 200 이고 200 을 넘는 값은 200 으로 맞춘다. 1 미만은 거절한다. 이와 별개로 한 응답에 싣는 발견의 JSON 은 합쳐 12,000 바이트까지다. 응답은 발견을 적어도 하나 실으므로 긴 발견 하나는 이 값을 넘을 수 있다 |
+| `cursor` | string, 선택 | 앞 응답의 `next_cursor`. 모양은 `o:<건너뛸 수>:<지문 12자>` 다. 지문은 `kind`·`page` 로 거른 발견 목록에서 나온다. 목록이 달라지면(위키가 바뀌었거나 거르는 값을 바꿨으면) 낡은 커서로 거절하고 커서 없이 다시 부르라고 답한다. 조용히 건너뛰거나 되풀이하지 않기 위해서다 |
 
 출력:
 
 | 필드 | 타입 | 뜻 |
 |---|---|---|
 | `schema` | string | `"masc.wiki_lint.v1"` |
-| `pages_total` | int | 위키 디렉터리의 페이지 파일 수. `Tool_wiki.list_pages` 와 같은 거름을 쓴다: `.md` 로 끝나는 파일 가운데 `Wiki_journal.is_own_file` 이 거르는 `index.md`, `log.md` 를 뺀다. `.wiki.lock` 은 페이지로 세지 않는다(옮김: code-reviewer, `tool_wiki.ml:250-259`) |
-| `pages_unreadable` | int | 헤더가 읽히지 않은 파일 수 |
-| `counts` | object | `kind` 마다 int 하나. 걸러 내기 전의 전체 건수 |
+| `pages_total` | int | 위키 디렉터리의 페이지 파일 수. `Tool_wiki.list_pages` 와 같은 거름을 쓴다: `.md` 로 끝나는 파일 가운데 `Wiki_journal.is_own_file` 이 거르는 `index.md`, `log.md` 를 뺀다. `.wiki.lock` 은 페이지로 세지 않는다(옮김: code-reviewer, `tool_wiki.ml:250-259`). 목록을 낸 뒤 읽기 전에 사라진 파일은 세지 않는다(`lib/tool_wiki.ml:519-546`, main `0a7b21f2f4` 직독) |
+| `pages_unreadable` | int | 헤더가 읽히지 않았거나, 있는데 열 수 없었던 파일 수 |
+| `counts` | object | `kind` 마다 int 하나. `kind`·`page` 로 거르기 전의 전체 건수 |
+| `matched` | int | `kind`·`page` 로 거른 뒤의 발견 수. `findings` 는 그 가운데 한 쪽이다 |
 | `findings` | array of finding | 이름순, 같은 페이지 안에서는 줄 번호순 |
 | `truncated` | bool | 더 있으면 true |
-| `next_cursor` | string 또는 null | 이어 읽을 자리 |
+| `next_cursor` | string 또는 null | 더 있을 때만 문자열이다. 다음 호출의 `cursor` 로 넘긴다 |
 
 finding 은 `kind` 로 갈리는 객체다.
 
 | `kind` | 나머지 필드 | 뜻 |
 |---|---|---|
 | `broken_link` | `page`: string, `line`: int, `target`: string | 위키 안 페이지를 가리키는 형식인데 그 페이지 파일이 없다 |
-| `unsupported_link` | `page`: string, `line`: int, `form`: string | 받지 않는 링크 형식(§5). 오류가 아니다 |
+| `unsupported_link` | `page`: string, `line`: int, `form`: string, `target`: string | 받지 않는 링크 형식(§5). 오류가 아니다 |
 | `orphan` | `page`: string | 다른 읽힌 페이지에서 들어오는 링크가 0개. 자기 자신으로 가는 링크와 `index.md` 의 줄은 세지 않는다 |
 | `orphan_unconfirmed` | `page`: string | 들어오는 링크가 0개지만 읽히지 않은 페이지가 있어 확정하지 못한다 |
 | `missing_sources` | `page`: string | `## Sources` 절이 없거나 그 절에 읽히는 참조 줄이 하나도 없다(§8) |
 | `hearsay_only` | `page`: string | 참조 줄이 `said:` 뿐이다 |
-| `unreadable_page` | `file`: string, `reason`: string | 헤더가 읽히지 않는다. `reason` 은 기존 `frontmatter_error_to_string` 의 문장이다 |
+| `unreadable_page` | `file`: string, `reason`: string | 헤더가 읽히지 않거나, 파일이 있는데 열 수 없다. `reason` 은 앞의 경우 기존 `frontmatter_error_to_string` 의 문장이고, 뒤의 경우 `the file could not be opened: ` 로 시작한다 |
 
 대상이 읽히지 않는 페이지인 링크는 `broken_link` 가 아니다. 파일은 있으므로 그 페이지의 `unreadable_page` 한 번으로만 보고한다(옮김: ocaml-agent-ic).
 
@@ -132,7 +133,7 @@ finding 은 `kind` 로 갈리는 객체다.
 
 - 선행 PR: `Tool_wiki` 안의 순수한 부분을 `Wiki_page_name`, `Wiki_page` 로 꺼내고 `Tool_wiki` 가 그것을 쓰게 한다. 동작은 바뀌지 않는다. 수용 기준은 기존 위키 테스트가 고치지 않은 채 통과하는 것이다. 이렇게 해야 서버 도구와 lint 가 같은 정의를 써서 "도구는 받는데 lint 는 못 읽는 페이지"가 생기지 않는다.
 - 순수 코어를 `unix`·`eio` 에 의존하지 않는 별도 dune 라이브러리로 둘지는 구현자가 정한다. `lib/dune` 의 `masc` 는 `(include_subdirs unqualified)` 인 한 라이브러리이고 위키 파일은 `lib/` 바로 아래에 있다(옮김: ocaml-agent-ic, PR #42963 댓글 6154636361).
-- `Tool_wiki` 의 `Line`·`Tag`·`parse_frontmatter` 는 다른 모듈이 쓴다: `lib/mcp_server_eio_resource.ml` 과 `test/test_tool_wiki_coverage.ml` (옮김: 같은 댓글). 그래서 선행 PR 은 `Tool_wiki` 가 같은 이름을 다시 내보내는 형태여야 기존 테스트를 고치지 않고 통과한다.
+- `Tool_wiki` 의 `Tag` 와 `parse_frontmatter` 는 `lib/mcp_server_eio_resource.ml` 이 쓴다(`parse_frontmatter` 는 72·320·383행, `Tag` 는 330·351행). `Line` 을 `Tool_wiki` 밖에서 쓰는 곳은 `test/test_tool_wiki_coverage.ml` 뿐이다(main `0a7b21f2f4` 의 `lib`·`test`·`bin` 에서 `Tool_wiki.Line`, `Tool_wiki.Tag`, `Tool_wiki.parse_frontmatter` 를 찾아 직독. 처음 읽은 이는 ocaml-agent-ic, PR #42963 댓글 6154636361). 그래서 선행 PR 은 `Tool_wiki` 가 같은 이름을 다시 내보내는 형태여야 기존 테스트를 고치지 않고 통과한다.
 
 ### 4.5 동시 쓰기
 
@@ -164,7 +165,7 @@ finding 은 `kind` 로 갈리는 객체다.
 |---|---|---|
 | 새 필수 키를 더함 | 새 바이너리가 지금 있는 페이지 전부를 `Missing_field` 로 못 읽는다 | 하지 않는다. 새 키는 선택 키로만 더한다 |
 | `source` 에 새 값을 더함 | 옛 바이너리가 그 값을 가진 새 페이지를 `Unknown_source` 로 못 읽는다(`tool_wiki.ml:211`) | 모르는 `source` 값을 견디는 읽기가 먼저 배포되고, 그 판이 운영에 깔린 뒤에만 새 값을 쓴다. 두 변경은 같은 PR 에 넣지 않는다 |
-| 선택 키를 더함 | 읽기는 키를 이름으로 찾으므로(`tool_wiki.ml:189`, `List.assoc_opt`) 모르는 키가 있어도 읽히는 것으로 보인다(추정). 그 앞 단계인 `Frontmatter.read` 가 모르는 키를 거절하는지는 읽지 않았다(미확인) | 조건부 허용. update 는 모르는 키를 보존하지 않는다: `render_page` 가 헤더 여덟 줄을 고정으로 쓰고 `handle_update` 가 읽은 레코드에서 다시 쓰므로, 헤더의 다른 키는 update 한 번에 사라진다(옮김: ocaml-agent-ic, `lib/tool_wiki.ml:422-442`, main `c5a9722b8d` 직독, PR #42963 댓글 6154636361. 작성자는 다시 읽지 않음). 그래서 선택 키를 더하는 PR 은 `frontmatter` 레코드와 `render_page` 에 그 키를 함께 넣어야 한다. 옛 바이너리로 update 하면 새 키가 지워지는 것은 피할 수 없으므로 새 키를 아는 판이 먼저 깔린 뒤에 그 키를 쓴다. "모르는 키가 있는 페이지가 옛 바이너리에서 읽히는가"는 여전히 테스트로 답해야 한다 |
+| 선택 키를 더함 | 읽기는 키를 이름으로 찾으므로(`tool_wiki.ml:189`, `List.assoc_opt`) 모르는 키가 있어도 읽히는 것으로 보인다(추정). 그 앞 단계인 `Frontmatter.read` 가 모르는 키를 거절하는지는 읽지 않았다(미확인) | 조건부 허용. update 는 모르는 키를 보존하지 않는다: `render_page` 가 헤더 여덟 줄을 고정으로 쓰고 `handle_update` 가 읽은 레코드에서 다시 쓰므로, 헤더의 다른 키는 update 한 번에 사라진다(`render_page` 의 고정 여덟 줄은 `lib/wiki_page.ml:230-250`, 호출은 `lib/tool_wiki.ml:371`·`471`, main `0a7b21f2f4` 직독. `handle_update` 가 읽은 레코드에서 다시 쓴다는 것은 옮김: ocaml-agent-ic, PR #42963 댓글 6154636361). 그래서 선택 키를 더하는 PR 은 `frontmatter` 레코드와 `render_page` 에 그 키를 함께 넣어야 한다. 옛 바이너리로 update 하면 새 키가 지워지는 것은 피할 수 없으므로 새 키를 아는 판이 먼저 깔린 뒤에 그 키를 쓴다. "모르는 키가 있는 페이지가 옛 바이너리에서 읽히는가"는 여전히 테스트로 답해야 한다 |
 
 이 RFC 의 1단계는 헤더를 바꾸지 않는다. 출처를 헤더 칸이 아니라 본문 절에 두는 이유가 이것이다.
 
@@ -256,7 +257,7 @@ finding 은 `kind` 로 갈리는 객체다.
 
 ### 11.1 1단계의 수용 기준
 
-1. 라이브 11장의 사본을 픽스처로 돌린 결과가 손으로 센 값과 같다: `broken_link` 0, `orphan` 1(`rfc-map`), `missing_sources` 11, `unreadable_page` 0.
+1. 라이브 11장에서 병합 뒤 한 번 부른 결과가 손으로 센 값과 같다: `pages_total` 11, `broken_link` 0, `orphan` 1(`rfc-map`), `missing_sources` 11, `unreadable_page` 0. 처음에는 라이브 사본을 픽스처로 돌리는 것으로 적었으나 구현자가 라이브 위키를 읽을 수 없어 라이브 호출로 바꿨다. 결과는 아직 없다.
 2. 고정 입력 하나에서 `broken_link` 1, `orphan` 1, `missing_sources` 1, `unreadable_page` 1, `unsupported_link` 1 이 정확히 나온다.
 3. 같은 디렉터리에 두 번 돌린 출력이 바이트로 같다.
 4. lint 전후로 위키 디렉터리의 파일 이름, 크기, 바이트 해시가 같고 새 파일이 없다(`.wiki.lock` 포함).
@@ -316,7 +317,7 @@ finding 은 `kind` 로 갈리는 객체다.
 
 읽지 못한 것:
 
-- `Frontmatter.read` 본체, `Line` 모듈 본체, update 가 헤더를 다시 쓰는 방식, 위키 테스트 파일들, `lib/dune` 의 라이브러리 경계, `Keeper_runtime_setting_registry`, 5,000장 규모의 실측. 이 가운데 update 가 헤더를 다시 쓰는 방식, `Line`·`Tag` 의 다른 사용처, `lib/dune` 의 경계는 구현자 ocaml-agent-ic 가 읽어 답했고(PR #42963 댓글 6154636361) 본문 §4.4 와 §6 에 옮김으로 반영했다. 작성자가 읽지 않았다는 사실은 그대로다.
+- `Frontmatter.read` 본체, `Line` 모듈 본체, update 가 헤더를 다시 쓰는 방식, 위키 테스트 파일들, `lib/dune` 의 라이브러리 경계, `Keeper_runtime_setting_registry`, 5,000장 규모의 실측. 이 가운데 update 가 헤더를 다시 쓰는 방식, `Line`·`Tag` 의 다른 사용처, `lib/dune` 의 경계는 구현자 ocaml-agent-ic 가 읽어 답했고(PR #42963 댓글 6154636361) 본문 §4.4 와 §6 에 옮김으로 반영했다. 그 뒤 작성자가 `render_page` 와 `Line`·`Tag`·`parse_frontmatter` 의 사용처를 main `0a7b21f2f4` 에서 직독했다. `lib/dune` 은 여전히 읽지 않았다.
 
 확신도:
 

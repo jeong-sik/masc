@@ -488,6 +488,13 @@ val drop_cells : string -> int -> string
     its right stay aligned. The horizontal-scroll counterpart of
     [fit_width]'s right-edge cut. *)
 
+val url_begins_at : string -> int -> bool
+(** Whether an [http://] or [https://] address starts at this byte index. *)
+
+val url_ends_at : char -> bool
+(** Whether this byte ends an address: whitespace, a control byte, a quote or
+    a bracket. *)
+
 val bare_urls : string -> string list
 (** The bare [http]/[https] URLs in this text, in the order they appear and cut
     at the same place {!dress_bare_links} stops underlining them. One rule, so

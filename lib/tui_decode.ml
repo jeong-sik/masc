@@ -7051,6 +7051,24 @@ let decode_task_history json =
    be read. The item vocabulary is the producer's closed set
    (Workspace_verification_store.submitted_evidence_item_to_yojson), so an
    unknown kind fails the decode rather than rendering as an empty row. *)
+type evidence_withheld =
+  | Withheld_not_image_format
+  | Withheld_body_not_filed
+  | Withheld_body_unreadable
+  | Withheld_over_delivery_ceiling of { bytes : int; ceiling : int }
+  | Withheld_over_response_budget
+
+type evidence_preview_defect =
+  | Defect_bad_base64
+  | Defect_length_mismatch of { declared : int; actual : int }
+  | Defect_digest_mismatch
+  | Defect_not_an_image
+
+type evidence_preview =
+  | Preview_image of { ev_media : Keeper_vision_downscale.media_type; ev_data : string }
+  | Preview_withheld of evidence_withheld
+  | Preview_defective of evidence_preview_defect
+
 type verification_evidence_item =
   | Ev_collaboration of { ev_reference : string; ev_content : string; ev_sha256 : string }
   | Ev_note of string
@@ -7064,10 +7082,80 @@ type verification_evidence_item =
       ev_u_reference : string option;
       ev_u_reason : string;
     }
+  | Ev_binary of {
+      ev_b_reference : string;
+      ev_b_bytes : int;
+      ev_b_sha256 : string;
+      ev_b_format : string;
+      ev_b_preview : evidence_preview;
+    }
 
 type verification_evidence =
   | Evidence_items of verification_evidence_item list
   | Evidence_access_unavailable of string
+
+(* The server states what it withheld and why, in a closed set. A reason this
+   build does not know fails the decode: showing it as some other cause would
+   tell the operator something the server did not say. *)
+let decode_evidence_withheld preview =
+  let int_field name =
+    match member name preview with
+    | `Int value when value >= 0 -> Ok value
+    | _ -> Error ("withheld preview has no " ^ name)
+  in
+  match member "reason" preview with
+  | `String "not_image_format" -> Ok Withheld_not_image_format
+  | `String "body_not_filed" -> Ok Withheld_body_not_filed
+  | `String "body_unreadable" -> Ok Withheld_body_unreadable
+  | `String "over_delivery_ceiling" ->
+      let* bytes = int_field "bytes" in
+      let* ceiling = int_field "ceiling" in
+      Ok (Withheld_over_delivery_ceiling { bytes; ceiling })
+  | `String "over_response_budget" -> Ok Withheld_over_response_budget
+  | `String reason -> Error ("unknown withheld preview reason: " ^ reason)
+  | _ -> Error "withheld preview has no reason"
+
+(* The inline bytes are checked against what the same item declares before
+   anything draws them: the length and the SHA-256 the store recorded, and the
+   format the bytes themselves carry (the item's [format] is a file extension
+   and says nothing about the content). A body that fails any of these is a
+   defect named on the item, so the operator sees that the picture was not
+   shown and why, and the rest of the evidence stays readable. *)
+let decode_inline_preview ~declared_bytes ~declared_sha256 encoded =
+  match Base64.decode encoded with
+  | Error (`Msg _) -> Preview_defective Defect_bad_base64
+  | Ok data ->
+      let actual = String.length data in
+      if actual <> declared_bytes then
+        Preview_defective (Defect_length_mismatch { declared = declared_bytes; actual })
+      else if
+        not
+          (String.equal declared_sha256
+             Digestif.SHA256.(digest_string data |> to_hex))
+      then Preview_defective Defect_digest_mismatch
+      else
+        match Keeper_vision_tool.sniff_image_media_type data with
+        | Error _ -> Preview_defective Defect_not_an_image
+        | Ok media_type -> (
+            match Keeper_vision_downscale.media_type_of_string media_type with
+            | Some ev_media -> Preview_image { ev_media; ev_data = data }
+            | None -> Preview_defective Defect_not_an_image)
+
+let decode_evidence_preview ~declared_bytes ~declared_sha256 item =
+  match member "preview" item with
+  | `Assoc _ as preview -> (
+      match member "state" preview with
+      | `String "inline" -> (
+          match member "body_base64" preview with
+          | `String encoded ->
+              Ok (decode_inline_preview ~declared_bytes ~declared_sha256 encoded)
+          | _ -> Error "inline preview has no body_base64")
+      | `String "withheld" ->
+          let* reason = decode_evidence_withheld preview in
+          Ok (Preview_withheld reason)
+      | `String state -> Error ("unknown preview state: " ^ state)
+      | _ -> Error "preview has no state")
+  | _ -> Error "evidence binary artifact has no preview"
 
 let decode_verification_evidence json =
   let result = member "result" json in
@@ -7124,6 +7212,19 @@ let decode_verification_evidence json =
               | _ -> Error "unreadable artifact has an invalid reason"
             in
             Ok (Ev_artifact_unreadable { ev_u_reference = str "reference"; ev_u_reason })
+        | `String "artifact_binary" -> (
+            (* Not decoded through the store: the operator projection adds
+               [preview], which the persisted decoder rejects as unknown. *)
+            match str "reference", str "sha256", str "format", member "bytes" item with
+            | Some ev_b_reference, Some ev_b_sha256, Some ev_b_format, `Int ev_b_bytes
+              when ev_b_bytes >= 0 ->
+                let* ev_b_preview =
+                  decode_evidence_preview ~declared_bytes:ev_b_bytes
+                    ~declared_sha256:ev_b_sha256 item
+                in
+                Ok (Ev_binary { ev_b_reference; ev_b_bytes; ev_b_sha256; ev_b_format; ev_b_preview })
+            | _ ->
+                Error "evidence binary artifact is missing reference/bytes/sha256/format")
         | `String kind -> Error ("unknown evidence item kind: " ^ kind)
         | _ -> Error "evidence item is missing kind"
       in

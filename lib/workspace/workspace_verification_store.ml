@@ -129,42 +129,40 @@ let collaboration_metadata ~reference ~content ~sha256 =
     "sha256", `String sha256; "bytes", `Int (String.length content);
     "content_omitted", `Bool true]
 
-let submitted_evidence_item_to_yojson = function
+let submitted_evidence_item_fields = function
   | Evidence_collaboration {reference; content; sha256} ->
-    `Assoc ["kind", `String "collaboration"; "reference", `String reference;
+    ["kind", `String "collaboration"; "reference", `String reference;
       "content", `String content; "sha256", `String sha256]
   | Evidence_note note ->
-    `Assoc [ "kind", `String "note"; "content", `String note ]
+    [ "kind", `String "note"; "content", `String note ]
   | Evidence_artifact { reference; content; bytes; truncated } ->
-    `Assoc
-      [ "kind", `String "artifact"
-      ; "reference", `String reference
-      ; "content", `String content
-      ; "bytes", `Int bytes
-      ; "truncated", `Bool truncated
-      ]
+    [ "kind", `String "artifact"
+    ; "reference", `String reference
+    ; "content", `String content
+    ; "bytes", `Int bytes
+    ; "truncated", `Bool truncated
+    ]
   | Evidence_invalid_reference ->
-    `Assoc
-      [ "kind", `String "artifact_unreadable"
-      ; "reason", `Assoc [ "code", `String invalid_reference_code ]
-      ]
+    [ "kind", `String "artifact_unreadable"
+    ; "reason", `Assoc [ "code", `String invalid_reference_code ]
+    ]
   | Evidence_artifact_unreadable { reference; reason } ->
-    `Assoc
-      [ "kind", `String "artifact_unreadable"
-      ; "reference", `String reference
-      ; "reason", evidence_read_failure_to_yojson reason
-      ]
+    [ "kind", `String "artifact_unreadable"
+    ; "reference", `String reference
+    ; "reason", evidence_read_failure_to_yojson reason
+    ]
   | Evidence_artifact_binary { reference; bytes; sha256; format; body } ->
-    `Assoc
-      ([ "kind", `String "artifact_binary"
-       ; "reference", `String reference
-       ; "bytes", `Int bytes
-       ; "sha256", `String sha256
-       ; "format", `String format
-       ]
-      @ (match body with
-         | Some path -> [ ("body", `String path) ]
-         | None -> []))
+    [ "kind", `String "artifact_binary"
+    ; "reference", `String reference
+    ; "bytes", `Int bytes
+    ; "sha256", `String sha256
+    ; "format", `String format
+    ]
+    @ (match body with
+       | Some path -> [ ("body", `String path) ]
+       | None -> [])
+
+let submitted_evidence_item_to_yojson item = `Assoc (submitted_evidence_item_fields item)
 
 let request_header_to_yojson request =
   `Assoc
@@ -917,6 +915,8 @@ let valid_producer_relative_path path =
    read stands (tests, host-profile keepers); with one, every artifact read --
    snapshot and size pre-check alike -- goes through it, so the two can never
    disagree about where a file is. *)
+let evidence_body_directory = "evidence"
+
 (* Where a binary artifact's bytes are filed (RFC-0436 §4.2): the
    verification-owned evidence directory, one file per item index. The path
    recorded on the item is spelled relative to the workspace's masc
@@ -927,11 +927,11 @@ let persist_binary_body ~base_path ?request_id ?index data =
   match (request_id, index) with
   | Some request_id, Some index ->
     let masc_dir = Workspace_utils.masc_dir_from_base_path ~base_path in
-    let dir = Filename.concat (Filename.concat masc_dir "evidence") request_id in
+    let dir = Filename.concat (Filename.concat masc_dir evidence_body_directory) request_id in
     Fs_compat.mkdir_p dir;
     let file = Printf.sprintf "%d.bin" index in
     Fs_compat.save_file (Filename.concat dir file) data;
-    Some (Filename.concat (Filename.concat "evidence" request_id) file)
+    Some (Filename.concat (Filename.concat evidence_body_directory request_id) file)
   | _ -> None
 
 (* Why a filed body did not come back as base64. Each case is a different
@@ -951,24 +951,57 @@ type read_binary_error =
    was decoded from persistence. Missing bodies and bodies above the capture
    ceiling are not delivered as images; their recorded references remain in
    the review evidence. The runtime still owns model capability selection. *)
+(* The shape [persist_binary_body] writes: evidence/<request id>/<n>.bin. The
+   persisted snapshot is a JSON document anyone with write access to the store
+   can change, and the operator route sends a body's bytes to its caller, so a
+   path of any other shape is refused rather than joined to the data
+   directory. *)
+let filed_body_path relative =
+  let is_plain_segment segment =
+    not (String.equal segment "")
+    && not (String.equal segment ".")
+    && not (String.equal segment "..")
+    && not (String.contains segment '\\')
+    && not (String.contains segment '\000')
+  in
+  match String.split_on_char '/' relative with
+  | [ directory; request_id; file ]
+    when String.equal directory evidence_body_directory
+         && is_plain_segment request_id
+         && is_plain_segment file
+         && String.ends_with ~suffix:".bin" file -> true
+  | _ -> false
+
 let read_binary_body_base64 ~base_path (item : submitted_evidence_item) =
   match item with
   | Evidence_artifact_binary { body = Some relative; _ } ->
+    if not (filed_body_path relative)
+    then Error (Body_unreadable "body path is not under the evidence directory")
+    else
     let path =
       Filename.concat
         (Workspace_utils.masc_dir_from_base_path ~base_path)
         relative
     in
     (try
-       let data = Fs_compat.load_file path in
-       let bytes = String.length data in
-       if bytes > verification_evidence_max_bytes
+       let on_disk = (Unix.stat path).Unix.st_size in
+       if on_disk > verification_evidence_max_bytes
        then
          Error
            (Over_delivery_ceiling
-              { bytes; ceiling = verification_evidence_max_bytes })
-       else Ok (Base64.encode_string data)
-     with Sys_error reason -> Error (Body_unreadable reason))
+              { bytes = on_disk; ceiling = verification_evidence_max_bytes })
+       else
+         let data = Fs_compat.load_file path in
+         let bytes = String.length data in
+         if bytes > verification_evidence_max_bytes
+         then
+           Error
+             (Over_delivery_ceiling
+                { bytes; ceiling = verification_evidence_max_bytes })
+         else Ok (Base64.encode_string data)
+     with
+     | Sys_error reason -> Error (Body_unreadable reason)
+     | Unix.Unix_error (code, _, _) -> Error (Body_unreadable (Unix.error_message code)))
   | Evidence_artifact_binary { body = None; _ } -> Error Body_not_filed
   | Evidence_collaboration _ -> Error Not_binary
   | Evidence_note _ -> Error Not_binary

@@ -39,6 +39,9 @@ type image =
   | Keeper_portrait  (** a Keeper's own portrait at the head of its detail *)
   | About_keeper_1 | About_keeper_2 | About_keeper_3 | About_keeper_4
       (** The four bounded Keeper placements on [/about]. *)
+  | Evidence_image_1 | Evidence_image_2 | Evidence_image_3 | Evidence_image_4
+      (** The pictures of one task's operator evidence, in the order the
+          evidence lists them. *)
 [@@deriving enumerate]
 
 val image_id : image -> int
@@ -46,6 +49,10 @@ val image_id : image -> int
     deleting one never takes another down. {!Graphics_query}'s is in the
     terminal's reply, so a reply cannot be taken for an answer about a
     picture actually being drawn. *)
+
+val evidence_images : image list
+(** The {!image} slots the operator evidence has, in order. A fifth picture in
+    one task's evidence has no slot and is listed by its caption only. *)
 
 val query : string
 (** Ask the terminal whether it speaks the protocol. Sends a one-pixel image
@@ -114,6 +121,30 @@ val put : image_id:int -> placement_id:int -> rows:int -> string
     placement {!replace_rgba} made. It needs the pixels to still be there:
     a clear screen ([ESC [2J]) frees an image whose placements it took, in
     Kitty and in Ghostty, and [q=2] means a missing image is not reported. *)
+
+(** The part of a picture that shows, as whole-width rows of source pixels. *)
+type crop = { top_px : int; height_px : int }
+
+val replace_png :
+  image_id:int -> placement_id:int -> data:string -> rows:int -> cols:int
+  -> crop:crop option -> string
+(** {!replace_rgba} for a picture that already is a PNG file: its bytes travel
+    as they are ([f=100]), chunked and silent like every other placement. The
+    terminal draws [crop] (all of the picture for [None]) over [cols] by
+    [rows] cells; both are sent because a cropped picture is not the shape of
+    the whole one. [""] when [data] is empty. [data] must be a PNG -- ask
+    {!payload_media_type}'s question of the bytes first. *)
+
+val put_png :
+  image_id:int -> placement_id:int -> rows:int -> cols:int -> crop:crop option -> string
+(** {!put} with the cells and crop of {!replace_png}: place, or move and
+    re-crop, the pixels the terminal already holds, without sending them. *)
+
+val delete_placement : image_id:int -> placement_id:int -> string
+(** Delete one placement and leave the image's pixels with the terminal
+    ([d=i], lowercase), so {!put_png} can bring the picture back without a
+    transfer. The terminal may still free the pixels on its own, as it does
+    after a clear screen; {!delete_image} is what frees them. *)
 
 val delete_image : image_id:int -> string
 (** Delete this image's placements and free its stored pixels. *)

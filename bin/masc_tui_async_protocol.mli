@@ -499,7 +499,7 @@ type async_msg =
       string * (Masc.Tui_decode.task_history_event list, string) result
   | Task_cancel_done of string * Masc.Tui_decode.server_identity * (string, string) result
   | Verification_evidence_loaded of
-      string * (Masc.Tui_decode.verification_evidence,
+      string * (Masc_tui_evidence_picture.evidence,
                 Masc_tui_types.Verification_evidence_read.failure) result
   | Keeper_config_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Keeper_items_loaded of

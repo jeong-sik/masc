@@ -492,6 +492,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_wiki_create", broadcast_tool);
     ("masc_wiki_update", broadcast_tool);
     ("masc_wiki_search", read_state_tool);
+    ("masc_wiki_lint", read_state_tool);
     ( "keeper_tasks_list",
       hidden_runtime_tool
         "Keeper task-list runtime tool; callable but hidden from the public MCP schema surface."

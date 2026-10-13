@@ -1124,6 +1124,102 @@ let test_two_writers_on_one_revision_do_not_both_win () =
       (List.length (lines_naming "] update r" (own_file ctx "log.md"))))
 
 (* ============================================================
+   wiki_lint
+   ============================================================ *)
+
+let add_page ctx ~page ~body =
+  let ok, message =
+    dispatch_exn ctx ~name:"masc_wiki_create" ~args:(create_args ~page ~body ())
+  in
+  if not ok then Alcotest.failf "create %s: %s" page message
+
+let lint_json ctx args =
+  let ok, message = dispatch_exn ctx ~name:"masc_wiki_lint" ~args in
+  Alcotest.(check bool) "lint succeeds" true ok;
+  Yojson.Safe.from_string message
+
+let lint_member json key = Yojson.Safe.Util.member key json
+
+let tree_snapshot (ctx : Tool_wiki.context) =
+  let root = Tool_wiki.wiki_root ~base_path:ctx.base_path in
+  Sys.readdir root
+  |> Array.to_list
+  |> List.sort String.compare
+  |> List.map (fun name ->
+    name, Digest.file (Filename.concat root name) |> Digest.to_hex)
+
+let test_lint_reports_and_does_not_write () =
+  with_temp_base_path (fun ctx ->
+    add_page ctx ~page:"alpha" ~body:"See [b](beta.md) and [gone](missing.md).\n\n## Sources\n- repo:lib/x.ml";
+    add_page ctx ~page:"beta" ~body:"no links, no sources";
+    write_wiki_page ctx ~filename:"torn.md" "no header at all";
+    let before = tree_snapshot ctx in
+    let json = lint_json ctx (`Assoc []) in
+    Alcotest.(check string) "schema" "masc.wiki_lint.v1"
+      Yojson.Safe.Util.(to_string (lint_member json "schema"));
+    Alcotest.(check int) "pages_total" 3
+      Yojson.Safe.Util.(to_int (lint_member json "pages_total"));
+    Alcotest.(check int) "pages_unreadable" 1
+      Yojson.Safe.Util.(to_int (lint_member json "pages_unreadable"));
+    let kinds =
+      Yojson.Safe.Util.(
+        lint_member json "findings"
+        |> to_list
+        |> List.map (fun f -> to_string (member "kind" f)))
+    in
+    Alcotest.(check bool) "broken link present" true (List.mem "broken_link" kinds);
+    Alcotest.(check bool) "unreadable page present" true
+      (List.mem "unreadable_page" kinds);
+    Alcotest.(check bool) "wiki untouched" true (before = tree_snapshot ctx))
+
+let test_lint_lock_file_is_not_a_page () =
+  with_temp_base_path (fun ctx ->
+    add_page ctx ~page:"alpha" ~body:"x";
+    write_wiki_page ctx ~filename:".wiki.lock" "";
+    let json = lint_json ctx (`Assoc []) in
+    Alcotest.(check int) "pages_total counts pages only" 1
+      Yojson.Safe.Util.(to_int (lint_member json "pages_total"));
+    Alcotest.(check int) "no unreadable page" 0
+      Yojson.Safe.Util.(to_int (lint_member json "pages_unreadable")))
+
+let test_lint_limit_and_cursor_walk_every_finding () =
+  with_temp_base_path (fun ctx ->
+    for i = 1 to 7 do
+      add_page ctx ~page:(Printf.sprintf "p%d" i) ~body:"nothing"
+    done;
+    let rec walk cursor acc guard =
+      if guard = 0 then Alcotest.fail "cursor did not terminate"
+      else
+        let args =
+          `Assoc
+            ([ "limit", `Int 3 ]
+             @ match cursor with None -> [] | Some c -> [ "cursor", `String c ])
+        in
+        let json = lint_json ctx args in
+        let n = List.length Yojson.Safe.Util.(to_list (lint_member json "findings")) in
+        match lint_member json "next_cursor" with
+        | `String c -> walk (Some c) (acc + n) (guard - 1)
+        | _ -> acc + n
+    in
+    let whole =
+      Yojson.Safe.Util.(
+        to_int (lint_member (lint_json ctx (`Assoc [ "limit", `Int 200 ])) "matched"))
+    in
+    Alcotest.(check int) "pages cover matched" whole (walk None 0 50);
+    Alcotest.(check bool) "has findings" true (whole > 3))
+
+let test_lint_refuses_bad_arguments () =
+  with_temp_base_path (fun ctx ->
+    let refused args =
+      let ok, _ = dispatch_exn ctx ~name:"masc_wiki_lint" ~args in
+      Alcotest.(check bool) "refused" false ok
+    in
+    refused (`Assoc [ "kind", `String "nope" ]);
+    refused (`Assoc [ "limit", `Int 0 ]);
+    refused (`Assoc [ "cursor", `String "garbage" ]);
+    refused (`Assoc [ "page", `String "../escape" ]))
+
+(* ============================================================
    Test runner
    ============================================================ *)
 
@@ -1197,6 +1293,12 @@ let () =
       Alcotest.test_case "a tags line with brackets inside a tag reads" `Quick test_a_tags_line_with_brackets_inside_a_tag_reads;
       Alcotest.test_case "a page whose tags do not read is shown and not updated" `Quick test_a_page_whose_tags_do_not_read_is_shown_and_not_updated;
       Alcotest.test_case "a carriage return inside a value does not read" `Quick test_a_carriage_return_inside_a_value_does_not_read;
+    ]);
+    ("wiki_lint", [
+      Alcotest.test_case "reports findings and writes nothing" `Quick test_lint_reports_and_does_not_write;
+      Alcotest.test_case "the lock file is not a page" `Quick test_lint_lock_file_is_not_a_page;
+      Alcotest.test_case "limit and cursor walk every finding" `Quick test_lint_limit_and_cursor_walk_every_finding;
+      Alcotest.test_case "bad arguments are refused" `Quick test_lint_refuses_bad_arguments;
     ]);
     ("unreadable", [
       Alcotest.test_case "unknown source is named, not passed through" `Quick test_unknown_source_is_named_not_passed_through;

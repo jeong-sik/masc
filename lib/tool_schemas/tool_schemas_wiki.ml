@@ -6,6 +6,7 @@ type operation =
   | Create_page
   | Update_page
   | Search_pages
+  | Lint_pages
 [@@deriving enumerate]
 
 type definition =
@@ -21,6 +22,7 @@ let operation_id = function
   | Create_page -> "create"
   | Update_page -> "update"
   | Search_pages -> "search"
+  | Lint_pages -> "lint"
 ;;
 
 let definition operation ~read_only (loaded : Tool_definition_toml.loaded) =
@@ -45,6 +47,8 @@ let definition_for = function
   (* masc_wiki_search *)
   | Search_pages ->
     definition Search_pages ~read_only:true Tool_schemas_wiki_toml.search
+  (* masc_wiki_lint *)
+  | Lint_pages -> definition Lint_pages ~read_only:true Tool_schemas_wiki_toml.lint
 ;;
 
 let definitions : definition list = List.map definition_for all_of_operation

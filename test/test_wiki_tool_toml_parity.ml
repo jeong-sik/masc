@@ -19,6 +19,7 @@ let expected =
   ; "masc_wiki_create"
   ; "masc_wiki_update"
   ; "masc_wiki_search"
+  ; "masc_wiki_lint"
   ]
 ;;
 
@@ -30,7 +31,7 @@ let published = Tool_schemas_wiki.schemas
 (* What a Keeper reads when the file declares a [keeper_projection] table:
    masc_wiki_list names its siblings by the keeper_* names a Keeper can
    call (keeper_tool_descriptor projects masc_wiki_read/search under
-   them), the other four carry no table and reach the Keeper as their row.
+   them), the other five carry no table and reach the Keeper as their row.
    Read off the descriptor's literal before the sentence moved into the
    file, so this passing is what proves the file says the same thing. *)
 let expected_keeper_projections =
@@ -39,6 +40,7 @@ let expected_keeper_projections =
   ; "masc_wiki_create", false
   ; "masc_wiki_update", false
   ; "masc_wiki_search", false
+  ; "masc_wiki_lint", false
   ]
 ;;
 

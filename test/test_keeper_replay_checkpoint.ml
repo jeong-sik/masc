@@ -122,6 +122,85 @@ let test_patch_last_assistant_preserves_typed_reasoning () =
     (has_content (function Thinking _ -> true | _ -> false) patched.messages)
 ;;
 
+let test_finalization_preserves_reasoning_source_through_restore () =
+  let module Types = Agent_core.Types in
+  let module Provider = Agent_core.Llm_provider in
+  List.iter (fun (kind, policy, artifact) ->
+    let contract : Provider.Reasoning_replay_contract.t =
+      { replay_policy = policy; streaming = No_streaming_reasoning;
+        output_wire = No_output_control } in
+    let source base_url =
+      Types.Reasoning_source.create ~provider_kind:kind
+        ~provider_instance:(Types.Reasoning_source.provider_instance
+          ~base_url ~request_path:"/fixture")
+        ~canonical_model_id:"replay-fixture" ~replay_contract:contract
+      |> expect_ok in
+    let producing_source = source "https://producer.test" in
+    let response : Types.api_response =
+      { id = "fixture"; model = "replay-fixture"; stop_reason = EndTurn;
+        content = [artifact; Types.Text "draft"]; usage = None;
+        telemetry = Some {Types.default_inference_telemetry with
+          reasoning_source = Some producing_source} } in
+    let assistant = Types.assistant_message_of_response response
+      |> Result.map_error Types.show_assistant_message_error |> expect_ok in
+    let assistant = {assistant with metadata =
+      ("test-origin", `String "keep") :: assistant.metadata} in
+    let history = [Types.user_msg "question"] in
+    let original = checkpoint ~working_context:None (history @ [assistant]) in
+    let finalize response_text =
+      Finalize.checkpoint_for_replay_persistence ~history_messages:history
+        ~session_id:original.session_id ~response_text
+        ~exclude_thought_from_replay:false original |> expect_ok |> fst in
+    let unchanged = finalize "draft" in
+    Alcotest.(check bool) "unchanged metadata does not rewrite the message spine"
+      true (unchanged.messages == original.messages);
+    let patched = finalize "final" in
+    with_temp_dir (fun session_dir ->
+      (match Masc.Keeper_checkpoint_store.save_agent_core_classified
+          ~history_retained:(history_retained ()) ~session_dir patched |> expect_ok with
+       | Saved _ -> ()
+       | Stale_noop _ -> Alcotest.fail "fresh checkpoint was not saved");
+      let restored = Masc.Keeper_checkpoint_store.load_agent_core ~session_dir
+          ~session_id:patched.session_id
+        |> Result.map_error Masc.Keeper_checkpoint_store.checkpoint_load_error_to_string
+        |> expect_ok in
+      (match List.rev restored.messages with
+       | (last : Types.message) :: _ ->
+         Alcotest.(check bool) "all provenance survives finalization and disk restore"
+           true (Yojson.Safe.equal (`Assoc assistant.metadata) (`Assoc last.metadata))
+       | [] -> Alcotest.fail "restored history is empty");
+      let project target =
+        let replay_capability : Provider.Reasoning_dialect.replay_capability =
+          {target; contract; rotation = Require_identical_source} in
+        Provider.Reasoning_history_projection.project
+          ~assistant_has_payload:(fun content -> content <> [])
+          ~reasoning_block_supported:(function
+            | Types.Thinking _ | Types.RedactedThinking _ | Types.ReasoningDetails _ -> true
+            | Types.Text _ | Types.ToolUse _ | Types.ToolResult _ | Types.Image _
+            | Types.Document _ | Types.Audio _ -> false)
+          ~replay_capability restored.messages
+        |> Result.map_error Provider.Reasoning_history_projection.error_to_string
+        |> expect_ok in
+      let same = project producing_source in
+      Alcotest.(check bool) "same source can still replay its artifact"
+        true (has_content ((=) artifact) same.messages);
+      Alcotest.(check int) "same source records no replay loss"
+        0 (List.length same.reasoning_replay_drops);
+      let rotated = project (source "https://other.test") in
+      Alcotest.(check bool) "foreign endpoint cannot replay a bound artifact"
+        false (has_content ((=) artifact) rotated.messages);
+      match rotated.reasoning_replay_drops with
+      | [{ reason = Incompatible_reasoning_source _; _ }] -> ()
+      | _ -> Alcotest.fail "rotation must be decided from provenance, not missing source"))
+    Provider.Provider_config.[
+      Anthropic, Provider.Reasoning_replay_contract.All_assistant_messages,
+        Types.Thinking {signature = Some "signature"; content = "reasoning"};
+      Gemini, Provider.Reasoning_replay_contract.All_assistant_messages,
+        Types.RedactedThinking "gemini-fixture";
+      OpenAI_compat, Provider.Reasoning_replay_contract.Provider_opaque_state,
+        Types.RedactedThinking "responses-fixture"]
+;;
+
 let test_finalization_reuses_matching_pipeline_checkpoint () =
   let open Agent_core.Types in
   let history = [ message User [ Text "question" ] ] in
@@ -851,6 +930,10 @@ let () =
             "patch preserves typed reasoning"
             `Quick
             test_patch_last_assistant_preserves_typed_reasoning
+        ; Alcotest.test_case
+            "finalization preserves reasoning provenance through disk restore"
+            `Quick
+            test_finalization_preserves_reasoning_source_through_restore
         ; Alcotest.test_case
             "contract observation preserves current turn"
             `Quick

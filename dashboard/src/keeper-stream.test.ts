@@ -870,6 +870,24 @@ describe('Keeper operation stream projection', () => {
     expect(entry?.delivery).toBe('streaming')
   })
 
+  it.each([false, true])('clears checkpoint control status while retaining structured content %s', (withContent) => {
+    assistantEntry()
+    if (withContent) keeperThreads.value = { ...keeperThreads.value, sangsu: keeperThreads.value.sangsu!.map(entry => ({ ...entry,
+      blocks: [{ t: 'thinking' as const, content: 'exposed reasoning', redacted: false },
+        { t: 'attach' as const, name: 'result.txt' }],
+    })) }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_CONTINUATION_CHECKPOINT',
+      value: { message: 'checkpoint', request_id: 'request-1' } })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_STARTED' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_REPLY_DETAILS',
+      value: { reply: 'completed answer', turn_ref: 'turn-1', turn_outcome: 'visible_reply' } })
+    const completed = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(completed?.text).toBe('completed answer')
+    expect(completed?.blocks?.some(block => block.t === 'status')).toBe(false)
+    if (withContent) expect(completed?.blocks).toEqual([
+      { t: 'thinking', content: 'exposed reasoning', redacted: false }, { t: 'attach', name: 'result.txt' },
+    ])
+  })
   it('preserves visible reply whitespace and SKILL-prefixed prose across deltas', () => {
     assistantEntry()
     const chunks = ['    ', '첫 줄', '\n', 'SKILL', '.md 설명', '\n\n\n', '끝  ', '\n\n']

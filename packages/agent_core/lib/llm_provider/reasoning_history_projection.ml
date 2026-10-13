@@ -359,11 +359,6 @@ let summarize_drops drops =
     drops
 ;;
 
-(* [stream] tells the two serializations of one request apart. Exact-output
-   planning serializes with [stream:false] before admission serializes with the
-   transport's real value, so the same history is projected twice and this
-   summary is emitted twice with byte-identical payloads. Without the flag the
-   pair says nothing about which stage produced it (#28636). *)
 (* Creation-prefix binding: admit stored reasoning only when the bytes
    before it still hash to the digest its producing request carried. *)
 
@@ -541,6 +536,11 @@ let observe_prefix_drops ~component ~stream verdict =
              ]))
 ;;
 
+(* [stream] tells the two serializations of one request apart. Exact-output
+   planning serializes with [stream:false] before admission serializes with the
+   transport's real value, so the same history is projected twice and this
+   summary is emitted twice with byte-identical payloads. Without the flag the
+   pair says nothing about which stage produced it (#28636). *)
 let observe ~component ~stream projection =
   let target_json = snd (Types.Reasoning_source.entry projection.reasoning_target) in
   (match projection.reasoning_replay_drops with

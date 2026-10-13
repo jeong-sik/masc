@@ -131,7 +131,10 @@ val content_wire_digest
     fold mirrors {!project}: emptied assistants are removed, other roles
     never are. [final_digest] is the chain after the last message — the
     value the record side stamps as the new response's request digest.
-    Malformed entries refuse loudly like {!error}; every other doubt drops. *)
+    Malformed entries refuse loudly like {!error}; every other doubt drops.
+    Dropping stays safe only while the Anthropic branch never emits manual
+    [enabled] thinking (which requires the last assistant turn to start with
+    a thinking block); revisit this policy the day it does. *)
 val verify_prefix_binding
   :  head:(string * Yojson.Safe.t) list
   -> encode_block:(Types.content_block -> Yojson.Safe.t)

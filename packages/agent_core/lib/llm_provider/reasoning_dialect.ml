@@ -516,12 +516,18 @@ let base_for_provider_config (config : Provider_config.t) =
       | Some caps -> caps
       | None -> provider_capabilities_of_kind config.kind
     in
-    { default with
-      toggle_wire = Anthropic_thinking
-    ; replay_policy = All_assistant_messages
-    ; streaming = Delta_field "thinking_delta"
-    ; sampling_policy = sampling_policy_of_capabilities caps
-    }
+    (* Signed blocks are replayed whole by default, which is right for a client
+       whose history is append-only. A caller that edits its history between
+       requests declares so in the capability row ([reasoning_replay]); the row
+       stays authoritative here, as it does for the other wires. *)
+    apply_replay_override
+      caps
+      { default with
+        toggle_wire = Anthropic_thinking
+      ; replay_policy = All_assistant_messages
+      ; streaming = Delta_field "thinking_delta"
+      ; sampling_policy = sampling_policy_of_capabilities caps
+      }
   | Gemini ->
     { default with
       toggle_wire = Gemini_thinking_config

@@ -3928,6 +3928,66 @@ let test_gemini_provider_resolves_capabilities_under_its_own_label () =
          check (option int) "my_gemini row wins over the bare gemini-probe row"
            (Some 4096) caps.max_context_tokens))
 
+(* A signed Anthropic thinking block stays valid only while everything before it
+   is unchanged. A Keeper's history is windowed and edited between requests, so
+   a runtime on the Messages wire replays only the latest user turn's tool loop;
+   a capability row that states its own replay stays authoritative. Seen live on
+   2026-10-12: 294 log lines of "Invalid `signature` in `thinking` block" on the
+   direct Anthropic runtime, each a 400 that retrying cannot clear. *)
+let anthropic_messages_runtime_toml =
+  "[providers.my_claude]\n\
+   kind = \"anthropic\"\n\
+   request-path = \"/v1/messages\"\n\
+   protocol = \"messages-http\"\n\
+   endpoint = \"https://api.anthropic.com\"\n\
+   \n\
+   [providers.my_claude.credentials]\n\
+   type = \"env\"\n\
+   key = \"MY_CLAUDE_API_KEY\"\n\
+   \n\
+   [models.probe]\n\
+   api-name = \"claude-sonnet-5-5\"\n\
+   max-context = 200000\n\
+   tools-support = true\n\
+   thinking-support = true\n\
+   streaming = true\n\
+   \n\
+   [models.probe.capabilities]\n\
+   max-output-tokens = 64000\n\
+   \n\
+   [my_claude.probe]\n\
+   \n\
+   [runtime]\n\
+   default = \"my_claude.probe\"\n"
+
+let anthropic_replay_policy_of_loaded_runtime () =
+  with_temp_runtime_toml anthropic_messages_runtime_toml (fun path ->
+    match load_list_text ~config_path:path with
+    | Error error -> failf "anthropic messages runtime should load: %s" error
+    | Ok (_, default, _, _, _) ->
+      (Llm_provider.Reasoning_dialect.for_provider_config
+         (agent_core_provider_config default))
+        .replay_policy)
+
+let test_anthropic_runtime_replays_only_the_latest_turn_tool_loop () =
+  check bool "default Anthropic runtime replays the latest user turn only" true
+    (anthropic_replay_policy_of_loaded_runtime ()
+     = Llm_provider.Reasoning_replay_contract
+       .Tool_call_assistant_messages_latest_user_turn)
+
+let test_anthropic_catalog_row_replay_stays_authoritative () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"claude-sonnet-5-5\"\n\
+     provider_name = \"my_claude\"\n\
+     base = \"anthropic\"\n\
+     reasoning_replay = \"preserve_always\"\n"
+  in
+  with_model_catalog_content catalog @@ fun () ->
+  check bool "a row that states preserve_always keeps replaying every turn" true
+    (anthropic_replay_policy_of_loaded_runtime ()
+     = Llm_provider.Reasoning_replay_contract.All_assistant_messages)
+
 let test_runtime_toml_enabled_defaults_true () =
   let runtime_toml =
     "[providers.local]\n\
@@ -6887,6 +6947,12 @@ let () =
           test_case
             "gemini provider resolves capabilities under its own label"
             `Quick test_gemini_provider_resolves_capabilities_under_its_own_label;
+          test_case
+            "anthropic runtime replays only the latest turn's tool loop"
+            `Quick test_anthropic_runtime_replays_only_the_latest_turn_tool_loop;
+          test_case
+            "anthropic catalog row's own replay stays authoritative"
+            `Quick test_anthropic_catalog_row_replay_stays_authoritative;
           test_case "runtime locality uses provider schema" `Quick
             test_runtime_locality_uses_provider_schema;
           test_case

@@ -504,7 +504,7 @@ let agent_core_thinking_control_format = function
     the row except for explicit output ceilings and thinking transport declarations;
     an absent runtime capability block remains absent and is
     rejected later by the normal startup gate. *)
-let model_capabilities_override_of_model_spec
+let declared_capabilities_override_of_model_spec
       ~(wire : Llm_provider.Provider_kind.t)
       ~(provider_id : string)
       (spec : Runtime_schema.model_spec)
@@ -595,6 +595,60 @@ let model_capabilities_override_of_model_spec
          ; emits_usage_tokens = stated caps.emits_usage_tokens ~default:base.emits_usage_tokens
          })
       spec.capabilities
+;;
+
+(* A signed Anthropic thinking block stays valid only while the system prompt,
+   the tools and every message before it are unchanged on later requests; a
+   replayed block that no longer matches fails the whole request with a 400
+   that a retry cannot clear. The history a Keeper sends is not append-only: it
+   is windowed to a carried range, aged tool results are demoted to markers, and
+   a per-turn context is injected. Only the latest user turn's tool loop, whose
+   history is fixed for the attempt, may carry reasoning back. A capability row
+   that states its own replay stays authoritative. *)
+let with_client_history_replay
+      ~(wire : Llm_provider.Provider_kind.t)
+      ~(provider_id : string)
+      ~(api_name : string)
+      (declared : Llm_provider.Capabilities.capabilities option)
+  =
+  match wire with
+  | Llm_provider.Provider_kind.Anthropic ->
+    let capabilities =
+      match declared with
+      | Some _ as found -> found
+      | None ->
+        Llm_provider.Capabilities.for_provider_model_id
+          ~wire:(Some wire)
+          ~allow_bare_fallback:false
+          ~provider_label:provider_id
+          ~model_id:api_name
+    in
+    (match capabilities with
+     | Some
+         ({ Llm_provider.Capabilities.reasoning_replay_override =
+              Llm_provider.Capabilities.Default_reasoning_replay
+          ; _
+          } as caps) ->
+       Some
+         { caps with
+           Llm_provider.Capabilities.reasoning_replay_override =
+             Llm_provider.Capabilities.Force_latest_user_turn_tool_calls
+         }
+     | Some _ | None -> declared)
+  | Llm_provider.Provider_kind.Kimi
+  | Llm_provider.Provider_kind.OpenAI_compat
+  | Llm_provider.Provider_kind.Ollama
+  | Llm_provider.Provider_kind.Gemini
+  | Llm_provider.Provider_kind.Glm -> declared
+;;
+
+let model_capabilities_override_of_model_spec
+      ~(wire : Llm_provider.Provider_kind.t)
+      ~(provider_id : string)
+      (spec : Runtime_schema.model_spec)
+  =
+  declared_capabilities_override_of_model_spec ~wire ~provider_id spec
+  |> with_client_history_replay ~wire ~provider_id ~api_name:spec.api_name
 ;;
 
 (* The window handed to AGENT_CORE is MASC's effective window, not the raw

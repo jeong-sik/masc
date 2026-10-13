@@ -502,6 +502,57 @@ let test_transmitted_history_keeps_what_the_wire_keeps () =
     (reasoning_block_count (transmitted_history_exn ~config messages))
 ;;
 
+(* Anthropic signs each thinking block against the system prompt, the tools and
+   every message before it, and rejects a replayed block when any of them
+   changed. A caller that edits its history between requests declares
+   [Force_latest_user_turn_tool_calls] on the capability row, and the Messages
+   wire has to honor it: only the latest user turn's tool loop carries
+   reasoning back, an earlier turn's signed block (tool-call or plain) is left
+   out. Dropping is always accepted by the API; a stale block is a 400 that a
+   retry cannot clear. *)
+let test_anthropic_honors_a_latest_turn_replay_declaration () =
+  let config =
+    Provider_config.make
+      ~kind:Anthropic
+      ~model_id:"claude-sonnet-5-5"
+      ~base_url:"https://api.anthropic.com"
+      ~model_capabilities_override:
+        { (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
+          reasoning_replay_override = Capabilities.Force_latest_user_turn_tool_calls
+        }
+      ()
+  in
+  let source = source_for_config config in
+  let signed content = Thinking { content; signature = Some "signature-of-the-producing-request" } in
+  let messages =
+    [ message User [ Text "first request" ]
+    ; with_source source Assistant [ signed "plain answer reasoning"; Text "first answer" ]
+    ; message User [ Text "current request" ]
+    ; with_source
+        source
+        Assistant
+        [ signed "current tool reasoning"
+        ; ToolUse { id = "current-call"; name = "inspect"; input = `Assoc [] }
+        ]
+    ; message Tool [ tool_result "current-call" ]
+    ]
+  in
+  let projected = transmitted_history_exn ~config messages in
+  check_int "the conversation itself survives" 5 (List.length projected);
+  check_bool
+    "an earlier turn's signed reasoning is not replayed"
+    false
+    (content_has_reasoning (List.nth projected 1).content);
+  check_bool
+    "the earlier answer text remains"
+    true
+    (List.exists (function Text "first answer" -> true | _ -> false) (List.nth projected 1).content);
+  check_bool
+    "the current tool loop keeps its reasoning"
+    true
+    (content_has_reasoning (List.nth projected 3).content)
+;;
+
 (* Every codec has to answer, because the caller asks before it knows which
    serializer will run. The expectation is not written down per codec — it is
    read off that codec's own replay contract, so a codec whose dispatch was
@@ -1398,6 +1449,10 @@ let () =
             "transmitted history keeps what the wire keeps"
             `Quick
             test_transmitted_history_keeps_what_the_wire_keeps
+        ; Alcotest.test_case
+            "anthropic honors a latest-turn replay declaration"
+            `Quick
+            test_anthropic_honors_a_latest_turn_replay_declaration
         ; Alcotest.test_case
             "a malformed tag anywhere refuses the projection"
             `Quick

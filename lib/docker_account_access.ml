@@ -83,7 +83,10 @@ let validate_snapshot ~host ~expected_uid snapshot ~probe_run ~require_rootless 
   | Group_missing | Membership_required | Session_refresh_required -> Error Session_not_active
   | Group_active ->
     let service = Sandbox_readiness.probe ~host ~run:probe_run ~require_rootless ~require_userns Docker in
-    match service.state with Service_ready -> Ok service | _ -> Error (Service_unavailable service)
+    match service.state with
+  | Service_ready -> Ok service
+  | Missing_prerequisite _ | Unsupported_host _ | Unsupported_capability _
+  | Probe_failed _ | Needs_configuration _ -> Error (Service_unavailable service)
 let validate_session ~host ~expected_uid ~probe_run ~require_rootless ~require_userns =
   let* value = snapshot () in
   validate_snapshot ~host ~expected_uid value ~probe_run ~require_rootless ~require_userns

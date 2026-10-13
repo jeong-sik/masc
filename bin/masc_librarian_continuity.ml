@@ -408,7 +408,10 @@ let run_comparison options =
             loop ((case, progress) :: completed) rest
         in
         let* completed = loop [] samples in
-        let arm_scored = function R.Scored _ -> true | _ -> false in
+        let arm_scored = function
+          | R.Scored _ -> true
+          | R.Not_started | R.Question_failed _ | R.Question_ready _ | R.Answer_failed _
+          | R.Answer_ready _ | R.Judge_failed _ -> false in
         let all_scored = List.for_all (fun (_, (progress : M.progress)) ->
           arm_scored progress.baseline && arm_scored progress.restored) completed in
         let bytes = encode completed in

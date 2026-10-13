@@ -441,7 +441,7 @@ let execute_unlocked t = function
           let* url_before = string_field "url" before in
           (match after with
            | `Assoc fields -> Ok (`Assoc (("urlBefore",`String url_before) ::
-               ("action",`String (match action with Browser_lane.Hover_at _ -> "hover_at" | Browser_lane.Click_at _ -> "click_at" | Browser_lane.Scroll_at _ -> "scroll_at" | _ -> "drag")) :: fields))
+               ("action",`String (Browser_lane.interaction_verb action)) :: fields))
            | _ -> Error (Protocol "invalid pointer receipt")))
         | _ -> script t session (Browser_scene_script.runtime ^ Browser_interaction.script) [args]
       in

@@ -4034,23 +4034,64 @@ let%test "parse_sse_event: known event still parses normally" =
     false
 ;;
 
+let test_block_starts (events : sse_event list) =
+  List.filter_map (function
+    | ContentBlockStart {index;content_type;_} -> Some (index,content_type)
+    | MessageStart _ | ContentBlockDelta _ | ContentBlockStop _ | MessageDelta _
+    | MessageStop | Ping | SSEError _ | NDJSONError _ | SSEParseFailed _
+    | NDJSONParseFailed _ | SSEUnknownEventType _ | SSEUnsupportedPart _
+    | SSEUnsupportedResponse _ | Connected | Timeout _ | StreamIncomplete _
+    | StreamRepeating _ -> None) events
+;;
+
+let test_block_deltas (events : sse_event list) =
+  List.filter_map (function
+    | ContentBlockDelta {index;delta} -> Some (index,delta)
+    | MessageStart _ | ContentBlockStart _ | ContentBlockStop _ | MessageDelta _
+    | MessageStop | Ping | SSEError _ | NDJSONError _ | SSEParseFailed _
+    | NDJSONParseFailed _ | SSEUnknownEventType _ | SSEUnsupportedPart _
+    | SSEUnsupportedResponse _ | Connected | Timeout _ | StreamIncomplete _
+    | StreamRepeating _ -> None) events
+;;
+
+let test_is_parse_failed : sse_event -> bool = function
+  | SSEParseFailed _ -> true
+  | MessageStart _ | ContentBlockStart _ | ContentBlockDelta _ | ContentBlockStop _
+  | MessageDelta _ | MessageStop | Ping | SSEError _ | NDJSONError _
+  | NDJSONParseFailed _ | SSEUnknownEventType _ | SSEUnsupportedPart _
+  | SSEUnsupportedResponse _ | Connected | Timeout _ | StreamIncomplete _
+  | StreamRepeating _ -> false
+;;
+
+let test_thinking_text : content_delta -> string option = function
+  | ThinkingDelta text -> Some text
+  | TextDelta _ | TextSnapshot _ | ThinkingSignatureDelta _ | RedactedThinkingSnapshot _
+  | ReasoningDetailsDelta _ | InputJsonDelta _ | InputJsonSnapshot _ | MediaDelta _ -> None
+;;
+
+let test_visible_text : content_delta -> string option = function
+  | TextDelta text -> Some text
+  | TextSnapshot _ | ThinkingDelta _ | ThinkingSignatureDelta _ | RedactedThinkingSnapshot _
+  | ReasoningDetailsDelta _ | InputJsonDelta _ | InputJsonSnapshot _ | MediaDelta _ -> None
+;;
+
 let%test "native details and inline reasoning retain distinct block payloads" =
   let state = create_openai_stream_state ~inline_reasoning:true () in
   let chunk = { (test_content_chunk "A<think>B</think>C") with
     delta_reasoning_details = Some {delta_reasoning_content = Some "native"; delta_details = []} } in
   let events, _ = openai_chunk_to_events state chunk in
-  let starts = List.filter_map (function ContentBlockStart {index;content_type;_} -> Some (index,content_type) | _ -> None) events in
-  let deltas = List.filter_map (function ContentBlockDelta {index;delta} -> Some (index,delta) | _ -> None) events in
+  let starts = test_block_starts events in
+  let deltas = test_block_deltas events in
   starts = [0,"reasoning_details";1,"text";2,"thinking";3,"text"]
-  && List.exists (function 2, ThinkingDelta "B" -> true | _ -> false) deltas
-  && not (List.exists (function 0, ThinkingDelta _ -> true | _ -> false) deltas)
+  && List.exists (fun (index, delta) -> index = 2 && test_thinking_text delta = Some "B") deltas
+  && not (List.exists (fun (index, delta) -> index = 0 && Option.is_some (test_thinking_text delta)) deltas)
 ;;
 
 let%test "inline answer emits incrementally after reasoning before terminal" =
   let state = create_openai_stream_state ~inline_reasoning:true () in
   let first, _ = openai_chunk_to_events state (test_content_chunk "<think>private</think>hel") in
   let second, _ = openai_chunk_to_events state (test_content_chunk "lo") in
-  let visible events = List.filter_map (function ContentBlockDelta {delta=TextDelta text;_} -> Some text | _ -> None) events in
+  let visible events = List.filter_map (fun (_, delta) -> test_visible_text delta) (test_block_deltas events) in
   visible first = ["hel"] && visible second = ["lo"]
 ;;
 
@@ -4069,11 +4110,12 @@ let%test "rejected tool chunk restores inline mode and held tag bytes" =
     let rejected_events, _ = openai_chunk_to_events state invalid in
     let after, _ = openai_chunk_to_events state
       { (test_content_chunk continuation) with finish_reason = Some "stop" } in
-    let payloads = List.filter_map (function
-      | ContentBlockDelta {delta = TextDelta text; _} -> Some (`Text text)
-      | ContentBlockDelta {delta = ThinkingDelta text; _} -> Some (`Thinking text)
-      | _ -> None) (before @ after) in
-    (match rejected_events with [SSEParseFailed _] -> true | _ -> false)
+    let payloads = List.filter_map (fun (_, delta) ->
+      match test_visible_text delta with
+      | Some text -> Some (`Text text)
+      | None -> Option.map (fun text -> `Thinking text) (test_thinking_text delta))
+      (test_block_deltas (before @ after)) in
+    List.length rejected_events = 1 && List.for_all test_is_parse_failed rejected_events
     && payloads = expected
   in
   check "<thi" "nk>discarded</think>" "nk>private</think>reply"

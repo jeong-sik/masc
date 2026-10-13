@@ -961,7 +961,12 @@ let%test "Ollama sync flush retains unfinished reasoning as reasoning" =
   let wire = {|{"model":"fixture","done_reason":"stop","message":{"content":"<think>private</thi"}}|} in
   match parse_ollama_response ~content_inline_reasoning:Capabilities.Think_tags wire with
   | Ok response ->
-      List.for_all (function Thinking _ -> true | _ -> false) response.content
-      && String.concat "" (List.filter_map (function Thinking {content;_} -> Some content | _ -> None) response.content) = "private</thi"
-  | _ -> false
+      let thinking_text = function
+        | Thinking {content;_} -> Some content
+        | Text _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+        | Image _ | Document _ | Audio _ -> None in
+      let blocks = List.map thinking_text response.content in
+      List.for_all Option.is_some blocks
+      && String.concat "" (List.filter_map Fun.id blocks) = "private</thi"
+  | Error _ -> false
 ;;

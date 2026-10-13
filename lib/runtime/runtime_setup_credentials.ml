@@ -51,7 +51,9 @@ let apply_to_provider ~runtime_config_path ~provider_id ~expected_source_revisio
     let config = match Runtime_toml.parse_string contents with
       | Ok config -> config | Error _ -> raise Provider_rejected in
     let provider = List.find_opt (fun (p : Runtime_schema.provider) -> p.id = provider_id) config.providers in
-    (match provider with Some { transport = Runtime_schema.Http _; _ } -> () | _ -> raise Provider_rejected);
+    (match provider with
+     | Some { transport = Runtime_schema.Http _; _ } -> ()
+     | Some { transport = Runtime_schema.Cli _; _ } | None -> raise Provider_rejected);
     let table = Runtime_toml_namespace.(path Providers) ("\"" ^ Toml_line_editor.escape_string provider_id ^ "\".credentials") in
     List.fold_left (fun text (key, value) ->
       Toml_line_editor.edit_table_scalar text ~path:table ~key ~value)

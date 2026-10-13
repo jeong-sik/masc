@@ -78,26 +78,39 @@ let verb_to_string = function
 
 (* The wire carries a verb name plus args; the closed variant is the only
    thing that crosses a boundary. *)
+let interaction_verb = function
+  | Activate_tab -> "activate_tab"
+  | Scroll_at _ -> "scroll_at"
+  | Hover_at _ -> "hover_at"
+  | Click_at _ -> "click_at"
+  | Drag _ -> "drag"
+  | Click _ | Click_node _ -> "click"
+  | Fill _ | Fill_node _ -> "fill"
+  | Follow_link _ -> "follow_link"
+  | Scroll _ -> "scroll"
+;;
+
 let interaction_args ~tab_id ~expected_url action =
   let node_fields target = ["documentId",`String target.document_id; "nodeId",`String target.node_id] in
+  let verb = "action", `String (interaction_verb action) in
   let fields = match action with
-    | Activate_tab -> ["action",`String "activate_tab"]
-    | Scroll_at {point;viewport;x;y} -> ["action", `String "scroll_at";
+    | Activate_tab -> [verb]
+    | Scroll_at {point;viewport;x;y} -> [verb;
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport;
         "x",`Int x; "y",`Int y]
-    | Hover_at {point;viewport} -> ["action", `String "hover_at";
+    | Hover_at {point;viewport} -> [verb;
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
-    | Click_at {point;viewport} -> ["action", `String "click_at";
+    | Click_at {point;viewport} -> [verb;
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
-    | Drag {from;to_;viewport} -> ["action", `String "drag";
+    | Drag {from;to_;viewport} -> [verb;
         "from", Pointer.point_to_json from; "to", Pointer.point_to_json to_;
         "viewport", Pointer.viewport_to_json viewport]
-    | Click selector -> ["action", `String "click"; "selector", `String selector]
-    | Fill {selector; text} -> ["action", `String "fill"; "selector", `String selector; "text", `String text]
-    | Follow_link target -> ("action",`String "follow_link") :: node_fields target
-    | Click_node target -> ("action",`String "click") :: node_fields target
-    | Fill_node {target;text} -> ("action",`String "fill") :: ("text",`String text) :: node_fields target
-    | Scroll {x; y} -> ["action", `String "scroll"; "x", `Int x; "y", `Int y] in
+    | Click selector -> [verb; "selector", `String selector]
+    | Fill {selector; text} -> [verb; "selector", `String selector; "text", `String text]
+    | Follow_link target -> verb :: node_fields target
+    | Click_node target -> verb :: node_fields target
+    | Fill_node {target;text} -> verb :: ("text",`String text) :: node_fields target
+    | Scroll {x; y} -> [verb; "x", `Int x; "y", `Int y] in
   `Assoc (("tabId", `Int tab_id) :: fields @
     (Option.map (fun url -> "expectedUrl", `String url) expected_url |> Option.to_list))
 

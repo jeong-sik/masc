@@ -631,7 +631,17 @@ let flow_input_capacity_evidence error =
    walk's advances, so the caller adds it. *)
 let flow_has_invalid_output error =
   let evidence, _ = flow_evidence_and_final_verdict error in
-  let invalid_json = function Exact_output.Invalid_json_output -> true | _ -> false in
+  let invalid_json = function
+    | Exact_output.Invalid_json_output -> true
+    | Exact_output.Completion_failed _
+    | Exact_output.Response_body_deadline_exceeded
+    | Exact_output.Provider_response_refused _
+    | Exact_output.Output_limit_reached
+    | Exact_output.Incomplete_output
+    | Exact_output.Missing_output
+    | Exact_output.Ambiguous_output _
+    | Exact_output.Unexpected_output_content -> false
+  in
   let invalid_advance (receipt : Exact_output.flow_advance_receipt) =
     match receipt.failed with
     | Exact_output.Flow_advance_execution_failed { cause; _ } -> invalid_json cause

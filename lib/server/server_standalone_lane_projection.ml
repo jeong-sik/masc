@@ -733,7 +733,9 @@ let lane_json
     | Configured _ when running_count > 0 -> "running"
     | Configured _ when runs = [] -> "no_retained_observation"
     | Configured _ ->
-      (match latest_terminal_kind with Some Failed -> "degraded" | Some _ | None -> "idle")
+      (match latest_terminal_kind with
+       | Some Failed -> "degraded"
+       | Some (Succeeded | Cancelled) | None -> "idle")
   in
   let last_started_at = Option.map (fun run -> run.started_at) latest in
   (* Only a measured finish. A server-restart orphan is written back with

@@ -136,7 +136,7 @@ let test_typed_provider_reason_reaches_runtime_exhausted () =
   check string
     "a typed exhaustion reason is not flattened into the provider catch-all"
     "runtime_exhausted"
-    surface.KSB.blocker_class
+    (KSB.runtime_blocker_class_to_string surface.KSB.blocker_class)
 ;;
 
 let test_reason_none_provider_error_falls_through () =
@@ -147,7 +147,7 @@ let test_reason_none_provider_error_falls_through () =
   check string
     "reason=None provider error -> provider_runtime_error catch-all"
     "provider_runtime_error"
-    surface.KSB.blocker_class
+    (KSB.runtime_blocker_class_to_string surface.KSB.blocker_class)
 ;;
 
 (* A typed provider code that is not a timeout: the summary carries the
@@ -163,7 +163,7 @@ let test_typed_provider_code_summary_is_the_record () =
      different model"
   in
   let surface = provider_runtime_surface_exn ~reason:None ~code ~detail () in
-  check string "class" "provider_runtime_error" surface.KSB.blocker_class;
+  check string "class" "provider_runtime_error" (KSB.runtime_blocker_class_to_string surface.KSB.blocker_class);
   check string "the summary is the record's code and detail"
     (Printf.sprintf "Provider runtime error (%s): %s" code detail)
     (Lazy.force surface.KSB.summary)
@@ -181,7 +181,7 @@ let test_provider_timeout_catch_all_stays_provider_runtime_error () =
   check string
     "provider timeout catch-all remains provider_runtime_error"
     "provider_runtime_error"
-    surface.KSB.blocker_class
+    (KSB.runtime_blocker_class_to_string surface.KSB.blocker_class)
 ;;
 
 let test_provider_timeout_detail_without_code_does_not_map_to_turn_timeout () =
@@ -197,7 +197,7 @@ let test_provider_timeout_detail_without_code_does_not_map_to_turn_timeout () =
     string
     "detail-only timeout text is not trusted"
     "provider_runtime_error"
-    surface.KSB.blocker_class
+    (KSB.runtime_blocker_class_to_string surface.KSB.blocker_class)
 ;;
 
 let test_masc_accept_rejected_provider_record_does_not_reparse_detail () =
@@ -222,7 +222,7 @@ let test_masc_accept_rejected_provider_record_does_not_reparse_detail () =
   check string
     "provider runtime detail is not reparsed"
     "provider_runtime_error"
-    surface.KSB.blocker_class
+    (KSB.runtime_blocker_class_to_string surface.KSB.blocker_class)
 ;;
 
 (* ── Agent_core agent_error decision (#38940 review) ────────────── *)

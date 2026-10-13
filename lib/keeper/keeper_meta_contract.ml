@@ -134,22 +134,6 @@ let blocker_class_of_serialized_string = function
   | _ -> None
 ;;
 
-let runtime_exhaustion_summary = function
-  | Connection_refused ->
-    "Runtime exhausted after provider failures; local runtime connection refused."
-  | Dns_failure ->
-    "Runtime exhausted; hostname resolution failed (DNS)."
-  | No_providers_available -> "Runtime exhausted; no providers were available."
-  | All_providers_failed ->
-    "Runtime exhausted after all configured providers failed; inspect per-attempt root causes."
-  | Candidates_filtered_after_cycles ->
-    "Runtime exhausted after provider candidates were filtered; inspect candidate filter reasons."
-  | Session_conflict ->
-    "Runtime exhausted because another process owns the provider session lease."
-  | Other_detail _ ->
-    "Runtime exhausted; inspect runtime attempts for the dominant root cause."
-;;
-
 (* ── Unified blocker_info: typed klass + free-form detail ───────
    Replaces the historic split blocker fields. The string-only field was used
    by substring classifiers to recover a typed class — exactly the workaround

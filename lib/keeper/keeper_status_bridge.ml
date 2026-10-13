@@ -106,9 +106,8 @@ let runtime_keepalive_started_at (config : Workspace_utils.config) (meta : keepe
 ;;
 
 (* ── Structured blocker classification ──────────────────────── *)
-(* Types blocker_class, runtime_exhaustion_reason, blocker_class_to_string,
-   and runtime_exhaustion_summary
-   are defined in Keeper_types (keeper_types.ml). *)
+(* The runtime blocker surface and its class are defined in
+   [Keeper_status_bridge_blocker]. *)
 
 
 include Keeper_status_bridge_blocker
@@ -162,7 +161,7 @@ let runtime_blocker_facts_json (meta : keeper_meta) =
 let runtime_blocker_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
   match runtime_blocker_surface_opt config meta with
   | Some blocker ->
-    [ "runtime_blocker_class", `String blocker.blocker_class
+    [ "runtime_blocker_class", `String (runtime_blocker_class_to_string blocker.blocker_class)
     ; "runtime_blocker_summary", `String (Lazy.force blocker.summary)
     ; "runtime_blocker_facts", runtime_blocker_facts_json meta
     ]
@@ -204,13 +203,22 @@ let attention_fields_json_with_approval_queue
       match runtime_blocker with
       | Some _ when meta.paused ->
         true, Some "paused", Some "inspect_blocker_before_resume"
-      | Some blocker when is_runtime_exhausted_blocker_class blocker.blocker_class ->
+      | Some { blocker_class = Blocked_by_runtime_exhaustion; _ } ->
         true, Some "runtime_attempts_exhausted", Some "inspect_runtime_attempts"
-      | Some blocker when is_provider_runtime_blocker_class blocker.blocker_class ->
+      | Some { blocker_class = Blocked_by_provider_runtime_error; _ } ->
         true, Some "provider_runtime_error", Some "inspect_provider_runtime_cause"
-      | Some blocker when is_fiber_unresolved_blocker_class blocker.blocker_class ->
+      | Some { blocker_class = Blocked_by_unresolved_fiber; _ } ->
         true, Some "fiber_unresolved", Some "inspect_turn_finalization"
-      | Some _ -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"
+      | Some
+          { blocker_class =
+              ( Blocked_by_heartbeat_failures
+              | Blocked_by_turn_failures
+              | Blocked_by_official_client_recovery
+              | Blocked_by_turn_configuration_error
+              | Blocked_by_exception
+              | Blocked_by_operator_interrupt )
+          ; _
+          } -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"
       | None when meta.paused -> true, Some "paused", Some "resume_or_review"
       (* Every branch above reads a record someone wrote: an approval row, a
          blocker class, an operator pause. A Keeper whose keepalive fiber is

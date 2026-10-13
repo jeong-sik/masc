@@ -376,8 +376,8 @@ let test_tool_audit_cache_invalidation_for_recreated_keeper () =
 
 (* Every failure_reason the registry can hold, so a new variant lands here
    rather than reaching the trust snapshot as an undecodable string. The
-   producer emits blocker_class as a string and the consumer parses it with
-   Keeper_meta_contract.blocker_class_of_serialized_string; the two
+   producer writes runtime_blocker_class_to_string and the consumer parses it
+   with Keeper_meta_contract.blocker_class_of_serialized_string; the two
    vocabularies are not the same set (#25797). *)
 let every_failure_reason : Keeper_registry.failure_reason list =
   [ Keeper_registry.Heartbeat_consecutive_failures 3
@@ -437,7 +437,7 @@ let test_exhaustion_reaches_the_runtime_exhausted_class () =
     Alcotest.(check string)
       "typed exhaustion is not flattened into provider_runtime_error"
       "runtime_exhausted"
-      surface.Keeper_status_bridge.blocker_class
+      (Keeper_status_bridge.runtime_blocker_class_to_string surface.Keeper_status_bridge.blocker_class)
 
 (* Without the typed reason the same constructor is a plain provider error, so
    the two must not collapse into one answer. *)
@@ -460,7 +460,7 @@ let test_provider_error_without_reason_stays_provider_error () =
     Alcotest.(check string)
       "a provider error without an exhaustion reason keeps its own class"
       "provider_runtime_error"
-      surface.Keeper_status_bridge.blocker_class
+      (Keeper_status_bridge.runtime_blocker_class_to_string surface.Keeper_status_bridge.blocker_class)
 
 let test_undecodable_blocker_classes_are_named_not_counted () =
   let undecodable =
@@ -472,10 +472,10 @@ let test_undecodable_blocker_classes_are_named_not_counted () =
         | Some surface ->
           (match
              Keeper_meta_contract.blocker_class_of_serialized_string
-               surface.Keeper_status_bridge.blocker_class
+               (Keeper_status_bridge.runtime_blocker_class_to_string surface.Keeper_status_bridge.blocker_class)
            with
            | Some _ -> None
-           | None -> Some surface.Keeper_status_bridge.blocker_class))
+           | None -> Some (Keeper_status_bridge.runtime_blocker_class_to_string surface.Keeper_status_bridge.blocker_class)))
       every_failure_reason
   in
   (* This is the gap the issue reports, pinned as a list rather than a count:
@@ -503,9 +503,9 @@ let test_decodable_blocker_classes_stay_decodable () =
         | Some surface ->
           (match
              Keeper_meta_contract.blocker_class_of_serialized_string
-               surface.Keeper_status_bridge.blocker_class
+               (Keeper_status_bridge.runtime_blocker_class_to_string surface.Keeper_status_bridge.blocker_class)
            with
-           | Some _ -> Some surface.Keeper_status_bridge.blocker_class
+           | Some _ -> Some (Keeper_status_bridge.runtime_blocker_class_to_string surface.Keeper_status_bridge.blocker_class)
            | None -> None))
       every_failure_reason
   in
@@ -604,7 +604,7 @@ let test_turn_failures_summary_names_the_newest_failed_receipt () =
         with
         | Some surface ->
           Alcotest.(check string)
-            "class" "turn_failures" surface.Keeper_status_bridge.blocker_class;
+            "class" "turn_failures" (Keeper_status_bridge.runtime_blocker_class_to_string surface.Keeper_status_bridge.blocker_class);
           Lazy.force surface.Keeper_status_bridge.summary
         | None -> Alcotest.fail "a turn failure streak must produce a blocker surface"
       in

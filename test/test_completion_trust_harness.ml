@@ -606,7 +606,7 @@ let test_rejection_delivery_then_changed_submission_completes () =
       | [ stimulus ] -> stimulus
       | rows -> failf "expected one rejection row, got %d" (List.length rows)
     in
-    (match Masc.Keeper_world_observation.pending_board_event_of_stimulus ~meta stimulus with
+    (match Masc.Keeper_world_observation.pending_board_event_of_stimulus ~base_path:config.base_path ~meta stimulus with
      | Ok (Some { event_kind = Masc.Keeper_world_observation.Completion_authority_rejected rejection; _ }) ->
        check string "world event task" "task-001" rejection.car_task_id;
        check string "world event verification" first_id rejection.car_verification_id;

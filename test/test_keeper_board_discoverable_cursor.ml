@@ -285,7 +285,7 @@ let test_queued_edits_keep_their_captured_content () =
   check int "both explicitly addressed edits are durable before consumption" 2
     (Keeper_event_queue.length queue);
   let events = Keeper_event_queue.to_list queue |> List.map (fun stimulus ->
-    match Keeper_world_observation.pending_board_event_of_stimulus ~meta stimulus with
+    match Keeper_world_observation.pending_board_event_of_stimulus ~base_path:config.base_path ~meta stimulus with
     | Ok (Some event) -> event
     | Ok None -> fail "queued edit disappeared from projection"
     | Error _ -> fail "queued edit could not read its Board source") in

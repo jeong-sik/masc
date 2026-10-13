@@ -37,6 +37,11 @@ val deliver
     delivery. Both production callers pass the canonical request's
     [submitted_at]; [0.] means no floor and scans the whole ledger. *)
 
+val terminal_of_status :
+  Keeper_msg_async.request_status -> Keeper_event_queue.composition_terminal option
+(** Canonical settled outcome used by delivery and result projection.
+    Active request states have no terminal completion. *)
+
 val on_worker_settled
   :  base_path:string
   -> composition_tool:string

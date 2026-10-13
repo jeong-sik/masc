@@ -33,7 +33,10 @@ any node executes. Plan validation does not bypass a leaf tool's permissions.
 Use `execution: "async"` for an independent read whose wait would otherwise
 occupy the Keeper. Run returns a durable request ID; completion uses the existing
 Keeper wake. The request retains its draft/run references and original invocation.
-Retrieve its result explicitly with `keeper_composition_status`, and use
+The completion projection supplies canonical status, selected exports that fit
+the existing inline context boundary, and the original task/turn/run references.
+Use those results to continue the submitted task. Large results carry an exact
+`result_reference`; read that reference with `keeper_composition_status`, and use
 `keeper_composition_cancel` to request cancellation. Submission, completion and
 cancellation acknowledgement are separate states. Async does not make the
 external read itself faster.
@@ -45,6 +48,11 @@ The worker is never restarted for notification recovery. Pending/terminal
 queue evidence prevents a completion from being admitted again after a crash
 between delivery and acknowledgement, including after the original event has
 already been consumed. Unreadable result or delivery evidence stays explicit.
+Queue publication and same-source retries confirm strict durability before
+acknowledgement. Conflicting terminal or tool payloads for the same pending
+request are rejected. If the result record cannot be read or disagrees with
+the completion, `result_available=false` and a structured error remain visible
+in the next prompt; a wake alone is not proof of a usable result.
 
 The initial transient execution contract admits static read-only ordinary nodes.
 Writes, builds and terminal actions use their direct tools until their resource
@@ -63,6 +71,6 @@ turn still collects every completion for later judgments. A leaf that requires
 serial access keeps its enclosing composition serial. Transient run and async
 submission controls keep their serial admission contracts.
 
-Completion result projection, nested composition references and effectful
-resource-aware jobs remain tracked in
+Nested composition references, draft-to-publish reuse, effectful resource-aware
+jobs and fixed-condition latency measurements remain tracked in
 [issue #42799](https://github.com/jeong-sik/masc/issues/42799).

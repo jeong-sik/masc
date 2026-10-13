@@ -89,7 +89,7 @@ let poison_board_signal_stimulus () : Keeper_event_queue.stimulus =
 let test_poison_stimulus_reports_permanent_error () =
   let meta = test_meta "poison-report" in
   match
-    Keeper_world_observation.pending_board_event_of_stimulus
+    Keeper_world_observation.pending_board_event_of_stimulus ~base_path:(Sys.getenv "MASC_BASE_PATH")
       ~meta
       (poison_board_signal_stimulus ())
   with
@@ -123,7 +123,7 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
   let meta = test_meta "poison-intake" in
   let stim = poison_board_signal_stimulus () in
   let first_pass =
-    Keeper_heartbeat_stimulus_intake.pending_board_events_of_stimulus_result
+    Keeper_heartbeat_stimulus_intake.pending_board_events_of_stimulus_result ~base_path:(Sys.getenv "MASC_BASE_PATH")
       ~meta_after_triage:meta
       stim
   in
@@ -138,7 +138,7 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
    | Keeper_heartbeat_stimulus_intake.Stimulus_connector_missing _ ->
      fail "Board source reported a connector read failure");
   let second_pass =
-    Keeper_heartbeat_stimulus_intake.pending_board_events_of_stimulus_result
+    Keeper_heartbeat_stimulus_intake.pending_board_events_of_stimulus_result ~base_path:(Sys.getenv "MASC_BASE_PATH")
       ~meta_after_triage:meta
       stim
   in
@@ -352,7 +352,7 @@ let comment_event ~meta ~post_id ~comment_id ~author content =
           }
     }
   in
-  match Keeper_world_observation.pending_board_event_of_stimulus ~meta stimulus with
+  match Keeper_world_observation.pending_board_event_of_stimulus ~base_path:(Sys.getenv "MASC_BASE_PATH") ~meta stimulus with
   | Error unavailable ->
     failf
       "comment event read failed: %s"
@@ -405,7 +405,7 @@ let test_board_replay_routes_exact_replies () =
     |> List.filter (fun source ->
          not (List.exists (Keeper_event_queue.stimulus_identity_equal source) before))
     |> List.filter_map (fun source ->
-         match Keeper_world_observation.pending_board_event_of_stimulus ~meta source with
+         match Keeper_world_observation.pending_board_event_of_stimulus ~base_path ~meta source with
          | Ok event -> event
          | Error unavailable -> fail (Keeper_world_observation_board_signal.unavailable_to_string unavailable))
   in

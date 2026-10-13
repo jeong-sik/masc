@@ -958,7 +958,7 @@ let test_completion_authority_rejection_preserves_human_provenance () =
     }
   in
   let event =
-    match WO.pending_board_event_of_stimulus ~meta:minimal_meta stimulus with
+    match WO.pending_board_event_of_stimulus ~base_path:(Filename.get_temp_dir_name ()) ~meta:minimal_meta stimulus with
     | Ok (Some event) -> event
     | Ok None -> fail "completion authority rejection must produce an event"
     | Error _ -> fail "completion authority rejection must not read Board state"

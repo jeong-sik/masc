@@ -107,6 +107,21 @@ let deliver_or_fail config ~terminal =
   | Error detail -> fail ("deliver failed: " ^ detail)
 ;;
 
+let persist_completion_result config status =
+  let entry : Async.entry =
+    { request_id; keeper_name = submitter; base_path = config.Workspace.base_path
+    ; submitted_by = submitter
+    ; request_context = Some [ "composition_tool", `String composition_tool
+        ; "composition_run_id", `String "original-run"
+        ; "parent_tool_use_id", `String "original-invocation"
+        ; "source_turn", `Int 7
+        ; "source_task_id", `String "original-task" ]
+    ; status; submitted_at = 1.; completed_at = Some 2. } in
+  match Async.For_testing.persist_terminal_record entry with
+  | Ok () -> ()
+  | Error detail -> fail ("persist completion fixture failed: " ^ detail)
+;;
+
 (* The whole point of the change: the Keeper is told, on its own queue, keyed
    on the request id the tool handed it. *)
 let the_result_reaches_the_submitter () =
@@ -236,6 +251,8 @@ let uncertain_queue_durability_does_not_acknowledge_delivery () =
 let the_turn_can_read_the_result () =
   with_workspace (fun config ->
     ensure_keeper config ~keeper_name:submitter;
+    persist_completion_result config
+      (Async.Done { ok = false; body = "node search: timed out"; data = None });
     deliver_or_fail
       config
       ~terminal:(Event_queue.Composition_failed "node search: timed out");
@@ -249,7 +266,7 @@ let the_turn_can_read_the_result () =
         | Ok None -> fail "the submitter has no meta"
         | Error err -> fail ("meta load failed: " ^ err)
       in
-      (match WO.pending_board_event_of_stimulus ~meta stimulus with
+      (match WO.pending_board_event_of_stimulus ~base_path:config.Workspace.base_path ~meta stimulus with
        | Error _ -> fail "the result must project without a Board read"
        | Ok None -> fail "the result projects to nothing the turn can read"
        | Ok (Some event) ->
@@ -268,11 +285,12 @@ let the_turn_can_read_the_result () =
            "the row states what finished, how, and under which id"
            (composition_tool ^ " failed " ^ request_id)
            event.WO.title;
-         check
-           bool
-           "the failure detail is what the turn reads"
-           true
-           (String.equal event.WO.preview "node search: timed out"))
+         let projected = Yojson.Safe.from_string event.WO.preview in
+         check string "the original failure detail is available"
+           "node search: timed out"
+           Yojson.Safe.Util.(projected |> member "terminal_detail" |> to_string);
+         check string "the failure points to the exact original result" request_id
+           Yojson.Safe.Util.(projected |> member "result_reference" |> member "arguments" |> member "request_id" |> to_string))
     | _ -> fail "the submitter's queue holds no result")
 ;;
 
@@ -285,6 +303,10 @@ let the_turn_can_read_the_result () =
 let the_prompt_row_says_what_settled () =
   with_workspace (fun config ->
     ensure_keeper config ~keeper_name:submitter;
+    let exports = `Assoc [ "answer", `Assoc [ "available", `Bool true; "value", `String "selected answer" ] ] in
+    persist_completion_result config
+      (Async.Done { ok = true; body = "complete durable result";
+        data = Some (`Assoc [ "exports", exports; "nodes", `List [] ]) });
     deliver_or_fail config ~terminal:Event_queue.Composition_succeeded;
     match
       queued_results ~base_path:config.Workspace.base_path ~keeper_name:submitter
@@ -296,7 +318,7 @@ let the_prompt_row_says_what_settled () =
         | Ok None -> fail "the submitter has no meta"
         | Error err -> fail ("meta load failed: " ^ err)
       in
-      (match WO.pending_board_event_of_stimulus ~meta stimulus with
+      (match WO.pending_board_event_of_stimulus ~base_path:config.Workspace.base_path ~meta stimulus with
        | Ok (Some event) ->
          let fields = Prompt.For_testing.board_event_fields event in
          let field name =
@@ -310,13 +332,115 @@ let the_prompt_row_says_what_settled () =
            ("keeper-composition:" ^ request_id) (field "post_id");
          check string "the title names the composition, the outcome, and the id"
            (composition_tool ^ " succeeded " ^ request_id) (field "title");
-         (* No preview on success: the result is in the async request record,
-            and the id to read it with is in the title above. Same as
-            Delegate_no_reply, which also has no text to show. *)
-         check string "a success shows no body" "" (field "preview")
+         let projected = Yojson.Safe.from_string (field "preview") in
+         check bool "success has canonical result proof" true
+           Yojson.Safe.Util.(projected |> member "result_available" |> to_bool);
+         check string "the next prompt carries the selected answer" "selected answer"
+           Yojson.Safe.Util.(projected |> member "exports" |> member "answer" |> member "value" |> to_string);
+         check string "the answer remains joined to the original task" "original-task"
+           Yojson.Safe.Util.(projected |> member "source" |> member "source_task_id" |> to_string);
+         check string "and to the actual run" "original-run"
+           Yojson.Safe.Util.(projected |> member "source" |> member "composition_run_id" |> to_string);
+         Printf.printf "composition_completion_projection_trial canonical_result=true selected_answer_in_prompt=true status_reads_to_recover_selected_answer=0 prompt_preview_bytes=%d model_latency_measured=false\n%!"
+           (String.length (field "preview"))
        | Ok None -> fail "the result projects to nothing the turn can read"
        | Error _ -> fail "the result must project without a Board read")
     | _ -> fail "the submitter's queue holds no result")
+;;
+
+let projected_completion config ~reader =
+  let meta = match Keeper_meta_store.read_meta config reader with
+    | Ok (Some meta) -> meta | Ok None -> fail "projection reader metadata is missing"
+    | Error detail -> fail detail in
+  match queued_results ~base_path:config.Workspace.base_path ~keeper_name:submitter with
+  | [ stimulus, _ ] ->
+    (match WO.pending_board_event_of_stimulus ~base_path:config.Workspace.base_path ~meta stimulus with
+     | Ok (Some event) ->
+       let fields = Prompt.For_testing.board_event_fields event in
+       let preview = match List.assoc_opt "preview" fields with
+         | Some preview -> preview | None -> fail "completion has no structured result projection" in
+       Yojson.Safe.from_string preview
+     | Ok None -> fail "completion did not reach the next prompt"
+     | Error unavailable -> fail (Masc.Keeper_world_observation_board_signal.unavailable_to_string unavailable))
+  | _ -> fail "projection did not find one original completion"
+;;
+
+let a_large_export_remains_an_exact_reference () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:submitter;
+    let value = String.make (Common.max_agent_core_inline_result_bytes + 1) 'x' in
+    let data = `Assoc [ "exports", `Assoc [ "answer", `Assoc [ "available", `Bool true; "value", `String value ] ] ] in
+    persist_completion_result config (Async.Done { ok = true; body = value; data = Some data });
+    deliver_or_fail config ~terminal:Event_queue.Composition_succeeded;
+    let projected = projected_completion config ~reader:submitter in
+    check bool "large selected value is explicitly referenced" false
+      Yojson.Safe.Util.(projected |> member "result_inline" |> to_bool);
+    check bool "partial JSON is not substituted for the value" true
+      Yojson.Safe.Util.(projected |> member "exports" = `Null);
+    let exact_id = Yojson.Safe.Util.(projected |> member "result_reference" |> member "arguments" |> member "request_id" |> to_string) in
+    check string "result lookup remains exact" request_id exact_id;
+    (match Async.poll ~base_path:config.Workspace.base_path ~caller:submitter exact_id with
+     | Async.Found { status = Async.Done { data = Some original; _ }; _ } ->
+       check string "reference recovers the complete original export" value
+         Yojson.Safe.Util.(original |> member "exports" |> member "answer" |> member "value" |> to_string)
+     | _ -> fail "large selected result could not be recovered by its exact reference"))
+;;
+
+let partial_failure_is_visible_with_the_available_result () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:submitter;
+    let exports = `Assoc
+        [ "answer", `Assoc [ "available", `Bool true; "value", `String "independent answer" ]
+        ; "other", `Assoc [ "available", `Bool false; "error", `Assoc [ "kind", `String "producer_unavailable" ] ] ] in
+    let detail = "independent branch returned; other branch failed" in
+    let data = `Assoc [ "exports", exports
+                      ; "cause", `Assoc [ "kind", `String "tool_did_not_complete" ]
+                      ; "effect_disposition", `String "effect_outcome_unknown" ] in
+    persist_completion_result config (Async.Done { ok = false; body = detail; data = Some data });
+    deliver_or_fail config ~terminal:(Event_queue.Composition_failed detail);
+    let projected = projected_completion config ~reader:submitter in
+    check string "partial result does not promote the terminal" "failed"
+      Yojson.Safe.Util.(projected |> member "outcome" |> to_string);
+    check string "independent result remains available" "independent answer"
+      Yojson.Safe.Util.(projected |> member "exports" |> member "answer" |> member "value" |> to_string);
+    check bool "failed branch is explicit" false
+      Yojson.Safe.Util.(projected |> member "exports" |> member "other" |> member "available" |> to_bool);
+    check string "unknown effect is retained" "effect_outcome_unknown"
+      Yojson.Safe.Util.(projected |> member "effect_disposition" |> to_string);
+    check string "original failure cause is retained" "tool_did_not_complete"
+      Yojson.Safe.Util.(projected |> member "cause" |> member "kind" |> to_string))
+;;
+
+let missing_or_inconsistent_result_is_explicit () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:submitter;
+    deliver_or_fail config ~terminal:Event_queue.Composition_succeeded;
+    let unavailable = projected_completion config ~reader:submitter in
+    check bool "a notification is not result proof" false
+      Yojson.Safe.Util.(unavailable |> member "result_available" |> to_bool);
+    check string "missing request is explicit" "canonical_result_unavailable"
+      Yojson.Safe.Util.(unavailable |> member "result_error" |> member "kind" |> to_string);
+    persist_completion_result config
+      (Async.Done { ok = false; body = "canonical failure"; data = None });
+    let inconsistent = projected_completion config ~reader:submitter in
+    check bool "a stale success cannot authorize a failed canonical result" false
+      Yojson.Safe.Util.(inconsistent |> member "result_available" |> to_bool);
+    check string "terminal disagreement is explicit" "terminal_mismatch"
+      Yojson.Safe.Util.(inconsistent |> member "result_error" |> member "kind" |> to_string))
+;;
+
+let another_keeper_cannot_read_the_result () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:submitter;
+    ensure_keeper config ~keeper_name:"another-keeper";
+    let data = `Assoc [ "exports", `Assoc [ "secret", `Assoc [ "available", `Bool true; "value", `String "owned result" ] ] ] in
+    persist_completion_result config (Async.Done { ok = true; body = "owned result"; data = Some data });
+    deliver_or_fail config ~terminal:Event_queue.Composition_succeeded;
+    let rejected = projected_completion config ~reader:"another-keeper" in
+    check bool "different Keeper has no canonical result authority" false
+      Yojson.Safe.Util.(rejected |> member "result_available" |> to_bool);
+    check bool "unowned result is not injected into the next prompt" true
+      Yojson.Safe.Util.(rejected |> member "exports" = `Null))
 ;;
 
 (* The queue is durable, so a result that cannot be read back is lost on the
@@ -687,6 +811,14 @@ let () =
             the_prompt_row_says_what_settled
         ; test_case "the result survives a round trip" `Quick
             the_result_survives_a_round_trip
+        ; test_case "large exports remain exact references" `Quick
+            a_large_export_remains_an_exact_reference
+        ; test_case "partial failure preserves available results and unknown effects" `Quick
+            partial_failure_is_visible_with_the_available_result
+        ; test_case "missing or inconsistent result remains explicit" `Quick
+            missing_or_inconsistent_result_is_explicit
+        ; test_case "another Keeper cannot read a result" `Quick
+            another_keeper_cannot_read_the_result
         ] )
     ; ( "ordering"
       , [ test_case "a result is read before the Board backlog" `Quick

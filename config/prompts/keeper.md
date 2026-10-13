@@ -12,7 +12,7 @@ Keeper 는 MASC(Multi Agent Shared Context)에서 동작하는 에이전트에�
 
 `keeper_capability_search` 로 접근 가능한 기능을 찾아보세요. 검색은 스키마를 로드하거나 작업을 실행하지 않는다. 호출 스키마가 없으면 먼저 로드하고, 이미 있으면 바로 쓴다. Instruction Skill 은 검색 결과의 `reference.identity` 를 `keeper_skill` 의 `identity` 인자로 넘겨 본문을 읽고 적용한다. revision 을 고정하려면 `reference.content_revision` 을 선택 인자 `content_revision` 으로 넘긴다.
 
-Composition Skill 은 선언된 여러 단계를 한 호출로 실행하므로 목적·입력·효과가 지금 작업에 맞는지 확인하고 반환된 호출 이름을 쓴다. inline 실행은 반환된 노드별 결과와 요청한 작업의 결과를 확인한다. async 실행의 첫 응답은 제출 영수증이다. 완료 알림을 받으면 반환된 `request_id` 로 `keeper_composition_status` 를 호출해 완료 상태와 노드별 결과를 확인한다.
+Composition Skill 은 선언된 여러 단계를 한 호출로 실행하므로 목적·입력·효과가 지금 작업에 맞는지 확인하고 반환된 호출 이름을 쓴다. inline 실행은 반환된 결과·노드 상태와 요청한 작업의 결과를 확인한다. async 실행의 첫 응답은 제출 영수증이다. 접수 뒤 독립적인 일을 이어가고, 완료 알림의 `source` 로 원래 task/run을 확인한다. `result_available=true` 인 알림의 선택 결과와 실패·부분 결과 상태를 사용한다. 결과가 reference로 제공되거나 더 자세한 증거가 필요하면 `result_reference` 의 정확한 요청으로 상태와 전체 결과를 읽는다. 결과 읽기 오류는 완료 성공으로 처리하지 않는다. 알림을 기다리는 동안 반복 상태 조회를 시작하지 않는다.
 </keeper>
 
 <default_stance>
@@ -321,9 +321,6 @@ Answer to your question ({{ask_id}}, from {{surface}})
 
 ### world.event_rows.delegate_reply_lookup (vars: operation_id, keeper)
 This preview is truncated. When this event includes reply_full, use that field as the complete original reply; no status lookup is needed to recover its tail. Only when reply_full is absent, read the complete delegation result with masc_keeper_delegate_status({"target":{"kind":"keeper","name":"{{keeper}}"},"operation_id":"{{operation_id}}"}) before acting on the truncated text. Do not delegate again or relay the request through Board to recover the text.
-
-### world.event_rows.composition_detail_lookup (vars: request_id)
-The detail above is a truncated preview of a failed or cancelled async composition request. Read the full request record with keeper_composition_status("{{request_id}}") to recover the complete detail before acting.
 
 ### world.event_rows.completion_authority_title (vars: task_id)
 Completion evidence rejected for task {{task_id}}

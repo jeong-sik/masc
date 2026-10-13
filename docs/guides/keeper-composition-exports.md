@@ -77,5 +77,9 @@ The structured plan request uses the same declarations:
 
 The [transient prepare/run tools](keeper-transient-compositions.md) use this
 request codec and describe the eligibility of named inline compositions for
-parallel execution. Async completion delivery, nested references and effectful jobs are tracked in
+parallel execution. Completion wakes project selected exports and original
+task/run references from the canonical owned request, or an exact lookup when
+they do not fit inline. This preserves failed-branch availability, cause and
+unknown-effect evidence. It does not copy full intermediate bodies into the
+durable queue. Nested references and effectful jobs are tracked in
 [issue #42799](https://github.com/jeong-sik/masc/issues/42799).

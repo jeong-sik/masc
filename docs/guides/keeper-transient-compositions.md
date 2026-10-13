@@ -54,6 +54,30 @@ request are rejected. If the result record cannot be read or disagrees with
 the completion, `result_available=false` and a structured error remain visible
 in the next prompt; a wake alone is not proof of a usable result.
 
+To continue a prepared async run, pass the same draft digest and its original
+`composition_run_id` to the existing run tool:
+
+```json
+{"sha256": "the original draft sha256", "resume_run_id": "the original composition_run_id"}
+```
+
+Continuation creates a new async request under the original run, invocation
+artifact, source turn and task. The previous request must have an exact canonical
+durable terminal record before the new worker can take ownership. A queued,
+running, cancelling or unreadable prior request cannot authorize another worker.
+Reusing the argument is an explicit request to continue, not notification recovery.
+
+Completed nodes retain their complete typed result and original occurrence IDs;
+they do not dispatch or emit another ordinary tool observation. Their outputs
+are validated against the frozen plan in the new executor before downstream
+inputs use them. An unfinished read-only attempt from a previous owner, or a
+failed node with producer-proven pre-effect evidence, can dispatch again.
+Deferred results and failed nodes with unknown or post-effect evidence cannot.
+Missing, corrupt, foreign or conflicting run evidence remains a typed refusal;
+the tool never converts it into a fresh run. This continuation applies to
+prepared async ordinary read-only drafts. Owned external-job suspension and
+effectful resource admission remain separate work in issue #42799.
+
 The initial transient execution contract admits static read-only ordinary nodes.
 Writes, builds and terminal actions use their direct tools until their resource
 and durable continuation contracts are implemented. The restriction is checked

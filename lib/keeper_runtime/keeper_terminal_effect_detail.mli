@@ -40,6 +40,9 @@ type node_deferral =
 
 (** The composition executor's failure cause, projected without its JSON. *)
 type composition_cause =
+  | Run_journal_rejected of { detail : string }
+      (** Original-run authority could not be established. The structured
+          journal refusal remains in the enclosing payload. *)
   | Node_failed of failed_node
       (** A node failed. *)
   | Node_deferred of

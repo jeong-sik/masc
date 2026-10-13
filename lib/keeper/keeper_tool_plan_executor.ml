@@ -107,6 +107,17 @@ let outer_completion plan =
   else Agent_core.Tool_contract.Continue_after_success
 ;;
 
+type node_execution_origin =
+  | Fresh_dispatch
+  | Retained_completion
+  | Dispatch_refused
+
+let node_execution_origin_to_string = function
+  | Fresh_dispatch -> "fresh_dispatch"
+  | Retained_completion -> "retained_completion"
+  | Dispatch_refused -> "dispatch_refused"
+;;
+
 type node_result =
   { node_id : Keeper_tool_plan.Node_id.t
   ; execution_id : Ids.Execution_id.t
@@ -116,6 +127,7 @@ type node_result =
   ; result : Tool_result.result
   ; output_validation_error : Keeper_tool_plan.execution_error option
   ; tool_use_id : string
+  ; execution_origin : node_execution_origin
   ; failure_effect_disposition : Tool_result.failure_effect_disposition option
   ; deferred_kind : Keeper_tool_execution.deferred_kind option
   ; result_bytes : int
@@ -153,6 +165,7 @@ let dispatch_result
 ;;
 
 type cause =
+  | Run_journal_rejected of Keeper_tool_execution_journal.error
   | Plan_execution_failed of
       { node_id : Keeper_tool_plan.Node_id.t
       ; schedule : Agent_core.Tool_contract.schedule
@@ -271,6 +284,7 @@ let execute_one
       ~outputs
       ~tool_use_id_for_node
       ~dispatch
+      ?journal
       ?observe_node_result
       scheduled
   =
@@ -311,28 +325,71 @@ let execute_one
     let execution_id = Ids.Execution_id.generate () in
     let tool_use_id = tool_use_id_for_node ~execution_id node in
     let start_time = Tool_timing.start () in
-    let result =
+    let journal_failure error =
+      dispatch_result
+        ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
+        (Tool_result.make_err
+           ~class_:(Keeper_tool_execution_journal.failure_class error)
+           ~effect_disposition:Tool_result.Effect_outcome_unknown
+           ~tool_name:node.tool_name ~start_time
+           ~data:(Keeper_tool_execution_journal.error_to_json error)
+           (Keeper_tool_execution_journal.error_to_string error))
+    in
+    let dispatch_fresh () =
       Cancel_safe.protect
         ~on_exn:(fun exn ->
           dispatch_result
             ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
             (Tool_result.make_err_of_exn
                ~class_:Tool_result.Runtime_failure
-               ~tool_name:node.tool_name
-               ~start_time
-               exn))
+               ~tool_name:node.tool_name ~start_time exn))
         (fun () ->
-           dispatch
-             ~tool_use_id
-             ~node
-             ~descriptor:scheduled.descriptor
-             ~schedule:scheduled.schedule
-             ~input)
+           dispatch ~tool_use_id ~node ~descriptor:scheduled.descriptor
+             ~schedule:scheduled.schedule ~input)
+    in
+    let execution_id, tool_use_id, execution_origin, result, journal_error =
+      match journal with
+      | None -> execution_id, tool_use_id, Fresh_dispatch, dispatch_fresh (), None
+      | Some worker ->
+        (match Keeper_tool_execution_journal.lookup worker
+                 ~node_id ~tool_name:node.tool_name ~input with
+         | Error error ->
+           execution_id, tool_use_id, Dispatch_refused, journal_failure error, None
+         | Ok (Keeper_tool_execution_journal.Reuse_completed stored) ->
+           stored.execution_id, stored.tool_use_id, Retained_completion,
+           dispatch_result ~result_bytes:stored.result_bytes
+             ?truncated_to:stored.truncated_to stored.result, None
+         | Ok Keeper_tool_execution_journal.Dispatch ->
+           let readonly =
+             Keeper_tool_descriptor.readonly_for_input scheduled.descriptor ~input
+             = Some true
+           in
+           match Keeper_tool_execution_journal.begin_attempt worker
+                   ~node_id ~tool_name:node.tool_name ~input
+                   ~execution_id ~tool_use_id ~readonly with
+           | Error error ->
+             execution_id, tool_use_id, Dispatch_refused, journal_failure error, None
+           | Ok attempt ->
+             let result = dispatch_fresh () in
+             let result_bytes = match result.result_bytes with
+               | Some bytes -> bytes
+               | None -> String.length (Tool_result.message result.result)
+             in
+             let journal_error =
+               match Keeper_tool_execution_journal.settle_attempt
+                       ?failure_effect_disposition:result.failure_effect_disposition
+                       attempt
+                       ~result:result.result ~result_bytes
+                       ~truncated_to:result.truncated_to with
+               | Ok () -> None
+               | Error error -> Some (Keeper_tool_execution_journal.error_to_string error)
+             in
+             execution_id, tool_use_id, Fresh_dispatch, result, journal_error)
     in
     let result_bytes =
-      Option.value
-        ~default:(String.length (Tool_result.message result.result))
-        result.result_bytes
+      match result.result_bytes with
+      | Some bytes -> bytes
+      | None -> String.length (Tool_result.message result.result)
     in
     let node_result =
       { node_id
@@ -343,6 +400,7 @@ let execute_one
       ; result = result.result
       ; output_validation_error = None
       ; tool_use_id
+      ; execution_origin
       ; failure_effect_disposition = result.failure_effect_disposition
       ; deferred_kind = result.deferred_kind
       ; result_bytes
@@ -367,9 +425,11 @@ let execute_one
     in
     let node_result = { node_result with output_validation_error } in
     let observation_error =
-      match observe_node_result with
-      | None -> None
-      | Some observe ->
+      match journal_error, execution_origin, observe_node_result with
+      | Some detail, _, _ -> Some detail
+      | None, Retained_completion, _ -> None
+      | None, (Fresh_dispatch | Dispatch_refused), None -> None
+      | None, (Fresh_dispatch | Dispatch_refused), Some observe ->
         (try
            match observe node_result with
            | Ok () -> None
@@ -391,6 +451,7 @@ let execute_with_tool_use_id
       ~run_id
       ~tool_use_id_for_node
       ~dispatch
+      ?journal
       ?observe_node_result
       ()
   =
@@ -629,6 +690,7 @@ let execute_with_tool_use_id
                 ~outputs
                 ~tool_use_id_for_node
                 ~dispatch
+                ?journal
                 ?observe_node_result
                 scheduled
             in
@@ -686,6 +748,15 @@ let execute_with_tool_use_id
        Error { settled; cause; effect_disposition = aggregate_effect_disposition settled })
   in
   let batches = schedule plan in
+  let journal_admission = match journal with
+    | None -> Ok ()
+    | Some worker -> Keeper_tool_execution_journal.validate_plan worker ~plan
+  in
+  match journal_admission with
+  | Error error -> Error
+      { settled = []; cause = Run_journal_rejected error
+      ; effect_disposition = Tool_result.Effect_outcome_unknown }
+  | Ok () ->
   match Keeper_tool_plan.prepare_inputs plan with
   | Ok prepared_inputs -> run_wave ~prepared_inputs batches
   | Error (node_id, error) ->
@@ -720,7 +791,7 @@ let execute_with_tool_use_id
 
 (* TEL-OK: forwards to [execute_with_tool_use_id] below; no new effect
    originates here, so there is nothing local to instrument. *)
-let execute ~plan ~run_id ~dispatch ?observe_node_result () =
+let execute ~plan ~run_id ~dispatch ?journal ?observe_node_result () =
   let tool_use_id_for_node ~execution_id _node =
     "composition-node:" ^ Ids.Execution_id.to_string execution_id
   in
@@ -729,6 +800,7 @@ let execute ~plan ~run_id ~dispatch ?observe_node_result () =
     ~run_id
     ~tool_use_id_for_node
     ~dispatch
+    ?journal
     ?observe_node_result
     ()
 ;;
@@ -794,6 +866,7 @@ let execute_keeper_with_authority
       ?on_external_effect_deferred
       ?on_failed
       ?admit_node
+      ?journal
       ?observe_node_result
       ()
   =
@@ -908,6 +981,7 @@ let execute_keeper_with_authority
     ~run_id
     ~tool_use_id_for_node
     ~dispatch
+    ?journal
     ?observe_node_result
     ()
 ;;

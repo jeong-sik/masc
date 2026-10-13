@@ -115,6 +115,7 @@ let failure_detail (failure : Executor.failure) =
       "observing %s failed: %s"
       (Plan.Node_id.to_string node.Executor.node_id)
       detail
+  | Executor.Run_journal_rejected error -> Masc.Keeper_tool_execution_journal.error_to_string error
   | Executor.Outer_completion_mismatch _ -> "the outer completion does not match the plan"
 ;;
 

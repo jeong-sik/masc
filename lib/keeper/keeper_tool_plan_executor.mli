@@ -24,6 +24,13 @@ val schedule : Keeper_tool_plan.t -> batch list
     single outer composite invocation terminal. *)
 val outer_completion : Keeper_tool_plan.t -> Agent_core.Tool_contract.completion
 
+type node_execution_origin =
+  | Fresh_dispatch
+  | Retained_completion
+  | Dispatch_refused
+
+val node_execution_origin_to_string : node_execution_origin -> string
+
 type node_result = private
   { node_id : Keeper_tool_plan.Node_id.t
   ; execution_id : Ids.Execution_id.t
@@ -33,6 +40,7 @@ type node_result = private
   ; result : Tool_result.result
   ; output_validation_error : Keeper_tool_plan.execution_error option
   ; tool_use_id : string
+  ; execution_origin : node_execution_origin
   ; failure_effect_disposition : Tool_result.failure_effect_disposition option
   ; deferred_kind : Keeper_tool_execution.deferred_kind option
   ; result_bytes : int
@@ -59,6 +67,7 @@ val dispatch_result
   -> dispatch_result
 
 type cause =
+  | Run_journal_rejected of Keeper_tool_execution_journal.error
   | Plan_execution_failed of
       { node_id : Keeper_tool_plan.Node_id.t
       ; schedule : Agent_core.Tool_contract.schedule
@@ -114,11 +123,19 @@ type dispatch =
     the dispatch, exception settlement, durable row, and live refresh all share
     that identity. [observe_node_result], when supplied, is part of settlement: an observation
     error becomes [Node_observation_failed] after every in-flight sibling has
-    settled, preserving the aggregate effect disposition. *)
+    settled, preserving the aggregate effect disposition.
+
+    A supplied [journal] is the prepared run's canonical async worker binding.
+    It records the exact occurrence before dispatch and commits the producer's
+    typed settlement before ordinary observation. Retained completed results
+    preserve their original occurrence and payload, revalidate output against
+    this plan/run, and do not dispatch or repeat ordinary tool observations.
+    Missing or unavailable journal authority never becomes a fresh node. *)
 val execute
   :  plan:Keeper_tool_plan.t
   -> run_id:Keeper_tool_plan.Run_id.t
   -> dispatch:dispatch
+  -> ?journal:Keeper_tool_execution_journal.worker
   -> ?observe_node_result:(node_result -> (unit, string) result)
   -> unit
   -> (node_result list, failure) result
@@ -153,6 +170,7 @@ val execute_keeper
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
   -> ?admit_node:
        (node:Keeper_tool_plan.node -> (unit, admission_rejection) result)
+  -> ?journal:Keeper_tool_execution_journal.worker
   -> ?observe_node_result:(node_result -> (unit, string) result)
   -> unit
   -> (node_result list, failure) result
@@ -182,6 +200,7 @@ module Compatibility : sig
     -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
     -> ?admit_node:
          (node:Keeper_tool_plan.node -> (unit, admission_rejection) result)
+    -> ?journal:Keeper_tool_execution_journal.worker
     -> ?observe_node_result:(node_result -> (unit, string) result)
     -> unit
     -> (node_result list, failure) result

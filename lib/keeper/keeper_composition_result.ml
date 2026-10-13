@@ -20,6 +20,7 @@ let node_summary (node : Executor.node_result) =
   `Assoc
     ([ "node_id", `String (Plan.Node_id.to_string node.node_id)
      ; "execution_id", Ids.Execution_id.to_yojson node.execution_id
+     ; "execution_origin", `String (Executor.node_execution_origin_to_string node.execution_origin)
      ; "tool_name", `String node.tool_name
      ; "settled", `Bool true
      ; "disposition", `String (Tool_result.string_of_disposition node.result)
@@ -32,6 +33,9 @@ let node_summary (node : Executor.node_result) =
 ;;
 
 let cause_summary = function
+  | Executor.Run_journal_rejected error ->
+    `Assoc [ "kind", `String "run_journal_rejected"
+           ; "error", Keeper_tool_execution_journal.error_to_json error ]
   | Executor.Tool_did_not_complete node ->
     `Assoc [ "kind", `String "tool_did_not_complete"; "node", node_summary node ]
   | Executor.Node_observation_failed { node; detail } ->

@@ -1,0 +1,105 @@
+(** Durable prepared-run ownership and exact node-result continuation.
+    A worker is issued only at canonical async Queued acceptance. Rebinding
+    requires the previous owner's exact canonical terminal proof; every node
+    operation checks the current durable binding under the run transaction. *)
+
+type source =
+  { keeper_name : string
+  ; composition_run_id : Keeper_tool_plan.Composition_run_id.t
+  ; draft_reference : Tool_output.artifact_ref
+  ; run_reference : Tool_output.artifact_ref
+  ; parent_tool_use_id : string
+  ; source_turn : int
+  ; source_task_id : string option
+  }
+
+type t
+type worker
+type attempt
+
+type completed =
+  { execution_id : Ids.Execution_id.t
+  ; tool_use_id : string
+  ; result : Tool_result.result
+  ; result_bytes : int
+  ; truncated_to : int option
+  }
+
+type replay = Dispatch | Reuse_completed of completed
+
+type error =
+  | Invalid_source of string
+  | Missing_journal
+  | Unreadable_journal of string
+  | Corrupt_journal of string
+  | Source_conflict
+  | Queued_request_rejected of string
+  | Prior_owner_not_terminal of { request_id : string; reason : string }
+  | Ownership_changed
+  | Node_identity_conflict of Keeper_tool_plan.Node_id.t
+  | Replay_not_proven of Keeper_tool_plan.Node_id.t
+  | Attempt_conflict of Keeper_tool_plan.Node_id.t
+  | Plan_identity_conflict
+  | Draft_unavailable of string
+  | Invalid_result of string
+  | Persistence_failed of string
+
+val error_to_string : error -> string
+val error_to_json : error -> Yojson.Safe.t
+val failure_class : error -> Tool_result.tool_failure_class
+
+val prepare : base_path:string -> source -> (t, error) result
+(** Create the immutable source or confirm its exact existing identity. The
+    journal lives in the already-retained [keeper_msg_requests] owned tree. *)
+
+val load
+  : base_path:string
+  -> keeper_name:string
+  -> composition_run_id:Keeper_tool_plan.Composition_run_id.t
+  -> (t, error) result
+(** Strict read-only load. Missing/corrupt authority never creates a run. *)
+
+val source : t -> source
+
+val bind_request : t -> request_id:string -> (worker, error) result
+(** Called from Async [on_accepted], before the worker starts. The canonical
+    Queued record must have caller and keeper equal to [source.keeper_name],
+    with exact [composition_run_id], [draft_reference], [run_artifact],
+    [parent_tool_use_id], [source_turn], and optional [source_task_id] context.
+    Repeated binding to the same accepted request is idempotent. *)
+
+val validate_plan : worker -> plan:Keeper_tool_plan.t -> (unit, error) result
+(** Integrity-read the original manifest and compare the exact frozen plan
+    (including edges and exports), then check current durable ownership. *)
+
+val lookup
+  : worker
+  -> node_id:Keeper_tool_plan.Node_id.t
+  -> tool_name:string
+  -> input:Yojson.Safe.t
+  -> (replay, error) result
+(** Completed results alone are reusable. A producer-proven pre-effect failure
+    or a previous statically read-only Attempting record may dispatch again.
+    Deferred and unproven effect outcomes reject replay. *)
+
+val begin_attempt
+  : worker
+  -> node_id:Keeper_tool_plan.Node_id.t
+  -> tool_name:string
+  -> input:Yojson.Safe.t
+  -> execution_id:Ids.Execution_id.t
+  -> tool_use_id:string
+  -> readonly:bool
+  -> (attempt, error) result
+
+val settle_attempt
+  : ?failure_effect_disposition:Tool_result.failure_effect_disposition
+  -> attempt
+  -> result:Tool_result.result
+  -> result_bytes:int
+  -> truncated_to:int option
+  -> (unit, error) result
+(** Settle only the exact current occurrence owned by this worker. Persist the
+    complete typed result, including duration, metadata, retained artifacts and
+    strict checkpoint-coded media. A committed append remains successful when
+    descriptor cleanup alone fails. Cancellation propagates. *)

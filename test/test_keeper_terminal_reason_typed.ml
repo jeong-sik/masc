@@ -2369,6 +2369,11 @@ let () =
               { node_id = "post"; error = D.Input_validation_failed }
         ; payload = `Null
         }
+    ; D.Composition_failed
+        { composition_tool = "keeper_composition_run"
+        ; cause = D.Run_journal_rejected { detail = "original run authority unavailable" }
+        ; payload = `Assoc [ "kind", `String "missing_journal" ]
+        }
     ; D.Composition_result_manifest_unpersisted
         { composition_tool = "keeper_compose_plan"; detail = "disk full" }
     ; D.Composition_evidence_unpublished
@@ -2433,6 +2438,7 @@ let () =
     | D.Node_deferred _ -> 1
     | D.Node_observation_failed _ -> 2
     | D.Plan_execution_failed _ -> 3
+    | D.Run_journal_rejected _ -> 4
   in
   let node_deferral = function
     | D.Deferral_unrecorded -> 0
@@ -2461,7 +2467,7 @@ let () =
             | D.Composition_failed { cause; _ } -> Some (composition_cause cause)
             | _ -> None)
           samples)
-     = List.init 4 Fun.id);
+     = List.init 5 Fun.id);
   check
     "terminal effect detail samples cover every node deferral"
     (List.sort_uniq

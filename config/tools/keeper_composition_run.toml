@@ -9,7 +9,11 @@ Async ordinary drafts return a durable request id and deliver completion \
 later. Use valid selected exports from the completion projection. When results \
 are referenced or required detail is missing, read keeper_composition_status \
 with the exact request_id in result_reference. Do not repeatedly poll while \
-other useful work is available. Shared Skill publication is optional and separate."""
+other useful work is available. To continue a prepared async run after its previous \
+request has canonically settled, supply its original composition_run_id as \
+resume_run_id together with the same draft sha256. Completed nodes reuse their \
+recorded result and occurrence; unavailable evidence or unproven effects do not \
+authorize replay. Shared Skill publication is optional and separate."""
 additional_properties = false
 defer_loading = true
 
@@ -20,3 +24,10 @@ required = true
 min_length = 64
 max_length = 64
 description = "Exact sha256 from the durable draft reference returned by prepare."
+
+[[params]]
+name = "resume_run_id"
+type = "string"
+min_length = 36
+max_length = 36
+description = "Original composition_run_id of a prepared async run to continue after its previous request has canonically settled. Omit for a fresh run."

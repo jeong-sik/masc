@@ -1,5 +1,6 @@
 module Catalog = Keeper_tool_composition_catalog
 module Executor = Keeper_tool_plan_executor
+module Journal = Keeper_tool_execution_journal
 module Activation_ledger = Keeper_skill_activation_ledger
 open Keeper_tool_composition_projection
 
@@ -565,6 +566,7 @@ let async_worker_result
       ~tool_kind
       ?skill_reference
       ~plan
+      ?journal
       ~tool_name
       ~request_id
       ~composition_run_id
@@ -591,6 +593,7 @@ let async_worker_result
     ~capability_authority
     ~plan
     ~run_id
+    ?journal
     ~composition_run_id
     ~parent_invocation:
       (async_parent_invocation ~request_id source_invocation)
@@ -665,6 +668,7 @@ let async_submission_result
       ?draft_reference
       ?run_reference
       ?composition_run_id
+      ?journal
       ~plan
       ~tool_name
       ~tool_kind
@@ -682,6 +686,12 @@ let async_submission_result
   let composition_run_id = match composition_run_id with
     | Some identity -> identity
     | None -> Keeper_tool_plan.Composition_run_id.fresh () in
+  let journal_worker = Atomic.make None in
+  let source_task_id = match journal with
+    | Some journal -> (Journal.source journal).source_task_id
+    | None -> Option.bind turn_context (fun context ->
+        context.Keeper_tool_call_log_context.task_id)
+  in
   let request_context_fields =
     [ "composition_tool", `String tool_name
     ; "parent_tool_use_id", `String (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation)
@@ -695,9 +705,8 @@ let async_submission_result
            skill_reference)
     @ Option.to_list (Option.map (fun reference -> "draft_reference", Tool_output.normalized_artifact_ref_to_json reference) draft_reference)
     @ Option.to_list (Option.map (fun reference -> "run_artifact", Tool_output.normalized_artifact_ref_to_json reference) run_reference)
-    @ Option.to_list (Option.bind turn_context (fun context ->
-        Option.map (fun task_id -> "source_task_id", `String task_id)
-          context.Keeper_tool_call_log_context.task_id))
+    @ Option.to_list (Option.map (fun task_id -> "source_task_id", `String task_id)
+        source_task_id)
   in
   let request_context =
     match request_context_fields with
@@ -720,9 +729,16 @@ let async_submission_result
        Keeper_msg_async.submit_with_request_id
          ?request_context
          ~on_accepted:(fun request_id ->
-           Keeper_composition_completion_outbox.prepare ~base_path:config.base_path
-             ~keeper_name:meta.name ~request_id ~composition_tool:tool_name
-           |> Result.map_error Keeper_composition_completion_outbox.error_to_string)
+           Result.bind
+             (Keeper_composition_completion_outbox.prepare ~base_path:config.base_path
+                ~keeper_name:meta.name ~request_id ~composition_tool:tool_name
+              |> Result.map_error Keeper_composition_completion_outbox.error_to_string)
+             (fun () -> match journal with
+                | None -> Ok ()
+                | Some journal ->
+                  match Journal.bind_request journal ~request_id with
+                  | Error error -> Error (Journal.error_to_string error)
+                  | Ok worker -> Atomic.set journal_worker (Some worker); Ok ()))
          ~background_sw
          ~base_path:config.base_path
          ~caller:meta.name
@@ -748,11 +764,19 @@ let async_submission_result
              ~composition_tool:tool_name
              settlement)
          ~f:(fun ~request_id request_sw ->
+           match journal, Atomic.get journal_worker with
+           | Some _, None ->
+             Tool_result.make_err ~tool_name ~start_time:(Tool_timing.start ())
+               ~class_:Tool_result.Runtime_failure
+               ~effect_disposition:Tool_result.Proven_pre_effect
+               "prepared composition worker has no accepted journal binding"
+           | (None | Some _), worker ->
            async_worker_result
              ~composition_execution:Catalog.Async
              ~tool_kind
              ?skill_reference
              ~plan
+             ?journal:worker
              ~tool_name
              ~request_id
              ~composition_run_id
@@ -1470,6 +1494,7 @@ let failure_returns_to_model ~plan ~committed (failure : Executor.failure) =
           && List.for_all eligible failure.settled
         | Tool_result.Completed _ | Tool_result.Deferred _ -> false)
      | Executor.Plan_execution_failed _ | Executor.Node_observation_failed _
+     | Executor.Run_journal_rejected _
      | Executor.Outer_completion_mismatch _ -> false
 ;;
 
@@ -1956,6 +1981,13 @@ let make_tools_with_authority
         Tool_result.make_err ~tool_name ~class_ ~effect_disposition:Tool_result.Proven_pre_effect
           ~start_time ~data (Yojson.Safe.to_string data)
       in
+      let journal_rejection ~start_time error =
+        Tool_result.make_err ~tool_name:Draft.run_tool_name
+          ~class_:(Journal.failure_class error)
+          ~effect_disposition:Tool_result.Effect_outcome_unknown
+          ~start_time ~data:(Journal.error_to_json error)
+          (Journal.error_to_string error)
+      in
       let make (schema : Masc_domain.tool_schema) ~artifact_projection ~call_effect handle =
         let model_projection = Tool_output.default_model_projection in
         (Tool_bridge.agent_core_tool_of_masc_with_execution_env
@@ -2012,17 +2044,29 @@ let make_tools_with_authority
             match Draft.load ~base_path:config.base_path ~capability_surface ~keeper_name:meta.name ~sha256 with
             | Error error -> rejection ~tool_name:Draft.run_tool_name ~start_time error
             | Ok draft ->
-              let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
-              match Draft.record_invocation ~base_path:config.base_path ~composition_run_id
-                      ~invocation:parent_invocation draft with
-              | Error error -> rejection ~tool_name:Draft.run_tool_name ~start_time error
-              | Ok run_reference ->
-                let plan = Draft.plan draft in
-                let turn_context = Option.map (fun cell ->
-                  Keeper_tool_call_log_context.get_turn_context_record ~cell ()) turn_ctx_cell in
+              let plan = Draft.plan draft in
+              let turn_context = Option.map (fun cell ->
+                Keeper_tool_call_log_context.get_turn_context_record ~cell ()) turn_ctx_cell in
+              let bind_result ~composition_run_id ~run_reference result =
+                let binding =
+                  [ "composition_run_id", `String (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
+                  ; "run_artifact", Tool_output.normalized_artifact_ref_to_json run_reference
+                  ; "draft", Tool_output.normalized_artifact_ref_to_json (Draft.reference draft) ] in
+                let data = match Tool_result.data result with
+                  | `Assoc fields -> `Assoc (binding @ List.remove_assoc "composition_run_id" fields)
+                  | data -> `Assoc (binding @ [ "result", data ]) in
+                let result = match result with
+                  | Tool_result.Completed payload -> Tool_result.Completed { payload with data }
+                  | Tool_result.Deferred payload -> Tool_result.Deferred { payload with data }
+                  | Tool_result.Failed payload -> Tool_result.Failed
+                      { payload with data_source = Tool_result.Explicit_data data; message = Yojson.Safe.to_string data } in
+                Tool_result.with_retained_artifacts
+                  (run_reference :: Draft.reference draft :: Tool_result.retained_artifacts result) result
+              in
+              let execute_run ?journal ~composition_run_id ~run_reference ~parent_invocation ~turn_context () =
                 let result = match Draft.execution draft with
                   | Catalog.Async ->
-                    async_submission_result ~draft_reference:(Draft.reference draft) ~run_reference ~composition_run_id
+                    async_submission_result ?journal ~draft_reference:(Draft.reference draft) ~run_reference ~composition_run_id
                       ~plan ~tool_name:Draft.run_tool_name ~tool_kind:Keeper_tool_descriptor.Async_composition_tool
                       ~parent_invocation ~config ~meta ~capability_authority ~publication_recovery
                       ~ctx_snapshot ~turn_context ?clock ()
@@ -2058,20 +2102,63 @@ let make_tools_with_authority
                       ~typed_result:result ();
                     result
                 in
-                let binding =
-                  [ "composition_run_id", `String (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
-                  ; "run_artifact", Tool_output.normalized_artifact_ref_to_json run_reference
-                  ; "draft", Tool_output.normalized_artifact_ref_to_json (Draft.reference draft) ] in
-                let data = match Tool_result.data result with
-                  | `Assoc fields -> `Assoc (binding @ List.remove_assoc "composition_run_id" fields)
-                  | data -> `Assoc (binding @ [ "result", data ]) in
-                let result = match result with
-                  | Tool_result.Completed payload -> Tool_result.Completed { payload with data }
-                  | Tool_result.Deferred payload -> Tool_result.Deferred { payload with data }
-                  | Tool_result.Failed payload -> Tool_result.Failed
-                      { payload with data_source = Tool_result.Explicit_data data; message = Yojson.Safe.to_string data } in
-                Tool_result.with_retained_artifacts
-                  (run_reference :: Draft.reference draft :: Tool_result.retained_artifacts result) result)
+                bind_result ~composition_run_id ~run_reference result
+              in
+              let resume_run_id = match input with
+                | `Assoc fields -> List.assoc_opt "resume_run_id" fields
+                | _ -> None in
+              match resume_run_id, Draft.execution draft with
+              | Some _, Catalog.Inline ->
+                rejection ~tool_name:Draft.run_tool_name ~start_time
+                  (Draft.Malformed_draft "resume_run_id requires a prepared async draft")
+              | Some (`String identity), Catalog.Async ->
+                (match Keeper_tool_plan.Composition_run_id.of_string identity with
+                 | Error _ -> rejection ~tool_name:Draft.run_tool_name ~start_time
+                     (Draft.Malformed_draft "resume_run_id must be a composition run UUIDv7")
+                 | Ok composition_run_id ->
+                   match Journal.load ~base_path:config.base_path ~keeper_name:meta.name ~composition_run_id with
+                   | Error error -> journal_rejection ~start_time error
+                   | Ok journal ->
+                     let source = Journal.source journal in
+                     if not (Yojson.Safe.equal
+                       (Tool_output.normalized_artifact_ref_to_json source.draft_reference)
+                       (Tool_output.normalized_artifact_ref_to_json (Draft.reference draft))) then
+                       journal_rejection ~start_time Journal.Source_conflict
+                     else
+                       let parent_invocation = Agent_core.Tool_contract.Invocation.create
+                         ~tool_use_id:source.parent_tool_use_id ~turn:source.source_turn
+                         ~schedule:(Agent_core.Tool_contract.Invocation.schedule parent_invocation)
+                         ~completion:Agent_core.Tool_contract.Continue_after_success in
+                       (* The new physical turn keeps its own trace/session identity,
+                          while work and completion belong to the original task. *)
+                       let context = match turn_context with
+                         | Some context -> context
+                         | None -> Keeper_tool_call_log_context.get_turn_context_record
+                             ~cell:(Keeper_tool_call_log_context.create_cell ()) () in
+                       let turn_context = Some { context with task_id = source.source_task_id } in
+                       execute_run ~journal ~composition_run_id ~run_reference:source.run_reference
+                         ~parent_invocation ~turn_context ())
+              | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _), Catalog.Async ->
+                rejection ~tool_name:Draft.run_tool_name ~start_time
+                  (Draft.Malformed_draft "resume_run_id must be a string")
+              | None, (Catalog.Inline | Catalog.Async) ->
+                let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
+                match Draft.record_invocation ~base_path:config.base_path ~composition_run_id
+                        ~invocation:parent_invocation draft with
+                | Error error -> rejection ~tool_name:Draft.run_tool_name ~start_time error
+                | Ok run_reference ->
+                  match Draft.execution draft with
+                  | Catalog.Inline -> execute_run ~composition_run_id ~run_reference ~parent_invocation ~turn_context ()
+                  | Catalog.Async ->
+                    let source : Journal.source =
+                      { keeper_name = meta.name; composition_run_id
+                      ; draft_reference = Draft.reference draft; run_reference
+                      ; parent_tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation
+                      ; source_turn = Agent_core.Tool_contract.Invocation.turn parent_invocation
+                      ; source_task_id = Option.bind turn_context (fun context -> context.Keeper_tool_call_log_context.task_id) } in
+                    match Journal.prepare ~base_path:config.base_path source with
+                    | Error error -> bind_result ~composition_run_id ~run_reference (journal_rejection ~start_time error)
+                    | Ok journal -> execute_run ~journal ~composition_run_id ~run_reference ~parent_invocation ~turn_context ())
       in
       [ prepare; run ]
   in

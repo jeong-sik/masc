@@ -114,7 +114,8 @@ let own_cause child = function
                   ; "node_id", `String (Plan.Node_id.to_string node_id)
                   ; "error", Projection.plan_execution_error_to_json error ])
     | Executor.Tool_did_not_complete _ | Executor.Node_observation_failed _
-    | Executor.Plan_execution_failed _ | Executor.Outer_completion_mismatch _ -> None
+    | Executor.Plan_execution_failed _ | Executor.Run_journal_rejected _
+    | Executor.Outer_completion_mismatch _ -> None
 ;;
 
 let disposition child nodes execution =
@@ -127,7 +128,8 @@ let disposition child nodes execution =
         (match failure.cause with
          | Executor.Node_observation_failed { node; detail = _ } -> contains child node.node_id
          | Executor.Plan_execution_failed { node_id; error = _; schedule = _ } -> contains child node_id
-         | Executor.Tool_did_not_complete _ | Executor.Outer_completion_mismatch _ -> false)
+         | Executor.Tool_did_not_complete _ | Executor.Run_journal_rejected _
+         | Executor.Outer_completion_mismatch _ -> false)
       | Ok _ -> false in
     if own_boundary_failed || List.exists (fun (node : Executor.node_result) ->
         match node.result, node.output_validation_error with

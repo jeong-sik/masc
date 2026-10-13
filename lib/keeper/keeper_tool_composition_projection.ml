@@ -71,6 +71,7 @@ let node_result_to_json (result : Executor.node_result) =
   `Assoc
     [ "node_id", `String (Keeper_tool_plan.Node_id.to_string result.node_id)
     ; "execution_id", Ids.Execution_id.to_yojson result.execution_id
+    ; "execution_origin", `String (Executor.node_execution_origin_to_string result.execution_origin)
     ; "tool_name", `String result.tool_name
     ; "input", result.input
     ; "schedule", schedule_to_json result.schedule
@@ -85,6 +86,9 @@ let node_result_to_json (result : Executor.node_result) =
 ;;
 
 let cause_to_json = function
+  | Executor.Run_journal_rejected error ->
+    `Assoc [ "kind", `String "run_journal_rejected"
+           ; "error", Keeper_tool_execution_journal.error_to_json error ]
   | Executor.Tool_did_not_complete result ->
     `Assoc
       [ "kind", `String "tool_did_not_complete"
@@ -179,6 +183,9 @@ type composition_projection =
 
 let composition_cause (failure : Executor.failure) =
   match failure.cause with
+  | Executor.Run_journal_rejected error ->
+    Terminal_cause (Keeper_terminal_effect_detail.Run_journal_rejected
+      { detail = Keeper_tool_execution_journal.error_to_string error })
   | Executor.Tool_did_not_complete node ->
     let node_id = Keeper_tool_plan.Node_id.to_string node.node_id in
     (match node.result with
@@ -217,6 +224,8 @@ let composition_cause (failure : Executor.failure) =
 
 let failure_class (failure : Executor.failure) =
   match failure.cause with
+  | Executor.Run_journal_rejected error ->
+    Keeper_tool_execution_journal.failure_class error
   | Executor.Tool_did_not_complete result ->
     Option.value
       ~default:Tool_result.Runtime_failure

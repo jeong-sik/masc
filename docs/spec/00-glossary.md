@@ -887,8 +887,12 @@ status: reference
     `rechecking delivery` 건수를 분리하고 로컬 NEXT 프리뷰를
     별도 행으로 표시한다. 각 모드는 같은 표시 행 계산으로 뷰포트 예산을 예약하며,
     큐 입력 단축키(`Ctrl-T:queue`)와 현재 작업 중단 안내를 보존한다.
-  - 큐 제어와 입력 보존: 대화 대기열 제어 명령(`/queue`·`/queue resume` 및 `Ctrl-T`)을 제공하며,
-    작성 도중 `Esc`로 다른 화면을 탐색하더라도 대기열 상태와 입력 드래프트는 파기되지 않고 유지된다.
+  - 큐 제어와 입력 보존: 대화 대기열 제어 명령(`/queue`·`/queue resume`·`/queue clear` 및
+    `Ctrl-T`)을 제공하며, 작성 도중 `Esc`로 다른 화면을 탐색하더라도 대기열 상태와 입력
+    드래프트는 파기되지 않고 유지된다. `/queue clear`는 이 TUI가 화면의 Keeper에 대해 추적하는
+    대기 메시지를 한 번에 취소한다. 아직 보내지 않은 것은 버리고, 전송 작업에 넘겼으나 첫
+    POST가 나가기 전인 것은 거둬들이고, 서버 큐에 들어 있는 것은 서버에 취소를 요청한다
+    (사용법: `docs/guides/tui-chat-queue.md`).
   - 검증과 증거: OCaml 생애주기 테스트(`test/test_tui_chat_queue_wiring.ml`,
     `test/test_tui_chat_activity.ml`)가 재연결 불확실성·Keeper 이동 후 복귀 계약을
     다룬다. 실행 증거와 한계는

@@ -803,23 +803,23 @@ let complete_cleanup
      call. Dropping it would send Apple's removal spelling to a guest another
      runtime booted -- or, since the teardown refuses an unnamed runtime,
      remove nothing at all and leave the guest running. *)
-  let sandbox_backend =
+  let effective_meta =
     (* The exact owner projection carries durable metadata. Its decoder leaves
        the TOML-owned microvm_backend unset; use the canonical profile resolution
        used at boot before choosing the teardown runtime. *)
-    match
-      Result.bind
-        (read_operation_meta ~config operation)
-        (Keeper_meta_contract.effective_meta_result ~base_path:config.base_path)
-    with
-    | Error detail -> Error detail
-    | Ok meta ->
-      Ok
-        ( (match meta.Keeper_meta_contract.sandbox_profile with
-           | Docker -> Keeper_sandbox.Docker
-           | Micro_vm -> Keeper_sandbox.Micro_vm
-           | Remote_ssh -> Keeper_sandbox.Remote_ssh)
-        , meta.Keeper_meta_contract.microvm_backend )
+    Result.bind
+      (read_operation_meta ~config operation)
+      (Keeper_meta_contract.effective_meta_result ~base_path:config.base_path)
+  in
+  let sandbox_backend =
+    Result.map
+      (fun (meta : Keeper_meta_contract.keeper_meta) ->
+         ( (match meta.sandbox_profile with
+            | Docker -> Keeper_sandbox.Docker
+            | Micro_vm -> Keeper_sandbox.Micro_vm
+            | Remote_ssh -> Keeper_sandbox.Remote_ssh)
+         , meta.microvm_backend ))
+      effective_meta
   in
   let require_released_summary_owner () =
     match operation.cleanup_intent.reason with
@@ -974,6 +974,28 @@ let complete_cleanup
                   ~keeper_name:operation.keeper_name
                   "keeper removed but its volumes were not: %s"
                   detail);
+             (* The worktrees its clones registered stay on disk the same
+                way. A dirty one is refused by git and named in a warning. *)
+             (match effective_meta with
+              | Error detail ->
+                Log.Keeper.warn
+                  ~keeper_name:operation.keeper_name
+                  "keeper removed but its worktrees were not looked for: %s"
+                  detail
+              | Ok meta ->
+                Keeper_bundle_worktrees.remove_keeper_worktrees
+                  ~run_argv:(fun ~timeout_sec argv ->
+                    Process_eio.run_argv_with_status ~timeout_sec argv)
+                  ~timeout_sec:
+                    (Env_config_sandbox.Shell_timeout.timeout_sec
+                       ~bucket:Env_config_sandbox.Shell_timeout.Cleanup_rm
+                       ())
+                  ~base_path:config.base_path
+                  ~keeper_name:operation.keeper_name
+                  ~profile:
+                    (Keeper_types_profile_sandbox.sandbox_profile_to_config
+                       meta.sandbox_profile)
+                |> Keeper_bundle_worktrees.log_outcomes ~keeper_name:operation.keeper_name);
              (match
                 Keeper_dos_controller.release_retired ~config
                   ~keeper_name:operation.keeper_name

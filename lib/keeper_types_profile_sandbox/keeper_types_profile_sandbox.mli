@@ -54,6 +54,10 @@ val observation_run_rejection : sandbox_profile -> observation_run -> string opt
     endpoint may take [Guest_local] is the endpoint's declaration, not the
     profile's, and is answered where the route is built. *)
 
+val sandbox_profile_to_config : sandbox_profile -> Keeper_sandbox_config.sandbox_profile
+(** The same profile in the config layer's type, which places the keeper's
+    playground bundle ({!Keeper_sandbox_config.host_root_rel_of_profile}). *)
+
 val sandbox_profile_to_string : sandbox_profile -> string
 val sandbox_profile_of_string : string -> sandbox_profile option
 val all_sandbox_profiles : sandbox_profile list

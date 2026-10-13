@@ -1459,6 +1459,30 @@ let commit_continuity ~commit ~observe =
   observed
 ;;
 
+(* The judgment run_best_effort applies to its optional admission arguments.
+   The wildcard-expansion codemod folded the accepting arm
+   [Some _, Memory_maintenance, None, None, None -> true] into the rejecting
+   one, so a standalone Memory maintenance pass carrying an explicit admission
+   batch was refused. Restored here as a named function so tests can pin the
+   accepted and rejected shapes. *)
+let admission_mode_valid ~has_admission ~write_scope ~has_continuity
+      ~has_durable_range_id ~has_official_range_id
+  =
+  match has_admission, write_scope, has_continuity, has_durable_range_id, has_official_range_id with
+  | (false, (Context_only | Context_and_memory | Memory_maintenance), (true | false), (true | false), (true | false)) ->
+    true
+  | true, Memory_maintenance, false, false, false -> true
+  | ( true
+    , (Context_only | Context_and_memory)
+    , (true | false)
+    , (true | false)
+    , (true | false) ) ->
+    false
+  | (true, Memory_maintenance, true, (true | false), (true | false)) -> false
+  | (true, Memory_maintenance, false, true, (true | false)) -> false
+  | true, Memory_maintenance, false, false, true -> false
+;;
+
 let run_best_effort
       ?(write_scope = Context_and_memory)
       ?admission
@@ -1479,11 +1503,13 @@ let run_best_effort
       (inp : Keeper_librarian.input)
   =
   let trace_id = input_trace_id inp in
-  let admission_mode_valid = match admission, write_scope, continuity, durable_range_id, official_range_id with
-    | (None, Context_only, _, _, _) | (None, Context_and_memory, _, _, _)
-    | (None, Memory_maintenance, _, _, _) -> true
-    | (Some _, Context_only, _, _, _) | (Some _, Context_and_memory, _, _, _)
-    | (Some _, Memory_maintenance, _, _, _) -> false in
+  let admission_mode_valid =
+    admission_mode_valid
+      ~has_admission:(Option.is_some admission)
+      ~write_scope
+      ~has_continuity:(Option.is_some continuity)
+      ~has_durable_range_id:(Option.is_some durable_range_id)
+      ~has_official_range_id:(Option.is_some official_range_id) in
   if not admission_mode_valid then
     on_not_committed {detail = "explicit admission requires a standalone Memory maintenance pass";
                       walk_shows_size = false; input_capacity_evidence = No_input_capacity_refusal; smaller_range_meets_same_failure = false}

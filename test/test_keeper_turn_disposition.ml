@@ -260,7 +260,8 @@ let test_registry_failure_reason_preserves_typed_configuration_error () =
        field;
      Alcotest.(check string)
        "undeclared credential safe detail"
-       "provider requires an API key but its runtime row declares no credential"
+       "provider requires an API key but its runtime row declares no credential; \
+        add a credentials block naming the environment variable that holds the key"
        detail
    | Some other ->
      Alcotest.failf

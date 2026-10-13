@@ -280,7 +280,9 @@ let registry_failure_reason_of_terminal_reason
            { code = "credential_undeclared"
            ; field = Some (Printf.sprintf "providers.%s.credentials" provider_id)
            ; detail =
-               "provider requires an API key but its runtime row declares no credential"
+               "provider requires an API key but its runtime row declares no \
+                credential; add a credentials block naming the environment \
+                variable that holds the key"
            })
     | Some
         (Agent_core.Error.Config

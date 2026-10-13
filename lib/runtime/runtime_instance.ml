@@ -98,7 +98,14 @@ let validate_dispatch_credential
          where it names the missing catalog entry. A catalog row that states
          [requires_api_key] while the runtime row declares no credential is
          turned away before the request leaves, the same way a declared but
-         empty one is: dispatching would send no auth header at all. *)
+         empty one is: dispatching would send no auth header at all.
+
+         Do not close this arm before runtime.toml can declare "no key" for a
+         row (task-2314, [credentials] [type = "none"]). The v0.54.0 Known
+         issues tell an operator whose catalog row points at a keyless proxy
+         to rename the row to an id the catalog does not know; that rename
+         passes through here. Closing it first would stop those rows with no
+         declaration left to add. *)
       | Unknown_provider -> Ok ()
       | Missing_declared_credential { provider_id } ->
         Error (Undeclared_credential { provider_id })

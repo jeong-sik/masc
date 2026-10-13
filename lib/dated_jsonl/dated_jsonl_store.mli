@@ -124,7 +124,16 @@ val locations_on_disk : base_path:string -> cluster_root -> t -> location list
     files of a keeper that is gone are still found. The reaction ledger
     also yields one per generation directory. *)
 
-val dated_path : location -> ts:float -> Jsonl_writer.dated_path
-(** The day file a row stamped [ts] belongs to. *)
+(** A store's day file: [<dir>/YYYY-MM/DD.jsonl]. *)
+type dated_path =
+  { base_dir : string  (** The store's directory. *)
+  ; month_dir : string  (** [YYYY-MM] *)
+  ; day_file : string  (** [DD.jsonl] *)
+  ; path : string
+  }
 
-val dated_path_now : location -> Jsonl_writer.dated_path
+val dated_path : location -> ts:float -> dated_path
+(** The day file a row stamped [ts] belongs to, by the UTC calendar day
+    [Jsonl_writer.utc_calendar_day] gives. *)
+
+val dated_path_now : location -> dated_path

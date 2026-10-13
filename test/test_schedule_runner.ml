@@ -94,7 +94,7 @@ let test_occurrence_id schedule_id =
 
 let read_recent_signal_rows config n =
   Dated_jsonl.read_recent
-    (Dated_jsonl.create ~base_dir:(signals_dir config) ())
+    (Schedule_runner.signal_store config)
     n
 ;;
 

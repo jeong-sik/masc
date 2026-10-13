@@ -240,7 +240,7 @@ type config = Workspace_utils.config
     [Eio.Mutex] instances — otherwise file I/O to the same
     [YYYY-MM/DD.jsonl] path would serialise through two different
     mutexes and racing appends could interleave on disk.  Under the
-    current single-domain Eio with a non-yielding [Dated_jsonl.create]
+    current single-domain Eio with a non-yielding [Dated_jsonl.open_store]
     this race does not fire today, but the fix is cheap and removes a
     fragile implicit invariant. *)
 let audit_store_cache : Dated_jsonl.t StringMap.t ref = ref StringMap.empty

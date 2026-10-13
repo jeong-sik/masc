@@ -250,7 +250,6 @@
   ambient-context
   ambient-context-eio
   masc.autonomous
-  masc.shared_audit
   masc.shared_types
   masc.multimodal
   masc.repo_manager

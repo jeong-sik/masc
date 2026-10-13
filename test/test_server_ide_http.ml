@@ -482,9 +482,8 @@ let test_repository_activity_covers_all_writers () =
     let repository = repository_fixture ~id:"masc" ~url:masc_remote ~local_path:base_path in
     (match Repo_store.save_all ~base_path [repository] with Ok () -> () | Error e -> fail e);
     Masc.Keeper_tool_call_log.init ~base_path ();
-    let directory = match Masc.Keeper_tool_call_log.store_dir () with
-      | Some path -> path | None -> fail "tool-call store was not initialized" in
-    let store = Dated_jsonl.create ~base_dir:directory () in
+    let store = match Masc.Keeper_tool_call_log.store () with
+      | Some store -> store | None -> fail "tool-call store was not initialized" in
     Fun.protect ~finally:(fun () ->
       Dated_jsonl.prepare_for_directory_removal store;
       Masc.Keeper_tool_call_log.reset_for_testing ()) (fun () ->
@@ -535,9 +534,8 @@ let test_repository_activity_needs_no_canonical_remote () =
     let repository = repository_fixture ~id:"local" ~url:local_remote ~local_path:base_path in
     (match Repo_store.save_all ~base_path [repository] with Ok () -> () | Error e -> fail e);
     Masc.Keeper_tool_call_log.init ~base_path ();
-    let directory = match Masc.Keeper_tool_call_log.store_dir () with
-      | Some path -> path | None -> fail "tool-call store was not initialized" in
-    let store = Dated_jsonl.create ~base_dir:directory () in
+    let store = match Masc.Keeper_tool_call_log.store () with
+      | Some store -> store | None -> fail "tool-call store was not initialized" in
     Fun.protect ~finally:(fun () ->
       Dated_jsonl.prepare_for_directory_removal store;
       Masc.Keeper_tool_call_log.reset_for_testing ()) (fun () ->

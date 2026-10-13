@@ -15,7 +15,9 @@
     threshold: a meter is drawn in the exhausted style only when the reported
     value is at or past the full value of its own unit and the server did not
     classify the window as counting something a model call does not need;
-    such a window is drawn dim whatever its value. The one other fact
+    such a window is drawn dim whatever its value. A window that sits under
+    [Unusable_now] only because the catalogue observed the account exhausted
+    keeps the tone its own report earns. The one other fact
     drawn is the runtime catalogue's [quota_exhausted], as an
     [exhausted (observed)] tag on the account whose quota scope it names.
 
@@ -78,15 +80,42 @@ val plan :
     observed exhausted always has an [Unusable_now] entry.
 
     - [Unusable_now]: the account with the longest wait for a reset first,
-      where a window with no reset time waits longest; an account's wait is
-      its longest. Its windows are in the same order. An account with no
-      window uses the catalogue's reopen time. Ties go by account name.
+      where a window with no reset time waits longest and a reset time that
+      has passed waits least; an account's wait is its longest. Its windows
+      are in the same order. An account with no window to show uses the
+      catalogue's reopen time. An account with a window does not: the
+      catalogue's time is not that window's reset, so a window with no reset
+      time waits longest whatever the catalogue says. Ties go by account name.
     - [Usable]: the account whose most used gating window is the most used
       first; windows that gate nothing and amounts with no cap come last. Its
       windows are in the same order. Ties go by account name.
     - [No_report]: by account name.
 
     Windows that tie keep the server's order. *)
+
+val drawn_observation : plan_section -> observed -> observed
+(** The catalogue observation an entry in this section draws. Only
+    [Unusable_now] draws it, so an account split across sections says it once.
+    The other sections draw [Not_observed_exhausted]. *)
+
+(** The header's [Blocked (observed)] value. A catalogue that was not read or
+    failed does not make the count zero. *)
+type blocked_count =
+  | Blocked_unknown
+  | Blocked_accounts of int
+
+(** The header's numbers. *)
+type counts = {
+  accounts : int;
+  reporting : int;  (** Accounts that sent a report, with or without windows. *)
+  at_limit : int;  (** Accounts with a {!window_at_limit} window. *)
+  blocked : blocked_count;
+}
+
+val counts :
+  runtimes:Masc_tui_types.overview_quota_reading ->
+  Masc.Tui_decode_usage.provider_usage_account list ->
+  counts
 
 val scope_id : Masc.Tui_decode_usage.provider_usage_account -> string
 (** The server's id for the scope, as its usage history names it. *)
@@ -111,10 +140,15 @@ val section :
 (** [None] before the first read. Every known account is drawn under a
     section heading with its count, including an explicit state when no usage
     has been reported. Empty and failed reads keep their explicit source states.
-    Every row fits [width] terminal cells: a detail that does not fit after the
-    bar moves to a row of its own. Emails and catalogue observations are rows
+    Every row fits [width] terminal cells. On a narrow screen the bar shrinks
+    first, then a row drops its reset clock and keeps the countdown, and only
+    then does a detail move to a row of its own. Emails and catalogue observations are rows
     under their account. Window roles still decide which full values are
     alarms. *)
+
+val clock_text : now:float -> float -> string
+(** A time of day in the terminal's zone; a time on another day than [now]
+    carries its month and day. *)
 
 val utilization_text : Masc.Tui_decode_usage.provider_usage_utilization -> string
 (** The value as a whole percent or a USD credit amount. A percent is

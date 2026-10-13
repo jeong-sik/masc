@@ -151,13 +151,27 @@ let clock_text ~now at =
 
 (* A reset time that has passed is said, not hidden and not drawn as an empty
    window: the server keeps the last report until a newer one arrives, so the
-   meter still shows what the provider last said. *)
-let reset_text ~now = function
-  | None -> (None, "no reset")
+   meter still shows what the provider last said. The short form keeps the
+   countdown and drops the clock, for a row that has no room for both. *)
+type reset_words = {
+  reset_tone : string option;
+  reset_full : string;
+  reset_short : string;
+}
+
+let reset_words ~now = function
+  | None -> { reset_tone = None; reset_full = "no reset"; reset_short = "no reset" }
   | Some at when at <= now ->
-      (Some (Theme.warn ()), "reset time passed \xc2\xb7 no newer report")
+      { reset_tone = Some (Theme.warn ())
+      ; reset_full = "reset time passed \xc2\xb7 no newer report"
+      ; reset_short = "reset passed"
+      }
   | Some at ->
-      (None, Printf.sprintf "resets %s (%s)" (clock_text ~now at) (span_text (at -. now)))
+      { reset_tone = None
+      ; reset_full =
+          Printf.sprintf "resets %s (%s)" (clock_text ~now at) (span_text (at -. now))
+      ; reset_short = Printf.sprintf "resets in %s" (span_text (at -. now))
+      }
 
 (* A clock that moved backwards says nothing rather than a negative age. *)
 let heard_text ~now observed_at =
@@ -269,6 +283,14 @@ type plan_section =
   | Unusable_now
   | Usable
   | No_report
+
+(* The catalogue's observation is a fact about the account, not about one
+   window, so only the Unusable_now entry draws it. An account split across
+   sections would otherwise say it twice. *)
+let drawn_observation section observed =
+  match section with
+  | Unusable_now -> observed
+  | Usable | No_report -> Not_observed_exhausted
 
 (* Draw order of the sections. *)
 let all_sections = [ Unusable_now; Usable; No_report ]
@@ -463,14 +485,14 @@ let bar_cells_min = 6
 let bar_frame_cells = 2
 
 (* The name and label columns hold their longest entry, up to a cap, and
-   give way on a narrow screen: a column takes at most one over this many
-   cells of the row. *)
+   give way on a narrow screen. The name takes at most one over this many
+   cells of the row; the label takes what is left after the name, the
+   narrowest bar and the widest amount-and-countdown. *)
 let name_cells_cap = 28
 let name_cells_min = 8
 let name_width_divisor = 3
 let label_cells_cap = 24
 let label_cells_min = 6
-let label_width_divisor = 4
 
 let detail_gap = "  "
 let detail_separator = " \xc2\xb7 "
@@ -522,7 +544,11 @@ type window_line = {
   label : string;
   share : float option;  (** [None]: an amount with no cap has no bar. *)
   percent : string;
-  detail : string;
+  detail : string;  (** Amount, reset with its clock, then notes. *)
+  detail_short : string;  (** The same with the countdown only. *)
+  detail_base : string;
+      (** Amount and countdown, no notes: what the bar's width leaves room
+          for. A note that does not fit wraps to its own line. *)
   tone : string option;
   detail_tone : string option;
 }
@@ -537,25 +563,28 @@ let window_line ~now ~newest (window : Masc.Tui_decode_usage.provider_usage_wind
     | Some share -> utilization_text (Masc.Tui_decode_usage.Utilization_fraction share)
     | None -> ""
   in
-  let reset_tone, reset = reset_text ~now window.puw_resets_at in
+  let reset = reset_words ~now window.puw_resets_at in
   let heard =
     match newest with
     | Some newest when not (Float.equal newest window.puw_observed_at) ->
         heard_text ~now window.puw_observed_at
     | Some _ | None -> None
   in
-  let detail =
+  let amount = money_text utilization in
+  let detail_with reset_part notes =
     String.concat detail_separator
-      (List.filter_map Fun.id
-         [ money_text utilization; Some reset; heard; role_tag window.puw_role ])
+      (List.filter_map Fun.id ([ amount; Some reset_part ] @ notes))
   in
+  let notes = [ heard; role_tag window.puw_role ] in
   let tone = window_tone window in
   { label = window_label window
   ; share
   ; percent
-  ; detail
+  ; detail = detail_with reset.reset_full notes
+  ; detail_short = detail_with reset.reset_short notes
+  ; detail_base = detail_with reset.reset_short []
   ; tone
-  ; detail_tone = (match reset_tone with Some _ -> reset_tone | None -> tone)
+  ; detail_tone = (match reset.reset_tone with Some _ -> reset.reset_tone | None -> tone)
   }
 
 type entry_body =
@@ -598,9 +627,7 @@ let drawn_groups ~now ~account_emails groups =
                     Window_lines (List.map (window_line ~now ~newest) windows)
               in
               let tag =
-                match pg_section with
-                | Unusable_now -> exhausted_tag ~now entry.pe_observed
-                | Usable | No_report -> None
+                exhausted_tag ~now (drawn_observation pg_section entry.pe_observed)
               in
               let email =
                 if first_time then account_email ~account_emails entry.pe_account
@@ -665,20 +692,30 @@ let draw_groups ~width groups =
       (widest (fun entry -> cells_of entry.de_name) entries)
       (min name_cells_cap (max name_cells_min (budget / name_width_divisor)))
   in
+  let barred_lines =
+    List.filter
+      (fun line -> match line.share with Some _ -> true | None -> false)
+      window_lines
+  in
+  let widest_base = widest (fun line -> cells_of line.detail_base) barred_lines in
+  let gauge_cells_min = bar_cells_min + bar_frame_cells + 1 + percent_cells in
+  let label_room =
+    budget - name_cells - 1 - 1 - gauge_cells_min - cells_of detail_gap - widest_base
+  in
   let label_cells =
     min
       (widest (fun line -> cells_of line.label) window_lines)
-      (min label_cells_cap (max label_cells_min (budget / label_width_divisor)))
+      (min label_cells_cap (max label_cells_min label_room))
   in
   let head_cells_without_bar =
     name_cells + 1 + label_cells + 1 + bar_frame_cells + 1 + percent_cells
   in
-  (* The bar keeps its default width and shrinks only when the row's head
-     does not fit. A detail that does not fit after the head moves to a row of
-     its own. *)
-  let bar_cells =
-    max bar_cells_min (min bar_cells_default (budget - head_cells_without_bar))
-  in
+  (* The bar keeps its default width and shrinks, down to its minimum, until
+     the widest amount-and-countdown fits beside it. A row whose detail is
+     still too wide drops the reset clock; one that is wider still moves its
+     detail to a row of its own. *)
+  let detail_room = budget - head_cells_without_bar - cells_of detail_gap in
+  let bar_cells = max bar_cells_min (min bar_cells_default (detail_room - widest_base)) in
   let blank_name = String.make name_cells ' ' in
   let continuation = indent ^ blank_name ^ " " in
   let continuation_cells = max 1 (budget - name_cells - 1) in
@@ -687,22 +724,39 @@ let draw_groups ~width groups =
   in
   let window_row tone ~first line =
     let name = match first with Some name -> name_cell tone name | None -> blank_name in
+    let label = Text.fit_middle label_cells line.label in
+    let gauge_width = bar_cells + bar_frame_cells + 1 + percent_cells in
     let gauge =
       match line.share with
       | Some share ->
           meter_open ^ meter ~cells:bar_cells share ^ meter_close ^ " "
           ^ pad_left line.percent percent_cells
-      | None -> String.make (bar_cells + bar_frame_cells + 1 + percent_cells) ' '
+      | None -> String.make gauge_width ' '
     in
-    let body = Text.fit_middle label_cells line.label ^ " " ^ gauge in
+    (* A row with no bar has an empty gauge. When the detail does not fit
+       after that empty space, it moves left into it before it wraps. *)
+    let bodies =
+      match line.share with
+      | Some _ -> [ (label ^ " " ^ gauge, detail_gap) ]
+      | None -> [ (label ^ " " ^ gauge, detail_gap); (label, " ") ]
+    in
     let head body = indent ^ name ^ " " ^ style line.tone body in
-    if cells_of (head body) + cells_of detail_gap + cells_of line.detail <= width then
-      [ head body ^ detail_gap ^ style line.detail_tone line.detail ]
-    else
-      head (rstrip_spaces body)
-      :: List.map
-           (fun wrapped -> continuation ^ style line.detail_tone wrapped)
-           (Text.wrap_words ~max_cells:continuation_cells line.detail)
+    let placements =
+      List.concat_map
+        (fun (body, gap) ->
+          List.map (fun detail -> (body, gap, detail)) [ line.detail; line.detail_short ])
+        bodies
+    in
+    let fits (body, gap, detail) =
+      cells_of (head body) + cells_of gap + cells_of detail <= width
+    in
+    match List.find_opt fits placements with
+    | Some (body, gap, detail) -> [ head body ^ gap ^ style line.detail_tone detail ]
+    | None ->
+        head (rstrip_spaces (label ^ " " ^ gauge))
+        :: List.map
+             (fun wrapped -> continuation ^ style line.detail_tone wrapped)
+             (Text.wrap_words ~max_cells:continuation_cells line.detail)
   in
   let note_lines ?tone text =
     List.map
@@ -747,6 +801,44 @@ let draw_groups ~width groups =
   in
   List.map (clip width) (separated groups)
 
+type blocked_count =
+  | Blocked_unknown
+  | Blocked_accounts of int
+
+type counts = {
+  accounts : int;
+  reporting : int;
+  at_limit : int;
+  blocked : blocked_count;
+}
+
+(* The header's four numbers. [at_limit] counts accounts, by the same
+   {!window_at_limit} that puts a window in Unusable_now. *)
+let counts ~runtimes (accounts : Masc.Tui_decode_usage.provider_usage_account list) =
+  let count keep = List.length (List.filter keep accounts) in
+  { accounts = List.length accounts
+  ; reporting =
+      count (fun account ->
+          match account.pua_state with
+          | Masc.Tui_decode_usage.Account_reported _
+          | Masc.Tui_decode_usage.Account_reported_no_windows _ -> true
+          | Masc.Tui_decode_usage.Account_not_reported_since_start -> false)
+  ; at_limit =
+      count (fun account ->
+          match account.pua_state with
+          | Masc.Tui_decode_usage.Account_reported (first, rest) ->
+              List.exists window_at_limit (first :: rest)
+          | Masc.Tui_decode_usage.Account_not_reported_since_start
+          | Masc.Tui_decode_usage.Account_reported_no_windows _ -> false)
+  ; blocked =
+      (match (runtimes : Types.overview_quota_reading) with
+       | Types.Quota_read _ ->
+           Blocked_accounts
+             (count (fun account ->
+                  observed_blocked (observed_exhaustion ~runtimes account.pua_scope)))
+       | Types.Quota_unread | Types.Quota_failed _ -> Blocked_unknown)
+  }
+
 let title_text () = Printf.sprintf " %sPlan usage%s" Ansi.bold Ansi.reset
 
 let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_emails ~now
@@ -762,12 +854,6 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
             ]
         }
   | Types.Providers_read { Masc.Tui_decode_usage.puws_since = _; puws_accounts } ->
-      let observed_accounts =
-        List.map
-          (fun (account : Masc.Tui_decode_usage.provider_usage_account) ->
-            (observed_exhaustion ~runtimes account.pua_scope, account))
-          puws_accounts
-      in
       let rows =
         draw_groups ~width
           (drawn_groups ~now ~account_emails (plan ~now ~runtimes puws_accounts))
@@ -796,23 +882,15 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_e
             ]
         | Types.Account_emails_unread | Types.Account_emails_read _ -> []
       in
-      let reporting = List.length (List.filter (fun (_, account) ->
-        match account.Masc.Tui_decode_usage.pua_state with
-        | Masc.Tui_decode_usage.Account_reported _ | Masc.Tui_decode_usage.Account_reported_no_windows _ -> true
-        | Masc.Tui_decode_usage.Account_not_reported_since_start -> false) observed_accounts) in
-      let full_reports = List.length (List.filter (fun (_, account) ->
-        match account.Masc.Tui_decode_usage.pua_state with
-        | Masc.Tui_decode_usage.Account_reported (first, rest) ->
-            List.exists window_at_limit (first :: rest)
-        | Masc.Tui_decode_usage.Account_not_reported_since_start
-        | Masc.Tui_decode_usage.Account_reported_no_windows _ -> false) observed_accounts) in
-      let blocked = match runtimes with
-        | Types.Quota_read _ -> string_of_int (List.length (List.filter (function
-            | Observed_exhausted _, _ -> true | Not_observed_exhausted, _ -> false) observed_accounts))
-        | Types.Quota_unread | Types.Quota_failed _ -> "unknown" in
+      let counts = counts ~runtimes puws_accounts in
+      let blocked =
+        match counts.blocked with
+        | Blocked_unknown -> "unknown"
+        | Blocked_accounts count -> string_of_int count
+      in
       let summary =
         [ Printf.sprintf "Accounts %d \xc2\xb7 Reporting %d \xc2\xb7 At limit (reported) %d \xc2\xb7 Blocked (observed) %s"
-            (List.length observed_accounts) reporting full_reports blocked
+            counts.accounts counts.reporting counts.at_limit blocked
         ; "Bar: share used at the last report \xc2\xb7 dim row: does not block model calls \xc2\xb7 v: Trend graphs" ]
         |> List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:width) in
       let notes = runtimes_note @ emails_note in

@@ -196,13 +196,68 @@ let native_completion_summary (completion : Runtime_native_tools.completion) =
   | End_observed | Completion_unrecorded | Completion_reported | Error_reported
   | Decline_reported | Result_received _ -> native_completion_status completion
 
-let native_activity_summary (activity : tool_activity) =
+(* The provider's report for a step that has ended. A step still running, or
+   one MASC itself executed, has none. An ended step with no recorded report
+   reads as [end_observed]. *)
+let native_completion_of_activity (activity : tool_activity) =
   match activity.outcome with
   | Native_ended | Native_failed ->
-      Some (native_completion_status
-        (Option.value activity.native_completion ~default:Runtime_native_tools.end_observed))
+      Some (Option.value activity.native_completion ~default:Runtime_native_tools.end_observed)
   | Started | Awaiting_result | Returned | Native_running | Failed | Never_returned
   | Outcome_unrecorded -> None
+
+let native_activity_summary (activity : tool_activity) =
+  Option.map native_completion_status (native_completion_of_activity activity)
+
+(* One status clause for every call of one tool that ended the same way.
+   Thirteen [Execute] calls that each returned a result with no error flag
+   used to draw thirteen identical clauses and wrap the block over several
+   rows. The key is the typed value, tool name plus the provider's report,
+   never the drawn text, so two reports that read alike but differ in a field
+   the clause hides stay apart -- except the status word of an unrecognized
+   report: [native_completion_status] never draws it (only the results view
+   does), so it is not part of what this clause says. *)
+type native_status_group =
+  { status_tool : string
+  ; status_completion : Runtime_native_tools.completion
+  ; status_calls : int
+  }
+
+let completion_as_drawn (completion : Runtime_native_tools.completion) =
+  let open Runtime_native_tools in
+  match completion.outcome with
+  | Unrecognized_status _ -> { completion with outcome = Unrecognized_status "" }
+  | End_observed | Completion_unrecorded | Completion_reported | Error_reported
+  | Decline_reported | Result_received _ -> completion
+
+(* Groups in order of first appearance. *)
+let group_native_statuses (activities : tool_activity list) =
+  List.fold_left
+    (fun groups activity ->
+      match native_completion_of_activity activity with
+      | None -> groups
+      | Some completion ->
+          let tool = display_tool_name activity.tool_name in
+          let completion = completion_as_drawn completion in
+          let rec add reversed = function
+            | [] ->
+                List.rev
+                  ({ status_tool = tool; status_completion = completion; status_calls = 1 }
+                   :: reversed)
+            | group :: rest
+              when String.equal group.status_tool tool
+                   && group.status_completion = completion ->
+                List.rev_append reversed
+                  ({ group with status_calls = group.status_calls + 1 } :: rest)
+            | group :: rest -> add (group :: reversed) rest
+          in
+          add [] groups)
+    [] activities
+
+let native_status_clause group =
+  let status = native_completion_status group.status_completion in
+  if group.status_calls = 1 then group.status_tool ^ ": " ^ status
+  else Printf.sprintf "%s x%d: %s" group.status_tool group.status_calls status
 
 let native_progress_summary (activity : tool_activity) =
   let progress = Option.map (fun progress ->
@@ -422,9 +477,7 @@ let compact_outcome_parts (activities : tool_activity list) =
              | [] -> Some counted
              | names -> Some (counted ^ ": " ^ String.concat ", " names)))
   in
-  ordinary @ List.filter_map (fun (activity : tool_activity) ->
-    Option.map (fun summary -> display_tool_name activity.tool_name ^ ": " ^ summary)
-      (native_activity_summary activity)) activities
+  ordinary @ List.map native_status_clause (group_native_statuses activities)
   @ List.filter_map (fun (activity : tool_activity) ->
       Option.map (fun summary -> display_tool_name activity.tool_name ^ ": " ^ summary)
         (native_progress_summary activity)) activities

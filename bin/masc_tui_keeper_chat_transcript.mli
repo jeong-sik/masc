@@ -278,6 +278,24 @@ val native_completion_summary : Runtime_native_tools.completion -> string
 (** {!native_completion_status} plus the provider's own word for an
     unrecognized status. For the results view, which draws it undressed. *)
 
+(** The ended native steps of one block that share a tool and a provider
+    report. The report's unrecognized-status word is not part of the key:
+    {!native_completion_status} never draws it. *)
+type native_status_group =
+  { status_tool : string  (** Display name of the tool. *)
+  ; status_completion : Runtime_native_tools.completion
+  ; status_calls : int
+  }
+
+val group_native_statuses : tool_activity list -> native_status_group list
+(** Groups by tool display name and typed completion (outcome and exit code),
+    in order of first appearance. Steps that have not ended, and calls MASC
+    executed itself, belong to no group. *)
+
+val native_status_clause : native_status_group -> string
+(** The one clause the compact and full headers draw for a group. A group of
+    one call reads as that call always did; a larger one carries its count. *)
+
 val descriptor_of_tool_name : string -> Masc.Keeper_tool_descriptor.t option
 (** The registry's descriptor for a tool name as a trace carries it: the
     public name first, then an internal alias. [None] for a name no

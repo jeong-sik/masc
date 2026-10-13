@@ -2842,7 +2842,7 @@ let test_parse_types_the_sandbox_profile () =
 
 (* [instructions] is free text, so [parse] checks only its shape. A non-string
    used to read as absent and leave the TOML's instructions in place; it is
-   refused now. A blank still reads as absent. *)
+   refused now. The empty string still reads as absent. *)
 let test_parse_refuses_non_string_instructions () =
   with_test_context @@ fun ctx ->
   let parse value =
@@ -2860,7 +2860,7 @@ let test_parse_refuses_non_string_instructions () =
     [ `Null; `Int 1; `List [] ];
   match parse (`String "") with
   | Ok parsed ->
-    check (option string) "a blank reads as absent" None parsed.instructions_arg
+    check (option string) "the empty string reads as absent" None parsed.instructions_arg
   | Error result -> fail (Keeper_types_profile.tool_result_body result)
 ;;
 

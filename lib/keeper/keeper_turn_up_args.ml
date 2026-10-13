@@ -336,8 +336,9 @@ let parse_network_mode args =
   | Some _ -> Error "network_mode must be a string"
 ;;
 
-(* Free text, so only the shape is checked. A blank reads as absent, so the
-   keeper TOML's instructions stay; a non-string is refused rather than read
+(* Free text, so only the shape is checked. The empty string reads as absent,
+   so the keeper TOML's instructions stay; a whitespace-only string is
+   instructions like any other text. A non-string is refused rather than read
    as absent. *)
 let parse_instructions args =
   match Json_util.assoc_member_opt "instructions" args with

@@ -15,10 +15,10 @@ one of these ten rounds.
 | 3 | Streamed response provenance and checkpoint collection | Source audit and independent review PASS; no defect confirmed |
 | 4 | Hook or persistence failure after provider response | Bounded source audit and independent review PASS |
 | 5 | Nested tool-result content and reasoning redaction | Repaired in #42725; independent source and focused CI PASS |
-| 6 | Checkpoint encoding, restore and metadata validation | Bounded source audit and independent review PASS |
+| 6 | Checkpoint encoding, restore and metadata validation | Checkpoint audit PASS; cache response codec lost provenance, repair pending review |
 | 7 | Provider/endpoint/model rotation and replay eligibility | Rules reviewed; catalog-source drift addressed with round 9; account identity limit remains |
 | 8 | Multimodal tool-result projections and user attribution | Bounded source audit and independent review PASS |
-| 9 | Count/preview versus frozen generation input | Request-policy snapshot repaired in #42727; source PASS; separate cache identity defect remains |
+| 9 | Count/preview versus frozen generation input | #42727 source and focused CI PASS; separate cache-identity repair pending review |
 | 10 | Cancellation, resumed state and stale checkpoint writes | Bounded source audit and independent review PASS |
 
 ## Round 1: malformed context cannot become new user evidence
@@ -149,6 +149,16 @@ located. The earlier #42716 finalization-to-disk-to-replay test passed in run
 38357586007. No additional ordinary-path metadata loss was found. New full/delta
 suite execution was not performed for this audit.
 
+The subsequent response-cache audit found a distinct persistence boundary:
+`Cache.response_to_json`/`response_of_json` did not store or restore telemetry.
+A signed response cache hit consequently lost its producing reasoning source
+and could not pass `Types.assistant_message_of_response`. Its list-filtering
+content decoder could also silently remove malformed blocks. The cache repair
+stores original telemetry with the existing typed codecs and rejects an
+unreadable response as a miss. It does not manufacture a new source on a hit.
+The request-level regression follows a signed HTTP response through cache
+storage, cache hit and assistant-message collection.
+
 ## Round 7: provider, endpoint and model changes
 
 Inspected `Types.Reasoning_source` and `Reasoning_dialect.rotation_policy` with
@@ -209,13 +219,25 @@ added. Five new scenarios cover HTTP sync/stream changes before measurement,
 the 480 + 64 > 512 reservation counterexample, and a six-provider matrix of
 present/absent entries, explicit overrides, identity changes and response source.
 Parser validation and independent review of committed head
-`dc8112eb60064558e11c59495100ed3bb3f35b77` passed; behavioral execution is
-pending. The response-cache key is a separate confirmed finding: it omits
+`e01bb1f3ca1e69b0bc2a5c8d0d7a28d91c8d771b` passed. Its three targeted
+suites passed in run https://github.com/jeong-sik/masc/actions/runs/38359308273.
+The response-cache key is a separate confirmed finding: it omits
 capability defaults and reasoning-source metadata, although those can change
 the serialized request. A hit returns the old response without dispatch. The
 follow-up must bind cache hits to the actual request; restamping old reasoning
 with a new source would hide the mistake. This change does not redefine cache
 identity.
+
+Cache follow-up: bind the existing conservative identity to the exact admitted
+HTTP codec/body and reuse that body for dispatch. A changed model ceiling or
+reasoning-source projection produces a miss; an identical effective body can
+still hit. Opaque injected transports supply no HTTP identity and therefore
+bypass this optional response cache while continuing to execute normally.
+Provider-side prompt caching is unchanged. The HTTP regression checks changed
+catalog defaults and compatible/foreign/absent reasoning-source metadata,
+admitted-body reuse and no dispatch observer on a cache hit. Separate cases
+exercise an injected transport that cannot serialize as HTTP.
+Final repaired-head review and targeted execution are pending.
 
 ## Round 10: cancellation, resume and stale writers
 
@@ -236,8 +258,9 @@ bounded audit, and those suites were not newly executed.
 
 ## Execution and completion limits
 
-Ten boundaries were inspected, with five additional repair findings in rounds
-1, 2, 5 and 9 (request-policy timing and cache identity). Independent review and requested behavior results remain separately
+Ten boundaries were inspected, with six additional repair findings in rounds
+1, 2, 5, 6 (cache response provenance) and 9 (request-policy timing and cache
+identity). Independent review and requested behavior results remain separately
 recorded above. The production runtime has not been replaced by these branches.
 The original #42718 test suite had one pre-existing publication-test contract
 failure; its new context-exclusion case passed. Separate test-only PR #42723

@@ -3,6 +3,8 @@
 
 module Cache = Llm_provider.Cache
 module PC = Llm_provider.Provider_config
+module Types = Llm_provider.Types
+module Api_common = Llm_provider.Api_common
 open Llm_provider.Types
 
 (* ── Helpers ─────────────────────────────────────────────── *)
@@ -12,7 +14,13 @@ let make_config ?(model_id = "test-model") () =
 ;;
 
 let simple_response ?(id = "resp-1") ?(model = "test-model") content =
-  { id; model; stop_reason = EndTurn; content; usage = None; telemetry = None }
+  let source =
+    match Llm_provider.Reasoning_dialect.reasoning_source_for_provider_config
+        (make_config ~model_id:model ()) with
+    | Ok source -> source
+    | Error detail -> Alcotest.fail detail in
+  { id; model; stop_reason = EndTurn; content; usage = None
+  ; telemetry = Some { default_inference_telemetry with reasoning_source = Some source } }
 ;;
 
 let response_with_usage ?(id = "resp-u") ?(model = "test-model") content =
@@ -257,6 +265,7 @@ let test_roundtrip_tool_result_content_blocks () =
   let blocks =
     [ Text "preview"
     ; Image { media_type = "image/png"; data = "abc"; source_type = Base64 }
+    ; Thinking { content = "tool data"; signature = Some "tool-signature" }
     ]
   in
   let resp =
@@ -270,6 +279,7 @@ let test_roundtrip_tool_result_content_blocks () =
           }
       ]
   in
+  let resp = { resp with telemetry = None } in
   let json = Cache.response_to_json resp in
   match Cache.response_of_json json with
   | Some r ->
@@ -277,7 +287,7 @@ let test_roundtrip_tool_result_content_blocks () =
      | [ ToolResult { tool_use_id; content; content_blocks = Some restored; _ } ] ->
        Alcotest.(check string) "tool_use_id" "tu_blocks" tool_use_id;
        Alcotest.(check string) "content from text blocks" "preview" content;
-       Alcotest.(check int) "content_blocks length" 2 (List.length restored)
+       Alcotest.(check int) "nested reasoning remains tool data" 3 (List.length restored)
      | [ ToolResult { content_blocks = None; _ } ] ->
        Alcotest.fail "expected structured content_blocks to survive cache roundtrip"
      | _ -> Alcotest.fail "expected ToolResult block")
@@ -510,6 +520,36 @@ let test_of_json_null () =
   Alcotest.(check bool) "null = None" true (Option.is_none (Cache.response_of_json `Null))
 ;;
 
+let test_of_json_rejects_corrupt_provenance () =
+  let valid = Cache.response_to_json (simple_response [Text "visible"]) in
+  let fields = Yojson.Safe.Util.to_assoc valid in
+  let replace key value = `Assoc ((key, value) :: List.remove_assoc key fields) in
+  Alcotest.(check bool) "plain text needs no reasoning source" true
+    (Option.is_some (Cache.response_of_json (replace "telemetry" `Null)));
+  let reasoning = Cache.response_to_json
+      (simple_response [Thinking {content = "private"; signature = Some "signed"}])
+      |> Yojson.Safe.Util.to_assoc in
+  let with_reasoning_telemetry telemetry =
+    `Assoc (("telemetry", telemetry) :: List.remove_assoc "telemetry" reasoning) in
+  let cases =
+    [ "missing telemetry", `Assoc (List.remove_assoc "telemetry" fields)
+    ; "invalid telemetry", replace "telemetry" (`String "not telemetry")
+    ; "invalid reasoning source", replace "telemetry"
+        (Types.inference_telemetry_to_yojson Types.default_inference_telemetry
+         |> Yojson.Safe.Util.to_assoc
+         |> fun fields -> `Assoc (("reasoning_source", `Assoc []) :: List.remove_assoc "reasoning_source" fields))
+    ; "mixed malformed thinking", replace "content"
+        (`List [Api_common.content_block_to_json (Text "visible");
+                `Assoc ["type", `String "thinking"; "thinking", `Int 42]])
+    ; "reasoning without telemetry", with_reasoning_telemetry `Null
+    ; "reasoning without source", with_reasoning_telemetry
+        (Types.inference_telemetry_to_yojson Types.default_inference_telemetry)
+    ] in
+  List.iter (fun (label, json) ->
+    Alcotest.(check bool) (label ^ " is a cache miss") true
+      (Option.is_none (Cache.response_of_json json))) cases
+;;
+
 (* ── Cache backend interface (t) ─────────────────────────── *)
 
 let test_cache_hit () =
@@ -652,6 +692,8 @@ let () =
         ; Alcotest.test_case "missing fields" `Quick test_of_json_missing_fields
         ; Alcotest.test_case "garbage" `Quick test_of_json_garbage
         ; Alcotest.test_case "null" `Quick test_of_json_null
+        ; Alcotest.test_case "corrupt provenance is a miss" `Quick
+            test_of_json_rejects_corrupt_provenance
         ] )
     ; ( "cache_backend"
       , [ Alcotest.test_case "hit" `Quick test_cache_hit

@@ -3972,7 +3972,16 @@ let test_dropped_originals_are_historical_and_searchable () =
       ~args:(`Assoc ["query",`String "canary deployment";
                     "source",`String source;"limit",`Int 10])
     |> Yojson.Safe.from_string in
+  Alcotest.(check string) "pending archive is an explicit search failure"
+    "dropped_read_failed" (string_field "error_kind" (search "dropped"));
+  let partial = search "all" in
+  Alcotest.(check bool) "pending archive does not report a clean miss" false
+    (Yojson.Safe.Util.member "no_match" partial = `Bool true);
+  Alcotest.(check bool) "pending archive is exposed in all search" true
+    (Yojson.Safe.Util.member "dropped_store_unavailable" partial <> `Null);
   Unix.rmdir journal;
+  Alcotest.(check string) "missing journal cannot hide pending archive evidence"
+    "dropped_read_failed" (string_field "error_kind" (search "dropped"));
   (match Current.upsert_fact ~keepers_dir ~keeper_id:meta.name ~now:3.5
       ~source:{kind=Current.Explicit_write;trace_id="resume"} current with
    | Ok _ -> () | Error _ -> Alcotest.fail "pending archive recovery failed");

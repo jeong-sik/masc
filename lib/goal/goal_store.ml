@@ -97,7 +97,9 @@ let pending_event_to_yojson event =
            "event_type", `String (event_kind_to_string event.kind);
            "payload", event.payload ]
 
-type notification_delivery = Awaiting_recipients | Pending_recipients of string list
+type notification_delivery =
+  | Awaiting_recipients
+  | Pending_recipients of Keeper_id.Keeper_name.t list
 
 type pending_notification = {
   notification_id : string;
@@ -142,7 +144,8 @@ let goal_to_yojson (goal : goal) =
 let pending_notification_to_yojson (notice : pending_notification) =
   let recipients = match notice.delivery with
     | Awaiting_recipients -> `Null
-    | Pending_recipients names -> `List (List.map (fun name -> `String name) names) in
+    | Pending_recipients names ->
+        `List (List.map (fun name -> `String (Keeper_id.Keeper_name.to_string name)) names) in
   `Assoc ["notification_id", `String notice.notification_id; "goal_id", `String notice.goal_id;
     "sender", `String notice.sender; "content", `String notice.content; "recipients", recipients]
 
@@ -303,7 +306,12 @@ let pending_notification_of_yojson = function
           | Some (`List values) ->
               let rec names acc = function
                 | [] -> Ok (Pending_recipients (List.rev acc))
-                | `String name :: rest when Result.is_ok (Keeper_id.Keeper_name.of_string name) && not (List.mem name acc) -> names (name :: acc) rest
+                | `String raw :: rest ->
+                    (match Keeper_id.Keeper_name.of_string raw with
+                     | Ok name when not (List.exists (Keeper_id.Keeper_name.equal name) acc) ->
+                         names (name :: acc) rest
+                     | Ok _ | Error _ ->
+                         rejected ~field:"pending_notifications" "invalid or duplicate recipient")
                 | _ -> rejected ~field:"pending_notifications" "invalid or duplicate recipient" in
               names [] values
           | _ -> rejected ~field:"pending_notifications" "missing recipients" in
@@ -1214,22 +1222,31 @@ let update_notification config (expected : pending_notification) change =
               write_state_result config updated |> Result.map_error (fun detail -> Persist_failed detail)
               |> Result.map (fun () -> next))
 
+(* The host roster arrives as strings; each is parsed here once and the
+   captured audience keeps the parsed names. *)
 let snapshot_notification_recipients config notice ~recipients =
-  if List.exists (fun name -> Result.is_error (Keeper_id.Keeper_name.of_string name)) recipients then
+  let parsed = List.map Keeper_id.Keeper_name.of_string recipients in
+  if List.exists Result.is_error parsed then
     Error (Rejected "invalid Goal notification recipient")
-  else update_notification config notice (fun current -> match current.delivery with
-    | Pending_recipients _ -> Ok (Some current)
-    | Awaiting_recipients ->
-        Ok (Some {current with delivery=Pending_recipients (List.sort_uniq String.compare recipients)}))
+  else
+    let names = List.filter_map Result.to_option parsed in
+    let by_name (a : Keeper_id.Keeper_name.t) (b : Keeper_id.Keeper_name.t) =
+      String.compare (a :> string) (b :> string)
+    in
+    update_notification config notice (fun current -> match current.delivery with
+      | Pending_recipients _ -> Ok (Some current)
+      | Awaiting_recipients ->
+          Ok (Some {current with delivery=Pending_recipients (List.sort_uniq by_name names)}))
 
 let acknowledge_notification_recipient config notice ~recipient =
   let* () = match notice.delivery with
-    | Pending_recipients names when List.mem recipient names -> Ok ()
+    | Pending_recipients names when List.exists (Keeper_id.Keeper_name.equal recipient) names -> Ok ()
     | Pending_recipients _ | Awaiting_recipients -> Error (Rejected "recipient is outside the captured Goal notification") in
   update_notification config notice (fun current -> match current.delivery with
     | Awaiting_recipients -> Error "Goal notification recipients have not been captured"
     | Pending_recipients remaining ->
-        Ok (Some {current with delivery=Pending_recipients (List.filter ((<>) recipient) remaining)}))
+        Ok (Some {current with delivery=Pending_recipients
+          (List.filter (fun name -> not (Keeper_id.Keeper_name.equal name recipient)) remaining)}))
   |> Result.map (fun _ -> ())
 
 let acknowledge_notification config notice =

@@ -1,6 +1,8 @@
 (** Materialize validated catalog entries as first-class Agent-Core tools,
     plus transient draft controls and durable async request controls when an entry is [Async]
-    ({!Keeper_tool_composition_catalog.requires_async_controls}). *)
+    ({!Keeper_tool_composition_catalog.requires_async_controls}). Named inline
+    compositions may overlap when all leaves are statically read-only,
+    ordinary and concurrent, and mutable causal evidence can be forked. *)
 
 val composition_run_summary_tool_name : string
 (** Internal durable row name for one terminal composition run. It is not a
@@ -113,6 +115,10 @@ val make_tools
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?gate_causal_context:Keeper_gate_causal_context.t
+       (** The owning turn's causal cell. Concurrent read-only compositions
+           fork it per invocation and append their results to both their own
+           history and the turn's [record_gate_result] callback. *)
   -> ?gate_grant:Keeper_gate.cycle_grant
   -> ?record_gate_result:
        (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
@@ -163,6 +169,7 @@ module Compatibility : sig
     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
     -> ?continuation_channel:Keeper_continuation_channel.t
     -> ?gate_context:(unit -> Keeper_gate.causal_context)
+    -> ?gate_causal_context:Keeper_gate_causal_context.t
     -> ?gate_grant:Keeper_gate.cycle_grant
     -> ?record_gate_result:
          (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)

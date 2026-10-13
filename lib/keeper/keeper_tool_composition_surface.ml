@@ -1478,6 +1478,7 @@ let make_tools_with_authority
       ?clock
       ?continuation_channel
       ?gate_context
+      ?gate_causal_context
       ?gate_grant
       ?record_gate_result
       ?on_completed
@@ -1517,24 +1518,43 @@ let make_tools_with_authority
     (* A template is not the input a node will execute. Only static read-only
        contracts for every node prove the whole inline composition read-only.
        Async admission writes a durable request even when its nodes only read. *)
+    let read_only =
+      List.for_all (fun (node : Keeper_tool_plan.node) ->
+        match Keeper_tool_plan.descriptor entry.plan node.id with
+        | None -> false
+        | Some descriptor ->
+          Keeper_tool_descriptor.readonly_static_hint descriptor = Some true)
+        (Keeper_tool_plan.nodes entry.plan)
+    in
+    (* A read-only leaf can still own a serial resource, such as a browser
+       session. Only leaves whose own contract permits concurrent execution
+       can prove that separate invocations of this whole plan may overlap. *)
+    let causal_context_isolatable = match gate_causal_context, gate_context with
+      | Some _, _ | None, None -> true
+      | None, Some _ -> false
+    in
+    let concurrent = read_only && causal_context_isolatable
+      && List.for_all (fun (node : Keeper_tool_plan.node) ->
+        match Keeper_tool_plan.descriptor entry.plan node.id with
+        | Some { Keeper_tool_descriptor.execution =
+                   Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent; _ } -> true
+        | Some _ | None -> false) (Keeper_tool_plan.nodes entry.plan)
+    in
     let call_effect _ =
       match entry.execution with
       | Catalog.Async -> Agent_core.Tool.Effect_possible
       | Catalog.Inline ->
-        if List.for_all (fun (node : Keeper_tool_plan.node) ->
-          match Keeper_tool_plan.descriptor entry.plan node.id with
-          | None -> false
-          | Some descriptor ->
-            Keeper_tool_descriptor.readonly_static_hint descriptor = Some true)
-          (Keeper_tool_plan.nodes entry.plan)
+        if read_only
         then Agent_core.Tool.Read_only
         else Agent_core.Tool.Effect_possible
     in
     let descriptor =
       match entry.execution, completion with
-      | Catalog.Async, Agent_core.Tool_contract.Continue_after_success
-      | Catalog.Inline, Agent_core.Tool_contract.Continue_after_success ->
+      | Catalog.Async, Agent_core.Tool_contract.Continue_after_success ->
         Agent_core.Tool.ordinary_descriptor ~call_effect Agent_core.Tool_contract.Serial
+      | Catalog.Inline, Agent_core.Tool_contract.Continue_after_success ->
+        Agent_core.Tool.ordinary_descriptor ~call_effect
+          (if concurrent then Agent_core.Tool_contract.Concurrent else Agent_core.Tool_contract.Serial)
       | Catalog.Inline, Agent_core.Tool_contract.Terminal_after_success disposition ->
         Agent_core.Tool.terminal_descriptor disposition
       | Catalog.Async, Agent_core.Tool_contract.Terminal_after_success _ ->
@@ -1575,6 +1595,23 @@ let make_tools_with_authority
                ~start_time
                "composition execution requires Agent-Core invocation identity"
            | Some parent_invocation ->
+             let gate_context, record_gate_result =
+               if concurrent && entry.execution = Catalog.Inline
+               then
+                 match gate_causal_context with
+                 | Some parent ->
+                   let local = Keeper_gate_causal_context.fork parent in
+                   let record ~operation ~input result =
+                     Keeper_gate_causal_context.record_tool_result local ~operation ~input result;
+                     match record_gate_result with
+                     | Some record -> record ~operation ~input result
+                     | None -> Keeper_gate_causal_context.record_tool_result parent ~operation ~input result
+                   in
+                   Some (fun () -> Keeper_gate_causal_context.snapshot local), Some record
+                 | None ->
+                   gate_context, record_gate_result
+               else gate_context, record_gate_result
+             in
              let turn_context =
                Option.map
                  (fun cell ->

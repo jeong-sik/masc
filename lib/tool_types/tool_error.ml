@@ -84,6 +84,7 @@ let of_exn ?detail exn =
        | System_error_class.(Emfile | Enfile) ->
            Resource_exhausted { resource = "fd"; detail = op }
        | System_error_class.(
-           Enospc | Eperm | Econnrefused | Etimedout | Other_errno _) ->
+           Enospc | Eperm | Econnrefused | Etimedout | Epipe | Eaddrinuse
+           | Eaddrnotavail | Other_errno _) ->
            internal_error ())
   | _ -> internal_error ()

@@ -56,7 +56,8 @@ let note_exception ?(site = "unknown") exn =
       (Printexc.to_string exn)
   | Some
       System_error_class.(
-        Enospc | Eacces | Eperm | Enoent | Econnrefused | Etimedout | Other_errno _)
+        Enospc | Eacces | Eperm | Enoent | Econnrefused | Etimedout | Epipe
+        | Eaddrinuse | Eaddrnotavail | Other_errno _)
   | None -> ()
 ;;
 

@@ -41,7 +41,7 @@ let note_exception ?(site = "unknown") exn =
   | Some
       System_error_class.(
         Emfile | Enfile | Eacces | Eperm | Enoent | Econnrefused | Etimedout
-        | Other_errno _)
+        | Epipe | Eaddrinuse | Eaddrnotavail | Other_errno _)
   | None -> ()
 ;;
 

@@ -107,10 +107,25 @@ let suffix_records_tool_activity (messages : Agent_core.Types.message list) =
 ;;
 
 let drop_trailing_assistants messages =
+  let retained_context (message : Agent_core.Types.message) =
+    match Agent_core.Types.Extra_system_context_provenance.classify message.metadata with
+    | Historical -> true
+    | Absent | Present | Invalid | Duplicate -> false
+  in
   let rec drop dropped = function
     | ({ Agent_core.Types.role = Agent_core.Types.Assistant; _ } :
         Agent_core.Types.message)
       :: rest ->
+      (* Collection stored this context immediately before the response whose
+         signed reasoning needed it. Once that response is excluded from
+         replay, its context must not survive as a standalone User message.
+         Never consume an ordinary input or context belonging to an earlier
+         retained response. *)
+      let rest =
+        match rest with
+        | context :: rest when retained_context context -> rest
+        | _ -> rest
+      in
       drop true rest
     | reversed -> List.rev reversed, dropped
   in

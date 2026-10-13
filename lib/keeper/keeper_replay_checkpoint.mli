@@ -45,7 +45,9 @@ val checkpoint_for_replay_persistence :
     inspects the text.
 
     A turn whose suffix records a ToolUse/ToolResult keeps that record and loses
-    only the trailing Assistant note. A turn that called nothing leaves replay
+    the trailing Assistant note and its immediately preceding retained runtime
+    context. Context for earlier retained responses remains intact.
+    A turn that called nothing leaves replay
     unchanged: its wake cue and note both go, because neither is something the
     next turn should read as dialogue. Direct turns pass [false] and behave
     exactly as before (RFC-0376 4.3). The argument is labelled and required so a

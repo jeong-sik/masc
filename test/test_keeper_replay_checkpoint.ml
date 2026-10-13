@@ -484,6 +484,44 @@ let test_success_preserves_typed_replay_suffix () =
     (patched.working_context = None)
 ;;
 
+let test_suppressed_response_releases_only_its_retained_context () =
+  let open Agent_core.Types in
+  let context text =
+    make_message ~role:User ~metadata:Extra_system_context_provenance.historical_metadata
+      [Text text] in
+  let history =
+    [message User [Text "old input"]; context "old context";
+     message Assistant [Text "old response"]] in
+  let tool_context = context "tool context" in
+  let executed =
+    [message User [Text "current input"]; tool_context;
+     message Assistant [ToolUse {id = "call"; name = "lookup"; input = `Assoc []}];
+     message Tool [ToolResult {tool_use_id = "call"; content = "result";
+       outcome = Tool_succeeded; json = None; content_blocks = None}]] in
+  let final = message Assistant
+      [Thinking {signature = Some "signature"; content = "internal"}; Text "final note"] in
+  List.iter (fun (suppress_visible_response, exclude_thought_from_replay) ->
+    List.iter (fun (last_input, should_remove) ->
+      let original = history @ executed @ [last_input; final] in
+      let patched, _ = Finalize.checkpoint_for_replay_persistence
+          ~history_messages:history ~session_id:"session" ~response_text:"final note"
+          ~suppress_visible_response ~exclude_thought_from_replay
+          (checkpoint original) |> expect_ok in
+      let expected = history @ executed @ if should_remove then [] else [last_input] in
+      Alcotest.(check bool) "only the discarded response's retained context is removed"
+        true (patched.messages = expected))
+      [context "discarded context", true;
+       message User [Text "[system context] actual user input"], false];
+    let original = history @ executed @ [context "preserved context"; final] in
+    let preserved, _ = Finalize.checkpoint_for_replay_persistence
+        ~history_messages:history ~session_id:"session" ~response_text:"final note"
+        ~suppress_visible_response:false ~exclude_thought_from_replay:false
+        (checkpoint original) |> expect_ok in
+    Alcotest.(check bool) "ordinary completion keeps its context and response"
+      true (preserved.messages = original))
+    [true, false; false, true]
+;;
+
 let test_success_appends_missing_final_assistant () =
   let open Agent_core.Types in
   let history =
@@ -963,6 +1001,10 @@ let () =
             "success preserves typed replay"
             `Quick
             test_success_preserves_typed_replay_suffix
+        ; Alcotest.test_case
+            "suppressed response releases only its retained context"
+            `Quick
+            test_suppressed_response_releases_only_its_retained_context
         ; Alcotest.test_case
             "success appends final assistant"
             `Quick

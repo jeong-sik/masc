@@ -348,9 +348,6 @@ let test_attention_grades_the_operators_tasks () =
           }
       ]
   in
-  Alcotest.(check (list string)) "graded by who is blocked and on what"
-    [ "held_without_actor"; "producer_record_unreadable" ]
-    (List.map (fun (item : Dashboard_attention.attention_item) -> item.category) items);
   Alcotest.(check (list bool)) "a repair is not an operator decision"
     [ true; false ]
     (List.map

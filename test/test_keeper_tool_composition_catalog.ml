@@ -1009,7 +1009,7 @@ let test_public_draft_run_preserves_one_execution_identity ?(observe = true) () 
     (leaf |> member "tool_use_id" |> to_string);
   Call_log.flush_now ();
   let rows = Call_log.read_recent ~keeper_name:meta.name () |> Result.get_ok in
-  let row name = match List.find_opt (fun row -> member "tool_name" row = `String name) rows with
+  let row name = match List.find_opt (fun row -> member "tool" row = `String name) rows with
     | Some row -> row | None -> failf "missing actual composition observation: %s" name in
   if observe then (
     let observed_leaf = row "keeper_lane_status" in

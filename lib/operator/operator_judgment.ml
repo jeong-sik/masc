@@ -3,9 +3,14 @@ open Result.Syntax
 type target_type =
   | Workspace
 
+type surface =
+  | Command_namespace
+  | Intervene
+[@@deriving enumerate]
+
 type record = {
   judgment_id : string;
-  surface : string;
+  surface : surface;
   target_type : target_type;
   target_id : string option;
   summary : string;
@@ -36,6 +41,15 @@ let target_type_of_string = function
        | None -> None)
 
 
+let surface_to_string = function
+  | Command_namespace -> "command.namespace"
+  | Intervene -> "intervene"
+
+let surface_of_string value =
+  List.find_opt
+    (fun surface -> String.equal (surface_to_string surface) value)
+    all_of_surface
+
 let operator_dir config =
   Filename.concat (Workspace.masc_dir config) "operator"
 
@@ -53,13 +67,14 @@ let key_of ~surface ~target_type ~target_id =
         if trimmed <> "" then trimmed else "__workspace__"
     | None -> "__workspace__"
   in
-  String.concat ":" [ surface; target_type_to_string target_type; target ]
+  String.concat ":"
+    [ surface_to_string surface; target_type_to_string target_type; target ]
 
 let to_yojson (value : record) =
   `Assoc
     [
       ("judgment_id", `String value.judgment_id);
-      ("surface", `String value.surface);
+      ("surface", `String (surface_to_string value.surface));
       ("target_type", `String (target_type_to_string value.target_type));
       ("target_id", Json_util.option_to_yojson (fun v -> `String v) value.target_id);
       ("summary", `String value.summary);
@@ -153,7 +168,10 @@ let of_yojson json =
       | None -> Error ("missing " ^ key)
     in
     let* judgment_id = required_string "judgment_id" in
-    let* surface = required_string "surface" in
+    let* surface =
+      let* raw = required_string "surface" in
+      Option.to_result ~none:"invalid surface" (surface_of_string raw)
+    in
     let* target_id = optional_string "target_id" in
     let* summary = required_string "summary" in
     let* generated_at = required_string "generated_at" in

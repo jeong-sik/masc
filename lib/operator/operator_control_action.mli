@@ -34,7 +34,7 @@ val judgment_write_json :
     The judgment's [keeper_name] is the caller's authenticated name.
 
     Optional: [target_id], [fresh_ttl_sec] (default 60s for
-    command.namespace, 300s for intervene; floored at 1),
+    command.namespace, 300s for intervene; a value below 1 is an error),
     [evidence_refs] (string list), [recommended_action] (object),
     [model_name], [runtime_name], [fallback_used] (bool, default
     false), [disagreement_with_truth] (bool, default false).

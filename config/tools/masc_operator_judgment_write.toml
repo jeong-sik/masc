@@ -37,6 +37,10 @@ How sure the judge is, 0.0-1.0. Shown to the operator; no code compares it."""
 [[params]]
 name = "fresh_ttl_sec"
 type = "integer"
+minimum = 1
+description = """
+Seconds the judgment stays fresh. Omit for the surface default \
+(60 for command.namespace, 300 for intervene)."""
 
 [[params]]
 name = "model_name"

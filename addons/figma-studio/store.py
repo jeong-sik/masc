@@ -8,6 +8,7 @@ import json
 import sqlite3
 import time
 import uuid
+from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -208,6 +209,10 @@ class Store:
             if not document["can_edit"]:
                 raise Refused("Session does not report Design editing capability")
             snapshot, _ = self.snapshot(text(args.get("snapshot_id")))
+            if snapshot["source"] != "plugin_live":
+                raise Refused(
+                    "An edit needs a live Plugin baseline, not an unassociated REST snapshot"
+                )
             if (
                 snapshot["session_id"] != session
                 or snapshot["root_id"] != args["root_id"]
@@ -241,7 +246,14 @@ class Store:
             )
         return self.operation(identity)
 
-    def relay(self, args: Json) -> Json:
+    def relay(
+        self,
+        args: Json,
+        *,
+        check_poll: Callable[[Json], None],
+        check_snapshot: Callable[[str, Json, bytes | None], None],
+        check_session: Callable[[str, Json], None],
+    ) -> Json:
         fields(
             args,
             {"kind", "worker_boot_id", "session_id"},
@@ -264,6 +276,7 @@ class Store:
                 raise Refused("Malformed Plugin context")
             for key in ("page_id", "editor_type", "mode"):
                 text(doc[key])
+            check_session(session, doc)
             with self.db:
                 self.db.execute(
                     "INSERT OR REPLACE INTO sessions VALUES (?,?)",
@@ -280,16 +293,35 @@ class Store:
                 ).fetchone()
                 if row is None:
                     return {"command": None}
+                operation = self.operation(row[0])
+                command = {"id": row[0], **operation["request"]}
+                if command["kind"] == "apply":
+                    snapshot, _ = self.snapshot(command.pop("snapshot_id"))
+                    command["expected_tree_json"] = snapshot["tree_json"]
+                response = {"command": command}
+                # The retained baseline can make this reply larger than the
+                # submitted operation. Refuse before handing off ownership.
+                try:
+                    check_poll(response)
+                except Refused as error:
+                    rejection = {"reason": str(error), "effect": "proven_pre_effect"}
+                    self.db.execute(
+                        "UPDATE operations SET state=?,result=?,updated=? WHERE id=?",
+                        (State.REJECTED, encode(rejection), time.time(), row[0]),
+                    )
+                    return {
+                        "command": None,
+                        "rejected_operation": {
+                            "operation_id": row[0],
+                            "state": State.REJECTED,
+                            **rejection,
+                        },
+                    }
                 self.db.execute(
                     "UPDATE operations SET state=?,updated=? WHERE id=?",
                     (State.DISPATCHED, time.time(), row[0]),
                 )
-            operation = self.operation(row[0])
-            command = {"id": row[0], **operation["request"]}
-            if command["kind"] == "apply":
-                snapshot, _ = self.snapshot(command.pop("snapshot_id"))
-                command["expected_tree_json"] = snapshot["tree_json"]
-            return {"command": command}
+            return response
         if args["kind"] != "result":
             raise Refused("Unknown relay action")
         fields(
@@ -319,7 +351,10 @@ class Store:
             if args["ok"]:
                 try:
                     result["snapshot_id"] = self.save_snapshot(
-                        args["payload"], session, operation["request"]["root_id"]
+                        args["payload"],
+                        session,
+                        operation["request"]["root_id"],
+                        check=check_snapshot,
                     )
                     state = (
                         State.CAPTURED
@@ -335,15 +370,26 @@ class Store:
             )
         return self.operation(operation["operation_id"])
 
-    def save_snapshot(self, value: Json, session: str, root: str) -> str:
+    def save_snapshot(
+        self,
+        value: Json,
+        session: str | None,
+        root: str,
+        *,
+        check: Callable[[str, Json, bytes | None], None],
+    ) -> str:
+        origin = (
+            {"session_id", "page_id"}
+            if session is not None
+            else {"file_key", "version"}
+        )
         fields(
             value,
-            {
+            origin
+            | {
                 "schema_version",
                 "source",
-                "session_id",
                 "root_id",
-                "page_id",
                 "tree_json",
                 "preview",
                 "coverage",
@@ -353,8 +399,9 @@ class Store:
         )
         if (
             value["schema_version"] != 1
-            or value["source"] != "plugin_live"
-            or value["session_id"] != session
+            or value["source"]
+            != ("plugin_live" if session is not None else "rest_version")
+            or (session is not None and value["session_id"] != session)
             or value["root_id"] != root
         ):
             raise Refused("Snapshot identity mismatch")
@@ -384,30 +431,37 @@ class Store:
         }
         encoded = encode(metadata)
         identity = hashlib.sha256(encoded.encode()).hexdigest()
+        # Validate both read and observation projections before publishing a
+        # latest pointer. A rejected readback remains only in its operation.
+        check(identity, metadata, data)
         self.db.execute(
             "INSERT OR IGNORE INTO snapshots VALUES (?,?,?)", (identity, encoded, data)
         )
         self.set_meta("latest_snapshot", identity)
         return identity
 
-    def status(self) -> Json:
+    def status(self, *, session: tuple[str, Json] | None = None) -> Json:
+        sessions = {
+            row[0]: {"session_id": row[0], **json.loads(row[1])}
+            for row in self.db.execute("SELECT id,document FROM sessions ORDER BY id")
+        }
+        if session is not None:
+            sessions[session[0]] = {"session_id": session[0], **session[1]}
         return {
             "worker_boot_id": self.boot_id,
             "binding_ready": self.binding is not None,
             "active_session": self.meta("active_session"),
             "latest_snapshot": self.meta("latest_snapshot"),
             "latest_validation": self.meta("latest_validation"),
-            "sessions": [
-                {"session_id": row[0], **json.loads(row[1])}
-                for row in self.db.execute(
-                    "SELECT id,document FROM sessions ORDER BY id"
-                )
-            ],
+            "sessions": [sessions[identity] for identity in sorted(sessions)],
         }
 
-    def record_validation(self, report: Json) -> Json:
+    def record_validation(
+        self, report: Json, *, check: Callable[[str, str], None]
+    ) -> Json:
         content = encode(report)
         identity = hashlib.sha256(content.encode()).hexdigest()
+        check(identity, content)
         with self.db:
             self.db.execute(
                 "INSERT OR IGNORE INTO reports VALUES (?,?)", (identity, content)
@@ -415,8 +469,18 @@ class Store:
             self.set_meta("latest_validation", identity)
         return {"report_id": identity, **report}
 
-    def observe(self) -> Json:
-        status = self.status()
+    def observe(
+        self,
+        *,
+        snapshot: tuple[str, Json, bytes | None] | None = None,
+        report: tuple[str, str] | None = None,
+        session: tuple[str, Json] | None = None,
+    ) -> Json:
+        status = self.status(session=session)
+        if snapshot is not None:
+            status["latest_snapshot"] = snapshot[0]
+        if report is not None:
+            status["latest_validation"] = report[0]
         row: Json = {
             "id": self.boot_id,
             "lane_id": "figma/studio",
@@ -433,7 +497,7 @@ class Store:
         artifacts: list[Json] = []
         if status["latest_snapshot"]:
             identity = status["latest_snapshot"]
-            metadata, data = self.snapshot(identity)
+            metadata, data = snapshot[1:] if snapshot else self.snapshot(identity)
             artifacts.append(
                 {
                     "id": identity,
@@ -454,9 +518,13 @@ class Store:
                 row["evidence"].append({"artifact_id": image_id})
         if status["latest_validation"]:
             identity = status["latest_validation"]
-            content = self.db.execute(
-                "SELECT content FROM reports WHERE id=?", (identity,)
-            ).fetchone()[0]
+            content = (
+                report[1]
+                if report
+                else self.db.execute(
+                    "SELECT content FROM reports WHERE id=?", (identity,)
+                ).fetchone()[0]
+            )
             artifacts.append(
                 {
                     "id": identity,

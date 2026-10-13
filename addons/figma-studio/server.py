@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from store import Json, Refused, Store, encode, fields, text
+from rest_queue import RestQueue
 from verify import validate
 
 ROOT = Path(__file__).resolve().parent
@@ -29,6 +30,11 @@ def schema(required: dict, optional: dict | None = None) -> Json:
 
 
 SCHEMAS = {
+    "masc_figma_rest_capture": schema(
+        {"operation_id": STRING, "file_key": STRING, "root_id": STRING},
+        {"version": STRING},
+    ),
+    "masc_figma_rest_operation": schema({"operation_id": STRING}),
     "masc_figma_status": schema({}),
     "masc_figma_bind": schema({"session_id": STRING}),
     "masc_figma_submit": schema(
@@ -63,7 +69,19 @@ SCHEMAS = {
         }
     ),
     "masc_figma_relay": schema(
-        {"kind": {"type": "string", "enum": ["status", "session", "poll", "result"]}},
+        {
+            "kind": {
+                "type": "string",
+                "enum": [
+                    "status",
+                    "session",
+                    "poll",
+                    "result",
+                    "rest_poll",
+                    "rest_result",
+                ],
+            }
+        },
         {
             "worker_boot_id": STRING,
             "session_id": STRING,
@@ -75,6 +93,8 @@ SCHEMAS = {
     ),
 }
 DESCRIPTIONS = {
+    "masc_figma_rest_capture": "Queue a PAT-backed server-version capture. Does not require an open Plugin.",
+    "masc_figma_rest_operation": "Read a retained REST capture outcome without replaying the request.",
     "masc_figma_status": "List reported Plugin sessions and the latest retained design snapshot.",
     "masc_figma_bind": "Select an explicit Plugin session before capture or editing.",
     "masc_figma_submit": "Retain an idempotent capture/edit request. A receipt is not edit completion.",
@@ -86,14 +106,9 @@ DESCRIPTIONS = {
 
 
 def result(value: Json, image: bytes | None = None) -> Json:
-    content = [
-        {
-            "type": "text",
-            "text": encode(value)
-            if image is None
-            else "Retained Figma snapshot; see structured data and PNG.",
-        }
-    ]
+    # Keeper consumes MCP content, while lane_observe uses structuredContent.
+    # Send each exported result once as model-visible JSON, plus the exact PNG.
+    content = [{"type": "text", "text": encode(value)}]
     if image is not None:
         content.append(
             {
@@ -102,7 +117,28 @@ def result(value: Json, image: bytes | None = None) -> Json:
                 "data": base64.b64encode(image).decode(),
             }
         )
-    return {"content": content, "structuredContent": value, "isError": False}
+    return {"content": content, "isError": False}
+
+
+def observation_result(value: Json) -> Json:
+    return {
+        "content": [
+            {"type": "text", "text": "Figma Studio state and retained artifacts."}
+        ],
+        "structuredContent": value,
+        "isError": False,
+    }
+
+
+def response_bytes(identity: str | int | None, output: Json) -> bytes:
+    return (
+        encode({"jsonrpc": "2.0", "id": identity, "result": output}) + "\n"
+    ).encode()
+
+
+def check_response(identity: str | int | None, output: Json) -> None:
+    if len(response_bytes(identity, output)) > MAX_BYTES:
+        raise Refused("Result exceeds the package's declared UTF-8 envelope")
 
 
 def summary(operation: Json) -> Json:
@@ -126,23 +162,44 @@ def summary(operation: Json) -> Json:
 class Worker:
     def __init__(self, directory: Path):
         self.store = Store(directory)
+        self.rest = RestQueue(self.store)
 
-    def call(self, name: str, arguments: Json) -> Json:
+    def call(
+        self, name: str, arguments: Json, *, response_id: str | int | None = 0
+    ) -> Json:
+        def check_snapshot(identity: str, metadata: Json, image: bytes | None) -> None:
+            check_response(
+                response_id, result({"snapshot_id": identity, **metadata}, image)
+            )
+            check_response(
+                response_id,
+                observation_result(
+                    self.store.observe(snapshot=(identity, metadata, image))
+                ),
+            )
+
+        def check_report(identity: str, content: str) -> None:
+            check_response(
+                response_id, result({"report_id": identity, **json.loads(content)})
+            )
+            check_response(
+                response_id,
+                observation_result(self.store.observe(report=(identity, content))),
+            )
+
+        def check_session(identity: str, document: Json) -> None:
+            session = (identity, document)
+            check_response(response_id, result(self.store.status(session=session)))
+            check_response(
+                response_id, observation_result(self.store.observe(session=session))
+            )
+
         if name == "lane_observe":
             fields(arguments, {"binding", "sources"})
             if arguments["sources"] != []:
                 raise Refused("Unexpected observation sources")
             self.store.configure(arguments["binding"])
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "Figma Studio state and retained artifacts.",
-                    }
-                ],
-                "structuredContent": self.store.observe(),
-                "isError": False,
-            }
+            return observation_result(self.store.observe())
         if name != "lane_call":
             raise Refused("Exported tools must use the host-owned lane_call envelope")
         fields(arguments, {"tool", "arguments", "caller"})
@@ -157,11 +214,32 @@ class Worker:
                         "max_request_bytes": MAX_BYTES,
                     }
                 )
-            response = self.store.relay(args)
+            if args.get("kind") in ("rest_poll", "rest_result"):
+                response = self.rest.relay(
+                    args,
+                    check_poll=lambda value: check_response(response_id, result(value)),
+                    check_snapshot=check_snapshot,
+                )
+                return result(
+                    self.rest.summary(response)
+                    if "operation_id" in response
+                    else response
+                )
+            response = self.store.relay(
+                args,
+                check_poll=lambda value: check_response(response_id, result(value)),
+                check_snapshot=check_snapshot,
+                check_session=check_session,
+            )
             return result(summary(response) if "operation_id" in response else response)
         if tool == "masc_figma_status":
             fields(args, set())
             return result(self.store.status())
+        if tool == "masc_figma_rest_capture":
+            return result(self.rest.summary(self.rest.submit(args)))
+        if tool == "masc_figma_rest_operation":
+            fields(args, {"operation_id"})
+            return result(self.rest.summary(self.rest.get(args["operation_id"])))
         if tool == "masc_figma_bind":
             fields(args, {"session_id"})
             return result(self.store.bind(args["session_id"]))
@@ -180,7 +258,7 @@ class Worker:
             report = validate(args["snapshot_id"], metadata, args["checks"])
             return result(
                 self.store.record_validation(
-                    {**report, "evaluator": arguments["caller"]}
+                    {**report, "evaluator": arguments["caller"]}, check=check_report
                 )
             )
         raise Refused("Unknown Studio tool")
@@ -261,7 +339,9 @@ def serve(worker: Worker) -> None:
             elif method == "tools/call":
                 params = fields(request.get("params"), {"name", "arguments"})
                 try:
-                    output = worker.call(params["name"], params["arguments"])
+                    output = worker.call(
+                        params["name"], params["arguments"], response_id=identity
+                    )
                 except Refused as error:
                     output = reject(str(error), pre_effect=True)
             else:

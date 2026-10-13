@@ -10,7 +10,7 @@ mode = "persistent"
 
 [world.tools]
 invocation = "host_context"
-export = ["masc_figma_status", "masc_figma_bind", "masc_figma_submit", "masc_figma_operation", "masc_figma_snapshot", "masc_figma_validate", "masc_figma_relay"]
+export = ["masc_figma_status", "masc_figma_bind", "masc_figma_submit", "masc_figma_operation", "masc_figma_snapshot", "masc_figma_validate", "masc_figma_rest_capture", "masc_figma_rest_operation", "masc_figma_relay"]
 
 [world.outputs.design]
 lanes = ["figma/studio"]
@@ -32,7 +32,7 @@ binding_schema = '''{
     "installation": {"type": "string", "minLength": 1},
     "keeper": {"type": "string", "minLength": 1},
     "relay_agent": {"type": "string", "minLength": 1},
-    "sources": {"type": "array", "maxItems": 0, "items": {"type": "object"}}
+    "sources": {"type": "array", "maxItems": 0, "items": {"type": "object", "properties": {}, "additionalProperties": false}}
   },
   "required": ["installation", "keeper", "relay_agent", "sources"],
   "additionalProperties": false

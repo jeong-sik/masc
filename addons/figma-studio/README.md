@@ -19,8 +19,9 @@ Plugin, model prompts and artifacts. Use a Full-profile MASC MCP connection for
 the relay; a bearer agent is not an operator or a Keeper identity.
 
 The package exports `masc_figma_status`, `masc_figma_bind`, `masc_figma_submit`,
-`masc_figma_operation`, `masc_figma_snapshot`, `masc_figma_validate`, and
-`masc_figma_relay`. Their private `lane_call` entrypoint receives the trusted
+`masc_figma_operation`, `masc_figma_snapshot`, `masc_figma_validate`,
+`masc_figma_rest_capture`, `masc_figma_rest_operation`, and `masc_figma_relay`.
+Their private `lane_call` entrypoint receives the trusted
 host caller. Direct raw export calls are refused. Discovery can be shared;
 call authorization is enforced inside the package. Only one visible Studio
 installation can currently export these names.
@@ -38,12 +39,20 @@ sessions require explicit pairing and binding. Duplicate operation IDs must
 carry identical input. Accepted result and snapshot insertion are one SQLite
 transaction. Keep `/state` on the host-managed persistent volume.
 
-`masc_figma_snapshot` returns the native JSON in structured content and the PNG
+`masc_figma_snapshot` returns native JSON in model-visible text and the PNG
 as an MCP image. `masc_figma_validate` checks supplied node/property assertions;
 it never certifies appearance. Its report records the evaluator and exact
 snapshot ID. The next `lane_observe` transfers snapshot, PNG and report bytes in
 the existing artifact envelope. Export success does not establish that host
 retention or terminal display has completed.
+
+REST capture uses its own request queue and never requires a Plugin session.
+Submit `masc_figma_rest_capture` with `operation_id`, `file_key`, `root_id` and
+optional `version`. The host relay reads the node and renders the exact returned
+version, then retains a `rest_version` snapshot. `masc_figma_rest_operation`
+reports its outcome. A server snapshot cannot be used as a live edit baseline
+without verifying its association to the Plugin document; this initial version
+requires a fresh Plugin capture for edits.
 
 For terminal preview, save the complete snapshot tool result and run the
 companion `studio/preview.py result.json --kitty`. It checks the PNG digest and

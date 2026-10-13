@@ -272,7 +272,7 @@ let test_roundtrip_tool_result_content_blocks () =
     simple_response
       [ ToolResult
           { tool_use_id = "tu_blocks"
-          ; content = "preview"
+          ; content = "preview\ntool data"
           ; outcome = Tool_succeeded
           ; json = None
           ; content_blocks = Some blocks
@@ -286,8 +286,9 @@ let test_roundtrip_tool_result_content_blocks () =
     (match r.content with
      | [ ToolResult { tool_use_id; content; content_blocks = Some restored; _ } ] ->
        Alcotest.(check string) "tool_use_id" "tu_blocks" tool_use_id;
-       Alcotest.(check string) "content from text blocks" "preview" content;
-       Alcotest.(check int) "nested reasoning remains tool data" 3 (List.length restored)
+       Alcotest.(check string) "content from textual blocks" "preview\ntool data" content;
+       Alcotest.(check bool) "all nested tool data and signatures are preserved" true
+         (restored = blocks)
      | [ ToolResult { content_blocks = None; _ } ] ->
        Alcotest.fail "expected structured content_blocks to survive cache roundtrip"
      | _ -> Alcotest.fail "expected ToolResult block")

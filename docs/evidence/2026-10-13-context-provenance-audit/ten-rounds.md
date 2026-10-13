@@ -15,10 +15,10 @@ one of these ten rounds.
 | 3 | Streamed response provenance and checkpoint collection | Source audit and independent review PASS; no defect confirmed |
 | 4 | Hook or persistence failure after provider response | Bounded source audit and independent review PASS |
 | 5 | Nested tool-result content and reasoning redaction | Repaired in #42725; independent source and focused CI PASS |
-| 6 | Checkpoint encoding, restore and metadata validation | Checkpoint audit PASS; cache provenance repaired in #42728, source PASS, execution pending |
+| 6 | Checkpoint encoding, restore and metadata validation | Checkpoint audit PASS; cache provenance repaired in #42728, first execution found a test expectation defect, corrected run pending |
 | 7 | Provider/endpoint/model rotation and replay eligibility | Rules reviewed; catalog-source drift addressed with round 9; account identity limit remains |
 | 8 | Multimodal tool-result projections and user attribution | Bounded source audit and independent review PASS |
-| 9 | Count/preview versus frozen generation input | #42727 source and focused CI PASS; #42728 cache identity source PASS, execution pending |
+| 9 | Count/preview versus frozen generation input | #42727 source and focused CI PASS; #42728 HTTP and injected-transport cases PASS, corrected cache-codec run pending |
 | 10 | Cancellation, resumed state and stale checkpoint writes | Bounded source audit and independent review PASS |
 
 ## Round 1: malformed context cannot become new user evidence
@@ -241,7 +241,17 @@ Independent `diagnosis_review` source PASS at
 `bb81c1374db51bafafa87547f86c7603d458e18d`, against
 `e01bb1f3ca1e69b0bc2a5c8d0d7a28d91c8d771b`. Full diff SHA-256:
 `1c1d24137e4a7d15e48d3492d2c538a0491925340829fd3ce60367fce8842f9e`.
-The final documentation/changelog delta and targeted execution remain separate.
+The final documentation/changelog head
+`150774e5346219dd8ee0c2e18817e159a6688310` also received source PASS.
+Targeted run https://github.com/jeong-sik/masc/actions/runs/38359756303
+passed `test_complete_http` (88 cases) and `test_complete_ext` (10 cases), but
+`test_llm_cache` failed 1 of 39 cases. The newly extended nested-tool fixture
+expected only `preview` in its text summary, although the existing shared
+decoder includes both Text and Thinking data from nested tool blocks. The
+fixture now expects the two-line summary `preview` followed by `tool data`
+and asserts every nested block,
+including its signature, equals the original. No production decoder change
+was needed. Corrected-head execution remains pending.
 Cache decoding uses the existing content-block decoder contract; this is not a
 claim that every form of arbitrary stored corruption has been tested.
 

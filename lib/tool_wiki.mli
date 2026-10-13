@@ -55,8 +55,9 @@
 
 (** {1 Wiki source} *)
 
-(** The kind of work a wiki page came from. *)
-type wiki_source =
+(** The kind of work a wiki page came from. The vocabulary lives in
+    {!Wiki_page}; this is the same type. *)
+type wiki_source = Wiki_page.wiki_source =
   | Direct_experience
   | Research
   | Experiment
@@ -71,43 +72,16 @@ val valid_source_strings : string list
 
 (** {1 Header values} *)
 
-(** A value that fits one header line and reads back unchanged. *)
-module Line : sig
-  type t = private string
+(** A value that fits one header line and reads back unchanged. Defined in
+    {!Wiki_page}. *)
+module Line = Wiki_page.Line
 
-  type problem =
-    | Blank  (** Empty once trimmed. *)
-    | Spans_lines  (** Holds a line feed or a carriage return. *)
-    | Outer_whitespace  (** The reader would trim it. *)
-
-  val of_string : string -> (t, problem) result
-
-  val of_date : Unix.tm -> t
-  (** [YYYY-MM-DD]. *)
-end
-
-(** One tag: a {!Line.t} with no comma. *)
-module Tag : sig
-  type t = private string
-
-  type problem =
-    | Not_a_line of Line.problem
-    | Has_comma  (** Would read back as two tags. *)
-
-  val of_string : string -> (t, problem) result
-
-  val to_line : t list -> string
-  (** The value of the [tags] line: [\[a, b\]], or [\[\]] for none. *)
-
-  val of_line : string -> t list option
-  (** Reads what {!to_line} wrote, and for every list of tags
-      [of_line (to_line tags) = Some tags]. [None] for anything else: no
-      brackets around the value, or an empty piece between commas. *)
-end
+(** One tag: a {!Line.t} with no comma. Defined in {!Wiki_page}. *)
+module Tag = Wiki_page.Tag
 
 (** {1 Pages} *)
 
-type frontmatter = {
+type frontmatter = Wiki_page.frontmatter = {
   title : Line.t;
   summary : Line.t;  (** One line saying what the page holds. *)
   source : wiki_source;
@@ -117,7 +91,7 @@ type frontmatter = {
   tags : Tag.t list;
 }
 
-type frontmatter_error
+type frontmatter_error = Wiki_page.frontmatter_error
 (** Why a page does not read: no frontmatter, a block with no closing
     delimiter, a required field absent or empty, a [source] outside
     {!wiki_source}, a [revision] that is not a whole number from 1, a [tags]
@@ -135,7 +109,7 @@ val describe_unreadable : string -> frontmatter_error -> string
 val page_path : base_path:string -> string -> string
 (** [page_path ~base_path page] is [<wiki_root>/<page>.md]. *)
 
-type page_name_error =
+type page_name_error = Wiki_page_name.page_name_error =
   | Empty_page_name
   | Bad_page_characters
   | Dash_at_edge

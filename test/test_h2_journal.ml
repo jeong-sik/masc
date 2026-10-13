@@ -431,7 +431,8 @@ let test_unproven_outcomes_refuse_replay () =
       if node_name node <> "consumer" then Executor.dispatch_result (success base_path node "original-profile")
       else match outcome with
         | `Failure phase -> failing phase node
-        | `Deferred -> Executor.dispatch_result (Tool_result.make_deferred ~tool_name:node.tool_name
+        | `Deferred phase -> Executor.dispatch_result ?failure_effect_disposition:phase
+            (Tool_result.make_deferred ~tool_name:node.tool_name
             ~start_time:(Tool_timing.start ()) ~data:(`String "accepted but unfinished") ()) in
     let first = submit base_path sw prepared dispatch |> accepted in
     ignore (await base_path first);
@@ -447,7 +448,8 @@ let test_unproven_outcomes_refuse_replay () =
         ["producer"; "sibling"]) in
     check_retained expected (settled (executed second));
     check_completion base_path prepared second))
-    [`Failure Tool_result.Effect_outcome_unknown; `Failure Proven_post_effect; `Deferred]
+    [`Failure Tool_result.Effect_outcome_unknown; `Failure Proven_post_effect;
+     `Deferred None; `Deferred (Some Tool_result.Proven_pre_effect)]
 let test_cancelled_readonly_attempt () = with_workspace (fun _env sw base_path ->
   let prepared = prepare base_path in
   let entered, enter = Eio.Promise.create () and never, _ = Eio.Promise.create () in

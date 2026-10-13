@@ -189,6 +189,20 @@ let host_is_started_only_with_an_installed_launcher_and_no_host () =
     check bool "an undeclared launcher" true
       (host_step base = Keeper_firefox.Launcher_not_ready Keeper_firefox.Needs_reinstall))
 
+(* The sentence the keeper's refusal carries names the workspace to install the
+   lane for. A bare command would resolve the workspace by environment,
+   directory or the recorded default, which may be another one. *)
+let a_missing_launcher_message_names_the_command_for_that_workspace () =
+  let base_path = "/work space/it's here" in
+  List.iter (fun (missing, standing) ->
+    let message = Keeper_firefox.launcher_missing_message ~base_path missing in
+    check bool ("says it is " ^ standing) true (String_util.contains_substring message standing);
+    check bool "names the command for this workspace" true
+      (String_util.contains_substring message
+         ("masc browser-lane-setup --mode extension --base-path " ^ Filename.quote base_path)))
+    [ Keeper_firefox.Not_installed, "not installed"
+    ; Keeper_firefox.Needs_reinstall, "not as its installation wrote it" ]
+
 (* --- the detached spawn ---------------------------------------------------- *)
 
 let alive pid = match Unix.kill pid 0 with () -> true | exception Unix.Unix_error (Unix.ESRCH, _, _) -> false
@@ -1606,7 +1620,9 @@ let () =
         ; test_case "a table that cannot start Firefox" `Quick a_table_that_cannot_start_firefox_is_refused ] )
     ; ( "what runs"
       , [ test_case "commands and logs" `Quick commands_run
-        ; test_case "when a host is started" `Quick host_is_started_only_with_an_installed_launcher_and_no_host ] )
+        ; test_case "when a host is started" `Quick host_is_started_only_with_an_installed_launcher_and_no_host
+        ; test_case "a missing launcher names the command for its workspace" `Quick
+            a_missing_launcher_message_names_the_command_for_that_workspace ] )
     ; ( "detached spawn"
       , [ test_case "exit status and output" `Quick spawn_reports_exit_and_writes_output
         ; test_case "outlives its switch in its own group" `Quick spawn_outlives_its_switch_in_its_own_group

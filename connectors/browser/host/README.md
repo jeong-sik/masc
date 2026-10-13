@@ -9,8 +9,8 @@ browser metadata, tab listing, page text/elements, screenshots, and page interac
 
 After installing MASC, register its native host with one command. The installed
 `masc` carries the extension and finds the `masc-browser-host` installed beside
-it, so the host and the extension are always the same build. No source checkout,
-download or local build is required:
+it. An install puts the two there from one build, so they match unless `--binary`
+names another host. No source checkout, download or local build is required:
 
 ```sh
 masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
@@ -22,12 +22,16 @@ starts no browser.
 From a source checkout, `scripts/install-local-build.sh` builds `masc`,
 `masc-tui` and `masc-browser-host`, installs them into `~/.local/bin`, and
 reinstalls every host registered under a workspace's
-`.masc/browser-lane/host` from the new binary under its own host name. It then
-stops the running hosts from those workspaces; the extension reconnects after
-five seconds and starts the new copy.
+`.masc/browser-lane/host` from the new binary under its own host name, with the
+`masc` it just installed. That also rewrites the extension files in each of those
+workspaces. It then stops the running hosts from those workspaces; the
+extension reconnects after five seconds and starts the new copy. A workspace
+that cannot be refreshed is named on stderr and the script exits with status 1
+after the others have been refreshed.
 
-Pass `--binary` to install a `masc-browser-host` that is not beside `masc` (the
-first one on `PATH` is used otherwise). Start the MASC server with the same base
+Pass `--binary` to install a `masc-browser-host` other than the one beside `masc`
+(the one beside `masc` is used first, then the first one on `PATH`). The command
+prints which executable it copied. Start the MASC server with the same base
 path. In Firefox, open `about:debugging#/runtime/this-firefox`, choose **Load
 Temporary Add-on**, and select `manifest.json` in
 `<base-path>/.masc/browser-lane/extension/`. Firefox removes temporary add-ons on
@@ -38,11 +42,15 @@ The command copies the executable into
 `<base-path>/.masc/browser-lane/host/` and registers the launcher there.
 Deleting or moving the source checkout therefore cannot break the installed
 host. Rerun installation to promote another built executable. The token is
-created with mode `0600` if absent; an existing nonempty token is preserved.
-The launcher carries file paths, never the token value.
+created with mode `0600` if absent and an existing token is preserved. A token
+file that is not a lane token (at least 16 visible ASCII characters, no space
+inside) stops the command with a message: the host and the server refuse such a
+token too. The launcher carries file paths, never the token value.
 
-`--base-path` is resolved as it is for every `masc` command (`MASC_BASE_PATH`,
-then the current directory when it holds `.masc/config`). The launcher
+`--base-path` is resolved as it is for every `masc` command: the flag, then
+`MASC_BASE_PATH`, then the current directory when it holds `.masc/config`, then
+the recorded default workspace. A trailing `.masc` is dropped and surrounding
+whitespace is trimmed. The launcher
 names no server address. The host reads the port from
 `<base-path>/.masc/config/connection.toml`, which the MASC server rewrites each
 time it starts listening and `masc workspace-connection --save` also writes.
@@ -97,10 +105,9 @@ Installing MASC's built-in browser Skill does not install a browser extension.
 
 After registering the native host above, open
 `about:debugging#/runtime/this-firefox` in the intended Firefox / Zen profile,
-choose **Load Temporary Add-on**, and select `manifest.json` in the downloaded
-`$EXTENSION_DIR` above. From a source checkout, select
-`connectors/browser/extension/manifest.json` instead. Then refresh the Browser
-Lane connections with `r` and choose that browser.
+choose **Load Temporary Add-on**, and select `manifest.json` in
+`<base-path>/.masc/browser-lane/extension/`. Then refresh the Browser Lane
+connections with `r` and choose that browser.
 
 This is a development installation: Firefox removes a temporary extension on
 browser restart, so it must be loaded again. See

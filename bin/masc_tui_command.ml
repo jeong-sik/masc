@@ -80,6 +80,16 @@ type command_help = {
   summary : string;
 }
 
+(* Named because its forms are printed in two more places than the catalog:
+   the /queue usage error and the foot of the queue snapshot. Both read this
+   entry, so a form added here is the form they show. *)
+let queue_help =
+  { word = "queue"
+  ; aliases = []
+  ; args = "[pause|resume|clear|cancel ID|last ID|edit ID message]"
+  ; summary = "inspect local/server waiting work and manage queued messages"
+  }
+
 (* Every slash word this build knows, said once. [help_lines] and the
    composer hint are both drawn from here: a command described in two places
    is a command that will be described two ways, and the one an operator
@@ -131,7 +141,7 @@ let catalog =
     ; args = ""
     ; summary = "open recorded file changes for this keeper"
     }
-  ; { word = "queue"; aliases = []; args = "[pause|resume|cancel ID|last ID|edit ID message]"; summary = "inspect local/server waiting work and manage queued messages" }
+  ; queue_help
   ; { word = "run-next"
     ; aliases = []
     ; args = ""

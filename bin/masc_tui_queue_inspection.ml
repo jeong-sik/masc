@@ -1,4 +1,4 @@
-type action = Inspect | Pause | Resume | Cancel of string | Move_to_end of string | Edit of string * string
+type action = Inspect | Pause | Resume | Clear | Cancel of string | Move_to_end of string | Edit of string * string
   | Cancel_event of string * int64 * string
   | Prioritize_event of string * int64 * Keeper_event_queue.urgency
 let ( let* ) = Result.bind
@@ -12,6 +12,7 @@ let parse text =
   | "", "" -> Ok Inspect
   | "pause", "" -> Ok Pause
   | "resume", "" -> Ok Resume
+  | "clear", "" -> Ok Clear
   | ("cancel" | "last" as verb), id when id <> "" ->
     let* id = Keeper_chat_operation.Operation_id.of_string id in
     let id = Keeper_chat_operation.Operation_id.to_string id in
@@ -31,7 +32,7 @@ let parse text =
     let* id = Keeper_chat_operation.Operation_id.of_string id in
     if message = "" then Error "/queue edit requires the new message"
     else Ok (Edit (Keeper_chat_operation.Operation_id.to_string id, message))
-  | _ -> Error "Use /queue, /queue pause, /queue resume, /queue cancel ID, /queue last ID, /queue edit ID message"
+  | _ -> Error ("Use " ^ Masc_tui_command.usage Masc_tui_command.queue_help)
 let field key = function
   | `Assoc fields -> (match List.assoc_opt key fields with Some value -> Ok value | None -> Error ("Queue response missing " ^ key))
   | _ -> Error "Queue response must be an object"

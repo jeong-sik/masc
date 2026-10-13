@@ -179,6 +179,10 @@ type command_help = {
   summary : string;  (** One line on what it does. *)
 }
 
+val queue_help : command_help
+(** The [/queue] entry of {!catalog}. The usage error and the queue snapshot
+    print its {!usage}, so the forms are written once. *)
+
 val catalog : command_help list
 (** Every command this build knows, said once: an alias rides in its command's
     {!aliases} rather than taking an entry of its own. {!help_lines} is drawn

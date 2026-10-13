@@ -1,5 +1,5 @@
 (** One explicit snapshot of the server inbox; never a claim of delivery. *)
-type action = Inspect | Pause | Resume | Cancel of string | Move_to_end of string | Edit of string * string
+type action = Inspect | Pause | Resume | Clear | Cancel of string | Move_to_end of string | Edit of string * string
   | Cancel_event of string * int64 * string
   | Prioritize_event of string * int64 * Keeper_event_queue.urgency
 val parse : string -> (action, string) result

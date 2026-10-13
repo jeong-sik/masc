@@ -65,6 +65,28 @@ type uncertain_attempt =
   ; tool_name : string; args_fingerprint : string; consumed_at : float }
 let journal_schema = "masc.late_approval.v2"
 
+(* The journal's row kinds. Every row is written and replayed in this module;
+   [journal_op_to_string] is the "op" value on disk. *)
+type journal_op =
+  | Note_timed_out
+  | Remember_late
+  | Consume
+  | Deliver
+  | Ack_uncertain
+[@@deriving enumerate]
+
+let journal_op_to_string = function
+  | Note_timed_out -> "note_timed_out"
+  | Remember_late -> "remember_late"
+  | Consume -> "consume"
+  | Deliver -> "deliver"
+  | Ack_uncertain -> "ack_uncertain"
+;;
+
+let journal_op_of_string raw =
+  List.find_opt (fun op -> String.equal (journal_op_to_string op) raw) all_of_journal_op
+;;
+
 type t =
   { mutable expired : expired_ask list
   ; mutable remembered : remembered list
@@ -118,13 +140,14 @@ let validate_records records =
     let string name = match List.assoc_opt name fields with
       | Some (`String value) when value <> "" -> value
       | _ -> bad ("missing or invalid " ^ name) in
-    let op = string "op" in
+    let op = match journal_op_of_string (string "op") with
+      | Some op -> op
+      | None -> bad "unknown late approval operation" in
     let names = ["schema";"op";"base_path";"keeper";"tool";"fingerprint";"at"] @
       (match op with
-       | "note_timed_out" -> ["tool_call_id"]
-       | "remember_late" -> ["tool_call_id";"decision";"actor"]
-       | "consume" | "deliver" | "ack_uncertain" -> ["consume_id"]
-       | _ -> bad "unknown late approval operation") in
+       | Note_timed_out -> ["tool_call_id"]
+       | Remember_late -> ["tool_call_id";"decision";"actor"]
+       | Consume | Deliver | Ack_uncertain -> ["consume_id"]) in
     if List.sort String.compare (List.map fst fields) <> List.sort String.compare names then
       bad "missing, duplicate or unknown journal fields";
     if string "schema" <> journal_schema then bad "unknown journal schema";
@@ -133,20 +156,19 @@ let validate_records records =
      | `Float value when Float.is_finite value -> ()
      | `Int _ -> () | _ -> bad "invalid journal timestamp");
     match op with
-    | "note_timed_out" -> ignore (string "tool_call_id")
-    | "remember_late" ->
+    | Note_timed_out -> ignore (string "tool_call_id")
+    | Remember_late ->
         ignore (string "tool_call_id"); ignore (string "actor");
         if Option.is_none (Registry.decision_of_string (string "decision")) then bad "invalid decision"
-    | "consume" ->
+    | Consume ->
         let id = string "consume_id" in
         if Hashtbl.mem attempts id then bad "duplicate consume attempt";
         Hashtbl.add attempts id (identity, false)
-    | "deliver" | "ack_uncertain" ->
+    | Deliver | Ack_uncertain ->
         let id = string "consume_id" in
         (match Hashtbl.find_opt attempts id with
          | Some (expected, false) when expected = identity -> Hashtbl.replace attempts id (identity, true)
-         | _ -> bad "closure does not name an open exact consume")
-    | _ -> bad "unknown journal operation") records
+         | _ -> bad "closure does not name an open exact consume")) records
 
 (* Entries older than the TTL leave on every write and every read, so the
    lists cannot grow on nothing but time: an unattended keeper whose asks
@@ -200,13 +222,16 @@ let bind_to_journal ?now ~base_path t =
                    when List.assoc_opt "schema" fields
                         = Some (`String journal_schema) ->
                      (match List.assoc_opt "op" fields with
-                      | Some (`String ("consume" | "deliver" | "ack_uncertain")) ->
-                          (match List.assoc_opt "consume_id" fields with
-                           | Some (`String id) when id <> "" -> ()
-                           | _ ->
-                               raise
-                                 (Yojson.Json_error
-                                    "missing consume attempt identity"))
+                      | Some (`String raw) ->
+                          (match journal_op_of_string raw with
+                           | Some (Consume | Deliver | Ack_uncertain) ->
+                               (match List.assoc_opt "consume_id" fields with
+                                | Some (`String id) when id <> "" -> ()
+                                | _ ->
+                                    raise
+                                      (Yojson.Json_error
+                                         "missing consume attempt identity"))
+                           | Some (Note_timed_out | Remember_late) | None -> ())
                       | _ -> ());
                      Some fields
                  | _ ->
@@ -240,7 +265,7 @@ let bind_to_journal ?now ~base_path t =
         let acked = ref [] in
         List.iter
           (fun fields ->
-            let op = read_field fields "op" in
+            let op = Option.bind (read_field fields "op") journal_op_of_string in
             let row_base_path = read_field fields "base_path" in
             let keeper = read_field fields "keeper" in
             let call_id = read_field fields "tool_call_id" in
@@ -249,7 +274,7 @@ let bind_to_journal ?now ~base_path t =
             let at = read_float fields "at" in
             let consume_id = read_field fields "consume_id" in
             match op with
-            | Some "note_timed_out" -> (
+            | Some Note_timed_out -> (
                 match (row_base_path, keeper, call_id, tool, fingerprint, at)
                 with
                 | Some bp, Some k, Some c, Some tl, Some f, Some at ->
@@ -263,7 +288,7 @@ let bind_to_journal ?now ~base_path t =
                       }
                       :: !live_asks
                 | _ -> ())
-            | Some "remember_late" -> (
+            | Some Remember_late -> (
                 match (row_base_path, keeper, tool, fingerprint, at) with
                 | Some bp, Some k, Some tl, Some f, Some at -> (
                     (* The ask leaves [live] — it was answered — and any
@@ -313,7 +338,7 @@ let bind_to_journal ?now ~base_path t =
                         | None -> ())
                     | _ -> ())
                 | _ -> ())
-            | Some "consume" -> (
+            | Some Consume -> (
                 match (consume_id, row_base_path, keeper, tool, fingerprint, at) with
                 | Some id, Some bp, Some k, Some tl, Some f, Some at ->
                     (* The remembered answer is durably spent: dropping it
@@ -335,7 +360,7 @@ let bind_to_journal ?now ~base_path t =
                         !remembered;
                     consumed := (id, bp, k, tl, f, at) :: !consumed
                 | _ -> ())
-            | Some "deliver" -> (
+            | Some Deliver -> (
                 match (consume_id, row_base_path, keeper, tool, fingerprint, at) with
                 | Some id, Some bp, Some k, Some tl, Some f, Some at ->
                     consumed :=
@@ -349,7 +374,7 @@ let bind_to_journal ?now ~base_path t =
                             && String.equal cid id))
                         !consumed
                 | _ -> ())
-            | Some "ack_uncertain" -> (
+            | Some Ack_uncertain -> (
                 (* The operator's acknowledgement that they have seen this
                    consume-only tail (design D4/§7): a warning
                    acknowledgement, never a re-authorization — nothing is
@@ -360,7 +385,7 @@ let bind_to_journal ?now ~base_path t =
                     acked :=
                       (id, bp, k, tl, f, at) :: !acked
                 | _ -> ())
-            | _ -> ())
+            | None -> ())
           records;
         (* An ack closes only its exact consume attempt under the same scope.
            Its timestamp cannot settle another attempt of the same input. *)
@@ -494,7 +519,7 @@ let note_timed_out t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
       reap_locked t ~now;
       let appended =
         append_record_locked t
-          [ ("op", `String "note_timed_out")
+          [ ("op", `String (journal_op_to_string Note_timed_out))
           ; ("base_path", `String base_path)
           ; ("keeper", `String keeper_name)
           ; ("tool_call_id", `String tool_call_id)
@@ -546,7 +571,7 @@ let remember_late t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
       | None -> No_matching_ask
       | Some ask -> (
           let record =
-            [ ("op", `String "remember_late")
+            [ ("op", `String (journal_op_to_string Remember_late))
             ; ("base_path", `String base_path)
             ; ("keeper", `String keeper_name)
             ; ("tool_call_id", `String tool_call_id)
@@ -621,7 +646,7 @@ let take t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name ~tool_name
              the call is asked about live. *)
           match
             append_record_locked t
-              [ ("op", `String "consume")
+              [ ("op", `String (journal_op_to_string Consume))
               ; ("consume_id", `String consume_id)
               ; ("base_path", `String base_path)
               ; ("keeper", `String keeper_name)
@@ -655,7 +680,7 @@ let take t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name ~tool_name
                  returns, so the exact consume remains outcome-unknown. *)
               (match
                  append_record_locked t
-                   [ ("op", `String "deliver")
+                   [ ("op", `String (journal_op_to_string Deliver))
                    ; ("consume_id", `String consume_id)
                    ; ("base_path", `String base_path)
                    ; ("keeper", `String keeper_name)
@@ -691,7 +716,7 @@ let ack_uncertain t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
     | None -> Not_uncertain
     | Some entry ->
         match append_record_locked t
-          ["op", `String "ack_uncertain"; "consume_id", `String consume_id;
+          ["op", `String (journal_op_to_string Ack_uncertain); "consume_id", `String consume_id;
            "base_path", `String base_path; "keeper", `String keeper_name;
            "tool", `String entry.tool_name; "fingerprint", `String entry.args_fingerprint;
            "at", `Float now] with

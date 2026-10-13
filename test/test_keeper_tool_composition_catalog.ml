@@ -1232,11 +1232,41 @@ let test_prepare_schema_has_no_recursive_references () =
      | _ -> None)
 ;;
 
+let test_frozen_plan_json_preserves_values_and_rejects_mixed_forms () =
+  let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
+  (* Compile fidelity, not an assertion that these fixture values are valid
+     inputs for a runtime call. Input preflight remains a separate boundary. *)
+  let request = `Assoc
+    [ "nodes", `List [ `Assoc [ "id", `String "lane"; "tool", `String "keeper_lane_status"
+        ; "input", `Assoc [ "kind", `String "literal"; "value", `Assoc
+            [ "nullable", `Null; "mixed", `List [ `String "검사\n\"quoted\""; `Int 2; `Bool true ] ] ] ] ]
+    ; "exports", `List [ `Assoc [ "name", `String "profile"; "node", `String "lane"; "pointer", `String "/profile" ] ]
+    ; "branch_failure_policy", `String "continue_independent" ] in
+  let plan = Masc.Keeper_tool_plan_request.plan_of_json ~descriptors request |> Result.get_ok in
+  let canonical = Masc.Keeper_tool_plan_request.to_yojson plan |> Result.get_ok in
+  let header = "[[compositions]]\nname = \"frozen\"\nexecution = \"inline\"\n" in
+  let document = header ^ "plan_json = " ^ Yojson.Safe.to_string (`String (Yojson.Safe.to_string canonical)) ^ "\n" in
+  let catalog = Catalog.parse ~descriptors document |> Result.get_ok in
+  let restored = match Catalog.entries catalog with [ entry ] -> entry.plan | _ -> fail "one entry" in
+  check bool "null, mixed arrays and escaped UTF-8 preserve exact JSON" true
+    (Yojson.Safe.equal canonical (Masc.Keeper_tool_plan_request.to_yojson restored |> Result.get_ok));
+  List.iter (fun extra -> match Catalog.parse ~descriptors (document ^ extra) with
+    | Error (Catalog.Conflicting_plan_field _) -> ()
+    | Error error -> fail (Catalog.error_to_string error)
+    | Ok _ -> fail "mixed plan accepted")
+    [ "nodes = []\n"; "params = []\n"; "exports = []\n"; "branch_failure_policy = \"fail_fast\"\n" ];
+  (match Catalog.parse ~descriptors (header ^ "plan_json = \"invalid\"\n") with
+   | Error (Catalog.Plan_json_syntax _) -> () | _ -> fail "invalid encoded JSON accepted");
+  (match Catalog.parse ~descriptors (header ^ "plan_json = \"{}\"\n") with
+   | Error (Catalog.Plan_json_rejected _) -> () | _ -> fail "invalid structured plan accepted")
+;;
+
 let () =
   run
     "keeper_tool_composition_catalog"
     [ ( "catalog"
-      , [ test_case "draft prepare and exact run binding" `Quick test_draft_prepare_and_exact_run_binding
+      , [ test_case "frozen JSON preserves values and rejects mixed forms" `Quick test_frozen_plan_json_preserves_values_and_rejects_mixed_forms
+        ; test_case "draft prepare and exact run binding" `Quick test_draft_prepare_and_exact_run_binding
         ; test_case "read-only outer invocations overlap without identity mixing" `Quick
             test_read_only_outer_invocations_overlap_without_identity_mixing
         ; test_case "causal forks keep invocation-owned history" `Quick

@@ -1,18 +1,39 @@
 let ( let* ) = Result.bind
 
+type source = Artifact of Keeper_peer_artifact_ref.t | Draft of string
+
+type source_error =
+  | Artifact_read_failed of string
+  | Draft_rejected of Keeper_composition_draft.error
+  | Frozen_surface_required
+
 let request = function
   | `Assoc fields when List.length fields = 2 ->
-    (match List.assoc_opt "artifact" fields, List.assoc_opt "package_id" fields with
-     | Some artifact, Some (`String directory) ->
-       let* artifact = Keeper_peer_artifact.reference artifact in
-       let* package_id =
-         Skill_reference.package_id_of_directory directory
-         |> Result.map_error (fun error ->
-           "package_id " ^ Skill_reference.package_id_error_to_string error)
-       in
-       Ok (artifact, package_id)
-     | _ -> Error "artifact and string package_id are required")
-  | _ -> Error "Expected exactly artifact and package_id"
+    let* package_id = match List.assoc_opt "package_id" fields with
+      | Some (`String directory) -> Skill_reference.package_id_of_directory directory
+          |> Result.map_error (fun error -> "package_id " ^ Skill_reference.package_id_error_to_string error)
+      | _ -> Error "string package_id is required" in
+    let* source = match List.assoc_opt "artifact" fields, List.assoc_opt "draft_sha256" fields with
+      | Some artifact, None -> Keeper_peer_artifact.reference artifact |> Result.map (fun artifact -> Artifact artifact)
+      | None, Some (`String digest) -> Ok (Draft digest)
+      | _ -> Error "exactly one of artifact or draft_sha256 is required" in
+    Ok (source, package_id)
+  | _ -> Error "Expected package_id and exactly one of artifact or draft_sha256"
+;;
+
+let resolve_source ~draft_context ~config ~package_id = function
+  | Artifact artifact ->
+    Keeper_peer_artifact.fetch ~config artifact
+    |> Result.map (fun text -> text, artifact.Keeper_peer_artifact_ref.filename)
+    |> Result.map_error (fun detail -> Artifact_read_failed detail)
+  | Draft sha256 ->
+    (match draft_context with
+     | None -> Error Frozen_surface_required
+     | Some (capability_surface, keeper_name) ->
+       Keeper_composition_draft.load_authored ~base_path:config.Workspace.base_path
+         ~capability_surface ~keeper_name ~package_id ~sha256
+       |> Result.map (fun source -> source.Keeper_composition_draft.source_text, "SKILL.md")
+       |> Result.map_error (fun error -> Draft_rejected error))
 ;;
 
 let failure ~class_ ~code ~message fields =
@@ -44,22 +65,29 @@ let source_identity ~filename source_text =
     ]
 ;;
 
-let handle ~descriptors ~config ~args =
+let handle ~descriptors ~draft_context ~config ~args =
   match request args with
   | Error message ->
     failure ~class_:Tool_result.Policy_rejection ~code:"invalid_skill_validation_request"
       ~message []
-  | Ok (artifact, package_id) ->
-    (match Keeper_peer_artifact.fetch ~config artifact with
-     | Error message ->
+  | Ok (source, package_id) ->
+    (match resolve_source ~draft_context ~config ~package_id source with
+     | Error (Artifact_read_failed message) ->
        failure ~class_:Tool_result.Runtime_failure ~code:"artifact_read_failed" ~message []
-     | Ok source_text ->
+     | Error Frozen_surface_required ->
+       failure ~class_:Tool_result.Policy_rejection ~code:"frozen_surface_required"
+         ~message:"Prepared Skill validation requires the caller's frozen surface" []
+     | Error (Draft_rejected error) ->
+       let detail = Keeper_composition_draft.error_to_json error in
+       let class_ = Keeper_composition_draft.failure_class error in
+       failure ~class_ ~code:"composition_draft_rejected"
+         ~message:(Yojson.Safe.to_string detail) [ "draft_error", detail ]
+     | Ok (source_text, filename) ->
        let directory = Skill_reference.package_id_to_string package_id in
        let identity =
          [ "source"
            , source_identity
-               ~filename:artifact.Keeper_peer_artifact_ref.filename
-               source_text
+               ~filename source_text
          ; "package_id", `String directory
          ; "validation", `String "static"
          ]

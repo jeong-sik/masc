@@ -6,8 +6,9 @@ input templates. Select final fields with exports. Returns a durable draft refer
 bound to this Keeper, execution mode, inputs and frozen tool/Skill contracts; pass \
 its sha256 to keeper_composition_run. No node executes during prepare. Choose async \
 for a long independent read that should let the Keeper continue other work; it \
-does not speed up the underlying read. Save a reusable procedure separately \
-with keeper_skill_publish after checking the execution evidence."""
+does not speed up the underlying read. Optional skill metadata freezes the \
+reusable SKILL.md in this same draft. Validate and publish it by draft_sha256 \
+after checking execution evidence; omit skill for a task-only composition."""
 additional_properties = false
 defer_loading = true
 
@@ -37,3 +38,19 @@ name = "branch_failure_policy"
 type = "string"
 enum = ["fail_fast", "continue_independent"]
 description = "Explicit failure policy; absent means fail_fast."
+
+[[params]]
+name = "skill"
+type = "object"
+additional_properties = false
+description = "Optional reusable Skill identity and description, frozen with the exact plan. No package is published during prepare."
+
+[[params.params]]
+name = "package_id"
+type = "string"
+required = true
+
+[[params.params]]
+name = "description"
+type = "string"
+required = true

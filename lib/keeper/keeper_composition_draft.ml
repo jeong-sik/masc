@@ -2,10 +2,16 @@ module Plan = Keeper_tool_plan
 module Catalog = Keeper_tool_composition_catalog
 module Descriptor = Keeper_tool_descriptor
 
+type authored_source =
+  { package_id : Skill_reference.package_id
+  ; source_text : string
+  }
+
 type t =
   { plan : Plan.t
   ; execution : Catalog.execution_mode
   ; reference : Tool_output.artifact_ref
+  ; authored_source : authored_source option
   }
 
 type error =
@@ -18,6 +24,9 @@ type error =
   | Malformed_draft of string
   | Different_keeper
   | Capability_changed
+  | Publication_rejected of Keeper_skill_catalog.authored_source_error
+  | Skill_not_prepared
+  | Different_package
 
 let prepare_tool_name = Catalog.prepare_tool_name
 let run_tool_name = Catalog.run_tool_name
@@ -26,6 +35,15 @@ let ( let* ) = Result.bind
 let plan draft = draft.plan
 let execution draft = draft.execution
 let reference draft = draft.reference
+let authored_source draft = draft.authored_source
+
+let failure_class = function
+  | Draft_read_failed (Tool_blob_store.Invalid_sha256 _) -> Tool_result.Policy_rejection
+  | Storage_failed _ | Draft_read_failed _ -> Tool_result.Runtime_failure
+  | Plan_rejected _ | Inputs_rejected _ | Unsupported_node _ | Draft_not_found
+  | Malformed_draft _ | Different_keeper | Capability_changed | Publication_rejected _
+  | Skill_not_prepared | Different_package -> Tool_result.Policy_rejection
+;;
 
 let error_to_json = function
   | Plan_rejected error -> Keeper_tool_plan_request.error_to_json error
@@ -42,6 +60,13 @@ let error_to_json = function
   | Draft_read_failed error -> `Assoc [ "kind", `String "draft_read_failed"; "detail", `String (Tool_blob_store.fetch_error_to_string error) ]
   | Draft_not_found -> `Assoc [ "kind", `String "draft_not_found" ]
   | Malformed_draft detail -> `Assoc [ "kind", `String "malformed_draft"; "detail", `String detail ]
+  | Publication_rejected (Keeper_skill_catalog.Source_too_large { bytes; max_bytes }) ->
+    `Assoc [ "kind", `String "source_too_large"; "bytes", `Int bytes; "max_bytes", `Int max_bytes ]
+  | Publication_rejected (Keeper_skill_catalog.Invalid_document error) ->
+    `Assoc [ "kind", `String (Keeper_skill_catalog.error_code error)
+           ; "detail", `String (Keeper_skill_catalog.error_to_string error) ]
+  | Skill_not_prepared -> `Assoc [ "kind", `String "skill_not_prepared" ]
+  | Different_package -> `Assoc [ "kind", `String "different_package" ]
   | Different_keeper -> `Assoc [ "kind", `String "different_keeper" ]
   | Capability_changed -> `Assoc [ "kind", `String "capability_changed"; "detail", `String "Prepare again against the current frozen tool and Skill surface." ]
 ;;
@@ -90,7 +115,12 @@ let prepare_schema : Masc_domain.tool_schema =
       let required = match List.assoc_opt "required" fields with
         | Some (`List required) -> required | _ -> invalid_arg "canonical plan schema has no required fields" in
       `Assoc (("properties", `Assoc
-          (("execution", `Assoc [ "type", `String "string"; "enum", `List [ `String "inline"; `String "async" ] ]) :: properties))
+          (("execution", `Assoc [ "type", `String "string"; "enum", `List [ `String "inline"; `String "async" ] ])
+           :: ("skill", (match Tool_schemas_composition_control.prepare_schema.input_schema with
+               | `Assoc schema_fields -> (match List.assoc_opt "properties" schema_fields with
+                   | Some (`Assoc schema_properties) -> List.assoc "skill" schema_properties
+                   | _ -> invalid_arg "prepare schema has no properties")
+               | _ -> invalid_arg "prepare schema is not an object")) :: properties))
         :: ("required", `List (`String "execution" :: required))
         :: List.remove_assoc "required" (List.remove_assoc "properties" fields))
     | _ -> invalid_arg "canonical plan request schema is not an object"
@@ -144,25 +174,86 @@ let put_document ~base_path json =
   | exception Sys_error detail -> Error (Storage_failed detail)
 ;;
 
+let encode_plan plan =
+  Keeper_tool_plan_request.to_yojson plan
+  |> Result.map_error (fun (Keeper_tool_plan_request.Unsubstituted_param { name }) ->
+      Malformed_draft ("unbound parameter " ^ name))
+;;
+
+let validate_authored ~capability_surface ~execution ~plan source =
+  let* skill = Keeper_skill_catalog.validate_authored_source
+      ~descriptors:(Keeper_capability_surface.descriptors capability_surface)
+      ~directory:(Skill_reference.package_id_to_string source.package_id) source.source_text
+      |> Result.map_error (fun error -> Publication_rejected error) in
+  match skill.surface with
+  | Keeper_skill_catalog.Instruction -> Error (Malformed_draft "draft Skill must be a composition")
+  | Composition entry ->
+    let* expected = encode_plan plan in
+    let* actual = encode_plan entry.plan in
+    if entry.execution = execution && entry.params = []
+       && entry.description = Some skill.description
+       && Yojson.Safe.equal (Yojson.Safe.sort expected) (Yojson.Safe.sort actual)
+    then Ok source
+    else Error (Malformed_draft "Skill source differs from the frozen plan or metadata")
+;;
+
+let exact_fields ~names = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare names -> Ok fields
+  | _ -> Error (Malformed_draft ("expected exactly " ^ String.concat ", " names))
+;;
+
+let package_id fields =
+  match List.assoc_opt "package_id" fields with
+  | Some (`String directory) -> Skill_reference.package_id_of_directory directory
+      |> Result.map_error (fun error -> Malformed_draft (Skill_reference.package_id_error_to_string error))
+  | _ -> Error (Malformed_draft "expected string package_id")
+;;
+
+let create_authored ~capability_surface ~execution ~plan json =
+  let* fields = exact_fields ~names:[ "package_id"; "description" ] json in
+  let* package_id = package_id fields in
+  let* description = match List.assoc_opt "description" fields with
+    | Some (`String value) -> Ok value | _ -> Error (Malformed_draft "expected string description") in
+  let* canonical = encode_plan plan in
+  let quote value = Yojson.Safe.to_string (`String value) in
+  let name = Skill_reference.package_id_to_string package_id in
+  let source_text = Printf.sprintf
+      "---\nname: %s\ndescription: %s\n---\n\n```toml composition\n[[compositions]]\nname = %s\ndescription = %s\nexecution = %s\nplan_json = %s\n```\n"
+      (quote name) (quote description) (quote name) (quote description)
+      (quote (Catalog.execution_mode_to_string execution)) (quote (Yojson.Safe.to_string canonical)) in
+  validate_authored ~capability_surface ~execution ~plan { package_id; source_text }
+;;
+
+let source_to_json source = `Assoc
+  [ "package_id", `String (Skill_reference.package_id_to_string source.package_id)
+  ; "source_text", `String source.source_text ]
+;;
+
 let prepare ~base_path ~capability_surface ~keeper_name ~execution json =
-  let* plan = validate_plan ~capability_surface json in
-  let* canonical = Keeper_tool_plan_request.to_yojson plan
-    |> Result.map_error (fun (Keeper_tool_plan_request.Unsubstituted_param { name }) -> Malformed_draft ("unbound parameter " ^ name)) in
+  let* plan_json, metadata = match json with
+    | `Assoc fields -> Ok (`Assoc (List.remove_assoc "skill" fields), List.assoc_opt "skill" fields)
+    | _ -> Ok (json, None) in
+  let* plan = validate_plan ~capability_surface plan_json in
+  let* canonical = encode_plan plan in
+  let* authored_source = match metadata with
+    | None -> Ok None
+    | Some json -> create_authored ~capability_surface ~execution ~plan json |> Result.map Option.some in
   let document = `Assoc
     [ "keeper", `String keeper_name
     ; "execution", `String (Catalog.execution_mode_to_string execution)
     ; "plan", canonical
-    ; "contracts", contracts ~capability_surface plan ] in
+    ; "contracts", contracts ~capability_surface plan
+    ; "skill", (match authored_source with None -> `Null | Some source -> source_to_json source) ] in
   let* reference = put_document ~base_path document in
-  Ok { plan; execution; reference }
+  Ok { plan; execution; reference; authored_source }
 ;;
 
 let draft_fields = function
   | `Assoc fields ->
     let names = List.map fst fields in
     if List.length (List.sort_uniq String.compare names) <> List.length names then Error (Malformed_draft "duplicate field")
-    else if List.sort String.compare names <> List.sort String.compare [ "keeper"; "execution"; "plan"; "contracts" ] then
-      Error (Malformed_draft "expected keeper, execution, plan and contracts")
+    else if List.sort String.compare names <> List.sort String.compare [ "keeper"; "execution"; "plan"; "contracts"; "skill" ] then
+      Error (Malformed_draft "expected keeper, execution, plan, contracts and skill")
     else Ok fields
   | _ -> Error (Malformed_draft "expected object")
 ;;
@@ -196,10 +287,28 @@ let load ~base_path ~capability_surface ~keeper_name ~sha256 =
   let* () = match List.assoc_opt "contracts" fields with
     | Some recorded when Yojson.Safe.equal (Yojson.Safe.sort recorded) (Yojson.Safe.sort (contracts ~capability_surface plan)) -> Ok ()
     | Some _ | None -> Error Capability_changed in
+  let* authored_source = match List.assoc_opt "skill" fields with
+    | Some `Null -> Ok None
+    | Some json ->
+      let* source_fields = exact_fields ~names:[ "package_id"; "source_text" ] json in
+      let* package_id = package_id source_fields in
+      let* source_text = required_string source_fields "source_text" in
+      validate_authored ~capability_surface ~execution ~plan { package_id; source_text }
+      |> Result.map Option.some
+    | None -> Error (Malformed_draft "missing skill") in
   let* reference = Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length bytes)
       ~preview:"" ~mime:Tool_output.artifact_manifest_mime
       |> Result.map_error (fun error -> Malformed_draft (Tool_output.make_error_to_string error)) in
-  Ok { plan; execution; reference }
+  Ok { plan; execution; reference; authored_source }
+;;
+
+let load_authored ~base_path ~capability_surface ~keeper_name ~package_id ~sha256 =
+  let* draft = load ~base_path ~capability_surface ~keeper_name ~sha256 in
+  match draft.authored_source with
+  | None -> Error Skill_not_prepared
+  | Some source when String.equal (Skill_reference.package_id_to_string package_id)
+        (Skill_reference.package_id_to_string source.package_id) -> Ok source
+  | Some _ -> Error Different_package
 ;;
 
 let preview draft =
@@ -213,7 +322,15 @@ let preview draft =
       `List (List.map (fun (node : Keeper_tool_plan_executor.scheduled_node) ->
         `Assoc [ "node_id", `String (Plan.Node_id.to_string node.node.id)
                ; "schedule", Keeper_tool_composition_projection.schedule_to_json node.schedule ]) nodes)) in
+  let skill = match draft.authored_source with
+    | None -> `Null
+    | Some source -> `Assoc
+        [ "package_id", `String (Skill_reference.package_id_to_string source.package_id)
+        ; "source", `Assoc
+            [ "sha256", `String Digestif.SHA256.(digest_string source.source_text |> to_hex)
+            ; "bytes", `Int (String.length source.source_text); "filename", `String "SKILL.md" ] ] in
   `Assoc [ "draft", Tool_output.normalized_artifact_ref_to_json draft.reference
+         ; "skill", skill
          ; "execution", `String (Catalog.execution_mode_to_string draft.execution)
          ; "branch_failure_policy", `String (Plan.branch_failure_policy_to_string (Plan.branch_failure_policy draft.plan))
          ; "dependency_layers", `List layers

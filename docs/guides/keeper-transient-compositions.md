@@ -64,6 +64,40 @@ original results and failure evidence. Publish a reusable Skill separately with
 `keeper_skill_publish` after checking execution evidence and applicability. A
 published Skill and a draft remain distinct objects.
 
+For a reusable parameter-free plan, add Skill metadata during prepare:
+
+```json
+{
+  "execution": "inline",
+  "skill": {"package_id": "lane-profile", "description": "Returns the current lane profile when checking lane capabilities."},
+  "nodes": [{"id": "lane", "tool": "keeper_lane_status"}],
+  "exports": [{"name": "profile", "node": "lane", "pointer": "/profile"}]
+}
+```
+
+The draft freezes both the plan and validated `SKILL.md` bytes. Its preview
+identifies the source by digest. Use the same draft digest to run, validate
+and publish; no handwritten TOML or repeated source-text submission is needed:
+
+```json
+{"package_id": "lane-profile", "draft_sha256": "the exact draft sha256"}
+```
+
+Pass this to `keeper_skill_validate`. For `keeper_skill_publish`, add a
+non-empty `evidence` list naming the execution references that support the
+reusable procedure. Validation proves static admission; it does not prove an
+execution succeeded. Both calls check the frozen owner, package and tool
+contracts before using the source. A task-only draft cannot be published this
+way. Publication preserves the editor's no-overwrite and shadowing outcomes
+and returns the exact source digest. It does not add a tool to the frozen turn.
+
+Generated composition fences use `plan_json`, the canonical parameter-free
+structured plan codec. It preserves JSON null, arrays and escaped values
+without a separate TOML literal conversion. The parser refuses mixing it with
+`nodes`, `params`, `exports` or `branch_failure_policy`; all belong inside that
+encoded plan. Hand-authored parameterized Skills still use the existing TOML
+node/parameter form and `source_text` or an exported artifact.
+
 Named inline Skill compositions whose leaves are all statically read-only,
 ordinary and concurrent may overlap with other such calls. Each invocation keeps
 its own run identity, observations, activation records and causal history. The
@@ -71,6 +105,6 @@ turn still collects every completion for later judgments. A leaf that requires
 serial access keeps its enclosing composition serial. Transient run and async
 submission controls keep their serial admission contracts.
 
-Nested composition references, draft-to-publish reuse, effectful resource-aware
+Nested composition references, effectful resource-aware
 jobs and fixed-condition latency measurements remain tracked in
 [issue #42799](https://github.com/jeong-sik/masc/issues/42799).

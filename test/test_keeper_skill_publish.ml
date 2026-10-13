@@ -124,7 +124,7 @@ let args ?(package_id = "proposed") ?(evidence = [ `String "memory:fact-1" ]) so
 ;;
 
 let call config args =
-  let result = Keeper_skill_publish.handle ~descriptors:(Keeper_tool_descriptor.all_descriptors ()) ~config ~keeper_name ~args in
+  let result = Keeper_skill_publish.handle ~capability_surface:None ~descriptors:(Keeper_tool_descriptor.all_descriptors ()) ~config ~keeper_name ~args in
   match result.Keeper_tool_execution.data with
   | Some data -> result, data
   | None -> fail "missing typed result"
@@ -489,12 +489,111 @@ let test_refusal_names_the_path_and_why () =
     (string_field "message" data)
 ;;
 
+(* No model-generated source text is submitted here. The real draft owner,
+   canonical validator, editor, publication hook and snapshot all participate. *)
+let test_owned_draft_validates_and_publishes_exact_bytes () =
+  with_workspace @@ fun ~base_path ~workspace ~config ~refresh ->
+  Masc_test_deps.init_unified_tool_registry ();
+  let meta = Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String keeper_name ])
+      |> require "Keeper fixture" in
+  let snapshot = match Service.current ~workspace with Some value -> value | None -> fail "snapshot" in
+  let surface ?(tool_deny = []) () = Keeper_capability_surface.create
+      ~tool_deny ~sandbox_profile:meta.sandbox_profile ~skill_names:None
+      ~global_skill_catalog:Keeper_skill_catalog.empty
+      ~skill_inventory:(Keeper_skill_inventory.of_snapshot snapshot) ~task_skills:[] in
+  let authority = surface () in
+  let context meta authority : Keeper_tool_runtime.context =
+    { config; meta
+    ; publication_recovery =
+        { provider = Keeper_publication_recovery_availability.non_runtime_provider
+        ; keeper_name = meta.name }
+    ; ctx_work = Keeper_context_runtime.create ~eio:true ~system_prompt:"fixture"
+    ; turn_sandbox_factory = None; sw = None; clock = None; proc_mgr = None
+    ; net = None; mcp_session_id = None; continuation_channel = None
+    ; gate_context = None; turn_ref = None; gate_grant = None; tool_use_id = None; trace_id = None
+    ; result_projection = None; capability_authority = Keeper_tool_runtime.Frozen_surface authority } in
+  let plan = `Assoc
+      [ "nodes", `List [ `Assoc [ "id", `String "lane"; "tool", `String "keeper_lane_status" ] ]
+      ; "exports", `List [ `Assoc [ "name", `String "profile"; "node", `String "lane"; "pointer", `String "/profile" ] ]
+      ; "branch_failure_policy", `String "continue_independent" ] in
+  let prepare json = Keeper_composition_draft.prepare ~base_path ~capability_surface:authority
+      ~keeper_name ~execution:Keeper_tool_composition_catalog.Inline json |> require "prepare" in
+  let authored_plan = match plan with
+    | `Assoc fields -> `Assoc (("skill", `Assoc
+        [ "package_id", `String "proposed"; "description", `String "Reuse the lane \"profile\": 검사." ]) :: fields)
+    | _ -> assert false in
+  let draft = prepare authored_plan in
+  let source = match Keeper_composition_draft.authored_source draft with
+    | Some source -> source | None -> fail "Skill source not frozen" in
+  let sha256 = (Keeper_composition_draft.reference draft).Tool_output.sha256 in
+  let validate_args = `Assoc [ "package_id", `String "proposed"; "draft_sha256", `String sha256 ] in
+  let publish_args = `Assoc [ "package_id", `String "proposed"; "draft_sha256", `String sha256
+                           ; "evidence", `List [ `String "test:prepared-draft" ] ] in
+  let calls = ref [] in
+  Atomic.set Workspace_hooks.keeper_skill_publish_fn (fun config request ->
+    calls := request :: !calls;
+    Server_keeper_skill_publish.publish ~refresh config request);
+  let dispatch context tool_name args =
+    let descriptor = Keeper_tool_runtime.descriptor_for_internal tool_name |> Option.get in
+    match Keeper_tool_runtime.handle context ~descriptor ~args with
+    | Some result -> result, (match result.data with Some data -> data | None -> fail "missing data")
+    | None -> fail "public dispatch missing" in
+  let caller = context meta authority in
+  let validate_result, validation = dispatch caller "keeper_skill_validate" validate_args in
+  check bool "static validation succeeds" true (validate_result.disposition = Tool_result.Completed ());
+  check int "validation does not invoke publisher" 0 (List.length !calls);
+  check bool "validation does not change snapshot" true
+    (match Service.current ~workspace with Some after -> after == snapshot | None -> false);
+  let path = Filename.concat base_path ".agents/skills/proposed/SKILL.md" in
+  check bool "validation creates no package" false (Sys.file_exists path);
+  let validated_sha = Yojson.Safe.Util.(member "source" validation |> member "sha256" |> to_string) in
+  check string "validation identifies frozen bytes"
+    Digestif.SHA256.(digest_string source.source_text |> to_hex) validated_sha;
+  (* Rejections happen before the editor hook and do not claim a write. *)
+  let reject caller args kind =
+    let ((_, data) as outcome) = dispatch caller "keeper_skill_publish" args in
+    failed_with ~code:"composition_draft_rejected" ~class_:Tool_result.Policy_rejection
+      ~effect_disposition:Tool_result.Proven_pre_effect outcome;
+    check string "specific draft refusal" kind Yojson.Safe.Util.(member "draft_error" data |> member "kind" |> to_string);
+    check int "rejected draft did not reach publisher" 0 (List.length !calls) in
+  let other_meta = Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String "other-author" ])
+      |> require "other Keeper" in
+  reject (context other_meta authority) publish_args "different_keeper";
+  reject caller (`Assoc [ "package_id", `String "another"; "draft_sha256", `String sha256
+                       ; "evidence", `List [ `String "test:prepared-draft" ] ]) "different_package";
+  reject (context meta (surface ~tool_deny:[ "Read" ] ())) publish_args "capability_changed";
+  let task_only = prepare plan in
+  reject caller (`Assoc [ "package_id", `String "proposed"
+                       ; "draft_sha256", `String (Keeper_composition_draft.reference task_only).sha256
+                       ; "evidence", `List [ `String "test:prepared-draft" ] ]) "skill_not_prepared";
+  let publish_result, publication = dispatch caller "keeper_skill_publish" publish_args in
+  check bool "publication completes" true (publish_result.disposition = Tool_result.Completed ());
+  check string "published exact source digest" validated_sha (string_field "source_sha256" publication);
+  check string "frozen bytes reached the actual package" source.source_text (read_file path);
+  check int "one actual publication" 1 (List.length !calls);
+  let admitted = Keeper_skill_catalog.validate_authored_source
+      ~descriptors:(Keeper_capability_surface.descriptors authority) ~directory:"proposed" (read_file path)
+      |> require "published catalog composition" in
+  (match admitted.surface with
+   | Keeper_skill_catalog.Composition entry ->
+     let canonical plan = Keeper_tool_plan_request.to_yojson plan |> require "canonical plan" in
+     check bool "published execution is the frozen plan" true
+       (Yojson.Safe.equal (canonical entry.plan) (canonical (Keeper_composition_draft.plan draft)))
+   | Instruction -> fail "frozen Skill did not publish as a composition");
+  dispatch caller "keeper_skill_publish" publish_args
+  |> failed_with ~code:"package_already_exists" ~class_:Tool_result.Policy_rejection
+       ~effect_disposition:Tool_result.Proven_pre_effect;
+  check string "repeat publication never overwrites" source.source_text (read_file path);
+  Printf.printf "composition_publication_trial submitted_source_text_fields=0 source_digest_preserved=true same_draft_used=true model_latency_measured=false\n%!"
+;;
+
 let () =
   Mirage_crypto_rng_unix.use_default ();
   run
     "Keeper Skill publication"
     [ ( "keeper_skill_publish"
-      , [ test_case "refused when no publisher is installed" `Quick test_not_installed
+      , [ test_case "owned draft validates and publishes exact bytes" `Quick test_owned_draft_validates_and_publishes_exact_bytes
+        ; test_case "refused when no publisher is installed" `Quick test_not_installed
         ; test_case "bad requests are refused before the publisher" `Quick
             test_request_refused_before_hook
         ; test_case "editor outcomes project typed" `Quick test_outcomes_project_typed

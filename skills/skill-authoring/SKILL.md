@@ -129,6 +129,15 @@ equivalent explicitly on every node that has one.
   tool contracts without publishing a Skill. It currently admits fixed-input,
   statically read-only ordinary tools. Preparation is useful for a new combination;
   it is not required before calling an existing composition or direct tool.
+- **Same draft to Skill:** for a reusable parameter-free plan, include `skill`
+  metadata (`package_id`, `description`) during prepare. This freezes the validated
+  `SKILL.md` bytes too. Use the same `draft_sha256` and `package_id` for
+  `keeper_skill_validate` and `keeper_skill_publish`; publish also requires the
+  evidence list below. Both refuse changed ownership, package or tool contracts.
+  A task-only draft lacks Skill metadata and cannot use this publication path.
+  Parameterized source remains authored explicitly rather than inferred from
+  literal values. Generated fences carry the canonical plan in `plan_json`;
+  this field cannot be mixed with separate nodes, params, exports or failure policy.
 - **Keeper publish:** `keeper_skill_publish` takes `package_id`, the whole `SKILL.md`
   as `source_text`, and a non-empty `evidence` list (Memory fact ids, turn or tool
   call references). It creates the package in the `project-agents` source and

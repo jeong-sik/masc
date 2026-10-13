@@ -1950,16 +1950,7 @@ let make_tools_with_authority
     | Keeper_tool_runtime.Frozen_surface capability_surface ->
       let module Draft = Keeper_composition_draft in
       let rejection ~tool_name ~start_time error =
-        let class_ = match error with
-          | Draft.Draft_read_failed (Tool_blob_store.Invalid_sha256 _) -> Tool_result.Policy_rejection
-          | Draft.Storage_failed _
-          | Draft.Draft_read_failed
-              ( Tool_blob_store.Owned_read_failed _ | Tool_blob_store.Too_large _
-              | Tool_blob_store.Invalid_max_bytes _ | Tool_blob_store.Integrity_mismatch _ ) ->
-            Tool_result.Runtime_failure
-          | Draft.Plan_rejected _ | Draft.Inputs_rejected _ | Draft.Unsupported_node _
-          | Draft.Draft_not_found | Draft.Malformed_draft _ | Draft.Different_keeper
-          | Draft.Capability_changed -> Tool_result.Policy_rejection in
+        let class_ = Draft.failure_class error in
         let data = Draft.error_to_json error in
         Tool_result.make_err ~tool_name ~class_ ~effect_disposition:Tool_result.Proven_pre_effect
           ~start_time ~data (Yojson.Safe.to_string data)

@@ -76,7 +76,7 @@ llm-wiki 는 세 층(원재료, 위키, 스키마)과 안내 파일 둘(index, l
 | `masc_library_list`, `read`, `search`, `add` | `masc_wiki_list`, `read`, `search`, `create`, `update` |
 | `keeper_library_read`, `search` | `keeper_wiki_read`, `search` |
 | `masc://library`, `masc://library.json` | `masc://wiki`, `masc://wiki.json` |
-| `<base_path>/docs/library/` | `<base_path>/docs/wiki/` |
+| `<base_path>/docs/library/` | `<base_path>/.masc/wiki/` |
 | `Tool_library`, `tool_schemas_library*`, `tool_shard_types_schemas_library*` | `Tool_wiki`, `tool_schemas_wiki*`, `tool_shard_types_schemas_wiki*` |
 | 용어집 `Library` | 용어집 `Wiki`, `Page revision`. `Librarian` 항목은 그대로 둔다 |
 
@@ -94,7 +94,7 @@ llm-wiki 는 세 층(원재료, 위키, 스키마)과 안내 파일 둘(index, l
 
 - `page` 는 `a-z`, `0-9`, `-` 로만 된 문자열이다. 비어 있으면 안 되고 `-` 로 시작하거나 끝나면 안 된다.
 - 쓰는 쪽이 정한다. 규칙에 안 맞으면 고쳐 주지 않고 거절한다. 지금처럼 글자를 몰래 버리면 서로 다른 제목이 같은 이름으로 모인다.
-- 파일은 `<base_path>/docs/wiki/<page>.md` 다. 이름에 날짜를 넣지 않는다. 날짜는 frontmatter 와 log 에 있다.
+- 파일은 `<base_path>/.masc/wiki/<page>.md` 다. 이름에 날짜를 넣지 않는다. 날짜는 frontmatter 와 log 에 있다. 위키는 서버가 자기 세계를 위해 쓰는 상태라 다른 상태와 함께 `.masc/` 아래에 둔다. workspace 의 `docs/` 에 두면 그 workspace 가 속한 저장소의 파일로 섞인다.
 - `title` 은 어느 나라 글자로든 쓸 수 있다. 한글도 된다.
 - 머리말에 한 줄로 들어가는 값(`title`, `summary`, 쓴 사람 이름, 태그 하나하나)은 비어 있지 않은 한 줄이어야 하고 앞뒤에 공백이 없어야 한다. 읽을 때 앞뒤 공백을 잘라 내므로, 그렇지 않은 값은 쓴 것과 다르게 읽힌다. 태그에는 쉼표도 쓸 수 없다. 쉼표가 태그를 나누기 때문이다. 이 규칙에 안 맞는 값은 고쳐 쓰지 않고 거절한다.
 - 한글로 찾을 때는 `title` 이 그 구실을 한다. `masc_wiki_read` 는 지금처럼 제목의 일부로도 페이지를 찾고, `masc_wiki_search` 는 frontmatter 를 포함한 파일 전체에서 찾는다. 그래서 따로 한글 별칭 칸을 두지 않는다.

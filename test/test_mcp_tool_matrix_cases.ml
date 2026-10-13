@@ -507,7 +507,7 @@ let ensure_wiki_topic fixture =
   match fixture.wiki_topic with
   | Some topic -> topic
   | None ->
-      mkdir_p (Filename.concat fixture.base_path "docs/wiki");
+      mkdir_p (Masc.Tool_wiki.wiki_root ~base_path:fixture.base_path);
       ignore
         (execute_tool_ok fixture ~name:"masc_wiki_create"
            ~arguments:

@@ -92,11 +92,10 @@ let decoy_base_path =
 
 (** Create the expected wiki directory structure under a temp base path. *)
 let setup_wiki_dirs base_path =
-  let docs_dir = Filename.concat base_path "docs" in
-  let lib_dir = Filename.concat docs_dir "wiki" in
-  Unix.mkdir docs_dir 0o755;
-  Unix.mkdir lib_dir 0o755;
-  lib_dir
+  let root = Tool_wiki.wiki_root ~base_path in
+  Unix.mkdir (Filename.dirname root) 0o755;
+  Unix.mkdir root 0o755;
+  root
 
 (** Run a test function with a temporary workspace containing wiki dirs. *)
 let with_temp_base_path ?(prepare_wiki=true) f =
@@ -216,6 +215,19 @@ let test_create_on_fresh_base () =
 (* ============================================================
    Dispatch routing tests
    ============================================================ *)
+
+(* The wiki is state the server writes for its world, so it sits under the
+   workspace's [.masc/] with the rest and leaves the workspace's own [docs/]
+   alone: there its pages were untracked files of the workspace's repository. *)
+let test_pages_live_under_the_masc_directory () =
+  with_temp_base_path ~prepare_wiki:false (fun ctx ->
+    create_ok ctx (create_args ~page:"placed" ());
+    Alcotest.(check bool) "the page is under .masc/wiki" true
+      (Sys.file_exists (Filename.concat ctx.base_path ".masc/wiki/placed.md"));
+    Alcotest.(check bool) "its index is beside it" true
+      (Sys.file_exists (Filename.concat ctx.base_path ".masc/wiki/index.md"));
+    Alcotest.(check bool) "nothing is written under docs" false
+      (Sys.file_exists (Filename.concat ctx.base_path "docs")))
 
 let test_dispatch_unknown () =
   with_temp_base_path (fun ctx ->
@@ -1133,6 +1145,7 @@ let () =
     ]);
     ("wiki_create", [
       Alcotest.test_case "fresh base creates the wiki and reads the page" `Quick test_create_on_fresh_base;
+      Alcotest.test_case "pages live under the .masc directory" `Quick test_pages_live_under_the_masc_directory;
       Alcotest.test_case "missing title" `Quick (test_create_missing_field "title");
       Alcotest.test_case "missing summary" `Quick (test_create_missing_field "summary");
       Alcotest.test_case "missing body" `Quick (test_create_missing_field "body");

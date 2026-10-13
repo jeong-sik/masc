@@ -3,7 +3,7 @@
 
     Implements 5 tools ([masc_wiki_list], [masc_wiki_read],
     [masc_wiki_create], [masc_wiki_update], [masc_wiki_search]) backed by
-    Markdown pages under {!wiki_root} ([<base_path>/docs/wiki], where
+    Markdown pages under {!wiki_root} ([<base_path>/.masc/wiki], where
     [base_path] is the workspace the caller resolved) with YAML frontmatter
     ([title], [summary], [source], [author], [created], [updated],
     [revision], [tags]).
@@ -153,7 +153,8 @@ type context = {
 (** {1 Path resolution} *)
 
 val wiki_root : base_path:string -> string
-(** [wiki_root ~base_path] is [<base_path>/docs/wiki]. *)
+(** [wiki_root ~base_path] is [<base_path>/.masc/wiki]
+    ({!Config_dir_resolver.wiki_dir}). *)
 
 (** {1 Direct handlers} *)
 

@@ -201,6 +201,12 @@ val microvm_shim_dir : base_path:string -> string
     runtime writes beside it; mounted read-only into every guest
     (RFC-0400). *)
 
+val wiki_dir : base_path:string -> string
+(** [<base_path>/.masc/wiki/]. The wiki's pages with its [index.md] and
+    [log.md]. It is state this server writes for its world, so it sits under
+    [.masc/] with the rest and not in the workspace's own [docs/], where it
+    showed up as untracked files of whatever repository the workspace is. *)
+
 val data_dir : base_path:string -> string
 (** [<base_path>/data/]. Bulk tool data (tool-events).
     Sibling of [.masc/]; callers historically wrote here without going

@@ -3786,7 +3786,7 @@ status: reference
   자동 수집 경로는 없다. 누가 만든 페이지만 있으므로 설치에 페이지가 하나도 없는 상태도
   정상이다.
   페이지는 호출자가 해석한 workspace(`Workspace.config.base_path`) 아래
-  `<base_path>/docs/wiki/<page>.md`에 저장되고, 도구는 환경 변수를 읽지 않는다.
+  `<base_path>/.masc/wiki/<page>.md`에 저장되고, 도구는 환경 변수를 읽지 않는다.
   `page`는 쓰는 쪽이 정하는 이름이다. 소문자 `a-z`, 숫자, `-`만 쓰고 `index`와 `log`는
   쓸 수 없다. 규칙에 안 맞는 이름은 고쳐 주지 않고 거절한다. 제목(`title`)에는 아무
   글자나 쓸 수 있다.

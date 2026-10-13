@@ -164,6 +164,44 @@ let test_gemini_url_variants () =
 
 (* ── complete wrapper paths ───────────────────────────── *)
 
+let test_cache_hit_clears_latency_telemetry () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let telemetry =
+    { Types.default_inference_telemetry with
+      request_latency_ms = Some 4242
+    ; ttfrc_ms = Some 1.5
+    ; prefill_ms = Some 2.5
+    ; reasoning_tokens = Some 3
+    }
+  in
+  let stored =
+    { (make_response ~content:[ Types.Text "cached" ] ()) with
+      Types.telemetry = Some telemetry
+    }
+  in
+  let cache : Cache.t =
+    { get = (fun ~key:_ -> Some (Cache.response_to_json stored))
+    ; set = (fun ~key:_ ~ttl_sec:_ _ -> ())
+    }
+  in
+  (* No injected transport: an injected transport bypasses the cache, and a
+     hit must never reach the network. *)
+  let config = make_config ~model_id:"cache-hit-test" () in
+  let messages = [ Types.user_msg "hello" ] in
+  match Complete.complete ~sw ~net:(Eio.Stdenv.net env) ~config ~messages ~cache () with
+  | Error err -> failf "unexpected complete error: %s" (string_of_http_error err)
+  | Ok resp ->
+    (match resp.telemetry with
+     | None -> fail "expected telemetry on a cache hit"
+     | Some t ->
+       check (option int) "hit clears request latency" None t.request_latency_ms;
+       check (option (float 0.)) "hit clears ttfrc" None t.ttfrc_ms;
+       check (option (float 0.)) "hit clears prefill" None t.prefill_ms;
+       check (option int) "hit keeps non-latency telemetry" (Some 3) t.reasoning_tokens)
+
 let test_complete_transport_bypasses_cache_with_metrics_and_trace_headers () =
   Eio_main.run
   @@ fun env ->
@@ -625,7 +663,9 @@ let () =
     "complete_ext"
     [ "helpers", [ test_case "gemini URL variants" `Quick test_gemini_url_variants ]
     ; ( "complete"
-      , [ test_case
+      , [ test_case "cache hit clears latency telemetry" `Quick
+            test_cache_hit_clears_latency_telemetry
+        ; test_case
             "transport bypasses response cache with metrics and trace headers"
             `Quick
             test_complete_transport_bypasses_cache_with_metrics_and_trace_headers

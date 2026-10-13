@@ -190,7 +190,22 @@ let complete_prepared_sync
            (match Cache.response_of_json json with
             | Some resp ->
               m.on_cache_hit ~model_id;
-              Some (Ok resp)
+              (* A hit replays the original call's telemetry, but its
+                 latency fields describe a network round trip this call
+                 never made. Clear them so latency consumers do not bill
+                 the hit as a slow call; the stored entry keeps the
+                 original numbers for provenance. *)
+              let telemetry =
+                Option.map
+                  (fun t ->
+                     { t with
+                       Types.request_latency_ms = None
+                     ; Types.ttfrc_ms = None
+                     ; Types.prefill_ms = None
+                     })
+                  resp.Types.telemetry
+              in
+              Some (Ok { resp with Types.telemetry })
             | None ->
               m.on_cache_miss ~model_id;
               None)

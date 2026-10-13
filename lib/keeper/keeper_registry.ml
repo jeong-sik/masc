@@ -847,7 +847,7 @@ let rec dispatch_event_with_audit_internal
             ; wall_clock_at_decision = now
             };
           Keeper_lifecycle_hooks.run
-            ~base_dir:base_path
+            ~masc_root:(Common.masc_dir_from_base_path ~base_path)
             ~meta:entry.meta
             ~keeper_id:name
             (Keeper_lifecycle_hooks.Phase_transition

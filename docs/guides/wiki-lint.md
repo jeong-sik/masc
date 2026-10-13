@@ -55,8 +55,19 @@ The response is JSON text: `schema` (`masc.wiki_lint.v1`), `pages_total`,
 page of them, about 12 KB at most. Pass `next_cursor` back as `cursor` to read
 the rest.
 
-Refused arguments: an unknown `kind`, a `limit` below 1, a `cursor` this tool
-did not issue, a `page` that is not a valid page name.
+Refused arguments: an unknown `kind`, a `limit` below 1, a value of the wrong
+type (`{"limit": "20"}`, `{"kind": 5}`), a `cursor` this tool did not issue, a
+`page` that is not a valid page name.
+
+## While the wiki is being written
+
+A call reads the wiki once and is not a snapshot across calls. A `cursor`
+carries a fingerprint of the findings it was issued for; if the wiki changed
+since, the call is refused with "call again without cursor" instead of
+skipping or repeating findings. A result read while someone is writing can
+show a `broken_link` that is gone on the next run; run it once more to confirm.
+A page file that exists but cannot be opened is reported as `unreadable_page`,
+not left out.
 
 ## Turning it off
 

@@ -1220,7 +1220,62 @@ let test_lint_refuses_bad_arguments () =
     refused (`Assoc [ "kind", `String "nope" ]);
     refused (`Assoc [ "limit", `Int 0 ]);
     refused (`Assoc [ "cursor", `String "garbage" ]);
-    refused (`Assoc [ "page", `String "../escape" ]))
+    refused (`Assoc [ "page", `String "../escape" ]);
+    refused (`Assoc [ "limit", `String "20" ]);
+    refused (`Assoc [ "limit", `Float 2.5 ]);
+    refused (`Assoc [ "kind", `Int 5 ]);
+    refused (`Assoc [ "cursor", `Int 1 ]))
+
+let test_lint_stale_cursor_is_refused () =
+  with_temp_base_path (fun ctx ->
+    for i = 1 to 4 do
+      add_page ctx ~page:(Printf.sprintf "p%d" i) ~body:"nothing"
+    done;
+    let first = lint_json ctx (`Assoc [ "limit", `Int 2 ]) in
+    let cursor =
+      match lint_member first "next_cursor" with
+      | `String c -> c
+      | _ -> Alcotest.fail "expected a next_cursor"
+    in
+    (* The caller fixes the first finding's page between the two calls. *)
+    add_page ctx ~page:"p0" ~body:"[p1](p1.md) [p2](p2.md) [p3](p3.md) [p4](p4.md)";
+    let ok, message =
+      dispatch_exn ctx ~name:"masc_wiki_lint"
+        ~args:(`Assoc [ "limit", `Int 2; "cursor", `String cursor ])
+    in
+    Alcotest.(check bool) "stale cursor refused" false ok;
+    Alcotest.(check bool) "says to start again" true
+      (msg_contains ~needle:"without cursor" message);
+    (* The same cursor is honoured while the wiki is unchanged. *)
+    let again = lint_json ctx (`Assoc [ "limit", `Int 2 ]) in
+    match lint_member again "next_cursor" with
+    | `String fresh ->
+      let ok, _ =
+        dispatch_exn ctx ~name:"masc_wiki_lint"
+          ~args:(`Assoc [ "limit", `Int 2; "cursor", `String fresh ])
+      in
+      Alcotest.(check bool) "fresh cursor accepted" true ok
+    | _ -> Alcotest.fail "expected a next_cursor")
+
+let test_lint_kind_enum_is_all_kinds () =
+  let schema = required_schema "masc_wiki_lint" in
+  let declared =
+    match schema.input_schema with
+    | `Assoc fields ->
+      (match List.assoc_opt "properties" fields with
+       | Some (`Assoc props) ->
+         (match List.assoc_opt "kind" props with
+          | Some (`Assoc kind) ->
+            (match List.assoc_opt "enum" kind with
+             | Some (`List values) ->
+               List.filter_map (function `String s -> Some s | _ -> None) values
+             | _ -> Alcotest.fail "kind has no enum")
+          | _ -> Alcotest.fail "no kind property")
+       | _ -> Alcotest.fail "no properties")
+    | _ -> Alcotest.fail "input_schema is not an object"
+  in
+  Alcotest.(check (list string)) "enum = Masc.Wiki_lint.all_kinds"
+    Masc.Wiki_lint.all_kinds declared
 
 (* ============================================================
    Test runner
@@ -1302,6 +1357,8 @@ let () =
       Alcotest.test_case "the lock file is not a page" `Quick test_lint_lock_file_is_not_a_page;
       Alcotest.test_case "limit and cursor walk every finding" `Quick test_lint_limit_and_cursor_walk_every_finding;
       Alcotest.test_case "bad arguments are refused" `Quick test_lint_refuses_bad_arguments;
+      Alcotest.test_case "a cursor from before the wiki changed is refused" `Quick test_lint_stale_cursor_is_refused;
+      Alcotest.test_case "the kind enum is every kind" `Quick test_lint_kind_enum_is_all_kinds;
     ]);
     ("unreadable", [
       Alcotest.test_case "unknown source is named, not passed through" `Quick test_unknown_source_is_named_not_passed_through;

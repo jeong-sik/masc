@@ -16,6 +16,9 @@ type problem =
   | Unknown_kind of string
   | Bad_limit
   | Bad_cursor of string
+  | Stale_cursor
+      (** The cursor was issued for a different list of findings: the wiki
+          changed between the calls. *)
 
 val problem_to_string : problem -> string
 

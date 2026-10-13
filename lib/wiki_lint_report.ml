@@ -9,6 +9,7 @@ type problem =
   | Unknown_kind of string
   | Bad_limit
   | Bad_cursor of string
+  | Stale_cursor
 
 let problem_to_string = function
   | Unknown_kind kind ->
@@ -19,13 +20,15 @@ let problem_to_string = function
   | Bad_limit -> "limit must be a whole number from 1"
   | Bad_cursor cursor ->
     Printf.sprintf "cursor %S is not a cursor this tool returned" cursor
+  | Stale_cursor ->
+    "the wiki changed since that cursor was issued; call again without cursor to read the \
+     findings from the start"
 ;;
 
 let schema = "masc.wiki_lint.v1"
 let default_limit = 50
 let max_limit = 200
 let byte_budget = 12_000
-let cursor_prefix = "o:"
 
 let finding_to_json (finding : Wiki_lint.finding) : Yojson.Safe.t =
   let kind = `String (Wiki_lint.kind finding) in
@@ -48,18 +51,31 @@ let finding_to_json (finding : Wiki_lint.finding) : Yojson.Safe.t =
     `Assoc [ "kind", kind; "file", `String file; "reason", `String reason ]
 ;;
 
+(* A cursor is [o:<offset>:<fingerprint>]. The fingerprint names the filtered
+   list the offset counts into, so a cursor from before the wiki changed is
+   refused instead of silently skipping or repeating findings. *)
+let fingerprint_length = 12
+
+let fingerprint selected =
+  selected
+  |> List.map (fun finding -> Yojson.Safe.to_string (finding_to_json finding))
+  |> String.concat "\n"
+  |> Digest.string
+  |> Digest.to_hex
+  |> fun hex -> String.sub hex 0 fingerprint_length
+;;
+
 let parse_cursor raw =
   match raw with
-  | None -> Ok 0
+  | None -> Ok None
   | Some cursor ->
-    let prefix_length = String.length cursor_prefix in
-    if String.length cursor > prefix_length
-       && String.equal (String.sub cursor 0 prefix_length) cursor_prefix
-    then (
-      match int_of_string_opt (String.sub cursor prefix_length (String.length cursor - prefix_length)) with
-      | Some offset when offset >= 0 -> Ok offset
-      | Some _ | None -> Error (Bad_cursor cursor))
-    else Error (Bad_cursor cursor)
+    let bad = Error (Bad_cursor cursor) in
+    (match String.split_on_char ':' cursor with
+     | [ "o"; offset; print ] when String.length print = fingerprint_length ->
+       (match int_of_string_opt offset with
+        | Some offset when offset >= 0 -> Ok (Some (offset, print))
+        | Some _ | None -> bad)
+     | _ -> bad)
 ;;
 
 let about_page page (finding : Wiki_lint.finding) =
@@ -75,7 +91,7 @@ let rec take_within_budget ~limit ~budget acc = function
     else (
       let json = finding_to_json finding in
       let size = String.length (Yojson.Safe.to_string json) in
-      if acc <> [] && size > budget
+      if (match acc with [] -> false | _ :: _ -> true) && size > budget
       then List.rev acc, remaining
       else take_within_budget ~limit:(limit - 1) ~budget:(budget - size) ((finding, json) :: acc) rest)
 ;;
@@ -95,7 +111,7 @@ let render ~pages_total ~pages_unreadable ~findings request =
     | None -> Ok default_limit
     | Some limit -> if limit >= 1 then Ok (min limit max_limit) else Error Bad_limit
   in
-  let* offset = parse_cursor request.cursor in
+  let* cursor = parse_cursor request.cursor in
   let selected =
     findings
     |> List.filter (fun finding ->
@@ -107,10 +123,17 @@ let render ~pages_total ~pages_unreadable ~findings request =
       | None -> true
       | Some page -> about_page page finding)
   in
+  let print = fingerprint selected in
+  let* offset =
+    match cursor with
+    | None -> Ok 0
+    | Some (offset, issued_for) ->
+      if String.equal issued_for print then Ok offset else Error Stale_cursor
+  in
   let after_offset = List.filteri (fun index _ -> index >= offset) selected in
   let shown, rest = take_within_budget ~limit ~budget:byte_budget [] after_offset in
   let next_offset = offset + List.length shown in
-  let truncated = rest <> [] in
+  let truncated = (match rest with [] -> false | _ :: _ -> true) in
   Ok
     (`Assoc
         [ "schema", `String schema
@@ -123,6 +146,6 @@ let render ~pages_total ~pages_unreadable ~findings request =
         ; "findings", `List (List.map snd shown)
         ; "truncated", `Bool truncated
         ; ( "next_cursor"
-          , if truncated then `String (cursor_prefix ^ string_of_int next_offset) else `Null )
+          , if truncated then `String (Printf.sprintf "o:%d:%s" next_offset print) else `Null )
         ])
 ;;

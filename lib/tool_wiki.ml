@@ -521,7 +521,16 @@ let lint_nodes ~base_path =
   |> List.filter_map (fun path ->
     let file = Filename.basename path in
     match In_channel.with_open_text path In_channel.input_all with
-    | exception Sys_error _ -> None
+    | exception Sys_error message ->
+      (* Gone between the listing and the read: not a page any more. Still
+         there but not opened (permissions, I/O): a page that does not read,
+         not a page that does not exist. *)
+      if Sys.file_exists path
+      then
+        Some
+          (Wiki_graph.Unreadable
+             { file; reason = Printf.sprintf "the file could not be opened: %s" message })
+      else None
     | content ->
       (match parse_frontmatter content with
        | Ok _ ->
@@ -537,14 +546,35 @@ let lint_nodes ~base_path =
            (Wiki_graph.Unreadable { file; reason = frontmatter_error_to_string error })))
 
 let handle_lint ~tool_name ~start_time ctx args : Tool_result.result =
-  let string_arg name = Json_util.get_string args name in
-  let request =
-    { Wiki_lint_report.page = string_arg "page"
-    ; kind = string_arg "kind"
-    ; limit = Json_util.get_int args "limit"
-    ; cursor = string_arg "cursor"
-    }
+  (* A value of the wrong type is refused, not read as "not given": a limit
+     of "20" would otherwise be the default and a kind of 5 no filter. *)
+  let typed name ~expected ~pick =
+    match args with
+    | `Assoc fields ->
+      (match List.assoc_opt name fields with
+       | None | Some `Null -> Ok None
+       | Some value ->
+         (match pick value with
+          | Some picked -> Ok (Some picked)
+          | None -> Error (Printf.sprintf "%s must be %s" name expected)))
+    | _ -> Ok None
   in
+  let string_arg name =
+    typed name ~expected:"a string" ~pick:(function `String s -> Some s | _ -> None)
+  in
+  let ( let* ) = Result.bind in
+  let request =
+    let* page = string_arg "page" in
+    let* kind = string_arg "kind" in
+    let* limit =
+      typed "limit" ~expected:"a whole number" ~pick:(function `Int n -> Some n | _ -> None)
+    in
+    let* cursor = string_arg "cursor" in
+    Ok { Wiki_lint_report.page; kind; limit; cursor }
+  in
+  match request with
+  | Error message -> workflow_err ~tool_name ~start_time message
+  | Ok request ->
   let page_checked =
     match request.page with
     | None -> Ok ()

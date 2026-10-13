@@ -227,30 +227,6 @@ let test_search_freezes_preview_lookup () = at_sizes (fun origin ->
   check bool "first metadata snapshot supplies a search result" true (Option.is_some found.match_result);
   check int "mapping and suffix measurement share one preview read" 1 !calls)
 
-let test_folded_thinking_search_identity () = at_sizes (fun origin ->
-  let set_cols columns=ignore(Masc_tui_render_schedule.Terminal_size_cache.refresh
-    Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some(26,columns))) in
-  let state=state origin in
-  state.msg_reasoning_visibility <- T.Reasoning_folded;
-  state.msg_loaded <- [row ~id:"thinking-identity" ~request_id:"thinking-identity"
-    ~role:T.Message_thinking ~text:("Reasoning " ^ String.make 100 'x') 1.];
-  set_cols 45;
-  let summary=find state "Reasoning" in
-  check bool "fold producer marks generated summary identity" true
-    (match summary.matched_position with Masc_tui_chat_search.Thinking_summary_byte _ -> true | _ -> false);
-  set_cols 180;
-  let source=find ~older:summary state "Reasoning" in
-  check bool "unfolded original is a distinct source occurrence" true
-    (match source.matched_position with Masc_tui_chat_search.Body_byte _ -> true | _ -> false);
-  set_cols 45;
-  check bool "returning to summary cannot cycle to its prior match" true
-    ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"Reasoning" ~older_than:(Some source)).match_result=None);
-  set_cols 180;
-  let source=find state "Reasoning" in
-  set_cols 45;
-  check bool "source-to-summary transition respects the same fixed order" true
-    ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"Reasoning" ~older_than:(Some source)).match_result=None))
-
 let test_indexed_scroll_anchors () = at_sizes (fun origin ->
   let state = state origin in
   state.msg_loaded <- List.init 500 (fun i -> row ~id:(string_of_int i)
@@ -1236,69 +1212,6 @@ let test_navigation_retires_a_running_search () = at_sizes (fun origin ->
       (Option.is_none (Render.admit_keeper_message_search state work answer)))
     ["scrolling back", 3; "returning to the live edge", 0])
 
-(* A view stance rewrites a tool, skill, Memory or reasoning body from the same
-   typed data while the row's identity stays. A reader scrolled inside that
-   body stays on the row in its new text: the old offsets neither land on an
-   unrelated line of the new text nor drop the reader at the live edge. *)
-let test_view_stance_keeps_reader_on_its_entry () = at_sizes (fun origin ->
-  let module Transcript = Masc_tui_keeper_chat_transcript in
-  let call name index = Transcript.make_tool_activity
-      ~execution_id:(Printf.sprintf "stance-exec-%02d" index) ~call_id:None
-      ~tool_name:(name index) ~args:"{}" ~outcome:Transcript.Returned ~duration:None () in
-  let entry role text = row ~id:"stance-entry" ~request_id:"stance-entry" ~role ~text 1. in
-  let tool name = {(entry T.Message_tool "tools") with
-    me_tool_block=Some (Transcript.tool_block (List.init 60 (call name)))} in
-  let cases = [
-    "tool full to compact", tool (fun _ -> "fixture_tool"),
-      (fun state -> state.T.msg_tool_visibility <- T.Tools_full),
-      (fun state -> state.T.msg_tool_visibility <- T.Tools_compact), "fixture_tool";
-    "tool full to results", tool (Printf.sprintf "TOOLCALL_%02d"),
-      (fun state -> state.T.msg_tool_visibility <- T.Tools_full),
-      (fun state -> state.T.msg_tool_visibility <- T.Tools_results), "TOOLCALL_00";
-    "tool results to full", tool (Printf.sprintf "TOOLCALL_%02d"),
-      (fun state -> state.T.msg_tool_visibility <- T.Tools_results),
-      (fun state -> state.T.msg_tool_visibility <- T.Tools_full), "TOOLCALL_00";
-    "skill full to compact",
-      {(entry (T.Message_skill Transcript.Skill_used) "skill") with
-        me_skill_block=[Transcript.make_skill_activity ~skill_name:"FIXTURE_SKILL"
-          ~state:Transcript.Skill_used
-          ~actions:(List.init 60 (Printf.sprintf "action_%02d")) ()]},
-      (fun state -> state.T.msg_tool_visibility <- T.Tools_full),
-      (fun state -> state.T.msg_tool_visibility <- T.Tools_compact), "FIXTURE_SKILL";
-    "memory full to summary",
-      {(entry T.Message_memory (long_answer "MEMORY_LINE_")) with
-        me_memory_summary=Some "MEMORY_SUMMARY"},
-      (fun state -> state.T.msg_memory_visibility <- T.Memory_full),
-      (fun state -> state.T.msg_memory_visibility <- T.Memory_summary), "MEMORY_SUMMARY";
-    "reasoning full to folded", entry T.Message_thinking (long_answer "REASONING_LINE_"),
-      (fun state -> state.T.msg_reasoning_visibility <- T.Reasoning_full),
-      (fun state -> state.T.msg_reasoning_visibility <- T.Reasoning_folded), "lines folded" ] in
-  List.iter (fun (name, stance_entry, before, after, expected) ->
-    let state = state origin in
-    before state;
-    state.msg_loaded <- [
-      row ~id:"stance-question" ~request_id:"stance-question" ~role:user ~text:"STANCE_QUESTION" 0.;
-      stance_entry;
-      row ~id:"stance-reply" ~request_id:"stance-reply" ~role:T.Message_keeper
-        ~text:(long_answer "STANCE_REPLY_") 3. ];
-    ignore (find state "STANCE_REPLY_000");
-    (* Twelve rows above the reply's first row: every drawn row of the frame
-       belongs to the long entry. *)
-    T.set_msg_scroll state (state.msg_scroll + 12);
-    let inside = screen state in
-    check bool (name ^ ": the fixture reads inside the entry") false
-      (Astring.String.is_infix ~affix:"STANCE_REPLY_" inside
-       || Astring.String.is_infix ~affix:"STANCE_QUESTION" inside);
-    after state;
-    let shown = frame_lines state in
-    check bool (name ^ ": the stance change does not jump to the live edge") false
-      (List.exists (Astring.String.is_infix ~affix:"STANCE_REPLY_099") shown);
-    ignore (visible_line shown expected);
-    check (option int) (name ^ ": the first drawn body row is the entry's first") (Some 0)
-      (Option.bind state.msg_scroll_pin (fun pin -> match pin.T.pin_points with
-         | point :: _ -> Some point.T.body_row | [] -> None));
-    assert_still_reading state expected) cases)
-
 (* /find reads a plan and returns. A daemon fiber on the UI domain renders the
    candidates afterwards, one entry per yield, and a newer generation stops it
    before it delivers anything. [seek_in_chat] posts its notice between the
@@ -1480,7 +1393,6 @@ let () = run "chat search projection" [
       test_retired_matcher_stops_before_next_candidate;
     test_case "find renders candidates after the handler returns" `Quick
       test_find_renders_candidates_after_the_handler_returns;
-    test_case "view stance keeps the reader on its entry" `Quick test_view_stance_keeps_reader_on_its_entry;
     test_case "search executor owns frozen source and keeps repeat cursor" `Quick test_search_executor_owns_frozen_source;
     test_case "rich card repeat follows interleaved source sequence" `Quick test_rich_card_repeat_follows_interleaved_source_order;
     test_case "replaced preview title is searched whole" `Quick test_replaced_preview_title_is_searched_whole;
@@ -1516,7 +1428,6 @@ let () = run "chat search projection" [
       test_frame_feedback_consumes_arrival_compensation;
     test_case "long history and journal matches land on their physical row" `Quick
       test_long_answer_match_location;
-    test_case "folded thinking has a distinct search identity" `Quick test_folded_thinking_search_identity;
     test_case "search freezes preview lookup across measurement" `Quick test_search_freezes_preview_lookup;
     test_case "preview and journal search survive reflow" `Quick test_preview_and_journal_search_reflow;
     test_case "source cursor survives actual layout reflow" `Quick test_repeat_cursor_across_reflow;

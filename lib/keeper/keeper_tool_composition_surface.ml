@@ -1894,6 +1894,7 @@ let make_tools_with_authority
       let module Draft = Keeper_composition_draft in
       let rejection ~tool_name ~start_time error =
         let class_ = match error with
+          | Draft.Draft_read_failed (Tool_blob_store.Invalid_sha256 _) -> Tool_result.Policy_rejection
           | Draft.Storage_failed _ | Draft.Draft_read_failed _ -> Tool_result.Runtime_failure
           | Draft.Plan_rejected _ | Draft.Inputs_rejected _ | Draft.Unsupported_node _
           | Draft.Draft_not_found | Draft.Malformed_draft _ | Draft.Different_keeper

@@ -55,209 +55,174 @@ let keeper_recovery_outcome after_diagnostic =
 
 (** {1 Domain-specific action handlers} *)
 
-let workspace_action_result ?(result_status = ActionOk) request result =
-  let* tool_name = delegated_tool_for request.action_type in
-  Ok (`Assoc [ ("tool_name", `String tool_name); ("result", result) ], result_status)
+(* A handler returns what its action produced. [execute_action] adds the
+   reported [tool_name] from [delegated_tool_name]. The tools a handler
+   dispatches are its own business and are named where they are called. *)
 
-let execute_workspace_action (ctx : 'a context) (request : action_request) =
-  match request.action_type with
-  | "broadcast" ->
-      let* () = validate_target_type Operator_action_constants.Workspace request in
-      let* message =
-        require_payload_field request.payload "message"
-          "payload.message is required"
-      in
-      let* result =
-        match
-          (* The operator addressing the workspace is speech. *)
-          Workspace.broadcast
-            ~audience:Workspace_broadcast.Fleet_conversation
-            ctx.config ~from_agent:request.actor ~content:message
-        with
-        | Ok result -> Ok result
-        | Error error -> Error (Workspace.broadcast_error_to_string error)
-      in
-      let result_status =
-        match result.mention_delivery with
-        | Workspace_broadcast.Passive
-        | Workspace_broadcast.Accepted
-        | Workspace_broadcast.Already_accepted -> ActionOk
-        | Workspace_broadcast.Pending
-        | Workspace_broadcast.Deferred _ -> ActionDeferred
-        | Workspace_broadcast.Rejected _ -> ActionError
-      in
-      workspace_action_result ~result_status request
-        (Workspace_broadcast.broadcast_delivery_to_yojson result)
-  | "namespace_pause" ->
-      let* () = validate_target_type Operator_action_constants.Workspace request in
-      let reason =
-        get_string request.payload "reason" "Paused by operator action"
-      in
-      Workspace.pause ctx.config ~by:request.actor ~reason;
-      workspace_action_result request
-        (`Assoc [ ("paused", `Bool true); ("reason", `String reason) ])
-  | "namespace_resume" ->
-      let* () = validate_target_type Operator_action_constants.Workspace request in
-      let status =
-        match Workspace.resume ctx.config ~by:request.actor with
-        | `Resumed -> "resumed"
-        | `Already_running -> "already_running"
-      in
-      workspace_action_result request (`Assoc [ ("status", `String status) ])
-  | "task_inject" ->
-      let* () = validate_target_type Operator_action_constants.Workspace request in
-      let* title =
-        require_payload_field request.payload "title"
-          "payload.title is required"
-      in
-      let priority = get_int request.payload "priority" 2 in
-      let description =
-        get_string request.payload "description" "Injected by operator action"
-      in
-      let result =
-        Workspace.add_task
-          ctx.config ~title ~priority ~description
-      in
-      workspace_action_result request (`String result)
-  | _ -> Error (Printf.sprintf "not a namespace action: %s" request.action_type)
+let execute_broadcast (ctx : 'a context) (request : action_request) =
+  let* message =
+    require_payload_field request.payload "message"
+      "payload.message is required"
+  in
+  let* result =
+    match
+      (* The operator addressing the workspace is speech. *)
+      Workspace.broadcast
+        ~audience:Workspace_broadcast.Fleet_conversation
+        ctx.config ~from_agent:request.actor ~content:message
+    with
+    | Ok result -> Ok result
+    | Error error -> Error (Workspace.broadcast_error_to_string error)
+  in
+  let result_status =
+    match result.mention_delivery with
+    | Workspace_broadcast.Passive
+    | Workspace_broadcast.Accepted
+    | Workspace_broadcast.Already_accepted -> ActionOk
+    | Workspace_broadcast.Pending
+    | Workspace_broadcast.Deferred _ -> ActionDeferred
+    | Workspace_broadcast.Rejected _ -> ActionError
+  in
+  Ok (Workspace_broadcast.broadcast_delivery_to_yojson result, result_status)
 
-let execute_keeper_action (ctx : 'a context) (request : action_request) =
-  match request.action_type with
-  | "keeper_probe" ->
-      let* () = validate_target_type Operator_action_constants.Keeper request in
-      let* name = require_target_id request in
-      let status_args =
-        `Assoc
-          [
-            ("name", `String name);
-            ("fast", `Bool false);
-            ("include_context", `Bool false);
-            ("include_metrics_overview", `Bool true);
-            ("include_history_tail", `Bool false);
-          ]
-      in
-      let* status_json =
-        dispatch_keeper_json ctx ~tool_name:"masc_keeper_status" ~args:status_args
-      in
-      let* diagnostic = keeper_diagnostic_for_name ctx ~name in
-      Ok
-        (`Assoc
-          [
-            ("tool_name", `String "masc_keeper_status");
-            ( "result",
-              `Assoc
-                [
-                  ("status", status_json);
-                  ("diagnostic", diagnostic);
-                ] );
-          ])
-  | "keeper_recover" ->
-      let* () = validate_target_type Operator_action_constants.Keeper request in
-      let* name = require_target_id request in
-      let* (resolved_name, _meta) =
-        resolve_keeper_meta_for_name ctx ~name
-      in
-      let* before_diagnostic = keeper_diagnostic_for_name ctx ~name:resolved_name in
-      let recoverable =
-        Json_util.get_bool before_diagnostic "recoverable" |> Option.value ~default:false
-      in
-      if not recoverable then
-        Ok
-          (`Assoc
-            [
-              ("tool_name", `String "masc_keeper_recover");
-              ( "result",
-                `Assoc
-                  [
-                    ("recovered", `Bool false);
-                    ("skipped_reason", `String "keeper is already healthy enough; recovery not required");
-                    ("before", before_diagnostic);
-                  ] );
-            ])
-      else
-        let* down_result =
-          dispatch_keeper_json ctx ~tool_name:"masc_keeper_down"
-            ~args:(`Assoc [ ("name", `String resolved_name) ])
-        in
-        let* up_result =
-          dispatch_keeper_json ctx ~tool_name:"masc_keeper_up"
-            ~args:(`Assoc [ ("name", `String resolved_name) ])
-        in
-        let* after_diagnostic = keeper_diagnostic_for_name ctx ~name:resolved_name in
-        let recovered, skipped_reason =
-          keeper_recovery_outcome after_diagnostic
-        in
-        Ok
-          (`Assoc
-            [
-              ("tool_name", `String "masc_keeper_recover");
-              ( "result",
-                `Assoc
-                  [
-                    ("recovered", `Bool recovered);
-                    ( "skipped_reason", Json_util.string_opt_to_json skipped_reason );
-                    ("before", before_diagnostic);
-                    ("after", after_diagnostic);
-                    ("down", down_result);
-                    ("up", up_result);
-                  ] );
-            ])
-  | "keeper_message" ->
-      let* () = validate_target_type Operator_action_constants.Keeper request in
-      let* name = require_target_id request in
-      let* message =
-        require_payload_field request.payload "message"
-          "payload.message is required"
-      in
-      let args =
-        `Assoc
-          [ ( "target"
-            , `Assoc [ "kind", `String "keeper"; "name", `String name ] )
-          ; "capability", `String "invoke_turn"
-          ; "prompt", `String message
-          ]
-      in
-      let* result =
-        dispatch_keeper_json ctx ~tool_name:Keeper_tool_name.(to_string Keeper_delegate) ~args
-      in
-      Ok
-        (`Assoc
-          [
-            ("tool_name", `String Keeper_tool_name.(to_string Keeper_delegate));
-            ("result", result);
-          ])
-  | _ -> Error (Printf.sprintf "not a keeper action: %s" request.action_type)
+let execute_namespace_pause (ctx : 'a context) (request : action_request) =
+  let reason =
+    get_string request.payload "reason" "Paused by operator action"
+  in
+  Workspace.pause ctx.config ~by:request.actor ~reason;
+  `Assoc [ ("paused", `Bool true); ("reason", `String reason) ]
+
+let execute_namespace_resume (ctx : 'a context) (request : action_request) =
+  let status =
+    match Workspace.resume ctx.config ~by:request.actor with
+    | `Resumed -> "resumed"
+    | `Already_running -> "already_running"
+  in
+  `Assoc [ ("status", `String status) ]
+
+let execute_task_inject (ctx : 'a context) (request : action_request) =
+  let* title =
+    require_payload_field request.payload "title"
+      "payload.title is required"
+  in
+  let priority = get_int request.payload "priority" 2 in
+  let description =
+    get_string request.payload "description" "Injected by operator action"
+  in
+  Ok (`String (Workspace.add_task ctx.config ~title ~priority ~description))
+
+let execute_keeper_probe (ctx : 'a context) (request : action_request) =
+  let* name = require_target_id request in
+  let status_args =
+    `Assoc
+      [
+        ("name", `String name);
+        ("fast", `Bool false);
+        ("include_context", `Bool false);
+        ("include_metrics_overview", `Bool true);
+        ("include_history_tail", `Bool false);
+      ]
+  in
+  let* status_json =
+    dispatch_keeper_json ctx ~tool_name:"masc_keeper_status" ~args:status_args
+  in
+  let* diagnostic = keeper_diagnostic_for_name ctx ~name in
+  Ok (`Assoc [ ("status", status_json); ("diagnostic", diagnostic) ])
+
+let execute_keeper_recover (ctx : 'a context) (request : action_request) =
+  let* name = require_target_id request in
+  let* (resolved_name, _meta) =
+    resolve_keeper_meta_for_name ctx ~name
+  in
+  let* before_diagnostic = keeper_diagnostic_for_name ctx ~name:resolved_name in
+  let recoverable =
+    Json_util.get_bool before_diagnostic "recoverable" |> Option.value ~default:false
+  in
+  if not recoverable then
+    Ok
+      (`Assoc
+        [
+          ("recovered", `Bool false);
+          ("skipped_reason", `String "keeper is already healthy enough; recovery not required");
+          ("before", before_diagnostic);
+        ])
+  else
+    let* down_result =
+      dispatch_keeper_json ctx ~tool_name:"masc_keeper_down"
+        ~args:(`Assoc [ ("name", `String resolved_name) ])
+    in
+    let* up_result =
+      dispatch_keeper_json ctx ~tool_name:"masc_keeper_up"
+        ~args:(`Assoc [ ("name", `String resolved_name) ])
+    in
+    let* after_diagnostic = keeper_diagnostic_for_name ctx ~name:resolved_name in
+    let recovered, skipped_reason =
+      keeper_recovery_outcome after_diagnostic
+    in
+    Ok
+      (`Assoc
+        [
+          ("recovered", `Bool recovered);
+          ( "skipped_reason", Json_util.string_opt_to_json skipped_reason );
+          ("before", before_diagnostic);
+          ("after", after_diagnostic);
+          ("down", down_result);
+          ("up", up_result);
+        ])
+
+let execute_keeper_message (ctx : 'a context) (request : action_request) =
+  let* name = require_target_id request in
+  let* message =
+    require_payload_field request.payload "message"
+      "payload.message is required"
+  in
+  let args =
+    `Assoc
+      [ ( "target"
+        , `Assoc [ "kind", `String "keeper"; "name", `String name ] )
+      ; "capability", `String "invoke_turn"
+      ; "prompt", `String message
+      ]
+  in
+  dispatch_keeper_json ctx ~tool_name:Keeper_tool_name.(to_string Keeper_delegate) ~args
 
 let execute_action (ctx : 'a context) (request : action_request) :
     (Yojson.Safe.t * action_result_status, string) result =
-  match request.action_type with
-  | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" ->
-      execute_workspace_action ctx request
-  | "keeper_probe" | "keeper_recover" | "keeper_message" ->
-      execute_keeper_action ctx request |> Result.map (fun result -> result, ActionOk)
-  | "" -> Error "action_type is required"
-  | other -> Error (Printf.sprintf "unsupported action_type: %s" other)
-
-let validate_request request =
-  if request.action_type = "" then Error "action_type is required"
-  else
-    match Operator_action_catalog.of_string request.action_type with
-    | Some _ -> Ok ()
-    | None -> Error (Printf.sprintf "unsupported action_type: %s" request.action_type)
+  let completed result = Ok (result, ActionOk) in
+  let* result, result_status =
+    match request.action with
+    | Operator_action_catalog.Broadcast -> execute_broadcast ctx request
+    | Operator_action_catalog.Namespace_pause ->
+      completed (execute_namespace_pause ctx request)
+    | Operator_action_catalog.Namespace_resume ->
+      completed (execute_namespace_resume ctx request)
+    | Operator_action_catalog.Task_inject ->
+      Result.bind (execute_task_inject ctx request) completed
+    | Operator_action_catalog.Keeper_message ->
+      Result.bind (execute_keeper_message ctx request) completed
+    | Operator_action_catalog.Keeper_probe ->
+      Result.bind (execute_keeper_probe ctx request) completed
+    | Operator_action_catalog.Keeper_recover ->
+      Result.bind (execute_keeper_recover ctx request) completed
+  in
+  Ok
+    ( `Assoc
+        [ ("tool_name", `String (delegated_tool_name request.action))
+        ; ("result", result)
+        ]
+    , result_status )
 
 let invalidate_operator_snapshot_views config =
   invalidate_snapshot_cache ();
   Dashboard_projection_cache.invalidate_snapshot_json ~config
 
-(* Every action is staged for confirmation and runs from [confirm_json]. A
-   request that reaches this point named a catalog action, and the catalog
-   answers "requires confirmation" for each of them. *)
+(* Every action is staged for confirmation and runs from [confirm_json]. *)
 let action_json ?actor_hint (ctx : _ context) args :
     (Yojson.Safe.t, string) result =
   let* request = action_request_of_args ?actor_hint ctx args in
-  let* () = validate_request request in
-  let* request = normalize_request_target_type request in
-  let* delegated_tool = delegated_tool_for request.action_type in
+  let action_type = Operator_action_catalog.to_string request.action in
+  let target_type = Operator_action_catalog.target_type_string request.action in
+  let delegated_tool = delegated_tool_name request.action in
   let trace_id = trace_id "ops" in
   let expires_at = Masc_domain.iso8601_of_unix_seconds (Unix.gettimeofday () +. remote_confirm_ttl_seconds) in
   let* token = generate_confirm_token ~clock:ctx.clock ctx.config in
@@ -267,8 +232,8 @@ let action_json ?actor_hint (ctx : _ context) args :
       confirm_token = token;
       trace_id;
       actor = request.actor;
-      action_type = request.action_type;
-      target_type = request.target_type;
+      action_type;
+      target_type;
       target_id = request.target_id;
       payload = request.payload;
       delegated_tool;
@@ -284,8 +249,8 @@ let action_json ?actor_hint (ctx : _ context) args :
       actor = request.actor;
       remote_session_id = ctx.mcp_session_id;
       remote_client_type = remote_client_type_of_context ctx;
-      action_type = request.action_type;
-      target_type = request.target_type;
+      action_type;
+      target_type;
       target_id = request.target_id;
       delegated_tool;
       confirmation_state = Preview;
@@ -415,15 +380,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                  ]))
           | Confirm ->
             let started_at = Unix.gettimeofday () in
-            let request =
-              {
-                actor = entry.actor;
-                action_type = entry.action_type;
-                target_type = entry.target_type;
-                target_id = entry.target_id;
-                payload = entry.payload;
-              }
-            in
+            let* request = action_request_of_pending_confirm entry in
             let* () = remove_pending_confirm ctx.config confirm_token in
             let () = invalidate_operator_snapshot_views ctx.config in
             let* executed, result_status = execute_action ctx request in

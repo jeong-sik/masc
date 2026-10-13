@@ -100,7 +100,11 @@ let attention_item_to_yojson (item : attention_item) =
       ("authoritative", `Bool false);
     ]
 
-let recommended_confirm_required = Operator_action_catalog.requires_confirmation
+let recommended_confirm_required action_type =
+  match Operator_action_catalog.of_string action_type with
+  | Some action -> Operator_action_catalog.requires_confirmation action
+  | None -> false
+;;
 
 let recommended_action_to_yojson ~actor (item : recommended_action) =
   let preview =

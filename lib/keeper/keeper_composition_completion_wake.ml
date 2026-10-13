@@ -1,5 +1,5 @@
-(* The result is committed before it is announced. [enqueue_durable_result]
-   writes the pending snapshot first and only then updates the live queue, so
+(* The result is committed before it is announced. The one-shot queue writer
+   confirms strict snapshot durability before updating the live queue, so
    an [Error] here means the submitter has not been told and the caller can
    report the delivery as failed instead of acknowledging one that never
    landed.

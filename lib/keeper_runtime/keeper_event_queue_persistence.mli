@@ -256,6 +256,14 @@ val observe_snapshot_with_errors :
     rather than a healthy empty projection. *)
 
 module For_testing : sig
+  val enqueue_stimulus_once_with_confirmation :
+    confirm_snapshot:(string -> Keeper_event_queue_state.t -> (unit, string) result) ->
+    already_delivered:(unit -> (bool, string) result) ->
+    base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus ->
+    (unit, string) result
+  (** Call-scoped fault seam through the production one-shot transaction.
+      The writer is used for both first publication and same-source retries. *)
+
   val bind_pending_repetition_scope_with_confirmation :
     confirm_snapshot:(string -> Keeper_event_queue_state.t -> (unit, string) result) ->
     base_path:string -> keeper_name:string ->
@@ -503,17 +511,24 @@ type enqueue_stimulus_result =
   | Already_present
 
 val enqueue_stimulus_if_absent_result :
-  ?already_delivered:(unit -> (bool, string) result) ->
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
   Keeper_event_queue.stimulus ->
   (enqueue_stimulus_result, string) result
 (** Atomically enqueue only when the same typed stimulus is absent from the
-    full durable state: pending and transition outbox. [already_delivered],
-    when supplied by a one-shot producer, checks its durable consumption
-    evidence under the queue owner lock before a new enqueue. Read errors
-    leave the queue unchanged. *)
+    full durable state: pending and transition outbox. *)
+
+val enqueue_stimulus_once_result :
+  already_delivered:(unit -> (bool, string) result) ->
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus ->
+  (enqueue_stimulus_result, string) result
+(** One-shot completion delivery under the owner lock. A same-source payload
+    conflict is rejected. Exact pending/outbox replays and consumed sources
+    return [Already_present] only after strict snapshot durability is confirmed.
+    [already_delivered] must return an error when absence is unproven; it runs
+    only when the source is absent from the full state. *)
 
 type 'authorization_error guarded_transfer_projection_result =
   | Transfer_projection_result of transfer_projection_result

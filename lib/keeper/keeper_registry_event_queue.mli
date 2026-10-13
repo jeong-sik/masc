@@ -292,7 +292,9 @@ val enqueue_stimulus_durable_result :
 val enqueue_stimulus_once_durable_result :
   base_path:string -> string -> Keeper_event_queue.stimulus -> enqueue_stimulus_durable_result
 (** One-shot producer delivery with the same pending/outbox deduplication,
-    plus exact source reaction evidence checked under the owner lock. A
+    plus same-source payload conflict rejection and strict snapshot durability,
+    including exact replays. Exact source reaction evidence is checked under
+    the owner lock; incomplete negative evidence rejects the delivery. A
     source that already entered a turn or reached a durable queue terminal is
     not recreated, including after consumption and producer-ack failure. *)
 

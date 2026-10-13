@@ -266,11 +266,11 @@ let forget_snapshot path =
   Stdlib.Mutex.protect snapshot_cache_mutex (fun () -> Hashtbl.remove snapshot_cache path)
 ;;
 
-let save_state_unlocked_with ~strict_parent_sync owner state =
+let save_state_unlocked_with ~save_snapshot owner state =
   let keeper_name = keeper_name_of_owner owner in
   let path = snapshot_path_of_owner owner in
   match
-    save_snapshot_atomic_with ~strict_parent_sync path state
+    save_snapshot path state
   with
   | Ok () ->
     (* The atomic writer does not return the written descriptor identity.
@@ -290,8 +290,9 @@ let save_state_unlocked_with ~strict_parent_sync owner state =
          message)
 ;;
 
-let save_state_unlocked = save_state_unlocked_with ~strict_parent_sync:false
-let save_state_unlocked_strict = save_state_unlocked_with ~strict_parent_sync:true
+let save_state_unlocked =
+  save_state_unlocked_with
+    ~save_snapshot:(save_snapshot_atomic_with ~strict_parent_sync:false)
 
 type snapshot_read_error_kind =
   | Invalid_path
@@ -1092,7 +1093,7 @@ let commit_transform_unlocked
         | Ok next ->
           let save_state =
             if strict_snapshot_durability
-            then save_state_unlocked_strict
+            then save_state_unlocked_with ~save_snapshot:confirm_snapshot
             else save_state_unlocked
           in
           (match save_state owner next with
@@ -1193,7 +1194,6 @@ let state_accounts_for_stimulus state stimulus =
 ;;
 
 let enqueue_stimulus_if_absent_result
-      ?(already_delivered = fun () -> Ok false)
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
@@ -1203,12 +1203,44 @@ let enqueue_stimulus_if_absent_result
     if state_accounts_for_stimulus state stimulus then
       Ok (state, Already_present)
     else
-      match already_delivered () with
-      | Error _ as error -> error
-      | Ok true -> Ok (state, Already_present)
-      | Ok false ->
-        let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
-        Ok (State.with_pending pending state, Enqueued))
+      let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
+      Ok (State.with_pending pending state, Enqueued))
+;;
+
+let enqueue_stimulus_once_with
+      ?confirm_snapshot
+      ~already_delivered
+      ~after_commit
+      ~base_path
+      ~keeper_name
+      stimulus
+  =
+  commit_transform ?confirm_snapshot ~strict_snapshot_durability:true
+    ~base_path ~keeper_name ~after_commit (fun state ->
+      let sources = Keeper_event_queue.to_list (State.pending state)
+          @ List.concat_map (fun (entry : outbox_entry) -> entry.stimuli)
+              (State.transition_outbox state) in
+      let conflicts candidate =
+        String.equal candidate.Keeper_event_queue.post_id stimulus.Keeper_event_queue.post_id
+        && not (Keeper_event_queue.stimulus_identity_equal candidate stimulus) in
+      if List.exists conflicts sources then
+        Error (Printf.sprintf "conflicting durable stimulus already exists for post_id=%s"
+                 stimulus.post_id)
+      else if state_accounts_for_stimulus state stimulus then
+        Ok (state, Already_present)
+      else match already_delivered () with
+        | Error _ as error -> error
+        | Ok true -> Ok (state, Already_present)
+        | Ok false ->
+          let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
+          Ok (State.with_pending pending state, Enqueued))
+;;
+
+let enqueue_stimulus_once_result
+      ~already_delivered ?(after_commit = fun _ -> ())
+      ~base_path ~keeper_name stimulus =
+  enqueue_stimulus_once_with ~already_delivered ~after_commit
+    ~base_path ~keeper_name stimulus
 ;;
 
 type 'authorization_error guarded_transfer_projection_result =
@@ -1766,6 +1798,13 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
 ;;
 
 module For_testing = struct
+  let enqueue_stimulus_once_with_confirmation
+        ~confirm_snapshot ~already_delivered ~base_path ~keeper_name stimulus =
+    enqueue_stimulus_once_with ~confirm_snapshot ~already_delivered
+      ~after_commit:ignore ~base_path ~keeper_name stimulus
+    |> Result.map (fun _ -> ())
+  ;;
+
   let load_state_with_read_interleave ~after_read ~base_path ~keeper_name =
     match resolve_owner ~base_path ~keeper_name with
     | Error _ as error -> error

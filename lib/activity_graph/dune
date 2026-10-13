@@ -15,6 +15,7 @@
  (libraries
   masc_workspace
   masc.jsonl_writer
+  masc.dated_jsonl
   masc_core
   masc_types
   masc_log

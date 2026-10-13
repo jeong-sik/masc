@@ -517,8 +517,12 @@ let load_recent ~config ~keeper_name ?(limit = default_limit) ?since () =
       match execution_ids with
       | [] -> []
       | _ ->
-        let ledger = Dated_jsonl.create
-          ~base_dir:(Filename.concat (Workspace.masc_root_dir config) "tool_calls") () in
+        let ledger =
+          Dated_jsonl.open_store
+            (Dated_jsonl.Store.cluster
+               (Workspace.dated_store_cluster_root config)
+               Dated_jsonl.Store.Cluster.Tool_calls)
+        in
         (match Keeper_tool_call_index.by_execution_ids
            ~store:ledger ~keeper_name ~execution_ids with
          | Ok rows -> rows

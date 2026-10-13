@@ -22,19 +22,6 @@ let latest_ts_of_record = function
                   | _ -> None))))
   | _ -> None
 
-let count_source_entries dir =
-  if not (Sys.file_exists dir) then 0
-  else
-    match Dated_jsonl.create ~base_dir:dir () with
-    | store -> Dated_jsonl.count_entries store
-    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-    | exception exn ->
-      Log.Dashboard.warn
-        "dashboard source entry count failed for %s: %s"
-        dir
-        (Stdlib.Printexc.to_string exn);
-      0
-
 let freshness_fields ~now latest_ts =
   match latest_ts with
   | Some ts ->
@@ -96,10 +83,10 @@ let coverage_gaps_for_store ~source_name ~durable_store =
            (Safe_ops.json_string ~default:"" "source" gap))
 
 let metadata_fields ~source_name ~source_producer ~dashboard_surface
-    ~freshness_slo_s ~durable_store ~latest_record () =
+    ~freshness_slo_s ~durable_store ~count_entries ~latest_record () =
   let now = Unix.gettimeofday () in
   let exists = not (String.equal durable_store "") && Sys.file_exists durable_store in
-  let entry_count = if exists then count_source_entries durable_store else 0 in
+  let entry_count = if exists then count_entries () else 0 in
   let latest_ts =
     if exists then Option.bind latest_record latest_ts_of_record else None
   in
@@ -132,5 +119,6 @@ let keeper_tool_call_io_fields ~dashboard_surface () =
     ~freshness_slo_s:300.0
     ~durable_store:
       (Keeper_tool_call_log.store_dir () |> Option.value ~default:"")
+    ~count_entries:Keeper_tool_call_log.count_entries
     ~latest_record:(Keeper_tool_call_log.read_latest ())
     ()

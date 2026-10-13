@@ -12,6 +12,14 @@ type read_result = {
   truncated : bool;
 }
 
+val fixed_store_location :
+  masc_root:string -> base_path:string -> source -> Dated_jsonl.Store.location option
+(** The store a fixed-path source reads. [masc_root] is the cluster's root. *)
+
+val keeper_metric_location : masc_root:string -> string -> Dated_jsonl.Store.location
+val execution_receipt_location : masc_root:string -> string -> Dated_jsonl.Store.location
+(** A keeper's metric and execution receipt stores, by keeper name. *)
+
 val fixed_store_dir : masc_root:string -> base_path:string -> source -> string option
 val source_freshness_slo_s : ?keeper_keepalive_interval_s:float -> source -> float
 val source_producer : source -> string

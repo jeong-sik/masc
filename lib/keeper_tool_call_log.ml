@@ -379,18 +379,24 @@ let reset_file_change_cache () =
   Stdlib.Mutex.protect file_change_cache_mu (fun () -> Hashtbl.reset file_change_cache)
 ;;
 
+(* [masc_root] is the cluster's root. *)
+let location masc_root =
+  Dated_jsonl.Store.(cluster (cluster_root masc_root) Cluster.Tool_calls)
+;;
+
 let init ?cluster_name ~base_path () =
   let cluster_name =
     Option.value ~default:(Env_config_core.cluster_name ()) cluster_name
   in
   let masc_root = Workspace_utils.masc_root_dir_from ~base_path ~cluster_name in
-  let dir = Filename.concat masc_root "tool_calls" in
+  let location = location masc_root in
+  let dir = Dated_jsonl.Store.dir location in
   Atomic.set store_state { store = None; configured = Some (masc_root, dir) };
   (* A carried tally names rows in the store being replaced. *)
   reset_file_change_cache ();
   try
     let retention_days = retention_days () in
-    let store = Dated_jsonl.create ~base_dir:dir ?retention_days () in
+    let store = Dated_jsonl.open_store ?retention_days location in
     Atomic.set store_state
       { store = Some store; configured = Some (masc_root, dir) }
   with
@@ -447,13 +453,20 @@ let store_dir () =
   | None -> None
 ;;
 
+let count_entries () =
+  match (Atomic.get store_state).store with
+  | Some store -> Dated_jsonl.count_entries store
+  | None -> 0
+;;
+
 let current_log_path () =
-  match store_dir () with
-  | None -> None
-  | Some dir ->
+  let state = Atomic.get store_state in
+  match state.store, state.configured with
+  | Some _, Some (masc_root, _) ->
     (* Same layout this file already reads through Jsonl_writer.day_key below;
        it was spelled out again here (#27143). *)
-    Some (Jsonl_writer.dated_path_now ~base_dir:dir).Jsonl_writer.path
+    Some (Dated_jsonl.Store.dated_path_now (location masc_root)).Jsonl_writer.path
+  | Some _, None | None, (Some _ | None) -> None
 ;;
 
 let configured_masc_root () =

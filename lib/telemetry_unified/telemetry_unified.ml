@@ -129,10 +129,10 @@ let latest_ts_probe_rows = 64
    keeper, so retaining [latest_ts_probe_rows] trees per store made the
    resident set scale with keeper count — the axis RFC-0372 §5 gates Phase 2
    on. Same value as [latest_ts_of_entries] over the same window. *)
-let latest_store_ts source dir label : float option =
-  if not (Sys.file_exists dir) then None
+let latest_store_ts source location label : float option =
+  if not (Sys.file_exists (Dated_jsonl.Store.dir location)) then None
   else
-    match Dated_jsonl.create ~base_dir:dir () with
+    match Dated_jsonl.open_store location with
     | store ->
       Dated_jsonl.filter_map_recent store latest_ts_probe_rows ~f:(fun json ->
         let ts = extract_ts json in
@@ -493,11 +493,14 @@ let merge_newest_bounded ~target ~read items =
       items
 ;;
 
-let read_fixed_source dir source ~n ?since_ts ?until_ts () : Yojson.Safe.t list =
-  match classify_store_dir source ~site:"read_fixed_source_dir" dir with
+let read_fixed_source location source ~n ?since_ts ?until_ts () : Yojson.Safe.t list =
+  match
+    classify_store_dir source ~site:"read_fixed_source_dir"
+      (Dated_jsonl.Store.dir location)
+  with
   | Store_missing | Store_invalid -> []
   | Store_directory ->
-    match Dated_jsonl.create ~base_dir:dir () with
+    match Dated_jsonl.open_store location with
     | store ->
       bounded_entries_for_window store ~n ?since_ts ?until_ts ()
       |> List.map (tag_entry source)
@@ -538,11 +541,14 @@ let read_tool_metrics ~masc_root ~n ?since_ts ?until_ts () =
    {!read_fixed_source} exactly, including that only [Dated_jsonl.create] is
    guarded — a read that raises still propagates. Entries are not tagged
    because nothing downstream sees them. *)
-let probe_latest_ts dir source ~n : float option =
-  match classify_store_dir source ~site:"probe_latest_ts_dir" dir with
+let probe_latest_ts location source ~n : float option =
+  match
+    classify_store_dir source ~site:"probe_latest_ts_dir"
+      (Dated_jsonl.Store.dir location)
+  with
   | Store_missing | Store_invalid -> None
   | Store_directory ->
-    match Dated_jsonl.create ~base_dir:dir () with
+    match Dated_jsonl.open_store location with
     | store ->
       Dated_jsonl.filter_map_recent store n ~f:(fun json ->
         let ts = extract_ts json in
@@ -562,8 +568,9 @@ let read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts ~n () :
     | None -> dirs
     | Some name -> List.filter (fun (k, _) -> String.equal k name) dirs
   in
-  merge_newest_bounded ~target:n dirs ~read:(fun (_name, dir) ->
-    read_fixed_source dir Keeper_metric ~n ?since_ts ?until_ts ())
+  merge_newest_bounded ~target:n dirs ~read:(fun (name, _dir) ->
+    read_fixed_source (keeper_metric_location ~masc_root name) Keeper_metric ~n
+      ?since_ts ?until_ts ())
 
 let read_keeper_metrics_fast_top ~masc_root ~n () : Yojson.Safe.t list =
   let target = n + 1 in
@@ -571,16 +578,17 @@ let read_keeper_metrics_fast_top ~masc_root ~n () : Yojson.Safe.t list =
   let dirs = discover_keeper_metric_dirs masc_root in
   let probes =
     List.filter_map
-      (fun (name, dir) ->
-        match probe_latest_ts dir Keeper_metric ~n:probe_limit with
+      (fun (name, _dir) ->
+        let location = keeper_metric_location ~masc_root name in
+        match probe_latest_ts location Keeper_metric ~n:probe_limit with
         | None -> None
-        | Some latest_ts -> Some (name, dir, latest_ts))
+        | Some latest_ts -> Some (name, location, latest_ts))
       dirs
     |> List.sort (fun (_, _, a) (_, _, b) -> Float.compare b a)
   in
   let rec loop acc = function
     | [] -> acc
-    | (_name, dir, latest_ts) :: rest ->
+    | (_name, location, latest_ts) :: rest ->
       let acc = sort_newest_first acc |> take_first target in
       let cutoff =
         if List.length acc < target then None
@@ -593,7 +601,7 @@ let read_keeper_metrics_fast_top ~masc_root ~n () : Yojson.Safe.t list =
             read for small [target] is what made the probe cost scale with
             keeper count; the cutoff above already skips most directories, so
             the reads this adds are the ones that contribute to the result. *)
-         let entries = read_fixed_source dir Keeper_metric ~n:target () in
+         let entries = read_fixed_source location Keeper_metric ~n:target () in
          loop (sort_newest_first (entries @ acc) |> take_first target) rest)
   in
   loop [] probes
@@ -614,9 +622,11 @@ let read_execution_receipts ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
     | Some name -> List.filter (fun (k, _) -> String.equal k name) dirs
   in
   merge_newest_bounded ~target:n dirs
-    ~read:(fun (_name, dir) ->
+    ~read:(fun (name, dir) ->
       try
-        let store = Dated_jsonl.create ~base_dir:dir () in
+        let store =
+          Dated_jsonl.open_store (execution_receipt_location ~masc_root name)
+        in
         dated_jsonl_entries store ~n ?since_ts ?until_ts ()
         |> List.map (tag_entry Execution_receipt)
       with
@@ -804,9 +814,9 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
       (* Fixed-path sources: Agent_event, Tool_call_io, Tool_usage,
          Agent_core_event use directory-based storage. *)
       | Agent_event | Tool_call_io | Tool_usage | Agent_core_event ->
-        match fixed_store_dir ~masc_root ~base_path source with
-        | Some dir ->
-          read_fixed_source dir source ~n:per_source ?since_ts ?until_ts ()
+        match fixed_store_location ~masc_root ~base_path source with
+        | Some location ->
+          read_fixed_source location source ~n:per_source ?since_ts ?until_ts ()
         | None -> [])
       |> List.filter keep)
   in
@@ -833,13 +843,16 @@ let read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
 (* ── Summary ────────────────────────────────────────── *)
 
 let count_fixed_source_entries ~masc_root ~base_path source : int =
-  match fixed_store_dir ~masc_root ~base_path source with
+  match fixed_store_location ~masc_root ~base_path source with
   | None -> 0
-  | Some dir ->
-    match classify_store_dir source ~site:"count_fixed_source_entries_dir" dir with
+  | Some location ->
+    match
+      classify_store_dir source ~site:"count_fixed_source_entries_dir"
+        (Dated_jsonl.Store.dir location)
+    with
     | Store_missing | Store_invalid -> 0
     | Store_directory ->
-      (match Dated_jsonl.create ~base_dir:dir () with
+      (match Dated_jsonl.open_store location with
        | store -> Dated_jsonl.count_entries store
        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
        | exception exn ->
@@ -852,11 +865,14 @@ let count_fixed_source_entries ~masc_root ~base_path source : int =
 let execution_receipt_summary_stats ~masc_root =
   discover_execution_receipt_dirs masc_root
   |> List.fold_left
-       (fun (count_acc, latest_acc) (_name, dir) ->
-         match Dated_jsonl.create ~base_dir:dir () with
+       (fun (count_acc, latest_acc) (name, dir) ->
+         let location = execution_receipt_location ~masc_root name in
+         match Dated_jsonl.open_store location with
          | store ->
            let count = Dated_jsonl.count_entries store in
-           let latest = latest_store_ts Execution_receipt dir "execution_receipt" in
+           let latest =
+             latest_store_ts Execution_receipt location "execution_receipt"
+           in
            ( count_acc + count,
              match latest with
              | Some ts -> max_ts_opt latest_acc ts
@@ -1123,9 +1139,9 @@ let summary_json ?keeper_keepalive_interval_s
   let coverage_gaps = Telemetry_coverage_gap.read_recent ~masc_root ~n:50 in
   let keeper_dirs = discover_keeper_metric_dirs masc_root in
   let keeper_total =
-    List.fold_left (fun acc (name, dir) ->
+    List.fold_left (fun acc (name, _dir) ->
       acc +
-      (match Dated_jsonl.create ~base_dir:dir () with
+      (match Dated_jsonl.open_store (keeper_metric_location ~masc_root name) with
        | store -> Dated_jsonl.count_entries store
        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
        | exception exn ->
@@ -1137,9 +1153,11 @@ let summary_json ?keeper_keepalive_interval_s
   in
   let keeper_latest_ts =
     List.fold_left
-      (fun acc (name, dir) ->
+      (fun acc (name, _dir) ->
         match
-          latest_store_ts Keeper_metric dir (Printf.sprintf "keeper %s" name)
+          latest_store_ts Keeper_metric
+            (keeper_metric_location ~masc_root name)
+            (Printf.sprintf "keeper %s" name)
         with
         | Some ts -> max_ts_opt acc ts
         | None -> acc)
@@ -1360,9 +1378,10 @@ let summary_json ?keeper_keepalive_interval_s
         else 0
       in
       let latest_ts =
-        if dir_state = Store_directory then
-          latest_store_ts source dir (source_to_string source)
-        else None
+        match dir_state, fixed_store_location ~masc_root ~base_path source with
+        | Store_directory, Some location ->
+          latest_store_ts source location (source_to_string source)
+        | (Store_directory | Store_missing | Store_invalid), _ -> None
       in
       let coverage_gap_fields, coverage_gap =
         coverage_gap_status_fields coverage_gaps source ~latest_ts

@@ -140,16 +140,19 @@ let telemetry_max_bytes () =
     ~default:default_telemetry_max_bytes
 
 let get_telemetry_store config : Dated_jsonl.t =
-  let base = Filename.concat (Workspace_utils.masc_dir config) "telemetry" in
+  let location =
+    Dated_jsonl.Store.cluster
+      (Workspace_utils.dated_store_cluster_root config)
+      Dated_jsonl.Store.Cluster.Telemetry
+  in
+  let base = Dated_jsonl.Store.dir location in
   Eio_guard.with_mutex telemetry_store_cache_mu (fun () ->
     match Hashtbl.find_opt telemetry_store_cache base with
     | Some store -> store
     | None ->
       let retention_days = telemetry_retention_days () in
       let max_bytes = telemetry_max_bytes () in
-      let store =
-        Dated_jsonl.create ~base_dir:base ?retention_days ?max_bytes ()
-      in
+      let store = Dated_jsonl.open_store ?retention_days ?max_bytes location in
       Hashtbl.replace telemetry_store_cache base store;
       store)
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { captureToolObservations, toolObservationContinues, toolObservationsFromUnknown } from './keeper-tool-observations'
-import { operationDeliveryProvenance, toolCallDeliveryProvenance } from './keeper-delivery-provenance'
+import { operationDeliveryProvenance } from './keeper-delivery-provenance'
+import { toolCallDeliveryProvenance } from './test-support/tool-delivery-provenance'
 import type { KeeperConversationEntry } from './types'
 
 const parent: KeeperConversationEntry = { id: 'reply', role: 'assistant', source: 'direct_assistant', label: 'keeper', text: '', delivery: 'streaming',

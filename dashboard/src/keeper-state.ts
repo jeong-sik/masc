@@ -1585,6 +1585,46 @@ function mergeLocalToolObservations(
   }
 }
 
+/** Point the tool steps of a trace at the canonical row that replaced the row
+ *  they named. A step moves only when the canonical row belongs to the same
+ *  producer as the trace's own delivery. */
+function remapToolTraceTargets(
+  entry: KeeperConversationEntry,
+  replacements: ReadonlyMap<string, KeeperConversationEntry>,
+): KeeperConversationEntry {
+  if (!entry.traceSteps) return entry
+  return {
+    ...entry,
+    traceSteps: entry.traceSteps.map(step => {
+      if (step.kind !== 'tool' || !step.toolOccurrenceId) return step
+      const replacement = replacements.get(step.toolOccurrenceId)
+      const parentKey = entry.deliveryProvenance?.delivery_key
+      const toolKey = replacement?.deliveryProvenance?.delivery_key
+      return replacement && parentKey && toolKey && toolDeliveryBelongsToProducer(parentKey, toolKey)
+        ? { ...step, toolOccurrenceId: replacement.id } : step
+    }),
+  }
+}
+
+/** Fold the live tool rows that report the same execution as one canonical row
+ *  into that row. The canonical row keeps its position and every other entry is
+ *  left as it is, so an acknowledgement does not reorder the thread. */
+export function foldToolRowsIntoCanonical(name: string, canonicalId: string): void {
+  const thread = keeperThreads.value[name] ?? []
+  const canonical = thread.find(entry => entry.id === canonicalId)
+  if (!canonical || canonical.role !== 'tool' || !canonical.deliveryProvenance) return
+  const observed = thread.filter(entry => entry.id !== canonicalId && matchesCanonicalTool(entry, canonical))
+  if (observed.length === 0) return
+  const folded = mergeLocalToolObservations(canonical, thread)
+  const replacements = new Map(observed.map(entry => [entry.id, folded] as const))
+  keeperThreads.value = {
+    ...keeperThreads.value,
+    [name]: thread
+      .filter(entry => !replacements.has(entry.id))
+      .map(entry => entry.id === canonicalId ? folded : remapToolTraceTargets(entry, replacements)),
+  }
+}
+
 function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   // An empty history payload means the caller did not request history
   // (e.g. hydrateKeeperStatus fast path with tail_messages: 0), not
@@ -1613,17 +1653,8 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       if (matchesCanonicalTool(previous, row)) toolRowReplacement.set(previous.id, row)
     }
   }
-  const historyEntries = reconciled.map(entry => entry.traceSteps ? {
-    ...entry,
-    traceSteps: entry.traceSteps.map(step => {
-      if (step.kind !== 'tool' || !step.toolOccurrenceId) return step
-      const replacement = toolRowReplacement.get(step.toolOccurrenceId)
-      const parentKey = entry.deliveryProvenance?.delivery_key
-      const toolKey = replacement?.deliveryProvenance?.delivery_key
-      return replacement && parentKey && toolKey && toolDeliveryBelongsToProducer(parentKey, toolKey)
-        ? { ...step, toolOccurrenceId: replacement.id } : step
-    }),
-  } : entry)
+  const remapTrace = (entry: KeeperConversationEntry) => remapToolTraceTargets(entry, toolRowReplacement)
+  const historyEntries = reconciled.map(remapTrace)
   const localEntries = existing.filter(
     entry => {
       const coveredByHistory = historyEntries.some(historyEntry => sameConversationEntry(entry, historyEntry))
@@ -1655,7 +1686,7 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   // position; no-timestamp entries sort last (in-flight tail stays at the
   // bottom) and the original array index breaks ties so same-second tool calls
   // keep their issued order.
-  const merged = [...historyEntries, ...localEntries]
+  const merged = [...historyEntries, ...localEntries.map(remapTrace)]
     .map((entry, index) => ({ entry, index }))
     .sort((a, b) => entryTimeMs(a.entry) - entryTimeMs(b.entry) || a.index - b.index)
     .map(({ entry }) => entry)

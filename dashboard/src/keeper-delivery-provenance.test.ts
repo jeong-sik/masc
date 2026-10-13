@@ -4,8 +4,6 @@ import {
   isOperationDeliveryProvenance,
   operationDeliveryProvenance,
   sameDeliveryProvenance,
-  toolCallDeliveryProvenance,
-  toolDeliveryProvenance,
 } from './keeper-delivery-provenance'
 import {
   decodeKeeperChatDeliveryProvenance,
@@ -129,23 +127,17 @@ describe('keeper chat delivery provenance', () => {
     expect(sameDeliveryProvenance(checkpoint, decode({ kind: 'operation', operation_id: 'kmsg-3' }))).toBe(false)
   })
 
-  it('derives a tool slot without changing the parent delivery key', () => {
-    const parent = operationDeliveryProvenance('kmsg-1', 'terminal_result')
-    expect(toolCallDeliveryProvenance(parent, 'exec-2', 1)).toEqual({
-      delivery_key: parent.delivery_key,
-      transcript_slot: { kind: 'tool_call', execution_id: 'exec-2', ordinal: 1 },
-    })
-  })
-
-  it('keeps a pre-result tool slot delivery-only and ordinal-specific', () => {
-    const parent = operationDeliveryProvenance('kmsg-1', 'terminal_result')
-    const first = toolDeliveryProvenance(parent, 0)
-    const second = toolDeliveryProvenance(parent, 1)
-    expect(first).toEqual({
-      delivery_key: parent.delivery_key,
-      transcript_slot: { kind: 'tool_delivery', ordinal: 0 },
-    })
-    expect(first && second && sameDeliveryProvenance(first, second)).toBe(false)
+  it('tells tool delivery slots apart by ordinal and by execution', () => {
+    const key = { kind: 'operation' as const, operation_id: 'kmsg-1' }
+    const delivery = (ordinal: number) => ({ delivery_key: key, transcript_slot: { kind: 'tool_delivery' as const, ordinal } })
+    const call = (executionId: string, ordinal: number) => ({
+      delivery_key: key, transcript_slot: { kind: 'tool_call' as const, execution_id: executionId, ordinal } })
+    expect(sameDeliveryProvenance(delivery(0), delivery(0))).toBe(true)
+    expect(sameDeliveryProvenance(delivery(0), delivery(1))).toBe(false)
+    expect(sameDeliveryProvenance(call('exec-2', 1), call('exec-2', 1))).toBe(true)
+    expect(sameDeliveryProvenance(call('exec-2', 1), call('exec-3', 1))).toBe(false)
+    expect(sameDeliveryProvenance(call('exec-2', 1), call('exec-2', 2))).toBe(false)
+    expect(sameDeliveryProvenance(delivery(1), call('exec-2', 1))).toBe(false)
   })
 
   it('normalizes status history through the same closed decoder', () => {

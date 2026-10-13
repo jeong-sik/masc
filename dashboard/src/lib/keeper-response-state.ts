@@ -84,7 +84,14 @@ export function reduceKeeperResponse(state: KeeperResponseState, event: KeeperRe
       if (!event.owner) {
         return state.floor ? refuse() : { state, accepted: true, advanced: false, authoritative: true, reopens: false }
       }
-      if (!state.current || compareOwner(event.owner, state.current) !== 0
+      // No established current owner (header-only observation so far, or an
+      // attempt/checkpoint boundary cleared it): only the floor's own stop
+      // still finalizes; anything else is stale.
+      if (!state.current) {
+        if (!state.floor || compareOwner(event.owner, state.floor) !== 0) return refuse()
+        return { state, accepted: true, advanced: false, authoritative: true, reopens: false }
+      }
+      if (compareOwner(event.owner, state.current) !== 0
         || (state.closed && compareOwner(event.owner, state.closed) <= 0)) return refuse()
       return { state: Object.freeze({ ...state, closed: state.current }), accepted: true, advanced: false, authoritative: true, reopens: false }
     case 'observe':

@@ -1,5 +1,5 @@
 (** Materialize validated catalog entries as first-class Agent-Core tools,
-    plus the durable async request controls when an entry is [Async]
+    plus transient draft controls and durable async request controls when an entry is [Async]
     ({!Keeper_tool_composition_catalog.requires_async_controls}). *)
 
 val composition_run_summary_tool_name : string
@@ -10,6 +10,8 @@ type 'evidence schema_tool_origin =
   | Declared_composition of 'evidence
   | Async_status
   | Async_cancel
+  | Transient_prepare
+  | Transient_run
 
 type instruction_skill =
   { reference : Skill_reference.t
@@ -54,13 +56,17 @@ val make_instruction_skill_tool :
     composition execution. Native Agent-Core invocation identity is preserved. *)
 
 val schema_tool_rows :
+  ?include_drafts:bool ->
   ?skill_compositions:(Keeper_tool_composition_catalog.entry * 'evidence) list ->
   unit ->
   ('evidence schema_tool_origin * Agent_core.Tool.t) list
 (** Handler-free schemas paired with caller-owned composition evidence. This
     preserves typed provenance through materialization instead of recovering it
     from a generated tool name. The async controls are rows exactly when
-    {!make_tools} would build them. *)
+    {!make_tools} would build them. Frozen surfaces also offer the transient
+    prepare/run controls, so they can mint async requests without a shared
+    Skill and carry status/cancel even without a named async composition.
+    [include_drafts=false] is for descriptor-only compatibility surfaces. *)
 
 val instruction_skill_schema_tool :
   instruction_skills:instruction_skill list ->

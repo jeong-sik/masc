@@ -107,7 +107,9 @@ let composition_rows skill_catalog =
          | Keeper_tool_composition_surface.Declared_composition provenance ->
            Composition_skill { provenance }
          | Keeper_tool_composition_surface.Async_status
-         | Keeper_tool_composition_surface.Async_cancel -> Composition_control
+         | Keeper_tool_composition_surface.Async_cancel
+         | Keeper_tool_composition_surface.Transient_prepare
+         | Keeper_tool_composition_surface.Transient_run -> Composition_control
        in
        { name; origin }, schema_tool)
 ;;

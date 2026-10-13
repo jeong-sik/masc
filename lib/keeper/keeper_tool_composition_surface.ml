@@ -97,6 +97,8 @@ type 'evidence schema_tool_origin =
   | Declared_composition of 'evidence
   | Async_status
   | Async_cancel
+  | Transient_prepare
+  | Transient_run
 
 let schema_tool_of_entry (entry : Catalog.entry) =
   schema_tool
@@ -105,7 +107,7 @@ let schema_tool_of_entry (entry : Catalog.entry) =
     ~input_schema:(Catalog.input_schema_of_params entry.params)
 ;;
 
-let schema_tool_rows ?(skill_compositions = []) () =
+let schema_tool_rows ?(include_drafts = true) ?(skill_compositions = []) () =
   let composition_tools =
     List.map
       (fun (entry, evidence) ->
@@ -113,7 +115,7 @@ let schema_tool_rows ?(skill_compositions = []) () =
       skill_compositions
   in
   let controls =
-    if Catalog.requires_async_controls (List.map fst skill_compositions)
+    if include_drafts || Catalog.requires_async_controls (List.map fst skill_compositions)
     then
       [ ( Async_status
         , schema_tool
@@ -128,7 +130,17 @@ let schema_tool_rows ?(skill_compositions = []) () =
       ]
     else []
   in
-  composition_tools @ controls
+  let drafts = if include_drafts then
+    [ Transient_prepare, schema_tool
+        ~name:Catalog.prepare_tool_name
+        ~description:Keeper_composition_draft.prepare_schema.description
+        ~input_schema:Keeper_composition_draft.prepare_schema.input_schema
+    ; Transient_run, schema_tool
+        ~name:Catalog.run_tool_name
+        ~description:Keeper_composition_draft.run_schema.description
+        ~input_schema:Keeper_composition_draft.run_schema.input_schema ]
+    else [] in
+  composition_tools @ controls @ drafts
 ;;
 
 let observe_node_result
@@ -644,6 +656,9 @@ let result_from_json ~tool_name ~start_time ~class_ ~ok data =
 
 let async_submission_result
       ?skill_reference
+      ?draft_reference
+      ?run_reference
+      ?composition_run_id
       ~plan
       ~tool_name
       ~tool_kind
@@ -658,7 +673,9 @@ let async_submission_result
       ()
   =
   let start_time = Tool_timing.start () in
-  let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
+  let composition_run_id = match composition_run_id with
+    | Some identity -> identity
+    | None -> Keeper_tool_plan.Composition_run_id.fresh () in
   let request_context_fields =
     [ ( "composition_run_id"
       , `String
@@ -667,6 +684,8 @@ let async_submission_result
         (Option.map
            (fun reference -> "skill_reference", Skill_reference.to_yojson reference)
            skill_reference)
+    @ Option.to_list (Option.map (fun reference -> "draft_reference", Tool_output.normalized_artifact_ref_to_json reference) draft_reference)
+    @ Option.to_list (Option.map (fun reference -> "run_artifact", Tool_output.normalized_artifact_ref_to_json reference) run_reference)
   in
   let request_context =
     match request_context_fields with
@@ -1868,6 +1887,125 @@ let make_tools_with_authority
     , entry.Catalog.loading
     , model_projection ))
   in
+  let draft_tools =
+    match capability_authority with
+    | Keeper_tool_runtime.Compatibility_meta -> []
+    | Keeper_tool_runtime.Frozen_surface capability_surface ->
+      let module Draft = Keeper_composition_draft in
+      let rejection ~tool_name ~start_time error =
+        let class_ = match error with
+          | Draft.Storage_failed _ | Draft.Draft_read_failed _ -> Tool_result.Runtime_failure
+          | Draft.Plan_rejected _ | Draft.Inputs_rejected _ | Draft.Unsupported_node _
+          | Draft.Draft_not_found | Draft.Malformed_draft _ | Draft.Different_keeper
+          | Draft.Capability_changed -> Tool_result.Policy_rejection in
+        let data = Draft.error_to_json error in
+        Tool_result.make_err ~tool_name ~class_ ~effect_disposition:Tool_result.Proven_pre_effect
+          ~start_time ~data (Yojson.Safe.to_string data)
+      in
+      let make (schema : Masc_domain.tool_schema) ~call_effect handle =
+        let model_projection = Tool_output.default_model_projection in
+        (Tool_bridge.agent_core_tool_of_masc_with_execution_env
+           ~descriptor:(Agent_core.Tool.ordinary_descriptor ~call_effect Agent_core.Tool_contract.Serial)
+           ~base_path:config.base_path ~model_projection:(fun () -> model_projection)
+           ?on_externalization_error ~name:schema.name ~description:schema.description
+           ~input_schema:schema.input_schema
+           (fun execution_env input ->
+              let start_time = Tool_timing.start () in
+              match Tool_input_validation.validate_args ~schema:schema.input_schema
+                      ~name:schema.name ~args:input () with
+              | Error rejected -> rejected
+              | Ok _ -> handle ~start_time execution_env input)
+        , Tool_loading_declarations.loading_of_tool schema.name
+        , model_projection)
+      in
+      let prepare = make Draft.prepare_schema ~call_effect:(fun _ -> Agent_core.Tool.Read_only)
+        (fun ~start_time _execution_env input ->
+          match input with
+          | `Assoc fields ->
+            let mode = match List.assoc_opt "execution" fields with
+              | Some (`String "inline") -> Some Catalog.Inline
+              | Some (`String "async") -> Some Catalog.Async
+              | Some _ | None -> None in
+            (match mode with
+             | None -> rejection ~tool_name:Draft.prepare_tool_name ~start_time
+                 (Draft.Malformed_draft "execution must be inline or async")
+             | Some execution ->
+               match Draft.prepare ~base_path:config.base_path ~capability_surface ~keeper_name:meta.name
+                       ~execution (`Assoc (List.remove_assoc "execution" fields)) with
+               | Error error -> rejection ~tool_name:Draft.prepare_tool_name ~start_time error
+               | Ok draft ->
+                 Tool_result.make_ok ~tool_name:Draft.prepare_tool_name ~start_time ~data:(Draft.preview draft) ()
+                 |> Tool_result.with_retained_artifacts [ Draft.reference draft ])
+          | _ -> rejection ~tool_name:Draft.prepare_tool_name ~start_time (Draft.Malformed_draft "expected object")) in
+      let run = make Draft.run_schema ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)
+        (fun ~start_time execution_env input ->
+          match Agent_core.Tool.Execution_env.invocation execution_env,
+                (match input with `Assoc fields -> List.assoc_opt "sha256" fields | _ -> None) with
+          | None, _ -> Tool_result.runtime_err ~tool_name:Draft.run_tool_name ~start_time
+              "composition run requires Agent-Core invocation identity"
+          | Some _, (None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _)) ->
+            rejection ~tool_name:Draft.run_tool_name ~start_time (Draft.Malformed_draft "expected draft sha256")
+          | Some parent_invocation, Some (`String sha256) ->
+            match Draft.load ~base_path:config.base_path ~capability_surface ~keeper_name:meta.name ~sha256 with
+            | Error error -> rejection ~tool_name:Draft.run_tool_name ~start_time error
+            | Ok draft ->
+              let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
+              match Draft.record_invocation ~base_path:config.base_path ~composition_run_id
+                      ~invocation:parent_invocation draft with
+              | Error error -> rejection ~tool_name:Draft.run_tool_name ~start_time error
+              | Ok run_reference ->
+                let plan = Draft.plan draft in
+                let turn_context = Option.map (fun cell ->
+                  Keeper_tool_call_log_context.get_turn_context_record ~cell ()) turn_ctx_cell in
+                let result = match Draft.execution draft with
+                  | Catalog.Async ->
+                    async_submission_result ~draft_reference:(Draft.reference draft) ~run_reference ~composition_run_id
+                      ~plan ~tool_name:Draft.run_tool_name ~tool_kind:Keeper_tool_descriptor.Async_composition_tool
+                      ~parent_invocation ~config ~meta ~capability_authority ~publication_recovery
+                      ~ctx_snapshot ~turn_context ?clock ()
+                  | Catalog.Inline ->
+                    let execution = execute_keeper_plan ~capability_authority ~plan
+                        ~run_id:(Keeper_tool_plan.Run_id.fresh ()) ~parent_invocation ~config ~meta
+                        ~publication_recovery ~ctx_snapshot ~keeper_turn_id:(keeper_turn_id_of turn_context)
+                        ?turn_sandbox_factory ?clock ?continuation_channel ?gate_context ?gate_grant ?record_gate_result
+                        ?on_deferred ?on_external_effect_deferred
+                        ?observe_node_result:(Option.map (fun turn_context ->
+                          observe_node_result ~composition_tool:Draft.run_tool_name ~composition_execution:Catalog.Inline
+                            ~composition_tool_kind:Keeper_tool_descriptor.Composition_tool ~composition_run_id
+                            ~parent_invocation ~meta ~turn_context) turn_context) () in
+                    let result = result_of_execution ~tool_name:Draft.run_tool_name
+                        ~tool_kind:Keeper_tool_descriptor.Composition_tool ~start_time execution in
+                    let result = match Keeper_composition_result.project ~base_path:config.base_path ~plan ~execution result with
+                      | Ok result -> result
+                      | Error { message; _ } -> Tool_result.make_err ~tool_name:Draft.run_tool_name
+                          ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Effect_outcome_unknown
+                          ~start_time message in
+                    Option.iter (fun turn_context -> observe_composition_run_summary
+                      ~composition_tool:Draft.run_tool_name ~composition_execution:Catalog.Inline
+                      ~composition_tool_kind:Keeper_tool_descriptor.Composition_tool ~composition_run_id
+                      ~parent_invocation ~meta ~turn_context ~input ~output_text:(Tool_result.message result)
+                      ~success:(Tool_result.is_success result) ~duration_ms:(Tool_result.duration_ms result)
+                      ~typed_result:result ()) turn_context;
+                    result
+                in
+                let binding =
+                  [ "composition_run_id", `String (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
+                  ; "run_artifact", Tool_output.normalized_artifact_ref_to_json run_reference
+                  ; "draft", Tool_output.normalized_artifact_ref_to_json (Draft.reference draft) ] in
+                let data = match Tool_result.data result with
+                  | `Assoc fields -> `Assoc (binding @ List.remove_assoc "composition_run_id" fields)
+                  | data -> `Assoc (binding @ [ "result", data ]) in
+                let result = match result with
+                  | Tool_result.Completed payload -> Tool_result.Completed { payload with data }
+                  | Tool_result.Deferred payload -> Tool_result.Deferred { payload with data }
+                  | Tool_result.Failed payload -> Tool_result.Failed
+                      { payload with data_source = Tool_result.Explicit_data data; message = Yojson.Safe.to_string data } in
+                Tool_result.with_retained_artifacts
+                  (run_reference :: Draft.reference draft :: Tool_result.retained_artifacts result) result)
+      in
+      [ prepare; run ]
+  in
+  let composition_tools = composition_tools @ draft_tools in
   (* A keeper with no instruction skills gets no tool: an empty [Available]
      list would ask the model to reach for something that answers nothing. *)
   let composition_tools =
@@ -1891,7 +2029,7 @@ let make_tools_with_authority
   (* Built only where they can address something: an async entry on this
      surface is the one thing that mints the request id they take. *)
   let async_controls =
-    Catalog.requires_async_controls
+    draft_tools <> [] || Catalog.requires_async_controls
       (List.map (fun (skill : composition_skill) -> skill.entry) skill_compositions)
   in
   let status_tool =

@@ -10635,7 +10635,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
             notice ~kind:Notice_reply ("/queue clear: " ^ String.concat " · " clauses));
          drain_queued_message state ~base_path ~mailbox;
          launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Clear
-       | Some keeper_name, Ok action ->
+       | Some keeper_name,
+         Ok ((Masc_tui_queue_inspection.Inspect | Pause | Resume | Cancel _
+             | Move_to_end _ | Edit _ | Cancel_event _ | Prioritize_event _) as action) ->
          let local_id = match action with
            | Masc_tui_queue_inspection.Cancel id | Move_to_end id | Edit (id, _) -> Some id
            | Inspect | Pause | Resume | Clear | Cancel_event _ | Prioritize_event _ -> None in
@@ -26552,7 +26554,16 @@ and is loaded on demand through keeper_skill.
        | Some k
          when (match text_input_target state ~compact_viewport with
                | Some (Text_board_draft | Text_board_attach_path) -> true
-               | Some _ | None -> false) ->
+               | Some
+                   (Text_collab_form | Text_account_login | Text_browser_url
+                   | Text_ask_answer | Text_fusion_launch | Text_preset_name
+                   | Text_runtime_lane_name | Text_runtime_param
+                   | Text_runtime_model_form | Text_runtime_account_form
+                   | Text_voice_wizard | Text_palette | Text_row_search
+                   | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
+                   | Text_identity_app_form | Text_identity_filter
+                   | Text_goal_drop_reason | Text_github_token)
+               | None -> false) ->
            (* Same shape as the chat pane: while a draft is being written,
               printable keys belong to the draft. A key the handler declines
               (Tab) keeps its global meaning, so the cycle works mid-compose

@@ -24,7 +24,10 @@ let diagnostic_to_string = function
 
 let entries_of_table = function
   | Otoml.TomlTable entries | Otoml.TomlInlineTable entries -> Ok entries
-  | _ -> Error [ Not_a_table ]
+  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlTableArray _ -> Error [ Not_a_table ]
 
 let parse_string content =
   match Otoml.Parser.from_string_result content with

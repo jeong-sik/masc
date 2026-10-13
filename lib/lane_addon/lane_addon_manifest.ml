@@ -183,7 +183,12 @@ let load ~path =
       | None -> Ok Docker
       | Some (Otoml.TomlString value) ->
           Option.to_result ~none:"runtime requires docker or apple_container" (runtime_of_string value)
-      | Some _ -> Error "runtime requires docker or apple_container" in
+      | Some (Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+             | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+             | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+             | Otoml.TomlTable _ | Otoml.TomlInlineTable _
+             | Otoml.TomlTableArray _) ->
+          Error "runtime requires docker or apple_container" in
     let* command = read ["command"] (Otoml.get_array Otoml.get_string) in
     let* names = read ["contributions"] (Otoml.get_array Otoml.get_string) in
     let* contributions =
@@ -203,7 +208,12 @@ let load ~path =
     let* pids = match Otoml.find_opt document Fun.id ["resources"; "pids"] with
       | None -> Ok None
       | Some (Otoml.TomlInteger value) -> Ok (Some value)
-      | Some _ -> Error "resources.pids requires an integer" in
+      | Some (Otoml.TomlString _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+             | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+             | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+             | Otoml.TomlTable _ | Otoml.TomlInlineTable _
+             | Otoml.TomlTableArray _) ->
+          Error "resources.pids requires an integer" in
     let* max_reply_bytes = read ["resources"; "max_reply_bytes"] Otoml.get_integer in
     if command = [] || List.exists (fun arg -> String.trim arg = "") command
     then Error "command requires non-blank argv entries"

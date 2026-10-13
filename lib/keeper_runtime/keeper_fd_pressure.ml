@@ -39,24 +39,25 @@ let last_external_signal_ts = Atomic.make None
 let last_external_signal_reason = Atomic.make None
 
 let note_exception ?(site = "unknown") exn =
-  (* Unix.error has about 70 constructors and only EMFILE and ENFILE are acted
-     on, so the others are not listed. *)
-  match[@warning "-4"] exn with
-  | Unix.Unix_error (Unix.EMFILE, _, _) ->
+  match System_error_class.errno_of_exn exn with
+  | Some System_error_class.Emfile ->
     Atomic.incr process_fd_exhaustion_total;
     Atomic.set last_fd_exhaustion_ts (Some (Time_compat.now ()));
     Log.Keeper.error
       "fd_observation: typed process FD exhaustion site=%s exception=%s"
       site
       (Printexc.to_string exn)
-  | Unix.Unix_error (Unix.ENFILE, _, _) ->
+  | Some System_error_class.Enfile ->
     Atomic.incr system_fd_exhaustion_total;
     Atomic.set last_fd_exhaustion_ts (Some (Time_compat.now ()));
     Log.Keeper.error
       "fd_observation: typed system FD exhaustion site=%s exception=%s"
       site
       (Printexc.to_string exn)
-  | _ -> ()
+  | Some
+      System_error_class.(
+        Enospc | Eacces | Eperm | Enoent | Econnrefused | Etimedout | Other_errno _)
+  | None -> ()
 ;;
 
 let string_of_external_level = function

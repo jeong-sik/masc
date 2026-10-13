@@ -267,6 +267,10 @@
 
 (env
  (_
+  ; Test assertions match the one case they check and fail on the rest, so
+  ; listing every other constructor would only bury the assertion.
+  (flags
+   (:standard -w -4))
   (env-vars
    ; Ignore shell-level workspace overrides so tests stay isolated in temp dirs.
    ; Prevent inherited shell MASC_BASE_PATH from binding tests to real

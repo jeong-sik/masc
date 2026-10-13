@@ -418,8 +418,13 @@ let mark_latest_beat state =
    drawn, so its size is not this module's to refuse. *)
 let number_argument missing tokens =
   match tokens with
-  | Tk_word word :: rest when String.length word > 0 && String.for_all is_digit word -> Ok rest
-  | _ -> Error (Missing_argument missing)
+  | Tk_word word :: rest ->
+    (if String.length word > 0 && String.for_all is_digit word
+     then Ok rest
+     else Error (Missing_argument missing))
+  | [] -> Error (Missing_argument missing)
+  | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
+    Error (Missing_argument missing)
 
 (* A tuning's note names, highest string first, as written: [E4] names its
    line [E]. The collection stops at the first token that is not a note name,
@@ -452,7 +457,9 @@ let collect_tuning tokens =
         (match note_name word with
          | Some name -> collect (name :: names) rest
          | None -> List.rev names, tokens)
-    | _ -> List.rev names, tokens
+    | [] -> List.rev names, tokens
+    | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
+      List.rev names, tokens
   in
   collect [] tokens
 
@@ -523,7 +530,9 @@ let read source =
     | Tk_directive Title :: rest ->
         (match rest with
          | Tk_quoted :: after -> step state after
-         | _ -> Error (Missing_argument Title_text))
+         | [] -> Error (Missing_argument Title_text)
+         | (Tk_directive _ | Tk_unknown_directive _ | Tk_effect _ | Tk_chord _ | Tk_bar | Tk_word _) :: _ ->
+           Error (Missing_argument Title_text))
     | Tk_directive Tempo :: rest ->
         let* after = number_argument Tempo_number rest in
         step state after

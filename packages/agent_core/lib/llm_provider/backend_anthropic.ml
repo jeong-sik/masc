@@ -730,19 +730,33 @@ let build_request_payload
   let body =
     let thinking = thinking_config_for_config thinking_mode config in
     let thinking =
-      match request_mode, thinking_mode, config.enable_thinking, thinking with
-      | Completion _,
-        Anthropic_control (Capabilities.Anthropic_adaptive_between_tools
-                           | Capabilities.Anthropic_adaptive_disabled_through_high),
-        Some true, Some (`Assoc fields)
+      (* These catalog policies describe Sonnet/Haiku 5.5. Their adaptive
+         wire accepts binding controls; between_tools and disabled do not.
+         The server validates the actual serialized prefix, including any
+         intentional window or tool-schema changes. *)
+      let binds_prefix_mismatch =
+        match request_mode, thinking_mode with
+        | Completion _,
+          Anthropic_control (Capabilities.Anthropic_adaptive_between_tools
+                             | Capabilities.Anthropic_adaptive_disabled_through_high)
+          -> true
+        | Completion _,
+          ( Anthropic_control (Capabilities.Anthropic_adaptive_default
+                               | Capabilities.Anthropic_adaptive_preferred
+                               | Capabilities.Anthropic_adaptive_only
+                               | Capabilities.Anthropic_always_adaptive)
+          | Anthropic_no_policy
+          | Kimi_flag )
+        | Count_tokens, (Anthropic_control _ | Anthropic_no_policy | Kimi_flag) -> false
+      in
+      match binds_prefix_mismatch, config.enable_thinking, thinking with
+      | true, Some true, Some (`Assoc fields)
         when Env_parse.bool_env ~default:true drop_block_env_var ->
-        (* These catalog policies describe Sonnet/Haiku 5.5. Their adaptive
-           wire accepts binding controls; between_tools and disabled do not.
-           The server validates the actual serialized prefix, including any
-           intentional window or tool-schema changes. *)
         Some (`Assoc (("block_binding",
           `Assoc [ "prefix_mismatch_behavior", `String "drop_block" ]) :: fields))
-      | _ -> thinking
+      | true, Some true, (None | Some _)
+      | true, (Some false | None), (None | Some _)
+      | false, (Some true | Some false | None), (None | Some _) -> thinking
     in
     match thinking with
     | Some thinking -> ("thinking", thinking) :: body

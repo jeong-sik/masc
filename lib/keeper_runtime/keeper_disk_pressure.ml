@@ -30,17 +30,19 @@ let storage_space_exhaustion_total = Atomic.make 0
 let last_storage_space_exhaustion_ts = Atomic.make None
 
 let note_exception ?(site = "unknown") exn =
-  (* Unix.error has about 70 constructors and only ENOSPC is acted on, so the
-     others are not listed. *)
-  match[@warning "-4"] exn with
-  | Unix.Unix_error (Unix.ENOSPC, _, _) ->
+  match System_error_class.errno_of_exn exn with
+  | Some System_error_class.Enospc ->
     Atomic.incr storage_space_exhaustion_total;
     Atomic.set last_storage_space_exhaustion_ts (Some (Time_compat.now ()));
     Log.Keeper.error
       "disk_observation: typed storage-space exhaustion site=%s exception=%s"
       site
       (Printexc.to_string exn)
-  | _ -> ()
+  | Some
+      System_error_class.(
+        Emfile | Enfile | Eacces | Eperm | Enoent | Econnrefused | Etimedout
+        | Other_errno _)
+  | None -> ()
 ;;
 
 let reset_for_tests () =

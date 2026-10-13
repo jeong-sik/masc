@@ -236,3 +236,8 @@ export function keeperResponseStateMayReplace(
   if (stored?.kind !== 'known' || stored.lastSequence === null) return true
   return incoming?.kind === 'known' && incoming.lastSequence !== null && incoming.lastSequence >= stored.lastSequence
 }
+
+/** A terminal response already holds its receipt; a later lookup failure cannot revoke it. */
+export function keeperResponseIsTerminal(state: KeeperResponseState | undefined): boolean {
+  return state?.kind === 'known' && state.phase === 'terminal'
+}

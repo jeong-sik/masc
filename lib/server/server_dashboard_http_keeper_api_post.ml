@@ -1063,9 +1063,10 @@ let config_write_fields = function
 (* A config POST refused before the update runs: nothing was written and the
    lane was not touched. The answer says so with the fields an update
    refusal that wrote nothing carries. *)
-let respond_config_refused_before_write ?(status = `Bad_request) reqd message =
+let respond_config_refused_before_write
+    ?(status : [ `Bad_request | `Not_found ] = `Bad_request) reqd message =
   Http.Response.json_value
-    ~status
+    ~status:(status :> Httpun.Status.t)
     (`Assoc
       (("error", `String message)
        :: config_write_fields Keeper_turn_up_update.Config_unchanged))
@@ -1110,17 +1111,15 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
     | Ok None ->
         respond_config_refused_before_write ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
     | Ok (Some meta0) ->
-        (try
-           let args = Yojson.Safe.from_string body_str in
-           let fields_opt =
-             match args with
-             | `Assoc fields -> Some fields
-             | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
-             | `String _ | `List _ ->
-                 None
-           in
-           match fields_opt with
-           | Some fields ->
+        (* Only the body parse is guarded: a [Json_error] raised after the write
+           must not come back as a refusal that says nothing was written. *)
+        (match Yojson.Safe.from_string body_str with
+           | exception Yojson.Json_error e ->
+               respond_config_refused_before_write reqd (Printf.sprintf "invalid json: %s" e)
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+           | `String _ | `List _ ->
+               respond_config_refused_before_write reqd "request body must be a JSON object"
+           | `Assoc fields ->
                let expected_config_revision =
                  match List.assoc_opt expected_config_revision_field fields with
                  | None -> Error "expected_config_revision is required"
@@ -1251,11 +1250,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                                reqd
                                ~name
                                ~refusal
-                               ~receipt:(config_write_receipt result))))))
-           | None ->
-               respond_config_refused_before_write reqd "request body must be a JSON object"
-         with Yojson.Json_error e ->
-           respond_config_refused_before_write reqd (Printf.sprintf "invalid json: %s" e))
+                               ~receipt:(config_write_receipt result)))))))
 
 let secret_projection_response_json config name =
   `Assoc

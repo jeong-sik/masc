@@ -6152,16 +6152,6 @@ let test_config_patch_separates_control_fields () =
          (List.assoc "max_context_override" patch.Keeper_config_post.config_fields))
 ;;
 
-let test_config_patch_input_policy () =
-  List.iter (fun wire ->
-    match Keeper_config_post.validate_dashboard_config_patch ["input_policy", `String wire] with
-    | Ok _ -> () | Error error -> Alcotest.fail error) ["small"; "wide"];
-  List.iter (fun value ->
-    match Keeper_config_post.validate_dashboard_config_patch ["input_policy", value] with
-    | Error _ -> () | Ok _ -> Alcotest.fail "invalid config policy accepted")
-    [`String "automatic"; `String "Wide"; `Null; `Int 1; `Bool true]
-;;
-
 let test_config_patch_accepts_typed_skills () =
   let validate fields =
     Keeper_config_post.validate_dashboard_config_patch fields
@@ -6571,6 +6561,34 @@ let test_config_post_requires_expected_revision () =
       ~name {|{"activation_mode":"autonomous"}|}
   in
   expect_http_status "missing revision HTTP 400" 400 raw;
+  ignore
+    (Masc.Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:config.base_path name)
+
+(* The dashboard checks only that [input_policy] is a string; the value is
+   read by [Keeper_turn_up_args.parse], which runs before anything is
+   written. A value parse cannot read is answered 400 and the keeper TOML
+   stays as it was. *)
+let test_config_post_refuses_an_unreadable_input_policy_without_a_write () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-input-policy-refused" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let before = read_file toml_path in
+  let raw, json =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name {|{"input_policy":"automatic"}|}
+  in
+  expect_http_status "unreadable input_policy HTTP 400" 400 raw;
+  let body = Yojson.Safe.to_string json in
+  check bool "the refusal names the accepted policies" true
+    (String_util.contains_substring body "input_policy must be small or wide");
+  (* The removed dashboard check said the same words and added
+     "(received string)"; its absence is what shows parse refused. *)
+  check bool "the refusal is parse's, not the dashboard's" false
+    (String_util.contains_substring body "(received");
+  check string "keeper TOML unchanged" before (read_file toml_path);
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
@@ -8183,7 +8201,6 @@ let () =
             test_context_shrink_detection;
           test_case "config patch accepts typed Skills" `Quick
             test_config_patch_accepts_typed_skills;
-          test_case "config patch input policy" `Quick test_config_patch_input_policy;
           test_case "config patch separates control fields" `Quick
             test_config_patch_separates_control_fields;
           test_case "config patch shape-checks remote_endpoint" `Quick
@@ -8198,6 +8215,8 @@ let () =
             test_config_post_mid_turn_policy_needs_the_lanes_proxy;
           test_case "config POST requires expected revision" `Quick
             test_config_post_requires_expected_revision;
+          test_case "config POST refuses an unreadable input_policy without a write" `Quick
+            test_config_post_refuses_an_unreadable_input_policy_without_a_write;
           test_case "stale config POST loses with typed 409" `Quick
             test_config_post_rejects_second_writer_with_same_revision;
           test_case "direct assignment stale writer loses without a write" `Quick

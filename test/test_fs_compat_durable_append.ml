@@ -862,6 +862,55 @@ let test_private_file_update_returns_value_with_close_failure () =
   check string "private update commits once" (original ^ suffix) (Fs_compat.load_file path)
 ;;
 
+let test_private_file_replacement_before_decide initial () =
+  with_transaction_jsonl initial @@ fun path ->
+  let detached = path ^ ".opened" in
+  let foreign = "{\"foreign_binding\":true}\n" in
+  let decisions = ref 0 and closes = ref 0 in
+  Fun.protect ~finally:(fun () -> remove_if_present detached) (fun () ->
+    let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+      { before_sync_parent = (fun _ ->
+          Unix.rename path detached;
+          Out_channel.with_open_bin path (fun channel -> output_string channel foreign);
+          Unix.chmod path 0o600)
+      ; close_fd = (fun fd -> incr closes; Unix.close fd) } in
+    (match Fs_compat.update_private_file_durable_locked_with_io_for_testing ~io path
+        (fun _ -> incr decisions; Some "unauthorized\n", `Authorized) with
+     | _ -> fail "replaced canonical binding authorized a transaction"
+     | exception Sys_error _ -> ());
+    check int "stale opened bytes never reach decision" 0 !decisions;
+    check int "stale descriptor closes exactly once" 1 !closes;
+    check string "original detached payload is untouched"
+      (match initial with Some bytes -> bytes | None -> "") (Fs_compat.load_file detached);
+    check string "replacement canonical payload is untouched" foreign (Fs_compat.load_file path))
+;;
+
+let test_private_file_replacement_during_decide () =
+  let original = "{\"original_binding\":true}\n" in
+  with_transaction_jsonl (Some original) @@ fun path ->
+  let detached = path ^ ".opened" in
+  let foreign = "{\"foreign_binding\":true}\n" in
+  let decisions = ref 0 and closes = ref 0 in
+  Fun.protect ~finally:(fun () -> remove_if_present detached) (fun () ->
+    let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+      { before_sync_parent = (fun _ -> ())
+      ; close_fd = (fun fd -> incr closes; Unix.close fd) } in
+    (match Fs_compat.update_private_file_durable_locked_with_io_for_testing ~io path
+        (fun bytes ->
+          incr decisions;
+          check string "decision read the original authoritative payload" original bytes;
+          Unix.rename path detached;
+          Out_channel.with_open_bin path (fun channel -> output_string channel foreign);
+          Unix.chmod path 0o600;
+          Some "unauthorized\n", `Authorized) with
+     | _ -> fail "decision returned authorization after canonical replacement"
+     | exception Sys_error _ -> ());
+    check int "one real decision preceded physical replacement" 1 !decisions;
+    check int "replaced descriptor closes exactly once" 1 !closes;
+    check string "detached payload never receives suffix" original (Fs_compat.load_file detached);
+    check string "replacement payload never receives suffix" foreign (Fs_compat.load_file path))
+;;
+
 let test_private_jsonl_transaction_preserves_primary_when_data_close_fails () =
   with_transaction_jsonl (Some "incomplete") @@ fun path ->
   let io, calls = injected_close_io ~fail_calls:[ 1 ] in
@@ -1573,6 +1622,12 @@ let () =
             "private file update preserves committed close failure"
             `Quick
             test_private_file_update_returns_value_with_close_failure
+        ; test_case "fresh private file replacement cannot reach decision" `Quick
+            (test_private_file_replacement_before_decide None)
+        ; test_case "existing private file replacement cannot reach decision" `Quick
+            (test_private_file_replacement_before_decide (Some "{\"original_binding\":true}\n"))
+        ; test_case "private file decision cannot authorize detached inode" `Quick
+            test_private_file_replacement_during_decide
         ; test_case
             "private JSONL nested close failures accumulate"
             `Quick

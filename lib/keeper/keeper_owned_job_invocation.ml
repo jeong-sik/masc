@@ -99,6 +99,7 @@ let check_scope ~base_path ~keeper_name ~invocation (reservation : reservation) 
 
 let reserve ~base_path ~keeper_name ~invocation ~source ~argv ~inputs = protect (fun () ->
   let* base_path = canonical_base_path base_path in
+  let* _ = Store.source_of_json (Store.source_to_json source) |> Result.map_error wrap in
   let* actual = invocation_of_source source |> Result.map_error (fun detail -> wrap (Store.Invalid_authority detail)) in
   let* () = if keeper_name <> "" && actual = Some invocation then Ok ()
     else Error (wrap (Store.Invalid_authority "invocation source differs from its exact key")) in

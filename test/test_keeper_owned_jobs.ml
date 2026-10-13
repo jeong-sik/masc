@@ -795,6 +795,17 @@ let test_corrupt_invocation_binding_cannot_launch () = with_fixture @@ fun _env 
   check int "corrupt authority never recreates" 1 (effect_count fixture "create");
   check int "corrupt authority never restarts" 1 (effect_count fixture "start")
 
+let test_malformed_source_cannot_publish_binding () = with_fixture @@ fun _env _initialize fixture ->
+  set_source fixture ~task_id:"" ~turn:41;
+  assert_start_rejected fixture ["fixture-program"];
+  check bool "malformed whole source never calls backend" false (Sys.file_exists fixture.daemon_path);
+  let directory = Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path:fixture.base_path) "keeper_msg_requests")
+      "owned_job_invocations" in
+  check bool "malformed whole source never prepares a reservation directory" false (Sys.file_exists directory);
+  (match Invocation.lookup ~base_path:fixture.base_path ~keeper_name:keeper (original_invocation fixture) with
+   | Ok None -> () | Ok (Some _) | Error _ -> fail "malformed source published a binding")
+
 let () =
   Printf.printf "owned_job_feature_transport=synthetic_docker_cli actual_public_handler=true actual_docker_execution=false\n%!";
   run "Keeper owned jobs"
@@ -809,4 +820,5 @@ let () =
       ; test_case "large stdout and stderr preserve complete original artifacts" `Quick test_large_streams_publish_complete_original_artifacts
       ; test_case "lost start reply recovers the original job" `Quick test_lost_start_reply_recovers_original_job
       ; test_case "original invocation rejects request and source rebinding" `Quick test_original_invocation_rejects_rebinding
-      ; test_case "corrupt invocation authority cannot launch" `Quick test_corrupt_invocation_binding_cannot_launch ]]
+      ; test_case "corrupt invocation authority cannot launch" `Quick test_corrupt_invocation_binding_cannot_launch
+      ; test_case "malformed whole source cannot publish a binding" `Quick test_malformed_source_cannot_publish_binding ]]

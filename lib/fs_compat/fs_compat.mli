@@ -1360,6 +1360,10 @@ val update_private_file_durable_locked_with_io_for_testing :
   string ->
   (string -> string option * 'a) ->
   ('a, durable_append_error) private_file_transaction_outcome
+(** Same creating transaction with injected parent-sync and descriptor settlement.
+    [before_sync_parent] runs after opening the data descriptor, before the
+    parent sync and locked canonical read. It can physically replace the path
+    to verify that stale descriptor bytes never reach [decide]. *)
 
 (** Production-path seam for deterministic stable-lock creation and descriptor
     settlement tests. *)
@@ -1452,7 +1456,13 @@ val durable_append_error_to_string : durable_append_error -> string
     mode [0600], and every transaction fsyncs its parent directory before
     touching payload bytes so a failed creation can be retried without silently
     skipping that durability boundary. Filesystems that reject directory fsync
-    fail explicitly. The shared path mutex serializes this operation with
+    fail explicitly. Existing paths must be uniquely linked regular files.
+    The current path and opened descriptor must retain the same device/inode
+    after open, lock and read, on both sides of [decide], and after a successful
+    append/fsync. Changed bindings fail through the setup/read exception
+    contract without returning an authorization result or claiming safe replay.
+    A post-append rejection does not undo committed bytes. The
+    shared path mutex serializes this operation with
     cached JSONL writers without closing their already-flushed descriptors.
     When the Eio filesystem is active, the transaction and [decide] run in a
     system thread so a contended file cannot stop unrelated fibers; [decide]

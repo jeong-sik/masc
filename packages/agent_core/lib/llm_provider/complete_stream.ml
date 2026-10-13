@@ -1209,7 +1209,23 @@ let complete_stream_http
                 { provider; model; prompt_eval_tokens; prompt_eval_ms; cache_hit })
          | Some _ | None -> ());
         let prefill_ms = Option.bind !stream_timings (fun t -> t.prompt_ms) in
-        Ok (patch_telemetry resp ~config ~ttfrc_ms:!ttfrc_ref ~prefill_ms latency_ms)
+        let reasoning_prefix =
+          Backend_anthropic.transmitted_reasoning_prefix
+            ~config
+            ~messages
+            ~tools
+            ~response_content:resp.Types.content
+            ~admitted_body_present:(Option.is_some admitted_body)
+            ()
+        in
+        Ok
+          (patch_telemetry
+             resp
+             ~config
+             ~ttfrc_ms:!ttfrc_ref
+             ~prefill_ms
+             ~reasoning_prefix
+             latency_ms)
       | Ok (Error (Http_client.TimeoutError _ as err)) ->
         publish_summary ~terminal:(Telemetry_event.Terminal_error "timeout_error") ();
         Error err

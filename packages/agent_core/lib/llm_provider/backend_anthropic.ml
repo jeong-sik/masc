@@ -332,10 +332,14 @@ let rec anthropic_content_block_to_json = function
     | Document _ | Audio _ ) as block -> Api_common.content_block_to_json block
 ;;
 
+let anthropic_role_tag = function
+  | Assistant -> "assistant"
+  | User | System | Tool -> "user"
+;;
+
 let anthropic_message_to_json (msg : message) =
-  let role = match msg.role with Assistant -> "assistant" | User | System | Tool -> "user" in
   `Assoc
-    [ "role", `String role
+    [ "role", `String (anthropic_role_tag msg.role)
     ; "content", `List (List.map anthropic_content_block_to_json msg.content)
     ]
 ;;
@@ -407,6 +411,152 @@ let project_tools_for_kind kind tools =
   | Provider_config.Glm -> tools
 ;;
 
+(* One cache_control object for every breakpoint this request emits.
+   [cache_extended_ttl] selects the 1h tier (2x write, same 0.1x read);
+   the default is the API's 5m tier, expressed by omitting [ttl]. *)
+let cache_control_for_config (config : Provider_config.t) =
+  if config.cache_extended_ttl
+  then `Assoc [ "type", `String "ephemeral"; "ttl", `String "1h" ]
+  else `Assoc [ "type", `String "ephemeral" ]
+;;
+
+(* Head members below are shared by the request body and the prefix-binding
+   digest: the digest must hash exactly the bytes the wire carries, so both
+   sides call these instead of rebuilding the members. *)
+
+let system_member ~cache_control (config : Provider_config.t) =
+  match config.system_prompt with
+  | Some s when not (Api_common.string_is_blank s) ->
+    let s = Utf8_sanitize.sanitize s in
+    if config.cache_system_prompt
+    then (
+      (* The caller owns the cache opt-in. Anthropic applies the
+         model/platform-specific minimum-token rule server-side; AGENT_CORE has no
+         tokenizer-independent way to turn that rule into a character
+         threshold. *)
+      let block =
+        `Assoc
+          [ "type", `String "text"
+          ; "text", `String s
+          ; "cache_control", cache_control
+          ]
+      in
+      Some ("system", `List [ block ]))
+    else Some ("system", `String s)
+  | _ -> None
+;;
+
+let thinking_member thinking_mode (config : Provider_config.t) =
+  match thinking_config_for_config thinking_mode config with
+  | Some thinking -> Some ("thinking", thinking)
+  | None -> None
+;;
+
+let output_config_member thinking_mode (config : Provider_config.t) =
+  match output_config_for_config thinking_mode config with
+  | Some output_config -> Some ("output_config", output_config)
+  | None -> None
+;;
+
+let tools_member ~cache_control (config : Provider_config.t) tools =
+  match tools with
+  | [] -> None
+  | ts ->
+    let ts = project_tools_for_kind config.kind ts in
+    if config.cache_system_prompt
+    then (
+      (* Add cache_control to last tool for extended cache prefix *)
+      let ts_with_cache =
+        (* ts is non-empty (outer match guarantees), safe to destructure *)
+        let rev = List.rev ts in
+        let last = List.hd rev
+        and rest = List.tl rev in
+        let last_with_cache =
+          match last with
+          | `Assoc fields -> `Assoc (("cache_control", cache_control) :: fields)
+          | other -> other
+        in
+        List.rev (last_with_cache :: rest)
+      in
+      Some ("tools", `List ts_with_cache))
+    else Some ("tools", `List ts)
+;;
+
+(* Anthropic Messages API nests [disable_parallel_tool_use] INSIDE
+   the [tool_choice] object — it is NOT a top-level body field.
+   See docs.anthropic.com/en/api/messages body params:
+     tool_choice.disable_parallel_tool_use: boolean
+
+   The previous implementation emitted [disable_parallel_tool_use]
+   as a top-level key, which Anthropic silently ignores, so any
+   caller with [disable_parallel_tool_use = true] and
+   tools was still receiving parallel tool calls. Same class of
+   silent-drop bug as #834 but for a different field; also fixes
+   the drift with the agent_core path in lib/api_anthropic.ml which
+   already nests correctly. *)
+let tool_choice_member ~disable_parallel_tool_use ~tools_present (config : Provider_config.t) =
+  let with_disable choice =
+    let base = tool_choice_to_json choice in
+    if disable_parallel_tool_use
+    then (
+      match base with
+      | `Assoc fields -> `Assoc (("disable_parallel_tool_use", `Bool true) :: fields)
+      | other -> other)
+    else base
+  in
+  match config.tool_choice with
+  | Some choice -> Some ("tool_choice", with_disable choice)
+  | None ->
+    if disable_parallel_tool_use && tools_present
+    then (
+      (* No explicit tool_choice but caller still wants to disable
+         parallel tool use — synthesize an [auto] choice to carry
+         the flag, matching the agent_core path at
+         lib/api_anthropic.ml. *)
+      let tc =
+        `Assoc [ "type", `String "auto"; "disable_parallel_tool_use", `Bool true ]
+      in
+      Some ("tool_choice", tc))
+    else None
+;;
+
+(* The request head the prefix digest chains from, in fixed member order.
+   System, tools, and the thinking/tool-choice controls are the non-message
+   bytes a thinking signature binds; sampling fields and output budgets
+   steer decoding, not conversation identity, and stay out. *)
+let prefix_head ~thinking_mode ~disable_parallel_tool_use ~tools_present ~tools config =
+  let cache_control = cache_control_for_config config in
+  List.filter_map
+    Fun.id
+    [ system_member ~cache_control config
+    ; tools_member ~cache_control config tools
+    ; thinking_member thinking_mode config
+    ; output_config_member thinking_mode config
+    ; tool_choice_member ~disable_parallel_tool_use ~tools_present config
+    ]
+;;
+
+let verify_prefix_binding ~head messages =
+  Reasoning_history_projection.verify_prefix_binding
+    ~head
+    ~encode_block:anthropic_content_block_to_json
+    ~role_tag:anthropic_role_tag
+    messages
+;;
+
+let capabilities_for_build (config : Provider_config.t) =
+  match Provider_config.capabilities_for_config_model config with
+  | Some caps -> caps
+  | None -> (
+    match config.kind with
+    | Provider_config.Anthropic -> Capabilities.anthropic_capabilities
+    | Provider_config.Kimi -> Capabilities.kimi_capabilities
+    | Provider_config.OpenAI_compat
+    | Provider_config.Ollama
+    | Provider_config.Gemini
+    | Provider_config.Glm -> Capabilities.default_capabilities)
+;;
+
 let build_request_payload
       ~request_mode
       ?anthropic_thinking_control
@@ -418,18 +568,7 @@ let build_request_payload
   (match Provider_config.validate_tool_choice_request config with
    | Ok () -> ()
    | Error reason -> invalid_arg ("Backend_anthropic.build_request: " ^ reason));
-  let caps =
-    match Provider_config.capabilities_for_config_model config with
-    | Some caps -> caps
-    | None ->
-      (match config.kind with
-       | Provider_config.Anthropic -> Capabilities.anthropic_capabilities
-       | Provider_config.Kimi -> Capabilities.kimi_capabilities
-       | Provider_config.OpenAI_compat
-       | Provider_config.Ollama
-       | Provider_config.Gemini
-       | Provider_config.Glm -> Capabilities.default_capabilities)
-  in
+  let caps = capabilities_for_build config in
   (match request_mode, config.seed with
    | Completion _, Some _ ->
      invalid_arg
@@ -485,6 +624,37 @@ let build_request_payload
       projection.messages
   in
   let messages = Api_common.merge_tool_result_followup_user_messages projected_messages in
+  (* Prefix binding runs on the merged list the wire serializes: only the
+     Anthropic kind verifies here. Its thinking toggle always resolves
+     Require_identical_source, while Kimi — the one other kind reaching
+     serialization — carries rotation-tolerant reasoning this backend must
+     not second-guess. *)
+  let messages =
+    match config.kind with
+    | Provider_config.Anthropic -> (
+      let head =
+        prefix_head ~thinking_mode ~disable_parallel_tool_use ~tools_present ~tools config
+      in
+      match verify_prefix_binding ~head messages with
+      | Error error ->
+        invalid_arg
+          ("Backend_anthropic.build_request: "
+           ^ Reasoning_history_projection.prefix_verify_error_to_string error)
+      | Ok verdict ->
+        Reasoning_history_projection.observe_prefix_drops
+          ~component:"backend_anthropic"
+          ~stream:
+            (match request_mode with
+             | Completion { stream; _ } -> stream
+             | Count_tokens -> false)
+          verdict;
+        verdict.Reasoning_history_projection.messages)
+    | Provider_config.Kimi
+    | Provider_config.OpenAI_compat
+    | Provider_config.Ollama
+    | Provider_config.Gemini
+    | Provider_config.Glm -> messages
+  in
   (match config.kind, caps.supports_assistant_prefill, List.rev messages with
    | Provider_config.Anthropic, false, { role = Assistant; _ } :: _ ->
      invalid_arg
@@ -508,14 +678,7 @@ let build_request_payload
            (Provider_config.string_of_provider_kind config.kind))
   in
   let msgs_json = List.map message_to_json messages in
-  (* One cache_control object for every breakpoint this request emits.
-     [cache_extended_ttl] selects the 1h tier (2x write, same 0.1x read);
-     the default is the API's 5m tier, expressed by omitting [ttl]. *)
-  let cache_control_json =
-    if config.cache_extended_ttl
-    then `Assoc [ "type", `String "ephemeral"; "ttl", `String "1h" ]
-    else `Assoc [ "type", `String "ephemeral" ]
-  in
+  let cache_control_json = cache_control_for_config config in
   let body =
     match request_mode with
     | Completion { output_token_receipt; stream } ->
@@ -547,25 +710,9 @@ let build_request_payload
     | Count_tokens -> [ "model", `String config.model_id; "messages", `List msgs_json ]
   in
   let body =
-    match config.system_prompt with
-    | Some s when not (Api_common.string_is_blank s) ->
-      let s = Utf8_sanitize.sanitize s in
-      if config.cache_system_prompt
-      then (
-        (* The caller owns the cache opt-in. Anthropic applies the
-           model/platform-specific minimum-token rule server-side; AGENT_CORE has no
-           tokenizer-independent way to turn that rule into a character
-           threshold. *)
-        let block =
-          `Assoc
-            [ "type", `String "text"
-            ; "text", `String s
-            ; "cache_control", cache_control_json
-            ]
-        in
-        ("system", `List [ block ]) :: body)
-      else ("system", `String s) :: body
-    | _ -> body
+    match system_member ~cache_control:cache_control_json config with
+    | Some pair -> pair :: body
+    | None -> body
   in
   let dialect = Reasoning_dialect.for_provider_config config in
   let body =
@@ -602,75 +749,24 @@ let build_request_payload
     | Count_tokens, _ | Completion _, None -> body
   in
   let body =
-    match thinking_config_for_config thinking_mode config with
-    | Some thinking -> ("thinking", thinking) :: body
+    match thinking_member thinking_mode config with
+    | Some pair -> pair :: body
     | None -> body
   in
   let body =
-    match output_config_for_config thinking_mode config with
-    | Some output_config -> ("output_config", output_config) :: body
+    match output_config_member thinking_mode config with
+    | Some pair -> pair :: body
     | None -> body
   in
   let body =
-    match tools with
-    | [] -> body
-    | ts ->
-      let ts = project_tools_for_kind config.kind ts in
-      if config.cache_system_prompt
-      then (
-        (* Add cache_control to last tool for extended cache prefix *)
-        let ts_with_cache =
-          (* ts is non-empty (outer match guarantees), safe to destructure *)
-          let rev = List.rev ts in
-          let last = List.hd rev
-          and rest = List.tl rev in
-          let last_with_cache =
-            match last with
-            | `Assoc fields ->
-              `Assoc (("cache_control", cache_control_json) :: fields)
-            | other -> other
-          in
-          List.rev (last_with_cache :: rest)
-        in
-        ("tools", `List ts_with_cache) :: body)
-      else ("tools", `List ts) :: body
-  in
-  (* Anthropic Messages API nests [disable_parallel_tool_use] INSIDE
-     the [tool_choice] object — it is NOT a top-level body field.
-     See docs.anthropic.com/en/api/messages body params:
-       tool_choice.disable_parallel_tool_use: boolean
-
-     The previous implementation emitted [disable_parallel_tool_use]
-     as a top-level key, which Anthropic silently ignores, so any
-     caller with [disable_parallel_tool_use = true] and
-     tools was still receiving parallel tool calls. Same class of
-     silent-drop bug as #834 but for a different field; also fixes
-     the drift with the agent_core path in lib/api_anthropic.ml which
-     already nests correctly. *)
-  let tool_choice_json_with_disable choice =
-    let base = tool_choice_to_json choice in
-    if disable_parallel_tool_use
-    then (
-      match base with
-      | `Assoc fields -> `Assoc (("disable_parallel_tool_use", `Bool true) :: fields)
-      | other -> other)
-    else base
+    match tools_member ~cache_control:cache_control_json config tools with
+    | Some pair -> pair :: body
+    | None -> body
   in
   let body =
-    match config.tool_choice with
-    | Some choice -> ("tool_choice", tool_choice_json_with_disable choice) :: body
-    | None ->
-      if disable_parallel_tool_use && tools_present
-      then (
-        (* No explicit tool_choice but caller still wants to disable
-           parallel tool use — synthesize an [auto] choice to carry
-           the flag, matching the agent_core path at
-           lib/api_anthropic.ml. *)
-        let tc =
-          `Assoc [ "type", `String "auto"; "disable_parallel_tool_use", `Bool true ]
-        in
-        ("tool_choice", tc) :: body)
-      else body
+    match tool_choice_member ~disable_parallel_tool_use ~tools_present config with
+    | Some pair -> pair :: body
+    | None -> body
   in
   Yojson.Safe.to_string (`Assoc body)
 ;;
@@ -793,4 +889,72 @@ let build_count_tokens_request ~config ~messages ?tools () =
     invalid_arg
       ("Backend_anthropic.build_count_tokens_request: Anthropic-compatible Messages "
        ^ "provider required")
+;;
+
+let transmitted_reasoning_prefix
+      ~(config : Provider_config.t)
+      ~messages
+      ~tools
+      ~response_content
+      ~admitted_body_present
+      ()
+  =
+  (* This backend records for the Anthropic kind only; every other kind it
+     can serve returns None, and replay fails closed. (Gemini binds
+     signatures too and gets its own adoption separately.) An admitted body
+     resolves frozen thinking control this reading cannot reproduce, so it
+     records nothing rather than a digest of bytes the wire never sent. *)
+  if admitted_body_present
+  then None
+  else (
+    match config.kind with
+  | Provider_config.Anthropic -> (
+    match Types.content_has_reasoning_artifact response_content with
+    | false -> None
+    | true -> (
+      let thinking_mode =
+        match nonexact_anthropic_thinking_control config with
+        | Some mode -> Anthropic_control mode
+        | None -> Anthropic_no_policy
+      in
+      match project_history config messages with
+      | Error _ -> None
+      | Ok projection ->
+        let merged =
+          Api_common.merge_tool_result_followup_user_messages projection.messages
+        in
+        let tools_present = tools <> [] in
+        let caps = capabilities_for_build config in
+        let disable_parallel_tool_use =
+          Capabilities.effective_disable_parallel_tool_use
+            ~caller_disabled:config.disable_parallel_tool_use
+            ~supports_parallel_tool_calls:caps.supports_parallel_tool_calls
+            ~tools_present
+        in
+        let head =
+          prefix_head
+            ~thinking_mode
+            ~disable_parallel_tool_use
+            ~tools_present
+            ~tools
+            config
+        in
+        (match verify_prefix_binding ~head merged with
+         | Error _ -> None
+         | Ok verdict ->
+           let message_digest =
+             Reasoning_history_projection.content_wire_digest
+               ~encode_block:anthropic_content_block_to_json
+               response_content
+           in
+           Some
+             { Types.Reasoning_prefix.request_digest =
+                 verdict.Reasoning_history_projection.final_digest
+             ; message_digest
+             })))
+  | Provider_config.Kimi
+  | Provider_config.OpenAI_compat
+  | Provider_config.Ollama
+  | Provider_config.Gemini
+  | Provider_config.Glm -> None)
 ;;

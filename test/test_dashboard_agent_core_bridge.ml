@@ -66,6 +66,7 @@ let make_telemetry ?timings ?(request_latency_ms = 0) ?ttfrc_ms ?prefill_ms ()
   ; reasoning_effort = None
   ; canonical_model_id = None
   ; reasoning_source = None
+  ; reasoning_prefix = None
   ; effective_context_window = None
   ; provider_internal_action_count = None
   ; ttfrc_ms

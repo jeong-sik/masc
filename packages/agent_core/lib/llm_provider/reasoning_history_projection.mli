@@ -74,3 +74,76 @@ val project_for_provider_config
     the immutable projection value; payload size is independent of history
     length and endpoint URLs are never logged. *)
 val observe : component:string -> stream:bool -> t -> unit
+
+(** {1 Creation-prefix binding} *)
+
+type prefix_drop_cause =
+  | Prefix_source_not_present
+  | Prefix_digest_absent
+  | Prefix_request_mismatch
+  | Prefix_reasoning_mismatch
+[@@deriving show]
+
+type prefix_drop =
+  { message_index : int
+  ; cause : prefix_drop_cause
+  }
+[@@deriving show]
+
+type prefix_verify_error =
+  | Malformed_prefix_entry of
+      { message_index : int
+      ; classification : Types.Reasoning_prefix.classification
+      }
+[@@deriving show]
+
+type prefix_verdict =
+  { messages : Types.message list
+  ; prefix_drops : prefix_drop list
+  ; removed_empty_assistant_indices : int list
+  ; final_digest : string
+  }
+[@@deriving show]
+
+val prefix_verify_error_to_string : prefix_verify_error -> string
+
+(** Wire bytes of one message's content through the caller's encoder, hashed.
+    The record side hashes the response content with the same function, so a
+    byte edited inside the message fails the comparison below. *)
+val content_wire_digest
+  :  encode_block:(Types.content_block -> Yojson.Safe.t)
+  -> Types.content_block list
+  -> string
+
+(** Drop reasoning whose creation prefix cannot be proven identical to the
+    current request. A binding wire (Anthropic today) verifies each signed
+    thinking block against the system prompt, the tools, the thinking
+    controls, and every message before it; replaying one across a rewritten
+    prefix fails the whole request with a 400 no retry clears. The fold
+    chains a digest over [head] (the request's own head members in wire
+    order) and every admitted block, and admits a message's reasoning only
+    when the source is present, the recorded request digest equals the chain
+    before the message, and the recorded message digest equals
+    {!content_wire_digest} of its current content.
+
+    Callers pass post-projection, post-merge messages with the exact encoder
+    the wire serializes with; [role_tag] is the wire's role spelling. The
+    fold mirrors {!project}: emptied assistants are removed, other roles
+    never are. [final_digest] is the chain after the last message — the
+    value the record side stamps as the new response's request digest.
+    Malformed entries refuse loudly like {!error}; every other doubt drops. *)
+val verify_prefix_binding
+  :  head:(string * Yojson.Safe.t) list
+  -> encode_block:(Types.content_block -> Yojson.Safe.t)
+  -> role_tag:(Types.role -> string)
+  -> Types.message list
+  -> (prefix_verdict, prefix_verify_error) result
+
+(** Bounded drop diagnostics in the shape of {!observe}: per-cause counts, a
+    bounded sample of dropped indices, and the emptied-assistant count.
+    Exact per-message evidence remains in the verdict. *)
+val observe_prefix_drops
+  :  component:string
+  -> stream:bool
+  -> prefix_verdict
+  -> unit

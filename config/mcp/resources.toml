@@ -135,7 +135,7 @@ mime_type = "application/json"
 uri_template = "masc://wiki/{topic}"
 name = "Wiki Page"
 title = "Wiki Page"
-description = "Read one wiki page by topic name"
+description = "Read one wiki page by topic name. The topic log reads the wiki's append-only log of page creations and updates. Each page and the log are also listed as resources."
 mime_type = "text/markdown"
 
 [[resource_templates]]

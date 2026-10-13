@@ -460,7 +460,7 @@ let handle_list_tools_eio
     make_response ~id (`Assoc result_fields)
 ;;
 
-let handle_list_resources_eio id cursor =
+let handle_list_resources_eio ~base_path id cursor =
   let tool_help_resources =
     public_tool_help_schemas ()
     |> List.sort (fun (a : Masc_domain.tool_schema) (b : Masc_domain.tool_schema) ->
@@ -475,7 +475,9 @@ let handle_list_resources_eio id cursor =
         ())
   in
   let resources =
-    Mcp_server.resources @ tool_help_resources
+    Mcp_server.resources
+    @ tool_help_resources
+    @ Mcp_server_eio_resource.wiki_resources ~base_path
     |> List.sort (fun (a : Mcp_server.mcp_resource) b -> String.compare a.uri b.uri)
   in
   match TP.page_items_with_cursor ~kind:"resources" resources cursor with
@@ -937,7 +939,8 @@ let handle_request
                   (fun _auth_token ->
                      match TP.parse_cursor_only_params req.params with
                      | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
-                     | Ok { cursor } -> handle_list_resources_eio id cursor)
+                     | Ok { cursor } ->
+                       handle_list_resources_eio ~base_path id cursor)
               | "resources/read" ->
                 with_required_auth
                   ~base_path

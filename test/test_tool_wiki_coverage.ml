@@ -765,6 +765,41 @@ let test_refused_writes_leave_no_log_line () =
     Alcotest.(check string) "the log is unchanged" before (own_file ctx "log.md"))
 
 (* ============================================================
+   Two writers at once
+   ============================================================
+
+   Both writers read revision 1 and both send an update. Under Eio the page
+   write hops to a system thread, so the first writer's fiber yields between
+   its revision check and its write, and the second writer runs. The wiki lock
+   is what keeps the second writer from reading revision 1 in that gap:
+   without it both updates are accepted, both write revision 2, and one body
+   is lost with no refusal to say so. *)
+let test_two_writers_on_one_revision_do_not_both_win () =
+  with_temp_base_path (fun ctx ->
+    create_ok ctx (create_args ~page:"shared" ~body:"first body" ());
+    let results =
+      Eio_main.run (fun _env ->
+        Eio.Fiber.List.map
+          (fun writer ->
+             update ctx
+               (update_args ~page:"shared" ~base_revision:1 ~body:("body from " ^ writer)
+                  ~note:("change by " ^ writer) ()))
+          [ "writer-a"; "writer-b" ])
+    in
+    let accepted = List.filter (fun (ok, _) -> ok) results in
+    let refused = List.filter (fun (ok, _) -> not ok) results in
+    Alcotest.(check int) "exactly one update is accepted" 1 (List.length accepted);
+    Alcotest.(check int) "the other is refused" 1 (List.length refused);
+    List.iter
+      (fun (_, msg) ->
+         Alcotest.(check bool) "the refusal says where the page is now" true
+           (String_util.contains_substring msg "is at revision 2, not 1"))
+      refused;
+    Alcotest.(check int) "the page is at revision 2" 2 (frontmatter_of ctx "shared").revision;
+    Alcotest.(check int) "the log has one update line" 1
+      (List.length (lines_naming "] update r" (own_file ctx "log.md"))))
+
+(* ============================================================
    Test runner
    ============================================================ *)
 
@@ -810,6 +845,7 @@ let () =
       Alcotest.test_case "missing base_revision" `Quick (test_update_missing_field "base_revision");
       Alcotest.test_case "missing body" `Quick (test_update_missing_field "body");
       Alcotest.test_case "missing note" `Quick (test_update_missing_field "note");
+      Alcotest.test_case "two writers on one revision do not both win" `Quick test_two_writers_on_one_revision_do_not_both_win;
       Alcotest.test_case "a header that does not read is not rewritten" `Quick test_update_refuses_a_page_whose_header_does_not_read;
     ]);
     ("wiki_search", [

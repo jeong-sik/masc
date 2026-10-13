@@ -4381,7 +4381,7 @@ let%test "parse_sse_event: known event still parses normally" =
     false
 ;;
 
-let test_block_starts (events : sse_event list) =
+let[@warning "-32"] test_block_starts (events : sse_event list) =
   List.filter_map (function
     | ContentBlockStart {index;content_type;_} -> Some (index,content_type)
     | MessageStart _ | ContentBlockDelta _ | ContentBlockStop _ | MessageDelta _
@@ -4391,7 +4391,7 @@ let test_block_starts (events : sse_event list) =
     | StreamRepeating _ -> None) events
 ;;
 
-let test_block_deltas (events : sse_event list) =
+let[@warning "-32"] test_block_deltas (events : sse_event list) =
   List.filter_map (function
     | ContentBlockDelta {index;delta} -> Some (index,delta)
     | MessageStart _ | ContentBlockStart _ | ContentBlockStop _ | MessageDelta _
@@ -4401,7 +4401,7 @@ let test_block_deltas (events : sse_event list) =
     | StreamRepeating _ -> None) events
 ;;
 
-let test_is_parse_failed : sse_event -> bool = function
+let[@warning "-32"] test_is_parse_failed : sse_event -> bool = function
   | SSEParseFailed _ -> true
   | MessageStart _ | ContentBlockStart _ | ContentBlockDelta _ | ContentBlockStop _
   | MessageDelta _ | MessageStop | Ping | SSEError _ | NDJSONError _
@@ -4410,13 +4410,13 @@ let test_is_parse_failed : sse_event -> bool = function
   | StreamRepeating _ -> false
 ;;
 
-let test_thinking_text : content_delta -> string option = function
+let[@warning "-32"] test_thinking_text : content_delta -> string option = function
   | ThinkingDelta text -> Some text
   | TextDelta _ | TextSnapshot _ | ThinkingSignatureDelta _ | RedactedThinkingSnapshot _
   | ReasoningDetailsDelta _ | InputJsonDelta _ | InputJsonSnapshot _ | MediaDelta _ -> None
 ;;
 
-let test_visible_text : content_delta -> string option = function
+let[@warning "-32"] test_visible_text : content_delta -> string option = function
   | TextDelta text -> Some text
   | TextSnapshot _ | ThinkingDelta _ | ThinkingSignatureDelta _ | RedactedThinkingSnapshot _
   | ReasoningDetailsDelta _ | InputJsonDelta _ | InputJsonSnapshot _ | MediaDelta _ -> None

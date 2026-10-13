@@ -330,34 +330,55 @@ let finish_writer_scope store captured run_writer =
           Printexc.raise_with_backtrace reserved backtrace))
 ;;
 
-let with_fresh store agent run =
+(* A protected writer cannot share its cancellation context with the provider:
+   cancelling that context would kill the actor before [abort_after_exception]
+   could persist the terminal event. Capture the actual caller context in a
+   child switch, then return only the callback to it. The callback's child
+   fibers therefore remain cancellable even inside a surrounding [Fiber.first]. *)
+let with_writer_lifetime run =
+  Eio.Switch.run (fun caller_sw ->
+    Eio.Cancel.protect (fun () -> run caller_sw))
+;;
+
+let in_caller_switch ~sw run =
+  (* Join the callback's own child fibers before closing the writer and
+     delivering the captured terminal disposition. Fiber-local bindings are
+     inherited by [fork_promise]; only cancellation ownership changes. *)
+  Eio.Fiber.fork_promise ~sw (fun () -> Eio.Switch.run run)
+  |> Eio.Promise.await_exn
+;;
+
+let with_fresh store agent run = with_writer_lifetime @@ fun caller_sw ->
   let captured : terminal_disposition option ref = ref None in
   let on_terminal_disposition = captured_terminal_sink store captured in
   finish_writer_scope store captured (fun () ->
     Execution_lane_writer.run ~codec:store.codec ~dir:store.dir
-    @@ fun ~sw writer ->
+    @@ fun ~sw:_ writer ->
     match
       Execution_agent_scope.start ~writer ~agent_name:agent.Agent_types.state.config.name
     with
     | Error error ->
       Error (execution_failure (Execution_agent_scope.error_to_string error))
     | Ok scope ->
-      let ready = prepare_scope store on_terminal_disposition scope in
-      (match ready with
-       | Error detail ->
-         abort_error
-           scope
-           on_terminal_disposition
-           (execution_failure ("scope locator sink failed: " ^ detail))
-       | Ok () -> with_scope ?on_terminal_disposition scope (fun () -> run ~sw scope)))
+      in_caller_switch ~sw:caller_sw (fun sw ->
+        let ready = prepare_scope store on_terminal_disposition scope in
+        match ready with
+        | Error detail ->
+          abort_error
+            scope
+            on_terminal_disposition
+            (execution_failure ("scope locator sink failed: " ^ detail))
+        | Ok () ->
+          with_scope ?on_terminal_disposition scope
+            (fun () -> run ~sw scope)))
 ;;
 
-let with_resumed store locator agent run =
+let with_resumed store locator agent run = with_writer_lifetime @@ fun caller_sw ->
   let captured : terminal_disposition option ref = ref None in
   let on_terminal_disposition = captured_terminal_sink store captured in
   finish_writer_scope store captured (fun () ->
     Execution_lane_writer.resume ~codec:store.codec ~dir:store.dir
-    @@ fun ~sw writer ->
+    @@ fun ~sw:_ writer ->
     match Execution_lane_writer.await_ready writer with
     | Error failure ->
       Error (execution_failure (Execution_lane_writer.scope_failure_to_string failure))
@@ -371,15 +392,17 @@ let with_resumed store locator agent run =
        | Error error ->
          Error (execution_failure (Execution_agent_scope.error_to_string error))
        | Ok scope ->
-         (match prepare_scope store on_terminal_disposition scope with
-          | Error detail ->
-            abort_error
-              scope
-              on_terminal_disposition
-              (execution_failure ("scope locator sink failed: " ^ detail))
-          | Ok () ->
-            Execution_context.with_resume_once (fun () ->
-              with_scope ?on_terminal_disposition scope (fun () -> run ~sw scope)))))
+         in_caller_switch ~sw:caller_sw (fun sw ->
+           match prepare_scope store on_terminal_disposition scope with
+           | Error detail ->
+             abort_error
+               scope
+               on_terminal_disposition
+               (execution_failure ("scope locator sink failed: " ^ detail))
+           | Ok () ->
+             Execution_context.with_resume_once (fun () ->
+               with_scope ?on_terminal_disposition scope
+                 (fun () -> run ~sw scope)))))
 ;;
 
 let with_store store agent run =

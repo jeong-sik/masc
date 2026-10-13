@@ -1,4 +1,6 @@
-(** Private ownership wrapper for one fresh Agent execution journal. *)
+(** Private ownership wrapper for one Agent execution journal. The provider and
+    tools retain the caller's cancellation scope. The writer remains available
+    until cancellation has committed its terminal event and drained the journal. *)
 
 type runtime
 type store

@@ -494,7 +494,7 @@ let name_width_divisor = 3
 let label_cells_cap = 24
 let label_cells_min = 6
 
-let detail_gap = "  "
+let detail_gap = "   "
 let detail_separator = " \xc2\xb7 "
 
 let usd_decimals = 2
@@ -787,12 +787,18 @@ let draw_groups ~width groups =
        | None -> []
        | Some email -> note_lines ~tone:(Theme.recede ()) email)
   in
+  (* One empty line between accounts so a multi-window account reads as a unit. *)
+  let rec separated_entries = function
+    | [] -> []
+    | [ entry ] -> entry
+    | entry :: rest -> entry @ ("" :: separated_entries rest)
+  in
   let draw_group (section, entries) =
     let tone = section_tone section in
     (" " ^ Ansi.bold ^ tone
      ^ Printf.sprintf "%s (%d)" (section_title section) (List.length entries)
      ^ Ansi.reset)
-    :: List.concat_map (draw_entry tone) entries
+    :: separated_entries (List.map (draw_entry tone) entries)
   in
   let rec separated = function
     | [] -> []

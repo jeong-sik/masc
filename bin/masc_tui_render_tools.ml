@@ -67,7 +67,9 @@ let skill_invocation_text = function
       { origin; served_content } ->
     skill_instruction_origin_text origin, skill_served_content_text served_content
   | Masc.Keeper_skill_activation_ledger.Composition_invocation
-      { origin; tool_name } ->
+      { origin; tool_name }
+  | Masc.Keeper_skill_activation_ledger.Nested_composition_invocation
+      { origin; tool_name; scope = _ } ->
     ( skill_composition_origin_text ~tool_name origin
     , "composition invocation tool=" ^ tool_name )
 

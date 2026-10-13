@@ -4267,7 +4267,7 @@ let lane_run_output_lines ~details ~width (detail : Tui_decode.lane_run_detail) 
           [Printf.sprintf "Confidence %.3f" judgment.confidence]
           @ List.map (fun (decision, probability) ->
               Printf.sprintf "%s %.3f" (Masc.Typesafeai_librarian_preflight.decision_label decision) probability)
-              judgment.probabilities
+              judgment.reported_probabilities
         | _ -> [] in
       let elapsed = match reading.lp_elapsed_s with
         | None -> [] | Some seconds -> [Printf.sprintf "JEV elapsed %.3fs" seconds] in

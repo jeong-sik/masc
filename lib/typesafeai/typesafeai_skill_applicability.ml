@@ -91,7 +91,11 @@ let assess ?clock ~keeper_id ~context ~reference ~body () =
         | Judged (evaluated, judgment) -> observe
             [ "status", `String "judged"; "model", `String evaluated.response.model
             ; "request_body_sha256", `String evaluated.request_body_sha256
-            ; "decision", `String (label judgment.choice) ]);
+            ; "decision", `String (label judgment.choice)
+            ; "reported_probability_sum", `Float judgment.reported_probability_sum
+            ; "reported_probabilities", `Assoc (List.map
+                (fun (choice, probability) -> label choice, `Float probability)
+                judgment.reported_probabilities) ]);
        Evaluated { reference; body_sha256; requested_models; outcome })
 ;;
 
@@ -125,8 +129,9 @@ let to_yojson = function
         [ "status", `String "judged"
         ; "decision", `String (label judgment.choice)
         ; "confidence", `Float judgment.confidence
-        ; "probabilities", `Assoc (List.map
-            (fun (choice, probability) -> label choice, `Float probability) judgment.probabilities)
+        ; "reported_probability_sum", `Float judgment.reported_probability_sum
+        ; "reported_probabilities", `Assoc (List.map
+            (fun (choice, probability) -> label choice, `Float probability) judgment.reported_probabilities)
         ] @ evaluated_fields evaluated
     in
     `Assoc ([ "reference", Skill_reference.to_yojson reference

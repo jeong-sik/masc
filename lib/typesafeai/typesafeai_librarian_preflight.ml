@@ -79,6 +79,7 @@ let to_yojson t =
     | Judged (evaluated, judgment) ->
       [ "status", `String "judged"; "decision", `String (label judgment.choice)
       ; "confidence", `Float judgment.confidence
-      ; "probabilities", `Assoc (List.map (fun (choice, probability) -> label choice, `Float probability) judgment.probabilities) ]
+      ; "reported_probability_sum", `Float judgment.reported_probability_sum
+      ; "reported_probabilities", `Assoc (List.map (fun (choice, probability) -> label choice, `Float probability) judgment.reported_probabilities) ]
       @ provenance evaluated in
   `Assoc (fields @ ["elapsed_s", match t.elapsed_s with None -> `Null | Some elapsed -> `Float elapsed])

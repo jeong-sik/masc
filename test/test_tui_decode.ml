@@ -4944,13 +4944,15 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     "rewriting_through", `Null; "prepared", prepared; "synthesis", `Null] in
   let context_payload cycle = map_keeper 0 (replace_field "context_cycle" cycle) json in
   let synthesis = `Assoc ["observed_at", `Float 1700000000.; "trace_id", `String "context-trace";
-    "state", `String "not_committed"; "range", `Assoc ["start_atom", `Int 3;
+    "state", `String "not_committed"; "stop_reason", `String "no_smaller_range_evidence";
+    "range", `Assoc ["start_atom", `Int 3;
       "end_atom", `Int 5; "completed_end_atom", `Int 20]] in
   let with_synthesis = replace_field "synthesis" synthesis cycle in
   (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (context_payload with_synthesis) with
    | Ok snapshot ->
      (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_synthesis with
       | Some {state=Masc.Keeper_continuity_observation.Not_committed;
+          stop_reason=Some No_smaller_range_evidence;
           range=Some {start_atom=3;end_atom=5;completed_end_atom=20};_} -> ()
       | _ -> Alcotest.fail "synthesis stop or atom frontier lost")
    | Error detail -> Alcotest.fail detail);
@@ -4958,6 +4960,11 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     (memory_health_rejects (
       (context_payload (replace_field "synthesis" invalid cycle)))))
     [replace_field "state" (`String "drained") synthesis;
+     replace_field "stop_reason" (`String "provider_quota") synthesis;
+     replace_field "stop_reason" (`String "source_read_failed") synthesis;
+     replace_field "stop_reason" `Null synthesis;
+     (match synthesis with `Assoc fields -> `Assoc (("stop_reason", `Null) :: fields) | value -> value);
+     replace_field "detail" (`String "PRIVATE_ERROR") synthesis;
      replace_field "trace_id" `Null synthesis;
      replace_field "state" (`String "running") (replace_field "range" `Null synthesis)];
   (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (context_payload cycle) with
@@ -10045,7 +10052,8 @@ let test_librarian_preflight_detail_reports_actual_route () =
     `Assoc
       ["status", `String "judged"; "decision", `String decision;
        "confidence", `Float 0.9;
-       "probabilities", `Assoc probs;
+       "reported_probabilities", `Assoc probs;
+       "reported_probability_sum", `Float 1.;
        "model", `String "jev-fixture"; "elapsed_s", `Float 0.1;
        "destination", `Assoc ["destination_uri", `String "https://jev.invalid/v1/evaluate";
                               "model", `String "jev-requested"];
@@ -10281,10 +10289,11 @@ let test_librarian_preflight_detail_reports_actual_route () =
       request_body_sha256=String.make 64 'a'; passed_over=[transport; http "busy"; http "\255"] } in
   let judgment : P.decision Typesafeai_types.decoded_choice =
     {choice=P.Needs_generation;confidence=0.9;
-     probabilities=[P.Keep_current,0.05;P.Needs_generation,0.9;P.Uncertain,0.05]} in
+     reported_probability_sum=1.;
+     reported_probabilities=[P.Keep_current,0.05;P.Needs_generation,0.9;P.Uncertain,0.05]} in
   let observed outcome elapsed_s = P.to_yojson {outcome;elapsed_s} in
   let received_fields = ["model";"destination";"request_body_sha256";"passed_over";
-                         "decision";"confidence";"probabilities"] in
+                         "decision";"confidence";"reported_probabilities";"reported_probability_sum"] in
   List.iter (fun (label, outcome, elapsed_s, path) ->
     let observation = observed outcome elapsed_s in
     accepted label ~path observation;
@@ -10320,7 +10329,7 @@ let test_librarian_preflight_detail_reports_actual_route () =
   List.iter (fun (key,value) -> rejected "native choice contract preserved" ~path:"full_lane"
     (with_field key value judged))
     ["confidence",`Float 1.1; "decision",`String "keep_current";
-     "probabilities",`Assoc ["keep_current",`Float 0.05;"needs_generation",`Float 0.9]];
+     "reported_probabilities",`Assoc ["keep_current",`Float 0.05;"needs_generation",`Float 0.9]];
   let mismatched_http = C.attempt_to_yojson (http "busy")
     |> with_field "destination_uri" (`String "https://different.invalid/evaluate") in
   rejected "received answer cannot misattribute a refused endpoint" ~path:"full_lane"

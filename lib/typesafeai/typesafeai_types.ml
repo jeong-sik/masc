@@ -299,7 +299,8 @@ let choice_of_set ~instructions set =
 
 type 'option decoded_choice =
   { choice : 'option
-  ; probabilities : ('option * float) list
+  ; reported_probabilities : ('option * float) list
+  ; reported_probability_sum : float
   ; confidence : float
   }
 
@@ -324,17 +325,14 @@ let decode_choice set = function
       then Ok ()
       else Error "typesafeai: probabilities and confidence must be finite values from zero to one"
     in
-    let total = List.fold_left (fun sum (_, p) -> sum +. p) 0.0 probabilities in
-    (* Summing bounded IEEE-754 values can accumulate one rounding error per option. *)
-    let rounding_error = Float.epsilon *. float_of_int (List.length probabilities) in
-    let* () =
-      if Float.abs (total -. 1.0) <= rounding_error then Ok ()
-      else Error "typesafeai: probabilities must sum to one"
-    in
+    (* JSON object member order has no semantic meaning. Sum in the declared
+       option order so diagnostic validation survives object reserialization. *)
+    let total = List.fold_left
+        (fun sum label -> sum +. List.assoc label probabilities) 0.0 labels in
     let* () =
       match List.assoc_opt choice probabilities with
-      | Some p when List.for_all (fun (_, other) -> p >= other) probabilities -> Ok ()
-      | _ -> Error "typesafeai: choice must have a highest probability"
+      | Some p when p > 0.0 && List.for_all (fun (_, other) -> p >= other) probabilities -> Ok ()
+      | _ -> Error "typesafeai: choice must have a positive highest reported probability"
     in
     let* choice = option_of_label set choice in
     let rec decode_probabilities acc = function
@@ -344,7 +342,7 @@ let decode_choice set = function
         decode_probabilities ((option, probability) :: acc) rest
     in
     let* probabilities = decode_probabilities [] probabilities in
-    Ok ({ choice; probabilities; confidence } : _ decoded_choice)
+    Ok ({ choice; reported_probabilities = probabilities; reported_probability_sum = total; confidence } : _ decoded_choice)
   | Score_answer _ -> Error "typesafeai: expected a choice answer, got a score answer"
   | Noul_answer _ -> Error "typesafeai: expected a choice answer, got a noul answer"
 ;;

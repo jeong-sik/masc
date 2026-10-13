@@ -55,20 +55,21 @@ let relevance_question ~choices ~interests candidate =
 ;;
 
 let rationale
-      ({ Typesafeai_types.choice; probabilities; confidence } :
+      ({ Typesafeai_types.choice; reported_probabilities; reported_probability_sum; confidence } :
         decision Typesafeai_types.decoded_choice)
   =
   let label = decision_label in
   let probabilities =
     List.map
-      (fun (decision, probability) -> Printf.sprintf "%s:%.2f" (label decision) probability)
-      probabilities
+      (fun (decision, probability) -> Printf.sprintf "%s:%.17g" (label decision) probability)
+      reported_probabilities
     |> String.concat ", "
   in
   Printf.sprintf
-    "TypeSafe AI Jev: %s (confidence=%.2f, %s)"
+    "TypeSafe AI Jev: %s (confidence=%.2f, reported_sum=%.17g, reported_values=%s)"
     (label choice)
     confidence
+    reported_probability_sum
     probabilities
 ;;
 

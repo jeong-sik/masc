@@ -58,7 +58,7 @@ let test_invalid_judgment_does_not_deliver_or_discard_memory () =
   let evaluate ~state:_ ~questions:_ = Ok
     {Types.model="invalid-fixture";usage=None;answers=["selection", Types.Choice_answer
       {choice="comparison";confidence=0.9;probabilities=
-        ["current_decision",0.01;"comparison",0.93;"inspect_source",0.05;"not_needed",0.]}]} in
+        ["current_decision",0.93;"comparison",0.01;"inspect_source",0.05;"not_needed",0.]}]} in
   let resolve ~id:_ = Alcotest.fail "invalid judgment cannot authorize source selection" in
   match Selection.select ~evaluate ~resolve ~purpose candidate with
   | Deferred {reason=Invalid_answer _;_} -> ()

@@ -105,6 +105,25 @@ val keeper : cluster_root -> keeper:string -> Keeper.t -> location
 
 val dir : location -> string
 
+(** How long a store's day files are kept. The prune pass reads it from
+    here; a handle carries no retention of its own. *)
+type retention =
+  | Operator_window
+      (** The workspace's window, which the prune pass is given. A window of
+          zero or less keeps everything. *)
+  | Fixed_days of int  (** A window the store's own reader depends on. *)
+  | Own_days of (unit -> int)
+      (** The store's own setting, read each time the pass runs. *)
+  | Kept  (** Never removed by date. *)
+
+val retention : t -> retention
+
+val locations_on_disk : base_path:string -> cluster_root -> t -> location list
+(** Every directory of the store that exists now. A store kept per keeper
+    yields one location for each keeper directory found on disk, so the
+    files of a keeper that is gone are still found. The reaction ledger
+    also yields one per generation directory. *)
+
 val dated_path : location -> ts:float -> Jsonl_writer.dated_path
 (** The day file a row stamped [ts] belongs to. *)
 

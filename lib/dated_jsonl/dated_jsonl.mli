@@ -61,24 +61,21 @@ val read_error_to_string : read_error -> string
 val create :
   base_dir:string ->
   ?mutex:Eio.Mutex.t ->
-  ?retention_days:int ->
   ?max_bytes:int ->
   unit ->
   t
 (** [create ~base_dir ()] builds a store rooted at [base_dir].
     An optional [mutex] can be injected to bypass the shared registry
-    (useful for testing).  When [?retention_days] is positive, [append]
-    performs an opportunistic once-per-process-day prune of older day-files.
-    When [?max_bytes] is positive, [append] prunes oldest completed day-files
-    until the store is at or below the cap, while preserving the current
-    day-file. *)
+    (useful for testing). When [?max_bytes] is positive, [append] prunes
+    oldest completed day-files until the store is at or below the cap, while
+    preserving the current day-file. Day files are removed by age only by
+    {!prune_listed_stores}. *)
 
 module Store = Dated_jsonl_store
 (** The closed list of stores and where each one lives. *)
 
 val open_store :
   ?mutex:Eio.Mutex.t ->
-  ?retention_days:int ->
   ?max_bytes:int ->
   Store.location ->
   t
@@ -398,6 +395,13 @@ val iter_range : t -> since:string -> until:string -> (Yojson.Safe.t -> unit) ->
 val prune : t -> days:int -> int
 (** [prune t ~days] deletes day-files older than [days] days ago.
     Returns the number of files deleted.  Removes empty month directories. *)
+
+val prune_listed_stores :
+  base_path:string -> Store.cluster_root -> operator_window_days:int -> int
+(** Prune every store in {!Store.all} by its {!Store.retention}, in every
+    directory {!Store.locations_on_disk} finds. [operator_window_days] is
+    the workspace's window for [Operator_window] stores. Returns the number
+    of day files deleted. *)
 
 (* OCaml 5.3 emits warning 32 on this exported signature item under
    [warn-error=+a] even though the implementation and internal call sites are

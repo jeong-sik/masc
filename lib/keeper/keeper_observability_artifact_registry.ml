@@ -44,8 +44,8 @@ let entries =
         ; "Dashboard_http_keeper_execution_receipt"
         ; "Workspace_task_receipts"
         ]
-    ; retention_owner = "Server_runtime_startup_maintenance"
-    ; retention_policy = "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+    ; retention_owner = "Dated_jsonl.Store"
+    ; retention_policy = "Operator_window dated JSONL pruning (MASC_JSONL_RETENTION_DAYS)"
     }
   ; { artifact = Turn_record
     ; producer = "Keeper_turn_record_writer"
@@ -56,8 +56,8 @@ let entries =
         ; "Keeper_context_observation_projection"
         ; "Keeper_raw_trace_retention"
         ]
-    ; retention_owner = "Server_runtime_startup_maintenance"
-    ; retention_policy = "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+    ; retention_owner = "Dated_jsonl.Store"
+    ; retention_policy = "Operator_window dated JSONL pruning (MASC_JSONL_RETENTION_DAYS)"
     }
   ; { artifact = Runtime_manifest
     ; producer = "Keeper_runtime_manifest"
@@ -75,8 +75,8 @@ let entries =
     ; authority_source = "typed terminal/tool/board observations"
     ; truth_role = Derived_projection
     ; consumers = [ "Server_activity_http"; "Dashboard_snapshot" ]
-    ; retention_owner = "Server_runtime_startup_maintenance"
-    ; retention_policy = "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+    ; retention_owner = "Dated_jsonl.Store"
+    ; retention_policy = "Operator_window dated JSONL pruning (MASC_JSONL_RETENTION_DAYS)"
     }
   ; { artifact = Metrics_snapshot
     ; producer = "Keeper_unified_metrics_snapshot"
@@ -87,8 +87,8 @@ let entries =
         ; "Keeper_status_metrics"
         ; "Telemetry_unified"
         ]
-    ; retention_owner = "Server_runtime_startup_maintenance"
-    ; retention_policy = "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+    ; retention_owner = "Dated_jsonl.Store"
+    ; retention_policy = "Operator_window dated JSONL pruning (MASC_JSONL_RETENTION_DAYS)"
     }
   ; { artifact = Raw_trace
     ; producer = "Agent_core.Raw_trace"

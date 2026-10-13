@@ -33,17 +33,6 @@ let location masc_root =
 
 let store_dir masc_root = Dated_jsonl.Store.dir (location masc_root)
 
-(* Opt-in: unset keeps everything. A malformed value now means the same here
-   as in every other store (#27110). *)
-let retention_days () =
-  match
-    Env_config_core.get_retention_days
-      ~default:Env_config_core.Retain_forever
-      "MASC_TOOL_USAGE_LOG_RETENTION_DAYS"
-  with
-  | Env_config_core.Retain_forever -> None
-  | Env_config_core.Prune_after_days days -> Some days
-
 let ts_of_record = Dashboard_tool_source_freshness.latest_ts_of_record
 
 let latest_ts_of_entries entries =
@@ -153,8 +142,7 @@ let init ?cluster_name ~base_path () =
   let dir = store_dir masc_root in
   (try
      Fs_compat.mkdir_p dir;
-     let retention_days = retention_days () in
-     let store = Dated_jsonl.open_store ?retention_days (location masc_root) in
+     let store = Dated_jsonl.open_store (location masc_root) in
      Atomic.set store_ref (Some store)
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Atomic.set store_ref None;

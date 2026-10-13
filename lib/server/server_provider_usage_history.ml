@@ -4,7 +4,6 @@ let ( let* ) = Result.bind
 
 let store config =
   Dated_jsonl.open_store
-    ~retention_days:16
     (Dated_jsonl.Store.cluster
        (Workspace_utils.dated_store_cluster_root config)
        Dated_jsonl.Store.Cluster.Provider_usage_history)

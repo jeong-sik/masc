@@ -461,73 +461,6 @@ let response_trace_id_emitted () =
     check_json_string "response trace_id string recorded" "trace_id"
       "trace-resp-xyz" json)
 
-let capture_prunes_old_files () =
-  with_flag "1" (fun () ->
-    with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "1" (fun () ->
-      with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "4096" (fun () ->
-        let base = Filename.temp_dir "wirecap_prune" "" in
-        let capture_dir = Filename.concat base "wire-capture" in
-        let old_month = Filename.concat capture_dir "2000-01" in
-        ensure_dir capture_dir;
-        ensure_dir old_month;
-        let old_file = Filename.concat old_month "01.jsonl" in
-        write_file old_file (String.make 1024 'x');
-        Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"alpha"
-          ~turn_id:10
-          ~agent_core_turn:1 ~response_text:"bounded" ();
-        Alcotest.(check bool) "old capture file pruned" false
-          (Sys.file_exists old_file);
-        Alcotest.(check int) "only current capture remains" 1
-          (List.length (find_jsonl base)))))
-
-let startup_prune_removes_old_files_without_new_capture () =
-  with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "1" (fun () ->
-    let base = Filename.temp_dir "wirecap_startup_prune" "" in
-    let capture_dir = Filename.concat base "wire-capture" in
-    let old_month = Filename.concat capture_dir "2000-01" in
-    ensure_dir capture_dir;
-    ensure_dir old_month;
-    let old_file = Filename.concat old_month "01.jsonl" in
-    write_file old_file (String.make 1024 'x');
-    match Wire.prune_expired ~masc_root:base with
-    | Ok count ->
-      Alcotest.(check int) "startup owner prune removes expired capture" 1 count;
-      Alcotest.(check bool) "expired capture is gone without a new write" false
-        (Sys.file_exists old_file)
-    | Error error ->
-      Alcotest.fail (Wire.prune_error_to_string error))
-
-let capture_cache_reloads_when_retention_changes () =
-  with_flag "1" (fun () ->
-    with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "4096" (fun () ->
-      let base = Filename.temp_dir "wirecap_cache_retention" "" in
-      let capture_dir = Filename.concat base "wire-capture" in
-      let old_ts = Unix.gettimeofday () -. (2. *. 24. *. 60. *. 60.) in
-      let old_tm = Unix.gmtime old_ts in
-      let old_month_name =
-        Printf.sprintf "%04d-%02d"
-          (old_tm.Unix.tm_year + 1900)
-          (old_tm.Unix.tm_mon + 1)
-      in
-      let old_day_name = Printf.sprintf "%02d.jsonl" old_tm.Unix.tm_mday in
-      let old_month = Filename.concat capture_dir old_month_name in
-      ensure_dir capture_dir;
-      ensure_dir old_month;
-      let old_file = Filename.concat old_month old_day_name in
-      write_file old_file (String.make 1024 'x');
-      with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "30" (fun () ->
-        Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"alpha"
-          ~turn_id:20
-          ~agent_core_turn:1 ~response_text:"cache warmup" ());
-      Alcotest.(check bool) "old capture retained by warm cache" true
-        (Sys.file_exists old_file);
-      with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "1" (fun () ->
-        Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"alpha"
-          ~turn_id:21
-          ~agent_core_turn:1 ~response_text:"cache reload" ());
-      Alcotest.(check bool) "old capture pruned after retention change" false
-        (Sys.file_exists old_file)))
-
 (* #29009: the byte cap rotates the full current file to a completed
    [DD.NNN.jsonl] segment instead of dropping every later record of the
    day. Both records survive — the earlier one byte-identical in the
@@ -877,12 +810,6 @@ let () =
             response_capture_writes_redacted;
           Alcotest.test_case "write failure is best effort" `Quick
             response_capture_failure_is_best_effort;
-          Alcotest.test_case "capture store prunes old files" `Quick
-            capture_prunes_old_files;
-          Alcotest.test_case "startup owner prune expires inactive captures" `Quick
-            startup_prune_removes_old_files_without_new_capture;
-          Alcotest.test_case "capture store reloads on retention change" `Quick
-            capture_cache_reloads_when_retention_changes;
           Alcotest.test_case "current file cap rotates into a segment" `Quick
             capture_rotates_when_current_file_cap_would_be_exceeded;
           Alcotest.test_case "trace_id is emitted when provided" `Quick

@@ -131,8 +131,8 @@ finding 은 `kind` 로 갈리는 객체다.
 | `Tool_wiki_lint` | 서버 | 파일 읽기, 상한, 커서, 출력 렌더링 |
 
 - 선행 PR: `Tool_wiki` 안의 순수한 부분을 `Wiki_page_name`, `Wiki_page` 로 꺼내고 `Tool_wiki` 가 그것을 쓰게 한다. 동작은 바뀌지 않는다. 수용 기준은 기존 위키 테스트가 고치지 않은 채 통과하는 것이다. 이렇게 해야 서버 도구와 lint 가 같은 정의를 써서 "도구는 받는데 lint 는 못 읽는 페이지"가 생기지 않는다.
-- 순수 코어를 `unix`·`eio` 에 의존하지 않는 별도 dune 라이브러리로 둘지는 구현자가 `lib/dune` 을 읽고 정한다. 지금 `lib/` 의 라이브러리 경계는 미확인이다.
-- `Tool_wiki` 의 `Line`·`Tag`·`parse_frontmatter` 를 다른 모듈이 쓰는지는 미확인이다. 선행 PR 이 컴파일로 확인한다.
+- 순수 코어를 `unix`·`eio` 에 의존하지 않는 별도 dune 라이브러리로 둘지는 구현자가 정한다. `lib/dune` 의 `masc` 는 `(include_subdirs unqualified)` 인 한 라이브러리이고 위키 파일은 `lib/` 바로 아래에 있다(옮김: ocaml-agent-ic, PR #42963 댓글 6154636361).
+- `Tool_wiki` 의 `Line`·`Tag`·`parse_frontmatter` 는 다른 모듈이 쓴다: `lib/mcp_server_eio_resource.ml` 과 `test/test_tool_wiki_coverage.ml` (옮김: 같은 댓글). 그래서 선행 PR 은 `Tool_wiki` 가 같은 이름을 다시 내보내는 형태여야 기존 테스트를 고치지 않고 통과한다.
 
 ### 4.5 동시 쓰기
 
@@ -164,7 +164,7 @@ finding 은 `kind` 로 갈리는 객체다.
 |---|---|---|
 | 새 필수 키를 더함 | 새 바이너리가 지금 있는 페이지 전부를 `Missing_field` 로 못 읽는다 | 하지 않는다. 새 키는 선택 키로만 더한다 |
 | `source` 에 새 값을 더함 | 옛 바이너리가 그 값을 가진 새 페이지를 `Unknown_source` 로 못 읽는다(`tool_wiki.ml:211`) | 모르는 `source` 값을 견디는 읽기가 먼저 배포되고, 그 판이 운영에 깔린 뒤에만 새 값을 쓴다. 두 변경은 같은 PR 에 넣지 않는다 |
-| 선택 키를 더함 | 읽기는 키를 이름으로 찾으므로(`tool_wiki.ml:189`, `List.assoc_opt`) 모르는 키가 있어도 읽히는 것으로 보인다(추정). 그 앞 단계인 `Frontmatter.read` 가 모르는 키를 거절하는지는 읽지 않았다(미확인) | 조건부 허용. update 가 헤더를 다시 쓸 때 모르는 키를 보존하는지도 미확인이다. 선택 키를 더하는 PR 은 "모르는 키가 있는 페이지가 옛 바이너리에서 읽히는가"와 "옛 바이너리로 update 한 뒤에도 키가 남는가"를 테스트로 답해야 한다 |
+| 선택 키를 더함 | 읽기는 키를 이름으로 찾으므로(`tool_wiki.ml:189`, `List.assoc_opt`) 모르는 키가 있어도 읽히는 것으로 보인다(추정). 그 앞 단계인 `Frontmatter.read` 가 모르는 키를 거절하는지는 읽지 않았다(미확인) | 조건부 허용. update 는 모르는 키를 보존하지 않는다: `render_page` 가 헤더 여덟 줄을 고정으로 쓰고 `handle_update` 가 읽은 레코드에서 다시 쓰므로, 헤더의 다른 키는 update 한 번에 사라진다(옮김: ocaml-agent-ic, `lib/tool_wiki.ml:422-442`, main `c5a9722b8d` 직독, PR #42963 댓글 6154636361. 작성자는 다시 읽지 않음). 그래서 선택 키를 더하는 PR 은 `frontmatter` 레코드와 `render_page` 에 그 키를 함께 넣어야 한다. 옛 바이너리로 update 하면 새 키가 지워지는 것은 피할 수 없으므로 새 키를 아는 판이 먼저 깔린 뒤에 그 키를 쓴다. "모르는 키가 있는 페이지가 옛 바이너리에서 읽히는가"는 여전히 테스트로 답해야 한다 |
 
 이 RFC 의 1단계는 헤더를 바꾸지 않는다. 출처를 헤더 칸이 아니라 본문 절에 두는 이유가 이것이다.
 
@@ -212,7 +212,7 @@ finding 은 `kind` 로 갈리는 객체다.
 - Curator 가 위키에 직접 쓰는 일은 이 RFC 범위 밖이다(보류). 하게 되면 Curator 페이지는 `author` 칸이나 이름 접두로 구분한다. `source` 에 Curator 용 값을 더하지 않는다(§6).
 - 전제 상태(옮김: claude-mcp-client `c-fe7fee86ed973568c3536a6ea88d993b`, 미검증): 라이브 Curator lane 에는 `cli_slots` 만 있다. briefing 은 2026-10-08 이후 갱신되지 않았다. 둘 사이의 인과는 확인되지 않았다(원 댓글 `c-659bceab4f021414c2362be1c064d988` 이 로그로 확인하지 못했다고 적음). 설정이 적용되기 전에는 Curator 가 원장 입력을 처리한다고 가정하지 않는다.
 
-저장소 경계의 한 줄 정의는 초안이고 운영자 채택 전이다. 기준으로 삼는 제안은 이렇다(옮김: glossary-maniac): 개인 기억은 한 Keeper 가 확인한 사실, 위키는 사람과 Keeper 가 함께 쓴 페이지, 원장은 모델이 분류한 공유 주장과 충돌. 채택 경로는 용어집 문서 PR 이다.
+저장소 경계의 한 줄 정의는 초안이고 운영자 채택 전이다. 기준으로 삼는 제안은 이렇다(옮김: 리더 정리와 claude-mcp-client `c-fe7fee86ed973568c3536a6ea88d993b` 가 glossary-maniac 의 것으로 옮긴 세 줄, 원문 미직독): 개인 기억은 한 Keeper 가 확인한 사실, 위키는 사람과 Keeper 가 함께 쓴 페이지, 원장은 모델이 분류한 공유 주장과 충돌. 채택 경로는 용어집 문서 PR 이다.
 
 ## 10. 범위의 경계와 측정
 
@@ -264,7 +264,7 @@ finding 은 `kind` 로 갈리는 객체다.
 6. `Wiki_graph` 의 결과가 입력 순서를 섞어도 같다.
 7. 링크 파서 테이블 테스트: 코드 펜스 안, 이미지, 앵커, `[[x]]`, 상대 경로, 대문자 이름.
 8. 페이지 11장과 합성 5,000장에서 각각 한 번 돌려 걸린 시간과 출력 바이트를 PR 에 적는다. 값이 없는 채로 "수천 장을 견딘다"고 쓰지 않는다. 한 호출이 수 초를 넘으면 리더 결정의 되돌리는 조건에 따라 스위치를 다시 논의한다.
-9. 새 도구의 `config/tools/masc_wiki_lint.toml` 과 `test/test_keeper_tool_matrix_cases.ml` 의 인자 계약 분기가 같은 PR 에 있다. 도구 설명의 첫 단어는 `Experimental:` 이다.
+9. 새 도구의 `config/tools/masc_wiki_lint.toml` 이 같은 PR 에 있다. Keeper 쪽 이름으로 투영한다면 `test/test_keeper_tool_matrix_cases.ml` 의 인자 계약 분기도 같은 PR 에 넣는다(근거: 작성자의 기억, 파일 미독). 도구 설명의 첫 단어는 `Experimental:` 이다.
 
 ### 11.2 PR 쪼개기와 켜는 법·끄는 법
 
@@ -316,7 +316,7 @@ finding 은 `kind` 로 갈리는 객체다.
 
 읽지 못한 것:
 
-- `Frontmatter.read` 본체, `Line` 모듈 본체, update 가 헤더를 다시 쓰는 방식, 위키 테스트 파일들, `lib/dune` 의 라이브러리 경계, `Keeper_runtime_setting_registry`, 5,000장 규모의 실측.
+- `Frontmatter.read` 본체, `Line` 모듈 본체, update 가 헤더를 다시 쓰는 방식, 위키 테스트 파일들, `lib/dune` 의 라이브러리 경계, `Keeper_runtime_setting_registry`, 5,000장 규모의 실측. 이 가운데 update 가 헤더를 다시 쓰는 방식, `Line`·`Tag` 의 다른 사용처, `lib/dune` 의 경계는 구현자 ocaml-agent-ic 가 읽어 답했고(PR #42963 댓글 6154636361) 본문 §4.4 와 §6 에 옮김으로 반영했다. 작성자가 읽지 않았다는 사실은 그대로다.
 
 확신도:
 

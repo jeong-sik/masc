@@ -2,8 +2,34 @@
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-10-13
+
 ### Upgrade notes
 
+- **Check runtime.toml before upgrading.** From this version a provider row
+  whose catalog entry needs an API key must have a
+  `[providers.<id>.credentials]` block. The server starts without it, but the
+  first call routed to that row is refused, and every Keeper that uses the row
+  stops with a configuration error. Find the rows that lack the block and add
+  it before upgrading. A row that points a keyed catalog id at a proxy that
+  needs no key cannot take a block; follow the Known issues entry. Add the
+  block in the dashboard or TUI runtime.toml editor, whose save reloads the
+  loaded runtime table, or restart the server after editing the file by hand:
+  a file edited on disk is not re-read by a running server. After that, the
+  next turn that reaches the row is no longer refused for this reason
+  (#42927, #42933).
+- **Stop the server and move these folders before the first start.** From this version the folders below are read only under `<base_path>/.masc/`. Anything left at the old place is not read and is not deleted.
+
+  | Old place | New place |
+  |---|---|
+  | `<base_path>/docs/wiki` (`docs/library` up to 0.52) | `<base_path>/.masc/wiki` |
+  | `<base_path>/data/tool-events` | `<base_path>/.masc/tool-events` |
+  | `<base_path>/data/keeper-wake-payload` | `<base_path>/.masc/keeper-wake-payload` |
+  | `<base_path>/data/verdicts` | `<base_path>/.masc/verdicts` |
+  | `<base_path>/event-queue-bulk-backups` | `<base_path>/.masc/event-queue-bulk-backups` |
+
+  If this version has already run once, the new folders exist and a plain `mv` nests the old one inside; follow the #42789 entry below (#42757, #42789).
+- (Since 0.53.0, listed there only under Removed) `scripts/deploy.sh` does not read `config/keeper.env` or `.env`. Deploys take every variable from the invoking shell (#42513).
 - The wiki moved from `<base_path>/docs/wiki` to `<base_path>/.masc/wiki`. The
   old directory is not read. A workspace that has pages moves it while the
   server is stopped: `mv <base_path>/docs/wiki <base_path>/.masc/wiki`
@@ -55,18 +81,6 @@
   (`MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS`) are pruned by the server's
   startup and 24h prune instead of on append. A process other than the server
   that writes a dated store no longer removes old day files itself (#42878).
-- **Check runtime.toml before upgrading.** From this version a provider row
-  whose catalog entry needs an API key must have a
-  `[providers.<id>.credentials]` block. The server starts without it, but the
-  first call routed to that row is refused, and every Keeper that uses the row
-  stops with a configuration error. Find the rows that lack the block and add
-  it before upgrading. A row that points a keyed catalog id at a proxy that
-  needs no key cannot take a block; follow the Known issues entry. Add the
-  block in the dashboard or TUI runtime.toml editor, whose save reloads the
-  loaded runtime table, or restart the server after editing the file by hand:
-  a file edited on disk is not re-read by a running server. After that, the
-  next turn that reaches the row is no longer refused for this reason
-  (#42927, #42933).
 - Provider credentials are declared only in runtime.toml under
   `[providers.<id>.credentials]`; the catalog no longer knows environment
   variable names (#42543, #42933).
@@ -81,27 +95,29 @@
   (task-2314). Rename the row to an id the catalog does not know and declare
   its `endpoint` and model `capabilities` yourself, and it runs as before. A
   row renamed this way has no model discovery (#42927, #42933).
+- When the server refuses to start on a store left in an unrecoverable publication state, the message recommends `--accept-store-quarantine`. That option is refused in this state too; only the second route in the message (repair, then `validate-stores`) works, and the repair procedure is not documented yet (task-2288).
+- The wiki and the stores that moved under `.masc/` look empty when files are still at the old place, and no screen says so. Move them as the Upgrade notes table shows (task-2300).
+- The TUI Resources screen does not follow the resource list's next page, so a list longer than one page (512 entries by default) is cut off at its end, where the wiki rows sort (task-2309).
 
 ### Added
 
-- Read the JSONL day-file retention window from runtime.toml `[maintenance].jsonl_retention_days` when `MASC_JSONL_RETENTION_DAYS` is unset, so operators can set retention per workspace; the startup prune log names the window source (#42625).
-- Allow Lane Addons to use an Apple `container` microVM with verified image identity, isolated networking, read-only root and owned persistent state; keep Docker as the default for existing Lane Addons. (#42764)
-- Retain the runtime for recovery and refuse runtime changes that would silently replace an installation's persistent state. (#42764)
-- Board post attachments accept the kinds `file`, `audio`, `score` and `midi` and an optional `name`; the dashboard reads them and offers a stored one as a download (#42766).
-- `POST /api/v1/artifacts` stores an uploaded file of up to 32 MiB in the artifact store and returns its sha256 and size (#42767).
-- The TUI board read pane lists a post's attachments by kind, name and size (#42769).
-- TUI board compose attaches local files with Ctrl-A and uploads them when the post is sent; a path that is not a regular file, or a file over the artifact store's 32 MiB limit, is refused before it is read (#42775).
-- The TUI highlights `alphatex` code blocks (#42777).
-- The TUI draws an `alphatex` code block as guitar tablature, breaking at bar lines to fit the pane; a score it cannot draw shows its source with the reason (#42779).
-- `/queue clear` in the Keeper chat cancels, in one command, the waiting messages this TUI is tracking for the Keeper on screen: it drops unsent ones, takes back one handed over for sending but not yet posted, and asks the server to cancel each one it holds in its queue. See `docs/guides/tui-chat-queue.md` (#42780).
-- `resources/list` carries one `masc://wiki/<topic>` entry per wiki page, titled and described by the page's own title and summary, and `masc://wiki/log` once the wiki has a log, so a client that only lists resources, the TUI Resources screen among them, can open a page (#42851).
-- The page listing carries only files whose name is a valid page topic: a file like notes.json.md, whose URI would read back as a different page or as nothing, stays in the masc://wiki index with its reason instead of becoming a dead listing row (#42851).
-- Usage: in the TUI, open the System / Resources screen and select a `masc://wiki/<topic>` row to read that page, or `masc://wiki/log` for the append-only log of page creations and updates. The TUI does not follow the resource list's next page, so a list longer than one page (512 entries by default) is cut off at its end, where the wiki rows sort; task-2309 tracks that and the per-listing file reads (#42851).
-- `AGENT_CORE_ANTHROPIC_DROP_BLOCK=false` stops adaptive Sonnet 5.5 and Haiku 5.5 completions from sending `thinking.block_binding.prefix_mismatch_behavior = "drop_block"`. It is an experiment switch for measuring the output-token cost of `drop_block` (RFC-AC-041 Q15); unset keeps the current behavior (#42852).
-- Every Anthropic response now logs one `thinking_input_transformation_summary` line with the response `id`, `model` and the number of provider-reported `input_transformations`, including zero, so a mismatch rate has a denominator (#42852).
-- The TUI alphaTex reader takes repeat signs: `\ro` opens a repeat, `\rc N` closes it with the count of total plays, and `\ae n …` names the ending passes a bar plays on (#42858).
-- The ending list also reads alphaTab own parenthesized form, \ae (1 2 3), which is the form the writer emits, so a shared tab round-trips instead of failing the reader (#42858).
-- The TUI guitar tab draws repeat signs: a bar an `\ro` opened starts past `|:`, one an `\rc N` closed ends in `:|xN` with the count of total plays, and `\ae` numbers ride the left barline (#42859).
+- Experimental: Read the JSONL day-file retention window from runtime.toml `[maintenance].jsonl_retention_days` when `MASC_JSONL_RETENTION_DAYS` is unset, so operators can set retention per workspace; the startup prune log names the window source (#42625).
+- Experimental: Allow Lane Addons to use an Apple `container` microVM with verified image identity, isolated networking, read-only root and owned persistent state; keep Docker as the default for existing Lane Addons. (#42764)
+- Experimental: Retain the runtime for recovery and refuse runtime changes that would silently replace an installation's persistent state. (#42764)
+- Experimental: Board post attachments accept the kinds `file`, `audio`, `score` and `midi` and an optional `name`; the dashboard reads them and offers a stored one as a download (#42766).
+- Experimental: `POST /api/v1/artifacts` stores an uploaded file of up to 32 MiB in the artifact store and returns its sha256 and size (#42767).
+- Experimental: The TUI board read pane lists a post's attachments by kind, name and size (#42769).
+- Experimental: TUI board compose attaches local files with Ctrl-A and uploads them when the post is sent; a path that is not a regular file, or a file over the artifact store's 32 MiB limit, is refused before it is read (#42775).
+- Experimental: The TUI highlights `alphatex` code blocks (#42777).
+- Experimental: The TUI draws an `alphatex` code block as guitar tablature, breaking at bar lines to fit the pane; a score it cannot draw shows its source with the reason (#42779).
+- Experimental: `/queue clear` in the Keeper chat cancels, in one command, the waiting messages this TUI is tracking for the Keeper on screen: it drops unsent ones, takes back one handed over for sending but not yet posted, and asks the server to cancel each one it holds in its queue. See `docs/guides/tui-chat-queue.md` (#42780).
+- Experimental: `resources/list` carries one `masc://wiki/<topic>` entry per wiki page, titled and described by the page's own title and summary, and `masc://wiki/log` once the wiki has a log, so a client that only lists resources, the TUI Resources screen among them, can open a page (#42851).
+- Experimental: The page listing carries only files whose name is a valid page topic: a file like notes.json.md, whose URI would read back as a different page or as nothing, stays in the masc://wiki index with its reason instead of becoming a dead listing row (#42851).
+- Experimental: Usage: in the TUI, open the System / Resources screen and select a `masc://wiki/<topic>` row to read that page, or `masc://wiki/log` for the append-only log of page creations and updates. (#42851).
+- Experimental: `AGENT_CORE_ANTHROPIC_DROP_BLOCK=false` stops adaptive Sonnet 5.5 and Haiku 5.5 completions from sending `thinking.block_binding.prefix_mismatch_behavior = "drop_block"`. It is an experiment switch for measuring the output-token cost of `drop_block` (RFC-AC-041 Q15); unset keeps the current behavior (#42852).
+- Experimental: The TUI alphaTex reader takes repeat signs: `\ro` opens a repeat, `\rc N` closes it with the count of total plays, and `\ae n …` names the ending passes a bar plays on (#42858).
+- Experimental: The ending list also reads alphaTab own parenthesized form, \ae (1 2 3), which is the form the writer emits, so a shared tab round-trips instead of failing the reader (#42858).
+- Experimental: The TUI guitar tab draws repeat signs: a bar an `\ro` opened starts past `|:`, one an `\rc N` closed ends in `:|xN` with the count of total plays, and `\ae` numbers ride the left barline (#42859).
 
 ### Changed
 
@@ -110,14 +126,12 @@
   `.masc/` directory with the rest of the server's state, not in the
   workspace's own `docs/`, where they were untracked files of whatever
   repository the workspace is (#42757).
-- Exercise persistent Lane Addon runtime protection through declaration removal and reconciliation, preserving the stale-handle deletion guard in the microVM scenario. (#42765)
 - `scripts/nofile-status.sh` treats a `dune` under any `lockf` or `flock` as
   wrapped, so `--kill-bare-dune` leaves it alone (#42778).
 - The scripts that read `MASC_BASE_PATH` through `scripts/lib/masc_base_path.py`
   report a value that starts with an unexpanded `~` instead of expanding it
   (#42790).
 - `masc_operator_action` refuses a request whose `target_type` is valid but is not the one its action addresses (for example `broadcast` with `target_type: "keeper"`) when it reads the request, with `invalid target_type for <action> (expected <target>)`. It used to refuse it later, while writing the pending confirmation, with a store validation message (#42834).
-- The G1 checker rejects a run observation whose `execution_mode` is neither `matrix` nor `live` with `unknown execution_mode: <value>`. Such an observation used to be read as a matrix run and then left out of both counts (#42840).
 - The prune pass walks the list of dated stores and keeps each one by the rule
   on its entry. In a cluster other than the default one, transition-audit,
   audit-approvals, reaction-ledger and decision_audit are now pruned under
@@ -138,28 +152,15 @@
   keyed provider row with no `[providers.<id>.credentials]` block now says how
   to fix it: add a credentials block naming the environment variable that
   holds the key (#42933).
+- Every Anthropic response now logs one `thinking_input_transformation_summary` line with the response `id`, `model` and the number of provider-reported `input_transformations`, including zero, so a mismatch rate has a denominator (#42852).
 
 ### Removed
 
-- `Config_dir_resolver.data_dir`. Each store has its own function under the
-  masc root: `tool_events_dir`, `keeper_wake_payload_dir`, `verdicts_dir`,
-  `event_queue_bulk_backups_dir` (#42789).
 - `MASC_DATA_DIR`. It was declared as an override for `<base_path>/data`,
   forwarded to keeper processes and shown on the dashboard settings screen,
   but no store read it (#42797).
 - The TRPG prune step of `viewer-trunk.sh`; the script it called was never in
   the repository (#42800).
-- `Dated_jsonl.create ~base_dir` is removed. A dated store is opened with
-  `Dated_jsonl.open_store` and a location from `Dated_jsonl.Store`, so a store
-  can only be opened where the store list puts it (#42884).
-- `Jsonl_writer.dated_path`, `dated_path_now` and `append_dated_jsonl` are
-  removed. The day-file path is `Dated_jsonl.Store.dated_path`;
-  `Jsonl_writer` keeps `utc_calendar_day` and `day_key` (#42884).
-- The `Shared_audit` library is removed. Nothing outside its own tests used it
-  (#42884).
-- The `SharedAudit` TLA+ spec and its two configs are removed, with their
-  `scripts/tla-check.sh` entry. They modelled `lib/shared_audit`, which #42884
-  removed (#42906).
 
 ### Fixed
 
@@ -183,12 +184,11 @@
   stay. A paused keeper keeps its worktrees.
   Keeper commands that run `git worktree remove <path>` now have that path
   judged like `git worktree add` (#42619).
-- Preserve transmitted context for signed Anthropic responses across tool rounds and checkpoint replay without reabsorbing injected context as new memory evidence. Unsigned and other-provider responses retain request-only context behavior. Adaptive Sonnet/Haiku 5.5 requests now report and recover from invalidated thinking prefixes, including streaming and exact-output dispatch (#42713).
+- Preserve transmitted context for signed Anthropic responses across tool rounds and checkpoint replay without reabsorbing injected context as new memory evidence. Unsigned and other-provider responses retain request-only context behavior. Adaptive Sonnet/Haiku 5.5 requests now report and recover from invalidated thinking prefixes, including streaming and exact-output dispatch Whether this default stays is not decided yet; its effect on output tokens has not been measured in MASC (#42713).
 - Preserve reasoning-source and other message metadata when Keeper finalization updates visible response text, so checkpoint restore can replay reasoning under its original provider contract (#42716).
 - Exclude injected runtime context from Keeper memory history searches across checkpoints and disk History, preserving ordinary User-role messages and reporting malformed context provenance (#42718).
 - Keep malformed or duplicated runtime-context provenance out of Librarian conversation and absorption evidence, preserving positions and ordinary untagged user text (#42720).
 - Remove a retained runtime-context carrier when its paired final assistant reply is suppressed, keeping earlier tool exchanges and ordinary user messages in replay (#42722).
-- Align removed-memory search tests with pending snapshot publication recovery, including exact archive data and receipt cleanup after the journal becomes writable (#42723).
 - Preserve unsupported nested Anthropic tool-result values as text data instead of emitting invalid reasoning or tool protocol blocks, while retaining native images and documents (#42725).
 - Freeze model capabilities and Anthropic thinking policy for a prepared request so catalog reloads cannot change its token reservation, count projection or response reasoning source (#42727).
 - Bind the client response cache to the exact HTTP request and preserve original reasoning provenance in cached responses. Opaque injected transports execute without using this HTTP response cache; provider prompt caching is unchanged (#42728).
@@ -244,19 +244,10 @@
   500 "backup write failed" and cancelled nothing (#42817).
 - A Lane Add-on producer wakes its dependents in the step that settles it, before its binding is persisted, so a reader that saw the producer settled is not overtaken by an earlier commit's wake (#42819).
 - `masc doctor` reads the declared sandbox backend's state instead of printing one fixed sentence. A Mac without Rosetta or a default kernel, or a stopped container service, now reports its own reason as `needs_setup`. The setup status route does not probe the backend (#42820).
-- The run-and-read failed-pipeline test now answers keeper_spawn with the status field its output schema requires, so it reaches its pipeline assertion instead of failing plan validation (#42824).
 - The Sangokushi II and III Skills are split into a main file and references/ files so each fits one inline keeper_skill read and a Keeper with the machine package can load them (#42825).
 - The MSX tick route answers 200 with loaded=false when no machine is loaded, as the spectating TUI expects, instead of 400 (#42826).
-- `dune build @check` passes on main again: the lane container probe
-  compares the pids limit that #42764 made optional (#42829).
-- The adaptive thinking-binding and cache-hit latency contracts are now asserted by their tests, so test_model_catalog_default and test_complete_http are green again on main (#42838).
-- `dune build @check` passes on main again: the credential requirement test
-  matches the `Missing_declared_credential` case #42543 added (#42839).
-- main compiles again. Five matches named the wiki tool handlers by their pre-rename `Tool_library_*` names, and the lane add-on transport-error mapping did not list `Lane_addon_worker.Engine_failed`; both came from PRs that were each correct but merged independently (#42862).
-- `main` builds again. The wiki rename now reaches the five files that still named `Tool_library_search`, `Tool_library_read` and `Tool_masc_library_dispatch`, and the add-on worker error map lists `Engine_failed` (#42863).
 - Reading an operator judgment now requires every member the writer emits, with its JSON type, instead of filling a missing `surface`, `summary` or `keeper_name` with a default; a rejected line is logged as `load_all` documented (#42898).
 - Reading a keeper trajectory tool row now requires every member the writer emits, with its JSON type, instead of reading a missing `ts` as `0.0` (a call at the epoch, sorted first in the dashboard) or a missing `tool_name` as `""`; such a row is skipped like one without a gate object (#42901).
-- `bin/masc_tui_alphatex_score.ml` compiles again under warning 4: the two `| _ ->` arms over `token` that #42858 brought in after #42755 enabled the warning now list every constructor (#42924).
 
 ### Documentation
 
@@ -279,7 +270,6 @@
 
 - Remove the tests that searched product source files for exact strings, and the unused binding and doc sentence that existed for them (#42746).
 - The TUI decodes a board post's attachments entry by entry, keeping a broken entry with its reason instead of failing the post (#42768).
-- Withdraw the unreleased MASC-coupled Figma Studio experiment and retain its independent-service direction as a deferred idea; published v0.52.0 and the already-cut v0.53.0 candidate do not include this experiment. (#42786)
 - Test fixtures and comments use neutral paths instead of one operator's home
   folder (#42794).
 - The unknown-effect composition terminal test fails its write through the pending admission queue as well as the snapshot, so it still produces the failure with the Librarian on (#42815).
@@ -343,14 +333,32 @@
 - `Operator_judgment.Confidence.t` (a private float made only by `of_float`, 0.0..1.0 and finite) is the type of a judgment's confidence; `record` can no longer write a value `of_yojson` would refuse, and the range check is written once (#42921).
 - Comments and whitespace only: `Checkpoint_codec.checkpoint_content_block_to_json` documents that it raises nothing, and a doubled blank line in `capability_manifest.ml` is removed (#42923).
 - `Keeper_external_read_cursor` keeps its pending Memory receipts as `durable_range_id` / `official_range_id` instead of raw JSON, so `read` takes `receipt_scope` from the typed range rather than looking it up by key; the cursor file format is unchanged (#42930).
-
-## [0.54.0] - 2026-10-13
-
-### Changed
-- TBD
-
-### Deprecated
-- TBD
+- Align removed-memory search tests with pending snapshot publication recovery, including exact archive data and receipt cleanup after the journal becomes writable (#42723).
+- The run-and-read failed-pipeline test now answers keeper_spawn with the status field its output schema requires, so it reaches its pipeline assertion instead of failing plan validation (#42824).
+- `dune build @check` passes on main again: the lane container probe
+  compares the pids limit that #42764 made optional (#42829).
+- The adaptive thinking-binding and cache-hit latency contracts are now asserted by their tests, so test_model_catalog_default and test_complete_http are green again on main (#42838).
+- `dune build @check` passes on main again: the credential requirement test
+  matches the `Missing_declared_credential` case #42543 added (#42839).
+- main compiles again. Five matches named the wiki tool handlers by their pre-rename `Tool_library_*` names, and the lane add-on transport-error mapping did not list `Lane_addon_worker.Engine_failed`; both came from PRs that were each correct but merged independently (#42862).
+- `main` builds again. The wiki rename now reaches the five files that still named `Tool_library_search`, `Tool_library_read` and `Tool_masc_library_dispatch`, and the add-on worker error map lists `Engine_failed` (#42863).
+- `bin/masc_tui_alphatex_score.ml` compiles again under warning 4: the two `| _ ->` arms over `token` that #42858 brought in after #42755 enabled the warning now list every constructor (#42924).
+- `Config_dir_resolver.data_dir`. Each store has its own function under the
+  masc root: `tool_events_dir`, `keeper_wake_payload_dir`, `verdicts_dir`,
+  `event_queue_bulk_backups_dir` (#42789).
+- `Dated_jsonl.create ~base_dir` is removed. A dated store is opened with
+  `Dated_jsonl.open_store` and a location from `Dated_jsonl.Store`, so a store
+  can only be opened where the store list puts it (#42884).
+- `Jsonl_writer.dated_path`, `dated_path_now` and `append_dated_jsonl` are
+  removed. The day-file path is `Dated_jsonl.Store.dated_path`;
+  `Jsonl_writer` keeps `utc_calendar_day` and `day_key` (#42884).
+- The `Shared_audit` library is removed. Nothing outside its own tests used it
+  (#42884).
+- The `SharedAudit` TLA+ spec and its two configs are removed, with their
+  `scripts/tla-check.sh` entry. They modelled `lib/shared_audit`, which #42884
+  removed (#42906).
+- Exercise persistent Lane Addon runtime protection through declaration removal and reconciliation, preserving the stale-handle deletion guard in the microVM scenario. (#42765)
+- The G1 checker rejects a run observation whose `execution_mode` is neither `matrix` nor `live` with `unknown execution_mode: <value>`. Such an observation used to be read as a matrix run and then left out of both counts (#42840).
 
 ## [0.53.0] - 2026-10-13
 

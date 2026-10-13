@@ -202,6 +202,9 @@ let checkpoint_tool_result_to_json ~tool_use_id ~content ~outcome content_overri
        | Some _ -> [ "text_content", `String content ])
 ;;
 
+(* Total: every arm builds JSON from typed fields and raises nothing.
+   Callers rely on that and do not catch around it, so an arm that can fail
+   must change the return type instead of raising. *)
 let rec checkpoint_content_block_to_json block =
   match block with
   | ToolResult { tool_use_id; content; outcome; json = _; content_blocks } ->

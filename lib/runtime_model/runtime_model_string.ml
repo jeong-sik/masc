@@ -120,6 +120,9 @@ let make_registry_config
   then None
   else
     let headers = Binding.default_headers_for_kind defaults.kind in
+    (* Discovery is keyed on the entry's name, not on [defaults.kind]:
+       ollama_cloud also has kind "ollama" (models.toml), and asking its
+       remote base_url for a model list would change what "auto" resolves to. *)
     let discover =
       if Binding.provider_name_matches_kind_default provider_name Ollama
       then

@@ -70,7 +70,12 @@ type operand_spec =
 
 let operand_specs = function
   | "git" ->
-    [ Flag_operand "-C"; Subcommand_operands ([ "worktree"; "add" ], Some 1) ]
+    [ Flag_operand "-C"
+    ; Subcommand_operands ([ "worktree"; "add" ], Some 1)
+    ; Subcommand_operands ([ "worktree"; "remove" ], Some 1)
+      (* same single-path shape as add: a keeper removing its own worktree
+         names one path, and that operand reaches the same path judge *)
+    ]
   | "mkdir" | "rm" | "cp" | "mv" -> [ Subcommand_operands ([], None) ]
   | _ -> []
 ;;

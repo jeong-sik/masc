@@ -1,8 +1,10 @@
 import base64
 import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "figma-studio/host"))
@@ -96,6 +98,35 @@ class AdapterTests(unittest.TestCase):
         with self.assertRaises(ServiceRefused):
             self.adapter.step()
         self.assertEqual(self.host.calls, [])
+
+    def test_stalled_error_body_is_a_transport_failure(self):
+        release = threading.Event()
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(409)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", "100")
+                self.end_headers()
+                self.wfile.flush()
+                release.wait(5)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            api = FigmaApi(f"http://127.0.0.1:{server.server_port}", "token", timeout=0.1)
+            with self.assertRaisesRegex(TransportError, "interrupted"):
+                api.call("/v1/info", {})
+        finally:
+            release.set()
+            server.shutdown()
+            server.server_close()
+            thread.join()
 
     def test_rest_and_plugin_operation_ids_are_independent(self):
         self.host.rest_commands = [{"id": "edit", "file_key": "file", "root_id": "root"}]

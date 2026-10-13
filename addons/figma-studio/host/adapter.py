@@ -54,6 +54,8 @@ class FigmaApi:
         except urllib.error.HTTPError as error:
             try:
                 detail = json.loads(error.read(self.max_bytes)).get("error", "Request refused")
+            except (OSError, http.client.HTTPException) as interrupted:
+                raise TransportError("Figma service error response was interrupted") from interrupted
             except (ValueError, AttributeError):
                 detail = "Request refused"
             finally:

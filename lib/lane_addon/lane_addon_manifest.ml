@@ -124,6 +124,11 @@ let load ~path =
     let* revision = text ["revision"] in
     let* title = text ["title"] in
     let* image = text ["image"] in
+    let* runtime = match Otoml.find_opt document Fun.id ["runtime"] with
+      | None -> Ok Docker
+      | Some (Otoml.TomlString value) ->
+          Option.to_result ~none:"runtime requires docker or apple_container" (runtime_of_string value)
+      | Some _ -> Error "runtime requires docker or apple_container" in
     let* command = read ["command"] (Otoml.get_array Otoml.get_string) in
     let* names = read ["contributions"] (Otoml.get_array Otoml.get_string) in
     let* contributions =
@@ -140,16 +145,19 @@ let load ~path =
       | _ -> Error "act contribution requires a distinct world.actions.tool, and vice versa" in
     let* cpus = read ["resources"; "cpus"] (Otoml.get_float ~strict:false) in
     let* memory = read ["resources"; "memory_bytes"] Otoml.get_integer in
-    let* pids = read ["resources"; "pids"] Otoml.get_integer in
+    let* pids = match Otoml.find_opt document Fun.id ["resources"; "pids"] with
+      | None -> Ok None
+      | Some (Otoml.TomlInteger value) -> Ok (Some value)
+      | Some _ -> Error "resources.pids requires an integer" in
     let* max_reply_bytes = read ["resources"; "max_reply_bytes"] Otoml.get_integer in
     if command = [] || List.exists (fun arg -> String.trim arg = "") command
     then Error "command requires non-blank argv entries"
     else if contributions = [] then Error "at least one contribution is required"
     else
       let resources = { cpus; memory_bytes = Int64.of_int memory; pids; max_reply_bytes } in
-      match check_resources resources with
+      match check_resources ~runtime resources with
       | Error detail -> Error detail
-      | Ok () -> Ok { id; revision; title; contributions = List.rev contributions; image; command;
+      | Ok () -> Ok { id; revision; title; contributions = List.rev contributions; runtime; image; command;
           directory = Filename.dirname path; skills_directory; action_tool; state_storage; tool_invocation; exported_tools; outputs; refresh_policy; model_access; binding_schema; presentation;
           resources }
   in

@@ -94,20 +94,28 @@ coverage에는 독립적인 시각이 없으므로 시간창 밖이라고 추정
 
 ## 진행과 장애 경계
 
-한 instance에 독립 Docker container와 server-owned fiber를 둔다. Keeper 턴 switch를 쓰지 않는다.
+한 instance에 독립 worker와 server-owned fiber를 둔다. 패키지의 `runtime`은 기본 `docker` 또는 명시적인 `apple_container`다. Apple 실행은 전용 Linux microVM이며 Keeper의 작업 디스크·자격 증명·shim mount를 공유하지 않는다. Keeper 턴 switch를 쓰지 않는다.
 한 관측이 실행 중일 때 추가 갱신 신호는 하나로 합친다. 원장 전체를 알림 큐에 넣지 않는다.
 기존 활동의 완료 신호나 명시적인 observe 요청을 이용하며 새 세계 scheduler는 만들지 않는다.
 inspect는 마지막 완료 관측과 pending/error 상태를 함께 반환한다. 다른 worker의 완료를 기다리지 않는다.
 
-CPU·memory·pids·응답 크기는 TOML 자원 계약이며 실제 Docker 적용값을 확인한다.
+CPU·memory·응답 크기는 TOML 자원 계약이며 선택한 실행기의 실제 적용값을 확인한다.
+Docker는 fractional CPU, memory/swap, 필수 pids 제한과 no-new-privileges를 적용한다.
+Apple microVM은 양의 정수 vCPU와 정확한 MiB 단위 memory를 요구하며 pids를 선언하지 않는다.
+PID cgroup·swap·no-new-privileges가 Docker와 동일하다고 주장하지 않는다. 대신 독립 guest kernel,
+network none, read-only root, capability 제거와 전용 상태 volume을 확인한다.
+기존 runtime을 생략한 Docker 패키지의 직렬화·설치 revision은 유지한다.
 이 한도는 Keeper 행동 budget이 아니다. 격리가 실패하면 그 Add-on만 실패하며 host 실행으로 대체하지 않는다.
-detach는 정확한 container ID의 제거와 부재를 확인한다. Docker CLI 종료를 container 종료로 대체하지 않는다.
+detach는 저장된 runtime과 정확한 container ID의 제거와 부재를 확인한다. CLI 종료를 worker 종료로 대체하지 않는다.
 daemon 장애로 제거를 확인하지 못하면 cleanup incomplete다. 다른 Lane은 진행한다.
 특히 Docker create 응답 이전에 daemon이 멈추면 아직 컨테이너 ID를 확보하지 못한 상태다.
 그 구간의 detach를 완료로 표시하지 않는다. 재시작 후 ID가 없는 설치는 해당 인스턴스의
-정확한 container 이름으로 찾고 이름·소유권 label·실제 ID를 확인한 뒤 제거한다. Docker 조회와
+정확한 container 이름으로 찾고 이름·소유권 label·실제 ID를 확인한 뒤 제거한다. 선택한 실행기의 조회와
 제거 후 부재 확인이 성공해야 정리가 완료된다. 조회 실패나 소유권 불일치를 정상 제거로 바꾸지 않는다.
-플러그인의 initialize/observe hang과 Docker daemon 자체의 장애를 별도 결과로 기록한다.
+플러그인의 initialize/observe hang과 실행기 자체의 장애를 별도 결과로 기록한다.
+영속 설치의 runtime을 바꾸면 같은 이름의 다른 image/volume 저장소가 빈 상태로 연결될 수 있다.
+따라서 기존 설치 ID를 재사용한 runtime 전환은 거절하고 새 설치 ID를 요구한다. 과거 worker는
+현재 manifest가 아니라 저장된 원래 runtime으로 정리한다. 상태 volume은 detach로 삭제하지 않는다.
 
 근거 전달은 기존 Keeper 메시지 경로를 사용한다. 전달 영수증과 Keeper의 실제 읽기·조치,
 독립 검증은 서로 다른 증거다. 선택적으로 보낸 근거가 상위 지침으로 승격되지 않는다.

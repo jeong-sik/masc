@@ -14,48 +14,41 @@ let identity owner =
   Yojson.Safe.to_string (`List [ `String owner.workspace;
     `String owner.installation; `String owner.package ])
 
-let volume_name owner =
-  "masc-lane-state-" ^ Digestif.SHA256.(to_hex (digest_string (identity owner)))
+let volume_name ?(runtime = Lane_addon_types.Docker) owner =
+  match runtime with
+  | Lane_addon_types.Docker ->
+      "masc-lane-state-" ^ Digestif.SHA256.(to_hex (digest_string (identity owner)))
+  | Apple_container -> Digestif.SHA256.(to_hex (digest_string ("volume:" ^ identity owner)))
 
-(* Docker reserves a container name atomically, even before start. All writers
+(* The engine reserves the container name before start. All writers
    of one logical volume use this slot; worker incarnations still have distinct
    labels so a losing attach cannot remove the winning worker. *)
-let container_name owner = volume_name owner ^ "-writer"
+let container_name ?(runtime = Lane_addon_types.Docker) owner =
+  match runtime with
+  | Lane_addon_types.Docker -> volume_name owner ^ "-writer"
+  | Apple_container -> Digestif.SHA256.(to_hex (digest_string ("writer:" ^ identity owner)))
 
 let label = "masc.lane.state.owner"
 let ( let* ) = Result.bind
 
-let inspect ~run owner =
-  let name = volume_name owner in
+let inspect ~runtime ~run owner =
+  let name = volume_name ~runtime owner in
   let* raw = run ~operation:"inspect persistent state" ["volume"; "inspect"; name] in
-  try
-    match Yojson.Safe.from_string raw with
-    | `List [`Assoc fields] ->
-        (match List.assoc_opt "Name" fields, List.assoc_opt "Labels" fields with
-         | Some (`String actual), Some (`Assoc labels)
-           when String.equal actual name
-             && List.assoc_opt label labels = Some (`String (identity owner)) -> Ok ()
-         | _ -> Error "persistent state volume belongs to a different owner")
-    | _ -> Error "unexpected persistent state volume inspection"
-  with Yojson.Json_error message -> Error message
+  Lane_addon_engine.verify_volume runtime ~name ~owner:(identity owner) raw
 
-let ensure ~run owner =
-  let name = volume_name owner in
+let ensure ?(runtime = Lane_addon_types.Docker) ~run owner =
+  let name = volume_name ~runtime owner in
   let* raw = run ~operation:"find persistent state"
-      ["volume"; "ls"; "--filter"; "name=^" ^ name ^ "$";
-       "--format"; "{{json .Name}}"] in
+      (Lane_addon_engine.volume_list_arguments runtime name) in
+  let* exists = Lane_addon_engine.listed_volume runtime ~name raw in
   let* () =
-    if String.trim raw = "" then
+    if not exists then
       let* _ = run ~operation:"create persistent state"
           ["volume"; "create"; "--label"; label ^ "=" ^ identity owner; name] in
       Ok ()
-    else
-      try match Yojson.Safe.from_string raw with
-        | `String actual when String.equal actual name -> Ok ()
-        | _ -> Error "ambiguous persistent state volume identity"
-      with Yojson.Json_error message -> Error message
+    else Ok ()
   in
   (* Create may race with another owner. Neither its exit status nor a
      deterministic name grants ownership; inspect before granting a mount. *)
-  let* () = inspect ~run owner in
-  Ok ("type=volume,src=" ^ name ^ ",dst=/state,volume-nocopy")
+  let* () = inspect ~runtime ~run owner in
+  Ok (Lane_addon_engine.state_mount runtime name)

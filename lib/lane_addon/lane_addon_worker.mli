@@ -1,4 +1,4 @@
-(** One optional Add-on, one Docker container. Calls yield without taking a
+(** One optional Add-on, one container or microVM. Calls yield without taking a
     Keeper or environment-owner lock. The caller owns the background fiber and
     passes a switch whose lifetime spans the binding, not a Keeper turn. *)
 type t
@@ -6,6 +6,7 @@ type t
 type error =
   | Invalid_package of string
   | Docker_failed of { operation : string; detail : string }
+  | Engine_failed of { runtime : Lane_addon_types.runtime; operation : string; detail : string }
   | Protocol_failed of string
   | Host_refusal of Lane_addon_call_context.host_refusal
   | Invalid_observation of string
@@ -16,9 +17,9 @@ type mount = { source : string; destination : string }
 (** [on_created] runs as soon as the exact created-container ID is known,
     before waiting for inspect or protocol initialization. Store the handle to
     allow concurrent detach even if either operation never responds. Packages expose
-    [lane_observe] in the initial MCP tools/list page. [docker_command] is an
-    executable path, also allowing hermetic control-protocol tests.
-    [control_timeout_sec] bounds each Docker control command and cancels its
+    [lane_observe] in the initial MCP tools/list page. [docker_command] and
+    [container_command] override the executable of their respective runtime.
+    [control_timeout_sec] bounds each engine control command and cancels its
     switch so the child is killed and reaped. A host sampling declaration
     requires [sampling_handler]; disabled packages refuse a supplied callback.
     Both mismatches fail before container creation. *)
@@ -32,6 +33,7 @@ val start :
   ?state_owner:Lane_addon_worker_state.owner ->
   ?mounts:mount list ->
   ?docker_command:string ->
+  ?container_command:string ->
   ?on_created:(t -> unit) ->
   ?artifact_store:Lane_addon_store.t ->
   ?sampling_handler:Lane_addon_sampling.t ->
@@ -50,14 +52,16 @@ val stop : t -> (unit, error) result
     container's ownership label before removal. [None] recovers a lost create
     receipt using this instance's deterministic container name, then verifies
     both the name and ownership label before removing the resolved exact ID.
-    In either case, absence requires a successful Docker query. Each query is
-    bounded by [control_timeout_sec]. *)
+    In either case, absence requires a successful query to the retained runtime.
+    Each query is bounded by [control_timeout_sec]. [runtime] defaults to Docker
+    for callers that predate runtime selection. *)
 val recover_stop :
   clock:_ Eio.Time.clock -> control_timeout_sec:float ->
   mgr:_ Eio.Process.mgr ->
   instance_id:string -> container_id:string option ->
+  ?runtime:Lane_addon_types.runtime ->
   ?state_owner:Lane_addon_worker_state.owner ->
-  ?docker_command:string -> unit -> (unit, error) result
+  ?docker_command:string -> ?container_command:string -> unit -> (unit, error) result
 
 (** Only manifest-declared tools, resolved against the initialized worker's
     MCP inventory. Empty before initialization and once shutdown begins. *)
@@ -77,8 +81,8 @@ val container_name : t -> string
 val error_to_string : error -> string
 
 (** Read-only engine inspection. Failure does not imply that the image is
-    absent. [control_timeout_sec] also bounds this Docker query. *)
+    absent. [control_timeout_sec] also bounds this engine query. *)
 val inspect_image :
   clock:_ Eio.Time.clock -> control_timeout_sec:float ->
   mgr:_ Eio.Process.mgr -> package:Lane_addon_types.package ->
-  ?docker_command:string -> unit -> (string, error) result
+  ?docker_command:string -> ?container_command:string -> unit -> (string, error) result

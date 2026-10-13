@@ -164,7 +164,7 @@ module For_testing : sig
       resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
-    recover_stop : state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> container_id:string option ->
+    recover_stop : runtime:Lane_addon_types.runtime -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> container_id:string option ->
       (unit, string) result;
     image_ready : package:Lane_addon_types.package -> (unit, string) result;
   }

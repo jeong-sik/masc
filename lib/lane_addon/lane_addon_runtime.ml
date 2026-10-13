@@ -38,7 +38,7 @@ type backend = {
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
     binding:Yojson.Safe.t ->
     (Yojson.Safe.t, string) result;
-  recover_stop : state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> container_id:string option ->
+  recover_stop : runtime:runtime -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> container_id:string option ->
     (unit, string) result;
   image_ready : package:package -> (unit, string) result;
 }
@@ -135,6 +135,10 @@ let text fields key = match List.assoc_opt key fields with
   | Some (`String value) when String.trim value <> "" -> Ok value
   | _ -> Error (key ^ " requires a non-blank string")
 let object_ = function `Assoc fields -> Ok fields | _ -> Error "expected an object"
+let retained_runtime fields = match List.assoc_opt "runtime" fields with
+  | None -> Ok Docker
+  | Some (`String value) -> Option.to_result ~none:"invalid retained runtime" (runtime_of_string value)
+  | Some _ -> Error "invalid retained runtime"
 let offload f = Eio_unix.run_in_systhread f
 let configuration_owner_json (owner : configuration_owner) =
   `Assoc ["id", `String owner.id; "source_path", `String owner.source_path;
@@ -226,6 +230,8 @@ let validate_released_binding ~package_shape fields =
   let* () = match package_shape with
     | Released_package -> exact_fields package_fields package
     | Current_package ->
+        let* _ = retained_runtime package in
+        let package_fields = if List.mem_assoc "runtime" package then "runtime" :: package_fields else package_fields in
         let* package_fields = match List.assoc_opt "tool_invocation" package with
           | None -> Ok package_fields
           | Some (`String ("direct" | "host_context")) -> Ok ("tool_invocation" :: package_fields)
@@ -278,10 +284,11 @@ let validate_released_binding ~package_shape fields =
     | `Intlit s -> Option.to_result ~none:"invalid retained memory bound" (Int64.of_string_opt s)
     | `Int n -> Ok (Int64.of_int n) | _ -> Error "invalid retained memory bound" in
   let* pids = match List.assoc "pids" resources with
-    | `Int n -> Ok n | _ -> Error "invalid retained resource bound" in
+    | `Int n -> Ok (Some n) | `Null -> Ok None | _ -> Error "invalid retained resource bound" in
   let* max_reply_bytes = match List.assoc "max_reply_bytes" resources with
     | `Int n -> Ok n | _ -> Error "invalid retained resource bound" in
-  let* () = Lane_addon_types.check_resources { cpus; memory_bytes; pids; max_reply_bytes }
+  let* runtime = retained_runtime package in
+  let* () = Lane_addon_types.check_resources ~runtime { cpus; memory_bytes; pids; max_reply_bytes }
     |> Result.map_error (fun detail -> "invalid retained resource bound: " ^ detail) in
   let binding = List.assoc "binding" fields in
   let* () = match List.assoc "binding_schema" package with
@@ -493,7 +500,7 @@ let stop_entry ~sw ~backend m e =
       | Some c -> Some (Some c.container_id, c.stop)
       | None when not e.running -> Some (None, fun () ->
           let* state_owner = state_owner_for_entry m e in
-          backend.recover_stop ~state_owner ~instance_id:e.instance_id ~container_id:None)
+          backend.recover_stop ~runtime:e.package.runtime ~state_owner ~instance_id:e.instance_id ~container_id:None)
       | None -> None (* startup still owns the unresolved create operation *) in
     match cleanup with
     | None -> ()
@@ -831,13 +838,13 @@ let backend ~store () = match !override with
               ~mgr:Posix_spawn_process_mgr.mgr ~package ()
             |> Result.map (fun (_ : string) -> ())
             |> Result.map_error Lane_addon_worker.error_to_string);
-      recover_stop = (fun ~state_owner ~instance_id ~container_id ->
+      recover_stop = (fun ~runtime ~state_owner ~instance_id ~container_id ->
         match clock with
         | None -> Error "Lane Add-on Docker control requires the server Eio clock"
         | Some clock ->
             Lane_addon_worker.recover_stop ~clock ~control_timeout_sec
               ~mgr:Posix_spawn_process_mgr.mgr
-              ~instance_id ~container_id ?state_owner ()
+              ~runtime ~instance_id ~container_id ?state_owner ()
             |> Result.map_error Lane_addon_worker.error_to_string) }
 let manager config =
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -1152,6 +1159,7 @@ let historical_detach ~sw m fields =
     let* package = match List.assoc_opt "package" fields with
       | Some json -> object_ json | None -> Error "missing persisted package" in
     let* run_id = text fields "run_id" in
+    let* runtime = retained_runtime package in
     let* package_id = text package "id" in
     let* package_revision = text package "revision" in
     let* configuration = configuration_of_fields fields in
@@ -1176,7 +1184,7 @@ let historical_detach ~sw m fields =
       | Error message -> Hashtbl.replace m.recovering id (Cleanup_request_failed (fields,message)); Error message in
     let backend = backend ~store:m.store () in
     fork_recovery ~sw m ~id ~on_failure:(fun detail -> Cleanup_unconfirmed (fields,detail)) (fun () ->
-      let result = try backend.recover_stop ~state_owner ~instance_id:id ~container_id with
+      let result = try backend.recover_stop ~runtime ~state_owner ~instance_id:id ~container_id with
         | Eio.Cancel.Cancelled _ as exn ->
             Hashtbl.replace m.recovering id (Cleanup_unconfirmed (fields,"cleanup cancelled before its result was confirmed"));
             raise exn
@@ -1414,7 +1422,34 @@ let binding_visibility m ~access ?resolve_visibility binding =
           Ok visibility
       | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Browser_document _ -> Ok Shared in
     Ok (merge current restriction)) (Ok Shared) sources
+let preserve_state_runtime ~configuration ~(package : package) bindings =
+  match configuration, package.state_storage with
+  | None, _ | Some _, Ephemeral -> Ok ()
+  | Some (owner : configuration_owner), Persistent ->
+      List.fold_left (fun result value ->
+        let* () = result in
+        let* fields = object_ value in
+        let* previous_owner = configuration_of_fields fields in
+        match previous_owner with
+        | Some previous when previous.id = owner.id ->
+            let* previous_package = match List.assoc_opt "package" fields with
+              | Some value -> object_ value | None -> Error "missing retained package" in
+            let* previous_id = text previous_package "id" in
+            if previous_id <> package.id
+               || List.assoc_opt "state_storage" previous_package <> Some (`String "persistent")
+            then Ok ()
+            else
+              let* previous_runtime = retained_runtime previous_package in
+              if previous_runtime = package.runtime then Ok ()
+              else Error "Persistent state belongs to a different runtime; use a new installation id"
+        | None | Some _ -> Ok ()) (Ok ()) bindings
+
 let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~visibility =
+  let* () = match configuration, package.state_storage with
+    | None, _ | Some _, Ephemeral -> Ok ()
+    | Some _, Persistent ->
+        let* bindings = read_retained_bindings m in
+        preserve_state_runtime ~configuration ~package bindings in
   let* refresh_interest = Lane_addon_sources.refresh_interest binding in
   let* input_installations = match configuration with
     | None -> Lane_addon_sources.dependencies binding
@@ -2182,6 +2217,10 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
            else
            let admitted =
              let* visibility = document_owner in
+             let* () = preserve_state_runtime
+               ~configuration:(Some {id=d.id; source_path=d.source_path; revision=d.revision})
+               ~package:d.package
+               (List.map entry_json (entries m) @ List.map (fun (_,fields) -> `Assoc fields) histories) in
              let* _ = validate_connection m ~run_id:d.run_id ~configuration_id:d.id ~binding:d.binding in
              Ok visibility in
            match admitted with
@@ -2324,7 +2363,7 @@ module For_testing = struct
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t ->
       (Yojson.Safe.t, string) result;
-    recover_stop : state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> container_id:string option ->
+    recover_stop : runtime:runtime -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> container_id:string option ->
       (unit, string) result;
     image_ready : package:package -> (unit, string) result;
   }

@@ -1,7 +1,8 @@
 id = "figma-studio"
-revision = "0.1.0"
+revision = "0.2.0"
 title = "Figma Studio"
 contributions = ["observe"]
+runtime = "apple_container"
 image = "masc-lane-figma-studio:0.1.0"
 command = ["python3", "server.py"]
 
@@ -19,9 +20,8 @@ lanes = ["figma/studio"]
 directory = "skills"
 
 [resources]
-cpus = 0.5
+cpus = 1
 memory_bytes = 268435456
-pids = 16
 # Native JSON and a PNG share one response. Host namespacing also uses this envelope.
 max_reply_bytes = 16777216
 

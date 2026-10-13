@@ -18,7 +18,7 @@ type parsed_args = {
   board_interests_opt : string list option;
   max_context_override_opt : int option;
   max_context_override_present : bool;
-  sandbox_profile_opt : string option;
+  sandbox_profile_opt : sandbox_profile option;
   sandbox_image_patch : string option option;
   microvm_backend_patch : Keeper_microvm_backend.t option option;
   remote_endpoint_opt : string option;
@@ -303,6 +303,29 @@ let parse_microvm_backend_patch args =
   | Some _ -> Error "microvm_backend must be a string or null"
 ;;
 
+let parse_sandbox_profile args =
+  match Json_util.assoc_member_opt "sandbox_profile" args with
+  | None -> Ok None
+  | Some (`String raw) ->
+    (match sandbox_profile_of_string raw with
+     | Some profile -> Ok (Some profile)
+     | None ->
+       Error
+         (Printf.sprintf
+            "invalid sandbox_profile: %S (expected: %s)"
+            raw
+            (String.concat ", " Keeper_types_profile.valid_sandbox_profile_strings)))
+  | Some _ -> Error "sandbox_profile must be a string"
+;;
+
+(* An explicit request wins over the TOML default. Neither source stating one
+   returns [None]: omission is not a choice of isolation boundary, and callers
+   report the missing field instead. *)
+let resolve_sandbox_profile ?requested ~fallback () =
+  match requested with
+  | Some stated -> Some stated
+  | None -> fallback
+
 let parse
     ?(docker_preflight = docker_preflight_default)
     (ctx : _ context)
@@ -361,8 +384,10 @@ let parse
     match parse_sandbox_image_patch args with
     | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
     | Ok sandbox_image_patch ->
+    match parse_sandbox_profile args with
+    | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
+    | Ok sandbox_profile_opt ->
     let max_context_override_res = parse_max_context_override args in
-    let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let remote_endpoint_res = parse_remote_endpoint args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
     let egress_allow_opt_res = parse_present_string_list_opt args "egress_allow" in
@@ -387,40 +412,28 @@ let parse
       | None -> profile_defaults
       | Some sandbox_image -> { profile_defaults with sandbox_image } in
     let effective_profile =
-      match sandbox_profile_opt with
-      | Some raw -> sandbox_profile_of_string raw
-      | None -> profile_defaults.sandbox_profile
+      resolve_sandbox_profile
+        ?requested:sandbox_profile_opt
+        ~fallback:profile_defaults.sandbox_profile
+        ()
     in
     match profile_defaults.microvm_backend, effective_profile with
     | Some _, (None | Some (Docker | Remote_ssh)) ->
       Error (tool_result_error ~class_:Tool_result.Policy_rejection
         "microvm_backend_requires_microvm: microvm_backend is only valid with sandbox_profile = microvm; pass null to clear it when changing profiles")
     | None, _ | Some _, Some Micro_vm ->
-    (* An explicit profile must be valid, and one of the call, the keeper TOML,
-       or the manifest has to state it. There is no fallback: the arm that used
-       to take [None, None, None] resolved to [Local], and the only thing
-       between that and host execution was a feature flag defaulting to off. *)
+    (* One of the call, the keeper TOML, or the manifest has to state a
+       profile. There is no fallback. *)
     let sandbox_profile_error =
-      match sandbox_profile_opt, profile_defaults.sandbox_profile,
-        profile_defaults.manifest_path
-      with
-      | Some raw, _, _ when Option.is_none (sandbox_profile_of_string raw) ->
-        Some
-          (Printf.sprintf
-             "invalid sandbox_profile: %S (expected: %s)"
-             raw
-             (String.concat ", " Keeper_types_profile.valid_sandbox_profile_strings))
-      | Some _, _, _ | None, Some _, _ ->
+      match effective_profile with
+      | Some profile ->
         (* A stated profile that runs a container also has to name its
            image (#37523). [profile_defaults] already carries this call's
            [sandbox_image] patch, so the call, the TOML or the manifest can
            each supply it; none of them is filled in for the caller. *)
-        (match effective_profile with
-         | Some profile ->
-           missing_required_sandbox_image_error ~keeper_name:name profile
-             profile_defaults
-         | None -> None)
-      | None, None, None | None, None, Some _ ->
+        missing_required_sandbox_image_error ~keeper_name:name profile
+          profile_defaults
+      | None ->
         Some
           (missing_required_sandbox_profile_error
              ~keeper_name:name
@@ -440,23 +453,16 @@ let parse
       | None, Error error -> Some error
       | None, Ok (remote_endpoint_present, remote_endpoint_opt) ->
         (* [sandbox_profile_error] is [None] only when a profile was stated,
-           so this is a [Some] every time control reaches here. Naming the
-           other arm rather than defaulting keeps it that way: a later edit
-           that admits an unstated profile has to answer this match. *)
-        let sandbox_profile =
-          match
-            Option.bind sandbox_profile_opt sandbox_profile_of_string,
-            profile_defaults.sandbox_profile
-          with
-          | Some profile, _ | None, Some profile -> Some profile
-          | None, None -> None
-        in
+           so [effective_profile] is a [Some] every time control reaches
+           here. Naming the other arm rather than defaulting keeps it that
+           way: a later edit that admits an unstated profile has to answer
+           this match. *)
         let endpoint_name =
           if remote_endpoint_present
           then remote_endpoint_opt
           else profile_defaults.remote_endpoint
         in
-        (match sandbox_profile, endpoint_name with
+        (match effective_profile, endpoint_name with
          | None, _ -> None
          | Some Remote_ssh, None ->
            Some
@@ -630,16 +636,6 @@ let resolve_board_interests ~board_interests_opt ~fallback_interests =
   | Some interests -> Keeper_types_profile_toml.normalize_board_interests interests
   | None -> Keeper_types_profile_toml.normalize_board_interests fallback_interests
 ;;
-
-(* An explicit request wins over the TOML default. Neither source stating one
-   returns [None] rather than [Local]: omission is not a choice of isolation
-   boundary. Substituting [Local] here sent every omission through the
-   playground gate, which answered "local is disabled" about a profile the
-   caller never named. Callers report the missing field instead. *)
-let resolve_sandbox_profile ?requested ~fallback () =
-  match Option.bind requested sandbox_profile_of_string with
-  | Some stated -> Some stated
-  | None -> fallback
 
 let resolve_network_mode ~sandbox_profile ~fallback =
   fallback

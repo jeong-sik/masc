@@ -427,7 +427,7 @@ let explicit_edits
   =
   []
   |> append_optional "instructions" set_string parsed.instructions_arg
-  |> append_optional "sandbox_profile" set_string parsed.sandbox_profile_opt
+  |> append_optional "sandbox_profile" set_string (Option.map sandbox_profile_to_string parsed.sandbox_profile_opt)
   |> append_optional "network_mode" set_string parsed.network_mode_opt
   |> append_optional "mention_targets" set_strings parsed.mention_targets_opt
   |> append_optional "board_interests" set_strings parsed.board_interests_opt

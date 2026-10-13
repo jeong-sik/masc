@@ -22,7 +22,7 @@ type parsed_args =
   ; board_interests_opt : string list option
   ; max_context_override_opt : int option
   ; max_context_override_present : bool
-  ; sandbox_profile_opt : string option
+  ; sandbox_profile_opt : sandbox_profile option
   ; sandbox_image_patch : string option option
         (** None retains the setting; Some None clears the override; Some (Some image) sets it. *)
   ; microvm_backend_patch : Keeper_microvm_backend.t option option
@@ -115,23 +115,16 @@ val resolve_board_interests :
   string list
 
 val resolve_sandbox_profile :
-  ?requested:string ->
+  ?requested:sandbox_profile ->
   fallback:sandbox_profile option ->
   unit ->
   sandbox_profile option
 (** An explicit [requested] profile wins over the TOML [fallback]; [None] means
     neither source named one.
 
-    Omission is not a profile, so it does not collapse into [Local].  It used
-    to: keeper-up then refused the substituted value with "local is disabled",
-    naming a profile the caller never chose, and the message sent operators
-    looking for a playground switch instead of the missing field.  Callers
-    turn [None] into
+    Omission is not a profile. Callers turn [None] into
     [Keeper_meta_contract.missing_required_sandbox_profile_error], which names
-    the field and the allowed values.
-
-    [requested] is the caller's raw string; an unparseable one is treated as absent,
-    since the gate rejects those first. *)
+    the field and the allowed values. *)
 
 val resolve_requested_network_mode :
   requested:string option ->

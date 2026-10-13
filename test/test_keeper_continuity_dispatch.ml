@@ -132,6 +132,30 @@ let test_real_dispatch_preserves_pair_across_refusal () =
       ^ working_state));
   check string "dispatch does not rewrite saved pair" saved_before (Fs_compat.load_file path);
   let observed = latest_observation ~config in
+  let evidence_store = Dated_jsonl.create
+      ~base_dir:(Filename.concat
+        (Filename.concat (Workspace.keepers_runtime_dir config) keeper_name)
+        "continuity-requests") () in
+  let evidence = Dated_jsonl.read_recent evidence_store 10 in
+  List.iter (fun (runtime, peer) ->
+    let row = match List.find_opt (fun row ->
+        U.member "runtime_id" row = `String runtime) evidence with
+      | Some row -> row | None -> fail "request-bound continuity evidence missing" in
+    let body = List.hd (Fixture.request_bodies peer) in
+    check int "bound evidence counts the exact prepared body" (String.length body)
+      (row |> U.member "wire" |> U.member "body_bytes" |> U.to_int);
+    check string "bound evidence names the exact prepared body digest"
+      Digestif.SHA256.(digest_string body |> to_hex)
+      (row |> U.member "wire" |> U.member "body_sha256" |> U.to_string);
+    let selection = U.member "selection" row in
+    check string "selection keeps the snapshot prefix identity" snapshot.prefix_sha256
+      (selection |> U.member "prefix_sha256" |> U.to_string);
+    check string "working state is represented by its digest"
+      Digestif.SHA256.(digest_string working_state |> to_hex)
+      (selection |> U.member "working_state_sha256" |> U.to_string);
+    check bool "raw working state is absent" true
+      (selection |> U.member "working_state" = `Null))
+    [ "refused.sample", refused; "accepted.sample", accepted ];
   check string "observation names the fallback runtime" "accepted.sample" observed.runtime_id;
   check int "observation counts actual serialized body bytes"
     (String.length (List.hd (Fixture.request_bodies accepted))) observed.request_bytes;

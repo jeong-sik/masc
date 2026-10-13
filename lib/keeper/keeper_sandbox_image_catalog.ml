@@ -128,7 +128,10 @@ let string_field ~path ~field fields =
   match List.assoc_opt field fields with
   | None -> Error (Missing_field { path; field })
   | Some (Otoml.TomlString value) -> Ok value
-  | Some _ -> Error (Expected_string { path; field })
+  | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _) | Some (Otoml.TomlBoolean _)
+  | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+  | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+  | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error (Expected_string { path; field })
 
 let reference_key = "reference"
 

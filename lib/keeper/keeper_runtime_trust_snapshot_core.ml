@@ -33,7 +33,21 @@ let fallback_disposition raw =
     (match raw.runtime_blocker_class with
      | Some (Ok (Keeper_meta_contract.Runtime_exhausted _)) ->
        "Alert", "runtime_exhausted"
-     | Some (Ok _) -> "Alert", "critical_block"
+     | Some (Ok (Keeper_meta_contract.Fiber_unresolved))
+     | Some (Ok (Keeper_meta_contract.Agent_core_context_window_exceeded))
+     | Some (Ok (Keeper_meta_contract.Agent_core_unrecognized_stop_reason))
+     | Some (Ok (Keeper_meta_contract.Agent_core_guardrail_violation))
+     | Some (Ok (Keeper_meta_contract.Agent_core_tripwire_violation))
+     | Some (Ok (Keeper_meta_contract.Agent_core_input_required))
+     | Some (Ok (Keeper_meta_contract.Internal_unhandled_exception))
+     | Some (Ok (Keeper_meta_contract.Internal_bridge_exception))
+     | Some (Ok (Keeper_meta_contract.Internal_contract_rejected))
+     | Some (Ok (Keeper_meta_contract.Incomplete_tool_transcript))
+     | Some (Ok (Keeper_meta_contract.Terminal_effect_failed))
+     | Some (Ok (Keeper_meta_contract.Provider_attempt_effect_fenced))
+     | Some (Ok (Keeper_meta_contract.Tool_correction_lost))
+     | Some (Ok (Keeper_meta_contract.Receipt_persistence_failed))
+     | Some (Ok (Keeper_meta_contract.Gate_replay_repair_required)) -> "Alert", "critical_block"
      | Some (Error _) -> "Alert", "unknown_runtime_blocker"
      | None -> "Pass", "healthy")
 ;;

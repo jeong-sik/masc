@@ -2471,7 +2471,7 @@ let sweep_one_backend backend ~base_path ~timeout_sec ~is_pid_alive ~run_argv li
             (delete_force_argv_for backend ~container_name:candidate.container_id)
         with
         | Unix.WEXITED 0, _ -> { acc with removed = candidate.container_id :: acc.removed }
-        | _, detail ->
+        | (Unix.WEXITED _, detail) | (Unix.WSIGNALED _, detail) | (Unix.WSTOPPED _, detail) ->
           { acc with failed = (candidate.container_id, detail) :: acc.failed })
       { removed = []; failed = [] }
       candidates

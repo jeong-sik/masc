@@ -497,7 +497,9 @@ let remote_cwd t cwd =
 let transport_failure t status =
   match t.transport, status with
   | Openssh _, Unix.WEXITED 255 -> Some "ssh client exited 255"
-  | (Openssh _ | Container_exec _ | Docker_exec _), _ -> None
+  | ((Openssh _ | Container_exec _ | Docker_exec _), Unix.WEXITED _)
+  | ((Openssh _ | Container_exec _ | Docker_exec _), Unix.WSIGNALED _)
+  | ((Openssh _ | Container_exec _ | Docker_exec _), Unix.WSTOPPED _) -> None
 ;;
 
 let log_first_dispatch t =

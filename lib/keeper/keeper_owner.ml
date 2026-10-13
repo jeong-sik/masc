@@ -1460,7 +1460,8 @@ let start
             match command, (Keeper_owner_reducer.projection state).meta with
             | Keeper_owner_reducer.Create _, None ->
               reopen_operation_store_if_missing t
-            | _ -> Ok ()
+            | (Keeper_owner_reducer.Create _, Some _)
+            | ((Keeper_owner_reducer.Pause _ | (Keeper_owner_reducer.Resume _ | (Keeper_owner_reducer.Reset_latch _ | (Keeper_owner_reducer.Retain_shutdown_latch _ | (Keeper_owner_reducer.Update_profile _ | (Keeper_owner_reducer.Delete_if_snapshot _ | (Keeper_owner_reducer.Commit_turn_runtime _ | Keeper_owner_reducer.Set_current_task _))))))), _) -> Ok ()
           in
           (match operation_store_ready with
            | Error error ->

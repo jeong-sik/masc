@@ -55,8 +55,7 @@ let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 let restart_keepalive_after_message_turn ctx meta =
   match start_keepalive ctx meta with
   | Keepalive_started _ | Keepalive_already_registered _ -> ()
-  | outcome ->
-    Log.Keeper.error
+  | (Keepalive_lane_ownership_lost | Keepalive_lifecycle_denied _ | Keepalive_registration_rejected _ | Keepalive_fiber_start_rejected _ | Keepalive_launch_callback_failed _ | Keepalive_fork_rejected _) as outcome -> Log.Keeper.error
       "keeper message turn did not restore keepalive name=%s outcome=%s"
       meta.name
       (start_keepalive_outcome_to_string outcome)
@@ -442,7 +441,15 @@ let run_keeper_invocation_turn_admitted_inner
          | Some cb -> Some (fun (evt : Agent_core.Types.sse_event) ->
              match evt with
              | Agent_core.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
-             | _ -> ()))
+             | Agent_core.Types.ContentBlockDelta { delta = (Agent_core.Types.TextSnapshot _ | (Agent_core.Types.ThinkingDelta _ | (Agent_core.Types.ThinkingSignatureDelta _ | (Agent_core.Types.RedactedThinkingSnapshot _ | (Agent_core.Types.ReasoningDetailsDelta _ | (Agent_core.Types.InputJsonDelta _ | (Agent_core.Types.InputJsonSnapshot _ | Agent_core.Types.MediaDelta _)))))));_}
+             | Agent_core.Types.MessageStop | Agent_core.Types.Ping | Agent_core.Types.Connected
+             | Agent_core.Types.MessageStart _ | Agent_core.Types.ContentBlockStart _
+             | Agent_core.Types.ContentBlockStop _ | Agent_core.Types.MessageDelta _
+             | Agent_core.Types.SSEError _ | Agent_core.Types.NDJSONError _
+             | Agent_core.Types.SSEParseFailed _ | Agent_core.Types.NDJSONParseFailed _
+             | Agent_core.Types.SSEUnknownEventType _ | Agent_core.Types.SSEUnsupportedPart _
+             | Agent_core.Types.SSEUnsupportedResponse _ | Agent_core.Types.Timeout _
+             | Agent_core.Types.StreamIncomplete _ | Agent_core.Types.StreamRepeating _ -> ()))
   in
   let name = Keeper_invocation_contract.target_name request in
   let message = Keeper_invocation_contract.prompt request in

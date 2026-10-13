@@ -599,7 +599,7 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
                 ; _
                 }) ->
             Error ("runtime assignment restore durability unconfirmed: " ^ detail)
-          | Ok _ -> Ok ()
+          | Ok (Runtime.Assignment_unchanged _) | Ok (Runtime.Assignment_committed _) -> Ok ()
           | Error detail -> Error detail
         in
         let manifest_restore = restore_snapshot path snapshot in
@@ -684,7 +684,8 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
                 Log.Keeper.error
                   "keeper manifest rollback failed during cancellation: %s"
                   (error_to_string error)
-              | Error _ | Ok _ -> ());
+              | Error (Io_error _) | Ok _ | Error (Revision_conflict _)
+              | Error (Publication_exception _) -> ());
              Printexc.raise_with_backtrace exn backtrace
            | exception exn -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. The arm above matches Eio.Cancel.Cancelled and re-throws it after rollback. The site is correct; the marker exists only because the guard reads three lines back. *)
              let backtrace = Printexc.get_raw_backtrace () in
@@ -705,7 +706,8 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
                publication_warnings with
            | Some (Runtime_config_parent_sync_unconfirmed detail) ->
              rollback (Io_error ("runtime assignment durability unconfirmed: " ^ detail))
-           | Some _ | None ->
+           | None | Some (Lock_release_unconfirmed _)
+           | Some (Runtime_config_lock_release_unconfirmed _) ->
              Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
              let* () = clear_journal () in
              Ok { value = after_commit (); warnings = write_warnings @ publication_warnings }

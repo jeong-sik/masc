@@ -275,7 +275,9 @@ let err_json ?detail ~failure_class code =
    same wiring, so this one still ends the walk. *)
 let wiring_rejected = function
   | Llm_provider.Http_client.AcceptRejected _ -> true
-  | _ -> false
+  | Llm_provider.Http_client.HttpError _ | Llm_provider.Http_client.NetworkError _
+  | Llm_provider.Http_client.TimeoutError _ | Llm_provider.Http_client.ProviderTerminal _
+  | Llm_provider.Http_client.ProviderFailure _ -> false
 
 (* Capacity belongs to the selected binding. A later image runtime may admit
    the same pixels under a different request/context ceiling. HTTP 413 states
@@ -301,7 +303,9 @@ let candidate_policy_http_error err =
     && code < 500
     && (not (candidate_capacity_http_error err))
     && not (Runtime_attempt_fsm.should_try_next err)
-  | _ -> false
+  | Llm_provider.Http_client.NetworkError _ | Llm_provider.Http_client.TimeoutError _
+  | Llm_provider.Http_client.AcceptRejected _ | Llm_provider.Http_client.ProviderTerminal _
+  | Llm_provider.Http_client.ProviderFailure _ -> false
 
 let failure_class_of_http_error = function
   | err when wiring_rejected err || candidate_policy_http_error err ->
@@ -488,7 +492,19 @@ type candidate_failure =
 let official_failure_can_advance : Fusion_official_client.failure -> bool = function
   | Missing_reply | Setup_failure _ | Antigravity_failure _ | Muse_failure _ -> false
   | Claude_admission_failure (Invalid_config _) -> false
-  | Claude_admission_failure _ -> true
+  | Claude_admission_failure (Runtime_claude_code.Spawn_failed _)
+  | Claude_admission_failure (Runtime_claude_code.Protocol_error _)
+  | Claude_admission_failure (Runtime_claude_code.Subscription_required _)
+  | Claude_admission_failure (Runtime_claude_code.Unsupported_control_request _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_transport_interrupted _)
+  | Claude_admission_failure (Runtime_claude_code.Context_window_exceeded _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_failed _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_failed_with_observation _)
+  | Claude_admission_failure (Runtime_claude_code.Stopped_by_host _)
+  | Claude_admission_failure (Runtime_claude_code.Quota_blocked _)
+  | Claude_admission_failure (Runtime_claude_code.Process_exited _)
+  | Claude_admission_failure (Runtime_claude_code.Unhandled_exception _)
+  | Claude_admission_failure (Runtime_claude_code.Timeout _) -> true
   | Codex_failure error ->
     (match error with
      | Subscription_required _ | Spawn_failed _
@@ -529,7 +545,20 @@ let outcome_of_official_failure ~runtime_id failure =
    Only typed pre-submission or explicit no-effect observations grant that
    receipt. The stateless runner supplies no durable recovery session. *)
 let official_failure_effect : Fusion_official_client.failure -> Tool_result.failure_effect_disposition = function
-  | Setup_failure _ | Claude_admission_failure _ -> Proven_pre_effect
+  | Setup_failure _ | Claude_admission_failure (Runtime_claude_code.Invalid_config _)
+  | Claude_admission_failure (Runtime_claude_code.Spawn_failed _)
+  | Claude_admission_failure (Runtime_claude_code.Protocol_error _)
+  | Claude_admission_failure (Runtime_claude_code.Subscription_required _)
+  | Claude_admission_failure (Runtime_claude_code.Unsupported_control_request _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_transport_interrupted _)
+  | Claude_admission_failure (Runtime_claude_code.Context_window_exceeded _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_failed _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_failed_with_observation _)
+  | Claude_admission_failure (Runtime_claude_code.Stopped_by_host _)
+  | Claude_admission_failure (Runtime_claude_code.Quota_blocked _)
+  | Claude_admission_failure (Runtime_claude_code.Process_exited _)
+  | Claude_admission_failure (Runtime_claude_code.Unhandled_exception _)
+  | Claude_admission_failure (Runtime_claude_code.Timeout _) -> Proven_pre_effect
   | Codex_failure (Invalid_config _ | Subscription_required _ | Spawn_failed _
       | Reasoning_effort_admission_failed _
       | Timeout { turn_accepted = false; _ }
@@ -782,8 +811,7 @@ let run_candidates_outcome
                continue_with
                  (Candidate_invalid_output
                     (Printf.sprintf "%s: empty extraction" runtime_id))
-             | outcome ->
-               record_vision_candidate_attempt
+             | (Vo_timeout | Vo_ok _ | Vo_invalid_request _ | Vo_no_runtime _ | Vo_provider _ | Vo_official_failure _) as outcome -> record_vision_candidate_attempt
                  ?tool_use_id ?trace_id ~runtime_id ~result:"ok"
                  ~reason:"provider_response" ~duration_ms:0.0
                  ~success:true ();
@@ -1007,7 +1035,7 @@ let handle_with_outcome
                         ~failure_class:Tool_result.Runtime_failure
                         ~detail
                         "artifact_store_failed")
-                 | outcome -> execution_of_vision_outcome outcome)))))
+                 | (Vo_timeout | Vo_empty | Vo_truncated | Vo_invalid_request _ | Vo_no_runtime _ | Vo_invalid_structured_response _ | Vo_provider _ | Vo_official_failure _) as outcome -> execution_of_vision_outcome outcome)))))
 
 let handle ?base_path ?complete ?tool_use_id ?trace_id ?sw ?clock ?net ~meta ~args () =
   (handle_with_outcome

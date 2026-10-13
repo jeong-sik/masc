@@ -1538,7 +1538,10 @@ let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
       Ok (Some {session_id; turn_id}, expected.turn_count)
     | Retryable_turn_failed, _ ->
       Error "retryable official-client terminal requires an acknowledged turn identity"
-    | _, _ -> Ok (previous_settlement, max 0 (expected.turn_count - 1)) in
+    | (Pre_dispatch_failed, _) | (Transient_spawn_failed, _) | (Owner_stopped_turn, _)
+    | (Transport_interrupted, _) | (Protocol_failed, _) | (Provider_rejected, _)
+    | (Input_rejected _, _) | (Host_hook_failed, _) | (State_persistence_failed, _)
+    | (Process_restarted, _) | (Vendor_session_full _, _) -> Ok (previous_settlement, max 0 (expected.turn_count - 1)) in
   let* released =
     transition
       ~base_path

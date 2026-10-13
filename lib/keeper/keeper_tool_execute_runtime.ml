@@ -108,7 +108,7 @@ let model_execute_cwd_resolution_error ~config ~meta ~args ~cwd error =
     match meta.sandbox_profile with
     | Docker ->
       Keeper_tool_execute_path.execute_cwd_resolution_error_public_message error
-    | _ -> private_message
+    | Micro_vm | Remote_ssh -> private_message
   in
   Keeper_tool_execution.failure
     ~class_:Tool_result.Policy_rejection

@@ -131,7 +131,15 @@ let activity_of_event preview (event : Agent_core.Types.sse_event) =
     Some { preview with activity = Receiving_response }
   | MessageStart _ | ContentBlockDelta { delta = ThinkingDelta _ | ReasoningDetailsDelta _; _ } ->
     Some { preview with activity = Receiving_response }
-  | _ -> None
+  | Agent_core.Types.ContentBlockDelta { delta = (Agent_core.Types.ThinkingSignatureDelta _ | (Agent_core.Types.RedactedThinkingSnapshot _ | (Agent_core.Types.InputJsonDelta _ | (Agent_core.Types.InputJsonSnapshot _ | Agent_core.Types.MediaDelta _))));_}
+  | Agent_core.Types.ContentBlockStart { tool_name = None;_} | Agent_core.Types.MessageStop
+  | Agent_core.Types.Ping | Agent_core.Types.Connected | Agent_core.Types.ContentBlockStop _
+  | Agent_core.Types.MessageDelta _ | Agent_core.Types.SSEError _ | Agent_core.Types.NDJSONError _
+  | Agent_core.Types.SSEParseFailed _ | Agent_core.Types.NDJSONParseFailed _
+  | Agent_core.Types.SSEUnknownEventType _ | Agent_core.Types.SSEUnsupportedPart _
+  | Agent_core.Types.SSEUnsupportedResponse _ | Agent_core.Types.Timeout _
+  | Agent_core.Types.StreamIncomplete _ | Agent_core.Types.StreamRepeating _
+  | ContentBlockDelta {delta=TextSnapshot _; _ } -> None
 
 (* Positions count only bytes actually emitted by this writer's redactor.
    A replacement starts a new source generation, even if its text repeats. *)
@@ -141,7 +149,15 @@ let released_text entry events =
       | ContentBlockDelta {delta=TextDelta text; _} -> false, Some text
       | ContentBlockDelta {delta=TextSnapshot text; _} ->
           true, Some (String.trim text)
-      | _ -> false, None in
+      | Agent_core.Types.ContentBlockDelta { delta = (Agent_core.Types.ThinkingDelta _ | (Agent_core.Types.ThinkingSignatureDelta _ | (Agent_core.Types.RedactedThinkingSnapshot _ | (Agent_core.Types.ReasoningDetailsDelta _ | (Agent_core.Types.InputJsonDelta _ | (Agent_core.Types.InputJsonSnapshot _ | Agent_core.Types.MediaDelta _))))));_}
+      | Agent_core.Types.MessageStop | Agent_core.Types.Ping | Agent_core.Types.Connected
+      | Agent_core.Types.MessageStart _ | Agent_core.Types.ContentBlockStart _
+      | Agent_core.Types.ContentBlockStop _ | Agent_core.Types.MessageDelta _
+      | Agent_core.Types.SSEError _ | Agent_core.Types.NDJSONError _
+      | Agent_core.Types.SSEParseFailed _ | Agent_core.Types.NDJSONParseFailed _
+      | Agent_core.Types.SSEUnknownEventType _ | Agent_core.Types.SSEUnsupportedPart _
+      | Agent_core.Types.SSEUnsupportedResponse _ | Agent_core.Types.Timeout _
+      | Agent_core.Types.StreamIncomplete _ | Agent_core.Types.StreamRepeating _ -> false, None in
     match text with
     | None -> entry, changed
     | Some text ->

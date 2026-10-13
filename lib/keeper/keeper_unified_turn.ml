@@ -168,7 +168,14 @@ let make_connector_pointer_filter ~on_attention_read ~base_path ~keeper_name =
       |> List.filter_map (fun (s : Keeper_event_queue.stimulus) ->
              match s.Keeper_event_queue.payload with
              | Keeper_event_queue.Connector_attention { event_id; _ } -> Some event_id
-             | _ -> None)
+             | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+             | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+             | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
+             | Keeper_event_queue.Ask_answered _
+             | Keeper_event_queue.Completion_authority_rejected _
+             | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+             | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+             | Keeper_event_queue.Task_outcome _ -> None)
       |> List.sort_uniq String.compare
     in
     match event_ids with
@@ -214,7 +221,14 @@ let make_connector_pointer_filter ~on_attention_read ~base_path ~keeper_name =
                match s.Keeper_event_queue.payload with
                | Keeper_event_queue.Connector_attention { event_id; _ } ->
                  Hashtbl.mem table event_id
-               | _ -> true)
+               | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+               | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+               | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
+               | Keeper_event_queue.Ask_answered _
+               | Keeper_event_queue.Completion_authority_rejected _
+               | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+               | Keeper_event_queue.Delegate_completed _
+               | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Task_outcome _ -> true)
         |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty
 ;;
 
@@ -1318,7 +1332,12 @@ let run_keeper_cycle
                           Keeper_metrics.(to_string Agent_coreTimeoutClassifications)
                           ~labels:[ "classification", "transient_network" ]
                           ()
-                      | _ -> ());
+                      | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _ | (Llm_provider.Retry.Overloaded _ | (Llm_provider.Retry.ServerError _ | (Llm_provider.Retry.AuthError _ | (Llm_provider.Retry.AuthorizationError _ | (Llm_provider.Retry.PaymentRequired _ | (Llm_provider.Retry.InvalidRequest _ | (Llm_provider.Retry.NotFound _ | (Llm_provider.Retry.ContextOverflow _ | (Llm_provider.Retry.InputCapacity _ | Llm_provider.Retry.NetworkError _))))))))))
+                      | Agent_core.Error.Provider _ | Agent_core.Error.Agent _
+                      | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
+                      | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
+                      | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _
+                      | Agent_core.Error.Internal_carried _ -> ());
                   let is_server_parse_rejection = EC.is_server_rejected_parse_error err in
                   let is_provider_wire_error = EC.is_provider_wire_error err in
                   Otel_metric_store.inc_counter

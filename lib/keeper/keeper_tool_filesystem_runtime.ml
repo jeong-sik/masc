@@ -946,7 +946,8 @@ let append_capability ~on_cancelled file content =
     , None
     , Fs_compat.Capability_append_target_not_checked )
     when outcome.requested_bytes = 0 -> Ok ()
-  | _ -> Error (Content_write_append outcome)
+  | (None, None, (Fs_compat.Capability_append_target_changed | Fs_compat.Capability_append_target_check_failed _))
+  | (None, Some _, _) | (Some _, _, _) | (None, None, Capability_append_target_not_checked) -> Error (Content_write_append outcome)
 ;;
 
 let created_directory_operation stage f =

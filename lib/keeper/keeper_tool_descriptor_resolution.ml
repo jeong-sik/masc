@@ -49,8 +49,8 @@ let capability_has kind tool_name =
   in
   match kind, descriptor_readonly_hint with
   | Tool_capability.Read_only, Some readonly -> readonly
-  | _ ->
-    Tool_capability.has kind tool_name
+  | (Tool_capability.Read_only, None)
+  | ((Tool_capability.Mcp_context_required | Tool_capability.Idempotent), _) -> Tool_capability.has kind tool_name
     ||
     match descriptor with
     | Some descriptor -> Tool_capability.has kind descriptor.internal_name

@@ -259,7 +259,11 @@ let optional_bool ~path field fields =
   match List.assoc_opt field fields with
   | None -> Ok None
   | Some (Toml.Toml_bool value) -> Ok (Some value)
-  | Some _ -> Error (Wrong_value_kind { path; field; expected = Bool_value })
+  | Some (Toml.Toml_string _) | Some (Toml.Toml_int _) | Some (Toml.Toml_float _)
+  | Some (Toml.Toml_string_array _) | Some (Toml.Toml_array _) | Some (Toml.Toml_table _)
+  | Some (Toml.Toml_inline_table _) | Some (Toml.Toml_table_array _)
+  | Some (Toml.Toml_offset_datetime _) | Some (Toml.Toml_local_datetime _)
+  | Some (Toml.Toml_local_date _) | Some (Toml.Toml_local_time _) -> Error (Wrong_value_kind { path; field; expected = Bool_value })
 ;;
 
 let table_fields ~path ~field = function

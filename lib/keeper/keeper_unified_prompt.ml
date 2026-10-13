@@ -603,7 +603,14 @@ let answered_ask_inputs (observation : Keeper_world_observation.world_observatio
     match event.event_kind with
     | Keeper_world_observation.Ask_answered_row { answered_by } ->
       Some (event.post_id, format_board_event_text event, answered_by)
-    | _ -> None)
+    | Keeper_world_observation.Board_post_created | Keeper_world_observation.Board_post_updated
+    | Keeper_world_observation.Fusion_completed | Keeper_world_observation.Composition_completed
+    | Keeper_world_observation.Board_comment_added _
+    | Keeper_world_observation.Board_reaction_changed _ | Keeper_world_observation.Board_vote_cast _
+    | Keeper_world_observation.Delegate_completed _ | Keeper_world_observation.Schedule_due _
+    | Keeper_world_observation.External_attention _
+    | Keeper_world_observation.Completion_authority_rejected _
+    | Keeper_world_observation.Task_outcome _ | Keeper_world_observation.Task_cancelled _ -> None)
 ;;
 
 (* Who said the autonomous turn's User message. The host wrote the wake cue and
@@ -950,7 +957,8 @@ let autonomous_trigger_lines
            Prompt_names.keeper_world_autonomous_trigger_reasons
            [ "reasons", String.concat ", " reasons ]
        ])
-  | _ -> []
+  | (Keeper_world_observation.Reactive, false)
+  | (Keeper_world_observation.Scheduled_autonomous, false) -> []
 
 let effective_instructions
     ~(meta : Keeper_meta_contract.keeper_meta)

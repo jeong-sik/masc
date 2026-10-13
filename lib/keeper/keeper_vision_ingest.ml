@@ -145,8 +145,7 @@ let eager_read ~base_path ~exclude_runtime_ids ~media_type ~bytes
          ()
      with
      | Keeper_vision_tool.Vo_ok reading -> Some (Ok (truncate_read_text reading.text))
-     | outcome ->
-       (match eager_read_eviction_reason_of_outcome outcome with
+     | (Keeper_vision_tool.Vo_timeout | Keeper_vision_tool.Vo_empty | Keeper_vision_tool.Vo_truncated | Keeper_vision_tool.Vo_invalid_request _ | Keeper_vision_tool.Vo_no_runtime _ | Keeper_vision_tool.Vo_invalid_structured_response _ | Keeper_vision_tool.Vo_provider _ | Keeper_vision_tool.Vo_official_failure _) as outcome -> (match eager_read_eviction_reason_of_outcome outcome with
         | Some reason -> Some (Error reason)
         | None -> Some (Error "eager_read_failed")))
   | _ -> None
@@ -233,7 +232,7 @@ let evict_block ~read ~mode ~keeper_name ~eager_budget (block : Agent_core.Types
                          ~handle
                          ~media_type
                          ~reason:"not read"))))))
-  | other -> other
+  | (Llm_provider.Types.Text _ | Llm_provider.Types.Thinking _ | Llm_provider.Types.ReasoningDetails _ | Llm_provider.Types.RedactedThinking _ | Llm_provider.Types.ToolUse _ | Llm_provider.Types.ToolResult _ | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _) as other -> other
 ;;
 
 (* Routing and delegation share the transport-plus-model capability view. *)
@@ -315,8 +314,11 @@ let fallback_projector_with_read ?(exclude_runtime_ids = []) ~read ~keeper_name 
           Agent_core.Types.Text
             (Printf.sprintf
                "[unread image file ID: %s; this runtime cannot view the image]" data)
-        | _ ->
-          evict_block
+        | Llm_provider.Types.Image { data = _; source_type = Llm_provider.Types.Base64;_}
+        | Llm_provider.Types.Text _ | Llm_provider.Types.Thinking _
+        | Llm_provider.Types.ReasoningDetails _ | Llm_provider.Types.RedactedThinking _
+        | Llm_provider.Types.ToolUse _ | Llm_provider.Types.ToolResult _
+        | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _ -> evict_block
             ~read:(read ~exclude_runtime_ids)
             ~mode ~keeper_name ~eager_budget block
       in

@@ -36,7 +36,9 @@ let source_clock_of_string = function
 let source_clock_of_event = function
   | Event_bus_correlated -> Event_bus
   | Context_injected | History_projection_observed -> Logical
-  | _ -> Wall
+  | Turn_started | Phase_gate_decided | Runtime_routed | Runtime_execution_built | Runtime_completed
+  | Runtime_failed | Pre_dispatch_blocked | Provider_lane_resolved | Checkpoint_loaded
+  | Checkpoint_saved | Receipt_appended | Turn_finished -> Wall
 
 type logical_ordering = {
   parent_event_id : string option;
@@ -196,14 +198,20 @@ let clock_refs_for_context ctx ~event ?agent_core_turn_count ?elapsed_ms
     match event with
     | Provider_lane_resolved ->
       Some (context_tool_batch_id ctx ?agent_core_turn_count ())
-    | _ -> None
+    | Turn_started | Phase_gate_decided | Runtime_routed | Runtime_execution_built
+    | Runtime_completed | Runtime_failed | Pre_dispatch_blocked | Context_injected
+    | History_projection_observed | Event_bus_correlated | Checkpoint_loaded | Checkpoint_saved
+    | Receipt_appended | Turn_finished -> None
   in
   let checkpoint_id =
     match event with
     | Checkpoint_loaded
     | Checkpoint_saved ->
       Some (context_checkpoint_id ctx ?agent_core_turn_count ())
-    | _ -> None
+    | Turn_started | Phase_gate_decided | Runtime_routed | Runtime_execution_built
+    | Runtime_completed | Runtime_failed | Pre_dispatch_blocked | Provider_lane_resolved
+    | Context_injected | History_projection_observed | Event_bus_correlated | Receipt_appended
+    | Turn_finished -> None
   in
   clock_refs ~edge_id:(context_edge_id ctx event)
     ~lane:(clock_lane_of_event event) ~source_clock:(source_clock_of_event event)

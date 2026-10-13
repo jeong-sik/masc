@@ -543,7 +543,12 @@ let rec retry_completion ~config ~keeper_name ~operation_id =
           (Completion_pending Dashboard_keeper_purged
           | Completion_delivery_failed { action = Dashboard_keeper_purged; _ }); _ } ->
         start_or_error ~config ~entry:None operation |> Result.map_error (fun error -> `Submit error)
-      | _ -> Error `Not_ready
+      | (Dashboard_keeper_purge _, Finalized { completion = Completion_pending (Supervisor_cleaned);_})
+      | (Dashboard_keeper_purge _, Finalized { completion = Completion_delivery_failed { action = Supervisor_cleaned;_};_})
+      | (Dashboard_keeper_purge _, Finalized { completion = Completion_delivered (Supervisor_cleaned);_})
+      | (Dashboard_keeper_purge _, Finalized { completion = Completion_not_requested;_})
+      | (Dashboard_keeper_purge _, (Prepared | (Joining_lanes | (Joined_idle | (Finalizing_tasks _ | (Cleanup_ready _ | (Reconciliation_required _ | (Owner_absent _ | (Operator_absence_acknowledged _ | (Blocked _ | Superseded _))))))))))
+      | ((Operator_stop_retain_meta | (Operator_stop_remove_meta | Supervisor_cleanup)), _) -> Error `Not_ready
 ;;
 
 let rec submit ~config ~entry ~request =
@@ -911,7 +916,8 @@ let recover_claimed
     (* Retained deletion evidence has no authority over a new same-name Keeper. *)
     Ok operation
   | Superseded _ when (match operation.cleanup_intent.reason with
-      | Dashboard_keeper_purge _ -> true | _ -> false) -> Ok operation
+      | Dashboard_keeper_purge _ -> true | Operator_stop_retain_meta | Operator_stop_remove_meta
+                                         | Supervisor_cleanup -> false) -> Ok operation
   | Owner_absent _
   | Operator_absence_acknowledged _ -> Ok operation
   | Prepared

@@ -441,6 +441,21 @@ let test_operator_tool_enum_mirrors () =
     ]
 ;;
 
+(* [masc_browser_read]'s [mode]. The handler reads it once with
+   [Tool_misc_browser_lane.read_mode_of_args], which takes exactly the
+   spellings of [all_of_read_mode]; the schema writes the enum by hand. *)
+let test_browser_read_mode_mirror () =
+  check
+    (list string)
+    "masc_browser_read mode matches its typed owner"
+    (List.sort_uniq String.compare
+       (List.map Masc.Tool_misc_browser_lane.read_mode_to_string
+          Masc.Tool_misc_browser_lane.all_of_read_mode))
+    (advertised_values_for_schemas
+       [ Tool_schemas_misc.browser_read_schema ]
+       ~property:"mode")
+;;
+
 (* Board sub-board access. [Masc.Board] owns the vocabulary through
    [sub_board_access_of_string_opt]; the schema writes the three strings by
    hand, in two places. *)
@@ -624,6 +639,7 @@ let () =
             test_read_file_default_appears_in_its_description
         ; test_case "goal tool enums" `Quick test_goal_tool_enum_mirrors
         ; test_case "operator tool enums" `Quick test_operator_tool_enum_mirrors
+        ; test_case "browser read mode" `Quick test_browser_read_mode_mirror
         ; test_case "sub_board access values decode" `Quick
             test_sub_board_access_advertised_values_decode
         ; test_case "reclaim_policy values decode" `Quick

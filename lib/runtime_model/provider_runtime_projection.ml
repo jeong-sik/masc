@@ -183,10 +183,16 @@ let default_local_fallback_label () =
   | None -> "auto"
 ;;
 
+(* [auth] is the requirement fact ("this endpoint takes a key"), not usability:
+   whether a keyed provider is usable is answered by [available] (registry
+   credential presence for catalog entries; model-catalog rows resolve their
+   declared credential later and refuse closed when it is missing). Gating
+   auto-detection on the requirement instead would silently drop every keyed
+   provider from the label set. *)
 let binding_auth_available (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true
-  | Runtime_binding.Api_key | Runtime_binding.Setup_token -> false
+  | Runtime_binding.Api_key | Runtime_binding.Setup_token -> binding.Runtime_binding.available
 ;;
 
 let default_model_label_for_binding (binding : Runtime_binding.t) =

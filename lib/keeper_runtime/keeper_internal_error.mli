@@ -281,6 +281,14 @@ val wire_kind_of_string : string -> wire_kind option
 
 val kind_of_masc_internal_error : masc_internal_error -> string
 
+val fenced_attempt_summary : masc_internal_error -> string option
+(** One line for a fenced attempt: the effect disposition, then the failure
+    that ended the attempt. [Some] only for [Provider_attempt_effect_fenced]
+    and [Tool_correction_lost]; every other error keeps its own summary path.
+    The cause is the variable-length part, so it comes last: a surface that
+    clips the line loses the tail of the cause, not the disposition, and shows
+    the cause where {!masc_internal_error_to_json} would have buried it. *)
+
 val runtime_id_of_masc_internal_error : masc_internal_error -> string
 
 val accept_no_progress_retry_kind :

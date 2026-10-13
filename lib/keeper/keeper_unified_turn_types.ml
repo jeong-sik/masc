@@ -234,7 +234,17 @@ let registry_failure_reason_of_terminal_reason
   let detail =
     match core_error with
     | Some (Agent_core.Error.Config _) -> "provider configuration failed"
-    | Some _ | None -> Keeper_types_profile.short_preview raw_error
+    | Some error ->
+      (* A fence's raw error is a JSON envelope whose cause comes last, so a
+         prefix preview shows only the repeated fields and cuts the cause. *)
+      (match
+         Option.bind
+           (Keeper_internal_error.classify_masc_internal_error error)
+           Keeper_internal_error.fenced_attempt_summary
+       with
+       | Some summary -> Keeper_types_profile.short_preview summary
+       | None -> Keeper_types_profile.short_preview raw_error)
+    | None -> Keeper_types_profile.short_preview raw_error
   in
   let configuration_failure =
     match core_error with

@@ -3015,6 +3015,69 @@ max-concurrent = 1
        aggregate.models)
 ;;
 
+(* A fence's raw error is a JSON envelope with the cause last. The status
+   surface kept only a prefix of it, so a Keeper that failed on a transport
+   error showed [kind]/[runtime_id]/[effect_disposition] and no cause. The
+   detail must name the cause even when the envelope is far longer than the
+   preview limit. *)
+let () =
+  let cause_message =
+    "Provider 'muse_serve' reported an error (modelError): Muse Code turn \
+     failed: transport error: error sending request for url \
+     (https://api.meta.ai/v1/responses) (after 4 provider attempts)"
+  in
+  let fenced =
+    Keeper_internal_error.Provider_attempt_effect_fenced
+      { runtime_id = "muse_d242bc1a.muse-spark-1.3_75bc5a82"
+      ; effect_disposition = Keeper_provider_attempt_effect_core.Observation_unavailable
+      ; cause =
+          Keeper_internal_error.Fenced_core
+            (Keeper_request_failure_core.of_core_error
+               (Agent_core.Error.Provider
+                  (Llm_provider.Error.ParseError { detail = cause_message })))
+      }
+  in
+  let core_error = Keeper_internal_error.core_error_of_masc_internal_error fenced in
+  let raw_error = Agent_core.Error.to_string core_error in
+  let contains ~needle text =
+    let n = String.length needle and t = String.length text in
+    let rec loop i = i + n <= t && (String.sub text i n = needle || loop (i + 1)) in
+    n = 0 || loop 0
+  in
+  check
+    "fixture: the raw envelope is longer than the preview limit"
+    (String.length raw_error > 220);
+  check
+    "fixture: a prefix preview of the raw envelope loses the cause"
+    (not
+       (contains
+          ~needle:"api.meta.ai"
+          (Masc.Keeper_types_profile.short_preview raw_error)));
+  let terminal = Masc.Keeper_turn_terminal.of_failure ~raw_error core_error in
+  (match
+     Masc.Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
+       ~core_error terminal ~raw_error
+   with
+   | Some (Masc.Keeper_registry.Provider_runtime_error { detail; code; _ }) ->
+     check
+       "a fenced attempt's registry detail names the cause"
+       (contains ~needle:"api.meta.ai" detail);
+     check
+       "a fenced attempt's registry detail keeps the effect disposition"
+       (contains ~needle:"observation_unavailable" detail);
+     check
+       "a fenced attempt keeps its typed code"
+       (String.equal code "provider_attempt_effect_fenced")
+   | Some _ | None -> check "a fenced attempt maps to a provider runtime error" false);
+  (* Only fences take the cause-first path: every other error keeps the
+     preview of its raw error. *)
+  check
+    "a non-fence masc error has no fenced summary"
+    (Keeper_internal_error.fenced_attempt_summary
+       (Keeper_internal_error.Receipt_persistence_failed { detail = "disk full" })
+     = None)
+;;
+
 let () =
   match !failures with
   | [] -> print_endline "test_keeper_terminal_reason_typed: OK"

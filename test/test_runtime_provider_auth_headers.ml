@@ -1576,6 +1576,118 @@ let test_dispatch_accepts_transformed_or_credential_free_provider () =
   check (result unit reject) "credential-free provider" (Ok ())
     (Runtime_instance.validate_dispatch_credential ~provider_config runtime)
 
+(* Two catalog rows that take an API key ([glm-coding], [openrouter]) and one
+   that does not ([ollama]). [declare] names the rows that carry a
+   [credentials] block; the others leave the request without an auth header
+   unless dispatch turns it away. *)
+let keyed_rows_runtime ~declare ~provider_id =
+  let credentials id =
+    if List.mem id declare
+    then Printf.sprintf {|[providers.%s.credentials]
+type = "inline"
+value = "fixture-key"
+|} id
+    else ""
+  in
+  let toml = Printf.sprintf
+    {|[runtime]
+default = "glm-coding.probe"
+[providers.glm-coding]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+%s
+[providers.openrouter]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+%s
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://127.0.0.1:2"
+[models.probe]
+api-name = "probe-model"
+tools-support = true
+[models.probe.capabilities]
+max-output-tokens = 4096
+[glm-coding.probe]
+max-tokens = 1024
+[openrouter.probe]
+max-tokens = 1024
+[ollama.probe]
+max-tokens = 1024
+|} (credentials "glm-coding") (credentials "openrouter")
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errors ->
+    failf "keyed rows config failed: %s"
+      (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) ->
+           e.path ^ ": " ^ e.message) errors))
+  | Ok cfg ->
+    (match
+       List.find_opt
+         (fun (b : Runtime_schema.binding) -> String.equal b.provider_id provider_id)
+         cfg.bindings
+     with
+     | None -> failf "no binding for %s" provider_id
+     | Some binding ->
+       (match Runtime_instance.of_binding cfg binding with
+        | Ok runtime -> runtime
+        | Error reason ->
+          failf "%s did not materialize: %s" provider_id
+            (Runtime_config_error.string_of_drop_reason reason)))
+
+let test_dispatch_rejects_undeclared_keyed_row () =
+  let runtime = keyed_rows_runtime ~declare:[] ~provider_id:"glm-coding" in
+  let provider_config = agent_core_provider_config_or_fail runtime in
+  check bool "the row carries no secret" true
+    (Llm_provider.Secret.is_empty provider_config.api_key);
+  match Runtime_instance.validate_dispatch_credential ~provider_config runtime with
+  | Error (Runtime_instance.Undeclared_credential { provider_id } as error) ->
+    check string "provider id" "glm-coding" provider_id;
+    check string "message names the block to add"
+      "provider \"glm-coding\" requires an API key and declares no credential: add \
+       [providers.glm-coding.credentials] with the environment variable that holds it"
+      (Runtime_instance.dispatch_credential_error_to_string error);
+    (match Runtime_instance.dispatch_credential_error_to_core_error error with
+     | Agent_core.Error.Config
+         (Agent_core.Error.CredentialUnavailable { provider_id; carrier }) ->
+       check string "typed provider id" "glm-coding" provider_id;
+       check bool "typed undeclared carrier" true
+         (carrier = Agent_core.Error.UndeclaredCredential)
+     | core_error ->
+       failf "expected CredentialUnavailable, got: %s"
+         (Agent_core.Error.to_string core_error))
+  | Error error ->
+    failf "expected undeclared credential, got: %s"
+      (Runtime_instance.dispatch_credential_error_to_string error)
+  | Ok () -> fail "an undeclared keyed row was let through to dispatch"
+
+let test_dispatch_rejects_only_the_undeclared_sibling_row () =
+  let declare = [ "glm-coding" ] in
+  let declared = keyed_rows_runtime ~declare ~provider_id:"glm-coding" in
+  check (result unit reject) "declared row dispatches" (Ok ())
+    (Runtime_instance.validate_dispatch_credential
+       ~provider_config:(agent_core_provider_config_or_fail declared)
+       declared);
+  let bare = keyed_rows_runtime ~declare ~provider_id:"openrouter" in
+  match
+    Runtime_instance.validate_dispatch_credential
+      ~provider_config:(agent_core_provider_config_or_fail bare)
+      bare
+  with
+  | Error (Runtime_instance.Undeclared_credential { provider_id }) ->
+    check string "only the missing row is named" "openrouter" provider_id
+  | Error error ->
+    failf "expected undeclared credential, got: %s"
+      (Runtime_instance.dispatch_credential_error_to_string error)
+  | Ok () -> fail "the undeclared sibling row was let through"
+
+let test_dispatch_accepts_auth_none_row_without_credentials () =
+  let runtime = keyed_rows_runtime ~declare:[] ~provider_id:"ollama" in
+  check (result unit reject) "auth = none needs no credential block" (Ok ())
+    (Runtime_instance.validate_dispatch_credential
+       ~provider_config:(agent_core_provider_config_or_fail runtime)
+       runtime)
+
 let test_runtime_of_binding_preserves_failure_reason () =
   let cfg =
     { Runtime_schema.providers = [ runpod_provider ]
@@ -3045,6 +3157,18 @@ let () =
             "dispatch accepts transformed or credential-free provider"
             `Quick
             test_dispatch_accepts_transformed_or_credential_free_provider
+        ; test_case
+            "dispatch rejects undeclared keyed row"
+            `Quick
+            test_dispatch_rejects_undeclared_keyed_row
+        ; test_case
+            "dispatch rejects only the undeclared sibling row"
+            `Quick
+            test_dispatch_rejects_only_the_undeclared_sibling_row
+        ; test_case
+            "dispatch accepts auth none row without credentials"
+            `Quick
+            test_dispatch_accepts_auth_none_row_without_credentials
         ; test_case
             "adapter stamps declared provider id"
             `Quick

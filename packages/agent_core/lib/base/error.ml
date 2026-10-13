@@ -88,6 +88,9 @@ type mcp_error =
 type credential_carrier =
   | InlineCredential
   | FileCredential
+  | UndeclaredCredential
+      (** The catalog states the endpoint takes an API key and the runtime row
+          declares no credential block for it. *)
 
 (** Configuration errors. *)
 type config_error =
@@ -266,12 +269,15 @@ let config_error_to_string = function
   | MissingEnvVar r -> Printf.sprintf "Missing env var: %s" r.var_name
   | UnsupportedProvider r -> Printf.sprintf "Unsupported provider: %s" r.detail
   | CredentialUnavailable r ->
-    Printf.sprintf
-      "Provider %S has an unavailable %s credential"
-      r.provider_id
-      (match r.carrier with
-       | InlineCredential -> "inline"
-       | FileCredential -> "file")
+    (match r.carrier with
+     | UndeclaredCredential ->
+       Printf.sprintf
+         "Provider %S requires an API key and declares no credential"
+         r.provider_id
+     | InlineCredential ->
+       Printf.sprintf "Provider %S has an unavailable inline credential" r.provider_id
+     | FileCredential ->
+       Printf.sprintf "Provider %S has an unavailable file credential" r.provider_id)
   | InvalidConfig r -> Printf.sprintf "Invalid config '%s': %s" r.field r.detail
   | SensitiveValueInConfig r -> Printf.sprintf "Sensitive value in config: %s" r.detail
 ;;

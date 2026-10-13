@@ -285,7 +285,8 @@ let core_config_error_fields = function
       , `String
           (match carrier with
            | Agent_core.Error.InlineCredential -> "inline"
-           | Agent_core.Error.FileCredential -> "file") )
+           | Agent_core.Error.FileCredential -> "file"
+           | Agent_core.Error.UndeclaredCredential -> "undeclared") )
     ]
   | Agent_core.Error.InvalidConfig { field; detail } ->
     [ "variant", `String "invalid_config"

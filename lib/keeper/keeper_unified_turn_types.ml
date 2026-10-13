@@ -271,7 +271,23 @@ let registry_failure_reason_of_terminal_reason
            ; field = None
            ; detail = "configured provider is unsupported"
            })
-    | Some (Agent_core.Error.Config (CredentialUnavailable _)) ->
+    | Some
+        (Agent_core.Error.Config
+           (CredentialUnavailable
+              { provider_id; carrier = Agent_core.Error.UndeclaredCredential })) ->
+      Some
+        (Keeper_registry.Turn_configuration_error
+           { code = "credential_undeclared"
+           ; field = Some (Printf.sprintf "providers.%s.credentials" provider_id)
+           ; detail =
+               "provider requires an API key but its runtime row declares no credential"
+           })
+    | Some
+        (Agent_core.Error.Config
+           (CredentialUnavailable
+              { carrier = Agent_core.Error.InlineCredential | Agent_core.Error.FileCredential
+              ; _
+              })) ->
       Some
         (Keeper_registry.Turn_configuration_error
            { code = "credential_unavailable"

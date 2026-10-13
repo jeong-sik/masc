@@ -19,6 +19,11 @@ val project_history
 
 val parse_response : Yojson.Safe.t -> Types.api_response
 
+val drop_block_env_var : string
+(** Name of the environment switch that withholds
+    [thinking.block_binding.prefix_mismatch_behavior = "drop_block"] when set
+    to a false value. Unset keeps the default (send it). Measurement only. *)
+
 val request_headers : body:string -> (string * string) list -> (string * string) list
 (** Add the binding-controls beta only when this exact serialized request
     contains [thinking.block_binding]. Preserve other caller beta values. *)

@@ -224,6 +224,18 @@ let test_binding_controls_completion_only () =
   check (option string) "existing beta retained with required beta"
     (Some "existing-beta,thinking-binding-controls-2026-08-01")
     (List.assoc_opt "anthropic-beta" headers);
+  let without_switch =
+    Env_parse.with_env Backend_anthropic.drop_block_env_var "false" (fun () ->
+      build cfg)
+  in
+  check bool "measurement switch withholds block_binding" false
+    (List.mem_assoc "block_binding"
+       (Yojson.Safe.from_string without_switch |> member "thinking" |> to_assoc));
+  check (option string) "no binding beta without block_binding"
+    (Some "existing-beta")
+    (List.assoc_opt "Anthropic-Beta"
+       (Backend_anthropic.request_headers ~body:without_switch
+          ["Anthropic-Beta", "existing-beta"]));
   let disabled = build {cfg with enable_thinking = Some false; reasoning_effort = None} in
   check bool "between_tools does not send forbidden binding" false
     (List.mem_assoc "block_binding"

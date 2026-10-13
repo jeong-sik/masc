@@ -397,6 +397,22 @@ let validate_record_fields ~status_fields json =
 ;;
 
 let decode_status ~tag json =
+  (* [done] and [error] carry the same members; the tag fixes what [ok] must
+     be. *)
+  let terminal ~expected_ok =
+    let* ok = required_bool "ok" json in
+    let* body = required_string "body" json in
+    let data = Json_util.assoc_member_opt "data" json in
+    let* completed_at = required_completed_at json in
+    if Bool.equal ok expected_ok
+    then Ok (Done { ok; body; data }, completed_at)
+    else
+      Error
+        (Printf.sprintf
+           "record status %S disagrees with required ok=%b"
+           tag
+           ok)
+  in
   match tag with
   | "queued" -> Ok (Queued, None)
   | "running" -> Ok (Running, None)
@@ -418,19 +434,8 @@ let decode_status ~tag json =
     let* reason = required_string "reason" json in
     let* completed_at = required_completed_at json in
     Ok (Persistence_failed { attempted_status; reason }, completed_at)
-  | ("done" | "error") as terminal_tag ->
-    let* ok = required_bool "ok" json in
-    let* body = required_string "body" json in
-    let data = Json_util.assoc_member_opt "data" json in
-    let* completed_at = required_completed_at json in
-    if Bool.equal ok (String.equal terminal_tag "done")
-    then Ok (Done { ok; body; data }, completed_at)
-    else
-      Error
-        (Printf.sprintf
-           "record status %S disagrees with required ok=%b"
-           terminal_tag
-           ok)
+  | "done" -> terminal ~expected_ok:true
+  | "error" -> terminal ~expected_ok:false
   | other -> Error (Printf.sprintf "unknown status %S in record" other)
 ;;
 

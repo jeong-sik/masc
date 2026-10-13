@@ -343,14 +343,16 @@ let unattributed_of_fields ~context fields =
   let* request_id, fields = field "request_id" Candle_json.as_non_blank fields in
   let* verification_run_id, fields = field "verification_run_id" Candle_json.as_non_blank fields in
   let* reason_text, fields = field "reason" Candle_json.as_string fields in
+  let attributed reason fields =
+    let* grade, fields = field "grade" Candle_appraisal.grade_of_json fields in
+    let* grade_trace, fields = field "grade_trace" Candle_appraisal.trace_of_json fields in
+    let* relations, fields = field "relations" (Candle_json.as_list Candle_appraisal.relation_of_json) fields in
+    Ok (reason {grade; grade_trace; relations}, fields)
+  in
   let* reason, fields = match reason_text with
     | "no_candidates" -> Ok (No_candidates, fields)
-    | "all_unrelated" | "no_related_keepers" ->
-      let* grade, fields = field "grade" Candle_appraisal.grade_of_json fields in
-      let* grade_trace, fields = field "grade_trace" Candle_appraisal.trace_of_json fields in
-      let* relations, fields = field "relations" (Candle_json.as_list Candle_appraisal.relation_of_json) fields in
-      let attribution = {grade; grade_trace; relations} in
-      Ok ((if reason_text = "all_unrelated" then All_unrelated attribution else No_related_keepers attribution), fields)
+    | "all_unrelated" -> attributed (fun attribution -> All_unrelated attribution) fields
+    | "no_related_keepers" -> attributed (fun attribution -> No_related_keepers attribution) fields
     | _ -> Error "unknown unattributed reason" in
   let* () = Candle_json.finish ~context fields in
   Ok (Unattributed { goal_id; request_id; verification_run_id; reason })

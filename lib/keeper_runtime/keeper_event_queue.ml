@@ -1166,22 +1166,22 @@ let payload_of_yojson json =
     let* terminal_kind =
       string_field ~context:"stimulus.payload.terminal" "kind" terminal_fields
     in
+    let with_message terminal =
+      let* () =
+        exact_fields
+          ~context:"stimulus.payload.terminal"
+          ~expected:[ "kind"; "message" ]
+          terminal_fields
+      in
+      let* message =
+        string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
+      in
+      Ok (terminal message)
+    in
     let* terminal =
       match terminal_kind with
-      | "replied" | "failed" ->
-        let* () =
-          exact_fields
-            ~context:"stimulus.payload.terminal"
-            ~expected:[ "kind"; "message" ]
-            terminal_fields
-        in
-        let* message =
-          string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
-        in
-        Ok
-          (if String.equal terminal_kind "replied"
-           then Delegate_replied message
-           else Delegate_failed message)
+      | "replied" -> with_message (fun message -> Delegate_replied message)
+      | "failed" -> with_message (fun message -> Delegate_failed message)
       | "no_reply" ->
         let* () =
           exact_fields
@@ -1255,6 +1255,18 @@ let payload_of_yojson json =
     let* terminal_kind =
       string_field ~context:"stimulus.payload.terminal" "kind" terminal_fields
     in
+    let with_message terminal =
+      let* () =
+        exact_fields
+          ~context:"stimulus.payload.terminal"
+          ~expected:[ "kind"; "message" ]
+          terminal_fields
+      in
+      let* message =
+        string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
+      in
+      Ok (terminal message)
+    in
     let* terminal =
       match terminal_kind with
       | "succeeded" ->
@@ -1265,20 +1277,8 @@ let payload_of_yojson json =
             terminal_fields
         in
         Ok Composition_succeeded
-      | "failed" | "cancelled" ->
-        let* () =
-          exact_fields
-            ~context:"stimulus.payload.terminal"
-            ~expected:[ "kind"; "message" ]
-            terminal_fields
-        in
-        let* message =
-          string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
-        in
-        Ok
-          (if String.equal terminal_kind "failed"
-           then Composition_failed message
-           else Composition_cancelled message)
+      | "failed" -> with_message (fun message -> Composition_failed message)
+      | "cancelled" -> with_message (fun message -> Composition_cancelled message)
       | value ->
         Error (Printf.sprintf "unknown keeper composition terminal kind: %s" value)
     in

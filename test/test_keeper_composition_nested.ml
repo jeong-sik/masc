@@ -358,8 +358,13 @@ let test_public_nested_prepare_run_records_only_admitted_children ~reject_child 
         ~completion:Agent_core.Tool_contract.Continue_after_success in
     let success, content = match Agent_core.Tool.execute ~invocation tool input with
       | Ok output -> true, output.content | Error error -> false, error.Agent_core.Types.message in
-    let json = Yojson.Safe.from_string content in
-    let structured = Yojson.Safe.Util.member "structured_content" json in
+    let structured =
+      match Tool_output.decode_from_agent_core content with
+      | Tool_output.Decoded reference -> read_document ~base_path reference
+      | Tool_output.Not_marker ->
+        Yojson.Safe.from_string content |> Yojson.Safe.Util.member "structured_content"
+      | Tool_output.Invalid_marker { detail } -> fail detail
+    in
     if structured = `Null then fail ("public result lacks structured content: " ^ content);
     success, content, structured in
   let scopes = [ nested ~args:(`Assoc []) "left" reference; nested ~args:(`Assoc []) "right" reference ]

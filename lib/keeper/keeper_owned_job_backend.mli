@@ -29,6 +29,9 @@ type error =
       ; stderr : string
       }
   | Response_rejected of { operation : string; detail : string }
+  | Log_capture_incomplete of { stream : Process_output_capture.stream; path : string; byte_length : int }
+  | Log_capture_failed of { stream : Process_output_capture.stream; path : string option; detail : string }
+  | Log_publication_failed of string
 
 val error_to_string : error -> string
 
@@ -72,7 +75,12 @@ val cancel : container_id:string -> preparation -> (observation, error) result
     Cancel kills only an exactly verified owned running container; stopped
     containers and their evidence remain available until explicit cleanup. *)
 
-type logs = { stdout : string; stderr : string }
+type logs = { stdout : Tool_output.artifact_ref; stderr : Tool_output.artifact_ref }
 val logs : container_id:string -> preparation -> (logs, error) result
-(** Captured streams from the exact verified container. Uses the existing
-    process capture contract; it adds no limit, timeout or truncation policy. *)
+(** Capture both streams to private files outside the workspace and CLI config.
+    Return durable artifact references only after both observed pipe EOF and
+    complete-file publication. Bounded process previews never become complete
+    logs. Completeness covers the delivered backend streams; Docker log
+    retention determines what remains available. Saved container identity and private-directory authority are checked
+    before and after capture. Cancellation propagates and partial capture files
+    remain evidence. No limit, timeout or retry is added. *)

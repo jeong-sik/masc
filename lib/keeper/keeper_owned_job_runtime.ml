@@ -45,16 +45,8 @@ let collect (record : Store.record) =
       (match Backend.logs ~container_id record.preparation with
        | Error error -> note record (Backend.error_to_string error)
        | Ok logs ->
-           let blobs = Tool_blob_store.create ~base_path:record.base_path in
-           let persist () =
-             let stdout = Tool_blob_store.put_durable blobs ~bytes:logs.stdout ~mime:"text/plain" in
-             let stderr = Tool_blob_store.put_durable blobs ~bytes:logs.stderr ~mime:"text/plain" in
-             save record ~phase:record.phase ~cancel_requested:record.cancel_requested
-               ~outputs:(Some (stdout,stderr)) ~detail:None in
-           (try persist () with
-            | Sys_error detail -> note record ("output publication failed: " ^ detail)
-            | Unix.Unix_error (code,operation,_) ->
-                note record ("output publication failed: " ^ operation ^ ": " ^ Unix.error_message code)))
+           save record ~phase:record.phase ~cancel_requested:record.cancel_requested
+             ~outputs:(Some (logs.stdout,logs.stderr)) ~detail:None)
   | (Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
     | Store.Running _ | Store.Cancelled_before_start _), _
   | Store.Exited _, Some _ -> Ok record

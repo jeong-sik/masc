@@ -28,10 +28,15 @@ type error =
   | Process_refused of { operation : string; refusal : Process_eio.spawn_refusal }
   | Command_failed of { operation : string; status : Unix.process_status; stdout : string; stderr : string }
   | Response_rejected of { operation : string; detail : string }
+  | Log_capture_incomplete of { stream : Process_output_capture.stream; path : string; byte_length : int }
+  | Log_capture_failed of { stream : Process_output_capture.stream; path : string option; detail : string }
+  | Log_publication_failed of string
 
 type observation = Absent | Created of string | Running of string
   | Stopped of string * int | Unconfirmed of string
-type logs = { stdout : string; stderr : string }
+type logs = { stdout : Tool_output.artifact_ref; stderr : Tool_output.artifact_ref }
+
+let log_stream_name = function Process_output_capture.Stdout -> "stdout" | Stderr -> "stderr"
 
 let status_text = function
   | Unix.WEXITED code -> Printf.sprintf "exit=%d" code
@@ -45,6 +50,12 @@ let error_to_string = function
   | Command_failed {operation; status; stdout; stderr} ->
     Printf.sprintf "%s %s; stdout=%s; stderr=%s" operation (status_text status) stdout stderr
   | Response_rejected {operation; detail} -> operation ^ ": " ^ detail
+  | Log_capture_incomplete {stream; path; byte_length} ->
+    Printf.sprintf "owned job %s capture did not reach EOF: %s (%d bytes)" (log_stream_name stream) path byte_length
+  | Log_capture_failed {stream; path; detail} ->
+    Printf.sprintf "owned job %s capture failed%s: %s" (log_stream_name stream)
+      (match path with None -> "" | Some path -> " at " ^ path) detail
+  | Log_publication_failed detail -> "owned job log publication failed: " ^ detail
 
 let component = "keeper-owned-job"
 let container_kind = "owned-job"
@@ -629,17 +640,107 @@ let cancel ~container_id prepared =
     Ok (after_effect prepared ~operation ~expected_id:id result)
   | Absent | Created _ | Stopped _ | Unconfirmed _ as observation -> Ok observation
 
-let logs ~container_id prepared =
-  let* () = isolation_guard () in
+let log_container_authority ~container_id prepared =
   match inspect prepared with
-  | (Created id | Running id | Stopped (id,_)) when id <> container_id ->
-      Error (Response_rejected {operation="owned job container logs"; detail="saved container identity differs"})
-  | Created id | Running id | Stopped (id, _) ->
-    let* () = directories_unchanged prepared in
-    let operation = "owned job container logs" in
-    let* result = run ~env:(cli_environment ()) ~operation (command prepared) ["container"; "logs"; id] in
-    (match result with
-     | Unix.WEXITED 0, stdout, stderr -> Ok {stdout; stderr}
-     | status, stdout, stderr -> Error (Command_failed {operation; status; stdout; stderr}))
+  | Created id | Running id | Stopped (id, _) when id = container_id -> Ok ()
+  | Created _ | Running _ | Stopped _ ->
+    Error (Response_rejected {operation="owned job container logs"; detail="saved container identity differs"})
   | Absent -> Error (Preparation_refused "logs require the exact owned container")
   | Unconfirmed detail -> Error (Response_rejected {operation="owned job container logs"; detail})
+
+let inspect_capture_directory prepared capture_dir =
+  let operation = "owned job log capture directory" in
+  let* () = directories_unchanged prepared in
+  Eio_guard.run_in_systhread ~label:operation (fun () ->
+    let* _ = Fs_compat.read_owned_directory ~owner_uid:prepared.uid
+      ~ownership_root:prepared.spec.base_path capture_dir
+      |> Result.map_error (fun error -> Log_publication_failed (Fs_compat.owned_regular_file_read_error_to_string error)) in
+    try decode operation (fun () ->
+      let stat = Unix.lstat capture_dir in
+      require (stat.Unix.st_kind = Unix.S_DIR && stat.st_uid = prepared.uid
+        && stat.st_perm land 0o077 = 0) "capture directory is not private and process-owned";
+      {path=capture_dir;device=stat.st_dev;inode=stat.st_ino;owner_uid=stat.st_uid;permissions=stat.st_perm})
+    with
+    | Sys_error detail -> Error (Log_publication_failed detail)
+    | Unix.Unix_error (error, operation, _) ->
+      Error (Log_publication_failed (operation ^ ": " ^ Unix.error_message error)))
+
+let prepare_capture_directory prepared =
+  let* () = directories_unchanged prepared in
+  let _, data, _, _ = private_paths prepared.spec in
+  let capture_dir = Filename.concat data "captures" in
+  let* () = Eio_guard.run_in_systhread ~label:"owned-job-create-capture-directory" (fun () ->
+    try Unix.mkdir capture_dir 0o700; Ok () with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> Ok ()
+    | Unix.Unix_error (error, operation, _) ->
+      Error (Log_publication_failed (operation ^ ": " ^ Unix.error_message error))) in
+  let* identity = inspect_capture_directory prepared capture_dir in
+  Ok (capture_dir, identity)
+
+let capture_directory_unchanged prepared expected =
+  let* actual = inspect_capture_directory prepared expected.path in
+  if actual = expected then Ok ()
+  else Error (Log_publication_failed "private capture directory identity changed")
+
+let complete_log_file ~stream = function
+  | Process_output_capture.Complete_file {path; byte_length} -> Ok (path, byte_length)
+  | Incomplete_file {path; byte_length} -> Error (Log_capture_incomplete {stream; path; byte_length})
+  | Capture_failed {path; message} -> Error (Log_capture_failed {stream; path; detail=message})
+
+let capture_file_snapshot prepared ~capture_directory ~path ~byte_length =
+  let* () = capture_directory_unchanged prepared capture_directory in
+  let* () = if Filename.dirname path = capture_directory.path then Ok ()
+    else Error (Log_publication_failed "capture file escaped its private directory") in
+  let* file = Fs_compat.load_owned_regular_file_range ~ownership_root:prepared.spec.base_path
+    ~offset:0 ~max_bytes:0 path
+    |> Result.map_error (fun error -> Log_publication_failed (Fs_compat.owned_regular_file_read_error_to_string error)) in
+  match file with
+  | None -> Error (Log_publication_failed "complete capture file is absent")
+  | Some file ->
+    let snapshot = file.Fs_compat.snapshot in
+    if snapshot.owner_uid = prepared.uid && snapshot.permissions land 0o077 = 0
+      && snapshot.file_size = byte_length
+    then Ok snapshot
+    else Error (Log_publication_failed "capture file owner, permissions or EOF length differs")
+
+let publish_log_file prepared ~capture_directory blobs (path, byte_length) =
+  let* before = capture_file_snapshot prepared ~capture_directory ~path ~byte_length in
+  let* sha256 = Fs_compat.sha256_owned_regular_file ~ownership_root:prepared.spec.base_path path
+    |> Result.map_error (fun error -> Log_publication_failed (Fs_compat.owned_regular_file_read_error_to_string error)) in
+  let* sha256 = match sha256 with Some value -> Ok value
+    | None -> Error (Log_publication_failed "complete capture disappeared before publication") in
+  let* reference =
+    try Ok (Tool_blob_store.put_file_durable blobs ~path ~mime:"text/plain") with
+    | Sys_error detail -> Error (Log_publication_failed detail)
+    | Unix.Unix_error (error, operation, _) ->
+      Error (Log_publication_failed (operation ^ ": " ^ Unix.error_message error)) in
+  let* after = capture_file_snapshot prepared ~capture_directory ~path ~byte_length in
+  if Fs_compat.equal_owned_regular_file_snapshot before after
+    && reference.Tool_output.sha256 = sha256 && reference.bytes = byte_length
+  then Ok reference
+  else Error (Log_publication_failed "complete capture changed during durable publication")
+
+let logs ~container_id prepared =
+  let* () = isolation_guard () in
+  let* () = log_container_authority ~container_id prepared in
+  let* capture_dir, capture_directory = prepare_capture_directory prepared in
+  let operation = "owned job container logs" in
+  let (result, files) = Process_output_capture.with_capture ~capture_dir (fun output_capture ->
+    let* () = capture_directory_unchanged prepared capture_directory in
+    let* () = log_container_authority ~container_id prepared in
+    Ok (Process_eio.run_argv_with_status_split_streaming
+      ~env:(cli_environment ()) ~output_capture
+      ~on_stdout_chunk:(fun _ -> ()) ~on_stderr_chunk:(fun _ -> ())
+      (command prepared @ ["container"; "logs"; container_id]))) in
+  let* status, stdout, stderr = result in
+  let* () = match status with Unix.WEXITED 0 -> Ok ()
+    | status -> Error (Command_failed {operation; status; stdout; stderr}) in
+  let* stdout_file = complete_log_file ~stream:Process_output_capture.Stdout files.stdout in
+  let* stderr_file = complete_log_file ~stream:Process_output_capture.Stderr files.stderr in
+  let* () = log_container_authority ~container_id prepared in
+  let blobs = Tool_blob_store.create ~base_path:prepared.spec.base_path in
+  let* stdout = publish_log_file prepared ~capture_directory blobs stdout_file in
+  let* stderr = publish_log_file prepared ~capture_directory blobs stderr_file in
+  let* () = log_container_authority ~container_id prepared in
+  let* () = capture_directory_unchanged prepared capture_directory in
+  Ok {stdout; stderr}

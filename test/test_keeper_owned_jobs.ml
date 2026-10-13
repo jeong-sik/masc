@@ -153,7 +153,17 @@ elif args[:2] == ["container", "logs"]:
     if control.get("mode") == "logs_unknown":
         print("synthetic output transport refused", file=sys.stderr)
         sys.exit(19)
-    if state["container"]["Id"] == container_id:
+    if control.get("large_logs"):
+        sizes = control["large_logs"]
+        head, tail = sizes["head"], sizes["tail"]
+        assert head > 0 and tail > 0
+        for stream, output, fill, remainder in (("stdout", sys.stdout, "O", "o"), ("stderr", sys.stderr, "E", "e")):
+            output.write(stream + " beginning\n")
+            output.write(fill * (head + tail))
+            output.write(stream.upper() + "_DEEP_MIDDLE\n")
+            output.write(remainder * tail)
+            output.write(stream.upper() + "_TERMINAL\n")
+    elif state["container"]["Id"] == container_id:
         sys.stdout.write("original job stdout\n")
         sys.stderr.write("original job stderr\n")
     else:
@@ -500,6 +510,61 @@ let test_changed_mount_cannot_authorize_cancel () = with_fixture @@ fun _env _in
   check int "one exact owned kill after restore" 1 (effect_count fixture "kill");
   check_original_source fixture recovered
 
+let test_large_streams_publish_complete_original_artifacts () = with_fixture @@ fun _env _initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"; "large output"]) in
+  let id = job_id started in
+  let head = Common.max_process_capture_head_bytes in
+  let tail = Common.max_process_capture_tail_bytes in
+  let body stream fill remainder =
+    let prefix = stream ^ " beginning\n" in
+    let middle = String.uppercase_ascii stream ^ "_DEEP_MIDDLE\n" in
+    let terminal = String.uppercase_ascii stream ^ "_TERMINAL\n" in
+    let bytes = prefix ^ String.make (head + tail) fill ^ middle
+        ^ String.make tail remainder ^ terminal in
+    let middle_offset = String.length prefix + head + tail in
+    check bool "deep marker lies beyond preview head" true (middle_offset > head);
+    check bool "deep marker lies before preview tail" true
+      (middle_offset + String.length middle < String.length bytes - tail);
+    bytes, middle_offset, middle, terminal
+  in
+  (* Expected bodies come from this independent producer fixture before the
+     public status/capture/publication path; hashes use only these source bytes. *)
+  let expected = [body "stdout" 'O' 'o'; body "stderr" 'E' 'e'] in
+  set_source fixture ~task_id:"task-B" ~turn:52;
+  control fixture (`Assoc
+      ["state", `String "exited"; "exit_code", `Int 0;
+       "large_logs", `Assoc ["head", `Int head; "tail", `Int tail]]);
+  let exited = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"status-large-streams" ~turn:52
+      "keeper_job_status" (argument id)) in
+  check string "large output job canonically exited" "exited" (exited |> member "phase" |> to_string);
+  check_json "complete publication leaves no capture uncertainty" `Null (exited |> member "detail");
+  check_original_source fixture exited;
+  let references = exited |> member "artifacts" |> to_list |> List.map (fun json ->
+      match Tool_output.normalized_artifact_ref_of_json json with
+      | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+      | _ -> fail "large output artifact reference is not canonical") in
+  check int "both complete streams have durable references" 2 (List.length references);
+  let blobs = Tool_blob_store.create ~base_path:fixture.base_path in
+  List.iter2 (fun reference (expected, middle_offset, middle, terminal) ->
+      let expected_bytes = String.length expected in
+      check bool "full stream exceeds process preview ceiling" true (expected_bytes > head + tail);
+      check int "declared artifact bytes cover the complete stream" expected_bytes reference.Tool_output.bytes;
+      let expected_sha = Digestif.SHA256.(to_hex (digest_string expected)) in
+      check string "artifact SHA matches independent full source digest" expected_sha reference.sha256;
+      let actual = match Tool_blob_store.fetch blobs ~sha256:reference.sha256 with
+        | Ok (Some bytes) -> bytes
+        | Ok None | Error _ -> fail "complete large stream artifact is unavailable" in
+      check int "durable file contains all observed bytes" expected_bytes (String.length actual);
+      check bool "artifact is original bytes without a rendered preview or truncation marker" true (String.equal expected actual);
+      check string "omitted-preview middle survives in original artifact" middle
+        (String.sub actual middle_offset (String.length middle));
+      check string "terminal source bytes survive in original artifact" terminal
+        (String.sub actual (String.length actual - String.length terminal) (String.length terminal))) references expected;
+  check int "large result never recreates job" 1 (effect_count fixture "create");
+  check int "large result never restarts job" 1 (effect_count fixture "start");
+  check int "one real output capture command" 1 (effect_count fixture "logs")
+
 let () =
   Printf.printf "owned_job_feature_transport=synthetic_docker_cli actual_public_handler=true actual_docker_execution=false\n%!";
   run "Keeper owned jobs"
@@ -508,4 +573,5 @@ let () =
       ; test_case "unknown create absence cannot relaunch" `Quick test_unknown_create_absence_never_replays
       ; test_case "unknown start absence cannot restart" `Quick test_unknown_start_absence_never_replays
       ; test_case "interrupted cancellation retains exact intent" `Quick test_cancel_in_flight_retains_exact_intent
-      ; test_case "changed mount or cloned identity cannot authorize a kill" `Quick test_changed_mount_cannot_authorize_cancel ]]
+      ; test_case "changed mount or cloned identity cannot authorize a kill" `Quick test_changed_mount_cannot_authorize_cancel
+      ; test_case "large stdout and stderr preserve complete original artifacts" `Quick test_large_streams_publish_complete_original_artifacts ]]

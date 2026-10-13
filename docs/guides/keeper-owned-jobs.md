@@ -18,9 +18,14 @@ turn and tool invocation when that context is available. Use that exact handle:
 
 Pass it to `keeper_job_status` to reconcile the saved backend or to
 `keeper_job_cancel` to persist a cancellation request. Cancellation and a
-confirmed exit are separate facts. Confirmed terminal stdout and stderr are
-published as complete durable artifact references in stdout, stderr order; an unavailable output remains
-explicit and can be collected later without running the program again.
+confirmed exit are separate facts. Available terminal logs are published as
+durable artifact references in stdout, stderr order. Unavailable output remains
+explicit and can be collected later without running the program again. The
+backend spools both actual `docker logs` pipes and requires authoritative EOF
+before publishing their complete files. Bounded process previews never become
+complete output. These artifacts preserve the bytes delivered by the backend;
+Docker's configured log retention determines which program bytes remain
+available before collection.
 
 Optional `inputs` is an array of `{ "path": "input.txt", "artifact": ... }`,
 where `artifact` is the exact normalized `Tool_output` reference returned by a

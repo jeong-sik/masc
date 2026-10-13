@@ -335,13 +335,17 @@ let run_doctor () =
     List.filter
       (fun (name, verdict) ->
         List.mem name spawned
-        && (match verdict with Probe.Not_a_descriptor -> true | _ -> false))
+        && (match verdict with
+          | Probe.Not_a_descriptor -> true
+          | Probe.Projected _ | Operator_only | Aliased _ | Withheld_by_schema_error _ -> false))
       verdict_of
   in
   let rides_every_turn =
     List.filter
       (fun (name, verdict) ->
-        (match verdict with Probe.Projected _ -> true | _ -> false)
+        (match verdict with
+          | Probe.Projected _ -> true
+          | Probe.Not_a_descriptor | Operator_only | Aliased _ | Withheld_by_schema_error _ -> false)
         && (match Masc.Keeper_tool_descriptor.declared_loading_of_model_name name with
             | Tool_definition_toml.Always_loaded -> true
             | Tool_definition_toml.Deferrable -> false))

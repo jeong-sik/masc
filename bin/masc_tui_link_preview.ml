@@ -435,7 +435,9 @@ let get_preview url =
          the url. Its result replaces this synthesized card on the next render;
          a failed or unregistered fetch simply leaves the synthesized card. A
          direct image URL has no HTML page to read, so it is not fetched. *)
-      (match p.kind with Image_direct _ -> () | _ -> !background_fetch url);
+      (match p.kind with
+        | Image_direct _ -> ()
+        | Github _ | Arxiv _ | HackerNews _ | YouTube _ | Web_page -> !background_fetch url);
       p
 
 let site_icon p =

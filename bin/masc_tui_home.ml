@@ -135,7 +135,10 @@ let reconcile_home_request_detail state =
          | Home_goal_confirmation _ | Home_operator_task _ -> false)
       then ()
       else if not (List.mem_assoc (Home_request request) (home_decision_rows state)) then begin
-        (match request with Home_question _ -> clear_ask_answering state | _ -> ());
+        (match request with
+          | Home_question _ -> clear_ask_answering state
+          | Home_held_call _ | Home_gate_request _ | Home_operator_request _
+          | Home_goal_confirmation _ | Home_operator_task _ -> ());
         state.home_opened_request <- None;
         state.approval_detail_open <- false;
         state.pending_approval_action <- None;
@@ -246,7 +249,9 @@ let home_initial_reading_ready state selected =
   | Some (Home_choose_keeper | Home_create_keeper) ->
       approvals_reading_current state
       && (match state.operator_stalled with Masc_tui_agenda.Read _ -> true | Not_read | Read_failed _ -> false)
-      && (match state.goals_to_confirm with Masc_tui_agenda.Read _ -> true | _ -> false)
+      && (match state.goals_to_confirm with
+        | Masc_tui_agenda.Read _ -> true
+        | Masc_tui_agenda.Not_read | Read_failed _ -> false)
   | Some Home_agenda | None -> false
 
 let home_notice_lines state =

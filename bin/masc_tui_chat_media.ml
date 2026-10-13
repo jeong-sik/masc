@@ -77,7 +77,10 @@ let newest_image media =
            | Masc_tui_image_preview.Unavailable_image _, None, Some src ->
              Masc_tui_image_preview.output_image ~name:attachment.name ~src
            | _, _, _ -> retained) in
-      (match preview with Masc_tui_image_preview.No_image -> None | _ -> Some preview)
+      (match preview with
+        | Masc_tui_image_preview.No_image -> None
+        | Masc_tui_image_preview.Named_path _ | Staged _ | Stored_attachment _ | Output_image _
+        | Unavailable_image _ -> Some preview)
     | Svg svg -> Some (Masc_tui_image_preview.inline_svg
         ~name:(Option.value svg.cap ~default:"SVG") svg.svg)
     | Voice _ -> None)

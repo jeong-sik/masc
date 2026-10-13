@@ -980,7 +980,9 @@ let render_question_reader (state : state) =
        else
          "  Left/Right: previous/next question · [/]: previous/next ask · "
          ^ "PgUp/PgDn: page · Home/End: top/bottom · Esc: "
-         ^ (match state.followed_from with Some (Overview, _) -> "Dashboard" | _ -> "approvals"));
+         ^ (match state.followed_from with
+          | Some (Overview, _) -> "Dashboard"
+          | Some ((Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board | Approvals | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs), _) | None -> "approvals"));
   box_divider buf cols;
   let lines, room = ask_question_viewport state in
   let limit = max 0 (List.length lines - room) in

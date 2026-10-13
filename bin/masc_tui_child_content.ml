@@ -180,7 +180,10 @@ let read ~mode ~keeper_name ~fetch ~previous =
         (* A suffix cannot repair evidence that the retained prefix changed.
            Keep that primary failure until a complete prefix comparison succeeds. *)
         let full = mode=Audit || Option.exists (fun (store:store) ->
-          match store.error with Some (History_rewritten _) -> true | _ -> false) old in
+          match store.error with
+          | Some (History_rewritten _) -> true
+          | Some (Transport _ | Http_refused _ | Invalid_json _ | Invalid_response _ | Service _
+                 | Persistence _ | Receiver_read _) | None -> false) old in
         let after=if full then None else Option.bind old (fun (store:store) -> store.cursor) in
         let request:Read.records_request={scope={keeper_name;receiver};after} in
         let received=

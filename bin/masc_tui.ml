@@ -1112,7 +1112,10 @@ let forget_queued_history (state : state) (request : Keeper_chat.request) =
       (fun entry ->
         not
           (String.equal entry.me_request_id request.Keeper_chat.request_id
-           && match entry.me_role with Message_user _ -> true | _ -> false))
+           && match entry.me_role with
+             | Message_user _ -> true
+             | Message_keeper | Message_autonomous | Message_status | Message_local | Message_error
+             | Message_tool | Message_skill _ | Message_thinking | Message_memory -> false))
       state.msg_history
 ;;
 
@@ -1982,7 +1985,10 @@ let append_user_history_once ~submitted_at state
   let already_present =
     List.exists
       (fun entry ->
-        (match entry.me_role with Message_user _ -> true | _ -> false)
+        (match entry.me_role with
+          | Message_user _ -> true
+          | Message_keeper | Message_autonomous | Message_status | Message_local | Message_error
+          | Message_tool | Message_skill _ | Message_thinking | Message_memory -> false)
         && String.equal entry.me_request_id request.Keeper_chat.request_id
         && String.equal entry.me_keeper_name request.keeper_name
         && String.equal entry.me_text expected_text)
@@ -3679,7 +3685,11 @@ let restore_account_login state (view : Masc_tui_account_login.t) =
 
 let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t) action =
   let module Login = Masc_tui_account_login in
-  let needs_identity = match action with Login.Nothing | Close | Cancel -> false | _ -> true in
+  let needs_identity = match action with
+    | Login.Nothing | Close | Cancel -> false
+    | Login.Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry | Select_existing _
+    | Start _ | Input _ | Recover | Discover | Prepare _ | Save _ | Preview_removal _ | Remove _
+    | Refresh_removed _ | Refresh_list _ -> true in
   if action = Login.Nothing then ()
   else if needs_identity && not (server_authority_ready state) then begin
     if account_login_action_is_read action then begin
@@ -3737,7 +3747,12 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
            | _ -> view.cancel_stream <- Some (fun () -> Eio.Cancel.cancel cancellation (Failure "login panel superseded")));
           Fun.protect ~finally:(fun () ->
             if generation = view.generation then
-              match action with Login.Input _ -> () | _ -> view.cancel_stream <- None)
+              match action with
+                | Login.Input _ -> ()
+                | Login.Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry
+                | Select_existing _ | Start _ | Cancel | Recover | Discover | Prepare _ | Save _
+                | Close | Nothing | Preview_removal _ | Remove _ | Refresh_removed _
+                | Refresh_list _ -> view.cancel_stream <- None)
             (fun () -> match check_workspace () with Error detail -> enqueue (Error detail) | Ok () -> f ()))
         with
         | Eio.Cancel.Cancelled _ as exn -> if generation = view.generation then raise exn
@@ -3783,7 +3798,11 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     (match view.login_id with None -> view.input_pending<-false
      | Some id -> start_job (fun () -> enqueue (post (login_path id ^ "/input") json)))
   | Inventory | Refresh_saved _ | Refresh_retry | Refresh_list _ ->
-    (match action with Inventory | Refresh_retry | Refresh_list _ -> view.phase<-Login.Loading | _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
+    (match action with
+      | Inventory | Refresh_retry | Refresh_list _ -> view.phase<-Login.Loading
+      | Activate_saved _ | Refresh_saved _ | Select_existing _ | Start _ | Input _ | Cancel
+      | Recover | Discover | Prepare _ | Save _ | Close | Nothing | Preview_removal _ | Remove _
+      | Refresh_removed _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
   | Recover -> (match view.login_id with
       | None -> view.notice<-"조회할 로그인 세션이 없습니다. n으로 새 로그인을 시작하세요."
       | Some id -> view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:(login_path id))))
@@ -4576,7 +4595,10 @@ let launch_lane_addons ?initial_detail state ~mailbox request =
     | Addons.Act action -> Some action, None
     | Addons.Action_status action -> Some action, view.action_receipt
     | _ -> view.last_action, view.action_receipt in
-  let presentation = match request with Addons.Subscriptions _ -> Addons.Technical | _ -> view.presentation in
+  let presentation = match request with
+    | Addons.Subscriptions _ -> Addons.Technical
+    | Addons.Inspect | Attach _ | Observe _ | Detach _ | Slice _ | Evidence _ | Act _
+    | Action_status _ -> view.presentation in
   let application_reading = match lane_addons_request_failure_kind request with
     | `Request -> Masc_tui_lane_application.empty
     | `Inventory | `Detail -> view.application_reading in
@@ -4772,7 +4794,9 @@ let launch_browser_lane state ~mailbox operation =
        | _ -> ())
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
+  | Some view when (match operation with
+    | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true
+    | Discover _ | Open_session | Close_session | Goto _ -> false)
       && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0; scene_scope = None; scene_delta = None;
@@ -4805,9 +4829,18 @@ let launch_browser_lane state ~mailbox operation =
       let generation = state.browser_lane_generation in
       let image_generation = state.image_request_generation in
       let launched = { view with load = Loading (generation, operation);
-        read_continuation = (match operation with Read -> No_read_continuation | _ -> view.read_continuation);
+        read_continuation = (match operation with
+          | Read -> No_read_continuation
+          | Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Read_refresh
+          | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _ | Scene_focus _
+          | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+          | Viewport_cadence _ | Viewport_pointer _ -> view.read_continuation);
         read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
-        refresh_pending = (match operation with Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> Some generation | _ -> view.refresh_pending) } in
+        refresh_pending = (match operation with
+          | Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> Some generation
+          | Discover _ | Read | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _
+          | Scene_regions _ | Scene_scroll _ | Scene_focus _ | Scene_click _ | Scene_follow _
+          | Viewport_refresh _ | Viewport_pointer _ -> view.refresh_pending) } in
       (* The picker that asks for the list again shows nothing of the read
          before it. Every other request leaves what the last discovery said. *)
       state.browser_lane <- Some (match operation with
@@ -8031,7 +8064,10 @@ let update_queued_history_text state (request : Keeper_chat.request) =
     List.map
       (fun entry ->
         if
-          (match entry.me_role with Message_user _ -> true | _ -> false)
+          (match entry.me_role with
+            | Message_user _ -> true
+            | Message_keeper | Message_autonomous | Message_status | Message_local | Message_error
+            | Message_tool | Message_skill _ | Message_thinking | Message_memory -> false)
           && String.equal entry.me_request_id request.Keeper_chat.request_id
           && String.equal entry.me_keeper_name request.keeper_name
         then { entry with me_text = text;
@@ -10162,7 +10198,23 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   let command = Masc_tui_command.parse text in
   if
     Option.is_some state.msg_recall_replaces
-    && match command with Masc_tui_command.Say _ -> false | _ -> true
+    && match command with
+      | Masc_tui_command.Say _ -> false
+      | Masc_tui_command.Task_for_keeper _ | Task_missing_title | Help | Show_load_errors | About
+      | Lane_addons _ | Play_invites | Play_link _ | Play_invite _ | Play_revoke _ | Play_invalid _
+      | Open_metrics | Account_login _ | Open_settings | Open_diff | Open_patch_modal | Open_usage
+      | Open_link_preview _ | Open_links_list | Copy_latest_reply | Set_embeds _ | Open_changes
+      | Toggle_acting_pane | Show_acting_pane_tab _ | Acting_pane_tab_unknown _
+      | Set_acting_pane_call_order _ | Acting_pane_call_order_unknown _ | Scroll_acting_pane _
+      | Acting_pane_scroll_unknown _ | Switch_keeper _ | Switch_keeper_missing_name | Queue _
+      | Run_next | Priority _ | Answer_tool_approval _ | Interrupt_turn | Interrupt_keeper_turn _
+      | Steer_turn _ | Steer_missing_message | Set_thinking _ | Set_tools _ | Cycle_memory
+      | Open_fleet_memory | Find_in_chat _ | Find_next | Open_measurement _
+      | Measurement_missing_sha | Inspect_context | View_image _ | View_image_missing_path
+      | Attach_image _ | Attach_image_missing_path | Attach_image_ref _
+      | Attach_image_ref_missing_value | Preset_list | Preset_save _ | Preset_save_missing_name
+      | Preset_restore _ | Preset_restore_missing_name | Preset_show _ | Preset_show_missing_name
+      | Preset_delete _ | Preset_delete_missing_name | Unknown _ -> true
   then
     notice ~kind:Notice_failure
       "A queued edit is active; press Enter for its text or Ctrl-U to abandon it"
@@ -11031,7 +11083,11 @@ let apply_asks_load state = function
       (* Silent while the operator is on the Approvals surface -- the panel is
          already in front of them there. A question that arrives on any other
          surface rings, since nothing else on that surface would show it. *)
-      let watching_asks = match state.view with Approvals -> true | _ -> false in
+      let watching_asks = match state.view with
+        | Approvals -> true
+        | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board | Planning
+        | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+        | Runtime | Config | Resources | Tools | System_logs -> false in
       if
         Ask.should_ring_for_new_ask ~new_ids:arrived
           ~operator_is_watching_asks:watching_asks
@@ -16834,7 +16890,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       (match state.account_login with
        | Some current when current == view && view.generation = generation ->
          let action = Masc_tui_account_login.event ~generation view event in
-         (match event with Masc_tui_account_login.Started _ | Login_failed _ -> remember_account_login state view | _ -> ());
+         (match event with
+           | Masc_tui_account_login.Started _ | Login_failed _ -> remember_account_login state view
+           | Masc_tui_account_login.Output _ | Input_ready | Complete _ | Login_error -> ());
          launch_account_login_action state ~mailbox view action
        | Some _ | None -> ())
   | Account_login_json (view, generation, action, result) ->
@@ -22681,7 +22739,9 @@ and is loaded on demand through keeper_skill.
                          let width = framed_inner_width cols in
                          let last = List.length (Addons.lines ~width view) - 1 in
                          update { view with scroll = max 0 (min last (view.scroll + (if key = "J" then 1 else -1))) }
-                     | "left" | "right" when (match view.focus with Addons.Timeline | Addons.Connections -> true | _ -> false) ->
+                     | "left" | "right" when (match view.focus with
+                       | Addons.Timeline | Addons.Connections -> true
+                       | Addons.Configurations | Instances | Rows -> false) ->
                          let delta = if key = "right" then 1 else -1 in
                          update (Addons.move_lane view delta)
                      | "j" | "down" | "k" | "up" ->
@@ -24773,7 +24833,9 @@ and is loaded on demand through keeper_skill.
                  | "esc" | "b" ->
                      state.browser_lane_generation <- state.browser_lane_generation + 1;
                      state.browser_lane <- Some { view with client_picker = None;
-                       load = (match view.load with Loading (_, Discover _) -> Idle | other -> other) }
+                       load = (match view.load with
+                          | Loading (_, Discover _) -> Idle
+                          | (Idle | No_browser | Loading _ | Failed _) as other -> other) }
                  | "r" when not (busy view) ->
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "a" when not (busy view) ->

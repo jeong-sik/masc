@@ -265,7 +265,9 @@ let run ~env ~sw ~config ~base_path ~fixtures ~repetitions ~injection_timeout_s 
           | Error error -> Error (Model_refused error.Browser_stagehand_wire.code)
           | Ok answer -> Result.bind (answer_value answer) (validate fixture)
         in
-        (match result with Ok () | Error Semantics_invalid -> incr shape_valid | Error _ -> ());
+        (match result with
+         | Ok () | Error Semantics_invalid -> incr shape_valid
+         | Error (Model_refused _ | Envelope_invalid | Shape_invalid | Injection_missing) -> ());
         let result = match route with
           | Injected_primary_then_fallback when !requests <= before || !server_errors <> errors_before ->
               Error Injection_missing
@@ -275,7 +277,9 @@ let run ~env ~sw ~config ~base_path ~fixtures ~repetitions ~injection_timeout_s 
         emit channel (`Assoc ["kind", `String "trial"; "route", `String (route_name route);
           "fixture", `String (fixture_name fixture); "trial", `Int trial;
           "elapsed_s", `Float (Eio.Time.now clock -. started); "result", json_result result;
-          "rpc_error_code", (match result with Error (Model_refused code) -> `Int code | _ -> `Null);
+          "rpc_error_code", (match result with
+            | Error (Model_refused code) -> `Int code
+            | Ok () | Error (Envelope_invalid | Shape_invalid | Semantics_invalid | Injection_missing) -> `Null);
           "refusal_observation", (match !refusal with None -> `Null
             | Some observed -> Browser_stagehand_model_observation.refusal_json observed);
           "synthetic_primary_requests", `Int (!requests - before)])

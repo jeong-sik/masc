@@ -5,11 +5,12 @@
     questions by {!Keeper_ask.fold_events}. Layout and failure handling mirror
     {!Keeper_external_attention}.
 
-    Writes are optimistic. Two surfaces can submit an answer for the same ask
-    at once, and nothing here locks the file: both lines may land. The fold
-    settles the log on first write, so every reader agrees on the winner, but a
-    {!answer} rereads the canonical fold before returning [Ok], and reports
-    the other winner or a committed-but-unconfirmed append explicitly. *)
+    Durable appends are serialized by a per-path mutex and file lock. Answer
+    preflight remains optimistic: two surfaces can validate an open ask before
+    either appends, so both answer rows may land. The fold chooses the first
+    recorded answer. {!answer} rereads the canonical fold before returning
+    [Ok], and reports the other winner or a committed-but-unconfirmed append
+    explicitly. *)
 
 type answer_failure =
   | Ask_not_found of { ask_id : string }

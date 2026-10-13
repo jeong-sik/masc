@@ -1,6 +1,8 @@
-(** The Usage surface's Plan usage section: one card per provider account.
-    Each card labels the reported percentage or USD amount and the window's role,
-    says when it resets, and shows the last report time beside every window.
+(** The Usage surface's Plan usage section: one row per reported window, in
+    sections for what cannot be used now, what can, and accounts with no report.
+    A row names the account and window, draws a bar and the percent used, and
+    says when the window resets. A window priced in USD also shows its amounts.
+    A window heard at a different time than its account's newest report says so.
 
     USD amounts describe the named window and its cap, not an inferred account
     balance.
@@ -101,19 +103,18 @@ val account_email :
 
 val section :
   providers:Masc_tui_types.overview_providers_reading ->
-  history:Masc_tui_types.provider_history_reading ->
   runtimes:Masc_tui_types.overview_quota_reading ->
   account_emails:Masc_tui_types.overview_account_emails_reading ->
   now:float ->
   width:int ->
   section option
-(** [None] before the first read. Every known account draws a bordered card,
-    including an explicit state when no usage has been reported. Empty and failed
-    reads keep their explicit source states. A wide viewport places two cards
-    beside each other; a narrow viewport stacks them. Every row fits [width]
-    terminal cells. Emails, reset times, hearing age and catalogue observations
-    are wrapped metadata rather than columns that displace utilization meters.
-    Window roles still decide which full values are alarms. *)
+(** [None] before the first read. Every known account is drawn under a
+    section heading with its count, including an explicit state when no usage
+    has been reported. Empty and failed reads keep their explicit source states.
+    Every row fits [width] terminal cells: a detail that does not fit after the
+    bar moves to a row of its own. Emails and catalogue observations are rows
+    under their account. Window roles still decide which full values are
+    alarms. *)
 
 val utilization_text : Masc.Tui_decode_usage.provider_usage_utilization -> string
 (** The value as a whole percent or a USD credit amount. A percent is

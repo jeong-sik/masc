@@ -10992,7 +10992,7 @@ let usage_lines ~cols (state : state) =
   let open Masc.Tui_decode_usage in
   let scopes =
     match Overview_providers.section
-            ~providers:state.overview_providers ~history:state.provider_history ~runtimes:state.overview_quota
+            ~providers:state.overview_providers ~runtimes:state.overview_quota
             ~account_emails:state.overview_account_emails
             ~now:(Unix.gettimeofday ()) ~width:(max 20 (cols - 4)) with
     | Some section -> section.title :: section.lines

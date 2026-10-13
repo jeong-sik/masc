@@ -12,10 +12,6 @@ type section = {
 
 let cells_of = Masc_tui_message_layout.display_width
 
-let pad_right text cells =
-  let gap = cells - cells_of text in
-  if gap > 0 then text ^ String.make gap ' ' else text
-
 (* ---- meter ------------------------------------------------------------ *)
 
 let eighths_per_cell = 8
@@ -157,13 +153,11 @@ let clock_text ~now at =
    window: the server keeps the last report until a newer one arrives, so the
    meter still shows what the provider last said. *)
 let reset_text ~now = function
-  | None -> (Some Ansi.dim, Masc_tui_theme.Glyph.no_value)
+  | None -> (None, "no reset")
   | Some at when at <= now ->
       (Some (Theme.warn ()), "reset time passed \xc2\xb7 no newer report")
   | Some at ->
-      ( None
-      , Printf.sprintf "\xe2\x86\xbb %s in %s" (clock_text ~now at)
-          (span_text (at -. now)) )
+      (None, Printf.sprintf "resets %s (%s)" (clock_text ~now at) (span_text (at -. now)))
 
 (* A clock that moved backwards says nothing rather than a negative age. *)
 let heard_text ~now observed_at =
@@ -452,96 +446,57 @@ let account_email ~account_emails (account : Masc.Tui_decode_usage.provider_usag
        | distinct -> Some (Terminal_text.single_line (String.concat ", " distinct)))
   | Types.Account_emails_unread | Types.Account_emails_failed _ -> None
 
-let history_line ~history ~scope_id (window:Masc.Tui_decode_usage.provider_usage_window) =
-  let kind = match window.puw_kind with
-    | Masc.Tui_decode_usage.Window_five_hour -> "five_hour"
-    | Masc.Tui_decode_usage.Window_seven_day -> "seven_day"
-    | Masc.Tui_decode_usage.Window_duration_minutes minutes -> Printf.sprintf "duration_%dm" minutes
-    | Masc.Tui_decode_usage.Window_provider_label label -> "provider:" ^ label in
-  match history with
-  | Types.Provider_history_unread | Types.Provider_history_error _ -> None
-  | Types.Provider_history_read trend ->
-    let row = List.find_opt (fun (row:Masc_tui_usage_trend.row) ->
-      String.equal row.scope_id scope_id && String.equal row.kind kind
-      && Option.equal String.equal row.limit_id window.puw_limit_id) trend.rows in
-    Some (match row with
-      | None when trend.unreadable_reports > 0 ->
-          Printf.sprintf "Trend %d UTC days · no readable reports · %d omitted"
-            trend.days trend.unreadable_reports
-      | None -> Printf.sprintf "Trend %d UTC days · no reports" trend.days
-      | Some row -> Printf.sprintf "Trend %d UTC days  %s  %d/%d days"
-          trend.days row.marks row.reported_days trend.days)
+(* ---- one line per window ------------------------------------------------ *)
 
-(* The first window opens its account card; subsequent windows share it. *)
-type name_cell =
-  | Account_name of string
-  | No_name
+let indent = "  "
+let indent_cells = 2
 
-type row =
-  | Window_row of {
-      name : name_cell;
-      window : Masc.Tui_decode_usage.provider_usage_window;
-      heard : string option;
-      tag : string option;
-      trend : string option;
-    }
-  | Silent_row of { name : string; tag : string option; state_text : string }
-      (** No report is an explicit state, not an absent account or zero use. *)
-  | Email_row of string
-      (** Account identity metadata, separate from window measurements. *)
+(* "100%" is the widest reading a gauge normally shows. *)
+let percent_cells = 4
 
-(* Keep accounts without measured windows visible and distinguish no report
-   since startup from a provider's explicit empty-window report. *)
-let entry_rows ~now ~history section entry =
-  let account = entry.pe_account in
-  let name = scope_name account in
-  let tag =
-    match section with
-    | Unusable_now -> exhausted_tag ~now entry.pe_observed
-    | Usable | No_report -> None
-  in
-  match entry.pe_windows with
-  | [] ->
-      let state_text =
-        match account.pua_state with
-        | Masc.Tui_decode_usage.Account_not_reported_since_start ->
-            "No usage report since server start"
-        | Masc.Tui_decode_usage.Account_reported_no_windows { observed_at; source } ->
-            "Provider reported no usage windows \xc2\xb7 Last report "
-            ^ clock_text ~now observed_at ^ " \xc2\xb7 " ^ Terminal_text.single_line source
-        | Masc.Tui_decode_usage.Account_reported _ ->
-            "No reported window gates model calls"
-      in
-      [ Silent_row { name; tag; state_text } ]
-  | first :: rest ->
-      (* Windows of one report share its hearing time; a window heard at
-         another time says its own. *)
-      Window_row
-        { name = Account_name name
-        ; window = first
-        ; heard = heard_text ~now first.puw_observed_at
-        ; tag
-        ; trend = history_line ~history ~scope_id:account.pua_scope_id first
-        }
-      :: List.map
-           (fun (window : Masc.Tui_decode_usage.provider_usage_window) ->
-             let heard =
-               if Float.equal window.puw_observed_at first.puw_observed_at then
-                 None
-               else heard_text ~now window.puw_observed_at
-             in
-             Window_row { name = No_name; window; heard; tag = None; trend = history_line ~history ~scope_id:account.pua_scope_id window })
-           rest
+(* A bar wider than this adds ink, not resolution: the percent beside it
+   prints whole numbers. A narrow screen shrinks it down to the minimum. *)
+let bar_cells_default = 12
+let bar_cells_min = 6
 
-let place_email email rows =
-  match email with None -> rows | Some email -> rows @ [ Email_row email ]
+(* Cells the open and close marks of a bar take. *)
+let bar_frame_cells = 2
 
-(* The value column prints whole percents; past this many cells (192
-   eighths) a wider meter adds ink, not resolution. *)
-let meter_max_cells = 24
+(* The name and label columns hold their longest entry, up to a cap, and
+   give way on a narrow screen: a column takes at most one over this many
+   cells of the row. *)
+let name_cells_cap = 28
+let name_cells_min = 8
+let name_width_divisor = 3
+let label_cells_cap = 24
+let label_cells_min = 6
+let label_width_divisor = 4
 
-(* A meter narrower than ten cells gives the label its own row. *)
-let meter_min_cells = 10
+let detail_gap = "  "
+let detail_separator = " \xc2\xb7 "
+
+let usd_decimals = 2
+
+(* Whole amounts read as "$100", others with cents. *)
+let usd_text value =
+  if Float.is_finite value && Float.equal (Float.round value) value then
+    Printf.sprintf "$%.0f" value
+  else Printf.sprintf "$%.*f" usd_decimals value
+
+let money_text = function
+  | Masc.Tui_decode_usage.Utilization_usd { used; limit = Some limit } ->
+      Some (usd_text used ^ "/" ^ usd_text limit)
+  | Masc.Tui_decode_usage.Utilization_usd { used; limit = None } ->
+      Some ("spent " ^ usd_text used)
+  | Masc.Tui_decode_usage.Utilization_fraction _
+  | Masc.Tui_decode_usage.Utilization_percent _ -> None
+
+(* A window that gates model calls says nothing more; the others say what
+   they are, since their tone alone does not. *)
+let role_tag = function
+  | Masc.Tui_decode_usage.Role_gates_model_calls -> None
+  | Masc.Tui_decode_usage.Role_counts_other_use -> Some "other use"
+  | Masc.Tui_decode_usage.Role_unclassified_limit -> Some "unclassified"
 
 (* A window that counts something a model call does not need never alarms:
    it being full refuses no model call. A limit the server could not classify
@@ -551,137 +506,250 @@ let window_tone (window : Masc.Tui_decode_usage.provider_usage_window) =
   else if at_or_past_full window.puw_utilization then Some (Theme.bad ())
   else None
 
-let role_text = function
-  | Masc.Tui_decode_usage.Role_gates_model_calls -> "Model call limit"
-  | Masc.Tui_decode_usage.Role_counts_other_use -> "Other use · does not block model calls"
-  | Masc.Tui_decode_usage.Role_unclassified_limit -> "Unclassified limit"
+(* When the account's newest report was heard. *)
+let newest_report (account : Masc.Tui_decode_usage.provider_usage_account) =
+  match account.pua_state with
+  | Masc.Tui_decode_usage.Account_reported (first, rest) ->
+      Some
+        (List.fold_left
+           (fun newest (window : Masc.Tui_decode_usage.provider_usage_window) ->
+             Float.max newest window.puw_observed_at)
+           first.puw_observed_at rest)
+  | Masc.Tui_decode_usage.Account_not_reported_since_start
+  | Masc.Tui_decode_usage.Account_reported_no_windows _ -> None
 
-(* An account owns its heading and metadata. A long catalogue explanation
-   never consumes the meter columns of every other account. *)
-let draw_rows ~now ~width rows =
-  let module Text = Masc_tui_message_layout in
-  let groups =
+type window_line = {
+  label : string;
+  share : float option;  (** [None]: an amount with no cap has no bar. *)
+  percent : string;
+  detail : string;
+  tone : string option;
+  detail_tone : string option;
+}
+
+(* A window heard at a different time than its account's newest report says
+   so; otherwise the time is left out. *)
+let window_line ~now ~newest (window : Masc.Tui_decode_usage.provider_usage_window) =
+  let utilization = window.puw_utilization in
+  let share = share_of_full utilization in
+  let percent =
+    match share with
+    | Some share -> utilization_text (Masc.Tui_decode_usage.Utilization_fraction share)
+    | None -> ""
+  in
+  let reset_tone, reset = reset_text ~now window.puw_resets_at in
+  let heard =
+    match newest with
+    | Some newest when not (Float.equal newest window.puw_observed_at) ->
+        heard_text ~now window.puw_observed_at
+    | Some _ | None -> None
+  in
+  let detail =
+    String.concat detail_separator
+      (List.filter_map Fun.id
+         [ money_text utilization; Some reset; heard; role_tag window.puw_role ])
+  in
+  let tone = window_tone window in
+  { label = window_label window
+  ; share
+  ; percent
+  ; detail
+  ; tone
+  ; detail_tone = (match reset_tone with Some _ -> reset_tone | None -> tone)
+  }
+
+type entry_body =
+  | Window_lines of window_line list
+  | State_text of string
+      (** An account with no window to show says why. *)
+
+type drawn_entry = {
+  de_name : string;
+  de_body : entry_body;
+  de_tag : string option;
+      (** The catalogue's observed exhaustion, in the Unusable section only. *)
+  de_email : string option;
+      (** Drawn once per account, with its first entry. *)
+}
+
+let state_text ~now (account : Masc.Tui_decode_usage.provider_usage_account) =
+  match account.pua_state with
+  | Masc.Tui_decode_usage.Account_not_reported_since_start ->
+      "No usage report since server start"
+  | Masc.Tui_decode_usage.Account_reported_no_windows { observed_at; source } ->
+      "Provider reported no usage windows \xc2\xb7 Last report "
+      ^ clock_text ~now observed_at ^ " \xc2\xb7 " ^ Terminal_text.single_line source
+  | Masc.Tui_decode_usage.Account_reported _ -> "No reported window gates model calls"
+
+let drawn_groups ~now ~account_emails groups =
+  let _, drawn =
     List.fold_left
-      (fun groups row ->
-        match row, groups with
-        | Window_row { name = Account_name name; _ }, _
-        | Silent_row { name; _ }, _ -> (name, [ row ]) :: groups
-        | (Window_row { name = No_name; _ } | Email_row _), (name, held) :: rest ->
-            (name, row :: held) :: rest
-        | (Window_row { name = No_name; _ } | Email_row _), [] ->
-            [ ("Usage", [ row ]) ])
-      [] rows
-    |> List.rev
-    |> List.map (fun (name, held) -> name, List.rev held)
+      (fun (seen, drawn) { pg_section; pg_entries } ->
+        let seen, entries =
+          List.fold_left
+            (fun (seen, entries) entry ->
+              let id = scope_id entry.pe_account in
+              let first_time = not (List.mem id seen) in
+              let newest = newest_report entry.pe_account in
+              let body =
+                match entry.pe_windows with
+                | [] -> State_text (state_text ~now entry.pe_account)
+                | _ :: _ as windows ->
+                    Window_lines (List.map (window_line ~now ~newest) windows)
+              in
+              let tag =
+                match pg_section with
+                | Unusable_now -> exhausted_tag ~now entry.pe_observed
+                | Usable | No_report -> None
+              in
+              let email =
+                if first_time then account_email ~account_emails entry.pe_account
+                else None
+              in
+              ( id :: seen
+              , { de_name = scope_name entry.pe_account
+                ; de_body = body
+                ; de_tag = tag
+                ; de_email = email
+                }
+                :: entries ))
+            (seen, []) pg_entries
+        in
+        (seen, (pg_section, List.rev entries) :: drawn))
+      ([], []) groups
   in
-  let gutter = 2 in
-  (* Each side keeps enough cells for a 20-cell label and a useful meter. *)
-  let minimum_card_cells = 64 in
-  let paired = width >= 2 * minimum_card_cells + gutter in
-  let card_width = if paired then (min width 180 - gutter) / 2 else width in
-  let inner = max 1 (card_width - 4) in
-  let quiet = Theme.recede () in
-  let style tone text = match tone with
-    | None -> text | Some tone -> tone ^ text ^ Ansi.reset
-  in
-  let wrap ?tone text =
-    Text.wrap_words ~max_cells:inner text |> List.map (style tone)
-  in
-  let window_lines window heard =
-    let label = window_label window in
-    let label_cells = min 20 (max 6 (inner / 3)) in
-    let utilization = window.Masc.Tui_decode_usage.puw_utilization in
-    let share = share_of_full utilization in
-    let value = match utilization, share with
-      | Masc.Tui_decode_usage.Utilization_usd _, _ ->
-          "Used " ^ utilization_text utilization
-      | _, Some share -> "Used " ^ Printf.sprintf "%4s" (utilization_text
-          (Masc.Tui_decode_usage.Utilization_fraction share))
-      | _, None -> "Used " ^ utilization_text utilization
-    in
-    let value_cells = Text.display_width value in
-    let room = inner - label_cells - value_cells - 4 in
-    let inline = room >= meter_min_cells && Text.display_width label <= label_cells in
-    let meter_room = if inline then room else inner - value_cells - 3 in
-    let meter_cells = max 1 (min meter_max_cells meter_room) in
-    let gauge = match share with
-      | Some share -> meter_open ^ meter ~cells:meter_cells share ^ meter_close ^ " " ^ value
-      | None -> value ^ " · no key limit"
-    in
-    let first =
-      if inline then
-        [ pad_right label label_cells ^ " " ^ style (window_tone window) gauge ]
-      else wrap label @ wrap ?tone:(window_tone window) gauge
-    in
-    let reset_tone, reset = reset_text ~now window.puw_resets_at in
-    let report = "Last report " ^ clock_text ~now window.puw_observed_at
-      ^ (match heard with None -> "" | Some heard -> " · " ^ heard) in
-    let metadata = "Reset " ^ reset in
-    let amounts = match utilization with
-      | Masc.Tui_decode_usage.Utilization_usd { used; limit = Some limit } ->
-          wrap (Printf.sprintf "USD used $%.4f / limit $%.4f · remaining $%.4f"
-                  used limit (limit -. used))
-      | Masc.Tui_decode_usage.Utilization_usd { limit = None; _ }
-      | Masc.Tui_decode_usage.Utilization_fraction _
-      | Masc.Tui_decode_usage.Utilization_percent _ -> []
-    in
-    let role = match utilization with
-      | Masc.Tui_decode_usage.Utilization_usd { limit = None; _ } -> "Reported usage total"
-      | Masc.Tui_decode_usage.Utilization_usd { limit = Some _; _ }
-      | Masc.Tui_decode_usage.Utilization_fraction _
-      | Masc.Tui_decode_usage.Utilization_percent _ -> role_text window.puw_role
-    in
-    let remaining = match share with
-      | Some share when window.puw_role = Masc.Tui_decode_usage.Role_gates_model_calls
-          && Float.is_finite share && share >= 0.0 && share <= 1.0 ->
-          wrap ("Remaining " ^ utilization_text (Masc.Tui_decode_usage.Utilization_fraction (1.0 -. share)))
-      | Some _ | None -> [] in
-    first @ remaining @ amounts @ wrap (report ^ " · " ^ role) @ wrap ?tone:reset_tone metadata
-  in
-  let render (name, held) =
-    let blocked = List.exists (function
-      | Window_row { tag = Some _; _ } | Silent_row { tag = Some _; _ } -> true
-      | Window_row { tag = None; _ } | Silent_row { tag = None; _ } | Email_row _ -> false) held in
-    let color = if blocked then Theme.bad () else Theme.info () in
-    let body = List.concat_map (function
-      | Email_row email -> wrap ~tone:quiet email
-      | Silent_row { tag; state_text; _ } -> wrap state_text
-          @ (match tag with None -> []
-             | Some tag -> wrap ~tone:(Theme.bad ()) ("Catalogue · " ^ tag))
-      | Window_row { window; heard; tag; trend; _ } ->
-          window_lines window heard
-          @ (match trend with None -> [] | Some trend -> wrap ~tone:quiet trend)
-          @ (match tag with None -> [] | Some tag -> wrap ~tone:(Theme.bad ()) ("Catalogue · " ^ tag))) held in
-    let title = Text.fit_middle (max 1 (card_width - 4)) name in
-    let top = color ^ Ansi.box_tl ^ " " ^ Ansi.bold ^ title ^ Ansi.reset ^ color
-      ^ " " ^ draw_hline (max 0 (card_width - Text.display_width title - 4)) ^ Ansi.box_tr ^ Ansi.reset in
-    let line content = quiet ^ Ansi.box_v ^ Ansi.reset ^ " "
-      ^ Text.fit_width content inner ^ Ansi.reset ^ " " ^ quiet ^ Ansi.box_v ^ Ansi.reset in
-    let bottom = quiet ^ Ansi.box_bl ^ draw_hline (max 0 (card_width - 2)) ^ Ansi.box_br ^ Ansi.reset in
-    top :: List.map line body @ [ bottom ]
-  in
-  let rec arrange = function
-    | [] -> []
-    | left :: right :: rest when paired ->
-        let left = render left and right = render right in
-        let height = max (List.length left) (List.length right) in
-        let row lines index = match List.nth_opt lines index with
-          | Some line -> Text.fit_width line card_width
-          | None -> String.make card_width ' ' in
-        List.init height (fun i -> row left i ^ String.make gutter ' ' ^ row right i)
-        @ [ "" ] @ arrange rest
-    | card :: rest -> render card @ [ "" ] @ arrange rest
-  in
-  arrange groups
+  List.rev drawn
 
 let section_title = function
   | Unusable_now -> "Unusable now"
   | Usable -> "Usable"
   | No_report -> "No report"
 
+let section_tone = function
+  | Unusable_now -> Theme.bad ()
+  | Usable -> Theme.info ()
+  | No_report -> Theme.recede ()
+
+let pad_left text cells =
+  let gap = cells - cells_of text in
+  if gap > 0 then String.make gap ' ' ^ text else text
+
+let rstrip_spaces text =
+  let stop = ref (String.length text) in
+  while !stop > 0 && Char.equal text.[!stop - 1] ' ' do
+    decr stop
+  done;
+  String.sub text 0 !stop
+
+let style tone text =
+  match tone with None -> text | Some tone -> tone ^ text ^ Ansi.reset
+
+(* Every line is cut to the screen: a column that cannot shrink further loses
+   its tail rather than the row's edge. *)
+let clip width line =
+  if cells_of line <= width then line else Masc_tui_message_layout.fit_width line width
+
+let draw_groups ~width groups =
+  let module Text = Masc_tui_message_layout in
+  let budget = max 1 (width - indent_cells) in
+  let widest cells_of_item items = List.fold_left (fun w item -> max w (cells_of_item item)) 0 items in
+  let entries = List.concat_map snd groups in
+  let window_lines =
+    List.concat_map
+      (fun entry ->
+        match entry.de_body with Window_lines lines -> lines | State_text _ -> [])
+      entries
+  in
+  let name_cells =
+    min
+      (widest (fun entry -> cells_of entry.de_name) entries)
+      (min name_cells_cap (max name_cells_min (budget / name_width_divisor)))
+  in
+  let label_cells =
+    min
+      (widest (fun line -> cells_of line.label) window_lines)
+      (min label_cells_cap (max label_cells_min (budget / label_width_divisor)))
+  in
+  let head_cells_without_bar =
+    name_cells + 1 + label_cells + 1 + bar_frame_cells + 1 + percent_cells
+  in
+  (* The bar keeps its default width and shrinks only when the row's head
+     does not fit. A detail that does not fit after the head moves to a row of
+     its own. *)
+  let bar_cells =
+    max bar_cells_min (min bar_cells_default (budget - head_cells_without_bar))
+  in
+  let blank_name = String.make name_cells ' ' in
+  let continuation = indent ^ blank_name ^ " " in
+  let continuation_cells = max 1 (budget - name_cells - 1) in
+  let name_cell tone name =
+    Ansi.bold ^ tone ^ Text.fit_middle name_cells name ^ Ansi.reset
+  in
+  let window_row tone ~first line =
+    let name = match first with Some name -> name_cell tone name | None -> blank_name in
+    let gauge =
+      match line.share with
+      | Some share ->
+          meter_open ^ meter ~cells:bar_cells share ^ meter_close ^ " "
+          ^ pad_left line.percent percent_cells
+      | None -> String.make (bar_cells + bar_frame_cells + 1 + percent_cells) ' '
+    in
+    let body = Text.fit_middle label_cells line.label ^ " " ^ gauge in
+    let head body = indent ^ name ^ " " ^ style line.tone body in
+    if cells_of (head body) + cells_of detail_gap + cells_of line.detail <= width then
+      [ head body ^ detail_gap ^ style line.detail_tone line.detail ]
+    else
+      head (rstrip_spaces body)
+      :: List.map
+           (fun wrapped -> continuation ^ style line.detail_tone wrapped)
+           (Text.wrap_words ~max_cells:continuation_cells line.detail)
+  in
+  let note_lines ?tone text =
+    List.map
+      (fun wrapped -> continuation ^ style tone wrapped)
+      (Text.wrap_words ~max_cells:continuation_cells text)
+  in
+  let draw_entry tone entry =
+    let rows =
+      match entry.de_body with
+      | Window_lines lines ->
+          List.concat
+            (List.mapi
+               (fun index line ->
+                 window_row tone ~first:(if index = 0 then Some entry.de_name else None) line)
+               lines)
+      | State_text text ->
+          (match Text.wrap_words ~max_cells:continuation_cells text with
+           | [] -> [ indent ^ name_cell tone entry.de_name ]
+           | first :: rest ->
+               (indent ^ name_cell tone entry.de_name ^ " " ^ first)
+               :: List.map (fun wrapped -> continuation ^ wrapped) rest)
+    in
+    rows
+    @ (match entry.de_tag with
+       | None -> []
+       | Some tag -> note_lines ~tone:(Theme.bad ()) ("Catalogue \xc2\xb7 " ^ tag))
+    @ (match entry.de_email with
+       | None -> []
+       | Some email -> note_lines ~tone:(Theme.recede ()) email)
+  in
+  let draw_group (section, entries) =
+    let tone = section_tone section in
+    (" " ^ Ansi.bold ^ tone
+     ^ Printf.sprintf "%s (%d)" (section_title section) (List.length entries)
+     ^ Ansi.reset)
+    :: List.concat_map (draw_entry tone) entries
+  in
+  let rec separated = function
+    | [] -> []
+    | [ group ] -> draw_group group
+    | group :: rest -> draw_group group @ ("" :: separated rest)
+  in
+  List.map (clip width) (separated groups)
+
 let title_text () = Printf.sprintf " %sPlan usage%s" Ansi.bold Ansi.reset
 
-let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~account_emails ~now
+let section ~(providers : Types.overview_providers_reading) ~runtimes ~account_emails ~now
     ~width =
   match providers with
   | Types.Providers_unread -> None
@@ -700,27 +768,9 @@ let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~
             (observed_exhaustion ~runtimes account.pua_scope, account))
           puws_accounts
       in
-      let groups = plan ~now ~runtimes puws_accounts in
-      let group_blocks =
-        List.map
-          (fun { pg_section; pg_entries } ->
-            let rows =
-              List.concat_map
-                (fun entry ->
-                  place_email
-                    (account_email ~account_emails entry.pe_account)
-                    (entry_rows ~now ~history pg_section entry))
-                pg_entries
-            in
-            (pg_section, List.length pg_entries, rows))
-          groups
-      in
       let rows =
-        List.concat_map
-          (fun (section, count, rows) ->
-            Printf.sprintf " %s (%d)" (section_title section) count
-            :: draw_rows ~now ~width rows)
-          group_blocks
+        draw_groups ~width
+          (drawn_groups ~now ~account_emails (plan ~now ~runtimes puws_accounts))
       in
       (* Without the runtime rows the exhausted tag cannot be drawn; the
          section says so instead of drawing every account untagged. *)
@@ -760,20 +810,10 @@ let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~
         | Types.Quota_read _ -> string_of_int (List.length (List.filter (function
             | Observed_exhausted _, _ -> true | Not_observed_exhausted, _ -> false) observed_accounts))
         | Types.Quota_unread | Types.Quota_failed _ -> "unknown" in
-      let trend_as_of = match history with
-        | Types.Provider_history_read trend ->
-          let day = Unix.gmtime trend.generated_at in
-          Printf.sprintf " · Trend through %02d-%02d UTC%s" (day.Unix.tm_mon + 1) day.Unix.tm_mday
-            (if trend.unreadable_reports = 0 then "" else
-               Printf.sprintf " · %d unreadable reports omitted" trend.unreadable_reports)
-        | Types.Provider_history_unread -> " · Trend not read"
-        | Types.Provider_history_error _ -> " · Trend unavailable" in
       let summary =
-        [ Printf.sprintf "Accounts %d · Reporting %d · At limit (reported) %d · Blocked (observed) %s"
+        [ Printf.sprintf "Accounts %d \xc2\xb7 Reporting %d \xc2\xb7 At limit (reported) %d \xc2\xb7 Blocked (observed) %s"
             (List.length observed_accounts) reporting full_reports blocked
-        ; "█ used · ░ remaining at last report · 0 zero · · no daily report"
-        ; "○ reported no windows · $ uncapped USD use · ↓ below zero · ↑ above limit"
-        ; "Login does not reset quota" ^ trend_as_of ^ " · v:Trend graphs" ]
+        ; "Bar: share used at the last report \xc2\xb7 dim row: does not block model calls \xc2\xb7 v: Trend graphs" ]
         |> List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:width) in
       let notes = runtimes_note @ emails_note in
       match rows with
@@ -785,5 +825,5 @@ let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~
       | _ :: _ ->
           Some
             { title = title_text ()
-            ; lines = summary @ rows @ notes
+            ; lines = summary @ ("" :: rows) @ notes
             }

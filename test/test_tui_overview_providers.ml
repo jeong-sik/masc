@@ -98,7 +98,89 @@ let meter_of row =
   let meter = String.sub row start (stop - start) in
   (meter, code_points meter)
 
-let test_section_draws_three_line_shapes () =
+let plan_section_t =
+  testable
+    (fun formatter section ->
+      Format.pp_print_string formatter
+        (match section with
+         | Providers.Unusable_now -> "Unusable_now"
+         | Providers.Usable -> "Usable"
+         | Providers.No_report -> "No_report"))
+    (fun left right ->
+      match (left, right) with
+      | Providers.Unusable_now, Providers.Unusable_now
+      | Providers.Usable, Providers.Usable
+      | Providers.No_report, Providers.No_report -> true
+      | ( Providers.Unusable_now, (Providers.Usable | Providers.No_report)
+        | Providers.Usable, (Providers.Unusable_now | Providers.No_report)
+        | Providers.No_report, (Providers.Unusable_now | Providers.Usable) ) -> false)
+
+let json_time = function None -> "null" | Some at -> Printf.sprintf "%.1f" at
+
+(* A window named by [id] (its limit id), so a test reads the order off ids. *)
+let percent_window ?(role = "gates_model_calls") ?resets ?(observed_at = 1790180000.0) ~id
+    percent =
+  Printf.sprintf
+    {|{"limit_id":%S,"window":{"kind":"five_hour"},"role":%S,"utilization":{"unit":"percent","value":%d},"resets_at":%s,"observed_at":%.1f,"source":"t"}|}
+    id role percent (json_time resets) observed_at
+
+let usd_window ?(role = "gates_model_calls") ?resets ~id ~used limit =
+  Printf.sprintf
+    {|{"limit_id":%S,"window":{"kind":"provider_label","label":"credit"},"role":%S,"utilization":{"unit":"usd","value":%.4f,"limit":%s},"resets_at":%s,"observed_at":1790180000.0,"source":"t"}|}
+    id role used
+    (match limit with None -> "null" | Some limit -> Printf.sprintf "%.4f" limit)
+    (json_time resets)
+
+let account_json ~name windows =
+  Printf.sprintf
+    {|{"scope":"scope:%s","scope_id":%S,"providers":[{"id":%S,"display_name":%S}],"state":"reported","windows":[%s]}|}
+    name name name name (String.concat "," windows)
+
+let silent_json name =
+  Printf.sprintf
+    {|{"scope":"scope:%s","scope_id":%S,"providers":[{"id":%S,"display_name":%S}],"state":"not_reported_since_start","windows":[]}|}
+    name name name name
+
+let empty_report_json name =
+  Printf.sprintf
+    {|{"scope":"scope:%s","scope_id":%S,"providers":[{"id":%S,"display_name":%S}],"state":"reported_no_windows","observed_at":1790180000.0,"source":"t","windows":[]}|}
+    name name name name
+
+let decode_accounts accounts =
+  let json =
+    Yojson.Safe.from_string
+      (Printf.sprintf {|{"provider_usage_windows_since":1.0,"provider_usage_windows":[%s]}|}
+         (String.concat "," accounts))
+  in
+  match Masc.Tui_decode_usage.decode_provider_usage_windows json with
+  | Ok reading -> reading
+  | Error detail -> failf "fixture should decode: %s" detail
+
+let exhausted_scope ?resets name =
+  runtime ?resets ~scope:("scope:" ^ name) ~exhausted:true (name ^ ".model")
+
+let shape groups =
+  List.map
+    (fun { Providers.pg_section; pg_entries } ->
+      ( pg_section
+      , List.map
+          (fun (entry : Providers.plan_entry) ->
+            ( Providers.scope_id entry.pe_account
+            , List.map
+                (fun (window : Masc.Tui_decode_usage.provider_usage_window) ->
+                  Option.value ~default:"-" window.puw_limit_id)
+                entry.pe_windows ))
+          pg_entries ))
+    groups
+
+let plan_shape ?(runtimes = Types.Quota_unread) accounts =
+  shape
+    (Providers.plan ~now ~runtimes (decode_accounts accounts).puws_accounts)
+
+let shape_t = list (pair plan_section_t (list (pair string (list string))))
+let hour = 3600.0
+
+let test_section_draws_one_line_per_window () =
   let windows =
     match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
     | Ok windows -> windows
@@ -113,7 +195,7 @@ let test_section_draws_three_line_shapes () =
   in
   let section =
     match
-      Providers.section ~history:Types.Provider_history_unread ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now
+      Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now
         ~width
     with
     | Some section -> section
@@ -128,18 +210,28 @@ let test_section_draws_three_line_shapes () =
   check string "plain usage title" " Plan usage" (plain section.title);
   let text = String.concat "\n" lines in
   List.iter (fun fact -> check bool ("retains " ^ fact) true (contains ~affix:fact text))
-    [ "Kimi Coding"; "Claude Max"; "5h"; "7d"; "Used  67%"; "Used  44%"; "Used 100%"
-    ; "Model call limit"; " in 4h12m"; "reported 3m00s ago"; "reset time passed"
-    ; "Remaining 33%"; "At limit (reported) 1"; "Blocked (observed) 1"
-    ; "no newer report"; "Last report"; "exhausted (observed)"; "catalogue reopens"; " in 2h00m" ];
-  check bool "exhausted account is first" true
-    (match List.find_opt (contains ~affix:"┌") lines with Some first -> contains ~affix:"Kimi Coding" first | None -> false);
+    [ "Kimi Coding"; "Claude Max"; "5h"; "7d"; " 67%"; " 44%"; "100%"
+    ; "(4h12m)"; "reset time passed"; "At limit (reported) 1"; "Blocked (observed) 1"
+    ; "exhausted (observed)"; " in 2h00m" ];
+  let groups =
+    Providers.plan ~now ~runtimes windows.puws_accounts
+  in
+  check (list plan_section_t) "the plan is drawn in section order"
+    [ Providers.Unusable_now; Providers.Usable; Providers.No_report ]
+    (List.map (fun { Providers.pg_section; _ } -> pg_section) groups);
+  let first_account =
+    match groups with
+    | { Providers.pg_entries = entry :: _; _ } :: _ -> Providers.scope_id entry.pe_account
+    | { Providers.pg_entries = []; _ } :: _ | [] -> fail "the plan has an unusable account"
+  in
+  check string "the account at its limit is drawn first" "id-kimi" first_account;
   check bool "unreported accounts remain visible" true
-    (contains ~affix:"Codex Pro" text || contains ~affix:"Ollama Cloud" text);
+    (contains ~affix:"Codex Pro" text && contains ~affix:"Ollama Cloud" text);
   let five_hour = List.find (fun line -> contains ~affix:"67%" line) lines in
   let meter, cells = meter_of five_hour in
   check string "the window still draws the reported share" meter (Providers.meter ~cells 0.67);
-  check bool "cards have visible boundaries" true (contains ~affix:"┌" text)
+  check bool "one window is one row" true
+    (List.length (List.filter (contains ~affix:meter_open) lines) = 3)
 
 (* A silent account keeps its identity and, when observed, its exhaustion. *)
 let test_silent_account_draws_only_its_exhaustion () =
@@ -152,7 +244,7 @@ let test_silent_account_draws_only_its_exhaustion () =
     Types.Quota_read [ runtime ~scope:"provider:codex" ~exhausted:true "codex.gpt" ]
   in
   match
-    Providers.section ~history:Types.Provider_history_unread ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now ~width
+    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now ~width
   with
   | None -> fail "a read draws a section"
   | Some section ->
@@ -178,7 +270,7 @@ let reported_section ?(current = now) ?(kimi_observed_at = 1790170000.0)
       ]
   in
   match
-    Providers.section ~history:Types.Provider_history_unread ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now:current
+    Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now:current
       ~width
   with
   | Some section -> List.map plain section.lines
@@ -189,52 +281,83 @@ let claude_five_hour lines =
   | Some row -> row
   | None -> fail "no Claude Max row"
 
-(* Reported values keep bounded meters; reset/age metadata wrap separately
-   rather than consuming the value columns. *)
-let test_meter_width_is_bounded () =
-  let wide = claude_five_hour (reported_section ~width:120 ()) in
-  let _, wide_cells = meter_of wide in
-  check int "a wide terminal draws a 24-cell meter" 24 wide_cells;
-  check bool "a wide terminal keeps the hearing age" true
-    (List.exists (contains ~affix:"reported 3m00s ago") (reported_section ~width:120 ()));
-  let narrow = claude_five_hour (reported_section ~width:44 ()) in
-  let _, narrow_cells = meter_of narrow in
-  check bool "a narrow card keeps a readable, bounded meter" true
-    (narrow_cells >= 10 && narrow_cells <= 24);
-  List.iter (fun line -> check bool "narrow card respects terminal cells" true
-    (Masc_tui_message_layout.display_width line <= 44)) (reported_section ~width:44 ());
-  let separate = reported_section ~width:70 () in
-  let text = String.concat "\n" separate in
-  check bool "one passed reset keeps the other account's report age" true
-    (contains ~affix:"Claude Max" text && contains ~affix:"reported 3m00s ago" text);
-  check bool "the past-reset card keeps the reset state" true
-    (contains ~affix:"reset time passed" text);
-  List.iter (fun line -> check bool "separate cards fit the supplied width" true
-    (Masc_tui_message_layout.display_width line <= 70)) separate
+let widths = [ 24; 44; 70; 80; 120; 132 ]
 
-(* Construct calendar times in the runner's own zone. The expected text is
-   fixed by the specified local calendar, including a prior-day report; the
-   test does not reimplement the clock formatter's branch or output. *)
-let test_observation_clock_follows_local_dates () =
+(* The meter stays bounded, shrinks before it grows, and every row of every
+   width fits the screen. *)
+let test_meter_width_is_bounded () =
+  let meter_cells width =
+    snd (meter_of (claude_five_hour (reported_section ~width ())))
+  in
+  let wide = meter_cells 132 and medium = meter_cells 80 and narrow = meter_cells 44 in
+  check bool "a wide terminal draws a bounded meter" true (wide >= 6 && wide <= 24);
+  check bool "a narrower terminal never draws a longer meter" true
+    (narrow <= medium && medium <= wide);
+  List.iter
+    (fun width ->
+      List.iter
+        (fun line ->
+          check bool (Printf.sprintf "row fits %d cells" width) true
+            (Masc_tui_message_layout.display_width line <= width))
+        (reported_section ~width ()))
+    widths;
+  check bool "a passed reset keeps its state" true
+    (List.exists (contains ~affix:"reset time passed") (reported_section ~width:120 ()))
+
+(* Reset times are drawn in the terminal's zone: a time on another day
+   carries its date. Calendar times are built in the runner's own zone, and
+   the expected text is fixed by the calendar, not by the formatter. *)
+let test_reset_clock_follows_local_dates () =
   let local_time day hour minute =
     let calendar = Unix.localtime now in
     fst (Unix.mktime { calendar with Unix.tm_year = 2026 - 1900; tm_mon = 9 - 1;
       tm_mday = day; tm_hour = hour; tm_min = minute; tm_sec = 0 })
   in
   let current = local_time 24 1 16 in
-  let card observed_at =
-    String.concat "\n" (reported_section ~width:90 ~current
-      ~kimi_observed_at:observed_at ~kimi_resets_at:(current -. 60.) ())
+  let drawn resets_at =
+    let reading =
+      decode_accounts [ account_json ~name:"a" [ percent_window ~id:"w" ~resets:resets_at 10 ] ]
+    in
+    match Providers.section ~providers:(Types.Providers_read reading)
+            ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread
+            ~now:current ~width:160 with
+    | Some section -> String.concat "\n" (List.map plain section.lines)
+    | None -> fail "a read draws a section"
   in
   check bool "same local day shows only the clock" true
-    (contains ~affix:"Last report 00:16" (card (local_time 24 0 16)));
-  check bool "previous local day includes month and day" true
-    (contains ~affix:"Last report 09-23 22:26" (card (local_time 23 22 26)))
+    (contains ~affix:"resets 23:10 (" (drawn (local_time 24 23 10)));
+  check bool "another local day includes month and day" true
+    (contains ~affix:"resets 09-25 02:05 (" (drawn (local_time 25 2 5)))
+
+(* A window heard at a different time than its account's newest report says
+   so. The others leave the time out. *)
+let test_only_a_window_heard_at_another_time_says_so () =
+  let reading =
+    decode_accounts
+      [ account_json ~name:"a"
+          [ percent_window ~id:"fresh" ~observed_at:(now -. 60.0) 10
+          ; percent_window ~id:"stale" ~observed_at:(now -. 7200.0) 20
+          ; percent_window ~id:"fresh-too" ~observed_at:(now -. 60.0) 30 ]
+      ]
+  in
+  let lines =
+    match Providers.section ~providers:(Types.Providers_read reading)
+            ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread
+            ~now ~width:160 with
+    | Some section -> List.map plain section.lines
+    | None -> fail "a read draws a section"
+  in
+  let row id = List.find (contains ~affix:(id ^ " 5h")) lines in
+  check bool "the older window says when it was heard" true
+    (contains ~affix:"reported 2h00m ago" (row "stale"));
+  List.iter
+    (fun id ->
+      check bool (id ^ " leaves the time out") false (contains ~affix:"reported" (row id)))
+    [ "fresh"; "fresh-too" ]
 
 (* Z.AI's TIME_LIMIT counts MCP and tool calls: at 100% it refuses no model
    call, so it is not drawn in the exhausted tone, while the account's token
-   window beside it is still drawn as reported. A window with no reset time
-   says so with the no-value mark rather than a sentence per row. *)
+   window beside it is still drawn as reported. *)
 let test_window_that_gates_nothing_is_not_an_alarm () =
   let json =
     Yojson.Safe.from_string
@@ -270,7 +393,7 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
   in
   let section =
     match
-      Providers.section ~history:Types.Provider_history_unread ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows)
+      Providers.section ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows)
         ~runtimes:Types.Quota_unread ~now ~width
     with
     | Some section -> section
@@ -286,12 +409,9 @@ let test_window_that_gates_nothing_is_not_an_alarm () =
   let text = String.concat "\n" (List.map plain section.lines) in
   List.iter (fun fact -> check bool ("window role retains " ^ fact) true
     (contains ~affix:fact text))
-    [ "Used 100%"; "Model call limit"; "Other use · does not block model calls"
-    ; "Unclassified limit"; "Used  80%" ];
+    [ "100%"; " 80%"; "other use"; "unclassified"; "no reset" ];
   check bool "the source label is retained" true
-    (List.exists (fun line -> contains ~affix:"1 x unit 5" (plain line)) section.lines);
-  check bool "missing reset stays distinct from zero" true
-    (List.exists (fun line -> contains ~affix:Masc_tui_theme.Glyph.no_value (plain line)) section.lines)
+    (List.exists (fun line -> contains ~affix:"1 x unit 5" (plain line)) section.lines)
 
 let test_unknown_role_is_rejected () =
   let json =
@@ -320,7 +440,7 @@ let test_account_emails_name_their_accounts () =
   in
   let section account_emails =
     match
-      Providers.section ~history:Types.Provider_history_unread ~providers:(Types.Providers_read windows)
+      Providers.section ~providers:(Types.Providers_read windows)
         ~runtimes:Types.Quota_unread ~account_emails ~now ~width
     with
     | Some section -> section
@@ -492,56 +612,32 @@ let test_scope_id_is_the_servers () =
         [ "id-codex"; "id-kimi"; "id-claude_code"; "id-ollama_cloud" ]
         (List.map Providers.scope_id windows.puws_accounts)
 
-let test_plan_history_joins_exact_quota_window () =
+let test_unread_catalogue_is_not_zero_blocked () =
   let windows = match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
     | Ok windows -> windows | Error reason -> fail reason in
-  let windows = { windows with puws_accounts = List.filter (fun account ->
-    Providers.scope_id account = "id-claude_code") windows.puws_accounts } in
-  let point scope kind limit value : Masc.Tui_decode_usage.provider_usage_history_point =
-    { puhp_scope_id = scope; puhp_kind = kind; puhp_limit_id = limit;
-      puhp_unit = Masc.Tui_decode_usage.Utilization_percent value; puhp_observed_at = now } in
-  let history : Masc.Tui_decode_usage.provider_usage_history =
-    { puh_days = 7; puh_generated_at = now; puh_unreadable_reports = 0;
-      puh_reported_no_windows = [];
-      puh_points = [point "id-claude_code" "five_hour" None 40;
-        point "id-other" "five_hour" None 100;
-        point "id-claude_code" "five_hour" (Some "different-limit") 100] } in
-  let trend = Masc_tui_usage_trend.of_history ~share:Providers.share_of_full history in
-  let section = match Providers.section ~history:(Types.Provider_history_read trend)
+  let section = match Providers.section
     ~providers:(Types.Providers_read windows) ~runtimes:Types.Quota_unread
     ~account_emails:Types.Account_emails_unread ~now ~width:80 with
-    | Some section -> section | None -> fail "expected plan cards" in
+    | Some section -> section | None -> fail "expected plan rows" in
   let text = String.concat "\n" (List.map plain section.lines) in
-  check bool "exact window has its own daily trend" true
-    (contains ~affix:("Trend 7 UTC days  " ^ String.concat "" (List.init 6 (fun _ -> Masc_tui_usage_trend.no_report_mark)) ^ "▃") text);
-  check bool "a window without matching history stays unreported" true
-    (contains ~affix:"Trend 7 UTC days · no reports" text);
   check bool "catalogue absence is not reported as no blocked accounts" true
-    (contains ~affix:"Blocked (observed) unknown" text);
-  List.iter (fun symbol ->
-    check bool ("Plan explains history symbol " ^ symbol) true (contains ~affix:symbol text))
-    ["○ reported no windows"; "$ uncapped USD use"; "↓ below zero"; "↑ above limit"]
+    (contains ~affix:"Blocked (observed) unknown" text)
 
 let test_plan_preserves_unknown_reports () =
   let open Masc.Tui_decode_usage in
   let windows = match decode_provider_usage_windows (resolved "reported") with
     | Ok value -> value | Error detail -> fail detail in
-  let trend : Masc_tui_usage_trend.t =
-    { days = 7; generated_at = now; unreadable_reports = 2; rows = [] } in
   let draw windows =
-    match Providers.section ~history:(Types.Provider_history_read trend)
+    match Providers.section
       ~providers:(Types.Providers_read windows) ~runtimes:Types.Quota_unread
       ~account_emails:Types.Account_emails_unread ~now ~width:100 with
     | Some section -> String.concat "\n" (List.map plain section.lines)
     | None -> fail "expected plan summary" in
-  let text = draw windows in
-  check bool "missing rows retain unreadable evidence" true
-    (contains ~affix:"no readable reports · 2 omitted" text);
   let silent = { windows with puws_accounts = List.map (fun account ->
     { account with pua_state = Account_not_reported_since_start }) windows.puws_accounts } in
   let text = draw silent in
   List.iter (fun expected -> check bool expected true (contains ~affix:expected text))
-    [ "Accounts 4"; "Reporting 0"; "2 unreadable reports omitted" ];
+    [ "Accounts 4"; "Reporting 0" ];
   let limit role share = { windows with puws_accounts = List.filter_map (fun account ->
     match account.pua_state with
     | Account_not_reported_since_start | Account_reported_no_windows _ -> None
@@ -565,13 +661,13 @@ let test_plan_preserves_unknown_reports () =
       (contains ~affix:"At limit (reported) 0" (draw (limit Role_gates_model_calls share))))
     [Float.nan; Float.neg_infinity; Float.infinity]
 
-let test_usd_cards_do_not_invent_a_percentage () =
+let test_usd_rows_do_not_invent_a_percentage () =
   let json = Yojson.Safe.from_string
     {|{"provider_usage_windows_since":1,"provider_usage_windows":[
       {"scope":"usd","scope_id":"usd","providers":[{"id":"openrouter","display_name":"OpenRouter"}],
        "state":"reported","windows":[
         {"limit_id":null,"window":{"kind":"provider_label","label":"API key credit limit"},"role":"gates_model_calls",
-         "utilization":{"unit":"usd","value":5.125,"limit":20},"resets_at":null,"observed_at":2},
+         "utilization":{"unit":"usd","value":5.5,"limit":20},"resets_at":null,"observed_at":2},
         {"limit_id":null,"window":{"kind":"provider_label","label":"API key usage (all time)"},"role":"counts_other_use",
          "utilization":{"unit":"usd","value":12.3456,"limit":null},"resets_at":null,"observed_at":2}]}]}|}
   in
@@ -579,12 +675,14 @@ let test_usd_cards_do_not_invent_a_percentage () =
     | Ok reading -> reading | Error detail -> fail detail in
   List.iter (fun width ->
     let section = match Providers.section ~providers:(Types.Providers_read reading)
-        ~history:Types.Provider_history_unread ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread ~now ~width with
+        ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread ~now ~width with
       | Some section -> section | None -> fail "USD accounts disappeared" in
     let lines = List.map plain section.lines in
     let text = String.concat " " lines in
     List.iter (fun value -> check bool ("retains " ^ value) true (contains ~affix:value text))
-      [ "Used $5.1250 / $20.0000"; "$5.1250"; "$20.0000"; "$14.8750"; "$12.3456"; "no key limit" ];
+      [ "$5.50/$20"; "27%"; "spent $12.35"; "no reset" ];
+    check bool "the uncapped amount draws no percentage" false
+      (List.exists (fun line -> contains ~affix:"spent" line && contains ~affix:"%" line) lines);
     check int "only the capped amount has a meter" 1
       (List.length (List.filter (contains ~affix:meter_open) lines));
     List.iter (fun line -> check bool "USD rows fit the terminal" true
@@ -594,88 +692,6 @@ let test_usd_cards_do_not_invent_a_percentage () =
     (Providers.share_of_full (Masc.Tui_decode_usage.Utilization_usd { used = 12.3456; limit = None }))
 
 (* ---- plan: sections and order, asserted on typed data ------------------ *)
-
-let plan_section_t =
-  testable
-    (fun formatter section ->
-      Format.pp_print_string formatter
-        (match section with
-         | Providers.Unusable_now -> "Unusable_now"
-         | Providers.Usable -> "Usable"
-         | Providers.No_report -> "No_report"))
-    (fun left right ->
-      match (left, right) with
-      | Providers.Unusable_now, Providers.Unusable_now
-      | Providers.Usable, Providers.Usable
-      | Providers.No_report, Providers.No_report -> true
-      | ( Providers.Unusable_now, (Providers.Usable | Providers.No_report)
-        | Providers.Usable, (Providers.Unusable_now | Providers.No_report)
-        | Providers.No_report, (Providers.Unusable_now | Providers.Usable) ) -> false)
-
-let json_time = function None -> "null" | Some at -> Printf.sprintf "%.1f" at
-
-(* A window named by [id] (its limit id), so a test reads the order off ids. *)
-let percent_window ?(role = "gates_model_calls") ?resets ?(observed_at = 1790180000.0) ~id
-    percent =
-  Printf.sprintf
-    {|{"limit_id":%S,"window":{"kind":"five_hour"},"role":%S,"utilization":{"unit":"percent","value":%d},"resets_at":%s,"observed_at":%.1f,"source":"t"}|}
-    id role percent (json_time resets) observed_at
-
-let usd_window ?(role = "gates_model_calls") ?resets ~id ~used limit =
-  Printf.sprintf
-    {|{"limit_id":%S,"window":{"kind":"provider_label","label":"credit"},"role":%S,"utilization":{"unit":"usd","value":%.4f,"limit":%s},"resets_at":%s,"observed_at":1790180000.0,"source":"t"}|}
-    id role used
-    (match limit with None -> "null" | Some limit -> Printf.sprintf "%.4f" limit)
-    (json_time resets)
-
-let account_json ~name windows =
-  Printf.sprintf
-    {|{"scope":"scope:%s","scope_id":%S,"providers":[{"id":%S,"display_name":%S}],"state":"reported","windows":[%s]}|}
-    name name name name (String.concat "," windows)
-
-let silent_json name =
-  Printf.sprintf
-    {|{"scope":"scope:%s","scope_id":%S,"providers":[{"id":%S,"display_name":%S}],"state":"not_reported_since_start","windows":[]}|}
-    name name name name
-
-let empty_report_json name =
-  Printf.sprintf
-    {|{"scope":"scope:%s","scope_id":%S,"providers":[{"id":%S,"display_name":%S}],"state":"reported_no_windows","observed_at":1790180000.0,"source":"t","windows":[]}|}
-    name name name name
-
-let decode_accounts accounts =
-  let json =
-    Yojson.Safe.from_string
-      (Printf.sprintf {|{"provider_usage_windows_since":1.0,"provider_usage_windows":[%s]}|}
-         (String.concat "," accounts))
-  in
-  match Masc.Tui_decode_usage.decode_provider_usage_windows json with
-  | Ok reading -> reading
-  | Error detail -> failf "fixture should decode: %s" detail
-
-let exhausted_scope ?resets name =
-  runtime ?resets ~scope:("scope:" ^ name) ~exhausted:true (name ^ ".model")
-
-let shape groups =
-  List.map
-    (fun { Providers.pg_section; pg_entries } ->
-      ( pg_section
-      , List.map
-          (fun (entry : Providers.plan_entry) ->
-            ( Providers.scope_id entry.pe_account
-            , List.map
-                (fun (window : Masc.Tui_decode_usage.provider_usage_window) ->
-                  Option.value ~default:"-" window.puw_limit_id)
-                entry.pe_windows ))
-          pg_entries ))
-    groups
-
-let plan_shape ?(runtimes = Types.Quota_unread) accounts =
-  shape
-    (Providers.plan ~now ~runtimes (decode_accounts accounts).puws_accounts)
-
-let shape_t = list (pair plan_section_t (list (pair string (list string))))
-let hour = 3600.0
 
 (* The sketch the operator approved: a priced key at its limit with no
    reset, an account whose weekly window is at its limit, accounts with room,
@@ -845,7 +861,7 @@ let test_at_limit_is_the_header_decision () =
          (Option.value ~default:"-" window.puw_limit_id, Providers.window_at_limit window))
        windows);
   let drawn =
-    match Providers.section ~history:Types.Provider_history_unread
+    match Providers.section 
             ~providers:(Types.Providers_read decoded) ~runtimes:Types.Quota_unread
             ~account_emails:Types.Account_emails_unread ~now ~width with
     | Some section -> String.concat "\n" (List.map plain section.lines)
@@ -853,13 +869,86 @@ let test_at_limit_is_the_header_decision () =
   in
   check bool "the account is counted once" true (contains ~affix:"At limit (reported) 1" drawn)
 
+(* The shape of the operator's screenshot, drawn by the real renderer. *)
+let screenshot_accounts =
+  [ account_json ~name:"antigravity"
+      [ percent_window ~id:"3p" ~resets:(now +. 5.0 *. hour) 0
+      ; percent_window ~id:"gemini" ~resets:(now +. 22.0 *. hour) 100 ]
+  ; account_json ~name:"ollama" [ percent_window ~id:"7d" 43 ]
+  ; account_json ~name:"kimi"
+      [ percent_window ~id:"5h" ~resets:(now +. 0.5 *. hour) 56
+      ; percent_window ~id:"usage" ~resets:(now +. 150.0 *. hour) 83 ]
+  ; account_json ~name:"openrouter"
+      [ usd_window ~id:"credit" ~used:100.0 (Some 100.0)
+      ; usd_window ~role:"counts_other_use" ~id:"key-usage" ~used:12.3456 None ]
+  ; silent_json "codex"
+  ]
+
+let screenshot_section ?(account_emails = Types.Account_emails_unread) ~width () =
+  match
+    Providers.section ~providers:(Types.Providers_read (decode_accounts screenshot_accounts))
+      ~runtimes:Types.Quota_unread ~account_emails ~now ~width
+  with
+  | Some section -> section.lines
+  | None -> fail "a read draws a section"
+
+let test_every_line_fits_the_width () =
+  List.iter
+    (fun width ->
+      List.iter
+        (fun line ->
+          let cells = Masc_tui_message_layout.display_width line in
+          if cells > width then failf "%d cells in a %d-cell screen: %S" cells width (plain line))
+        (screenshot_section ~width ()))
+    [ 20; 24; 44; 80; 120; 132 ]
+
+let test_rows_follow_the_plan () =
+  let raw = screenshot_section ~width:120 () in
+  let lines = List.map plain raw in
+  let index affix =
+    let rec find position = function
+      | [] -> failf "no line with %S" affix
+      | line :: rest -> if contains ~affix line then position else find (position + 1) rest
+    in
+    find 0 lines
+  in
+  check bool "the sections are drawn in plan order" true
+    (index "Unusable now (2)" < index "Usable (4)" && index "Usable (4)" < index "No report (1)");
+  check int "each window is one row with one bar" 6
+    (List.length (List.filter (contains ~affix:meter_open) lines));
+  check int "an account's name is drawn once for its consecutive windows" 1
+    (List.length (List.filter (contains ~affix:"kimi") lines));
+  let bad = Masc_tui_ansi.Theme.bad () in
+  check bool "the tone is drawn with a code" true (not (String.equal bad ""));
+  let has_bar line = contains ~affix:meter_open (plain line) in
+  let at_limit = List.filter (fun line -> has_bar line && contains ~affix:"100%" (plain line)) raw in
+  check int "two windows are at their limit" 2 (List.length at_limit);
+  List.iter (fun line -> check bool "an at-limit row uses the bad tone" true (contains ~affix:bad line))
+    at_limit;
+  List.iter
+    (fun line ->
+      if has_bar line && not (contains ~affix:"100%" (plain line)) then
+        check bool "a window with room does not" false (contains ~affix:bad line))
+    raw
+
+let test_an_account_email_is_drawn_once () =
+  let lines =
+    screenshot_section
+      ~account_emails:
+        (Types.Account_emails_read
+           { emails = [ ("antigravity", "ag@example.com") ]; unreadable_rows = 0 })
+      ~width:120 ()
+  in
+  check int "split across two sections, the account names its email once" 1
+    (List.length (List.filter (contains ~affix:"ag@example.com") (List.map plain lines)))
+
 let () =
   run "tui_overview_providers"
     [ ( "providers"
       , [ test_case "out-of-range Plan history" `Quick test_plan_history_preserves_out_of_range_reports;
           test_case "unknown report evidence" `Quick test_plan_preserves_unknown_reports;
-          test_case "exact quota window history join" `Quick test_plan_history_joins_exact_quota_window;
-          test_case "account summary and reported gauges" `Quick test_section_draws_three_line_shapes
+          test_case "an unread catalogue is not zero blocked" `Quick test_unread_catalogue_is_not_zero_blocked;
+          test_case "one line per window and the account summary" `Quick test_section_draws_one_line_per_window
         ; test_case "unknown state is rejected" `Quick test_unknown_state_is_rejected
         ; test_case "history uses reported points" `Quick
             test_history_preserves_reported_days_and_units
@@ -867,12 +956,14 @@ let () =
         ; test_case "trend is built from the answer" `Quick
             test_trend_is_built_from_the_answer
         ; test_case "scope id is the server's" `Quick test_scope_id_is_the_servers
-        ; test_case "USD cards preserve amounts without a fabricated meter" `Quick test_usd_cards_do_not_invent_a_percentage
+        ; test_case "USD rows preserve amounts without a fabricated meter" `Quick test_usd_rows_do_not_invent_a_percentage
         ; test_case "a silent account draws only its exhaustion" `Quick
             test_silent_account_draws_only_its_exhaustion
         ; test_case "meter width is bounded" `Quick test_meter_width_is_bounded
-        ; test_case "observation clock follows local dates" `Quick
-            test_observation_clock_follows_local_dates
+        ; test_case "reset clock follows local dates" `Quick
+            test_reset_clock_follows_local_dates
+        ; test_case "only a window heard at another time says so" `Quick
+            test_only_a_window_heard_at_another_time_says_so
         ; test_case "a window that gates nothing is not an alarm" `Quick
             test_window_that_gates_nothing_is_not_an_alarm
         ; test_case "unknown role is rejected" `Quick test_unknown_role_is_rejected
@@ -890,6 +981,9 @@ let () =
         ; test_case "observed exhaustion blocks gating windows" `Quick
             test_observed_exhaustion_blocks_gating_windows
         ; test_case "an empty report is no report" `Quick test_an_empty_report_is_no_report
+        ; test_case "every line fits the width" `Quick test_every_line_fits_the_width
+        ; test_case "rows follow the plan" `Quick test_rows_follow_the_plan
+        ; test_case "an account email is drawn once" `Quick test_an_account_email_is_drawn_once
         ; test_case "at limit is the header decision" `Quick
             test_at_limit_is_the_header_decision
         ] )

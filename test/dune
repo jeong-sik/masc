@@ -2454,6 +2454,8 @@
 (include stanzas/test_exec_policy_log_sanitize.inc)
 (include stanzas/test_lane_cli_probe_args.inc)
 
+(include stanzas/test_artifacts_upload.inc)
+
 (include stanzas/test_auth_bearer_mismatch_9786.inc)
 (include stanzas/test_auth_oauth.inc)
 (include stanzas/test_server_oauth_protocol.inc)

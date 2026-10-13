@@ -6581,9 +6581,13 @@ let test_config_post_refuses_an_unreadable_input_policy_without_a_write () =
       ~name {|{"input_policy":"automatic"}|}
   in
   expect_http_status "unreadable input_policy HTTP 400" 400 raw;
-  check bool "the refusal is parse's" true
-    (String_util.contains_substring (Yojson.Safe.to_string json)
-       "input_policy must be small or wide");
+  let body = Yojson.Safe.to_string json in
+  check bool "the refusal names the accepted policies" true
+    (String_util.contains_substring body "input_policy must be small or wide");
+  (* The removed dashboard check said the same words and added
+     "(received string)"; its absence is what shows parse refused. *)
+  check bool "the refusal is parse's, not the dashboard's" false
+    (String_util.contains_substring body "(received");
   check string "keeper TOML unchanged" before (read_file toml_path);
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await

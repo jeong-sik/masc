@@ -32,8 +32,17 @@ are unchanged.
 checkpoint message. `Keeper_tool_memory_runtime.search_history` presents those
 bodies through `keeper_memory_search` with `source=history` or `source=all`.
 Consequently a Historical context retained by PR #42713 is searchable as a
-previous user statement. The extraction boundary and corresponding disk-history
-reader are being addressed in a separate follow-up change.
+previous user statement. The follow-up change applies the same typed filter to
+checkpoint extraction and the disk-history reader. Current/historical context
+is omitted; malformed or duplicate context provenance is omitted with a
+diagnostic. Malformed disk rows count toward existing unreadable-row reporting.
+Unrelated metadata does not exclude ordinary User-role messages.
+
+The regression calls the actual `keeper_memory_search` tool with both `history`
+and `all`: checkpoint and disk contexts containing a private sentinel must not
+match, while ordinary text remains searchable. Its result also checks disk
+metadata error reporting. Checkpoint provenance errors remain log-only; this
+change does not widen the search result schema.
 
 ## Other boundaries inspected
 
@@ -51,7 +60,7 @@ that every runtime consumer or wire-level prefix edit has been covered.
 
 ## Verification boundary
 
-The three changed OCaml files passed parser-only validation and `git diff
+Both repairs' changed OCaml files passed parser-only validation and `git diff
 --check`. The added behavioral cases require execution in CI. Local Dune builds
 and tests were not run under the repository execution protocol. No runtime
 checkpoint or installed binary was modified.

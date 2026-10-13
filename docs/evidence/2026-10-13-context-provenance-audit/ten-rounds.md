@@ -10,16 +10,16 @@ one of these ten rounds.
 
 | Round | Boundary | State |
 |---|---|---|
-| 1 | Malformed context provenance in Librarian evidence | Repaired in #42720; source review PASS; focused CI requested |
+| 1 | Malformed context provenance in Librarian evidence | Repaired in #42720; source review and focused CI PASS |
 | 2 | Suppressed terminal replies and retained context ownership | Repaired in #42722; source review PASS; behavior execution pending |
 | 3 | Streamed response provenance and checkpoint collection | Source audit and independent review PASS; no defect confirmed |
-| 4 | Hook or persistence failure after provider response | Pending |
-| 5 | Nested tool-result content and reasoning redaction | Pending |
-| 6 | Checkpoint encoding, restore and metadata validation | Pending |
-| 7 | Provider/endpoint/model rotation and replay eligibility | Pending |
-| 8 | Multimodal tool-result projections and user attribution | Pending |
-| 9 | Count/preview versus frozen generation input | Pending |
-| 10 | Cancellation, resumed state and stale checkpoint writes | Pending |
+| 4 | Hook or persistence failure after provider response | Bounded source audit and independent review PASS |
+| 5 | Nested tool-result content and reasoning redaction | Additional Anthropic wire defect found; repair implemented, review pending |
+| 6 | Checkpoint encoding, restore and metadata validation | Bounded source audit done; independent review pending |
+| 7 | Provider/endpoint/model rotation and replay eligibility | Bounded source audit done; account-identity limitation recorded |
+| 8 | Multimodal tool-result projections and user attribution | Bounded source audit done; independent review pending |
+| 9 | Count/preview versus frozen generation input | Independent review found count-side catalog reload gap; repair in progress |
+| 10 | Cancellation, resumed state and stale checkpoint writes | Bounded source audit done; independent review pending |
 
 ## Round 1: malformed context cannot become new user evidence
 
@@ -40,7 +40,8 @@ Librarian request and absorption observations. No canonical message is changed.
 
 Execution: parser and focused behavior results will be recorded separately.
 Independent source review: `d16a5a884392897f47d3edfe7697671711e64dc7` PASS.
-Focused CI: https://github.com/jeong-sik/masc/actions/runs/38358072279 (result not yet read).
+Focused CI: https://github.com/jeong-sik/masc/actions/runs/38358072279
+completed successfully at the same head.
 
 ## Round 2: retained context must not outlive its suppressed response
 
@@ -61,6 +62,9 @@ and includes marker-looking user text as a negative case.
 Independent source review: `1586e9677af96915a2129de15112ec7631fbfb6c` PASS
 against `d16a5a884392897f47d3edfe7697671711e64dc7`.
 Focused behavioral execution is pending; source review does not establish it.
+Final documentation/changelog head `681b118d7b69efb0ccf039d0a67c1ad449b49252`
+also received source PASS. Targeted run:
+https://github.com/jeong-sik/masc/actions/runs/38358410887 (in progress when read).
 
 ## Round 3: stream assembly and source stamping
 
@@ -88,3 +92,127 @@ not a live-provider or all-runtime streaming certification.
 Independent review of these bounded source claims: `diagnosis_review`,
 `1586e9677af96915a2129de15112ec7631fbfb6c`, PASS. No P0–P2 or
 source-loss counterexample was found in the inspected routes.
+
+## Round 4: failed hooks and checkpoint sinks
+
+`Pipeline.stage_collect` rejects a failed `after_turn` hook before appending the
+assistant or its retained context. After successful admission, it updates live
+state before passing that same state to `Pipeline_checkpoint.persist_for_state`.
+A sink failure returns before tool execution. `Agent_execution_runner.with_scope`
+passes the error through durable abort rather than reporting completion.
+No new provenance-loss counterexample was found in these boundaries.
+
+`test_agent_advanced.test_assistant_checkpoint_failure_suppresses_release_and_tool`
+already checks that the rejected snapshot and live state agree on their message
+count and that neither tools nor release/boundary callbacks run. Its response is
+unsigned: it does not prove retained signed-context bytes or all crash windows.
+Independent source review: `diagnosis_review`, base inspection at
+`681b118d7b69efb0ccf039d0a67c1ad449b49252`, PASS. No new execution claimed.
+
+## Round 5: nested tool data must not become protocol reasoning
+
+A tool handler can return arbitrary typed `content_blocks`. The shared replay
+projection inspects top-level reasoning; nested blocks in a `ToolResult` are
+tool data. `Backend_anthropic.anthropic_content_block_to_json` recursively
+serialized those nested values as protocol blocks, so a tool-provided Thinking,
+RedactedThinking, ReasoningDetails, ToolUse, ToolResult or Audio could make an
+invalid Anthropic request. This is distinct from the original prefix mismatch.
+
+The [Anthropic tool-result contract](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)
+permits text, image, document and search-result nested blocks. Of the existing
+typed constructors, the repair preserves Text/Image/Document natively and wraps
+the other variants' JSON in a text block inside the same tool result. It keeps
+the source checkpoint and block order unchanged. Kimi already selects
+`Api_common.kimi_message_to_json` separately, so this boundary change need not
+alter its wire. OpenAI/Responses/Ollama use string data for these tool blocks.
+
+The request regression exercises completion and count requests, unsigned/signed
+and foreign opaque nested reasoning, nested tool use/results, audio, supported
+media, source equality and unchanged Kimi messages. Parser checks passed;
+independent repaired-head review and behavioral execution are pending.
+
+## Round 6: full and delta checkpoint metadata
+
+Inspected `Checkpoint_codec.message_json`, `message_of_json`,
+`validated_message_encoding`, `drop_unencodable_json`, `Checkpoint_delta`'s
+message splice and Keeper's context/checkpoint conversions. Normal full and
+delta paths preserve complete metadata and content. Splice equality includes
+metadata; the strict public checkpoint boundary rejects malformed JSON rather
+than treating duplicate keys as an ordinary authoritative record. The explicit
+unencodable-JSON recovery path may drop invalid payloads and reports that recovery;
+it is not evidence that arbitrary malformed metadata is safe to replay.
+
+Existing full/delta metadata roundtrips and nested duplicate-key scenarios were
+located. The earlier #42716 finalization-to-disk-to-replay test passed in run
+38357586007. No additional ordinary-path metadata loss was found. New full/delta
+suite execution was not performed for this audit.
+
+## Round 7: provider, endpoint and model changes
+
+Inspected `Types.Reasoning_source` and `Reasoning_dialect.rotation_policy` with
+`Reasoning_history_projection.project`. The source combines provider kind,
+canonical model, replay contract and an endpoint/request-path digest. Signed
+Anthropic/Gemini and opaque Responses state require the identical source;
+self-contained reasoning can rotate endpoints only under its declared policy.
+The existing provider-agnostic scenarios check per-dialect selection and changed
+endpoint, model and contract. No new violation of that declared rule was found.
+
+Limitation: this identity does not include credentials or the proxy's hidden
+account/route. A different account behind an unchanged endpoint is not detected
+by the source comparison. No account-rotation safety or live provider matrix is
+claimed. Anthropic's prefix-mismatch control in #42713 is a separate mechanism,
+not proof that all account changes preserve a reasoning artifact.
+
+## Round 8: multimodal projection and user attribution
+
+Inspected `Tool_result_projection.with_image_followups`, OpenAI's
+`messages_of_message_with`, Gemini's `build_request_artifact` and
+`contents_of_messages`, and Responses tool output encoding. Synthetic user media
+followups are built from a projected copy, after reasoning-history selection;
+they do not redefine the latest real user turn in canonical history. Tool-result
+labels retain the call identity and error outcome. No additional canonical
+user-attribution leak was found in these paths. Round 5 handles unsupported
+nested Anthropic protocol blocks separately. No new multimodal live run claimed.
+
+## Round 9: measurement and dispatched input
+
+Inspected `Prepared_completion_request.prepare`, `admit_serialized_body`,
+`measure_serialized`, and sync/stream routing. Admission saves the serialized body
+alongside its prepared request; measurement carries that admitted body into
+generation. The stream timeout adjustment updates transport timing without
+rewriting body bytes. Independent review found that ordinary measurement itself
+still rebuilds the count request from the current catalog. A catalog reload
+between serialization and count can therefore count a different projection from
+the frozen generation body. This is an additional finding, not a completed pass.
+
+`test_anthropic_input_token_count` covers catalog mutation after measurement,
+which misses this earlier window. `test_exact_output_flow` covers a separate
+frozen-artifact path whose count projection is already derived from that artifact.
+Both were in successful run 38357088798, but that success does not discharge the
+new counterexample. The ordinary count-side repair is in progress.
+
+## Round 10: cancellation, resume and stale writers
+
+Inspected `Keeper_checkpoint_store`'s session-lock writes and exact-source CAS,
+`Agent_execution_runner.abort_after_exception`, and the pipeline resume frontier.
+Lower-turn writes become `Stale_noop`; source-CAS writers compare the exact
+checkpoint reference, so competing same-turn candidates cannot both commit.
+The resume frontier uses durable turn identity rather than recomputing it from
+mutated state. Cancellation is preserved through protected execution abort.
+
+The existing `test_history_link_keeps_transaction_until_cancelled_job_finishes`
+holds an accepted history-link job, cancels its caller, and checks that a later
+writer cannot pass until the transaction finishes. Existing source-CAS cases
+cover equal-turn contention. Ordinary stage saves intentionally allow equal
+turn numbers; these observations do not prove exclusion of every possible
+same-turn caller. No additional provenance defect was established within this
+bounded audit, and those suites were not newly executed.
+
+## Execution and completion limits
+
+Ten boundaries were inspected, with four additional repair findings in rounds
+1, 2, 5 and 9. Independent review and requested behavior results remain separately
+recorded above. The production runtime has not been replaced by these branches.
+The original #42718 test suite had one pre-existing publication-test contract
+failure; its new context-exclusion case passed. A separate test-only stack repairs
+that expectation, without calling the failed run a suite success.

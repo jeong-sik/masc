@@ -1137,11 +1137,15 @@ let corrupt_exact_ack ~base_path ~keeper_name ~source corruption =
       ~since:"1970-01-01" ~until:"9999-12-31" with
     | Ok paths -> paths | Error error -> fail (Dated_jsonl.read_error_to_string error) in
   let is_exact_ack line =
-    let row = Yojson.Safe.from_string line in
-    let reaction = row |> member "reaction" in
-    (reaction |> member "kind") =
-      `String (Keeper_reaction_ledger.reaction_kind_to_string Keeper_reaction_ledger.Event_queue_ack)
-    && (reaction |> member "post_id") = `String source.Keeper_event_queue.post_id in
+    match Yojson.Safe.from_string line with
+    | `Assoc fields ->
+      (match List.assoc_opt "record_kind" fields, List.assoc_opt "reaction" fields with
+       | Some (`String "reaction"), Some (`Assoc reaction) ->
+         List.assoc_opt "kind" reaction =
+           Some (`String (Keeper_reaction_ledger.reaction_kind_to_string Keeper_reaction_ledger.Event_queue_ack))
+         && List.assoc_opt "post_id" reaction = Some (`String source.Keeper_event_queue.post_id)
+       | _ -> false)
+    | _ -> false in
   let path, lines = match List.find_map (fun path ->
       let lines = In_channel.with_open_bin path In_channel.input_lines in
       if List.exists is_exact_ack lines then Some (path, lines) else None) paths with

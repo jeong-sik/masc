@@ -1954,6 +1954,7 @@ let test_scope_durable_reload_noop_and_conflict () =
     let bind selections scope = Persistence.bind_pending_repetition_scope_result
       ~after_commit:(fun _ -> incr committed) ~base_path ~keeper_name ~selections ~scope () in
     bind (State.pending_selections initial) scope |> require_ok "durable bind" |> ignore;
+    Alcotest.(check int) "first binding publishes once" 1 !committed;
     Persistence.For_testing.reset_snapshot_cache_for_testing ();
     let reloaded = read () in
     List.iter (check_scope "cold reload binding" scope) (State.pending_selections reloaded);
@@ -1964,11 +1965,12 @@ let test_scope_durable_reload_noop_and_conflict () =
     let bytes () = In_channel.with_open_bin primary In_channel.input_all in
     let before = bytes () in
     bind (State.pending_selections reloaded) scope |> require_ok "same-scope replay" |> ignore;
+    Alcotest.(check int) "same-scope durability confirmation republishes once" 2 !committed;
     expect_binding_error "conflicting durable binding accepted"
       (bind (State.pending_selections reloaded) (scope_id "conflicting"));
     expect_binding_error "stale durable binding accepted" (bind (State.pending_selections initial) scope);
     Alcotest.(check string) "no-op and errors preserve bytes" before (bytes ());
-    Alcotest.(check int) "callback only for committed binding" 1 !committed;
+    Alcotest.(check int) "refused bindings publish nothing" 2 !committed;
     Alcotest.(check int64) "no phantom revision" (State.revision reloaded) (State.revision (read ())))
 
 let test_scope_uncertain_rename_requires_durability_confirmation () =
@@ -1999,18 +2001,26 @@ let test_scope_uncertain_rename_requires_durability_confirmation () =
     let selections = State.pending_selections visible in
     List.iter (check_scope "binding visible despite sync failure" scope) selections;
     let confirmations = ref 0 in
-    expect_binding_error "strict no-op skipped failing durability confirmation"
-      (Persistence.For_testing.bind_pending_repetition_scope_with_confirmation
-        ~confirm_snapshot:(fun path state ->
-          incr confirmations; fail_after_rename path (State.to_yojson state))
-        ~base_path ~keeper_name ~selections ~scope ());
+    let failed_notifications = ref 0 in
+    with_state_change_observer (fun () -> incr failed_notifications) (fun () ->
+      expect_binding_error "strict no-op skipped failing durability confirmation"
+        (Persistence.For_testing.bind_pending_repetition_scope_with_confirmation
+          ~confirm_snapshot:(fun path state ->
+            incr confirmations; fail_after_rename path (State.to_yojson state))
+          ~base_path ~keeper_name ~selections ~scope ()));
     Alcotest.(check int) "same binding retried the barrier" 1 !confirmations;
+    Alcotest.(check int) "failed durability confirmation does not notify" 0 !failed_notifications;
+    let before = In_channel.with_open_bin primary In_channel.input_all in
     let notifications = ref 0 in
+    let publications = ref 0 in
     with_state_change_observer (fun () -> incr notifications) (fun () ->
       Persistence.bind_pending_repetition_scope_result ~base_path ~keeper_name
-        ~after_commit:(fun _ -> incr notifications) ~selections ~scope ()
+        ~after_commit:(fun _ -> incr publications) ~selections ~scope ()
         |> require_ok "real strict durability confirmation" |> ignore);
-    Alcotest.(check int) "confirmation is not a logical mutation" 0 !notifications;
+    Alcotest.(check int) "confirmed snapshot notifies once" 1 !notifications;
+    Alcotest.(check int) "confirmed snapshot republishes once" 1 !publications;
+    Alcotest.(check string) "confirmation preserves snapshot bytes" before
+      (In_channel.with_open_bin primary In_channel.input_all);
     Alcotest.(check int64) "confirmation preserves committed revision"
       (State.revision bound) (State.revision (read ())))
 

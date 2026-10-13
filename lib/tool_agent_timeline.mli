@@ -45,8 +45,17 @@ type context = {
 
 (** {1 Timeline construction} *)
 
+(** Who said a chat line. The keeper-aware caller drops the chat store's
+    other roles (tool, system, request failure) before a line gets here. *)
+type chat_role =
+  | Chat_user
+  | Chat_assistant
+
+val chat_role_to_string : chat_role -> string
+(** ["user"], ["assistant"]: the [role] a chat timeline event carries. *)
+
 type chat_line = {
-  cl_role : string;
+  cl_role : chat_role;
   cl_content : string;
   cl_ts : float;
   cl_connector : string option;

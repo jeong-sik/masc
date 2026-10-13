@@ -10,9 +10,9 @@
     is the only place the before/after text survives.
 
     How far back the answer reaches is the log's retention window, not this
-    module's: {!Keeper_tool_call_log.init} prunes at
-    [MASC_TOOL_CALL_LOG_RETENTION_DAYS] (30 days by default). Past that the
-    change is gone from disk and no projection can recover it. *)
+    module's: the server's prune pass removes the log's day files at the
+    workspace's window ([MASC_JSONL_RETENTION_DAYS], 30 days by default).
+    Past that the change is gone from disk and no projection can recover it. *)
 
 type location =
   | In_repo of {

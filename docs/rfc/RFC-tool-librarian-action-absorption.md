@@ -230,7 +230,7 @@ Memory OS의 Librarian은 관련 기억(`m1`, `m2`)을 새 claim으로 묶고, �
 Tool Librarian은 다음 3가지 조건을 모두 충족할 때만 컴포지션 후보로 선별한다.
 조건은 횟수·비율 문턱이 아니라 기록에서 일어난 일로 정한다.
 마이너는 남아 있는 `tool_calls` 기록을 전부 읽고, 읽은 범위(첫 파일과 마지막 파일)를 후보 카드에 적는다.
-기록이 얼마나 남는지는 `lib/keeper_tool_call_log.ml` 의 `retention_days` 가 정한다(`MASC_TOOL_CALL_LOG_RETENTION_DAYS`, 없으면 `retention_days_default`). 이 RFC 는 따로 기간을 정하지 않는다.
+기록이 얼마나 남는지는 `Dated_jsonl.Store.retention` 이 정한다. `tool_calls` 는 운영자 창(`MASC_JSONL_RETENTION_DAYS`, 그다음 `runtime.toml` 의 `[maintenance].jsonl_retention_days`, 없으면 30일)을 따른다. 이 RFC 는 따로 기간을 정하지 않는다.
 세는 방법과 한계는 §1.2.1 과 같다. 컴포지션이 대신 부른 노드 줄(`composition_run_id` 가 있는 줄)은 어느 조건에서도 세지 않는다.
 1. **재사용성**: 서로 다른 Keeper 둘 이상이 각자의 턴 안에서 같은 시퀀스를 연달아 부른 기록이 있다.
    몇 번 불렀는지는 카드에 적지만 문턱으로 쓰지 않는다.
@@ -296,9 +296,9 @@ Tool Librarian은 다음 3가지 조건을 모두 충족할 때만 컴포지션 
 
 첫 줄(제거)은 남아 있는 `tool_calls` 기록 전체가 그 컴포지션을 처음 보인 뒤의 것일 때만 쓴다.
 `tool-events` 에서 그 컴포지션이 처음 나온 시각이 남아 있는 기록의 첫 줄보다 늦으면 판정하지 않는다.
-그래서 제거 판정이 보는 기간은 로그 보존 기간(`retention_days`, 없으면 `retention_days_default`)과 같다.
+그래서 제거 판정이 보는 기간은 로그 보존 기간(운영자 창)과 같다.
 이 값은 로그가 디스크를 얼마나 쓸지로 정한 값이고, 이 RFC 가 고른 값이 아니다.
-보존을 끄면(`MASC_TOOL_CALL_LOG_RETENTION_DAYS` 가 0 이하) 옛 기록이 계속 남아서, 한 번이라도 쓰인 컴포지션은 이 줄로 제거되지 않는다.
+운영자 창이 0 이하면 옛 기록이 계속 남아서, 한 번이라도 쓰인 컴포지션은 이 줄로 제거되지 않는다.
 
 풀어서 한 턴에서 볼 것: 설명이 그 상황과 맞는가, 모델이 넘긴 입력을 컴포지션 param 으로 적을 수 있는가,
 두 호출 사이에 모델 판단이 필요했는가(§3.1 조건 2 를 다시 본다).

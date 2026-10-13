@@ -22,9 +22,7 @@ open Dated_jsonl_layout
 type t = {
   base_dir : string;
   mutex : Eio.Mutex.t Atomic.t;
-  retention_days : int option;
   max_bytes : int option;
-  last_prune_day : string option Atomic.t;
 }
 
 type read_operation =
@@ -152,16 +150,11 @@ let mutex_for_base_dir ~base_dir =
         Hashtbl.add mutex_registry key cell;
         cell)
 
-let create ~base_dir ?mutex ?retention_days ?max_bytes () =
+let create ~base_dir ?mutex ?max_bytes () =
   let mutex =
     match mutex with
     | Some mutex -> Atomic.make mutex
     | None -> mutex_for_base_dir ~base_dir
-  in
-  let retention_days =
-    match retention_days with
-    | Some days when days > 0 -> Some days
-    | _ -> None
   in
   let max_bytes =
     match max_bytes with
@@ -171,15 +164,13 @@ let create ~base_dir ?mutex ?retention_days ?max_bytes () =
   {
     base_dir;
     mutex;
-    retention_days;
     max_bytes;
-    last_prune_day = Atomic.make None;
   }
 
 module Store = Dated_jsonl_store
 
-let open_store ?mutex ?retention_days ?max_bytes location =
-  create ~base_dir:(Store.dir location) ?mutex ?retention_days ?max_bytes ()
+let open_store ?mutex ?max_bytes location =
+  create ~base_dir:(Store.dir location) ?mutex ?max_bytes ()
 
 let base_dir t = t.base_dir
 
@@ -809,24 +800,12 @@ type append_outcome =
   | Skipped_rotation_exhausted of { sequence_limit : int }
   | Skipped_by_append_guard
 
-(* Shared post-append maintenance for every append entry point:
-   opportunistic once-per-process-day retention prune, then best-effort
-   byte-budget prune that never touches the current day file. Divergence
-   between append paths here would give the same store two different
-   retention behaviours, so both call this one helper. *)
+(* Shared post-append maintenance for every append entry point: a
+   best-effort byte-budget prune that never touches the current day file.
+   Divergence between append paths here would give the same store two
+   different size limits, so both call this one helper. Removing day files
+   by age is the prune pass's job ([prune_listed_stores]). *)
 let run_post_append_pruning_unlocked t ~(dated : Jsonl_writer.dated_path) =
-  (match t.retention_days with
-   | None -> ()
-   | Some days ->
-     let today = dated.month_dir ^ "/" ^ dated.day_file in
-     if
-       not
-         (Option.equal String.equal (Atomic.get t.last_prune_day) (Some today))
-     then begin
-       (* See retention pruning is opportunistic after append durability. *)
-       ignore (prune_unlocked t ~days : int);
-       Atomic.set t.last_prune_day (Some today)
-     end);
   match t.max_bytes with
   | None -> ()
   | Some max_bytes ->
@@ -1913,6 +1892,27 @@ let read_range_recent ?offset t ~since ~until n =
 let prune t ~days =
   let mutex = Atomic.get t.mutex in
   Eio.Mutex.use_ro mutex (fun () -> prune_unlocked t ~days)
+
+let days_to_keep ~operator_window_days store =
+  match Store.retention store with
+  | Store.Operator_window ->
+    if operator_window_days > 0 then Some operator_window_days else None
+  | Store.Fixed_days days -> Some days
+  | Store.Own_days read -> Some (read ())
+  | Store.Kept -> None
+
+let prune_listed_stores ~base_path cluster_root ~operator_window_days =
+  List.fold_left
+    (fun pruned store ->
+       match days_to_keep ~operator_window_days store with
+       | None -> pruned
+       | Some days ->
+         List.fold_left
+           (fun pruned location -> pruned + prune (open_store location) ~days)
+           pruned
+           (Store.locations_on_disk ~base_path cluster_root store))
+    0
+    Store.all
 
 (* Test hooks declared in the .mli — implementation lives in this
    module so tests can verify mutex-registry sharing without

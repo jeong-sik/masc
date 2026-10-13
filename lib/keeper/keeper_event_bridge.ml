@@ -591,25 +591,6 @@ let deliver_pending_with
   | exn -> Retryable_failure (pending, Broadcast, exn)
 ;;
 
-let agent_core_event_retention_days_default = 30
-
-let resolve_agent_core_event_retention_days = function
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | Some days when days > 0 -> Some days
-     | Some _ -> None
-     | None -> Some agent_core_event_retention_days_default)
-  | None -> Some agent_core_event_retention_days_default
-;;
-
-let agent_core_event_retention_days () =
-  resolve_agent_core_event_retention_days (Sys.getenv_opt "MASC_AGENT_CORE_EVENTS_RETENTION_DAYS")
-;;
-
-let open_agent_core_event_store location =
-  let retention_days = agent_core_event_retention_days () in
-  Dated_jsonl.open_store ?retention_days location
-;;
 
 (* The reference keeps the location beside the handle so a failed append can
    open the same store again. *)
@@ -623,7 +604,7 @@ let deliver_pending ?store_ref (pending : pending_relay) =
         (try Dated_jsonl.append store json with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-           store_ref := location, open_agent_core_event_store location;
+           store_ref := location, Dated_jsonl.open_store location;
            raise exn)
   in
   try deliver_pending_with ~append_json ~broadcast_json:broadcast_relay_json pending with
@@ -680,7 +661,7 @@ let agent_core_event_store ~config =
       (Workspace.dated_store_cluster_root config)
       Dated_jsonl.Store.Cluster.Agent_core_events
   in
-  location, open_agent_core_event_store location
+  location, Dated_jsonl.open_store location
 ;;
 
 let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =

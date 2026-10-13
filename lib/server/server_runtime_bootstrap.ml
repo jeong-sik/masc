@@ -1050,21 +1050,6 @@ let initialize_owner_state_blocking
     | Error detail ->
       raise (Owner_initialization_failed (Runtime_config_read_failed detail))
   in
-  (match
-     Eio_unix.run_in_systhread ~label:"wire-capture-prune" (fun () ->
-       Keeper_wire_capture.prune_expired
-         ~masc_root:(Workspace.masc_root_dir (Mcp_server.workspace_config state)))
-   with
-   | Error error ->
-     Log.Server.warn
-       "startup wire-capture retention prune failed: %s"
-       (Keeper_wire_capture.prune_error_to_string error)
-   | Ok wire_capture_pruned ->
-     if wire_capture_pruned > 0
-     then
-       Log.Server.info
-         "startup wire-capture retention: pruned %d expired day-file(s)"
-         wire_capture_pruned);
   Runtime_settings.ensure_init ();
   Runtime_params.restore ~base_path;
   Log.Server.info "Runtime_params restored from %s" base_path;

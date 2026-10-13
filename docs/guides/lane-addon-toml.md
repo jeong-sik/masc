@@ -46,6 +46,23 @@ Fusion 상태 갱신 시 해당 run을 연결한 설치만 다시 관측한다. 
 정확한 Browser 대상을 요구하며, 선언을 추가한다고 새 세션이나 탭을 만들지 않는다.
 MSX 예제는 incarnation을 고정하지 않으므로 기존 머신의 load/restore를 구분해서 계속 관측한다.
 
+## 실행기 선택
+
+패키지 `lane.toml`에 `runtime = "apple_container"`를 선언하면 Apple `container`의 전용 microVM에서 실행한다. 생략하면 기존 Docker 실행을 유지한다. 이미지도 선택한 실행기의 저장소에 준비해야 한다. Docker에만 있는 이미지는 Apple 실행기가 읽을 수 없다.
+
+```toml
+runtime = "apple_container"
+# 나머지 package 필드
+[resources]
+cpus = 1
+memory_bytes = 268435456
+max_reply_bytes = 16777216
+```
+
+Apple에서는 정수 vCPU와 정확한 MiB 단위 메모리를 사용하고 `pids`를 생략한다. Docker의 PID·swap·no-new-privileges 제한과 같은 보장이라고 표시하지 않는다. 두 실행기 모두 guest 네트워크를 닫고 root filesystem을 읽기 전용으로 연결하며 capability를 제거한다. Keeper의 작업 디스크·토큰을 Addon에 연결하지 않는다.
+
+`world.state.mode = "persistent"`인 기존 설치의 runtime을 바꿀 때는 새 설치 ID를 사용한다. 서로 다른 실행기의 같은 이름 volume은 동일한 데이터가 아니다. 기존 설치의 runtime 전환을 거절하여 빈 상태로 교체되는 일을 막고, 과거 worker 정리는 저장된 원래 runtime으로 수행한다.
+
 ## 반영 시점과 화면 읽기
 
 서버 시작 시 한 번 읽고, 기존 maintenance cadence를 쓰는 독립 Pulse에서 다시 읽는다.

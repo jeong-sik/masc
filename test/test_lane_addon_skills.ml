@@ -107,7 +107,7 @@ let backend fixture : Lane.For_testing.backend = {
     Ok connection);
   image_ready = (fun ~package:_ -> Ok ());
   acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
-  recover_stop = (fun ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ());
+  recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ());
 }
 
 let dispatch fixture operation fields =

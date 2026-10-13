@@ -425,7 +425,41 @@ max_reply_bytes = 4096
   check bool "a zero cpu count is refused at load" true (Result.is_error (load "0.0"));
   check bool "check_resources agrees with the manifest" true
     (Result.is_error (Lane_addon_types.check_resources
-      {Lane_addon_types.cpus = 1e-12; memory_bytes = 1L; pids = 1; max_reply_bytes = 1})))
+      {Lane_addon_types.cpus = 1e-12; memory_bytes = 1L; pids = Some 1; max_reply_bytes = 1})))
+
+let runtime_selects_enforceable_resources () = with_directory (fun _root packages _directory ->
+  let path = Filename.concat packages "runtime-probe.toml" in
+  let load runtime cpus memory pids =
+    write path (Printf.sprintf {|id = "runtime-probe"
+revision = "fixture-1"
+title = "Runtime probe"
+runtime = %S
+image = "fixture/worker"
+command = ["worker"]
+contributions = ["observe"]
+[resources]
+cpus = %s
+memory_bytes = %s
+%s
+max_reply_bytes = 4096
+|} runtime cpus memory pids);
+    Lane_addon_manifest.load ~path in
+  let apple = match load "apple_container" "1" "67108864" "" with
+    | Ok package -> package | Error error -> fail (Lane_addon_manifest.error_to_string error) in
+  check bool "explicit microVM runtime" true (apple.runtime = Lane_addon_types.Apple_container);
+  check bool "no imaginary PID cgroup" true (apple.resources.pids = None);
+  List.iter (fun (runtime,cpus,memory,pids) ->
+    check bool "unsupported resource contract refused" true
+      (Result.is_error (load runtime cpus memory pids)))
+    ["apple_container","0.5","67108864","";
+     "apple_container","1","67108865","";
+     "apple_container","1","67108864","pids = 16";
+     "docker","1","67108864","";
+     "unknown","1","67108864",""];
+  let docker = match load "docker" "0.5" "67108864" "pids = 16" with
+    | Ok package -> package | Error error -> fail (Lane_addon_manifest.error_to_string error) in
+  check bool "Docker serialized identity remains unchanged" true
+    (Yojson.Safe.Util.member "runtime" (Lane_addon_types.package_to_json docker) = `Null))
 
 let tool_exports_are_explicit_and_revisioned () = with_directory (fun _root packages directory ->
   let manifest = install_package packages in
@@ -468,7 +502,8 @@ path = "/host"|} ])
 
 let () = run "Lane Add-on declarative composition"
   ["configuration",
-    [test_case "persistent state is explicit and revisioned" `Quick persistent_state_is_explicit_and_revisioned;
+    [test_case "runtime resources name only enforceable limits" `Quick runtime_selects_enforceable_resources;
+     test_case "persistent state is explicit and revisioned" `Quick persistent_state_is_explicit_and_revisioned;
      test_case "tool exports are explicit and revisioned" `Quick tool_exports_are_explicit_and_revisioned;
      test_case "judge source schema is enforced before worker start" `Quick judge_source_schema_is_enforced;
      test_case "assembled Fusion declarations load with explicit model boundaries" `Quick assembled_fusion_declarations;

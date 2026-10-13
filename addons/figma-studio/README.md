@@ -8,7 +8,7 @@ A companion Figma Plugin and host relay live in the `figma-mcp` repository under
 Build from the MASC repository root:
 
 ```sh
-docker build -f addons/figma-studio/Dockerfile -t masc-lane-figma-studio:0.1.0 addons
+container build -f addons/figma-studio/Dockerfile -t masc-lane-figma-studio:0.1.0 addons
 ```
 
 Copy `install.toml` to the resolved MASC config root's `lane-addons` directory,
@@ -95,3 +95,7 @@ pyright addons/figma-studio
 These exercise the real worker entrypoint with a fixture document. They do not
 establish Docker installation, real Figma edits, a connected Keeper, visual
 quality, or application behavior. See the [platform capability reference](../../docs/design/figma-platform-capabilities.md).
+
+### Apple microVM runtime
+
+This package selects `runtime = "apple_container"`: build the image into the Apple `container` store with the command above. Docker Desktop is not required. The Addon receives its own VM with one vCPU, 256 MiB RAM, no guest network, dropped capabilities, read-only package/root filesystem and a separately owned persistent `/state` volume. It does not reuse a Keeper VM or its credential mounts. Apple PID/swap/no-new-privileges limits are not claimed to match the Docker backend. A Docker-backed persistent installation must use a new installation ID when switching engines; existing state is not automatically migrated.

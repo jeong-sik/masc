@@ -46,6 +46,7 @@ type fake = {
   events : worker_event list ref;
   state_owners : (string, string option) Hashtbl.t;
   recovered_state_owners : (string, string option) Hashtbl.t;
+  recovered_runtimes : (string, Types.runtime) Hashtbl.t;
   observations : (string * Yojson.Safe.t) list ref;
   recovery_barrier : unit Eio.Promise.t option ref;
   startup_available : bool ref;
@@ -63,14 +64,14 @@ let output : Types.output = {
 }
 
 let make_backend () =
-  let state = { events = ref []; state_owners=Hashtbl.create 4; recovered_state_owners=Hashtbl.create 4; observations = ref []; recovery_barrier = ref None;
+  let state = { events = ref []; state_owners=Hashtbl.create 4; recovered_state_owners=Hashtbl.create 4; recovered_runtimes=Hashtbl.create 4; observations = ref []; recovery_barrier = ref None;
                 startup_available = ref true; startup_barrier = ref None; cleanup_available = ref true;
                 image_available = ref true } in
   let record event = state.events := event :: !(state.events) in
   let backend : Runtime.For_testing.backend = {
     start = (fun ~sw:_ ~state_owner ~instance_id ~(package : Types.package) ~binding:_ ~on_created ->
       Hashtbl.replace state.state_owners instance_id
-        (Option.map Lane_addon_worker_state.volume_name state_owner);
+        (Option.map (Lane_addon_worker_state.volume_name ~runtime:package.runtime) state_owner);
       let stopped, release_stop = Eio.Promise.create () in
       let stop_sent = ref false in
       let connection : Runtime.For_testing.connection = {
@@ -108,9 +109,10 @@ let make_backend () =
     acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
     image_ready = (fun ~package:_ ->
       if !(state.image_available) then Ok () else Error "image is not on the host");
-    recover_stop = (fun ~state_owner ~instance_id ~container_id ->
+    recover_stop = (fun ~runtime ~state_owner ~instance_id ~container_id ->
+      Hashtbl.replace state.recovered_runtimes instance_id runtime;
       Hashtbl.replace state.recovered_state_owners instance_id
-        (Option.map Lane_addon_worker_state.volume_name state_owner);
+        (Option.map (Lane_addon_worker_state.volume_name ~runtime) state_owner);
       if Option.exists (fun id -> id <> Store.digest instance_id) container_id
       then Error "persisted container does not belong to instance"
       else begin
@@ -125,20 +127,23 @@ let make_backend () =
   } in
   state, backend
 
-let package directory id =
+let package ?(runtime = Types.Docker) directory id =
   let path = Filename.concat directory (id ^ "-package.toml") in
   write path (Printf.sprintf {|id = %S
+%s
 revision = "fixture-1"
 title = "Declared observer"
 image = "fixture/observer"
 command = ["observer"]
 contributions = ["observe"]
 [resources]
-cpus = 0.5
+cpus = %s
 memory_bytes = 67108864
-pids = 16
+%s
 max_reply_bytes = 4096
-|} id);
+|} id (match runtime with Types.Docker -> "" | Apple_container -> "runtime = \"apple_container\"")
+    (match runtime with Types.Docker -> "0.5" | Apple_container -> "1")
+    (match runtime with Types.Docker -> "pids = 16" | Apple_container -> ""));
   path
 
 let declaration ?enabled ?(setting = "initial") ~id ~manifest () =
@@ -287,6 +292,50 @@ mode = "persistent"
        |> List.exists (fun row -> text "id" row = old_row));
     detach clock config new_id)
 
+let test_persistent_runtime_switch_requires_new_installation () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let original = In_channel.with_open_bin manifest In_channel.input_all in
+    write manifest (original ^ "\n[world.state]\nmode = \"persistent\"\n");
+    let path = Filename.concat directory "observer.toml" in
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let old_id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config old_id;
+    write manifest {|id = "ready"
+revision = "fixture-2"
+title = "Declared observer"
+runtime = "apple_container"
+image = "fixture/observer"
+command = ["observer"]
+contributions = ["observe"]
+[world.state]
+mode = "persistent"
+[resources]
+cpus = 1
+memory_bytes = 67108864
+max_reply_bytes = 4096
+|};
+    let refused = reconcile config directory in
+    check bool "runtime switch is visible as configuration issue" true
+      (values "issues" refused <> []);
+    check (list string) "old owner remains running" [old_id] (starts state);
+    check (list string) "refused migration does not stop old owner" [] (stops state);
+    let fresh = Filename.concat directory "fresh.toml" in
+    write fresh (declaration ~id:"fresh" ~manifest ());
+    ignore (reconcile config directory);
+    let fresh_id = declared_instance config "fresh" |> text "instance_id" in
+    await_ready clock config fresh_id;
+    check bool "new installation owns a different state volume" true
+      (Hashtbl.find state.state_owners old_id <> Hashtbl.find state.state_owners fresh_id);
+    detach clock config old_id;
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    check int "detached history still protects the original state" 2 (List.length (starts state));
+    Sys.remove path;
+    detach clock config fresh_id)
+
 let test_invalid_inventory_preserves_existing_activity () =
   with_fixture (fun env _ config directory packages state ->
     let clock = Eio.Stdenv.clock env in
@@ -392,10 +441,10 @@ let test_duplicate_toml_keys_preserve_applied_workers () =
     detach clock config id;
     detach clock config independent)
 
-let test_restart_recovers_exact_owner_before_replacement () =
+let test_restart_recovers_exact_owner_before_replacement ?(runtime = Types.Docker) () =
   with_fixture (fun env sw config directory packages state ->
     let clock = Eio.Stdenv.clock env in
-    let manifest = package packages "ready" in
+    let manifest = package ~runtime packages "ready" in
     let manifest_bytes = In_channel.with_open_bin manifest In_channel.input_all in
     write manifest (manifest_bytes ^ {|
 [world.state]
@@ -444,6 +493,8 @@ mode = "persistent"
       original_state (Hashtbl.find state.state_owners replacement);
     check (option string) "historical cleanup restores the original state owner"
       original_state (Hashtbl.find state.recovered_state_owners old_id);
+    check bool "historical cleanup uses its retained runtime" true
+      (Hashtbl.find state.recovered_runtimes old_id = runtime);
     let relevant = List.rev !(state.events) |> List.filter (function
       | Recovery_completed _ -> true | Started id -> id = replacement | _ -> false) in
     check bool "recovery confirmation precedes replacement acquisition" true
@@ -1012,6 +1063,8 @@ let test_historical_publication_is_not_completion ~never_started ~cold_recovery 
         check string "publication does not alter desired bytes" off (In_channel.with_open_bin path In_channel.input_all))))
 
 let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension", [
+  test_case "persistent runtime switch preserves old state and requires new installation" `Quick
+    test_persistent_runtime_switch_requires_new_installation;
   test_case "created container waits for accepted startup" `Quick test_created_container_waits_for_start_acceptance;
   test_case "historical replacement commit remains pending and retries publication only" `Quick
     (test_historical_publication_is_not_completion ~never_started:false ~cold_recovery:false);
@@ -1050,7 +1103,9 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
   test_case "deleted declaration retains queryable history" `Quick
     test_deleted_declaration_retains_history;
   test_case "restart recovers persisted exact owner before replacement" `Quick
-    test_restart_recovers_exact_owner_before_replacement;
+    (test_restart_recovers_exact_owner_before_replacement ~runtime:Types.Docker);
+  test_case "microVM restart recovers using the retained engine and state owner" `Quick
+    (test_restart_recovers_exact_owner_before_replacement ~runtime:Types.Apple_container);
   test_case "held observation preserves primary and other declaration progress" `Quick
     test_held_observer_does_not_block_other_declarations;
 ]]

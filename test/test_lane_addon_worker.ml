@@ -189,6 +189,71 @@ let write path value =
   Fun.protect ~finally:(fun () -> close_out channel)
     (fun () -> output_string channel value)
 
+let apple_fixture = {|#!/usr/bin/env python3
+import hashlib, json, os, pathlib, signal, sys
+root = pathlib.Path(__file__).parent
+argv = sys.argv[1:]
+digest = 'sha256:' + 'a' * 64
+def emit(value): print(json.dumps(value), flush=True)
+def value(flag): return argv[argv.index(flag) + 1]
+if (root / 'daemon-unavailable').exists(): raise SystemExit(7)
+if argv[:2] == ['image', 'inspect']:
+    assert argv == ['image', 'inspect', 'fixture/image'], argv
+    emit([{'configuration': {'descriptor': {'digest': digest}}}])
+elif argv[:1] == ['volume']:
+    action = argv[1]
+    if action == 'list':
+        emit([json.loads(p.read_text()) for p in root.glob('*.volume')])
+    elif action == 'create':
+        name = argv[-1]
+        path = root / (name + '.volume')
+        if not path.exists():
+            label = value('--label').split('=', 1)
+            path.write_text(json.dumps({'id': name, 'configuration': {'name': name, 'labels': dict([label])}}))
+        print(name)
+    elif action == 'inspect': emit([json.loads((root / (argv[-1] + '.volume')).read_text())])
+    else: raise SystemExit(2)
+elif argv[:1] == ['create']:
+    assert '--pull' not in argv and '--pids-limit' not in argv and '--security-opt' not in argv, argv
+    assert '--no-dns' in argv and value('--network') == 'none', argv
+    assert value('--cap-drop') == 'ALL' and '--read-only' in argv, argv
+    assert argv[argv.index('--') + 1] == 'fixture/image', argv
+    cid = value('--name')
+    assert len(cid) == 64, cid
+    mode = argv[-1]
+    config = {'id': cid, 'Id': cid, 'mode': mode, 'argv': argv,
+        'configuration': {'id': cid, 'labels': dict([value('--label').split('=', 1)]),
+            'resources': {'cpus': int(value('--cpus')), 'memoryInBytes': int(value('--memory')[:-1]) * 1048576},
+            'image': {'descriptor': {'digest': digest}}, 'networks': [], 'readOnly': True,
+            'capAdd': [], 'capDrop': ['ALL'], 'publishedPorts': [], 'publishedSockets': []}}
+    if mode == 'unlimited': config['configuration']['resources']['cpus'] = 0
+    if mode == 'wrong_image': config['configuration']['image']['descriptor']['digest'] = 'sha256:' + 'b' * 64
+    try:
+        with (root / (cid + '.json')).open('x') as output: json.dump(config, output)
+    except FileExistsError: raise SystemExit(1)
+    print('lost receipt' if mode == 'lost_create_response' else cid, flush=True)
+elif argv[:1] == ['inspect']:
+    emit([json.loads((root / (argv[-1] + '.json')).read_text())])
+elif argv[:1] == ['list']:
+    if (root / 'malformed-list').exists(): emit({})
+    else: emit([json.loads(p.read_text()) for p in root.glob('*.json') if 'configuration' in json.loads(p.read_text())])
+elif argv[:1] == ['delete']:
+    assert argv[1] == '--force', argv
+    cid = argv[-1]
+    if (root / (cid + '.refuse-remove')).exists(): raise SystemExit(7)
+    pidfile = root / (cid + '.pid')
+    if pidfile.exists():
+        try: os.kill(int(pidfile.read_text()), signal.SIGKILL)
+        except ProcessLookupError: pass
+        pidfile.unlink()
+    path = root / (cid + '.json')
+    if path.exists(): path.unlink()
+    print(cid)
+elif argv[:1] == ['start']:
+    os.execv(str(root / 'docker-fixture'), ['docker-fixture', 'container'] + argv)
+else: raise SystemExit(2)
+|}
+
 let rec remove_tree path =
   if Sys.is_directory path then begin
     Array.iter (fun entry -> remove_tree (Filename.concat path entry)) (Sys.readdir path);
@@ -209,12 +274,12 @@ let with_fixture f =
 
 let package directory mode : Types.package = {
   id = "worker-test"; revision = "fixture-1"; title = "Worker test";
-  contributions = [ Types.Observe ]; image = "fixture/image";
+  contributions = [ Types.Observe ]; runtime = Types.Docker; image = "fixture/image";
   command = [ "observer"; mode ]; directory; skills_directory = None; action_tool = None; state_storage=Types.Ephemeral;tool_invocation=Types.Direct; exported_tools = []; outputs = [];
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;refresh_policy=Types.Every_hint;
   model_access=Types.Model_disabled;
   resources = { cpus = 0.5; memory_bytes = 67_108_864L;
-                pids = 16; max_reply_bytes = 4096 };
+                pids = Some 16; max_reply_bytes = 4096 };
 }
 
 let unwrap = function Ok value -> value | Error error -> fail (Worker.error_to_string error)
@@ -227,6 +292,103 @@ let start ?state_owner ?(instance_id = Random_id.uuid_v7 ()) env sw dir docker m
     ~package:{ (package dir mode) with state_storage =
       (match state_owner with None -> Types.Ephemeral | Some _ -> Types.Persistent) }
     ?state_owner ~docker_command:docker ()
+
+let with_apple_fixture f = with_fixture (fun env sw dir _ ->
+  let command = Filename.concat dir "container-fixture" in
+  write command apple_fixture;
+  Unix.chmod command 0o700;
+  f env sw dir command)
+
+let start_apple ?state_owner ?(instance_id = Random_id.uuid_v7 ()) env sw dir command mode =
+  let base = package dir mode in
+  let package = { base with runtime = Types.Apple_container;
+    state_storage = (match state_owner with None -> Types.Ephemeral | Some _ -> Types.Persistent);
+    resources = {base.resources with cpus = 1.; pids = None} } in
+  Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id ~package ?state_owner
+    ~container_command:command ()
+
+let test_apple_state_has_one_writer_and_survives_detach () =
+  with_apple_fixture (fun env sw dir command ->
+    let module State = Masc.Lane_addon_worker_state in
+    let runtime = Types.Apple_container in
+    let owner = match State.create_owner ~workspace_root:dir ~installation_id:"apple-state"
+        ~package_id:"worker-test" with Ok value -> value | Error message -> fail message in
+    check int "Apple writer ID fits the engine name contract" 64
+      (String.length (State.container_name ~runtime owner));
+    let first = unwrap (start_apple ~state_owner:owner ~instance_id:"first" env sw dir command "good") in
+    let volume = Filename.concat dir (State.volume_name ~runtime owner ^ ".volume") in
+    check bool "state volume exists" true (Sys.file_exists volume);
+    check bool "another incarnation cannot take the active writer slot" true
+      (Result.is_error (start_apple ~state_owner:owner ~instance_id:"second" env sw dir command "good"));
+    ignore (unwrap (observe first "good"));
+    unwrap (Worker.stop first);
+    check bool "detach retains named Apple volume" true (Sys.file_exists volume);
+    let next = unwrap (start_apple ~state_owner:owner ~instance_id:"replacement" env sw dir command "good") in
+    unwrap (Worker.recover_stop ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+      ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"replacement" ~container_id:None
+      ~runtime ~state_owner:owner ~container_command:command ());
+    check bool "receiptless recovery removes only the writer" false
+      (Sys.file_exists (Filename.concat dir (Worker.container_id next ^ ".json")));
+    check bool "recovery retains the volume" true (Sys.file_exists volume))
+
+let test_apple_control_refuses_unknown_state_and_recovers_exact_owner () =
+  with_apple_fixture (fun env sw dir command ->
+    let first = unwrap (start_apple ~instance_id:"apple-owner" env sw dir command "good") in
+    let recover instance_id = Worker.recover_stop ~clock:(Eio.Stdenv.clock env)
+      ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id
+      ~container_id:(Some (Worker.container_id first)) ~runtime:Types.Apple_container
+      ~container_command:command () in
+    check bool "foreign owner cannot delete VM" true (Result.is_error (recover "foreign"));
+    write (Filename.concat dir "malformed-list") "unknown";
+    check bool "malformed enumeration is not absence" true (Result.is_error (recover "apple-owner"));
+    Sys.remove (Filename.concat dir "malformed-list");
+    write (Filename.concat dir "daemon-unavailable") "offline";
+    check bool "failed enumeration is not absence" true (Result.is_error (recover "apple-owner"));
+    Sys.remove (Filename.concat dir "daemon-unavailable");
+    ignore (unwrap (observe first "good"));
+    unwrap (recover "apple-owner");
+    unwrap (recover "apple-owner"))
+
+let test_apple_stale_handle_preserves_replacement () =
+  with_apple_fixture (fun env sw dir command ->
+    let module State = Masc.Lane_addon_worker_state in
+    let owner = match State.create_owner ~workspace_root:dir ~installation_id:"reused-name"
+        ~package_id:"worker-test" with Ok value -> value | Error message -> fail message in
+    let old = unwrap (start_apple ~state_owner:owner ~instance_id:"old" env sw dir command "good") in
+    ignore (Eio.Process.parse_out (Eio.Stdenv.process_mgr env) Eio.Buf_read.take_all
+      [command; "delete"; "--force"; Worker.container_id old]);
+    let replacement = unwrap (start_apple ~state_owner:owner ~instance_id:"new" env sw dir command "good") in
+    check string "Apple reuses the persistent writer name" (Worker.container_id old)
+      (Worker.container_id replacement);
+    check bool "stale live handle cannot delete replacement owner" true
+      (Result.is_error (Worker.stop old));
+    ignore (unwrap (observe replacement "good"));
+    unwrap (Worker.stop replacement);
+    unwrap (Worker.stop old))
+
+let test_apple_create_receipt_and_verified_resources () =
+  with_apple_fixture (fun env sw dir command ->
+    let other = unwrap (start_apple env sw dir command "good") in
+    check bool "wrong resources reject before MCP start" true
+      (Result.is_error (start_apple env sw dir command "unlimited"));
+    check bool "changed image descriptor rejects before MCP start" true
+      (Result.is_error (start_apple env sw dir command "wrong_image"));
+    check bool "lost create receipt is recovered by owned name" true
+      (Result.is_error (start_apple ~instance_id:"lost-apple-create" env sw dir command "lost_create_response"));
+    check int "only unrelated VM remains" 1
+      (Array.fold_left (fun count name -> if Filename.check_suffix name ".json" then count + 1 else count)
+        0 (Sys.readdir dir));
+    ignore (unwrap (observe other "good"));
+    write (Filename.concat dir "daemon-unavailable") "offline";
+    let base = package dir "good" in
+    (match Worker.inspect_image ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+       ~mgr:(Eio.Stdenv.process_mgr env) ~package:{base with runtime=Types.Apple_container}
+       ~container_command:command () with
+     | Error (Worker.Engine_failed {runtime=Types.Apple_container;_}) -> ()
+     | _ -> fail "Apple image failure lost its runtime identity");
+    Sys.remove (Filename.concat dir "daemon-unavailable");
+    unwrap (Worker.stop other))
 
 let await_marker clock file =
   let rec wait () =
@@ -1793,6 +1955,10 @@ let test_caller_context_is_a_separate_envelope () =
     (Result.is_error (Types.validate_exported_tools ~action_tool:None [Context.tool_name]))
 
 let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "Apple state has one writer and survives detach" `Quick test_apple_state_has_one_writer_and_survives_detach;
+  test_case "Apple recovery requires exact owner and known enumeration" `Quick test_apple_control_refuses_unknown_state_and_recovers_exact_owner;
+  test_case "Apple stale handle preserves replacement incarnation" `Quick test_apple_stale_handle_preserves_replacement;
+  test_case "Apple create receipt and resources are verified" `Quick test_apple_create_receipt_and_verified_resources;
   test_case "exported tools follow worker lifetime" `Quick test_exported_tools_follow_worker_lifetime;
   test_case "canonical missing under external parent refuses public read" `Quick
     (test_canonical_parent_is_not_followed ~directory:false);

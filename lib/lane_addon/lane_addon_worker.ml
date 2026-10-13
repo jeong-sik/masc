@@ -1,14 +1,16 @@
 open Lane_addon_types
+module Engine = Lane_addon_engine
 
 type error =
   | Invalid_package of string
   | Docker_failed of { operation : string; detail : string }
+  | Engine_failed of { runtime : runtime; operation : string; detail : string }
   | Protocol_failed of string
   | Host_refusal of Lane_addon_call_context.host_refusal
   | Invalid_observation of string
   | Stopped
 
-type mount = { source : string; destination : string }
+type mount = Engine.mount = { source : string; destination : string }
 
 type t = {
   id : string;
@@ -31,6 +33,8 @@ let error_to_string = function
   | Invalid_package detail -> "invalid Add-on package: " ^ detail
   | Docker_failed { operation; detail } ->
       Printf.sprintf "Add-on Docker %s failed: %s" operation detail
+  | Engine_failed { runtime; operation; detail } ->
+      Printf.sprintf "Add-on %s %s failed: %s" (runtime_to_string runtime) operation detail
   | Host_refusal (Lane_addon_call_context.Rejected detail | Unavailable detail | Activity_disabled detail | Activity_unobserved detail) -> detail
   | Protocol_failed detail -> "Add-on MCP failure: " ^ detail
   | Invalid_observation detail -> "invalid Add-on observation: " ^ detail
@@ -41,21 +45,21 @@ let container_id t = t.id
 let container_name t = t.name
 let action_schema t = t.action_schema
 let exported_tools t = if t.stopping then [] else t.exported_tools
-let owned_name instance_id =
-  "masc-lane-" ^ Digestif.SHA256.(to_hex (digest_string instance_id))
-let valid_container_id id =
-  String.length id = 64 && String.for_all (function
-    | '0' .. '9' | 'a' .. 'f' -> true | _ -> false) id
+let engine_error runtime ~operation detail = match runtime with
+  | Docker -> Docker_failed { operation; detail }
+  | Apple_container -> Engine_failed { runtime; operation; detail }
+let command_for runtime ~docker_command ~container_command = match runtime with
+  | Docker -> docker_command | Apple_container -> container_command
 
 exception Control_reply_too_large
 
-(* Docker control output is host-run CLI output, not a package reply, so the
+(* Engine control output is host-run CLI output, not a package reply, so the
    manifest's reply bound does not apply. It is bounded like any other
    captured subprocess stream, because an image can add large labels to an
    inspect result. Package stdout goes through the MCP transport's own bound. *)
 let control_output_max_bytes = Common.max_process_capture_head_bytes
 
-(* This reader bounds both Docker control streams before retaining their
+(* This reader bounds both engine control streams before retaining their
    contents. *)
 let read_control flow =
   let max_bytes = control_output_max_bytes in
@@ -72,14 +76,15 @@ let read_control flow =
   in
   loop ()
 
-let run_control ~clock ~timeout_sec ~mgr ~docker_command ~operation args =
+let run_control ~clock ~timeout_sec ~mgr ~runtime ~command ~operation args =
+  let error detail = Error (engine_error runtime ~operation detail) in
   let run () =
     try Eio.Switch.run (fun sw ->
       let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
       let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
       let child = Eio.Process.spawn ~sw mgr
           ~stdin:(Eio.Flow.string_source "")
-          ~stdout:stdout_w ~stderr:stderr_w (docker_command :: args) in
+          ~stdout:stdout_w ~stderr:stderr_w (command :: args) in
       Eio.Flow.close stdout_w;
       Eio.Flow.close stderr_w;
       let stdout, stderr = Eio.Fiber.pair
@@ -88,45 +93,33 @@ let run_control ~clock ~timeout_sec ~mgr ~docker_command ~operation args =
       match Eio.Process.await child with
       | `Exited 0 -> Ok stdout
       | `Exited code ->
-          Error (Docker_failed { operation;
-            detail = Printf.sprintf "exit %d: %s" code (String.trim stderr) })
+          error (Printf.sprintf "exit %d: %s" code (String.trim stderr))
       | `Signaled signal ->
-          Error (Docker_failed { operation;
-            detail = Printf.sprintf "signal %d: %s" signal (String.trim stderr) }))
+          error (Printf.sprintf "signal %d: %s" signal (String.trim stderr)))
     with
     | Control_reply_too_large ->
-        Error (Docker_failed { operation; detail = "control response exceeds byte limit" })
+        error "control response exceeds byte limit"
     | (Eio.Io _ | Unix.Unix_error _ | Sys_error _) as exn ->
-        Error (Docker_failed { operation; detail = Printexc.to_string exn })
+        error (Printexc.to_string exn)
   in
   match Eio.Time.with_timeout clock timeout_sec (fun () -> Ok (run ())) with
   | Ok result -> result
   | Error `Timeout ->
-      Error (Docker_failed { operation;
-        detail = Printf.sprintf "timed out after %.3g seconds" timeout_sec })
+      error (Printf.sprintf "timed out after %.3g seconds" timeout_sec)
 
 let inspect_image ~clock ~control_timeout_sec ~mgr ~(package : package)
-    ?(docker_command="docker") () =
+    ?(docker_command="docker") ?(container_command="container") () =
   if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
     Error (Invalid_package "control_timeout_sec must be finite and positive")
   else
-  let* raw = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command
-      ~operation:"image inspect" ["image";"inspect";"--format";"{{.Id}}";package.image] in
-  let digest = String.trim raw in
-  if digest="" then Error (Docker_failed {operation="image inspect";detail="empty image identity"})
-  else Ok digest
-
-let mount_argument ({ source; destination } : mount) =
-  if Filename.is_relative source || Filename.is_relative destination then
-    Error (Invalid_package "mount source and destination must be absolute")
-  else if String.contains source ',' || String.contains destination ',' then
-    Error (Invalid_package "Docker mount paths cannot contain a comma")
-  else if String.contains source '\000' || String.contains destination '\000' then
-    Error (Invalid_package "mount paths cannot contain NUL")
-  else Ok (Printf.sprintf "type=bind,src=%s,dst=%s,readonly" source destination)
+  let runtime = package.runtime in
+  let command = command_for runtime ~docker_command ~container_command in
+  let* raw = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command
+      ~operation:"image inspect" (Engine.image_arguments runtime package.image) in
+  Engine.image_digest runtime raw |> Result.map_error (engine_error runtime ~operation:"image inspect")
 
 let validate_package (package : package) =
-  match Lane_addon_types.check_resources package.resources with
+  match Lane_addon_types.check_resources ~runtime:package.runtime package.resources with
   | Error detail -> Error (Invalid_package detail)
   | Ok () ->
   if String.trim package.image = "" || package.command = [] then
@@ -135,115 +128,62 @@ let validate_package (package : package) =
     Error (Invalid_package "package directory must be absolute")
   else Ok ()
 
-let int64_json = function
-  | `Int value -> Some (Int64.of_int value)
-  | `Intlit value -> Int64.of_string_opt value
-  | _ -> None
+let verify_absent ~runtime ~run id =
+  (* Only a successful enumeration can establish absence. *)
+  let* raw = run ~operation:"verify removal" (Engine.list_arguments runtime (Engine.Id id)) in
+  let* visible = Engine.listed_id runtime (Engine.Id id) raw
+    |> Result.map_error (engine_error runtime ~operation:"verify removal") in
+  match visible with
+  | None -> Ok ()
+  | Some _ -> Error (engine_error runtime ~operation:"verify removal"
+      ("container remains visible after removal: " ^ id))
 
-let verify_container ~name ~resources raw =
-  let bad detail = Error (Docker_failed { operation = "inspect"; detail }) in
-  try
-    match Yojson.Safe.from_string raw with
-    | `List [ `Assoc fields ] ->
-        (match List.assoc_opt "Id" fields, List.assoc_opt "Name" fields,
-               List.assoc_opt "HostConfig" fields with
-         | Some (`String id), Some (`String actual_name), Some (`Assoc host)
-           when String.length id = 64 && String.equal actual_name ("/" ^ name) ->
-             let expected_cpus = Int64.of_float
-                 (Float.round (resources.cpus *. 1_000_000_000.)) in
-             let field key = Option.bind (List.assoc_opt key host) int64_json in
-             if field "NanoCpus" <> Some expected_cpus
-                || field "Memory" <> Some resources.memory_bytes
-                || field "MemorySwap" <> Some resources.memory_bytes
-                || field "PidsLimit" <> Some (Int64.of_int resources.pids)
-             then bad "Docker did not apply requested CPU, memory, swap and PID limits"
-             else Ok id
-         | _ -> bad "container identity or resource settings are absent")
-    | _ -> bad "expected one Docker container inspect result"
-  with Yojson.Json_error detail -> bad detail
+let find_named_container ~runtime ~run name =
+  let* raw = run ~operation:"resolve owned container" (Engine.list_arguments runtime (Engine.Name name)) in
+  Engine.listed_id runtime (Engine.Name name) raw
+  |> Result.map_error (engine_error runtime ~operation:"resolve owned container")
 
-let verify_absent ~run id =
-  (* A successful exact-ID list query distinguishes absence from an
-     unreachable Docker daemon; an inspect error alone cannot do that. *)
-  let* raw = run ~operation:"verify removal"
-      [ "container"; "ls"; "--all"; "--no-trunc";
-        "--filter"; "id=" ^ id; "--format"; "{{json .ID}}" ] in
-  if String.trim raw = "" then Ok ()
-  else Error (Docker_failed { operation = "verify removal";
-    detail = "container remains visible after removal: " ^ id })
-
-let find_named_container ~run name =
-  let* raw = run ~operation:"resolve owned container"
-      [ "container"; "ls"; "--all"; "--no-trunc";
-        "--filter"; "name=^/" ^ name ^ "$"; "--format"; "{{json .ID}}" ] in
-  if String.trim raw = "" then Ok None
-  else
-    try match Yojson.Safe.from_string raw with
-      | `String id when valid_container_id id -> Ok (Some id)
-      | _ -> Error (Docker_failed { operation = "resolve owned container";
-          detail = "unexpected container identity" })
-    with Yojson.Json_error detail ->
-      Error (Docker_failed { operation = "resolve owned container"; detail })
-
-let remove_container ~run id =
-  (* rm --force is the explicit detach operation, not a Keeper timeout. It
-     stops a non-cooperative package and removes only its exact container. *)
-  let removal = run ~operation:"remove" [ "container"; "rm"; "--force"; "--volumes"; id ] in
-  match verify_absent ~run id with
+let remove_container ~runtime ~run id =
+  (* Exact deletion does not delete a persistent named state volume. *)
+  let removal = run ~operation:"remove" (Engine.remove_arguments runtime id) in
+  match verify_absent ~runtime ~run id with
   | Ok () -> Ok ()
   | Error verify_error ->
       (match removal with Error error -> Error error | Ok _ -> Error verify_error)
 
-let inspect_owned_container ~run ~instance_id ~name id =
-  let* raw = run ~operation:"recover inspect" [ "container"; "inspect"; id ] in
-  let refusal () = Error (Docker_failed { operation = "recover ownership";
-    detail = "container identity and masc.lane.instance label must match the persisted binding" }) in
-  try match Yojson.Safe.from_string raw with
-    | `List [ `Assoc fields ] ->
-        let name_matches = match name with
-          | None -> true
-          | Some expected -> List.assoc_opt "Name" fields = Some (`String ("/" ^ expected)) in
-        (match List.assoc_opt "Id" fields, List.assoc_opt "Config" fields with
-         | Some (`String actual_id), Some (`Assoc config)
-           when String.equal id actual_id && name_matches ->
-             (match List.assoc_opt "Labels" config with
-              | Some (`Assoc labels) ->
-                  (match List.assoc_opt "masc.lane.instance" labels with
-                   | Some (`String owner) when String.equal owner instance_id -> Ok ()
-                   | _ -> refusal ())
-              | _ -> refusal ())
-         | _ -> refusal ())
-    | _ -> refusal ()
-  with Yojson.Json_error detail ->
-    Error (Docker_failed { operation = "recover ownership"; detail })
+let inspect_owned_container ~runtime ~run ~instance_id ~name id =
+  let* raw = run ~operation:"recover inspect" (Engine.inspect_arguments runtime id) in
+  Engine.verify_owner runtime ~instance_id ~name ~id raw
+  |> Result.map_error (engine_error runtime ~operation:"recover ownership")
 
-let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id ?state_owner
-    ?(docker_command = "docker") () =
+let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id ?(runtime = Docker) ?state_owner
+    ?(docker_command = "docker") ?(container_command = "container") () =
   if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
     Error (Invalid_package "control_timeout_sec must be finite and positive")
   else if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
-  else if Option.exists (fun id -> not (valid_container_id id)) container_id then
-    Error (Docker_failed { operation = "recover ownership"; detail = "invalid container ID" })
+  else if Option.exists (fun id -> not (Engine.valid_id id)) container_id then
+    Error (engine_error runtime ~operation:"recover ownership" "invalid container ID")
   else
-    let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command in
+    let command = command_for runtime ~docker_command ~container_command in
+    let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command in
     let* found, name = match container_id with
       | None ->
           let name = match state_owner with
-            | None -> owned_name instance_id
-            | Some owner -> Lane_addon_worker_state.container_name owner in
-          let* id = find_named_container ~run name in
+            | None -> Engine.owned_name runtime instance_id
+            | Some owner -> Lane_addon_worker_state.container_name ~runtime owner in
+          let* id = find_named_container ~runtime ~run name in
           Ok (id, Some name)
       | Some id ->
-          let* visible = run ~operation:"recover existence"
-              [ "container"; "ls"; "--all"; "--no-trunc";
-                "--filter"; "id=" ^ id; "--format"; "{{json .ID}}" ] in
-          Ok ((if String.trim visible = "" then None else Some id), None)
+          let* raw = run ~operation:"recover existence" (Engine.list_arguments runtime (Engine.Id id)) in
+          let* visible = Engine.listed_id runtime (Engine.Id id) raw
+            |> Result.map_error (engine_error runtime ~operation:"recover existence") in
+          Ok (visible, None)
     in
     match found with
     | None -> Ok ()
     | Some id ->
-        let* () = inspect_owned_container ~run ~instance_id ~name id in
-        remove_container ~run id
+        let* () = inspect_owned_container ~runtime ~run ~instance_id ~name id in
+        remove_container ~runtime ~run id
 
 let stop t =
   (* Never take the observation mutex: an unresponsive observation is a
@@ -258,7 +198,7 @@ let stop t =
     Ok ()
 
 let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package) ?state_owner ?(mounts = [])
-    ?(docker_command = "docker") ?(on_created = fun _ -> ()) ?artifact_store ?sampling_handler () =
+    ?(docker_command = "docker") ?(container_command = "container") ?(on_created = fun _ -> ()) ?artifact_store ?sampling_handler () =
   let* () = if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
     else Ok () in
   let* () = if Float.is_finite control_timeout_sec && control_timeout_sec > 0. then Ok ()
@@ -281,29 +221,41 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
   let* () = match package.action_tool, artifact_store with
     | Some _, None -> Error (Invalid_package "action worker requires its owned artifact store")
     | _ -> Ok () in
-  let* package_mount = mount_argument
-      { source = package.directory; destination = "/addon" } in
+  let runtime = package.runtime in
+  let command = command_for runtime ~docker_command ~container_command in
+  let* package_mount = Engine.mount_argument runtime
+      { source = package.directory; destination = "/addon" }
+      |> Result.map_error (fun detail -> Invalid_package detail) in
   let* mounted = List.fold_left (fun acc mount ->
       let* paths = acc in
-      let* path = mount_argument mount in
+      let* path = Engine.mount_argument runtime mount
+        |> Result.map_error (fun detail -> Invalid_package detail) in
       Ok (paths @ [ "--mount"; path ])) (Ok []) mounts in
   (* The binding is persisted before create. Its instance ID therefore also
      identifies a container when the process dies before receiving create's
      stdout or persisting [on_created]. Domain labels are checked before any
      recovered container is removed. *)
   let name = match state_owner with
-            | None -> owned_name instance_id
-            | Some owner -> Lane_addon_worker_state.container_name owner in
-  let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command in
+            | None -> Engine.owned_name runtime instance_id
+            | Some owner -> Lane_addon_worker_state.container_name ~runtime owner in
+  let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command in
+  (* Apple resolves local tags during create. Record the descriptor first and
+     verify the created configuration before starting any package process. *)
+  let* image_digest = match runtime with
+    | Docker -> Ok None
+    | Apple_container ->
+        let* raw = run ~operation:"image inspect" (Engine.image_arguments runtime package.image) in
+        Engine.image_digest runtime raw |> Result.map Option.some
+        |> Result.map_error (engine_error runtime ~operation:"image inspect") in
   let* state_mount = match state_owner with
     | None -> Ok []
     | Some owner when not (Lane_addon_worker_state.belongs_to owner ~package_id:package.id) ->
         Error (Invalid_package "persistent state owner names a different package")
     | Some owner ->
-        Lane_addon_worker_state.ensure owner
+        Lane_addon_worker_state.ensure ~runtime owner
           ~run:(fun ~operation args -> run ~operation args |> Result.map_error error_to_string)
         |> Result.map (fun mount -> ["--mount"; mount])
-        |> Result.map_error (fun detail -> Docker_failed {operation="persistent state";detail})
+        |> Result.map_error (engine_error runtime ~operation:"persistent state")
   in
   let identity = ref None in
   let cleanup_finished = ref false in
@@ -314,12 +266,19 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
           (* create can take effect before its stdout is received. Verify the
              binding's deterministic name and label instead of removing an
              unverified name collision. *)
-          let* () = recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id:None ?state_owner
-              ~docker_command () in
+          let* () = recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id:None ~runtime ?state_owner
+              ~docker_command ~container_command () in
           cleanup_finished := true;
           Ok ()
       | Some id ->
-          let* () = remove_container ~run id in
+          let* () = match runtime with
+            | Docker -> remove_container ~runtime ~run id
+            | Apple_container ->
+                (* Apple IDs are reusable names. An old handle cannot delete
+                   the new incarnation now occupying its persistent slot. *)
+                recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id
+                  ~container_id:(Some id) ~runtime ?state_owner
+                  ~docker_command ~container_command () in
           cleanup_finished := true;
           Ok ()
   in
@@ -332,26 +291,17 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
     match cleanup () with
     | Ok () -> Error error
     | Error cleanup_error ->
-        Error (Docker_failed { operation = "failed attach cleanup";
-          detail = error_to_string error ^ "; " ^ error_to_string cleanup_error })
+        Error (engine_error runtime ~operation:"failed attach cleanup"
+          (error_to_string error ^ "; " ^ error_to_string cleanup_error))
   in
-  let cpus = Printf.sprintf "%.9f" package.resources.cpus in
-  let memory = Int64.to_string package.resources.memory_bytes in
   let* created = match run ~operation:"create"
-      ([ "container"; "create"; "--pull"; "never";
-         "--name"; name; "--label"; "masc.lane.instance=" ^ instance_id;
-         "--cpus"; cpus; "--memory"; memory; "--memory-swap"; memory;
-         "--pids-limit"; string_of_int package.resources.pids;
-         "--network"; "none"; "--read-only"; "--cap-drop"; "ALL";
-         "--security-opt"; "no-new-privileges"; "--log-driver"; "none";
-         "--interactive"; "--workdir"; "/addon"; "--mount"; package_mount ]
-       @ mounted @ state_mount @ [ "--"; package.image ] @ package.command) with
+      (Engine.create_arguments package ~name ~instance_id ~image:package.image ~package_mount ~mounts:mounted ~state_mounts:state_mount) with
     | Ok value -> Ok value
     | Error error -> fail_start error
   in
   let id = String.trim created in
-  if not (valid_container_id id) then
-    fail_start (Docker_failed { operation = "create"; detail = "invalid container ID" })
+  if not (Engine.valid_id id) || (runtime = Apple_container && not (String.equal id name)) then
+    fail_start (engine_error runtime ~operation:"create" "invalid container ID")
   else begin
     identity := Some id;
     let stderr_source = ref None in
@@ -367,10 +317,11 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
     let result = try
       on_created worker;
       let* () = if worker.stopping then Error Stopped else Ok () in
-      let* inspected = run ~operation:"inspect" [ "container"; "inspect"; id ] in
-      let* inspected_id = verify_container ~name ~resources:package.resources inspected in
+      let* inspected = run ~operation:"inspect" (Engine.inspect_arguments runtime id) in
+      let* inspected_id = Engine.verify_container runtime ~name ~resources:package.resources ~image_digest inspected
+        |> Result.map_error (engine_error runtime ~operation:"inspect") in
       if not (String.equal inspected_id id) then
-        Error (Docker_failed { operation = "inspect"; detail = "container ID changed" })
+        Error (engine_error runtime ~operation:"inspect" "container ID changed")
       else
         (* Package diagnostics have an OS-bounded pipe. They cannot flood the
            host log or allocate an unbounded buffer. A noisy package may block
@@ -378,8 +329,8 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
         let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
         stderr_source := Some stderr_r;
         let protocol_error error = Protocol_failed (Agent_core.Error.to_string error) in
-        let* client = Agent_core.Mcp.connect ~sw ~mgr ~command:docker_command
-            ~args:[ "container"; "start"; "--attach"; "--interactive"; id ]
+        let* client = Agent_core.Mcp.connect ~sw ~mgr ~command
+            ~args:(Engine.start_arguments runtime id)
             ~stderr:(stderr_w :> Eio.Flow.sink_ty Eio.Resource.t)
             ~max_response_bytes:package.resources.max_reply_bytes ?sampling_handler ()
           |> Result.map_error protocol_error in

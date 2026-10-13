@@ -15,23 +15,38 @@ type coverage = {
 type output = { rows : row list; coverage : coverage list }
 type output_selection = All_lanes | Selected_lanes of string list
 type output_ports = (string * output_selection) list
-type resources = { cpus : float; memory_bytes : int64; pids : int; max_reply_bytes : int }
+type runtime = Docker | Apple_container
+let runtime_to_string = function Docker -> "docker" | Apple_container -> "apple_container"
+let runtime_of_string = function
+  | "docker" -> Some Docker | "apple_container" -> Some Apple_container | _ -> None
+type resources = { cpus : float; memory_bytes : int64; pids : int option; max_reply_bytes : int }
 let nano_cpus_per_cpu = 1_000_000_000.
-let check_resources r =
+let check_resources ?(runtime = Docker) r =
   if not (Float.is_finite r.cpus) || r.cpus <= 0. then Error "cpus must be finite and positive"
-  else if r.cpus *. nano_cpus_per_cpu < 1. then
-    Error "cpus must be representable as a positive Docker NanoCpus value"
-  else if r.cpus *. nano_cpus_per_cpu >= Int64.to_float Int64.max_int then
-    Error "cpus exceed Docker NanoCpus representation"
-  else if r.memory_bytes <= 0L || r.pids <= 0 || r.max_reply_bytes <= 0 then
-    Error "memory_bytes, pids and max_reply_bytes must be positive"
-  else Ok ()
+  else if r.memory_bytes <= 0L || r.max_reply_bytes <= 0 then
+    Error "memory_bytes and max_reply_bytes must be positive"
+  else match runtime, r.pids with
+  | Docker, Some pids when pids > 0 ->
+      if r.cpus *. nano_cpus_per_cpu < 1. then
+        Error "cpus must be representable as a positive Docker NanoCpus value"
+      else if r.cpus *. nano_cpus_per_cpu >= Int64.to_float Int64.max_int then
+        Error "cpus exceed Docker NanoCpus representation"
+      else Ok ()
+  | Docker, (None | Some _) -> Error "Docker requires a positive pids limit"
+  | Apple_container, Some _ -> Error "Apple microVM does not expose a PID cgroup limit; omit pids"
+  | Apple_container, None ->
+      if Float.floor r.cpus <> r.cpus || r.cpus >= float_of_int max_int then
+        Error "Apple microVM cpus must be a positive whole vCPU count"
+      else if Int64.rem r.memory_bytes 1_048_576L <> 0L then
+        Error "Apple microVM memory_bytes must be an exact number of MiB"
+      else Ok ()
 type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling
 type state_storage = Ephemeral | Persistent
 type tool_invocation = Direct | Host_context
 type package = {
   id : string; revision : string; title : string; contributions : contribution list;
+  runtime : runtime;
   image : string; command : string list; directory : string;
   action_tool : string option;
   state_storage : state_storage;
@@ -179,7 +194,9 @@ let output_selection_to_json = function
 let output_ports_to_json ports =
   `Assoc (List.map (fun (id, selection) -> id, output_selection_to_json selection) ports)
 let package_to_json (p : package) =
-  `Assoc ["id", string p.id; "revision", string p.revision; "title", string p.title;
+  `Assoc ((match p.runtime with Docker -> []
+      | Apple_container -> ["runtime", string (runtime_to_string p.runtime)])
+    @ ["id", string p.id; "revision", string p.revision; "title", string p.title;
     "contributions", strings (List.map (function Observe -> "observe" | Derive -> "derive" | Act -> "act") p.contributions);
     "image", string p.image; "command", strings p.command; "directory", string p.directory;
     "action_tool", optional string p.action_tool;
@@ -195,4 +212,5 @@ let package_to_json (p : package) =
       | Some path -> string (Skill_resource_path.to_string path));
     "resources", `Assoc ["cpus", `Float p.resources.cpus;
       "memory_bytes", `Intlit (Int64.to_string p.resources.memory_bytes);
-      "pids", `Int p.resources.pids; "max_reply_bytes", `Int p.resources.max_reply_bytes]]
+      "pids", optional (fun value -> `Int value) p.resources.pids;
+      "max_reply_bytes", `Int p.resources.max_reply_bytes]])

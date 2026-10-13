@@ -107,7 +107,7 @@ let make_backend ?observe_step () =
     image_ready = (fun ~package:_ -> Ok ());
     acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
-    recover_stop = (fun ~state_owner:_ ~instance_id ~container_id ->
+    recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id ~container_id ->
       match container_id with
       | Some id when id = Store.digest instance_id ->
           state.recovery := (instance_id, id) :: !(state.recovery); Ok ()

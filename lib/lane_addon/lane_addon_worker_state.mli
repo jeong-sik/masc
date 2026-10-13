@@ -5,11 +5,12 @@ type owner
 val create_owner : workspace_root:string -> installation_id:string ->
   package_id:string -> (owner, string) result
 val belongs_to : owner -> package_id:string -> bool
-val volume_name : owner -> string
-val container_name : owner -> string
+val volume_name : ?runtime:Lane_addon_types.runtime -> owner -> string
+val container_name : ?runtime:Lane_addon_types.runtime -> owner -> string
 val ensure :
+  ?runtime:Lane_addon_types.runtime ->
   run:(operation:string -> string list -> (string, string) result) ->
   owner -> (string, string) result
-(** Creates or verifies an exactly owned local Docker volume, then returns the
+(** Creates or verifies an exactly owned runtime-local volume, then returns the
     /state mount. Failed enumeration is not interpreted as absence. Callers
     must serialize active writers for a logical installation. *)

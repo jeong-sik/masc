@@ -34,6 +34,68 @@ def write_json(path, value):
     path.write_bytes(encode(value) + b"\n")
 
 
+def redact_credential(value, key):
+    """Check decoded strings, including JSON carried in content/arguments strings."""
+    if isinstance(value, str):
+        redacted = value.replace(key, "[REDACTED]")
+        try:
+            nested = json.loads(value)
+        except json.JSONDecodeError:
+            return redacted, redacted != value
+        nested, echoed = redact_credential(nested, key)
+        if echoed:
+            return encode(nested).decode("utf-8"), True
+        return redacted, redacted != value
+    if isinstance(value, list):
+        items = [redact_credential(item, key) for item in value]
+        return [item for item, _ in items], any(echoed for _, echoed in items)
+    if isinstance(value, dict):
+        result, echoed = {}, False
+        for name, item in value.items():
+            name, name_echoed = redact_credential(name, key)
+            item, item_echoed = redact_credential(item, key)
+            result[name] = item
+            echoed = echoed or name_echoed or item_echoed
+        return result, echoed
+    return value, False
+
+
+def assistant_response(response):
+    if not isinstance(response, dict):
+        raise ValueError("provider response must be an object")
+    choices = response.get("choices")
+    if not isinstance(choices, list) or len(choices) != 1:
+        raise ValueError("expected exactly one assistant choice in an array")
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        raise ValueError("assistant choice must be an object")
+    message = choice.get("message")
+    if not isinstance(message, dict) or message.get("role") != "assistant":
+        raise ValueError("expected an assistant message object")
+    if message.get("content") is not None and not isinstance(message["content"], str):
+        raise ValueError("assistant message content must be text or null")
+    calls = message.get("tool_calls")
+    if calls is None:
+        calls = []
+    if not isinstance(calls, list):
+        raise ValueError("assistant tool_calls must be an array")
+    for call in calls:
+        if not isinstance(call, dict) or call.get("type") != "function":
+            raise ValueError("expected a function tool call object")
+        if not isinstance(call.get("id"), str) or not call["id"]:
+            raise ValueError("missing artifact tool call identity")
+        function = call.get("function")
+        if not isinstance(function, dict):
+            raise ValueError("tool call function must be an object")
+        if not isinstance(function.get("name"), str) or not function["name"]:
+            raise ValueError("missing tool call function name")
+        if not isinstance(function.get("arguments"), (str, dict)):
+            raise ValueError("tool call arguments must be JSON text or an object")
+    if not calls and not isinstance(message.get("content"), str):
+        raise ValueError("assistant answer content must be JSON text")
+    return choice, message, calls
+
+
 def read_corpus(path):
     raw = path.read_bytes()
     text = raw.decode("utf-8")
@@ -122,31 +184,35 @@ def run_sample(args, options, key, scenario, condition, directory):
             break
         row["seconds"] = time.perf_counter() - before
         row["response_body_bytes"] = len(raw)
-        # Preserve the response while redacting a credential echoed by a provider.
-        stem.with_suffix(".response.json").write_bytes(raw.replace(key.encode(), b"[REDACTED]"))
-        if sample["outcome"] == "provider_error":
-            break
+        row["response_body_sha256"] = hashlib.sha256(raw).hexdigest()
         try:
-            response = json.loads(raw)
-            row["usage"] = response.get("usage")
-            row["reported_model"] = response.get("model")
-            choices = response["choices"]
-            if len(choices) != 1:
-                raise ValueError("expected exactly one assistant choice")
-            choice = choices[0]
+            try:
+                response = json.loads(raw)
+            except ValueError:
+                stem.with_suffix(".response.json").write_bytes(raw.replace(key.encode(), b"[REDACTED]"))
+                if sample["outcome"] == "provider_error":
+                    break
+                raise
+            response, echoed = redact_credential(response, key)
+            # Keep exact bytes when safe; decoded echoes must never enter history.
+            stem.with_suffix(".response.json").write_bytes(encode(response) if echoed else raw)
+            if echoed:
+                sample["outcome"] = "credential_echo"
+                sample["response_error"] = "provider response echoed the credential; propagation stopped"
+                break
+            if sample["outcome"] == "provider_error":
+                break
+            if isinstance(response, dict):
+                row["usage"] = response.get("usage")
+                row["reported_model"] = response.get("model")
+            choice, message, calls = assistant_response(response)
             row["finish_reason"] = choice.get("finish_reason")
-            message = choice["message"]
-            if message.get("role") != "assistant":
-                raise ValueError("missing assistant role")
-            calls = message.get("tool_calls") or []
             if calls:
                 # Preserve unmodified reasoning and tool calls in the next request.
                 messages.append(message)
                 for call in calls:
                     content = replay_page(scenario, call)
                     call_id = call["id"]
-                    if not isinstance(call_id, str) or not call_id:
-                        raise ValueError("missing artifact tool call identity")
                     messages.append({"role": "tool", "tool_call_id": call_id, "content": content})
                     sample["artifact_reads"] += 1
                     if sample["first_useful_action_seconds"] is None:
@@ -161,9 +227,12 @@ def run_sample(args, options, key, scenario, condition, directory):
             if correct and sample["first_useful_action_seconds"] is None:
                 sample["first_useful_action_seconds"] = time.perf_counter() - started
             break
-        except (KeyError, TypeError, ValueError) as error:
+        except (KeyError, TypeError, ValueError, RecursionError) as error:
             sample["outcome"] = "invalid_or_uncaptured_response"
             sample["response_error"] = str(error).replace(key, "[REDACTED]")
+            if not stem.with_suffix(".response.json").exists():
+                row["response_body_retained"] = False
+                row["response_evidence_error"] = "safe response decoding or redaction did not complete"
             break
     sample["completion_seconds"] = time.perf_counter() - started
     sample["request_count"] = len(sample["requests"])

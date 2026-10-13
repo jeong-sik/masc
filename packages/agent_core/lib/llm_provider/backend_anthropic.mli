@@ -163,10 +163,9 @@ val build_request
     reasoning, and when the history refuses projection. Every [None] fails
     closed at replay instead of recording a digest the wire cannot honor.
     Pure: it replays the same projection, merge, and fold {!build_request}
-    runs, so the value matches the bytes the provider verified. That holds
-    for an admitted body too, which {!build_request_artifact} serialized
-    from the same config, messages and tools; the agent pipeline admits
-    every request, so recording it is what lets a Keeper turn replay. *)
+    runs on the same messages and tools, so the value matches the bytes the
+    provider verified, for a request whose body was admitted before dispatch
+    as for one serialized at dispatch. *)
 val transmitted_reasoning_prefix
   :  config:Provider_config.t
   -> messages:Types.message list

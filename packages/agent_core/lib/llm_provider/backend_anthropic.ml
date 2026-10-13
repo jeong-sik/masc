@@ -649,20 +649,15 @@ let build_request_payload
     match config.kind with
     | Provider_config.Anthropic -> (
       let head = prefix_head ~tools config in
-      match verify_prefix_binding ~head messages with
-      | Error error ->
-        invalid_arg
-          ("Backend_anthropic.build_request: "
-           ^ Reasoning_history_projection.prefix_verify_error_to_string error)
-      | Ok verdict ->
-        Reasoning_history_projection.observe_prefix_drops
-          ~component:"backend_anthropic"
-          ~stream:
-            (match request_mode with
-             | Completion { stream; _ } -> stream
-             | Count_tokens -> false)
-          verdict;
-        verdict.Reasoning_history_projection.messages)
+      let verdict = verify_prefix_binding ~head messages in
+      Reasoning_history_projection.observe_prefix_drops
+        ~component:"backend_anthropic"
+        ~stream:
+          (match request_mode with
+           | Completion { stream; _ } -> stream
+           | Count_tokens -> false)
+        verdict;
+      verdict.Reasoning_history_projection.messages)
     | Provider_config.Kimi
     | Provider_config.OpenAI_compat
     | Provider_config.Ollama
@@ -1001,12 +996,10 @@ let transmitted_reasoning_prefix
   =
   (* This backend records for the Anthropic kind only; every other kind it
      can serve returns None, and replay fails closed. (Gemini binds
-     signatures too and gets its own adoption separately.) An admitted body
-     is recorded too: [Complete_common.serialize_final_http_request_unadmitted]
-     builds it with [build_request_artifact] from the same config, messages
-     and tools read here, and the head covers only system and tools. Frozen
-     thinking control is serialized only on the exact-output and count-tokens
-     paths, which never reach this function. *)
+     signatures too and gets its own adoption separately.) The digest covers
+     the system prompt, the tools and the projected messages, which the
+     request serializes the same way whether or not its body was admitted
+     ahead of dispatch, so one reading serves both paths. *)
   match config.kind with
   | Provider_config.Anthropic -> (
     match Types.content_has_reasoning_artifact response_content with
@@ -1019,19 +1012,17 @@ let transmitted_reasoning_prefix
           Api_common.merge_tool_result_followup_user_messages projection.messages
         in
         let head = prefix_head ~tools config in
-        (match verify_prefix_binding ~head merged with
-         | Error _ -> None
-         | Ok verdict ->
-           let message_digest =
-             Reasoning_history_projection.content_wire_digest
-               ~encode_block:anthropic_content_block_to_json
-               response_content
-           in
-           Some
-             { Types.Reasoning_prefix.request_digest =
-                 verdict.Reasoning_history_projection.final_digest
-             ; message_digest
-             })))
+        let verdict = verify_prefix_binding ~head merged in
+        let message_digest =
+          Reasoning_history_projection.content_wire_digest
+            ~encode_block:anthropic_content_block_to_json
+            response_content
+        in
+        Some
+          { Types.Reasoning_prefix.request_digest =
+              verdict.Reasoning_history_projection.final_digest
+          ; message_digest
+          }))
   | Provider_config.Kimi
   | Provider_config.OpenAI_compat
   | Provider_config.Ollama

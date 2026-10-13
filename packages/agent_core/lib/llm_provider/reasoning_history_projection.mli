@@ -77,35 +77,46 @@ val observe : component:string -> stream:bool -> t -> unit
 
 (** {1 Creation-prefix binding} *)
 
+(** Why one message's reasoning was removed before serialization. Every cause
+    fails closed: the block is not sent and the turn proceeds without it.
+    - [Prefix_entry_invalid] and [Prefix_entry_duplicate]: the stored digest tag
+      cannot be read. They name corrupted history, not a changed request.
+    - [Prefix_request_mismatch]: the request digest differs from the chain and
+      no earlier message in this request was dropped.
+    - [Prefix_chain_broken_upstream]: the same mismatch after an earlier drop
+      in this request. The earlier drop already changed the chain, so this one
+      is not an independent finding. *)
 type prefix_drop_cause =
   | Prefix_source_not_present
   | Prefix_digest_absent
+  | Prefix_entry_invalid
+  | Prefix_entry_duplicate
   | Prefix_request_mismatch
+  | Prefix_chain_broken_upstream
   | Prefix_reasoning_mismatch
 [@@deriving show]
 
+(** [stored_message_digest] is the message digest read from the stored tag.
+    It is [Some] only for the three causes decided after the tag parsed
+    ([Prefix_request_mismatch], [Prefix_chain_broken_upstream],
+    [Prefix_reasoning_mismatch]). *)
 type prefix_drop =
   { message_index : int
   ; cause : prefix_drop_cause
+  ; stored_message_digest : string option
   }
 [@@deriving show]
 
-type prefix_verify_error =
-  | Malformed_prefix_entry of
-      { message_index : int
-      ; classification : Types.Reasoning_prefix.classification
-      }
-[@@deriving show]
-
+(** [reasoning_message_count] is the number of messages that carried reasoning
+    when they entered the fold; each drop removes one of them. *)
 type prefix_verdict =
   { messages : Types.message list
   ; prefix_drops : prefix_drop list
   ; removed_empty_assistant_indices : int list
+  ; reasoning_message_count : int
   ; final_digest : string
   }
 [@@deriving show]
-
-val prefix_verify_error_to_string : prefix_verify_error -> string
 
 (** Wire bytes of one message's content through the caller's encoder, hashed.
     The record side hashes the response content with the same function, so a
@@ -132,7 +143,10 @@ val content_wire_digest
     fold mirrors {!project}: emptied assistants are removed, other roles
     never are. [final_digest] is the chain after the last message — the
     value the record side stamps as the new response's request digest.
-    Malformed entries refuse loudly like {!error}; every other doubt drops.
+    An unreadable tag (invalid or duplicated) drops the message's reasoning
+    with its own cause instead of failing the request: the tag sits in the
+    stored history, so a failure would repeat on every request while the
+    message stays in the window. Every doubt drops.
     Dropping stays safe only while the Anthropic branch never emits manual
     [enabled] thinking (which requires the last assistant turn to start with
     a thinking block); revisit this policy the day it does. *)
@@ -141,11 +155,24 @@ val verify_prefix_binding
   -> encode_block:(Types.content_block -> Yojson.Safe.t)
   -> role_tag:(Types.role -> string)
   -> Types.message list
-  -> (prefix_verdict, prefix_verify_error) result
+  -> prefix_verdict
 
-(** Bounded drop diagnostics in the shape of {!observe}: per-cause counts, a
-    bounded sample of dropped indices, and the emptied-assistant count.
-    Exact per-message evidence remains in the verdict. *)
+(** The fields of the per-request snapshot {!observe_prefix_drops} logs:
+    messages entering the fold with reasoning, replayed and dropped, a count
+    per cause, and a bounded sample of dropped blocks named by the first 12 hex
+    characters of their stored message digest. It reads one request, not an
+    event count: a stale block is dropped again by every request that still
+    carries it, so the number of distinct blocks cut is a query over
+    [dropped_block_ids]. *)
+val prefix_snapshot_json
+  :  component:string
+  -> stream:bool
+  -> prefix_verdict
+  -> Yojson.Safe.t
+
+(** Logs {!prefix_snapshot_json} when the request dropped reasoning or removed
+    an emptied assistant. The line is Warn when a stored tag was unreadable
+    and Info otherwise. Exact per-message evidence remains in the verdict. *)
 val observe_prefix_drops
   :  component:string
   -> stream:bool

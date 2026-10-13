@@ -862,30 +862,389 @@ let test_prefix_entry_round_trip_and_classification () =
    | Absent | Present _ | Invalid -> Alcotest.fail "expected a duplicate prefix")
 ;;
 
-let test_prefix_malformed_entry_refuses_verification () =
-  let prefix =
+let drop_testable =
+  Alcotest.testable Reasoning_history_projection.pp_prefix_drop ( = )
+;;
+
+let fold_role_tag = function
+  | System -> "system"
+  | User -> "user"
+  | Assistant -> "assistant"
+  | Tool -> "tool"
+;;
+
+let fold ~head messages =
+  Reasoning_history_projection.verify_prefix_binding
+    ~head
+    ~encode_block:Api_common.content_block_to_json
+    ~role_tag:fold_role_tag
+    messages
+;;
+
+let valid_prefix_for_tag_tests =
+  { Types.Reasoning_prefix.request_digest = String.make 64 'a'
+  ; message_digest = String.make 64 'b'
+  }
+;;
+
+let invalid_prefix_entries =
+  Types.Reasoning_prefix.metadata
     { Types.Reasoning_prefix.request_digest = "not-hex"
     ; message_digest = String.make 64 'b'
     }
-  in
+;;
+
+let duplicate_prefix_entries =
+  let entry = Types.Reasoning_prefix.entry valid_prefix_for_tag_tests in
+  [ entry; entry ]
+;;
+
+let assistant_with_prefix_entries ~config entries content =
+  message
+    ~metadata:(Types.Reasoning_source.metadata (source_for_config config) @ entries)
+    Assistant
+    content
+;;
+
+let test_prefix_unreadable_entry_drops_with_its_own_cause () =
   let config = anthropic_build_config () in
-  let source = source_for_config config in
-  let base =
-    with_source source Assistant [ Thinking { content = "t"; signature = Some "s" } ]
+  let thinking = [ Thinking { content = "t"; signature = Some "s" } ] in
+  List.iter
+    (fun (label, entries, cause) ->
+       let verdict =
+         fold ~head:[] [ assistant_with_prefix_entries ~config entries thinking ]
+       in
+       Alcotest.(check (list drop_testable))
+         (label ^ ": the drop names its message and cause")
+         [ { Reasoning_history_projection.message_index = 0
+           ; cause
+           ; stored_message_digest = None
+           }
+         ]
+         verdict.prefix_drops;
+       check_int (label ^ ": one message entered the fold with reasoning") 1
+         verdict.reasoning_message_count;
+       check_bool
+         (label ^ ": the reasoning block is not in the verdict")
+         false
+         (List.exists
+            (fun (m : message) -> content_has_reasoning m.content)
+            verdict.messages))
+    [ ( "invalid tag"
+      , invalid_prefix_entries
+      , Reasoning_history_projection.Prefix_entry_invalid )
+    ; ( "duplicate tag"
+      , duplicate_prefix_entries
+      , Reasoning_history_projection.Prefix_entry_duplicate )
+    ]
+;;
+
+(* A corrupted tag sits in stored history, so a request that refused it would
+   refuse again on every later request while the message stays in the window.
+   The request is built without that block, and a block created after the
+   corruption was already being dropped still replays. *)
+let test_a_corrupted_tag_in_history_does_not_block_requests () =
+  let preserve_always =
+    { (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
+      reasoning_replay_override = Capabilities.Force_preserve_always
+    }
   in
-  let message =
-    { base with metadata = base.metadata @ Types.Reasoning_prefix.metadata prefix }
+  let config = anthropic_build_config_variant ~cap_override:preserve_always () in
+  let tools = [ prefix_test_tool_schema ] in
+  let thinking_blocks ~call_id reasoning signature =
+    [ Thinking { content = reasoning; signature = Some signature }
+    ; Text (reasoning ^ " text")
+    ; ToolUse { id = call_id; name = "inspect"; input = `Assoc [] }
+    ]
   in
-  match
-    Reasoning_history_projection.verify_prefix_binding
-      ~head:[]
-      ~encode_block:Api_common.content_block_to_json
-      ~role_tag:(fun _ -> "assistant")
-      [ message ]
-  with
-  | Error (Reasoning_history_projection.Malformed_prefix_entry { message_index; _ }) ->
-    check_int "the refusal names its message" 0 message_index
-  | Ok _ -> Alcotest.fail "expected verification to refuse a malformed entry"
+  List.iter
+    (fun (label, entries) ->
+       let u1 = message User [ Text "one" ] in
+       let corrupted =
+         assistant_with_prefix_entries
+           ~config
+           entries
+           (thinking_blocks ~call_id:"call-1" "corrupted reasoning" "sig-corrupted")
+       in
+       let t1 = message Tool [ tool_result "call-1" ] in
+       let u2 = message User [ Text "two" ] in
+       let later =
+         stamped_assistant
+           ~config
+           ~request_messages:[ u1; corrupted; t1; u2 ]
+           ~tools
+           (thinking_blocks ~call_id:"call-2" "later reasoning" "sig-later")
+       in
+       let t2 = message Tool [ tool_result "call-2" ] in
+       let history = [ u1; corrupted; t1; u2; later; t2 ] in
+       let assert_wire body =
+         let types = wire_content_types body in
+         check_int (label ^ ": five merged wire messages") 5 (List.length types);
+         check_bool
+           (label ^ ": the corrupted block is not sent")
+           false
+           (List.mem "thinking" (List.nth types 1));
+         check_bool
+           (label ^ ": its text still rides")
+           true
+           (List.mem "text" (List.nth types 1));
+         check_bool
+           (label ^ ": the block created after the corruption replays")
+           true
+           (List.mem "thinking" (List.nth types 3))
+       in
+       assert_wire (Backend_anthropic.build_request ~config ~messages:history ~tools ());
+       (* Token counting shares the payload builder and had the same refusal. *)
+       assert_wire
+         (Backend_anthropic.build_count_tokens_request ~config ~messages:history ~tools ()))
+    [ "invalid tag", invalid_prefix_entries
+    ; "duplicate tag", duplicate_prefix_entries
+    ]
+;;
+
+let stored_message_digest_exn (message : message) =
+  match Types.Reasoning_prefix.classify message.metadata with
+  | Present prefix -> prefix.Types.Reasoning_prefix.message_digest
+  | Absent | Invalid | Duplicate -> Alcotest.fail "expected a stamped message"
+;;
+
+(* Stamps a response the way the record side does: the request digest is the
+   chain over what the request would send, drops included. *)
+let stamp_over ~head ~request_messages content =
+  let verdict = fold ~head request_messages in
+  let prefix =
+    { Types.Reasoning_prefix.request_digest =
+        verdict.Reasoning_history_projection.final_digest
+    ; message_digest =
+        Reasoning_history_projection.content_wire_digest
+          ~encode_block:Api_common.content_block_to_json
+          content
+    }
+  in
+  message
+    ~metadata:
+      (Types.Reasoning_source.metadata (source_for_config (anthropic_build_config ()))
+       @ Types.Reasoning_prefix.metadata prefix)
+    Assistant
+    content
+;;
+
+let hex_head_12 digest = String.sub digest 0 12
+
+let test_a_cut_counts_once_per_request_and_later_blocks_survive () =
+  let head_one = [ "system", `String "one" ] in
+  let head_two = [ "system", `String "two" ] in
+  let reasoning label = [ Thinking { content = label; signature = Some ("sig-" ^ label) }; Text label ] in
+  let u1 = message User [ Text "u1" ] in
+  let a = stamp_over ~head:head_one ~request_messages:[ u1 ] (reasoning "a") in
+  let u2 = message User [ Text "u2" ] in
+  let b = stamp_over ~head:head_one ~request_messages:[ u1; a; u2 ] (reasoning "b") in
+  let history = [ u1; a; u2; b ] in
+  let stable = fold ~head:head_one history in
+  Alcotest.(check (list drop_testable)) "the creating head drops nothing" [] stable.prefix_drops;
+  check_int "both blocks entered" 2 stable.reasoning_message_count;
+  let changed = fold ~head:head_two history in
+  let digest_a = stored_message_digest_exn a in
+  let digest_b = stored_message_digest_exn b in
+  Alcotest.(check (list drop_testable))
+    "the first mismatch is the cut; the later block is its cascade"
+    [ { Reasoning_history_projection.message_index = 1
+      ; cause = Reasoning_history_projection.Prefix_request_mismatch
+      ; stored_message_digest = Some digest_a
+      }
+    ; { Reasoning_history_projection.message_index = 3
+      ; cause = Reasoning_history_projection.Prefix_chain_broken_upstream
+      ; stored_message_digest = Some digest_b
+      }
+    ]
+    changed.prefix_drops;
+  (* A block stamped after the cut was already in effect chains over the
+     stripped history, so it verifies and is not a drop. *)
+  let u3 = message User [ Text "u3" ] in
+  let c =
+    stamp_over ~head:head_two ~request_messages:[ u1; a; u2; b; u3 ] (reasoning "c")
+  in
+  let later = fold ~head:head_two [ u1; a; u2; b; u3; c ] in
+  Alcotest.(check (list drop_testable))
+    "only the two stale blocks are cut; the block created afterwards replays"
+    changed.prefix_drops
+    later.prefix_drops;
+  check_int "three blocks entered" 3 later.reasoning_message_count;
+  let snapshot =
+    Reasoning_history_projection.prefix_snapshot_json
+      ~component:"test"
+      ~stream:false
+      changed
+  in
+  let open Yojson.Safe.Util in
+  let int_field name = snapshot |> member name |> to_int in
+  check_int "snapshot: entering" 2 (int_field "reasoning_messages");
+  check_int "snapshot: replayed" 0 (int_field "reasoning_messages_replayed");
+  check_int "snapshot: dropped" 2 (int_field "reasoning_messages_dropped");
+  check_int "snapshot: one root mismatch" 1 (int_field "request_mismatch");
+  check_int "snapshot: one cascade" 1 (int_field "chain_broken_upstream");
+  check_int "snapshot: no tag corruption" 0 (int_field "entry_invalid");
+  Alcotest.(check (list string))
+    "snapshot names blocks by the head of their stored digest"
+    [ hex_head_12 digest_a; hex_head_12 digest_b ]
+    (snapshot |> member "dropped_block_ids" |> to_list |> List.map to_string)
+;;
+
+(* The Keeper path admits the request body before dispatch, so the response
+   that stamps the digest comes from [complete_serialized] and
+   [complete_stream_serialized], not from the direct [complete] calls. This
+   goes admit, dispatch, stamp, admit again over a loopback provider and reads
+   the second admitted body from the wire: the thinking block rides only when
+   the digest recorded on the admitted path matched. *)
+let admitted_thinking_response_json =
+  {|{"id":"msg-1","type":"message","role":"assistant","model":"claude-sonnet-5-5","content":[{"type":"thinking","thinking":"admitted reasoning","signature":"sig-admitted"},{"type":"text","text":"admitted text"},{"type":"tool_use","id":"call-1","name":"inspect","input":{}}],"stop_reason":"tool_use","usage":{"input_tokens":10,"output_tokens":1}}|}
+;;
+
+let admitted_thinking_response_sse =
+  "event: message_start\n\
+   data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-5-5\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n\
+   event: content_block_start\n\
+   data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n\
+   event: content_block_delta\n\
+   data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"admitted reasoning\"}}\n\n\
+   event: content_block_delta\n\
+   data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig-admitted\"}}\n\n\
+   event: content_block_stop\n\
+   data: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
+   event: content_block_start\n\
+   data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
+   event: content_block_delta\n\
+   data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"admitted text\"}}\n\n\
+   event: content_block_stop\n\
+   data: {\"type\":\"content_block_stop\",\"index\":1}\n\n\
+   event: content_block_start\n\
+   data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call-1\",\"name\":\"inspect\",\"input\":{}}}\n\n\
+   event: content_block_delta\n\
+   data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}\n\n\
+   event: content_block_stop\n\
+   data: {\"type\":\"content_block_stop\",\"index\":2}\n\n\
+   event: message_delta\n\
+   data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":1}}\n\n\
+   event: message_stop\n\
+   data: {\"type\":\"message_stop\"}\n\n"
+;;
+
+let free_loopback_port () =
+  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Unix.setsockopt socket Unix.SO_REUSEADDR true;
+  Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
+  let port =
+    match Unix.getsockname socket with
+    | Unix.ADDR_INET (_, port) -> port
+    | Unix.ADDR_UNIX _ -> Alcotest.fail "loopback socket did not expose a TCP port"
+  in
+  Unix.close socket;
+  port
+;;
+
+let admitted_wire_types ~stream =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let port = free_loopback_port () in
+  let completion_bodies = ref [] in
+  let handler _conn _request body =
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    completion_bodies := body :: !completion_bodies;
+    if stream
+    then
+      Cohttp_eio.Server.respond_string
+        ~status:`OK
+        ~headers:(Cohttp.Header.of_list [ "content-type", "text/event-stream" ])
+        ~body:admitted_thinking_response_sse
+        ()
+    else
+      Cohttp_eio.Server.respond_string
+        ~status:`OK
+        ~body:admitted_thinking_response_json
+        ()
+  in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:4
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run
+      socket
+      (Cohttp_eio.Server.make ~callback:handler ())
+      ~on_error:(fun _ -> ()));
+  let config =
+    Provider_config.make
+      ~kind:Anthropic
+      ~model_id:"claude-sonnet-5-5"
+      ~base_url:(Printf.sprintf "http://127.0.0.1:%d" port)
+      ~api_key:"test-key"
+      ~headers:
+        [ "Content-Type", "application/json"; "anthropic-version", "2023-06-01" ]
+      ~request_path:"/proxy/messages"
+      ~max_tokens:4096
+      ~system_prompt:"keeper system"
+      ~model_capabilities_override:
+        { (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
+          reasoning_replay_override = Capabilities.Force_latest_user_turn_tool_calls
+        }
+      ()
+  in
+  let tools = [ prefix_test_tool_schema ] in
+  let dispatch messages =
+    let serialized =
+      match
+        Complete.admit_request_body
+          ~stream
+          (Complete.prepare_request ~config ~messages ~tools ())
+      with
+      | Ok serialized -> serialized
+      | Error _ -> Alcotest.fail "admission of the request body failed"
+    in
+    let result =
+      if stream
+      then Complete.complete_stream_serialized ~sw ~net serialized ~on_event:ignore ()
+      else Complete.complete_serialized ~sw ~net serialized ()
+    in
+    match result with
+    | Ok response -> response
+    | Error _ -> Alcotest.fail "the loopback provider call failed"
+  in
+  let carrier = message User [ Text "trigger"; Text "extra context block" ] in
+  let first = dispatch [ carrier ] in
+  let assistant =
+    match Types.assistant_message_of_response first with
+    | Ok assistant -> assistant
+    | Error _ -> Alcotest.fail "a sourced response must stamp"
+  in
+  check_bool
+    "the admitted response carries a recorded digest"
+    true
+    (match first.Types.telemetry with
+     | Some { Types.reasoning_prefix = Some _; _ } -> true
+     | Some { Types.reasoning_prefix = None; _ } | None -> false);
+  let _second =
+    dispatch [ carrier; assistant; message Tool [ tool_result "call-1" ] ]
+  in
+  match !completion_bodies with
+  | second_body :: _first_body :: [] -> wire_content_types second_body
+  | bodies ->
+    Alcotest.failf "expected two dispatched bodies, saw %d" (List.length bodies)
+;;
+
+let test_admitted_path_records_a_digest_the_next_request_honors ~stream () =
+  let types = admitted_wire_types ~stream in
+  check_int "three wire messages" 3 (List.length types);
+  check_bool
+    "thinking recorded on the admitted path replays in the next admitted body"
+    true
+    (List.mem "thinking" (List.nth types 1))
 ;;
 
 let test_prefix_binding_drops_thinking_when_the_request_head_changes () =
@@ -1922,9 +2281,25 @@ let () =
             `Quick
             test_prefix_entry_round_trip_and_classification
         ; Alcotest.test_case
-            "prefix malformed entry refuses verification"
+            "prefix unreadable entry drops with its own cause"
             `Quick
-            test_prefix_malformed_entry_refuses_verification
+            test_prefix_unreadable_entry_drops_with_its_own_cause
+        ; Alcotest.test_case
+            "a corrupted tag in history does not block requests"
+            `Quick
+            test_a_corrupted_tag_in_history_does_not_block_requests
+        ; Alcotest.test_case
+            "a cut counts once per request and later blocks survive"
+            `Quick
+            test_a_cut_counts_once_per_request_and_later_blocks_survive
+        ; Alcotest.test_case
+            "admitted sync path records a digest the next request honors"
+            `Quick
+            (test_admitted_path_records_a_digest_the_next_request_honors ~stream:false)
+        ; Alcotest.test_case
+            "admitted stream path records a digest the next request honors"
+            `Quick
+            (test_admitted_path_records_a_digest_the_next_request_honors ~stream:true)
         ; Alcotest.test_case
             "prefix binding drops thinking when the request head changes"
             `Quick

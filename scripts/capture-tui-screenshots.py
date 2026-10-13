@@ -11,7 +11,7 @@ every cell after it on that row.
 
 Usage:
     python3 scripts/capture-tui-screenshots.py \
-        --base-path ~/me --out docs/screenshots/tui/$(date -u +%Y-%m-%d)/surfaces
+        --base-path "$MASC_BASE_PATH" --out docs/screenshots/tui/$(date -u +%Y-%m-%d)/surfaces
 """
 
 from __future__ import annotations
@@ -30,6 +30,10 @@ import time
 from typing import Iterator
 
 from playwright.sync_api import Browser, Page, sync_playwright
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+
+import masc_base_path  # noqa: E402
 
 WORKTREE = Path(__file__).resolve().parents[1]
 TTYD = Path("/opt/homebrew/bin/ttyd")
@@ -342,7 +346,7 @@ def goto_surface(page: Page, query: str, expect: str) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base-path", default=str(Path.home() / "me"))
+    ap.add_argument("--base-path", default=None, help="MASC base path (default: MASC_BASE_PATH)")
     ap.add_argument("--api-port", type=int, default=8935)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--cols", type=int, default=132)
@@ -350,6 +354,9 @@ def main() -> int:
     ap.add_argument("--workspace", default="demo-workspace")
     args = ap.parse_args()
 
+    base = masc_base_path.resolve(args.base_path)
+    if base is None:
+        ap.error(masc_base_path.required("--base-path"))
     if not TTYD.is_file():
         print(f"missing ttyd: {TTYD}", file=sys.stderr)
         return 1
@@ -357,7 +364,6 @@ def main() -> int:
         print(f"missing {EXECUTABLE}; run dune build --root . bin/masc_tui.exe", file=sys.stderr)
         return 1
 
-    base = Path(args.base_path).expanduser()
     names = discover_keeper_names(base)
     pairs = [[n, placeholder_for(n, i + 1)] for i, n in enumerate(names)]
     args.out.mkdir(parents=True, exist_ok=True)

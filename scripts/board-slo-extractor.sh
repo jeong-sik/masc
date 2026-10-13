@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # board-slo-extractor.sh — Board convergence SLO snapshot (PR-1).
 #
-# Read-only. Runtime 무변경. basepath SSOT 준수:
-#   MASC_BASE_PATH env 우선 → config_dir_resolver fallback → hard fail.
-# 절대 $HOME 또는 ~/me 하드코딩 금지.
+# Read-only. Runtime 무변경. Base path 는 MASC_BASE_PATH 로만 정하고,
+# 없으면 멈춘다.
 #
 # Output: 13-row SLO table per Goal goal-board-live-issue-convergence-20260519.
 # Modes: --json (default), --table (human render via jq), --offline (fixtures/CI).
@@ -19,24 +18,9 @@ resolve_basepath() {
     printf '%s' "$MASC_BASE_PATH"
     return 0
   fi
-  # Fallback: resolver via env_config_core normalization mirror.
-  # config_dir_resolver SSOT: MASC_CONFIG_DIR > $MASC_BASE_PATH/.masc/config > missing.
-  # When neither env is set, refuse to guess — hard fail with directive.
-  echo "ERROR: MASC_BASE_PATH unset. Set it explicitly (current env: \"$HOME\" is not a default)." >&2
-  echo "       Hint: export MASC_BASE_PATH=\"\$HOME/me\"   # current developer env" >&2
+  echo "ERROR: MASC_BASE_PATH unset. Set it explicitly; there is no default." >&2
   return 2
 }
-
-readonly BASE_PATH="$(resolve_basepath)"
-readonly MASC_DIR="$BASE_PATH/.masc"
-readonly LOGS_DIR="$MASC_DIR/logs"
-readonly TASKS_FILE="$MASC_DIR/tasks/backlog.json"
-readonly POSTS_FILE="$MASC_DIR/board_posts.jsonl"
-readonly COMMENTS_FILE="$MASC_DIR/board_comments.jsonl"
-readonly TOOL_CALLS_DIR="$MASC_DIR/tool_calls"
-readonly DOCKER_PLAYGROUND_DIR="$MASC_DIR/playground/docker"
-readonly TODAY="$(date -u +%Y-%m-%d)"
-readonly LOG_TODAY="$LOGS_DIR/system_log_${TODAY}.jsonl"
 
 WINDOW_HOURS=24
 OUTPUT_MODE=json
@@ -52,10 +36,25 @@ while [[ $# -gt 0 ]]; do
     --offline) OFFLINE_MODE=1; shift ;;
     --dashboard-host) DASHBOARD_HOST="$2"; shift 2 ;;
     -h|--help)
-      sed -n '2,12p' "$0"; exit 0 ;;
+      awk 'NR > 1 && /^#/ { print; next } NR > 1 { exit }' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 64 ;;
   esac
 done
+
+# Assigned apart from `readonly`: `readonly X="$(f)"` returns readonly's own
+# status, so a failed resolve would leave BASE_PATH empty and report the
+# board under /.masc as an empty one.
+BASE_PATH="$(resolve_basepath)"
+readonly BASE_PATH
+readonly MASC_DIR="$BASE_PATH/.masc"
+readonly LOGS_DIR="$MASC_DIR/logs"
+readonly TASKS_FILE="$MASC_DIR/tasks/backlog.json"
+readonly POSTS_FILE="$MASC_DIR/board_posts.jsonl"
+readonly COMMENTS_FILE="$MASC_DIR/board_comments.jsonl"
+readonly TOOL_CALLS_DIR="$MASC_DIR/tool_calls"
+readonly DOCKER_PLAYGROUND_DIR="$MASC_DIR/playground/docker"
+readonly TODAY="$(date -u +%Y-%m-%d)"
+readonly LOG_TODAY="$LOGS_DIR/system_log_${TODAY}.jsonl"
 
 readonly WINDOW_SEC=$(( WINDOW_HOURS * 3600 ))
 

@@ -1160,8 +1160,7 @@ def audit_keeper(
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
     if args.base_path is None:
         raise SystemExit(
-            "Error: MASC_BASE_PATH is required (or pass --base-path PATH). "
-            "RFC-0121 forbids ME_ROOT/cwd fallback."
+            "Error: MASC_BASE_PATH is required (or pass --base-path PATH)."
         )
     base_path = Path(args.base_path).expanduser().resolve()
     config_dir = base_path / ".masc" / "config" / "keepers"

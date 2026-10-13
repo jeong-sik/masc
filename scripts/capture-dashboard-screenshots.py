@@ -13,7 +13,7 @@ redacted, so a reader never mistakes a placeholder for a real name.
 
 Usage:
     python3 scripts/capture-dashboard-screenshots.py \
-        --base-path ~/me --out docs/screenshots/dashboard/$(date -u +%Y-%m-%d)
+        --base-path "$MASC_BASE_PATH" --out docs/screenshots/dashboard/$(date -u +%Y-%m-%d)
 """
 
 from __future__ import annotations

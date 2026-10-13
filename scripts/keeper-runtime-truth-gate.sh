@@ -6,8 +6,8 @@
 # coverage. It does not start keepers or mutate live runtime state.
 #
 # Usage:
-#   scripts/keeper-runtime-truth-gate.sh --base-path ~/me --keeper sangsu
-#   scripts/keeper-runtime-truth-gate.sh --base-path ~/me --keeper sangsu \
+#   scripts/keeper-runtime-truth-gate.sh --base-path "$MASC_BASE_PATH" --keeper sangsu
+#   scripts/keeper-runtime-truth-gate.sh --base-path "$MASC_BASE_PATH" --keeper sangsu \
 #     --trace-id trace-... --turn-id 42 --server-url http://127.0.0.1:8931
 
 set -euo pipefail

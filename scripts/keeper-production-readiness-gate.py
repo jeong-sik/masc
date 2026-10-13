@@ -39,9 +39,9 @@ ERROR_STATUSES = {"error", "failed", "failure", "timeout", "cancelled", "cancele
 
 
 def default_base_path() -> str | None:
-    # RFC-0121: MASC_BASE_PATH is the sole canonical source. No ME_ROOT
-    # alias, no cwd fallback. Argparse handles the None case by surfacing
-    # an explicit error rather than silently writing to the wrong root.
+    # RFC-0121: MASC_BASE_PATH is the sole canonical source. Argparse
+    # handles the None case by surfacing an explicit error rather than
+    # silently writing to the wrong root.
     value = os.environ.get("MASC_BASE_PATH", "").strip()
     return value or None
 
@@ -843,8 +843,7 @@ def main(argv: list[str] | None = None) -> int:
     thresholds = thresholds_from_args(args)
     if args.base_path is None:
         raise SystemExit(
-            "Error: MASC_BASE_PATH is required (or pass --base-path PATH). "
-            "RFC-0121 forbids ME_ROOT/cwd fallback."
+            "Error: MASC_BASE_PATH is required (or pass --base-path PATH)."
         )
     summary = evaluate(
         base_path=Path(args.base_path).expanduser(),

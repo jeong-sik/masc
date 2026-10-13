@@ -99,7 +99,7 @@ let set_dashboard_runtime_probe_cache_for_tests ~probe ~age_sec () =
 ;;
 
 (* Per-path TTL cache for `git rev-parse --short HEAD`.  Each miss forks
-   git and can take seconds on large worktrees (~/me etc.), yet HEAD
+   git and can take seconds on large worktrees, yet HEAD
    changes infrequently, and every dashboard shell refresh calls this
    twice (workspace + base).  Serving cached values keeps snapshot_json
    off the 5 s git-probe budget on the hot path. *)
@@ -254,8 +254,9 @@ let git_probe_command_available ?(getenv = Sys.getenv_opt) () =
 ;;
 
 (* Bumped 5s → 15s for large repos (#9765, #9775).
-   `~/me` repeatedly trips the 5s budget on first probe after TTL
-   expiry (3 occurrences in issue #9775 logs at 18:29/18:41/18:50).
+   A large base-path repository repeatedly trips the 5s budget on the
+   first probe after TTL expiry (3 occurrences in issue #9775 logs at
+   18:29/18:41/18:50).
    The probe runs on a background fiber via
    [maybe_refresh_git_rev_parse_short_in_background], so the extra
    wall-time does not affect the hot dashboard path — cached values

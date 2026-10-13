@@ -32,8 +32,14 @@ import re
 import time
 import urllib.error
 import urllib.parse
+import sys
 import urllib.request
+from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+
+import masc_base_path  # noqa: E402
 
 SEARXNG_URL = os.environ.get("MASC_SEARXNG_URL", "http://localhost:8888")
 MCP_URL = os.environ.get("MASC_MCP_URL", "http://localhost:8935/mcp")
@@ -157,21 +163,25 @@ def probe_ollama(api_key: str, query: str) -> dict[str, Any]:
     return record
 
 
-def token_candidates() -> list[tuple[str, str]]:
+def token_candidates() -> tuple[list[tuple[str, str]], list[str]]:
     """Bearer token candidates, most likely first: MASC_MCP_TOKEN env,
     then every ``<base>/.masc/auth/*.token`` file newest-first (tokens
-    rotate, so a stale env value must not end the search). Returns
-    (label-for-evidence, token value) pairs; labels never carry the value."""
+    rotate, so a stale env value must not end the search). ``<base>`` is
+    MASC_BASE_PATH; without it no token file is searched and the second
+    list says so. Returns (label-for-evidence, token value) pairs and the
+    sources that were not searched; labels never carry the value."""
     pairs: list[tuple[str, str]] = []
     from_env = os.environ.get("MASC_MCP_TOKEN")
     if from_env:
         pairs.append(("env:MASC_MCP_TOKEN", from_env.strip()))
-    base = os.environ.get("MASC_BASE_PATH", os.path.expanduser("~/me"))
+    base = masc_base_path.resolve(None)
+    if base is None:
+        return pairs, [f"token files not searched: {masc_base_path.ENV_KEY} is unset"]
     files = glob.glob(os.path.join(base, ".masc", "auth", "*.token"))
     for path in sorted(files, key=os.path.getmtime, reverse=True):
         with open(path, encoding="utf-8") as handle:
             pairs.append((os.path.basename(path), handle.read().strip()))
-    return pairs
+    return pairs, []
 
 
 class McpClient:
@@ -258,7 +268,8 @@ def authenticated_client(url: str) -> tuple[McpClient, dict[str, Any]]:
     per candidate are recorded, not swallowed; exhausting all candidates
     raises with the full attempt trail."""
     attempts: list[str] = []
-    for label, token in token_candidates() or [("no-token", "")]:
+    candidates, unsearched = token_candidates()
+    for label, token in candidates or [("no-token", "")]:
         client = McpClient(url, token or None)
         try:
             init, ms, _ = client.rpc(
@@ -278,7 +289,7 @@ def authenticated_client(url: str) -> tuple[McpClient, dict[str, Any]]:
             "initialize_ms": round(ms, 1),
             "server_info": init.get("result", {}).get("serverInfo", {}),
         }
-    raise RuntimeError("no token candidate accepted: " + " | ".join(attempts))
+    raise RuntimeError("no token candidate accepted: " + " | ".join(attempts + unsearched))
 
 
 def probe_mcp(url: str) -> dict[str, Any]:

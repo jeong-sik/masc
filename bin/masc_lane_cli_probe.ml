@@ -68,7 +68,7 @@ let () =
     prerr_endline Masc_lane_cli_probe_args.usage;
     exit 2);
   (* A probe has no approval entry, so resolve the same workspace identity as a
-     normal command. Do not guess $HOME/me: that can silently measure a
+     normal command. Do not guess a base path: that can silently measure a
      different workspace from the one selected by the server. *)
   let base_dir =
     match Workspace_root.resolve_current ~flag:None with

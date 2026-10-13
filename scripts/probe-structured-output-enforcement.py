@@ -42,10 +42,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-# SSOT-R6 (#31902): the runtime root must resolve from an explicit base path
-# (MASC_BASE_PATH here, or --config), never from a literal home-anchored .masc.
-DEFAULT_BASE = Path(os.environ.get("MASC_BASE_PATH", str(Path.home() / "me")))
-DEFAULT_CONFIG = str(DEFAULT_BASE / ".masc" / "config" / "runtime.toml")
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+
+import masc_base_path  # noqa: E402
 
 # The prompt asks for a key the schema forbids. Nothing else about the request
 # is interesting; a bigger schema measures the same thing more slowly.
@@ -229,8 +228,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config",
-        default=DEFAULT_CONFIG,
-        help="runtime.toml to read; default derives from MASC_BASE_PATH/.masc/config/runtime.toml",
+        default=None,
+        help="runtime.toml to read (default: MASC_BASE_PATH/.masc/config/runtime.toml)",
     )
     parser.add_argument("-n", "--runs", type=int, default=5)
     parser.add_argument("--timeout", type=float, default=180.0)
@@ -246,6 +245,14 @@ def main() -> int:
         help="also probe targets that declare no structured-output support.",
     )
     args = parser.parse_args()
+
+    # SSOT-R6 (#31902): the runtime root comes from --config or MASC_BASE_PATH,
+    # never from a path under the home directory.
+    if args.config is None:
+        base = masc_base_path.resolve(None)
+        if base is None:
+            parser.error(masc_base_path.required("--config"))
+        args.config = str(base / ".masc" / "config" / "runtime.toml")
 
     targets = load_targets(args.config)
     if args.target:

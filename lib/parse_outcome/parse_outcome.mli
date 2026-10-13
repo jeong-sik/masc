@@ -1,8 +1,7 @@
 (** Parse_outcome — canonical helper for parse-with-failure boundaries.
 
-    Replaces the [try f s with _ -> None / [] / default] pattern documented
-    as Cluster A "telemetry-as-fix" in
-    [~/me/.tmp/pr-audit-2026-05-20/AUDIT-REPORT.md].
+    Replaces the [try f s with _ -> None / [] / default] pattern, which the
+    PR audit of 2026-05-20 grouped as Cluster A "telemetry-as-fix".
 
     Design constraints (RFC-0145):
     - Cancellation [Eio.Cancel.Cancelled] is re-raised, never absorbed.

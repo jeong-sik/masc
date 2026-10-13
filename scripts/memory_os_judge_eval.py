@@ -54,6 +54,10 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+
+import masc_base_path  # noqa: E402
+
 # GOLD: the single irreducible HUMAN-anchored calibration set — the one manual
 # artifact left after moving all measurement to the LLM judge. It exists to keep the
 # judge honest (anti-rig): a judge that cannot reproduce these labels is not trusted.
@@ -432,6 +436,23 @@ def deterministic_sample(items: list, n: int) -> list:
     return [items[int(i * stride)] for i in range(n)]
 
 
+def store_and_config(
+    store_dir: str | None, runtime_config: str | None
+) -> tuple[str, str] | None:
+    """The fact store and the runtime config: each as named, an unnamed one
+    under MASC_BASE_PATH. None when one is unnamed and no base is set."""
+    if store_dir is not None and runtime_config is not None:
+        return store_dir, runtime_config
+    base = masc_base_path.resolve(None)
+    if base is None:
+        return None
+    config_dir = base / ".masc" / "config"
+    return (
+        str(config_dir / "keepers") if store_dir is None else store_dir,
+        str(config_dir / "runtime.toml") if runtime_config is None else runtime_config,
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -439,22 +460,14 @@ def main() -> int:
     )
     ap.add_argument(
         "--store-dir",
-        default=os.path.join(
-            os.environ.get("MASC_BASE_PATH") or os.path.expanduser("~/me"),
-            ".masc",
-            "config",
-            "keepers",
-        ),
+        default=None,
+        help="keeper fact store (default: MASC_BASE_PATH/.masc/config/keepers)",
     )
     ap.add_argument(
         "--runtime-config",
-        default=os.path.join(
-            os.environ.get("MASC_BASE_PATH") or os.path.expanduser("~/me"),
-            ".masc",
-            "config",
-            "runtime.toml",
-        ),
-        help="masc runtime.toml that defines the judge provider",
+        default=None,
+        help="masc runtime.toml that defines the judge provider "
+        "(default: MASC_BASE_PATH/.masc/config/runtime.toml)",
     )
     ap.add_argument(
         "--judge-provider",
@@ -474,6 +487,11 @@ def main() -> int:
     ap.add_argument("--min-accuracy", type=float, default=0.78)
     ap.add_argument("--out", default="", help="relabel mode: output JSONL path")
     args = ap.parse_args()
+
+    paths = store_and_config(args.store_dir, args.runtime_config)
+    if paths is None:
+        ap.error(masc_base_path.required("--store-dir with --runtime-config"))
+    args.store_dir, args.runtime_config = paths
 
     cfg = load_runtime_cfg(args.runtime_config)
     if args.judge_provider or args.judge_model:

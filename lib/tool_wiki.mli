@@ -1,11 +1,25 @@
 
 (** Tool_wiki — Wiki MCP tools.
 
-    Implements 4 tools ([masc_wiki_list], [masc_wiki_read],
-    [masc_wiki_add], [masc_wiki_search]) backed by Markdown
-    pages under {!wiki_root} ([<base_path>/docs/wiki], where
+    Implements 5 tools ([masc_wiki_list], [masc_wiki_read],
+    [masc_wiki_create], [masc_wiki_update], [masc_wiki_search]) backed by
+    Markdown pages under {!wiki_root} ([<base_path>/docs/wiki], where
     [base_path] is the workspace the caller resolved) with YAML frontmatter
-    ([title], [source], [author], [created], [updated], [tags]).
+    ([title], [summary], [source], [author], [created], [updated],
+    [revision], [tags]).
+
+    A page lives at [<page>.md]. The writer chooses [page] (lowercase a-z,
+    digits and [-]; [index] and [log] are reserved) and it never changes. A
+    name that breaks the rule is refused, not repaired. [title] may be in any
+    script.
+
+    [masc_wiki_create] refuses a page that exists. [masc_wiki_update] takes
+    the [revision] the writer read as [base_revision]: when the page has
+    moved on, the update is refused and the refusal carries the current
+    revision and body, so the writer merges and sends again. An accepted
+    update replaces the body, adds one to [revision] and keeps [author],
+    [created] and [source]. Both run under one lock for the wiki directory
+    and replace the file by rename.
 
     Every frontmatter field records something observable about the
     page: who wrote it, when, from what kind of work, and under
@@ -16,18 +30,19 @@
     once, in the implementation's [source_to_string]; {!valid_source_strings}
     and the parser that reads [source] back are derived from it, so a new
     constructor is a non-exhaustive match in that one function. The
-    [masc_wiki_add] schema repeats the strings as a literal enum in
-    [config/tools/masc_wiki_add.toml]; the "wiki source enum" case in
+    [masc_wiki_create] schema repeats the strings as a literal enum in
+    [config/tools/masc_wiki_create.toml]; the "wiki source enum" case in
     [test_enum_mirror_sync] compares that enum with {!valid_source_strings}.
 
     A page reads only when its frontmatter is closed and carries [title],
-    [source], [author], [created] and [tags], with [source] inside the
-    vocabulary. Any other page is printed by filename with the reason —
+    [summary], [source], [author], [created], [revision] and [tags], with
+    [source] inside the vocabulary and [revision] a whole number from 1. Any other page is printed by filename with the reason —
     by the tools here and by the [masc://wiki] resources, which read
     through {!parse_frontmatter} and {!list_pages} — instead of passing a
     raw or empty value through.
 
-    Internal: [handle_list] / [handle_add] (reachable via {!dispatch}). *)
+    Internal: [handle_list] / [handle_create] / [handle_update] (reachable via
+    {!dispatch}). *)
 
 (** {1 Wiki source} *)
 
@@ -42,23 +57,25 @@ val source_to_string : wiki_source -> string
 (** The spelling written to, and read back from, a page's [source]. *)
 
 val valid_source_strings : string list
-(** Every spelling [masc_wiki_add] accepts for [source], derived from
+(** Every spelling [masc_wiki_create] accepts for [source], derived from
     {!wiki_source}. Handler error messages list it. *)
 
 (** {1 Pages} *)
 
 type frontmatter = {
   title : string;
+  summary : string;  (** One line saying what the page holds. *)
   source : wiki_source;
   author : string;
   created : string;
+  revision : int;  (** 1 when created; one more after each update. *)
   tags : string list;
 }
 
 type frontmatter_error
 (** Why a page does not read: no frontmatter, a block with no closing
-    delimiter, a required field absent or empty, or a [source] outside
-    {!wiki_source}. *)
+    delimiter, a required field absent or empty, a [source] outside
+    {!wiki_source}, or a [revision] that is not a whole number from 1. *)
 
 val parse_frontmatter : string -> (frontmatter, frontmatter_error) result
 
@@ -68,6 +85,9 @@ val frontmatter_error_to_string : frontmatter_error -> string
 val describe_unreadable : string -> frontmatter_error -> string
 (** [describe_unreadable path error] is ["<basename> (<reason>)"], the line
     every wiki surface prints for a page that does not read. *)
+
+val page_path : base_path:string -> string -> string
+(** [page_path ~base_path page] is [<wiki_root>/<page>.md]. *)
 
 val list_pages : base_path:string -> string list
 (** Every [.md] file directly under {!wiki_root}, as full paths in name
@@ -117,15 +137,15 @@ val dispatch :
   args:Yojson.Safe.t ->
   Tool_result.result option
 (** [dispatch ctx ~name ~args] routes by tool name to the
-    private handlers ([handle_list], [handle_add]) plus
+    private handlers ([handle_list], [handle_create], [handle_update]) plus
     {!handle_read} / {!handle_search}.  Returns [None] when
-    [name] is not one of the 4 wiki tools — caller treats
+    [name] is not one of the 5 wiki tools — caller treats
     that as "not my tool". *)
 
 (** {1 MCP schemas} *)
 
 val schemas : Masc_domain.tool_schema list
-(** [schemas] is the 4-entry [Masc_domain.tool_schema] list registered
+(** [schemas] is the 5-entry [Masc_domain.tool_schema] list registered
     with the MCP catalog.  Used by [Tool_spec.register] in this
     module's side-effect block at module load.  External
     callers (e.g. [Tools.ml]) read it for catalog enumeration. *)

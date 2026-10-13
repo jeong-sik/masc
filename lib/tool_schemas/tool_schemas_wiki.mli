@@ -1,7 +1,8 @@
 type operation =
   | List_pages
   | Read_page
-  | Add_page
+  | Create_page
+  | Update_page
   | Search_pages
 [@@deriving enumerate]
 

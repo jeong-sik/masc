@@ -366,7 +366,8 @@ let test_registered_cluster_model_projections_are_explicit () =
     (fun name -> check_projection name Descriptor.Internal_name)
     [ "keeper_wiki_read"
     ; "keeper_wiki_search"
-    ; "masc_wiki_add"
+    ; "masc_wiki_create"
+    ; "masc_wiki_update"
     ; "masc_wiki_list"
     ; "masc_get_metrics"
     ];

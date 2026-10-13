@@ -500,7 +500,7 @@
       "visibility": "default"
     },
     {
-      "name": "masc_wiki_add",
+      "name": "masc_wiki_create",
       "visibility": "default"
     },
     {
@@ -875,7 +875,7 @@
         "call_count": 5
       },
       {
-        "name": "masc_wiki_add",
+        "name": "masc_wiki_create",
         "call_count": 5
       },
       {

@@ -1,8 +1,12 @@
 (** Tool_wiki - Wiki operations
 
-    Manages the knowledge base at [<base>/docs/wiki/]
+    Manages the pages at [<base>/docs/wiki/<page>.md]
+    - The writer names the page; the name is the file name and never changes
     - Every page carries a [source] from [wiki_source]
-    - YAML frontmatter recording who wrote the page, when, and why
+    - YAML frontmatter records who wrote the page, when, why, a one-line
+      summary and the page revision
+    - A page is created once and then updated against the revision the
+      writer read
 *)
 
 open Printf
@@ -11,8 +15,8 @@ open Printf
     spelling is written: [valid_source_strings] and [source_of_string_opt] are
     derived from it over [all_of_wiki_source], so a new constructor is a
     non-exhaustive match there and nowhere else in this module.
-    masc_wiki_add's schema writes the same strings as a literal enum in
-    config/tools/masc_wiki_add.toml; the "wiki source enum" case in
+    masc_wiki_create's schema writes the same strings as a literal enum in
+    config/tools/masc_wiki_create.toml; the "wiki source enum" case in
     test_enum_mirror_sync compares that enum with [valid_source_strings]. *)
 type wiki_source =
   | Direct_experience
@@ -46,29 +50,35 @@ type context = {
 let wiki_root ~base_path =
   Filename.concat base_path "docs/wiki"
 
-(* YAML frontmatter parsing. Every field [handle_add] writes and a reader
-   projects is required: a page missing one does not read, rather than
-   reading as an empty string. [updated] is written but nothing reads it. *)
+(* YAML frontmatter parsing. Every field a writer sets and a reader projects
+   is required: a page missing one does not read, rather than reading as an
+   empty string. [updated] is written but nothing reads it. *)
 type frontmatter = {
   title: string;
+  summary: string;
   source: wiki_source;
   author: string;
   created: string;
+  revision: int;
   tags: string list;
 }
 
 type frontmatter_field =
   | Title
+  | Summary
   | Source
   | Author
   | Created
+  | Revision
   | Tags
 
 let frontmatter_field_key = function
   | Title -> "title"
+  | Summary -> "summary"
   | Source -> "source"
   | Author -> "author"
   | Created -> "created"
+  | Revision -> "revision"
   | Tags -> "tags"
 
 (* Why a page's header does not read as a wiki page. The raw value
@@ -78,6 +88,7 @@ type frontmatter_error =
   | Unclosed_frontmatter
   | Missing_field of frontmatter_field
   | Unknown_source of string
+  | Bad_revision of string
 
 let parse_frontmatter content =
   match Frontmatter.read content with
@@ -96,18 +107,25 @@ let parse_frontmatter content =
       | Some _ | None -> Error (Missing_field field)
     in
     let* title = scalar Title in
+    let* summary = scalar Summary in
     let* raw_source = scalar Source in
     let* source =
       Option.to_result ~none:(Unknown_source raw_source) (source_of_string_opt raw_source)
     in
     let* author = scalar Author in
     let* created = scalar Created in
+    let* raw_revision = scalar Revision in
+    let* revision =
+      match int_of_string_opt raw_revision with
+      | Some revision when revision >= 1 -> Ok revision
+      | Some _ | None -> Error (Bad_revision raw_revision)
+    in
     let* tags =
       match lookup Tags with
       | Some value -> Ok (Frontmatter.list_value value)
       | None -> Error (Missing_field Tags)
     in
-    Ok { title; source; author; created; tags }
+    Ok { title; summary; source; author; created; revision; tags }
 ;;
 
 (* The raw source is quoted as written: [%S] would escape a non-ASCII value
@@ -118,6 +136,7 @@ let frontmatter_error_to_string = function
   | Missing_field field -> sprintf "no %s in frontmatter" (frontmatter_field_key field)
   | Unknown_source raw ->
     sprintf "source \"%s\" is not one of: %s" raw (String.concat ", " valid_source_strings)
+  | Bad_revision raw -> sprintf "revision \"%s\" is not a whole number from 1" raw
 
 (* The one line list, read and search print for a page whose header does
    not read: its filename and the reason. *)
@@ -245,81 +264,259 @@ let handle_read ~tool_name ~start_time ctx args : Tool_result.result =
                  (Tool_error.to_string (Tool_error.of_exn exn)))
   end
 
-(* Add page *)
-let handle_add ~tool_name ~start_time ctx args : Tool_result.result =
-  let title = Json_util.get_string args "title" |> Option.value ~default:"" in
-  let tags = Json_util.get_string_list args "tags" in
-  let content = Json_util.get_string args "content" |> Option.value ~default:"" in
+(* Page names. The writer chooses the name. Nothing is derived from the title
+   or the date, and a name that breaks the rule is refused rather than
+   repaired: dropping characters silently is how two different titles ended
+   up in one file. *)
+type page_name_error =
+  | Empty_page_name
+  | Bad_page_characters
+  | Dash_at_edge
+  | Reserved_page_name
 
-  if String.equal title "" then missing_required ~tool_name ~start_time "title"
-  else if String.equal content "" then missing_required ~tool_name ~start_time "content"
-  else if String.equal (String.trim ctx.agent_name) ""
-  then
-    (* The reader requires [author]; a page this handler writes must read
-       back through it, so a caller with no name is refused here rather than
-       leaving a header the wiki then reports as unreadable. *)
-    workflow_err ~tool_name ~start_time "the caller has no agent name to write as author"
-  else begin
-    (* The schema requires [source]. A missing or unknown value is refused,
-       never filled in: the frontmatter records what kind of work the writer
-       said the page came from, and a default would record a claim
-       nobody made. *)
-    match Json_util.get_string args "source" with
-    | None -> missing_required ~tool_name ~start_time "source"
-    | Some raw ->
-    match source_of_string_opt raw with
-    | None ->
-      workflow_err ~tool_name ~start_time
-       (sprintf "Invalid source. Must be one of: %s"
-         (String.concat ", " valid_source_strings))
-    | Some source -> begin
-      (* Local, not UTC, and deliberately left that way: [date_str] lands in the
-         page's filename, so switching it would rename where pages are
-         written. Everything derived from this one [tm] is spelled here rather
-         than at each use — [created] and [updated] used to carry the same
-         sprintf twice on adjacent lines. *)
-      let date = Time_compat.now () |> Unix.localtime in
-      let date_str = sprintf "%04d%02d%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday in
-      let day = sprintf "%04d-%02d-%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday in
-      let topic_slug = String.lowercase_ascii title
-        |> String.map (fun c -> if Char.equal c ' ' then '-' else c)
-        |> Stdlib.String.to_seq |> Stdlib.Seq.filter (fun c ->
-            (match c with 'a'..'z' | '0'..'9' | '-' -> true | _ -> false))
-        |> String.of_seq in
-      let filename = sprintf "%s-%s.md" topic_slug date_str in
-      let filepath = Filename.concat (wiki_root ~base_path:ctx.base_path) filename in
+(* [index] and [log] are the wiki's own files. *)
+let reserved_page_names = [ "index"; "log" ]
 
-      (* Create frontmatter *)
-      let tags_str = sprintf "[%s]" (String.concat ", " tags) in
-      let full_content = sprintf {|---
+let validate_page_name raw =
+  let allowed c =
+    match c with
+    | 'a' .. 'z' | '0' .. '9' | '-' -> true
+    | _ -> false
+  in
+  if String.equal raw ""
+  then Error Empty_page_name
+  else if not (Stdlib.String.for_all allowed raw)
+  then Error Bad_page_characters
+  else if Char.equal raw.[0] '-' || Char.equal raw.[String.length raw - 1] '-'
+  then Error Dash_at_edge
+  else if List.exists (String.equal raw) reserved_page_names
+  then Error Reserved_page_name
+  else Ok raw
+
+(* The name is quoted as written: [%S] would escape a non-ASCII name into
+   decimal byte codes the writer cannot recognise. *)
+let page_name_error_to_string raw = function
+  | Empty_page_name -> "page is required"
+  | Bad_page_characters ->
+    sprintf
+      "page name \"%s\" may only contain lowercase a-z, digits and '-'. Put other \
+       scripts in the title."
+      raw
+  | Dash_at_edge -> sprintf "page name \"%s\" may not start or end with '-'" raw
+  | Reserved_page_name -> sprintf "page name \"%s\" is reserved by the wiki" raw
+
+let page_path ~base_path page =
+  Filename.concat (wiki_root ~base_path) (page ^ ".md")
+
+let one_line value = not (String.contains value '\n' || String.contains value '\r')
+
+let today () =
+  (* Local, not UTC: the header dates are read by the people and Keepers on
+     this machine. *)
+  let date = Time_compat.now () |> Unix.localtime in
+  sprintf "%04d-%02d-%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday
+
+let render_page ~title ~summary ~source ~author ~created ~updated ~revision ~tags ~body =
+  let body_end = if String.ends_with ~suffix:"\n" body then "" else "\n" in
+  sprintf {|---
 title: %s
+summary: %s
 source: %s
 author: %s
 created: %s
 updated: %s
-tags: %s
+revision: %d
+tags: [%s]
 ---
 
-%s
-|} title (source_to_string source) ctx.agent_name
-        day
-        day
-        tags_str content in
+%s%s|}
+    title summary (source_to_string source) author created updated revision
+    (String.concat ", " tags) body body_end
 
-      (* Write file *)
-      try
-        Fs_compat.mkdir_p (Filename.dirname filepath);
-        Out_channel.with_open_text filepath (fun oc -> Out_channel.output_string oc full_content);
-        text_ok ~tool_name ~start_time
-          (sprintf "Page added to the wiki: %s" filepath)
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-          runtime_err ~tool_name ~start_time
-            (sprintf "Write error: %s"
-               (Tool_error.to_string (Tool_error.of_exn exn)))
+(* The body as the writer sent it: everything after the header, without the
+   blank line [render_page] puts between the two. *)
+let page_body content =
+  let body = (Frontmatter.parse content).Frontmatter.body in
+  if String.starts_with ~prefix:"\n" body
+  then String.sub body 1 (String.length body - 1)
+  else body
+
+(* One lock for the whole wiki directory. Create and update check the file and
+   then write it; without the lock two writers both pass the check. The lock
+   also holds between processes, for a second server on the same base path. *)
+let with_wiki_lock ~tool_name ~start_time ctx f : Tool_result.result =
+  let root = wiki_root ~base_path:ctx.base_path in
+  match Fs_compat.mkdir_p root with
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception exn ->
+    runtime_err ~tool_name ~start_time
+      (sprintf "Wiki directory error: %s" (Tool_error.to_string (Tool_error.of_exn exn)))
+  | () ->
+    (match
+       File_lock_eio.with_durable_lock ~lock_path:(Filename.concat root ".wiki.lock") f
+     with
+     | Ok result -> result
+     | Error error ->
+       runtime_err ~tool_name ~start_time
+         (sprintf "Wiki lock error: %s" (File_lock_eio.durable_lock_error_to_string error)))
+
+let write_page ~tool_name ~start_time path content ~written : Tool_result.result =
+  match Fs_compat.save_file_atomic_strict_staged path content with
+  | Ok () -> text_ok ~tool_name ~start_time written
+  | Error failure ->
+    runtime_err ~tool_name ~start_time
+      (sprintf "Write error: %s" (Fs_compat.atomic_replace_failure_to_string failure))
+
+(* A field the schema does not offer but a caller sent anyway. *)
+let has_field args name =
+  match args with
+  | `Assoc fields -> List.mem_assoc name fields
+  | _ -> false
+
+(* Create page *)
+let handle_create ~tool_name ~start_time ctx args : Tool_result.result =
+  let text name = Json_util.get_string args name |> Option.value ~default:"" in
+  let raw_page = text "page" in
+  let title = text "title" in
+  let summary = text "summary" in
+  let body = text "body" in
+  let tags = Json_util.get_string_list args "tags" in
+  match validate_page_name raw_page with
+  | Error error ->
+    workflow_err ~tool_name ~start_time (page_name_error_to_string raw_page error)
+  | Ok page ->
+    if String.equal title "" then missing_required ~tool_name ~start_time "title"
+    else if not (one_line title)
+    then workflow_err ~tool_name ~start_time "title must be one line"
+    else if String.equal summary "" then missing_required ~tool_name ~start_time "summary"
+    else if not (one_line summary)
+    then workflow_err ~tool_name ~start_time "summary must be one line"
+    else if String.equal body "" then missing_required ~tool_name ~start_time "body"
+    else if String.equal (String.trim ctx.agent_name) ""
+    then
+      (* The reader requires [author]; a page this handler writes must read
+         back through it, so a caller with no name is refused here rather than
+         leaving a header the wiki then reports as unreadable. *)
+      workflow_err ~tool_name ~start_time "the caller has no agent name to write as author"
+    else begin
+      (* The schema requires [source]. A missing or unknown value is refused,
+         never filled in: the frontmatter records what kind of work the writer
+         said the page came from, and a default would record a claim
+         nobody made. *)
+      match Json_util.get_string args "source" with
+      | None -> missing_required ~tool_name ~start_time "source"
+      | Some raw ->
+      match source_of_string_opt raw with
+      | None ->
+        workflow_err ~tool_name ~start_time
+         (sprintf "Invalid source. Must be one of: %s"
+           (String.concat ", " valid_source_strings))
+      | Some source ->
+        with_wiki_lock ~tool_name ~start_time ctx (fun () ->
+          let path = page_path ~base_path:ctx.base_path page in
+          if Sys.file_exists path
+          then
+            workflow_err ~tool_name ~start_time
+              (sprintf
+                 "page \"%s\" already exists. Read it and call masc_wiki_update to \
+                  change it."
+                 page)
+          else begin
+            let day = today () in
+            let content =
+              render_page ~title ~summary ~source ~author:ctx.agent_name ~created:day
+                ~updated:day ~revision:1 ~tags ~body
+            in
+            write_page ~tool_name ~start_time path content
+              ~written:(sprintf "Created wiki page %s at revision 1: %s" page path)
+          end)
     end
-  end
+
+(* A refused update tells the writer where the page is now, so the writer can
+   merge into that body and send again without another read. *)
+let stale_revision ~tool_name ~start_time ~page ~base_revision ~current_revision ~body =
+  Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection ~start_time
+    ~data:
+      (`Assoc
+         [ "page", `String page
+         ; "base_revision", `Int base_revision
+         ; "current_revision", `Int current_revision
+         ; "body", `String body
+         ])
+    (sprintf
+       "page \"%s\" is at revision %d, not %d. Merge your change into the current \
+        body below and call again with base_revision %d.\n\n%s"
+       page current_revision base_revision current_revision body)
+
+(* Update page *)
+let handle_update ~tool_name ~start_time ctx args : Tool_result.result =
+  let raw_page = Json_util.get_string args "page" |> Option.value ~default:"" in
+  let body = Json_util.get_string args "body" |> Option.value ~default:"" in
+  match validate_page_name raw_page with
+  | Error error ->
+    workflow_err ~tool_name ~start_time (page_name_error_to_string raw_page error)
+  | Ok page ->
+    match Json_util.get_int args "base_revision" with
+    | None -> missing_required ~tool_name ~start_time "base_revision"
+    | Some base_revision ->
+    if String.equal body "" then missing_required ~tool_name ~start_time "body"
+    else if has_field args "source"
+    then
+      (* [source] says what kind of work the page first came from. *)
+      workflow_err ~tool_name ~start_time "source cannot change on update"
+    else begin
+      let new_title = Json_util.get_string args "title" in
+      let new_summary = Json_util.get_string args "summary" in
+      let one_line_field name = function
+        | None -> Ok ()
+        | Some "" -> Error (sprintf "%s may not be empty; omit it to keep the current one" name)
+        | Some value when not (one_line value) -> Error (sprintf "%s must be one line" name)
+        | Some _ -> Ok ()
+      in
+      match one_line_field "title" new_title, one_line_field "summary" new_summary with
+      | Error message, _ | Ok (), Error message ->
+        workflow_err ~tool_name ~start_time message
+      | Ok (), Ok () ->
+        with_wiki_lock ~tool_name ~start_time ctx (fun () ->
+          let path = page_path ~base_path:ctx.base_path page in
+          if not (Sys.file_exists path)
+          then
+            workflow_err ~tool_name ~start_time
+              (sprintf "No page named \"%s\". Create it with masc_wiki_create." page)
+          else
+            match In_channel.with_open_text path In_channel.input_all with
+            | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+            | exception exn ->
+              runtime_err ~tool_name ~start_time
+                (sprintf "Read error: %s" (Tool_error.to_string (Tool_error.of_exn exn)))
+            | content ->
+              (match parse_frontmatter content with
+               | Error error ->
+                 workflow_err ~tool_name ~start_time
+                   (sprintf
+                      "page \"%s\" cannot be updated: its header does not read (%s)"
+                      page
+                      (frontmatter_error_to_string error))
+               | Ok current when current.revision <> base_revision ->
+                 stale_revision ~tool_name ~start_time ~page ~base_revision
+                   ~current_revision:current.revision ~body:(page_body content)
+               | Ok current ->
+                 let revision = current.revision + 1 in
+                 let tags =
+                   if has_field args "tags"
+                   then Json_util.get_string_list args "tags"
+                   else current.tags
+                 in
+                 let content =
+                   render_page
+                     ~title:(Option.value new_title ~default:current.title)
+                     ~summary:(Option.value new_summary ~default:current.summary)
+                     ~source:current.source ~author:current.author
+                     ~created:current.created ~updated:(today ()) ~revision ~tags ~body
+                 in
+                 write_page ~tool_name ~start_time path content
+                   ~written:(sprintf "Updated wiki page %s to revision %d" page revision)))
+    end
 
 (* Search pages *)
 let handle_search ~tool_name ~start_time ctx args : Tool_result.result =
@@ -375,8 +572,10 @@ let dispatch ctx ~name ~args : Tool_result.result option =
     lift (handle_list ~tool_name:name ~start_time:start ctx args)
   | Some Tool_schemas_wiki.Read_page ->
     lift (handle_read ~tool_name:name ~start_time:start ctx args)
-  | Some Tool_schemas_wiki.Add_page ->
-    lift (handle_add ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_wiki.Create_page ->
+    lift (handle_create ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_wiki.Update_page ->
+    lift (handle_update ~tool_name:name ~start_time:start ctx args)
   | Some Tool_schemas_wiki.Search_pages ->
     lift (handle_search ~tool_name:name ~start_time:start ctx args)
 

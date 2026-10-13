@@ -3781,22 +3781,33 @@ status: reference
   [Server_dashboard_http_delete_actions](../../lib/server/server_dashboard_http_delete_actions.ml)
 
 **Wiki**
-: 이름 붙은 공유 Markdown 페이지 모음. 사람과 Keeper가 같이 본다. Keeper 한 명의 기억
+: 이름 붙은 공유 Markdown 페이지 모음. 사람과 Keeper가 같이 읽고 쓴다. Keeper 한 명의 기억
   (Memory OS, Librarian이 정리한다)과는 다른 것이다.
-  자동 수집 경로는 없고 Keeper에게는 검색·읽기 샤드만 있으므로, 설치에 페이지가
-  하나도 없는 상태도 정상이다. 알려진 페이지가 있을 때만 검색한다.
+  자동 수집 경로는 없다. 누가 만든 페이지만 있으므로 설치에 페이지가 하나도 없는 상태도
+  정상이다.
   페이지는 호출자가 해석한 workspace(`Workspace.config.base_path`) 아래
-  `<base_path>/docs/wiki`에 저장되고, 도구는 환경 변수를 읽지 않는다.
+  `<base_path>/docs/wiki/<page>.md`에 저장되고, 도구는 환경 변수를 읽지 않는다.
+  `page`는 쓰는 쪽이 정하는 이름이다. 소문자 `a-z`, 숫자, `-`만 쓰고 `index`와 `log`는
+  쓸 수 없다. 규칙에 안 맞는 이름은 고쳐 주지 않고 거절한다. 제목(`title`)에는 아무
+  글자나 쓸 수 있다.
   각 페이지는 YAML frontmatter
-  (`title`·`source`·`author`·`created`·`updated`·`tags`)를 갖는다. 한 층의 평평한
-  디렉터리라 페이지는 들어 있거나 없거나 둘 중 하나다. `source`는 닫힌 합타입
-  (`Direct_experience`·`Research`·`Experiment`·`Observation`)이고, 생성자를 더하면
-  `source_to_string`이 컴파일 오류로 강제된다. 쓰기에서 `source`가 없으면 `title`
-  없을 때처럼 거부하고, 읽기에서 알 수 없는 `source`는 파일명과 이유로 표시한다.
-  네 도구가 이걸 쓴다 —
-  `masc_wiki_list`·`masc_wiki_read`·`masc_wiki_add`·`masc_wiki_search`.
-  Keeper 쪽에는 read-only인 `keeper_wiki_search`·`keeper_wiki_read` 샤드
-  투영만 있다.
+  (`title`·`summary`·`source`·`author`·`created`·`updated`·`revision`·`tags`)를 갖는다.
+  한 층의 평평한 디렉터리라 페이지는 들어 있거나 없거나 둘 중 하나다. `source`는 닫힌
+  합타입(`Direct_experience`·`Research`·`Experiment`·`Observation`)이고, 생성자를 더하면
+  `source_to_string`이 컴파일 오류로 강제된다. 만들 때 `source`가 없으면 거부하고,
+  고칠 때는 바꿀 수 없다. 읽기에서 알 수 없는 `source`는 파일명과 이유로 표시한다.
+  다섯 도구가 이걸 쓴다 —
+  `masc_wiki_list`·`masc_wiki_read`·`masc_wiki_create`·`masc_wiki_update`·`masc_wiki_search`.
+  Keeper는 `masc_wiki_list`·`masc_wiki_create`·`masc_wiki_update`를 그 이름 그대로 부르고,
+  읽기와 검색은 `keeper_wiki_read`·`keeper_wiki_search`라는 이름으로 부른다.
+  → [Tool_wiki](../../lib/tool_wiki.mli)
+
+**Page revision**
+: Wiki 페이지가 몇 번째 판인지 적은 수(frontmatter의 `revision`). 만들 때 1이고 고칠 때마다
+  1씩 는다. `masc_wiki_update`는 쓰는 쪽이 읽었던 값을 `base_revision`으로 받는다. 그 사이
+  페이지가 바뀌었으면 고치기를 거절하고, 거절 응답에 지금 revision과 본문을 싣는다. 쓰는
+  쪽은 그 본문에 자기 변경을 합쳐서 받은 revision으로 다시 보낸다. 서버는 본문을 합치지
+  않는다. `Backlog revision`·`content_revision`과는 다른 값이다.
   → [Tool_wiki](../../lib/tool_wiki.mli)
 
 **Librarian**

@@ -209,16 +209,16 @@ let test_schedule_refusal_kinds_named_in_descriptions_decode () =
    accepting any matching enum elsewhere — a constructor added to either one
    without editing its file would otherwise ship a schema that never offers the
    value, and the tool would reject what its own documentation advertised. *)
-(* masc_wiki_add's [source] vocabulary. [Masc.Tool_wiki] owns it,
+(* masc_wiki_create's [source] vocabulary. [Masc.Tool_wiki] owns it,
    deriving the strings from its variant; the schema wrote the same four by
-   hand and now writes them in config/tools/masc_wiki_add.toml, where
+   hand and now writes them in config/tools/masc_wiki_create.toml, where
    nothing can read an OCaml value. Nothing compared the two until this: a
    fifth source added to the variant would have shipped a schema that never
    offered it. *)
 let test_wiki_source_mirrors_its_owner () =
   check
     (list string)
-    "masc_wiki_add source matches Tool_wiki.valid_source_strings"
+    "masc_wiki_create source matches Tool_wiki.valid_source_strings"
     (List.sort_uniq String.compare Masc.Tool_wiki.valid_source_strings)
     (advertised_values_for_schemas Tool_schemas_wiki.schemas ~property:"source")
 ;;

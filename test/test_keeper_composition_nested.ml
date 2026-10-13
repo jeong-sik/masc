@@ -295,12 +295,8 @@ description: Inspect independent lane profiles with exact fixed bindings.
 ```toml composition
 [[compositions]]
 name = "nested-read"
+execution = "inline"
 branch_failure_policy = "continue_independent"
-[[compositions.params]]
-name = "query"
-type = "string"
-enum = ["docker", "host"]
-description = "Exact fixture query."
 [[compositions.nodes]]
 id = "lane-a"
 tool = "keeper_lane_status"
@@ -366,8 +362,11 @@ let test_public_nested_prepare_run_records_only_admitted_children ~reject_child 
     let structured = Yojson.Safe.Util.member "structured_content" json in
     if structured = `Null then fail ("public result lacks structured content: " ^ content);
     success, content, structured in
-  let scopes = [ nested "left" reference; nested "right" reference ]
-      @ if reject_child then [ nested "reject" reference; nested ~after:[ "reject" ] "blocked" reference ] else [] in
+  let scopes = [ nested ~args:(`Assoc []) "left" reference; nested ~args:(`Assoc []) "right" reference ]
+      @ if reject_child then
+          [ nested ~args:(`Assoc []) "reject" reference
+          ; nested ~args:(`Assoc []) ~after:[ "reject" ] "blocked" reference ]
+        else [] in
   let recipe = request ~exports:[ exported "answer" "left" "/profile" ] scopes in
   let input = match recipe with `Assoc fields -> `Assoc (("execution", `String "inline") :: fields)
     | _ -> fail "recipe object" in

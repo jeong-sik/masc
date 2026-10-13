@@ -47,6 +47,7 @@ type operation_interrupt_result =
       { running_operation_id : Operation_id.t option }
   | Operation_settling
   | Operation_maintenance_running
+  | Operation_slot_held_by_autonomous_turn
   | Operation_interrupt_failed of string
 
 type pause_result = Interrupt_result of operation_interrupt_result | Pending_admission_paused
@@ -295,6 +296,7 @@ type interrupt_resolution =
   | Interrupt_now of (unit -> unit)
   | Interrupt_settling
   | Interrupt_maintenance_running
+  | Interrupt_held_by_autonomous_turn
   | Interrupt_not_current
 
 (* The metadata snapshot store and the chat operation store fail on their own
@@ -1398,20 +1400,31 @@ let start
 
              A maintenance run holds the slot for an internal transaction
              whose caller expects a value or a typed error, not an operator
-             cancellation; a chat stop names it and cancels nothing. *)
-          let resolve_held holds =
+             cancellation; a chat stop names it and cancels nothing.
+
+             A chat operation id names the child of the [Chat_operation] lane
+             that claimed it. The durable running id can outlive that child (a
+             refused settle leaves the row Running after the slot is released),
+             and an autonomous cycle may then hold the slot. [~autonomous_ok]
+             is false for an operation id, so that cycle is reported as
+             [Interrupt_held_by_autonomous_turn] and is not cancelled. An
+             observed-turn token names the slot's own occupant, so any
+             non-maintenance lane may be its target. *)
+          let resolve_held ~autonomous_ok holds =
             match Atomic.get t.turn_in_flight with
             | None -> Interrupt_not_current
             | Some _ when not holds -> Interrupt_not_current
             | Some { lane = Maintenance; _ } -> Interrupt_maintenance_running
-            | Some _ ->
+            | Some { lane = Autonomous; _ } when not autonomous_ok ->
+              Interrupt_held_by_autonomous_turn
+            | Some { lane = Autonomous | Chat_operation; _ } ->
               (match Atomic.get t.child_cancel with
                | Some cancel -> Interrupt_now cancel.interrupt
                | None -> Interrupt_settling)
           in
           match target with
           | Observed_turn { interrupt_token } ->
-            Ok (resolve_held
+            Ok (resolve_held ~autonomous_ok:true
               (match Atomic.get t.turn_in_flight with
                | Some turn -> Keeper_interrupt_token.equal turn.interrupt_token interrupt_token
                | None -> false))
@@ -1427,7 +1440,7 @@ let start
                let expected = match operation.Chat_operation.batch_membership with
                  | Some member -> member.execution_id
                  | None -> operation.operation_id in
-               Ok (resolve_held
+               Ok (resolve_held ~autonomous_ok:false
                  (match (Atomic.get t.operation_projection).running_operation_id with
                   | Some running -> Operation_id.equal running expected
                   | None -> false)))
@@ -1436,7 +1449,8 @@ let start
           let resolved = match target with None -> Ok Interrupt_not_current | Some target -> exact_interrupt target in
           match resolved with
           | Error error -> false, Some (error_to_string error)
-          | Ok (Interrupt_not_current | Interrupt_settling | Interrupt_maintenance_running) -> false, None
+          | Ok (Interrupt_not_current | Interrupt_settling | Interrupt_maintenance_running
+                | Interrupt_held_by_autonomous_turn) -> false, None
           | Ok (Interrupt_now interrupt) ->
             (try interrupt (); true, None with
              | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1639,7 +1653,8 @@ let start
               |> Result.map (function
                 | None | Some {Chat_operation.state = Queued; _} -> true
                 | Some {Chat_operation.state = (Running _ | Succeeded _ | Failed _ | Cancelled _); _} -> false)
-            | (Interrupt_not_current | Interrupt_settling | Interrupt_maintenance_running | Interrupt_now _),
+            | (Interrupt_not_current | Interrupt_settling | Interrupt_maintenance_running
+              | Interrupt_held_by_autonomous_turn | Interrupt_now _),
               (Observed_turn _ | Direct_operation _), (Some _ | None) -> Ok false in
             Ok (interrupt, pending) in
           (match authorization with
@@ -1654,6 +1669,8 @@ let start
                | Interrupt_not_current -> Pending_admission_paused
                | Interrupt_settling -> Interrupt_result Operation_settling
                | Interrupt_maintenance_running -> Interrupt_result Operation_maintenance_running
+               | Interrupt_held_by_autonomous_turn ->
+                 Interrupt_result Operation_slot_held_by_autonomous_turn
                | Interrupt_now interrupt -> Interrupt_result
                    (try interrupt (); Operation_interrupt_signalled with
                     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1689,6 +1706,7 @@ let start
                 {running_operation_id = (Atomic.get t.operation_projection).running_operation_id})
             | Ok Interrupt_settling -> Ok Operation_settling
             | Ok Interrupt_maintenance_running -> Ok Operation_maintenance_running
+            | Ok Interrupt_held_by_autonomous_turn -> Ok Operation_slot_held_by_autonomous_turn
             | Ok (Interrupt_now interrupt) ->
               Ok (try interrupt (); Operation_interrupt_signalled with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn

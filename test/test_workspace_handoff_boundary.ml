@@ -262,6 +262,18 @@ let render_marks_an_unattributed_note () =
   Alcotest.(check bool) "absence of an author is stated" true (contains "unattributed")
 ;;
 
+let render_keeps_next_step_without_summary () =
+  let note = { (handoff ~summary:"" ()) with
+    next_step = Some "capture the corrected screen";
+    evidence_refs = ["artifact:accepted-source"] } in
+  let held = task ~handoff_context:note ~status:(in_progress "keeper-b") "task-1" in
+  let rendered = Masc.Keeper_unified_prompt.format_current_task held in
+  List.iter (fun value ->
+    Alcotest.(check bool) ("handoff field reaches the next owner: " ^ value) true
+      (String_util.contains_substring rendered value))
+    ["capture the corrected screen"; "artifact:accepted-source"; "keeper-a"]
+;;
+
 let () =
   Alcotest.run
     "workspace_handoff_boundary"
@@ -296,6 +308,10 @@ let () =
             "render carries author, time and refs"
             `Quick
             render_carries_attribution_and_refs
+        ; Alcotest.test_case
+            "next step and evidence survive an empty summary"
+            `Quick
+            render_keeps_next_step_without_summary
         ; Alcotest.test_case
             "an unattributed note says so"
             `Quick

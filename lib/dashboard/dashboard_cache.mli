@@ -81,7 +81,12 @@ val peek_payload : string -> cached_payload option
     entry. JSON-only entries return [None] until a payload reader prepares them.
     This never serializes, waits for preparation, or submits executor work. *)
 
-exception Compute_timeout of string * bool
+(** Whose window closed when a compute timed out. *)
+type compute_timeout_role =
+  | Compute_owner (** the caller's own compute exceeded its window *)
+  | Compute_waiter (** the caller was waiting on another fiber's compute *)
+
+exception Compute_timeout of { key : string; role : compute_timeout_role }
 (** Raised internally when the compute function exceeds [timeout_sec].
     Callers of [get_or_compute_with_timeout] do not need to handle this —
     it is caught and converted to a timeout-error JSON response. *)

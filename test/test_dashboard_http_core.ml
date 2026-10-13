@@ -3961,7 +3961,8 @@ let test_execution_parameterized_timeout_keeps_request_metadata () =
   for _attempt = 1 to 3 do
     let timeout = Dashboard_cache.get_or_compute_with_timeout key
         ~ttl:120.0 ~clock ~timeout_sec:0.01
-        (fun () -> raise (Dashboard_cache.Compute_timeout (key, false))) in
+        (fun () ->
+          raise (Dashboard_cache.Compute_timeout { key; role = Dashboard_cache.Compute_owner })) in
     check bool "timeout does not publish a successful payload" true
       (Dashboard_cache.is_timeout_envelope timeout)
   done;

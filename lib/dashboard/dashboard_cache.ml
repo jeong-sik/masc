@@ -285,7 +285,13 @@ let stale_factor = 3.0
     normal stale_grace before retrying.  #5402 *)
 let bg_revalidate_backoff_factor = 2.0
 
-exception Compute_timeout of string * bool
+(* Whose window closed: the fiber computing the value, or one waiting on it.
+   The envelope's kind is read from this, so it is never inferred later. *)
+type compute_timeout_role =
+  | Compute_owner
+  | Compute_waiter
+
+exception Compute_timeout of { key : string; role : compute_timeout_role }
 
 let is_compute_timeout exn =
   match exn with
@@ -313,9 +319,7 @@ let should_restore_stale_after_failure exn =
    and giving it its own HTTP status. *)
 let timeout_error_code = "computation_timeout"
 
-(* Which wait ran out. It used to be a label string beside a [waiting] flag;
-   the message matched the label and then the flag, so a label could be paired
-   with a flag it never occurs with. *)
+(* Which wait ran out. *)
 type timeout_kind =
   | Timeout_owner (* the caller's own compute exceeded its window *)
   | Timeout_waiter (* the caller was waiting on another fiber's compute *)
@@ -368,10 +372,9 @@ let () =
   Http_server_eio.Response.register_timeout_envelope_recognizer
     is_timeout_envelope
 
-(* [Compute_timeout] carries whether the caller was waiting on another
-   fiber's compute. *)
-let timeout_kind_of_compute_timeout ~waiting =
-  if waiting then Timeout_waiter else Timeout_owner
+let timeout_kind_of_role = function
+  | Compute_owner -> Timeout_owner
+  | Compute_waiter -> Timeout_waiter
 
 (** Maximum seconds a waiter will poll for a [Computing] slot before evicting
     it and recomputing.
@@ -513,7 +516,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
       (* PR-0.2.A: cache hit observation (no logic change). *)
       inc_cache_hit ();
       entry
-    | `Timed_out -> raise (Compute_timeout (key, true))
+    | `Timed_out -> raise (Compute_timeout { key; role = Compute_waiter })
     | `Wait token ->
       (* Per-fiber ±20% jitter on the poll interval. Concurrent waiters
          parked on the same in-flight cache key (e.g. several keepers
@@ -883,7 +886,7 @@ let compute_under_timeout ~clock ~timeout_sec ~key f =
   | Ok value -> value
   | Error `Timeout ->
     Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
-    raise (Compute_timeout (key, false))
+    raise (Compute_timeout { key; role = Compute_owner })
 ;;
 
 let get_or_compute_value_with_timeout ~preparation
@@ -905,11 +908,11 @@ let get_or_compute_value_with_timeout ~preparation
       clear_timeout_circuit key;
       payload_of_entry entry
     with
-    | Compute_timeout (key, waiting) ->
+    | Compute_timeout { key; role } ->
         record_timeout_circuit key;
         Prepared (payload_of_json ~origin:Timeout
           (timeout_envelope_json
-             ~kind:(timeout_kind_of_compute_timeout ~waiting) ~key ~timeout_sec))
+             ~kind:(timeout_kind_of_role role) ~key ~timeout_sec))
 
 let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
     key ~ttl ~clock ~timeout_sec compute =
@@ -923,11 +926,11 @@ let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
        | Eio_guard.Eio_fiber ->
            try compute_under_timeout ~clock ~timeout_sec ~key
              (fun () -> force_cached_payload value)
-           with Compute_timeout (key, waiting) ->
+           with Compute_timeout { key; role } ->
              record_timeout_circuit key;
              payload_of_json ~origin:Timeout
                (timeout_envelope_json
-                  ~kind:(timeout_kind_of_compute_timeout ~waiting) ~key ~timeout_sec))
+                  ~kind:(timeout_kind_of_role role) ~key ~timeout_sec))
 
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
   get_or_compute_value_with_timeout ~preparation:Cache_json

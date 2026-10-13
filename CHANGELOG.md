@@ -104,20 +104,20 @@
 - Experimental: Read the JSONL day-file retention window from runtime.toml `[maintenance].jsonl_retention_days` when `MASC_JSONL_RETENTION_DAYS` is unset, so operators can set retention per workspace; the startup prune log names the window source (#42625).
 - Experimental: Allow Lane Addons to use an Apple `container` microVM with verified image identity, isolated networking, read-only root and owned persistent state; keep Docker as the default for existing Lane Addons. (#42764)
 - Experimental: Retain the runtime for recovery and refuse runtime changes that would silently replace an installation's persistent state. (#42764)
-- Experimental: Board post attachments accept the kinds `file`, `audio`, `score` and `midi` and an optional `name`; the dashboard reads them and offers a stored one as a download (#42766).
-- Experimental: `POST /api/v1/artifacts` stores an uploaded file of up to 32 MiB in the artifact store and returns its sha256 and size (#42767).
-- Experimental: The TUI board read pane lists a post's attachments by kind, name and size (#42769).
-- Experimental: TUI board compose attaches local files with Ctrl-A and uploads them when the post is sent; a path that is not a regular file, or a file over the artifact store's 32 MiB limit, is refused before it is read (#42775).
-- Experimental: The TUI highlights `alphatex` code blocks (#42777).
-- Experimental: The TUI draws an `alphatex` code block as guitar tablature, breaking at bar lines to fit the pane; a score it cannot draw shows its source with the reason (#42779).
+- Experimental: Board post attachments accept the kinds `file`, `audio`, `score` and `midi` and an optional `name`; the dashboard reads them and offers a stored one as a download No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42766).
+- Experimental: `POST /api/v1/artifacts` stores an uploaded file of up to 32 MiB in the artifact store and returns its sha256 and size No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42767).
+- Experimental: The TUI board read pane lists a post's attachments by kind, name and size No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42769).
+- Experimental: TUI board compose attaches local files with Ctrl-A and uploads them when the post is sent; a path that is not a regular file, or a file over the artifact store's 32 MiB limit, is refused before it is read No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42775).
+- Experimental: The TUI highlights `alphatex` code blocks No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42777).
+- Experimental: The TUI draws an `alphatex` code block as guitar tablature, breaking at bar lines to fit the pane; a score it cannot draw shows its source with the reason No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42779).
 - Experimental: `/queue clear` in the Keeper chat cancels, in one command, the waiting messages this TUI is tracking for the Keeper on screen: it drops unsent ones, takes back one handed over for sending but not yet posted, and asks the server to cancel each one it holds in its queue. See `docs/guides/tui-chat-queue.md` (#42780).
 - Experimental: `resources/list` carries one `masc://wiki/<topic>` entry per wiki page, titled and described by the page's own title and summary, and `masc://wiki/log` once the wiki has a log, so a client that only lists resources, the TUI Resources screen among them, can open a page (#42851).
 - Experimental: The page listing carries only files whose name is a valid page topic: a file like notes.json.md, whose URI would read back as a different page or as nothing, stays in the masc://wiki index with its reason instead of becoming a dead listing row (#42851).
 - Experimental: Usage: in the TUI, open the System / Resources screen and select a `masc://wiki/<topic>` row to read that page, or `masc://wiki/log` for the append-only log of page creations and updates. (#42851).
-- Experimental: `AGENT_CORE_ANTHROPIC_DROP_BLOCK=false` stops adaptive Sonnet 5.5 and Haiku 5.5 completions from sending `thinking.block_binding.prefix_mismatch_behavior = "drop_block"`. It is an experiment switch for measuring the output-token cost of `drop_block` (RFC-AC-041 Q15); unset keeps the current behavior (#42852).
-- Experimental: The TUI alphaTex reader takes repeat signs: `\ro` opens a repeat, `\rc N` closes it with the count of total plays, and `\ae n …` names the ending passes a bar plays on (#42858).
-- Experimental: The ending list also reads alphaTab own parenthesized form, \ae (1 2 3), which is the form the writer emits, so a shared tab round-trips instead of failing the reader (#42858).
-- Experimental: The TUI guitar tab draws repeat signs: a bar an `\ro` opened starts past `|:`, one an `\rc N` closed ends in `:|xN` with the count of total plays, and `\ae` numbers ride the left barline (#42859).
+- Experimental: `AGENT_CORE_ANTHROPIC_DROP_BLOCK=false` stops adaptive Sonnet 5.5 and Haiku 5.5 completions from sending `thinking.block_binding.prefix_mismatch_behavior = "drop_block"`. It is an experiment switch for measuring the output-token cost of `drop_block` (RFC-AC-041 Q15); unset keeps the current behavior Whether that default stays is not decided yet; its effect on output tokens has not been measured in MASC (#42713, #42852).
+- Experimental: The TUI alphaTex reader takes repeat signs: `\ro` opens a repeat, `\rc N` closes it with the count of total plays, and `\ae n …` names the ending passes a bar plays on No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42858).
+- Experimental: The ending list also reads alphaTab own parenthesized form, \ae (1 2 3), which is the form the writer emits, so a shared tab round-trips instead of failing the reader No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42858).
+- Experimental: The TUI guitar tab draws repeat signs: a bar an `\ro` opened starts past `|:`, one an `\rc N` closed ends in `:|xN` with the count of total plays, and `\ae` numbers ride the left barline No guide yet (none found in docs/guides, TUI-GUIDE.md or KEEPER-USER-MANUAL.md) (#42859).
 
 ### Changed
 
@@ -184,7 +184,7 @@
   stay. A paused keeper keeps its worktrees.
   Keeper commands that run `git worktree remove <path>` now have that path
   judged like `git worktree add` (#42619).
-- Preserve transmitted context for signed Anthropic responses across tool rounds and checkpoint replay without reabsorbing injected context as new memory evidence. Unsigned and other-provider responses retain request-only context behavior. Adaptive Sonnet/Haiku 5.5 requests now report and recover from invalidated thinking prefixes, including streaming and exact-output dispatch Whether this default stays is not decided yet; its effect on output tokens has not been measured in MASC (#42713).
+- Preserve transmitted context for signed Anthropic responses across tool rounds and checkpoint replay without reabsorbing injected context as new memory evidence. Unsigned and other-provider responses retain request-only context behavior. Adaptive Sonnet/Haiku 5.5 requests now report and recover from invalidated thinking prefixes, including streaming and exact-output dispatch (#42713).
 - Preserve reasoning-source and other message metadata when Keeper finalization updates visible response text, so checkpoint restore can replay reasoning under its original provider contract (#42716).
 - Exclude injected runtime context from Keeper memory history searches across checkpoints and disk History, preserving ordinary User-role messages and reporting malformed context provenance (#42718).
 - Keep malformed or duplicated runtime-context provenance out of Librarian conversation and absorption evidence, preserving positions and ordinary untagged user text (#42720).

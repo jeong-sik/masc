@@ -106,6 +106,9 @@ val keeper_chat_history_page_json :
     so [GET /chat/history] already carried every one that exists; repeating them
     per page would duplicate rows the caller holds.
 
+    Rows carry no [stream_contract]: the only client is the TUI, which never
+    reads it (#42200). The transcript route keeps it for the dashboard.
+
     [next_before] is the cursor for the following page — the oldest [ts] among
     the returned rows, or [`Null] for an empty page. A caller must stop on a
     null cursor rather than resend the previous one. *)

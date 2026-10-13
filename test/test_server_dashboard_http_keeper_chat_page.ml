@@ -230,6 +230,26 @@ let test_autonomous_turns_are_not_repeated_per_page () =
       rows)
 ;;
 
+let test_page_rows_carry_no_stream_contract () =
+  (* The page route's only client is the TUI, which never reads
+     [stream_contract]; the object is about a quarter of the page's bytes,
+     so the route leaves it out (#42200). The transcript route keeps it for
+     the dashboard. *)
+  with_lane "chat-page-slim" (numbered ~total:5) (fun config name ->
+    let body = Keeper_api.keeper_chat_history_page_json config name ~before:None in
+    let rows = messages_of body in
+    Alcotest.(check int) "five rows in the slim window" 5 (List.length rows);
+    List.iter
+      (fun r ->
+        Alcotest.(check bool)
+          "no stream_contract on a paged row"
+          false
+          (match r with
+           | `Assoc fields -> List.mem_assoc "stream_contract" fields
+           | _ -> false))
+      rows)
+;;
+
 let () =
   Alcotest.run
     "server_dashboard_http_keeper_chat_page"
@@ -255,6 +275,10 @@ let () =
             "autonomous turns are not repeated per page"
             `Quick
             test_autonomous_turns_are_not_repeated_per_page
+        ; Alcotest.test_case
+            "page rows carry no stream_contract"
+            `Quick
+            test_page_rows_carry_no_stream_contract
         ] )
     ]
 ;;

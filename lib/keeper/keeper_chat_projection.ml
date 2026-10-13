@@ -160,7 +160,8 @@ let chat_stream_contract_json ~trace_lookup_available ~trace_block
                 @ stream_delivery_receipt_field "no_delivery_receipt"
                 @ base_fields)))
 
-let message_to_json ~trace_lookup_available ~trace_block (m : chat_message) : Yojson.Safe.t =
+let message_to_json ?(omit_stream_contract = false) ~trace_lookup_available
+    ~trace_block (m : chat_message) : Yojson.Safe.t =
   `Assoc
     ([ ("id", `String m.id);
        ("role", `String (Role.to_label m.role));
@@ -199,11 +200,12 @@ let message_to_json ~trace_lookup_available ~trace_block (m : chat_message) : Yo
               ) atts in
               [("attachments", `List att_json)])
        @ audio_fields m.audio
-       @ [ ("stream_contract",
+       @ (if omit_stream_contract then [] else
+          [ ("stream_contract",
              chat_stream_contract_json
                ~trace_lookup_available
                ~trace_block m )
-         ]
+          ])
        @ blocks_fields_of_list (blocks_with_trace_block ~trace_block m)
        @ Json_util.string_field_if_present "turn_ref"
            (Option.map Ids.Turn_ref.to_string m.turn_ref)

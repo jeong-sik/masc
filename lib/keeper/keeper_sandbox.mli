@@ -166,9 +166,10 @@ val sandbox_root_rel_of_meta :
 (** [keeper_visible_root_abs t] is the absolute path the keeper LLM
     should treat as its working root.  For Docker keepers this is the
     in-container path ({!container_root}); for a keeper whose tree the
-    endpoint owns (microvm, remote_ssh) this is {!host_root_abs}.  Surfacing a host-absolute workspace path to a
-    Docker keeper makes the LLM emit host paths inside the container,
-    which fails because that path does not exist there (#10650). *)
+    endpoint owns (microvm, remote_ssh) this is {!host_root_abs}.
+    Surfacing a host-absolute workspace path to a Docker keeper makes the
+    LLM emit host paths inside the container, which fails because that path
+    does not exist there (#10650). *)
 val keeper_visible_root_abs : t -> string
 
 (** [visible_path_of_host t p] projects a host path into the coordinate
@@ -178,8 +179,9 @@ val keeper_visible_root_abs : t -> string
     collapse to the sandbox root, or search [repos/] for a plausible
     segment — produces a directory the keeper is then told exists.
 
-    Local keepers share the host filesystem, so the projection is the
-    identity and cannot fail. Docker keepers live in a disjoint tree, so a
+    For a tree the endpoint owns, the visible spelling on this side is the
+    host bookkeeping path, so the projection is the identity and cannot
+    fail. Docker keepers live in a disjoint tree, so a
     path outside the sandbox root has no visible spelling and is an
     [Error]; callers must say what to do about that rather than receive a
     substitute.

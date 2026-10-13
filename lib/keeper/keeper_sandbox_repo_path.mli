@@ -22,6 +22,6 @@ val execution_location_json :
     or outside it ([outside_playground]). [relative_cwd] is relative to
     [playground_root] for playground scopes and [null] when the cwd is outside
     the playground. Docker host-only absolute paths are projected into the
-    mounted sandbox namespace or returned as [null]; Local paths retain their
-    host namespace identity. Relative argv paths resolve against the effective
+    mounted sandbox namespace or returned as [null]; paths of a tree the
+    endpoint owns retain their host namespace identity. Relative argv paths resolve against the effective
     cwd. *)

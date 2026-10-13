@@ -1,6 +1,6 @@
 ---
 name: prior-art
-description: "Looks one phrase up in your durable memory facts, the knowledge library and board posts in one call, before diagnosing or building something another Keeper or an earlier turn may already have met. Use it when a failure, a tool name or a piece of work is new to this turn. All three match the phrase as a case-insensitive substring, so pass a short fragment exactly as it appeared, such as an error code, a tool name or a file name, not a sentence or a guessed cause. Returns up to 5 memory facts, the titles of matching library documents, and up to 10 board posts, newest first, one line each; board comments are not searched. Read a document with keeper_library_read and a post with masc_board_post_get. No match in all three is an answer too: the problem is new here and worth recording. If one search fails, the call fails and names that action, and searches scheduled after it do not run."
+description: "Looks one phrase up in your durable memory facts, the wiki and board posts in one call, before diagnosing or building something another Keeper or an earlier turn may already have met. Use it when a failure, a tool name or a piece of work is new to this turn. All three match the phrase as a case-insensitive substring, so pass a short fragment exactly as it appeared, such as an error code, a tool name or a file name, not a sentence or a guessed cause. Returns up to 5 memory facts, the titles of matching wiki pages, and up to 10 board posts, newest first, one line each; board comments are not searched. Read a document with keeper_wiki_read and a post with masc_board_post_get. No match in all three is an answer too: the problem is new here and worth recording. If one search fails, the call fails and names that action, and searches scheduled after it do not run."
 ---
 
 # prior-art
@@ -15,12 +15,12 @@ Keeper 에게 보이는 설명은 아래 fence 의 `description` 과 params 설�
 | id | 도구 | 입력 | 도구 기본값과 다른 점 |
 |---|---|---|---|
 | `memory` | `keeper_memory_search` | `query`, `limit = 5`, `source = "current"` | 현재 Memory만 조회하는 기본값을 명시한다 |
-| `library` | `keeper_library_search` | `query` | 이 도구에는 개수 인자가 없다. 제목 한 줄씩만 돌려준다 |
+| `wiki` | `keeper_wiki_search` | `query` | 이 도구에는 개수 인자가 없다. 제목 한 줄씩만 돌려준다 |
 | `board` | `masc_board_search` | `query`, `limit = 10`, `compact = true` | 기본 `limit` 은 20 이다 |
 
 - 노드 입력에 개수와 모양을 적어 두는 이유: 입력을 비워 두면 도구 기본값이 그대로 나오고,
   기본값이 바뀌면 이 합성의 응답 크기도 말없이 바뀐다.
-- `keeper_memory_search` 는 descriptor 가 `Serial` 이라 따로 돈다. `keeper_library_search`
+- `keeper_memory_search` 는 descriptor 가 `Serial` 이라 따로 돈다. `keeper_wiki_search`
   와 `masc_board_search` 는 `Concurrent` 라 같은 batch 에서 함께 돈다. 한 batch 가 실패하면
   그 뒤 batch 는 돌지 않는다.
 - 세 도구 모두 대소문자를 가리지 않는 부분 문자열 일치로 찾는다. 긴 문장이나 짐작한 원인은
@@ -32,7 +32,7 @@ Keeper 에게 보이는 설명은 아래 fence 의 `description` 과 params 설�
 ```toml composition
 [[compositions]]
 name = "prior-art"
-description = "Looks one phrase up in your durable memory facts, the knowledge library and board posts in one call, before diagnosing or building something another Keeper or an earlier turn may already have met. Use it when a failure, a tool name or a piece of work is new to this turn. All three match the phrase as a case-insensitive substring, so pass a short fragment exactly as it appeared, such as an error code, a tool name or a file name, not a sentence or a guessed cause. Returns up to 5 memory facts, the titles of matching library documents, and up to 10 board posts, newest first, one line each; board comments are not searched. Read a document with keeper_library_read and a post with masc_board_post_get. No match in all three is an answer too: the problem is new here and worth recording. If one search fails, the call fails and names that action, and searches scheduled after it do not run."
+description = "Looks one phrase up in your durable memory facts, the wiki and board posts in one call, before diagnosing or building something another Keeper or an earlier turn may already have met. Use it when a failure, a tool name or a piece of work is new to this turn. All three match the phrase as a case-insensitive substring, so pass a short fragment exactly as it appeared, such as an error code, a tool name or a file name, not a sentence or a guessed cause. Returns up to 5 memory facts, the titles of matching wiki pages, and up to 10 board posts, newest first, one line each; board comments are not searched. Read a document with keeper_wiki_read and a post with masc_board_post_get. No match in all three is an answer too: the problem is new here and worth recording. If one search fails, the call fails and names that action, and searches scheduled after it do not run."
 execution = "inline"
 
 [[compositions.params]]
@@ -62,8 +62,8 @@ kind = "literal"
 value = "current"
 
 [[compositions.nodes]]
-id = "library"
-tool = "keeper_library_search"
+id = "wiki"
+tool = "keeper_wiki_search"
 [compositions.nodes.input]
 kind = "object"
 [[compositions.nodes.input.fields]]

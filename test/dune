@@ -569,8 +569,8 @@
   test_filesystem_shard_toml_parity
   test_operator_tool_toml_parity
   test_workspace_core_toml_parity
-  test_keeper_library_tool_toml_parity
-  test_library_tool_toml_parity
+  test_keeper_wiki_tool_toml_parity
+  test_wiki_tool_toml_parity
   test_execute_tool_toml_parity
   test_agent_timeline_tool_toml_parity
   test_agent_core_projection_toml_parity
@@ -928,8 +928,8 @@
   test_filesystem_shard_toml_parity
   test_operator_tool_toml_parity
   test_workspace_core_toml_parity
-  test_keeper_library_tool_toml_parity
-  test_library_tool_toml_parity
+  test_keeper_wiki_tool_toml_parity
+  test_wiki_tool_toml_parity
   test_execute_tool_toml_parity
   test_agent_timeline_tool_toml_parity
   test_agent_core_projection_toml_parity
@@ -1630,7 +1630,7 @@
   test_activity_graph
   test_tool_agent_timeline_build
   test_masc_log
-  test_library_resource_topic
+  test_wiki_resource_topic
   test_dashboard_snapshot
   test_server_runtime_startup_maintenance
   test_server_hibernation
@@ -1778,7 +1778,7 @@
   test_activity_graph
   test_tool_agent_timeline_build
   test_masc_log
-  test_library_resource_topic
+  test_wiki_resource_topic
   test_dashboard_snapshot
   test_server_runtime_startup_maintenance
   test_server_hibernation

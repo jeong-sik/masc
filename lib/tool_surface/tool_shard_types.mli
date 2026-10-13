@@ -36,7 +36,7 @@ val tool_execute_schema : Masc_domain.tool_schema
 val voice_tools : Masc_domain.tool_schema list
 (** Voice tool schemas. *)
 
-val library_tools : Masc_domain.tool_schema list
+val wiki_tools : Masc_domain.tool_schema list
 
 val max_rich_blocks : int
 (** Canonical maximum number of top-level Slack Block Kit blocks per message. *)

@@ -209,18 +209,18 @@ let test_schedule_refusal_kinds_named_in_descriptions_decode () =
    accepting any matching enum elsewhere — a constructor added to either one
    without editing its file would otherwise ship a schema that never offers the
    value, and the tool would reject what its own documentation advertised. *)
-(* masc_library_add's [source] vocabulary. [Masc.Tool_library] owns it,
+(* masc_wiki_add's [source] vocabulary. [Masc.Tool_wiki] owns it,
    deriving the strings from its variant; the schema wrote the same four by
-   hand and now writes them in config/tools/masc_library_add.toml, where
+   hand and now writes them in config/tools/masc_wiki_add.toml, where
    nothing can read an OCaml value. Nothing compared the two until this: a
    fifth source added to the variant would have shipped a schema that never
    offered it. *)
-let test_library_source_mirrors_its_owner () =
+let test_wiki_source_mirrors_its_owner () =
   check
     (list string)
-    "masc_library_add source matches Tool_library.valid_source_strings"
-    (List.sort_uniq String.compare Masc.Tool_library.valid_source_strings)
-    (advertised_values_for_schemas Tool_schemas_library.schemas ~property:"source")
+    "masc_wiki_add source matches Tool_wiki.valid_source_strings"
+    (List.sort_uniq String.compare Masc.Tool_wiki.valid_source_strings)
+    (advertised_values_for_schemas Tool_schemas_wiki.schemas ~property:"source")
 ;;
 
 (* The keeper sandbox and status vocabularies. Their owners are
@@ -607,7 +607,7 @@ let () =
         ; test_case "schedule contract enums" `Quick test_schedule_contract_mirrors
         ; test_case "schedule refusal kinds named in descriptions" `Quick
             test_schedule_refusal_kinds_named_in_descriptions_decode
-        ; test_case "library source enum" `Quick test_library_source_mirrors_its_owner
+        ; test_case "wiki source enum" `Quick test_wiki_source_mirrors_its_owner
         ; test_case "runtime tool owners" `Quick test_runtime_tool_owners_match
         ; test_case "keeper tool enums" `Quick test_keeper_tool_enum_mirrors
         ; test_case

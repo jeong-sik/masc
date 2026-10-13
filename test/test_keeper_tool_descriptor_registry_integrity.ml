@@ -292,7 +292,7 @@ let test_structurally_invalid_schema_is_excluded () =
    lookup. This pins it. The exceptions below reach the model through other
    constructors and keep their own text on purpose — the Board projection
    narrows the canonical schema for the Keeper surface (its description is
-   usually the longer, more specific one), [masc_library_list] reads its
+   usually the longer, more specific one), [masc_wiki_list] reads its
    file's [keeper_projection] the same way (#32561), and the shard and
    individually-declared keeper tools are declared with
    [in_process_descriptor] rather than the cluster path. Adding an inline
@@ -313,10 +313,10 @@ let descriptions_owned_elsewhere =
   ; "tool_read_file"
   ; "tool_search_files"
   ; "tool_write_file"
-    (* Library and individually-declared keeper tools *)
-  ; "keeper_library_read"
-  ; "keeper_library_search"
-  ; "masc_library_list"
+    (* Wiki and individually-declared keeper tools *)
+  ; "keeper_wiki_read"
+  ; "keeper_wiki_search"
+  ; "masc_wiki_list"
   ; "keeper_context_status"
   ; "keeper_ide_annotate"
   ; "keeper_workspace_memory_read"
@@ -364,10 +364,10 @@ let test_registered_cluster_model_projections_are_explicit () =
   let keeper_model_names = Policy.keeper_model_tool_names () in
   List.iter
     (fun name -> check_projection name Descriptor.Internal_name)
-    [ "keeper_library_read"
-    ; "keeper_library_search"
-    ; "masc_library_add"
-    ; "masc_library_list"
+    [ "keeper_wiki_read"
+    ; "keeper_wiki_search"
+    ; "masc_wiki_add"
+    ; "masc_wiki_list"
     ; "masc_get_metrics"
     ];
   List.iter
@@ -410,8 +410,8 @@ let test_registered_cluster_model_projections_are_explicit () =
   List.iter
     (fun (name, projected_by) ->
        check_projection name (Descriptor.Transport_alias { projected_by }))
-    [ "masc_library_read", "keeper_library_read"
-    ; "masc_library_search", "keeper_library_search"
+    [ "masc_wiki_read", "keeper_wiki_read"
+    ; "masc_wiki_search", "keeper_wiki_search"
     ; "masc_tasks", "keeper_tasks_list"
       (* #29681: the keeper_* twin is what the model sees. *)
     ; "masc_add_task", "keeper_task_create"
@@ -1519,18 +1519,18 @@ let test_masc_board_registry_has_descriptor_projection () =
        | _ :: _ :: _ -> Alcotest.failf "duplicate descriptor for %s" schema.name)
     Tool_name.Board_name.all
 
-let test_library_search_descriptor_has_recoverable_query_schema () =
-  let descriptor = required_internal_descriptor "keeper_library_search" in
+let test_wiki_search_descriptor_has_recoverable_query_schema () =
+  let descriptor = required_internal_descriptor "keeper_wiki_search" in
   let query_description =
     schema_property_description descriptor.Descriptor.input_schema "query"
     |> Option.value ~default:""
   in
   check_contains
-    "keeper_library_search descriptor documents query"
+    "keeper_wiki_search descriptor documents query"
     ~sub:"Search query"
     query_description;
   Alcotest.(check bool)
-    "keeper_library_search query is not validation-required"
+    "keeper_wiki_search query is not validation-required"
     false
     (List.mem "query" (schema_required_fields descriptor.input_schema))
 ;;
@@ -1587,8 +1587,6 @@ let test_concurrent_execution_opt_ins_are_exact () =
        appends ride the per-path mutex. *)
     ; "keeper_context_status"
     ; "keeper_lane_status"
-    ; "keeper_library_read"
-    ; "keeper_library_search"
     (* File reads and pure ranking; revalidate serialized by the file lock,
        appends by the per-path mutex, log-once flag an Atomic. *)
     ; "keeper_memory_search"
@@ -1608,6 +1606,8 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "keeper_voice_sessions"
     (* One bridge subprocess per call; script-path cache is mutex-guarded. *)
     ; "keeper_webmcp_list"
+    ; "keeper_wiki_read"
+    ; "keeper_wiki_search"
     ; "keeper_workspace_memory_read"
     ; "masc_agent_card"
     ; "masc_agent_fitness"
@@ -1653,10 +1653,6 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "masc_lane_declaration_read"
     ; "masc_lane_inspect"
     ; "masc_lane_slice"
-    (* Directory listing plus whole-file reads; no shared state. *)
-    ; "masc_library_list"
-    ; "masc_library_read"
-    ; "masc_library_search"
     ; "masc_plan_get_task"
     ; "masc_run_list"
     (* Whole-file schedule loads; writers hold the file lock. *)
@@ -1670,6 +1666,10 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "masc_tool_help"
     ; "masc_web_fetch"
     ; "masc_web_search"
+    (* Directory listing plus whole-file reads; no shared state. *)
+    ; "masc_wiki_list"
+    ; "masc_wiki_read"
+    ; "masc_wiki_search"
     ; "tool_read_file"
     ; "tool_search_files"
     ]
@@ -2308,9 +2308,9 @@ let () =
             `Quick
             test_masc_board_descriptions_disambiguate_post_id_flow
         ; test_case
-            "Library search query is runtime-recoverable"
+            "Wiki search query is runtime-recoverable"
             `Quick
-            test_library_search_descriptor_has_recoverable_query_schema
+            test_wiki_search_descriptor_has_recoverable_query_schema
         ] )
     ; ( "masc-board"
       , [ test_case

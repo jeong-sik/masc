@@ -487,10 +487,10 @@ let explicit_metadata : (string * metadata) list =
     ("masc_fusion", broadcast_tool);
     ("masc_fusion_status", read_state_tool);
     ("masc_fusion_decision", broadcast_tool);
-    ("masc_library_list", read_state_tool);
-    ("masc_library_read", read_state_tool);
-    ("masc_library_add", broadcast_tool);
-    ("masc_library_search", read_state_tool);
+    ("masc_wiki_list", read_state_tool);
+    ("masc_wiki_read", read_state_tool);
+    ("masc_wiki_add", broadcast_tool);
+    ("masc_wiki_search", read_state_tool);
     ( "keeper_tasks_list",
       hidden_runtime_tool
         "Keeper task-list runtime tool; callable but hidden from the public MCP schema surface."
@@ -556,8 +556,8 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_constitution_write", keeper_shard_write);
     ("keeper_constitution_remove", keeper_shard_write);
     ("keeper_constitution_read", keeper_shard_read);
-    ("keeper_library_search", keeper_shard_read);
-    ("keeper_library_read", keeper_shard_read);
+    ("keeper_wiki_search", keeper_shard_read);
+    ("keeper_wiki_read", keeper_shard_read);
     ("keeper_surface_read", keeper_shard_read);
     ("keeper_surface_post", keeper_shard_write);
     ("keeper_person_note_set", keeper_shard_write);

@@ -3780,25 +3780,24 @@ status: reference
   → [Keeper_shutdown_types](../../lib/keeper/keeper_shutdown_types.mli),
   [Server_dashboard_http_delete_actions](../../lib/server/server_dashboard_http_delete_actions.ml)
 
-**Library**
-: `masc_library_add`로 수동 추가한 Markdown 문서를 읽는 지식 라이브러리.
-  자동 수집 경로는 없고 Keeper에게는 검색·읽기 샤드만 있으므로, 설치에 문서가
-  하나도 없는 상태도 정상이다. 알려진 문서가 있을 때만 검색한다.
-  문서는 호출자가 해석한 workspace(`Workspace.config.base_path`) 아래
-  `<base_path>/docs/library`에 저장되고, 도구는 환경 변수를 읽지 않는다.
-  각 문서는 YAML frontmatter
+**Wiki**
+: 이름 붙은 공유 Markdown 페이지 모음. 사람과 Keeper가 같이 본다. Keeper 한 명의 기억
+  (Memory OS, Librarian이 정리한다)과는 다른 것이다.
+  자동 수집 경로는 없고 Keeper에게는 검색·읽기 샤드만 있으므로, 설치에 페이지가
+  하나도 없는 상태도 정상이다. 알려진 페이지가 있을 때만 검색한다.
+  페이지는 호출자가 해석한 workspace(`Workspace.config.base_path`) 아래
+  `<base_path>/docs/wiki`에 저장되고, 도구는 환경 변수를 읽지 않는다.
+  각 페이지는 YAML frontmatter
   (`title`·`source`·`author`·`created`·`updated`·`tags`)를 갖는다. 한 층의 평평한
-  디렉터리라 문서는 들어 있거나 없거나 둘 중 하나다. `source`는 닫힌 합타입
+  디렉터리라 페이지는 들어 있거나 없거나 둘 중 하나다. `source`는 닫힌 합타입
   (`Direct_experience`·`Research`·`Experiment`·`Observation`)이고, 생성자를 더하면
   `source_to_string`이 컴파일 오류로 강제된다. 쓰기에서 `source`가 없으면 `title`
   없을 때처럼 거부하고, 읽기에서 알 수 없는 `source`는 파일명과 이유로 표시한다.
   네 도구가 이걸 쓴다 —
-  `masc_library_list`·`masc_library_read`·`masc_library_add`·`masc_library_search`.
-  Keeper 쪽에는 read-only인 `keeper_library_search`·`keeper_library_read` 샤드
+  `masc_wiki_list`·`masc_wiki_read`·`masc_wiki_add`·`masc_wiki_search`.
+  Keeper 쪽에는 read-only인 `keeper_wiki_search`·`keeper_wiki_read` 샤드
   투영만 있다.
-  Librarian(기억 정리자)과 이름이 비슷하지만 다른 것이다 — Librarian은 Keeper의
-  Memory OS를 정리하고, Library는 명시적으로 추가된 문서만 담는다.
-  → [Tool_library](../../lib/tool_library.mli)
+  → [Tool_wiki](../../lib/tool_wiki.mli)
 
 **Librarian**
 : Keeper마다 따로 도는 기억 정리자. Keeper의 History와 현재 facts를 읽고 LLM을

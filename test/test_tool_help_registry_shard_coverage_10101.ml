@@ -80,7 +80,7 @@ let test_representative_tools_across_categories () =
       "tool_read_file",       "filesystem_tools";
       "tool_search_files",         "search_files_tools";
       "keeper_task_claim",    "taskboard_tools";
-      "keeper_library_search","library_tools";
+      "keeper_wiki_search","wiki_tools";
       "keeper_voice_speak",   "voice_tools";
     ]
   in

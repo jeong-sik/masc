@@ -1,8 +1,8 @@
 type operation =
-  | List_documents
-  | Read_document
-  | Add_document
-  | Search_documents
+  | List_pages
+  | Read_page
+  | Add_page
+  | Search_pages
 [@@deriving enumerate]
 
 type definition =

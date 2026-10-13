@@ -86,7 +86,7 @@ let tag_of_runtime_handler
   | Tool_browser_session
   | Tool_browser_goto | Tool_browser_act | Tool_browser_interact | Tool_browser_instruct -> Mod_misc
   | Tool_masc_local_runtime_dispatch -> Mod_local_runtime
-  | Tool_masc_library_dispatch -> Mod_library
+  | Tool_masc_wiki_dispatch -> Mod_wiki
   | Tool_board_dispatch -> Mod_inline
   | Tool_task_dispatch -> Mod_keeper_task
   | Tool_execute
@@ -110,8 +110,8 @@ let tag_of_runtime_handler
   | Tool_constitution_write
   | Tool_constitution_read
   | Tool_constitution_remove
-  | Tool_library_search
-  | Tool_library_read
+  | Tool_wiki_search
+  | Tool_wiki_read
   | Tool_surface_read
   | Tool_surface_post
   | Tool_person_note_set

@@ -1,8 +1,8 @@
-(** [masc://library/<topic>] resolves a topic against the library listing.
+(** [masc://wiki/<topic>] resolves a topic against the wiki listing.
 
     The topic arrives from the client's URI. Before this suite it was
-    concatenated onto [docs/library] and read, so [library/../<name>]
-    reached a file outside the library directory. *)
+    concatenated onto [docs/wiki] and read, so [wiki/../<name>]
+    reached a file outside the wiki directory. *)
 
 let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
 
@@ -11,7 +11,7 @@ module Lib = Masc
 open Alcotest
 
 let test_dir () =
-  let tmp = Filename.temp_file "masc_library_resource" "" in
+  let tmp = Filename.temp_file "masc_wiki_resource" "" in
   Sys.remove tmp;
   Unix.mkdir tmp 0o755;
   tmp
@@ -50,20 +50,20 @@ let served_text json =
      | _ -> None)
 ;;
 
-let with_library ?(documents = []) f =
+let with_wiki ?(documents = []) f =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
-       let library_dir = Filename.concat (Filename.concat dir "docs") "library" in
+       let wiki_dir = Filename.concat (Filename.concat dir "docs") "wiki" in
        Unix.mkdir (Filename.concat dir "docs") 0o755;
-       Unix.mkdir library_dir 0o755;
-       write (Filename.concat library_dir "topic.md") "# Topic\n\nin the library.\n";
+       Unix.mkdir wiki_dir 0o755;
+       write (Filename.concat wiki_dir "topic.md") "# Topic\n\nin the wiki.\n";
        List.iter
-         (fun (name, body) -> write (Filename.concat library_dir name) body)
+         (fun (name, body) -> write (Filename.concat wiki_dir name) body)
          documents;
-       (* A sibling of docs/, reachable only by climbing out of the library. *)
-       write (Filename.concat dir "outside.md") "NOT-A-LIBRARY-DOCUMENT\n";
+       (* A sibling of docs/, reachable only by climbing out of the wiki. *)
+       write (Filename.concat dir "outside.md") "NOT-A-WIKI-PAGE\n";
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -85,17 +85,17 @@ let test_blocking_resource_io_uses_systhread () =
   | Eio_fiber -> fail "blocking resource I/O remained on the Eio fiber"
 ;;
 
-let test_topic_in_the_library_is_served () =
-  with_library (fun state ->
-    match served_text (read_resource state "masc://library/topic") with
-    | None -> fail "expected masc://library/topic to serve the document"
+let test_topic_in_the_wiki_is_served () =
+  with_wiki (fun state ->
+    match served_text (read_resource state "masc://wiki/topic") with
+    | None -> fail "expected masc://wiki/topic to serve the document"
     | Some text ->
-      check bool "serves the library document" true (contains text "in the library"))
+      check bool "serves the wiki page" true (contains text "in the wiki"))
 ;;
 
-let test_topic_cannot_climb_out_of_the_library () =
-  with_library (fun state ->
-    let uri = "masc://library/../../outside" in
+let test_topic_cannot_climb_out_of_the_wiki () =
+  with_wiki (fun state ->
+    let uri = "masc://wiki/../../outside" in
     let json = read_resource state uri in
     let open Yojson.Safe.Util in
     check (option string) "outside topic has no content" None (served_text json);
@@ -105,18 +105,18 @@ let test_topic_cannot_climb_out_of_the_library () =
       (json |> member "error" |> member "data" |> member "uri" |> to_string))
 ;;
 
-(* [library] used to be matched as a bare prefix and the remainder taken from
-   a fixed offset of 8, so [libraryfoo] was read as the topic [oo]. *)
+(* [wiki] without the separator is not a topic: [wikifoo] must not read as
+   the topic [foo]. *)
 let test_prefix_without_separator_is_not_a_topic () =
-  with_library (fun state ->
-    let json = read_resource state "masc://libraryfoo" in
+  with_wiki (fun state ->
+    let json = read_resource state "masc://wikifoo" in
     let open Yojson.Safe.Util in
     let code = json |> member "error" |> member "code" in
-    check bool "libraryfoo is not a library resource" true (code = `Int (-32602)))
+    check bool "wikifoo is not a wiki resource" true (code = `Int (-32602)))
 ;;
 
 let test_missing_topic_is_a_protocol_error () =
-  with_library (fun state ->
+  with_wiki (fun state ->
     List.iter
       (fun uri ->
         let response = read_resource state uri in
@@ -126,24 +126,24 @@ let test_missing_topic_is_a_protocol_error () =
           (response |> member "error" |> member "code" |> to_int);
         check string (uri ^ " error URI") uri
           (response |> member "error" |> member "data" |> member "uri" |> to_string))
-      [ "masc://library/missing"; "masc://library/missing.json" ])
+      [ "masc://wiki/missing"; "masc://wiki/missing.json" ])
 ;;
 
-let test_missing_library_has_empty_json_index () =
+let test_missing_wiki_has_empty_json_index () =
   let dir = test_dir () in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
     Eio_main.run @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
-    let response = read_resource state "masc://library.json" in
+    let response = read_resource state "masc://wiki.json" in
     let body = Option.get (served_text response) |> Yojson.Safe.from_string in
     let open Yojson.Safe.Util in
     check int "empty document count" 0 (body |> member "count" |> to_int);
     check int "empty document list" 0 (body |> member "documents" |> to_list |> List.length))
 ;;
 
-(* The resources read a document the way the library tools do. A document
-   [masc_library_add] would write shows its source as the vocabulary word,
+(* The resources read a page the way the wiki tools do. A document
+   [masc_wiki_add] would write shows its source as the vocabulary word,
    not as a link; a document whose header does not read is named by filename
    with the tools' reason and is given no title, source, or fields the writer
    never writes. *)
@@ -189,24 +189,24 @@ let document_named topic json =
 ;;
 
 let test_markdown_index_follows_the_tool_contract () =
-  with_library ~documents:contract_documents (fun state ->
-    match served_text (read_resource state "masc://library") with
-    | None -> fail "expected masc://library to serve the index"
+  with_wiki ~documents:contract_documents (fun state ->
+    match served_text (read_resource state "masc://wiki") with
+    | None -> fail "expected masc://wiki to serve the index"
     | Some text ->
       check bool "readable document shows its source word" true
-        (contains text "- **Alpha Doc** -- `masc://library/alpha` (research) -- `alpha`, `keeper`");
+        (contains text "- **Alpha Doc** -- `masc://wiki/alpha` (research) -- `alpha`, `keeper`");
       check bool "no source is drawn as a link" false (contains text "](");
       check bool "unknown source named by filename and reason" true
-        (contains text ("- beta.md (" ^ beta_reason ^ ") -- `masc://library/beta`"));
+        (contains text ("- beta.md (" ^ beta_reason ^ ") -- `masc://wiki/beta`"));
       check bool "unknown-source document is given no title" false
         (contains text "**Beta Doc**");
       check bool "document without frontmatter named" true
-        (contains text "- topic.md (no frontmatter) -- `masc://library/topic`"))
+        (contains text "- topic.md (no frontmatter) -- `masc://wiki/topic`"))
 ;;
 
 let test_json_index_carries_written_fields_only () =
-  with_library ~documents:contract_documents (fun state ->
-    let json = json_text state "masc://library.json" in
+  with_wiki ~documents:contract_documents (fun state ->
+    let json = json_text state "masc://wiki.json" in
     let alpha = document_named "alpha" json in
     check (list string) "readable document fields"
       [ "topic"; "title"; "source"; "author"; "created"; "tags"; "uri" ]
@@ -221,8 +221,8 @@ let test_json_index_carries_written_fields_only () =
 ;;
 
 let test_json_topic_of_an_unreadable_document () =
-  with_library ~documents:contract_documents (fun state ->
-    let json = json_text state "masc://library/beta.json" in
+  with_wiki ~documents:contract_documents (fun state ->
+    let json = json_text state "masc://wiki/beta.json" in
     check (list string) "fields" [ "topic"; "unreadable"; "content" ] (keys json);
     check string "content is served" "Beta body"
       Yojson.Safe.Util.(json |> member "content" |> to_string))
@@ -230,7 +230,7 @@ let test_json_topic_of_an_unreadable_document () =
 
 let () =
   run
-    "library_resource_topic"
+    "wiki_resource_topic"
     [ ( "document contract"
       , [ test_case
             "markdown index follows the tool contract"
@@ -246,21 +246,21 @@ let () =
             test_json_topic_of_an_unreadable_document
         ] )
     ; ( "topic resolution"
-      , [ test_case "a topic in the listing is served" `Quick test_topic_in_the_library_is_served
+      , [ test_case "a topic in the listing is served" `Quick test_topic_in_the_wiki_is_served
         ; test_case
             "blocking resource I/O uses a system thread"
             `Quick
             test_blocking_resource_io_uses_systhread
         ; test_case
-            "a topic cannot climb out of docs/library"
+            "a topic cannot climb out of docs/wiki"
             `Quick
-            test_topic_cannot_climb_out_of_the_library
+            test_topic_cannot_climb_out_of_the_wiki
         ; test_case
-            "library without a separator is not a topic"
+            "wiki without a separator is not a topic"
             `Quick
             test_prefix_without_separator_is_not_a_topic
         ; test_case "missing topic is a protocol error" `Quick test_missing_topic_is_a_protocol_error
-        ; test_case "missing library has an empty JSON index" `Quick test_missing_library_has_empty_json_index
+        ; test_case "missing wiki has an empty JSON index" `Quick test_missing_wiki_has_empty_json_index
         ] )
     ]
 ;;

@@ -59,8 +59,8 @@ let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
     | Keeper_tool_descriptor.Tool_constitution_write
     | Keeper_tool_descriptor.Tool_constitution_read
     | Keeper_tool_descriptor.Tool_constitution_remove
-    | Keeper_tool_descriptor.Tool_library_search
-    | Keeper_tool_descriptor.Tool_library_read
+    | Keeper_tool_descriptor.Tool_wiki_search
+    | Keeper_tool_descriptor.Tool_wiki_read
     | Keeper_tool_descriptor.Tool_surface_read
     | Keeper_tool_descriptor.Tool_surface_post
     | Keeper_tool_descriptor.Tool_person_note_set
@@ -89,7 +89,7 @@ let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
     | Keeper_tool_descriptor.Tool_masc_fusion_status
     | Keeper_tool_descriptor.Tool_masc_fusion_decision
     | Keeper_tool_descriptor.Tool_masc_file_dispatch
-    | Keeper_tool_descriptor.Tool_masc_library_dispatch
+    | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
     | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
     | Keeper_tool_descriptor.Tool_analyze_image ) ->
     Failure_returns_to_model

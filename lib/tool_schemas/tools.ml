@@ -18,7 +18,7 @@ let raw_schemas : tool_schema list =
   @ Tool_schemas_webmcp.schemas
   @ Tool_schemas_spawn.schemas
   @ Masc_task_handlers.Tool_task_schemas.schemas
-  @ Tool_schemas_library.schemas
+  @ Tool_schemas_wiki.schemas
 
 let all_schemas : tool_schema list = raw_schemas
 

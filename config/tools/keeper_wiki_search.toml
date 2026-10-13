@@ -1,10 +1,10 @@
-name = "keeper_library_search"
+name = "keeper_wiki_search"
 description = """
-Search the knowledge library by keyword.
+Search the wiki by keyword.
 
-Returns matching document titles, \
-relevance scores (0-1), and text snippets. Use to discover relevant docs before \
-reading full content with keeper_library_read."""
+Returns one line per matching page: \
+its title and file name. Use to discover relevant pages before \
+reading full content with keeper_wiki_read."""
 
 # Held back from the request until the model asks for it by name.
 # 2026-08-25..08-31 across the fleet: called 9 times in 6 turns, 415 bytes of

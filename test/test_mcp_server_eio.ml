@@ -2815,11 +2815,11 @@ let handled_resource_id id =
   match id with
   | "tool-help-index" | "status" | "status.json" | "tasks" | "tasks.json"
   | "who" | "who.json" | "messages" | "messages.json" | "events"
-  | "events.json" | "library" | "library.json" ->
+  | "events.json" | "wiki" | "wiki.json" ->
       true
   | _ ->
       String.starts_with ~prefix:"tool-help/" id
-      || String.starts_with ~prefix:"library/" id
+      || String.starts_with ~prefix:"wiki/" id
 
 let concrete_uri_of_template uri_template =
   (* RFC 6570: a query expression ({?...}) drops out; a path variable
@@ -2954,12 +2954,12 @@ let test_handle_request_resources_read_matrix () =
   let ensure_dir path =
     if not (Sys.file_exists path) then Unix.mkdir path 0o755
   in
-  let library_dir = Filename.concat base_path "docs/library" in
+  let wiki_dir = Filename.concat base_path "docs/wiki" in
   let masc_dir = Filename.concat base_path Common.masc_dirname in
   ensure_dir (Filename.concat base_path "docs");
-  ensure_dir library_dir;
+  ensure_dir wiki_dir;
   ensure_dir masc_dir;
-  write_text_file (Filename.concat library_dir "alpha.md")
+  write_text_file (Filename.concat wiki_dir "alpha.md")
     {|---
 title: Alpha Doc
 source: research
@@ -2977,10 +2977,10 @@ Alpha body
       ("masc://who.json", "application/json", "[");
       ("masc://messages.json", "application/json", "[");
       ("masc://events.json", "application/json", "[");
-      ("masc://library", "text/markdown", "`masc://library/alpha` (research)");
-      ("masc://library.json", "application/json", "\"source\":\"research\"");
-      ("masc://library/alpha", "text/markdown", "Alpha body");
-      ("masc://library/alpha.json", "application/json", "\"Alpha body\"");
+      ("masc://wiki", "text/markdown", "`masc://wiki/alpha` (research)");
+      ("masc://wiki.json", "application/json", "\"source\":\"research\"");
+      ("masc://wiki/alpha", "text/markdown", "Alpha body");
+      ("masc://wiki/alpha.json", "application/json", "\"Alpha body\"");
     ]
   in
   List.iter

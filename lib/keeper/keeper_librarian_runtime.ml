@@ -1468,19 +1468,12 @@ let commit_continuity ~commit ~observe =
 let admission_mode_valid ~has_admission ~write_scope ~has_continuity
       ~has_durable_range_id ~has_official_range_id
   =
-  match has_admission, write_scope, has_continuity, has_durable_range_id, has_official_range_id with
-  | (false, (Context_only | Context_and_memory | Memory_maintenance), (true | false), (true | false), (true | false)) ->
-    true
-  | true, Memory_maintenance, false, false, false -> true
-  | ( true
-    , (Context_only | Context_and_memory)
-    , (true | false)
-    , (true | false)
-    , (true | false) ) ->
-    false
-  | (true, Memory_maintenance, true, (true | false), (true | false)) -> false
-  | (true, Memory_maintenance, false, true, (true | false)) -> false
-  | true, Memory_maintenance, false, false, true -> false
+  (not has_admission)
+  ||
+  match write_scope with
+  | Memory_maintenance ->
+    not (has_continuity || has_durable_range_id || has_official_range_id)
+  | Context_only | Context_and_memory -> false
 ;;
 
 let run_best_effort

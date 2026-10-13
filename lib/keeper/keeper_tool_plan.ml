@@ -51,6 +51,9 @@ module Json_pointer = struct
 
   let root = []
 
+  let uncons = function [] -> None | segment :: rest -> Some (segment, rest)
+  let append prefix suffix = prefix @ suffix
+
   let decode_segment segment =
     let length = String.length segment in
     let buffer = Buffer.create length in

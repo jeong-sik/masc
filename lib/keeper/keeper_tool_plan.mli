@@ -43,6 +43,9 @@ module Json_pointer : sig
   val of_string : string -> (t, syntax_error) result
   val to_string : t -> string
   (** Canonical RFC 6901 spelling. *)
+  val uncons : t -> (string * t) option
+  (** [None] means the root pointer; segments are already RFC 6901 decoded. *)
+  val append : t -> t -> t
   val resolve : t -> Yojson.Safe.t -> (Yojson.Safe.t, resolution_error) result
 end
 

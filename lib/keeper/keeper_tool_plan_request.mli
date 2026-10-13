@@ -91,6 +91,19 @@ val to_yojson
     instructive. *)
 val composable_tool_names : descriptors:Keeper_tool_descriptor.t list -> string list
 
+type request_shape = private
+  { node_jsons : Yojson.Safe.t list
+  ; exports : Keeper_tool_plan.export list
+  ; branch_failure_policy : Keeper_tool_plan.branch_failure_policy
+  }
+
+val shape_of_json : Yojson.Safe.t -> (request_shape, error) result
+(** Decode the closed outer grammar without resolving node authority. Nested
+    composition compilation reuses this parser and the ordinary node parser;
+    it must still validate the final expanded graph through [Plan.create]. *)
+
+val node_of_json : index:int -> Yojson.Safe.t -> (Keeper_tool_plan.node, error) result
+
 val plan_of_json
   :  descriptors:Keeper_tool_descriptor.t list
   -> Yojson.Safe.t

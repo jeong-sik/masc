@@ -136,9 +136,8 @@ let test_prune_shared_jsonl_stores_production_geometry () =
   let raw_old = p [ "keepers"; "keeper-a"; "raw-traces"; "turn-old.jsonl" ] in
   let manifest_old = p [ "keepers"; "keeper-a"; "runtime-manifests"; "trace-x.jsonl.1" ] in
   let manifest_fresh = p [ "keepers"; "keeper-a"; "runtime-manifests"; "trace-x.jsonl" ] in
-  (* Stores that were on no prune list until 2026-08-05. costs and
-     audit-approvals are top-level dated; decision_audit is keeper-scoped at
-     the masc root, like resilience_audit. *)
+  (* costs and audit-approvals are dated stores at the root; decision_audit
+     keeps one folder per keeper at the masc root. *)
   let costs_old = p [ "costs"; "2020-01"; "01.jsonl" ] in
   let costs_fresh = p [ "costs"; "2999-01"; "01.jsonl" ] in
   let approvals_old = p [ "audit-approvals"; "2020-01"; "01.jsonl" ] in

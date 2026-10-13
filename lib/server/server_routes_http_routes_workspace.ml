@@ -106,7 +106,7 @@ let resolve_workspace_base ~state ~uri =
   let lookup_playground name =
     match Keeper_meta_store.read_effective_meta config name with
     | Ok (Some m) -> Some (Keeper_sandbox.host_root_abs_of_meta ~config m)
-    | _ -> None
+    | Ok (None) | Error _ -> None
   in
   let exists_dir p = Sys.file_exists p && Sys.is_directory p in
   classify_workspace_query

@@ -785,7 +785,7 @@ let rec resolve_durable_occurrence
         (* A cached target snapshot may predate the transfer commit. *)
         Hashtbl.remove cache target;
         resolve_target ()
-      | disposition -> Ok disposition
+      | (Pending_at (_, _) | Transfer_projecting_at (_, _) | Terminal_completed_at (_, _, _) | Terminal_failed_at (_, _, _, _) | Terminal_cancelled_at (_, _, _, _) | Absent_at _) as disposition -> Ok disposition
     in
     let disposition_of_occurrence
           (occurrence : Keeper_event_queue_state.schedule_occurrence)

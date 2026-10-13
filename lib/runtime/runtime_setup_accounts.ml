@@ -32,7 +32,7 @@ let root ~create () =
 let owned_read root path =
   match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:root path with
   | Ok (Some file) when file.snapshot.owner_uid=Unix.geteuid () && file.snapshot.permissions land 0o077=0 -> Ok file.content
-  | _ -> Error Private_storage_unavailable
+  | Ok (None) | Error _ | Ok (Some _) -> Error Private_storage_unavailable
 let credential ~directory path =
   if Filename.is_relative path then Error Import_failed else
   let canonical=Unix.realpath path in

@@ -225,7 +225,10 @@ let exit_code result =
   match result.failure with
   | None -> 0
   | Some (Unavailable _) -> 2
-  | Some _ -> 1
+  | Some (Rate_limited _) | Some (Quota_exhausted _) | Some (Provider_overloaded _)
+  | Some (Provider_auth_refused _) | Some (Provider_unreachable _) | Some (Model_not_found _)
+  | Some (Provider_rejected _) | Some (Timed_out) | Some (Tool_not_called)
+  | Some (Tool_result_not_consumed) | Some (Empty_response) | Some (Model_unreported) -> 1
 ;;
 
 type unmeasured =
@@ -774,8 +777,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                       { model = result.response.model
                       ; text = Agent_core.Types.text_of_response result.response
                       }
-                  | stop_reason ->
-                    Error (Provider_rejected (unfinished_run_reason stop_reason))))))
+                  | (Runtime_agent_context.Yielded_to_operation_queued _ | Runtime_agent_context.Yielded_to_durable_stimulus _ | Runtime_agent_context.Yielded_after_repeated_tool_call _ | Runtime_agent_context.Yielded_after_repeated_assistant_text _ | Runtime_agent_context.InputRequired _) as stop_reason -> Error (Provider_rejected (unfinished_run_reason stop_reason))))))
       | Runtime_execution.Claude_code execution ->
         let config =
           { (Runtime_claude_code.default_config ~cwd:cwd_path) with

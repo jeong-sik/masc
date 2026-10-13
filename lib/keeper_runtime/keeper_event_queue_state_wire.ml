@@ -504,8 +504,19 @@ let witness_of_yojson json =
     match kind, source_kind with
     | Projected_fusion_terminal, Source_fusion_completed
     | Projected_hitl_terminal, Source_hitl_resolved -> false
-    | Projected_fusion_terminal, _
-    | Projected_hitl_terminal, _ -> true
+    | (Projected_fusion_terminal, Source_board_signal) | (Projected_hitl_terminal, _)
+    | (Projected_fusion_terminal, Source_board_attention)
+    | (Projected_fusion_terminal, Source_bootstrap)
+    | (Projected_fusion_terminal, Source_schedule_due)
+    | (Projected_fusion_terminal, Source_connector_attention)
+    | (Projected_fusion_terminal, Source_hitl_resolved)
+    | (Projected_fusion_terminal, Source_ask_answered)
+    | (Projected_fusion_terminal, Source_completion_authority_rejected)
+    | (Projected_fusion_terminal, Source_task_outcome)
+    | (Projected_fusion_terminal, Source_task_cancelled)
+    | (Projected_fusion_terminal, Source_workspace_message)
+    | (Projected_fusion_terminal, Source_delegate_completed)
+    | (Projected_fusion_terminal, Source_composition_completed) -> true
     | Projected_cancel _, _
     | Projected_transfer _, _
     | Projected_turn_completed, _

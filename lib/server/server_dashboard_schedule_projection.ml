@@ -272,14 +272,26 @@ let schedule_queue_match
       && String.equal wake.schedule_id schedule_id
       && Float.equal wake.due_at due_at
       && String.equal wake.payload_digest payload_digest
-    | _ -> false)
+    | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+    | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+    | Keeper_event_queue.Connector_attention _ | Keeper_event_queue.Hitl_resolved _
+    | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
+    | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+    | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+    | Keeper_event_queue.Task_outcome _ -> false)
 ;;
 
 let schedule_queue_match_fields ~now bucket (stimulus : Keeper_event_queue.stimulus) =
   let scheduled_wake =
     match stimulus.payload with
     | Keeper_event_queue.Schedule_due wake -> Some wake
-    | _ -> None
+    | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+    | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+    | Keeper_event_queue.Connector_attention _ | Keeper_event_queue.Hitl_resolved _
+    | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
+    | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+    | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+    | Keeper_event_queue.Task_outcome _ -> None
   in
   [ "matched_bucket", `String bucket
   ; "matched_post_id", `String stimulus.post_id
@@ -331,7 +343,9 @@ let schedule_keeper_queue_evidence_dashboard_json
   let schedule_cancelled =
     match schedule_status with
     | Schedule_domain.Cancelled -> true
-    | _ -> false
+    | Schedule_contract_values.Scheduled | Schedule_contract_values.Due
+    | Schedule_contract_values.Running | Schedule_contract_values.Succeeded
+    | Schedule_contract_values.Failed | Schedule_contract_values.Expired -> false
   in
   match wake with
   | None -> `Null

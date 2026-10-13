@@ -52,7 +52,9 @@ let load config =
               | (key,Otoml.TomlString value)::rest -> let* rest=pairs rest in Ok ((key,`String value)::rest)
               | _ -> Error "subscription fields must be strings" in
             let* fields = pairs fields in decode (`Assoc fields)
-        | _ -> Error "subscription requires table" in
+        | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+        | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+        | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error "subscription requires table" in
       let rec loop = function [] -> Ok [] | row::rest -> let* row=parse row in let* rest=loop rest in Ok(row::rest) in
       let* rows = loop rows in
       if List.length rows<>List.length (List.sort_uniq Stdlib.compare rows)
@@ -247,7 +249,7 @@ let dispatch_with ~io ?(access=Lane_addon_sources.Unauthenticated) ~config ~call
       Ok (configuration_snapshot ~io ~access ~caller config rows (Some (Store.digest bytes)))
   | Read | Acknowledge ->
       let* ()=exact (match operation with Read->["run_id";"installation_id";"output_id"]
-        | _->["run_id";"installation_id";"output_id";"receipt"]) args in
+        | Inspect | Save | Acknowledge -> ["run_id";"installation_id";"output_id";"receipt"]) args in
       let* ()=match access with
         | Lane_addon_sources.Operator_configuration -> Ok ()
         | Keeper keeper when String.equal keeper caller -> Ok ()

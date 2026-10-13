@@ -207,7 +207,10 @@ let remove text ~id =
        | None -> Ok []
        | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
          Ok (List.map (fun (model_id, _) -> [ id; model_id ]) entries)
-       | Some _ -> Error (cannot_reach id "the binding table"))
+       | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+       | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+       | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
+       | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error (cannot_reach id "the binding table"))
   in
   let provider_paths = List.filter (is_prefix [ "providers"; id ]) (table_paths text) in
   let* () =

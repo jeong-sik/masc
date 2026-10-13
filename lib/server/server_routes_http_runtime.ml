@@ -1208,7 +1208,7 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
     | _ ->
         (match snapshot with
          | Some { failure = Some (Proactive_refresh.Timed_out _); _ } -> true
-         | _ -> false)
+         | Some { failure = Some (Proactive_refresh.Raised _);_} | Some { failure = None;_} | None -> false)
   in
   let snapshot_age_ms, computed_at, duration_ms, error, stale_since_ts, status =
     match snapshot with

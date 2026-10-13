@@ -108,7 +108,8 @@ let transition record json =
            | Committed _,Some (Pending _),_ | Committed _,Some Accepted,Accepted ->
                Ok {record with recipients=List.map (fun (name,old) ->
                  name,(if name=recipient then next else old)) record.recipients}
-           | _ -> Error (Corrupt "recipient not admitted, commit absent or accepted state regressed"))
+           | (Committed _, Some (Accepted), Pending _) | (Committed _, None, _)
+           | (Uncommitted, _, _) -> Error (Corrupt "recipient not admitted, commit absent or accepted state regressed"))
       | Some _ | None -> Error (Corrupt "unknown delivery event"))
   | _ -> Error (Corrupt "delivery event must be an object")
 let decode bytes =
@@ -274,7 +275,7 @@ type journal_reconciliation =
 let pending_markers_after_scan t ~after_scan = protect (fun () ->
   let names = match Fs_compat.exact_path_kind (pending_dir t) with
     | Fs_compat.Exact_missing -> []
-    | _ -> Fs_compat.read_dir (pending_dir t) |> List.sort String.compare in
+    | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ -> Fs_compat.read_dir (pending_dir t) |> List.sort String.compare in
   after_scan ();
   Ok names)
 let pending_markers t = pending_markers_after_scan t ~after_scan:(fun () -> ())

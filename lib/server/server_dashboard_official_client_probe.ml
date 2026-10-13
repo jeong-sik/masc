@@ -150,10 +150,12 @@ let probe_codex ~mgr ~clock ~process_cwd ~runtime ~runtime_id ~model
         (`Assoc
            [ "status", `String (match measured.subscription with
                | Runtime_codex_app_server.Provider_managed -> "configured"
-               | _ -> "ready")
+               | Runtime_codex_app_server.Api_key | Runtime_codex_app_server.Amazon_bedrock
+               | Runtime_codex_app_server.Chatgpt _ -> "ready")
            ; "authenticated", `Bool (match measured.subscription with
                | Runtime_codex_app_server.Provider_managed -> false
-               | _ -> true)
+               | Runtime_codex_app_server.Api_key | Runtime_codex_app_server.Amazon_bedrock
+               | Runtime_codex_app_server.Chatgpt _ -> true)
            ; "evidence_source", `String "configured_executable_self_report"
            ; "identity_verified", `Bool false
            ; "auth_method", `String (Runtime_codex_app_server.authentication_to_string measured.subscription)

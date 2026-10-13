@@ -165,8 +165,11 @@ let parse_rearm_fields fields =
     match expected_disposition with
     | Keeper_approval_queue_rules_types.Summary_attempt_persistence_uncertain ->
       Ok ()
-    | _ ->
-      Error
+    | Keeper_approval_queue_rules_types.Summary_attempt_ready
+    | Keeper_approval_queue_rules_types.Summary_attempt_in_flight
+    | Keeper_approval_queue_rules_types.Summary_attempt_identity_unbound
+    | Keeper_approval_queue_rules_types.Summary_attempt_settled
+    | Keeper_approval_queue_rules_types.Summary_attempt_pre_worker_unavailable _ -> Error
         "recover rearm requires summary_attempt_disposition \
          persistence_uncertain"
   in
@@ -302,9 +305,8 @@ let rearm_json ~base_path ~requested_by ~approval_id ~input_hash ~sequence
            /api/v1/dashboard/gate/retry; repeating this rearm will answer \
            409."
           detail )
-  | Error
-      (( Retry_mode_unreadable _
-       | Retry_cas_rejected _ ) as error) ->
+  | Error (Retry_mode_unreadable _ | Retry_cas_rejected (Keeper_approval_queue_result.Exact_attempt_storage_error _) as error)
+  | Error (Retry_cas_rejected (Keeper_approval_queue_result.Exact_attempt_rejected _) as error) ->
     Error
       ( `Unavailable
       , Keeper_gate.auto_judge_retry_error_to_string error )

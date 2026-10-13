@@ -75,7 +75,10 @@ let strict_float_find (path : string) (tbl : Otoml.t) (key : string)
   match Otoml.find_opt tbl Fun.id [ key ] with
   | None -> Ok None
   | Some (Otoml.TomlFloat value) -> Ok (Some value)
-  | Some _ -> Error (error (path ^ "." ^ key) (key ^ " must be a float"))
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlBoolean _)
+  | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+  | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+  | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error (error (path ^ "." ^ key) (key ^ " must be a float"))
 ;;
 
 let positive_finite_float_opt_field
@@ -443,15 +446,21 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
                           "add-dirs entries must be absolute paths, got %S"
                           value) )
                | Otoml.TomlString value -> dirs @ [ value ], errs
-               | _ ->
-                 dirs, errs @ error (path ^ ".add-dirs") "add-dirs entries must be strings")
+               | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+               | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+               | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
+               | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ -> dirs, errs @ error (path ^ ".add-dirs") "add-dirs entries must be strings")
             ([], [])
             entries
         in
         (match errs with
          | [] -> Ok dirs
          | errs -> Error errs)
-      | Some _ -> Error (error (path ^ ".add-dirs") "add-dirs must be an array of strings")
+      | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+      | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+      | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
+      | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _)
+      | Some (Otoml.TomlTableArray _) -> Error (error (path ^ ".add-dirs") "add-dirs must be an array of strings")
     in
     let timeout_result =
       match
@@ -717,7 +726,9 @@ let parse_provider (id : string) (tbl : Otoml.t)
       (match unknown_table_keys ~path ~expected:provider_keys entries with
        | [] -> Ok ()
        | errors -> Error errors)
-    | _ -> Error (error path "provider must be a TOML table")
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error (error path "provider must be a TOML table")
   in
   let enabled_result =
     typed_find "a boolean" path tbl "enabled" Otoml.get_boolean
@@ -769,8 +780,9 @@ let parse_provider (id : string) (tbl : Otoml.t)
            when Runtime_account_home.is_valid home -> Ok (Some home)
          | Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime ->
            Error (error (path ^ ".account-home") "account-home must be a non-empty absolute path without surrounding whitespace")
-         | _ ->
-           Error (error (path ^ ".account-home") "account-home is valid only for Claude Code, Codex and Muse Code official clients"))
+         | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api
+         | Runtime_schema.Ollama_api | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api
+         | Runtime_schema.Antigravity_cli_runtime -> Error (error (path ^ ".account-home") "account-home is valid only for Claude Code, Codex and Muse Code official clients"))
     in
     let is_non_interactive_result =
       typed_find_or "a boolean" path tbl "is-non-interactive" Otoml.get_boolean ~default:false
@@ -815,7 +827,10 @@ let parse_provider (id : string) (tbl : Otoml.t)
                    (Printf.sprintf
                       "healthcheck.path must be absolute, got %S"
                       healthcheck_path)))
-         | Some _ ->
+         | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+         | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+         | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
+         | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) ->
            Error
              (error (path ^ ".healthcheck") "healthcheck must be a TOML table")
        in
@@ -1178,7 +1193,9 @@ let number_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
       match value with
       | Otoml.TomlFloat v -> Some v
       | Otoml.TomlInteger v -> Some (float_of_int v)
-      | _ -> None
+      | Otoml.TomlString _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+      | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+      | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ -> None
     in
     (match as_float with
      | None -> Error (error (path ^ "." ^ key) (key ^ " must be a number"))
@@ -1926,7 +1943,9 @@ let parse_egress_keeper ~(name : string) (tbl : Otoml.t)
                   key
                   (String.concat ", " egress_keeper_keys)))
         entries
-    | _ -> error path "expected a table"
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> error path "expected a table"
   in
   match unknown_key_errors with
   | _ :: _ as errors -> Error errors
@@ -1984,7 +2003,9 @@ let parse_egress_allowlists (toml : Otoml.t)
        (match keepers_value with
         | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
           partition_results (List.map (fun (name, tbl) -> parse_egress_keeper ~name tbl) entries)
-        | _ -> Error (error (Ns.(path Egress) "keepers") "expected a table")))
+        | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+        | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+        | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error (error (Ns.(path Egress) "keepers") "expected a table")))
 ;;
 
 let parse_exec_endpoints (toml : Otoml.t)
@@ -2055,7 +2076,10 @@ let parse_lsp_server ~(lang_id : string) (value : Otoml.t)
          List.map
            (function
              | Otoml.TomlString word -> Some word
-             | _ -> None)
+             | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+             | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+             | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
+             | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ -> None)
            items
        in
        (match List.filter_map Fun.id words with
@@ -2066,8 +2090,9 @@ let parse_lsp_server ~(lang_id : string) (value : Otoml.t)
             (error
                path
                "expected a non-empty array of strings: the executable, then its arguments"))
-     | _ ->
-       Error
+     | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+     | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+     | Otoml.TomlLocalTime _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ -> Error
          (error path "expected an array of strings: the executable, then its arguments"))
 ;;
 
@@ -2085,7 +2110,9 @@ let parse_lsp_servers (toml : Otoml.t)
         | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
           partition_results
             (List.map (fun (lang_id, value) -> parse_lsp_server ~lang_id value) entries)
-        | _ -> Error (error (Ns.(path Lsp) "servers") "expected a table of language = [\"command\", ...]")))
+        | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+        | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+        | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error (error (Ns.(path Lsp) "servers") "expected a table of language = [\"command\", ...]")))
 ;;
 
 (* --- Reserved namespace detection --- *)
@@ -2190,7 +2217,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     match typed_find "an integer" path tbl "max-context" Otoml.get_integer with
     | Ok (Some n) when n <= 0 ->
       Error (error (path ^ ".max-context") "max-context must be a positive integer")
-    | result -> result
+    | (Ok (None) | Error _ | Ok (Some _)) as result -> result
   in
   let max_concurrent_result =
     match typed_find "an integer" path tbl "max-concurrent" Otoml.get_integer with
@@ -2275,7 +2302,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
            (Printf.sprintf
               "repeat-penalty must be greater than 0 (1.0 disables the penalty); got %g"
               value))
-    | other -> other
+    | (Ok (None) | Error _ | Ok (Some _)) as other -> other
   in
   let repeat_last_n_result =
     match typed_find "an integer" path tbl "repeat-last-n" Otoml.get_integer with
@@ -2287,7 +2314,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
               "repeat-last-n must be -1 (whole context), 0 (disabled), or a positive \
                window; got %d"
               value))
-    | other -> other
+    | (Ok (None) | Error _ | Ok (Some _)) as other -> other
   in
   let return_progress_result =
     typed_find "a boolean" path tbl "return-progress" Otoml.get_boolean
@@ -2376,7 +2403,10 @@ let parse_provider_table (provider_id : string) (tbl : Otoml.t)
 let declared_provider_ids (toml : Otoml.t) : string list =
   match Otoml.find_opt toml Fun.id [ Ns.(key Providers) ] with
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) -> List.map fst entries
-  | Some _ | None -> []
+  | Some (Otoml.TomlString _) | None | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> []
 ;;
 
 (* Sets are source-level declarations, expanded into the same typed bindings
@@ -2391,7 +2421,10 @@ let parse_model_sets (toml : Otoml.t)
     match Otoml.find_opt toml Fun.id [ Ns.(key Models) ] with
     | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
       List.map fst entries
-    | Some _ | None -> []
+    | Some (Otoml.TomlString _) | None | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+    | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+    | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+    | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> []
   in
   let parse_set (id, tbl) =
     let path = Ns.(path Model_sets) id in
@@ -2430,7 +2463,10 @@ let parse_model_sets (toml : Otoml.t)
   | None -> Ok []
   | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
     partition_results (List.map parse_set entries)
-  | Some _ -> Error (error namespace "model_sets must be a TOML table")
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error (error namespace "model_sets must be a TOML table")
 ;;
 
 let parse_bindings (toml : Otoml.t)
@@ -2529,15 +2565,20 @@ let parse_keeper_assignments (toml : Otoml.t)
         (fun (keeper_name, value) ->
           match value with
           | Otoml.TomlString runtime_id -> Left (keeper_name, runtime_id)
-          | _ ->
-            Right
+          | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+          | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+          | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _
+          | Otoml.TomlTableArray _ -> Right
               { path = Ns.(path Runtime) ("assignments." ^ keeper_name)
               ; message = "keeper runtime assignment must be a string runtime id"
               })
         entries
     in
     if errs <> [] then Error errs else Ok oks
-  | Some _ ->
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) ->
     Error
       [ { path = Ns.(path Runtime) "assignments"
         ; message = "[runtime.assignments] must be a table of keeper = runtime-id"
@@ -2559,7 +2600,9 @@ let empty_runtime_section =
 let parse_runtime_string_leaf ~path ~key value =
   match value with
   | Otoml.TomlString value -> Ok value
-  | _ -> Error (error path (key ^ " must be a string runtime id"))
+  | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+  | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+  | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ -> Error (error path (key ^ " must be a string runtime id"))
 ;;
 
 let parse_runtime_media_failover ~path value =
@@ -2628,7 +2671,10 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
         entries
     in
     if errs <> [] then Error errs else Ok section
-  | Some _ -> Error (error (Ns.(key Runtime)) "[runtime] must be a TOML table")
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error (error (Ns.(key Runtime)) "[runtime] must be a TOML table")
 ;;
 
 (* [\[runtime.lanes.<id>\]] — ordered failover candidate lists. Each lane is a
@@ -2660,7 +2706,9 @@ let parse_lane ~(id : string) (tbl : Otoml.t)
                    by construction; there is no strategy key)"
                   key))
         entries
-    | _ -> []
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> []
   in
   let candidate_ids_result =
     match Otoml.find_opt tbl Fun.id [ "candidates" ] with
@@ -2693,13 +2741,17 @@ let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error l
          (fun (id, value) ->
             match value with
             | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> parse_lane ~id value
-            | _ ->
-              Error
+            | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+            | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+            | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error
                 (error
                    (Ns.(path Runtime) ("lanes." ^ id))
                    "lane must be a table"))
          entries)
-  | Some _ ->
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) ->
     Error (error (Ns.(path Runtime) "lanes") "[runtime.lanes] must be a table of lane tables")
 ;;
 
@@ -2728,7 +2780,9 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
                    max_output_tokens or thinking"
                   key))
         entries
-    | _ -> []
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> []
   in
   let enabled_result = typed_find_or "a boolean" path tbl "enabled" Otoml.get_boolean ~default:true in
   let slots_result =
@@ -2893,13 +2947,17 @@ let parse_exact_output_lanes (toml : Otoml.t)
                          (List.map Standalone_lane.to_id Standalone_lane.all))))
             | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
               parse_exact_output_lane ~id value
-            | _ ->
-              Error
+            | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+            | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+            | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error
                 (error
                    (Ns.(path Runtime) ("exact_output_lanes." ^ id))
                    "exact-output lane must be a table"))
          entries)
-  | Some _ ->
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) ->
     Error
       (error
          (Ns.(path Runtime) "exact_output_lanes")
@@ -3109,8 +3167,9 @@ let parse_typesafeai_destination ~(path : string) (entry : Otoml.t)
      | _ ->
        Error
          (unknown @ result_errors endpoint @ result_errors model @ result_errors api_key_env))
-  | _ ->
-    Error
+  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+  | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+  | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error
       (error path "each destination must be a table with endpoint, model and api_key_env")
 ;;
 
@@ -3161,7 +3220,10 @@ let parse_typesafeai_destinations ~(path : string) (tbl : Otoml.t)
             key_path
             "destinations must name at least one server; leave the key out for the vendor's own")
      | errors, _ -> Error errors)
-  | Some _ -> Error (error key_path "destinations must be an array of tables")
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) -> Error (error key_path "destinations must be an array of tables")
 ;;
 
 (* [board_attention_confidence_floor] is a confidence Jev reports, so it is a
@@ -3271,7 +3333,10 @@ let parse_typesafeai (toml : Otoml.t)
           @ result_errors librarian_preflight
           @ result_errors workspace_memory_selection_enabled
           @ result_errors excluded_keepers))
-  | Some _ -> Error (error path "[typesafeai] must be a TOML table")
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error (error path "[typesafeai] must be a TOML table")
 ;;
 
 let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =

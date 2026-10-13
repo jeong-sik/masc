@@ -463,7 +463,7 @@ let low_to_normal_aging_threshold_sec = 3600.0
 let effective_urgency ~now (s : stimulus) : urgency =
   match s.urgency with
   | Low when now -. s.arrived_at >= low_to_normal_aging_threshold_sec -> Normal
-  | u -> u
+  | (Immediate | Normal | Low) as u -> u
 ;;
 
 let effective_urgency_rank ~now (s : stimulus) : int =

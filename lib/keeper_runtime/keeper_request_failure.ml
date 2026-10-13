@@ -97,7 +97,15 @@ let cause_of_core_error (error : Agent_core.Error.t) =
   | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { limit; _ }) ->
     Context_overflow { limit }
   | Agent_core.Error.Api (Agent_core.Retry.InputCapacity _) -> Input_capacity
-  | Agent_core.Error.Api _ -> unnamed_core_cause error
+  | Agent_core.Error.Api (Agent_core.Retry.RateLimited _)
+  | Agent_core.Error.Api (Agent_core.Retry.Overloaded _)
+  | Agent_core.Error.Api (Agent_core.Retry.ServerError _)
+  | Agent_core.Error.Api (Agent_core.Retry.AuthError _)
+  | Agent_core.Error.Api (Agent_core.Retry.AuthorizationError _)
+  | Agent_core.Error.Api (Agent_core.Retry.PaymentRequired _)
+  | Agent_core.Error.Api (Agent_core.Retry.InvalidRequest _)
+  | Agent_core.Error.Api (Agent_core.Retry.NotFound _)
+  | Agent_core.Error.Api (Agent_core.Retry.Timeout _) -> unnamed_core_cause error
   | Agent_core.Error.Provider
       (Llm_provider.Error.NetworkError { provider; kind; detail; _ }) ->
     Provider_network { provider = Some provider; kind; detail }

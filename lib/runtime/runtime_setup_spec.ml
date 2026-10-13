@@ -182,7 +182,8 @@ let of_json ?home_dir = function
         else Ok None in
       let* account_home = match account_home,choice with
         | None,Muse -> invalid "account_home"
-        | None,_ -> Ok None
+        | (None, Ollama) | (None, Llama_cpp) | (None, Vllm) | (None, Openai_compatible)
+        | (None, Messages) | (None, Claude_code) | (None, Codex) | (None, Antigravity) -> Ok None
         | Some home,_ when Runtime_account_home.is_valid home -> Ok (Some home)
         | Some _,_ -> invalid "account_home" in
       let* oauth,timeout = if choice <> Antigravity then Ok (None,None) else (
@@ -290,7 +291,10 @@ let for_existing_inline_provider spec (provider : Runtime_schema.provider) =
       (* Provenance belongs to this parsed configured provider, not to a
          temporary file or a JSON assertion. The locked resolver rechecks it. *)
       for_provider {spec with existing_inline=Some (provider.id, original)} provider
-  | _ -> None
+  | (Http { credential = None;_}, None, Some (Runtime_schema.Env _ | Runtime_schema.File _))
+  | (Http { credential = None;_}, None, None) | (Http { credential = None;_}, Some _, _)
+  | (Http { credential = Some _;_}, _, _) | (Client _, _, _)
+  | (Http {credential=None; _ }, None, Some (Inline _)) -> None
 let resolve_provider spec providers =
   let selected = match spec.declared_provider_id with
     | Some _ as selected -> selected | None -> spec.requested_provider_id in

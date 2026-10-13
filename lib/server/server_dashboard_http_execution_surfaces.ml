@@ -1130,7 +1130,7 @@ let running_keeper_names (config : Workspace.config) =
     match Keeper_meta_store.read_meta config name with
     | Ok (Some meta) when Keeper_status_bridge.runtime_keepalive_running config meta ->
       Some name
-    | _ -> None)
+    | Ok (None) | Error _ | Ok (Some _) -> None)
 ;;
 
 let patch_surface_json_for_running_keepers (config : Workspace.config) = function

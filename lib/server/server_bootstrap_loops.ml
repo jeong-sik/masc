@@ -1045,8 +1045,10 @@ let prepare_keeper_persistence ?requested_base_path ~accept_store_quarantine ~co
          match error with
          | Preparation_base_path_identity_unavailable failure
          | Preparation_config_not_canonical failure -> failure
-         | _ ->
-           persistence_failure
+         | Preparation_in_progress | Preparation_awaiting_claim | Preparation_already_claimed
+         | Preparation_ownership_lost | Shutdown_inventory_unavailable _
+         | Shutdown_admission_unavailable _ | Preparation_failed_previously _
+         | Store_quarantine_refused _ -> persistence_failure
              ~phase:!phase
              ~base_path:requested_base_path
              ~cause:(failure_cause_of_prepare_error error)
@@ -2152,8 +2154,7 @@ let start_keeper_loops_owned
               (match launch_outcome with
                | Keeper_keepalive.Keepalive_started _
                | Keeper_keepalive.Keepalive_already_registered _ -> ()
-               | outcome ->
-                 Log.Keeper.warn
+               | (Keeper_keepalive.Keepalive_lane_ownership_lost | Keeper_keepalive.Keepalive_lifecycle_denied _ | Keeper_keepalive.Keepalive_registration_rejected _ | Keeper_keepalive.Keepalive_fiber_start_rejected _ | Keeper_keepalive.Keepalive_launch_callback_failed _ | Keeper_keepalive.Keepalive_fork_rejected _) as outcome -> Log.Keeper.warn
                    "%s: start_keepalive rejected %s: %s"
                    log_prefix
                    m.name

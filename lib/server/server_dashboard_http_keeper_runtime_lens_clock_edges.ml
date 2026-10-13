@@ -119,14 +119,33 @@ let clock_edge_json ~idx (row : manifest_row) =
     match event with
     | Keeper_runtime_manifest.Provider_lane_resolved ->
       first_string_opt [ clock_string row "tool_batch_id"; Some (fallback_tool_batch_id row) ]
-    | _ -> clock_string row "tool_batch_id"
+    | Keeper_runtime_manifest_types.Turn_started | Keeper_runtime_manifest_types.Phase_gate_decided
+    | Keeper_runtime_manifest_types.Runtime_routed
+    | Keeper_runtime_manifest_types.Runtime_execution_built
+    | Keeper_runtime_manifest_types.Runtime_completed | Keeper_runtime_manifest_types.Runtime_failed
+    | Keeper_runtime_manifest_types.Pre_dispatch_blocked
+    | Keeper_runtime_manifest_types.Context_injected
+    | Keeper_runtime_manifest_types.History_projection_observed
+    | Keeper_runtime_manifest_types.Event_bus_correlated
+    | Keeper_runtime_manifest_types.Checkpoint_loaded
+    | Keeper_runtime_manifest_types.Checkpoint_saved
+    | Keeper_runtime_manifest_types.Receipt_appended | Keeper_runtime_manifest_types.Turn_finished -> clock_string row "tool_batch_id"
   in
   let checkpoint_id =
   match event with
   | Keeper_runtime_manifest.Checkpoint_loaded
   | Keeper_runtime_manifest.Checkpoint_saved ->
     first_string_opt [ clock_string row "checkpoint_id"; fallback_checkpoint_id row ]
-    | _ -> clock_string row "checkpoint_id"
+    | Keeper_runtime_manifest_types.Turn_started | Keeper_runtime_manifest_types.Phase_gate_decided
+    | Keeper_runtime_manifest_types.Runtime_routed
+    | Keeper_runtime_manifest_types.Runtime_execution_built
+    | Keeper_runtime_manifest_types.Runtime_completed | Keeper_runtime_manifest_types.Runtime_failed
+    | Keeper_runtime_manifest_types.Pre_dispatch_blocked
+    | Keeper_runtime_manifest_types.Provider_lane_resolved
+    | Keeper_runtime_manifest_types.Context_injected
+    | Keeper_runtime_manifest_types.History_projection_observed
+    | Keeper_runtime_manifest_types.Event_bus_correlated
+    | Keeper_runtime_manifest_types.Receipt_appended | Keeper_runtime_manifest_types.Turn_finished -> clock_string row "checkpoint_id"
   in
   let event_bus_correlation_id =
     first_string_opt
@@ -146,13 +165,33 @@ let clock_edge_json ~idx (row : manifest_row) =
     match event with
     | Keeper_runtime_manifest.Event_bus_correlated ->
       Json_util.get_int decision "event_count"
-    | _ -> None
+    | Keeper_runtime_manifest_types.Turn_started | Keeper_runtime_manifest_types.Phase_gate_decided
+    | Keeper_runtime_manifest_types.Runtime_routed
+    | Keeper_runtime_manifest_types.Runtime_execution_built
+    | Keeper_runtime_manifest_types.Runtime_completed | Keeper_runtime_manifest_types.Runtime_failed
+    | Keeper_runtime_manifest_types.Pre_dispatch_blocked
+    | Keeper_runtime_manifest_types.Provider_lane_resolved
+    | Keeper_runtime_manifest_types.Context_injected
+    | Keeper_runtime_manifest_types.History_projection_observed
+    | Keeper_runtime_manifest_types.Checkpoint_loaded
+    | Keeper_runtime_manifest_types.Checkpoint_saved
+    | Keeper_runtime_manifest_types.Receipt_appended | Keeper_runtime_manifest_types.Turn_finished -> None
   in
   let event_bus_payload_kinds =
     match event with
     | Keeper_runtime_manifest.Event_bus_correlated ->
       Json_util.get_string_list decision "payload_kinds"
-    | _ -> []
+    | Keeper_runtime_manifest_types.Turn_started | Keeper_runtime_manifest_types.Phase_gate_decided
+    | Keeper_runtime_manifest_types.Runtime_routed
+    | Keeper_runtime_manifest_types.Runtime_execution_built
+    | Keeper_runtime_manifest_types.Runtime_completed | Keeper_runtime_manifest_types.Runtime_failed
+    | Keeper_runtime_manifest_types.Pre_dispatch_blocked
+    | Keeper_runtime_manifest_types.Provider_lane_resolved
+    | Keeper_runtime_manifest_types.Context_injected
+    | Keeper_runtime_manifest_types.History_projection_observed
+    | Keeper_runtime_manifest_types.Checkpoint_loaded
+    | Keeper_runtime_manifest_types.Checkpoint_saved
+    | Keeper_runtime_manifest_types.Receipt_appended | Keeper_runtime_manifest_types.Turn_finished -> []
   in
   `Assoc
     [

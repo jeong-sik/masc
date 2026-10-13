@@ -743,8 +743,7 @@ let run ~sw backend m e =
             notify_tool_change e.package;
             let rec loop () =
               if e.stopping then (
-                match e.phase with Detached -> () | _ ->
-                  let pending = e.wake in
+                match e.phase with Detached -> () | Attached | Observing | Detaching | Failed _ -> let pending = e.wake in
                   Eio.Promise.await pending; clear_wake e; loop ())
               else (
                 let pending = e.wake in
@@ -825,7 +824,7 @@ let backend ~store () = match !override with
             Lane_addon_worker.call_exported_tool ~on_result ?authorize ~principal worker ~name ~arguments
             |> Result.map_error (function
               | Lane_addon_worker.Host_refusal refusal -> Lane_addon_call_context.Host_refusal refusal
-              | error -> Lane_addon_call_context.Transport_error (Lane_addon_worker.error_to_string error)));
+              | (Lane_addon_worker.Stopped | Lane_addon_worker.Invalid_package _ | Lane_addon_worker.Docker_failed _ | Lane_addon_worker.Protocol_failed _ | Lane_addon_worker.Invalid_observation _) as error -> Lane_addon_call_context.Transport_error (Lane_addon_worker.error_to_string error)));
           action_schema = (fun () -> Lane_addon_worker.action_schema worker);
           act = (fun ~arguments -> Lane_addon_worker.act worker ~arguments
             |> Result.map_error Lane_addon_worker.error_to_string);
@@ -1311,7 +1310,7 @@ let snapshot m ~access ?instance_id () =
       | Ok (Failed message) -> Failed message
       | Ok Detaching when (match text fields "instance_id" with
           | Ok id -> Hashtbl.mem m.recovering id | Error _ -> false) -> Detaching
-      | _ -> Failed "previous process; explicit detach can verify container cleanup" in
+      | Ok (Attached | Observing) | Error _ | Ok Detaching -> Failed "previous process; explicit detach can verify container cleanup" in
     Ok (`Assoc (("runtime_presence", `String "retained")
       :: ("phase", phase_to_json phase)
       :: ("configuration", Option.fold ~none:`Null ~some:configuration_owner_json owner)
@@ -1484,8 +1483,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
   Ok (entry_json e)
 
 let detach_entry ~sw m e =
-  (match e.phase with Detached -> () | _ ->
-    e.stopping <- true; e.phase <- Detaching; notify_tool_change e.package; wake e;
+  (match e.phase with Detached -> () | Attached | Observing | Detaching | Failed _ -> e.stopping <- true; e.phase <- Detaching; notify_tool_change e.package; wake e;
     wake_dependents m e;
     stop_entry ~sw ~backend:(backend ~store:m.store ()) m e);
   let* () = persist m e in Ok (entry_json e)
@@ -1538,7 +1536,8 @@ let read_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
     let* document = offload (fun () -> Lane_addon_declaration.read ~directory ~source_path)
       |> Result.map_error (fun error -> match access, error.Lane_addon_declaration.code with
         | (Keeper _ | Unauthenticated), Not_found -> denied
-        | _ -> error) in
+        | ((Lane_addon_sources.Keeper _ | Lane_addon_sources.Unauthenticated), (Lane_addon_declaration.Invalid_request | (Lane_addon_declaration.Revision_conflict | (Lane_addon_declaration.Invalid_declaration | Lane_addon_declaration.Io_error))))
+        | (Lane_addon_sources.Operator_configuration, _) -> error) in
     let* () = authorize_document m ~access document
       |> Result.map_error (fun error -> match access with
         | Lane_addon_sources.Operator_configuration -> error
@@ -1581,7 +1580,9 @@ let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
           (match access, visibility with
            | Keeper keeper, Keeper_only owner when String.equal keeper owner -> Ok (Some keeper)
            | (Keeper _ | Unauthenticated), Shared -> Ok None
-           | _ -> Error {Lane_addon_declaration.code=Invalid_request;
+           | (Lane_addon_sources.Keeper _, Operator_only)
+           | (Lane_addon_sources.Unauthenticated, (Operator_only | Keeper_only _))
+           | (Lane_addon_sources.Operator_configuration, _) | (Keeper _, Keeper_only _) -> Error {Lane_addon_declaration.code=Invalid_request;
                message="verified declaration owner required";current=None}) in
     let source_path = Filename.concat directory request.file_name in
     let ownership_error message = {Lane_addon_declaration.code=Io_error;message;current=None} in
@@ -1693,7 +1694,8 @@ let retained_action_unlocked m ~instance_id ~request_id =
             detail = Some "original worker no longer runs; dispatched outcome is unknown and will not be replayed"}
         | false, Lane_addon_action.Queued -> Some {receipt with state = Failed_before_effect;
             detail = Some "original worker no longer runs; queued request was not dispatched"}
-        | _ -> None in
+        | (false, (Lane_addon_action.Confirmed | (Lane_addon_action.Failed_before_effect | Lane_addon_action.Outcome_unknown)))
+        | (true, _) -> None in
       (match recovered with None -> Ok (Some receipt)
        | Some receipt -> let* () = save_action_unlocked m receipt in Ok (Some receipt))
 let action_status m args =
@@ -2100,8 +2102,10 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
               | Some json -> runtime_result (phase_of_json json) | None -> Error (Runtime_failed "missing retained phase") in
             let* owner = runtime_result (configuration_of_fields fields) in
             let* () = match phase, owner with
-              | Detached, _ | _, None -> Ok ()
-              | _, Some owner ->
+              | (Detached, _) | (Attached, None) | (Observing, None) | (Failed _, None)
+              | (Detaching, None) -> Ok ()
+              | (Attached, Some owner) | (Observing, Some owner) | (Failed _, Some owner)
+              | (Detaching, Some owner) ->
                   let another_owner = List.exists (fun e -> match e.configuration with
                     | Some current -> current.id = owner.id | None -> false) (entries m) in
                   if another_owner then Ok () else

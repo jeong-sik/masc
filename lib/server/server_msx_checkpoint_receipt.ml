@@ -43,7 +43,13 @@ let schema_objects db =
       let rec rows acc = match Sqlite3.step stmt with
         | Sqlite3.Rc.ROW -> rows ((Sqlite3.column_text stmt 0,Sqlite3.column_text stmt 1)::acc)
         | DONE -> Ok (List.rev acc)
-        | _ -> Error (sql_error db) in
+        | Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM
+        | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM
+        | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT
+        | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL
+        | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT
+        | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH
+        | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _ -> Error (sql_error db) in
       rows [])
 let expected_schema = List.sort compare
   ["receipts",schema;"terminal_immutable",immutable;"receipt_retained",no_delete;"binding_immutable",binding_immutable]
@@ -111,7 +117,13 @@ let read db binding =
              | Some (Committed completed) when not (valid_completion completed) ->
                  Error (Store_unavailable "invalid persisted checkpoint completion evidence")
              | Some state -> Ok (Some {binding;epoch=Sqlite3.column_text stmt 2;state}))
-      | _ -> Error (sql_error db))
+      | Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT
+      | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY
+      | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND
+      | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY
+      | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH
+      | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT
+      | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _ -> Error (sql_error db))
 let admit ~path ~epoch binding =
   let* () = valid binding in
   if String.trim epoch = "" then Error (Invalid_binding "checkpoint epoch is blank") else

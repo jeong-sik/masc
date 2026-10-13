@@ -773,7 +773,21 @@ let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
       (if tool_effect_attempted
        then Keeper_official_client_session_store.Activity_observed
        else Keeper_official_client_session_store.No_activity_observed)
-  | (Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), _ ->
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Invalid_config _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Spawn_failed _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Reasoning_effort_admission_failed _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Turn_input_write_failed _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Protocol_error _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Rpc_error _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Subscription_required _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Unsupported_server_request _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Context_window_exceeded _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Turn_failed _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Stopped_by_host _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Turn_interrupted)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Runtime_shutting_down)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Process_exited _)
+  | ((Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), Runtime_codex_app_server.Timeout _) ->
     recovery_failure_of_client_error error
 ;;
 

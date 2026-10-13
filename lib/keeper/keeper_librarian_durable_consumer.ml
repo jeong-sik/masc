@@ -1391,9 +1391,19 @@ let consume_one_with_progress_writer
       is empty, and the official stop is no wide range that failed. Keeping
       the marker would narrow every later pass to one turn for good. *)
    | Error (Official_range_stopped _), _ -> clear_failed key
-   | Ok (Progress_advanced _ | Official_advanced _), R.To_first_cut_point
-   | Ok Memory_not_committed, _
-   | Error _, _ -> ());
+   | (Ok (Progress_advanced _ | Official_advanced _), R.To_first_cut_point)
+   | (Ok (Memory_not_committed), _) | (Error (Keeper_meta_absent), _)
+   | (Error (Keeper_meta_unreadable _), _) | (Error (Boundary_log_unreadable _), _)
+   | (Error (Progress_unreadable _), _) | (Error (Checkpoint_unreadable _), _)
+   | (Error (Position_in_other_trace _), _) | (Error (Position_not_in_history _), _)
+   | (Error (Range_stopped _), _) | (Error (Range_end_boundary_missing _), _)
+   | (Error (Progress_boundary_missing _), _) | (Error (Memory_snapshot_unreadable _), _)
+   | (Error (Counterpart_interval_non_monotone _), _)
+   | (Error (Counterpart_observations_unreadable _), _) | (Error (Progress_write_failed _), _)
+   | (Error (Official_progress_unreadable _), _) | (Error (Official_progress_write_failed _), _)
+   | (Error (Official_progress_boundary_missing _), _)
+   | (Error (Committed_official_range_mismatch), _) | (Error (Fragment_store_unreadable _), _)
+   | (Error (Fragment_line_unreadable _), _) -> ());
   result
 ;;
 

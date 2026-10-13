@@ -793,7 +793,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          | Sys_error detail -> Error (config_error ~field:"native_workspace" detail)
          | Unix.Unix_error (error, _, _) ->
            Error (config_error ~field:"native_workspace" (Unix.error_message error)))
-      | _ -> Ok () in
+      | (Runtime_antigravity_home.Shared_workspace _, None)
+      | (Runtime_antigravity_home.Private_workspace, _) -> Ok () in
     let* native_cwd = Eio_guard.run_in_systhread ~label:"antigravity-native-workspace" (fun () ->
         Runtime_antigravity_home.prepare_native_workspace home ~workspace:native_workspace)
       |> Result.map_error home_error_to_core_error in

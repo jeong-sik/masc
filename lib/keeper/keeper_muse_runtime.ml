@@ -218,7 +218,12 @@ let runtime_error_to_core_error (error : Serve.error) =
 let recovery_failure_of_runtime_error ?current (error : Serve.error) =
   match current with
   | Some Session_store.State_persistence_failed -> Session_store.State_persistence_failed
-  | None | Some _ ->
+  | None | Some (Session_store.Pre_dispatch_failed) | Some (Session_store.Transient_spawn_failed)
+  | Some (Session_store.Owner_stopped_turn) | Some (Session_store.Retryable_turn_failed)
+  | Some (Session_store.Transport_interrupted) | Some (Session_store.Protocol_failed)
+  | Some (Session_store.Provider_rejected) | Some (Session_store.Input_rejected _)
+  | Some (Session_store.Host_hook_failed) | Some (Session_store.Process_restarted)
+  | Some (Session_store.Vendor_session_full _) ->
   match error with
   | Serve.Spawn_failed _ -> Session_store.Transient_spawn_failed
   | Serve.Turn_input_write_failed _
@@ -273,7 +278,9 @@ let recovery_failure_for_attempt ~current ~admission error =
   | Session_store.State_persistence_failed, _, _ -> current
   | _, Not_dispatched, (Serve.Timeout {turn_accepted=false; _} | Serve.Capability_not_granted _) ->
     Session_store.Pre_dispatch_failed
-  | _ -> recovery_failure_of_runtime_error ~current error
+  | ((Session_store.Pre_dispatch_failed | (Session_store.Transient_spawn_failed | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), Not_dispatched, Serve.Timeout { turn_accepted = true;_})
+  | ((Session_store.Pre_dispatch_failed | (Session_store.Transient_spawn_failed | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), Not_dispatched, (Serve.Session_not_durable | (Serve.Turn_cancelled | (Serve.Runtime_shutting_down | (Serve.Invalid_config _ | (Serve.Spawn_failed _ | (Serve.Turn_input_write_failed _ | (Serve.Protocol_error _ | (Serve.Rpc_error _ | (Serve.Session_model_mismatch _ | (Serve.Session_workspace_mismatch _ | (Serve.Session_approval_mode_mismatch _ | (Serve.Auth_required _ | (Serve.Turn_failed _ | (Serve.Unsupported_server_request _ | Serve.Process_exited _)))))))))))))))
+  | ((Session_store.Pre_dispatch_failed | (Session_store.Transient_spawn_failed | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), (Dispatched | Acknowledged), _) -> recovery_failure_of_runtime_error ~current error
 ;;
 
 (* Whether a failed attempt can no longer claim it was effect-free. Before the
@@ -900,7 +907,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         | Runtime_muse_home.Sign_in_required _ as error ->
           Agent_core.Error.Provider (Llm_provider.Error.AuthError
             { provider = provider_name; detail = Runtime_muse_home.error_to_string error })
-        | error -> config_error ~field:"account_home"
+        | (Runtime_muse_home.Invalid_account_home _ | Runtime_muse_home.State_unavailable _) as error -> config_error ~field:"account_home"
             (Runtime_muse_home.error_to_string error)) in
     let* historical_task_message = match official_task_reference with
       | None -> Ok None

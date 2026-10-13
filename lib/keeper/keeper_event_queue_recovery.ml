@@ -444,7 +444,7 @@ let project_discovered_bounded ~base_path ~budget ~cursor =
       match error with
       | Executor_pool_ref.Work_failed failure ->
         Sweep_execution_failed failure
-      | error -> Sweep_executor_unavailable error
+      | (Executor_pool_ref.Pool_unavailable | Executor_pool_ref.Caller_not_in_eio | Executor_pool_ref.Submission_failed _) as error -> Sweep_executor_unavailable error
     in
     { report =
         { discovered = 0

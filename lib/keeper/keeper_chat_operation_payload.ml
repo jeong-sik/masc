@@ -150,7 +150,13 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
       if String.trim channel_user_id = ""
       then Ok ()
       else Error "Keeper-routed chat operation cannot carry an external speaker"
-    | Keeper_continuation_channel.Unrouted _, _ ->
+    | (Keeper_continuation_channel.Unrouted _, Surface_ref.Dashboard _)
+    | (Keeper_continuation_channel.Unrouted _, Surface_ref.Discord _)
+    | (Keeper_continuation_channel.Unrouted _, Surface_ref.Slack _)
+    | (Keeper_continuation_channel.Unrouted _, Surface_ref.Webhook _)
+    | (Keeper_continuation_channel.Unrouted _, Surface_ref.Agent)
+    | (Keeper_continuation_channel.Unrouted _, Surface_ref.Broadcast)
+    | (Keeper_continuation_channel.Unrouted _, Surface_ref.Gate _) ->
       Error "Keeper chat operation continuation must be routable"
     | (Keeper_continuation_channel.Dashboard _
       | Keeper_continuation_channel.Discord _

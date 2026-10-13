@@ -182,7 +182,9 @@ let occupy_non_tool_index ?channel bridge_state index =
   match stream_block_for_index bridge_state index with
   | None | Some (Occupied_non_tool_block None) ->
       replace_block bridge_state index (Occupied_non_tool_block channel)
-  | Some _ -> bridge_state
+  | Some (Active_tool _) | Some (Active_native_tool _) | Some (Ended_native_tool _)
+  | Some (Occupied_non_tool_block _) | Some (Invalid_tool_block _) | Some (Invalid_media_block)
+  | Some (Active_media _) -> bridge_state
 
 let tool_start_is_replay existing tool =
   Option.equal String.equal existing.tool_call_id tool.tool_call_id
@@ -541,7 +543,7 @@ let media_payload_too_large_reason ~size_bytes ~max_bytes =
 
 let media_persist_protocol_reason = function
   | Keeper_chat_media_store.Write_failed _ -> "failed to persist generated media"
-  | err -> Keeper_chat_media_store.persist_error_to_string err
+  | (Keeper_chat_media_store.Unsupported_source_type _ | Keeper_chat_media_store.Invalid_base64 _ | Keeper_chat_media_store.Media_too_large _) as err -> Keeper_chat_media_store.persist_error_to_string err
 
 let add_media_chunk ~max_bytes ~media_type ~source_type ~chunks ~encoded_bytes data =
   let encoded_bytes = encoded_bytes + String.length data in

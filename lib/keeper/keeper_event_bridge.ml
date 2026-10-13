@@ -711,7 +711,14 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
                  Some (match Tool_schemas_misc.misc_operation_of_tool_name tool_name with
                    | Some operation -> Lane_addon_sources.activity_of_misc_operation operation
                    | None -> Lane_addon_sources.Tool_completed)
-             | _ -> None) events |> List.sort_uniq Stdlib.compare in
+             | Agent_core.Event_bus.AgentStarted _ | Agent_core.Event_bus.AgentCompleted _
+             | Agent_core.Event_bus.AgentYielded _ | Agent_core.Event_bus.AgentInputRequired _
+             | Agent_core.Event_bus.AgentFailed _ | Agent_core.Event_bus.ToolCalled _
+             | Agent_core.Event_bus.TurnStarted _ | Agent_core.Event_bus.TurnReady _
+             | Agent_core.Event_bus.TurnCompleted _ | Agent_core.Event_bus.HandoffRequested _
+             | Agent_core.Event_bus.HandoffCompleted _ | Agent_core.Event_bus.ElicitationCompleted _
+             | Agent_core.Event_bus.ToolApprovalCompleted _
+             | Agent_core.Event_bus.InferenceTelemetry _ | Agent_core.Event_bus.Custom (_, _) -> None) events |> List.sort_uniq Stdlib.compare in
            List.iter (fun activity -> Lane_addon_runtime.notify_activity ~config ~activity) activities;
            pending := prepare_pending_events events;
            pending := process_pending ~store_ref:store [] !pending);

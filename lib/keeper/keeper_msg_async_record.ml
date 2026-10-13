@@ -575,7 +575,7 @@ let entry_to_json ~now (e : entry) : Yojson.Safe.t =
               ; "reason", `String reason
               ] )
         ]
-    | _ -> fields
+    | Queued | Running -> fields
   in
   `Assoc fields
 ;;

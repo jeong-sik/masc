@@ -1595,7 +1595,7 @@ let save_agent_core_classified_typed
              turn's checkpoint replaces it"
             canonical_path got expected;
           Ok None
-        | answer -> answer
+        | (Error (Not_found | (Store_error _ | (Parse_error _ | (Newer_version _ | (Io_error _ | (Read_failed _ | Agent_core_error _)))))) | Ok _) as answer -> answer
       with
       | Error error -> Error (Existing_checkpoint_unreadable error)
       | Ok (Some existing) when not (String.equal existing.session_id session_id) ->

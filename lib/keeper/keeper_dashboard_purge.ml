@@ -148,7 +148,7 @@ let existing_operation (config : Workspace.config) requested_name =
            absence is not an unavailable inventory. *)
         Ok (Keeper_shutdown_intake_fence.shutdown_operation_id
           ~base_path:config.base_path ~keeper_name)
-      | result -> result
+      | (Error (Keeper_owner_registry.Inventory_stopping | (Keeper_owner_registry.Inventory_not_installed _ | (Keeper_owner_registry.Owner_unavailable _ | Keeper_owner_registry.Owner_initialization_failed _))) | Ok _) as result -> result
     in
     (match snapshot with
      | Error error ->

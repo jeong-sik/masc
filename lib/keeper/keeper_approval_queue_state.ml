@@ -65,12 +65,10 @@ let delta_rows ~before_pending ~before_deliveries ~after_pending ~after_deliveri
 
 let classify_restarted_entry (entry : pending_approval) =
   match entry.exact_attempt, entry.summary_status with
-  | Exact_bound
-      ( { status =
-            Exact_dispatch_uncertain
-        ; _
-        } as binding ),
-    _ ->
+  | (Exact_bound ({ status = Exact_dispatch_uncertain;_} as binding), Summary_not_requested)
+  | (Exact_bound ({ status = Exact_dispatch_uncertain;_} as binding), Summary_pending)
+  | (Exact_bound ({ status = Exact_dispatch_uncertain;_} as binding), Summary_available _)
+  | (Exact_bound ({ status = Exact_dispatch_uncertain;_} as binding), Summary_failed _) ->
     ( { entry with
         exact_attempt =
           Exact_bound
@@ -97,17 +95,10 @@ let classify_restarted_entry (entry : pending_approval) =
           Summary_attempt_persistence_uncertain
       }
     , true )
-  | Exact_unbound, _
-  | Exact_bound
-      { status =
-          ( Exact_released_before_dispatch
-          | Exact_released_recovery_required
-          | Exact_quarantined _
-          | Exact_restart_quarantined
-          | Exact_completed )
-      ; _
-      },
-    _ ->
+  | (Exact_unbound, Summary_not_requested)
+  | (Exact_bound { status = (Exact_released_before_dispatch | Exact_released_recovery_required | Exact_quarantined _ | Exact_restart_quarantined | Exact_completed);_}, _)
+  | (Exact_unbound, Summary_pending) | (Exact_unbound, Summary_available _)
+  | (Exact_unbound, Summary_failed _) ->
     entry, false
 ;;
 

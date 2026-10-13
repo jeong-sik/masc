@@ -78,8 +78,7 @@ let input_rejection_to_string = function
 let rejection_to_json = function
   | Binding.Rejected_assistant reason -> obj ["kind",str "rejected_assistant";
       "input_rejection",str (input_rejection_to_string reason)]
-  | reason ->
-      let kind = match reason with
+  | (Keeper_claude_task_binding.Missing_ticket | Keeper_claude_task_binding.Conflicting_invocation | Keeper_claude_task_binding.Foreign_session | Keeper_claude_task_binding.Foreign_invocation | Keeper_claude_task_binding.Unknown_parent | Keeper_claude_task_binding.Conflicting_parent_provenance | Keeper_claude_task_binding.Missing_assistant_evidence | Keeper_claude_task_binding.Unattributed_assistant | Keeper_claude_task_binding.Input_not_in_group | Keeper_claude_task_binding.Conflicting_assistant_evidence) as reason -> let kind = match reason with
         | Binding.Missing_ticket -> "missing_ticket" | Conflicting_invocation -> "conflicting_invocation"
         | Foreign_session -> "foreign_session" | Foreign_invocation -> "foreign_invocation"
         | Unknown_parent -> "unknown_parent" | Conflicting_parent_provenance -> "conflicting_parent_provenance"

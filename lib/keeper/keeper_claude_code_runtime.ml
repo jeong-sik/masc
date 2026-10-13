@@ -495,7 +495,20 @@ let recovery_failure_of_attempt ~session_mode ~gate_continuation error =
       (if tool_effect_attempted || response_emitted
        then Session_store.Activity_observed
        else Session_store.No_activity_observed)
-  | (Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), _ ->
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Invalid_config _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Spawn_failed _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Protocol_error _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Subscription_required _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Unsupported_control_request _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Turn_transport_interrupted _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Context_window_exceeded _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Turn_failed _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Turn_failed_with_observation _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Stopped_by_host _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Quota_blocked _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Process_exited _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Unhandled_exception _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Timeout _) ->
     recovery_failure_of_client_error error
 ;;
 
@@ -1314,7 +1327,12 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                 , Runtime_claude_code.Context_window_exceeded
                     { tool_effect_attempted = false; response_emitted = false; _ } ) ->
                 true
-              | _ -> false);
+              | (Runtime_claude_code.Start, (Some _ | None), Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_})
+              | (Runtime_claude_code.Start, (Some _ | None), Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_})
+              | (Runtime_claude_code.Start, (Some _ | None), (Runtime_claude_code.Invalid_config _ | (Runtime_claude_code.Spawn_failed _ | (Runtime_claude_code.Protocol_error _ | (Runtime_claude_code.Subscription_required _ | (Runtime_claude_code.Unsupported_control_request _ | (Runtime_claude_code.Turn_transport_interrupted _ | (Runtime_claude_code.Turn_failed _ | (Runtime_claude_code.Turn_failed_with_observation _ | (Runtime_claude_code.Stopped_by_host _ | (Runtime_claude_code.Quota_blocked _ | (Runtime_claude_code.Process_exited _ | (Runtime_claude_code.Unhandled_exception _ | Runtime_claude_code.Timeout _)))))))))))))
+              | (Runtime_claude_code.Resume _, None, Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_})
+              | (Runtime_claude_code.Resume _, None, Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_})
+              | (Runtime_claude_code.Resume _, None, (Runtime_claude_code.Invalid_config _ | (Runtime_claude_code.Spawn_failed _ | (Runtime_claude_code.Protocol_error _ | (Runtime_claude_code.Subscription_required _ | (Runtime_claude_code.Unsupported_control_request _ | (Runtime_claude_code.Turn_transport_interrupted _ | (Runtime_claude_code.Turn_failed _ | (Runtime_claude_code.Turn_failed_with_observation _ | (Runtime_claude_code.Stopped_by_host _ | (Runtime_claude_code.Quota_blocked _ | (Runtime_claude_code.Process_exited _ | (Runtime_claude_code.Unhandled_exception _ | Runtime_claude_code.Timeout _))))))))))))) -> false);
            (* A provider can reject after the child process spawned but
               before any response or MCP tool effect. Preserve the typed
               no-effect fact so failover is allowed for that narrow case.

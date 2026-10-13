@@ -1895,7 +1895,12 @@ let apply_delta ~now t (delta : Live.delta) =
        | args ->
          (match
             update_unique_call t ~call_id
-              ~eligible:(fun call -> not call.result_ready && not call.failed)
+              ~eligible:(fun call ->
+                call.authority = Masc_execution
+                && call.segment = t.segment
+                && call.attempt = t.attempt
+                && not call.result_ready
+                && not call.failed)
               (fun call -> { call with args })
           with
           | Call_updated | Call_missing | Call_ambiguous | Call_conflicting -> ()));

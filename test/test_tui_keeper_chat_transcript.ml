@@ -1168,6 +1168,34 @@ let test_a_late_settle_for_another_call_leaves_the_prompt () =
         awaiting.Transcript.call_id
   | None -> fail "a settle for a different call cleared the wrong prompt"
 
+let test_approval_arguments_cannot_update_native_call () =
+  let t = fresh () in
+  let native = occurrence ~block_index:7 "approval-native" in
+  feed t [Live.Run_started; Live.Native_tool_started {occurrence=native;tool_name=Some "Read"};
+    Live.Approval_requested {call_id="approval-native";
+      tool_name="Read";args="foreign arguments";question="read?";because="provided"}];
+  match Transcript.tool_calls t with
+  | [call] -> check string "native arguments remain observational" "" call.Transcript.args;
+      check tool_outcome "native lifecycle unchanged" Transcript.Native_running call.outcome
+  | [] | _ :: _ :: _ -> fail "expected one native observation"
+;;
+
+let test_approval_arguments_cannot_update_a_call_of_a_superseded_attempt () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; tool_started "approval-old" "Edit"
+    ; Live.Runtime_attempt_started { runtime_id = Some "next-runtime"; attempt_index = Some 1 }
+    ; Live.Approval_requested
+        { call_id = "approval-old"; tool_name = "Edit"; args = "late arguments"
+        ; question = "edit?"; because = "held" }
+    ];
+  match Transcript.tool_calls t with
+  | [ call ] ->
+      check string "the earlier attempt's call keeps its arguments" ""
+        call.Transcript.args
+  | [] | _ :: _ :: _ -> fail "expected one call from the earlier attempt"
+;;
 let test_the_whole_reasoning_trail_is_kept () =
   let t = fresh () in
   feed t
@@ -2696,6 +2724,9 @@ let () =
         test_case "error body and runtime context remain independent" `Quick test_failure_body_and_runtime_are_independent])
     ; ( "event timeline"
       , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
+         test_case "approval args retain native authority" `Quick test_approval_arguments_cannot_update_native_call;
+         test_case "approval args skip a superseded attempt's call" `Quick
+           test_approval_arguments_cannot_update_a_call_of_a_superseded_attempt;
          test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts;
          test_case "a reported native failure shows as failure" `Quick
            test_a_reported_native_failure_shows_as_failure;

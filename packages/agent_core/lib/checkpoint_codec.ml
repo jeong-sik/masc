@@ -171,66 +171,46 @@ let result_all items =
   |> Result.map List.rev
 ;;
 
-let checkpoint_tool_result_to_json
-      ~tool_use_id
-      ~content
-      ~outcome
-      ~json
-      content_override
-  =
-  let wire_json =
-    Llm_provider.Api_common.content_block_to_json
-      (ToolResult
-         { tool_use_id; content; outcome; json; content_blocks = None })
+let checkpoint_tool_result_to_json ~tool_use_id ~content ~outcome content_override =
+  let fields =
+    Llm_provider.Api_common.tool_result_wire_fields ~tool_use_id ~content ~outcome
   in
-  match wire_json with
-  | `Assoc fields ->
-    let fields =
-      match content_override with
-      | None -> fields
-      | Some content ->
-        List.map
-          (fun (name, value) ->
-             if String.equal name "content" then name, content else name, value)
-          fields
-    in
-    let provenance =
-      match outcome with
-      | Tool_succeeded -> []
-      | Tool_failed { failure_kind; error_class } ->
-        [ "failure_kind", Types.tool_failure_kind_to_yojson failure_kind ]
-        @
-          (match error_class with
-          | Some error_class ->
-            [ "error_class", Types.tool_error_class_to_yojson error_class ]
-          | None -> [])
-    in
-    `Assoc
-      (fields @ provenance
-       @ match content_override with
-         | None -> []
-         | Some _ -> [ "text_content", `String content ])
-  | non_object ->
-    invalid_arg
-      (Printf.sprintf
-         "Checkpoint ToolResult serializer invariant failed: expected object, got %s"
-         (Yojson.Safe.to_string non_object))
+  let fields =
+    match content_override with
+    | None -> fields
+    | Some content ->
+      List.map
+        (fun (name, value) ->
+           if String.equal name "content" then name, content else name, value)
+        fields
+  in
+  let provenance =
+    match outcome with
+    | Tool_succeeded -> []
+    | Tool_failed { failure_kind; error_class } ->
+      [ "failure_kind", Types.tool_failure_kind_to_yojson failure_kind ]
+      @
+        (match error_class with
+        | Some error_class ->
+          [ "error_class", Types.tool_error_class_to_yojson error_class ]
+        | None -> [])
+  in
+  `Assoc
+    (fields @ provenance
+     @ match content_override with
+       | None -> []
+       | Some _ -> [ "text_content", `String content ])
 ;;
 
 let rec checkpoint_content_block_to_json block =
   match block with
-  | ToolResult { tool_use_id; content; outcome; json; content_blocks } ->
+  | ToolResult { tool_use_id; content; outcome; json = _; content_blocks } ->
     let content_override =
       Option.map
         (fun blocks -> `List (List.map checkpoint_content_block_to_json blocks))
         content_blocks
     in
-    checkpoint_tool_result_to_json
-      ~tool_use_id
-      ~content
-      ~outcome
-      ~json
-      content_override
+    checkpoint_tool_result_to_json ~tool_use_id ~content ~outcome content_override
   | Text _
   | Thinking _
   | ReasoningDetails _
@@ -271,13 +251,7 @@ let rec checkpoint_content_block_to_json_result ~scope block =
         |> result_all
         |> Result.map (fun blocks -> Some (`List blocks))
     in
-    Ok
-      (checkpoint_tool_result_to_json
-         ~tool_use_id
-         ~content
-         ~outcome
-         ~json
-         content_override)
+    Ok (checkpoint_tool_result_to_json ~tool_use_id ~content ~outcome content_override)
   | Text _
   | Thinking _
   | ReasoningDetails _
@@ -610,10 +584,6 @@ let checkpoint_fields_around_messages cp =
 let checkpoint_json_with_messages cp messages =
   let before_messages, after_messages = checkpoint_fields_around_messages cp in
   `Assoc (before_messages @ ((messages_field, `List messages) :: after_messages))
-;;
-
-let checkpoint_to_json cp =
-  checkpoint_json_with_messages cp (List.map message_to_json cp.messages)
 ;;
 
 let checkpoint_to_json_result (cp : Checkpoint_types.t) =

@@ -407,29 +407,13 @@ let rec content_block_to_json_with
       ; "input", input
       ]
   | ToolResult { tool_use_id; content; outcome; content_blocks; _ } ->
-    let content_json =
-      match content_blocks with
-      | Some blocks ->
-        (* Structured result: emit the blocks (text/image/...) as the
-           tool_result content array. *)
-        `List (List.map (content_block_to_json_with ~tool_result_content_style) blocks)
-      | None ->
-        (match tool_result_content_style with
-         | Tool_result_content_string -> `String (Utf8_sanitize.sanitize content)
-         | Tool_result_content_text_blocks ->
-           `List
-             [ `Assoc
-                 [ "type", `String "text"
-                 ; "text", `String (Utf8_sanitize.sanitize content)
-                 ]
-             ])
-    in
     `Assoc
-      [ "type", `String "tool_result"
-      ; "tool_use_id", `String tool_use_id
-      ; "content", content_json
-      ; "is_error", `Bool (tool_result_outcome_is_error outcome)
-      ]
+      (tool_result_wire_fields_with
+         ~tool_result_content_style
+         ~tool_use_id
+         ~content
+         ~outcome
+         content_blocks)
   | Image { media_type; data; source_type } ->
     `Assoc
       [ "type", `String "image"
@@ -460,10 +444,49 @@ let rec content_block_to_json_with
             ; "data", `String data
             ] )
       ]
+
+and tool_result_wire_fields_with
+      ~tool_result_content_style
+      ~tool_use_id
+      ~content
+      ~outcome
+      content_blocks
+  =
+  let content_json =
+    match content_blocks with
+    | Some blocks ->
+      (* Structured result: emit the blocks (text/image/...) as the
+         tool_result content array. *)
+      `List (List.map (content_block_to_json_with ~tool_result_content_style) blocks)
+    | None ->
+      (match tool_result_content_style with
+       | Tool_result_content_string -> `String (Utf8_sanitize.sanitize content)
+       | Tool_result_content_text_blocks ->
+         `List
+           [ `Assoc
+               [ "type", `String "text"
+               ; "text", `String (Utf8_sanitize.sanitize content)
+               ]
+           ])
+  in
+  [ "type", `String "tool_result"
+  ; "tool_use_id", `String tool_use_id
+  ; "content", content_json
+  ; "is_error", `Bool (tool_result_outcome_is_error outcome)
+  ]
 ;;
 
 let content_block_to_json =
   content_block_to_json_with ~tool_result_content_style:Tool_result_content_string
+;;
+
+let tool_result_wire_fields ~tool_use_id ~content ~outcome =
+  tool_result_wire_fields_with
+    ~tool_result_content_style:Tool_result_content_string
+    ~tool_use_id
+    ~content
+    ~outcome
+    None
 ;;
 
 type content_block_decode_error =

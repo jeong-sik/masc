@@ -36,6 +36,13 @@ val link : t -> string
 (** The link itself, for the terminal clipboard. The one place it leaves the
     card apart from {!draw}; a caller that logs it has copied a credential. *)
 
+type address_class = Reachable | Local_only | Wildcard_bind
+
+val classify_address : t -> address_class
+(** Where the link's host can be reached from: [Wildcard_bind] for an
+    unspecified bind address, [Local_only] for a loopback host, otherwise
+    [Reachable]. The card's address advice is chosen from this value. *)
+
 val issued_notice : t -> retained:bool -> string
 (** The line the conversation keeps of an issue: which invite, when it
     expires, and that [/play link] opens the card again. It never carries the

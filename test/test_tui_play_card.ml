@@ -225,34 +225,30 @@ let test_the_issue_notice_never_carries_the_link () =
   check bool "and still does not carry a link" false (contains ~sub:"play#" retained)
 ;;
 
-let test_local_link_explains_device_scope () =
-  List.iter (fun (host, local) ->
-    let card = match make ~link:("http://" ^ host ^ "/play#fixture") () with
-      | Ok card -> card | Error error -> fail error in
-    let notes = Card.draw card ~width:140 ~rows:100 |> List.filter_map (function
-      | Card.Note text -> Some text | _ -> None) |> String.concat " " in
-    check bool ("local address " ^ host) local (contains ~sub:"this computer only" notes))
-    ["localhost:8935", true; "127.5.2.1:8935", true; "[::1]:8935", true;
-     "[::ffff:127.0.0.1]:8935", true; "[::ffff:127.5.2.1]:8935", true;
-     "[::ffff:192.168.0.7]:8935", false;
-     "play.example.test", false]
-;;
+(* The card's address advice is chosen from this classification. The
+   decision is checked here, not the advice wording. *)
+let address_class = testable (fun ppf address_class -> Format.pp_print_string ppf
+  (match address_class with
+   | Card.Reachable -> "reachable" | Card.Local_only -> "local only"
+   | Card.Wildcard_bind -> "wildcard bind")) (=)
 
-let test_wildcard_link_requires_reachable_address () =
-  List.iter (fun host ->
-    let card = match make ~link:("http://" ^ host ^ "/play#fixture") () with
-      | Ok card -> card | Error error -> fail error in
-    let notes = Card.draw card ~width:140 ~rows:100 |> List.filter_map (function
-      | Card.Note text -> Some text | _ -> None) |> String.concat " " in
-    check bool "wildcard is not advertised as a guest destination" true
-      (contains ~sub:"wildcard bind address" notes)) ["0.0.0.0:8935"; "[::]:8935"]
+let test_the_link_host_decides_the_address_advice () =
+  List.iter (fun (address, expected) ->
+    match make ~link:("http://" ^ address ^ "/play#fixture") () with
+    | Error _ -> fail ("the card refused " ^ address)
+    | Ok card -> check address_class ("address " ^ address) expected (Card.classify_address card))
+    ["localhost:8935", Card.Local_only; "127.5.2.1:8935", Card.Local_only;
+     "[::1]:8935", Card.Local_only; "[::ffff:127.0.0.1]:8935", Card.Local_only;
+     "[::ffff:127.5.2.1]:8935", Card.Local_only;
+     "[::ffff:192.168.0.7]:8935", Card.Reachable; "play.example.test", Card.Reachable;
+     "0.0.0.0:8935", Card.Wildcard_bind; "[::]:8935", Card.Wildcard_bind]
 ;;
 
 let () =
   run "Masc_tui_play_card"
     [ ( "card"
-      , [ test_case "wildcard links require reachable address" `Quick test_wildcard_link_requires_reachable_address
-        ; test_case "local links explain which device can open them" `Quick test_local_link_explains_device_scope
+      , [ test_case "the link host decides the address advice" `Quick
+            test_the_link_host_decides_the_address_advice
         ; test_case "a link the card cannot draw is refused" `Quick
             test_a_link_the_card_cannot_draw_is_refused
         ; test_case "the QR is the library's QR with its quiet zone" `Quick

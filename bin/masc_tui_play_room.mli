@@ -3,6 +3,9 @@
 type t
 type request
 type intent = Repaint | Send
+type origin = Viewer | Keeper | Peer
+(** Who a message belongs to as this view reads it: the authenticated viewer,
+    a keeper, or another participant. *)
 val create : unit -> t
 val focused : t -> bool
 val focus : t -> bool -> t
@@ -36,6 +39,9 @@ val request_json : request -> Yojson.Safe.t
 val receive : ?viewer:string -> t -> request -> now:float -> (Masc.Play_room.snapshot, string) result -> t
 (** [viewer] is the authenticated response principal, committed only with a
     successful response owned by this request. It identifies local messages. *)
+val origin : t -> Masc.Play_room.message -> origin
+(** [Viewer] when the message's author is the committed viewer, otherwise the
+    room speaker. Layout marks each message from this value. *)
 val layout : t -> width:int -> height:int -> t * string list
 (** Pure layout and its normalized navigation state. Commit the returned state
     only after the terminal write succeeds. PgUp/PgDn use these actual row

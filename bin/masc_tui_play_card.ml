@@ -111,19 +111,25 @@ let advice =
   ]
 ;;
 
+type address_class = Reachable | Local_only | Wildcard_bind
+
+let classify_address card =
+  match Uri.host (Uri.of_string card.link) with
+  | Some host when Masc_network_defaults.is_unspecified_host host -> Wildcard_bind
+  | Some host when Masc_network_defaults.is_loopback_host host -> Local_only
+  | Some _ | None -> Reachable
+
 let address_advice card =
-  let host = Uri.host (Uri.of_string card.link) in
-  let local = Option.fold ~none:false ~some:Masc_network_defaults.is_loopback_host host in
-  let unspecified = Option.fold ~none:false ~some:Masc_network_defaults.is_unspecified_host host in
-  if unspecified then
+  match classify_address card with
+  | Wildcard_bind ->
     [ Note "This link names a wildcard bind address, not a reachable destination."
     ; Note "Set MASC_HTTP_BASE_URL to the server's reachable address before issuing a guest link."
     ]
-  else if local then
+  | Local_only ->
     [ Note "This link works on this computer only; a phone's QR scan cannot reach it."
     ; Note "For guests, set the server's MASC_HTTP_BASE_URL to its reachable address before issuing a link."
     ]
-  else []
+  | Reachable -> []
 
 (* [make] only lets a link of printable ASCII through, so a byte is a cell and
    a cut never lands inside a character. *)

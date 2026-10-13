@@ -722,7 +722,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            let keeper_visible_abs = Keeper_sandbox.keeper_visible_root_abs sandbox in
            "execution_context", `Assoc [
              ("sandbox_id", `String sandbox.sandbox_id);
-             ("sandbox_backend", `String (Keeper_sandbox.backend_to_string sandbox.backend));
+             ("sandbox_backend", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox.backend));
              ("sandbox_root", `String sandbox.root_arg);
              ("sandbox_container_root", Json_util.string_opt_to_json sandbox.container_root);
              ("default_cwd", `String keeper_visible_abs);

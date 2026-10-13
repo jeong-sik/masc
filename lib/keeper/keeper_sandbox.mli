@@ -7,7 +7,7 @@
 
 (** {1 Types} *)
 
-type backend =
+type backend = Keeper_types_profile_sandbox.sandbox_profile =
   | Docker
   | Micro_vm
   | Remote_ssh
@@ -16,8 +16,7 @@ type t = {
   keeper_name : string;
   sandbox_id : string;
   backend : backend;
-  sandbox_profile : string;
-  network_mode : string;
+  network_mode : Keeper_types_profile_sandbox.network_mode;
   host_root_rel : string;
   host_root_abs : string;
   container_root : string option;
@@ -69,8 +68,6 @@ module Path : sig
 end
 
 (** {1 Backend helpers} *)
-
-val backend_to_string : backend -> string
 
 val tree_location_of_backend : backend -> Keeper_types_profile_sandbox.tree_location
 (** Where the backend's tree lives, which decides every projection below and

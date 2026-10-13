@@ -1,4 +1,4 @@
-type sandbox_profile =
+type sandbox_profile = Keeper_sandbox_config.sandbox_profile =
   | Docker
     (** Containerized execution with hardened defaults: cap-drop,
         no-new-privs, read-only rootfs, tmpfs, pids/memory limits.
@@ -50,29 +50,11 @@ type network_mode =
           listener on the host gateway. *)
 [@@deriving tla]
 
-let sandbox_profile_to_config = function
-  | Docker -> Keeper_sandbox_config.Docker
-  | Micro_vm -> Keeper_sandbox_config.Micro_vm
-  | Remote_ssh -> Keeper_sandbox_config.Remote_ssh
-
-let sandbox_profile_of_config = function
-  | Keeper_sandbox_config.Docker -> Docker
-  | Keeper_sandbox_config.Micro_vm -> Micro_vm
-  | Keeper_sandbox_config.Remote_ssh -> Remote_ssh
-
-let sandbox_profile_to_string profile =
-  profile
-  |> sandbox_profile_to_config
-  |> Keeper_sandbox_config.sandbox_profile_to_string
-;;
+let sandbox_profile_to_string = Keeper_sandbox_config.sandbox_profile_to_string
 
 (** Parse a sandbox profile string. Canonical values are ["docker"],
     ["microvm"] and ["remote_ssh"]. *)
-let sandbox_profile_of_string raw =
-  raw
-  |> Keeper_sandbox_config.sandbox_profile_of_string
-  |> Option.map sandbox_profile_of_config
-;;
+let sandbox_profile_of_string = Keeper_sandbox_config.sandbox_profile_of_string
 
 (* Issue #8467: Variant SSOT — adding a constructor to [sandbox_profile]
    forces [sandbox_profile_to_string] exhaustiveness AND extends

@@ -97,7 +97,7 @@ let test_config_agent_projection_docker () =
     "config-backed backend"
     "docker"
     (Keeper_sandbox.backend_of_config_agent ~config ~agent_name
-     |> Keeper_sandbox.backend_to_string);
+     |> Masc.Keeper_types_profile.sandbox_profile_to_string);
   Alcotest.(check string)
     "config-backed host root rel"
     ".masc/playground/docker/alpha/"

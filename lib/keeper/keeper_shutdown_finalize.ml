@@ -814,11 +814,7 @@ let complete_cleanup
   let sandbox_backend =
     Result.map
       (fun (meta : Keeper_meta_contract.keeper_meta) ->
-         ( (match meta.sandbox_profile with
-            | Docker -> Keeper_sandbox.Docker
-            | Micro_vm -> Keeper_sandbox.Micro_vm
-            | Remote_ssh -> Keeper_sandbox.Remote_ssh)
-         , meta.microvm_backend ))
+         (meta.sandbox_profile, meta.microvm_backend))
       effective_meta
   in
   let require_released_summary_owner () =
@@ -993,9 +989,7 @@ let complete_cleanup
                        ())
                   ~base_path:config.base_path
                   ~keeper_name:operation.keeper_name
-                  ~profile:
-                    (Keeper_types_profile_sandbox.sandbox_profile_to_config
-                       meta.sandbox_profile)
+                  ~profile:meta.sandbox_profile
                 |> Keeper_bundle_worktrees.log_outcomes ~keeper_name:operation.keeper_name);
              (match
                 Keeper_dos_controller.release_retired ~config

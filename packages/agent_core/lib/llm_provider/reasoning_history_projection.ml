@@ -181,8 +181,11 @@ let validate_supported_reasoning ~reasoning_block_supported ~message_index conte
    reasoning block whenever a request carried the trailing per-turn context —
    a keeper tool loop injects one on every provider round, so replay was
    permanently empty on those lanes. Any classification of the carrier key
-   marks the message as a carrier, mirroring
-   [Runtime_model_input_tail_window]. *)
+   marks the message as a carrier (a replay question: does this message
+   carry context the thinking prefix must keep?). This deliberately differs
+   from [Runtime_model_input_tail_window.is_extra_context], which answers a
+   pinning question (must this message survive every cut?) and returns
+   false for [Historical]. *)
 let is_extra_system_context_carrier (message : Types.message) =
   match Types.Extra_system_context_provenance.classify message.metadata with
   | Types.Extra_system_context_provenance.Absent -> false

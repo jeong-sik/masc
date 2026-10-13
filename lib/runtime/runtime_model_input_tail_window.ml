@@ -118,7 +118,11 @@ let budget_error_to_core_error error =
    message with extra-system-context provenance, and the Librarian working
    state. [Invalid]/[Duplicate] provenance still means the per-turn context
    assembler authored the message, so it is pinned rather than exposed to
-   the cut on a malformed tag. *)
+   the cut on a malformed tag. [Historical] is not pinned: a retained
+   context carrier is ordinary history the cut may trim. This deliberately
+   differs from [Reasoning_history_projection.is_extra_system_context_carrier],
+   which answers a replay question (carrier or not?) and returns true for
+   [Historical]. *)
 let is_extra_context (msg : Agent_core.Types.message) =
   match
     Agent_core.Types.Extra_system_context_provenance.classify msg.metadata

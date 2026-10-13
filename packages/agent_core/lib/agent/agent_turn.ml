@@ -32,6 +32,11 @@ let prepare_tools ~(tools : Tool_set.t) () =
   tools_json, visible_tool_names
 ;;
 
+(* Cadence premise: at most one fresh carrier per prepare call. The hook may
+   attach on every agent-core turn (tool rounds are turns here), so each
+   signed Anthropic turn that carries context retains one [Historical]
+   carrier in history; the context window trims them as ordinary history.
+   A caller that attaches per round must accept per-round history growth. *)
 let context_message turn_params =
   match turn_params.Hooks.extra_system_context with
   | None -> None
@@ -51,20 +56,20 @@ let context_message turn_params =
     Some system_msg
 ;;
 
-let prepare_messages ~messages ~turn_params () =
-  match context_message turn_params with
+let append_context_message ~messages ~context_message =
+  match context_message with
   | None -> messages
   | Some message -> Util.snoc messages message
+;;
+
+let prepare_messages ~messages ~turn_params () =
+  append_context_message ~messages ~context_message:(context_message turn_params)
 ;;
 
 let prepare_turn ~tools ~messages ~turn_params ?model_input_projection () =
   let tools_json, visible_tool_names = prepare_tools ~tools () in
   let context_message = context_message turn_params in
-  let prepared =
-    match context_message with
-    | None -> messages
-    | Some message -> Util.snoc messages message
-  in
+  let prepared = append_context_message ~messages ~context_message in
   let effective_messages =
     match model_input_projection with
     | None -> Ok prepared

@@ -322,10 +322,15 @@ module Extra_system_context_provenance = struct
   let key = "agent_core.extra_system_context.v1"
   let entry = key, `Bool true
   let metadata = [ entry ]
-  let historical_metadata = [ key, `String "historical" ]
+
+  (* The round-trip value all three historical sites share: [classify]
+     decides by JSON shape, so one spelling keeps them from silently
+     flipping to [Invalid]. *)
+  let historical_value = "historical"
+  let historical_metadata = [ key, `String historical_value ]
   let as_historical metadata =
     List.map (fun (name, value) ->
-      if String.equal name key then name, `String "historical" else name, value)
+      if String.equal name key then name, `String historical_value else name, value)
       metadata
   ;;
 
@@ -339,7 +344,7 @@ module Extra_system_context_provenance = struct
     match values with
     | [] -> Absent
     | [ `Bool true ] -> Present
-    | [ `String "historical" ] -> Historical
+    | [ `String s ] when String.equal s historical_value -> Historical
     | [ _ ] -> Invalid
     | _ -> Duplicate
   ;;

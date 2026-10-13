@@ -133,11 +133,18 @@ let normalize ~(declared_candidates : candidate list) ~(steps : step list) =
         | Measurement_not_required, None -> Ok ()
         | Measurement_not_required, Some _ ->
           Error (Invalid_measurement_state { ordinal })
-        | _, None ->
+        | (Measurement_succeeded, None) | (Measurement_unsupported, None)
+        | (Measurement_local_invalid, None) | (Measurement_transport_failed, None)
+        | (Measurement_invalid_response, None) | (Measurement_fence_rejected, None)
+        | (Measurement_cancelled, None) ->
           if not receipt_required
           then Ok ()
           else Error (Measurement_binding_mismatch { ordinal })
-        | _, Some measurement ->
+        | (Measurement_succeeded, Some measurement) | (Measurement_unsupported, Some measurement)
+        | (Measurement_local_invalid, Some measurement)
+        | (Measurement_transport_failed, Some measurement)
+        | (Measurement_invalid_response, Some measurement)
+        | (Measurement_fence_rejected, Some measurement) | (Measurement_cancelled, Some measurement) ->
           if
             admission_measurement.dispatch <> measurement.dispatch
             || admission_measurement.outcome <> measurement.outcome
@@ -153,14 +160,20 @@ let normalize ~(declared_candidates : candidate list) ~(steps : step list) =
       in
       let* () =
         match normalized_admission, step.attempt, normalized_outcome with
-        | Normalized_rejected _, Some _, _ ->
+        | (Normalized_rejected _, Some _, Normalized_advance _)
+        | (Normalized_rejected _, Some _, Normalized_semantic_rejected _)
+        | (Normalized_rejected _, Some _, Normalized_accepted _) ->
           Error (Rejected_admission_has_attempt { ordinal })
         | ( Normalized_rejected _
           , None
           , Normalized_advance { failure = Candidate_rejected; _ } ) -> Ok ()
-        | Normalized_rejected _, None, _ ->
+        | (Normalized_rejected _, None, Normalized_advance _)
+        | (Normalized_rejected _, None, Normalized_semantic_rejected _)
+        | (Normalized_rejected _, None, Normalized_accepted _) ->
           Error (Rejected_admission_did_not_advance { ordinal })
-        | Normalized_admitted _, None, _ ->
+        | (Normalized_admitted _, None, Normalized_advance _)
+        | (Normalized_admitted _, None, Normalized_semantic_rejected _)
+        | (Normalized_admitted _, None, Normalized_accepted _) ->
           Error (Admitted_candidate_missing_attempt { ordinal })
         | ( Normalized_admitted admitted
           , Some attempt

@@ -228,7 +228,7 @@ let request_uses_exact_cross_feature (request : Llm_transport.completion_request
   || config.disable_parallel_tool_use
   || (match config.tool_choice with
       | None | Some Types.None_ -> false
-      | Some _ -> true)
+      | Some (Types.Auto) | Some (Types.Any) | Some (Types.Tool _) -> true)
   || Option.is_some config.preserve_thinking
   || Option.is_some config.clear_thinking
   || uses_anthropic_schema_prefill config request.messages
@@ -721,7 +721,8 @@ let%test "Off reads the prompt-requested JSON locally and refuses other text" =
   &&
   match normalize_response Types.Off (response "not json") with
   | Error (Invalid_json _) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Incomplete_structured_response _) | Error (Missing_structured_text)
+  | Error (Ambiguous_structured_text _) | Error (Unexpected_structured_content) -> false
 ;;
 
 let%test "canonical fingerprint is sensitive to the frozen response codec" =
@@ -856,7 +857,13 @@ let%test "exact preflight still rejects genuinely caller-supplied headers" =
     with
     | Error (Caller_supplied_header_not_allowed reported) ->
       expected_err = Some reported
-    | Error _ -> false
+    | Error (Explicit_capability_snapshot_required) | Error (Unsupported_output_contract _)
+    | Error (Unsupported_exact_cross_feature) | Error (Global_admission_not_allowed)
+    | Error (Invalid_connect_timeout _) | Error (Invalid_body_timeout _)
+    | Error (Missing_deadline _) | Error (Unsupported_image_input)
+    | Error (Unsupported_document_input) | Error (Unsupported_audio_input)
+    | Error (Unsupported_system_prompt) | Error (Provider_request_rejected _)
+    | Error (Request_serialization_rejected _) -> false
     | Ok _ -> expected_err = None in
   test_headers None []
   && test_headers None [ ("Content-Type", "application/json") ]

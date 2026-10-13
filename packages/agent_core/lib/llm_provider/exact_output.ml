@@ -2079,7 +2079,7 @@ let execute_flow_candidate
             (match Generation_receipt.phase attempt.receipt with
              | Generation_receipt.Not_started ->
                Generation_receipt.start attempt.receipt
-             | _ -> ());
+             | Before_dispatch | Dispatch_started | Response_received | Terminal -> ());
             publish ();
             let cause =
               { call_id = receipt_call_id attempt.receipt

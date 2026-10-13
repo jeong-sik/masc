@@ -363,8 +363,7 @@ let classify_unix_error = function
   | Unix.EHOSTUNREACH -> Dns_failure
   | Unix.EMFILE | Unix.ENFILE | Unix.ENOBUFS -> Local_resource_exhaustion
   | Unix.EADDRNOTAVAIL -> Local_resource_exhaustion
-  | unclassified_unix_error ->
-    let (_ : Unix.error) = unclassified_unix_error in
+  | (Unix.E2BIG | Unix.EACCES | Unix.EAGAIN | Unix.EBADF | Unix.EBUSY | Unix.ECHILD | Unix.EDEADLK | Unix.EDOM | Unix.EEXIST | Unix.EFAULT | Unix.EFBIG | Unix.EINTR | Unix.EINVAL | Unix.EIO | Unix.EISDIR | Unix.EMLINK | Unix.ENAMETOOLONG | Unix.ENODEV | Unix.ENOENT | Unix.ENOEXEC | Unix.ENOLCK | Unix.ENOMEM | Unix.ENOSPC | Unix.ENOSYS | Unix.ENOTDIR | Unix.ENOTEMPTY | Unix.ENOTTY | Unix.ENXIO | Unix.EPERM | Unix.ERANGE | Unix.EROFS | Unix.ESPIPE | Unix.ESRCH | Unix.EXDEV | Unix.EWOULDBLOCK | Unix.EINPROGRESS | Unix.EALREADY | Unix.ENOTSOCK | Unix.EDESTADDRREQ | Unix.EMSGSIZE | Unix.EPROTOTYPE | Unix.ENOPROTOOPT | Unix.EPROTONOSUPPORT | Unix.ESOCKTNOSUPPORT | Unix.EOPNOTSUPP | Unix.EPFNOSUPPORT | Unix.EAFNOSUPPORT | Unix.EADDRINUSE | Unix.ENETDOWN | Unix.ENETRESET | Unix.ECONNABORTED | Unix.EISCONN | Unix.ENOTCONN | Unix.ESHUTDOWN | Unix.ETOOMANYREFS | Unix.EHOSTDOWN | Unix.ELOOP | Unix.EOVERFLOW | Unix.EUNKNOWNERR _) as unclassified_unix_error -> let (_ : Unix.error) = unclassified_unix_error in
     Unknown
 ;;
 
@@ -1118,7 +1117,9 @@ let%test "classify_network_exn: Eio.Time.Timeout is Http_operation" =
      timeouts are intercepted before this point, so this stays accurate. *)
   match classify_network_exn Eio.Time.Timeout with
   | Some (TimeoutError { phase = Http_operation; _ }) -> true
-  | _ -> false
+  | Some (TimeoutError { phase = (Queue | (First_token | (Wall_clock | (Capacity_backpressure | (Non_streaming_body | (Stream_body | (Provider_step | (Cli_stdout_idle | (Unknown_timeout | Stream_idle _)))))))));_})
+  | Some (HttpError _ | (NetworkError _ | (AcceptRejected _ | (ProviderTerminal _ | ProviderFailure _))))
+  | None -> false
 ;;
 
 let%test "classify_network_exn: non-network exn is None (propagates)" =
@@ -2570,7 +2571,7 @@ let%test "pre-header phase: the narrower declared budget names itself" =
 let%test "pre-header phase: nothing declared stays unbounded" =
   match pre_header_deadline ~connect:Unbounded ~first_event:Unbounded with
   | Unbounded, Connect_budget -> true
-  | _ -> false
+  | (Unbounded, First_event_budget) | (Bounded (_, _), _) -> false
 ;;
 
 let with_post_stream
@@ -2813,7 +2814,12 @@ let with_post_stream
            { message = "no response headers before the first-event budget ran out"
            ; phase = First_token
            })
-    | (Ok _ | Error _), (Connect_budget | First_event_budget) -> post_result
+    | ((Ok _ | Error (HttpError _)), (Connect_budget | First_event_budget))
+    | (Error (NetworkError _), (Connect_budget | First_event_budget))
+    | (Error (TimeoutError _), (Connect_budget | First_event_budget))
+    | (Error (AcceptRejected _), (Connect_budget | First_event_budget))
+    | (Error (ProviderTerminal _), (Connect_budget | First_event_budget))
+    | (Error (ProviderFailure _), (Connect_budget | First_event_budget)) -> post_result
   in
   (* Phase 1b: body consumption. Deliberately OUTSIDE [catch_network]: a
      body-phase [Eio.Time.Timeout] is phase-distinct from the connect /

@@ -196,7 +196,8 @@ let execute_once_with_evidence ~net ~clock ?on_phase plan =
          (match Option.bind envelope Backend_glm.provider_failure_of_glm_error with
           | Some failure -> failure
           | None -> refusal)
-       | _ -> refusal
+       | (Provider_http_codec.Glm_chat, Http_client.Not_received_in_window)
+       | ((Provider_http_codec.Anthropic_messages | (Provider_http_codec.Openai_chat | (Provider_http_codec.Openai_responses | (Provider_http_codec.Ollama_chat | Provider_http_codec.Gemini_generate_content)))), _) -> refusal
      in
      error ?raw_response (response_received_receipt raw.status)
        (Provider_error provider_error)

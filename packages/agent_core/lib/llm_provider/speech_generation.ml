@@ -373,7 +373,9 @@ let[@warning "-32"] test_config ?(kind = Provider_config.OpenAI_compat) task =
 let%test "speech request requires exact catalog task" =
   match validate_request (test_config None) "hello" (Named "alloy") with
   | Error (Http_client.AcceptRejected _) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.ProviderTerminal _)
+  | Error (Http_client.ProviderFailure _) -> false
 ;;
 
 let%test "named voice request preserves exact model and format" =
@@ -436,17 +438,17 @@ let%test "Opus maps to the documented audio/opus in both directions" =
   &&
   match format_of_media_type "audio/opus" with
   | Ok Opus -> true
-  | Ok _ | Error _ -> false
+  | Ok (Mp3) | Error _ | Ok (Aac) | Ok (Flac) | Ok (Wav) | Ok (Pcm) -> false
 ;;
 
 let%test "parameterized and case-variant MIME still resolves" =
   (match format_of_media_type "audio/L16;codec=pcm;rate=24000" with
    | Ok Pcm -> true
-   | Ok _ | Error _ -> false)
+   | Ok (Mp3) | Error _ | Ok (Opus) | Ok (Aac) | Ok (Flac) | Ok (Wav) -> false)
   &&
   match format_of_media_type "audio/mpeg" with
   | Ok Mp3 -> true
-  | Ok _ | Error _ -> false
+  | Error _ | Ok (Opus) | Ok (Aac) | Ok (Flac) | Ok (Wav) | Ok (Pcm) -> false
 ;;
 
 let%test "Gemini non-object 2xx body is a typed parse failure" =
@@ -454,7 +456,9 @@ let%test "Gemini non-object 2xx body is a typed parse failure" =
   | Error
       (Http_client.ProviderFailure
          { kind = Http_client.Provider_parse_error { parser = Some _ }; _ }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _) | Error (Http_client.ProviderFailure _) -> false
 ;;
 
 let%test "Gemini non-completed status is a provider failure, not a parse error" =
@@ -463,5 +467,7 @@ let%test "Gemini non-completed status is a provider failure, not a parse error" 
       (Http_client.ProviderFailure
          { kind = Http_client.Unknown_provider_failure { reason = Some reason }; _ }) ->
     String.equal reason "gemini interaction status cancelled"
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _) | Error (Http_client.ProviderFailure _) -> false
 ;;

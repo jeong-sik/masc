@@ -330,7 +330,9 @@ let complete_prepared_sync
              ~provider:(Provider_registry.provider_name_of_config config)
              ~model_id
              ~status:code
-         | Error _ -> ());
+         | Error (Http_client.NetworkError _) | Error (Http_client.TimeoutError _)
+         | Error (Http_client.AcceptRejected _) | Error (Http_client.ProviderTerminal _)
+         | Error (Http_client.ProviderFailure _) -> ());
        let result = ensure_nonempty_completion result in
        (match result with
         | Ok resp ->

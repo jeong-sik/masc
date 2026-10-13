@@ -54,7 +54,10 @@ let%test "ordinary unclassified transport exceptions remain typed" =
     match transport_exception_disposition exn with
     | Typed_transport_error (ProviderFailure { kind = Unknown_provider_failure _; _ }) ->
       true
-    | Reserved_transport_exception | Typed_transport_error _ -> false
+    | Reserved_transport_exception | Typed_transport_error (HttpError _)
+    | Typed_transport_error (NetworkError _) | Typed_transport_error (TimeoutError _)
+    | Typed_transport_error (AcceptRejected _) | Typed_transport_error (ProviderTerminal _)
+    | Typed_transport_error (ProviderFailure _) -> false
   in
   is_unknown (Failure "opaque failure") && is_unknown (Sys_error "opaque sys error")
 ;;

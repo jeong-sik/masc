@@ -447,7 +447,7 @@ let compose_hook (outer : hook option) (inner : hook option) : hook option =
         match f_outer event with
         | Continue -> f_inner event
         | HookFailed _ as failed -> failed
-        | decision -> decision)
+        | (AdjustParams _ | ElicitInput _ | ElicitToolApproval _ | Nudge _ | Block _) as decision -> decision)
 ;;
 
 let compose ~outer ~inner =
@@ -470,14 +470,14 @@ let%test "invoke_validated: hook returning Continue propagates" =
   let event = BeforeTurn { turn = 0; messages = [] } in
   match invoke_validated (Some (fun _ -> Continue)) event with
   | Continue -> true
-  | _ -> false
+  | AdjustParams _ | ElicitInput _ | ElicitToolApproval _ | Nudge _ | HookFailed _ | Block _ -> false
 ;;
 
 let%test "invoke_validated: None hook returns Continue" =
   let event = BeforeTurn { turn = 0; messages = [] } in
   match invoke_validated None event with
   | Continue -> true
-  | _ -> false
+  | AdjustParams _ | ElicitInput _ | ElicitToolApproval _ | Nudge _ | HookFailed _ | Block _ -> false
 ;;
 
 let%test "invoke_validated: Sys.Break remains reserved" =

@@ -245,7 +245,9 @@ let%test "glm quota envelopes promote to hard quota" =
          | Some
              (Http_client.ProviderFailure
                 { kind = Http_client.Hard_quota { retry_after = None }; _ }) -> true
-         | Some _ | None -> false)
+         | Some (Http_client.HttpError _) | None | Some (Http_client.NetworkError _)
+         | Some (Http_client.TimeoutError _) | Some (Http_client.AcceptRejected _)
+         | Some (Http_client.ProviderTerminal _) | Some (Http_client.ProviderFailure _) -> false)
       | None -> false)
     [ "1113"; "1304"; "1308"; "1309"; "1310"; "1311"; "1313" ]
 ;;
@@ -272,8 +274,8 @@ let extract_reasoning_content_json (resp : api_response) (json : Yojson.Safe.t)
        | Some r when String.trim r <> "" ->
          (match resp.content with
           | Thinking { content; _ } :: _ when String.equal content r -> resp
-          | _ ->
-            let thinking_block = Thinking { signature = None; content = r } in
+          | (Text _ | (ReasoningDetails _ | (RedactedThinking _ | (ToolUse _ | (ToolResult _ | (Image _ | (Document _ | Audio _)))))))::_
+          | [] | Thinking _::_ -> let thinking_block = Thinking { signature = None; content = r } in
             { resp with content = thinking_block :: resp.content })
        | Some _ | None -> resp)
     | `List [] | `Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->

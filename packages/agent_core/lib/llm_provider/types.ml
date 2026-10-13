@@ -1214,7 +1214,8 @@ let validate_tool_result_shape
           (* Both allowed — any JSON is fine *)
           Ok ())
     else Ok ()
-  | _ -> Ok ()
+  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _
+  | Audio _ -> Ok ()
 ;;
 
 (** Extract text from content blocks, concatenating with newlines.
@@ -1224,7 +1225,8 @@ let text_of_content content =
   |> List.filter_map (function
     | Text s -> Some s
     | ToolResult { content; _ } -> Some content
-    | _ -> None)
+    | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _
+    | Audio _ -> None)
   |> String.concat "\n"
 ;;
 

@@ -256,7 +256,11 @@ let validate_thinking_controls wire (config : Provider_config.t) =
       (Printf.sprintf
          "model %S cannot disable always-on adaptive thinking"
          config.model_id)
-  | _, _, _ -> Provider_config.validate_reasoning_effort_request config
+  | (Capabilities.Anthropic_adaptive_default, _, _)
+  | (Capabilities.Anthropic_adaptive_disabled_through_high, _, _)
+  | (Capabilities.Anthropic_adaptive_between_tools, _, _)
+  | (Capabilities.Anthropic_adaptive_preferred, _, _) | (Capabilities.Anthropic_adaptive_only, _, _)
+  | (Capabilities.Anthropic_always_adaptive, _, _) -> Provider_config.validate_reasoning_effort_request config
 ;;
 
 let output_config_for_config _mode (config : Provider_config.t) =

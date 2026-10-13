@@ -7,6 +7,18 @@
     says its own duration sets it for the beats after it. [\title], [\tempo]
     and [\ts] are read and checked and carry nothing into the score.
 
+    Repeat signs stand in the bar they mark: [\ro] opens the repeat, [\rc N]
+    closes it with the count of total plays, and [\ae n …] names the ending
+    passes the bar plays on. [\ae] also takes alphaTab's own parenthesized
+    list, [\ae (1 2 3)], which is the form the writer emits; a single pass
+    may carry or drop the parentheses. [N] counts total plays the way
+    alphaTab's example does: [\ro … \rc 2] plays the passage twice. A second
+    [\rc] says the count again; [\ae]
+    numbers gather across the bar. A sign with no bar of its own -- on a bar
+    with no beat, or after the last bar -- fails rather than being dropped.
+    Open and close are not paired: a close without an open, or an open
+    without a close, reads fine.
+
     Technique markup in braces -- a [{…}] after a beat or on a chord member --
     marks its note and changes nothing else. Markup that changes a beat's
     length ([{d}], [{tu 3}], [{gr}]) fails the score.
@@ -25,6 +37,8 @@ type directive_argument =
   | Tempo_number
   | Time_signature_numbers
   | Tuning_notes
+  | Repeat_count
+  | Alternate_ending_numbers
 
 (** Why a text is not a score in the subset. *)
 type failure =
@@ -47,6 +61,9 @@ type failure =
   | No_music  (** directives alone: no note and no rest *)
   | Too_many_strings of int
   | String_past_tuning of { string : int; strings : int }
+  | Repeat_count_out_of_range of string  (** the count as written *)
+  | Alternate_ending_out_of_range of string  (** the ending as written *)
+  | Repeat_without_bar  (** a repeat sign with no bar of its own *)
 
 val failure_text : failure -> string
 (** The failure in a sentence a reader can show. *)
@@ -68,6 +85,9 @@ type beat = {
 type measure = {
   units : int;  (** the sum of its beats' spans *)
   beats : beat list;  (** never empty *)
+  repeat_start : bool;  (** a [\ro] opened this bar *)
+  repeat_end : int option;  (** a [\rc N] closed it: the count of total plays *)
+  endings : int list;  (** [\ae] numbers, ascending, no two alike *)
 }
 
 type t = {

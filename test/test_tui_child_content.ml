@@ -151,7 +151,10 @@ let test_audit_redaction_disappearance_and_replacement () =
   check int "collector-lifetime caveat accompanies a real diagnostic" 2
     (List.length (Consumer.diagnostics absent));
   check (list string) "no caveat without a real failure" [] (Consumer.diagnostics fresh);
-  let service=Consumer.failed fresh (Consumer.Service (Read.failure Read.Store_corrupt)) in
+  let server_failure=match Read.failure Read.Store_corrupt with
+    | Read.Failure failure -> failure
+    | Read.Records _ | Read.Receivers _ | Read.Hints _ -> fail "failure constructor returned a non-failure" in
+  let service=Consumer.failed fresh (Consumer.Service server_failure) in
   check int "server failure code gets exactly one caveat line" 1
     (List.length (Consumer.diagnostics service));
   let unreadable=Consumer.failed fresh (Consumer.Transport "refused") in

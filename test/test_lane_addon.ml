@@ -382,6 +382,34 @@ let test_unreadable_retained_bindings_are_isolated () = with_fixture (fun env _ 
   check bool "the live record keeps its own read authority" true
     (Result.is_ok (Runtime.authorize_retained_read ~bindings:records
       ~access:Lane_addon_sources.Unauthenticated (record id)));
+  let refusal access instance_id =
+    match Runtime.dispatch ~config ~access ~operation:Runtime.Inspect
+      (`Assoc ["instance_id", `String instance_id]) with
+    | Error message -> message
+    | Ok _ -> fail "an unreadable or absent instance is refused" in
+  List.iter (fun retained_id ->
+    List.iter (fun access ->
+      check string "a caller that cannot operate gets the refusal of an absent instance"
+        (refusal access "absent-instance") (refusal access retained_id))
+      [Lane_addon_sources.Keeper "someone"; Lane_addon_sources.Unauthenticated];
+    check bool "the operator is told why the record is unreadable" true
+      (refusal Lane_addon_sources.Operator_configuration retained_id
+       <> refusal Lane_addon_sources.Operator_configuration "absent-instance")) unreadable_ids;
+  let slice access = unwrap (Runtime.dispatch ~config ~access ~operation:Runtime.Slice (`Assoc [])) in
+  let coverage_sources access =
+    slice access |> member "coverage" |> Yojson.Safe.Util.to_list |> List.map (text "source_id") in
+  List.iter (fun retained_id ->
+    check bool "the operator's slice names each unreadable record" true
+      (List.mem retained_id (coverage_sources Lane_addon_sources.Operator_configuration));
+    List.iter (fun access ->
+      check bool "another caller's slice does not name an unreadable record" false
+        (List.mem retained_id (coverage_sources access))) 
+      [Lane_addon_sources.Keeper "someone"; Lane_addon_sources.Unauthenticated]) unreadable_ids;
+  List.iter (fun access ->
+    check bool "a slice that skipped unreadable records is incomplete for every caller" false
+      (member "complete" (slice access) = `Bool true))
+    [Lane_addon_sources.Operator_configuration; Lane_addon_sources.Keeper "someone";
+     Lane_addon_sources.Unauthenticated];
   check Alcotest.int "unreadable records stay in place for operator repair" 3
     (Store.bindings store |> unwrap |> List.length);
   detach config id; await_phase clock config id "detached")

@@ -510,27 +510,58 @@ let highwater t instance_id = protect (fun () ->
           | _ -> scan maximum
           | exception End_of_file -> Ok maximum
         in scan 0))
+type unreadable_binding = { path : string; detail : string; contents : Yojson.Safe.t option }
+type binding_reading = { readable : Yojson.Safe.t list; unreadable : unreadable_binding list }
 (* A renamed observation can survive a failed binding write. Recover its
-   sequence for every retained reader; reads still verify the exact record. *)
-let bindings t =
-  let* values = read_directory t "bindings" in
+   sequence for every retained reader; reads still verify the exact record.
+   Each file is read on its own: a file that is not JSON, is not an object,
+   lacks an instance id or sequence, or sits beside a misnamed observation
+   file is listed in [unreadable] and never hides its siblings. Only a
+   directory that cannot be listed or synced fails the whole reading. *)
+let read_bindings t =
+  let directory = Filename.concat t.root "bindings" in
+  let* names = protect (fun () ->
+    match Fs_compat.exact_path_kind directory with
+    | Fs_compat.Exact_missing -> Ok []
+    | _ -> Ok (Fs_compat.read_dir directory |> List.sort String.compare)) in
+  let read name =
+    let path = Filename.concat directory name in
+    let unreadable ?contents detail = Some (Error { path; detail; contents }) in
+    (* A binding removed between the listing and this read is absent,
+       the same as one never listed. *)
+    match protect (fun () -> Ok (Fs_compat.load_file_opt path)) with
+    | Error detail -> unreadable detail
+    | Ok None -> None
+    | Ok (Some bytes) ->
+        (match Yojson.Safe.from_string bytes with
+         | exception Yojson.Json_error detail -> unreadable detail
+         | `Assoc fields as json ->
+             (match List.assoc_opt "instance_id" fields, List.assoc_opt "observation_seq" fields with
+              | Some (`String instance_id), Some (`Int sequence) when sequence >= 0 ->
+                  (match highwater t instance_id with
+                   | Ok retained ->
+                       Some (Ok (`Assoc (("observation_seq", `Int (max sequence retained)) ::
+                         List.remove_assoc "observation_seq" fields)))
+                   | Error detail -> unreadable ~contents:json detail)
+              | _ -> unreadable ~contents:json "invalid retained binding sequence")
+         | json -> unreadable ~contents:json "invalid retained binding") in
+  let reading = List.fold_left (fun reading name ->
+    if not (Filename.check_suffix name ".json") then reading
+    else match read name with
+      | None -> reading
+      | Some (Ok value) -> { reading with readable = value :: reading.readable }
+      | Some (Error issue) -> { reading with unreadable = issue :: reading.unreadable })
+    { readable = []; unreadable = [] } names in
   (* This reading also authorizes reconciliation. On a cold process, confirm
      the publication of terminal records/absence before admitting replacement. *)
-  let* () = protect (fun () ->
-    sync_existing_parent ~sync_parent:sync_parent_directory (Filename.concat t.root "bindings"); Ok ()) in
-  let rec reconcile = function
-    | [] -> Ok []
-    | `Assoc fields :: rest ->
-        let* instance_id, sequence = match List.assoc_opt "instance_id" fields,
-            List.assoc_opt "observation_seq" fields with
-          | Some (`String id), Some (`Int seq) when seq >= 0 -> Ok (id, seq)
-          | _ -> Error "invalid retained binding sequence" in
-        let* retained = highwater t instance_id in
-        let* rest = reconcile rest in
-        Ok (`Assoc (("observation_seq", `Int (max sequence retained)) ::
-          List.remove_assoc "observation_seq" fields) :: rest)
-    | _ -> Error "invalid retained binding" in
-  reconcile values
+  let* () = protect (fun () -> sync_existing_parent ~sync_parent:sync_parent_directory directory; Ok ()) in
+  Ok { readable = List.rev reading.readable; unreadable = List.rev reading.unreadable }
+(* The whole-store reading for a caller that cannot use a partial one. *)
+let bindings t =
+  let* reading = read_bindings t in
+  match reading.unreadable with
+  | [] -> Ok reading.readable
+  | issue :: _ -> Error (issue.path ^ ": " ^ issue.detail)
 let retained_read_limit max_bytes =
   let envelope_bytes = String.length {|{"sources":,"output":}|} in
   if max_bytes <= 0 || max_bytes > (max_int - envelope_bytes) / 2

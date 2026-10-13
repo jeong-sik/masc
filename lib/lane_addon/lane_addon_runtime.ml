@@ -59,11 +59,17 @@ type retained_fault_reason =
   | Visibility_invalid
   | Source_access_invalid
   | Record_invalid of string
+(* Whose record it is, as far as the record says. [Unowned] is a record whose
+   configuration is null: a manual attach, which belongs to no declaration.
+   [Owner_unreadable] is a record whose configuration cannot be read, so it
+   could belong to any declaration. *)
+type retained_owner = Owned_by of configuration_owner | Unowned | Owner_unreadable
 (* One retained record the inventory could not list. [issue_owner] is the
-   declaration the record names, when its configuration owner is readable. *)
+   owner the record names. *)
 type inventory_issue = {
   issue_path : string;
-  issue_owner : configuration_owner option;
+  issue_owner : retained_owner;
+  issue_terminal : bool;
   issue_reason : retained_fault_reason;
 }
 type inventory = {
@@ -224,12 +230,32 @@ type retained_binding = {
   read_visibility : visibility;
   binding_owner : configuration_owner option;
 }
+(* [fault_fields] are the record's own fields, empty when the file was not an
+   object. They stay readable so a record that is a terminal history of a
+   declaration can still be checked for persistent state. *)
 type retained_fault = {
   fault_instance : string option;
-  fault_owner : configuration_owner option;
+  fault_owner : retained_owner;
+  fault_fields : (string * Yojson.Safe.t) list;
   fault_reason : retained_fault_reason;
 }
 type retained_reading = { readable : retained_binding list; faults : retained_fault list }
+let record_is_detached fields =
+  match List.assoc_opt "phase" fields with
+  | Some json -> phase_of_json json = Ok Detached | None -> false
+(* A record belongs to a declaration when it names that installation id or
+   that declaration file, the same identity [configuration_json] uses to
+   attribute a worker. A record whose owner cannot be read could belong to any
+   declaration; a record with no owner belongs to none. *)
+let owner_concerns ~id ~source_path = function
+  | Owned_by owner -> String.equal owner.id id || String.equal owner.source_path source_path
+  | Owner_unreadable -> true
+  | Unowned -> false
+(* A record that names its declaration and is detached holds no worker and no
+   container, so nothing waits on it even when it cannot be read. *)
+let owner_is_terminal owner fields = match owner with
+  | Owned_by _ -> record_is_detached fields
+  | Unowned | Owner_unreadable -> false
 let read_authority fields =
   match List.mem_assoc "visibility" fields, List.mem_assoc "source_access" fields with
   | false, false -> Error Read_authority_absent
@@ -243,22 +269,32 @@ let read_authority fields =
                 | Ok _ -> Ok visibility
                 | Error _ -> Error Source_access_invalid)))
 (* The owner of an unreadable record is read only to say whose declaration it
-   belongs to; an unreadable owner leaves the fault unattributed. *)
+   belongs to. A configuration that is absent or null names no declaration; one
+   that cannot be parsed could name any. *)
 let owner_of_fields fields = match configuration_of_fields fields with
-  | Ok owner -> owner
-  | Error _ -> None
+  | Ok (Some owner) -> Owned_by owner
+  | Ok None -> Unowned
+  | Error _ -> Owner_unreadable
+let fault_of_fields fields reason = { fault_instance = Result.to_option (text fields "instance_id");
+  fault_owner = owner_of_fields fields; fault_fields = fields; fault_reason = reason }
 let parse_retained_binding = function
   | `Assoc fields ->
-      let fault owner reason = Error { fault_instance = Result.to_option (text fields "instance_id");
-        fault_owner = owner; fault_reason = reason } in
       (match read_authority fields with
-       | Error reason -> fault (owner_of_fields fields) reason
+       | Error reason -> Error (fault_of_fields fields reason)
        | Ok read_visibility ->
            (match configuration_of_fields fields with
-            | Error detail -> fault None (Record_invalid detail)
+            | Error detail -> Error (fault_of_fields fields (Record_invalid detail))
             | Ok binding_owner -> Ok { binding_fields = fields; read_visibility; binding_owner }))
-  | _ -> Error { fault_instance = None; fault_owner = None;
+  | _ -> Error { fault_instance = None; fault_owner = Owner_unreadable; fault_fields = [];
       fault_reason = Record_invalid "expected an object" }
+let fault_of_unreadable (unreadable : Lane_addon_store.unreadable_binding) =
+  let located = unreadable.path ^ ": " ^ unreadable.detail in
+  let unattributed reason = { fault_instance = None; fault_owner = Owner_unreadable;
+    fault_fields = []; fault_reason = reason } in
+  match unreadable.contents with
+  | Some (`Assoc fields) -> fault_of_fields fields (Record_invalid located)
+  | Some _ -> unattributed (Record_invalid located)
+  | None -> unattributed (Store_unreadable located)
 let split_retained values =
   let readable, faults = List.fold_left (fun (readable, faults) value ->
     match parse_retained_binding value with
@@ -939,8 +975,9 @@ let recovery_bindings m bindings =
     `Assoc (("phase",phase_to_json phase)::List.remove_assoc "phase" fields)) in
   retained @ pending
 let read_retained_bindings m =
-  let* bindings = offload (fun () -> Lane_addon_store.bindings m.store) in
-  Ok (split_retained (recovery_bindings m bindings))
+  let* stored = offload (fun () -> Lane_addon_store.read_bindings m.store) in
+  let parsed = split_retained (recovery_bindings m stored.readable) in
+  Ok { parsed with faults = parsed.faults @ List.map fault_of_unreadable stored.unreadable }
 let is_live m (binding : retained_binding) =
   match List.assoc_opt "instance_id" binding.binding_fields with
   | Some (`String id) -> Hashtbl.mem m.entries id
@@ -995,14 +1032,17 @@ let inventory_at_root ~root =
           Failed "previous process; explicit detach can verify container cleanup" in
     Ok {instance_id;incarnation;run_id;package_id;title;package_revision;
         configuration;presence=Retained;phase} in
-  let owner_of_json = function `Assoc fields -> owner_of_fields fields | _ -> None in
+  let owner_of_json = function `Assoc fields -> owner_of_fields fields | _ -> Owner_unreadable in
   let stored_issues = List.map (fun (path, detail) ->
-    { issue_path = path; issue_owner = None; issue_reason = Store_unreadable detail }) stored.issues in
+    { issue_path = path; issue_owner = Owner_unreadable; issue_terminal = false;
+      issue_reason = Store_unreadable detail }) stored.issues in
   let retained,issues = List.fold_left (fun (values,issues) (path,json) ->
     match decode path json with
     | Error reason ->
-        values,{ issue_path = Option.value ~default:root path;
-                 issue_owner = owner_of_json json; issue_reason = reason }::issues
+        let owner = owner_of_json json in
+        let terminal = match json with `Assoc fields -> owner_is_terminal owner fields | _ -> false in
+        values,{ issue_path = Option.value ~default:root path; issue_owner = owner;
+                 issue_terminal = terminal; issue_reason = reason }::issues
     | Ok value when List.exists (fun (current : inventory_instance) ->
         current.instance_id=value.instance_id) live -> values,issues
     | Ok value -> value::values,issues) ([],stored_issues) (List.map (fun (path,json) -> Some path,json) records
@@ -1184,15 +1224,18 @@ let configuration_json m ~access =
                 then Some issue.message else None) in
               (* A record that names another declaration says nothing about
                  this one. A record whose owner cannot be read could be any
-                 declaration's worker, so it leaves every reading incomplete. *)
+                 declaration's worker, so it leaves every reading incomplete.
+                 A detached record that names this one holds no worker; it is
+                 listed for the operator and leaves the reading complete. *)
               let concerns = List.filter (fun (issue : inventory_issue) ->
+                owner_concerns ~id:d.id ~source_path:d.source_path issue.issue_owner
+                && not issue.issue_terminal) inventory.issues in
+              let unattributed = List.exists (fun (issue : inventory_issue) ->
                 match issue.issue_owner with
-                | Some owner -> owner.id = d.id || owner.source_path = d.source_path
-                | None -> true) inventory.issues in
-              let ownerless = List.exists (fun (issue : inventory_issue) ->
-                Option.is_none issue.issue_owner) inventory.issues in
+                | Owner_unreadable -> true
+                | Owned_by _ | Unowned -> false) inventory.issues in
               Lane_addon_application.observe ~enabled:d.enabled
-                ~complete:(reading.snapshot.complete && not ownerless)
+                ~complete:(reading.snapshot.complete && not unattributed)
                 ~issues:(issues @ List.map inventory_issue_message concerns) ~workers in
         `Assoc ["id", `String d.id; "source_path", `String d.source_path; "enabled", `Bool d.enabled;
           "source_revision", `String d.source_revision;
@@ -1207,8 +1250,8 @@ let configuration_json m ~access =
         | None -> []
         | Some inventory -> List.map (fun (issue : inventory_issue) ->
             let source_path, id = match issue.issue_owner with
-              | Some owner -> owner.source_path, `String owner.id
-              | None -> issue.issue_path, `Null in
+              | Owned_by owner -> owner.source_path, `String owner.id
+              | Unowned | Owner_unreadable -> issue.issue_path, `Null in
             `Assoc ["source_path", `String source_path; "id", id;
               "message", `String (inventory_issue_message issue)]) inventory.issues in
       `Assoc ["directory", `String reading.directory; "complete", `Bool reading.snapshot.complete;
@@ -1400,26 +1443,30 @@ let preserve_state_runtime ~configuration ~(package : package) bindings =
               else Error "Persistent state belongs to a different runtime; use a new installation id"
         | None | Some _ -> Ok ()) (Ok ()) bindings
 
-(* A fault belongs to a declaration when its record names that installation
-   id or that declaration file, the same identity [configuration_json] uses
-   to attribute a worker. A fault whose owner is unreadable belongs to no
-   declaration. *)
-let declaration_fault ~id ~source_path fault =
-  match fault.fault_owner with
-  | Some owner -> String.equal owner.id id || String.equal owner.source_path source_path
-  | None -> false
+(* A terminal fault holds no worker, but its own fields still say which
+   runtime wrote persistent state, so [preserve_state_runtime] reads them. *)
+let fault_is_terminal fault = owner_is_terminal fault.fault_owner fault.fault_fields
+(* Unreadable records that may hold this declaration's worker or its privacy
+   owner and cannot be checked. *)
+let blocking_faults ~id ~source_path faults =
+  List.filter (fun fault -> owner_concerns ~id ~source_path fault.fault_owner
+    && not (fault_is_terminal fault)) faults
+let terminal_fault_records ~id ~source_path faults =
+  List.filter_map (fun fault ->
+    if owner_concerns ~id ~source_path fault.fault_owner && fault_is_terminal fault
+    then Some (`Assoc fault.fault_fields) else None) faults
 
 let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~visibility =
   let* () = match configuration, package.state_storage with
     | None, _ | Some _, Ephemeral -> Ok ()
     | Some owner, Persistent ->
         let* reading = read_retained_bindings m in
-        let* () = match List.filter (declaration_fault ~id:owner.id ~source_path:owner.source_path)
-            reading.faults with
+        let* () = match blocking_faults ~id:owner.id ~source_path:owner.source_path reading.faults with
           | [] -> Ok ()
           | _ :: _ -> Error "Persistent state cannot be checked while this installation has unreadable retained bindings" in
         preserve_state_runtime ~configuration ~package
-          (List.map (fun (binding : retained_binding) -> `Assoc binding.binding_fields) reading.readable) in
+          (List.map (fun (binding : retained_binding) -> `Assoc binding.binding_fields) reading.readable
+           @ terminal_fault_records ~id:owner.id ~source_path:owner.source_path reading.faults) in
   let* refresh_interest = Lane_addon_sources.refresh_interest binding in
   let* input_installations = match configuration with
     | None -> Lane_addon_sources.dependencies binding
@@ -2121,8 +2168,9 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
     let live_for id = List.filter (fun e -> owned e id) (entries m) in
     let root_switch = match Eio_context.get_root_switch_opt () with
       | Some sw -> Ok sw | None -> Error "server background owner unavailable" in
-    (* A store that cannot be read stops reconciliation. A record that is
-       read but cannot be parsed is a fault of its own declaration only. *)
+    (* A store whose directory cannot be listed stops reconciliation. A record
+       that cannot be read is a fault that holds back the declarations it may
+       belong to; every other declaration proceeds. *)
     let past = historical m in
     let histories, faults = match past with
       | Error message -> add_issue directory message; [], []
@@ -2131,7 +2179,7 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
             Option.map (fun owner -> (owner, binding.binding_fields)) binding.binding_owner) reading.readable,
           reading.faults in
     let own_faults (d : Lane_addon_config.declaration) =
-      List.filter (declaration_fault ~id:d.id ~source_path:d.source_path) faults in
+      blocking_faults ~id:d.id ~source_path:d.source_path faults in
     let can_apply = Result.is_ok past && snapshot.complete in
     if not can_apply then
       List.iter (fun (d : Lane_addon_config.declaration) ->
@@ -2146,9 +2194,6 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
     let retire_past sw (owner, fields) =
       match historical_detach ~sw m fields with
       | Ok _ -> () | Error message -> add_issue ~id:owner.id owner.source_path message in
-    let detached fields =
-      match List.assoc_opt "phase" fields with
-      | Some json -> phase_of_json json = Ok Detached | None -> false in
     let protected owner =
       List.exists (fun (d : Lane_addon_config.declaration) -> d.id = owner.id) snapshot.declarations
       || List.exists (fun (i : Lane_addon_config.issue) ->
@@ -2160,20 +2205,22 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
            | Some owner when not (protected owner) -> retire sw e
            | Some _ | None -> ()) (entries m);
          List.iter (fun ((owner, fields) as history) ->
-           if not (protected owner) && not (detached fields) then retire_past sw history) histories
+           if not (protected owner) && not (record_is_detached fields) then retire_past sw history) histories
      | Ok _ -> ());
     (match root_switch with
      | Error _ -> ()
      | Ok sw when can_apply ->
          List.iter (fun (d : Lane_addon_config.declaration) ->
-           (* A record of this declaration that cannot be read may hold its
-              persistent state, its privacy owner or a running worker, and none
-              of those can be checked. The declaration waits for the record to
-              be repaired or moved away; no other declaration does. *)
+           (* A record that may belong to this declaration and cannot be read
+              may hold its running worker or its privacy owner, and neither can
+              be checked. The declaration waits for the record to be repaired
+              or moved away; a declaration no such record may belong to does
+              not wait. A detached record that names this declaration holds no
+              worker and does not make it wait. *)
            match d.enabled, own_faults d with
            | true, (_ :: _ as unreadable) ->
                add_issue ~id:d.id d.source_path
-                 (Printf.sprintf "Not applied while %d retained bindings of this declaration cannot be read"
+                 (Printf.sprintf "Not applied while %d retained bindings that may belong to this declaration cannot be read"
                     (List.length unreadable))
            | true, [] | false, _ ->
            let retained_visibility =
@@ -2198,14 +2245,15 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
               | Ok _ -> () | Error message -> add_issue ~id:d.id d.source_path message);
              List.iter (retire sw) (live_for d.id);
              List.iter (retire_past sw)
-               (List.filter (fun (owner, fields) -> owner.id = d.id && not (detached fields)) histories))
+               (List.filter (fun (owner, fields) -> owner.id = d.id && not (record_is_detached fields)) histories))
            else
            let admitted =
              let* visibility = document_owner in
              let* () = preserve_state_runtime
                ~configuration:(Some {id=d.id; source_path=d.source_path; revision=d.revision})
                ~package:d.package
-               (List.map entry_json (entries m) @ List.map (fun (_,fields) -> `Assoc fields) histories) in
+               (List.map entry_json (entries m) @ List.map (fun (_,fields) -> `Assoc fields) histories
+                @ terminal_fault_records ~id:d.id ~source_path:d.source_path faults) in
              let* _ = validate_connection m ~run_id:d.run_id ~configuration_id:d.id ~binding:d.binding in
              Ok visibility in
            match admitted with
@@ -2221,7 +2269,7 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
                       | Error message -> add_issue ~id:d.id d.source_path message)
                 | Some _ | None -> retire sw e)
            | [] ->
-               let pending = List.filter (fun (owner, fields) -> owner.id = d.id && not (detached fields)) histories in
+               let pending = List.filter (fun (owner, fields) -> owner.id = d.id && not (record_is_detached fields)) histories in
                if pending <> [] then List.iter (retire_past sw) pending
                else (
                  (* An image that is not on the host is not a worker that failed.

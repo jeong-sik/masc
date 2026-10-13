@@ -49,19 +49,32 @@ not the activity control.
 
 ## Incomplete and rejected readings
 
-The reconciler requires a complete declaration reading and a readable retained
-binding store before applying changes. An unrelated unreadable file or a binding
-store that cannot be read can therefore defer a valid off request; the
-configuration reports that cleanup awaits a complete reading. The observed worker
-remains visible. Malformed or duplicate declarations keep the last applied
-worker; invalid input is never interpreted as off.
+The reconciler requires a complete declaration reading and a retained binding
+directory it can list before applying changes. An unrelated unreadable
+declaration file or a binding directory that cannot be listed can therefore
+defer a valid off request; the configuration reports that cleanup awaits a
+complete reading. The observed worker remains visible. Malformed or duplicate
+declarations keep the last applied worker; invalid input is never interpreted
+as off.
 
-A retained binding record that was read but does not parse (it records no read
-visibility or source access) is reported in the configuration issues with its
-file path and, when its configuration owner is readable, that installation id.
-Only the installation it names is held back, and its application state is
-`failed`. The record is not rewritten, retired or cleaned up. Move the file away
-or repair it, and the installation applies on the next reconciliation.
+Each retained binding file is read on its own. A file that cannot be read
+(it is not JSON, it records no read visibility or source access, or it has no
+instance id or observation sequence) is reported in the configuration issues
+with its path. The record is not rewritten, retired or cleaned up. What waits
+depends on whose record it is:
+
+- A record that names an installation holds back only that installation, and
+  only while the record is not detached. A detached record holds no worker, so
+  the installation applies. Persistent state is still checked against the
+  runtime recorded in a detached record.
+- A record whose configuration cannot be read could belong to any
+  installation, so every enabled installation waits. A record with no
+  configuration (a manual attach) holds none back.
+
+To release a held installation, repair the record by adding `visibility` and
+`source_access`, or move the file away. Move only a detached file: the
+container of a record that is not detached is cleaned up only through a
+readable record.
 
 New Skill publications exclude workers that are stopping, including those whose
 cleanup failed and will retry. A complete declaration reading also withdraws

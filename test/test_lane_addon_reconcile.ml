@@ -1069,28 +1069,71 @@ let test_historical_publication_is_not_completion ~never_started ~cold_recovery 
 (* Three real retained records that carry neither visibility nor
    source_access, so none names a reader: two producers of installation
    dos-counter and one consumer of it, which owns installation
-   dos-output-statistics. *)
+   dos-output-statistics. All three are detached. *)
 let retained_without_read_authority = ["producer-a.json"; "producer-b.json"; "consumer.json"]
 let fixture_directory = Filename.concat "fixtures" "lane_addon_bindings_without_read_authority"
 let fixture_bytes name =
   In_channel.with_open_bin (Filename.concat fixture_directory name) In_channel.input_all
+let fixture_record name = Yojson.Safe.from_string (fixture_bytes name)
 let retained_store config =
   Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons")
-let seed_retained_without_read_authority config =
-  let store = retained_store config in
-  List.map (fun name ->
-    let json = Yojson.Safe.from_string (fixture_bytes name) in
+let bindings_directory config =
+  Filename.concat (Filename.concat (Workspace.masc_dir config) "lane-addons") "bindings"
+let replace_field key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | _ -> fail "a retained record is an object"
+let still_attached = replace_field "phase" (Types.phase_to_json Types.Attached)
+let fixture_records ?(transform = Fun.id) () =
+  List.map (fun name -> transform (fixture_record name)) retained_without_read_authority
+let seed_records config records =
+  List.map (fun json ->
     let id = text "instance_id" json in
-    unwrap (Store.save_binding store ~instance_id:id json);
-    id) retained_without_read_authority
+    unwrap (Store.save_binding (retained_store config) ~instance_id:id json);
+    id) records
+let remove_seeded_files config =
+  let bindings = bindings_directory config in
+  Array.iter (fun name -> Sys.remove (Filename.concat bindings name)) (Sys.readdir bindings)
 let issues_of id result =
   values "issues" result |> List.filter (fun issue -> member "id" issue = `String id)
+let check_unchanged config records =
+  List.iter (fun json ->
+    let id = text "instance_id" json in
+    let stored = unwrap (Store.bindings (retained_store config))
+      |> List.find (fun stored -> text "instance_id" stored = id) in
+    check bool "an unreadable record is neither rewritten nor cleaned up" true
+      (Yojson.Safe.sort stored = Yojson.Safe.sort json)) records
 
-let test_unreadable_bindings_do_not_block_unrelated_declarations () =
+let test_detached_unreadable_history_does_not_hold_its_declaration () =
   with_fixture (fun env _ config directory packages state ->
     let clock = Eio.Stdenv.clock env in
     let manifest = package packages "ready" in
-    let seeded = seed_retained_without_read_authority config in
+    let records = fixture_records () in
+    ignore (seed_records config records);
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    write (Filename.concat directory "dos-counter.toml") (declaration ~id:"dos-counter" ~manifest ());
+    let result = reconcile config directory in
+    let observer = declared_instance config "observer" |> text "instance_id" in
+    let counter = declared_instance config "dos-counter" |> text "instance_id" in
+    await_ready clock config observer;
+    await_ready clock config counter;
+    check (list string) "a detached unreadable record of dos-counter holds no worker, so both start"
+      (List.sort String.compare [observer; counter]) (List.sort String.compare (starts state));
+    check_application config "observer" "applied";
+    check_application config "dos-counter" "applied";
+    check int "each detached record of dos-counter is still listed for the operator" 2
+      (List.length (issues_of "dos-counter" result));
+    check int "the consumer record is listed under its own installation id" 1
+      (List.length (issues_of "dos-output-statistics" result));
+    check_unchanged config records;
+    detach clock config observer;
+    detach clock config counter)
+
+let test_unreadable_records_hold_only_the_declaration_they_name () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let records = fixture_records ~transform:still_attached () in
+    let seeded = seed_records config records in
     write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
     write (Filename.concat directory "dos-counter.toml") (declaration ~id:"dos-counter" ~manifest ());
     let result = reconcile config directory in
@@ -1105,12 +1148,10 @@ let test_unreadable_bindings_do_not_block_unrelated_declarations () =
     check int "the consumer record is listed under its own installation id" 1
       (List.length (issues_of "dos-output-statistics" result));
     check int "no issue names the unrelated declaration" 0 (List.length (issues_of "observer" result));
-    List.iter2 (fun id name ->
-      let stored = unwrap (Store.bindings (retained_store config))
-        |> List.find (fun json -> text "instance_id" json = id) in
-      check bool (name ^ " is neither rewritten nor cleaned up") true
-        (Yojson.Safe.sort stored = Yojson.Safe.sort (Yojson.Safe.from_string (fixture_bytes name))))
-      seeded retained_without_read_authority;
+    check_unchanged config records;
+    check bool "a record that may hold a worker cannot be detached through its unreadable form" true
+      (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Detach
+        (`Assoc ["instance_id", `String (List.hd seeded)])));
     let slice = dispatch config Runtime.Slice [] in
     check bool "a slice that skipped unreadable records is not complete" false
       (member "complete" slice = `Bool true);
@@ -1120,31 +1161,103 @@ let test_declaration_waits_for_its_unreadable_records_then_applies () =
   with_fixture (fun env _ config directory packages state ->
     let clock = Eio.Stdenv.clock env in
     let manifest = package packages "ready" in
-    ignore (seed_retained_without_read_authority config);
+    ignore (seed_records config (fixture_records ~transform:still_attached ()));
     write (Filename.concat directory "dos-counter.toml") (declaration ~id:"dos-counter" ~manifest ());
     ignore (reconcile config directory);
     check (list string) "the declaration with unreadable records waits" [] (starts state);
-    let bindings = Filename.concat (Filename.concat (Workspace.masc_dir config) "lane-addons") "bindings" in
-    Array.iter (fun name -> Sys.remove (Filename.concat bindings name)) (Sys.readdir bindings);
+    remove_seeded_files config;
     ignore (reconcile config directory);
     let id = declared_instance config "dos-counter" |> text "instance_id" in
     await_ready clock config id;
     check_application config "dos-counter" "applied";
     detach clock config id)
 
-let test_corrupt_binding_store_stops_reconciliation () =
+(* A configuration owner that cannot be read leaves the record unattributed,
+   so it could hold any declaration's worker. It is not the same as a record
+   whose configuration is null, which belongs to no declaration. *)
+let test_record_with_unreadable_owner_holds_every_declaration () =
+  let shared = `Assoc ["kind", `String "shared"] in
+  let access = Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated in
+  let owner_without_revision = `Assoc ["id", `String "dos-counter"; "source_path", `String "x"] in
+  let variants = [
+    "no read authority and a configuration that is not an owner",
+      (fun json -> replace_field "configuration" (`Assoc ["id", `Int 5]) json);
+    "readable authority and an owner without a revision",
+      (fun json -> json |> replace_field "visibility" shared |> replace_field "source_access" access
+        |> replace_field "configuration" owner_without_revision) ] in
+  List.iter (fun (label, damage) ->
+    with_fixture (fun env _ config directory packages state ->
+      let clock = Eio.Stdenv.clock env in
+      let manifest = package packages "ready" in
+      ignore (seed_records config [damage (still_attached (fixture_record "producer-a.json"))]);
+      write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+      let result = reconcile config directory in
+      check (list string) (label ^ ": no declaration starts beside it") [] (starts state);
+      check bool (label ^ ": the refusal is a configuration issue of the declaration") true
+        (issues_of "observer" result <> []);
+      check string (label ^ ": the declaration's application is unknown") "unknown"
+        (application config "observer" |> text "kind");
+      remove_seeded_files config;
+      ignore (reconcile config directory);
+      let id = declared_instance config "observer" |> text "instance_id" in
+      await_ready clock config id;
+      check_application config "observer" "applied";
+      detach clock config id)) variants
+
+(* A record that is valid JSON but has no observation sequence names its
+   owner, so it is held against that owner like any other unreadable record. *)
+let test_record_without_sequence_is_a_fault_of_its_owner () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let producer = still_attached (fixture_record "producer-a.json") in
+    let without_sequence = match producer with
+      | `Assoc fields -> `Assoc (List.remove_assoc "observation_seq" fields)
+      | _ -> fail "a retained record is an object" in
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    write (Filename.concat directory "dos-counter.toml") (declaration ~id:"dos-counter" ~manifest ());
+    Fs_compat.mkdir_p (bindings_directory config);
+    write (Filename.concat (bindings_directory config) (Store.digest (text "instance_id" producer) ^ ".json"))
+      (Yojson.Safe.to_string without_sequence);
+    let result = reconcile config directory in
+    let observer = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config observer;
+    check (list string) "the record held against dos-counter does not stop observer"
+      [observer] (starts state);
+    check bool "dos-counter is refused beside the listed record" true
+      (List.length (issues_of "dos-counter" result) >= 2);
+    detach clock config observer)
+
+let test_unparsable_file_holds_every_declaration_but_not_inspect () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    unwrap (Store.save_binding (retained_store config) ~instance_id:"present"
+      (`Assoc ["instance_id", `String "present"; "observation_seq", `Int 0]));
+    write (Filename.concat (bindings_directory config) "corrupt.json") "{";
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    check (list string) "a file that is not JSON could belong to any declaration, so none starts" []
+      (starts state);
+    check bool "Inspect still answers, per record" true
+      (Result.is_ok (Runtime.dispatch ~config ~operation:Runtime.Inspect (`Assoc [])));
+    Sys.remove (Filename.concat (bindings_directory config) "corrupt.json");
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    detach clock config id)
+
+let test_unlistable_binding_store_stops_reconciliation () =
   with_fixture (fun _ _ config directory packages state ->
     let manifest = package packages "ready" in
-    let store = retained_store config in
-    unwrap (Store.save_binding store ~instance_id:"present"
-      (`Assoc ["instance_id", `String "present"; "observation_seq", `Int 0]));
-    let bindings = Filename.concat (Filename.concat (Workspace.masc_dir config) "lane-addons") "bindings" in
-    write (Filename.concat bindings "corrupt.json") "{";
+    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    Fs_compat.mkdir_p root;
+    write (Filename.concat root "bindings") "not a directory";
     write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
     let result = reconcile config directory in
-    check (list string) "an unreadable store starts no declaration" [] (starts state);
+    check (list string) "a store that cannot be listed starts no declaration" [] (starts state);
     check bool "the store failure is a configuration issue" true (values "issues" result <> []);
-    check bool "Inspect refuses an unreadable store" true
+    check bool "Inspect refuses a store that cannot be listed" true
       (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Inspect (`Assoc []))))
 
 let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension", [
@@ -1193,10 +1306,18 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     (test_restart_recovers_exact_owner_before_replacement ~runtime:Types.Apple_container);
   test_case "held observation preserves primary and other declaration progress" `Quick
     test_held_observer_does_not_block_other_declarations;
-  test_case "unreadable retained bindings do not block unrelated declarations" `Quick
-    test_unreadable_bindings_do_not_block_unrelated_declarations;
+  test_case "a detached unreadable record does not hold its declaration" `Quick
+    test_detached_unreadable_history_does_not_hold_its_declaration;
+  test_case "unreadable records hold only the declaration they name" `Quick
+    test_unreadable_records_hold_only_the_declaration_they_name;
   test_case "a declaration waits for its unreadable records and applies once they are gone" `Quick
     test_declaration_waits_for_its_unreadable_records_then_applies;
-  test_case "a corrupt binding store still stops reconciliation" `Quick
-    test_corrupt_binding_store_stops_reconciliation;
+  test_case "a record with an unreadable owner holds every declaration" `Quick
+    test_record_with_unreadable_owner_holds_every_declaration;
+  test_case "a record without a sequence is a fault of its owner" `Quick
+    test_record_without_sequence_is_a_fault_of_its_owner;
+  test_case "a file that is not JSON holds every declaration but not Inspect" `Quick
+    test_unparsable_file_holds_every_declaration_but_not_inspect;
+  test_case "a binding store that cannot be listed stops reconciliation" `Quick
+    test_unlistable_binding_store_stops_reconciliation;
 ]]

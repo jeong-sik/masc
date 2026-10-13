@@ -123,13 +123,19 @@ type retained_fault_reason =
   | Source_access_invalid
   | Record_invalid of string
 val retained_fault_message : retained_fault_reason -> string
+type retained_owner = Owned_by of configuration_owner | Unowned | Owner_unreadable
+(** Whose record it is. [Unowned] is a manual attach, which belongs to no
+    declaration. [Owner_unreadable] is a record whose configuration cannot be
+    read, so it could belong to any declaration. *)
 type inventory_issue = {
   issue_path : string;
-  issue_owner : configuration_owner option;
+  issue_owner : retained_owner;
+  issue_terminal : bool;
   issue_reason : retained_fault_reason;
 }
 (** One retained record the inventory could not list. [issue_owner] is the
-    declaration the record names, when its configuration owner is readable. *)
+    owner the record names. [issue_terminal] is true for a detached record that
+    names its declaration: it holds no worker, so nothing waits on it. *)
 type inventory = {
   owner_present : bool;
   instances : inventory_instance list;

@@ -954,6 +954,26 @@ let complete_cleanup
           (match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
            | Retain_operator_pause -> ()
            | Remove_meta ->
+             (* The teardown above leaves the volumes, since a paused keeper
+                comes back to its work volume. This one is not coming back.
+                Logged rather than blocking, like the teardown: the warning
+                names what to remove by hand. *)
+             (match
+                match sandbox_backend with
+                | Error detail -> Error detail
+                | Ok (backend, microvm_backend) ->
+                  Keeper_turn_sandbox_runtime.remove_keeper_volumes_by_name
+                    ~keeper_name:operation.keeper_name
+                    ~backend
+                    ?microvm_backend
+                    ()
+              with
+              | Ok () -> ()
+              | Error detail ->
+                Log.Keeper.warn
+                  ~keeper_name:operation.keeper_name
+                  "keeper removed but its volumes were not: %s"
+                  detail);
              (match
                 Keeper_dos_controller.release_retired ~config
                   ~keeper_name:operation.keeper_name

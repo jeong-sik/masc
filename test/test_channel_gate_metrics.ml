@@ -48,7 +48,7 @@ let test_record_attempt_tracks_connector_diagnostics () =
       check int "workspace_count counts unique workspaces" 2 stats.workspace_count;
       check string "last_keeper trimmed" "luna" stats.last_keeper;
       check_error_kind "last_error_kind" "validation" stats.last_error_kind;
-      check string "last_outcome" "validation_error" stats.last_outcome;
+      check string "last_outcome" "validation_error" (Metrics.outcome_to_string stats.last_outcome);
       check string "last_workspace_id" "workspace-b" stats.last_workspace_id)
 
 let test_record_internal_error_exn_tracks_internal_failures () =
@@ -71,7 +71,7 @@ let test_record_internal_error_exn_tracks_internal_failures () =
       check string "last_keeper trimmed" "alpha" stats.last_keeper;
       check string "last_error redacted" "internal error" stats.last_error;
       check_error_kind "last_error_kind" "internal" stats.last_error_kind;
-      check string "last_outcome" "internal_error" stats.last_outcome)
+      check string "last_outcome" "internal_error" (Metrics.outcome_to_string stats.last_outcome))
 
 let test_record_validation_error_metric_tracks_request_metadata () =
   with_eio (fun () ->

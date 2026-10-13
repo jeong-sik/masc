@@ -14,6 +14,10 @@ type outcome =
   | Dispatch_unavailable
   | Internal_error of string
 
+val outcome_to_string : outcome -> string
+(** The status-surface label: [success], [validation_error], [keeper_error],
+    [dispatch_unavailable] or [internal_error]. *)
+
 (** Connector error-kind labels. Closed set mirroring the in-module
     producer surface: validation / keeper / dispatch_unavailable /
     internal, plus [Ek_none] as the marker used by [Success]
@@ -55,7 +59,7 @@ type channel_stats = {
   last_workspace_id : string;
   last_error : string;
   last_error_kind : error_kind;
-  last_outcome : string;
+  last_outcome : outcome;
   total_duration_ms : int;
   timed_count : int;
   max_duration_ms : int;
@@ -76,22 +80,21 @@ type binding_stats = {
   last_error_ts : float;
   last_error : string;
   last_error_kind : error_kind;
-  last_outcome : string;
+  last_outcome : outcome;
   total_duration_ms : int;
   timed_count : int;
   max_duration_ms : int;
 }
 
-(** Recent connector event snapshot. *)
+(** Recent connector event snapshot. The JSON [outcome], [error_kind] and
+    [error] are all read off [outcome]. *)
 type gate_event = {
   seq : int;
   timestamp : float;
   channel : string;
   workspace_id : string;
   keeper : string;
-  outcome : string;
-  error_kind : error_kind;
-  error : string;
+  outcome : outcome;
   duration_ms : int;
 }
 

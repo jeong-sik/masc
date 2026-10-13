@@ -8,6 +8,13 @@ type outcome =
   | Dispatch_unavailable
   | Internal_error of string
 
+let outcome_to_string = function
+  | Success -> "success"
+  | Validation_error _ -> "validation_error"
+  | Keeper_error _ -> "keeper_error"
+  | Dispatch_unavailable -> "dispatch_unavailable"
+  | Internal_error _ -> "internal_error"
+
 (* Closed sum mirroring the in-module producer surface (5 sites in this
    file).  [Ek_none] replaces the [Error_kind ""] marker previously
    used to encode the no-error state for [Success]
@@ -50,7 +57,7 @@ type channel_stats = {
   last_workspace_id : string;
   last_error : string;
   last_error_kind : error_kind;
-  last_outcome : string;
+  last_outcome : outcome;
   total_duration_ms : int;
   timed_count : int;
   max_duration_ms : int;
@@ -70,7 +77,7 @@ type binding_stats = {
   last_error_ts : float;
   last_error : string;
   last_error_kind : error_kind;
-  last_outcome : string;
+  last_outcome : outcome;
   total_duration_ms : int;
   timed_count : int;
   max_duration_ms : int;
@@ -82,9 +89,7 @@ type gate_event = {
   channel : string;
   workspace_id : string;
   keeper : string;
-  outcome : string;
-  error_kind : error_kind;
-  error : string;
+  outcome : outcome;
   duration_ms : int;
 }
 
@@ -98,7 +103,7 @@ type binding_acc = {
   keeper : string;
   last_error : string;
   last_error_kind : error_kind;
-  last_outcome : string;
+  last_outcome : outcome;
   total_dur_ms : int;
   timed_count : int;
   max_dur_ms : int;
@@ -119,7 +124,7 @@ type stats_acc = {
   last_workspace_id : string;
   last_error : string;
   last_error_kind : error_kind;
-  last_outcome : string;
+  last_outcome : outcome;
   total_dur_ms : int;
   timed_count : int;
   max_dur_ms : int;
@@ -135,7 +140,7 @@ let slow_threshold_ms () = 10_000
 let max_tracked_workspaces = 256
 let max_recent_events = 128
 
-let make_binding_acc () =
+let make_binding_acc ~last_outcome =
   {
     msg_count = 0;
     success_count = 0;
@@ -146,13 +151,13 @@ let make_binding_acc () =
     keeper = "";
     last_error = "";
     last_error_kind = Ek_none;
-    last_outcome = "idle";
+    last_outcome;
     total_dur_ms = 0;
     timed_count = 0;
     max_dur_ms = 0;
   }
 
-let make_acc () =
+let make_acc ~last_outcome =
   {
     msg_count = 0;
     success_count = 0;
@@ -168,7 +173,7 @@ let make_acc () =
     last_workspace_id = "";
     last_error = "";
     last_error_kind = Ek_none;
-    last_outcome = "idle";
+    last_outcome;
     total_dur_ms = 0;
     timed_count = 0;
     max_dur_ms = 0;
@@ -185,20 +190,16 @@ let start_time = Unix.gettimeofday ()
 let recent_events : gate_event Queue.t = Queue.create ()
 let next_event_seq = ref 0
 
-let get_or_create_acc channel =
+(* A channel or binding is created by the attempt that first names it, so it
+   starts out holding that attempt's outcome; there is no "no attempt yet"
+   value to carry. *)
+let get_or_create_acc channel ~outcome =
   match Hashtbl.find_opt table channel with
   | Some acc -> acc
   | None ->
-      let acc = make_acc () in
+      let acc = make_acc ~last_outcome:outcome in
       Hashtbl.replace table channel acc;
       acc
-
-let outcome_name = function
-  | Success -> "success"
-  | Validation_error _ -> "validation_error"
-  | Keeper_error _ -> "keeper_error"
-  | Dispatch_unavailable -> "dispatch_unavailable"
-  | Internal_error _ -> "internal_error"
 
 let update_error_fields acc ~now ~kind ~message =
   { acc with
@@ -232,7 +233,7 @@ let remember_workspace acc workspace_id =
    end;
   { acc with last_workspace_id = workspace_id }
 
-let get_or_create_binding acc workspace_id =
+let get_or_create_binding acc workspace_id ~outcome =
   match Hashtbl.find_opt acc.bindings workspace_id with
   | Some binding -> binding
   | None ->
@@ -242,7 +243,7 @@ let get_or_create_binding acc workspace_id =
         let evicted = Queue.take acc.binding_order in
         Hashtbl.remove acc.bindings evicted
       end;
-      let binding = make_binding_acc () in
+      let binding = make_binding_acc ~last_outcome:outcome in
       Hashtbl.replace acc.bindings workspace_id binding;
       Queue.add workspace_id acc.binding_order;
       binding
@@ -256,7 +257,6 @@ let outcome_error_details = function
   | Success -> (Ek_none, "")
 
 let append_event ~channel ~workspace_id ~keeper ~duration_ms outcome ~timestamp =
-  let error_kind, error = outcome_error_details outcome in
   incr next_event_seq;
   if Queue.length recent_events >= max_recent_events then ignore (Queue.take recent_events);
   Queue.add
@@ -266,9 +266,7 @@ let append_event ~channel ~workspace_id ~keeper ~duration_ms outcome ~timestamp 
       channel;
       workspace_id;
       keeper;
-      outcome = outcome_name outcome;
-      error_kind;
-      error;
+      outcome;
       duration_ms;
     }
     recent_events
@@ -284,14 +282,14 @@ let record_attempt ~channel ~workspace_id ~keeper ~duration_ms outcome =
          and the two tables are written once at the end. The nested [bindings]
          / [workspaces] tables are shared handles carried by [{ acc with ... }],
          so their in-place updates land whichever copy is held. *)
-      let acc = get_or_create_acc channel_key in
+      let acc = get_or_create_acc channel_key ~outcome in
       let now = Unix.gettimeofday () in
       let trimmed_keeper = String.trim keeper in
       let acc =
         { acc with
           msg_count = acc.msg_count + 1
         ; last_ts = now
-        ; last_outcome = outcome_name outcome
+        ; last_outcome = outcome
         ; last_keeper =
             (if trimmed_keeper <> "" then trimmed_keeper else acc.last_keeper)
         }
@@ -301,12 +299,12 @@ let record_attempt ~channel ~workspace_id ~keeper ~duration_ms outcome =
         if trimmed_workspace = "" then acc, None
         else begin
           let acc = remember_workspace acc trimmed_workspace in
-          let binding = get_or_create_binding acc trimmed_workspace in
+          let binding = get_or_create_binding acc trimmed_workspace ~outcome in
           let binding =
             { binding with
               msg_count = binding.msg_count + 1
             ; last_ts = now
-            ; last_outcome = outcome_name outcome
+            ; last_outcome = outcome
             ; keeper =
                 (if trimmed_keeper <> "" then trimmed_keeper else binding.keeper)
             }
@@ -528,6 +526,7 @@ let binding_health (stats : binding_stats) =
     ~timed_count:stats.timed_count ~slow_count:0
 
 let gate_event_to_json (event : gate_event) =
+  let error_kind, error = outcome_error_details event.outcome in
   `Assoc
     [
       ("seq", `Int event.seq);
@@ -535,9 +534,9 @@ let gate_event_to_json (event : gate_event) =
       ("channel", `String event.channel);
       ("workspace_id", `String event.workspace_id);
       ("keeper", `String event.keeper);
-      ("outcome", `String event.outcome);
-      ("error_kind", `String (error_kind_to_string event.error_kind));
-      ("error", `String event.error);
+      ("outcome", `String (outcome_to_string event.outcome));
+      ("error_kind", `String (error_kind_to_string error_kind));
+      ("error", `String error);
       ("duration_ms", `Int event.duration_ms);
     ]
 
@@ -652,7 +651,7 @@ let snapshot_json () =
         ("last_workspace_id", `String stats.last_workspace_id);
         ("last_error", `String stats.last_error);
         ("last_error_kind", `String (error_kind_to_string stats.last_error_kind));
-        ("last_outcome", `String stats.last_outcome);
+        ("last_outcome", `String (outcome_to_string stats.last_outcome));
         ("avg_duration_ms", `Int avg_dur);
         ("max_duration_ms", `Int stats.max_duration_ms);
         ("slow_count", `Int stats.slow_count);
@@ -680,7 +679,7 @@ let snapshot_json () =
         ("last_error_at", `String (iso_of_ts stats.last_error_ts));
         ("last_error", `String stats.last_error);
         ("last_error_kind", `String (error_kind_to_string stats.last_error_kind));
-        ("last_outcome", `String stats.last_outcome);
+        ("last_outcome", `String (outcome_to_string stats.last_outcome));
         ("avg_duration_ms", `Int avg_dur);
         ("max_duration_ms", `Int stats.max_duration_ms);
         ("success_rate_pct", `Int (binding_success_rate_pct stats));

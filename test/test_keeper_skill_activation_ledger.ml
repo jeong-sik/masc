@@ -1318,7 +1318,7 @@ let nested_scope ~parent_tool_use_id ~composition_run_id ~alias =
 
 let test_nested_dispatch_identity_and_parent_delivery_survive_reload () =
   with_session @@ fun config trace_id _session_dir ->
-  let composition_run_id = Random_id.uuid_v7 () in
+  let composition_run_id = Keeper_tool_plan.Composition_run_id.(fresh () |> to_string) in
   let make ~id ~parent ~alias =
     let scope = nested_scope ~parent_tool_use_id:parent ~composition_run_id ~alias in
     activation ~skill_tool_use_id:id ~invocation:(Ledger.Nested_composition_invocation
@@ -1365,7 +1365,7 @@ let test_nested_dispatch_identity_and_parent_delivery_survive_reload () =
 
 let test_nested_scope_integrity_and_invocation_conflict () =
   with_session @@ fun config trace_id _session_dir ->
-  let composition_run_id = Random_id.uuid_v7 () in
+  let composition_run_id = Keeper_tool_plan.Composition_run_id.(fresh () |> to_string) in
   List.iter (fun (parent_tool_use_id, run, alias) ->
     match Ledger.nested_composition_scope ~parent_tool_use_id ~composition_run_id:run ~alias with
     | Error (Ledger.Invalid_nested_composition_scope _) -> ()

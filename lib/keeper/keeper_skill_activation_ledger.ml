@@ -1008,8 +1008,9 @@ let decode_invocation json =
     let* origin = decode_composition_origin origin_json in
     let* tool_name = string_field "tool_name" fields in
     let* () = if Safe_identifier.is_portable_name tool_name then Ok () else Error (Invalid_tool_name tool_name) in
-    let* json = required_field ~field:"scope" fields in
-    let* fields = object_field "scope" json in
+    let* fields = match List.assoc_opt "scope" fields with
+      | Some json -> object_field "scope" json
+      | None -> Error (Expected_object { field = "scope" }) in
     let* () = exact_fields ~object_name:"scope"
         ~allowed:[ "parent_tool_use_id"; "composition_run_id"; "alias" ] fields in
     let* parent_tool_use_id = string_field "parent_tool_use_id" fields in

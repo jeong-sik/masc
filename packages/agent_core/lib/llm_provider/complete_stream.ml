@@ -659,7 +659,12 @@ let complete_stream_http
           ~on_response_status
           ~net
           ~url
-          ~headers:(config.headers @ auth_headers)
+          ~headers:
+            ((match config.kind with
+              | Provider_config.Anthropic ->
+                Backend_anthropic.request_headers ~body:body_with_stream config.headers
+              | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> config.headers)
+             @ auth_headers)
           ~body:body_with_stream
           ~f:(fun ~pre_header_elapsed_s reader ->
             (* The first-event budget is one window from the request to the
@@ -939,6 +944,10 @@ let complete_stream_http
                              match http_codec with
                              | Provider_http_codec.Anthropic_messages ->
                                (match Streaming.parse_sse_event event_type data with
+                                | Some (Types.MessageStart _ as evt) ->
+                                  Backend_anthropic.observe_input_transformations
+                                    (Yojson.Safe.from_string data);
+                                  [ evt ], None
                                 | Some evt -> [ evt ], None
                                 | None ->
                                   ( [ Types.SSEParseFailed

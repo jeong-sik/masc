@@ -733,6 +733,17 @@ let test_no_preamble_when_nothing_is_cut () =
 ;;
 
 let test_extra_context_pinned () =
+  let historical =
+    { extra_context with metadata = Types.Extra_system_context_provenance.historical_metadata }
+  in
+  let historical_window =
+    ok_exn ~what:"historical context" (project ~capacity_bytes:60_000
+      (historical :: atoms (4 * k) @ [extra_context]))
+  in
+  Alcotest.(check bool) "historical context can leave the window" false
+    (List.exists (fun (m : Types.message) ->
+       Types.Extra_system_context_provenance.classify m.metadata = Historical)
+      historical_window);
   let history = atoms (4 * k) @ [ extra_context ] in
   let projected =
     ok_exn ~what:"pinned" (project ~capacity_bytes:60_000 history)

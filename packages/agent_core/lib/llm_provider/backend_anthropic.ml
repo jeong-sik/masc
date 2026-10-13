@@ -11,6 +11,67 @@ type request_artifact = string Request_artifact_internal.t
 let request_payload = Request_artifact_internal.payload
 let request_output_token_receipt = Request_artifact_internal.output_token_receipt
 
+let binding_controls_beta = "thinking-binding-controls-2026-08-01"
+
+let request_headers ~body headers =
+  let has_binding =
+    match Yojson.Safe.from_string body with
+    | `Assoc fields ->
+      (match List.assoc_opt "thinking" fields with
+       | Some (`Assoc fields) -> List.mem_assoc "block_binding" fields
+       | _ -> false)
+    | _ -> false
+  in
+  if has_binding then (
+    let betas, other =
+      List.partition
+        (fun (name, _) -> String.equal (String.lowercase_ascii name) "anthropic-beta")
+        headers
+    in
+    let values =
+      List.concat_map
+        (fun (_, value) -> String.split_on_char ',' value |> List.map String.trim)
+        betas
+    in
+    let values = List.sort_uniq String.compare (binding_controls_beta :: values) in
+    ("anthropic-beta", String.concat "," values) :: other)
+  else headers
+;;
+
+let observe_input_transformations json =
+  let transformations =
+    match json with
+    | `Assoc fields ->
+      (match List.assoc_opt "input_transformations" fields with
+       | Some (`List items) -> items
+       | _ ->
+         (match List.assoc_opt "message" fields with
+          | Some (`Assoc fields) ->
+            (match List.assoc_opt "input_transformations" fields with
+             | Some (`List items) -> items
+             | _ -> [])
+          | _ -> []))
+    | _ ->
+      []
+  in
+  List.iter
+    (function
+      | `Assoc fields ->
+        let details =
+          List.filter_map
+            (fun key ->
+               match List.assoc_opt key fields with
+               | Some (`String value) -> Some (key, `String value)
+               | _ -> None)
+            [ "type"; "path"; "reason" ]
+        in
+        Diag.info "anthropic" "%s"
+          (Yojson.Safe.to_string
+             (`Assoc (("event", `String "thinking_input_transformation") :: details)))
+      | _ -> ())
+    transformations
+;;
+
 (* The Messages wire reports exclusive input: "input_tokens: Number of input
    tokens which were not read from or used to create a cache", with
    total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens
@@ -602,7 +663,22 @@ let build_request_payload
     | Count_tokens, _ | Completion _, None -> body
   in
   let body =
-    match thinking_config_for_config thinking_mode config with
+    let thinking = thinking_config_for_config thinking_mode config in
+    let thinking =
+      match request_mode, thinking_mode, config.enable_thinking, thinking with
+      | Completion _,
+        Anthropic_control (Capabilities.Anthropic_adaptive_between_tools
+                           | Capabilities.Anthropic_adaptive_disabled_through_high),
+        Some true, Some (`Assoc fields) ->
+        (* These catalog policies describe Sonnet/Haiku 5.5. Their adaptive
+           wire accepts binding controls; between_tools and disabled do not.
+           The server validates the actual serialized prefix, including any
+           intentional window or tool-schema changes. *)
+        Some (`Assoc (("block_binding",
+          `Assoc [ "prefix_mismatch_behavior", `String "drop_block" ]) :: fields))
+      | _ -> thinking
+    in
+    match thinking with
     | Some thinking -> ("thinking", thinking) :: body
     | None -> body
   in

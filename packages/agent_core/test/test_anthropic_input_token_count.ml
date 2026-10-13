@@ -204,6 +204,36 @@ let field_json name fields =
   | None -> fail ("missing request field: " ^ name)
 ;;
 
+let test_binding_controls_completion_only () =
+  let cfg = Provider_config.make ~kind:Anthropic ~model_id:"claude-sonnet-5-5"
+      ~base_url:"https://api.anthropic.com" ~api_key:"fixture" ~max_tokens:64
+      ~enable_thinking:true () in
+  let build cfg =
+    Backend_anthropic.build_request_artifact_with_thinking_control
+      ~anthropic_thinking_control:(Some Capabilities.Anthropic_adaptive_between_tools)
+      ~config:cfg ~messages:[msg User [Text "hello"]] ()
+    |> Result.get_ok |> Backend_anthropic.request_payload
+  in
+  let body = build cfg in
+  let open Yojson.Safe.Util in
+  check string "adaptive requests recover only invalid thinking" "drop_block"
+    (Yojson.Safe.from_string body |> member "thinking" |> member "block_binding"
+     |> member "prefix_mismatch_behavior" |> to_string);
+  let headers = Backend_anthropic.request_headers ~body
+      ["Anthropic-Beta", "existing-beta"; "x-test", "retained"] in
+  check (option string) "existing beta retained with required beta"
+    (Some "existing-beta,thinking-binding-controls-2026-08-01")
+    (List.assoc_opt "anthropic-beta" headers);
+  let disabled = build {cfg with enable_thinking = Some false; reasoning_effort = None} in
+  check bool "between_tools does not send forbidden binding" false
+    (List.mem_assoc "block_binding"
+       (Yojson.Safe.from_string disabled |> member "thinking" |> to_assoc));
+  let count = Backend_anthropic.build_count_tokens_request
+      ~config:{cfg with enable_thinking = None} ~messages:[msg User [Text "hello"]] () in
+  check (list (pair string string)) "count request adds no beta" []
+    (Backend_anthropic.request_headers ~body:count [])
+;;
+
 let test_shared_projection () =
   let cfg = config "https://api.anthropic.com" in
   let completion =
@@ -1621,6 +1651,10 @@ let () =
             "measurement uses provider admission"
             `Quick
             test_measurement_uses_provider_admission
+        ; test_case
+            "binding controls use the adaptive completion wire only"
+            `Quick
+            test_binding_controls_completion_only
         ; test_case
             "Agent route uses prepared admission"
             `Quick

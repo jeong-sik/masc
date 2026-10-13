@@ -262,6 +262,99 @@ let transport_returning response =
   }
 ;;
 
+let test_provider_context_retention () =
+  List.iter (fun (kind, next_kind, signed, retained, duplicate_context) ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let captured = ref [] in
+  let response = pipeline_response Types.EndTurn in
+  let capture (request : Llm_provider.Llm_transport.completion_request) =
+    captured := request.messages :: !captured;
+    if signed then (
+      let source = Llm_provider.Reasoning_dialect.reasoning_source_for_provider_config
+          request.config |> Result.get_ok in
+      Ok { response with
+        content = [Types.Thinking {signature = Some "fixture-signature"; content = "fixture"};
+                   Types.Text "done"];
+        telemetry = Some {Types.default_inference_telemetry with reasoning_source = Some source} })
+    else Ok response
+  in
+  let transport =
+    { Llm_provider.Llm_transport.complete_sync = (fun request ->
+        { Llm_provider.Llm_transport.response = capture request; latency_ms = Some 0 });
+      complete_stream = (fun ?on_telemetry:_ ~on_event:_ request -> capture request) }
+  in
+  let hooks =
+    { Hooks.empty with before_turn_params = Some (function
+        | Hooks.BeforeTurnParams { turn = 0; current_params; _ } ->
+          Hooks.AdjustParams
+            { current_params with extra_system_context = Some "first request context" }
+        | _ -> Hooks.Continue) }
+  in
+  let options =
+    { Internal_agent.default_options with transport = Some transport; hooks;
+      provider_config = Some
+        { (Provider_mock.to_provider_config ()) with kind } }
+  in
+  let projection (messages : Types.message list) =
+    match duplicate_context, List.rev messages with
+    | true, last :: _ when
+        Types.Extra_system_context_provenance.classify last.metadata = Present ->
+      Ok (messages @ [last])
+    | _ -> Ok messages
+  in
+  let agent = Internal_agent.create ~net:env#net ~model_input_projection:projection
+      ~config:{ (Types.default_config ~model:"test-model") with max_tokens = Some 64 } ~options () in
+  Internal_agent.set_state agent
+    { (Internal_agent.state agent) with messages = [Types.user_msg "first"] };
+  let run agent api_strategy =
+    match run_pipeline_turn ~sw ~api_strategy agent with
+    | Ok _ -> ()
+    | Error error -> Alcotest.fail (Error.to_string error)
+  in
+  run agent Internal_pipeline.Sync;
+  let saved = (Internal_agent.state agent).messages in
+  let saved = List.map (fun message ->
+      Checkpoint.message_to_json message |> Checkpoint.message_of_json |> Result.get_ok) saved in
+  let has_historical = List.exists (fun (m : Types.message) ->
+    Types.Extra_system_context_provenance.classify m.metadata = Historical) saved in
+  Alcotest.(check bool) "retention follows the producing provider" retained has_historical;
+  Alcotest.(check int) "only Anthropic adds durable context"
+    (if retained then 3 else 2) (List.length saved);
+  let next_options = { options with provider_config = Some
+    { (Provider_mock.to_provider_config ()) with kind = next_kind } } in
+  let resumed = Internal_agent.create ~net:env#net
+      ~config:{ (Types.default_config ~model:"test-model") with max_tokens = Some 64 }
+      ~options:next_options () in
+  Internal_agent.set_state resumed
+    { (Internal_agent.state agent) with messages = saved @ [Types.user_msg "next"] };
+  run resumed (Internal_pipeline.Stream { on_event = ignore; on_telemetry = None });
+  match !captured with
+  | second :: first :: [] ->
+    let content messages = List.map (fun (m : Types.message) -> m.role, m.content) messages in
+    if retained then
+      Alcotest.(check bool) "Anthropic previous request stays an unchanged prefix" true
+        (List.take (List.length first) (content second) = content first)
+    else
+      Alcotest.(check bool) "other-provider continuation keeps its existing transcript" true
+        (second = saved @ [Types.user_msg "next"])
+  | _ -> Alcotest.fail "expected exactly two provider requests")
+    Llm_provider.Provider_config.[
+      Anthropic, Anthropic, true, true, false;
+      Anthropic, Anthropic, false, false, false;
+      Anthropic, Anthropic, false, false, true;
+      Kimi, Kimi, false, false, true;
+      OpenAI_compat, OpenAI_compat, false, false, true;
+      Ollama, Ollama, false, false, true;
+      Gemini, Gemini, false, false, true;
+      Glm, Glm, false, false, true;
+      Anthropic, Kimi, true, true, false;
+      Anthropic, OpenAI_compat, true, true, false;
+      Anthropic, Ollama, true, true, false;
+      Anthropic, Gemini, true, true, false;
+      Anthropic, Glm, true, true, false]
+;;
+
 let make_pipeline_test_agent ~net ~response =
   let transport = transport_returning response in
   let options =
@@ -3887,6 +3980,10 @@ let () =
             "provider receives exact supplied tools"
             `Quick
             test_pipeline_sends_exact_supplied_tools
+        ; Alcotest.test_case
+            "provider context retention survives sync, checkpoint and stream"
+            `Quick
+            test_provider_context_retention
         ; Alcotest.test_case
             "effective provider config drives lifecycle and pricing"
             `Quick

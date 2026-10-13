@@ -106,6 +106,7 @@ let is_composed_system_context (message : Agent_core.Types.message) =
   (match Agent_core.Types.Extra_system_context_provenance.classify message.metadata with
    | Agent_core.Types.Extra_system_context_provenance.Present -> true
    | Agent_core.Types.Extra_system_context_provenance.Absent
+   | Agent_core.Types.Extra_system_context_provenance.Historical
    | Agent_core.Types.Extra_system_context_provenance.Invalid
    | Agent_core.Types.Extra_system_context_provenance.Duplicate -> false)
   || Runtime_model_input_tail_window.is_working_state message

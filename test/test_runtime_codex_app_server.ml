@@ -7251,7 +7251,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
           |> Agent_core.Types.Extra_system_context_provenance.classify
         with
         | Agent_core.Types.Extra_system_context_provenance.Present -> ()
-        | Absent | Invalid | Duplicate ->
+        | Absent | Historical | Invalid | Duplicate ->
           fail "dynamic context lost its typed provenance");
        check string "start prompt stays exact" goal (turn_prompt start_capture);
        check string "resume prompt carries the current context in front of the goal"
@@ -8096,7 +8096,7 @@ let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
           |> Agent_core.Types.Extra_system_context_provenance.classify
         with
         | Agent_core.Types.Extra_system_context_provenance.Present -> ()
-        | Absent | Invalid | Duplicate ->
+        | Absent | Historical | Invalid | Duplicate ->
           fail "production dynamic context lost its typed provenance"))
 ;;
 

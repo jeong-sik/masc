@@ -67,6 +67,8 @@ val observations_for_absorption : input -> Yojson.Safe.t list
     [batch_turn_ref] identifies the selected batch, never an individual source
     turn. [local_position] is zero based within each observation kind.
     Conversation entries retain local position, role and host speaker provenance;
+    runtime context carriers retain their positions with an explicit attribution
+    and omitted body, so recalled content is not absorbed as a new observation.
     tool entries report execution outcome only, not payload or domain success.
     When present, historical task contexts are a separate observation whose
     [ranges] preserve the original source spans, attributions and local offsets.

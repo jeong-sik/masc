@@ -218,6 +218,31 @@ val event_queue_delivery_seen_for_source_result :
     matching rows do not become positive evidence; read failures remain
     explicit so callers can conservatively replay. *)
 
+type strict_delivery_evidence_error =
+  | Delivery_evidence_unavailable of event_queue_reaction_evidence_error
+  | Evidence_incomplete of
+      { malformed_row_count : int
+      ; semantic_invalid_row_count : int
+      ; first_reason : row_quarantine_reason
+      }
+
+val strict_delivery_evidence_error_to_string : strict_delivery_evidence_error -> string
+
+val event_queue_delivery_seen_for_source_strict_result :
+  base_path:string ->
+  keeper_name:string ->
+  post_id:string ->
+  stimulus_kind:stimulus_kind ->
+  (bool, strict_delivery_evidence_error) result
+(** Scan every owned current-generation row through the canonical decoder.
+    Exact valid turn-entry or accepted-terminal evidence returns [Ok true],
+    even when unrelated rows are malformed or semantically invalid. Without
+    positive evidence, any invalid row produces {!Evidence_incomplete}; only
+    a complete valid scan can return [Ok false]. Empty identities and owned
+    storage failures remain typed {!Delivery_evidence_unavailable} errors.
+    This strict absence authority is for one-shot recovery; the permissive
+    reader above and its existing callers retain their prior semantics. *)
+
 val summary_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t
 (** Summarize the recent ledger rows for a keeper.  The summary is intentionally

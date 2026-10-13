@@ -1090,6 +1090,141 @@ let test_quarantine_is_keeper_local () =
     (healthy_summary |> member "reaction_count" |> to_int)
 ;;
 
+let with_consumed_delivery_source f =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "strict-delivery-keeper" in
+  let source = board_stimulus ~post_id:"consumed-exact-source" () in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name source;
+  ignore (Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+    ~base_path ~keeper_name source |> require_ok "enqueue exact source");
+  let selection = match Keeper_event_queue_persistence.select_when_result
+      ~base_path ~keeper_name ~now:(Unix.gettimeofday ()) ~ready:(fun _ -> true)
+      |> require_ok "select exact source" with
+    | Some selection -> selection | None -> fail "exact source was not selectable" in
+  let receipt =
+    match Keeper_event_queue_persistence.terminalize_pending_turn_completed_result
+            ~base_path ~keeper_name ~applied_at:(Unix.gettimeofday ()) ~selection ()
+          |> require_ok "consume exact source" with
+    | Keeper_event_queue_persistence.Turn_terminal_committed
+        (Keeper_event_queue_persistence.Transition_applied receipt
+         | Keeper_event_queue_persistence.Transition_already_applied receipt) -> receipt
+    | Keeper_event_queue_persistence.Turn_terminal_committed
+        (Keeper_event_queue_persistence.Transition_committed_followup_failed { detail; _ }) -> fail detail
+    | Keeper_event_queue_persistence.Turn_selection_withdrawn -> fail "exact source was withdrawn" in
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result ~base_path ~keeper_name
+    ~expected_transition_id:receipt.transition_id |> require_ok "project exact ACK evidence";
+  let pending = Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name
+    |> require_ok "read consumed queue" in
+  check int "exact source is durably consumed" 0 (List.length pending);
+  f ~base_path ~keeper_name ~source
+;;
+
+let delivery_seen_strict ~base_path ~keeper_name source =
+  Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
+    ~base_path ~keeper_name ~post_id:source.Keeper_event_queue.post_id
+    ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue source)
+;;
+
+let require_strict_delivery label expected = function
+  | Ok seen -> check bool label expected seen
+  | Error error -> failf "%s: %s" label
+      (Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error)
+;;
+
+let corrupt_exact_ack ~base_path ~keeper_name ~source corruption =
+  let store = reaction_ledger_store ~base_path ~keeper_name in
+  let paths = match Dated_jsonl.range_day_file_paths_result store
+      ~since:"1970-01-01" ~until:"9999-12-31" with
+    | Ok paths -> paths | Error error -> fail (Dated_jsonl.read_error_to_string error) in
+  let is_exact_ack line =
+    let row = Yojson.Safe.from_string line in
+    let reaction = row |> member "reaction" in
+    (reaction |> member "kind") =
+      `String (Keeper_reaction_ledger.reaction_kind_to_string Keeper_reaction_ledger.Event_queue_ack)
+    && (reaction |> member "post_id") = `String source.Keeper_event_queue.post_id in
+  let path, lines = match List.find_map (fun path ->
+      let lines = In_channel.with_open_bin path In_channel.input_lines in
+      if List.exists is_exact_ack lines then Some (path, lines) else None) paths with
+    | Some file -> file | None -> fail "canonical consumed-source ACK row is missing" in
+  let original = String.concat "\n" lines ^ "\n" in
+  let changed = List.map (fun line -> if is_exact_ack line then corruption line else line) lines in
+  write_file path (String.concat "\n" changed ^ "\n");
+  fun () -> write_file path original
+;;
+
+let test_consumed_delivery_syntax_corruption_is_incomplete () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  delivery_seen_strict ~base_path ~keeper_name source |> require_strict_delivery "valid exact ACK" true;
+  let restore = corrupt_exact_ack ~base_path ~keeper_name ~source (fun _ -> "not-json") in
+  (match delivery_seen_strict ~base_path ~keeper_name source with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete
+       { malformed_row_count; semantic_invalid_row_count; first_reason }) ->
+     check int "damaged consumed row is not absence" 1 malformed_row_count;
+     check int "syntax damage remains its own evidence" 0 semantic_invalid_row_count;
+     check string "syntax damage is typed" "malformed_json"
+       (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
+   | Error (Keeper_reaction_ledger.Delivery_evidence_unavailable error) ->
+     fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+   | Ok _ -> fail "strict reader approved absence after the consumed ACK was damaged");
+  Keeper_reaction_ledger.event_queue_delivery_seen_for_source_result
+    ~base_path ~keeper_name ~post_id:source.post_id ~stimulus_kind:Keeper_reaction_ledger.Board_signal
+    |> function
+    | Error error -> fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+    | Ok seen ->
+      check bool "permissive reader keeps its prior semantics" false seen;
+      restore ();
+      delivery_seen_strict ~base_path ~keeper_name source |> require_strict_delivery "restored ACK" true
+;;
+
+let test_consumed_delivery_semantic_corruption_is_incomplete () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  let corrupt line =
+    match Yojson.Safe.from_string line with
+    | `Assoc fields ->
+      let reaction = match List.assoc_opt "reaction" fields with
+        | Some (`Assoc fields) -> `Assoc (("kind", `String "unknown_delivery") :: List.remove_assoc "kind" fields)
+        | Some _ | None -> fail "canonical ACK has no reaction" in
+      `Assoc (("reaction", reaction) :: List.remove_assoc "reaction" fields) |> Yojson.Safe.to_string
+    | _ -> fail "canonical ACK is not an object" in
+  let restore = corrupt_exact_ack ~base_path ~keeper_name ~source corrupt in
+  (match delivery_seen_strict ~base_path ~keeper_name source with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete
+       { malformed_row_count; semantic_invalid_row_count; first_reason }) ->
+     check int "semantic damage is not a syntax error" 0 malformed_row_count;
+     check int "damaged consumed ACK is counted" 1 semantic_invalid_row_count;
+     check string "semantic damage is typed" "unknown_reaction_kind"
+       (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
+   | Error (Keeper_reaction_ledger.Delivery_evidence_unavailable error) ->
+     fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+   | Ok _ -> fail "strict reader approved absence after semantic ACK corruption");
+  restore ();
+  delivery_seen_strict ~base_path ~keeper_name source |> require_strict_delivery "restored semantic ACK" true
+;;
+
+let test_exact_delivery_survives_unrelated_corruption () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  let dir = Filename.concat (reaction_ledger_dir ~base_path ~keeper_name) "1970-01" in
+  mkdir_p dir;
+  write_file (Filename.concat dir "01.jsonl") "not-json\n{}\n";
+  delivery_seen_strict ~base_path ~keeper_name source
+    |> require_strict_delivery "exact valid positive overrides unrelated damaged rows" true;
+  let unknown = board_stimulus ~post_id:"never-delivered-source" () in
+  match delivery_seen_strict ~base_path ~keeper_name unknown with
+  | Error (Keeper_reaction_ledger.Evidence_incomplete
+      { malformed_row_count; semantic_invalid_row_count; _ }) ->
+    check int "unrelated syntax damage also forbids absence" 1 malformed_row_count;
+    check int "unrelated semantic damage also forbids absence" 1 semantic_invalid_row_count
+  | Error (Keeper_reaction_ledger.Delivery_evidence_unavailable error) ->
+    fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+  | Ok _ -> fail "an absent source was approved through an incomplete ledger"
+;;
+
+let test_valid_complete_delivery_scan_can_prove_absence () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source:_ ->
+  delivery_seen_strict ~base_path ~keeper_name (board_stimulus ~post_id:"never-delivered-source" ())
+    |> require_strict_delivery "complete valid ledger proves exact absence" false
+;;
+
 let test_syntax_error_does_not_claim_an_occurrence_identity () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "strict-evidence-keeper" in
@@ -1442,6 +1577,18 @@ let () =
             "quarantine remains keeper-local"
             `Quick
             test_quarantine_is_keeper_local
+        ; test_case
+            "consumed delivery syntax damage never approves absence"
+            `Quick test_consumed_delivery_syntax_corruption_is_incomplete
+        ; test_case
+            "consumed delivery semantic damage never approves absence"
+            `Quick test_consumed_delivery_semantic_corruption_is_incomplete
+        ; test_case
+            "exact valid delivery survives unrelated corruption"
+            `Quick test_exact_delivery_survives_unrelated_corruption
+        ; test_case
+            "only a complete valid delivery scan proves absence"
+            `Quick test_valid_complete_delivery_scan_can_prove_absence
         ; test_case
             "syntax error cannot claim an occurrence identity"
             `Quick

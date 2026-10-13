@@ -944,6 +944,17 @@ let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
   | Ok _ -> Error Evidence_invalid_stimulus_id
 ;;
 
+let current_row_matches_source_reaction ~reaction_matches ~post_id ~expected_stimulus_kind = function
+  | Current_reaction { metadata; reaction_kind; transition_receipt }
+    when reaction_matches reaction_kind transition_receipt ->
+    (match assoc_field "reaction" metadata.raw with
+     | Some reaction ->
+       string_field "post_id" reaction = Some post_id
+       && string_field "stimulus_kind" reaction = Some expected_stimulus_kind
+     | None -> false)
+  | Current_stimulus _ | Current_reaction _ -> false
+;;
+
 let event_queue_reaction_seen_for_source_result
     ~reaction_matches
     ~base_path
@@ -958,23 +969,10 @@ let event_queue_reaction_seen_for_source_result
     let expected_stimulus_kind = stimulus_kind_to_string stimulus_kind in
     let note_parsed_row row =
       match decode_current_row ~keeper_name row with
-      | Ok
-          (Current_reaction
-             { metadata
-             ; reaction_kind
-             ; transition_receipt
-             })
-         when reaction_matches reaction_kind transition_receipt ->
-        (match assoc_field "reaction" metadata.raw with
-         | Some reaction
-           when string_field "post_id" reaction = Some post_id
-                && string_field "stimulus_kind" reaction
-                   = Some expected_stimulus_kind ->
-           reaction_seen := true
-         | Some _ | None -> ())
-      | Ok (Current_stimulus _ | Current_reaction _)
-      | Error _ ->
-        ()
+      | Ok row ->
+        if current_row_matches_source_reaction ~reaction_matches ~post_id
+             ~expected_stimulus_kind row then reaction_seen := true
+      | Error _ -> ()
     in
     let store = store_for_base_path ~base_path ~keeper_name in
     match
@@ -986,17 +984,76 @@ let event_queue_reaction_seen_for_source_result
     | Ok () -> Ok !reaction_seen
 ;;
 
+let delivery_reaction_matches reaction_kind transition_receipt =
+  match reaction_kind, transition_receipt with
+  | Turn_started, None
+  | (Event_queue_ack | Event_queue_cancelled), Some _ -> true
+  (* A finished row is the turn's outcome, not its delivery: delivery is
+     proven by entry and by the queue transitions. *)
+  | Turn_finished, _
+  | Turn_started, Some _
+  | (Event_queue_ack | Event_queue_cancelled), None -> false
+;;
+
 let event_queue_delivery_seen_for_source_result =
-  event_queue_reaction_seen_for_source_result
-    ~reaction_matches:(fun reaction_kind transition_receipt ->
-      match reaction_kind, transition_receipt with
-      | Turn_started, None
-      | (Event_queue_ack | Event_queue_cancelled), Some _ -> true
-      (* A finished row is the turn's outcome, not its delivery: delivery is
-         proven by entry and by the queue transitions. *)
-      | Turn_finished, _
-      | Turn_started, Some _
-      | (Event_queue_ack | Event_queue_cancelled), None -> false)
+  event_queue_reaction_seen_for_source_result ~reaction_matches:delivery_reaction_matches
+;;
+
+type strict_delivery_evidence_error =
+  | Delivery_evidence_unavailable of event_queue_reaction_evidence_error
+  | Evidence_incomplete of
+      { malformed_row_count : int
+      ; semantic_invalid_row_count : int
+      ; first_reason : row_quarantine_reason
+      }
+
+let strict_delivery_evidence_error_to_string = function
+  | Delivery_evidence_unavailable error -> event_queue_reaction_evidence_error_to_string error
+  | Evidence_incomplete { malformed_row_count; semantic_invalid_row_count; first_reason } ->
+    Printf.sprintf
+      "reaction ledger delivery evidence incomplete: malformed_rows=%d semantic_invalid_rows=%d first_reason=%s"
+      malformed_row_count semantic_invalid_row_count (row_quarantine_reason_to_string first_reason)
+;;
+
+let event_queue_delivery_seen_for_source_strict_result
+      ~base_path ~keeper_name ~post_id ~stimulus_kind =
+  if String.equal post_id ""
+  then Error (Delivery_evidence_unavailable Evidence_invalid_stimulus_id)
+  else
+    let reaction_seen = ref false in
+    let malformed_row_count = ref 0 in
+    let semantic_invalid_row_count = ref 0 in
+    let first_reason = ref None in
+    let note_reason reason =
+      match !first_reason with
+      | None -> first_reason := Some reason
+      | Some _ -> ()
+    in
+    let expected_stimulus_kind = stimulus_kind_to_string stimulus_kind in
+    let store = store_for_base_path ~base_path ~keeper_name in
+    match Dated_jsonl.iter_all_entries_result store (function
+      | Dated_jsonl.Malformed_json _ ->
+        incr malformed_row_count;
+        note_reason Malformed_json_row
+      | Dated_jsonl.Parsed row ->
+        (match decode_current_row ~keeper_name row with
+         | Error reason ->
+           incr semantic_invalid_row_count;
+           note_reason reason
+         | Ok row ->
+           if current_row_matches_source_reaction
+                ~reaction_matches:delivery_reaction_matches ~post_id ~expected_stimulus_kind row
+           then reaction_seen := true)) with
+    | Error error -> Error (Delivery_evidence_unavailable (Evidence_read_error error))
+    | Ok () when !reaction_seen -> Ok true
+    | Ok () ->
+      match !first_reason with
+      | None -> Ok false
+      | Some first_reason ->
+        Error (Evidence_incomplete
+          { malformed_row_count = !malformed_row_count
+          ; semantic_invalid_row_count = !semantic_invalid_row_count
+          ; first_reason })
 ;;
 
 let nested_string_field outer inner json =

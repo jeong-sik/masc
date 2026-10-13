@@ -177,6 +177,8 @@ def token_candidates() -> tuple[list[tuple[str, str]], list[str]]:
     base = masc_base_path.resolve(None)
     if base is None:
         return pairs, [f"token files not searched: {masc_base_path.ENV_KEY} is unset"]
+    if isinstance(base, masc_base_path.Unexpanded):
+        return pairs, [f"token files not searched: {masc_base_path.ENV_KEY} {base.message()}"]
     files = glob.glob(os.path.join(base, ".masc", "auth", "*.token"))
     for path in sorted(files, key=os.path.getmtime, reverse=True):
         with open(path, encoding="utf-8") as handle:

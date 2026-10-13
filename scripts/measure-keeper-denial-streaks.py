@@ -19,8 +19,8 @@ keeper also stopped finishing turns; --window lets the same command describe the
 period before the change so the two can be compared.
 
 Usage:
-    scripts/measure-keeper-denial-streaks.py --keeper sangsu --window 24
-    scripts/measure-keeper-denial-streaks.py --window 24        # every keeper
+    scripts/measure-keeper-denial-streaks.py --base /srv/masc --keeper sangsu --window 24
+    MASC_BASE_PATH=/srv/masc scripts/measure-keeper-denial-streaks.py --window 24   # every keeper
 """
 
 from __future__ import annotations
@@ -138,9 +138,7 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
-    base = masc_base_path.resolve(args.base)
-    if base is None:
-        parser.error(masc_base_path.required("--base"))
+    base = masc_base_path.require(parser, args.base, "--base")
     root = base / ".masc" / "trajectories"
     if not root.is_dir():
         print(f"no trajectories under {root}", file=sys.stderr)

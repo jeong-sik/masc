@@ -564,6 +564,23 @@ let test_current_nonterminal_event_set () =
           [ "tool_call_id", `String "tool-1"
           ; "outcome", `String "approved"
           ]
+      else if String.equal name "KEEPER_PROVIDER_RETRY" then
+        (* The strict decoder requires the attempt/retry objects; a Null
+           falls through and is rejected. *)
+        `Assoc
+          [ "attempt"
+          , Runtime_native_tasks.attempt_to_json
+                Runtime_native_tasks.{ routing_run_id = "run-attempt-1"
+                                     ; runtime_id = "runtime-1"
+                                     ; lane_attempt_index = 0 }
+          ; "retry"
+          , Runtime_claude_api_retry.to_json
+              Runtime_claude_api_retry.{ observation_id = "obs-1"
+                                       ; attempt = 1
+                                       ; max_retries = 3
+                                       ; retry_delay_ms = 250
+                                       ; error_status = Some 529 }
+          ]
       else `Null
     in
     event "CUSTOM"

@@ -14,7 +14,6 @@ val normalize_provider_id : string -> string
 (** Trim, lowercase, and replace [-] with [_] in a provider identifier so
     label/binding lookups are case- and separator-insensitive. *)
 
-
 val local_runtime_label : string -> string
 
 val provider_name_matches_default_local_openai_runtime : string -> bool

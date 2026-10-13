@@ -48,6 +48,13 @@ original results and failure evidence. Publish a reusable Skill separately with
 `keeper_skill_publish` after checking execution evidence and applicability. A
 published Skill and a draft remain distinct objects.
 
-Outer composition parallelism, nested composition references, completion delivery
+Named inline Skill compositions whose leaves are all statically read-only,
+ordinary and concurrent may overlap with other such calls. Each invocation keeps
+its own run identity, observations, activation records and causal history. The
+turn still collects every completion for later judgments. A leaf that requires
+serial access keeps its enclosing composition serial. Transient run and async
+submission controls keep their serial admission contracts.
+
+Nested composition references, completion delivery
 recovery and effectful resource-aware jobs remain tracked in
 [issue #42799](https://github.com/jeong-sik/masc/issues/42799).

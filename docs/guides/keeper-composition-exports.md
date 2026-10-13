@@ -76,6 +76,6 @@ The structured plan request uses the same declarations:
 ```
 
 The [transient prepare/run tools](keeper-transient-compositions.md) use this
-request codec. Composition concurrency,
-async completion delivery, nested references and effectful jobs are tracked in
+request codec and describe the eligibility of named inline compositions for
+parallel execution. Async completion delivery, nested references and effectful jobs are tracked in
 [issue #42799](https://github.com/jeong-sik/masc/issues/42799).

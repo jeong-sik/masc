@@ -517,6 +517,7 @@ let make_tool_bundle_for_descriptors_with_policy
         ?clock
         ?continuation_channel
         ?gate_context:gate_context_provider
+        ?gate_causal_context:gate_context
         ?gate_grant
         ?record_gate_result
         ~on_completed:(fun ~composition_tool -> function

@@ -1021,11 +1021,148 @@ let test_public_draft_run_preserves_one_execution_identity ?(observe = true) () 
     (row Surface.composition_run_summary_tool_name |> member "composition_run_id" |> to_string)
 ;;
 
+let test_read_only_outer_invocations_overlap_without_identity_mixing () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_draft_base @@ fun base_path ->
+  let module Surface = Masc.Keeper_tool_composition_surface in
+  let module Call_log = Masc.Keeper_tool_call_log in
+  let module Recorder = Masc.Keeper_skill_activation_recorder in
+  let module Ledger = Masc.Keeper_skill_activation_ledger in
+  let module Causal = Masc.Keeper_gate_causal_context in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "overlap"; "activation_mode", `String "manual" ])
+    |> Result.get_ok in
+  let catalog = Catalog.parse export_catalog_fixture |> Result.get_ok in
+  let entry = match Catalog.entries catalog with
+    | [ entry ] -> entry | _ -> fail "expected the read composition" in
+  let source_id = Skill_source_config.source_id_of_string "workspace" |> Result.get_ok in
+  let package_id = Skill_reference.package_id_of_directory "read-path" |> Result.get_ok in
+  let reference = Skill_reference.make
+      ~identity:(Skill_reference.make_identity ~source_id ~package_id ~name:"read-path")
+      ~content_revision:(Skill_reference.content_revision_of_string (String.make 64 'a') |> Result.get_ok) in
+  let trace_id = meta.runtime.trace_id in
+  ignore (Masc.Keeper_fs.ensure_dir
+    (Masc.Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string trace_id)));
+  let activation_context = Recorder.make ~trace_id
+      ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string trace_id) ~absolute_turn:1)
+      ~runtime_id:(fun () -> Some "overlap.runtime")
+      ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision_of_string (String.make 64 'f') |> Result.get_ok)
+      ~task_selection:Masc.Keeper_task_skill_turn.empty |> Result.get_ok in
+  let ctx_snapshot = Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"outer overlap fixture" in
+  let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
+    { provider = Masc.Keeper_publication_recovery_availability.non_runtime_provider
+    ; keeper_name = meta.name } in
+  Call_log.reset_for_testing ();
+  Fun.protect ~finally:Call_log.reset_for_testing @@ fun () ->
+  Call_log.init ~base_path ();
+  let turn_ctx_cell = Call_log.create_turn_ctx_cell () in
+  Call_log.set_turn_context ~cell:turn_ctx_cell ~agent_name:meta.name ~turn:7 ~keeper_turn_id:1 ();
+  let causal = Causal.create ~turn_id:(Some 1) ~initial:(`Assoc []) in
+  let both_read, release = Eio.Promise.create () in
+  let arrivals = Atomic.make 0 in
+  let record_gate_result ~operation ~input result =
+    Causal.record_tool_result causal ~operation ~input result;
+    if Atomic.fetch_and_add arrivals 1 = 1 then Eio.Promise.resolve release ();
+    (* The first real leaf has returned, but its outer invocation cannot
+       finish until the second invocation has dispatched its own leaf. *)
+    Eio.Promise.await both_read in
+  let tools = Surface.make_tools ~capability_surface:(draft_surface ())
+      ~skill_compositions:[ Surface.{ reference; entry } ] ~config ~meta ~publication_recovery
+      ~ctx_snapshot ~turn_ctx_cell ~gate_causal_context:causal
+      ~gate_context:(fun () -> Causal.snapshot causal) ~record_gate_result
+      ~record_composition_activation:(fun ~invocation ~tool_name ~reference ->
+        Recorder.record_composition ~config activation_context ~invocation ~tool_name reference) () in
+  let tool = match List.find_opt (fun (tool, _, _) ->
+      String.equal tool.Agent_core.Tool.schema.name (Catalog.tool_name entry)) tools with
+    | Some (tool, _, _) -> tool | None -> fail "read composition not materialized" in
+  check bool "read-only outer contract permits overlap" true
+    (Agent_core.Tool.execution_mode tool ~input:(`Assoc []) = Agent_core.Tool_contract.Concurrent);
+  let callback_only = Surface.make_tools ~capability_surface:(draft_surface ())
+      ~skill_compositions:[ Surface.{ reference; entry } ] ~config ~meta ~publication_recovery
+      ~ctx_snapshot ~gate_context:(fun () -> Causal.snapshot causal) () in
+  let callback_only_tool = match List.find_opt (fun (tool, _, _) ->
+      String.equal tool.Agent_core.Tool.schema.name (Catalog.tool_name entry)) callback_only with
+    | Some (tool, _, _) -> tool | None -> fail "callback-only composition not materialized" in
+  check bool "a mutable callback without its causal cell stays serial" true
+    (Agent_core.Tool.execution_mode callback_only_tool ~input:(`Assoc []) = Agent_core.Tool_contract.Serial);
+  let files = [ "left", "left evidence"; "right", "right evidence" ] in
+  List.iter (fun (file, content) ->
+    let channel = open_out (Filename.concat base_path file) in
+    Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel content)) files;
+  let run index file =
+    let id = "outer-" ^ file in
+    let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:id ~turn:7
+        ~schedule:{ planned_index = index; batch_index = 0; batch_size = 2
+                  ; execution_mode = Agent_core.Tool_contract.Concurrent }
+        ~completion:Agent_core.Tool_contract.Continue_after_success in
+    let output = match Agent_core.Tool.execute ~invocation tool
+        (`Assoc [ "file", `String (Filename.concat base_path file) ]) with
+      | Ok output -> output | Error error -> fail error.Agent_core.Types.message in
+    let open Yojson.Safe.Util in
+    let selected = Yojson.Safe.from_string output.content |> member "structured_content"
+        |> member "exports" |> member "path" in
+    check bool (file ^ " selected result available") true (selected |> member "available" |> to_bool);
+    check string (file ^ " receives its own path") (Filename.concat base_path file)
+      (selected |> member "value" |> to_string)
+  in
+  Eio.Fiber.both (fun () -> run 0 "left") (fun () -> run 1 "right");
+  Printf.printf "composition_outer_trial invocations=2 dispatches=%d overlap_proven_by_barrier=true model_latency_measured=false\n%!"
+    (Atomic.get arrivals);
+  check int "two actual leaf dispatches overlapped" 2 (Atomic.get arrivals);
+  let open Yojson.Safe.Util in
+  check int "owning turn retains both completions" 2
+    ((Causal.snapshot causal).snapshot |> member "completed_tool_calls" |> to_list |> List.length);
+  let ledger = Ledger.load ~config ~trace_id |> Result.get_ok in
+  check (list string) "durable activations keep separate outer identities" [ "outer-left"; "outer-right" ]
+    (Ledger.activations ledger |> List.map (fun activation ->
+      Ledger.activation_to_yojson activation |> member "skill_tool_use_id" |> to_string) |> List.sort String.compare);
+  Call_log.flush_now ();
+  let rows = Call_log.read_recent ~keeper_name:meta.name () |> Result.get_ok in
+  let summaries = List.filter (fun row -> member "tool_name" row = `String Surface.composition_run_summary_tool_name) rows in
+  check int "each overlapping invocation has one run summary" 2 (List.length summaries);
+  let run_ids = List.map (fun row -> row |> member "composition_run_id" |> to_string) summaries in
+  check int "overlapping invocations have distinct run identities" 2 (List.sort_uniq String.compare run_ids |> List.length);
+  List.iter (fun summary ->
+    let run_id = summary |> member "composition_run_id" |> to_string in
+    let parent = summary |> member "tool_use_id" |> to_string in
+    let leaf = List.filter (fun row -> member "composition_run_id" row = `String run_id
+        && member "tool_name" row <> `String Surface.composition_run_summary_tool_name) rows in
+    match leaf with
+    | [ row ] -> check string "leaf observation keeps its own outer parent" parent
+        (row |> member "parent_tool_use_id" |> to_string)
+    | _ -> fail "overlapping run mixed or lost its leaf observations") summaries
+;;
+
+let test_causal_forks_keep_invocation_owned_history () =
+  let module Causal = Masc.Keeper_gate_causal_context in
+  let parent = Causal.create ~turn_id:(Some 1) ~initial:(`Assoc []) in
+  let record cell operation = Causal.record_tool_result cell ~operation ~input:(`Assoc [])
+      (Tool_result.make_ok ~tool_name:operation ~start_time:(Tool_timing.start ()) ()) in
+  record parent "prior";
+  let left = Causal.fork parent in
+  let right = Causal.fork parent in
+  record left "left";
+  record right "right";
+  record parent "later";
+  let operations cell = let open Yojson.Safe.Util in
+    (Causal.snapshot cell).snapshot |> member "completed_tool_calls" |> to_list
+    |> List.map (fun call -> call |> member "operation" |> to_string) in
+  check (list string) "left has its own causal continuation" [ "prior"; "left" ] (operations left);
+  check (list string) "right has its own causal continuation" [ "prior"; "right" ] (operations right);
+  check (list string) "parent retains its own continuation" [ "prior"; "later" ] (operations parent)
+;;
+
 let () =
   run
     "keeper_tool_composition_catalog"
     [ ( "catalog"
       , [ test_case "draft prepare and exact run binding" `Quick test_draft_prepare_and_exact_run_binding
+        ; test_case "read-only outer invocations overlap without identity mixing" `Quick
+            test_read_only_outer_invocations_overlap_without_identity_mixing
+        ; test_case "causal forks keep invocation-owned history" `Quick
+            test_causal_forks_keep_invocation_owned_history
         ; test_case "public draft run keeps one execution identity and readable references" `Quick
             (test_public_draft_run_preserves_one_execution_identity ~observe:true)
         ; test_case "public draft run records its summary without optional turn context" `Quick

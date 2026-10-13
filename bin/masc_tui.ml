@@ -4795,7 +4795,10 @@ let launch_browser_lane state ~mailbox operation =
   | None -> ()
   | Some view when busy view -> ()
   | Some view when (match operation with
-    | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true
+    | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _
+    | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _
+    | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+    | Viewport_cadence _ | Viewport_pointer _ -> true
     | Discover _ | Open_session | Close_session | Goto _ -> false)
       && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;

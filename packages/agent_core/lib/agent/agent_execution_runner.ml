@@ -360,17 +360,16 @@ let with_fresh store agent run = with_writer_lifetime @@ fun caller_sw ->
     | Error error ->
       Error (execution_failure (Execution_agent_scope.error_to_string error))
     | Ok scope ->
-      in_caller_switch ~sw:caller_sw (fun sw ->
-        let ready = prepare_scope store on_terminal_disposition scope in
-        match ready with
-        | Error detail ->
-          abort_error
-            scope
-            on_terminal_disposition
-            (execution_failure ("scope locator sink failed: " ^ detail))
-        | Ok () ->
-          with_scope ?on_terminal_disposition scope
-            (fun () -> run ~sw scope)))
+      let ready = prepare_scope store on_terminal_disposition scope in
+      (match ready with
+       | Error detail ->
+         abort_error
+           scope
+           on_terminal_disposition
+           (execution_failure ("scope locator sink failed: " ^ detail))
+       | Ok () ->
+         with_scope ?on_terminal_disposition scope (fun () ->
+           in_caller_switch ~sw:caller_sw (fun sw -> run ~sw scope))))
 ;;
 
 let with_resumed store locator agent run = with_writer_lifetime @@ fun caller_sw ->
@@ -392,17 +391,16 @@ let with_resumed store locator agent run = with_writer_lifetime @@ fun caller_sw
        | Error error ->
          Error (execution_failure (Execution_agent_scope.error_to_string error))
        | Ok scope ->
-         in_caller_switch ~sw:caller_sw (fun sw ->
-           match prepare_scope store on_terminal_disposition scope with
-           | Error detail ->
-             abort_error
-               scope
-               on_terminal_disposition
-               (execution_failure ("scope locator sink failed: " ^ detail))
-           | Ok () ->
-             Execution_context.with_resume_once (fun () ->
-               with_scope ?on_terminal_disposition scope
-                 (fun () -> run ~sw scope)))))
+         (match prepare_scope store on_terminal_disposition scope with
+          | Error detail ->
+            abort_error
+              scope
+              on_terminal_disposition
+              (execution_failure ("scope locator sink failed: " ^ detail))
+          | Ok () ->
+            Execution_context.with_resume_once (fun () ->
+              with_scope ?on_terminal_disposition scope (fun () ->
+                in_caller_switch ~sw:caller_sw (fun sw -> run ~sw scope))))))
 ;;
 
 let with_store store agent run =

@@ -56,13 +56,13 @@ let to_string t =
 (* Unix.error has about 70 constructors and only EACCES, ENOENT, EMFILE and
    ENFILE are classified; the rest fall to Internal_error with the other
    exceptions, so the wildcard arm is intentional. *)
-let[@warning "-4"] of_exn ?detail exn =
+let of_exn ?detail exn =
   let default_detail () =
     match detail with
     | Some d -> d
     | None -> Printexc.to_string exn
   in
-  match exn with
+  match[@warning "-4"] exn with
   | Stdlib.Not_found ->
       Not_found { what = default_detail () }
   | Failure msg ->

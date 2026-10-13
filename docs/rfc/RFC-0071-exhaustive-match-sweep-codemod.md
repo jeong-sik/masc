@@ -255,30 +255,28 @@ manifest 갱신은 RFC-0071 의 inventory regeneration step (§4 Phase 5) 에서
 
 | 도구 | 무엇을 잡나 | 한계 |
 |------|------------|------|
-| **OCaml `-w +4`** | `match expr with ... | _ -> ...` 에서 `expr` 의 타입이 *closed concrete variant* 일 때, `_` arm 이 *새 ctor 가 추가되면 silent 하게 흡수* 한다는 사실을 warning. 컴파일러가 typed AST 에서 직접 검출. | open variant, polymorphic variant, GADT existential, abstract type 은 warning 안 함 (의도된 lookup 일 수 있어서). |
+| **OCaml `-w +4`** | `match expr with ... | _ -> ...` 에서 `expr` 의 타입이 *closed concrete variant* 일 때, `_` arm 이 *새 ctor 가 추가되면 silent 하게 흡수* 한다는 사실을 warning. 컴파일러가 typed AST 에서 직접 검출. | open variant, polymorphic variant, GADT existential, abstract type 은 warning 안 함 (의도된 lookup 일 수 있어서). `exn` 만으로는 `| _ ->` 가 경고되지 않지만, 같은 match 에 `Unix.Unix_error (Unix.ENOSPC, _, _)` 처럼 닫힌 variant(`Unix.error`)를 인자로 가진 갈래가 있으면 그 variant 에 대해 경고된다 (OCaml 5.5.1 로 확인). |
 | 본 RFC `exhaustive-guard.sh` | net-new `_ -> (false\|None\|())` 변경을 *git diff* 수준에서 차단. 타입 시스템 외부에서도 동작 (allowlist + symbol 매칭). | 의미 분석 없음 — false-positive 가능. |
 
 결론: **`-w +4` 가 일급 enforcement, shell lint 는 백업.** 단, `-w +4` 를 *지금* 켜면 1044 사이트 전부가 즉시 빌드 오류 (`-w +4 -w +a-...` warning-as-error in dune dev profile). 그래서 활성화 순서가 중요:
 
 1. Phase 3/4 codemod 완료 → catch-all 잔여 사이트 = (a) Intentional 만.
 2. (a) 사이트 각각에 `[@warning "-4"]` 명시적 suppression 부여 + `(* WORKAROUND: <이유>. 근본 해결: <방법> *)` 주석 (AGENT-LLM-A.md §software-development.md "임시 조치 주석 필수" 준수).
-3. **Phase 5 의 핵심 액션**: `lib/dune` 의 `library` stanza 에 `(flags (:standard -w +4))` 추가. dune dev profile 의 warning-as-error 와 결합하여 net-new fragile match 는 *컴파일 실패*.
+3. **Phase 5 의 핵심 액션**: 루트 `dune` 의 `env`(dev·release 공통)에 `-w +4+32+69 -warn-error +a` 를 둔다. `lib/` 뿐 아니라 `bin/`, `packages/`, `tools/`, `ppx_tla/` 가 같은 설정을 상속하고, 테스트 디렉터리는 자기 `env` 에서 `(flags (:standard -w -4))` 로, `vendor/` 는 `-w -4-69` 로 끈다. net-new fragile match 는 *컴파일 실패*.
 
 #### 3.4.1 `[@warning "-4"]` 의 정당한 사용 범위
 
 (a) Intentional 사이트의 패턴:
 
 ```ocaml
-(* WORKAROUND: open polymorphic variant — provider 별 새 cap 추가가
-   런타임에 추가됨. closed 화 불가. 근본 해결: capability registry 도입.
-   *)
-match cap with
-| `Tool_use -> ...
-| `Web_search -> ...
-| _ [@warning "-4"] -> default_unsupported ()
+(* Unix.error has about 70 constructors and only ENOSPC is acted on, so the
+   others are not listed. *)
+match[@warning "-4"] exn with
+| Unix.Unix_error (Unix.ENOSPC, _, _) -> ...
+| _ -> ()
 ```
 
-`[@warning "-4"]` attribute 가 *그 arm 한 줄* 에만 적용. 파일/모듈 단위 suppression 금지.
+`[@warning "-4"]` 는 그 `match` 식 하나에만 붙인다. 컴파일러(OCaml 5.5.1 로 확인)는 이 경고를 갈래가 아니라 `match` 식 전체 위치에 보고한다. 그래서 `| _ [@warning "-4"] -> ...` 처럼 갈래나 그 오른쪽 식에 붙이면 억제되지 않고, `match[@warning "-4"] ... with` 또는 식 뒤에 붙인 형태만 억제된다. 함수(`let[@warning "-4"] f`)·파일·모듈 단위 suppression 은 금지.
 
 #### 3.4.2 검출 도구 우선순위
 
@@ -304,7 +302,7 @@ match cap with
 | **2** | `tools/codemod/exhaustive_match_sweep` 구현 (§3.2 sketch 의 실체) | Phase 0 | MEDIUM — ppxlib + .cmt 의존 |
 | **3** | codemod 1차 적용: 단일 PR per `scrutinee_type`. *큰 도메인부터*: `Goal_phase`, `keeper_phase`, `epoch_status`, `Resilience_outcome`. 한 PR 안에 같은 타입의 sibling site 전부. | Phase 2 | MEDIUM — large diff, but compiler-verified |
 | **4** | codemod 2차: 나머지 closed-variant 사이트 일괄 | Phase 3 | MEDIUM — 동일 패턴 |
-| **5** | allowlist 의 (b)/(c) 항목 제거 → `exhaustive-guard.sh` 를 *blocking* CI 로 승격. `fsm-types.txt` manifest 첫 commit. **그리고 `lib/dune` 에 `(flags (:standard -w +4))` 추가** — 컴파일러 빌트인 fragile-match warning 을 일급 enforcement 로 활성화 (§3.4). 잔여 (a) 사이트는 `[@warning "-4"]` 와 `WORKAROUND` 주석으로 명시. | Phase 4 | LOW — codemod 후 잔여 사이트 ≪ 100, compiler 가 직접 검증 |
+| **5** | allowlist 의 (b)/(c) 항목 제거 → `exhaustive-guard.sh` 를 *blocking* CI 로 승격. `fsm-types.txt` manifest 첫 commit. **그리고 루트 `dune` 의 `env` 에 `-w +4+32+69 -warn-error +a` 추가** — 컴파일러 빌트인 fragile-match warning 을 일급 enforcement 로 활성화 (§3.4). 잔여 (a) 사이트는 `[@warning "-4"]` 와 `WORKAROUND` 주석으로 명시. | Phase 4 | LOW — codemod 후 잔여 사이트 ≪ 100, compiler 가 직접 검증 |
 
 각 Phase 는 독립적으로 revertable. **Phase 3 는 한 PR 안에 같은 type 의 sibling site 전부를 묶는 것이 핵심** — 이게 정확히 N-of-M 의 반대.
 

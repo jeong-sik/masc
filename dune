@@ -32,9 +32,10 @@
 ; Warning 4 (fragile match) joins them: a `| _ ->` over a variant we define
 ; keeps compiling when a constructor is added, so the new case silently takes
 ; the old default. With 4 on, the compiler names every match that has to
-; decide about the new constructor. Where the scrutinee is a foreign type with
-; far too many cases (Sqlite3.Rc.t), the match carries its own justified
-; [@warning "-4"]. Test directories switch it off in their own env stanza.
+; decide about the new constructor. Where a match lists only a few cases of a
+; foreign type with far too many (Unix.error), that one match carries its own
+; justified [@warning "-4"]. Test directories switch it off in their own env
+; stanza.
 (env
  (dev
   (flags

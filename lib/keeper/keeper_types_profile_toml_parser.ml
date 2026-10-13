@@ -171,7 +171,20 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
   let agent_core_env = extract_agent_core_env_from_doc doc in
-  let result =
+  let ( let* ) = Result.bind in
+  (* A key whose value comes from a closed vocabulary is read once. The parsed
+     value is what the cross-field checks below compare and what the record
+     holds, so a spelling is not accepted in one place and read again in
+     another. *)
+  let closed key of_string ~invalid =
+    match str key with
+    | None -> Ok None
+    | Some raw ->
+      (match of_string raw with
+       | Some value -> Ok (Some value)
+       | None -> Error (invalid raw))
+  in
+  let* () =
     match detect_unknown_keeper_toml_keys doc with
     | [] -> Ok ()
     | fields ->
@@ -200,37 +213,20 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   (* Unlike [tools.attached_allow], absent and explicit [] mean the same thing
      here -- deny nothing -- so a plain list carries no lost distinction. *)
   let tool_deny = strs "tools.deny" |> dedupe_keep_order in
-  let result =
-    Result.bind result (fun () ->
-        validate_known_keeper_field_types doc)
+  let* () = validate_known_keeper_field_types doc in
+  let* sandbox_profile =
+    closed "sandbox_profile" sandbox_profile_of_string ~invalid:(fun raw ->
+      Printf.sprintf
+        "invalid sandbox_profile '%s' (allowed: %s)"
+        raw
+        (String.concat ", " valid_sandbox_profile_strings))
   in
-  let result =
-    Result.bind result (fun () ->
-        match str "sandbox_profile" with
-        | Some raw -> (
-            match sandbox_profile_of_string raw with
-            | Some _ -> Ok ()
-            | None ->
-                Error
-                  (Printf.sprintf
-                     "invalid sandbox_profile '%s' (allowed: %s)"
-                     raw
-                     (String.concat ", " valid_sandbox_profile_strings)))
-        | None -> Ok ())
-  in
-  let result =
-    Result.bind result (fun () ->
-        match str "network_mode" with
-        | Some raw -> (
-            match network_mode_of_string raw with
-            | Some _ -> Ok ()
-            | None ->
-                Error
-                  (Printf.sprintf
-                     "invalid network_mode '%s' (allowed: %s)"
-                     raw
-                     (String.concat ", " valid_network_mode_strings)))
-        | None -> Ok ())
+  let* network_mode =
+    closed "network_mode" network_mode_of_string ~invalid:(fun raw ->
+      Printf.sprintf
+        "invalid network_mode '%s' (allowed: %s)"
+        raw
+        (String.concat ", " valid_network_mode_strings))
   in
   (* The profile/mode compatibility rule, read from the type that owns both
      ({!Keeper_types_profile_sandbox.network_mode_rejection}) rather than
@@ -238,17 +234,13 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
      ran it: the keeper_up write path never compared the two, so a create
      could produce a keeper TOML that this very function refused on the next
      load. *)
-  let result =
-    Result.bind result (fun () ->
-        match
-          ( Option.bind (str "sandbox_profile") sandbox_profile_of_string
-          , Option.bind (str "network_mode") network_mode_of_string )
-        with
-        | Some profile, Some mode -> (
-            match network_mode_rejection profile mode with
-            | Some message -> Error message
-            | None -> Ok ())
-        | Some _, None | None, _ -> Ok ())
+  let* () =
+    match sandbox_profile, network_mode with
+    | Some profile, Some mode -> (
+        match network_mode_rejection profile mode with
+        | Some message -> Error message
+        | None -> Ok ())
+    | Some _, None | None, _ -> Ok ()
   in
   (* Phase 1 SSH lane (Task 1 review follow-up): [remote_endpoint] is only
      meaningful for the remote_ssh profile — it names an
@@ -257,18 +249,15 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
      typo, not an override, so the load rejects it with a named error
      instead of silently carrying a value nothing will read. No legacy TOML
      exists to break: the key itself was introduced by the SSH lane. *)
-  let result =
-    Result.bind result (fun () ->
-        match
-          ( Option.bind (str "sandbox_profile") sandbox_profile_of_string
-          , str "remote_endpoint" )
-        with
-        | Some Remote_ssh, _ -> Ok ()
-        | (None | Some (Docker | Micro_vm)), Some _ ->
-            Error
-              "remote_endpoint_requires_remote_ssh: keeper.remote_endpoint is \
-               only valid with sandbox_profile = \"remote_ssh\""
-        | (None | Some (Docker | Micro_vm)), None -> Ok ())
+  let remote_endpoint = str "remote_endpoint" in
+  let* () =
+    match sandbox_profile, remote_endpoint with
+    | Some Remote_ssh, _ -> Ok ()
+    | (None | Some (Docker | Micro_vm)), Some _ ->
+        Error
+          "remote_endpoint_requires_remote_ssh: keeper.remote_endpoint is \
+           only valid with sandbox_profile = \"remote_ssh\""
+    | (None | Some (Docker | Micro_vm)), None -> Ok ()
   in
   (* [microvm_backend] names which runtime supplies the guest, so it is only
      meaningful under sandbox_profile = "microvm". Set anywhere else it is a
@@ -277,27 +266,23 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
      spelling is refused by name rather than falling back to a runtime the
      keeper did not ask for -- the point of the key is that the isolation is
      the declared one. *)
-  let result =
-    Result.bind result (fun () ->
-        match
-          ( Option.bind (str "sandbox_profile") sandbox_profile_of_string
-          , str "microvm_backend" )
-        with
-        | (None | Some (Docker | Micro_vm | Remote_ssh)), None -> Ok ()
-        | Some Micro_vm, Some raw ->
-            (match Keeper_microvm_backend.of_string raw with
-            | Some _ -> Ok ()
-            | None ->
-                Error
-                  (Printf.sprintf
-                     "microvm_backend_unknown: keeper.microvm_backend = %S is not \
-                      one of: %s"
-                     raw
-                     (String.concat ", " Keeper_microvm_backend.valid_strings)))
-        | (None | Some (Docker | Remote_ssh)), Some _ ->
+  let* microvm_backend =
+    match sandbox_profile, str "microvm_backend" with
+    | (None | Some (Docker | Micro_vm | Remote_ssh)), None -> Ok None
+    | Some Micro_vm, Some raw ->
+        (match Keeper_microvm_backend.of_string raw with
+        | Some backend -> Ok (Some backend)
+        | None ->
             Error
-              "microvm_backend_requires_microvm: keeper.microvm_backend is only \
-               valid with sandbox_profile = \"microvm\"")
+              (Printf.sprintf
+                 "microvm_backend_unknown: keeper.microvm_backend = %S is not \
+                  one of: %s"
+                 raw
+                 (String.concat ", " Keeper_microvm_backend.valid_strings)))
+    | (None | Some (Docker | Remote_ssh)), Some _ ->
+        Error
+          "microvm_backend_requires_microvm: keeper.microvm_backend is only \
+           valid with sandbox_profile = \"microvm\""
   in
   (* RFC-0422 §3.4: [observation_run] chooses the box a tool_execute runs in
      before the judge is asked. The spelling is checked whether or not a
@@ -305,58 +290,46 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
      ({!Keeper_types_profile_sandbox.observation_run_rejection}) only when
      one is, since an absent profile is resolved later from the workspace
      default and this loader cannot see it. *)
-  let result =
-    Result.bind result (fun () ->
-        match str "observation_run" with
-        | None -> Ok ()
-        | Some raw ->
-            (match observation_run_of_string raw with
-            | None ->
-                Error
-                  (Printf.sprintf
-                     "observation_run_unknown: keeper.observation_run = %S is not \
-                      one of: %s"
-                     raw
-                     (String.concat ", " valid_observation_run_strings))
-            | Some run ->
-                (match Option.bind (str "sandbox_profile") sandbox_profile_of_string with
-                | None -> Ok ()
-                | Some profile ->
-                    (match observation_run_rejection profile run with
-                    | Some message -> Error message
-                    | None -> Ok ()))))
+  let* observation_run =
+    closed "observation_run" observation_run_of_string ~invalid:(fun raw ->
+      Printf.sprintf
+        "observation_run_unknown: keeper.observation_run = %S is not \
+         one of: %s"
+        raw
+        (String.concat ", " valid_observation_run_strings))
   in
-  let result =
-    Result.bind result (fun () ->
-        match str "tools.native" with
-        | Some raw -> (
-            match Runtime_native_tools.of_string raw with
-            | Some _ -> Ok ()
-            | None ->
-                Error
-                  (Printf.sprintf
-                     "invalid keeper.tools.native '%s' (allowed: %s)"
-                     raw
-                     (String.concat
-                        ", "
-                        Runtime_native_tools.valid_posture_strings)))
+  let* () =
+    match sandbox_profile, observation_run with
+    | Some profile, Some run -> (
+        match observation_run_rejection profile run with
+        | Some message -> Error message
         | None -> Ok ())
+    | Some _, None | None, _ -> Ok ()
   in
-  let result = Result.bind result (fun () ->
-    match str "activation_mode" with
-    | None -> Ok ()
-    | Some raw ->
-      match Keeper_activation_mode.of_string raw with
-      | Some _ -> Ok ()
-      | None -> Error "keeper.activation_mode must be manual, on_demand, or autonomous") in
-  let result = Result.bind result (fun () ->
-    match str "input_policy" with
-    | None -> Ok ()
-    | Some raw ->
-      match Keeper_input_policy.of_string raw with
-      | Some _ -> Ok ()
-      | None -> Error "keeper.input_policy must be small or wide") in
-  let max_context_override_result =
+  let* native_tool_posture =
+    closed "tools.native" Runtime_native_tools.of_string ~invalid:(fun raw ->
+      Printf.sprintf
+        "invalid keeper.tools.native '%s' (allowed: %s)"
+        raw
+        (String.concat ", " Runtime_native_tools.valid_posture_strings))
+  in
+  let* activation_mode =
+    closed "activation_mode" Keeper_activation_mode.of_string ~invalid:(fun _ ->
+      "keeper.activation_mode must be manual, on_demand, or autonomous")
+  in
+  let* input_policy =
+    closed "input_policy" Keeper_input_policy.of_string ~invalid:(fun _ ->
+      "keeper.input_policy must be small or wide")
+  in
+  let* sandbox_image =
+    match str "sandbox_image" with
+    | None -> Ok None
+    | Some name ->
+      (match Keeper_sandbox_image_catalog.name_error ~field:"keeper.sandbox_image" name with
+       | None -> Ok (Some name)
+       | Some detail -> Error ("sandbox_image_invalid: " ^ detail))
+  in
+  let* max_context_override =
     match int_ "max_context_override" with
     | None -> Ok None
     | Some value ->
@@ -376,67 +349,43 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       |> Result.map_error (fun detail ->
         Printf.sprintf "%s_invalid: keeper.%s: %s" key key detail)
   in
-  let microvm_memory_result =
+  let* microvm_memory =
     guest_dimension
       "microvm_memory"
       Keeper_microvm_guest_size.memory_of_string
       (str "microvm_memory")
   in
-  let microvm_cpus_result =
+  let* microvm_cpus =
     guest_dimension "microvm_cpus" Keeper_microvm_guest_size.cpus_of_int (int_ "microvm_cpus")
   in
-  let sandbox_image_result =
-    match str "sandbox_image" with
-    | None -> Ok None
-    | Some name ->
-      (match Keeper_sandbox_image_catalog.name_error ~field:"keeper.sandbox_image" name with
-       | None -> Ok (Some name)
-       | Some detail -> Error ("sandbox_image_invalid: " ^ detail))
-  in
-  let scalar_results =
-    Result.bind sandbox_image_result (fun sandbox_image ->
-    Result.bind max_context_override_result (fun max_context_override ->
-      Result.bind microvm_memory_result (fun microvm_memory ->
-        Result.map
-          (fun microvm_cpus -> sandbox_image, max_context_override, microvm_memory, microvm_cpus)
-          microvm_cpus_result)))
-  in
-  Result.bind result (fun () ->
-    Result.map
-      (fun (sandbox_image, max_context_override, microvm_memory, microvm_cpus) ->
-      {
-        id = None;
-        manifest_path = None;
-        instructions = str "instructions";
-        activation_mode = Option.bind (str "activation_mode") Keeper_activation_mode.of_string;
-        input_policy = Option.bind (str "input_policy") Keeper_input_policy.of_string;
-        mention_targets = strs "mention_targets";
-        board_interests = normalize_board_interests (strs "board_interests");
-        sandbox_profile =
-          Option.bind (str "sandbox_profile") sandbox_profile_of_string;
-        sandbox_image;
-        network_mode =
-          Option.bind (str "network_mode") network_mode_of_string;
-        remote_endpoint = str "remote_endpoint";
-        microvm_backend =
-          Option.bind (str "microvm_backend") Keeper_microvm_backend.of_string;
-        microvm_memory;
-        microvm_cpus;
-        observation_run =
-          Option.bind (str "observation_run") observation_run_of_string;
-        max_context_override;
-        telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
-        telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
-        always_allow = bool_ "always_allow";
-        voice_always_allow = bool_ "voice_always_allow";
-        native_tool_posture =
-          Option.bind (str "tools.native") Runtime_native_tools.of_string;
-        skill_names;
-        attached_tool_allow;
-        tool_deny;
-        agent_core_env;
-      })
-      scalar_results)
+  Ok
+    {
+      id = None;
+      manifest_path = None;
+      instructions = str "instructions";
+      activation_mode;
+      input_policy;
+      mention_targets = strs "mention_targets";
+      board_interests = normalize_board_interests (strs "board_interests");
+      sandbox_profile;
+      sandbox_image;
+      network_mode;
+      remote_endpoint;
+      microvm_backend;
+      microvm_memory;
+      microvm_cpus;
+      observation_run;
+      max_context_override;
+      telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
+      telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
+      always_allow = bool_ "always_allow";
+      voice_always_allow = bool_ "voice_always_allow";
+      native_tool_posture;
+      skill_names;
+      attached_tool_allow;
+      tool_deny;
+      agent_core_env;
+    }
 
 (** Fields actually read by [profile_defaults_of_toml] from the [[keeper]]
     TOML table.  Keep this a subset of [canonical_keeper_toml_key_names] —

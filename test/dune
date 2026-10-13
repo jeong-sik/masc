@@ -1,7 +1,12 @@
+; task-2245: the shared input table the TUI suite and the dashboard vitest
+; suite both assert on (lib/tool_display.ml / dashboard toolDisplayLabel).
+(copy_files# fixtures/tool-display-labels.json)
+
 (test
  (name test_tool_display)
  (modules test_tool_display)
- (libraries masc alcotest))
+ (deps fixtures/tool-display-labels.json)
+ (libraries masc alcotest yojson))
 
 (test
  (name test_eio_process_capture_pipe_close)

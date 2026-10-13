@@ -3,6 +3,7 @@ import { TextInput } from '../common/input'
 import { CountBadge } from '../common/badge'
 import { ActionButton } from '../common/button'
 import { searchQuery, tierFilter, filteredTools, selectedTool, selectTool } from './tool-executor-state'
+import { toolDisplayLabel } from '../../lib/tool-display-label'
 import type { McpToolSchema } from '../../types/json-schema'
 
 const TIER_OPTIONS = [
@@ -24,7 +25,7 @@ function ToolRow({ tool, isSelected }: { tool: McpToolSchema; isSelected: boolea
       class=${`text-left px-3 py-2 ${isDeprecated ? 'opacity-50' : ''}`}
       onClick=${() => selectTool(tool)}>
       <div class="flex items-center gap-1.5">
-        <span class="text-xs text-[var(--color-fg-secondary)] font-mono truncate flex-1">${tool.name}</span>
+        <span class="text-xs text-[var(--color-fg-secondary)] font-mono truncate flex-1">${toolDisplayLabel(tool.name)}</span>
         ${isReadOnly ? html`<${CountBadge} tone="ok">R<//>` : null}
       </div>
       <div class="text-3xs text-[var(--color-fg-muted)] mt-0.5 line-clamp-1">${tool.description}</div>

@@ -91,6 +91,38 @@ let registry_is_injective () =
       Alcotest.fail
         ("label collisions: " ^ String.concat "; " (List.map show cs))
 
+(* task-2245 (leader's term: the two implementations assert the same input
+   table in one PR). The dashboard reads this exact file from its vitest suite
+   (dashboard/src/lib/tool-display-label.shared-table.test.ts), so a mapping
+   change landing on only one side fails the other side's test too — the same
+   togetherness promise as the sync rule (task-2258). *)
+let shared_table_rows name =
+  let json = Yojson.Safe.from_file ("fixtures/" ^ name) in
+  match json with
+  | `List rows ->
+      List.map
+        (fun row ->
+          match row with
+          | `Assoc fields ->
+              let find key =
+                match List.assoc_opt key fields with
+                | Some (`String value) -> value
+                | _ -> Alcotest.failf "the shared table row misses %s" key
+              in
+              (find "name", find "label")
+          | _ -> Alcotest.fail "the shared table row is not an object")
+        rows
+  | _ -> Alcotest.fail "the shared table is not a list"
+
+let shared_table () =
+  let rows = shared_table_rows "tool-display-labels.json" in
+  Alcotest.(check bool) "the shared table is not empty" true (List.length rows > 0);
+  List.iter
+    (fun (name, expected) ->
+      Alcotest.(check string) ("shared table: " ^ name) expected
+        (Masc.Tool_display.list_label name))
+    rows
+
 let () =
   Alcotest.run "tool_display"
     [
@@ -98,4 +130,6 @@ let () =
       ("list label", list_tests);
       ("gate row", [ ("non-identity row shows the label", `Quick, gate_row_shows_the_display_label) ]);
       ("registry", [ ("labels are injective", `Quick, registry_is_injective) ]);
+      ( "shared table"
+      , [ ("the dashboard port maps the shared table identically", `Quick, shared_table) ] );
     ]

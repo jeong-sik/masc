@@ -192,7 +192,8 @@ let task_events (config : Workspace.config) ~agent_name :
                          ];
                    }
              | None -> None)
-         | _ -> None)
+         | Types_core.Todo | Types_core.AwaitingVerification _
+         | (Claimed _|InProgress _|Done _|Cancelled _) -> None)
 
 (* Collect broadcast messages from agent *)
 let message_events (config : Workspace.config) ~agent_name ~limit :

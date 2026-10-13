@@ -25,12 +25,12 @@ let store_unavailable context = function
     (match List.find_opt (fun (row : Context.keeper) -> row.keeper_id = keeper_id)
        (Context.keepers context) with
      | Some { ordinary = Context.Unavailable _; _ } -> true
-     | _ -> false)
+     | Some { ordinary = (Context.Missing | Context.Available _);_} | None -> false)
   | Ledger.Source_bound { keeper_id; _ } ->
     (match List.find_opt (fun (row : Context.keeper) -> row.keeper_id = keeper_id)
        (Context.keepers context) with
      | Some { source_bound = Context.Unavailable _; _ } -> true
-     | _ -> false)
+     | Some { source_bound = (Context.Missing | Context.Available _);_} | None -> false)
 
 let read ~base_path =
   match Ledger.observe ~base_path with

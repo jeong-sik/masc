@@ -835,7 +835,7 @@ let issue_document_if_idle ~target ~tab_id ~timeout_sec =
           let data = `Assoc (with_connection_fields target data) in
           Ok (Answered (`Assoc (("data", data) :: List.remove_assoc "data" fields)))
         | Some _ | None -> Ok (Answered (`Assoc fields)))
-     | answer -> answer)
+     | (Ok (Answered (`Null | (`List _ | (`Bool _ | (`Float _ | (`Int _ | (`Intlit _ | `String _))))))) | Ok (Lane_absent | (Timed_out | (Refused _ | Rejected_before_effect _))) | Error _) as answer -> answer)
   (* The Stagehand backend has no idle document observer; the optional
      source is unavailable there, as it is for a busy browser. *)
   | Stagehand -> Ok Lane_absent

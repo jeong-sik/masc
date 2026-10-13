@@ -458,7 +458,29 @@ type lookup =
 let reset_step_of_reason = function
   | Schema_rejected { field; _ } -> Repair_field field
   | Unreadable Unix.EACCES -> Restore_permission
-  | Unreadable _ -> Reset_goal_store
+  | Unreadable (Unix.E2BIG) | Unreadable (Unix.EAGAIN) | Unreadable (Unix.EBADF)
+  | Unreadable (Unix.EBUSY) | Unreadable (Unix.ECHILD) | Unreadable (Unix.EDEADLK)
+  | Unreadable (Unix.EDOM) | Unreadable (Unix.EEXIST) | Unreadable (Unix.EFAULT)
+  | Unreadable (Unix.EFBIG) | Unreadable (Unix.EINTR) | Unreadable (Unix.EINVAL)
+  | Unreadable (Unix.EIO) | Unreadable (Unix.EISDIR) | Unreadable (Unix.EMFILE)
+  | Unreadable (Unix.EMLINK) | Unreadable (Unix.ENAMETOOLONG) | Unreadable (Unix.ENFILE)
+  | Unreadable (Unix.ENODEV) | Unreadable (Unix.ENOENT) | Unreadable (Unix.ENOEXEC)
+  | Unreadable (Unix.ENOLCK) | Unreadable (Unix.ENOMEM) | Unreadable (Unix.ENOSPC)
+  | Unreadable (Unix.ENOSYS) | Unreadable (Unix.ENOTDIR) | Unreadable (Unix.ENOTEMPTY)
+  | Unreadable (Unix.ENOTTY) | Unreadable (Unix.ENXIO) | Unreadable (Unix.EPERM)
+  | Unreadable (Unix.EPIPE) | Unreadable (Unix.ERANGE) | Unreadable (Unix.EROFS)
+  | Unreadable (Unix.ESPIPE) | Unreadable (Unix.ESRCH) | Unreadable (Unix.EXDEV)
+  | Unreadable (Unix.EWOULDBLOCK) | Unreadable (Unix.EINPROGRESS) | Unreadable (Unix.EALREADY)
+  | Unreadable (Unix.ENOTSOCK) | Unreadable (Unix.EDESTADDRREQ) | Unreadable (Unix.EMSGSIZE)
+  | Unreadable (Unix.EPROTOTYPE) | Unreadable (Unix.ENOPROTOOPT) | Unreadable (Unix.EPROTONOSUPPORT)
+  | Unreadable (Unix.ESOCKTNOSUPPORT) | Unreadable (Unix.EOPNOTSUPP)
+  | Unreadable (Unix.EPFNOSUPPORT) | Unreadable (Unix.EAFNOSUPPORT) | Unreadable (Unix.EADDRINUSE)
+  | Unreadable (Unix.EADDRNOTAVAIL) | Unreadable (Unix.ENETDOWN) | Unreadable (Unix.ENETUNREACH)
+  | Unreadable (Unix.ENETRESET) | Unreadable (Unix.ECONNABORTED) | Unreadable (Unix.ECONNRESET)
+  | Unreadable (Unix.ENOBUFS) | Unreadable (Unix.EISCONN) | Unreadable (Unix.ENOTCONN)
+  | Unreadable (Unix.ESHUTDOWN) | Unreadable (Unix.ETOOMANYREFS) | Unreadable (Unix.ETIMEDOUT)
+  | Unreadable (Unix.ECONNREFUSED) | Unreadable (Unix.EHOSTDOWN) | Unreadable (Unix.EHOSTUNREACH)
+  | Unreadable (Unix.ELOOP) | Unreadable (Unix.EOVERFLOW) | Unreadable (Unix.EUNKNOWNERR _) -> Reset_goal_store
   | Missing_after_init -> Reset_goal_store
   | Not_json _ -> Reset_goal_store
 
@@ -872,7 +894,7 @@ let append_audit_event config json =
       | Fs_compat.Private_file_failed (Fs_compat.End_offset_mismatch {actual;_})
       | Fs_compat.Private_file_failed_with_cleanup_failure
           { error = Fs_compat.End_offset_mismatch {actual;_}; _ } -> append actual
-      | outcome -> outcome in
+      | (Fs_compat.Private_file_failed (Fs_compat.Incomplete_jsonl_tail | (Fs_compat.Invalid_jsonl_suffix | (Fs_compat.Incomplete_jsonl_tail_truncate_failed _ | (Fs_compat.Negative_expected_end_offset _ | Fs_compat.Durable_jsonl_append_failed _)))) | Fs_compat.Private_file_failed_with_cleanup_failure { error = (Fs_compat.Incomplete_jsonl_tail | (Fs_compat.Invalid_jsonl_suffix | (Fs_compat.Incomplete_jsonl_tail_truncate_failed _ | (Fs_compat.Negative_expected_end_offset _ | Fs_compat.Durable_jsonl_append_failed _))));_} | Fs_compat.Private_file_succeeded _ | Fs_compat.Private_file_succeeded_with_cleanup_failure _) as outcome -> outcome in
     match append expected with
     | Fs_compat.Private_file_succeeded _ -> Ok ()
     | Private_file_succeeded_with_cleanup_failure { cleanup_failure; _ } ->

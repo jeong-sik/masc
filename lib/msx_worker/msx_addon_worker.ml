@@ -16,7 +16,8 @@ let response ?(extra_content = []) result : S.tool_result =
         | None -> []
         | Some Tool_result.Workflow_rejection | Some Tool_result.Policy_rejection ->
             ["io.github.jeong-sik/masc.machine.failure", `String "rejected"]
-        | Some _ -> ["io.github.jeong-sik/masc.machine.failure", `String "failed"] in
+        | Some (Tool_result.Dependency_unavailable) | Some (Tool_result.Runtime_failure)
+        | Some (Tool_result.Operator_cancelled) -> ["io.github.jeong-sik/masc.machine.failure", `String "failed"] in
       Some (`Assoc (failure @ fields)) }
 
 let screen ~tool_name ~start_time ~arguments =

@@ -790,7 +790,9 @@ let process_goal_work (runtime : runtime) (claim : claim) work =
                          with
                          | Committed | Superseded -> loop true rest
                          | Deferred (Not_reviewed {retryable_runtimes = _ :: _; _}) -> true
-                         | Deferred _ -> committed)
+                         | Deferred (Review_not_bound _) | Deferred (Proof_lookup_unavailable _)
+                         | Deferred (Not_reviewed _) | Deferred (Verdict_without_reason)
+                         | Deferred (Commit_refused _) -> committed)
                     in
                     loop false work)))
           (fun () ->

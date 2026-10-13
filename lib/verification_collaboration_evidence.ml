@@ -152,7 +152,9 @@ let submitted_source ~submitted_evidence reference =
   let matches = List.filter_map (function
     | Store.Evidence_collaboration item when item.reference = reference ->
         Some (Store.Evidence_collaboration item)
-    | _ -> None) submitted_evidence in
+    | Store.Evidence_invalid_reference | Store.Evidence_note _ | Store.Evidence_artifact _
+    | Store.Evidence_artifact_unreadable _ | Store.Evidence_artifact_binary _
+    | Evidence_collaboration _ -> None) submitted_evidence in
   match matches with
   | [item] ->
       (* Reuse the persistence decoder for hash and shape validation. *)
@@ -161,7 +163,8 @@ let submitted_source ~submitted_evidence reference =
         |> Result.map_error (fun detail -> Storage_failed detail) in
       (match item with
        | Store.Evidence_collaboration {content; _} -> Ok (Yojson.Safe.from_string content)
-       | _ -> Error (Storage_failed "invalid submitted collaboration kind"))
+       | Store.Evidence_invalid_reference | Store.Evidence_note _ | Store.Evidence_artifact _
+       | Store.Evidence_artifact_unreadable _ | Store.Evidence_artifact_binary _ -> Error (Storage_failed "invalid submitted collaboration kind"))
   | [] -> Error (Access_denied "source was not captured in this verification submission")
   | _ -> Error (Storage_failed "duplicate submitted collaboration identity")
 

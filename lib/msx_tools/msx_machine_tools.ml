@@ -75,7 +75,8 @@ let of_lane ?(extra = []) ?sprites ?metadata ~tool_name ~start_time
   | Error ((Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved) as e) ->
     let code = match e with
       | Msx_lane.Activity_disabled -> "activity_disabled"
-      | _ -> "activity_unobserved" in
+      | Msx_lane.Activity_unobserved | Msx_lane.No_machine | Msx_lane.Invalid_request _
+      | Msx_lane.Effect_unknown _ | Msx_lane.Unreadable _ -> "activity_unobserved" in
     reject ~tool_name ~start_time (Msx_lane.error_to_string e)
     |> Tool_result.with_metadata (`Assoc ["io.github.jeong-sik/masc.machine.errorCode", `String code])
   | Error (Msx_lane.No_machine as e) ->

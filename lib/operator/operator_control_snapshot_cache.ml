@@ -134,8 +134,7 @@ let do_bg_compute ~key ~token ~ttl ~stale_value compute =
               }
             in
             ((), SMap.add key (Ready entry) map)
-          | _ ->
-            Log.Dashboard.debug
+          | Some (Ready _) | None | Some (Computing _) -> Log.Dashboard.debug
               "operator_snapshot_cache: bg-revalidate discarded for %s (slot replaced)"
               key;
             ((), map))
@@ -155,7 +154,7 @@ let do_bg_compute ~key ~token ~ttl ~stale_value compute =
                   ; stale_until = ts +. (stale_grace *. 2.0)
                   })
                map)
-          | _ -> ((), map));
+          | Some (Ready _) | None | Some (Computing _) -> ((), map));
       raise e
     | exn ->
       Log.Dashboard.warn
@@ -175,7 +174,7 @@ let do_bg_compute ~key ~token ~ttl ~stale_value compute =
                   ; stale_until = ts +. (stale_grace *. 2.0)
                   })
                map)
-          | _ -> ((), map))
+          | Some (Ready _) | None | Some (Computing _) -> ((), map))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -205,8 +204,7 @@ let run_compute_inline ~key ~token ~ttl ~stale compute =
              key
              (Ready { value; expires_at = ts +. ttl; stale_until = ts +. ttl +. stale_grace })
              map)
-        | _ ->
-          Log.Dashboard.debug
+        | Some (Ready _) | None | Some (Computing _) -> Log.Dashboard.debug
             "operator_snapshot_cache: inline compute result discarded for %s (slot replaced)"
             key;
           ((), map));
@@ -224,12 +222,12 @@ let run_compute_inline ~key ~token ~ttl ~stale compute =
                 key
                 (Ready { value = stale_value; expires_at = ts; stale_until = ts +. stale_grace })
                 map)
-           | _ -> ((), map))
+           | Some (Ready _) | None | Some (Computing _) -> ((), map))
      | None ->
        atomic_update table (fun map ->
            match SMap.find_opt key map with
            | Some (Computing { token = t; _ }) when t = token -> ((), SMap.remove key map)
-           | _ -> ((), map)));
+           | Some (Ready _) | None | Some (Computing _) -> ((), map)));
     raise e
   | exn ->
     (match stale with
@@ -243,12 +241,12 @@ let run_compute_inline ~key ~token ~ttl ~stale compute =
                 key
                 (Ready { value = stale_value; expires_at = ts; stale_until = ts +. stale_grace })
                 map)
-           | _ -> ((), map))
+           | Some (Ready _) | None | Some (Computing _) -> ((), map))
      | None ->
        atomic_update table (fun map ->
            match SMap.find_opt key map with
            | Some (Computing { token = t; _ }) when t = token -> ((), SMap.remove key map)
-           | _ -> ((), map)));
+           | Some (Ready _) | None | Some (Computing _) -> ((), map)));
     raise exn
 ;;
 
@@ -331,7 +329,7 @@ let peek key =
   match SMap.find_opt key map with
   | Some (Ready entry) when entry.stale_until > ts -> Some entry.value
   | Some (Computing { stale = Some stale_value; _ }) -> Some stale_value
-  | _ -> None
+  | Some (Computing { stale = None;_}) | None | Some (Ready _) -> None
 ;;
 
 type slot_kind = Fresh | Stale | Expired | Computing_slot

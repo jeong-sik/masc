@@ -1917,7 +1917,7 @@ let watch_capture_level
              "voice capture: room %.1f dB, speech above %.1f dB"
              (db_of_amplitude floor)
              (db_of_amplitude floor +. capture.Voice_config.trigger_margin_db)
-         | _ -> ());
+         | (Calibrating _, (Calibrating _ | Speaking _)) | ((Listening _ | Speaking _), _) -> ());
         step next)
   in
   let start = Eio.Time.now clock in

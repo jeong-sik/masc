@@ -219,4 +219,4 @@ let install () =
   Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
     | Dispatch_outcome.Handled, Some r -> on_tool_result r
-    | _ -> ())
+    | (Dispatch_outcome.Handled, None) | (Dispatch_outcome.No_handler, _) -> ())

@@ -34,7 +34,10 @@ let enabled ~path entries =
   match List.assoc_opt "enabled" entries with
   | None -> Ok true
   | Some (Otoml.TomlBoolean value) -> Ok value
-  | Some _ -> Error (path ^ ".enabled must be a boolean")
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+  | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+  | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error (path ^ ".enabled must be a boolean")
 
 let absolute ~path entries key =
   match List.assoc_opt key entries with

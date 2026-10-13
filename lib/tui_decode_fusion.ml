@@ -333,7 +333,8 @@ let decode_fusion_run json =
     match fur_status, fur_finished_at with
     | Fusion_running, None -> Ok ()
     | (Fusion_completed | Fusion_failed _), Some ts when Float.is_finite ts && ts >= 0. -> Ok ()
-    | _ -> Error "Fusion finish timestamp disagrees with run status"
+    | (Fusion_completed, None) | (Fusion_failed _, None) | (Fusion_running, Some _)
+    | (Fusion_completed, Some _) | (Fusion_failed _, Some _) -> Error "Fusion finish timestamp disagrees with run status"
   in
   let* stage = required_string_field json "stage" in
   let* progress = required_member json "progress" in

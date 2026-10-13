@@ -537,8 +537,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
             match SMap.find_opt key map with
             | Some (Computing { token = c; _ }) when c = token ->
               ((), SMap.add key (Ready new_entry) map)
-            | _ ->
-              Log.Dashboard.info "cache: bg-revalidate discarded for %s (slot replaced)" key;
+            | Some (Ready _) | None | Some (Computing _) -> Log.Dashboard.info "cache: bg-revalidate discarded for %s (slot replaced)" key;
               ((), map)
           )
         (* [do_bg_compute] runs inside [Eio.Fiber.fork ~sw] on the process
@@ -573,7 +572,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                 stale_until = ts +. backoff_grace;
               } in
               ((), SMap.add key (Ready refreshed) map)
-            | _ -> ((), map)
+            | Some (Ready _) | None | Some (Computing _) -> ((), map)
           )
       and restore_stale_ready () =
         atomic_update table (fun map ->
@@ -587,7 +586,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                 stale_until = ts +. backoff_grace;
               } in
               ((), SMap.add key (Ready restored) map)
-          | _ -> ((), map)
+          | Some (Ready _) | None | Some (Computing _) -> ((), map)
         )
       in
       (* Snapshot refreshes can read this cache from an executor worker. Eio
@@ -627,7 +626,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            | Eio.Cancel.Cancelled _ as e ->
              restore_stale_ready ();
              raise e)
-        | _ -> ()
+        | Some (Ready _) | None | Some (Computing _) -> ()
       in
       (try Eio_context.run_on_owner_domain register_refresh with
        | Invalid_argument _ -> abandon_registration ()
@@ -664,7 +663,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
               ((), SMap.add key (Ready restored) map)
           | Some (Computing { token = c; stale = None; _ }) when c = token ->
               ((), SMap.remove key map)
-          | _ -> ((), map))
+          | Some (Ready _) | None | Some (Computing _) -> ((), map))
       in
       let run_compute () =
         try result_ref := Some (Ok (compute ()))
@@ -695,8 +694,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
              match SMap.find_opt key map with
              | Some (Computing { token = c; _ }) when c = token ->
                ((), SMap.add key (Ready new_entry) map)
-             | _ ->
-               Log.Dashboard.info "cache: compute result discarded for %s (slot replaced)" key;
+             | Some (Ready _) | None | Some (Computing _) -> Log.Dashboard.info "cache: compute result discarded for %s (slot replaced)" key;
                ((), map)
            );
            new_entry
@@ -717,7 +715,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                  ((), SMap.add key (Ready refreshed) map)
              | Some (Computing { token = c; stale = None; _ }) when c = token ->
                  ((), SMap.remove key map)
-             | _ -> ((), map)
+             | Some (Ready _) | None | Some (Computing _) -> ((), map)
            );
            (match !fallback_val with
             | Some entry when should_restore_stale_after_failure exn ->
@@ -739,7 +737,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                       let cooldown = { payload = fallback_payload; expires_at = ts +. 5.0; stale_until = ts +. 5.0 } in
                       fallback_val := Some cooldown;
                       ((), SMap.add key (Ready cooldown) map))
-             | _ -> ((), map)
+             | Some (Ready _) | None | Some (Computing _) -> ((), map)
            );
            (match !fallback_val with
             | Some entry -> entry
@@ -766,8 +764,7 @@ let get_or_compute_simple key ~ttl compute =
     match SMap.find_opt key map with
     | Some (Ready entry) when entry.stale_until > ts ->
       (`Hit entry, map)
-    | _ ->
-      let token = next_token () in
+    | Some (Computing _) | None | Some (Ready _) -> let token = next_token () in
       (`Compute token, SMap.add key (Computing { token; started_at = ts; stale = None }) map)
   ) with
   | `Hit entry ->
@@ -789,14 +786,14 @@ let get_or_compute_simple key ~ttl compute =
          match SMap.find_opt key map with
          | Some (Computing { token = c; _ }) when c = token ->
            ((), SMap.add key (Ready entry) map)
-         | _ -> ((), map)
+         | Some (Ready _) | None | Some (Computing _) -> ((), map)
        );
        entry
      | exception exn ->
        atomic_update table (fun map ->
          match SMap.find_opt key map with
          | Some (Computing { token = c; _ }) when c = token -> ((), SMap.remove key map)
-         | _ -> ((), map)
+         | Some (Ready _) | None | Some (Computing _) -> ((), map)
        );
        raise exn)
 
@@ -814,7 +811,7 @@ let peek_entry key =
   match SMap.find_opt key map with
   | Some (Ready entry) when entry.stale_until > ts -> Some entry
   | Some (Computing { stale = Some stale_entry; _ }) -> Some stale_entry
-  | _ -> None
+  | Some (Computing { stale = None;_}) | None | Some (Ready _) -> None
 
 let peek_payload key =
   Option.bind (peek_entry key) (fun entry -> peek_cached_payload entry.payload)

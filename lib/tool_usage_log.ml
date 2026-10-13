@@ -231,7 +231,7 @@ let install ~on_io_failure =
           ~tool_name
           ~disposition:result
           ~caller:(extract_caller result)
-    | _ -> ())
+    | (Dispatch_outcome.Handled, None) | (Dispatch_outcome.No_handler, _) -> ())
 
 (* -- Read utilities (for analysis) -- *)
 

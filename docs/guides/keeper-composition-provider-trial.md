@@ -15,9 +15,11 @@ duration, installed behavior or the entire task improvement.
 
 1. Request the single focused `test_keeper_tool_plan_executor` suite through the
    repository's development-check workflow. Do not build locally or watch CI.
-2. At a work boundary, save its completed log. It must contain exactly one
-   `composition_provider_trial_corpus=` receipt after a successful suite. Record
-   that run's actual head and run identity.
+2. At a work boundary, confirm the suite succeeded and download its
+   `suite-runner-log` artifact. The console log may omit the large receipt.
+   The artifact's `ci-run-tests.log` must contain exactly one
+   `composition_provider_trial_corpus=` receipt. Record the run's actual head
+   and run identity.
 3. Choose one OpenAI-compatible endpoint/model and put provider options in a JSON
    file. For example, a supported model can use
    `{"temperature":0,"max_tokens":512,"thinking":{"type":"disabled"}}`.

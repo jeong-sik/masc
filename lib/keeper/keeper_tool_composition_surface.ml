@@ -1994,7 +1994,7 @@ let make_tools_with_authority
                        ~execution (`Assoc (List.remove_assoc "execution" fields)) with
                | Error error -> rejection ~tool_name:Draft.prepare_tool_name ~start_time error
                | Ok draft ->
-                 Tool_result.make_ok ~tool_name:Draft.prepare_tool_name ~start_time ~data:(Draft.preview draft) ()
+                 Tool_result.make_ok ~tool_name:Draft.prepare_tool_name ~start_time ~data:(Keeper_composition_draft_preview.preview draft) ()
                  |> Tool_result.with_retained_artifacts [ Draft.reference draft ])
           | _ -> rejection ~tool_name:Draft.prepare_tool_name ~start_time (Draft.Malformed_draft "expected object")) in
       let run = make Draft.run_schema ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)

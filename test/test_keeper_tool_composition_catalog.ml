@@ -913,7 +913,15 @@ let test_draft_rejects_effects_and_bad_fixed_inputs () =
   let invalid_read = `Assoc [ "nodes", `List [ `Assoc [ "id", `String "read"; "tool", `String "Read"
       ; "input", `Assoc [ "kind", `String "literal"; "value", `Assoc [ "file_path", `Int 3 ] ] ] ] ] in
   match prepare invalid_read with
-  | Error (Draft.Inputs_rejected _) -> ()
+  | Error (Draft.Inputs_rejected _ as error) ->
+    let open Yojson.Safe.Util in
+    let projected = Draft.error_to_json error in
+    check string "fixed input rejection keeps its public error kind" "inputs_rejected"
+      (projected |> member "kind" |> to_string);
+    check string "fixed input rejection identifies its node" "read"
+      (projected |> member "node_id" |> to_string);
+    check string "fixed input rejection keeps canonical validation detail" "input_validation_failed"
+      (projected |> member "error" |> member "kind" |> to_string)
   | Error _ | Ok _ -> fail "invalid fixed input survived prepare"
 ;;
 
@@ -984,6 +992,20 @@ let test_public_draft_run_preserves_one_execution_identity ?(observe = true) () 
        | `Assoc fields -> `Assoc (("execution", `String "inline") :: fields)
        | _ -> fail "fixture plan is not an object") in
   let open Yojson.Safe.Util in
+  let preview_node = match prepared |> member "schedule_preview" |> to_list with
+    | [ `List [ node ] ] -> node
+    | _ -> fail "public prepare lost its single-node schedule preview" in
+  check string "public preview keeps the admitted node" "lane"
+    (preview_node |> member "node_id" |> to_string);
+  let preview_schedule = preview_node |> member "schedule" in
+  check int "public preview keeps the canonical planned index" 0
+    (preview_schedule |> member "planned_index" |> to_int);
+  check int "public preview keeps the canonical batch index" 0
+    (preview_schedule |> member "batch_index" |> to_int);
+  check int "public preview keeps the descriptor batch size" 1
+    (preview_schedule |> member "batch_size" |> to_int);
+  check string "public preview keeps concurrent descriptor execution" "concurrent"
+    (preview_schedule |> member "execution_mode" |> to_string);
   let draft_reference = prepared |> member "draft" |> decode_reference in
   let run_parent = "public-draft-run" in
   let result = invoke run_parent Draft.run_tool_name

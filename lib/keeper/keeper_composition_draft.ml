@@ -50,7 +50,7 @@ let error_to_json = function
   | Inputs_rejected (node_id, error) ->
     `Assoc [ "kind", `String "inputs_rejected"
            ; "node_id", `String (Plan.Node_id.to_string node_id)
-           ; "error", Keeper_tool_composition_projection.plan_execution_error_to_json error ]
+           ; "error", Keeper_tool_plan_error_projection.plan_execution_error_to_json error ]
   | Unsupported_node { node_id; tool_name } ->
     `Assoc [ "kind", `String "unsupported_node"
            ; "node_id", `String (Plan.Node_id.to_string node_id)
@@ -314,14 +314,6 @@ let load_authored ~base_path ~capability_surface ~keeper_name ~package_id ~sha25
 let preview draft =
   let layers = Plan.dependency_layers draft.plan |> List.map (fun nodes ->
     `List (List.map (fun (node : Plan.node) -> `String (Plan.Node_id.to_string node.id)) nodes)) in
-  let batches = Keeper_tool_plan_executor.schedule draft.plan |> List.map (function
-    | Keeper_tool_plan_executor.Serial_batch node ->
-      `List [ `Assoc [ "node_id", `String (Plan.Node_id.to_string node.node.id)
-                      ; "schedule", Keeper_tool_composition_projection.schedule_to_json node.schedule ] ]
-    | Keeper_tool_plan_executor.Concurrent_batch nodes ->
-      `List (List.map (fun (node : Keeper_tool_plan_executor.scheduled_node) ->
-        `Assoc [ "node_id", `String (Plan.Node_id.to_string node.node.id)
-               ; "schedule", Keeper_tool_composition_projection.schedule_to_json node.schedule ]) nodes)) in
   let skill = match draft.authored_source with
     | None -> `Null
     | Some source -> `Assoc
@@ -334,7 +326,6 @@ let preview draft =
          ; "execution", `String (Catalog.execution_mode_to_string draft.execution)
          ; "branch_failure_policy", `String (Plan.branch_failure_policy_to_string (Plan.branch_failure_policy draft.plan))
          ; "dependency_layers", `List layers
-         ; "schedule_preview", `List batches
          ; "scheduling", `String "The executor dispatches ready nodes dynamically; these are dependency and descriptor groups, not fixed start times."
          ; "exports", `List (List.map (fun (export : Plan.export) ->
              `Assoc [ "name", `String export.name; "node", `String (Plan.Node_id.to_string export.node_id)

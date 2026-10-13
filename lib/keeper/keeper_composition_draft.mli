@@ -66,6 +66,9 @@ val load_authored
 (** Load only the exact Skill source frozen in this owned draft. A task-only
     draft or a different package identity is refused before publication. *)
 val preview : t -> Yojson.Safe.t
+(** Immutable draft metadata, including dependencies, exports and authored
+    source references. The public composition prepare boundary adds its
+    [schedule_preview] through {!Keeper_composition_draft_preview.preview}. *)
 
 val record_invocation
   :  base_path:string

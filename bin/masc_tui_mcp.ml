@@ -24,6 +24,17 @@ type resource = {
   size : int option;
 }
 
+(* Why a walk over the [resources/list] pages ended. A caller that cannot tell
+   a finished listing from one stopped at a bound will report a truncated list
+   as the whole thing -- which is the bug the walk exists to fix, one page size
+   further out. [Page_limit_reached] carries the bound it hit so the message
+   can name it. *)
+type resources_walk_stop =
+  [ `Complete
+  | `Page_limit_reached of int
+  | `Repeated_cursor of string
+  ]
+
 let string_field fields name =
   match List.assoc_opt name fields with
   | Some (`String value) -> Some value
@@ -273,23 +284,29 @@ let resources_of_body ~request_id body =
    one [resources/list] request for the cursor it is given ([None] for the
    first page), so the HTTP caller keeps its framing and this stays a pure
    loop. Two stops keep a misbehaving server from spinning: a cursor seen
-   before ends the walk, and [max_pages] bounds even fresh cursors. *)
+   before ends the walk, and [max_pages] bounds even fresh cursors. Both stops
+   are reported in the returned [resources_walk_stop]; [Error] is only a
+   [fetch] or parse failure, so a caller never reads a cut-off page as the
+   whole listing. *)
 let resources_list_all ~request_id ?(max_pages = 64)
-    ~(fetch : cursor:string option -> (string, string) result) () =
+    ~(fetch : cursor:string option -> (string, string) result) () :
+    (resource list * resources_walk_stop, string) result =
   let rec loop ~cursor ~seen ~acc ~pages =
-    if pages > max_pages then Ok (List.rev acc)
-    else
-      match fetch ~cursor with
-      | Error detail -> Error detail
-      | Ok body -> (
-          match resources_page_of_body ~request_id body with
-          | Error detail -> Error detail
-          | Ok (resources, next_cursor) -> (
-              let acc = List.rev_append resources acc in
-              match next_cursor with
-              | None -> Ok (List.rev acc)
-              | Some cursor when List.mem cursor seen -> Ok (List.rev acc)
-              | Some cursor ->
+    match fetch ~cursor with
+    | Error detail -> Error detail
+    | Ok body -> (
+        match resources_page_of_body ~request_id body with
+        | Error detail -> Error detail
+        | Ok (resources, next_cursor) -> (
+            let acc = List.rev_append resources acc in
+            match next_cursor with
+            | None -> Ok (List.rev acc, `Complete)
+            | Some cursor when List.mem cursor seen ->
+                Ok (List.rev acc, `Repeated_cursor cursor)
+            | Some cursor ->
+                if pages >= max_pages then
+                  Ok (List.rev acc, `Page_limit_reached max_pages)
+                else
                   loop ~cursor:(Some cursor) ~seen:(cursor :: seen) ~acc
                     ~pages:(pages + 1)))
   in

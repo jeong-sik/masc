@@ -3251,10 +3251,12 @@ let post_connector_unbind_owned ~(host : string) ~(port : int)
 (** One [resources/list] over the MCP endpoint, on an open session. The
     listing is paged and the entries a reader is likeliest to be missing (the
     wiki pages) sort at its end, so this follows [nextCursor] to the last page
-    instead of keeping only the first one. *)
+    instead of keeping only the first one. The answer carries how the walk
+    ended, so the screen can say when the listing it shows is not whole. *)
 let call_mcp_resources_list ~(host : string) ~(port : int)
     ~(session_id : string) ~(request_id : string) :
-    (Masc_tui_mcp.resource list, string) result =
+    (Masc_tui_mcp.resource list * Masc_tui_mcp.resources_walk_stop, string) result
+    =
   let headers =
     json_headers
       (("Accept", "application/json, text/event-stream")

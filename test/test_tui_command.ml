@@ -579,15 +579,18 @@ let test_resources_list_all_walks_every_page () =
   in
   match Mcp.resources_list_all ~request_id:"res-1" ~fetch () with
   | Error detail -> failf "expected every page, got %s" detail
-  | Ok resources ->
+  | Ok (resources, stop) ->
       check (list string) "every page in server order"
         [ "masc://a"; "masc://b"; "masc://c" ]
         (List.map (fun (r : Mcp.resource) -> r.uri) resources);
       check (list (option string)) "the cursors asked, in order"
         [ None; Some "cur-2"; Some "cur-3" ]
-        (List.rev !asked)
+        (List.rev !asked);
+      check bool "the walk reports a complete listing" true
+        (stop = `Complete)
 
-(* A cursor that never advances must not spin. *)
+(* A cursor that never advances must not spin, and the caller must be told the
+   listing it gets is not the whole listing. *)
 let test_resources_list_all_stops_on_a_repeated_cursor () =
   let calls = ref 0 in
   let fetch ~cursor:_ =
@@ -596,9 +599,37 @@ let test_resources_list_all_stops_on_a_repeated_cursor () =
   in
   match Mcp.resources_list_all ~request_id:"res-1" ~fetch () with
   | Error detail -> failf "expected a stop, got %s" detail
-  | Ok resources ->
+  | Ok (resources, stop) ->
       check int "the repeated page is kept once per call" 2 (List.length resources);
-      check int "and the walk stops" 2 !calls
+      check int "and the walk stops" 2 !calls;
+      check bool "the stop names the cursor that repeated" true
+        (stop = `Repeated_cursor "cur-2")
+
+(* The page bound is reachable with a small MASC_LIST_PAGE_SIZE, and a walk
+   that hits it must not answer as though it read the whole listing. *)
+let test_resources_list_all_reports_the_page_bound () =
+  let pages =
+    [ (None, resources_page ~id:"res-1" ~next_cursor:"cur-2" [ uri_row "masc://a" ])
+    ; (Some "cur-2", resources_page ~id:"res-1" ~next_cursor:"cur-3" [ uri_row "masc://b" ])
+    ; (Some "cur-3", resources_page ~id:"res-1" [ uri_row "masc://c" ])
+    ]
+  in
+  let calls = ref 0 in
+  let fetch ~cursor =
+    incr calls;
+    match List.assoc_opt cursor pages with
+    | Some body -> Ok body
+    | None -> Error "asked for an unexpected cursor"
+  in
+  match Mcp.resources_list_all ~request_id:"res-1" ~max_pages:2 ~fetch () with
+  | Error detail -> failf "expected a bounded walk, got %s" detail
+  | Ok (resources, stop) ->
+      check int "only the bound's pages are read" 2 !calls;
+      check (list string) "and they are the first pages"
+        [ "masc://a"; "masc://b" ]
+        (List.map (fun (r : Mcp.resource) -> r.uri) resources);
+      check bool "the stop names the bound it hit" true
+        (stop = `Page_limit_reached 2)
 
 let test_resources_list_request_carries_the_cursor () =
   let params_of body =
@@ -1017,5 +1048,7 @@ let () =
             test_resources_list_all_walks_every_page
         ; test_case "a repeated cursor ends the walk" `Quick
             test_resources_list_all_stops_on_a_repeated_cursor
+        ; test_case "a bounded walk reports the bound" `Quick
+            test_resources_list_all_reports_the_page_bound
         ] )
     ]

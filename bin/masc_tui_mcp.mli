@@ -59,6 +59,13 @@ val display_name : resource -> string
     it, and a search that matches text the list does not show finds rows the
     reader cannot see. *)
 
+type resources_walk_stop =
+  [ `Complete
+  | `Page_limit_reached of int
+  | `Repeated_cursor of string
+  ]
+(** How a [resources_list_all] walk ended. *)
+
 val resources_of_body :
   request_id:string -> string -> (resource list, string) result
 (** Read one [resources/list] answer in server order without discarding the
@@ -76,11 +83,14 @@ val resources_list_all :
   ?max_pages:int ->
   fetch:(cursor:string option -> (string, string) result) ->
   unit ->
-  (resource list, string) result
+  (resource list * resources_walk_stop, string) result
 (** Every page, in server order, by calling [fetch] once per page until the
-    answer carries no [nextCursor]. A cursor already seen ends the walk, and
-    [max_pages] (64 by default) bounds a server that keeps returning fresh
-    cursors. [Error] is the first [fetch] or parse failure. *)
+    answer carries no [nextCursor]. The returned stop says how the walk ended:
+    [`Complete] means the listing is whole, [`Repeated_cursor] and
+    [`Page_limit_reached] mean it is not, and a caller must surface that rather
+    than present the pages it got as the whole listing. A cursor already seen
+    ends the walk, and [max_pages] (64 by default) bounds a server that keeps
+    returning fresh cursors. [Error] is the first [fetch] or parse failure. *)
 
 type resource_content_kind =
   | Resource_text of string

@@ -2840,6 +2840,30 @@ let test_parse_types_the_sandbox_profile () =
     ]
 ;;
 
+(* [instructions] is free text, so [parse] checks only its shape. A non-string
+   used to read as absent and leave the TOML's instructions in place; it is
+   refused now. The empty string still reads as absent. *)
+let test_parse_refuses_non_string_instructions () =
+  with_test_context @@ fun ctx ->
+  let parse value =
+    parse_stating_a_profile ctx
+      (`Assoc [ "name", `String "instructions-shape"; "instructions", value ])
+  in
+  List.iter
+    (fun value ->
+       match parse value with
+       | Ok _ -> fail "a non-string instructions must not be read as absent"
+       | Error result ->
+         check bool "the refusal says instructions must be a string" true
+           (contains "instructions must be a string"
+              (Keeper_types_profile.tool_result_body result)))
+    [ `Null; `Int 1; `List [] ];
+  match parse (`String "") with
+  | Ok parsed ->
+    check (option string) "the empty string reads as absent" None parsed.instructions_arg
+  | Error result -> fail (Keeper_types_profile.tool_result_body result)
+;;
+
 let test_parse_rejects_unknown_keys () =
   with_test_context @@ fun ctx ->
   List.iter
@@ -2996,6 +3020,8 @@ let () =
             `Quick
             test_parse_rejects_unknown_keys
         ; test_case "typed input policy" `Quick test_input_policy
+        ; test_case "non-string instructions are refused" `Quick
+            test_parse_refuses_non_string_instructions
         ] )
     ; ( "sandbox_profile"
       , [ test_case

@@ -341,6 +341,31 @@ let test_every_keeper_directory_on_disk_is_pruned () =
   check bool "stray file untouched" true (Sys.file_exists stray)
 ;;
 
+(* A keeper folder that is a broken link, or that disappears while the pass
+   reads the folder list, is not a keeper. It does not stop the stores after
+   it from being pruned (#42891). *)
+let test_a_broken_keeper_link_does_not_stop_the_pass () =
+  with_workspace
+  @@ fun ~base_path ~cluster_root ->
+  let metrics = write_day_file (Store.keeper cluster_root ~keeper:"alice" Metrics) ~age_days:400 in
+  let decision =
+    write_day_file (Store.decision_audit ~base_path ~keeper_dirname:"alice") ~age_days:400
+  in
+  let keepers_dir =
+    Filename.dirname
+      (Filename.dirname (Store.dir (Store.keeper cluster_root ~keeper:"alice" Metrics)))
+  in
+  let decision_dir = Filename.dirname (Store.dir (Store.decision_audit ~base_path ~keeper_dirname:"alice")) in
+  Unix.symlink (Filename.concat keepers_dir "gone") (Filename.concat keepers_dir "ghost");
+  Unix.symlink (Filename.concat decision_dir "gone") (Filename.concat decision_dir "ghost");
+  let pruned =
+    Dated_jsonl.prune_listed_stores ~base_path cluster_root ~operator_window_days:30
+  in
+  check int "both old files counted" 2 pruned;
+  check bool "keeper store pruned" false (Sys.file_exists metrics);
+  check bool "decision audit pruned" false (Sys.file_exists decision)
+;;
+
 let test_a_missing_store_counts_nothing () =
   with_workspace
   @@ fun ~base_path ~cluster_root ->
@@ -380,6 +405,8 @@ let () =
             test_own_days_are_read_at_each_pass
         ; test_case "every keeper directory on disk is pruned" `Quick
             test_every_keeper_directory_on_disk_is_pruned
+        ; test_case "a broken keeper link does not stop the pass" `Quick
+            test_a_broken_keeper_link_does_not_stop_the_pass
         ; test_case "a missing store counts nothing" `Quick
             test_a_missing_store_counts_nothing
         ] )

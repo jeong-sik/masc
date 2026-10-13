@@ -5,16 +5,13 @@
 (* ── Startup pruning ───────────────────────────────── *)
 
 (* Fold [prune_dir] over the immediate sub-directories of [root].
-   A missing [root] counts 0 and stray files under [root] are skipped. *)
+   A missing [root] counts 0; stray files and broken links under [root]
+   are skipped. *)
 let prune_children_dirs ~prune_dir root =
-  if not (Sys.file_exists root) then 0
-  else
-    Array.fold_left
-      (fun acc name ->
-        let dir = Filename.concat root name in
-        if Sys.is_directory dir then acc + prune_dir dir else acc)
-      0
-      (Sys.readdir root)
+  List.fold_left
+    (fun acc name -> acc + prune_dir (Filename.concat root name))
+    0
+    (Fs_compat.subdirectory_names root)
 
 (* A flat-store file is [<name>.jsonl] or a numeric rotation sibling
    [<name>.jsonl.<n>] (runtime-manifests rotate whole files to [.jsonl.1],

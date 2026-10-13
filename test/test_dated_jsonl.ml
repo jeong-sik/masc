@@ -1207,6 +1207,27 @@ let test_prune_keeps_the_cutoff_day_itself () =
     (Sys.file_exists dated.Dated_jsonl.Store.path)
 ;;
 
+(* Only removals that happened are counted. A folder named like a day file
+   cannot be unlinked, as root too, so it is attempted and not counted; the
+   two real day files go and are the two counted (#42891). *)
+let test_prune_counts_only_removed_files () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let location = temp_store "dated_jsonl_prune_counts" in
+  let dir = Dated_jsonl.Store.dir location in
+  let january = Filename.concat dir "2020-01" in
+  let february = Filename.concat dir "2020-02" in
+  List.iter Fs_compat.mkdir_p [ january; february ];
+  let unremovable = Filename.concat january "14.jsonl" in
+  Unix.mkdir unremovable 0o755;
+  let removable = [ Filename.concat january "15.jsonl"; Filename.concat february "15.jsonl" ] in
+  List.iter (fun path -> Fs_compat.append_file path "{\"old\":true}\n") removable;
+  let store = Dated_jsonl.open_store location in
+  let deleted = Dated_jsonl.prune store ~days:30 in
+  check int "only the removed files count" 2 deleted;
+  check bool "the folder stays" true (Sys.file_exists unremovable);
+  List.iter (fun path -> check bool path false (Sys.file_exists path)) removable
+
 let test_prune_zero_days () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1650,6 +1671,8 @@ let () =
         [
           test_case "removes old files" `Quick test_prune;
           test_case "zero days safe" `Quick test_prune_zero_days;
+          test_case "counts only removed files" `Quick
+            test_prune_counts_only_removed_files;
           test_case "boundary follows the writer layout" `Quick
             test_prune_boundary_follows_the_writer_layout;
           test_case "cutoff day itself is kept" `Quick

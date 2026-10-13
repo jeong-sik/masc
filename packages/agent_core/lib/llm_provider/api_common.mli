@@ -173,6 +173,15 @@ val degrade_audio_messages
 
 val content_block_to_json : Types.content_block -> Yojson.Safe.t
 
+(** The members {!content_block_to_json} writes for a [ToolResult] without
+    [content_blocks], as a list so callers can extend the object without
+    checking that it is one. *)
+val tool_result_wire_fields :
+  tool_use_id:string ->
+  content:string ->
+  outcome:Types.tool_result_outcome ->
+  (string * Yojson.Safe.t) list
+
 type content_block_decode_error =
   | Missing_content_block_type
   | Unsupported_content_block_type of string

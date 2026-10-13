@@ -50,4 +50,4 @@ description = "New one-line summary. Omit to keep the current summary."
 name = "tags"
 type = "array"
 items = { type = "string" }
-description = "New list of tags. Omit to keep the current tags."
+description = "New list of tags, each one line with no comma and no whitespace at either end. An empty list removes the tags. Omit to keep the current tags."

@@ -36,10 +36,19 @@
 
     A page reads only when its frontmatter is closed and carries [title],
     [summary], [source], [author], [created], [revision] and [tags], with
-    [source] inside the vocabulary and [revision] a whole number from 1. Any other page is printed by filename with the reason —
-    by the tools here and by the [masc://wiki] resources, which read
-    through {!parse_frontmatter} and {!list_pages} — instead of passing a
-    raw or empty value through.
+    [source] inside the vocabulary, [revision] a whole number from 1 and
+    [tags] written as [\[a, b\]]. Any other page is printed by filename with
+    the reason — by the tools here and by the [masc://wiki] resources, which
+    read through {!parse_frontmatter} and {!list_pages} — instead of passing a
+    raw or empty value through. No tool rewrites a page that does not read.
+
+    A header value is written on one line and read back trimmed, so the page
+    writer takes only values that come back as they went in: a {!Line.t} for
+    [title], [summary], [author] and the update [note], a {!Tag.t} for each
+    tag. The tool arguments and a page on disk are both turned into these
+    types, and a value that is not one is refused by name: blank, more than
+    one line, whitespace at either end, or for a tag a comma. A tag that is
+    blank or not a string is refused too, not dropped.
 
     Internal: [handle_list] / [handle_create] / [handle_update] (reachable via
     {!dispatch}). *)
@@ -60,22 +69,59 @@ val valid_source_strings : string list
 (** Every spelling [masc_wiki_create] accepts for [source], derived from
     {!wiki_source}. Handler error messages list it. *)
 
+(** {1 Header values} *)
+
+(** A value that fits one header line and reads back unchanged. *)
+module Line : sig
+  type t = private string
+
+  type problem =
+    | Blank  (** Empty once trimmed. *)
+    | Spans_lines  (** Holds a line feed or a carriage return. *)
+    | Outer_whitespace  (** The reader would trim it. *)
+
+  val of_string : string -> (t, problem) result
+
+  val of_date : Unix.tm -> t
+  (** [YYYY-MM-DD]. *)
+end
+
+(** One tag: a {!Line.t} with no comma. *)
+module Tag : sig
+  type t = private string
+
+  type problem =
+    | Not_a_line of Line.problem
+    | Has_comma  (** Would read back as two tags. *)
+
+  val of_string : string -> (t, problem) result
+
+  val to_line : t list -> string
+  (** The value of the [tags] line: [\[a, b\]], or [\[\]] for none. *)
+
+  val of_line : string -> t list option
+  (** Reads what {!to_line} wrote, and for every list of tags
+      [of_line (to_line tags) = Some tags]. [None] for anything else: no
+      brackets around the value, or an empty piece between commas. *)
+end
+
 (** {1 Pages} *)
 
 type frontmatter = {
-  title : string;
-  summary : string;  (** One line saying what the page holds. *)
+  title : Line.t;
+  summary : Line.t;  (** One line saying what the page holds. *)
   source : wiki_source;
-  author : string;
-  created : string;
+  author : Line.t;
+  created : Line.t;
   revision : int;  (** 1 when created; one more after each update. *)
-  tags : string list;
+  tags : Tag.t list;
 }
 
 type frontmatter_error
 (** Why a page does not read: no frontmatter, a block with no closing
     delimiter, a required field absent or empty, a [source] outside
-    {!wiki_source}, or a [revision] that is not a whole number from 1. *)
+    {!wiki_source}, a [revision] that is not a whole number from 1, a [tags]
+    value {!Tag.of_line} does not read, or a carriage return inside a value. *)
 
 val parse_frontmatter : string -> (frontmatter, frontmatter_error) result
 

@@ -44,7 +44,7 @@ enum = ["direct_experience", "research", "experiment", "observation"]
 name = "tags"
 type = "array"
 items = { type = "string" }
-description = "List of tags"
+description = "List of tags. A tag is one line with no comma and no whitespace at either end."
 
 [[params]]
 name = "body"

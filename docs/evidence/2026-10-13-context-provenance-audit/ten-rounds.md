@@ -11,15 +11,15 @@ one of these ten rounds.
 | Round | Boundary | State |
 |---|---|---|
 | 1 | Malformed context provenance in Librarian evidence | Repaired in #42720; source review and focused CI PASS |
-| 2 | Suppressed terminal replies and retained context ownership | Repaired in #42722; source review PASS; behavior execution pending |
+| 2 | Suppressed terminal replies and retained context ownership | Repaired in #42722; source review and focused CI PASS |
 | 3 | Streamed response provenance and checkpoint collection | Source audit and independent review PASS; no defect confirmed |
 | 4 | Hook or persistence failure after provider response | Bounded source audit and independent review PASS |
-| 5 | Nested tool-result content and reasoning redaction | Additional Anthropic wire defect found; repair implemented, review pending |
-| 6 | Checkpoint encoding, restore and metadata validation | Bounded source audit done; independent review pending |
-| 7 | Provider/endpoint/model rotation and replay eligibility | Bounded source audit done; account-identity limitation recorded |
-| 8 | Multimodal tool-result projections and user attribution | Bounded source audit done; independent review pending |
-| 9 | Count/preview versus frozen generation input | Independent review found count-side catalog reload gap; repair in progress |
-| 10 | Cancellation, resumed state and stale checkpoint writes | Bounded source audit done; independent review pending |
+| 5 | Nested tool-result content and reasoning redaction | Repaired in #42725; independent source and focused CI PASS |
+| 6 | Checkpoint encoding, restore and metadata validation | Bounded source audit and independent review PASS |
+| 7 | Provider/endpoint/model rotation and replay eligibility | Rules reviewed; catalog-source drift addressed with round 9; account identity limit remains |
+| 8 | Multimodal tool-result projections and user attribution | Bounded source audit and independent review PASS |
+| 9 | Count/preview versus frozen generation input | Request-policy snapshot repaired in #42727; source PASS; separate cache identity defect remains |
+| 10 | Cancellation, resumed state and stale checkpoint writes | Bounded source audit and independent review PASS |
 
 ## Round 1: malformed context cannot become new user evidence
 
@@ -61,10 +61,10 @@ and includes marker-looking user text as a negative case.
 
 Independent source review: `1586e9677af96915a2129de15112ec7631fbfb6c` PASS
 against `d16a5a884392897f47d3edfe7697671711e64dc7`.
-Focused behavioral execution is pending; source review does not establish it.
+Focused behavioral execution passed at the final documentation/changelog head.
 Final documentation/changelog head `681b118d7b69efb0ccf039d0a67c1ad449b49252`
 also received source PASS. Targeted run:
-https://github.com/jeong-sik/masc/actions/runs/38358410887 (in progress when read).
+https://github.com/jeong-sik/masc/actions/runs/38358410887 (success).
 
 ## Round 3: stream assembly and source stamping
 
@@ -129,7 +129,9 @@ alter its wire. OpenAI/Responses/Ollama use string data for these tool blocks.
 The request regression exercises completion and count requests, unsigned/signed
 and foreign opaque nested reasoning, nested tool use/results, audio, supported
 media, source equality and unchanged Kimi messages. Parser checks passed;
-independent repaired-head review and behavioral execution are pending.
+independent source review at `73895a3640f7df56795e5de5b77d06af4889f502`
+is PASS. Targeted run: https://github.com/jeong-sik/masc/actions/runs/38358749814
+(success at that head). This targeted success is not a live-provider run.
 
 ## Round 6: full and delta checkpoint metadata
 
@@ -156,6 +158,10 @@ Anthropic/Gemini and opaque Responses state require the identical source;
 self-contained reasoning can rotate endpoints only under its declared policy.
 The existing provider-agnostic scenarios check per-dialect selection and changed
 endpoint, model and contract. No new violation of that declared rule was found.
+Independent review did identify that the contract used to stamp the response
+could drift during a catalog reload; round 9's request-policy snapshot addresses
+that additional timing boundary. This rule review alone did not prove that the
+pre-repair response always received the right source.
 
 Limitation: this identity does not include credentials or the proxy's hidden
 account/route. A different account behind an unchanged endpoint is not detected
@@ -177,19 +183,39 @@ nested Anthropic protocol blocks separately. No new multimodal live run claimed.
 ## Round 9: measurement and dispatched input
 
 Inspected `Prepared_completion_request.prepare`, `admit_serialized_body`,
-`measure_serialized`, and sync/stream routing. Admission saves the serialized body
+`measure`, and sync/stream routing. Admission saves the serialized body
 alongside its prepared request; measurement carries that admitted body into
 generation. The stream timeout adjustment updates transport timing without
 rewriting body bytes. Independent review found that ordinary measurement itself
 still rebuilds the count request from the current catalog. A catalog reload
 between serialization and count can therefore count a different projection from
-the frozen generation body. This is an additional finding, not a completed pass.
+the frozen generation body. Output reservation can drift too: a frozen request
+with 64 output tokens could be admitted using a later 16-token catalog ceiling.
+Response telemetry similarly re-resolved its reasoning contract after dispatch.
 
 `test_anthropic_input_token_count` covers catalog mutation after measurement,
 which misses this earlier window. `test_exact_output_flow` covers a separate
 frozen-artifact path whose count projection is already derived from that artifact.
 Both were in successful run 38357088798, but that success does not discharge the
-new counterexample. The ordinary count-side repair is in progress.
+new counterexample.
+
+Repair: `Provider_config.freeze_for_request` captures capabilities and Anthropic
+policy from the same catalog/manifest snapshot at request preparation, including
+absent entries. It preserves explicit caller overrides and disregards a stored
+snapshot for a different provider/model identity. The count adapter, serializers
+and telemetry access the same prepared configuration. Existing live lookups
+retain their behavior for unprepared callers. No user configuration knob was
+added. Five new scenarios cover HTTP sync/stream changes before measurement,
+the 480 + 64 > 512 reservation counterexample, and a six-provider matrix of
+present/absent entries, explicit overrides, identity changes and response source.
+Parser validation and independent review of committed head
+`dc8112eb60064558e11c59495100ed3bb3f35b77` passed; behavioral execution is
+pending. The response-cache key is a separate confirmed finding: it omits
+capability defaults and reasoning-source metadata, although those can change
+the serialized request. A hit returns the old response without dispatch. The
+follow-up must bind cache hits to the actual request; restamping old reasoning
+with a new source would hide the mistake. This change does not redefine cache
+identity.
 
 ## Round 10: cancellation, resume and stale writers
 
@@ -210,9 +236,11 @@ bounded audit, and those suites were not newly executed.
 
 ## Execution and completion limits
 
-Ten boundaries were inspected, with four additional repair findings in rounds
-1, 2, 5 and 9. Independent review and requested behavior results remain separately
+Ten boundaries were inspected, with five additional repair findings in rounds
+1, 2, 5 and 9 (request-policy timing and cache identity). Independent review and requested behavior results remain separately
 recorded above. The production runtime has not been replaced by these branches.
 The original #42718 test suite had one pre-existing publication-test contract
-failure; its new context-exclusion case passed. A separate test-only stack repairs
-that expectation, without calling the failed run a suite success.
+failure; its new context-exclusion case passed. Separate test-only PR #42723
+repairs that expectation; its targeted suite passed at
+`75ee4ca9e8f180aa58abfcc6476890e5c21fafb0` in run 38358719791. This does not
+retroactively turn the failed #42718 run into a suite success.

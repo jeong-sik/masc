@@ -60,6 +60,7 @@ let request_fingerprint
                      ; cache_extended_ttl
                      ; supports_structured_output_override
                      ; model_capabilities_override
+                     ; request_policy_snapshot
                      ; keep_alive
                      ; return_progress
                      ; internal_model_rotation_count
@@ -103,6 +104,7 @@ let request_fingerprint
   ignore internal_model_rotation_count;
   ignore supports_structured_output_override;
   ignore model_capabilities_override;
+  ignore request_policy_snapshot;
   ignore reasoning_uncontrolled;
   let json =
     `Assoc

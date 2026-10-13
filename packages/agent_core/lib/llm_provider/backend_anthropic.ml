@@ -810,29 +810,7 @@ let build_request_artifact_with_thinking_control
    wrapper; it calls [build_request_artifact_with_thinking_control] with the
    snapshot-frozen option, including an explicit [None]. *)
 let nonexact_anthropic_thinking_control (config : Provider_config.t) =
-  match config.kind with
-  | Provider_config.Anthropic ->
-    (* Provider-qualified rows (deepseek on the Anthropic-compatible surface)
-       are invisible to the bare lookup, so a provider label resolves them
-       first; without one — or when the provider row declares no policy — the
-       bare reading stands. Adversarial F1. *)
-    (match config.provider_id with
-     | Some provider_label -> (
-       match
-         Capabilities.anthropic_thinking_control_for_provider_model_id
-           ~provider_label
-           ~model_id:config.model_id
-       with
-       | Some _ as control -> control
-       | None ->
-         Capabilities.anthropic_thinking_control_for_model_id config.model_id)
-     | None ->
-       Capabilities.anthropic_thinking_control_for_model_id config.model_id)
-  | Provider_config.Kimi
-  | Provider_config.OpenAI_compat
-  | Provider_config.Ollama
-  | Provider_config.Gemini
-  | Provider_config.Glm -> None
+  Provider_config.anthropic_thinking_control config
 ;;
 
 let validate_nonexact_thinking_controls (config : Provider_config.t) =

@@ -316,6 +316,22 @@ val for_provider_model_id
   -> model_id:string
   -> capabilities option
 
+(** Immutable resolution for one request. A missing model or thinking policy
+    remains missing even if the process catalogs are replaced later. *)
+type request_policy
+
+val resolve_request_policy
+  :  wire:Provider_kind.t
+  -> allow_bare_fallback:bool
+  -> provider_label:string
+  -> anthropic_provider_label:string option
+  -> model_id:string
+  -> request_policy
+
+val request_policy_capabilities : request_policy -> capabilities option
+val request_policy_anthropic_thinking_control :
+  request_policy -> anthropic_thinking_control option
+
 
 (** Lookup capabilities for a known model_id.
 

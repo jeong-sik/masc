@@ -67,7 +67,8 @@ let prepare
   =
   { request =
       { Llm_transport.config =
-          Complete_common.config_with_trace_context config trace_context
+          Complete_common.config_with_trace_context
+            (Provider_config.freeze_for_request config) trace_context
       ; messages
       ; tools
       ; capture_id

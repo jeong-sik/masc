@@ -129,10 +129,13 @@ let availability_of_yojson json =
   let module Json = Run_registry_core.Json in
   let* fields = Json.object_fields json in
   let* state = Json.string_field "state" fields in
-  match state with
-  | "available" | "not_loaded" ->
+  let state_only availability =
     let* () = Json.exact_fields ~required:[ "state" ] fields in
-    Ok (if String.equal state "available" then Available else Not_loaded)
+    Ok availability
+  in
+  match state with
+  | "available" -> state_only Available
+  | "not_loaded" -> state_only Not_loaded
   | "unavailable" ->
     let* () = Json.exact_fields ~required:[ "state"; "error" ] fields in
     let* error = List.assoc_opt "error" fields |> Option.to_result ~none:"missing error" in

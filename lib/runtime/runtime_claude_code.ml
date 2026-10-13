@@ -2084,26 +2084,28 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* block = required_member stage "content_block" event in
         let* block = assoc_at stage block in
         let* kind = required_string stage "type" block in
+        let start_text_block channel =
+          let* text = partial_text_value stage channel block in
+          let* message_id = match partial.message_id with
+            | Some id -> Ok id
+            | None -> protocol_error stage "content block has no message start" in
+          if List.exists (fun (held : partial_block) -> held.message_id = message_id && held.index = index)
+              partial.blocks then
+            protocol_error stage "content block index already started"
+          else begin
+            let buffer = Buffer.create 256 in
+            Buffer.add_string buffer text;
+            let identity = Partial_block {message_id; index} in
+            partial.blocks <- partial.blocks @
+              [{identity; message_id; index; channel; buffer; phase=Streaming}];
+            emit_content ~on_stream_event ~response_emitted
+              ~message_id:partial.message_id ~block:identity channel text;
+            Ok ()
+          end
+        in
         (match kind with
-         | ("text" | "thinking") as kind ->
-             let channel = if kind = "text" then Text_content else Thinking_content in
-             let* text = partial_text_value stage channel block in
-             let* message_id = match partial.message_id with
-               | Some id -> Ok id
-               | None -> protocol_error stage "content block has no message start" in
-             if List.exists (fun (held : partial_block) -> held.message_id = message_id && held.index = index)
-                 partial.blocks then
-               protocol_error stage "content block index already started"
-             else begin
-               let buffer = Buffer.create 256 in
-               Buffer.add_string buffer text;
-               let identity = Partial_block {message_id; index} in
-               partial.blocks <- partial.blocks @
-                 [{identity; message_id; index; channel; buffer; phase=Streaming}];
-               emit_content ~on_stream_event ~response_emitted
-                 ~message_id:partial.message_id ~block:identity channel text;
-               Ok ()
-             end
+         | "text" -> start_text_block Text_content
+         | "thinking" -> start_text_block Thinking_content
          | "tool_use" | "redacted_thinking" -> Ok ()
          | other -> protocol_error stage ("unsupported content block type " ^ other))
     | "content_block_delta" ->
@@ -2111,20 +2113,22 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* delta = required_member stage "delta" event in
         let* delta = assoc_at stage delta in
         let* kind = required_string stage "type" delta in
+        let append_text_delta channel =
+          let* text = partial_text_value stage channel delta in
+          let held = List.find_opt (fun (held : partial_block) ->
+            Some held.message_id = partial.message_id && held.index = index
+            && held.channel = channel) partial.blocks in
+          (match held with
+           | Some held when held.phase = Streaming ->
+               Buffer.add_string held.buffer text;
+               emit_content ~on_stream_event ~response_emitted
+                 ~message_id:partial.message_id ~block:held.identity channel text;
+               Ok ()
+           | _ -> protocol_error stage "content delta has no matching open message/channel block")
+        in
         (match kind with
-         | ("text_delta" | "thinking_delta") as kind ->
-             let channel = if kind = "text_delta" then Text_content else Thinking_content in
-             let* text = partial_text_value stage channel delta in
-             let held = List.find_opt (fun (held : partial_block) ->
-               Some held.message_id = partial.message_id && held.index = index
-               && held.channel = channel) partial.blocks in
-             (match held with
-              | Some held when held.phase = Streaming ->
-                  Buffer.add_string held.buffer text;
-                  emit_content ~on_stream_event ~response_emitted
-                    ~message_id:partial.message_id ~block:held.identity channel text;
-                  Ok ()
-              | _ -> protocol_error stage "content delta has no matching open message/channel block")
+         | "text_delta" -> append_text_delta Text_content
+         | "thinking_delta" -> append_text_delta Thinking_content
          | "input_json_delta" | "signature_delta" | "citations_delta" -> Ok ()
          | other -> protocol_error stage ("unsupported content delta type " ^ other))
     | "content_block_stop" ->

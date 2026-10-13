@@ -841,12 +841,11 @@ let gate_binding_of_json json =
   | Some json -> let* waiting = gate_wait_of_json json in gate_binding_with_wait ~binding ~waiting
 let recovery_origin_of_json json =
   let* kind = kind_of_json json in
+  let kind_only origin = let* _ = exact ["kind"] json in Ok origin in
   match kind with
-  | "unconfirmed_sources" | "confirmed_undispatched" | "interrupted_execution" ->
-      let* _ = exact ["kind"] json in
-      Ok (if kind = "unconfirmed_sources" then Unconfirmed_sources
-          else if kind = "confirmed_undispatched" then Confirmed_undispatched
-          else Interrupted_execution)
+  | "unconfirmed_sources" -> kind_only Unconfirmed_sources
+  | "confirmed_undispatched" -> kind_only Confirmed_undispatched
+  | "interrupted_execution" -> kind_only Interrupted_execution
   | "gate_wait" ->
       let* fields = exact ["kind";"waiting";"resolution"] json in
       let* waiting = gate_wait_of_json (field "waiting" fields) in
@@ -873,10 +872,11 @@ let phase_of_json json =
   let* kind = match json with
     | `Assoc fields -> (match List.assoc_opt "kind" fields with Some (`String kind) -> Ok kind | _ -> Error "phase kind missing")
     | _ -> Error "phase must be an object" in
+  let kind_only phase = let* _ = exact ["kind"] json in Ok phase in
   match kind with
-  | "preparing" | "ready" | "running" ->
-      let* _ = exact ["kind"] json in
-      Ok (if kind = "preparing" then Preparing else if kind = "ready" then Ready else Running)
+  | "preparing" -> kind_only Preparing
+  | "ready" -> kind_only Ready
+  | "running" -> kind_only Running
   | "resuming_gate" ->
       let* fields = exact ["kind";"waiting";"resolution"] json in
       let* waiting = gate_wait_of_json (field "waiting" fields) in

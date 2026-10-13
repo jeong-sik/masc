@@ -405,8 +405,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
     match Browser_page_script.text_cap (get_int_opt args "maxChars") with
     | Error detail -> make_input_err ~tool_name ~start_time detail
     | Ok max_chars ->
-    match get_string args "mode" "text" with
-    | ("scene" | "regions") as mode ->
+    let read_scene view =
       (match get_int_opt args "tabId" with
        | Some tab_id when tab_id >= 0 ->
            (let scope = match args with
@@ -431,11 +430,15 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
             | Error detail -> make_input_err ~tool_name ~start_time detail
             | Ok (navigation_source, expected_url, scope) ->
               match Browser_scene.read ?navigation_source ?expected_url
-                ~view:(if mode = "regions" then Browser_lane.Regions else Browser_lane.Content)
+                ~view
                 ?scope {request with tab_id=Some tab_id} ~max_chars with
               | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
               | Error failure -> read_failure ~base_path ~tool_name ~start_time failure)
        | _ -> make_input_err ~tool_name ~start_time "scene requires an observed tabId")
+    in
+    match get_string args "mode" "text" with
+    | "scene" -> read_scene Browser_lane.Content
+    | "regions" -> read_scene Browser_lane.Regions
     | "downloads" ->
       if not automation then make_input_err ~tool_name ~start_time "downloads require automation"
       else (match get_int_opt args "tabId" with

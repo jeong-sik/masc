@@ -380,6 +380,15 @@ let keeper_chat_event_to_json event =
 let keeper_chat_event_of_json json =
   let open Yojson.Safe.Util in
   let ( let* ) = Result.bind in
+  (* The members every native tool row carries, plus the one its kind adds. *)
+  let native_tool ~extra =
+    let* fields = object_fields ~label:"native_tool"
+        ~allowed:(["type"; "occurrence"; "tool_call_id"; "tool_call_name"] @ extra) json in
+    let* occurrence = occurrence_of_json (json |> member "occurrence") in
+    let* tool_call_id = optional_identity ~label:"native_tool" "tool_call_id" fields in
+    let* tool_call_name = optional_identity ~label:"native_tool" "tool_call_name" fields in
+    Ok ({ occurrence; tool_call_id; tool_call_name }, fields)
+  in
   try
     let* _ = object_fields ~label:"keeper_chat_event" json in
     let tag = json |> member "type" |> to_string in
@@ -588,32 +597,24 @@ let keeper_chat_event_of_json json =
            { occurrence
            ; tool_call_id = json |> member "tool_call_id" |> to_string_option
            })
-    | ("native_tool_start" | "native_tool_end" | "native_tool_progress") as tag ->
-      let extra = match tag with
-        | "native_tool_start" -> []
-        | "native_tool_progress" -> ["progress"]
-        | _ -> ["completion"] in
-      let* fields = object_fields ~label:"native_tool"
-          ~allowed:(["type"; "occurrence"; "tool_call_id"; "tool_call_name"] @ extra) json in
-      let* occurrence = occurrence_of_json (json |> member "occurrence") in
-      let* tool_call_id = optional_identity ~label:"native_tool" "tool_call_id" fields in
-      let* tool_call_name = optional_identity ~label:"native_tool" "tool_call_name" fields in
-      let tool = { occurrence; tool_call_id; tool_call_name } in
-      (match tag with
-      | "native_tool_start" -> Ok (Native_tool_start tool)
-      | "native_tool_progress" ->
-          let* progress = Runtime_native_tools.progress_of_json (json |> member "progress") in
-          Ok (Native_tool_progress (tool, progress))
-      | _ ->
-          (* Rows written before the writer kept a completion have none.
-             Whether the provider reported a status for them is not known, so
-             they read as completion_unrecorded, not as an end seen with no
-             status. object_fields above already rejects a duplicate member;
-             a malformed present completion is unreadable. *)
-          let* completion = match List.assoc_opt "completion" fields with
-            | None -> Ok Runtime_native_tools.completion_unrecorded
-            | Some value -> Runtime_native_tools.completion_of_json value in
-          Ok (Native_tool_end (tool, completion)))
+    | "native_tool_start" ->
+      let* tool, _ = native_tool ~extra:[] in
+      Ok (Native_tool_start tool)
+    | "native_tool_progress" ->
+      let* tool, _ = native_tool ~extra:["progress"] in
+      let* progress = Runtime_native_tools.progress_of_json (json |> member "progress") in
+      Ok (Native_tool_progress (tool, progress))
+    | "native_tool_end" ->
+      let* tool, fields = native_tool ~extra:["completion"] in
+      (* Rows written before the writer kept a completion have none.
+         Whether the provider reported a status for them is not known, so
+         they read as completion_unrecorded, not as an end seen with no
+         status. object_fields in native_tool already rejects a duplicate
+         member; a malformed present completion is unreadable. *)
+      let* completion = match List.assoc_opt "completion" fields with
+        | None -> Ok Runtime_native_tools.completion_unrecorded
+        | Some value -> Runtime_native_tools.completion_of_json value in
+      Ok (Native_tool_end (tool, completion))
     | "tool_approval_requested" ->
       Ok
         (Tool_approval_requested

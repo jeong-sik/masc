@@ -367,15 +367,17 @@ let decode_fusion_run json =
 
 let decode_fusion_replay json =
   let* status = required_string_field json "status" in
+  let replayed ~incomplete =
+    let* _lines_read = required_nonnegative_int_field json "lines_read" in
+    let* malformed_lines = required_nonnegative_int_field json "malformed_lines" in
+    let* dropped_running = required_nonnegative_int_field json "dropped_running" in
+    Ok (Fusion_replayed { malformed_lines; dropped_running; incomplete })
+  in
   match status with
   | "not_replayed" -> Ok Fusion_not_replayed
   | "absent" -> Ok Fusion_log_absent
-  | "complete" | "incomplete" ->
-      let* _lines_read = required_nonnegative_int_field json "lines_read" in
-      let* malformed_lines = required_nonnegative_int_field json "malformed_lines" in
-      let* dropped_running = required_nonnegative_int_field json "dropped_running" in
-      Ok (Fusion_replayed { malformed_lines; dropped_running;
-                            incomplete = String.equal status "incomplete" })
+  | "complete" -> replayed ~incomplete:false
+  | "incomplete" -> replayed ~incomplete:true
   | other -> Error (Printf.sprintf "unknown Fusion replay status %S" other)
 
 let decode_fusion_historical_evidence json =

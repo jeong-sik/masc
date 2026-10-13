@@ -151,25 +151,22 @@ let append ~keeper_name (rec_ : decision_record) =
    through the store is what keeps the directory name and the pruner's cutoff
    on one calendar: both resolve the day from the same clock, so a name never
    denotes a different day to the reader than it did to the writer. *)
-let decision_audit_dirname = "decision_audit"
-
 (* Keyed by resolved [base_dir]: a base_path or keeper-name change resolves to
    a different directory and therefore takes a distinct store rather than
    reusing one bound to the previous path. *)
 let audit_stores : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
 
 let store_for ~base_path ~keeper_name =
-  let base_dir =
-    Filename.concat
-      (Filename.concat
-         (Common.masc_dir_from_base_path ~base_path)
-         decision_audit_dirname)
-      (Keeper_alerting_path.sanitize_keeper_name keeper_name)
+  let location =
+    Dated_jsonl.Store.decision_audit
+      ~base_path
+      ~keeper_dirname:(Keeper_alerting_path.sanitize_keeper_name keeper_name)
   in
+  let base_dir = Dated_jsonl.Store.dir location in
   match Hashtbl.find_opt audit_stores base_dir with
   | Some store -> store
   | None ->
-    let store = Dated_jsonl.create ~base_dir () in
+    let store = Dated_jsonl.open_store location in
     Hashtbl.replace audit_stores base_dir store;
     store
 

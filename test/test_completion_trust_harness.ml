@@ -83,7 +83,7 @@ let with_ws name fn =
          different workspace, so bind its store explicitly and reset it only
          after the case's switch has stopped all completion-authority fibers. *)
       Masc.Eval_calibration.For_testing.set_store
-        ~base_dir:(Filename.concat dir ".masc/verdicts");
+        ~base_path:dir;
       check int "new workspace has no verdicts from earlier cases" 0
         Yojson.Safe.Util.(Masc.Eval_calibration.calibration_stats ()
                           |> member "total_verdicts" |> to_int);

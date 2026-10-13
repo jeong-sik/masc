@@ -2,6 +2,8 @@
 
 open Board_types
 
+(** What a vote points at. [Board_types.reaction_target_type] draws the same
+    line for reactions; folding the two into one type is #42987. *)
 type target_kind =
   | Post
   | Comment

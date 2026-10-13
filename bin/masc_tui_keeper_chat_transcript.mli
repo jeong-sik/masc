@@ -279,8 +279,9 @@ val native_completion_summary : Runtime_native_tools.completion -> string
     unrecognized status. For the results view, which draws it undressed. *)
 
 (** The ended native steps of one block that share a tool and a provider
-    report. The report's unrecognized-status word is not part of the key:
-    {!native_completion_status} never draws it. *)
+    report. The key is what {!native_completion_status} draws: the
+    unrecognized-status word is left out, and a result with an error flag is
+    the error report. *)
 type native_status_group =
   { status_tool : string  (** Display name of the tool. *)
   ; status_completion : Runtime_native_tools.completion
@@ -295,6 +296,37 @@ val group_native_statuses : tool_activity list -> native_status_group list
 val native_status_clause : native_status_group -> string
 (** The one clause the compact and full headers draw for a group. A group of
     one call reads as that call always did; a larger one carries its count. *)
+
+(** What one progress clause says, as a value: the observation the provider
+    gave, any retry notice (without the agent id the clause never draws), and
+    whether the step is still running, which changes the wording. *)
+type native_progress_observation =
+  | Progress_message of string  (** The provider's message, already sanitised. *)
+  | Progress_output_arriving
+  | Progress_output_observed
+  | Progress_heartbeat of int  (** Provider elapsed seconds. *)
+  | Progress_activity_observed
+
+type native_progress_key =
+  { observation : native_progress_observation option
+  ; retry : Runtime_native_tools.retry_observation option
+  ; running : bool
+  }
+
+(** The calls of one block that show the same progress for one tool. *)
+type native_progress_group =
+  { progress_tool : string  (** Display name of the tool. *)
+  ; progress_key : native_progress_key
+  ; progress_calls : int
+  }
+
+val group_native_progress : tool_activity list -> native_progress_group list
+(** Groups by tool display name and typed progress, in order of first
+    appearance. Calls with no progress observation and no retry notice belong
+    to no group. *)
+
+val native_progress_clause : native_progress_group -> string
+(** The one clause the compact and full headers draw for a progress group. *)
 
 val descriptor_of_tool_name : string -> Masc.Keeper_tool_descriptor.t option
 (** The registry's descriptor for a tool name as a trace carries it: the

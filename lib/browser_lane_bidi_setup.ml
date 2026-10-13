@@ -49,8 +49,8 @@ let error_message = function
   | Home_unknown ->
     "HOME is not set, so the default profile has no place. Name the profile with --profile."
   | Firefox_not_found ->
-    "No Firefox answered on PATH or in /Applications. Install Firefox, or name the \
-     executable with --firefox."
+    "No Firefox answered on PATH or in the macOS application folders. Install Firefox, or \
+     name the executable with --firefox."
   | Firefox_does_not_answer { path; detail } ->
     Printf.sprintf
       "The Firefox at %s did not answer --version: %s. Name another with --firefox."
@@ -70,12 +70,10 @@ let error_message = function
 
 let ( let* ) = Result.bind
 
-let live_bidi_of_text text =
+let configuration_of_text text =
   match Otoml.Parser.from_string_result text with
   | Error reason -> Error reason
-  | Ok toml ->
-    Result.map (fun (configuration : Browser_configuration.t) -> configuration.live_bidi)
-      (Browser_configuration.parse toml)
+  | Ok toml -> Browser_configuration.parse toml
 
 let set_key ~(table : Browser_configuration.live_bidi) text = function
   | Firefox ->
@@ -89,20 +87,60 @@ let set_key ~(table : Browser_configuration.live_bidi) text = function
 let edit_text ~table ~set text = List.fold_left (set_key ~table) text set
 
 (* What the loader reads from the edited text is the table that was asked for.
-   An edit that lands elsewhere than intended (a table written inline or with
-   dotted keys, which a line editor does not reach) loads as another table, or
-   twice, and is refused here rather than committed. *)
+   A last check on the edit: {!editable} has already refused the spellings a
+   line editor cannot reach. *)
 let reads_back ~table text =
-  match live_bidi_of_text text with
+  match configuration_of_text text with
   | Error reason -> Error (Table_refused reason)
-  | Ok (Some written) when Browser_configuration.equal_live_bidi written table -> Ok ()
-  | Ok (Some _) ->
+  | Ok { Browser_configuration.live_bidi = Some written; _ }
+    when Browser_configuration.equal_live_bidi written table -> Ok ()
+  | Ok { Browser_configuration.live_bidi = Some _ | None; _ } ->
+    Error (Table_refused "the file loads with other values than the ones written")
+
+(* The loader reads what strict TOML forbids: a header for a table that dotted
+   keys or an inline table already declared loads as one table, and a TOML
+   reader that is strict (a script reading runtime.toml with Python's tomllib)
+   refuses the file. A line editor adds a header or edits the keys under one,
+   so it is only sound where the table has its own header or is absent and
+   nothing above it is inline. *)
+let standard_header_present text =
+  let lines, _ = Toml_line_editor.split_lines text in
+  List.exists2
+    (fun line structural -> structural && Toml_line_editor.is_table ~path:table_path line)
+    lines
+    (Toml_line_editor.structural_lines lines)
+
+let inline_ancestor text =
+  match Otoml.Parser.from_string_result text with
+  | Error _ -> false
+  | Ok toml ->
+    List.exists
+      (fun path ->
+         match Otoml.find_opt toml Fun.id path with
+         | Some (Otoml.TomlInlineTable _) -> true
+         | Some _ | None -> false)
+      [ [ "browser" ]; [ "browser"; "live" ] ]
+
+let editable ~existing text =
+  if inline_ancestor text
+  then
     Error
       (Table_refused
-         "the file loads with other values than the ones written. The table may be written \
-          inline or with dotted keys, which this command does not edit; change it in \
-          runtime.toml")
-  | Ok None -> Error (Table_refused "the file loads with no table after the edit")
+         "[browser] or [browser.live] is written inline, which this command cannot add a \
+          table to. Add [browser.live.bidi] in runtime.toml")
+  else if Option.is_some existing && not (standard_header_present text)
+  then
+    Error
+      (Table_refused
+         "the table is written inline or with dotted keys, which this command does not edit. \
+          Change it in runtime.toml")
+  else Ok ()
+
+let edited ~existing ~table ~set text =
+  let* () = editable ~existing text in
+  let text = edit_text ~table ~set text in
+  let* () = reads_back ~table text in
+  Ok text
 
 let installed_firefox () =
   Browser_runtime_dependencies.observe Browser_runtime_dependencies.Firefox
@@ -156,19 +194,71 @@ let decide ~find_firefox request = function
     Ok ({ Browser_configuration.firefox; profile; port }, set, change)
 
 (* A Firefox the operator names is not looked for: a Firefox of another
-   edition or a fork may be what they want. It has to be a file that can run. *)
-let named_firefox_runs ~request ~set =
+   edition or a fork may be what they want. It has to be a file that can run.
+   One that is there and does not answer [--version] is written as named, with
+   a note saying so: the probe runs without the display variables a Firefox may
+   need to print its version, so a refusal would turn away one that works. *)
+let named_firefox ~request ~set =
   match request.firefox with
   | Some path when List.mem Firefox set ->
     (match Browser_runtime_dependencies.probe path with
      | Browser_runtime_dependencies.Missing _ -> Error (Firefox_not_executable path)
-     | Browser_runtime_dependencies.Started _ | Browser_runtime_dependencies.Failed _ -> Ok ())
-  | Some _ | None -> Ok ()
+     | Browser_runtime_dependencies.Started _ -> Ok None
+     | Browser_runtime_dependencies.Failed { detail; _ } ->
+       Ok
+         (Some
+            (Printf.sprintf
+               "%s did not answer --version (%s), so it was written as named and is not \
+                verified."
+               path detail)))
+  | Some _ | None -> Ok None
+
+type profile_state =
+  | Missing
+  | Directory
+  | Not_a_directory
+
+(* A symbolic link that points nowhere is something at the path, not a
+   directory to make there. *)
+let profile_state profile =
+  match Unix.lstat profile with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Missing
+  | exception Unix.Unix_error (code, _, _) ->
+    Error (Profile_not_created { path = profile; reason = Unix.error_message code })
+  | _ ->
+    (match Unix.stat profile with
+     | { Unix.st_kind = Unix.S_DIR; _ } -> Ok Directory
+     | _ | (exception Unix.Unix_error _) -> Ok Not_a_directory)
+
+(* The directory that would hold the new profile is the nearest one that
+   exists, and a profile is made there only when it can be written. Asked at
+   the plan, so a profile that cannot be made refuses before the host is
+   installed. *)
+let creatable profile =
+  let rec nearest path =
+    if Sys.file_exists path || String.equal (Filename.dirname path) path
+    then path
+    else nearest (Filename.dirname path)
+  in
+  let holder = nearest (Filename.dirname profile) in
+  match
+    if not (Sys.is_directory holder)
+    then Error (holder ^ " is not a directory")
+    else (
+      match Unix.access holder [ Unix.W_OK; Unix.X_OK ] with
+      | () -> Ok ()
+      | exception Unix.Unix_error (code, _, _) ->
+        Error (Printf.sprintf "%s is not writable: %s" holder (Unix.error_message code)))
+  with
+  | Ok () -> Ok ()
+  | Error reason -> Error (Profile_not_created { path = profile; reason })
 
 let profile_usable profile =
-  if Sys.file_exists profile && not (Sys.is_directory profile)
-  then Error (Profile_not_a_directory profile)
-  else Ok ()
+  let* state = profile_state profile in
+  match state with
+  | Directory -> Ok ()
+  | Not_a_directory -> Error (Profile_not_a_directory profile)
+  | Missing -> creatable profile
 
 (* A connect to a loopback port nobody listens on is refused at once, and one
    somebody listens on answers at once. A bound of a second keeps a full accept
@@ -191,15 +281,20 @@ let port_answers_now port =
 type plan =
   { runtime_config_path : string
   ; revision : string
+  ; existing : Browser_configuration.live_bidi option
   ; table : Browser_configuration.live_bidi
   ; set : key list
   ; change : change
   ; port_answers : bool
+  ; lane_enabled : bool
+  ; firefox_note : string option
   }
 
 let table plan = plan.table
 let change plan = plan.change
 let port_answers plan = plan.port_answers
+let lane_enabled plan = plan.lane_enabled
+let firefox_note plan = plan.firefox_note
 
 let revision_of (observation : Runtime.config_observation) =
   Runtime.config_source_revision_to_string observation.source_revision
@@ -214,45 +309,53 @@ let plan ~find_firefox (request : request) =
       |> Result.map_error (fun reason -> Configuration_unreadable { path; reason })
     in
     let text = observation.source_text in
-    let* existing =
-      live_bidi_of_text text |> Result.map_error (fun reason -> Configuration_refused reason)
+    let* configuration =
+      configuration_of_text text |> Result.map_error (fun reason -> Configuration_refused reason)
     in
+    let existing = configuration.Browser_configuration.live_bidi in
     let* table, set, change = decide ~find_firefox request existing in
     let* () = profile_usable table.profile in
-    let* () =
+    let* firefox_note =
       match set with
-      | [] -> Ok ()
+      | [] -> Ok None
       | set ->
-        let edited = edit_text ~table ~set text in
-        let* () = reads_back ~table edited in
-        let* () = named_firefox_runs ~request ~set in
-        Runtime.validate_config_text ~runtime_config_path:path edited
-        |> Result.map_error (fun reason -> Configuration_refused reason)
+        let* edited = edited ~existing ~table ~set text in
+        let* note = named_firefox ~request ~set in
+        let* () =
+          Runtime.validate_config_text ~runtime_config_path:path edited
+          |> Result.map_error (fun reason -> Configuration_refused reason)
+        in
+        Ok note
     in
     Ok
       { runtime_config_path = path
       ; revision = revision_of observation
+      ; existing
       ; table
       ; set
       ; change
       ; port_answers = port_answers_now table.port
+      ; lane_enabled = configuration.Browser_configuration.live_enabled
+      ; firefox_note
       }
 
 type applied = { profile_created : bool }
 
 let ensure_profile profile =
-  if Sys.file_exists profile
-  then Ok false
-  else
-    match
-      Fs_compat.mkdir_p (Filename.dirname profile);
-      Unix.mkdir profile profile_mode
-    with
-    | () -> Ok true
-    | exception Unix.Unix_error (Unix.EEXIST, _, _) -> Ok false
-    | exception Unix.Unix_error (code, _, _) ->
-      Error (Profile_not_created { path = profile; reason = Unix.error_message code })
-    | exception Sys_error reason -> Error (Profile_not_created { path = profile; reason })
+  let* state = profile_state profile in
+  match state with
+  | Directory -> Ok false
+  | Not_a_directory -> Error (Profile_not_a_directory profile)
+  | Missing ->
+    (match
+       Fs_compat.mkdir_p (Filename.dirname profile);
+       Unix.mkdir profile profile_mode
+     with
+     | () -> Ok true
+     | exception Unix.Unix_error (Unix.EEXIST, _, _) -> Ok false
+     | exception Unix.Unix_error (code, _, _) ->
+       Error (Profile_not_created { path = profile; reason = Unix.error_message code })
+     | exception Sys_error reason -> Error (Profile_not_created { path = profile; reason }))
 
 exception Refused of error
 
@@ -265,11 +368,9 @@ let commit plan =
       revision_of (Runtime.config_observation ~path:plan.runtime_config_path text)
     in
     if not (String.equal current plan.revision) then raise (Refused Configuration_changed);
-    let edited = edit_text ~table:plan.table ~set:plan.set text in
-    (match reads_back ~table:plan.table edited with
-     | Ok () -> ()
-     | Error error -> raise (Refused error));
-    edited
+    match edited ~existing:plan.existing ~table:plan.table ~set:plan.set text with
+    | Ok text -> text
+    | Error error -> raise (Refused error)
   in
   match Runtime.edit_config_text ~runtime_config_path:plan.runtime_config_path edit with
   | Ok _receipt -> Ok ()

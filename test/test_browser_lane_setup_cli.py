@@ -243,7 +243,7 @@ class BrowserLaneSetupCommand(unittest.TestCase):
                 self.assertFalse(lane(base).exists(), "the host was not installed first")
                 self.assertEqual(runtime_toml(base).read_text(), before)
 
-    def test_a_profile_that_cannot_be_made_leaves_the_host_and_no_table(self):
+    def test_a_profile_that_cannot_be_made_is_refused_before_the_host_is_installed(self):
         root = self.scratch()
         base = workspace(root)
         before = runtime_toml(base).read_text()
@@ -254,10 +254,54 @@ class BrowserLaneSetupCommand(unittest.TestCase):
                       "--firefox", str(fake_firefox(root)), "--profile", str(locked / "profile"))
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("Could not create the profile directory", result.stderr)
+        self.assertFalse(lane(base).exists(), "nothing was installed")
+        self.assertEqual(runtime_toml(base).read_text(), before)
+
+    def test_a_table_that_cannot_be_written_leaves_the_host_and_no_table(self):
+        root = self.scratch()
+        base = workspace(root)
+        before = runtime_toml(base).read_text()
+        # masc needs to create its lock file beside runtime.toml; a directory
+        # it cannot write into fails the commit, which comes after the host.
+        config = runtime_toml(base).parent
+        config.chmod(0o500)
+        self.addCleanup(config.chmod, 0o700)
+        result = masc(root, "--mode", "bidi", "--binary", str(HOST), "--base-path", str(base),
+                      "--firefox", str(fake_firefox(root)), "--profile", str(root / "profile"))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("runtime.toml was not written", result.stderr)
         # The host is installed first and the table last, so what a failure
         # leaves is an installed lane and no table, never a table with no lane.
         self.assertTrue((lane(base) / "host/launch.json").is_file())
         self.assertEqual(runtime_toml(base).read_text(), before)
+
+    def test_a_live_lane_that_is_off_says_so_instead_of_asking_for_a_restart(self):
+        root = self.scratch()
+        base = workspace(root)
+        runtime_toml(base).write_text(RUNTIME_TOML + "\n[browser.live]\nenabled = false\n")
+        result = masc(root, "--mode", "bidi", "--binary", str(HOST), "--base-path", str(base),
+                      "--firefox", str(fake_firefox(root)), "--profile", str(root / "profile"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[browser.live.bidi]", runtime_toml(base).read_text().splitlines())
+        self.assertIn("keeps the live lane off", result.stdout)
+
+    def test_the_table_goes_where_the_config_directory_override_points(self):
+        root = self.scratch()
+        base = root / "workspace"
+        base.mkdir()
+        elsewhere = root / "elsewhere config"
+        elsewhere.mkdir()
+        (elsewhere / "runtime.toml").write_text(RUNTIME_TOML)
+        environment = {"HOME": str(root / "home"), "PATH": "/usr/bin:/bin",
+                       "MASC_CONFIG_DIR": str(elsewhere)}
+        result = subprocess.run(
+            [str(MASC), "browser-lane-setup", "--mode", "bidi", "--binary", str(HOST),
+             "--base-path", str(base), "--firefox", str(fake_firefox(root)),
+             "--profile", str(root / "profile")],
+            env=environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[browser.live.bidi]", (elsewhere / "runtime.toml").read_text().splitlines())
+        self.assertFalse((base / ".masc/config/runtime.toml").exists())
 
     def test_bidi_without_a_runtime_toml_creates_nothing(self):
         root = self.scratch()

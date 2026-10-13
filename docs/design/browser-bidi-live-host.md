@@ -28,8 +28,10 @@ and launcher and writes this table. It names the first Firefox that answers
 directory unless `--profile` names another, and writes no `port` unless `--port`
 names one. A table that is already in `runtime.toml` keeps its values: each one
 changes only when its option is given, and the line it is rewritten on loses its
-trailing comment. Every other line stays as it was. The server reads the table
-when it starts, so restart it afterwards.
+trailing comment. Every other line stays as it was. A table written inline or
+with dotted keys is not edited: the command refuses and leaves the file as it
+was. The server reads the table when it starts, so restart it afterwards, and it
+starts the Firefox only while `[browser.live] enabled` is not `false`.
 
 - It starts only what is missing. A port that already answers gets no second
   Firefox, and a host holding the host lock gets no second host.

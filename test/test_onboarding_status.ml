@@ -457,19 +457,33 @@ let a_bidi_host_that_met_another_profile_names_both_profiles () =
    installation would write one and hand the start to MASC, so the paragraph
    names the extension's, which writes no runtime.toml. *)
 let the_installation_a_paragraph_names_follows_who_starts_the_firefox () =
-  let said keeper launcher =
-    Status.message (observation ~launcher ~keeper Record.Never_started) in
   let masc =
     Status.Masc_starts
       { port = 9444; profile = "/keeper/profile"; last_start = Masc.Browser_keeper_firefox_start_record.Absent } in
+  let ended =
+    Record.Ended
+      ( host_entry
+      , { at = 1_791_000_060.; reason = "stopped"; session = Record.No_session_left
+        ; because = Record.Reason_only } ) in
+  (* Every state of the record whose paragraph closes with the installation
+     step, for each way the Firefox is started. *)
+  let records =
+    [ "never started", Record.Never_started
+    ; "ended", ended
+    ; "died", Record.Died host_entry
+    ; "unreadable and unlocked", Record.Unreadable { detail = "torn by this test"; held = Some false } ] in
   let install route = "masc browser-lane-setup --mode " ^ route ^ " --base-path '/workspace'" in
   List.iter (fun (launcher, lead) ->
-      has (said masc launcher) [ lead ^ install "bidi" ];
-      lacks (said masc launcher) [ "--mode extension" ];
-      List.iter (fun keeper ->
-          has (said keeper launcher) [ lead ^ install "extension" ];
-          lacks (said keeper launcher) [ "--mode bidi" ])
-        [ Status.Not_configured; Status.Not_known ])
+      List.iter (fun (state, record) ->
+          let said keeper = Status.message (observation ~launcher ~keeper record) in
+          has (said masc) [ lead ^ install "bidi" ];
+          lacks (said masc) [ "--mode extension" ];
+          List.iter (fun keeper ->
+              check bool (state ^ ": names the extension installation where the operator starts it")
+                true (String_util.contains_substring (said keeper) (lead ^ install "extension"));
+              lacks (said keeper) [ "--mode bidi" ])
+            [ Status.Not_configured; Status.Not_known ])
+        records)
     [ Launcher.Not_installed, "the operator first installs the lane by running "
     ; Launcher.Undeclared, "the operator first installs the lane again by running " ]
 

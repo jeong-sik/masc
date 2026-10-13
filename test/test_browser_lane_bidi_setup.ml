@@ -70,7 +70,7 @@ let operator_table ~firefox ~profile =
     {|
 # 2026-10-13: the profile the Keepers are logged in to.
 [browser.live.bidi]
-firefox = "%s"
+firefox   =   "%s"   # the operator's own build
 profile = "%s"
 port = 9300 # not the default
 |}
@@ -368,15 +368,47 @@ let test_a_table_written_inline_is_not_edited_into_a_second_table () =
 
 let test_the_profile_is_made_before_the_table_and_a_failure_leaves_no_table () =
   with_fixture (fun fixture ->
-    let locked = Filename.concat fixture.root "locked" in
-    Unix.mkdir locked 0o500;
-    let profile = Filename.concat locked "profile" in
+    let parent = Filename.concat fixture.root "parent" in
+    Unix.mkdir parent 0o700;
+    let profile = Filename.concat parent "profile" in
     let plan = plan_ok (request ~firefox:fixture.firefox ~profile fixture) in
     let before = read fixture.runtime in
+    (* Writable when it was planned, and not when it is applied. *)
+    Unix.chmod parent 0o500;
     (match B.apply plan with
      | Error (B.Profile_not_created { path; _ }) -> check string "the path it names" profile path
      | Ok _ | Error _ -> fail "a profile that cannot be made is refused as that");
     check string "no table was written" before (read fixture.runtime))
+
+let test_a_profile_that_cannot_be_made_is_refused_at_the_plan () =
+  with_fixture (fun fixture ->
+    let locked = Filename.concat fixture.root "locked" in
+    Unix.mkdir locked 0o500;
+    let profile = Filename.concat (Filename.concat locked "deeper") "profile" in
+    refused "an unwritable parent"
+      (function B.Profile_not_created { path; _ } -> String.equal path profile | _ -> false)
+      fixture
+      (request ~firefox:fixture.firefox ~profile fixture);
+    let under_a_file = Filename.concat fixture.firefox "profile" in
+    refused "a parent that is a file"
+      (function B.Profile_not_created _ | B.Profile_not_a_directory _ -> true | _ -> false)
+      fixture
+      (request ~firefox:fixture.firefox ~profile:under_a_file fixture))
+
+let test_a_link_that_points_nowhere_is_not_a_profile_but_a_link_to_a_directory_is () =
+  with_fixture (fun fixture ->
+    let dangling = Filename.concat fixture.root "dangling" in
+    Unix.symlink (Filename.concat fixture.root "nowhere") dangling;
+    refused "a dangling link"
+      (function B.Profile_not_a_directory path -> String.equal path dangling | _ -> false)
+      fixture
+      (request ~firefox:fixture.firefox ~profile:dangling fixture);
+    let linked = Filename.concat fixture.root "linked" in
+    Unix.symlink fixture.operator_profile linked;
+    let applied =
+      apply_ok (plan_ok (request ~firefox:fixture.firefox ~profile:linked fixture))
+    in
+    check bool "a link to a directory is that directory" false applied.B.profile_created)
 
 let test_a_change_after_the_plan_is_refused_and_not_overwritten () =
   with_fixture (fun fixture ->
@@ -387,6 +419,104 @@ let test_a_change_after_the_plan_is_refused_and_not_overwritten () =
      | Error B.Configuration_changed -> ()
      | Ok _ | Error _ -> fail "a file that changed after the plan is refused as changed");
     check string "the other writer's file is kept" changed (read fixture.runtime))
+
+(* --- spellings the line editor cannot reach ------------------------------ *)
+
+(* The loader accepts a header for a table that dotted keys or an inline table
+   declared; a strict TOML reader does not. Each of these would load after an
+   append and break that reader, so none is written. *)
+let test_a_table_declared_another_way_is_refused_not_declared_twice () =
+  let dotted_table =
+    "browser.live.bidi.firefox = \"/bin/sh\"\nbrowser.live.bidi.profile = \"/tmp\"\n"
+  in
+  List.iter
+    (fun (label, config, request_of) ->
+       with_fixture ~config (fun fixture ->
+         refused label
+           (function B.Table_refused _ -> true | _ -> false)
+           fixture
+           (request_of fixture)
+           ~find:(found fixture)))
+    [ ( "dotted keys at the root"
+      , dotted_table ^ runtime_base
+      , fun fixture -> request ~port:9444 fixture )
+    ; ( "dotted keys under [browser.live]"
+      , runtime_base ^ "\n[browser.live]\nbidi.firefox = \"/bin/sh\"\nbidi.profile = \"/tmp\"\n"
+      , fun fixture -> request ~port:9444 fixture )
+    ; ( "the table is inline"
+      , runtime_base
+        ^ "\n[browser.live]\nbidi = { firefox = \"/bin/sh\", profile = \"/tmp\" }\n"
+      , fun fixture -> request ~port:9444 fixture )
+    ; ( "[browser] is inline"
+      , "browser = { live = { enabled = true } }\n" ^ runtime_base
+      , fun fixture -> request fixture )
+    ; ( "[browser.live] is inline"
+      , runtime_base ^ "\n[browser]\nlive = { enabled = true }\n"
+      , fun fixture -> request fixture )
+    ]
+
+(* The same files are fine where nothing has to be written into them, and a
+   table is added beside dotted keys that declare only its parent. *)
+let test_what_needs_no_edit_or_a_new_header_is_not_refused () =
+  let dotted_table =
+    "browser.live.bidi.firefox = \"/bin/sh\"\nbrowser.live.bidi.profile = \"/tmp\"\n"
+  in
+  with_fixture ~config:(dotted_table ^ runtime_base) (fun fixture ->
+    let before = read fixture.runtime in
+    let plan = plan_ok (request fixture) in
+    check bool "nothing is named" true (B.change plan = B.Unchanged);
+    ignore (apply_ok plan);
+    check string "the file is as it was" before (read fixture.runtime));
+  with_fixture ~config:("browser.live.enabled = true\n" ^ runtime_base) (fun fixture ->
+    let plan = plan_ok ~find:(found fixture) (request ~profile:fixture.root fixture) in
+    ignore (apply_ok plan);
+    check string "the table follows dotted keys that name only its parent" fixture.root
+      (configured fixture).C.profile)
+
+(* A key written twice in the table is a file the loader refuses as it is, so
+   nothing is edited into it. *)
+let test_a_key_written_twice_in_the_table_is_refused_untouched () =
+  with_fixture (fun fixture ->
+    let table =
+      Printf.sprintf
+        "\n[browser.live.bidi]\nfirefox = \"%s\"\nprofile = \"%s\"\nport = 9300\nport = 9301\n"
+        fixture.firefox fixture.root
+    in
+    let config = runtime_base ^ table in
+    write fixture.runtime config;
+    let message = message_of (B.plan ~find_firefox:never_asked (request ~port:9444 fixture)) in
+    check bool ("refused (got: " ^ message ^ ")") true (contains message "nothing was written");
+    check string "runtime.toml is as it was" config (read fixture.runtime))
+
+(* --- the live lane switch --------------------------------------------------- *)
+
+let test_a_lane_that_is_off_is_reported_and_the_table_is_still_written () =
+  with_fixture ~config:(runtime_base ^ "\n[browser.live]\nenabled = false\n") (fun fixture ->
+    let plan = plan_ok ~find:(found fixture) (request ~profile:fixture.root fixture) in
+    check bool "the lane is off" false (B.lane_enabled plan);
+    ignore (apply_ok plan);
+    check string "the table is there" fixture.root (configured fixture).C.profile);
+  with_fixture (fun fixture ->
+    check bool "a lane nobody turned off is on" true
+      (B.lane_enabled (plan_ok ~find:(found fixture) (request ~profile:fixture.root fixture))))
+
+(* --- a Firefox that is there and does not answer ------------------------- *)
+
+let test_a_named_firefox_that_does_not_answer_is_written_with_a_note () =
+  with_fixture (fun fixture ->
+    let broken = Filename.concat fixture.root "broken firefox" in
+    write ~mode:0o755 broken "#!/bin/sh\necho broken >&2\nexit 3\n";
+    let plan = plan_ok (request ~firefox:broken ~profile:fixture.root fixture) in
+    (match B.firefox_note plan with
+     | Some note ->
+       check bool "the note names it" true (contains note broken);
+       check bool "and says it is not verified" true (contains note "not verified")
+     | None -> fail "a Firefox that did not answer is noted");
+    ignore (apply_ok plan);
+    check string "it was written as named" broken (configured fixture).C.firefox;
+    check (option string) "one that answers has no note" None
+      (B.firefox_note
+         (plan_ok (request ~firefox:fixture.firefox ~profile:fixture.operator_profile fixture))))
 
 (* --- the port ------------------------------------------------------------ *)
 
@@ -456,6 +586,22 @@ let () =
             test_the_profile_is_made_before_the_table_and_a_failure_leaves_no_table
         ; test_case "a change after the plan" `Quick
             test_a_change_after_the_plan_is_refused_and_not_overwritten
+        ; test_case "a profile that cannot be made is refused at the plan" `Quick
+            test_a_profile_that_cannot_be_made_is_refused_at_the_plan
+        ; test_case "a link that points nowhere is not a profile" `Quick
+            test_a_link_that_points_nowhere_is_not_a_profile_but_a_link_to_a_directory_is
+        ; test_case "a table declared another way is not declared twice" `Quick
+            test_a_table_declared_another_way_is_refused_not_declared_twice
+        ; test_case "a key written twice in the table is refused untouched" `Quick
+            test_a_key_written_twice_in_the_table_is_refused_untouched
+        ] )
+    ; ( "what is not refused"
+      , [ test_case "no edit, or a new header beside dotted parents" `Quick
+            test_what_needs_no_edit_or_a_new_header_is_not_refused
+        ; test_case "a lane that is off still gets the table" `Quick
+            test_a_lane_that_is_off_is_reported_and_the_table_is_still_written
+        ; test_case "a named Firefox that does not answer is noted" `Quick
+            test_a_named_firefox_that_does_not_answer_is_written_with_a_note
         ] )
     ; "the port", [ test_case "an answering port is reported" `Quick test_a_port_that_answers_is_reported ]
     ]

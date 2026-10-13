@@ -2331,7 +2331,9 @@ let browser_lane_setup_cmd =
         let base_path = Env_config.normalize_masc_base_path_input base_path in
         Masc_cli_browser_lane_setup.run
           ~base_path
-          ~runtime_config_path:(runtime_config_path_for_base_path base_path)
+          (* The file the server and masc doctor read: it honors MASC_CONFIG_DIR,
+             which the helper the other setup commands use does not. *)
+          ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
           ~modes ~binary ~token_file ~manifest_dir ~host_name ~firefox ~profile ~port)
       $ base_path
       $ modes

@@ -115,12 +115,20 @@ let print_table ~runtime_config_path plan (applied : Bidi_setup.applied) =
        runtime_config_path);
   Printf.printf "  firefox  %s\n" firefox;
   Printf.printf "  profile  %s%s\n" profile (if applied.profile_created then " (created)" else "");
-  Printf.printf "  port     %d\n" port
+  Printf.printf "  port     %d\n" port;
+  Option.iter (Printf.printf "Note: %s\n") (Bidi_setup.firefox_note plan)
 
 let print_bidi_steps plan =
   let { Browser_configuration.port; _ } = Bidi_setup.table plan in
   print_endline "";
   print_endline "Next, for the Firefox MASC starts:";
+  (* The table is written whatever this says; the server reads it only while
+     the live lane is on. *)
+  if not (Bidi_setup.lane_enabled plan)
+  then
+    print_endline
+      "  [browser.live] enabled = false in runtime.toml keeps the live lane off, so the \
+       server starts no Firefox. Turn it on first.";
   print_endline
     "  1. Restart the MASC server. It reads runtime.toml when it starts, then opens this \
      Firefox on the profile above and attaches its host. The server must be this build or \

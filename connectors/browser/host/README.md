@@ -33,7 +33,9 @@ masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
 them the command uses the first Firefox that answers `--version`, the profile
 `masc-keeper-firefox-profile` in the home directory, and the default port. A
 table that is already there keeps its values, because its profile holds the
-logins the Keepers use. Give `--mode` twice to connect both routes. An option the
+logins the Keepers use, and a table written inline or with dotted keys is not
+edited. The table goes into the `runtime.toml` the server reads, which
+`MASC_CONFIG_DIR` overrides. Give `--mode` twice to connect both routes. An option the
 chosen modes do not use is refused.
 
 From a source checkout, `scripts/install-local-build.sh` builds `masc`,

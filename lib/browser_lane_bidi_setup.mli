@@ -68,6 +68,14 @@ val table : plan -> Browser_configuration.live_bidi
 
 val change : plan -> change
 
+val lane_enabled : plan -> bool
+(** [\[browser.live\] enabled] is not false. The server starts no Firefox
+    while it is. The table is written either way. *)
+
+val firefox_note : plan -> string option
+(** Said when the Firefox the operator named is there and did not answer
+    [--version]: it is written as named and not verified. *)
+
 val port_answers : plan -> bool
 (** Something already answers on the table's port on the loopback interface.
     Firefox's Remote Agent refuses a second one on that port. A host also

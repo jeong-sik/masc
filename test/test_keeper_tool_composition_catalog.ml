@@ -1032,8 +1032,45 @@ let test_read_only_outer_invocations_overlap_without_identity_mixing () =
   let module Causal = Masc.Keeper_gate_causal_context in
   let config = Masc.Workspace.default_config base_path in
   let meta = Masc_test_deps.meta_of_json_fixture
-      (`Assoc [ "name", `String "overlap"; "activation_mode", `String "manual" ])
+      (`Assoc [ "name", `String "overlap"; "activation_mode", `String "manual"
+              ; "sandbox_profile", `String "docker"; "sandbox_image", `String "base" ])
     |> Result.get_ok in
+  let image_reference = "composition-overlap:test" in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path [ "base", image_reference ];
+  let read_root = Masc.Keeper_tool_shared_runtime.keeper_playground_root ~config ~meta in
+  (* The public composition and Read authority remain real. Only the Docker
+     transport is synthetic: it runs Read's command on the same fixture
+     bytes after applying the sandbox mount translation. This proves causal
+     overlap and identities, not execution inside a real Docker container. *)
+  let docker_path = Filename.concat base_path "read-docker-fixture" in
+  let script = Printf.sprintf {|#!/bin/sh
+case "$1" in
+  info|image) printf '[]\n'; exit 0;;
+  run)
+    shift
+    while [ "$#" -gt 0 ] && [ "$1" != %s ]; do shift; done
+    [ "$#" -gt 0 ] || exit 2
+    shift
+    [ "$#" -eq 7 ] && [ "$1" = sh ] && [ "$2" = -c ] && [ "$4" = sh ] || exit 2
+    fixture_root=%s
+    fixture_container_root=%s
+    case "$6" in
+      "$fixture_container_root"/*)
+        fixture_path="$fixture_root/${6#"$fixture_container_root"/}"
+        exec "$1" "$2" "$3" "$4" "$5" "$fixture_path" "$7";;
+      *) exit 2;;
+    esac;;
+  *) exit 2;;
+esac
+|} (Filename.quote image_reference) (Filename.quote read_root)
+      (Filename.quote (Masc.Keeper_sandbox.container_root meta.name)) in
+  Out_channel.with_open_bin docker_path (fun channel -> output_string channel script);
+  Unix.chmod docker_path 0o700;
+  let fake_docker_key = "MASC_TEST_FAKE_DOCKER_PATH" in
+  let prior_fake_docker = Env_config_core.raw_value_opt fake_docker_key in
+  Unix.putenv fake_docker_key docker_path;
+  Fun.protect ~finally:(fun () ->
+    Unix.putenv fake_docker_key (Option.value ~default:"" prior_fake_docker)) @@ fun () ->
   let catalog = Catalog.parse export_catalog_fixture |> Result.get_ok in
   let entry = match Catalog.entries catalog with
     | [ entry ] -> entry | _ -> fail "expected the read composition" in
@@ -1088,7 +1125,6 @@ let test_read_only_outer_invocations_overlap_without_identity_mixing () =
   check bool "a mutable callback without its causal cell stays serial" true
     (Agent_core.Tool.execution_mode callback_only_tool ~input:(`Assoc []) = Agent_core.Tool_contract.Serial);
   let files = [ "left", "left evidence"; "right", "right evidence" ] in
-  let read_root = Masc.Keeper_tool_shared_runtime.keeper_playground_root ~config ~meta in
   List.iter (fun (file, content) ->
     let channel = open_out (Filename.concat read_root file) in
     Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel content)) files;
@@ -1109,7 +1145,7 @@ let test_read_only_outer_invocations_overlap_without_identity_mixing () =
       (selected |> member "value" |> to_string)
   in
   Eio.Fiber.both (fun () -> run 0 "left") (fun () -> run 1 "right");
-  Printf.printf "composition_outer_trial invocations=2 dispatches=%d overlap_proven_by_barrier=true model_latency_measured=false\n%!"
+  Printf.printf "composition_outer_trial invocations=2 dispatches=%d overlap_proven_by_barrier=true container_transport=fixture model_latency_measured=false\n%!"
     (Atomic.get arrivals);
   check int "two actual leaf dispatches overlapped" 2 (Atomic.get arrivals);
   let open Yojson.Safe.Util in

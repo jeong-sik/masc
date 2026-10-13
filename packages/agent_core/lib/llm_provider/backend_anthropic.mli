@@ -147,19 +147,18 @@ val build_request
     chain over the API-checked head members plus every projected, merged
     message, and over the response content. Returns [None] for kinds
     this backend serves without a binding (Kimi), for responses without
-    reasoning, when the history refuses projection, and when
-    [admitted_body_present]: an admitted body resolves frozen thinking
-    control the non-exact reading cannot reproduce, so recording it would
-    describe bytes the wire never sent. Every [None] fails closed at replay
-    instead of recording a digest the wire cannot honor. Pure: it replays
-    the same projection, merge, and fold {!build_request} runs, so the
-    value matches the bytes the provider verified. *)
+    reasoning, and when the history refuses projection. Every [None] fails
+    closed at replay instead of recording a digest the wire cannot honor.
+    Pure: it replays the same projection, merge, and fold {!build_request}
+    runs, so the value matches the bytes the provider verified. That holds
+    for an admitted body too, which {!build_request_artifact} serialized
+    from the same config, messages and tools; the agent pipeline admits
+    every request, so recording it is what lets a Keeper turn replay. *)
 val transmitted_reasoning_prefix
   :  config:Provider_config.t
   -> messages:Types.message list
   -> tools:Yojson.Safe.t list
   -> response_content:Types.content_block list
-  -> admitted_body_present:bool
   -> unit
   -> Types.Reasoning_prefix.t option
 

@@ -619,7 +619,6 @@ let stamped_assistant ~config ~request_messages ~tools response_content =
       ~messages:request_messages
       ~tools
       ~response_content
-      ~admitted_body_present:false
       ()
   in
   check_bool "the producing request records a digest" true (Option.is_some prefix);
@@ -665,6 +664,87 @@ let round_one_fixtures () =
     stamped_assistant ~config ~request_messages:[ carrier ] ~tools response_content
   in
   config, tools, carrier, assistant
+;;
+
+(* The agent pipeline admits every request body before it dispatches
+   ([Pipeline_stage_route]: [admit_request_body], then [complete_serialized]
+   or [complete_stream_serialized]), so a Keeper turn's response always
+   arrives with an admitted body. It must still record its prefix, or the
+   next round drops every thinking block as [Prefix_digest_absent]. *)
+let admitted_round_one ~stream =
+  let config = anthropic_build_config () in
+  let tools = [ prefix_test_tool_schema ] in
+  let carrier = message User [ Text "trigger"; Text "extra context block" ] in
+  let response =
+    { Types.id = "msg_admitted_round_one"
+    ; model = "claude-sonnet-5-5"
+    ; stop_reason = Types.EndTurn
+    ; content =
+        [ Thinking { content = "admitted round reasoning"; signature = Some "sig-admitted" }
+        ; Text "admitted round text"
+        ; ToolUse { id = "call-1"; name = "inspect"; input = `Assoc [] }
+        ]
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  let transport =
+    { Llm_transport.complete_sync =
+        (fun _ -> { Llm_transport.response = Ok response; latency_ms = None })
+    ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok response)
+    }
+  in
+  let completed =
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    let prepared = Complete.prepare_request ~config ~messages:[ carrier ] ~tools () in
+    match Complete.admit_request_body ~stream prepared with
+    | Error _ -> Alcotest.fail "the round-one body must be admitted"
+    | Ok serialized ->
+      if stream
+      then
+        Complete.complete_stream_serialized
+          ~sw
+          ~net
+          ~transport
+          serialized
+          ~on_event:ignore
+          ()
+      else Complete.complete_serialized ~sw ~net ~transport serialized ()
+  in
+  match completed with
+  | Error _ -> Alcotest.fail "the stubbed admitted completion must succeed"
+  | Ok resp -> config, tools, carrier, resp
+;;
+
+let check_admitted_round_two_keeps_thinking ~stream =
+  let config, tools, carrier, resp = admitted_round_one ~stream in
+  check_bool
+    "the admitted response records its prefix"
+    true
+    (match resp.telemetry with
+     | Some telemetry -> Option.is_some telemetry.reasoning_prefix
+     | None -> false);
+  match Types.assistant_message_of_response resp with
+  | Error _ -> Alcotest.fail "the admitted response must stamp"
+  | Ok assistant ->
+    let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+    let body = Backend_anthropic.build_request ~config ~messages:round_two ~tools () in
+    check_bool
+      "round one's thinking replays in round two"
+      true
+      (List.mem "thinking" (List.nth (wire_content_types body) 1))
+;;
+
+let test_an_admitted_completion_keeps_thinking_for_the_next_round () =
+  check_admitted_round_two_keeps_thinking ~stream:false
+;;
+
+let test_an_admitted_stream_keeps_thinking_for_the_next_round () =
+  check_admitted_round_two_keeps_thinking ~stream:true
 ;;
 
 let test_prefix_binding_keeps_thinking_on_a_stable_prefix () =
@@ -1813,6 +1893,14 @@ let () =
             "anthropic honors a latest-turn replay declaration"
             `Quick
             test_anthropic_honors_a_latest_turn_replay_declaration
+        ; Alcotest.test_case
+            "an admitted completion keeps thinking for the next round"
+            `Quick
+            test_an_admitted_completion_keeps_thinking_for_the_next_round
+        ; Alcotest.test_case
+            "an admitted stream keeps thinking for the next round"
+            `Quick
+            test_an_admitted_stream_keeps_thinking_for_the_next_round
         ; Alcotest.test_case
             "prefix binding keeps thinking on a stable prefix"
             `Quick

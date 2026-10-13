@@ -863,45 +863,44 @@ let transmitted_reasoning_prefix
       ~messages
       ~tools
       ~response_content
-      ~admitted_body_present
       ()
   =
   (* This backend records for the Anthropic kind only; every other kind it
      can serve returns None, and replay fails closed. (Gemini binds
      signatures too and gets its own adoption separately.) An admitted body
-     resolves frozen thinking control this reading cannot reproduce, so it
-     records nothing rather than a digest of bytes the wire never sent. *)
-  if admitted_body_present
-  then None
-  else (
-    match config.kind with
-    | Provider_config.Anthropic -> (
-      match Types.content_has_reasoning_artifact response_content with
-      | false -> None
-      | true -> (
-        match project_history config messages with
-        | Error _ -> None
-        | Ok projection ->
-          let merged =
-            Api_common.merge_tool_result_followup_user_messages projection.messages
-          in
-          let head = prefix_head ~tools config in
-          (match verify_prefix_binding ~head merged with
-           | Error _ -> None
-           | Ok verdict ->
-             let message_digest =
-               Reasoning_history_projection.content_wire_digest
-                 ~encode_block:anthropic_content_block_to_json
-                 response_content
-             in
-             Some
-               { Types.Reasoning_prefix.request_digest =
-                   verdict.Reasoning_history_projection.final_digest
-               ; message_digest
-               })))
-    | Provider_config.Kimi
-    | Provider_config.OpenAI_compat
-    | Provider_config.Ollama
-    | Provider_config.Gemini
-    | Provider_config.Glm -> None)
+     is recorded too: [Complete_common.serialize_final_http_request_unadmitted]
+     builds it with [build_request_artifact] from the same config, messages
+     and tools read here, and the head covers only system and tools. Frozen
+     thinking control is serialized only on the exact-output and count-tokens
+     paths, which never reach this function. *)
+  match config.kind with
+  | Provider_config.Anthropic -> (
+    match Types.content_has_reasoning_artifact response_content with
+    | false -> None
+    | true -> (
+      match project_history config messages with
+      | Error _ -> None
+      | Ok projection ->
+        let merged =
+          Api_common.merge_tool_result_followup_user_messages projection.messages
+        in
+        let head = prefix_head ~tools config in
+        (match verify_prefix_binding ~head merged with
+         | Error _ -> None
+         | Ok verdict ->
+           let message_digest =
+             Reasoning_history_projection.content_wire_digest
+               ~encode_block:anthropic_content_block_to_json
+               response_content
+           in
+           Some
+             { Types.Reasoning_prefix.request_digest =
+                 verdict.Reasoning_history_projection.final_digest
+             ; message_digest
+             })))
+  | Provider_config.Kimi
+  | Provider_config.OpenAI_compat
+  | Provider_config.Ollama
+  | Provider_config.Gemini
+  | Provider_config.Glm -> None
 ;;

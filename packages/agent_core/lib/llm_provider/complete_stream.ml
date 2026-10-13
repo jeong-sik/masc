@@ -1215,7 +1215,6 @@ let complete_stream_http
             ~messages
             ~tools
             ~response_content:resp.Types.content
-            ~admitted_body_present:(Option.is_some admitted_body)
             ()
         in
         Ok

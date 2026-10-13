@@ -309,7 +309,6 @@ let complete_prepared_sync
               ~messages
               ~tools
               ~response_content:resp.Types.content
-              ~admitted_body_present:(Option.is_some admitted_body)
               ()
           in
           let resp = patch_telemetry resp ~config ~reasoning_prefix latency_ms in
@@ -660,7 +659,6 @@ let complete_prepared_stream
              ~messages
              ~tools
              ~response_content:resp.Types.content
-             ~admitted_body_present:(Option.is_some admitted_body)
              ()
          in
          let resp =

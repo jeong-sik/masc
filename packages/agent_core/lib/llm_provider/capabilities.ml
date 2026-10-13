@@ -1785,7 +1785,7 @@ let test_catalog_entry id_prefix : Model_catalog.model_entry =
 ;;
 
 let[@warning "-32"] test_manifest_entry id_prefix : Capability_manifest.entry =
-  { id_prefix
+  { id_prefix = Model_identifiers.Id_prefix.of_string_exn id_prefix
   ; base_label = None
   ; max_context_tokens = None
   ; max_output_tokens = None

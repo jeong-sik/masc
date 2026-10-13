@@ -166,7 +166,7 @@ let base_label =
 in
 
 let entry : Capability_manifest.entry =
-  { id_prefix = "my-model"
+  { id_prefix = Model_identifiers.Id_prefix.of_string_exn "my-model"
   ; base_label = Some base_label
   ; max_context_tokens = Some 65536
   ; supports_tools = Some true

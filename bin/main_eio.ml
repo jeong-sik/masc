@@ -4078,7 +4078,9 @@ let doctor_cmd =
   let inspect requested json =
     (* The setup journey asks doctor which workspace to offer, so doctor answers
        in the same order `masc start` boots in; a workspace cwd is found here. *)
-    let state = Onboarding_status.inspect ~base_path:(selected_base_path requested) in
+    let state = Onboarding_status.inspect
+        ~sandbox:(Onboarding_status.Probe_with Masc.Sandbox_readiness.system_runner)
+        ~base_path:(selected_base_path requested) in
     print_endline (if json then Yojson.Safe.to_string (Onboarding_status.to_json state)
                    else Onboarding_status.to_text state);
     (* Reporting incomplete preparation is successful observation, never a

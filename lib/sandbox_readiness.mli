@@ -50,6 +50,13 @@ val catalog_json : host:host -> configured:backend option -> entry list -> Yojso
 val declaration : base_path:string -> (selection, configuration_error) result
 (** Read imp's declared sandbox from the workspace. No request overrides and
     no host default: a microvm profile without a named backend is invalid. *)
+val boot_declaration : base_path:string -> (selection, configuration_error) result
+(** The sandbox the server would boot imp with. Same file, same checks as
+    [declaration], except that a microvm profile without a named backend takes
+    the host's runtime the way boot does
+    ({!Keeper_meta_contract.microvm_backend_of_profile_defaults}); on a host
+    with none, it is invalid for the reason boot refuses with. For reporting
+    what boots, not for setup, which makes the operator name the backend. *)
 val configuration_error_json : configuration_error -> Yojson.Safe.t
 val inspect : base_path:string option -> Yojson.Safe.t
 (** Observe the declared sandbox and host services without changing either.

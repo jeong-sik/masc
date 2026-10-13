@@ -172,6 +172,35 @@ let test_declaration_reasons () =
     Out_channel.with_open_text path (fun out -> output_string out contents);
     check bool "readable docker declaration selects" true
       (match S.declaration ~base_path with Ok selection -> selection.backend = S.Docker | Error _ -> false))
+(* The doctor reports what boots. A microvm declaration that names no backend
+   takes the host's runtime in boot; [declaration] keeps refusing it because
+   setup makes the operator name one. The two agree on every other file. *)
+let test_boot_declaration_follows_the_host_default () =
+  with_workspace (fun ~base_path ~path ->
+    mkdir_p (Filename.dirname path);
+    Out_channel.with_open_text path (fun out -> output_string out microvm_without_backend);
+    check bool "setup's declaration still refuses the unnamed backend" true
+      (match S.declaration ~base_path with Error {kind = S.Declaration_invalid; _} -> true | _ -> false);
+    (match Masc.Keeper_microvm_backend.default_for_host (), S.boot_declaration ~base_path with
+     | Some Masc.Keeper_microvm_backend.Apple_container, Ok selection ->
+       check bool "boot's runtime is selected" true (selection.backend = S.Apple_container)
+     | None, Error {kind = S.Declaration_invalid; _} -> ()
+     | None, Error {kind = S.Declaration_unreadable; _} -> fail "the fixture file was readable"
+     | Some _, Error _ -> fail "a host with a runtime refused the unnamed backend"
+     | None, Ok _ -> fail "a host with no runtime selected one"
+     | Some _, Ok _ -> fail "boot's host default is neither Apple Container nor none");
+    let named = "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"microvm\"\nmicrovm_backend = \"nerdctl_kata\"\nsandbox_image = \"base\"\nnetwork_mode = \"inherit\"\ninstructions = \"Respond to the operator.\"\n" in
+    Out_channel.with_open_text path (fun out -> output_string out named);
+    check bool "a named backend is not replaced by the host default" true
+      (match S.boot_declaration ~base_path, S.declaration ~base_path with
+       | Ok boot, Ok setup -> boot.backend = S.Nerdctl_kata && setup.backend = S.Nerdctl_kata
+       | _ -> false);
+    Out_channel.with_open_text path (fun out -> output_string out contents);
+    check bool "a docker declaration is selected the same way" true
+      (match S.boot_declaration ~base_path with Ok selection -> selection.backend = S.Docker | Error _ -> false);
+    Sys.remove path;
+    check bool "an unreadable file is still unreadable" true
+      (match S.boot_declaration ~base_path with Error {kind = S.Declaration_unreadable; _} -> true | _ -> false))
 (* Apple Container answers as a running service on a Mac without Rosetta, and
    then cannot start the VM it builds images in: that VM uses Rosetta unless
    [build] rosetta = false. Measured 2026-09-15 on a colleague's Mac: setup
@@ -271,5 +300,6 @@ let () = run "sandbox readiness" ["selection",[
   test_case "validated staged selection preserves decisions" `Quick test_staging;
   test_case "no host default for a microvm backend" `Quick test_no_host_default_backend;
   test_case "declaration errors carry kind and reason" `Quick test_declaration_reasons;
+  test_case "boot declaration follows the host default" `Quick test_boot_declaration_follows_the_host_default;
   test_case "an Apple builder that cannot start is not ready" `Quick
     test_an_apple_builder_that_cannot_start_is_not_ready]]

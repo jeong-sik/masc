@@ -219,7 +219,13 @@ let catalog_json ~host ~configured entries =
            | Some backend -> ["--microvm-backend"; Keeper_microvm_backend.to_string backend]));
       "recommended", `Bool (recommended = Some row.backend);
       "advanced", `Bool (List.mem row.backend [Nerdctl_kata; Microsandbox; Remote_ssh])]) entries)]
-let selection_of_contents ~path ~contents ~profile:requested ~microvm_backend:requested_backend ~network_mode:requested_network =
+(* Where a microvm declaration names no backend. [Refuse_unnamed] is the setup
+   wizard's rule: the operator chooses and the written TOML shows the choice.
+   [Resolve_like_boot] is the server's: the keeper takes the host's runtime
+   through the same function boot reads, and where the host has none the boot
+   refuses, so this does too. *)
+type unnamed_backend = Refuse_unnamed | Resolve_like_boot
+let select ~unnamed_backend ~path ~contents ~profile:requested ~microvm_backend:requested_backend ~network_mode:requested_network =
   let open Result.Syntax in
   let* defaults = Keeper_types_profile.materialization_defaults_of_content ~path contents
     |> Result.map_error Keeper_types_profile.keeper_toml_load_error_to_string in
@@ -233,7 +239,15 @@ let selection_of_contents ~path ~contents ~profile:requested ~microvm_backend:re
     | Micro_vm -> (match requested_backend, defaults.microvm_backend with
       | Some b, _ -> Ok (of_microvm b)
       | None, Some b -> Ok (of_microvm b)
-      | None, None -> Error "Choose a microVM backend explicitly; no host default is written on your behalf") in
+      | None, None -> (match unnamed_backend with
+        | Refuse_unnamed ->
+          Error "Choose a microVM backend explicitly; no host default is written on your behalf"
+        | Resolve_like_boot ->
+          (match Keeper_meta_contract.microvm_backend_of_profile_defaults defaults with
+           | Some b -> Ok (of_microvm b)
+           | None -> Error ("microvm_backend_unresolved: sandbox_profile \"microvm\" has no runtime on this host. Set microvm_backend to one of: "
+               ^ String.concat ", " Keeper_microvm_backend.valid_strings
+               ^ ", or declare a sandbox_profile this host can serve")))) in
   let sandbox_profile = match chosen_profile with Keeper_sandbox_config.Docker -> Keeper_types_profile_sandbox.Docker | Micro_vm -> Micro_vm | Remote_ssh -> Remote_ssh in
   (* #37523: the image, like the backend above, is named by the operator; the
      wizard does not write one on their behalf. Same rule as boot. *)
@@ -254,13 +268,16 @@ let declaration_fault_id = function
   | Declaration_invalid -> "declaration_invalid" | Declaration_unreadable -> "declaration_unreadable"
 let configuration_error_json {kind; detail} =
   `Assoc ["kind", `String (declaration_fault_id kind); "detail", `String detail]
-let declaration ~base_path =
+let selection_of_contents = select ~unnamed_backend:Refuse_unnamed
+let read_declaration ~unnamed_backend ~base_path =
   let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
   match In_channel.with_open_text path In_channel.input_all with
   | contents ->
-    selection_of_contents ~path ~contents ~profile:None ~microvm_backend:None ~network_mode:None
+    select ~unnamed_backend ~path ~contents ~profile:None ~microvm_backend:None ~network_mode:None
     |> Result.map_error (fun detail -> {kind=Declaration_invalid; detail})
   | exception Sys_error detail -> Error {kind=Declaration_unreadable; detail}
+let declaration = read_declaration ~unnamed_backend:Refuse_unnamed
+let boot_declaration = read_declaration ~unnamed_backend:Resolve_like_boot
 let inspect ~base_path =
   let host = detect_host ~run:system_runner in
   let declared = Option.map (fun base_path -> declaration ~base_path) base_path in

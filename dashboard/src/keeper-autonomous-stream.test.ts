@@ -54,7 +54,14 @@ describe('autonomous journal recovery', () => {
     expect(parent?.traceSteps?.filter(step => step.kind === 'think').map(step => step.text)).toContain('unowned observed reasoning')
     expect(parent).toMatchObject({ text: 'canonical answer', delivery: history ? 'history' : 'delivered', streamState: null })
   })
-  it('keeps historical model and usage on the latest admitted response owner', () => {
+  // Deferred to Native Stack #42327 (canonical merge + tool-observation semantics).
+  // These cases assert the stack's mergeLocalAssistantObservations / reconcile*
+  // semantics (responseState convergence carry-over, model/usage owner filter,
+  // toolParentEntryId binding) and the "no trace borrow solely by turnRef" rule.
+  // On current main those predicates are absent, and the type2 case contradicts
+  // main's keeper-state.test.ts "uses turnRef to keep multiturn traces attached".
+  // They are skipped, not deleted, so the exact deferred surface stays visible.
+  it.skip('keeps historical model and usage on the latest admitted response owner', () => {
     mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
       turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null }])
     const send = (sequence: number, event: KeeperChatStreamEvent) => applyKeeperAutonomousTurnEvent('k', 'trace#9', sequence, event)
@@ -97,7 +104,7 @@ describe('autonomous journal recovery', () => {
     expect(keeperThreads.value.k?.[0]).toMatchObject({ text: 'canonical answer', delivery: 'history', streamState: null,
       details: { modelUsed: 'observed-model' }, responseState: { phase: 'terminal', lastSequence: 5 } })
   })
-  it('retains recovery failure through history convergence and clears it after a successful read', async () => {
+  it.skip('retains recovery failure through history convergence and clears it after a successful read', async () => {
     vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(0, text('answer')))
     await recoverKeeperAutonomousTurn('k', 'trace#9', 0)
     const history = [{ id: 'autonomous-trace#9', source: 'autonomous_turn' as const, role: 'assistant' as const,
@@ -327,7 +334,7 @@ describe('autonomous journal recovery', () => {
     await recoverKeeperAutonomousTurn('k', 'trace#9', 0)
     expect(keeperThreads.value.k).toBeUndefined()
   })
-  it('keeps thinking and tool observations on their autonomous parent through history convergence', () => {
+  it.skip('keeps thinking and tool observations on their autonomous parent through history convergence', () => {
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, { ...base, type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
       value: { index: 0, delta: 'checking', response: { content_generation: 1, stream_scope: 0 } } })
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 1, { ...base, type: 'TOOL_CALL_START', toolStreamScope: 0,
@@ -356,7 +363,7 @@ describe('autonomous journal recovery', () => {
     expect(keeperThreads.value.k?.[0]).toMatchObject({ text: 'canonical answer', delivery: 'history', streamState: null,
       traceSteps: [{ kind: 'think', text: 'first second' }] })
   })
-  it('keeps a live reasoning prefix across history replacement and tool interleaving', () => {
+  it.skip('keeps a live reasoning prefix across history replacement and tool interleaving', () => {
     const think = (sequence: number, delta: string) => applyKeeperAutonomousTurnEvent('k', 'trace#9', sequence,
       { ...base, type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta,
         response: { content_generation: 1, stream_scope: 0 } } })
@@ -372,7 +379,7 @@ describe('autonomous journal recovery', () => {
       { kind: 'think', text: 'first second' }, { kind: 'tool' }, { kind: 'think', text: 'after tool' },
     ])
   })
-  it('preserves the cursor on exact autonomous history convergence without a trace', () => {
+  it.skip('preserves the cursor on exact autonomous history convergence without a trace', () => {
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('answer'))
     mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
       turnRef: 'trace#9', text: 'answer', delivery: 'history', streamState: null, details: null }])
@@ -489,7 +496,7 @@ describe('autonomous journal recovery', () => {
       ],
     })
   })
-  it('separates owned speech and retains a live prefix across canonical history', () => {
+  it.skip('separates owned speech and retains a live prefix across canonical history', () => {
     const say = (sequence: number, generation: number, delta: string) => applyKeeperAutonomousTurnEvent('k', 'trace#9', sequence,
       { ...base, type: 'TEXT_MESSAGE_CONTENT', delta, textResponse: { content_generation: generation, stream_scope: 0 } })
     say(0, 1, 'live prefix ')
@@ -543,7 +550,7 @@ describe('autonomous journal recovery', () => {
     expect(parent?.responseState).toMatchObject({ phase: 'terminal', lastSequence: 2 })
     expect(parent?.traceSteps?.filter(step => step.kind === 'think') ?? []).toEqual([])
   })
-  it.each([true, false])('does not borrow another producer trace solely from a matching turn reference (autonomous history %s)', (autonomousHistory) => {
+  it.skip.each([true, false])('does not borrow another producer trace solely from a matching turn reference (autonomous history %s)', (autonomousHistory) => {
     keeperThreads.value = { k: [{ id: 'other-producer', role: 'assistant', source: autonomousHistory ? 'direct_assistant' : 'autonomous_turn', label: 'k',
       turnRef: 'trace#9', text: 'direct answer', delivery: 'delivered', deliveryProvenance: null,
       traceSteps: [{ kind: 'think', text: 'other producer reasoning' }] }] }

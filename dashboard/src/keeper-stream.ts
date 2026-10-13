@@ -998,7 +998,7 @@ export function applyKeeperStreamEvent(
       }
       const streamState = textMessageStreamState(keeperName, assistantEntryId)
       const response = admitResponseEvent(keeperName, assistantEntryId, {
-        kind: 'observe', owner: null, scope: event.textStreamScope ?? null, source: 'body',
+        kind: 'observe', owner: event.textResponse ?? null, scope: event.textStreamScope ?? null, source: 'body',
       })
       if (!response.accepted) return null
       const messageId = textStreamMessageId(event.messageId)
@@ -1099,7 +1099,7 @@ export function applyKeeperStreamEvent(
         toolOccurrenceId,
         name: toolName,
         agentCoreBlockIndex,
-      })
+      }, source.kind !== 'direct' && source.observationOnly ? 'observation' : 'active')
       // Insert above the live assistant bubble so the final reply text
       // stays the last entry in the transcript.
       insertThreadEntryBefore(keeperName, assistantEntryId, {
@@ -1406,7 +1406,9 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_START') {
         const response = admitResponseEvent(keeperName, assistantEntryId, {
-          kind: 'observe', source: 'header', scope: event.value.stream_scope, owner: null,
+          kind: 'observe', source: 'header', scope: event.value.stream_scope,
+          owner: event.value.content_generation === undefined ? null
+            : { content_generation: event.value.content_generation, stream_scope: event.value.stream_scope },
         })
         if (!response.accepted) return null
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
@@ -1429,6 +1431,9 @@ export function applyKeeperStreamEvent(
         }
         if (usage?.costUsd !== undefined && current?.costUsd == null) patch.costUsd = usage.costUsd
         if (Object.keys(patch).length > 0) mergeAssistantStreamDetails(keeperName, assistantEntryId, patch)
+        // An observation of a settled autonomous/operation turn must not reopen
+        // its delivery: recovered metadata is additive evidence, not a new stream.
+        if (source.kind !== 'direct' && source.observationOnly) return null
         setAssistantStreamState(
           keeperName,
           assistantEntryId,
@@ -1441,7 +1446,9 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_DELTA') {
         if (!admitResponseEvent(keeperName, assistantEntryId, {
-          kind: 'observe', source: 'details', scope: event.value.stream_scope, owner: null,
+          kind: 'observe', source: 'details', scope: event.value.stream_scope,
+          owner: event.value.content_generation === undefined ? null
+            : { content_generation: event.value.content_generation, stream_scope: event.value.stream_scope },
         }).accepted) return null
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
@@ -1452,7 +1459,7 @@ export function applyKeeperStreamEvent(
         if (usage) patch.usage = usage
         if (usage?.costUsd !== undefined) patch.costUsd = usage.costUsd
         if (Object.keys(patch).length > 0) mergeAssistantStreamDetails(keeperName, assistantEntryId, patch)
-        if (stopReason) markFinalizingIfLive('KEEPER_STREAM_MESSAGE_DELTA')
+        if (stopReason && !(source.kind !== 'direct' && source.observationOnly)) markFinalizingIfLive('KEEPER_STREAM_MESSAGE_DELTA')
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_STOP') {
@@ -1462,7 +1469,7 @@ export function applyKeeperStreamEvent(
         if (owner && admitted && compareStreamResponseOwners(owner, admitted) !== 0) return null
         if (!admitResponseEvent(keeperName, assistantEntryId, { kind: 'stop', owner: event.value }).accepted) return null
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        markFinalizingIfLive('KEEPER_STREAM_MESSAGE_STOP')
+        if (!(source.kind !== 'direct' && source.observationOnly)) markFinalizingIfLive('KEEPER_STREAM_MESSAGE_STOP')
         return null
       }
       if (event.name === 'KEEPER_STREAM_PING') return null

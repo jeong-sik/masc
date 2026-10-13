@@ -1264,6 +1264,7 @@ export function appendAssistantToolTraceStep(
     ts?: string
     agentCoreBlockIndex?: number
   },
+  activity: 'active' | 'observation' = 'active',
 ): void {
   const toolCallId = nonBlankToolCallId(step.toolCallId) ?? undefined
   const toolOccurrenceId = step.toolOccurrenceId.trim()
@@ -1305,8 +1306,9 @@ export function appendAssistantToolTraceStep(
     return {
       ...entry,
       traceSteps,
-      streamState: 'streaming',
-      delivery: 'streaming',
+      // An observation of an already-settled turn adds a durable tool fact but
+      // must not reopen its delivery; only a live stream flips to streaming.
+      ...(activity === 'active' ? { streamState: 'streaming' as const, delivery: 'streaming' as const } : {}),
     }
   })
 }

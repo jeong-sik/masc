@@ -168,6 +168,7 @@ let measure_completion_request_staged
   let config = request.config in
   if supports_completion_request_measurement config
   then (
+    let config = Provider_config.freeze_for_request config in
     let output_token_receipt =
       Backend_anthropic.required_output_token_receipt config
       |> Result.map_error (fun error ->

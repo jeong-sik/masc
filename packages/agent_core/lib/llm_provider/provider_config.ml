@@ -35,6 +35,13 @@ type credential_source =
   | Static_credential
   | Refreshable_credential of (unit -> (Secret.t, credential_refresh_error) result)
 
+type request_policy_snapshot =
+  { snapshot_kind : provider_kind
+  ; snapshot_provider_id : string option
+  ; snapshot_model_id : string
+  ; policy : Capabilities.request_policy
+  }
+
 type t =
   { kind : provider_kind
   ; provider_id : string option
@@ -77,6 +84,7 @@ type t =
   ; cache_extended_ttl : bool
   ; supports_structured_output_override : bool option
   ; model_capabilities_override : Capabilities.capabilities option
+  ; request_policy_snapshot : request_policy_snapshot option
   ; keep_alive : string option
   ; return_progress : bool
   ; internal_model_rotation_count : int option
@@ -183,6 +191,7 @@ let make
   ; cache_extended_ttl
   ; supports_structured_output_override
   ; model_capabilities_override
+  ; request_policy_snapshot = None
   ; keep_alive
   ; return_progress
   ; internal_model_rotation_count
@@ -213,25 +222,71 @@ let capability_provider_label (config : t) =
   Option.value config.provider_id ~default:(Provider_kind.to_string config.kind)
 ;;
 
+let matching_request_policy (config : t) =
+  match config.request_policy_snapshot with
+  | Some snapshot
+    when snapshot.snapshot_kind = config.kind
+         && snapshot.snapshot_provider_id = config.provider_id
+         && String.equal snapshot.snapshot_model_id config.model_id -> Some snapshot.policy
+  | Some _ | None -> None
+;;
+
+let allow_bare_capability_fallback (config : t) =
+  match config.provider_id, config.kind with
+  | Some _, _ | None, OpenAI_compat -> false
+  | None, (Anthropic | Kimi | Ollama | Gemini | Glm) -> true
+;;
+
+let resolve_request_policy (config : t) =
+  Capabilities.resolve_request_policy
+    ~wire:config.kind ~allow_bare_fallback:(allow_bare_capability_fallback config)
+    ~provider_label:(capability_provider_label config)
+    ~anthropic_provider_label:config.provider_id ~model_id:config.model_id
+;;
+
+let freeze_for_request (config : t) =
+  match matching_request_policy config with
+  | Some _ -> config
+  | None ->
+    let policy = resolve_request_policy config in
+    { config with request_policy_snapshot = Some
+        { snapshot_kind = config.kind; snapshot_provider_id = config.provider_id
+        ; snapshot_model_id = config.model_id; policy } }
+;;
+
 let capabilities_for_config_model (config : t) =
   match config.model_capabilities_override with
   | Some caps -> Some caps
   | None ->
-    let provider_label = capability_provider_label config in
-    let allow_bare_fallback =
-      match config.provider_id, config.kind with
-      | Some _, _ | None, OpenAI_compat -> false
-      | None, (Anthropic | Kimi | Ollama | Gemini | Glm) -> true
-    in
-    (* The label says which provider; [kind] says which of that provider's
-       wires this config resolved to. Both are needed: a provider that admits
-       two wires ([[providers]] identity_kinds) can differ between them in what
-       a request can express, and the label alone cannot tell them apart. *)
-    Capabilities.for_provider_model_id
-      ~wire:(Some config.kind)
-      ~allow_bare_fallback
-      ~provider_label
-      ~model_id:config.model_id
+    (match matching_request_policy config with
+     | Some policy -> Capabilities.request_policy_capabilities policy
+     | None ->
+       let provider_label = capability_provider_label config in
+       let allow_bare_fallback = allow_bare_capability_fallback config in
+       (* The label says which provider; [kind] says which of that provider's
+          wires this config resolved to. Both are needed: a provider that admits
+          two wires ([[providers]] identity_kinds) can differ between them in what
+          a request can express, and the label alone cannot tell them apart. *)
+       Capabilities.for_provider_model_id
+         ~wire:(Some config.kind)
+         ~allow_bare_fallback
+         ~provider_label
+         ~model_id:config.model_id)
+;;
+
+let anthropic_thinking_control (config : t) =
+  match config.kind with
+  | Anthropic ->
+    (match matching_request_policy config with
+     | Some policy -> Capabilities.request_policy_anthropic_thinking_control policy
+     | None ->
+       let scoped = Option.bind config.provider_id (fun provider_label ->
+         Capabilities.anthropic_thinking_control_for_provider_model_id
+           ~provider_label ~model_id:config.model_id) in
+       (match scoped with
+        | Some _ -> scoped
+        | None -> Capabilities.anthropic_thinking_control_for_model_id config.model_id))
+  | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> None
 ;;
 
 let context_window (config : t) =

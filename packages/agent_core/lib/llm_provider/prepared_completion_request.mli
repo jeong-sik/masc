@@ -29,6 +29,9 @@ type fit_error =
       ; reason : Serving_constraint.admission_error
       }
 
+(** Capture provider/model policy once for this request, including missing
+    capability and Anthropic thinking-policy lookups. The snapshot follows
+    serialization, measurement, admission, dispatch, and response provenance. *)
 val prepare
   :  config:Provider_config.t
   -> messages:Types.message list

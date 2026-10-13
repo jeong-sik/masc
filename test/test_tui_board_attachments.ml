@@ -374,9 +374,8 @@ let test_a_file_over_the_limit_is_not_uploaded () =
     Alcotest.(check (list string)) "no upload was attempted" [] (sent ()))
 ;;
 
-(* A file that grows past the limit after it was looked at is cut off by the
-   read itself: the limit is a bound on what is read, not a number checked
-   once. *)
+(* At send time the limit is a bound on what is read, not a size looked up
+   first: the read itself stops one byte past it and refuses the file. *)
 let test_the_read_stops_at_the_limit () =
   with_temp_files [ "0123456789" ] (fun paths ->
     let path = List.hd paths in

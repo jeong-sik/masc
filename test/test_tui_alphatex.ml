@@ -307,19 +307,45 @@ let test_a_sign_with_no_bar () =
   check_failure "a closer on an empty bar" ":4 0.6 | \\rc 2 | 3.6" Repeat_without_bar;
   check_failure "endings on an empty bar" "\\ae 1 | :4 0.6" Repeat_without_bar
 
-(* A failure's sentence is printed, so the author's text in it never reaches
-   the terminal as control bytes. *)
+(* A failure's sentence quotes the author's text and is printed on the pane,
+   so whatever the text held, the sentence holds nothing a terminal acts on:
+   no C0 byte or DEL, no C1 control in UTF-8 (an xterm reads U+009B as CSI),
+   and no bidi control that reorders what the reader sees. *)
+let acts_on_a_terminal text =
+  let length = String.length text in
+  let at index = Char.code text.[index] in
+  let rec scan index =
+    index < length
+    && (at index < 0x20
+        || at index = 0x7f
+        || (at index = 0xc2 && index + 1 < length && at (index + 1) >= 0x80
+            && at (index + 1) <= 0x9f)
+        || (at index = 0xe2 && index + 2 < length && at (index + 1) = 0x80
+            && at (index + 2) >= 0xaa && at (index + 2) <= 0xae)
+        || (at index = 0xe2 && index + 2 < length && at (index + 1) = 0x81
+            && at (index + 2) >= 0xa6 && at (index + 2) <= 0xa9)
+        || scan (index + 1))
+  in
+  scan 0
+
 let test_a_failure_sentence_holds_no_control_bytes () =
+  let refuse sentence =
+    Alcotest.(check bool)
+      (Printf.sprintf "nothing a terminal acts on in %S" sentence)
+      false
+      (acts_on_a_terminal sentence)
+  in
   List.iter
-    (fun word ->
-      String.iter
-        (fun char ->
-          Alcotest.(check bool)
-            (Printf.sprintf "no control byte for %S" word)
-            true
-            (Char.code char >= 0x20 && char <> '\x7f'))
-        (Score.failure_text (Score.Not_a_note word)))
-    [ "a\000b"; "a\x01b"; "a\x7fb"; "a\nb"; "tab\there" ]
+    (fun source ->
+      match Score.read source with
+      | Ok _ -> Alcotest.failf "%S was read as a score" source
+      | Error failure -> refuse (Score.failure_text failure))
+    [ ":4 3.1 \027[2Jboom"; ":4\027 0.6"; ":4 0.6{tu \0273}"; ":4 0.6 a\127b"
+    ; ":4 0.6 a\xc2\x9bb"; ":4 0.6 a\xe2\x80\xaeb" ];
+  List.iter
+    (fun word -> refuse (Score.failure_text (Score.Not_a_note word)))
+    [ "a\000b"; "a\x01b"; "a\x7fb"; "a\nb"; "tab\there"; "a\xc2\x9bb"; "a\xe2\x80\xaeb"
+    ; "a\xe2\x81\xa6b" ]
 
 let () =
   Alcotest.run "tui-alphatex"

@@ -131,6 +131,7 @@ let test_unprintable_name_rejected () =
     ; "a name with a path separator", "riffs/take1.mid"
     ; "a name with a backslash", "riffs\\take1.mid"
     ; "the parent directory", ".."
+    ; "a name that is not UTF-8", "riff\xff\xfe.gp5"
     ]
 ;;
 

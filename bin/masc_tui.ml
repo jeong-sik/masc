@@ -14629,11 +14629,11 @@ let open_board_composer_editor state ~restore ~reenter =
           end )
 ;;
 
-(* Stage one local file for the post. Kind and media type come from the
-   file's name on purpose: a keeper-exported file's stored mime is always
-   application/octet-stream, so the extension is the only honest signal. A
-   path that does not name a plain file keeps the input open with the error
-   showing, so the typing can be fixed rather than re-entered. *)
+(* Stage one local file for the post. Its kind comes from the file's name:
+   the store keeps nothing that says what a file is, so the extension is the
+   only signal. A path that does not name a plain file keeps the input open
+   with the error showing, so the typing can be fixed rather than
+   re-entered. *)
 let stage_board_compose_path state raw =
   (* A shell would have expanded a leading [~]; nothing does here, and a
      path typed by hand usually starts with one. *)

@@ -13,8 +13,8 @@ val max_name_bytes : int
 (** The longest [name] an entry may carry, in bytes: a file name's length. *)
 
 type unresolved = { kind : kind; source : source; name : string option }
-(** [name] is the file's name, optional: non-empty, on one line (no control
-    characters), no path separator, not [.] or [..], at most
+(** [name] is the file's name, optional: non-empty valid UTF-8, on one line
+    (no control characters), no path separator, not [.] or [..], at most
     {!max_name_bytes}. A reader prints it and the dashboard saves the
     download under it. [None] means none was given; readers fall back to the
     kind and the url or shortened sha256. *)

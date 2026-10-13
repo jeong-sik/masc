@@ -1271,11 +1271,13 @@
  (libraries masc_tui_message_layout))
 
 ;; alphaTex text → score: measures of beats on their counts, or why the text
-;; is not a score. No pane and no drawing; the tab below is its reader.
+;; is not a score. No pane and no drawing; the tab below is its reader. masc
+;; is linked for the one terminal sanitizer a failure's quote goes through.
 (library
  (name masc_tui_alphatex_score)
  (wrapped false)
- (modules masc_tui_alphatex_score))
+ (modules masc_tui_alphatex_score)
+ (libraries masc))
 
 ;; Score → ASCII tablature laid across a pane.
 (library

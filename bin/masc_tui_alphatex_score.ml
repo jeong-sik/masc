@@ -70,20 +70,23 @@ type t = {
 let quoted_limit = 24
 
 let quoted text =
-  (* The text is the author's, and the sentence is printed: a control byte in
-     it is shown as a mark, never sent to the terminal. *)
-  let text =
-    String.map (fun char -> if Char.code char < 0x20 || char = '\x7f' then '?' else char) text
+  let shown =
+    if String.length text <= quoted_limit then text
+    else begin
+      (* Back off a UTF-8 continuation byte so the cut lands between characters. *)
+      let rec boundary index =
+        if index > 0 && Char.code text.[index] land 0xC0 = 0x80 then boundary (index - 1)
+        else index
+      in
+      String.sub text 0 (boundary quoted_limit) ^ "\xe2\x80\xa6"
+    end
   in
-  if String.length text <= quoted_limit then text
-  else begin
-    (* Back off a UTF-8 continuation byte so the cut lands between characters. *)
-    let rec boundary index =
-      if index > 0 && Char.code text.[index] land 0xC0 = 0x80 then boundary (index - 1)
-      else index
-    in
-    String.sub text 0 (boundary quoted_limit) ^ "\xe2\x80\xa6"
-  end
+  (* The text is the author's, and the sentence is printed. The terminal
+     sanitizer every other TUI row uses escapes C0, DEL, C1 (raw and UTF-8),
+     malformed UTF-8 and invisible code points such as bidi controls. It runs
+     after the cut, so the limit counts the author's characters, not the
+     escapes. *)
+  Masc.Tui_terminal_text.sanitize_terminal_text shown
 
 let failure_text = function
   | Unclosed Comment -> "an unclosed comment"

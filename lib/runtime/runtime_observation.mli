@@ -45,7 +45,8 @@ type request_context = {
 type runtime_observation = {
   runtime_id : string;
   selected_model : string option;
-  selected_model_raw : string option;
+      (** The model the runtime answered with, unredacted. Public surfaces
+          redact it at their own JSON emitter. *)
   attempts : runtime_attempt list;
   attempt_details_available : bool;
   attempt_details_source : string;

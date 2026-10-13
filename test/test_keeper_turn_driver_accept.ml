@@ -1829,7 +1829,7 @@ let test_official_failure_observation_reaches_receipt () =
   | Some observed ->
     Alcotest.(check string) "runtime identity" "antigravity.test" observed.runtime_id;
     Alcotest.(check bool) "no model response invented" true
-      (Option.is_none observed.selected_model_raw);
+      (Option.is_none observed.selected_model);
     match observed.attempts with
     | [attempt] ->
       Alcotest.(check (option int)) "measured duration" (Some 2000) attempt.latency_ms;

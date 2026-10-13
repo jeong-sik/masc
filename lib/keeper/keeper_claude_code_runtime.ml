@@ -1499,7 +1499,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
            let runtime_observation =
              Runtime_observation.runtime_observation_with_metrics
                ~runtime_id
-               ~selected_model_raw:(Some turn.model)
+               ~selected_model:(Some turn.model)
                ~capture
                ~attempt_details_source:"claude_code"
                ~agent_core_internal_runtime_allowed:false

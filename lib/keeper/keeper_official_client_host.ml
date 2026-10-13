@@ -232,7 +232,7 @@ let host_stop_result
     let runtime_observation =
       Runtime_observation.runtime_observation_with_metrics
         ~runtime_id
-        ~selected_model_raw:(Some model)
+        ~selected_model:(Some model)
         ~capture
         ~attempt_details_source:"official_client_host_stop"
         ~agent_core_internal_runtime_allowed:false

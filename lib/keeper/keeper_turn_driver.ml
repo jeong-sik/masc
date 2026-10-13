@@ -143,7 +143,7 @@ let official_client_observation ~runtime_id ~model_id ~prompt_sent_at ~now = fun
         ~latency_ms:(Some (int_of_float (max 0.0 (now -. started_at) *. 1000.0)))
         ~error:(Some (Agent_core.Error.to_string error));
       Runtime_observation.runtime_observation_with_metrics
-        ~runtime_id ~selected_model_raw:None ~capture
+        ~runtime_id ~selected_model:None ~capture
         ~attempt_details_source:"official_client_terminal_error"
         ~agent_core_internal_runtime_allowed:false ()) prompt_sent_at
 ;;

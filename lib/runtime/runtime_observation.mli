@@ -45,8 +45,9 @@ type request_context = {
 type runtime_observation = {
   runtime_id : string;
   selected_model : string option;
-      (** The model the runtime answered with, unredacted. Public surfaces
-          redact it at their own JSON emitter. *)
+      (** The model the runtime answered with, unredacted. The redacted
+          metrics JSON writes it as [null]; the keeper composite view shows
+          it as is. *)
   attempts : runtime_attempt list;
   attempt_details_available : bool;
   attempt_details_source : string;
@@ -116,7 +117,7 @@ val runtime_metrics_for_candidates :
 
 val runtime_observation_with_metrics :
   runtime_id:string ->
-  selected_model_raw:string option ->
+  selected_model:string option ->
   capture:runtime_metrics_capture ->
   ?attempt_details_source:string ->
   ?agent_core_internal_runtime_allowed:bool ->

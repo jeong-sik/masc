@@ -51,7 +51,7 @@ let public_runtime_model_label =
 (* ================================================================ *)
 
 let runtime_observation_of_candidates ~runtime_id
-    ~(selected_model_raw : string option)
+    ~(selected_model : string option)
     ?(attempts = [])
     ?(attempt_details_available = false)
     ?(attempt_details_source = "opaque_named_runtime")
@@ -63,16 +63,15 @@ let runtime_observation_of_candidates ~runtime_id
     ?request_context
     ?reported_context_window
     () : runtime_observation =
-  (* The caller-supplied raw model attribution is the observation's
-     [selected_model]. Without it, success rows lose model attribution at
+  (* Without [selected_model], success rows lose model attribution at
      construction time and downstream consumers (model_inference_metrics
      parse_telemetry_entry, execution receipts, composite observer) drop the
-     row as Missing_success_model. Public-surface redaction to
-     [public_runtime_model_label] happens at the redacted JSON emitter
-     layer, not at observation construction. *)
+     row as Missing_success_model. Nothing is redacted here; the redacted
+     JSON emitters write it as null and attempt model ids as
+     [public_runtime_model_label]. *)
   {
     runtime_id;
-    selected_model = selected_model_raw;
+    selected_model;
     attempts;
     attempt_details_available;
     attempt_details_source;
@@ -236,7 +235,7 @@ let runtime_metrics_for_candidates () =
   (capture, metrics)
 
 let runtime_observation_with_metrics ~runtime_id
-    ~(selected_model_raw : string option) ~(capture : runtime_metrics_capture)
+    ~(selected_model : string option) ~(capture : runtime_metrics_capture)
     ?(attempt_details_source = "agent_core_metrics_callbacks")
     ?(agent_core_internal_runtime_allowed = false)
     ?(usage_scope = Runtime_usage_scope.Usage_scope_unavailable)
@@ -246,7 +245,7 @@ let runtime_observation_with_metrics ~runtime_id
   let ttfrc, chunk_count, chunk_avg =
     streaming_metrics_of_capture capture.streaming
   in
-  runtime_observation_of_candidates ~runtime_id ~selected_model_raw
+  runtime_observation_of_candidates ~runtime_id ~selected_model
     ~attempts:(List.rev capture.attempts_rev)
     ~attempt_details_available:true
     ~attempt_details_source

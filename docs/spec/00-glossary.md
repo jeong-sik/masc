@@ -58,7 +58,7 @@ status: reference
   없다는 것은 성공을 뜻하지 않는다. 실패 관찰값은 `runtime_id`를 보존하고,
   지연 시간은 `prompt_sent_at`부터 잰다. 시도의 `model_id`에는 실제 모델 id 대신
   `Boundary_redaction.runtime_model_label`(`runtime`)을 기록하며,
-  `selected_model`과 `selected_model_raw`는 모두 `None`이다. 따라서 이 실패
+  `selected_model`은 `None`이다. 따라서 이 실패
   관찰값만으로 실제 모델을 식별할 수는 없다.
   → [Keeper_turn_driver.official_client_observation](../../lib/keeper/keeper_turn_driver.mli) ·
   [Runtime_observation](../../lib/runtime/runtime_observation.ml)

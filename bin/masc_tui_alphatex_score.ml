@@ -551,7 +551,15 @@ let collect_endings tokens =
         match endings_of_members members with
         | Some endings -> collect (List.rev_append endings found) rest
         | None -> Error (Alternate_ending_out_of_range inner))
-    | _ -> Ok (List.rev found, tokens)
+    | []
+    | ( Tk_word _
+      | Tk_chord (_, (None | Some _))
+      | Tk_directive _
+      | Tk_unknown_directive _
+      | Tk_quoted
+      | Tk_effect _
+      | Tk_bar )
+      :: _ -> Ok (List.rev found, tokens)
   in
   collect [] tokens
 
@@ -665,7 +673,14 @@ let read source =
             | Ok count ->
                 step { state with b_marks = { state.b_marks with m_end = Some count } } after
             | Error failure -> Error failure)
-        | _ -> Error (Missing_argument Repeat_count))
+        | []
+        | ( Tk_directive _
+          | Tk_unknown_directive _
+          | Tk_quoted
+          | Tk_effect _
+          | Tk_chord _
+          | Tk_bar )
+          :: _ -> Error (Missing_argument Repeat_count))
     | Tk_directive Alternate_endings :: rest -> (
         match collect_endings rest with
         | Error failure -> Error failure

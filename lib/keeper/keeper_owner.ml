@@ -1379,7 +1379,14 @@ let start
                Error (Chat_operation_store.Integrity_error "deferred operation is not queued")))
       | Some operation_id, Operation_succeeded { outcome_ref } ->
         Result.bind (settle_native_call ~operation_id ~policy:(policy ())) (function
-          | Native_call_left_for_restart_recovery -> Ok ()
+          | Native_call_left_for_restart_recovery ->
+            (* Not an error: the runner ended without settling the native
+               call, so the row stays Running and holds its queue slot until
+               a restart resumes it. Say so instead of stopping quietly. *)
+            Log.Keeper.warn ~keeper_name:t.keeper_name
+              "keeper_owner: operation %s left Running with an active native call after a reported success; restart will resume it"
+              (Chat_operation.Operation_id.to_string operation_id);
+            Ok ()
           | Native_call_settleable ->
             run_operation_command t ~label:"succeed running Keeper chat operation" (fun () ->
               Chat_operation_store.succeed_running
@@ -1397,7 +1404,14 @@ let start
               ~outcome_ref:(Some outcome_ref))
       | Some operation_id, Operation_failed { kind; detail; outcome_ref } ->
         Result.bind (settle_native_call ~operation_id ~policy:(policy ())) (function
-          | Native_call_left_for_restart_recovery -> Ok ()
+          | Native_call_left_for_restart_recovery ->
+            (* Not an error: the runner ended without settling the native
+               call, so the row stays Running and holds its queue slot until
+               a restart resumes it. Say so instead of stopping quietly. *)
+            Log.Keeper.warn ~keeper_name:t.keeper_name
+              "keeper_owner: operation %s left Running with an active native call after a reported failure; restart will resume it"
+              (Chat_operation.Operation_id.to_string operation_id);
+            Ok ()
           | Native_call_settleable
           | Native_call_effect_unknown
           | Native_call_closed_without_disposition ->

@@ -3,7 +3,7 @@ module StringMap = Set_util.StringMap
 (** Eval_calibration — Verdict logging and evaluator calibration loop.
 
     Persists every anti-rationalization verdict to a date-partitioned JSONL
-    store ([data/verdicts/YYYY-MM/DD.jsonl]).  Supports human-label
+    store ([.masc/verdicts/YYYY-MM/DD.jsonl]).  Supports human-label
     attachment for ground-truth tracking and divergence analysis to
     generate few-shot calibration examples for prompt improvement.
 
@@ -103,7 +103,7 @@ type calibration_example = {
 let store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 
 let base_path () =
-  Filename.concat (Env_config_core.base_path ()) "data/verdicts"
+  Config_dir_resolver.verdicts_dir ~base_path:(Env_config_core.base_path ())
 
 let rec get_store () =
   match Atomic.get store_ref with

@@ -220,12 +220,7 @@ let get_or_create_runtime () : active_runtime =
       match store_bound_to ~base_path current with
       | Some store -> activate current store
       | None ->
-        (* RFC-0121: layout SSOT via [Config_dir_resolver.data_dir]. *)
-        let dir =
-          Filename.concat
-            (Config_dir_resolver.data_dir ~base_path)
-            "tool-events"
-        in
+        let dir = Config_dir_resolver.tool_events_dir ~base_path in
         Fs_compat.mkdir_p dir;
         let store = Dated_jsonl.create ~base_dir:dir () in
         let rebound = Option.is_some current.store in

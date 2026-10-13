@@ -46,7 +46,7 @@ let failure_metric site =
     ()
 
 let append_raw_tool_event json =
-  let dir = Filename.concat (Env_config.base_path ()) "data/tool-events" in
+  let dir = Filename.concat (Env_config.base_path ()) ".masc/tool-events" in
   Fs_compat.mkdir_p dir;
   let store = Dated_jsonl.create ~base_dir:dir () in
   Dated_jsonl.append store json
@@ -83,8 +83,10 @@ let test_store_follows_the_base_path () =
             ~reason:"second workspace"
             ()
         in
-        check bool "the second workspace holds the store" true
-          (Sys.file_exists (Filename.concat second "data/tool-events"));
+        check bool "the second workspace holds the store under .masc" true
+          (Sys.file_exists (Filename.concat second ".masc/tool-events"));
+        check bool "nothing is written beside .masc" false
+          (Sys.file_exists (Filename.concat second "data"));
         (match Tool_assignment_telemetry.find_latest_assignment_id ~agent_id:"agent-move" with
          | Some id -> check string "index restarted with the new workspace" assignment_id id
          | None -> fail "the new workspace's assignment is not indexed");

@@ -78,7 +78,7 @@ let trim_recent (type a) max_items (values : a list) : a list =
 
 
 let wake_payload_store_base_dir () =
-  Filename.concat (Env_config.base_path ()) "data/keeper-wake-payload"
+  Config_dir_resolver.keeper_wake_payload_dir ~base_path:(Env_config.base_path ())
 ;;
 
 let get_or_create_store ~store_ref ~store_mu base_dir_fn =

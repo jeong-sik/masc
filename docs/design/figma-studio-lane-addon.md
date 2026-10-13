@@ -7,7 +7,12 @@ The experimental `addons/figma-studio` package has been withdrawn from the
 shipping tree. Its peer relay required MASC tool names, credentials and worker
 protocols inside the Figma repository. Removing that experiment does not remove
 MASC's generic Lane Addon framework, Apple microVM backend or Figma OAuth Identity.
-Existing installations and private state are not automatically deleted.
+Existing installations and private state are not automatically deleted. Operators
+who installed the experiment should identify its Addon installation/binding,
+owned state volume (`studio.sqlite3`), relay configuration and imported Studio
+development Plugin. Retire only credentials dedicated to that experiment after
+checking whether the MASC relay token or Figma PAT is shared. Uninstalling the
+experiment and deleting its private state require a separate operator decision.
 
 The replacement experiments remain for reference in
 [MASC #42784](https://github.com/jeong-sik/masc/pull/42784) and
@@ -16,6 +21,8 @@ not ready to install. Source and fixture results do not establish actual Figma
 canvas behavior, installed MASC integration or visual fidelity. Review also found
 that stale Plugin sessions could accept work and later execute delayed edits.
 That lifecycle problem must be resolved before any replacement is admitted.
+See the original [MASC lifecycle review](https://github.com/jeong-sik/masc/pull/42784#pullrequestreview-5501882081)
+and [Figma lifecycle review](https://github.com/jeong-sik/figma-mcp/pull/194#pullrequestreview-5501881690).
 
 ## Proposed dependency boundary
 
@@ -70,12 +77,14 @@ redesign, not a list of implemented features. The next design review must cover:
 
 ## Release proposal
 
-Propose the coupling removal for **v0.53.0**, following the published v0.52.0.
-This is a candidate scope only; release owners assign the version and apply the
-normal release checks. Do not advertise Figma Studio creation, implementation or
-an independent service as delivered by that cleanup release.
+The cleanup is proposed for the **v0.54.0** development scope following the
+already-cut v0.53.0 candidate. Candidate `22395227d5addda383a80e8d549e7d366b7a03ee`
+and published v0.52.0 contain none of the withdrawn Studio package or design
+files (only the pre-existing versioned roadmap). Do not reopen that candidate
+for this cleanup, or advertise withdrawal as removal of a released feature.
+Release owners retain version assignment and normal release checks.
 
-Full Studio functionality belongs in a later **0.xx.0** minor release only after
-the design is reviewed, its capability gaps are explicit and both real user
+Full Studio functionality has **no assigned release**. A later **0.xx.0** minor
+may include it after design review, explicit capability gaps and both real user
 journeys pass. No version bump, tag, runtime installation or private-state cleanup
 is authorized by this proposal.

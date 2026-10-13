@@ -7229,6 +7229,14 @@ let verification_evidence_lines (state : state) ~width task_id =
     |> List.mapi (fun index line ->
            Ansi.reset, (if index = 0 then prefix else "      ") ^ line)
   in
+  (* The links an item carries, one row each under it. Printed as text: an
+     OSC 8 hyperlink would be counted as printable cells by the wrap and
+     truncation code, which treats only CSI as zero-width. *)
+  let link_rows item =
+    Masc_tui_evidence_link.of_item item
+    |> List.concat_map (fun link ->
+           wrap ~prefix:"      link: " (Masc_tui_evidence_link.text link))
+  in
   let rows =
     match state.verification_evidence with
     | Some (id, result) when String.equal id task_id -> (
@@ -7238,7 +7246,7 @@ let verification_evidence_lines (state : state) ~width task_id =
         | Ok (Masc.Tui_decode.Evidence_items items) ->
             List.concat_map
               (fun (item : Masc.Tui_decode.verification_evidence_item) ->
-                match item with
+                (match item with
                 | Masc.Tui_decode.Ev_collaboration {ev_reference; ev_content; ev_sha256} ->
                     ((Ansi.reset, Printf.sprintf "    - submitted source %s (sha256 %s)"
                         (Terminal_text.single_line ev_reference) ev_sha256)
@@ -7264,6 +7272,7 @@ let verification_evidence_lines (state : state) ~width task_id =
                       (Printf.sprintf "%s %s"
                          (Option.value ev_u_reference ~default:"(no reference)")
                          ev_u_reason))
+                @ link_rows item)
               items
         | Ok (Masc.Tui_decode.Evidence_access_unavailable reason) ->
             (* The producer's reason is already the evidence access verdict. *)

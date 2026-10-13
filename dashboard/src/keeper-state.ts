@@ -974,6 +974,8 @@ function normalizeHistoryEntry(
     approvalLifecycle,
     attachments,
     blocks,
+    ...(serverBlocks && role === 'assistant' ? { replyBlockSource: 'canonical_body' as const } : {}),
+    ...(!serverBlocks && blocks ? { replyTextProjection: Object.freeze({ offset: 0, length: blocks.length }) } : {}),
   }
 }
 
@@ -1156,6 +1158,8 @@ export function promoteAssistantTextToProgress(
       text: '',
       rawText: '',
       blocks: [],
+      replyTextProjection: undefined,
+      replyBlockSource: undefined,
       traceSteps: [...(entry.traceSteps ?? []), progress],
     }
   })
@@ -1434,6 +1438,7 @@ export function finalizeAssistantEntry(
     const next: KeeperConversationEntry = { ...entry, ...patch }
     if (next.role === 'assistant' && !next.blocks?.length && next.text) {
       next.blocks = parseTextToChatBlocks(next.text)
+      next.replyTextProjection = Object.freeze({ offset: 0, length: next.blocks.length })
     }
     return next
   })
@@ -1746,6 +1751,7 @@ function autonomousTurnEntry(
     text,
     rawText: message.content,
     blocks: blocks && blocks.length > 0 ? blocks : undefined,
+    ...(blocks && blocks.length > 0 ? { replyBlockSource: 'canonical_body' as const } : {}),
     traceSteps: traceSteps && traceSteps.length > 0 ? traceSteps : undefined,
     timestamp,
     delivery: message.content === null ? 'no_reply' : 'history',

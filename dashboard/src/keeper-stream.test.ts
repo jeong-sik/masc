@@ -7,6 +7,7 @@ import {
   _resetLiveSendRequestOwnersForTests,
   activeStreamRequestId,
   appendThreadEntry,
+  chatHistoryEntriesFromRest,
   mergeServerHistoryEntries,
   claimLiveSendRequest,
   clearActiveStream,
@@ -886,7 +887,55 @@ describe('Keeper operation stream projection', () => {
     expect(completed?.blocks?.some(block => block.t === 'status')).toBe(false)
     if (withContent) expect(completed?.blocks).toEqual([
       { t: 'thinking', content: 'exposed reasoning', redacted: false }, { t: 'attach', name: 'result.txt' },
+      { t: 'p', html: 'completed answer' },
     ])
+  })
+  it('rebuilds final prose while retaining exposed reasoning and attachments', () => {
+    assistantEntry()
+    keeperThreads.value = { sangsu: keeperThreads.value.sangsu!.map(entry => ({ ...entry,
+      replyTextProjection: { offset: 0, length: 1 },
+      blocks: [{ t: 'p' as const, html: 'old partial answer' },
+        { t: 'thinking' as const, content: 'reasoning', redacted: false }, { t: 'attach' as const, name: 'result.txt' }],
+    })) }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_REPLY_DETAILS',
+      value: { reply: 'final answer', turn_ref: 'turn-1', turn_outcome: 'visible_reply' } })
+    expect(keeperThreads.value.sangsu?.[0]?.blocks).toEqual([
+      { t: 'thinking', content: 'reasoning', redacted: false }, { t: 'attach', name: 'result.txt' },
+      { t: 'p', html: 'final answer' },
+    ])
+  })
+  it.each(['https://example.com/a.png', 'https://example.com/document'])('keeps final text projection idempotent for %s', (reply) => {
+    assistantEntry()
+    const details = { type: 'CUSTOM' as const, name: 'KEEPER_REPLY_DETAILS' as const,
+      value: { reply, turn_ref: 'turn-1', turn_outcome: 'visible_reply' as const } }
+    applyKeeperStreamEvent('sangsu', 'reply-1', details)
+    const first = keeperThreads.value.sangsu?.[0]?.blocks
+    applyKeeperStreamEvent('sangsu', 'reply-1', details)
+    expect(keeperThreads.value.sangsu?.[0]?.blocks).toEqual(first)
+  })
+  it.each([
+    ['committed answer', { t: 'p', html: 'committed answer' }],
+    ['https://example.com/a.png', { t: 'image', src: 'https://example.com/a.png' }],
+    ['https://example.com/document', { t: 'link', url: 'https://example.com/document', title: 'document' }],
+  ])('preserves canonical body blocks when final details replay for %s', (reply, block) => {
+    const entries = chatHistoryEntriesFromRest('sangsu', [{ id: 'reply-1', role: 'assistant', content: reply as string,
+      ts: 1, blocks: [block] }])
+    mergeServerHistoryEntries('sangsu', entries)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_REPLY_DETAILS',
+      value: { reply: 'late differing reply', turn_ref: 'turn-1', turn_outcome: 'visible_reply' } })
+    expect(keeperThreads.value.sangsu?.[0]?.text).toBe(reply)
+    expect(keeperThreads.value.sangsu?.[0]?.blocks).toEqual([block])
+  })
+  it('releases canonical body authority when a checkpoint continues into a new attempt', () => {
+    mergeServerHistoryEntries('sangsu', chatHistoryEntriesFromRest('sangsu', [{ id: 'reply-1', role: 'assistant',
+      content: '', ts: 1, blocks: [{ t: 'status', kind: 'continuation_checkpoint' }] }]))
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_CONTINUATION_CHECKPOINT',
+      value: { message: 'checkpoint', request_id: 'request-1' } })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_STARTED' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: null })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_REPLY_DETAILS',
+      value: { reply: 'new answer', turn_ref: 'turn-1', turn_outcome: 'visible_reply' } })
+    expect(keeperThreads.value.sangsu?.[0]).toMatchObject({ text: 'new answer', blocks: [{ t: 'p', html: 'new answer' }] })
   })
   it('preserves visible reply whitespace and SKILL-prefixed prose across deltas', () => {
     assistantEntry()

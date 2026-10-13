@@ -13,7 +13,7 @@ import {
   normalizeKeeperConversationDetails,
   normalizeKeeperExternalEffectTarget,
 } from './keeper-message'
-import { parseTextToChatBlocks } from './lib/chat-blocks'
+import { projectFinalReplyBlocks, producerReplyBlocks } from './lib/keeper-reply-block-projection'
 import type { KeeperChatStreamEvent } from './api'
 import { currentStoredTokenRevision } from './api/core'
 import type { KeeperConversationDetails, KeeperConversationEntry } from './types'
@@ -177,7 +177,9 @@ function resetUnfinishedRuntimeAttempt(
     text: '',
     rawText: '',
     runtimeAttempt,
-    blocks: (entry.blocks ?? []).filter(block => (
+    replyTextProjection: undefined,
+    replyBlockSource: undefined,
+    blocks: producerReplyBlocks(entry).filter(block => (
       block.t !== 'p' && block.t !== 'thinking'
     )),
     traceSteps: (entry.traceSteps ?? []).filter(step => step.kind === 'tool'),
@@ -699,6 +701,7 @@ function admitResponseEvent(
     ...current,
     responseState: decision.state,
     ...(decision.reopens ? {
+      replyBlockSource: undefined,
       streamState: 'opening' as const,
       details: current.details ? { ...current.details, providerMessageId: null, modelUsed: null,
         stopReason: null, usage: null, costUsd: null } : current.details,
@@ -1418,8 +1421,10 @@ export function applyKeeperStreamEvent(
           : ''
         updateThreadEntry(keeperName, assistantEntryId, entry => ({
           ...entry,
+          replyTextProjection: undefined,
+          replyBlockSource: undefined,
           blocks: [
-            ...(entry.blocks ?? []).filter(block => block.t !== 'status'),
+            ...producerReplyBlocks(entry).filter(block => block.t !== 'status'),
             { t: 'status', kind: 'continuation_checkpoint' },
           ],
           details: {
@@ -1483,7 +1488,9 @@ export function applyKeeperStreamEvent(
               costUsd: details.costUsd ?? entry.details?.costUsd ?? null,
               usage: details.usage ?? entry.details?.usage ?? null,
             }
-            const rawText = mergedDetails.replyText ?? entry.rawText ?? entry.text
+            const rawText = entry.replyBlockSource === 'canonical_body'
+              ? entry.rawText ?? entry.text
+              : mergedDetails.replyText ?? entry.rawText ?? entry.text
             if (keeperTurnOutcomeSuppressesReply(mergedDetails.turnOutcome)) {
               return {
                 ...entry,
@@ -1496,15 +1503,14 @@ export function applyKeeperStreamEvent(
               }
             }
             const text = rawText
-            const retainedBlocks = (entry.blocks ?? []).filter(block => block.t !== 'status')
-            const blocks = retainedBlocks.length ? retainedBlocks : parseTextToChatBlocks(text)
+            const projection = projectFinalReplyBlocks(entry, text)
             return {
               ...entry,
               details: mergedDetails,
               turnRef: mergedDetails.turnRef ?? entry.turnRef,
               rawText,
               text,
-              blocks,
+              ...projection,
             }
           })
         }

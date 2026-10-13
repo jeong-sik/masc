@@ -430,6 +430,23 @@ let test_runtime_toml_path_uses_explicit_base_path () =
       "/x/.masc/config/runtime.toml"
       (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:"/x"))
 
+let test_child_workspace_does_not_inherit_parent_config () =
+  let inherited =
+    [| "PATH=/bin"; "MASC_CONFIG_DIR=/mounted/read-only-config";
+       "MASC_BASE_PATH=/mounted/parent"; "MASC_CONFIG_DIR=/other/parent";
+       "MODEL_CREDENTIAL=value=with=equals" |]
+  in
+  let original = Array.copy inherited in
+  let child = Config_dir_resolver.environment_for_workspace
+      ~cwd:"/sandbox" ~base_path:"capture/.masc" ~env:inherited in
+  check (list string) "child uses the workspace it will validate and start"
+    [ "PATH=/bin"; "MODEL_CREDENTIAL=value=with=equals";
+      "MASC_BASE_PATH=/sandbox/capture";
+      "MASC_CONFIG_DIR=/sandbox/capture/.masc/config" ]
+    (Array.to_list child);
+  check (list string) "parent environment is unchanged"
+    (Array.to_list original) (Array.to_list inherited)
+
 let test_rfc0121_masc_root_agrees_with_common () =
   (* SSOT bridge — resolver helper must produce the same path as the
      pre-existing [Common] helper that callers historically used. *)
@@ -594,6 +611,8 @@ let () =
             test_rfc0121_repositories_toml;
           test_case "runtime.toml uses explicit workspace config root" `Quick
             test_runtime_toml_path_uses_explicit_base_path;
+          test_case "child workspace does not inherit parent config" `Quick
+            test_child_workspace_does_not_inherit_parent_config;
           test_case "masc_root agrees with Common" `Quick
             test_rfc0121_masc_root_agrees_with_common;
         ] );

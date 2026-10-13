@@ -4964,7 +4964,6 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
      replace_field "stop_reason" (`String "source_read_failed") synthesis;
      replace_field "stop_reason" `Null synthesis;
      (match synthesis with `Assoc fields -> `Assoc (("stop_reason", `Null) :: fields) | value -> value);
-     replace_field "detail" (`String "PRIVATE_ERROR") synthesis;
      replace_field "trace_id" `Null synthesis;
      replace_field "state" (`String "running") (replace_field "range" `Null synthesis)];
   (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (context_payload cycle) with

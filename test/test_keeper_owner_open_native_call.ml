@@ -2,7 +2,10 @@
    the cancelled call never reported a terminal disposition. These tests drive
    the Owner with an executor that leaves exactly that state behind and check
    what the Owner settles, what it keeps available, and what it leaves for the
-   next process. Assertions are on typed states, never on message text. *)
+   next process. An operator interrupt, a raised exception and a reported
+   success close the call as an unknown effect. A stopping Owner and a failure
+   the runner reports on its own leave it for the next process to resume.
+   Assertions are on typed states, never on message text. *)
 open Alcotest
 open Masc
 
@@ -138,6 +141,31 @@ let cancelled_by_turn =
     { kind = Chat_operation.Turn_cancelled; detail = cancelled_message; outcome_ref = None }
 ;;
 
+let interrupt_running owner id =
+  match owner_ok (Owner.interrupt_running_operation owner id) with
+  | Owner.Operation_interrupt_signalled -> ()
+  | Owner.Operation_not_current _ | Owner.Operation_settling
+  | Owner.Operation_maintenance_running | Owner.Operation_interrupt_failed _ ->
+    fail "the interrupt did not reach the running child"
+;;
+
+let is_unknown_effect = function
+  | Native.Terminal_unacknowledged (_, disposition) -> disposition = unknown_effect_disposition
+  | Native.No_native_call | Native.Active _ -> false
+;;
+
+let is_active = function
+  | Native.Active _ -> true
+  | Native.No_native_call | Native.Terminal_unacknowledged _ -> false
+;;
+
+let is_running (operation : Chat_operation.t) =
+  match operation.state with
+  | Chat_operation.Running _ -> true
+  | Chat_operation.Queued | Chat_operation.Succeeded _ | Chat_operation.Failed _
+  | Chat_operation.Cancelled _ -> false
+;;
+
 let fresh_store_path ~sw =
   let path = Filename.temp_file "keeper-owner-open-native-" ".sqlite3" in
   Unix.unlink path;
@@ -176,10 +204,10 @@ let submit owner id text =
           ~input:(operation_input text)))
 ;;
 
-(* The reported failure: an interrupted turn leaves an Active native call with
-   no terminal disposition. Settling that operation used to be refused as store
-   corruption, which fenced the whole Owner: a queued operation could not be
-   cancelled and nothing behind the stuck one could start. *)
+(* The reported failure: an operator interrupt leaves an Active native call
+   with no terminal disposition. Settling that operation used to be refused as
+   store corruption, which fenced the whole Owner: a queued operation could not
+   be cancelled and nothing behind the stuck one could start. *)
 let test_interrupted_active_call_settles_and_keeps_the_owner_available () =
   Eio_main.run @@ fun env ->
   let clock = env#clock in
@@ -187,6 +215,7 @@ let test_interrupted_active_call_settles_and_keeps_the_owner_available () =
   let owner_cell = ref None in
   let ready = ref true in
   let first = ref true in
+  let bound = ref false in
   let execute ~sw:_ ~keeper_name:_ ~claim =
     let operation = match owner_ok (claim ()) with
       | Some operation -> operation
@@ -197,7 +226,9 @@ let test_interrupted_active_call_settles_and_keeps_the_owner_available () =
       (* Hold the later operations queued until the test releases them. *)
       ready := false;
       bind_active_call (Option.get !owner_cell) operation;
-      cancelled_by_turn)
+      bound := true;
+      (* The interrupt fails this child's switch. *)
+      Eio.Fiber.await_cancel ())
     else Owner.Operation_succeeded { outcome_ref = "later" }
   in
   let owner =
@@ -209,17 +240,16 @@ let test_interrupted_active_call_settles_and_keeps_the_owner_available () =
   let cancelled = operation_id "open-native-cancelled" in
   let next = operation_id "open-native-next" in
   submit owner stuck "first";
-  wait_until ~clock ~what:"the first claim" (fun () -> not !first);
+  wait_until ~clock ~what:"the native call to bind" (fun () -> !bound);
   submit owner cancelled "to cancel";
   submit owner next "runs after";
+  interrupt_running owner stuck;
   let settled = await_terminal ~clock owner stuck in
   check bool "the interrupted operation fails as cancelled" true
     (failed_kind settled = Chat_operation.Turn_cancelled);
   check bool "the Owner is not fenced" false (Owner.operation_projection owner).store_unavailable;
   check bool "the unknown effect stays on record for an operator" true
-    (match native_state owner stuck with
-     | Native.Terminal_unacknowledged (_, disposition) -> disposition = unknown_effect_disposition
-     | Native.No_native_call | Native.Active _ -> false);
+    (is_unknown_effect (native_state owner stuck));
   (match owner_ok (Owner.cancel_queued_operation owner cancelled) with
    | { Chat_operation.state = Chat_operation.Cancelled _; _ } -> ()
    | operation -> fail ("queued cancel left " ^ Chat_operation.state_to_string operation.state));
@@ -231,6 +261,101 @@ let test_interrupted_active_call_settles_and_keeps_the_owner_available () =
      | Chat_operation.Succeeded _ -> true
      | Chat_operation.Queued | Chat_operation.Running _ | Chat_operation.Failed _
      | Chat_operation.Cancelled _ -> false)
+;;
+
+(* A runner that reports its own cancellation, without the Owner having
+   signalled it, also ends the operation: a cancelled call is not resumed. *)
+let test_runner_reported_cancellation_closes_the_call () =
+  Eio_main.run @@ fun env ->
+  let clock = env#clock in
+  Eio.Switch.run @@ fun sw ->
+  let owner_cell = ref None in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    let operation = match owner_ok (claim ()) with
+      | Some operation -> operation
+      | None -> fail "the executor claimed nothing" in
+    bind_active_call (Option.get !owner_cell) operation;
+    cancelled_by_turn
+  in
+  let owner =
+    start_owner ~sw ~path:(fresh_store_path ~sw) ~name:"open-native-reported"
+      ~runner:(runner ~ready:(ref true) execute)
+  in
+  owner_cell := Some owner;
+  let id = operation_id "open-native-reported" in
+  submit owner id "cancelled by the runner";
+  let settled = await_terminal ~clock owner id in
+  check bool "fails as cancelled" true (failed_kind settled = Chat_operation.Turn_cancelled);
+  check bool "the unknown effect stays on record" true (is_unknown_effect (native_state owner id))
+;;
+
+(* An exception out of the runner may have left a tool attempt unsettled, so the
+   call closes as an unknown effect. *)
+let test_raised_exception_closes_the_call () =
+  Eio_main.run @@ fun env ->
+  let clock = env#clock in
+  Eio.Switch.run @@ fun sw ->
+  let owner_cell = ref None in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    let operation = match owner_ok (claim ()) with
+      | Some operation -> operation
+      | None -> fail "the executor claimed nothing" in
+    bind_active_call (Option.get !owner_cell) operation;
+    failwith "runner raised after dispatch"
+  in
+  let owner =
+    start_owner ~sw ~path:(fresh_store_path ~sw) ~name:"open-native-raised"
+      ~runner:(runner ~ready:(ref true) execute)
+  in
+  owner_cell := Some owner;
+  let id = operation_id "open-native-raised" in
+  submit owner id "runner raises";
+  let settled = await_terminal ~clock owner id in
+  check bool "fails as an exception" true (failed_kind settled = Chat_operation.Turn_exception);
+  check bool "the unknown effect stays on record" true (is_unknown_effect (native_state owner id))
+;;
+
+(* A resumed call that fails before anything is dispatched, such as a
+   checkpoint that cannot be loaded, is the runner's own failure. The call is
+   untouched by this process, so it stays Active and resumable. Closing it as an
+   unknown effect would lose an operation no new attempt ran. *)
+let test_failure_before_dispatch_leaves_the_call_resumable () =
+  Eio_main.run @@ fun env ->
+  let clock = env#clock in
+  Eio.Switch.run @@ fun sw ->
+  let owner_cell = ref None in
+  let ready = ref true in
+  let bound = ref false in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    let operation = match owner_ok (claim ()) with
+      | Some operation -> operation
+      | None -> fail "the executor claimed nothing" in
+    ready := false;
+    bind_active_call (Option.get !owner_cell) operation;
+    bound := true;
+    Owner.Operation_failed
+      { kind = Chat_operation.Turn_exception
+      ; detail = "continuation could not be loaded"
+      ; outcome_ref = None
+      }
+  in
+  let owner =
+    start_owner ~sw ~path:(fresh_store_path ~sw) ~name:"open-native-predispatch"
+      ~runner:(runner ~ready execute)
+  in
+  owner_cell := Some owner;
+  let id = operation_id "open-native-predispatch" in
+  let queued = operation_id "open-native-predispatch-queued" in
+  submit owner id "resumed call fails to load";
+  wait_until ~clock ~what:"the failure to be reported" (fun () ->
+    !bound && Option.is_none (Owner.turn_in_flight owner));
+  submit owner queued "waits behind";
+  check bool "the operation is not settled" true (is_running (operation_of owner id));
+  check bool "the call stays active for the next process" true (is_active (native_state owner id));
+  check bool "the Owner is not fenced" false (Owner.operation_projection owner).store_unavailable;
+  (match owner_ok (Owner.cancel_queued_operation owner queued) with
+   | { Chat_operation.state = Chat_operation.Cancelled _; _ } -> ()
+   | operation -> fail ("queued cancel left " ^ Chat_operation.state_to_string operation.state))
 ;;
 
 (* The terminal disposition is already on record: settlement is unchanged and
@@ -293,10 +418,44 @@ let test_success_without_a_disposition_is_not_recorded () =
   check bool "recorded as an invariant failure, not a success" true
     (failed_kind settled = Chat_operation.Turn_invariant);
   check bool "the Owner is not fenced" false (Owner.operation_projection owner).store_unavailable;
-  check bool "the unknown effect stays on record" true
-    (match native_state owner id with
-     | Native.Terminal_unacknowledged (_, disposition) -> disposition = unknown_effect_disposition
-     | Native.No_native_call | Native.Active _ -> false)
+  check bool "the unknown effect stays on record" true (is_unknown_effect (native_state owner id))
+;;
+
+(* The call already holds an unknown-effect receipt when the turn reports
+   success. The receipt cannot complete, so the success is not recorded, and
+   refusing it is a precondition, not store corruption that fences the Owner. *)
+let test_success_over_an_unknown_effect_receipt_is_not_recorded () =
+  Eio_main.run @@ fun env ->
+  let clock = env#clock in
+  Eio.Switch.run @@ fun sw ->
+  let owner_cell = ref None in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    let operation = match owner_ok (claim ()) with
+      | Some operation -> operation
+      | None -> fail "the executor claimed nothing" in
+    let owner = Option.get !owner_cell in
+    bind_active_call owner operation;
+    owner_ok
+      (Owner.terminal_direct_native_call
+         owner
+         ~operation_id:operation.operation_id
+         ~execution_digest:operation.execution_digest
+         ~call_id
+         ~disposition:unknown_effect_disposition);
+    Owner.Operation_succeeded { outcome_ref = "claimed" }
+  in
+  let owner =
+    start_owner ~sw ~path:(fresh_store_path ~sw) ~name:"open-native-unknown-success"
+      ~runner:(runner ~ready:(ref true) execute)
+  in
+  owner_cell := Some owner;
+  let id = operation_id "open-native-unknown-success" in
+  submit owner id "claims success";
+  let settled = await_terminal ~clock owner id in
+  check bool "recorded as an invariant failure, not a success" true
+    (failed_kind settled = Chat_operation.Turn_invariant);
+  check bool "the Owner is not fenced" false (Owner.operation_projection owner).store_unavailable;
+  check bool "the unknown effect stays on record" true (is_unknown_effect (native_state owner id))
 ;;
 
 (* An Owner that is stopping leaves the Active call alone. The next process
@@ -352,6 +511,14 @@ let () =
     [ ( "child ends with an open native call"
       , [ test_case "interrupted turn settles and keeps the Owner available" `Quick
             test_interrupted_active_call_settles_and_keeps_the_owner_available
+        ; test_case "runner-reported cancellation closes the call" `Quick
+            test_runner_reported_cancellation_closes_the_call
+        ; test_case "raised exception closes the call" `Quick
+            test_raised_exception_closes_the_call
+        ; test_case "failure before dispatch leaves the call resumable" `Quick
+            test_failure_before_dispatch_leaves_the_call_resumable
+        ; test_case "success over an unknown-effect receipt is not recorded" `Quick
+            test_success_over_an_unknown_effect_receipt_is_not_recorded
         ; test_case "recorded disposition settles as before" `Quick
             test_recorded_disposition_settles_as_before
         ; test_case "success without a disposition is not recorded" `Quick

@@ -33,11 +33,12 @@ val load : binding:binding -> (admission, string) result
     call is not a restartable provider attempt. No canonical-history fallback
     is used for missing or inconsistent retained evidence. *)
 
-val reconcile_on_abort : binding -> (unit -> 'a) -> 'a
-(** Run the native dispatch. If it raises while the Owner call is still
-    Active, copy the Core journal's terminal disposition, when one exists, into
-    the Owner receipt under cancellation protection, then re-raise. A normal
-    return is untouched. *)
+val reconcile_after_dispatch : binding -> (unit -> 'a) -> 'a
+(** Run the native dispatch. When it ends, by return or by exception, and the
+    Owner call is still Active, copy the Core journal's terminal disposition,
+    when one exists, into the Owner receipt under cancellation protection. The
+    result or exception then continues unchanged. A journal without a terminal,
+    or one that cannot be read, leaves the call Active. *)
 
 val runtime_id : resumed -> string
 val system_prompt : resumed -> string

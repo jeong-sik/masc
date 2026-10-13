@@ -156,10 +156,20 @@ type 'a autonomous_response =
   | Autonomous_busy of autonomous_block
   | Autonomous_raised of exn * Printexc.raw_backtrace
 
+(* How an operation child ended, as far as the Owner can tell without asking
+   the runner. The runner reports [operation_execution]; this records what the
+   Owner itself did to the child. *)
+type child_end =
+  | Child_returned
+  | Child_interrupted_by_operator
+  | Child_stopped_by_owner
+  | Child_raised
+
 type child_completion =
   | Operation_child_finished of
       { claimed_operation_id : Operation_id.t option
       ; execution : operation_execution
+      ; ended : child_end
       }
   | Autonomous_child_finished :
       { outcome : ('a, exn * Printexc.raw_backtrace) result
@@ -741,10 +751,16 @@ let apply_transition t store old_state transition =
 ;;
 
 (* What the Owner found when a child ended with its native call possibly open. *)
-type active_native_call_outcome =
-  | Native_call_not_active
+type native_call_at_settlement =
+  | Native_call_settleable
+  | Native_call_effect_unknown
   | Native_call_left_for_restart_recovery
   | Native_call_closed_without_disposition
+
+(* What to do with a native call that is still Active when its child ended. *)
+type active_native_call_policy =
+  | Close_active_call
+  | Leave_active_call_for_restart
 
 let native_call_unknown_effect_disposition =
   { Agent_core.Agent.outcome = Agent_core.Agent.Terminal_cancelled
@@ -753,8 +769,35 @@ let native_call_unknown_effect_disposition =
   }
 ;;
 
-let native_call_without_disposition_detail =
-  "native call ended without a terminal disposition; the Owner recorded it as cancelled with an unknown effect"
+let native_call_unknown_effect_success_detail =
+  "turn reported success, but its native call has an unknown effect; recorded as failed"
+;;
+
+(* An Active call has two futures. A restart requeues the operation and resumes
+   the same call from its checkpoint, which is right when this process never
+   dispatched into it (the Owner is stopping, or a resumed call failed to load).
+   Closing it is permanent, which is right when the call was cancelled or ran
+   and the Owner cannot prove that no tool attempt is unsettled. An operator
+   interrupt is a permanent cancel, so it closes even on a stopping Owner. *)
+let active_native_call_policy ~owner_stopping ~ended execution =
+  match ended with
+  | Child_interrupted_by_operator | Child_raised -> Close_active_call
+  | Child_stopped_by_owner -> Leave_active_call_for_restart
+  | Child_returned ->
+    (match execution with
+     | Operation_succeeded _ -> Close_active_call
+     | Operation_deferred -> Leave_active_call_for_restart
+     | Operation_failed { kind; _ } ->
+       (match kind with
+        | Chat_operation.Turn_cancelled ->
+          if owner_stopping then Leave_active_call_for_restart else Close_active_call
+        | Chat_operation.Interrupted_by_restart
+        | Chat_operation.Turn_exception
+        | Chat_operation.Store_unavailable
+        | Chat_operation.No_queued_operation
+        | Chat_operation.Invalid_input
+        | Chat_operation.Turn_invariant
+        | Chat_operation.Delivery_failed -> Leave_active_call_for_restart))
 ;;
 
 let owner_error_of_operation_error = function
@@ -1255,46 +1298,57 @@ let start
        terminal disposition itself, but not when the call is cancelled out from
        under it, and an Active call refuses every settlement. Reading the
        durable state decides: no call, or a call that already has a
-       disposition, settles as before. An Active call on a stopping Owner stays
-       Active: [settle_running_after_restart] requeues it and the next process
-       resumes the same call from its checkpoint. An Active call otherwise ends
-       the operation, so the Owner records the disposition. It cannot prove from
-       here that no tool attempt is unsettled, so it records the conservative
-       one: cancelled, with an operator repair required for the unknown effect. *)
-    let close_active_native_call ~operation_id =
+       disposition, settles as before (an unknown-effect receipt can fail the
+       operation but never complete it). For an Active call,
+       [active_native_call_policy] says whether to leave it for the next
+       process to resume or to close it. Closing records the conservative
+       disposition: cancelled, with an operator repair required for the
+       unknown effect, because the Owner cannot prove from here that no tool
+       attempt is unsettled. *)
+    let settle_native_call ~operation_id ~policy =
       run_operation_command t ~label:"close active native call" (fun () ->
         let ( let* ) = Result.bind in
         let* native_call =
           Chat_operation_store.direct_native_call t.operation_store ~operation_id
         in
         match native_call with
-        | Keeper_native_call.No_native_call
-        | Keeper_native_call.Terminal_unacknowledged _ -> Ok Native_call_not_active
+        | Keeper_native_call.No_native_call -> Ok Native_call_settleable
+        | Keeper_native_call.Terminal_unacknowledged (_, disposition) ->
+          (match disposition.Agent_core.Agent.recovery with
+           | Agent_core.Agent.Retire -> Ok Native_call_settleable
+           | Agent_core.Agent.Operator_repair_required
+               Agent_core.Agent.Effect_outcome_unknown -> Ok Native_call_effect_unknown)
         | Keeper_native_call.Active call ->
-          if (Atomic.get t.projection).Keeper_owner_reducer.stopping
-          then Ok Native_call_left_for_restart_recovery
-          else
-            let* operation = Chat_operation_store.get t.operation_store operation_id in
-            let* operation =
-              match operation with
-              | Some operation -> Ok operation
-              | None -> Error (Chat_operation_store.Unknown_operation operation_id)
-            in
-            let* () =
-              Chat_operation_store.update_direct_native_call
-                t.operation_store
-                ~now:(t.now ())
-                ~operation_id
-                ~execution_digest:operation.Chat_operation.execution_digest
-                (Keeper_native_call.Terminal
-                   { call_id = call.Keeper_native_call.call_id
-                   ; disposition = native_call_unknown_effect_disposition
-                   })
-            in
-            Ok Native_call_closed_without_disposition)
+          (match policy with
+           | Leave_active_call_for_restart -> Ok Native_call_left_for_restart_recovery
+           | Close_active_call ->
+             let* operation = Chat_operation_store.get t.operation_store operation_id in
+             let* operation =
+               match operation with
+               | Some operation -> Ok operation
+               | None -> Error (Chat_operation_store.Unknown_operation operation_id)
+             in
+             let* () =
+               Chat_operation_store.update_direct_native_call
+                 t.operation_store
+                 ~now:(t.now ())
+                 ~operation_id
+                 ~execution_digest:operation.Chat_operation.execution_digest
+                 (Keeper_native_call.Terminal
+                    { call_id = call.Keeper_native_call.call_id
+                    ; disposition = native_call_unknown_effect_disposition
+                    })
+             in
+             Ok Native_call_closed_without_disposition))
       |> Result.map fst
     in
-    let finish_operation_child claimed_operation_id execution =
+    let finish_operation_child claimed_operation_id execution ~ended =
+      let policy () =
+        active_native_call_policy
+          ~owner_stopping:(Atomic.get t.projection).Keeper_owner_reducer.stopping
+          ~ended
+          execution
+      in
       match claimed_operation_id, execution with
       | None, _ -> Ok ()
       | Some operation_id, Operation_deferred ->
@@ -1324,9 +1378,9 @@ let start
              | Chat_operation.Running _ | Chat_operation.Succeeded _ | Chat_operation.Failed _ ->
                Error (Chat_operation_store.Integrity_error "deferred operation is not queued")))
       | Some operation_id, Operation_succeeded { outcome_ref } ->
-        Result.bind (close_active_native_call ~operation_id) (function
+        Result.bind (settle_native_call ~operation_id ~policy:(policy ())) (function
           | Native_call_left_for_restart_recovery -> Ok ()
-          | Native_call_not_active ->
+          | Native_call_settleable ->
             run_operation_command t ~label:"succeed running Keeper chat operation" (fun () ->
               Chat_operation_store.succeed_running
                 t.operation_store
@@ -1334,17 +1388,19 @@ let start
                 ~operation_id
                 ~outcome_ref)
             |> Result.map (fun _ -> ())
-          | Native_call_closed_without_disposition ->
-            (* The turn reported success, but its native call never reported
-               a terminal disposition. An unknown effect cannot complete, so
-               the claimed success is not recorded. *)
+          | Native_call_effect_unknown | Native_call_closed_without_disposition ->
+            (* The turn reported success, but its native call has an unknown
+               effect. That cannot complete, so the claimed success is not
+               recorded. *)
             fail_running_operation ~operation_id ~kind:Chat_operation.Turn_invariant
-              ~detail:native_call_without_disposition_detail
+              ~detail:native_call_unknown_effect_success_detail
               ~outcome_ref:(Some outcome_ref))
       | Some operation_id, Operation_failed { kind; detail; outcome_ref } ->
-        Result.bind (close_active_native_call ~operation_id) (function
+        Result.bind (settle_native_call ~operation_id ~policy:(policy ())) (function
           | Native_call_left_for_restart_recovery -> Ok ()
-          | Native_call_not_active | Native_call_closed_without_disposition ->
+          | Native_call_settleable
+          | Native_call_effect_unknown
+          | Native_call_closed_without_disposition ->
             fail_running_operation ~operation_id ~kind ~detail ~outcome_ref)
     in
     let rec start_child_if_needed state shutdown_operation_id =
@@ -1381,7 +1437,11 @@ let start
                 result
               | (Ok None | Error _) as result -> result
             in
-            let execution =
+            (* Set by the interrupt capability below, before it fails the
+               child switch, so the Owner knows an operator asked for this
+               end no matter which exception or value the runner returns. *)
+            let operator_interrupted = Atomic.make false in
+            let execution, runner_ended =
               try
                 Eio.Switch.run (fun child_sw ->
                   Atomic.set t.child_cancel
@@ -1389,47 +1449,58 @@ let start
                        { stop = (fun () -> Eio.Switch.fail child_sw Stop_active_child)
                        ; interrupt =
                            (fun () ->
+                              Atomic.set operator_interrupted true;
                               Eio.Switch.fail child_sw
                                 Keeper_registry_types.Operator_interrupt)
                        });
                   if (Atomic.get t.projection).Keeper_owner_reducer.stopping
                   then
-                    Operation_failed
-                      { kind = Chat_operation.Turn_cancelled
-                      ; detail = "Keeper owner is stopping"
-                      ; outcome_ref = None
-                      }
-                  else runner.execute ~sw:child_sw ~keeper_name ~claim)
+                    ( Operation_failed
+                        { kind = Chat_operation.Turn_cancelled
+                        ; detail = "Keeper owner is stopping"
+                        ; outcome_ref = None
+                        }
+                    , Child_stopped_by_owner )
+                  else (runner.execute ~sw:child_sw ~keeper_name ~claim, Child_returned))
               with
               | Stop_active_child ->
-                Operation_failed
-                  { kind = Chat_operation.Turn_cancelled
-                  ; detail = "Keeper owner stopped the active turn"
-                  ; outcome_ref = None
-                  }
+                ( Operation_failed
+                    { kind = Chat_operation.Turn_cancelled
+                    ; detail = "Keeper owner stopped the active turn"
+                    ; outcome_ref = None
+                    }
+                , Child_stopped_by_owner )
               | exn when Keeper_registry_types.is_operator_interrupt exn ->
                 (* Typed operator cancellation (#28810): the interrupt route
                    fails the turn switch with this exception. The guard
                    covers every delivery shape — bare, [Cancelled]-wrapped,
                    and [Finally_raised]/[Multiple] combinations
                    (#28868 review). None of them is an internal error. *)
-                Operation_failed
-                  { kind = Chat_operation.Turn_cancelled
-                  ; detail = Keeper_registry_types.operator_interrupt_detail
-                  ; outcome_ref = None
-                  }
+                ( Operation_failed
+                    { kind = Chat_operation.Turn_cancelled
+                    ; detail = Keeper_registry_types.operator_interrupt_detail
+                    ; outcome_ref = None
+                    }
+                , Child_interrupted_by_operator )
               | Eio.Cancel.Cancelled cause ->
-                Operation_failed
-                  { kind = Chat_operation.Turn_cancelled
-                  ; detail = Printexc.to_string cause
-                  ; outcome_ref = None
-                  }
+                ( Operation_failed
+                    { kind = Chat_operation.Turn_cancelled
+                    ; detail = Printexc.to_string cause
+                    ; outcome_ref = None
+                    }
+                , Child_stopped_by_owner )
               | exn ->
-                Operation_failed
-                  { kind = Chat_operation.Turn_exception
-                  ; detail = Printexc.to_string exn
-                  ; outcome_ref = None
-                  }
+                ( Operation_failed
+                    { kind = Chat_operation.Turn_exception
+                    ; detail = Printexc.to_string exn
+                    ; outcome_ref = None
+                    }
+                , Child_raised )
+            in
+            let ended =
+              if Atomic.get operator_interrupted
+              then Child_interrupted_by_operator
+              else runner_ended
             in
             Atomic.set t.child_cancel None;
             (* Hook-before-durable-settle gives observers a happens-before: a
@@ -1454,7 +1525,7 @@ let start
               t
               (Child_finished
                  (Operation_child_finished
-                    { claimed_operation_id = !claimed_operation_id; execution }))
+                    { claimed_operation_id = !claimed_operation_id; execution; ended }))
           ))
     and loop state shutdown_operation_id =
         let exact_interrupt target =
@@ -2140,11 +2211,11 @@ let start
         | Command (Child_finished completion, resolve) ->
           let result =
             match completion with
-            | Operation_child_finished { claimed_operation_id; execution } ->
+            | Operation_child_finished { claimed_operation_id; execution; ended } ->
               (* The child ignores this result and the row stays Running, so
                  a refused settlement is otherwise invisible until the next
                  boot settles it. *)
-              (match finish_operation_child claimed_operation_id execution with
+              (match finish_operation_child claimed_operation_id execution ~ended with
                | Ok () as ok -> ok
                | Error error as failed ->
                  Log.Keeper.error ~keeper_name:t.keeper_name

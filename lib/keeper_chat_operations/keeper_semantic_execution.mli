@@ -108,10 +108,12 @@ type error =
   | Invalid_record of string
   | Invalid_transition of string
   | Native_call_unsettled
-      (** The execution has an active native call whose terminal disposition has
-          not been recorded. Settling it, or any action that changes its phase,
-          is refused until that disposition arrives. This is a reachable
-          precondition, not a damaged record. *)
+      (** The execution's native call blocks the requested change. Either it is
+          active and its terminal disposition has not been recorded, so settling
+          or changing the phase is refused, or it holds an unknown-effect
+          receipt, which cannot complete or resume through another
+          continuation. Both are reachable preconditions, not a damaged
+          record. *)
   | Revision_exhausted
 
 type action =

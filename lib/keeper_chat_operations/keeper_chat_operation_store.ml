@@ -155,7 +155,7 @@ let error_to_string = function
   | Store_unavailable detail -> "Keeper chat operation store unavailable: " ^ detail
   | Integrity_error detail -> "Keeper chat operation store integrity error: " ^ detail
   | Native_call_unsettled ->
-    "Keeper chat operation has an active native call without a terminal disposition"
+    "Keeper chat operation native call blocks this change: it is active without a terminal disposition or holds an unknown-effect receipt"
 ;;
 
 let path store = store.path

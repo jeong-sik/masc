@@ -166,8 +166,13 @@ let test_unknown_effect_receipt_lets_the_operation_fail_but_not_complete () = wi
   bind store operation (make_call operation);
   terminal store operation (Agent.Operator_repair_required Agent.Effect_outcome_unknown);
   (match Store.succeed_running store ~now:4. ~operation_id ~outcome_ref:"x" with
-   | Error (Store.Integrity_error _) -> ()
-   | Ok _ | Error _ -> fail "an unknown effect completed");
+   | Error Store.Native_call_unsettled -> ()
+   | Ok _ | Error _ -> fail "an unknown effect completed, or its refusal was not a precondition");
+  (match Store.defer_direct_checkpoint store ~now:4. ~operation_id
+           ~execution_digest:operation.Operation.execution_digest
+           ~checkpoint:(Keeper_semantic_execution.Agent_core (checkpoint 1)) with
+   | Error Store.Native_call_unsettled -> ()
+   | Ok _ | Error _ -> fail "an unknown effect resumed through another continuation");
   (match settle_failed store ~now:5. with
    | Ok {Operation.state=Operation.Failed _; _} -> ()
    | Ok _ | Error _ -> fail "an unknown effect could not fail the operation");

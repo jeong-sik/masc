@@ -225,7 +225,8 @@ type action =
 let error_to_string = function
   | Invalid_record detail -> "invalid semantic execution: " ^ detail
   | Invalid_transition detail -> "invalid semantic execution transition: " ^ detail
-  | Native_call_unsettled -> "native call is active and has no terminal disposition"
+  | Native_call_unsettled ->
+    "native call has no settled disposition that allows this change"
   | Revision_exhausted -> "semantic execution revision exhausted"
 
 let phase_name = function
@@ -541,10 +542,13 @@ let apply ~now action current =
             | Settle (Completed | Cancelled | Failed _) -> Ok current.native_call)
          | Agent_core.Agent.Operator_repair_required Agent_core.Agent.Effect_outcome_unknown ->
            (match action with
-            | Settle Completed -> Error (Invalid_transition "unknown native effect cannot complete")
+            | Settle Completed ->
+              (* An unknown effect cannot complete. *)
+              Error Native_call_unsettled
             | Suspend _ | Suspend_official_checkpoint _ | Suspend_runtime_retry _
             | Suspend_gate _ | Suspend_gate_reconciliation _ ->
-              Error (Invalid_transition "unknown native effect cannot resume through another continuation")
+              (* An unknown effect cannot resume through another continuation. *)
+              Error Native_call_unsettled
             | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
             | Require_reconciliation _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
             | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _

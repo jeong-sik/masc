@@ -728,6 +728,7 @@ let test_attachment_artifact_read_bound () =
   let entries =
     [ { Board_tool_attachment.kind = Board_tool_attachment.Image
       ; source = Board_tool_attachment.Artifact_sha256 blob.sha256
+      ; name = None
       }
     ]
   in

@@ -3,17 +3,24 @@
     The post handler is the only writer of [meta.attachments]. The HTTP
     route and the MCP tool both enter through that handler. *)
 
-type kind = Image | Video | Youtube | External_link
+type kind = Image | Video | Youtube | External_link | File | Audio | Score | Midi
 
 type source =
   | Https_url of string
   | Artifact_sha256 of string
 
-type unresolved = { kind : kind; source : source }
+type unresolved = { kind : kind; source : source; name : string option }
+(** [name] is an optional display label (typically the original file name).
+    [None] means no label was given; readers fall back to the kind and the
+    url or shortened sha256. *)
 
 type t =
-  | Url of { kind : kind; url : string }
-  | Artifact of { kind : kind; reference : Tool_output.artifact_ref }
+  | Url of { kind : kind; url : string; name : string option }
+  | Artifact of
+      { kind : kind
+      ; reference : Tool_output.artifact_ref
+      ; name : string option
+      }
 
 type error =
   | Raw_meta_attachments
@@ -22,6 +29,7 @@ type error =
   | Entry_not_object of int
   | Invalid_entry_fields of int
   | Invalid_kind of int
+  | Invalid_name of int
   | Invalid_url of int
   | Invalid_sha256 of int * Tool_output.invalid_sha256
   | Missing_artifact of int * string
@@ -33,13 +41,17 @@ type error =
 val error_to_string : error -> string
 val parse_args : Yojson.Safe.t -> (unresolved list, error) result
 (** Rejects a raw [meta.attachments] slot even when [attachments] is absent.
-    Each new entry has exactly [kind] and one of [url] or [sha256]. A
-    [youtube] entry must use [url]: a stored artifact is not a YouTube video.
+    Each new entry has exactly [kind], one of [url] or [sha256], and an
+    optional string [name]; any other field is refused. A [youtube] entry
+    must use [url]: a stored artifact is not a YouTube video.
 
     [kind] is how the reader shows the entry. For an artifact, the dashboard
     loads the bytes on request and then shows [image] as an image and [video]
     as a video (the element sniffs the format, since no media type is stored
-    per hash); [external_link] stays a download. *)
+    per hash); [external_link] stays a download. [file], [audio], [score] and
+    [midi] carry no per-kind server behaviour yet: they are stored and served
+    like any artifact, and surfaces render them as labelled cards until a
+    per-kind renderer lands. *)
 
 val resolve :
   base_path:string ->

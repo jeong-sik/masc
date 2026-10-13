@@ -137,6 +137,8 @@ export type BoardAttachmentSource =
 
 export interface BoardAttachment {
   kind: BoardAttachmentKind
+  /** Optional display label carried on the wire entry (original file name). */
+  name?: string
   source: BoardAttachmentSource
 }
 

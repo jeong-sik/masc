@@ -33,7 +33,7 @@ description = "Optional structured operational metadata. Do not put attachments 
 [[params]]
 name = "attachments"
 type = "array"
-description = "Optional typed attachments. Each entry has kind and exactly one of url (absolute HTTPS) or sha256 (an existing artifact)."
+description = "Optional typed attachments. Each entry has kind, exactly one of url (absolute HTTPS) or sha256 (an existing artifact), and an optional name (display label, typically the original file name)."
 
 [params.items]
 type = "object"
@@ -42,8 +42,8 @@ type = "object"
 name = "kind"
 type = "string"
 required = true
-enum = ["image", "video", "youtube", "external_link"]
-description = "How the attachment is shown"
+enum = ["image", "video", "youtube", "external_link", "file", "audio", "score", "midi"]
+description = "How the attachment is shown. file/audio/score/midi are stored like any artifact and render as labelled download cards until a per-kind renderer lands."
 
 [[params.items.params]]
 name = "url"
@@ -54,6 +54,11 @@ description = "Absolute HTTPS URL; omit when sha256 is set"
 name = "sha256"
 type = "string"
 description = "Existing artifact content hash; omit when url is set"
+
+[[params.items.params]]
+name = "name"
+type = "string"
+description = "Optional display label, typically the original file name"
 
 [[params]]
 name = "sources"
@@ -182,7 +187,7 @@ reason to preserve why you posted/classified it this way"""
 [[keeper_projection.params]]
 name = "attachments"
 type = "array"
-description = "Optional typed attachments. Each entry has kind and exactly one of url (absolute HTTPS) or sha256 (existing artifact)."
+description = "Optional typed attachments. Each entry has kind, exactly one of url (absolute HTTPS) or sha256 (existing artifact), and an optional name (display label, typically the original file name)."
 
 [keeper_projection.params.items]
 type = "object"
@@ -191,8 +196,8 @@ type = "object"
 name = "kind"
 type = "string"
 required = true
-enum = ["image", "video", "youtube", "external_link"]
-description = "How the attachment is shown"
+enum = ["image", "video", "youtube", "external_link", "file", "audio", "score", "midi"]
+description = "How the attachment is shown. file/audio/score/midi are stored like any artifact and render as labelled download cards until a per-kind renderer lands."
 
 [[keeper_projection.params.items.params]]
 name = "url"
@@ -203,6 +208,11 @@ description = "Absolute HTTPS URL; omit when sha256 is set"
 name = "sha256"
 type = "string"
 description = "Existing artifact content hash; omit when url is set"
+
+[[keeper_projection.params.items.params]]
+name = "name"
+type = "string"
+description = "Optional display label, typically the original file name"
 
 [[keeper_projection.params]]
 name = "sources"

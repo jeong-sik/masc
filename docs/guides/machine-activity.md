@@ -27,9 +27,9 @@ incarnation, RAM, input history and checkpoints. Screen/live reads, captures,
 memory inspection and checkpoint saving remain available. Ejecting a machine
 and releasing DOS control are still possible. The DOS load/restore tools with
 no arguments list available programs/checkpoints and remain usable while off.
-Turning On allows new work on the retained machine. Retained RAM lives in the
-machine's attached worker; use the existing save/restore checkpoints for
-persistence across worker or server restarts.
+Turning On allows new work on the retained machine. Retained RAM refers to the
+current server process; use the existing save/restore checkpoints for persistence
+across server restarts.
 
 The MSX spectator keeps watching the retained screen through read-only requests
 while activity is Off or unavailable. Once On is observed, its next normal poll

@@ -26,11 +26,27 @@ modified OCaml runtime. The observed runtime binary was
 ## Change and boundaries
 
 Anthropic collection now retains the fresh context actually returned by the
-caller projection, atomically with the assistant response. Its historical
+caller projection only when the response contains signed thinking or redacted
+thinking, atomically with the assistant response. Its historical
 provenance distinguishes it from the next request's current context. Removed
 or redacted context cannot reappear through persistence. Historical carriers
 remain ordinary windowable history and do not double-count current prompt
-metrics. Other providers keep their current request-only injection policy.
+metrics. Other providers and unsigned Anthropic-compatible responses keep their
+current request-only injection policy. An ambiguous retention selection is
+deferred until a signed response actually needs it; it does not add a failure
+to other providers' request preparation.
+
+The follow-up provider audit expands the pipeline regression to 13 cases:
+same-provider continuation across all six kinds, unsigned/duplicate context,
+and signed Anthropic history resumed on Kimi, OpenAI-compatible, Ollama, Gemini
+and GLM. These are mock-transport regression cases, not live-provider proofs.
+Retained context intentionally remains ordinary history on a provider switch;
+input size and checkpoint size therefore increase relative to discarding it.
+Librarian prompt and absorption observations omit current/historical runtime
+context bodies while preserving message positions and explicit runtime
+attribution. This prevents injected memories and instructions from becoming
+fresh memory evidence. Historical-context volume and end-to-end behavior have
+not been measured on a deployed modified runtime.
 
 Adaptive Sonnet/Haiku 5.5 completion requests enable the official
 `thinking-binding-controls-2026-08-01` beta and `drop_block`. This handles
@@ -53,7 +69,8 @@ rounds; intentional edits still have an observable reasoning-loss boundary.
 OCaml parsing and `git diff --check` passed. Added/extended behavioral cases
 cover projected context retention, removal/redaction, checkpoint message
 roundtrip, historical context metrics/window behavior, completion headers,
-count exclusions and frozen exact-output dispatch. These require CI execution;
+count exclusions, frozen exact-output dispatch, and Librarian observation
+boundaries. These require CI execution;
 local Dune builds/tests were not run under the repository execution protocol.
 
 Official provider contract, read 2026-10-13:

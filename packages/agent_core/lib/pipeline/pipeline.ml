@@ -273,6 +273,19 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config ~context_message 
                 ("assistant response has invalid reasoning provenance: "
                  ^ Types.show_assistant_message_error error))
        in
+       let binds_context =
+         List.exists (function
+           | Thinking { signature = Some _; _ } | RedactedThinking _ -> true
+           | Thinking { signature = None; _ } | ReasoningDetails _ | Text _
+           | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+           response.content
+       in
+       let* context_message =
+         match provider_config.Llm_provider.Provider_config.kind, binds_context with
+         | Anthropic, true -> context_message
+         | Anthropic, false
+         | (Kimi | OpenAI_compat | Ollama | Gemini | Glm), _ -> Ok None
+       in
        let next_turn = turn + 1 in
        (* A dropped call leaves no tool_use for a tool_result to answer, so the
           model would otherwise see its turn vanish without a reason. The note

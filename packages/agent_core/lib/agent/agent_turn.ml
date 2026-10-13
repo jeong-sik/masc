@@ -20,7 +20,7 @@ let provider_turn_ordinal (state : agent_state) : int = state.turn_count
 type turn_preparation =
   { tools_json : Yojson.Safe.t list option
   ; effective_messages : message list
-  ; context_message : message option
+  ; context_message : (message option, Error.t) result
   ; visible_tool_names : string list
   }
 
@@ -74,8 +74,8 @@ let prepare_turn ~tools ~messages ~turn_params ?model_input_projection () =
          Llm_provider.Reserved_exn.reraise_if_reserved exn;
          Error (Error.Internal (Printexc.to_string exn)))
   in
-  Result.bind effective_messages (fun effective_messages ->
-    let retained_context =
+  Result.map (fun effective_messages ->
+    let context_message =
       match context_message with
       | None -> Ok None
       | Some _ ->
@@ -86,9 +86,8 @@ let prepare_turn ~tools ~messages ~turn_params ?model_input_projection () =
          | [message] -> Ok (Some message)
          | _ -> Error (Error.Internal "model input projection returned multiple current context carriers"))
     in
-    Result.map (fun context_message ->
-      { tools_json; effective_messages; context_message; visible_tool_names })
-      retained_context)
+    { tools_json; effective_messages; context_message; visible_tool_names })
+    effective_messages
 ;;
 
 let provider_config_with_agent_config

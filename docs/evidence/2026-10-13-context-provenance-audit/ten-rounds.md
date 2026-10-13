@@ -15,10 +15,10 @@ one of these ten rounds.
 | 3 | Streamed response provenance and checkpoint collection | Source audit and independent review PASS; no defect confirmed |
 | 4 | Hook or persistence failure after provider response | Bounded source audit and independent review PASS |
 | 5 | Nested tool-result content and reasoning redaction | Repaired in #42725; independent source and focused CI PASS |
-| 6 | Checkpoint encoding, restore and metadata validation | Checkpoint audit PASS; cache response codec lost provenance, repair pending review |
+| 6 | Checkpoint encoding, restore and metadata validation | Checkpoint audit PASS; cache provenance repaired in #42728, source PASS, execution pending |
 | 7 | Provider/endpoint/model rotation and replay eligibility | Rules reviewed; catalog-source drift addressed with round 9; account identity limit remains |
 | 8 | Multimodal tool-result projections and user attribution | Bounded source audit and independent review PASS |
-| 9 | Count/preview versus frozen generation input | #42727 source and focused CI PASS; separate cache-identity repair pending review |
+| 9 | Count/preview versus frozen generation input | #42727 source and focused CI PASS; #42728 cache identity source PASS, execution pending |
 | 10 | Cancellation, resumed state and stale checkpoint writes | Bounded source audit and independent review PASS |
 
 ## Round 1: malformed context cannot become new user evidence
@@ -237,7 +237,13 @@ Provider-side prompt caching is unchanged. The HTTP regression checks changed
 catalog defaults and compatible/foreign/absent reasoning-source metadata,
 admitted-body reuse and no dispatch observer on a cache hit. Separate cases
 exercise an injected transport that cannot serialize as HTTP.
-Final repaired-head review and targeted execution are pending.
+Independent `diagnosis_review` source PASS at
+`bb81c1374db51bafafa87547f86c7603d458e18d`, against
+`e01bb1f3ca1e69b0bc2a5c8d0d7a28d91c8d771b`. Full diff SHA-256:
+`1c1d24137e4a7d15e48d3492d2c538a0491925340829fd3ce60367fce8842f9e`.
+The final documentation/changelog delta and targeted execution remain separate.
+Cache decoding uses the existing content-block decoder contract; this is not a
+claim that every form of arbitrary stored corruption has been tested.
 
 ## Round 10: cancellation, resume and stale writers
 

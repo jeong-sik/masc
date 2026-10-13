@@ -67,7 +67,19 @@ let fixture_snapshot ?(source = document ()) ?(skill_names = None) ?(tool_deny =
       ; candidates = [ Snapshot.Candidate_document { directory = "nested-read"; source_text = source } ] }) config.sources in
   let snapshot = Snapshot.configured ~config scans |> require "frozen snapshot" in
   let global_skill_catalog, diagnostics = Masc.Keeper_skill_catalog.of_snapshot snapshot in
-  check int "valid fixture catalog" 0 (List.length diagnostics);
+  (match diagnostics with
+   | [] -> ()
+   | diagnostics ->
+     let details =
+       List.map
+         (fun (diagnostic : Masc.Keeper_skill_catalog.projection_diagnostic) ->
+            Printf.sprintf "%s: %s"
+              (Snapshot.identity_to_yojson diagnostic.identity |> Yojson.Safe.to_string)
+              (Masc.Keeper_skill_catalog.error_to_string diagnostic.error))
+         diagnostics
+       |> String.concat "\n"
+     in
+     failf "invalid fixture catalog:\n%s" details);
   let surface = Surface.create ~tool_deny ~sandbox_profile:Masc.Keeper_types_profile.Docker
       ~skill_names ~global_skill_catalog ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot snapshot)
       ~task_skills:[] in
@@ -288,6 +300,7 @@ branch_failure_policy = "continue_independent"
 name = "query"
 type = "string"
 enum = ["docker", "host"]
+description = "Exact fixture query."
 [[compositions.nodes]]
 id = "lane-a"
 tool = "keeper_lane_status"

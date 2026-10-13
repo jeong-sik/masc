@@ -95,7 +95,8 @@ let with_stmt db sql values fn =
         if Sqlite3.Rc.is_success rc then bind (index + 1) rest else Error (sql_error db rc) in
     bind 1 values)
 let update db sql values = with_stmt db sql values (fun stmt ->
-  match Sqlite3.step stmt with Sqlite3.Rc.DONE -> Ok () | rc -> Error (sql_error db rc))
+  let rc = Sqlite3.step stmt in
+  if rc = Sqlite3.Rc.DONE then Ok () else Error (sql_error db rc))
 let rows db sql values decode = with_stmt db sql values (fun stmt ->
   let rec loop acc = match Sqlite3.step stmt with
     | Sqlite3.Rc.DONE -> Ok (List.rev acc)

@@ -319,7 +319,9 @@ let prove_released_shared ~bindings fields =
       | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Browser_document _ -> Ok ()
       | Lane_output {installation_id;output_id;_} ->
           let candidates = List.filter_map (function `Assoc f when List.assoc_opt "run_id" f = Some (`String run) ->
-            (match configuration_of_fields f with Ok (Some owner) when owner.id = installation_id -> Some f | _ -> None)
+            (match configuration_of_fields f with
+              | Ok (Some owner) when owner.id = installation_id -> Some f
+              | Ok (Some _) | Ok None | Error _ -> None)
             | _ -> None) bindings in
           (match candidates with
            | [producer] ->

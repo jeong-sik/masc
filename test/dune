@@ -4,6 +4,11 @@
  (libraries masc alcotest))
 
 (test
+ (name test_eio_process_capture_pipe_close)
+ (modules test_eio_process_capture_pipe_close)
+ (libraries masc_process eio eio.unix alcotest unix))
+
+(test
  (name test_tui_play_room)
  (modules test_tui_play_room)
  (libraries alcotest yojson masc masc_tui_play_room))

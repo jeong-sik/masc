@@ -50,6 +50,36 @@ let test_a_control_sequence_ends_the_address () =
     [ web "https://x.example/a" ]
     (Link.of_item (note "https://x.example/a\x1b[2Jrest"))
 
+let test_text_that_follows_an_address_without_a_space_is_not_part_of_it () =
+  (* Korean particles attach to the word before them without a space, and an
+     address is ASCII. *)
+  List.iter
+    (fun (label, text, expected) ->
+      Alcotest.(check (list link_testable)) label [ web expected ] (Link.of_item (note text)))
+    [ "a Korean particle", "설계는 https://docs.example/d를 참고", "https://docs.example/d"
+    ; "a full-width comma", "https://docs.example/d，그리고", "https://docs.example/d"
+    ; "an ellipsis", "https://docs.example/a\xe2\x80\xa6", "https://docs.example/a"
+    ; "a Korean sentence end", "https://docs.example/d입니다.", "https://docs.example/d"
+    ]
+
+let test_parentheses_around_and_inside_an_address () =
+  Alcotest.(check (list link_testable)) "a pair inside the address is part of it"
+    [ web "https://en.wikipedia.org/wiki/Foo_(bar)" ]
+    (Link.of_item (note "(https://en.wikipedia.org/wiki/Foo_(bar))"));
+  Alcotest.(check (list link_testable)) "a parenthesis that closes the sentence's is not"
+    [ web "https://x.example/a" ]
+    (Link.of_item (note "(see https://x.example/a)"));
+  Alcotest.(check (list link_testable)) "a closing one with nothing to close ends it"
+    [ web "https://x.example/a" ]
+    (Link.of_item (note "https://x.example/a) and more"))
+
+let test_an_address_is_shown_as_it_is_written () =
+  (* A user-info part is the address's own text; nothing is shortened to its
+     host, so the reader sees what the author wrote. *)
+  Alcotest.(check (list string)) "the whole address"
+    [ "https://trusted.example@evil.example/x" ]
+    (List.map Link.text (Link.of_item (note "https://trusted.example@evil.example/x")))
+
 let test_a_submitted_source_links_to_its_masc_object () =
   Alcotest.(check (list link_testable)) "board post"
     [ Link.Masc_reference { kind = Masc_tui_link.Board_post; id = "post-1" } ]
@@ -105,6 +135,12 @@ let () =
             test_only_http_addresses_with_a_host_are_links
         ; Alcotest.test_case "a control sequence ends the address" `Quick
             test_a_control_sequence_ends_the_address
+        ; Alcotest.test_case "text attached to an address is not part of it" `Quick
+            test_text_that_follows_an_address_without_a_space_is_not_part_of_it
+        ; Alcotest.test_case "parentheses around and inside an address" `Quick
+            test_parentheses_around_and_inside_an_address
+        ; Alcotest.test_case "an address is shown as it is written" `Quick
+            test_an_address_is_shown_as_it_is_written
         ] )
     ; ( "items"
       , [ Alcotest.test_case "a source links to its object" `Quick

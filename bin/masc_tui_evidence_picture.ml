@@ -15,6 +15,8 @@ type cause =
   | Conversion_failed of string
   | Not_png_after_conversion
   | Too_many_pixels of { width : int; height : int }
+  | Empty_dimensions
+  | Png_incomplete
   | Unknown_size
   | No_free_slot
 
@@ -50,6 +52,8 @@ let cause_text = function
   | Not_png_after_conversion -> "the converter's output is not a PNG"
   | Too_many_pixels { width; height } ->
       Printf.sprintf "%dx%d pixels is over the %d pixels shown" width height max_picture_pixels
+  | Empty_dimensions -> "the picture has no width or no height"
+  | Png_incomplete -> "the PNG ends before its last chunk"
   | Unknown_size -> "the PNG header has no readable size"
   | No_free_slot ->
       Printf.sprintf "only the first %d pictures of a task are drawn"
@@ -70,6 +74,7 @@ type pixels = {
 
 type picture =
   | Drawable of pixels
+  | Undrawn_image of Media.media_type
   | Binary_only
   | Unshown of cause
 
@@ -94,18 +99,36 @@ let is_png bytes =
   | Ok media -> String.equal media png_media_type
   | Error _ -> false
 
-let over_pixel_limit (width, height) = width * height > max_picture_pixels
+(* The size of a picture the terminal is asked to decode. A side of zero is a
+   picture with nothing to draw, and the product is never formed: PNG sides
+   are 32 bits and the product of two of them wraps a 63-bit int, so "width
+   times height is under the limit" is asked as "width is under the limit
+   over height". *)
+let measure (width, height) =
+  if width <= 0 || height <= 0 then Error Empty_dimensions
+  else if width > max_picture_pixels / height then Error (Too_many_pixels { width; height })
+  else Ok (width, height)
+
+(* The last chunk of every PNG: length 0, "IEND", and its fixed CRC. A file
+   that stops short carries a header that parses and pixels that do not, which
+   a terminal drops without saying so. *)
+let png_end_chunk = "\x00\x00\x00\x00IEND\xaeB\x60\x82"
+
+let png_complete png = String.ends_with ~suffix:png_end_chunk png
 
 (* One image's route to a drawable PNG. The size is read from the original
    first where its format carries one, so a small file that describes a huge
    picture never reaches a converter; WebP carries none this module reads, so
    it is measured after conversion only. *)
 let drawable ~convert ~slot ~media data =
-  let original = Masc.Keeper_image_dimensions.image_dimensions data in
-  match original with
-  | Some ((width, height) as size) when over_pixel_limit size ->
-      Unshown (Too_many_pixels { width; height })
-  | Some _ | None -> (
+  let before =
+    match Masc.Keeper_image_dimensions.image_dimensions data with
+    | Some size -> Result.map ignore (measure size)
+    | None -> Ok ()
+  in
+  match before with
+  | Error cause -> Unshown cause
+  | Ok () -> (
       let png =
         match media with
         | Media.Png -> Ok data
@@ -117,25 +140,32 @@ let drawable ~convert ~slot ~media data =
       | Ok png -> (
           match Masc.Keeper_image_dimensions.image_dimensions png with
           | None -> Unshown Unknown_size
-          | Some (width, height) when over_pixel_limit (width, height) ->
-              Unshown (Too_many_pixels { width; height })
-          | Some (pixel_width, pixel_height) ->
-              Drawable
-                { media; png
-                ; key = Digestif.SHA256.(digest_string png |> to_hex)
-                ; pixel_width; pixel_height; slot }))
+          | Some size -> (
+              match measure size with
+              | Error cause -> Unshown cause
+              | Ok (pixel_width, pixel_height) ->
+                  if not (png_complete png) then Unshown Png_incomplete
+                  else
+                    Drawable
+                      { media; png
+                      ; key = Digestif.SHA256.(digest_string png |> to_hex)
+                      ; pixel_width; pixel_height; slot })))
 
 (* Pictures take slots in the order the evidence lists them. A picture that
-   does not become drawable leaves its slot for the next one. *)
-let prepare_preview ~convert ~free_slots preview =
+   does not become drawable leaves its slot for the next one. A terminal that
+   draws no pixels gives no slot and runs no converter: the picture is its
+   caption. *)
+let prepare_preview ~draws_pixels ~convert ~free_slots preview =
   match preview with
+  | Decode.Preview_image { ev_media; _ } when not draws_pixels ->
+      Undrawn_image ev_media, free_slots
   | Decode.Preview_image { ev_media; ev_data } -> (
       match free_slots with
       | [] -> Unshown No_free_slot, free_slots
       | slot :: rest -> (
           match drawable ~convert ~slot ~media:ev_media ev_data with
           | Drawable _ as picture -> picture, rest
-          | (Binary_only | Unshown _) as picture -> picture, free_slots))
+          | (Undrawn_image _ | Binary_only | Unshown _) as picture -> picture, free_slots))
   | Decode.Preview_withheld Decode.Withheld_not_image_format -> Binary_only, free_slots
   | Decode.Preview_withheld
       ((Decode.Withheld_body_not_filed | Decode.Withheld_body_unreadable
@@ -144,9 +174,14 @@ let prepare_preview ~convert ~free_slots preview =
       Unshown (Withheld withheld), free_slots
   | Decode.Preview_defective defect -> Unshown (Defective defect), free_slots
 
-let prepare ~convert = function
+let draws_pixels = function
+  | View.Pixels _ -> true
+  | View.Mosaic | View.No_picture -> false
+
+let prepare ~display ~convert = function
   | Decode.Evidence_access_unavailable reason -> Access_unavailable reason
   | Decode.Evidence_items items ->
+      let draws_pixels = draws_pixels display in
       let _free, rev =
         List.fold_left
           (fun (free_slots, acc) (item : Decode.verification_evidence_item) ->
@@ -154,7 +189,7 @@ let prepare ~convert = function
             | Decode.Ev_binary
                 { ev_b_reference; ev_b_bytes; ev_b_sha256; ev_b_format; ev_b_preview } ->
                 let picture, free_slots =
-                  prepare_preview ~convert ~free_slots ev_b_preview
+                  prepare_preview ~draws_pixels ~convert ~free_slots ev_b_preview
                 in
                 ( free_slots
                 , Binary_item
@@ -186,7 +221,7 @@ let caption_line ~reference ~bytes ~sha256 ~format = function
 let caption ~reference ~bytes ~sha256 ~format picture =
   caption_line ~reference ~bytes ~sha256 ~format
     (match picture with
-     | Drawable { media; _ } -> `Image media
+     | Drawable { media; _ } | Undrawn_image media -> `Image media
      | Binary_only -> `Binary
      | Unshown cause -> `Unshown cause)
 
@@ -224,32 +259,56 @@ let block display picture ~width ~caption_rows ~content_height =
             ~columns:max_cols ~rows:max_rows
         in
         (* The width the picture takes at that many rows, rounded up so the
-           box never claims fewer cells than the picture covers. *)
+           box never claims fewer cells than the picture covers. [fit_rows]
+           never answers under one row, so a picture wider than the pane by
+           more than a row's worth is still wider at one row: the terminal
+           would draw it past the pane's edge, so it is a caption. *)
         let covered_pixels = rows * cell_height * pixels.pixel_width in
-        let cols = (covered_pixels + (pixels.pixel_height * cell_width) - 1)
-                   / (pixels.pixel_height * cell_width) in
-        Picture { cols = max 1 (min max_cols cols); rows }
-  | View.Pixels _, (Binary_only | Unshown _)
-  | (View.Mosaic | View.No_picture), (Drawable _ | Binary_only | Unshown _) ->
+        let cell_row_pixels = pixels.pixel_height * cell_width in
+        let cols = (covered_pixels + cell_row_pixels - 1) / cell_row_pixels in
+        if cols > max_cols then Caption_only else Picture { cols = max 1 cols; rows }
+  | View.Pixels _, (Undrawn_image _ | Binary_only | Unshown _)
+  | (View.Mosaic | View.No_picture), (Drawable _ | Undrawn_image _ | Binary_only | Unshown _) ->
       Caption_only
 
 type slot = { first : int; box : box }
 
 type placement_plan =
-  | Place of { row : int; column : int }
+  | Place of { row : int; column : int; cut_top : int; shown_rows : int }
   | Hidden
 
+(* The rows of the area that are inside the window, cut off at the top or the
+   bottom where the window ends. *)
 let plan slot ~scroll ~content_height ~content_origin:(origin_row, origin_column) =
-  if slot.first >= scroll && slot.first + slot.box.rows <= scroll + content_height
-  then Place { row = origin_row + (slot.first - scroll); column = origin_column + picture_indent_cols }
-  else Hidden
+  let area_end = slot.first + slot.box.rows in
+  let first_shown = max slot.first scroll in
+  let last_shown = min area_end (scroll + content_height) in
+  if last_shown <= first_shown then Hidden
+  else
+    Place
+      { row = origin_row + (first_shown - scroll)
+      ; column = origin_column + picture_indent_cols
+      ; cut_top = first_shown - slot.first
+      ; shown_rows = last_shown - first_shown
+      }
 
-let png_placement pixels box ~row ~column =
+(* The source rows of the part that shows. Row boundaries are cut from the
+   same proportion at both ends, so the pieces of a picture scrolled past a
+   window edge tile exactly. *)
+let crop_of pixels box ~cut_top ~shown_rows =
+  if cut_top = 0 && shown_rows = box.rows then None
+  else
+    let at rows = rows * pixels.pixel_height / box.rows in
+    let top_px = at cut_top in
+    Some { Masc_tui_graphics.top_px; height_px = max 1 (at (cut_top + shown_rows) - top_px) }
+
+let png_placement pixels box ~row ~column ~cut_top ~shown_rows =
   { View.png_image_id = Masc_tui_graphics.image_id pixels.slot
   ; png_row = row
   ; png_column = column
   ; png_cols = box.cols
-  ; png_rows = box.rows
+  ; png_rows = shown_rows
+  ; png_crop = crop_of pixels box ~cut_top ~shown_rows
   ; png_key = pixels.key
   ; png_data = pixels.png
   }

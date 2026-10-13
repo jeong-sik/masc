@@ -2421,6 +2421,7 @@
   masc_tui_ansi
   masc_tui_evidence_link
   masc_tui_evidence_picture
+  masc_tui_graphics
   masc_tui_keeper_chat_projection
   masc_tui_message_layout
   masc_tui_portrait_view

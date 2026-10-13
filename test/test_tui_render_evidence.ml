@@ -19,19 +19,39 @@ let be32 value =
 
 let png_of ~width ~height =
   "\x89PNG\r\n\x1a\n" ^ be32 13 ^ "IHDR" ^ be32 width ^ be32 height ^ "\x08\x06\x00\x00\x00"
-  ^ "crc!" ^ "image data"
+  ^ "crc!" ^ "image data" ^ "\x00\x00\x00\x00IEND\xaeB\x60\x82"
 
 let sha256 = String.make 64 'a'
 
-let prepared_png ?(slot = Masc_tui_graphics.Evidence_image_1) ~width ~height () =
-  Picture.Drawable
-    { media = Masc.Keeper_vision_downscale.Png
-    ; png = png_of ~width ~height
-    ; key = "k"
-    ; pixel_width = width
-    ; pixel_height = height
-    ; slot
-    }
+let kitty = View.Pixels { cell_width = 10; cell_height = 20 }
+
+(* Drawable pictures come from [prepare] alone, in slot order. *)
+let prepared_pngs sizes =
+  let item index (width, height) =
+    Decode.Ev_binary
+      { ev_b_reference = Printf.sprintf "artifact:p%d.png" index
+      ; ev_b_bytes = 10
+      ; ev_b_sha256 = sha256
+      ; ev_b_format = "png"
+      ; ev_b_preview =
+          Decode.Preview_image
+            { ev_media = Masc.Keeper_vision_downscale.Png; ev_data = png_of ~width ~height }
+      }
+  in
+  match
+    Picture.prepare ~display:kitty
+      ~convert:(fun _ -> Alcotest.fail "a PNG must not reach a converter")
+      (Decode.Evidence_items (List.mapi item sizes))
+  with
+  | Picture.Items prepared ->
+      List.map
+        (function
+          | Picture.Binary_item { picture; _ } -> picture
+          | Picture.Text_item _ -> Alcotest.fail "a binary item came back as text")
+        prepared
+  | Picture.Access_unavailable _ -> Alcotest.fail "available evidence came back unavailable"
+
+let prepared_png ~width ~height () = List.hd (prepared_pngs [ width, height ])
 
 let binary ?(reference = "artifact:shots/home.png") picture =
   Picture.Binary_item { reference; bytes = 41230; sha256; format = "png"; picture }
@@ -44,8 +64,6 @@ let unreadable =
        { ev_u_reference = Some "artifact:gone.txt"; ev_u_reason = "missing" })
 
 let evidence items = Some ("task-1", Ok (Picture.Items items))
-
-let kitty = View.Pixels { cell_width = 10; cell_height = 20 }
 
 let section ?(width = 80) ?(content_height = 40) ?(display = kitty) ?(task_id = "task-1")
     evidence =
@@ -143,13 +161,17 @@ let test_a_picture_taller_than_the_pane_leaves_a_caption () =
   ignore (index_of ~needle:"artifact:shots/home.png" rows)
 
 let test_pictures_have_ordered_non_overlapping_areas () =
+  let first_picture, second_picture =
+    match prepared_pngs [ 800, 600; 600, 800 ] with
+    | [ first; second ] -> first, second
+    | _ -> Alcotest.fail "two images, two pictures"
+  in
   let rows, pictures =
     section ~content_height:60
       (evidence
-         [ binary ~reference:"artifact:one.png" (prepared_png ~width:800 ~height:600 ())
+         [ binary ~reference:"artifact:one.png" first_picture
          ; note "between"
-         ; binary ~reference:"artifact:two.png"
-             (prepared_png ~slot:Masc_tui_graphics.Evidence_image_2 ~width:600 ~height:800 ())
+         ; binary ~reference:"artifact:two.png" second_picture
          ])
   in
   match pictures with
@@ -187,6 +209,138 @@ let test_links_follow_the_item_that_carries_them () =
   let second = index_of ~needle:"no link here" rows in
   Alcotest.(check bool) "and the next note follows the link" true (second > note_row + 1)
 
+(* The terminal-bound text of every kind of row: a note, a submitted source, a
+   text artifact, an unreadable artifact's reference and the link rows built
+   from them. Escape, CSI, OSC, C1 and a bidi override must not reach a row
+   as bytes. *)
+let hostile = "x\x1b[2Jy\x1b]8;;http://evil.example\x07z\xc2\x9bw\xe2\x80\xaeabc"
+
+let test_no_row_carries_a_control_or_bidi_byte_from_the_evidence () =
+  let url_text = "see https://x.example/a" ^ hostile in
+  let rows, _ =
+    section ~width:60
+      (evidence
+         [ note (hostile ^ " " ^ url_text)
+         ; Picture.Text_item
+             (Decode.Ev_collaboration
+                { ev_reference = "board:" ^ hostile; ev_content = url_text; ev_sha256 = "x" })
+         ; Picture.Text_item
+             (Decode.Ev_artifact
+                { ev_reference = "artifact:" ^ hostile; ev_content = url_text; ev_bytes = 9
+                ; ev_truncated = false })
+         ; Picture.Text_item
+             (Decode.Ev_artifact_unreadable
+                { ev_u_reference = Some ("artifact:" ^ hostile); ev_u_reason = hostile })
+         ; binary ~reference:("artifact:" ^ hostile) Picture.Binary_only
+         ])
+  in
+  let forbidden =
+    [ "escape", "\x1b"; "bell", "\x07"; "C1 control", "\xc2\x9b"; "bidi override", "\xe2\x80\xae" ]
+  in
+  List.iter
+    (fun (row : string * string) ->
+      List.iter
+        (fun (name, bytes) ->
+          Alcotest.(check bool) ("no " ^ name ^ " in a row") false (contains ~needle:bytes (snd row)))
+        forbidden)
+    (* The row style is an ANSI sequence of ours; only the text is the evidence's. *)
+    rows;
+  Alcotest.(check bool) "the readable part of the link survives" true
+    (List.exists (fun text -> contains ~needle:"https://x.example/a" text) (texts rows))
+
+(* {2 requests: where the pictures go on the frame} *)
+
+let request_testable =
+  let pp formatter = function
+    | Section.Hold { image_id; _ } -> Format.fprintf formatter "Hold %d" image_id
+    | Section.Show p ->
+        Format.fprintf formatter "Show %d at %d,%d %d rows%s" p.View.png_image_id p.View.png_row
+          p.View.png_column p.View.png_rows
+          (if p.View.png_crop = None then "" else " cropped")
+  in
+  Alcotest.testable pp ( = )
+
+let one_picture () =
+  let rows, pictures = section ~content_height:30 (fixture ()) in
+  match pictures with
+  | [ (slot, pixels) ] -> rows, slot, pixels
+  | _ -> Alcotest.fail "one image, one picture"
+
+let requests ?(scroll = 0) ?(content_height = 30) ?(evidence_first = 10)
+    ?(content_origin = (4, 2)) pictures =
+  Section.requests ~pictures ~evidence_first ~scroll ~content_height ~content_origin
+
+let image_id pixels = Masc_tui_graphics.image_id pixels.Picture.slot
+
+let test_a_picture_lands_at_the_origin_plus_its_row_in_the_pane () =
+  let _, slot, pixels = one_picture () in
+  (* The pane has [evidence_first] rows ahead of the section, so the area's
+     row among all rows is evidence_first + slot.first. *)
+  let row_in_pane = 10 + slot.first in
+  List.iter
+    (fun (label, content_origin, (origin_row, origin_column)) ->
+      match requests ~content_origin ~scroll:0 [ slot, pixels ] with
+      | [ Section.Show p ] ->
+          Alcotest.(check (pair int int)) label
+            (origin_row + row_in_pane, origin_column + Picture.picture_indent_cols)
+            (p.View.png_row, p.View.png_column);
+          Alcotest.(check int) "its own terminal image" (image_id pixels) p.View.png_image_id
+      | _ -> Alcotest.fail (label ^ ": the picture is in view"))
+    [ "one pane", (4, 2), (4, 2); "two panes, the detail to the right", (4, 41), (4, 41) ];
+  (* Scrolling moves the picture up by the rows scrolled. *)
+  match requests ~content_origin:(4, 2) ~scroll:3 [ slot, pixels ] with
+  | [ Section.Show p ] ->
+      Alcotest.(check int) "three rows scrolled, three rows up" (4 + row_in_pane - 3)
+        p.View.png_row
+  | _ -> Alcotest.fail "the picture is still in view"
+
+let test_a_picture_cut_by_the_window_is_cropped_and_one_outside_it_is_held () =
+  let _, slot, pixels = one_picture () in
+  let first = 10 + slot.first in
+  let rows = slot.box.rows in
+  (match requests ~scroll:(first + 2) [ slot, pixels ] with
+   | [ Section.Show p ] ->
+       Alcotest.(check int) "the rows still in view" (rows - 2) p.View.png_rows;
+       Alcotest.(check bool) "cropped" true (p.View.png_crop <> None);
+       Alcotest.(check int) "its top edge is the window's" 4 p.View.png_row
+   | _ -> Alcotest.fail "a picture with rows in view is shown");
+  (match requests ~scroll:(first + rows) [ slot, pixels ] with
+   | [ Section.Hold { image_id = held; key } ] ->
+       Alcotest.(check int) "held by its terminal image" (image_id pixels) held;
+       Alcotest.(check string) "and by its bytes" pixels.key key
+   | _ -> Alcotest.fail "a picture wholly above the window is held");
+  match requests ~scroll:0 ~content_height:first [ slot, pixels ] with
+  | [ Section.Hold _ ] -> ()
+  | _ -> Alcotest.fail "a picture wholly below the window is held"
+
+let test_every_scroll_offset_shows_or_holds_every_picture () =
+  let _, slot, pixels = one_picture () in
+  for scroll = 0 to 10 + slot.first + slot.box.rows + 2 do
+    match requests ~scroll [ slot, pixels ] with
+    | [ Section.Show _ ] | [ Section.Hold _ ] -> ()
+    | other -> Alcotest.failf "scroll %d: %d requests for one picture" scroll (List.length other)
+  done
+
+let test_two_pictures_are_requested_under_their_own_images () =
+  match prepared_pngs [ 800, 600; 600, 800 ] with
+  | [ first; second ] ->
+      let _, pictures =
+        section ~content_height:60
+          (evidence
+             [ binary ~reference:"artifact:one.png" first; binary ~reference:"artifact:two.png" second ])
+      in
+      let ids =
+        requests ~content_height:60 pictures
+        |> List.map (function
+             | Section.Show p -> p.View.png_image_id
+             | Section.Hold { image_id; _ } -> image_id)
+      in
+      Alcotest.(check (list int)) "one request per picture, in order"
+        (List.map Masc_tui_graphics.image_id
+           [ Masc_tui_graphics.Evidence_image_1; Masc_tui_graphics.Evidence_image_2 ])
+        ids
+  | _ -> Alcotest.fail "two images, two pictures"
+
 let () =
   Alcotest.run "Tui render evidence"
     [ ( "row model"
@@ -210,5 +364,17 @@ let () =
             test_a_failed_read_has_rows_and_no_picture
         ; Alcotest.test_case "links follow the item that carries them" `Quick
             test_links_follow_the_item_that_carries_them
+        ; Alcotest.test_case "no row carries a control or bidi byte from the evidence" `Quick
+            test_no_row_carries_a_control_or_bidi_byte_from_the_evidence
+        ] )
+    ; ( "requests"
+      , [ Alcotest.test_case "a picture lands at the origin plus its row" `Quick
+            test_a_picture_lands_at_the_origin_plus_its_row_in_the_pane
+        ; Alcotest.test_case "a cut picture is cropped, an outside one held" `Quick
+            test_a_picture_cut_by_the_window_is_cropped_and_one_outside_it_is_held
+        ; Alcotest.test_case "every scroll offset shows or holds every picture" `Quick
+            test_every_scroll_offset_shows_or_holds_every_picture
+        ; Alcotest.test_case "two pictures are requested under their own images" `Quick
+            test_two_pictures_are_requested_under_their_own_images
         ] )
     ]

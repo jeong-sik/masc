@@ -96,6 +96,12 @@ val download :
 (** Fetch or reuse nonempty input bytes. Failed fetches and empty bodies are
     removed; unknown signatures remain eligible for a decoder. *)
 
+val run_bounded : deadline_seconds:float -> string -> Unix.process_status
+(** A [run] for the functions below that cannot hang the caller. [command] is
+    one simple command, run by [sh] with the null device for input and
+    output, and killed with SIGKILL when it has not exited after
+    [deadline_seconds]; the status is then [WSIGNALED Sys.sigkill]. *)
+
 val run_decoder :
   run:(string -> Unix.process_status) -> output_path:string -> string ->
   (string, decode_failure) result

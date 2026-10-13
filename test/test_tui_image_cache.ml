@@ -428,6 +428,45 @@ let test_a_refused_body_never_reaches_the_cache_path () =
      | Error _ -> ());
     check bool "nothing was left at the shared path" false (Sys.file_exists shared))
 
+(* ---- bounded run ---- *)
+
+let status_testable =
+  testable
+    (fun fmt -> function
+       | Unix.WEXITED code -> Format.fprintf fmt "WEXITED %d" code
+       | Unix.WSIGNALED signal -> Format.fprintf fmt "WSIGNALED %d" signal
+       | Unix.WSTOPPED signal -> Format.fprintf fmt "WSTOPPED %d" signal)
+    ( = )
+;;
+
+let test_a_bounded_run_reports_the_exit_status () =
+  check status_testable "zero" (Unix.WEXITED 0)
+    (Cache.run_bounded ~deadline_seconds:5. "true");
+  check status_testable "nonzero" (Unix.WEXITED 3)
+    (Cache.run_bounded ~deadline_seconds:5. "sh -c 'exit 3'")
+;;
+
+let test_a_bounded_run_kills_a_command_past_its_deadline () =
+  let started = Unix.gettimeofday () in
+  let status = Cache.run_bounded ~deadline_seconds:0.2 "sleep 30" in
+  let elapsed = Unix.gettimeofday () -. started in
+  check status_testable "killed" (Unix.WSIGNALED Sys.sigkill) status;
+  check bool "well before the command would have ended" true (elapsed < 10.)
+;;
+
+let test_a_bounded_run_gives_the_command_no_input () =
+  (* [cat] with the null device for input ends at once; with the caller's
+     terminal it would wait for keys, and this test would be killed. *)
+  check status_testable "input is at its end" (Unix.WEXITED 0)
+    (Cache.run_bounded ~deadline_seconds:5. "cat >/dev/null")
+;;
+
+let test_a_killed_decoder_is_described_as_killed () =
+  check string "text"
+    "decoder was killed (SIGKILL: out of time or memory)"
+    (Cache.decode_failure_text (Cache.Decoder_signaled { signal = Sys.sigkill }))
+;;
+
 let () =
   run "tui image cache"
     [ ( "workflows"
@@ -478,6 +517,15 @@ let () =
         ; test_case "curl exit codes are named" `Quick test_curl_exit_codes_are_named
         ; test_case "a signal on curl is kept" `Quick test_a_signal_on_curl_is_kept
         ;] )
+    ; ( "bounded run"
+      , [ test_case "the exit status is reported" `Quick test_a_bounded_run_reports_the_exit_status
+        ; test_case "a command past its deadline is killed" `Quick
+            test_a_bounded_run_kills_a_command_past_its_deadline
+        ; test_case "the command gets no input" `Quick
+            test_a_bounded_run_gives_the_command_no_input
+        ; test_case "a killed decoder is described as killed" `Quick
+            test_a_killed_decoder_is_described_as_killed
+        ] )
     ; ( "decode"
       , [ test_case "a clean decode with a frame is not a failure" `Quick
             test_a_clean_decode_with_a_frame_is_not_a_failure

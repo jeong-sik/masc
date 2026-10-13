@@ -16,9 +16,13 @@ let png = Media.Png
 let be32 value =
   String.init 4 (fun index -> Char.chr ((value lsr (8 * (3 - index))) land 0xff))
 
+let iend = "\x00\x00\x00\x00IEND\xaeB\x60\x82"
+
 let png_of ~width ~height =
   "\x89PNG\r\n\x1a\n" ^ be32 13 ^ "IHDR" ^ be32 width ^ be32 height ^ "\x08\x06\x00\x00\x00"
-  ^ "crc!" ^ "image data"
+  ^ "crc!" ^ "image data" ^ iend
+
+let kitty = View.Pixels { cell_width = 10; cell_height = 20 }
 
 (* SOI, then an SOF0 marker: height and width are the next two words. *)
 let jpeg_of ~width ~height =
@@ -127,7 +131,8 @@ let test_only_unreadable_images_carry_a_cause () =
         | Picture.Withheld withheld -> Decode.Preview_withheld withheld
         | Picture.Defective defect -> Decode.Preview_defective defect
         | Picture.Conversion_failed _ | Picture.Not_png_after_conversion
-        | Picture.Too_many_pixels _ | Picture.Unknown_size | Picture.No_free_slot ->
+        | Picture.Too_many_pixels _ | Picture.Empty_dimensions | Picture.Png_incomplete
+        | Picture.Unknown_size | Picture.No_free_slot ->
             Alcotest.fail "fixture causes come from the server"
       in
       Alcotest.(check bool) "an unreadable image states its cause" true
@@ -143,6 +148,8 @@ let test_only_unreadable_images_carry_a_cause () =
     [ Picture.Conversion_failed "sips: exit 1"
     ; Picture.Not_png_after_conversion
     ; Picture.Too_many_pixels { width = 9000; height = 9000 }
+    ; Picture.Empty_dimensions
+    ; Picture.Png_incomplete
     ; Picture.Unknown_size
     ; Picture.No_free_slot
     ]
@@ -194,7 +201,7 @@ let binary_item ?(index = 0) preview =
 let image_preview ~media data = Decode.Preview_image { ev_media = media; ev_data = data }
 
 let pictures_of ~convert items =
-  match Picture.prepare ~convert (Decode.Evidence_items items) with
+  match Picture.prepare ~display:kitty ~convert (Decode.Evidence_items items) with
   | Picture.Items prepared ->
       List.map
         (function
@@ -321,7 +328,7 @@ let test_pictures_beyond_the_slots_are_listed_by_caption () =
 let test_other_previews_and_items_keep_their_meaning () =
   let note = Decode.Ev_note "tests green" in
   match
-    Picture.prepare ~convert:never_convert
+    Picture.prepare ~display:kitty ~convert:never_convert
       (Decode.Evidence_items
          [ note
          ; binary_item ~index:0 (Decode.Preview_withheld Decode.Withheld_not_image_format)
@@ -342,14 +349,13 @@ let test_other_previews_and_items_keep_their_meaning () =
 
 let test_unavailable_access_passes_through () =
   match
-    Picture.prepare ~convert:never_convert (Decode.Evidence_access_unavailable "no snapshot")
+    Picture.prepare ~display:kitty ~convert:never_convert
+      (Decode.Evidence_access_unavailable "no snapshot")
   with
   | Picture.Access_unavailable "no snapshot" -> ()
   | _ -> Alcotest.fail "the server's reason was lost"
 
 (* {2 block, plan} *)
-
-let kitty = View.Pixels { cell_width = 10; cell_height = 20 }
 
 let drawable ~width ~height =
   match
@@ -403,7 +409,7 @@ let test_the_picture_never_claims_more_than_the_space () =
           let shape_cols = ((rows * 20 * width) + (height * 10) - 1) / (height * 10) in
           Alcotest.(check int) "the width is the picture's shape, within the space"
             (max 1 (min max_cols shape_cols)) cols)
-    [ 1000, 500, 80, 40; 500, 1000, 80, 40; 3000, 100, 60, 25; 100, 3000, 120, 50; 1, 1, 40, 12 ]
+    [ 1000, 500, 80, 40; 500, 1000, 80, 40; 600, 100, 60, 25; 100, 3000, 120, 50; 1, 1, 40, 12 ]
 
 let test_a_tall_picture_is_bounded_by_the_pane () =
   match
@@ -443,39 +449,75 @@ let test_only_a_pixel_terminal_gets_a_picture () =
     (fun (label, picture) ->
       Alcotest.(check block_testable) label Picture.Caption_only
         (Picture.block kitty picture ~width:100 ~caption_rows:1 ~content_height:40))
-    [ "a binary artifact", Picture.Binary_only
+    [ "an image on a terminal that draws none", Picture.Undrawn_image png
+    ; "a binary artifact", Picture.Binary_only
     ; "an unreadable image", Picture.Unshown Picture.Unknown_size
     ]
 
 let plan_testable =
   let pp formatter = function
     | Picture.Hidden -> Format.pp_print_string formatter "Hidden"
-    | Picture.Place { row; column } -> Format.fprintf formatter "Place %d,%d" row column
+    | Picture.Place { row; column; cut_top; shown_rows } ->
+        Format.fprintf formatter "Place %d,%d cut %d shows %d" row column cut_top shown_rows
   in
   Alcotest.testable pp ( = )
 
-let test_a_picture_is_placed_only_while_every_row_of_it_is_shown () =
+let test_a_picture_is_placed_for_every_row_of_it_that_is_shown () =
   (* The area is rows 10 to 17 of the content, in a window of 12 rows. *)
   let slot = { Picture.first = 10; box = { Picture.cols = 20; rows = 8 } } in
   let plan ~scroll =
     Picture.plan slot ~scroll ~content_height:12 ~content_origin:(3, 2)
   in
   let column = 2 + Picture.picture_indent_cols in
+  let place ~row ~cut_top ~shown_rows =
+    Picture.Place { row; column; cut_top; shown_rows }
+  in
   Alcotest.(check plan_testable) "inside the window, the row is origin + offset"
-    (Picture.Place { row = 3 + 2; column }) (plan ~scroll:8);
+    (place ~row:(3 + 2) ~cut_top:0 ~shown_rows:8) (plan ~scroll:8);
   Alcotest.(check plan_testable) "its first row exactly at the top"
-    (Picture.Place { row = 3; column }) (plan ~scroll:10);
-  Alcotest.(check plan_testable) "its first row scrolled off" Picture.Hidden (plan ~scroll:11);
+    (place ~row:3 ~cut_top:0 ~shown_rows:8) (plan ~scroll:10);
+  Alcotest.(check plan_testable) "two rows scrolled off the top are cut, the rest shows"
+    (place ~row:3 ~cut_top:2 ~shown_rows:6) (plan ~scroll:12);
+  Alcotest.(check plan_testable) "its last row alone at the top"
+    (place ~row:3 ~cut_top:7 ~shown_rows:1) (plan ~scroll:17);
+  Alcotest.(check plan_testable) "wholly above the window" Picture.Hidden (plan ~scroll:18);
   Alcotest.(check plan_testable) "its last row exactly at the bottom"
-    (Picture.Place { row = 3 + 4; column }) (plan ~scroll:6);
-  Alcotest.(check plan_testable) "its last row below the window" Picture.Hidden (plan ~scroll:5);
-  Alcotest.(check plan_testable) "not scrolled at all, far below" Picture.Hidden (plan ~scroll:0)
+    (place ~row:(3 + 4) ~cut_top:0 ~shown_rows:8) (plan ~scroll:6);
+  Alcotest.(check plan_testable) "its last two rows below the window are cut"
+    (place ~row:(3 + 5) ~cut_top:0 ~shown_rows:7) (plan ~scroll:5);
+  Alcotest.(check plan_testable) "only its first two rows inside the window"
+    (place ~row:(3 + 10) ~cut_top:0 ~shown_rows:2) (plan ~scroll:0);
+  Alcotest.(check plan_testable) "wholly below the window" Picture.Hidden
+    (Picture.plan slot ~scroll:0 ~content_height:10 ~content_origin:(3, 2))
+
+(* Every scroll offset, not a few: the operator pages through the pane, so a
+   picture that is Hidden at an offset where one of its rows is in the window
+   would be a gap with nothing in it. *)
+let test_no_scroll_offset_leaves_a_shown_row_without_its_picture () =
+  let rows = 9 and first = 14 and content_height = 12 in
+  let slot = { Picture.first; box = { Picture.cols = 20; rows } } in
+  for scroll = 0 to first + rows do
+    let shown_rows =
+      List.length
+        (List.filter
+           (fun row -> row >= scroll && row < scroll + content_height)
+           (List.init rows (fun index -> first + index)))
+    in
+    match Picture.plan slot ~scroll ~content_height ~content_origin:(0, 0) with
+    | Picture.Hidden -> Alcotest.(check int) "hidden only when no row shows" 0 shown_rows
+    | Picture.Place { shown_rows = placed; cut_top; row; _ } ->
+        Alcotest.(check int) "every shown row is placed" shown_rows placed;
+        Alcotest.(check int) "the cut is the rows above the window"
+          (max 0 (scroll - first)) cut_top;
+        Alcotest.(check int) "it starts at the first shown row" (max first scroll - scroll) row
+  done
 
 let test_a_placement_carries_the_slot_the_key_and_the_box () =
   match drawable ~width:640 ~height:480 with
   | Picture.Drawable pixels ->
       let placement =
         Picture.png_placement pixels { Picture.cols = 30; rows = 12 } ~row:7 ~column:9
+          ~cut_top:0 ~shown_rows:12
       in
       Alcotest.(check int) "the picture's own terminal image"
         (Masc_tui_graphics.image_id pixels.slot) placement.View.png_image_id;
@@ -483,8 +525,187 @@ let test_a_placement_carries_the_slot_the_key_and_the_box () =
       Alcotest.(check string) "sent as the PNG" pixels.png placement.View.png_data;
       Alcotest.(check (list int)) "where and how big" [ 7; 9; 30; 12 ]
         [ placement.View.png_row; placement.View.png_column; placement.View.png_cols
-        ; placement.View.png_rows ]
-  | Picture.Binary_only | Picture.Unshown _ -> Alcotest.fail "fixture not drawable"
+        ; placement.View.png_rows ];
+      Alcotest.(check bool) "all of it shows, so nothing is cropped" true
+        (placement.View.png_crop = None)
+  | Picture.Undrawn_image _ | Picture.Binary_only | Picture.Unshown _ ->
+      Alcotest.fail "fixture not drawable"
+
+let crop_testable =
+  let pp formatter = function
+    | None -> Format.pp_print_string formatter "whole"
+    | Some { Masc_tui_graphics.top_px; height_px } ->
+        Format.fprintf formatter "y=%d h=%d" top_px height_px
+  in
+  Alcotest.testable pp ( = )
+
+let pixels_of ~width ~height =
+  match drawable ~width ~height with
+  | Picture.Drawable pixels -> pixels
+  | Picture.Undrawn_image _ | Picture.Binary_only | Picture.Unshown _ ->
+      Alcotest.fail "fixture not drawable"
+
+let crop_of pixels ~rows ~cut_top ~shown_rows =
+  (Picture.png_placement pixels { Picture.cols = 30; rows } ~row:0 ~column:0 ~cut_top
+     ~shown_rows).View.png_crop
+
+let test_a_cut_picture_is_cropped_to_the_rows_that_show () =
+  (* 400 px tall in 10 rows: 40 source pixels a row. *)
+  let pixels = pixels_of ~width:300 ~height:400 in
+  Alcotest.(check crop_testable) "all rows" None (crop_of pixels ~rows:10 ~cut_top:0 ~shown_rows:10);
+  Alcotest.(check crop_testable) "the first three rows"
+    (Some { Masc_tui_graphics.top_px = 0; height_px = 120 })
+    (crop_of pixels ~rows:10 ~cut_top:0 ~shown_rows:3);
+  Alcotest.(check crop_testable) "four rows cut from the top"
+    (Some { Masc_tui_graphics.top_px = 160; height_px = 240 })
+    (crop_of pixels ~rows:10 ~cut_top:4 ~shown_rows:6)
+
+let test_the_parts_of_a_cut_picture_tile_without_a_gap () =
+  (* 7 rows over 100 px does not divide: every cut must still start where the
+     one above it ended, and the parts must add up to the picture. *)
+  let pixels = pixels_of ~width:50 ~height:100 in
+  let rows = 7 in
+  for cut = 1 to rows - 1 do
+    let above = crop_of pixels ~rows ~cut_top:0 ~shown_rows:cut in
+    let below = crop_of pixels ~rows ~cut_top:cut ~shown_rows:(rows - cut) in
+    match above, below with
+    | Some above, Some below ->
+        Alcotest.(check int) "starts where the part above ended"
+          (above.Masc_tui_graphics.top_px + above.Masc_tui_graphics.height_px)
+          below.Masc_tui_graphics.top_px;
+        Alcotest.(check int) "and the two make the picture" 100
+          (above.Masc_tui_graphics.height_px + below.Masc_tui_graphics.height_px)
+    | _ -> Alcotest.fail "a cut picture must carry a crop"
+  done
+
+let test_a_picture_shorter_than_its_rows_keeps_a_pixel_per_part () =
+  (* 3 px over 20 rows: a row is under a pixel, and a crop of a pixel is the
+     least the terminal is asked for. *)
+  let pixels = pixels_of ~width:1 ~height:3 in
+  match crop_of pixels ~rows:20 ~cut_top:1 ~shown_rows:1 with
+  | Some { Masc_tui_graphics.height_px; _ } ->
+      Alcotest.(check bool) "never an empty source rectangle" true (height_px >= 1)
+  | None -> Alcotest.fail "a cut picture must carry a crop"
+
+(* A header that parses is not a picture: zero sides and sides whose product
+   wraps are the fixtures a hostile artifact author writes. *)
+let prepare_one data =
+  match pictures_of ~convert:never_convert [ binary_item (image_preview ~media:png data) ] with
+  | [ picture ] -> picture
+  | _ -> Alcotest.fail "one item, one picture"
+
+let test_a_side_of_zero_is_not_drawable () =
+  List.iter
+    (fun (width, height) ->
+      match prepare_one (png_of ~width ~height) with
+      | Picture.Unshown Picture.Empty_dimensions -> ()
+      | _ -> Alcotest.failf "%dx%d reached the terminal" width height)
+    [ 1, 0; 0, 1; 0, 0; 500, 0 ];
+  (* The layout divides by the height. *)
+  match prepare_one (png_of ~width:10 ~height:0) with
+  | Picture.Unshown _ as picture ->
+      Alcotest.(check block_testable) "and lays out as a caption" Picture.Caption_only
+        (Picture.block kitty picture ~width:80 ~caption_rows:1 ~content_height:40)
+  | _ -> Alcotest.fail "a zero height was drawable"
+
+let test_a_product_that_wraps_the_int_is_over_the_limit () =
+  List.iter
+    (fun (width, height) ->
+      match prepare_one (png_of ~width ~height) with
+      | Picture.Unshown (Picture.Too_many_pixels _) -> ()
+      | _ -> Alcotest.failf "%dx%d was drawable" width height)
+    [ 1 lsl 31, 1 lsl 31; 0xFFFFFFFF, 0xFFFFFFFF; 0xFFFFFFFF, 1; 1, 0xFFFFFFFF ]
+
+let test_the_limit_is_exact_on_both_sides () =
+  let limit = Picture.max_picture_pixels in
+  (match prepare_one (png_of ~width:limit ~height:1) with
+   | Picture.Drawable _ -> ()
+   | _ -> Alcotest.fail "exactly the limit, as one row, was refused");
+  match prepare_one (png_of ~width:(limit + 1) ~height:1) with
+  | Picture.Unshown (Picture.Too_many_pixels _) -> ()
+  | _ -> Alcotest.fail "one pixel over the limit was drawable"
+
+let test_a_png_that_stops_before_its_last_chunk_is_named () =
+  let whole = png_of ~width:100 ~height:100 in
+  let cut = String.sub whole 0 (String.length whole - 1) in
+  (match prepare_one cut with
+   | Picture.Unshown Picture.Png_incomplete -> ()
+   | _ -> Alcotest.fail "a truncated PNG was drawable");
+  (* It does not hold a slot: the next picture takes the first. *)
+  match
+    pictures_of ~convert:never_convert
+      [ binary_item ~index:0 (image_preview ~media:png cut)
+      ; binary_item ~index:1 (image_preview ~media:png whole) ]
+  with
+  | [ Picture.Unshown Picture.Png_incomplete; Picture.Drawable pixels ] ->
+      Alcotest.(check string) "the slot is free"
+        (slot_name Masc_tui_graphics.Evidence_image_1) (slot_name pixels.slot)
+  | _ -> Alcotest.fail "a truncated PNG held a slot"
+
+let test_a_converted_picture_is_measured_again () =
+  (* WebP carries no size this module reads, so the converter's output is the
+     only measure: a bomb that converts to a huge PNG is refused there. *)
+  let webp = "RIFF\x00\x00\x00\x00WEBPVP8 " in
+  let side = 5000 in
+  (match
+     pictures_of ~convert:(fun _ -> Ok (png_of ~width:side ~height:side))
+       [ binary_item (image_preview ~media:Media.Webp webp) ]
+   with
+   | [ Picture.Unshown (Picture.Too_many_pixels { width; height }) ] ->
+       Alcotest.(check (pair int int)) "the converted size is named" (side, side) (width, height)
+   | _ -> Alcotest.fail "an oversized conversion output was drawable");
+  match
+    pictures_of ~convert:(fun _ -> Ok (png_of ~width:10 ~height:0))
+      [ binary_item (image_preview ~media:Media.Webp webp) ]
+  with
+  | [ Picture.Unshown Picture.Empty_dimensions ] -> ()
+  | _ -> Alcotest.fail "an empty conversion output was drawable"
+
+let test_a_terminal_without_pixels_converts_nothing_and_holds_no_slot () =
+  let items =
+    List.init 6 (fun index ->
+      binary_item ~index (image_preview ~media:Media.Jpeg (jpeg_of ~width:10 ~height:10)))
+  in
+  List.iter
+    (fun display ->
+      match
+        Picture.prepare ~display
+          ~convert:(fun _ -> Alcotest.fail "a converter ran for a terminal that draws no pixels")
+          (Decode.Evidence_items items)
+      with
+      | Picture.Items prepared ->
+          List.iter
+            (function
+              | Picture.Binary_item { picture = Picture.Undrawn_image media; _ } ->
+                  Alcotest.(check string) "the image keeps its format" "image/jpeg"
+                    (Media.media_type_to_string media)
+              | _ ->
+                  Alcotest.fail "every image is its caption alone, past the slot count too")
+            prepared
+      | Picture.Access_unavailable _ -> Alcotest.fail "available evidence came back unavailable")
+    [ View.Mosaic; View.No_picture ];
+  Alcotest.(check bool) "its line names an image and no cause" true
+    (contains ~needle:"image/jpeg"
+       (Picture.caption ~reference:"artifact:a.jpg" ~bytes:1 ~sha256 ~format:"jpg"
+          (Picture.Undrawn_image Media.Jpeg)));
+  Alcotest.(check bool) "and does not say not shown" false
+    (contains ~needle:"not shown"
+       (Picture.caption ~reference:"artifact:a.jpg" ~bytes:1 ~sha256 ~format:"jpg"
+          (Picture.Undrawn_image Media.Jpeg)))
+
+let test_a_banner_wider_than_the_pane_at_one_row_is_a_caption () =
+  (* 4000 x 20 in 94 columns of 10 x 20 px: the pane holds 0.235 of a row of
+     it. The terminal draws no fewer than one row, so the picture would run
+     across the pane's edge. *)
+  Alcotest.(check block_testable) "a caption" Picture.Caption_only
+    (Picture.block kitty (drawable ~width:4000 ~height:20) ~width:100 ~caption_rows:1
+       ~content_height:40);
+  (* The widest picture that fits at one row (94 cells of 10 px across a 20 px
+     tall picture at one 20 px row) is still a picture. *)
+  Alcotest.(check block_testable) "a banner that fits one row"
+    (Picture.Picture { cols = 94; rows = 1 })
+    (Picture.block kitty (drawable ~width:940 ~height:20) ~width:100 ~caption_rows:1
+       ~content_height:40)
 
 let () =
   Alcotest.run "Tui evidence picture"
@@ -522,6 +743,18 @@ let () =
             test_other_previews_and_items_keep_their_meaning
         ; Alcotest.test_case "unavailable access passes through" `Quick
             test_unavailable_access_passes_through
+        ; Alcotest.test_case "a side of zero is not drawable" `Quick
+            test_a_side_of_zero_is_not_drawable
+        ; Alcotest.test_case "a product that wraps the int is over the limit" `Quick
+            test_a_product_that_wraps_the_int_is_over_the_limit
+        ; Alcotest.test_case "the limit is exact on both sides" `Quick
+            test_the_limit_is_exact_on_both_sides
+        ; Alcotest.test_case "a PNG that stops before its last chunk is named" `Quick
+            test_a_png_that_stops_before_its_last_chunk_is_named
+        ; Alcotest.test_case "a converted picture is measured again" `Quick
+            test_a_converted_picture_is_measured_again
+        ; Alcotest.test_case "a terminal without pixels converts nothing" `Quick
+            test_a_terminal_without_pixels_converts_nothing_and_holds_no_slot
         ] )
     ; ( "layout"
       , [ Alcotest.test_case "a picture keeps its shape in the width" `Quick
@@ -534,8 +767,18 @@ let () =
             test_too_little_room_is_a_caption
         ; Alcotest.test_case "only a pixel terminal gets a picture" `Quick
             test_only_a_pixel_terminal_gets_a_picture
-        ; Alcotest.test_case "a picture is placed only while all of it is shown" `Quick
-            test_a_picture_is_placed_only_while_every_row_of_it_is_shown
+        ; Alcotest.test_case "a picture is placed for every row of it that is shown" `Quick
+            test_a_picture_is_placed_for_every_row_of_it_that_is_shown
+        ; Alcotest.test_case "no scroll offset leaves a shown row without its picture" `Quick
+            test_no_scroll_offset_leaves_a_shown_row_without_its_picture
+        ; Alcotest.test_case "a cut picture is cropped to the rows that show" `Quick
+            test_a_cut_picture_is_cropped_to_the_rows_that_show
+        ; Alcotest.test_case "the parts of a cut picture tile without a gap" `Quick
+            test_the_parts_of_a_cut_picture_tile_without_a_gap
+        ; Alcotest.test_case "a short picture keeps a pixel per part" `Quick
+            test_a_picture_shorter_than_its_rows_keeps_a_pixel_per_part
+        ; Alcotest.test_case "a banner wider than the pane is a caption" `Quick
+            test_a_banner_wider_than_the_pane_at_one_row_is_a_caption
         ; Alcotest.test_case "a placement carries the slot, key and box" `Quick
             test_a_placement_carries_the_slot_the_key_and_the_box
         ] )

@@ -7287,21 +7287,16 @@ let verification_detail_pane (state : state) ~rows ~cols
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
-  (* A picture is requested only while every row of its area is in view; one
-     the window has moved off is not requested, and the next flush takes it
-     off the terminal. *)
+  (* A picture with a row in view is requested, cropped to those rows. One
+     wholly out of view is held: its pixels stay with the terminal, and a
+     picture that is neither requested nor held comes off at the next flush. *)
   List.iter
-    (fun ((slot : Masc_tui_evidence_picture.slot), pixels) ->
-       match
-         Masc_tui_evidence_picture.plan
-           { slot with first = evidence_first + slot.first }
-           ~scroll ~content_height ~content_origin
-       with
-       | Masc_tui_evidence_picture.Place { row; column } ->
-           Masc_tui_portrait_view.request_png
-             (Masc_tui_evidence_picture.png_placement pixels slot.box ~row ~column)
-       | Masc_tui_evidence_picture.Hidden -> ())
-    pictures;
+    (function
+      | Masc_tui_render_evidence.Show placement -> Masc_tui_portrait_view.request_png placement
+      | Masc_tui_render_evidence.Hold { image_id; key } ->
+          Masc_tui_portrait_view.hold_png ~image_id ~key)
+    (Masc_tui_render_evidence.requests ~pictures ~evidence_first ~scroll ~content_height
+       ~content_origin);
   Option.iter
     (fun note -> box_line_styled buf cols ~style:(Theme.warn ())
       (fit_width note (cols - 4)))

@@ -72,7 +72,7 @@ let section ~evidence ~task_id ~width ~content_height ~display =
         | Picture.Drawable pixels ->
             ( caption @ List.init box.rows (fun _ -> Ansi.reset, "")
             , Some ({ Picture.first = List.length caption; box }, pixels) )
-        | Picture.Binary_only | Picture.Unshown _ -> caption, None)
+        | Picture.Undrawn_image _ | Picture.Binary_only | Picture.Unshown _ -> caption, None)
   in
   let message rows = wrap_rows ~width rows, [] in
   let rows, pictures =
@@ -124,3 +124,24 @@ let section ~evidence ~task_id ~width ~content_height ~display =
       (fun ((slot : Picture.slot), pixels) ->
          { slot with first = heading_rows + slot.first }, pixels)
       pictures )
+
+type request =
+  | Show of Masc_tui_portrait_view.png_placement
+  | Hold of { image_id : int; key : string }
+
+(* What the frame asks the terminal for each picture of the section. A picture
+   with a row in the window is shown cropped to those rows; one wholly
+   outside it is held, so its pixels stay with the terminal and scrolling
+   back is a placement, not a transfer. *)
+let requests ~pictures ~evidence_first ~scroll ~content_height ~content_origin =
+  List.map
+    (fun ((slot : Picture.slot), (pixels : Picture.pixels)) ->
+       match
+         Picture.plan { slot with first = evidence_first + slot.first } ~scroll
+           ~content_height ~content_origin
+       with
+       | Picture.Place { row; column; cut_top; shown_rows } ->
+           Show (Picture.png_placement pixels slot.box ~row ~column ~cut_top ~shown_rows)
+       | Picture.Hidden ->
+           Hold { image_id = Masc_tui_graphics.image_id pixels.slot; key = pixels.key })
+    pictures

@@ -122,12 +122,29 @@ val put : image_id:int -> placement_id:int -> rows:int -> string
     a clear screen ([ESC [2J]) frees an image whose placements it took, in
     Kitty and in Ghostty, and [q=2] means a missing image is not reported. *)
 
-val replace_png : image_id:int -> placement_id:int -> data:string -> rows:int -> string
+(** The part of a picture that shows, as whole-width rows of source pixels. *)
+type crop = { top_px : int; height_px : int }
+
+val replace_png :
+  image_id:int -> placement_id:int -> data:string -> rows:int -> cols:int
+  -> crop:crop option -> string
 (** {!replace_rgba} for a picture that already is a PNG file: its bytes travel
     as they are ([f=100]), chunked and silent like every other placement. The
-    terminal fits the picture into [rows] cells and derives the width from the
-    picture's own shape. [""] when [data] is empty. [data] must be a PNG --
-    ask {!payload_media_type}'s question of the bytes first. *)
+    terminal draws [crop] (all of the picture for [None]) over [cols] by
+    [rows] cells; both are sent because a cropped picture is not the shape of
+    the whole one. [""] when [data] is empty. [data] must be a PNG -- ask
+    {!payload_media_type}'s question of the bytes first. *)
+
+val put_png :
+  image_id:int -> placement_id:int -> rows:int -> cols:int -> crop:crop option -> string
+(** {!put} with the cells and crop of {!replace_png}: place, or move and
+    re-crop, the pixels the terminal already holds, without sending them. *)
+
+val delete_placement : image_id:int -> placement_id:int -> string
+(** Delete one placement and leave the image's pixels with the terminal
+    ([d=i], lowercase), so {!put_png} can bring the picture back without a
+    transfer. The terminal may still free the pixels on its own, as it does
+    after a clear screen; {!delete_image} is what frees them. *)
 
 val delete_image : image_id:int -> string
 (** Delete this image's placements and free its stored pixels. *)

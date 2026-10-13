@@ -30,3 +30,22 @@ val section :
     also a run of blank rows under its caption; its slot gives the index of the
     first blank row among the section's rows and the cells it takes. Each item
     is followed by the links it carries, one row each. *)
+
+(** What one frame asks of the terminal for one picture. *)
+type request =
+  | Show of Masc_tui_portrait_view.png_placement
+      (** the picture, cropped to the rows of its area inside the window *)
+  | Hold of { image_id : int; key : string }
+      (** no row of its area is inside the window *)
+
+val requests :
+  pictures:(Masc_tui_evidence_picture.slot * Masc_tui_evidence_picture.pixels) list ->
+  evidence_first:int ->
+  scroll:int ->
+  content_height:int ->
+  content_origin:int * int ->
+  request list
+(** [pictures] are as {!section} returned them, their rows counted from the
+    section's first row. [evidence_first] is the section's first row among
+    all the pane's rows, [scroll] the pane's first shown row, [content_origin]
+    the frame (row, column) of the first content row's first cell. *)

@@ -24,6 +24,10 @@ type cause =
   | Too_many_pixels of { width : int; height : int }
       (** a small file that describes a picture beyond {!max_picture_pixels},
           which the terminal would have to decode in full *)
+  | Empty_dimensions  (** the header says the picture has no width or no height *)
+  | Png_incomplete
+      (** the header parses and the file stops before its last chunk, so the
+          terminal would drop it without saying so *)
   | Unknown_size  (** the PNG's header carries no readable dimensions *)
   | No_free_slot
       (** more pictures than {!Masc_tui_graphics.evidence_images} has slots;
@@ -47,10 +51,13 @@ val short_sha_length : int
     the same length. *)
 
 val max_picture_pixels : int
-(** Width times height beyond which a picture is not handed to the terminal. *)
+(** Width times height beyond which a picture is not handed to the terminal.
+    Compared without forming the product, so a header that claims 2^31 by 2^31
+    is over the limit and not wrapped under it. *)
 
-(** An image ready for the terminal. *)
-type pixels = {
+(** An image ready for the terminal. Built only by {!prepare}, which gives it
+    sides of at least one pixel and a PNG that ends with its last chunk. *)
+type pixels = private {
   media : Masc.Keeper_vision_downscale.media_type;  (** what the artifact was *)
   png : string;  (** the same picture as a PNG file, which is what Kitty takes *)
   key : string;  (** SHA-256 of [png]; equal keys are equal bytes *)
@@ -61,6 +68,9 @@ type pixels = {
 
 type picture =
   | Drawable of pixels
+  | Undrawn_image of Masc.Keeper_vision_downscale.media_type
+      (** an image on a terminal that draws no pixels: nothing was converted,
+          and the caption is all of it *)
   | Binary_only  (** not an image: one line says what it is *)
   | Unshown of cause
 
@@ -80,6 +90,7 @@ type evidence =
   | Access_unavailable of string
 
 val prepare :
+  display:Masc_tui_portrait_view.display ->
   convert:(string -> (string, string) result) ->
   Masc.Tui_decode.verification_evidence ->
   evidence
@@ -90,7 +101,8 @@ val prepare :
     order the evidence lists them; one past the last slot is
     [Unshown No_free_slot]. Dimensions are read before any conversion where
     the format allows it, so a picture over {!max_picture_pixels} is never
-    handed to a converter. *)
+    handed to a converter. When [display] does not draw pixels no picture is
+    converted or given a slot: every image is {!Undrawn_image}. *)
 
 val caption :
   reference:string ->
@@ -144,23 +156,30 @@ val block :
     the width left of {!picture_indent_cols} and into the rows the content
     area has under the caption, at most {!picture_max_rows}. With fewer than
     {!Masc_tui_portrait_view.min_pixel_rows} rows to give it is
-    [Caption_only]: a smudge is not a picture. *)
+    [Caption_only]: a smudge is not a picture. A picture wider than the pane
+    at one row (a banner) is [Caption_only] too: the terminal draws no fewer
+    than one row, and would draw it past the pane's edge. *)
 
 (** Where a reserved area sits among the content rows. *)
 type slot = { first : int; box : box }
 
 type placement_plan =
-  | Place of { row : int; column : int }
-      (** the 0-based frame cell of the picture's top-left corner *)
-  | Hidden
-      (** the area is not wholly inside the window: no picture is requested,
-          so the terminal's copy is deleted, and the caption above stays *)
+  | Place of { row : int; column : int; cut_top : int; shown_rows : int }
+      (** [row] and [column] are the 0-based frame cell of the top-left corner
+          of the part that shows; [cut_top] rows of the area are above the
+          window and [shown_rows] are inside it *)
+  | Hidden  (** no row of the area is inside the window *)
 
 val plan :
   slot -> scroll:int -> content_height:int -> content_origin:int * int -> placement_plan
 (** [content_origin] is the frame (row, column) of the first content row's
-    first cell. A picture is placed only when every row of its area is shown:
-    a partly scrolled picture would be drawn over the rows around it. *)
+    first cell. The part of the area inside the window is placed and the rest
+    is cropped from the picture, so a picture is there at every scroll
+    offset that shows one of its rows. *)
 
 val png_placement :
-  pixels -> box -> row:int -> column:int -> Masc_tui_portrait_view.png_placement
+  pixels -> box -> row:int -> column:int -> cut_top:int -> shown_rows:int ->
+  Masc_tui_portrait_view.png_placement
+(** The picture cropped to the rows of its area that [plan] left inside the
+    window. The crop is cut from the same proportion at both ends: the parts
+    of one picture scrolled past a window edge tile exactly. *)

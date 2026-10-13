@@ -85,10 +85,48 @@ let decode_failure_of_status status ~output_present =
 let decode_failure_text = function
   | Decoder_missing -> "decoder executable was not found"
   | Decoder_exit { code } -> Printf.sprintf "decoder exited %d" code
-  | Decoder_signaled { signal } -> Printf.sprintf "decoder was killed by signal %d" signal
+  | Decoder_signaled { signal } ->
+    if signal = Sys.sigkill
+    then "decoder was killed (SIGKILL: out of time or memory)"
+    else Printf.sprintf "decoder was killed by signal %d" signal
   | Decoder_stopped { signal } -> Printf.sprintf "decoder was stopped by signal %d" signal
   | No_frame_written -> "decoder wrote no frame"
   | Frame_unreadable { detail } -> "the decoded frame could not be read: " ^ detail
+
+(* How often a bounded run looks at its child. A decoder that finishes is
+   noticed within one interval; the interval is not a cost of its own, since
+   the caller is a loader thread with nothing else to do. *)
+let run_poll_interval_seconds = 0.02
+
+let run_bounded ~deadline_seconds command =
+  (* Standard input, output and error are the null device: a decoder that
+     reads a terminal would take the keys the operator is typing, and one that
+     writes to it would draw over the screen. *)
+  let null = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close null)
+    (fun () ->
+       (* exec: the shell becomes the decoder, so the kill below reaches it. *)
+       let pid =
+         Unix.create_process "/bin/sh" [| "sh"; "-c"; "exec " ^ command |] null null null
+       in
+       let deadline = Unix.gettimeofday () +. deadline_seconds in
+       let rec wait () =
+         match Unix.waitpid [ Unix.WNOHANG ] pid with
+         | 0, _ ->
+           if Unix.gettimeofday () >= deadline
+           then begin
+             (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+             snd (Unix.waitpid [] pid)
+           end
+           else begin
+             Unix.sleepf run_poll_interval_seconds;
+             wait ()
+           end
+         | _, status -> status
+         | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+       in
+       wait ())
 
 let discard path = try Sys.remove path with Sys_error _ -> ()
 

@@ -3521,11 +3521,17 @@ let ensure_img_cache_dir () =
 (* An evidence image that is not a PNG, made into one. Kitty takes PNG
    (f=100) and drops anything else without saying so, so the converters the
    link preview already uses (sips, ImageMagick, ffmpeg) run first. They block
-   on child processes: only the evidence loader's systhread calls this. A
-   converter that cannot start is that image's failure, not the bundle's. *)
+   on child processes: only the evidence loader's systhread calls this. An
+   artifact's author chooses the bytes, so each converter runs with no
+   terminal to read and is killed at the deadline: a decompression bomb costs
+   that image, not the evidence pane. A converter that cannot start is that
+   image's failure, not the bundle's. *)
+let evidence_converter_deadline_seconds = 10.
+
 let convert_evidence_image bytes =
   match
-    Masc_tui_image_cache.prepare_payload ~run:Unix.system
+    Masc_tui_image_cache.prepare_payload
+      ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:evidence_converter_deadline_seconds)
       ~cache_dir:(ensure_img_cache_dir ()) bytes
   with
   | result -> result
@@ -3549,7 +3555,9 @@ let launch_verification_evidence_load state ~mailbox task_id =
              (* Decoding the bytes is done; making them drawable runs
                 converters, so it leaves the fiber the render loop shares. *)
              Eio_guard.run_in_systhread ~label:"tui-evidence-pictures" (fun () ->
-                 Masc_tui_evidence_picture.prepare ~convert:convert_evidence_image
+                 Masc_tui_evidence_picture.prepare
+                   ~display:(Masc_tui_portrait_view.current_display ())
+                   ~convert:convert_evidence_image
                    evidence)))
 
 (* The detail pane's two non-Info tabs. Same discipline as the call log:

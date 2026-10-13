@@ -3026,33 +3026,36 @@ let () =
      failed: transport error: error sending request for url \
      (https://api.meta.ai/v1/responses) (after 4 provider attempts)"
   in
+  let core =
+    Keeper_request_failure_core.of_core_error
+      (Agent_core.Error.Provider
+         (Llm_provider.Error.ParseError { detail = cause_message }))
+  in
   let fenced =
     Keeper_internal_error.Provider_attempt_effect_fenced
       { runtime_id = "muse_d242bc1a.muse-spark-1.3_75bc5a82"
       ; effect_disposition = Keeper_provider_attempt_effect_core.Observation_unavailable
-      ; cause =
-          Keeper_internal_error.Fenced_core
-            (Keeper_request_failure_core.of_core_error
-               (Agent_core.Error.Provider
-                  (Llm_provider.Error.ParseError { detail = cause_message })))
+      ; cause = Keeper_internal_error.Fenced_core core
       }
   in
   let core_error = Keeper_internal_error.core_error_of_masc_internal_error fenced in
   let raw_error = Agent_core.Error.to_string core_error in
-  let contains ~needle text =
-    let n = String.length needle and t = String.length text in
-    let rec loop i = i + n <= t && (String.sub text i n = needle || loop (i + 1)) in
-    n = 0 || loop 0
+  (* The expected line is built from the typed cause and disposition, so the
+     check compares values rather than looking for a word inside a sentence. *)
+  let expected_summary =
+    Printf.sprintf
+      "effect_disposition=%s; %s"
+      (Keeper_provider_attempt_effect_core.to_string
+         Keeper_provider_attempt_effect_core.Observation_unavailable)
+      (Keeper_request_failure_core.summary core)
   in
+  let prefix_preview = Masc.Keeper_types_profile.short_preview raw_error in
   check
     "fixture: the raw envelope is longer than the preview limit"
     (String.length raw_error > 220);
   check
-    "fixture: a prefix preview of the raw envelope loses the cause"
-    (not
-       (contains
-          ~needle:"api.meta.ai"
-          (Masc.Keeper_types_profile.short_preview raw_error)));
+    "the fenced summary is the typed disposition and cause"
+    (Keeper_internal_error.fenced_attempt_summary fenced = Some expected_summary);
   let terminal = Masc.Keeper_turn_terminal.of_failure ~raw_error core_error in
   (match
      Masc.Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
@@ -3060,11 +3063,11 @@ let () =
    with
    | Some (Masc.Keeper_registry.Provider_runtime_error { detail; code; _ }) ->
      check
-       "a fenced attempt's registry detail names the cause"
-       (contains ~needle:"api.meta.ai" detail);
+       "a fenced attempt's registry detail is its typed summary"
+       (String.equal detail (Masc.Keeper_types_profile.short_preview expected_summary));
      check
-       "a fenced attempt's registry detail keeps the effect disposition"
-       (contains ~needle:"observation_unavailable" detail);
+       "a fenced attempt's registry detail is no longer the prefix of the raw envelope"
+       (not (String.equal detail prefix_preview));
      check
        "a fenced attempt keeps its typed code"
        (String.equal code "provider_attempt_effect_fenced")

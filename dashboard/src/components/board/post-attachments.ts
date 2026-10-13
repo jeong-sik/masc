@@ -229,7 +229,7 @@ function ArtifactAttachment({ kind, source, compact }: {
       <button type="button" class="text-left text-xs font-semibold text-[var(--color-fg-secondary)] underline"
         disabled=${loading} onClick=${() => void load()}>
         ${kind === 'image' ? '🖼 이미지 불러오기' : kind === 'video' ? '🎞 동영상 불러오기' : '📎 아티팩트 다운로드 준비'}
-        ${' '}(${source.sha256.slice(0, 12)})
+        ${' '}(${source.name ?? source.sha256.slice(0, 12)})
       </button>
       <span class="text-2xs text-[var(--color-fg-muted)]">
         ${formatFileSize(source.bytes)} · ${source.mime}
@@ -258,7 +258,7 @@ function ArtifactAttachment({ kind, source, compact }: {
           </span>`
         : null}
       ${downloadUrl !== null
-        ? html`<a href=${downloadUrl} download=${`artifact-${source.sha256}.bin`}
+        ? html`<a href=${downloadUrl} download=${source.name ?? `artifact-${source.sha256}.bin`}
             data-testid="board-attachment-artifact-download">다운로드</a>`
         : null}
     </div>

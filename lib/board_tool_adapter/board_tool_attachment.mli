@@ -9,10 +9,15 @@ type source =
   | Https_url of string
   | Artifact_sha256 of string
 
+val max_name_bytes : int
+(** The longest [name] an entry may carry, in bytes: a file name's length. *)
+
 type unresolved = { kind : kind; source : source; name : string option }
-(** [name] is an optional display label (typically the original file name).
-    [None] means no label was given; readers fall back to the kind and the
-    url or shortened sha256. *)
+(** [name] is the file's name, optional: non-empty, on one line (no control
+    characters), no path separator, not [.] or [..], at most
+    {!max_name_bytes}. A reader prints it and the dashboard saves the
+    download under it. [None] means none was given; readers fall back to the
+    kind and the url or shortened sha256. *)
 
 type t =
   | Url of { kind : kind; url : string; name : string option }
@@ -42,7 +47,7 @@ val error_to_string : error -> string
 val parse_args : Yojson.Safe.t -> (unresolved list, error) result
 (** Rejects a raw [meta.attachments] slot even when [attachments] is absent.
     Each new entry has exactly [kind], one of [url] or [sha256], and an
-    optional string [name]; any other field is refused. A [youtube] entry
+    optional [name]; any other field is refused. A [youtube] entry
     must use [url]: a stored artifact is not a YouTube video.
 
     [kind] is how the reader shows the entry. For an artifact, the dashboard

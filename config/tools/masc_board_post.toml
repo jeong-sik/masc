@@ -33,7 +33,7 @@ description = "Optional structured operational metadata. Do not put attachments 
 [[params]]
 name = "attachments"
 type = "array"
-description = "Optional typed attachments. Each entry has kind, exactly one of url (absolute HTTPS) or sha256 (an existing artifact), and an optional name (display label, typically the original file name)."
+description = "Optional typed attachments. Each entry has kind, exactly one of url (absolute HTTPS) or sha256 (an existing artifact), and an optional name (the file's name)."
 
 [params.items]
 type = "object"
@@ -58,7 +58,7 @@ description = "Existing artifact content hash; omit when url is set"
 [[params.items.params]]
 name = "name"
 type = "string"
-description = "Optional display label, typically the original file name"
+description = "Optional file name shown beside the attachment and used for its download. Not empty, one line, no path separators, at most 255 bytes."
 
 [[params]]
 name = "sources"
@@ -187,7 +187,7 @@ reason to preserve why you posted/classified it this way"""
 [[keeper_projection.params]]
 name = "attachments"
 type = "array"
-description = "Optional typed attachments. Each entry has kind, exactly one of url (absolute HTTPS) or sha256 (existing artifact), and an optional name (display label, typically the original file name)."
+description = "Optional typed attachments. Each entry has kind, exactly one of url (absolute HTTPS) or sha256 (existing artifact), and an optional name (the file's name)."
 
 [keeper_projection.params.items]
 type = "object"
@@ -212,7 +212,7 @@ description = "Existing artifact content hash; omit when url is set"
 [[keeper_projection.params.items.params]]
 name = "name"
 type = "string"
-description = "Optional display label, typically the original file name"
+description = "Optional file name shown beside the attachment and used for its download. Not empty, one line, no path separators, at most 255 bytes."
 
 [[keeper_projection.params]]
 name = "sources"

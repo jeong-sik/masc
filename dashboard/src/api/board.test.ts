@@ -1113,11 +1113,11 @@ describe('normalizeBoardAttachments', () => {
         sha256, bytes: 12, mime: 'text/plain', preview: '',
       } } },
     ])).toEqual([
-      { ok: true, attachment: { kind: 'image', name: 'a.png', source: {
-        kind: 'url', url: 'https://cdn.example.com/a.png',
+      { ok: true, attachment: { kind: 'image', source: {
+        kind: 'url', url: 'https://cdn.example.com/a.png', name: 'a.png',
       } } },
-      { ok: true, attachment: { kind: 'external_link', name: 'trace.log', source: {
-        kind: 'artifact', sha256, bytes: 12, mime: 'text/plain',
+      { ok: true, attachment: { kind: 'external_link', source: {
+        kind: 'artifact', sha256, bytes: 12, mime: 'text/plain', name: 'trace.log',
       } } },
     ])
   })

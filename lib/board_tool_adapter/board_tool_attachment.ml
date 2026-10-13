@@ -14,6 +14,8 @@ type t =
       ; name : string option
       }
 
+let max_name_bytes = 255
+
 type error =
   | Raw_meta_attachments
   | Attachments_not_array
@@ -46,7 +48,10 @@ let error_to_string = function
       "attachments[%d].kind must be image, video, youtube, external_link, file, audio, score, or midi"
       index
   | Invalid_name index ->
-    Printf.sprintf "attachments[%d].name must be a string" index
+    Printf.sprintf
+      "attachments[%d].name must be a non-empty string on one line, at most %d bytes"
+      index
+      max_name_bytes
   | Invalid_url index ->
     Printf.sprintf
       "attachments[%d].url must be an absolute https URL without credentials or controls"
@@ -110,6 +115,22 @@ let valid_https_url url =
     | exception Invalid_argument _ -> false
 ;;
 
+(* A name is the file's name: a reader prints it beside the attachment and
+   the dashboard saves the download under it. So it is one line, no longer
+   than a file name, and names no directory. *)
+let valid_name name =
+  let length = String.length name in
+  length > 0
+  && length <= max_name_bytes
+  && (not (String.equal name "."))
+  && (not (String.equal name ".."))
+  && String.for_all
+       (fun char ->
+         let code = Char.code char in
+         code >= 0x20 && code <> 0x7f && char <> '/' && char <> '\\')
+       name
+;;
+
 let parse_source index fields name =
   if List.length fields <> 2
   then Error (Invalid_entry_fields index)
@@ -140,7 +161,8 @@ let parse_entry index = function
       List.partition (fun (key, _) -> String.equal key "name") entry_fields
     in
     (match name_fields with
-     | [ _, `String name ] -> parse_source index fields (Some name)
+     | [ _, `String name ] when valid_name name ->
+       parse_source index fields (Some name)
      | [] -> parse_source index fields None
      | [ _ ] -> Error (Invalid_name index)
      | _ -> Error (Invalid_entry_fields index))

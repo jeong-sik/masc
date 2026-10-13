@@ -519,7 +519,7 @@ function normalizeBoardAttachment(raw: unknown): BoardAttachmentDecode {
   const keys = Object.keys(raw).filter((key) => key !== 'name')
 
   if (keys.length === 2 && keys.includes('url') && isHttpsAttachmentUrl(raw.url)) {
-    return { ok: true, attachment: { kind, ...name, source: { kind: 'url', url: raw.url } } }
+    return { ok: true, attachment: { kind, source: { kind: 'url', url: raw.url, ...name } } }
   }
 
   if (keys.length === 2 && keys.includes('artifact') && isRecord(raw.artifact)) {
@@ -540,8 +540,7 @@ function normalizeBoardAttachment(raw: unknown): BoardAttachmentDecode {
           ok: true,
           attachment: {
             kind,
-            ...name,
-            source: { kind: 'artifact', sha256: blob.sha256 as string, bytes: blob.bytes, mime: blob.mime },
+            source: { kind: 'artifact', sha256: blob.sha256 as string, bytes: blob.bytes, mime: blob.mime, ...name },
           },
         }
       }

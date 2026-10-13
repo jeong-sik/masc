@@ -180,6 +180,26 @@ describe('PostAttachments', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith(objectUrl)
   })
 
+  it('names a stored attachment by its name, on the card and on the download', async () => {
+    const sha256 = 'c'.repeat(64)
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:named')
+      static revokeObjectURL = vi.fn()
+    })
+    vi.mocked(fetchToolBlobBytes).mockResolvedValue(new ArrayBuffer(1))
+    render(h(PostAttachments, { attachments: [{
+      ok: true,
+      attachment: { kind: 'score', source: {
+        kind: 'artifact', sha256, bytes: 1, mime: 'application/octet-stream', name: 'riff.gp5',
+      } },
+    }] }))
+    const card = screen.getByTestId('board-attachment-artifact')
+    expect(card.textContent).toContain('riff.gp5')
+    fireEvent.click(card.querySelector('button')!)
+    const link = await screen.findByTestId('board-attachment-artifact-download')
+    expect(link).toHaveAttribute('download', 'riff.gp5')
+  })
+
   function stubObjectUrls(objectUrl: string) {
     const NativeURL = URL
     vi.stubGlobal('URL', class extends NativeURL {

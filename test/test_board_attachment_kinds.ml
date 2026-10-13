@@ -103,21 +103,35 @@ let test_non_string_name_rejected () =
   | Ok _ -> Alcotest.fail "non-string name was accepted"
 ;;
 
-let test_empty_name_carried_verbatim () =
-  match
-    parse
-      [ `Assoc
-          [ "kind", `String "file"
-          ; "url", `String "https://cdn.example.test/empty"
-          ; "name", `String ""
+(* A name is a file's name, printed and used for the download: empty,
+   multi-line, longer than a file name, or naming a directory is refused
+   where it enters, so no reader has to clean it. *)
+let test_unprintable_name_rejected () =
+  List.iter
+    (fun (label, name) ->
+      match
+        parse
+          [ `Assoc
+              [ "kind", `String "file"
+              ; "url", `String "https://cdn.example.test/f"
+              ; "name", `String name
+              ]
           ]
-      ]
-  with
-  | Ok [ { Board_tool_attachment.name = Some ""; _ } ] -> ()
-  | Ok _ -> Alcotest.fail "empty name was coerced instead of carried"
-  | Error error ->
-    Alcotest.failf "empty name rejected: %s"
-      (Board_tool_attachment.error_to_string error)
+      with
+      | Error (Board_tool_attachment.Invalid_name 0) -> ()
+      | Error error ->
+        Alcotest.failf "%s rejected with the wrong error: %s" label
+          (Board_tool_attachment.error_to_string error)
+      | Ok _ -> Alcotest.failf "%s was accepted" label)
+    [ "an empty name", ""
+    ; "a name with a newline", "a\nb"
+    ; "a name with an escape character", "a\027[2Jb"
+    ; ( "a name one byte too long"
+      , String.make (Board_tool_attachment.max_name_bytes + 1) 'a' )
+    ; "a name with a path separator", "riffs/take1.mid"
+    ; "a name with a backslash", "riffs\\take1.mid"
+    ; "the parent directory", ".."
+    ]
 ;;
 
 let test_unknown_extra_field_still_rejected () =
@@ -178,6 +192,58 @@ let test_resolve_and_to_json_preserve_name () =
      | _ -> Alcotest.fail "resolved wire shape malformed")
 ;;
 
+(* The path file sharing uses: a stored blob attached by digest with a name.
+   Each kind that takes an artifact keeps its own word and the name through
+   resolve and to_json. *)
+let test_stored_artifact_keeps_kind_and_name () =
+  let base_path = Filename.temp_dir "board-attachment-kinds" "" in
+  let stored =
+    Tool_blob_store.put_durable
+      (Tool_blob_store.create ~base_path)
+      ~bytes:"riff bytes"
+      ~mime:"application/octet-stream"
+  in
+  let kinds =
+    Board_tool_attachment.
+      [ File, "file"; Audio, "audio"; Score, "score"; Midi, "midi" ]
+  in
+  Eio_main.run
+  @@ fun _env ->
+  match
+    Board_tool_attachment.resolve
+      ~base_path
+      ~max_artifact_bytes:1024
+      (List.map
+         (fun (kind, word) ->
+           { Board_tool_attachment.kind
+           ; source = Board_tool_attachment.Artifact_sha256 stored.Tool_output.sha256
+           ; name = Some (word ^ ".bin")
+           })
+         kinds)
+  with
+  | Error error ->
+    Alcotest.failf "stored artifact failed to resolve: %s"
+      (Board_tool_attachment.error_to_string error)
+  | Ok resolved ->
+    Alcotest.(check (list (pair string string)))
+      "each entry's kind word and name"
+      (List.map (fun (_, word) -> word, word ^ ".bin") kinds)
+      (List.map
+         (fun entry ->
+           let json = Board_tool_attachment.to_json entry in
+           Yojson.Safe.Util.(
+             ( member "kind" json |> to_string
+             , member "name" json |> to_string )))
+         resolved);
+    Alcotest.(check bool) "the entry points at the stored blob" true
+      (List.for_all
+         (function
+           | Board_tool_attachment.Artifact { reference; _ } ->
+             String.equal reference.Tool_output.sha256 stored.Tool_output.sha256
+           | Board_tool_attachment.Url _ -> false)
+         resolved)
+;;
+
 let () =
   Alcotest.run
     "board_attachment_kinds"
@@ -195,12 +261,14 @@ let () =
     ; ( "name"
       , [ Alcotest.test_case "non-string name rejected" `Quick
             test_non_string_name_rejected
-        ; Alcotest.test_case "empty name carried verbatim" `Quick
-            test_empty_name_carried_verbatim
+        ; Alcotest.test_case "unprintable name rejected" `Quick
+            test_unprintable_name_rejected
         ; Alcotest.test_case "unknown extra field still rejected" `Quick
             test_unknown_extra_field_still_rejected
         ; Alcotest.test_case "resolve and to_json preserve name" `Quick
             test_resolve_and_to_json_preserve_name
+        ; Alcotest.test_case "a stored artifact keeps its kind and name" `Quick
+            test_stored_artifact_keeps_kind_and_name
         ]
       )
     ]

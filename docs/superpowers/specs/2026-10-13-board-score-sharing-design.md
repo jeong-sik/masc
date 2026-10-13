@@ -1,7 +1,7 @@
 # Board 파일 공유 + 악보/Tab 표시 설계 (TUI-first)
 
 - 날짜: 2026-10-13
-- 상태: 초안 (사용자 승인 대기), builder check 2회 + TUI-first 개정 반영
+- 상태: 구현됨 (스택 board-attachments/01~07). 아래 "구현에서 달라진 점" 참조
 - 맥락: 사용자가 "midi 파일이나 다른 파일을 board 또는 대화에 공유하고 싶고, 악보/Tab
   표시 기능이 있으면 좋겠다"고 요청. 사용자는 dashboard를 거의 쓰지 않으므로
   **TUI가 1차 표시·입력 표면**이다.
@@ -86,13 +86,12 @@ TUI (`bin/masc_tui_*`):
 
 ### Phase 1 — 서버 공통 기반 (표면 무관)
 
-1. 업로드: HTTP `POST /api/v1/artifacts` (raw body + Content-Type) → `Tool_blob_store`
+1. 업로드: HTTP `POST /api/v1/artifacts` (raw body) → `Tool_blob_store`
    기록 → sha256 반환. 쓰기 API는 이미 존재한다: `Tool_blob_store.put_durable`
    (fsync 보장) / `put_file_durable`(스풀에서 스트리밍 해시+복사, 대용량에 적합)을
    라우트에 연결하는 작업이다 (`lib/tool_blob_store/tool_blob_store.mli:108,127`).
-   mime 인자를 그대로 저장한다. 참고: keeper export 경로(`keeper_peer_artifact.ml:41`)는
-   mime을 `application/octet-stream`으로 고정 스탬프하므로 keeper가 올린 파일의 kind
-   판별은 `name` 필드와 매직바이트에 기댄다.
+   저장소는 해시마다 미디어 타입을 두지 않는다. 파일이 무엇인지는 첨부의 kind가 말하고,
+   kind는 `name`의 확장자에서 정한다.
 2. attachment wire 포맷에 선택 필드 `name` 추가 (아래 결정 1).
 3. attachment kind 확장: `file`, `audio`, `score`, `midi`. `board_tool_attachment` 파싱과
    kind 합타입 확장. (dashboard가 모르는 kind를 어떻게 보여줄지는 dashboard 단계에서.)
@@ -124,13 +123,13 @@ TUI (`bin/masc_tui_*`):
 
 1. `emit_fence`에 alphatex arm 추가. 1차는 `masc_tui_code_lexer`에 lexer 등록 수준의
    구문 강조 + "alphaTex 악보" 표시行. board와 chat 양쪽에 자동 적용.
-2. alphaTex → ASCII 탭 변환 렌더러는 **사용자 결정 대기** (아래 미결 사항).
+2. alphaTex → ASCII 탭 변환 렌더러를 부분집합으로 포함한다 (아래 미결 사항의 결정).
 
 ### 후속 (이 설계의 범위 밖, 순서만 기록)
 
 - dashboard alphaTab 렌더러(스파이크로 유효성 검증 완료)와 dashboard 업로드 UI.
 - MIDI SMF 파싱 기반 트랙/길이/BPM 표시.
-- alphaTex → ASCII 탭 엔진.
+- TUI에서 첨부를 열거나 내려받는 키.
 - MCP 업로드 tool 변형 (TUI/HTTP 외 클라이언트용).
 
 ## Builder check 결정 사항 (2026-10-13, 진행자 판단)
@@ -159,14 +158,25 @@ TUI (`bin/masc_tui_*`):
 탭 그림이 없음. 부분집합 범위: duration/노트/화음/마디/반복, 테크닉 기호는 생략하고
 생략 사실을 표기).
 
+## 구현에서 달라진 점
+
+- TUI 읽기 화면은 모든 kind를 한 줄 라벨(kind, 이름, 크기)로만 보여 준다. 이미지 미리보기와
+  링크 프리뷰, 목록 뷰의 첨부 개수는 넣지 않았다. TUI에서 첨부를 여는 키도 없다.
+- dashboard는 새 kind 4종을 읽는다. 저장된 파일은 기존 다운로드 카드로, URL은 링크 카드로
+  나온다. 재생기나 악보 렌더러는 없다.
+- compose에서 kind는 확장자로만 정하고, 직접 고르는 방법은 없다.
+- 업로드는 미디어 타입을 받지 않는다. 저장소가 바이트와 해시만 두기 때문에 받아도 남길
+  곳이 없었다. 브라우저 재생처럼 실제 타입이 필요한 기능은 저장소가 타입을 갖게 된 뒤의 일이다.
+- 업로드 한도는 저장소 한도(32 MiB) 하나다. 일반 요청 본문 한도(`MASC_MAX_BODY_BYTES`)와
+  따로 읽는다.
+- 탭은 화면 폭을 넘으면 마디 경계에서 줄을 나눈다. 반복 기호(`\ro`, `\rc`)는 부분집합에 없어서
+  그런 악보는 이유와 함께 소스로 보인다.
+
 ## 빌더에게 맡기는 사항
 
 - 업로드 엔드포인트의 요청/응답 스키마, kind별 크기 상한 (`max_served_bytes` 범위 내).
   권한은 현행 GET `/api/v1/artifacts/<sha256>`의 `CanAdmin`
   (`server_routes_http_routes_artifacts.ml`) 관례를 따르는지 명시할 것.
-- 업로드 시 mime을 blob `_blob` wrapper(`sha256/bytes/mime/preview`)에 기록할 것.
-  현행 GET 응답은 mime을 `text/plain`으로 고정해 실제 타입을 잃는데, `file`/`audio`/
-  `score`/`midi` kind 표시와 브라우저 재생은 이 값에 기대야 한다.
 - compose 첨부 스테이징의 구체적 키/명령 UX (tui-chat-design 스킬 준수).
 - `.xml`이 MusicXML인지 판별하는 방식.
 - 목록 뷰 첨부 개수 표기 형식.

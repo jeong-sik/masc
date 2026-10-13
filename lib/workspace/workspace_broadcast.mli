@@ -155,7 +155,7 @@ val mention_delivery_reason : mention_delivery -> string option
 val broadcast_delivery_to_yojson : broadcast_delivery -> Yojson.Safe.t
 
 val broadcast : ?trace_context:string ->
-           ?msg_type:string ->
+           ?msg_type:Masc_domain.message_kind ->
            ?task_cache_signal:task_cache_signal ->
            audience:audience ->
            Workspace_utils_backend_setup.config ->

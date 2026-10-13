@@ -175,7 +175,7 @@ let project_registry token (entry : Keeper_registry.registry_entry) =
           { stage = Registry_transition
           ; detail = Keeper_state_machine.transition_error_to_string error
           })
-    | phase -> Ok phase
+    | (Keeper_state_machine.Offline | Keeper_state_machine.Running | Keeper_state_machine.Failing | Keeper_state_machine.Draining | Keeper_state_machine.Stopped | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting) as phase -> Ok phase
   in
   if not (Keeper_state_machine.is_terminal phase)
   then Atomic.set entry.fiber_wakeup true;

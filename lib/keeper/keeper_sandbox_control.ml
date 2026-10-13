@@ -727,7 +727,8 @@ let repository_checkouts_json_with_budget_impl
             (match catalog, scan with
              | Ok _, Ok (Keeper_playground_checkouts.Partial { limit = Checkout_budget_exhausted _; _ }) ->
                "inspection_budget_exhausted"
-             | Ok _, Ok _ -> "available"
+             | (Ok _, Ok (Keeper_playground_checkouts.Complete _))
+             | (Ok _, Ok (Keeper_playground_checkouts.Partial _)) -> "available"
              | Error _, _ -> "catalog_unavailable"
              | Ok _, Error _ -> "filesystem_unavailable") )
       ; "scan", Keeper_playground_checkouts.scan_json scan

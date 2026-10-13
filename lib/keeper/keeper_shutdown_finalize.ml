@@ -965,7 +965,9 @@ let run ~config ~entry ?successor_operation_id operation =
                   ?successor_operation_id
                   ready
                   cleanup
-              | _ -> Error Unsupported_phase))))
+              | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _
+              | Reconciliation_required _ | Finalized _ | Owner_absent _
+              | Operator_absence_acknowledged _ | Blocked _ | Superseded _ -> Error Unsupported_phase))))
   | Finalizing_tasks settled_task_ids ->
     (match read_operation_meta ~config operation with
      | Error detail -> block ~config operation Meta_read detail
@@ -984,7 +986,9 @@ let run ~config ~entry ?successor_operation_id operation =
                   ?successor_operation_id
                   ready
                   cleanup
-              | _ -> Error Unsupported_phase))))
+              | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _
+              | Reconciliation_required _ | Finalized _ | Owner_absent _
+              | Operator_absence_acknowledged _ | Blocked _ | Superseded _ -> Error Unsupported_phase))))
   | Cleanup_ready cleanup ->
     complete_cleanup
       ~config

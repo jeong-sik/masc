@@ -446,8 +446,7 @@ let decision_outcome_to_label = function
 let terminal_reason_of_result (result : Keeper_agent_run.run_result) =
   match Keeper_execution_receipt.disposition_of_stop_reason result.stop_reason with
   | Keeper_turn_disposition.Success -> Keeper_turn_terminal.success ()
-  | disposition ->
-    Keeper_turn_terminal.of_disposition ~source:"runtime_stop_reason" disposition
+  | (Keeper_turn_disposition.Checkpoint | Keeper_turn_disposition.External_cancel | Keeper_turn_disposition.Input_required | Keeper_turn_disposition.Runtime_attempts_exhausted | Keeper_turn_disposition.Provider_error _ | Keeper_turn_disposition.Unknown _) as disposition -> Keeper_turn_terminal.of_disposition ~source:"runtime_stop_reason" disposition
 
 exception Owner_meta_commit_failed of string
 

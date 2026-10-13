@@ -45,7 +45,14 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Schedule_due _, Schedule_due -> stimulus.post_id
   | Keeper_event_queue.Completion_authority_rejected _, Completion_authority_rejected ->
     stimulus.post_id
-  | _, kind ->
+  | (Keeper_event_queue.Board_signal _, kind) | (Keeper_event_queue.Board_attention _, kind)
+  | (Keeper_event_queue.Bootstrap, kind) | (Keeper_event_queue.Fusion_completed _, kind)
+  | (Keeper_event_queue.Schedule_due _, kind) | (Keeper_event_queue.Connector_attention _, kind)
+  | (Keeper_event_queue.Hitl_resolved _, kind) | (Keeper_event_queue.Ask_answered _, kind)
+  | (Keeper_event_queue.Completion_authority_rejected _, kind)
+  | (Keeper_event_queue.Task_cancelled _, kind) | (Keeper_event_queue.Workspace_message _, kind)
+  | (Keeper_event_queue.Delegate_completed _, kind)
+  | (Keeper_event_queue.Composition_completed _, kind) | (Keeper_event_queue.Task_outcome _, kind) ->
     digest_id
       "stimulus"
       (String.concat

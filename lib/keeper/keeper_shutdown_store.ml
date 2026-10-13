@@ -544,7 +544,8 @@ let validate_operation operation =
     else
       Error (Invalid_operation (Invalid_absence_acknowledgement
         "retained original shutdown observation digest differs"))
-  | _ -> Ok ()
+  | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _
+  | Reconciliation_required _ | Finalized _ | Owner_absent _ | Blocked _ | Superseded _ -> Ok ()
 ;;
 
 let active_turn_of_json json =
@@ -968,7 +969,8 @@ let reclaimable_terminal_phase (operation : Keeper_shutdown_types.t) =
   (* The operator-facing deletion inventory consumes these receipts after
      the Keeper itself disappears, including across server restarts. *)
   | Dashboard_keeper_purge _, _ -> false
-  | _, phase -> match phase with
+  | (Operator_stop_retain_meta, phase) | (Operator_stop_remove_meta, phase)
+  | (Supervisor_cleanup, phase) -> match phase with
   | Keeper_shutdown_types.Owner_absent _
   | Keeper_shutdown_types.Operator_absence_acknowledged _ -> false
   | Keeper_shutdown_types.Superseded _ -> true
@@ -1025,7 +1027,8 @@ let replace ~config ~expected_revision operation =
   let* () = match operation.phase with
     | Operator_absence_acknowledged _ -> Error (Invalid_operation
         (Invalid_absence_acknowledgement "use the explicit absence acknowledgement transaction"))
-    | _ -> Ok () in
+    | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _
+    | Reconciliation_required _ | Finalized _ | Owner_absent _ | Blocked _ | Superseded _ -> Ok () in
   let* operation_path = path_for_operation ~config operation in
   with_keeper_inventory_lock
     ~access:Write
@@ -1437,7 +1440,9 @@ let acknowledge_absent_owner ~config ~keeper_name ~operation_id
             | Finalized evidence when evidence = acknowledgement.finalization -> Ok ()
             | Owner_absent { finalization; _ }
               when finalization = acknowledgement.finalization -> Ok ()
-            | _ -> Error (Invalid_operation
+            | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _
+            | Reconciliation_required _ | Operator_absence_acknowledged _ | Blocked _ | Superseded _
+            | (Finalized _|Owner_absent _) -> Error (Invalid_operation
                 (Invalid_absence_acknowledgement "acknowledgement must retain original Finalized evidence"))
           in
           let acknowledged =

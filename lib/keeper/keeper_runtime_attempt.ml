@@ -117,8 +117,19 @@ let core_error_to_runtime_outcome err =
          (provider_error_to_http_error
             (Llm_provider.Error.ProviderUnavailable
                { provider = runtime_id; detail })))
-  | Some _
-  | None ->
+  | Some (Keeper_internal_error.Official_client_recovery_required _) | None
+  | Some (Keeper_internal_error.Runtime_exhausted _)
+  | Some (Keeper_internal_error.Accept_rejected _)
+  | Some (Keeper_internal_error.Internal_unhandled_exception _)
+  | Some (Keeper_internal_error.Internal_bridge_exception _)
+  | Some (Keeper_internal_error.Internal_contract_rejected _)
+  | Some (Keeper_internal_error.Incomplete_tool_transcript _)
+  | Some (Keeper_internal_error.Terminal_effect_failed _)
+  | Some (Keeper_internal_error.Provider_attempt_effect_fenced _)
+  | Some (Keeper_internal_error.Tool_correction_lost _)
+  | Some (Keeper_internal_error.Host_stopped_turn _)
+  | Some (Keeper_internal_error.Receipt_persistence_failed _)
+  | Some (Keeper_internal_error.Gate_replay_repair_required _) ->
     (match err with
      | Agent_core.Error.Api api_err ->
        let http_err =

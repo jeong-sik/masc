@@ -400,7 +400,7 @@ let resolve_target ~surface ~channel_id ?continuation_channel
 let set_blocks target blocks_opt =
   match target with
   | To_slack s -> To_slack { s with blocks = blocks_opt }
-  | other -> other
+  | (To_dashboard | To_discord _) as other -> other
 
 let matches_continuation_route target channel =
   match target, channel with

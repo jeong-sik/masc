@@ -90,8 +90,9 @@ let mandatory_clock_refs_for_event = function
     [ "edge_id"; "lane" ]
   | Turn_finished ->
     [ "edge_id"; "lane" ]
-  | _ ->
-    [ "edge_id"; "lane" ]
+  | Phase_gate_decided | Runtime_routed | Runtime_execution_built | Runtime_completed
+  | Runtime_failed | Pre_dispatch_blocked | Context_injected | History_projection_observed
+  | Event_bus_correlated | Checkpoint_loaded -> [ "edge_id"; "lane" ]
 
 let clock_refs_has_keys keys clock_refs_json =
   match clock_refs_json with

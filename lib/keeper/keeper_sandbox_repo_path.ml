@@ -102,7 +102,7 @@ let host_execution_location_json
   let relative_cwd =
     match scope with
     | Outside_playground -> `Null
-    | _ -> `String (relative_path_of_segments relative_segments)
+    | Playground_root | Playground_subpath | Repo_root | Repo_subpath -> `String (relative_path_of_segments relative_segments)
   in
   `Assoc
     [ "cwd", `String cwd

@@ -33,7 +33,7 @@ failure just because a keeper uses the Docker backend.
 
 ## Deterministic Rules
 
-- Canonical sandbox profiles are only `local` and `docker`.
+- Canonical sandbox profiles are `docker`, `microvm` and `remote_ssh`.
 - Legacy aliases are rejected, not warned and reinterpreted.
 - Keeper TOML is parsed with `Otoml`, not ad hoc string parsing.
 - Docker container roots are path projections from the config contract,

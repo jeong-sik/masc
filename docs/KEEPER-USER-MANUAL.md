@@ -226,7 +226,7 @@ A standing rule records the approval it came from, so a rule that surprises you
 can be traced back to the moment somebody granted it.
 
 Gate is an authorization workflow. It is not a sandbox and not a credential
-boundary. A `local` sandbox profile runs on your host with your permissions.
+boundary.
 
 ## When something is wrong
 

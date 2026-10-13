@@ -8598,20 +8598,21 @@ let selected_source_logs_for_keeper state keeper_name =
    one execution must precede its output, even if a follower's more complete
    journal is the selected source. Never join by message text. *)
 let chat_execution_member_index state ~keeper_name =
-  let by_execution : (string, string) Hashtbl.t = Hashtbl.create 16 in
+  let by_execution : (execution_source_key, string) Hashtbl.t = Hashtbl.create 16 in
   state.msg_settled_logs
   @ List.map (fun (entry : inflight) -> entry.log) state.msg_inflight
   @ Option.to_list state.msg_live
   |> List.iter (fun log ->
       if turn_log_keeper_name log = keeper_name then
-        Hashtbl.add by_execution (turn_log_execution_id log) (turn_log_request_id log));
-  fun ~execution_id ->
-    execution_id :: Hashtbl.find_all by_execution execution_id
+        Hashtbl.add by_execution (turn_log_execution_source_key log) (turn_log_request_id log));
+  fun ~source ->
+    Masc_tui_keeper_chat_log.source_key source ::
+      Hashtbl.find_all by_execution (execution_source_key_of_source source)
     |> List.sort_uniq String.compare
 ;;
 
-let chat_execution_member_ids state ~keeper_name ~execution_id =
-  chat_execution_member_index state ~keeper_name ~execution_id
+let chat_execution_member_ids state ~keeper_name ~source =
+  chat_execution_member_index state ~keeper_name ~source
 ;;
 
 (* Existing consumers ask for held sources, but selection must also account

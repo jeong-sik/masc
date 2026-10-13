@@ -17,7 +17,7 @@ lock and calls no model. The design is
 | `orphan_unconfirmed` | No readable page links to it, but some page whose header does not read could. |
 | `missing_sources` | No `## Sources` section with a `repo:`, `board:`, `artifact:` or `url:` line. |
 | `hearsay_only` | Its sources are only `said:` lines. |
-| `unreadable_page` | Its header does not read; `reason` says why. |
+| `unreadable_page` | Its header does not read, or the file exists but cannot be opened; `reason` says why. |
 
 Links inside code fences, code spans and images are not counted.
 
@@ -46,14 +46,16 @@ error.
 ```
 
 Arguments: `page` (page name, without `.md`), `kind` (one of the table above),
-`limit` (default 50, at most 200), `cursor` (the `next_cursor` of the previous
-response).
+`limit` (default 50, at most 200; a larger value is treated as 200, not refused),
+`cursor` (the `next_cursor` of the previous response; pass the same `kind` and
+`page` with it, see below).
 
 The response is JSON text: `schema` (`masc.wiki_lint.v1`), `pages_total`,
 `pages_unreadable`, `counts` per kind, `matched`, `findings`, `truncated` and
-`next_cursor`. `counts` and `matched` describe every finding; `findings` is one
-page of them, about 12 KB at most. Pass `next_cursor` back as `cursor` to read
-the rest.
+`next_cursor`. `counts` is over every finding, before `kind` and `page` narrow
+it; `matched` is how many are left after they do; `findings` is one page of
+those, about 12 KB at most. Pass `next_cursor` back as `cursor` to read the
+rest.
 
 Refused arguments: an unknown `kind`, a `limit` below 1, a value of the wrong
 type (`{"limit": "20"}`, `{"kind": 5}`), a `cursor` this tool did not issue, a
@@ -62,9 +64,11 @@ type (`{"limit": "20"}`, `{"kind": 5}`), a `cursor` this tool did not issue, a
 ## While the wiki is being written
 
 A call reads the wiki once and is not a snapshot across calls. A `cursor`
-carries a fingerprint of the findings it was issued for; if the wiki changed
-since, the call is refused with "call again without cursor" instead of
-skipping or repeating findings. A result read while someone is writing can
+carries a fingerprint of the filtered findings it was issued for; if that list
+changed, the call is refused with "call again without cursor" instead of
+skipping or repeating findings. The list changes when the wiki changed and also
+when `kind` or `page` differ from the call that issued the cursor, so a cursor
+from a different filter is refused the same way (and with the same wording). A result read while someone is writing can
 show a `broken_link` that is gone on the next run; run it once more to confirm.
 A page file that exists but cannot be opened is reported as `unreadable_page`,
 not left out.

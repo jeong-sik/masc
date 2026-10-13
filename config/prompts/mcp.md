@@ -10,7 +10,7 @@ PROJECT: Agents sharing the same base path (.masc/ folder) align together.
 CLUSTER: Set MASC_CLUSTER_NAME for multi-machine workspace (otherwise tool
 surfaces use the configured cluster/default label).
 READ: use resources/list + resources/read (status, tasks, who, messages,
-events, library, tool-help-index) for snapshots.
+events, wiki, tool-help-index) for snapshots.
 WRITE: task state changes are CAS-guarded; pass expected_version.
 
 ### managed_agent [primary: managed-agent MCP 프로필의 도구 발견 안내]

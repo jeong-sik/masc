@@ -10,6 +10,7 @@ import sqlite3
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,79 @@ class Access(StrEnum):
 
 class Refused(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class _RawNumber:
+    lexeme: str
+
+
+def parse_wire_float(lexeme: str) -> float | _RawNumber:
+    number = float(lexeme)
+    return number if math.isfinite(number) else _RawNumber(lexeme)
+
+
+def representation_issue(value: Any) -> str | None:
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, _RawNumber) or (
+            isinstance(item, float) and not math.isfinite(item)
+        ):
+            return "Number cannot be represented as a finite JSON value"
+        if isinstance(item, str):
+            try:
+                item.encode("utf-8")
+            except UnicodeError:
+                return "Unpaired Unicode surrogate in JSON string"
+        elif isinstance(item, dict):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+    return None
+
+
+def relay_readback(ok: bool, payload: Json) -> tuple[Json, str | None]:
+    raw = {"ok": ok, "payload": payload}
+    issue = representation_issue(raw)
+    if issue is None:
+        return raw, None
+    numbers = []
+
+    def project(value: Any, path: list[str | int]) -> Any:
+        if isinstance(value, _RawNumber):
+            numbers.append(
+                {"path": path, "kind": "wire_number", "lexeme": value.lexeme}
+            )
+            return None
+        if isinstance(value, float) and not math.isfinite(value):
+            numbers.append({"path": path, "kind": "python_float", "value": repr(value)})
+            return None
+        if isinstance(value, dict):
+            return {key: project(value[key], [*path, key]) for key in sorted(value)}
+        if isinstance(value, list):
+            return [project(item, [*path, index]) for index, item in enumerate(value)]
+        return value
+
+    evidence = {"value": project(raw, []), "number_lexemes": numbers}
+    # Escaping keeps original surrogate code units without asking SQLite or
+    # an outbound UTF-8 encoder to accept them as text. Numeric slots have a
+    # separate typed path so they cannot collide with an actual null/object.
+    serialized = json.dumps(
+        evidence,
+        ensure_ascii=True,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return {
+        "ok": ok,
+        "payload": {
+            "representation_kind": "unrepresentable_json",
+            "reported_result_json": serialized,
+        },
+    }, issue
 
 
 def encode(value: Any) -> str:
@@ -86,6 +160,9 @@ def native_document(tree_json: Any) -> Json:
         raise Refused("Invalid native export JSON") from error
     if not isinstance(tree, dict) or not isinstance(tree.get("document"), dict):
         raise Refused("Native export requires a document object")
+    issue = representation_issue(tree)
+    if issue is not None:
+        raise Refused(issue)
     document = tree["document"]
     pending = [document]
     identities = set()
@@ -384,19 +461,28 @@ class Store:
             raise Refused("Result belongs to another session/worker")
         if type(args["ok"]) is not bool or not isinstance(args["payload"], dict):
             raise Refused("Expected boolean ok and object payload")
-        raw = {"ok": args["ok"], "payload": args["payload"]}
+        raw, issue = relay_readback(args["ok"], args["payload"])
+        representation = "unrepresentable_json" if issue is not None else None
         if operation["state"] != State.DISPATCHED:
-            if operation["result"] and operation["result"].get("relay_result") == raw:
+            if (
+                operation["result"]
+                and operation["result"].get("relay_result") == raw
+                and operation["result"].get("relay_result_representation")
+                == representation
+            ):
                 return operation
             raise Refused("Operation already has a result or was not dispatched")
         result: Json = {"relay_result": raw}
         state = (
             State.REJECTED
-            if args["payload"].get("status") == "rejected"
+            if issue is None and args["payload"].get("status") == "rejected"
             else State.UNKNOWN
         )
+        if issue is not None:
+            result["reason"] = f"Unusable readback: {issue}"
+            result["relay_result_representation"] = representation
         with self.db:
-            if args["ok"]:
+            if args["ok"] and issue is None:
                 try:
                     result["snapshot_id"] = self.save_snapshot(
                         args["payload"],

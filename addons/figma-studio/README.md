@@ -52,6 +52,18 @@ explicit in `completed_available` and `completed_omitted`. The package's byte
 limit applies to replies and published observations; the host owns incoming
 transport framing, including its private caller envelope.
 
+Outer relay results containing an out-of-range number or unpaired Unicode surrogate close
+as `outcome_unknown` without publishing a snapshot. Their retained
+`relay_result.payload` has `representation_kind: unrepresentable_json` and a
+`reported_result_json` evidence string. That ASCII-escaped JSON preserves the
+reported value; numeric placeholders are distinguished from real nulls by a
+`number_lexemes` list with typed key/index paths and original wire number text.
+The worker-owned `relay_result_representation` distinguishes this evidence from
+a caller's ordinary payload with similar fields. Native export strings are also
+decoded and checked; when only that export is malformed, its original outer
+payload is retained. Normal results retain their original payload. Evidence is kept in the operation
+ledger rather than repeated in the acknowledgement.
+
 `masc_figma_snapshot` returns native JSON in model-visible text and the PNG
 as an MCP image. `masc_figma_validate` checks supplied node/property assertions;
 it never certifies appearance. Its report records the evaluator and exact

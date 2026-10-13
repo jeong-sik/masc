@@ -160,6 +160,266 @@ class StudioTests(unittest.TestCase):
         self.assertNotIn("structuredContent", response)
         self.assertIn("worker_boot_id", json.loads(response["content"][0]["text"]))
 
+    def test_stdio_unrepresentable_results_keep_evidence_and_allow_next_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            process = subprocess.Popen(
+                [sys.executable, str(PACKAGE / "server.py"), "--state-dir", directory],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+            )
+            assert process.stdin and process.stdout
+            sequence = 0
+
+            def nonfinite(token):
+                self.fail(f"Non-finite token in worker output: {token}")
+
+            def request(name, arguments, *, number=False, allow_error=False):
+                nonlocal sequence
+                sequence += 1
+                wire = json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": sequence,
+                        "method": "tools/call",
+                        "params": {"name": name, "arguments": arguments},
+                    },
+                    ensure_ascii=True,
+                    allow_nan=False,
+                )
+                if number:
+                    wire = wire.replace('"RAW_OUT_OF_RANGE_NUMBER"', "1e309")
+                process.stdin.write(wire.encode() + b"\n")
+                process.stdin.flush()
+                reply = json.loads(process.stdout.readline(), parse_constant=nonfinite)
+                self.assertEqual(reply["id"], sequence)
+                result = reply["result"]
+                if allow_error:
+                    return result
+                self.assertFalse(result.get("isError"), result)
+                return result.get("structuredContent") or json.loads(
+                    result["content"][0]["text"], parse_constant=nonfinite
+                )
+
+            def call(tool, arguments, caller=OWNER, **options):
+                return request(
+                    "lane_call",
+                    {"tool": tool, "arguments": arguments, "caller": caller},
+                    **options,
+                )
+
+            try:
+                request("lane_observe", {"binding": BINDING, "sources": []})
+                boot = call("masc_figma_relay", {"kind": "status"}, RELAY)[
+                    "worker_boot_id"
+                ]
+                relay = {"worker_boot_id": boot, "session_id": "plugin-1"}
+                call(
+                    "masc_figma_relay",
+                    {
+                        "kind": "session",
+                        **relay,
+                        "document": {
+                            "name": "File",
+                            "page_id": "page:1",
+                            "selection": [],
+                            "editor_type": "figma",
+                            "mode": "default",
+                            "can_edit": True,
+                        },
+                    },
+                    RELAY,
+                )
+                call("masc_figma_bind", {"session_id": "plugin-1"})
+
+                def submit(identity, source):
+                    if source == "plugin":
+                        call(
+                            "masc_figma_submit",
+                            {
+                                "operation_id": identity,
+                                "session_id": "plugin-1",
+                                "kind": "capture",
+                                "root_id": "frame:1",
+                            },
+                        )
+                        command = call(
+                            "masc_figma_relay", {"kind": "poll", **relay}, RELAY
+                        )["command"]
+                    else:
+                        call(
+                            "masc_figma_rest_capture",
+                            {
+                                "operation_id": identity,
+                                "file_key": "file-1",
+                                "root_id": "frame:1",
+                            },
+                        )
+                        command = call(
+                            "masc_figma_relay",
+                            {"kind": "rest_poll", "worker_boot_id": boot},
+                            RELAY,
+                        )["command"]
+                    self.assertEqual(command["id"], identity)
+
+                def arguments(identity, source, payload):
+                    return {
+                        "kind": "result" if source == "plugin" else "rest_result",
+                        "worker_boot_id": boot,
+                        **({"session_id": "plugin-1"} if source == "plugin" else {}),
+                        "operation_id": identity,
+                        "ok": True,
+                        "payload": payload,
+                    }
+
+                submit("before-invalid", "plugin")
+                previous = call(
+                    "masc_figma_relay",
+                    arguments("before-invalid", "plugin", bundle()),
+                    RELAY,
+                )["result"]["snapshot_id"]
+                for source in ("plugin", "rest"):
+                    for fault in (
+                        "number",
+                        "surrogate",
+                        "native_surrogate",
+                        "number_collision",
+                    ):
+                        with self.subTest(source=source, fault=fault):
+                            numeric = fault in ("number", "number_collision")
+                            identity = f"{source}-{fault}"
+                            submit(identity, source)
+                            payload = bundle()
+                            if source == "rest":
+                                del payload["session_id"], payload["page_id"]
+                                payload.update(
+                                    source="rest_version",
+                                    file_key="file-1",
+                                    version="v9",
+                                )
+                            if numeric:
+                                payload["observed_at"] = "RAW_OUT_OF_RANGE_NUMBER"
+                                if fault == "number_collision":
+                                    payload["coverage"]["missing"].append("\ud800")
+                            elif fault == "surrogate":
+                                payload["coverage"]["missing"].append("\ud800")
+                            else:
+                                tree = json.loads(payload["tree_json"])
+                                tree["document"]["\ud800"] = "unrepresentable key"
+                                payload["tree_json"] = json.dumps(tree)
+                            args = arguments(identity, source, payload)
+                            acknowledgement = call(
+                                "masc_figma_relay",
+                                args,
+                                RELAY,
+                                number=numeric,
+                            )
+                            self.assertEqual(
+                                acknowledgement["state"], "outcome_unknown"
+                            )
+                            self.assertEqual(
+                                call(
+                                    "masc_figma_relay",
+                                    args,
+                                    RELAY,
+                                    number=numeric,
+                                ),
+                                acknowledgement,
+                            )
+                            table = (
+                                "operations" if source == "plugin" else "rest_requests"
+                            )
+                            with sqlite3.connect(
+                                Path(directory) / "studio.sqlite3"
+                            ) as db:
+                                state, serialized = db.execute(
+                                    f"SELECT state,result FROM {table} WHERE id=?",
+                                    (identity,),
+                                ).fetchone()
+                            self.assertEqual(state, "outcome_unknown")
+                            serialized.encode("utf-8")
+                            retained = json.loads(serialized, parse_constant=nonfinite)
+                            self.assertNotIn("snapshot_id", retained)
+                            if fault != "native_surrogate":
+                                raw = retained["relay_result"]["payload"]
+                                self.assertEqual(
+                                    raw["representation_kind"], "unrepresentable_json"
+                                )
+                                self.assertEqual(
+                                    retained["relay_result_representation"],
+                                    "unrepresentable_json",
+                                )
+                                # A literal copy of the generated evidence is
+                                # a different input, not an original retry.
+                                self.assertTrue(
+                                    call(
+                                        "masc_figma_relay",
+                                        {**args, "payload": raw},
+                                        RELAY,
+                                        allow_error=True,
+                                    )["isError"]
+                                )
+                                evidence = json.loads(
+                                    raw["reported_result_json"],
+                                    parse_constant=nonfinite,
+                                )
+                                if fault in ("surrogate", "number_collision"):
+                                    self.assertEqual(
+                                        evidence["value"]["payload"]["coverage"][
+                                            "missing"
+                                        ][-1],
+                                        "\ud800",
+                                    )
+                                if numeric:
+                                    self.assertEqual(
+                                        evidence["number_lexemes"],
+                                        [
+                                            {
+                                                "path": ["payload", "observed_at"],
+                                                "kind": "wire_number",
+                                                "lexeme": "1e309",
+                                            }
+                                        ],
+                                    )
+                                if fault == "number_collision":
+                                    different = {
+                                        **args,
+                                        "payload": {**payload, "observed_at": None},
+                                    }
+                                    rejected = call(
+                                        "masc_figma_relay",
+                                        different,
+                                        RELAY,
+                                        allow_error=True,
+                                    )
+                                    self.assertTrue(rejected["isError"])
+                            else:
+                                self.assertEqual(
+                                    retained["relay_result"]["payload"], payload
+                                )
+                            self.assertEqual(
+                                call("masc_figma_status", {})["latest_snapshot"],
+                                previous,
+                            )
+                    submit(f"{source}-next-valid", source)
+                    payload = bundle()
+                    if source == "rest":
+                        del payload["session_id"], payload["page_id"]
+                        payload.update(
+                            source="rest_version", file_key="file-1", version="v9"
+                        )
+                    valid = call(
+                        "masc_figma_relay",
+                        arguments(f"{source}-next-valid", source, payload),
+                        RELAY,
+                    )
+                    self.assertEqual(valid["state"], "captured")
+                    previous = valid["result"]["snapshot_id"]
+            finally:
+                process.stdin.close()
+                process.wait()
+                process.stdout.close()
+                self.assertEqual(process.returncode, 0)
+
     def test_private_stdin_envelope_retains_large_result_and_acknowledges_next_work(
         self,
     ):

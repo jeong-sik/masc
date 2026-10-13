@@ -9,7 +9,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from store import Access, Json, Refused, Store, encode, fields, text
+from store import Access, Json, Refused, Store, encode, fields, parse_wire_float, text
 from rest_queue import RestQueue
 from verify import validate
 
@@ -358,6 +358,7 @@ def serve(worker: Worker) -> None:
         try:
             request = json.loads(
                 line,
+                parse_float=parse_wire_float,
                 parse_constant=lambda _: (_ for _ in ()).throw(
                     Refused("Non-finite JSON")
                 ),
@@ -366,9 +367,14 @@ def serve(worker: Worker) -> None:
                 raise Refused("Expected JSON-RPC 2.0")
             if "id" not in request:
                 continue
-            identity = request["id"]
-            if not isinstance(identity, (str, int)) or isinstance(identity, bool):
+            candidate_id = request["id"]
+            if not isinstance(candidate_id, (str, int)) or isinstance(
+                candidate_id, bool
+            ):
                 raise Refused("JSON-RPC id must be a string or integer")
+            if isinstance(candidate_id, str):
+                candidate_id.encode("utf-8")
+            identity = candidate_id
             method = request.get("method")
             if method == "initialize":
                 output = {

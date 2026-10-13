@@ -4,7 +4,7 @@ import json
 import time
 from typing import Callable
 
-from store import Json, Refused, State, Store, encode, fields, text
+from store import Json, Refused, State, Store, encode, fields, relay_readback, text
 
 
 class RestQueue:
@@ -109,15 +109,24 @@ class RestQueue:
         ):
             raise Refused("Invalid REST result")
         operation = self.get(args["operation_id"])
-        raw = {"ok": args["ok"], "payload": args["payload"]}
+        raw, issue = relay_readback(args["ok"], args["payload"])
+        representation = "unrepresentable_json" if issue is not None else None
         if operation["state"] != State.DISPATCHED:
-            if operation["result"] and operation["result"].get("relay_result") == raw:
+            if (
+                operation["result"]
+                and operation["result"].get("relay_result") == raw
+                and operation["result"].get("relay_result_representation")
+                == representation
+            ):
                 return operation
             raise Refused("REST capture already has a result or was not dispatched")
         result: Json = {"relay_result": raw}
         state = State.UNKNOWN
+        if issue is not None:
+            result["reason"] = f"Unusable REST capture: {issue}"
+            result["relay_result_representation"] = representation
         with self.db:
-            if args["ok"]:
+            if args["ok"] and issue is None:
                 try:
                     request, payload = operation["request"], args["payload"]
                     if payload.get("file_key") != request["file_key"] or (

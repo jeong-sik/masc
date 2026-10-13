@@ -92,6 +92,11 @@ Writes, builds and terminal actions use their direct tools until their resource
 and durable continuation contracts are implemented. The restriction is checked
 again on load; an artifact reference is not a new execution permission.
 
+[Isolated jobs](keeper-owned-jobs.md) provide direct durable start/status/cancel
+handles for programs operating in private Docker workspaces. Their producer
+records create/start intent before effects. Admission into effectful composed
+plans and automatic suspended-run continuation remain separate contracts.
+
 [Output exports](keeper-composition-exports.md) select final fields while retaining
 original results and failure evidence. Publish a reusable Skill separately with
 `keeper_skill_publish` after checking execution evidence and applicability. A

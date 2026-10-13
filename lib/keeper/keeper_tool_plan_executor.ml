@@ -853,6 +853,7 @@ let execute_keeper_with_authority
       ~publication_recovery
       ~ctx_snapshot
       ~keeper_turn_id
+      ?source_context
       ?turn_sandbox_factory
       ?clock
       ?continuation_channel
@@ -917,6 +918,7 @@ let execute_keeper_with_authority
         ~publication_recovery
         ~ctx_snapshot
         ~keeper_turn_id
+        ~source_context:(fun () -> source_context)
         ?turn_sandbox_factory
         ?clock
         ?continuation_channel

@@ -133,6 +133,7 @@ let with_fixture ?(tool_deny = []) f =
             { provider = Keeper_publication_recovery_availability.non_runtime_provider
             ; keeper_name = meta.name }
         ; ctx_work = Keeper_context_runtime.create ~eio:true ~system_prompt:"fixture"
+        ; source_context = None
         ; turn_sandbox_factory = None; sw = None; clock = None; proc_mgr = None
         ; net = None; mcp_session_id = None; continuation_channel = None
         ; gate_context = None; turn_ref = None; gate_grant = None; tool_use_id = None; trace_id = None

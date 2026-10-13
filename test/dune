@@ -5931,6 +5931,11 @@
  (libraries masc_test_deps masc.skill_config masc.skill_reference))
 
 (test
+ (name test_keeper_owned_jobs)
+ (modules test_keeper_owned_jobs)
+ (libraries masc_test_deps masc.skill_config))
+
+(test
  (name test_h5_media_failover_continuity)
  (modules test_h5_media_failover_continuity)
  (libraries masc_test_deps))

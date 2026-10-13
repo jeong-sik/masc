@@ -206,6 +206,7 @@ let runtime_context
       ~meta
       ~publication_recovery
       ~ctx_work
+      ?source_context
       ?turn_sandbox_factory
       ?sw
       ?clock
@@ -227,6 +228,7 @@ let runtime_context
     ; meta
     ; publication_recovery
     ; ctx_work
+    ; source_context
     ; turn_sandbox_factory
     ; sw
     ; clock
@@ -251,6 +253,7 @@ let execute_keeper_tool_descriptor_with_authority
       ~(publication_recovery :
           Keeper_publication_recovery_availability.turn_context)
       ~(ctx_work : working_context)
+      ?source_context
       ?turn_sandbox_factory
       ?sw
       ?clock
@@ -288,6 +291,7 @@ let execute_keeper_tool_descriptor_with_authority
         ~meta
         ~publication_recovery
         ~ctx_work
+        ?source_context
         ?turn_sandbox_factory
         ?sw
         ?clock
@@ -340,6 +344,7 @@ let execute_keeper_tool_call_with_authority
       ~(publication_recovery :
           Keeper_publication_recovery_availability.turn_context)
       ~(ctx_work : working_context)
+      ?source_context
       ?turn_sandbox_factory
       (* RFC-0182 Phase 5 PR-A.2: optional Eio resources threaded to
          Keeper_tool_runtime.context for Eio-bound descriptor handlers. *)
@@ -371,6 +376,7 @@ let execute_keeper_tool_call_with_authority
            ~meta
            ~publication_recovery
            ~ctx_work
+           ?source_context
            ?turn_sandbox_factory
            ?sw
            ?clock
@@ -470,6 +476,7 @@ module Compatibility = struct
         ~(publication_recovery :
             Keeper_publication_recovery_availability.turn_context)
         ~(ctx_work : working_context)
+        ?source_context
         ?turn_sandbox_factory
         ~(name : string)
         ~(input : Yojson.Safe.t)
@@ -482,6 +489,7 @@ module Compatibility = struct
         ~meta
         ~publication_recovery
         ~ctx_work
+        ?source_context
         ?turn_sandbox_factory
         ~name
         ~input

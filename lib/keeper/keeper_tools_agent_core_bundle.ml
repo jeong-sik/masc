@@ -118,12 +118,16 @@ let make_tool_bundle_for_descriptors_with_policy
     | Some Runtime_execution.Masc_agent_core, (Tool_output.Inline_up_to _ as projection) ->
       projection
   in
-  (* The keeper turn the tool-call ledger files a call under. The run's turn
-     context is filled after this bundle is built, so it is read per call. *)
+  (* The per-run carrier is filled after bundle construction. Each handler
+     freezes this context at invocation entry before input preparation. *)
+  let source_context () =
+    Option.map
+      (fun cell -> Keeper_tool_call_log_context.get_turn_context_record ~cell ())
+      turn_ctx_cell
+  in
   let keeper_turn_id () =
-    Option.bind turn_ctx_cell (fun cell ->
-      (Keeper_tool_call_log_context.get_turn_context_record ~cell ())
-        .Keeper_tool_call_log_context.keeper_turn_id)
+    Option.bind (source_context ()) (fun context ->
+      context.Keeper_tool_call_log_context.keeper_turn_id)
   in
   let descriptors =
     List.map
@@ -414,6 +418,7 @@ let make_tool_bundle_for_descriptors_with_policy
                    ~publication_recovery
                    ~ctx_snapshot
                    ~keeper_turn_id
+                   ~source_context
                    ?turn_sandbox_factory
                    ?clock
                    ?continuation_channel
@@ -434,6 +439,7 @@ let make_tool_bundle_for_descriptors_with_policy
                    ~publication_recovery
                    ~ctx_snapshot
                    ~keeper_turn_id
+                   ~source_context
                    ?turn_sandbox_factory
                    ?clock
                    ?continuation_channel

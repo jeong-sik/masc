@@ -141,6 +141,7 @@ type runtime_handler =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_spawn_dispatch
+  | Tool_keeper_job_dispatch
   | Tool_keeper_code_query_dispatch
   | Tool_keeper_webmcp_dispatch
   | Tool_masc_keeper_dispatch
@@ -275,6 +276,7 @@ let runtime_handler_to_string = function
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
   | Tool_keeper_spawn_dispatch -> "tool_keeper_spawn_dispatch"
+  | Tool_keeper_job_dispatch -> "tool_keeper_job_dispatch"
   | Tool_keeper_code_query_dispatch -> "tool_keeper_code_query_dispatch"
   | Tool_keeper_webmcp_dispatch -> "tool_keeper_webmcp_dispatch"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
@@ -530,6 +532,7 @@ let descriptor
       | Tool_masc_agent_timeline_dispatch
       | Tool_masc_schedule_dispatch
       | Tool_keeper_spawn_dispatch
+      | Tool_keeper_job_dispatch
       | Tool_masc_keeper_dispatch
       | Tool_masc_fusion_dispatch
       | Tool_masc_fusion_status
@@ -2277,6 +2280,63 @@ let keeper_spawn_descriptor (definition : Tool_schemas_spawn.definition) =
   | Tool_schemas_spawn.Read | Tool_schemas_spawn.Wait | Tool_schemas_spawn.Stop -> descriptor
 ;;
 
+(* All three actions return the same durable handle shape. Status may persist
+   reconciled terminal evidence, so it shares the Serial effectful policy. *)
+let owned_job_output_schema =
+  let nullable_string =
+    `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+  in
+  let nullable_integer =
+    `Assoc [ "type", `List [ `String "integer"; `String "null" ] ]
+  in
+  let source_schema =
+    object_output_schema
+      ~properties:
+        [ "task_id", nullable_string
+        ; "turn_ref", nullable_string
+        ; "tool_use_id", nullable_string
+        ; "trace_id", nullable_string
+        ; "keeper_turn_id", nullable_integer
+        ]
+      ~required:[ "task_id"; "turn_ref"; "tool_use_id"; "trace_id"; "keeper_turn_id" ]
+  in
+  object_output_schema
+    ~properties:
+      [ "job_id", `Assoc [ "type", `String "string" ]
+      ; "status", `Assoc [ "type", `String "string" ]
+      ; "source", source_schema
+      ; "phase", `Assoc
+          [ "type", `String "string"
+          ; "enum", `List (List.map (fun phase -> `String phase)
+              [ "prepared"; "create_requested"; "created"; "start_requested"
+              ; "running"; "exited"; "cancelled_before_start" ]) ]
+      ; "cancel_requested", `Assoc [ "type", `String "boolean" ]
+      ; "artifacts", `Assoc
+          [ "type", `String "array"; "items", normalized_artifact_ref_schema ]
+      ; "detail", nullable_string
+      ; "container_id", nullable_string
+      ; "exit_code", nullable_integer
+      ]
+    ~required:[ "job_id"; "status"; "source"; "phase"; "cancel_requested"; "artifacts"; "detail" ]
+;;
+
+let keeper_owned_job_descriptor (definition : Tool_schemas_owned_job.definition) =
+  let schema : Masc_domain.tool_schema = definition.schema in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:("masc.job." ^ definition.id)
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_keeper_job_dispatch
+    ~ordinary_execution_mode:Serial
+    ~readonly:definition.read_only
+    ()
+  |> with_composable_output (Json_output { schema = owned_job_output_schema })
+;;
+
 let keeper_code_query_descriptor () =
   let schema : Masc_domain.tool_schema = Tool_schemas_code_query.schema in
   cluster_descriptor_with_schema_source
@@ -3122,6 +3182,7 @@ let internal_descriptors : t list =
   ]
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
   @ List.map keeper_spawn_descriptor Tool_schemas_spawn.definitions
+  @ List.map keeper_owned_job_descriptor Tool_schemas_owned_job.definitions
   (* ── RFC a-language-server-the-keeper-can-ask (1 entry) ───────── *)
   @ [ keeper_code_query_descriptor () ]
   (* ── RFC-webmcp-keeper-consumption Lane B (2 entries) ─────────── *)

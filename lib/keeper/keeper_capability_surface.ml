@@ -214,15 +214,20 @@ let create_with_descriptors
      carries the start refusal, the reason none of them can do anything. Like a
      deny, it applies only to a descriptor the model could otherwise call. *)
   let sandbox_refusal descriptor =
-    if
-      descriptor.Keeper_tool_descriptor.runtime_handler
-      = Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
-      && Keeper_tool_descriptor.keeper_model_names descriptor <> []
-    then (
-      match Keeper_spawn_boundary.of_sandbox_profile sandbox_profile with
-      | Keeper_spawn_boundary.Refuses_start { detail } -> Some detail
-      | Keeper_spawn_boundary.Starts_in_container -> None)
-    else None
+    if Keeper_tool_descriptor.keeper_model_names descriptor = [] then None
+    else
+      match descriptor.Keeper_tool_descriptor.runtime_handler with
+      | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch ->
+        (match Keeper_spawn_boundary.of_sandbox_profile sandbox_profile with
+         | Keeper_spawn_boundary.Refuses_start { detail } -> Some detail
+         | Keeper_spawn_boundary.Starts_in_container -> None)
+      | Keeper_tool_descriptor.Tool_keeper_job_dispatch ->
+        (match sandbox_profile with
+         | Keeper_types_profile_sandbox.Docker -> None
+         | Keeper_types_profile_sandbox.Micro_vm
+         | Keeper_types_profile_sandbox.Remote_ssh ->
+           Some "owned jobs require the Docker profile's isolated private workspace backend")
+      | _ -> None
   in
   let off_turn_availability descriptor =
     match denied descriptor, sandbox_refusal descriptor with

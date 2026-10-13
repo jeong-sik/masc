@@ -80,7 +80,9 @@ val create
     [sandbox_profile] is the Keeper's profile. The four spawn tools leave
     {!descriptors} the same way when {!Keeper_spawn_boundary.of_sandbox_profile}
     refuses a start for it, their rows read [Refused_by_sandbox], and a
-    composition that runs one is then withheld. *)
+    composition that runs one is then withheld. The three owned-job tools
+    require the exact [Docker] profile; the other profiles retain refused
+    inventory rows and cannot dispatch them through this frozen surface. *)
 
 val create_with_descriptors
   :  tool_descriptors:Keeper_tool_descriptor.t list

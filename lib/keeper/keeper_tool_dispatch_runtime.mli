@@ -33,6 +33,7 @@ val execute_keeper_tool_descriptor_for_capability_surface_with_outcome
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
   -> ctx_work:working_context
+  -> ?source_context:Keeper_tool_call_log_context.turn_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -60,6 +61,7 @@ val execute_keeper_tool_call_for_capability_surface_with_outcome
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
   -> ctx_work:working_context
+  -> ?source_context:Keeper_tool_call_log_context.turn_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -85,6 +87,7 @@ module Compatibility : sig
     -> publication_recovery:
          Keeper_publication_recovery_availability.turn_context
     -> ctx_work:working_context
+    -> ?source_context:Keeper_tool_call_log_context.turn_context
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
     -> ?sw:Eio.Switch.t
     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -109,6 +112,7 @@ module Compatibility : sig
     -> publication_recovery:
          Keeper_publication_recovery_availability.turn_context
     -> ctx_work:working_context
+    -> ?source_context:Keeper_tool_call_log_context.turn_context
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
     -> ?sw:Eio.Switch.t
     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -133,6 +137,7 @@ module Compatibility : sig
     -> publication_recovery:
          Keeper_publication_recovery_availability.turn_context
     -> ctx_work:working_context
+    -> ?source_context:Keeper_tool_call_log_context.turn_context
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
     -> name:string
     -> input:Yojson.Safe.t
@@ -146,4 +151,6 @@ end
     the turn-resource boundary. Dispatch never resolves the Keeper name again;
     [publication_recovery] preserves that entry's exact owner identity while
     carrying the live runtime provider. File edit/write dispatch reads the
-    provider only at the effect boundary. *)
+    provider only at the effect boundary. [source_context] is the immutable
+    context of this invocation; its absence does not authorize a current-Task
+    lookup. *)

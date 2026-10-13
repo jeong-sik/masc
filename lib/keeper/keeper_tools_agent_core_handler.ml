@@ -20,6 +20,7 @@ let make_keeper_tool_handler_with_authority
           Keeper_publication_recovery_availability.turn_context)
       ~(ctx_snapshot : Keeper_types.working_context)
       ~(keeper_turn_id : unit -> int option)
+      ?source_context
       ?turn_sandbox_factory
       ?clock
       ?continuation_channel
@@ -128,7 +129,12 @@ let make_keeper_tool_handler_with_authority
   in
   fun ?agent_core_invocation ?result_projection raw_input ->
     let invocation_fields = agent_core_invocation_fields agent_core_invocation in
-    let call_keeper_turn_id = keeper_turn_id () in
+    let call_source_context = Option.bind source_context (fun snapshot -> snapshot ()) in
+    let call_keeper_turn_id =
+      match call_source_context with
+      | Some context -> context.Keeper_tool_call_log_context.keeper_turn_id
+      | None -> keeper_turn_id ()
+    in
     let handle_validation_error ~input (validation_result : Tool_result.result) =
       let validation_result =
         match validation_result with
@@ -242,6 +248,7 @@ let make_keeper_tool_handler_with_authority
                 ~publication_recovery
                 ~ctx_snapshot
                 ~keeper_turn_id:call_keeper_turn_id
+                ?source_context:call_source_context
                 ?turn_sandbox_factory
                 ?sw
                 ?clock

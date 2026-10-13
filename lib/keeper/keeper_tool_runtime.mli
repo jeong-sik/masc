@@ -43,6 +43,9 @@ type context =
         start/termination rows to this call. [None] on callers without
         invocation context (tests, direct dispatch). *)
   ; trace_id : string option
+  ; source_context : Keeper_tool_call_log_context.turn_context option
+    (** Immutable context captured for this invocation. None means unavailable;
+        job ownership never substitutes the Keeper current task. *)
   ; result_projection : Tool_output.model_projection option
     (** The projection this call's result crosses on its way to the model,
         resolved for the lane running the call. [None] when the caller did

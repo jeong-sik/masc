@@ -1,0 +1,70 @@
+name = "keeper_job_start"
+description = """
+Start argv in an isolated Docker job with a private workspace and return its durable job_id. \
+The handle survives Keeper turns and server restarts. Only checksum-verified input artifacts \
+are copied into the job workspace; it receives no network access, Keeper or host identity, \
+credentials, or current workspace mounts. Use keeper_job_status and keeper_job_cancel with \
+the exact returned job_id. An unconfirmed create or launch never authorizes starting a \
+replacement: inspect the original job handle instead of retrying the command."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "argv"
+type = "array"
+items = { type = "string" }
+min_items = 1
+required = true
+description = "Program and arguments passed verbatim as argv, with no shell interpretation. The working directory is the job-private workspace."
+
+[[params]]
+name = "inputs"
+type = "array"
+description = "Optional immutable artifacts copied into the private workspace. Each path is a single file name, never an absolute path or nested mount."
+
+[params.items]
+type = "object"
+additional_properties = false
+
+[[params.items.params]]
+name = "path"
+type = "string"
+min_length = 1
+required = true
+description = "Single file name inside the job-private workspace."
+
+[[params.items.params]]
+name = "artifact"
+type = "object"
+additional_properties = false
+required = true
+description = "Exact canonical normalized Tool_output artifact reference."
+
+[[params.items.params.params]]
+name = "_blob"
+type = "object"
+additional_properties = false
+required = true
+
+[[params.items.params.params.params]]
+name = "sha256"
+type = "string"
+pattern = "^[0-9a-f]{64}$"
+required = true
+
+[[params.items.params.params.params]]
+name = "bytes"
+type = "integer"
+minimum = 0
+required = true
+
+[[params.items.params.params.params]]
+name = "mime"
+type = "string"
+min_length = 1
+required = true
+
+[[params.items.params.params.params]]
+name = "preview"
+type = "string"
+required = true

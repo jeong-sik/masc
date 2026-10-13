@@ -28,7 +28,11 @@
     [keeper_turn_id] is asked each time a call runs and names the keeper turn
     the call's [keeper_tool_call] broadcast is filed under -- the one the
     tool-call ledger row names. It is a function because the turn context it
-    reads is filled after the bundle is built. *)
+    reads is filled after the bundle is built. [source_context], when supplied,
+    is read once at invocation entry and passed unchanged through dispatch.
+    That same snapshot supplies the turn id when available. Callers without
+    source context retain [keeper_turn_id] attribution without inventing a
+    source Task. *)
 val make_keeper_tool_handler
   :  capability_surface:Keeper_capability_surface.t
   -> name:string
@@ -41,6 +45,7 @@ val make_keeper_tool_handler
        Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context
   -> keeper_turn_id:(unit -> int option)
+  -> ?source_context:(unit -> Keeper_tool_call_log_context.turn_context option)
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
@@ -76,6 +81,7 @@ val make_keeper_tool_handler_from_meta
        Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context
   -> keeper_turn_id:(unit -> int option)
+  -> ?source_context:(unit -> Keeper_tool_call_log_context.turn_context option)
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t

@@ -603,6 +603,7 @@ let async_worker_result
     ~publication_recovery
     ~ctx_snapshot
     ~keeper_turn_id:(keeper_turn_id_of turn_context)
+    ?source_context:turn_context
     ~turn_sandbox_factory:sandbox_factory
     ?observe_node_result:
       (Option.map
@@ -1802,6 +1803,7 @@ let make_tools_with_authority
                  ~publication_recovery
                  ~ctx_snapshot
                  ~keeper_turn_id:(keeper_turn_id_of turn_context)
+                 ?source_context:turn_context
                  ?turn_sandbox_factory
                  ?clock
                  ?continuation_channel
@@ -2078,6 +2080,7 @@ let make_tools_with_authority
                     let execution = execute_keeper_plan ~capability_authority ~plan ~composition_run_id
                         ~run_id:(Keeper_tool_plan.Run_id.fresh ()) ~parent_invocation ~config ~meta
                         ~publication_recovery ~ctx_snapshot ~keeper_turn_id:(keeper_turn_id_of turn_context)
+                        ?source_context:turn_context
                         ?turn_sandbox_factory ?clock ?continuation_channel ?gate_context ?gate_grant ?record_gate_result
                         ?on_deferred ?on_external_effect_deferred
                         ~admit_node:(Keeper_composition_nested_run.admit_node nested_run)

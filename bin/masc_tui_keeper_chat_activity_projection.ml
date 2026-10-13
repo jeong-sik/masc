@@ -196,38 +196,159 @@ let native_completion_summary (completion : Runtime_native_tools.completion) =
   | End_observed | Completion_unrecorded | Completion_reported | Error_reported
   | Decline_reported | Result_received _ -> native_completion_status completion
 
-let native_activity_summary (activity : tool_activity) =
+(* The provider's report for a step that has ended. A step still running, or
+   one MASC itself executed, has none. An ended step with no recorded report
+   reads as [end_observed]. *)
+let native_completion_of_activity (activity : tool_activity) =
   match activity.outcome with
   | Native_ended | Native_failed ->
-      Some (native_completion_status
-        (Option.value activity.native_completion ~default:Runtime_native_tools.end_observed))
+      Some (Option.value activity.native_completion ~default:Runtime_native_tools.end_observed)
   | Started | Awaiting_result | Returned | Native_running | Failed | Never_returned
   | Outcome_unrecorded -> None
 
-let native_progress_summary (activity : tool_activity) =
-  let progress = Option.map (fun progress ->
-    let observation = match progress.message, progress.output_bytes, progress.provider_elapsed_seconds with
-      | Some message, _, _ -> safe_line message
-      | None, Some _, _ when activity.outcome=Native_running -> "output arriving"
-      | None, Some _, _ -> "output observed"
-      | None, None, Some seconds -> Printf.sprintf "heartbeat · provider elapsed %ds" seconds
-      | None, None, None -> "native activity observed" in
-    observation)
+let native_activity_summary (activity : tool_activity) =
+  Option.map native_completion_status (native_completion_of_activity activity)
+
+(* Counts equal keys, listing each key once in order of first appearance. *)
+let count_in_order_of_first_appearance (keys : 'key list) : ('key * int) list =
+  List.fold_left
+    (fun counted key ->
+      if List.exists (fun (seen, _) -> seen = key) counted
+      then List.map (fun (seen, calls) -> if seen = key then seen, calls + 1 else seen, calls) counted
+      else counted @ [ key, 1 ])
+    [] keys
+
+(* The clause of [calls] equal observations of one tool: the single call
+   reads as it always did, a larger group carries its count. *)
+let counted_clause ~tool ~calls text =
+  if calls = 1 then tool ^ ": " ^ text else Printf.sprintf "%s x%d: %s" tool calls text
+
+(* One status clause for every call of one tool that ended the same way.
+   Thirteen [Execute] calls that each returned a result with no error flag
+   used to draw thirteen identical clauses and wrap the block over several
+   rows. The key is the typed value, tool name plus the provider's report,
+   never the drawn text, so two reports that read alike but differ in a field
+   the clause hides stay apart. The key is cut to what the clause says:
+   [completion_as_drawn] folds the reports that draw the same words. *)
+type native_status_group =
+  { status_tool : string
+  ; status_completion : Runtime_native_tools.completion
+  ; status_calls : int
+  }
+
+(* [native_completion_status] never draws the status word of an unrecognized
+   report (only the results view does), and draws a result that carries an
+   error flag as the error report. *)
+let completion_as_drawn (completion : Runtime_native_tools.completion) =
+  let open Runtime_native_tools in
+  match completion.outcome with
+  | Unrecognized_status _ -> { completion with outcome = Unrecognized_status "" }
+  | Result_received { is_error = Some true } -> { completion with outcome = Error_reported }
+  | End_observed | Completion_unrecorded | Completion_reported | Error_reported
+  | Decline_reported | Result_received { is_error = None | Some false } -> completion
+
+let group_native_statuses (activities : tool_activity list) =
+  List.filter_map
+    (fun activity ->
+      Option.map
+        (fun completion ->
+          display_tool_name activity.tool_name, completion_as_drawn completion)
+        (native_completion_of_activity activity))
+    activities
+  |> count_in_order_of_first_appearance
+  |> List.map (fun ((status_tool, status_completion), status_calls) ->
+         { status_tool; status_completion; status_calls })
+
+let native_status_clause group =
+  counted_clause ~tool:group.status_tool ~calls:group.status_calls
+    (native_completion_status group.status_completion)
+
+(* What a progress clause says, as a value. The provider's message is kept as
+   it is drawn (sanitised), and a retry notice without the agent id, which
+   the clause never draws. [running] decides the clause's wording ("output
+   arriving" against "output observed", "last observed" before a retry). *)
+type native_progress_observation =
+  | Progress_message of string
+  | Progress_output_arriving
+  | Progress_output_observed
+  | Progress_heartbeat of int
+  | Progress_activity_observed
+
+type native_progress_key =
+  { observation : native_progress_observation option
+  ; retry : Runtime_native_tools.retry_observation option
+  ; running : bool
+  }
+
+let retry_as_drawn : Runtime_native_tools.retry_observation -> Runtime_native_tools.retry_observation =
+  let without_id (agent : Runtime_native_tools.retry_agent) = { agent with agent_id = "" } in
+  function
+  | Runtime_native_tools.Retry_cleared agent -> Runtime_native_tools.Retry_cleared (without_id agent)
+  | Runtime_native_tools.Retry_reported note ->
+      Runtime_native_tools.Retry_reported { note with agent = without_id note.agent }
+
+let native_progress_key (activity : tool_activity) =
+  let running = activity.outcome = Native_running in
+  let observation = Option.map (fun progress ->
+    match progress.message, progress.output_bytes, progress.provider_elapsed_seconds with
+    | Some message, _, _ -> Progress_message (safe_line message)
+    | None, Some _, _ when running -> Progress_output_arriving
+    | None, Some _, _ -> Progress_output_observed
+    | None, None, Some seconds -> Progress_heartbeat seconds
+    | None, None, None -> Progress_activity_observed)
     activity.native_progress in
+  let retry = Option.map retry_as_drawn activity.native_retry in
+  match observation, retry with
+  | None, None -> None
+  | Some _, _ | None, Some _ -> Some { observation; retry; running }
+
+let native_progress_text (key : native_progress_key) =
+  let progress = Option.map (function
+    | Progress_message message -> message
+    | Progress_output_arriving -> "output arriving"
+    | Progress_output_observed -> "output observed"
+    | Progress_heartbeat seconds -> Printf.sprintf "heartbeat · provider elapsed %ds" seconds
+    | Progress_activity_observed -> "native activity observed")
+    key.observation in
   let retry = Option.map (function
     | Runtime_native_tools.Retry_cleared agent ->
         "provider retry notice cleared · " ^ safe_line agent.subagent_type
     | Runtime_native_tools.Retry_reported note ->
         Printf.sprintf "%sprovider retry %d/%d · delay %dms · %s · %s%s"
-          (if activity.outcome=Native_running then "" else "last observed ")
+          (if key.running then "" else "last observed ")
           note.attempt note.max_retries note.retry_delay_ms
           (safe_line note.agent.subagent_type) (safe_line note.error_category)
           (Option.fold ~none:"" ~some:(fun code -> Printf.sprintf " · status %d" code) note.error_status))
-    activity.native_retry in
-  match progress, retry with
-  | Some progress, Some retry -> Some (progress ^ " · " ^ retry)
-  | Some _ as value, None | None, (Some _ as value) -> value
-  | None, None -> None
+    key.retry in
+  (* [native_progress_key] builds a key only when one of the two is present. *)
+  String.concat " · " (List.filter_map Fun.id [ progress; retry ])
+
+let native_progress_summary (activity : tool_activity) =
+  Option.map native_progress_text (native_progress_key activity)
+
+(* One progress clause for every call of one tool that reports the same
+   thing, grouped like the status clauses. Calls that differ in the message
+   they carry stay separate clauses. *)
+type native_progress_group =
+  { progress_tool : string
+  ; progress_key : native_progress_key
+  ; progress_calls : int
+  }
+
+let group_native_progress (activities : tool_activity list) =
+  List.filter_map
+    (fun activity ->
+      Option.map
+        (fun key -> display_tool_name activity.tool_name, key)
+        (native_progress_key activity))
+    activities
+  |> count_in_order_of_first_appearance
+  |> List.map (fun ((progress_tool, progress_key), progress_calls) ->
+         { progress_tool; progress_key; progress_calls })
+
+let native_progress_clause group =
+  counted_clause ~tool:group.progress_tool ~calls:group.progress_calls
+    (native_progress_text group.progress_key)
 
 let native_progress_details ?(include_elapsed=false) (activity : tool_activity) =
   match native_progress_summary activity, activity.native_progress with
@@ -422,12 +543,8 @@ let compact_outcome_parts (activities : tool_activity list) =
              | [] -> Some counted
              | names -> Some (counted ^ ": " ^ String.concat ", " names)))
   in
-  ordinary @ List.filter_map (fun (activity : tool_activity) ->
-    Option.map (fun summary -> display_tool_name activity.tool_name ^ ": " ^ summary)
-      (native_activity_summary activity)) activities
-  @ List.filter_map (fun (activity : tool_activity) ->
-      Option.map (fun summary -> display_tool_name activity.tool_name ^ ": " ^ summary)
-        (native_progress_summary activity)) activities
+  ordinary @ List.map native_status_clause (group_native_statuses activities)
+  @ List.map native_progress_clause (group_native_progress activities)
 ;;
 
 let compact_tool_parts (activities : tool_activity list) =

@@ -3436,6 +3436,11 @@
   masc_tui_keeper_chat_transcript))
 
 (test
+ (name test_tui_native_status_groups)
+ (modules test_tui_native_status_groups)
+ (libraries masc.runtime alcotest masc masc_tui_keeper_chat_transcript))
+
+(test
  (name test_tui_autonomous_journal)
  (modules test_tui_autonomous_journal)
  (libraries alcotest masc masc.masc_types masc_tui_types masc_tui_observer

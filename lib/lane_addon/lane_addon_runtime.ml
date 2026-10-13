@@ -2222,7 +2222,15 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
                add_issue ~id:d.id d.source_path
                  (Printf.sprintf "Not applied while %d retained bindings that may belong to this declaration cannot be read"
                     (List.length unreadable))
-           | true, [] | false, _ ->
+           | false, (_ :: _) ->
+               (* A disabled declaration with an unreadable record that may
+                  belong to it leaves its privacy owner untouched: the
+                  retention decision cannot be made, so nothing is revoked,
+                  while the worker cleanup still runs. *)
+               List.iter (retire sw) (live_for d.id);
+               List.iter (retire_past sw)
+                 (List.filter (fun (owner, fields) -> owner.id = d.id && not (record_is_detached fields)) histories)
+           | true, [] | false, [] ->
            let retained_visibility =
              let same (owner : configuration_owner) = owner.id = d.id
                && owner.source_path = d.source_path && owner.revision = d.revision in
@@ -2230,7 +2238,25 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
                match e.configuration with Some owner when same owner -> Some e.visibility | _ -> None) in
              let past = histories |> List.filter_map (fun (owner, fields) ->
                if same owner then Result.to_option (visibility_of_fields fields) else None) in
-             match List.sort_uniq Stdlib.compare (live @ past) with
+             (* An unreadable record that names this same declaration may
+                hold its privacy owner, detached records included: they hold
+                no worker, but the visibility they would name cannot be
+                checked. A record whose read authority is present but cannot
+                be read holds the decision; a record with no read authority
+                at all holds no privacy owner and passes. *)
+             let unreadable, unreadable_hold =
+               List.fold_left
+                 (fun (visibilities, hold) (fault : retained_fault) ->
+                   match fault.fault_owner with
+                   | Owned_by owner when same owner && fault.fault_reason <> Read_authority_absent -> (
+                       match visibility_of_fields fault.fault_fields with
+                       | Ok visibility -> (visibility :: visibilities, hold)
+                       | Error _ -> (visibilities, true))
+                   | Owned_by _ | Owner_unreadable | Unowned -> (visibilities, hold))
+                 ([], false) faults in
+             if unreadable_hold then Error "declaration retains a binding whose read visibility cannot be read"
+             else
+             match List.sort_uniq Stdlib.compare (live @ past @ unreadable) with
              | [visibility] -> Ok visibility
              | [] -> desired_visibility [] d
              | _ -> Error "declaration has ambiguous retained ownership" in

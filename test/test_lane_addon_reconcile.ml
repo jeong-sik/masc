@@ -1172,6 +1172,52 @@ let test_declaration_waits_for_its_unreadable_records_then_applies () =
     check_application config "dos-counter" "applied";
     detach clock config id)
 
+(* An unreadable record that names the declaration and carries a broken read
+   authority may hold its privacy owner, detached or not: the retention
+   decision waits for the record instead of deciding shared and revoking the
+   owner the record may name. *)
+let test_detached_unreadable_record_keeps_the_document_owner () =
+  with_fixture (fun _ _ config directory packages state ->
+    let manifest = package packages "ready" in
+    let broken_visibility = replace_field "visibility" (`String "unreadable") in
+    ignore (seed_records config (fixture_records ~transform:broken_visibility ()));
+    let path = Filename.concat directory "dos-counter.toml" in
+    let source = declaration ~id:"dos-counter" ~manifest () in
+    write path source;
+    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    unwrap (Lane_addon_document_owner.prepare ~root ~source_path:path ~keeper:"owner"
+      ~prior_revision:None ~proposed_revision:(Store.digest source));
+    let result = reconcile config directory in
+    check bool "the declaration is held by its unreadable record" true
+      (issues_of "dos-counter" result <> []);
+    check (list string) "a held declaration starts no worker" [] (starts state);
+    check bool "the document owner is not revoked" true
+      (Result.is_ok (Lane_addon_document_owner.read ~root ~source_path:path));
+    remove_seeded_files config)
+
+(* A disabled declaration with its own unreadable record leaves the privacy
+   owner untouched -- the retention decision cannot be made, so nothing is
+   revoked -- while the records stay listed and no worker runs. *)
+let test_disabled_declaration_with_unreadable_record_keeps_the_document_owner () =
+  with_fixture (fun _ _ config directory packages state ->
+    let manifest = package packages "ready" in
+    let unreadable_attached json =
+      replace_field "visibility" (`String "unreadable") (still_attached json) in
+    ignore (seed_records config (fixture_records ~transform:unreadable_attached ()));
+    let path = Filename.concat directory "dos-counter.toml" in
+    let source = declaration ~enabled:false ~id:"dos-counter" ~manifest () in
+    write path source;
+    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    unwrap (Lane_addon_document_owner.prepare ~root ~source_path:path ~keeper:"owner"
+      ~prior_revision:None ~proposed_revision:(Store.digest source));
+    let result = reconcile config directory in
+    check (list string) "a disabled declaration starts no worker" [] (starts state);
+    check bool "the document owner is not revoked" true
+      (Result.is_ok (Lane_addon_document_owner.read ~root ~source_path:path));
+    check bool "the unreadable records stay listed for the operator" true
+      (issues_of "dos-counter" result <> []);
+    remove_seeded_files config)
+
 (* A configuration owner that cannot be read leaves the record unattributed,
    so it could hold any declaration's worker. It is not the same as a record
    whose configuration is null, which belongs to no declaration. *)
@@ -1312,6 +1358,10 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     test_unreadable_records_hold_only_the_declaration_they_name;
   test_case "a declaration waits for its unreadable records and applies once they are gone" `Quick
     test_declaration_waits_for_its_unreadable_records_then_applies;
+  test_case "an unreadable record keeps the document owner it may name" `Quick
+    test_detached_unreadable_record_keeps_the_document_owner;
+  test_case "a disabled declaration with unreadable records keeps its document owner" `Quick
+    test_disabled_declaration_with_unreadable_record_keeps_the_document_owner;
   test_case "a record with an unreadable owner holds every declaration" `Quick
     test_record_with_unreadable_owner_holds_every_declaration;
   test_case "a record without a sequence is a fault of its owner" `Quick

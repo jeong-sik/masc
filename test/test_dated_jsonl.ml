@@ -1207,35 +1207,26 @@ let test_prune_keeps_the_cutoff_day_itself () =
     (Sys.file_exists dated.Dated_jsonl.Store.path)
 ;;
 
-(* Only removals that happened are counted. The month the test locks keeps
-   its two files; the other month's file goes and is the only one counted
-   (#42891). *)
+(* Only removals that happened are counted. A folder named like a day file
+   cannot be unlinked, as root too, so it is attempted and not counted; the
+   two real day files go and are the two counted (#42891). *)
 let test_prune_counts_only_removed_files () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let location = temp_store "dated_jsonl_prune_counts" in
   let dir = Dated_jsonl.Store.dir location in
-  let locked = Filename.concat dir "2020-01" in
-  let open_month = Filename.concat dir "2020-02" in
-  List.iter Fs_compat.mkdir_p [ locked; open_month ];
-  List.iter
-    (fun path -> Fs_compat.append_file path "{\"old\":true}\n")
-    [ Filename.concat locked "14.jsonl"
-    ; Filename.concat locked "15.jsonl"
-    ; Filename.concat open_month "15.jsonl"
-    ];
-  Unix.chmod locked 0o555;
+  let january = Filename.concat dir "2020-01" in
+  let february = Filename.concat dir "2020-02" in
+  List.iter Fs_compat.mkdir_p [ january; february ];
+  let unremovable = Filename.concat january "14.jsonl" in
+  Unix.mkdir unremovable 0o755;
+  let removable = [ Filename.concat january "15.jsonl"; Filename.concat february "15.jsonl" ] in
+  List.iter (fun path -> Fs_compat.append_file path "{\"old\":true}\n") removable;
   let store = Dated_jsonl.open_store location in
-  let deleted =
-    Fun.protect
-      ~finally:(fun () -> Unix.chmod locked 0o755)
-      (fun () -> Dated_jsonl.prune store ~days:30)
-  in
-  check int "only the removed file counts" 1 deleted;
-  check bool "locked month keeps its files" true
-    (Sys.file_exists (Filename.concat locked "14.jsonl"));
-  check bool "open month file removed" false
-    (Sys.file_exists (Filename.concat open_month "15.jsonl"))
+  let deleted = Dated_jsonl.prune store ~days:30 in
+  check int "only the removed files count" 2 deleted;
+  check bool "the folder stays" true (Sys.file_exists unremovable);
+  List.iter (fun path -> check bool path false (Sys.file_exists path)) removable
 
 let test_prune_zero_days () =
   Eio_main.run @@ fun env ->

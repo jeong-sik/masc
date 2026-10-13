@@ -8816,16 +8816,22 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
           ~body:(Yojson.Safe.to_string (`Assoc fields)) in
         Ok ["Server confirmed event update: " ^ reference]
       | Inbox.Clear ->
-        (* Each line is its own operation on the server, so one refusal says
-           nothing about the next: every cancel is sent and answered by id. *)
+        (* Each line is its own operation on the server, so one failure says
+           nothing about the next: every cancel is attempted and answered by
+           id. "Not sent" is this client declining to send. "Not confirmed"
+           is a refusal or an answer that never arrived, and the snapshot
+           read below shows which lines are still queued. *)
         Ok (List.map (fun (request : Keeper_chat.request) ->
           let id = request.request_id in
-          match post_json ~host ~port
-                  ~path:(root ^ "/chat/operations/"
-                         ^ Masc_tui_http.percent_encode_path_segment id ^ "/cancel")
-                  ~body:(Yojson.Safe.to_string (`Assoc [])) with
-          | Ok _ -> "Server confirmed cancel: " ^ id
-          | Error detail -> "Server refused cancel " ^ id ^ ": " ^ detail)
+          match check_authority () with
+          | Error detail -> "Cancel not sent for " ^ id ^ ": " ^ detail
+          | Ok () ->
+            (match Masc_tui_http.post_json ~host ~port
+                     ~path:(root ^ "/chat/operations/"
+                            ^ Masc_tui_http.percent_encode_path_segment id ^ "/cancel")
+                     ~body:(Yojson.Safe.to_string (`Assoc [])) with
+             | Ok _ -> "Server confirmed cancel: " ^ id
+             | Error detail -> "Cancel not confirmed for " ^ id ^ ": " ^ detail))
           clear_accepted)
       | Inbox.Cancel id | Inbox.Move_to_end id | Inbox.Edit (id, _) ->
         let path = root ^ "/chat/operations/" ^ Masc_tui_http.percent_encode_path_segment id in
@@ -10509,36 +10515,33 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
        | _, Error detail -> notice ~kind:Notice_failure detail
        | Some keeper_name, Ok Masc_tui_queue_inspection.Clear ->
          (* Every unsent line for this Keeper is dropped the way Ctrl-K drops
-            one, then each accepted line gets its own cancel. The unsent lines
-            go first and need no server: they are gone even when the request
-            below is refused or cannot be sent. *)
+            one. That needs no server, so it is done first and holds even when
+            the request below is refused. This row states what this client
+            holds; whether a cancel was sent and how the server answered is
+            the queue request's own report, which follows it. The request is
+            made even with nothing to cancel: its snapshot is where a line
+            this client no longer tracks is still visible. *)
          let clearing = keeper_queue_clearing state ~keeper_name in
          let dropped = List.fold_left (fun dropped (item : Chat_queue.item) ->
            match Chat_queue.take state.msg_queued ~request_id:item.request.request_id with
            | Some (_, rest) ->
              state.msg_queued <- rest;
              forget_queued_history state item.request;
-             item :: dropped
-           | None -> dropped) [] clearing.kqc_unsent in
-         (match state.msg_recall_replaces with
-          | Some editing when List.exists (fun (item : Chat_queue.item) ->
-              Keeper_chat.same_request_identity item.request editing.Chat_queue.request)
-              dropped ->
-            state.msg_recall_replaces <- None; clear_staged_attachments state
-          | Some _ | None -> ());
+             dropped + 1
+           | None -> dropped) 0 clearing.kqc_unsent in
          let clause count what =
            if count = 0 then None else Some (Printf.sprintf "%d %s" count what) in
          (match List.filter_map Fun.id
-                  [ clause (List.length dropped) "unsent cancelled"
-                  ; clause (List.length clearing.kqc_accepted) "accepted, asking the server to cancel"
-                  ; clause clearing.kqc_undecided "still being delivered, left as they are" ] with
-          | [] -> notice ~kind:Notice_reply "None of your messages are waiting for this Keeper"
+                  [ clause dropped "unsent cancelled"
+                  ; clause (List.length clearing.kqc_accepted) "waiting in the server queue"
+                  ; clause clearing.kqc_left "left as they are (being sent, or already started)" ] with
+          | [] ->
+            notice ~kind:Notice_reply
+              "/queue clear: no message sent from this session is waiting for this Keeper"
           | _ :: _ as clauses ->
             notice ~kind:Notice_reply ("/queue clear: " ^ String.concat " · " clauses));
-         (match clearing.kqc_accepted with
-          | [] -> drain_queued_message state ~base_path ~mailbox
-          | _ :: _ ->
-            launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Clear)
+         drain_queued_message state ~base_path ~mailbox;
+         launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Clear
        | Some keeper_name, Ok action ->
          let local_id = match action with
            | Masc_tui_queue_inspection.Cancel id | Move_to_end id | Edit (id, _) -> Some id

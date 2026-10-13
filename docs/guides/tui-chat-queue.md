@@ -29,18 +29,24 @@ groups; the group count is not a total message count. Run `/queue` again to refr
 | --- | --- |
 | `/queue pause` | Pause new work; the current turn can finish. |
 | `/queue resume` | Resume queue consumption. |
-| `/queue clear` | Cancel every message of yours that is waiting for this Keeper. |
+| `/queue clear` | Cancel the messages this session sent that are still waiting for this Keeper. |
 | `/queue edit ID message` | Replace queued text while retaining attachments. |
 | `/queue cancel ID` | Cancel a waiting message. |
 | `/queue last ID` | Move a waiting message to the end of its queue. |
 | `/queue cancel-event REF INCARNATION reason` | Cancel the exact event shown. |
 | `/queue priority-event REF INCARNATION urgency` | Change that event's priority. |
 
-`Esc` stops a turn; it does not empty the queue. `/queue clear` does, for the
-Keeper on screen: unsent local messages are dropped at once, and each message
-the server accepted but has not started gets its own cancel request, answered
-by ID. A message still being delivered is left alone, because whether the Keeper
-holds it is not known yet. Messages other senders queued are not touched.
+`Esc` stops a turn; it does not remove waiting messages. `/queue clear` removes
+the ones this TUI session sent to the Keeper on screen. Unsent local messages are
+dropped at once. Each message waiting in the server queue gets its own cancel
+request, answered by ID: `confirmed`, `not sent`, or `not confirmed`. The queue
+snapshot that follows shows what is still waiting.
+
+`/queue clear` leaves alone a message already handed over for sending, one whose
+delivery is being rechecked, and one the server reported as started; `Esc` is
+what stops a started turn. It also does not see a message this session is not
+tracking, such as one sent before the TUI was restarted or one another sender
+queued. Those stay listed in `/queue`, and `/queue cancel ID` removes one.
 
 Copy message IDs and event references from `/queue`. An event reference identifies
 the displayed event, not every event in its group. Already running or changed

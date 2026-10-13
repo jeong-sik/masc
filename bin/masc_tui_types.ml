@@ -11386,14 +11386,18 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
 ;;
 
 (* What /queue clear withdraws for one Keeper. An unsent line exists only in
-   the local queue, so dropping it is a local act. An accepted line that has
-   not started is the server's to cancel, under the id this client sent it
-   with. A line whose POST is still out, or whose delivery is being re-read,
-   is neither: whether the Keeper holds it is not known yet, so it stays. *)
+   the local queue, so dropping it is a local act. A line the server accepted
+   into its queue is the server's to cancel, under the id this client sent it
+   with. Every other waiting line is left: it was handed to a dispatch that
+   may already be posting it, its delivery is being re-read, or the server
+   answered that it had started.
+
+   Only lines this client still tracks are seen here. One an earlier TUI
+   process sent is not, and stays for /queue cancel ID. *)
 type keeper_queue_clearing =
   { kqc_unsent : Masc_tui_keeper_chat_queue.item list
   ; kqc_accepted : Masc_tui_keeper_chat_projection.request list
-  ; kqc_undecided : int
+  ; kqc_left : int
   }
 
 let keeper_queue_clearing (state : state) ~keeper_name =
@@ -11403,15 +11407,22 @@ let keeper_queue_clearing (state : state) ~keeper_name =
     List.exists (fun (item : Masc_tui_keeper_chat_queue.item) ->
       Masc_tui_keeper_chat_projection.same_request_identity item.request request)
       unsent in
-  let accepted, undecided =
-    List.fold_left (fun (accepted, undecided) (request, delivery) ->
+  let waits_in_server_queue request =
+    List.exists (fun (entry : inflight) ->
+      Masc_tui_keeper_chat_projection.same_request_identity entry.sent_request request
+      && match Masc_tui_keeper_chat_transcript.admission entry.log.tl_transcript with
+         | Some (Masc_tui_keeper_chat_live.Queued, _) -> true
+         | Some ((Masc_tui_keeper_chat_live.Running | Settled), _) | None -> false)
+      state.msg_inflight in
+  let accepted, left =
+    List.fold_left (fun (accepted, left) (request, delivery) ->
       match delivery with
-      | Keeper_queued -> request :: accepted, undecided
-      | Local_pending when is_unsent request -> accepted, undecided
-      | Local_pending | Awaiting_receipt | Rechecking_delivery ->
-          accepted, undecided + 1)
+      | Keeper_queued when waits_in_server_queue request -> request :: accepted, left
+      | Local_pending when is_unsent request -> accepted, left
+      | Keeper_queued | Local_pending | Awaiting_receipt | Rechecking_delivery ->
+          accepted, left + 1)
       ([], 0) (keeper_message_waiting_requests state ~keeper_name) in
-  { kqc_unsent = unsent; kqc_accepted = List.rev accepted; kqc_undecided = undecided }
+  { kqc_unsent = unsent; kqc_accepted = List.rev accepted; kqc_left = left }
 ;;
 
 let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =

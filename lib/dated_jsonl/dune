@@ -11,6 +11,8 @@
  ; (flags)/(ocamlc_flags)/(ocamlopt_flags).
  (flags
   (:standard -w +33 -w +4 -w +37))
+ (preprocess
+  (pps ppx_enumerate))
  (libraries
   fs_compat
   jsonl_writer

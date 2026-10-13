@@ -1668,6 +1668,7 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "masc_web_fetch"
     ; "masc_web_search"
     (* Directory listing plus whole-file reads; no shared state. *)
+    ; "masc_wiki_lint"
     ; "masc_wiki_list"
     ; "masc_wiki_read"
     ; "masc_wiki_search"

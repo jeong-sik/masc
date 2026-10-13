@@ -1,4 +1,4 @@
-(** The five wiki tools, read from [config/tools/masc_wiki_*.toml] (RFC
+(** The six wiki tools, read from [config/tools/masc_wiki_*.toml] (RFC
     prompts-and-tool-definitions-outside-ocaml §2.2).
 
     Each value is decoded once at module initialization. A missing file or a
@@ -33,3 +33,4 @@ let read = loaded_of_name "masc_wiki_read"
 let create = loaded_of_name "masc_wiki_create"
 let update = loaded_of_name "masc_wiki_update"
 let search = loaded_of_name "masc_wiki_search"
+let lint = loaded_of_name "masc_wiki_lint"

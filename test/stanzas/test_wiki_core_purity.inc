@@ -16,5 +16,7 @@
   ../lib/wiki_graph.ml
   ../lib/wiki_graph.mli
   ../lib/wiki_lint.ml
-  ../lib/wiki_lint.mli)
+  ../lib/wiki_lint.mli
+  ../lib/wiki_lint_report.ml
+  ../lib/wiki_lint_report.mli)
  (libraries alcotest))

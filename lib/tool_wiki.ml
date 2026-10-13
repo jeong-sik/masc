@@ -510,6 +510,102 @@ let handle_search ~tool_name ~start_time ctx args : Tool_result.result =
            (List.length matches) (String.concat "\n" matches))
   end
 
+(* The nodes the lint reads: one per page file [list_pages] names, a readable
+   page with its links and sources, or the file and the reason its header does
+   not read. The same listing and the same header parser the other handlers
+   use, so the lint cannot disagree with them about what a page is. A file that
+   vanishes between the listing and the read is left out, as in
+   [index_entries]. Nothing is written and no lock is taken. *)
+let lint_nodes ~base_path =
+  list_pages ~base_path
+  |> List.filter_map (fun path ->
+    let file = Filename.basename path in
+    match In_channel.with_open_text path In_channel.input_all with
+    | exception Sys_error message ->
+      (* Gone between the listing and the read: not a page any more. Still
+         there but not opened (permissions, I/O): a page that does not read,
+         not a page that does not exist. *)
+      if Sys.file_exists path
+      then
+        Some
+          (Wiki_graph.Unreadable
+             { file; reason = Printf.sprintf "the file could not be opened: %s" message })
+      else None
+    | content ->
+      (match parse_frontmatter content with
+       | Ok _ ->
+         let body = page_body content in
+         Some
+           (Wiki_graph.Readable
+              { page = Filename.chop_suffix file ".md"
+              ; links = Wiki_link.extract body
+              ; sources = Wiki_sources.of_body body
+              })
+       | Error error ->
+         Some
+           (Wiki_graph.Unreadable { file; reason = frontmatter_error_to_string error })))
+
+let handle_lint ~tool_name ~start_time ctx args : Tool_result.result =
+  (* A value of the wrong type is refused, not read as "not given": a limit
+     of "20" would otherwise be the default and a kind of 5 no filter. *)
+  let typed name ~expected ~pick =
+    match args with
+    | `Assoc fields ->
+      (match List.assoc_opt name fields with
+       | None | Some `Null -> Ok None
+       | Some value ->
+         (match pick value with
+          | Some picked -> Ok (Some picked)
+          | None -> Error (Printf.sprintf "%s must be %s" name expected)))
+    | _ -> Ok None
+  in
+  let string_arg name =
+    typed name ~expected:"a string" ~pick:(function `String s -> Some s | _ -> None)
+  in
+  let ( let* ) = Result.bind in
+  let request =
+    let* page = string_arg "page" in
+    let* kind = string_arg "kind" in
+    let* limit =
+      typed "limit" ~expected:"a whole number" ~pick:(function `Int n -> Some n | _ -> None)
+    in
+    let* cursor = string_arg "cursor" in
+    Ok { Wiki_lint_report.page; kind; limit; cursor }
+  in
+  match request with
+  | Error message -> workflow_err ~tool_name ~start_time message
+  | Ok request ->
+  let page_checked =
+    match request.page with
+    | None -> Ok ()
+    | Some page ->
+      validate_page_name page |> Result.map ignore
+      |> Result.map_error (page_name_error_to_string page)
+  in
+  match page_checked with
+  | Error message -> workflow_err ~tool_name ~start_time message
+  | Ok () ->
+    let nodes = lint_nodes ~base_path:ctx.base_path in
+    let pages_unreadable =
+      List.length
+        (List.filter
+           (function
+             | Wiki_graph.Unreadable _ -> true
+             | Wiki_graph.Readable _ -> false)
+           nodes)
+    in
+    let findings = Wiki_lint.run (Wiki_graph.of_nodes nodes) in
+    (match
+       Wiki_lint_report.render
+         ~pages_total:(List.length nodes)
+         ~pages_unreadable
+         ~findings
+         request
+     with
+     | Error problem ->
+       workflow_err ~tool_name ~start_time (Wiki_lint_report.problem_to_string problem)
+     | Ok json -> text_ok ~tool_name ~start_time (Yojson.Safe.to_string json))
+
 (* RFC-0189 PR-1b.7 — boundary projection. Handlers are typed; the
    dispatch ABI stays [Tool_result.result option] so external callers
    (mcp_server_eio_execute, keeper_tag_dispatch) remain unchanged.
@@ -542,6 +638,8 @@ let dispatch ctx ~name ~args : Tool_result.result option =
     lift (handle_update ~tool_name:name ~start_time:start ctx args)
   | Some Tool_schemas_wiki.Search_pages ->
     lift (handle_search ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_wiki.Lint_pages ->
+    lift (handle_lint ~tool_name:name ~start_time:start ctx args)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

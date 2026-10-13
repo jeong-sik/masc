@@ -7,7 +7,14 @@
 open Alcotest
 
 let modules =
-  [ "wiki_page_name"; "wiki_page"; "wiki_link"; "wiki_sources"; "wiki_graph"; "wiki_lint" ]
+  [ "wiki_page_name"
+  ; "wiki_page"
+  ; "wiki_link"
+  ; "wiki_sources"
+  ; "wiki_graph"
+  ; "wiki_lint"
+  ; "wiki_lint_report"
+  ]
 ;;
 
 (* What none of them may mention. *)

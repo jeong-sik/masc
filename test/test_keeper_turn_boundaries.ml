@@ -417,7 +417,7 @@ let test_history_stated_in_store_answers_from_the_tail () =
     ; record ~turn:2 ~history_at_start:Boundaries.Fresh_history Boundaries.No_atom_history
     ];
   check_stated "the trace's last row decides" "stated empty" ();
-  append_lines ~keepers_dir [ record ~turn:3 Boundaries.Atom_history ];
+  append_lines ~keepers_dir [ record ~turn:3 atom_history ];
   check_stated "a later atom row moves it back" "may hold atoms" ();
   append_lines ~keepers_dir [ history_restarted () ];
   check_stated "a restart row states empty" "stated empty" ();

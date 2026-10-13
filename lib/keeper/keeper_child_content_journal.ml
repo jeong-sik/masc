@@ -127,13 +127,23 @@ let statement db cleanup operation sql f =
     ~on_cleanup:(cleanup_report cleanup) db ~operation sql f
 let bind db stmt values = Keeper_sqlite_observation_io.bind ~error:sql_error db stmt values
 let done_ db stmt operation =
-  match Sqlite3.step stmt with Sqlite3.Rc.DONE -> Ok () | rc -> Error (sqlite_failure db operation rc)
+  (* Sqlite3.Rc.t is the C result-code enum (about 30 codes). Every code except
+  DONE is a failure and the code is reported as is, so the catch-all is the intent. *)
+  match[@warning "-4"] Sqlite3.step stmt with
+  | Sqlite3.Rc.DONE -> Ok ()
+  | rc -> Error (sqlite_failure db operation rc)
 let scalar db cleanup sql = statement db cleanup "scalar" sql (fun stmt ->
   match Sqlite3.step stmt with
   | Sqlite3.Rc.ROW -> let value = Sqlite3.column stmt 0 in let* () = done_ db stmt "scalar end" in Ok value
   | rc -> Error (sqlite_failure db "scalar" rc))
-let integer = function Sqlite3.Data.INT value -> Ok value | _ -> corrupt "expected integer"
-let text = function Sqlite3.Data.TEXT value -> Ok value | _ -> corrupt "expected text"
+let integer = function
+  | Sqlite3.Data.INT value -> Ok value
+  | Sqlite3.Data.NONE | Sqlite3.Data.NULL | Sqlite3.Data.FLOAT _ | Sqlite3.Data.TEXT _
+  | Sqlite3.Data.BLOB _ -> corrupt "expected integer"
+let text = function
+  | Sqlite3.Data.TEXT value -> Ok value
+  | Sqlite3.Data.NONE | Sqlite3.Data.NULL | Sqlite3.Data.INT _ | Sqlite3.Data.FLOAT _
+  | Sqlite3.Data.BLOB _ -> corrupt "expected text"
 let schema_objects db cleanup = statement db cleanup "schema"
     "SELECT name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name" (fun stmt ->
   let rec loop acc = match Sqlite3.step stmt with

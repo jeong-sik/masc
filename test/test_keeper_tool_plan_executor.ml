@@ -1172,10 +1172,10 @@ let project_export ~base_path ~plan ~execution original =
   | Error error -> fail error.Tool_bridge.message
 ;;
 
-let provider_content ~base_path result =
+let provider_content ~base_path ?model_projection result =
   let module T = Agent_core.Types in
   let content, outcome =
-    match Tool_bridge.to_agent_core_typed_result ~base_path result with
+    match Tool_bridge.to_agent_core_typed_result ~base_path ?model_projection result with
     | Ok output -> output.content, T.Tool_succeeded
     | Error error -> error.message, T.Tool_failed
         { T.failure_kind = T.Non_retryable_tool_error; error_class = error.error_class }
@@ -1197,15 +1197,17 @@ let provider_content ~base_path result =
 (* Keep the real provider projection and real bounded artifact-reader pages.
    A later external model trial replays these immutable observations; it does
    not synthesize a smaller result or reexecute the producer. *)
-let previous_provider_content ~base_path result =
+let previous_provider_content ~base_path ?model_projection result =
   match Tool_bridge.attach_artifact_manifest ~projection:Tool_output.Inline_with_reference ~base_path result with
-  | Ok result -> provider_content ~base_path result
+  | Ok result -> provider_content ~base_path ?model_projection result
   | Error error -> fail error.Tool_bridge.message
 ;;
 
-let record_provider_trial ~base_path ~scenario ~task ~expected original projected =
-  let baseline = provider_content ~base_path original in
-  let selected = provider_content ~base_path projected in
+let record_provider_trial ~base_path ?(model_projection = Tool_output.default_model_projection)
+    ~scenario ~task ~expected original projected =
+  let baseline = provider_content ~base_path ~model_projection original in
+  let selected = provider_content ~base_path ~model_projection projected in
+  let previous = previous_provider_content ~base_path ~model_projection projected in
   let references_in_json json =
     match Tool_output.normalized_artifact_refs_in_json_strict json with
     | Ok references -> references
@@ -1219,7 +1221,7 @@ let record_provider_trial ~base_path ~scenario ~task ~expected original projecte
         (match Yojson.Safe.from_string content with
          | json -> references_in_json json
          | exception Yojson.Json_error _ -> [])
-      | Tool_output.Invalid_marker { detail } -> fail detail) [ baseline; selected ]
+      | Tool_output.Invalid_marker { detail } -> fail detail) [ baseline; selected; previous ]
     @ Tool_result.retained_artifacts projected
     @ references_in_json (Tool_result.data projected)
     |> List.sort_uniq (fun left right -> String.compare left.Tool_output.sha256 right.Tool_output.sha256)
@@ -1249,7 +1251,8 @@ let record_provider_trial ~base_path ~scenario ~task ~expected original projecte
     `Assoc [ "scenario", `String scenario; "task", `String task; "expected", expected
            ; "tool_name", `String (Tool_result.tool_name original)
            ; "baseline_content", `String baseline; "selected_content", `String selected
-           ; "previous_selected_content", `String (previous_provider_content ~base_path projected)
+           ; "previous_selected_content", `String previous
+           ; "provider_projection_ceiling_bytes", `Int (Tool_output.inline_ceiling_bytes model_projection)
            ; "reader_tool", reader_tool
            ; "reader_default_max_bytes", `Int Masc.Keeper_artifact_read.default_max_bytes
            ; "pages", `List pages ] :: !provider_trial_corpus
@@ -1339,7 +1342,9 @@ let test_export_failure_preserves_independent_branch () =
     | Ok plan -> plan
     | Error error -> fail (Plan.error_to_string error)
   in
+  let dispatches = ref 0 in
   let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    incr dispatches;
     if String.equal (node_name node) "b" then
       Executor.dispatch_result ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
         (Tool_result.make_err ~tool_name:node.Plan.tool_name ~class_:Tool_result.Runtime_failure
@@ -1351,6 +1356,7 @@ let test_export_failure_preserves_independent_branch () =
       Executor.dispatch_result (completed ~tool_name:node.Plan.tool_name ~data)
   in
   let execution = Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () in
+  let dispatched_before_presentations = !dispatches in
   let original = Masc.Keeper_tool_composition_surface.For_testing.result_of_execution
       ~tool_name:"keeper_compose_partial-fixture" ~tool_kind:Descriptor.Composition_tool
       ~start_time:(Tool_timing.start ()) execution in
@@ -1392,11 +1398,45 @@ let test_export_failure_preserves_independent_branch () =
     check string "full original failure evidence is unchanged"
       (Tool_result.to_json original |> Yojson.Safe.to_string)
       (execution_document ~base_path full_reference |> member "result" |> Yojson.Safe.to_string);
-    record_provider_trial ~base_path ~scenario:"partial_unknown_effect"
-      ~task:"Return JSON with the independent branch's post_count as independent, availability of the failed branch as failed_available, aggregate disposition as disposition, and effect disposition as effect_disposition. Preserve the failure and never replay the producer. If you read artifacts, use default full pages and omit max_bytes."
-      ~expected:(`Assoc [ "independent", `Int 0; "failed_available", `Bool false
-                        ; "disposition", `String "failed"; "effect_disposition", `String "effect_outcome_unknown" ])
-      original projected
+    let task = "Return JSON with the independent branch's post_count as independent, availability of the failed branch as failed_available, aggregate disposition as disposition, and effect disposition as effect_disposition. Preserve the failure and never replay the producer. If you read artifacts, use default full pages and omit max_bytes." in
+    let expected = `Assoc [ "independent", `Int 0; "failed_available", `Bool false
+                         ; "disposition", `String "failed"; "effect_disposition", `String "effect_outcome_unknown" ] in
+    record_provider_trial ~base_path ~scenario:"partial_unknown_effect" ~task ~expected original projected;
+    (* Use this already observed selected wire's exact size as the fixture
+       descriptor boundary; both presentations share it and the producer is
+       not rerun. The default descriptor trial above remains unchanged. *)
+    let model_projection = Tool_output.Store_above { threshold_bytes = String.length selected_wire } in
+    record_provider_trial ~base_path ~model_projection ~scenario:"partial_unknown_effect_marker_boundary"
+      ~task ~expected original projected;
+    let boundary = match !provider_trial_corpus with
+      | trial :: _ -> trial | [] -> fail "boundary trial was not captured" in
+    let previous_root = match boundary |> member "previous_selected_content" |> to_string
+        |> Tool_output.decode_from_agent_core with
+      | Tool_output.Decoded reference -> reference
+      | Tool_output.Not_marker -> fail "previous presentation did not cross the same descriptor ceiling"
+      | Tool_output.Invalid_marker { detail } -> fail detail in
+    check bool "same ceiling leaves the selected result immediately readable" false
+      (boundary |> member "selected_content" |> to_string |> Tool_output.is_marker);
+    let root_page = boundary |> member "pages" |> to_list |> List.find_opt (fun page ->
+        let args = member "args" page in
+        (args |> member "sha256" |> to_string) = previous_root.sha256
+        && (args |> member "offset" |> to_int) = 0) in
+    (match root_page with
+     | Some captured ->
+       let execution, observation = Masc.Keeper_artifact_read.handle_with_page
+           ~base_path ~args:(member "args" captured) in
+       (match observation, execution.Masc.Keeper_tool_execution.data with
+        | Some page, Some data ->
+          check string "reader replay resolves the exact previous root" previous_root.sha256 page.sha256;
+          let replay = provider_content ~base_path (completed ~tool_name:"keeper_artifact_read" ~data) in
+          check string "captured root page replays the real reader response"
+            (member "content" captured |> to_string) replay
+        | None, _ | Some _, None -> fail "real reader replay could not retrieve the previous root")
+     | None -> fail "previous marker root cannot be replayed through the captured artifact reader");
+    check int "presentation and root-page capture never replay the producer"
+      dispatched_before_presentations !dispatches;
+    Printf.printf "composition_provider_trial_root_capture previous_marker=true selected_inline=true root_page_captured=true producer_dispatches=%d projection_ceiling_bytes=%d\n%!"
+      !dispatches (Tool_output.inline_ceiling_bytes model_projection)
 ;;
 
 let run_exported_read ~base_path ?(pointer = "/path") ?(retained = []) () =

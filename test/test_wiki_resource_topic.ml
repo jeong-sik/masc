@@ -232,6 +232,109 @@ let test_json_topic_of_an_unreadable_document () =
       Yojson.Safe.Util.(json |> member "content" |> to_string))
 ;;
 
+(* A client that only lists resources cannot expand the [masc://wiki/{topic}]
+   template, so the listing names each page itself and the log beside them. *)
+let listed state =
+  let base_path = (Lib.Mcp_server.workspace_config state).Lib.Workspace.base_path in
+  Lib.Mcp_server_eio_resource.wiki_resources ~base_path
+;;
+
+let find_listed uri resources =
+  List.find_opt
+    (fun (resource : Lib.Mcp_server.mcp_resource) -> String.equal resource.uri uri)
+    resources
+;;
+
+let test_pages_are_listed_with_title_and_summary () =
+  with_wiki ~documents:contract_documents (fun state ->
+    match find_listed "masc://wiki/alpha" (listed state) with
+    | None -> fail "expected masc://wiki/alpha to be listed"
+    | Some resource ->
+      check (option string) "title is the page title" (Some "Alpha Doc") resource.title;
+      check string "description is the page summary" "What alpha holds" resource.description;
+      check string "pages are markdown" "text/markdown" resource.mime_type)
+;;
+
+let test_unreadable_page_is_listed_by_file_with_reason () =
+  with_wiki ~documents:contract_documents (fun state ->
+    match find_listed "masc://wiki/beta" (listed state) with
+    | None -> fail "expected masc://wiki/beta to be listed"
+    | Some resource ->
+      check string "named by file" "beta.md" resource.name;
+      (* [make_resource] titles a resource by its name when it has no title,
+         so the file name stands in; no page title is invented for it. *)
+      check (option string) "titled by its file name" (Some "beta.md") resource.title;
+      check string "described by the reason" beta_reason resource.description)
+;;
+
+(* A file whose name is not a valid page topic would resolve to a different
+   page or to nothing, so it must not become a listing row: every listed page
+   URI reads back as the file it was made from. *)
+let test_only_round_trippable_pages_are_listed () =
+  let bad_name_documents =
+    [ "notes.json.md", "# not a page\n"
+    ; "release notes.md", "# not a page\n"
+    ; "a?b.md", "# not a page\n"
+    ; "a#b.md", "# not a page\n" ]
+  in
+  with_wiki ~documents:(bad_name_documents @ contract_documents) (fun state ->
+    let resources = listed state in
+    List.iter
+      (fun file ->
+        let uri = "masc://wiki/" ^ Filename.chop_suffix file ".md" in
+        check bool (file ^ " is not listed") true
+          (Option.is_none (find_listed uri resources)))
+      [ "notes.json.md"; "release notes.md"; "a?b.md"; "a#b.md" ];
+    List.iter
+      (fun (resource : Lib.Mcp_server.mcp_resource) ->
+        match served_text (read_resource state resource.uri) with
+        | None -> fail ("listed uri does not serve: " ^ resource.uri)
+        | Some _ -> ())
+      resources)
+;;
+
+let test_log_is_listed_and_served_once_it_exists () =
+  let log = "## [2026-10-13 10:00] create r1 | alpha | codex | first\n" in
+  with_wiki ~documents:(("log.md", log) :: contract_documents) (fun state ->
+    (match find_listed "masc://wiki/log" (listed state) with
+     | None -> fail "expected masc://wiki/log to be listed"
+     | Some resource ->
+       check (option string) "log title" (Some "Wiki log") resource.title;
+       check string "log is markdown" "text/markdown" resource.mime_type);
+    match served_text (read_resource state "masc://wiki/log") with
+    | None -> fail "expected the log to be served"
+    | Some text -> check string "the log file is served as written" log text)
+;;
+
+let test_log_is_neither_listed_nor_served_without_a_log_file () =
+  with_wiki ~documents:contract_documents (fun state ->
+    check bool "no log entry" true
+      (Option.is_none (find_listed "masc://wiki/log" (listed state)));
+    let response = read_resource state "masc://wiki/log" in
+    check (option string) "no log content" None (served_text response);
+    check int "a missing log is a protocol error" (-32602)
+      Yojson.Safe.Util.(response |> member "error" |> member "code" |> to_int))
+;;
+
+(* [index.md] and [log.md] are the wiki's own files. The index has its own
+   resource, [masc://wiki], so the file is not a page under a second URI. *)
+let test_own_index_file_is_not_a_listed_page () =
+  with_wiki ~documents:(("index.md", "# Wiki index\n") :: contract_documents) (fun state ->
+    check bool "index.md is not listed as a page" true
+      (Option.is_none (find_listed "masc://wiki/index" (listed state)));
+    check (option string) "index.md is not served as a page" None
+      (served_text (read_resource state "masc://wiki/index")))
+;;
+
+let test_missing_wiki_lists_nothing () =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    check int "no wiki directory lists no resources" 0
+      (List.length (Lib.Mcp_server_eio_resource.wiki_resources ~base_path:dir)))
+;;
+
 let () =
   run
     "wiki_resource_topic"
@@ -265,6 +368,33 @@ let () =
             test_prefix_without_separator_is_not_a_topic
         ; test_case "missing topic is a protocol error" `Quick test_missing_topic_is_a_protocol_error
         ; test_case "missing wiki has an empty JSON index" `Quick test_missing_wiki_has_empty_json_index
+        ] )
+    ; ( "listing"
+      , [ test_case
+            "pages are listed with title and summary"
+            `Quick
+            test_pages_are_listed_with_title_and_summary
+        ; test_case
+            "an unreadable page is listed by file with the reason"
+            `Quick
+            test_unreadable_page_is_listed_by_file_with_reason
+        ; test_case
+            "only round-trippable pages are listed"
+            `Quick
+            test_only_round_trippable_pages_are_listed
+        ; test_case
+            "the log is listed and served once it exists"
+            `Quick
+            test_log_is_listed_and_served_once_it_exists
+        ; test_case
+            "the log is neither listed nor served without a log file"
+            `Quick
+            test_log_is_neither_listed_nor_served_without_a_log_file
+        ; test_case
+            "the index file is not a listed page"
+            `Quick
+            test_own_index_file_is_not_a_listed_page
+        ; test_case "a missing wiki lists nothing" `Quick test_missing_wiki_lists_nothing
         ] )
     ]
 ;;

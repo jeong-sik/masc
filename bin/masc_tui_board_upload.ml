@@ -59,9 +59,9 @@ let too_large ~max_bytes size =
 ;;
 
 (* What the name points at, without following a link at its end. *)
-type inspected = { device : int; inode : int }
+type inspected = { device : int; inode : int; size : int }
 
-let inspect ~max_bytes path =
+let inspect path =
   match Unix.lstat path with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Error "no such file"
   | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
@@ -70,26 +70,61 @@ let inspect ~max_bytes path =
      at, which the name does not say. *)
   | { Unix.st_kind = Unix.S_LNK; _ } ->
       Error "that is a symbolic link; attach the file it points to"
+  (* A device or a pipe has no end to read to. *)
+  | { Unix.st_kind = Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK; _ } ->
+      Error "not a regular file"
   | { Unix.st_kind = Unix.S_REG; st_size = 0; _ } -> Error "the file is empty"
-  | { Unix.st_kind = Unix.S_REG; st_size; _ } when st_size > max_bytes ->
-      Error (too_large ~max_bytes st_size)
-  | { Unix.st_kind = Unix.S_REG; st_dev; st_ino; _ } ->
-      Ok { device = st_dev; inode = st_ino }
-  | _ -> Error "not a regular file"
+  | { Unix.st_kind = Unix.S_REG; st_dev; st_ino; st_size; _ } ->
+      Ok { device = st_dev; inode = st_ino; size = st_size }
 ;;
 
 (** Whether [path] can be attached: a regular file, not a link to one, that
-    is not empty and no larger than [max_bytes]. The server refuses the rest,
-    and a device or a pipe has no end to read to. Asked when the file is
-    staged; {!read_file} asks again of the file it actually opened. *)
-let attachable ~max_bytes path = Result.map ignore (inspect ~max_bytes path)
+    is not empty and no larger than [max_bytes]. Asked when the file is
+    staged, so a file that cannot go is refused while its path is still on
+    the pane. {!read_file} holds the limit again at send time. *)
+let attachable ~max_bytes path =
+  match inspect path with
+  | Error _ as refused -> refused
+  | Ok { size; _ } when size > max_bytes -> Error (too_large ~max_bytes size)
+  | Ok _ -> Ok ()
+;;
+
+(* The size to name when a read ran past the limit: what the file is now, and
+   never less than what was already read of it. *)
+let size_now descriptor ~at_least =
+  match Unix.fstat descriptor with
+  | { Unix.st_size; _ } -> max st_size at_least
+  | exception Unix.Unix_error _ -> at_least
+;;
+
+(* The limit is a bound on what is read, not a size looked up first: a file
+   can grow after it was staged. One byte past the limit is enough to know
+   the file is over it, so no more than that is ever held. *)
+let read_bounded ~max_bytes descriptor =
+  let read = Buffer.create 65536 in
+  let chunk = Bytes.create 65536 in
+  let rec fill () =
+    let room = max_bytes + 1 - Buffer.length read in
+    if room = 0 then
+      Error (too_large ~max_bytes (size_now descriptor ~at_least:(max_bytes + 1)))
+    else
+      match Unix.read descriptor chunk 0 (min room (Bytes.length chunk)) with
+      | 0 -> Ok (Buffer.contents read)
+      | count ->
+          Buffer.add_subbytes read chunk 0 count;
+          fill ()
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> fill ()
+      | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+  in
+  fill ()
+;;
 
 (** The staged file's bytes, read at send time. The path is inspected by
-    name and then the opened file is inspected again: a name can be pointed
-    elsewhere between the two, and a file can grow, so the read stops at
-    [max_bytes] whatever its size said. *)
+    name and then the opened file is checked to be that same file: a name can
+    be pointed elsewhere between the two. The read stops one byte past
+    [max_bytes] and refuses the file there. *)
 let read_file ~max_bytes path =
-  match inspect ~max_bytes path with
+  match inspect path with
   | Error _ as refused -> refused
   | Ok named -> (
       match Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 with
@@ -100,25 +135,15 @@ let read_file ~max_bytes path =
               try Unix.close descriptor with Unix.Unix_error _ -> ())
             (fun () ->
               match Unix.fstat descriptor with
-              | { Unix.st_kind = Unix.S_REG; st_dev; st_ino; _ }
-                when st_dev = named.device && st_ino = named.inode ->
-                  let read = Buffer.create 65536 in
-                  let chunk = Bytes.create 65536 in
-                  let rec fill () =
-                    if Buffer.length read > max_bytes then
-                      Error (too_large ~max_bytes (Buffer.length read))
-                    else
-                      match Unix.read descriptor chunk 0 (Bytes.length chunk) with
-                      | 0 -> Ok (Buffer.contents read)
-                      | count ->
-                          Buffer.add_subbytes read chunk 0 count;
-                          fill ()
-                      | exception Unix.Unix_error (Unix.EINTR, _, _) -> fill ()
-                      | exception Unix.Unix_error (error, _, _) ->
-                          Error (Unix.error_message error)
-                  in
-                  fill ()
-              | _ -> Error "the file changed while it was being opened"))
+              | exception Unix.Unix_error (error, _, _) ->
+                  Error (Unix.error_message error)
+              | opened ->
+                  if
+                    opened.Unix.st_kind = Unix.S_REG
+                    && opened.st_dev = named.device
+                    && opened.st_ino = named.inode
+                  then read_bounded ~max_bytes descriptor
+                  else Error "the file changed while it was being opened"))
 ;;
 
 (** Read and upload each staged file in staging order, stopping at the first

@@ -1805,15 +1805,15 @@ let board_attachment_kind_of_string = function
   | other -> Ak_unknown other
 ;;
 
-let is_sha256 text =
-  String.length text = 64
-  && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) text
-;;
+(* The store's own rule for a digest, so a post's reader and the store agree
+   on what one is. *)
+let is_sha256 text = Result.is_ok (Tool_output.validate_sha256 text)
 
 (* A stored artifact is the handler's normalized [_blob] wrapper, which
    always carries the digest and the size. Anything else under [artifact] is
    not its wrapper, and the entry breaks rather than reading as an artifact
-   of unknown size. mime/preview stay in the store. *)
+   of unknown size. The wrapper's other fields are not read: the pane shows
+   a kind, a name and a size. *)
 let board_attachment_artifact = function
   | `Assoc [ "_blob", `Assoc blob ] -> (
       match List.assoc_opt "sha256" blob, List.assoc_opt "bytes" blob with

@@ -116,12 +116,14 @@ let valid_https_url url =
 ;;
 
 (* A name is the file's name: a reader prints it beside the attachment and
-   the dashboard saves the download under it. So it is one line, no longer
-   than a file name, and names no directory. *)
+   the dashboard saves the download under it. So it is text (the entry is
+   stored as JSON, and a JSON string is not arbitrary bytes), one line, no
+   longer than a file name, and names no directory. *)
 let valid_name name =
   let length = String.length name in
   length > 0
   && length <= max_name_bytes
+  && String.is_valid_utf_8 name
   && (not (String.equal name "."))
   && (not (String.equal name ".."))
   && String.for_all

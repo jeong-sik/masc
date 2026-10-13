@@ -197,6 +197,20 @@ let test_notes_that_cannot_be_placed () =
     (String_past_tuning { string = 7; strings = 6 });
   check_failure "string zero" ":4 0.0" (String_past_tuning { string = 0; strings = 6 })
 
+(* A failure's sentence quotes the author's text and is printed on the pane,
+   so whatever the text held, the sentence holds no control byte. *)
+let test_a_failure_sentence_carries_no_control_byte () =
+  List.iter
+    (fun source ->
+      match Score.read source with
+      | Ok _ -> Alcotest.failf "%S was read as a score" source
+      | Error failure ->
+          Alcotest.(check bool) "no control byte in the sentence" true
+            (String.for_all
+               (fun char -> Char.code char >= 0x20 && char <> '\x7f')
+               (Score.failure_text failure)))
+    [ ":4 3.1 \027[2Jboom"; ":4\027 0.6"; ":4 0.6{tu \0273}"; ":4 0.6 a\127b" ]
+
 let () =
   Alcotest.run "tui-alphatex"
     [ ( "music"
@@ -232,5 +246,7 @@ let () =
             test_markup_that_changes_length
         ; Alcotest.test_case "notes that cannot be placed" `Quick
             test_notes_that_cannot_be_placed
+        ; Alcotest.test_case "a failure sentence carries no control byte" `Quick
+            test_a_failure_sentence_carries_no_control_byte
         ] )
     ]

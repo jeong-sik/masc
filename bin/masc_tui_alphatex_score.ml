@@ -62,6 +62,11 @@ type t = {
 let quoted_limit = 24
 
 let quoted text =
+  (* The text is the author's, and the sentence is printed: a control byte in
+     it is shown as a mark, never sent to the terminal. *)
+  let text =
+    String.map (fun char -> if Char.code char < 0x20 || char = '\x7f' then '?' else char) text
+  in
   if String.length text <= quoted_limit then text
   else begin
     (* Back off a UTF-8 continuation byte so the cut lands between characters. *)
@@ -322,10 +327,8 @@ let item_failure word = function
    note that takes no time -- moves every later note, so drawing the score
    without it would draw a different rhythm. *)
 let effect_changes_length text =
-  String.split_on_char ' ' text
-  |> List.concat_map (String.split_on_char '\n')
-  |> List.concat_map (String.split_on_char '\t')
-  |> List.concat_map (String.split_on_char '\r')
+  String.map (fun char -> if is_whitespace char then ' ' else char) text
+  |> String.split_on_char ' '
   |> List.exists (fun word -> List.mem word [ "d"; "dd"; "tu"; "gr" ])
 
 (* A note names a string the tuning has. The tuning is settled before the

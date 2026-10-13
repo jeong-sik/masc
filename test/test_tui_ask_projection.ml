@@ -381,9 +381,103 @@ let test_unknown_wire_resolution_is_rejected () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "unknown resolution must not create an answerable ask"
 
+let decode_answer_receipt ~status_code body =
+  Masc.Tui_decode_asks.decode_ask_answer_receipt
+    ~expected_ask_id:"wire-ask" ~status_code body
+
+let test_recording_and_wake_delivery_are_separate () =
+  let response delivered =
+    Server_routes_http_keeper_stream.ask_answer_response
+      ~ask_id:"wire-ask" ~actor:"operator" ~answer_count:1 ~open_remaining:0
+      ~delivered
+  in
+  let status, body = response false in
+  (match status with
+   | `Internal_server_error -> ()
+   | _ -> Alcotest.fail "a pending wake is a partial failure");
+  (match decode_answer_receipt ~status_code:500 body with
+   | Ok (Masc.Tui_decode_asks.Ask_answer_recorded (Ask_wake_pending _)) -> ()
+   | _ -> Alcotest.fail "partial receipt must preserve confirmed recording");
+  let status, body = response true in
+  (match status with
+   | `OK -> ()
+   | _ -> Alcotest.fail "a stored wake is accepted");
+  (match decode_answer_receipt ~status_code:200 body with
+   | Ok (Masc.Tui_decode_asks.Ask_answer_recorded Ask_wake_stored) -> ()
+   | _ -> Alcotest.fail "queue acceptance is distinct from answer consumption")
+
+let test_conflict_keeps_the_canonical_winner () =
+  List.iter (fun delivered ->
+    let status, body = Server_routes_http_keeper_stream.ask_already_answered_response
+        ~ask_id:"wire-ask" ~answers:[] ~answered_at:123. ~delivered in
+    (match status with
+     | `Conflict -> ()
+     | _ -> Alcotest.fail "an existing winner remains a conflict");
+    match decode_answer_receipt ~status_code:409 body with
+    | Ok (Masc.Tui_decode_asks.Ask_answer_already_recorded
+        { aar_answered_at = 123.; aar_delivery }) ->
+        (match delivered, aar_delivery with
+         | true, Ask_wake_stored | false, Ask_wake_pending _ -> ()
+         | _ -> Alcotest.fail "conflict must preserve wake outcome")
+    | _ -> Alcotest.fail "an existing answer cannot be attributed to the submitted choices")
+    [false; true]
+
+let receipt_body ?(ask_id = "wire-ask") ?(state = `Null)
+    ?(recorded = `Bool true) ?(delivered = `Bool false) () =
+  `Assoc ["ask_id", `String ask_id; "recorded", recorded; "delivered", delivered;
+          "state", state; "error", `String "delivery storage unavailable";
+          "answered_at", `Float 123.]
+
+let test_unconfirmed_winner_is_not_a_recorded_submission () =
+  let body = receipt_body ~state:(`String "recording_unconfirmed") () in
+  match decode_answer_receipt ~status_code:500 body with
+  | Ok (Masc.Tui_decode_asks.Ask_answer_written_unconfirmed _) -> ()
+  | _ -> Alcotest.fail "append proof must not invent a canonical winner"
+
+let test_answer_receipts_reject_incoherent_or_foreign_evidence () =
+  let malformed = [
+    500, receipt_body ~ask_id:"other-ask" ();
+    200, receipt_body ();
+    500, receipt_body ~delivered:(`Bool true) ();
+    409, receipt_body ();
+    409, receipt_body ~state:(`String "answered") ~recorded:`Null ();
+    500, receipt_body ~recorded:(`String "true") ();
+    500, receipt_body ~delivered:`Null ();
+    503, receipt_body ();
+    200, receipt_body ~state:(`String "future") ~delivered:(`Bool true) ();
+    409, `Assoc ["ask_id", `String "wire-ask"; "recorded", `Bool true;
+                "delivered", `Bool true; "state", `String "answered";
+                "answered_at", `Float nan];
+  ] in
+  List.iter (fun (status_code, body) ->
+    match decode_answer_receipt ~status_code body with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "incoherent evidence cannot authorize draft retirement") malformed
+
+let test_refusal_and_missing_recording_evidence_are_distinct () =
+  let body = `Assoc ["error", `String "invalid choice"] in
+  (match decode_answer_receipt ~status_code:400 body with
+   | Ok (Masc.Tui_decode_asks.Ask_answer_refused _) -> ()
+   | _ -> Alcotest.fail "a server refusal keeps the answer editable");
+  (match decode_answer_receipt ~status_code:500 body with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "a generic server error leaves recording unconfirmed")
+
 let () =
   Alcotest.run "TUI ask projection"
-    [ ( "wire",
+    [ ( "answer receipt",
+        [ Alcotest.test_case "recorded answer and wake outcome" `Quick
+            test_recording_and_wake_delivery_are_separate
+        ; Alcotest.test_case "canonical conflict and wake outcome" `Quick
+            test_conflict_keeps_the_canonical_winner
+        ; Alcotest.test_case "append proof without winner" `Quick
+            test_unconfirmed_winner_is_not_a_recorded_submission
+        ; Alcotest.test_case "foreign or incoherent evidence" `Quick
+            test_answer_receipts_reject_incoherent_or_foreign_evidence
+        ; Alcotest.test_case "refusal versus uncertainty" `Quick
+            test_refusal_and_missing_recording_evidence_are_distinct
+        ] );
+      ( "wire",
         [ Alcotest.test_case "question reaches the answer draft" `Quick
             test_wire_question_reaches_the_answer_draft
         ; Alcotest.test_case "unknown resolution rejected" `Quick

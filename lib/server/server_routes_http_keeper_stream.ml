@@ -4012,23 +4012,32 @@ let ask_answer_failure_status = function
   | Keeper_ask_store.Ask_not_found _ -> `Not_found
   | Keeper_ask_store.Already_answered _ | Keeper_ask_store.Already_withdrawn _ -> `Conflict
   | Keeper_ask_store.Rejected _ -> `Bad_request
-  | Keeper_ask_store.Store_failed _ -> `Internal_server_error
+  | Keeper_ask_store.Store_failed _ | Keeper_ask_store.Answer_recorded_unconfirmed _ -> `Internal_server_error
 
-let ask_answer_failure_json failure =
+let ask_already_answered_response ~ask_id ~answers ~answered_at ~delivered =
+  (`Conflict,
+   `Assoc
+     [ "error", `String (if delivered then "ask already answered" else
+         "ask already answered; delivery is pending automatic recovery")
+     ; "state", `String "answered"
+     ; "ask_id", `String ask_id
+     ; "recorded", `Bool true
+     ; "delivered", `Bool delivered
+     ; "answered_at", `Float answered_at
+     ; "answered_question_ids", `List (List.map
+         (fun (answer : Keeper_ask.answer) -> `String answer.question_id) answers) ])
+
+let ask_answer_failure_json ~ask_id failure =
   let detail = Keeper_ask_store.answer_failure_to_string failure in
   match failure with
   | Keeper_ask_store.Already_answered { answers; answered_at; _ } ->
-      `Assoc
-        [
-          ("error", `String detail);
-          ("state", `String "answered");
-          ("answered_at", `Float answered_at);
-          ( "answered_question_ids",
-            `List
-              (List.map
-                 (fun (answer : Keeper_ask.answer) -> `String answer.question_id)
-                 answers) );
-        ]
+      snd (ask_already_answered_response ~ask_id ~answers ~answered_at ~delivered:false)
+  | Keeper_ask_store.Answer_recorded_unconfirmed _ ->
+      `Assoc [ "error", `String (detail ^ "; delivery awaits automatic recovery")
+             ; "state", `String "recording_unconfirmed"
+             ; "ask_id", `String ask_id
+             ; "recorded", `Bool true
+             ; "delivered", `Bool false ]
   | Keeper_ask_store.Ask_not_found _
   | Keeper_ask_store.Already_withdrawn _
   | Keeper_ask_store.Rejected _
@@ -4061,55 +4070,16 @@ let ask_answer_response ~ask_id ~actor ~answer_count ~open_remaining ~delivered 
       `Assoc
         (( "error",
            `String
-             "answer recorded but the keeper could not be told; answer again to \
-              deliver it" )
+             "answer recorded; delivery to the keeper is pending automatic recovery" )
         :: body) )
 
 let wake_keeper_for_answered_ask ~base_path ~keeper_name ~ask_id =
-  let channel =
-    match
-      List.assoc_opt ask_id (Keeper_ask_store.rows ~base_path ~keeper_name)
-    with
-    | Some (ask, _) -> ask.Keeper_ask.continuation
-    | None ->
-        Keeper_continuation_channel.unrouted
-          "answered ask is no longer in the store"
-  in
-  let payload = { Keeper_event_queue.ask_id; channel } in
-  let stimulus =
-    { Keeper_event_queue.post_id = Keeper_event_queue.ask_answered_post_id payload
-      (* A human addressed this Keeper directly, the same as a mention. *)
-    ; urgency = Keeper_event_queue.Normal
-      (* NDT-OK: stimulus receipt time, used only for ordering/age *)
-    ; arrived_at = Unix.gettimeofday ()
-    ; payload = Keeper_event_queue.Ask_answered payload
-    }
-  in
-  match
-    Keeper_registry_event_queue.enqueue_stimulus_durable_result ~base_path keeper_name
-      stimulus
-  with
-  | Keeper_registry_event_queue.Stimulus_storage_error detail ->
-      Log.Server.error "ask answer wake could not be stored (keeper=%s ask_id=%s): %s"
-        keeper_name ask_id detail;
+  match Keeper_ask_answer_wake.deliver ~base_path ~keeper_name ~ask_id with
+  | Ok (Keeper_ask_answer_wake.Enqueued | Already_pending | Already_delivered) -> true
+  | Error error ->
+      Log.Server.error "ask answer delivery retained (keeper=%s ask_id=%s): %s"
+        keeper_name ask_id (Keeper_ask_answer_wake.error_to_string error);
       false
-  | Keeper_registry_event_queue.Stimulus_enqueued
-  | Keeper_registry_event_queue.Stimulus_already_present -> (
-      match
-        Keeper_registry.wakeup_running ~intent:Keeper_registry.Reactive_signal ~base_path
-          keeper_name
-      with
-      | Keeper_registry.Signaled -> true
-      | Keeper_registry.Deferred_not_running _
-      | Keeper_registry.Deferred_lifecycle _
-      | Keeper_registry.Deferred_unregistered ->
-          (* Delivered all the same: the stimulus is stored and the Keeper
-             reads it when it next runs. Only the storage failure above leaves
-             an answer nobody will ever be told about. *)
-          Log.Server.info
-            "ask answer wake stored for a keeper that is not running (keeper=%s ask_id=%s)"
-            keeper_name ask_id;
-          true)
 
 let handle_keeper_ask_answer ~actor state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
@@ -4162,26 +4132,20 @@ let handle_keeper_ask_answer ~actor state request reqd =
                 ~now
             with
             | Error failure ->
-                (* An answer recorded but never delivered leaves the Keeper
-                   waiting on a decision that already exists. Answering again
-                   is how an operator retries, so the retry finishes the
-                   delivery instead of only being told it lost the race. The
-                   wake is keyed by ask_id, so re-enqueueing a delivered one
-                   is a no-op. *)
-                (match failure with
-                 | Keeper_ask_store.Already_answered _ ->
-                     ignore
-                       (wake_keeper_for_answered_ask ~base_path ~keeper_name ~ask_id
-                         : bool)
-                 | Keeper_ask_store.Ask_not_found _
-                 | Keeper_ask_store.Already_withdrawn _
-                 | Keeper_ask_store.Rejected _
-                 | Keeper_ask_store.Store_failed _ -> ());
                 Log.Keeper.info "keeper_ask_answer: keeper=%s ask_id=%s actor=%s refused=%s"
                   keeper_name ask_id actor
                   (Keeper_ask_store.answer_failure_to_string failure);
-                respond_json_value_with_cors ~status:(ask_answer_failure_status failure) request
-                  reqd (ask_answer_failure_json failure)
+                let status, body = match failure with
+                  | Keeper_ask_store.Already_answered { answers; answered_at; _ } ->
+                      let delivered = wake_keeper_for_answered_ask ~base_path ~keeper_name ~ask_id in
+                      ask_already_answered_response ~ask_id ~answers ~answered_at ~delivered
+                  | Keeper_ask_store.Ask_not_found _
+                  | Keeper_ask_store.Already_withdrawn _
+                  | Keeper_ask_store.Rejected _
+                  | Keeper_ask_store.Store_failed _
+                  | Keeper_ask_store.Answer_recorded_unconfirmed _ ->
+                      ask_answer_failure_status failure, ask_answer_failure_json ~ask_id failure in
+                respond_json_value_with_cors ~status request reqd body
             | Ok answers ->
                 Log.Keeper.info "keeper_ask_answer: keeper=%s ask_id=%s actor=%s answers=%d"
                   keeper_name ask_id actor (List.length answers);

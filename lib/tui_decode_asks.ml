@@ -164,3 +164,59 @@ let decode_asks_snapshot json =
   let* row_items = ask_list json "asks" in
   let* asn_rows = ask_map_results decode_ask_row row_items in
   Ok { asn_keeper; asn_open_count; asn_rows }
+
+type ask_answer_delivery =
+  | Ask_wake_stored
+  | Ask_wake_pending of string
+
+type ask_answer_receipt =
+  | Ask_answer_recorded of ask_answer_delivery
+  | Ask_answer_already_recorded of {
+      aar_delivery : ask_answer_delivery;
+      aar_answered_at : float;
+    }
+  | Ask_answer_written_unconfirmed of string
+  | Ask_answer_refused of string
+
+let decode_ask_answer_receipt ~expected_ask_id ~status_code json =
+  let error_detail () =
+    match member "error" json with
+    | `String detail when String.trim detail <> "" -> Ok detail
+    | _ -> Error "ask answer: error detail is required"
+  in
+  match member "recorded" json with
+  | `Bool true ->
+      let* ask_id = ask_string json "ask_id" in
+      if not (String.equal ask_id expected_ask_id) then
+        Error "ask answer: receipt belongs to another question"
+      else
+        let* delivery =
+          match member "delivered" json with
+          | `Bool true -> Ok Ask_wake_stored
+          | `Bool false ->
+              let* detail = error_detail () in
+              Ok (Ask_wake_pending detail)
+          | _ -> Error "ask answer: delivered must be a boolean"
+        in
+        (match status_code, member "state" json, delivery with
+         | 200, `Null, Ask_wake_stored
+         | 500, `Null, Ask_wake_pending _ -> Ok (Ask_answer_recorded delivery)
+         | 500, `String "recording_unconfirmed", Ask_wake_pending detail ->
+             Ok (Ask_answer_written_unconfirmed detail)
+         | 409, `String "answered", (Ask_wake_stored | Ask_wake_pending _) ->
+             let* answered_at = ask_float json "answered_at" in
+             if not (Float.is_finite answered_at) then
+               Error "ask answer: canonical answer time is not finite"
+             else Ok (Ask_answer_already_recorded
+               { aar_delivery = delivery; aar_answered_at = answered_at })
+         | _ -> Error "ask answer: HTTP status contradicts recording or delivery evidence")
+  | `Bool false | `Null ->
+      if status_code >= 400 && status_code < 500 then
+        (match member "state" json with
+         | `String "answered" | `String "recording_unconfirmed" ->
+             Error "ask answer: canonical recording receipt is missing"
+         | _ ->
+             let* detail = error_detail () in
+             Ok (Ask_answer_refused detail))
+      else Error "ask answer: recording is unconfirmed"
+  | _ -> Error "ask answer: recorded must be a boolean"

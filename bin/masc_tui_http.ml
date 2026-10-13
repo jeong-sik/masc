@@ -2311,13 +2311,13 @@ let post_operator_confirm ~(host : string) ~(port : int) ~(token : string)
 
     The answers come from [Masc_tui_ask_projection.readiness], which builds
     them in the ask's question order from choice ids the row itself carried.
-    The store settles on first write, so a second submission gets back the
-    answer that won rather than a bare rejection: the caller reads
-    [state] and [answers] out of the body to say what was chosen. *)
+    Recording and durable wake delivery are separate facts. An HTTP 500 can
+    establish that the answer was recorded while wake recovery remains due.
+    A conflict describes the canonical winner, not the submitted choice labels. *)
 let post_keeper_ask_answer ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(ask_id : string) ~(answers : Yojson.Safe.t)
     ~(session_id : string option) :
-    (Yojson.Safe.t, string) result =
+    (Masc.Tui_decode_asks.ask_answer_receipt, string) result =
   let payload =
     match
       Masc_tui_ask_projection.request_body ~answers ~session_id
@@ -2326,8 +2326,17 @@ let post_keeper_ask_answer ~(host : string) ~(port : int)
         `Assoc (("name", `String keeper_name) :: ("ask_id", `String ask_id) :: fields)
     | other -> other
   in
-  post_json ~host ~port ~path:"/api/v1/keepers/ask-answer"
-    ~body:(Yojson.Safe.to_string payload)
+  match http_post ~headers:(auth_headers ()) ~host ~port
+      ~path:"/api/v1/keepers/ask-answer" ~body:(Yojson.Safe.to_string payload) with
+  | Error _ as error -> error
+  | Ok ((401 | 403) as status_code, body) ->
+      Ok (Masc.Tui_decode_asks.Ask_answer_refused (refusal ~status_code ~body))
+  | Ok (status_code, body) ->
+      (match Yojson.Safe.from_string body with
+       | exception Yojson.Json_error detail ->
+           Error ("ask answer: invalid recording receipt: " ^ detail)
+       | json -> Masc.Tui_decode_asks.decode_ask_answer_receipt
+           ~expected_ask_id:ask_id ~status_code json)
 
 (** Fetch /api/v1/board (post list) in the operator-selected server order,
     optionally narrowed to one hearth.

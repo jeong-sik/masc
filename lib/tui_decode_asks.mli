@@ -60,3 +60,32 @@ val decode_asks_snapshot : Yojson.Safe.t -> (asks_snapshot, string) result
 (** A row whose mode or free-text shape is unknown fails the decode rather
     than defaulting: a surface that guessed would offer the operator a control
     the server will refuse. *)
+
+type ask_answer_delivery =
+  | Ask_wake_stored
+      (** The durable wake is accepted or previously delivered. This does not
+          prove that a Keeper acted on the answer. *)
+  | Ask_wake_pending of string
+      (** The answer is recorded; automatic delivery recovery remains due. *)
+
+type ask_answer_receipt =
+  | Ask_answer_recorded of ask_answer_delivery
+  | Ask_answer_already_recorded of {
+      aar_delivery : ask_answer_delivery;
+      aar_answered_at : float;
+    }
+      (** Another canonical answer already exists. Submitted choice labels
+          cannot describe that winner. *)
+  | Ask_answer_written_unconfirmed of string
+      (** The append succeeded, but its first winner could not be read.
+          Do not attribute the submitted choices to the canonical answer. *)
+  | Ask_answer_refused of string
+
+val decode_ask_answer_receipt :
+  expected_ask_id:string ->
+  status_code:int ->
+  Yojson.Safe.t ->
+  (ask_answer_receipt, string) result
+(** Bind recording evidence to the exact requested ask, preserving an HTTP
+    500 partial receipt. Missing, contradictory or mismatched evidence is
+    [Error], meaning recording is unconfirmed, not proven absent. *)

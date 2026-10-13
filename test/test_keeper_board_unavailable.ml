@@ -135,8 +135,11 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
        0
        (List.length events)
    | Keeper_heartbeat_stimulus_intake.Stimulus_connector_retry_later _
-   | Keeper_heartbeat_stimulus_intake.Stimulus_connector_missing _ ->
-     fail "Board source reported a connector read failure");
+   | Keeper_heartbeat_stimulus_intake.Stimulus_connector_missing _
+   | Keeper_heartbeat_stimulus_intake.Stimulus_ask_retry_later _
+   | Keeper_heartbeat_stimulus_intake.Stimulus_ask_missing _
+   | Keeper_heartbeat_stimulus_intake.Stimulus_ask_not_answered _ ->
+     fail "Board source reported another source's read failure");
   let second_pass =
     Keeper_heartbeat_stimulus_intake.pending_board_events_of_stimulus_result ~base_path:(Sys.getenv "MASC_BASE_PATH")
       ~meta_after_triage:meta
@@ -150,8 +153,11 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
       0
       (List.length events)
   | Keeper_heartbeat_stimulus_intake.Stimulus_connector_retry_later _
-   | Keeper_heartbeat_stimulus_intake.Stimulus_connector_missing _ ->
-    fail "Board source reported a connector read failure"
+   | Keeper_heartbeat_stimulus_intake.Stimulus_connector_missing _
+   | Keeper_heartbeat_stimulus_intake.Stimulus_ask_retry_later _
+   | Keeper_heartbeat_stimulus_intake.Stimulus_ask_missing _
+   | Keeper_heartbeat_stimulus_intake.Stimulus_ask_not_answered _ ->
+    fail "Board source reported another source's read failure"
 ;;
 
 let test_poison_durable_source_is_retired_during_intake () =

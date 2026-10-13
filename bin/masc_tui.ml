@@ -14104,16 +14104,38 @@ let clear_ask_question state =
 let apply_ask_answer_completion state answered_label result asks =
   state.ask_submit_inflight <- false;
   state.pending_ask_submit <- None;
+  let close_draft () =
+    state.ask_draft <- None;
+    state.ask_answer_mode <- Ask_browsing
+  in
+  let report_delivery ~already = function
+    | Masc.Tui_decode_asks.Ask_wake_stored ->
+        report_action state "system"
+          (if already then "Question already answered; keeper wake stored"
+           else Printf.sprintf "Answer recorded for %s; keeper wake stored" answered_label)
+    | Masc.Tui_decode_asks.Ask_wake_pending detail ->
+        report_action state "error"
+          (Printf.sprintf "%s; keeper delivery pending, automatic recovery will retry: %s"
+             (if already then "Question already answered"
+              else Printf.sprintf "Answer recorded for %s" answered_label)
+             detail)
+  in
   (match result with
-   | Ok _ ->
-       state.ask_draft <- None;
-       state.ask_answer_mode <- Ask_browsing;
-       report_action state "system" (Printf.sprintf "Answered %s" answered_label)
+   | Ok (Masc.Tui_decode_asks.Ask_answer_recorded delivery) ->
+       close_draft ();
+       report_delivery ~already:false delivery
+   | Ok (Masc.Tui_decode_asks.Ask_answer_already_recorded { aar_delivery; _ }) ->
+       close_draft ();
+       report_delivery ~already:true aar_delivery
+   | Ok (Masc.Tui_decode_asks.Ask_answer_written_unconfirmed detail) ->
+       report_action state "error"
+         (Printf.sprintf "Answer log write confirmed; winning answer unconfirmed: %s" detail)
+   | Ok (Masc.Tui_decode_asks.Ask_answer_refused detail) ->
+       report_action state "error" (Printf.sprintf "Answer refused: %s" detail)
    | Error err ->
-       (* The mode stays open on failure: the draft is still the operator's
-          work, and a conflict means someone else answered, which the reloaded
-          rows will show. *)
-       report_action state "error" (Printf.sprintf "Answer not recorded: %s" err));
+       (* A lost or invalid response cannot establish that the write did not
+          land. Keep the draft and read the canonical questions again. *)
+       report_action state "error" (Printf.sprintf "Answer recording unconfirmed: %s" err));
   apply_asks_load state asks
 
 (* TEL-OK: the TUI-local submit gate emits user-visible events here; the

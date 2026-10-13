@@ -1074,6 +1074,68 @@ let event_queue_delivery_seen_for_source_strict_result
           ; first_reason })
 ;;
 
+module Delivery_source_set = Set.Make (struct
+  type t = string * stimulus_kind
+  let compare = Stdlib.compare
+end)
+
+type strict_source_delivery_snapshot = {
+  delivered_sources : Delivery_source_set.t;
+  incomplete : strict_delivery_evidence_error option;
+}
+
+let strict_source_delivery_snapshot_result ~base_path ~keeper_name =
+  let delivered_sources = ref Delivery_source_set.empty in
+  let malformed_row_count = ref 0 in
+  let semantic_invalid_row_count = ref 0 in
+  let first_reason = ref None in
+  let note_reason reason =
+    match !first_reason with
+    | None -> first_reason := Some reason
+    | Some _ -> ()
+  in
+  let note_invalid reason =
+    incr semantic_invalid_row_count;
+    note_reason reason
+  in
+  let store = store_for_base_path ~base_path ~keeper_name in
+  match Dated_jsonl.iter_all_entries_result store (function
+    | Dated_jsonl.Malformed_json _ ->
+        incr malformed_row_count;
+        note_reason Malformed_json_row
+    | Dated_jsonl.Parsed row ->
+        (match decode_current_row ~keeper_name row with
+         | Error reason -> note_invalid reason
+         | Ok (Current_stimulus _) -> ()
+         | Ok (Current_reaction { metadata; reaction_kind; transition_receipt }) ->
+             if delivery_reaction_matches reaction_kind transition_receipt then
+               match assoc_field "reaction" metadata.raw with
+               | None -> note_invalid Missing_reaction
+               | Some reaction ->
+                   (match decode_reaction_stimulus_reference reaction with
+                    | Error reason -> note_invalid reason
+                    | Ok source -> delivered_sources :=
+                        Delivery_source_set.add source !delivered_sources))) with
+  | Error error -> Error (Delivery_evidence_unavailable (Evidence_read_error error))
+  | Ok () ->
+      let incomplete = Option.map (fun first_reason ->
+        Evidence_incomplete
+          { malformed_row_count = !malformed_row_count
+          ; semantic_invalid_row_count = !semantic_invalid_row_count
+          ; first_reason }) !first_reason in
+      Ok { delivered_sources = !delivered_sources; incomplete }
+;;
+
+let source_delivery_seen_in_snapshot snapshot ~post_id ~stimulus_kind =
+  if String.equal post_id "" then
+    Error (Delivery_evidence_unavailable Evidence_invalid_stimulus_id)
+  else if Delivery_source_set.mem (post_id, stimulus_kind) snapshot.delivered_sources then
+    Ok true
+  else match snapshot.incomplete with
+    | None -> Ok false
+    | Some error -> Error error
+;;
+
 let nested_string_field outer inner json =
   match assoc_field outer json with
   | Some nested -> string_field inner nested

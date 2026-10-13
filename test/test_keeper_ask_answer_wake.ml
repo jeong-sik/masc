@@ -263,6 +263,236 @@ let test_a_delivered_answer_is_a_success () =
 
 ;;
 
+module Wake = Keeper_ask_answer_wake
+module Queue = Keeper_registry_event_queue
+
+let with_persistence f =
+  let base_path = Filename.temp_file "masc-ask-answer-wake-" "" in
+  Unix.unlink base_path;
+  Unix.mkdir base_path 0o700;
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:(Some "test-operator"));
+  let owners = ref [] in
+  let ensure_keeper keeper_name =
+    let meta = match Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String keeper_name; "activation_mode", `String "manual" ]) with
+      | Ok meta -> meta | Error error -> fail error in
+    (match Keeper_meta_store.replace_snapshot config meta with
+     | Ok _ -> () | Error error -> fail error);
+    ignore (Keeper_registry.register_offline ~base_path keeper_name meta);
+    owners := keeper_name :: !owners in
+  let rec remove path =
+    if Sys.is_directory path then (
+      Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path)
+    else Unix.unlink path in
+  Fun.protect ~finally:(fun () ->
+      List.iter (Keeper_registry.For_testing.unregister ~base_path) !owners;
+      Fs_compat.clear_fs ();
+      remove base_path)
+    (fun () -> f config ensure_keeper)
+;;
+
+let persist_answer ~base_path ~keeper_name ~ask_id =
+  let continuation = Keeper_continuation_channel.dashboard ~thread_id:"original-ask-thread" |> Result.get_ok in
+  let ask = Keeper_ask.ask ~ask_id ~keeper_name
+      ~questions:[ question ~id:"q1" ~header:"deploy" ~choices:[ choice ~id:"c1" ~label:"yes" ] ]
+      ~context:"original task" ~continuation ~asked_at:100. () |> Result.get_ok in
+  (match Keeper_ask_store.record_ask ~base_path ask with
+   | Ok () -> () | Error error -> fail error);
+  (match Keeper_ask_store.answer ~base_path ~keeper_name ~ask_id
+      ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "c1" ] } ] ~responder ~now:200. with
+   | Ok _ -> () | Error error -> fail (Keeper_ask_store.answer_failure_to_string error));
+  ask
+;;
+
+let pending_asks ~base_path ~keeper_name =
+  match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
+  | Error error -> fail error
+  | Ok queue -> Keeper_event_queue.to_list queue
+      |> List.filter_map (fun (source : Keeper_event_queue.stimulus) ->
+          match source.payload with
+          | Keeper_event_queue.Ask_answered payload -> Some (source, payload)
+          | Keeper_event_queue.Board_signal _ | Board_attention _ | Bootstrap
+          | Fusion_completed _ | Composition_completed _ | Schedule_due _
+          | Connector_attention _ | Hitl_resolved _ | Completion_authority_rejected _
+          | Task_outcome _ | Task_cancelled _ | Workspace_message _ | Delegate_completed _ -> None)
+;;
+
+let reconcile_or_fail ~base_path =
+  match Wake.reconcile ~base_path with
+  | Ok report -> report
+  | Error error -> fail (Keeper_ask_store.read_error_to_string error)
+;;
+
+let terminalize_answer ~base_path ~keeper_name source =
+  let selection = match Queue.select_when_result ~base_path keeper_name ~now:300. ~ready:(fun _ -> true) with
+    | Ok (Some selection) -> selection
+    | Ok None -> fail "answer source was not admitted"
+    | Error error -> fail error in
+  Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name source;
+  match Queue.terminalize_pending_turn_completed_result ~base_path keeper_name ~applied_at:301. ~selection with
+  | Ok (Queue.Turn_source_acked _) -> ()
+  | Ok Queue.Turn_selection_withdrawn -> fail "answer source was withdrawn"
+  | Error error -> fail error
+;;
+
+let test_recorded_answer_recovers_once_on_original_continuation () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path in
+  let keeper_name = "alpha" in
+  ensure_keeper keeper_name;
+  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"answer-recovery" in
+  let log_path = Keeper_ask_store.log_path ~base_path ~keeper_name in
+  let original_log = Fs_compat.load_file log_path in
+  let queue_path = Filename.concat
+      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+      Keeper_event_queue_persistence.snapshot_filename in
+  Fs_compat.mkdir_p (Filename.dirname queue_path);
+  Fs_compat.save_file queue_path "invalid queue snapshot";
+  (match Wake.deliver ~base_path ~keeper_name ~ask_id:ask.ask_id with
+   | Error (Wake.Queue_storage_failed _) -> ()
+   | Error error -> fail (Wake.error_to_string error)
+   | Ok _ -> fail "failed queue storage acknowledged answer delivery");
+  let status, receipt = Server_routes_http_keeper_stream.ask_answer_response
+      ~ask_id:ask.ask_id ~actor:"operator" ~answer_count:1 ~open_remaining:0 ~delivered:false in
+  check bool "recorded but undelivered remains HTTP500" true (status = `Internal_server_error);
+  check bool "receipt preserves the recorded answer" true
+    Yojson.Safe.Util.(receipt |> member "recorded" |> to_bool);
+  check string "receipt correlates to the exact ask" ask.ask_id
+    Yojson.Safe.Util.(receipt |> member "ask_id" |> to_string);
+  Unix.unlink queue_path;
+  let recovered = reconcile_or_fail ~base_path in
+  check int "canonical record recovers without another answer" 1 recovered.enqueued;
+  check int "recovery has no retained failures" 0 (List.length recovered.failures);
+  let source = match pending_asks ~base_path ~keeper_name with
+    | [ source, payload ] ->
+        check string "original ask pointer" ask.ask_id payload.Keeper_event_queue.ask_id;
+        check bool "original continuation is retained" true (payload.channel = ask.continuation);
+        check (float 0.) "canonical answer timestamp is stable" 200. source.Keeper_event_queue.arrived_at;
+        source
+    | _ -> fail "recovery did not create one exact answer source" in
+  (match Wake.deliver ~base_path ~keeper_name ~ask_id:ask.ask_id with
+   | Ok Wake.Already_pending -> ()
+   | Ok _ -> fail "pending answer delivery was not idempotent"
+   | Error error -> fail (Wake.error_to_string error));
+  check int "duplicate delivery leaves one pending source" 1 (List.length (pending_asks ~base_path ~keeper_name));
+  terminalize_answer ~base_path ~keeper_name source;
+  let repeated = reconcile_or_fail ~base_path in
+  check int "accepted source evidence suppresses re-enqueue" 0 repeated.enqueued;
+  check int "accepted source is recognized by exact evidence" 1 repeated.already_delivered;
+  check int "accepted source stays absent from pending" 0 (List.length (pending_asks ~base_path ~keeper_name));
+  check string "delivery and recovery never replay the answer write" original_log (Fs_compat.load_file log_path)
+;;
+
+let test_durable_write_failure_is_recovered_from_the_answer_record () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path in
+  ensure_keeper "alpha";
+  let ask = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"write-failure" in
+  let payload = { Keeper_event_queue.ask_id = ask.ask_id; channel = ask.continuation } in
+  let source = { Keeper_event_queue.post_id = Keeper_event_queue.ask_answered_post_id payload;
+    urgency = Keeper_event_queue.Normal; arrived_at = 200.; payload = Keeper_event_queue.Ask_answered payload } in
+  let before = Fs_compat.load_file (Keeper_ask_store.log_path ~base_path ~keeper_name:"alpha") in
+  (match Keeper_event_queue_persistence.For_testing.enqueue_stimulus_once_with_confirmation
+      ~base_path ~keeper_name:"alpha"
+      ~already_delivered:(fun () -> Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
+        ~base_path ~keeper_name:"alpha" ~post_id:source.post_id
+        ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue source)
+        |> Result.map_error Keeper_reaction_ledger.strict_delivery_evidence_error_to_string)
+      ~confirm_snapshot:(fun _path _state -> Error "injected durable snapshot confirmation failure") source with
+   | Error _ -> () | Ok () -> fail "snapshot confirmation failure acknowledged delivery");
+  check int "failed confirmation does not publish pending answer" 0 (List.length (pending_asks ~base_path ~keeper_name:"alpha"));
+  let report = reconcile_or_fail ~base_path in
+  check int "recovery uses the original canonical answer" 1 report.enqueued;
+  check string "recovery does not answer again" before
+    (Fs_compat.load_file (Keeper_ask_store.log_path ~base_path ~keeper_name:"alpha"))
+;;
+
+let test_corrupt_delivery_evidence_cannot_recreate_an_accepted_source () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path in
+  ensure_keeper "alpha";
+  let ask = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"evidence-recovery" in
+  (match Wake.deliver ~base_path ~keeper_name:"alpha" ~ask_id:ask.ask_id with
+   | Ok Wake.Enqueued -> () | Ok _ -> fail "fresh answer was not enqueued"
+   | Error error -> fail (Wake.error_to_string error));
+  let source = match pending_asks ~base_path ~keeper_name:"alpha" with
+    | [ source, _ ] -> source | _ -> fail "answer source is missing" in
+  terminalize_answer ~base_path ~keeper_name:"alpha" source;
+  let dir = Keeper_reaction_ledger.store_dir
+      ~masc_root:(Common.masc_dir_from_base_path ~base_path) ~keeper_name:"alpha" in
+  let paths = Dated_jsonl.range_day_file_paths_result (Dated_jsonl.create ~base_dir:dir ())
+      ~since:"1970-01-01" ~until:"9999-12-31" |> Result.get_ok in
+  check bool "real accepted-source ledger files exist" true (paths <> []);
+  let originals = List.map (fun path -> path, Fs_compat.load_file path) paths in
+  List.iter (fun (path, _) -> Fs_compat.save_file path "{corrupt delivery evidence}\n") originals;
+  let blocked = reconcile_or_fail ~base_path in
+  check int "incomplete evidence retains one recovery failure" 1 (List.length blocked.failures);
+  check int "incomplete evidence cannot authorize re-enqueue" 0 blocked.enqueued;
+  check int "accepted source remains absent from pending" 0 (List.length (pending_asks ~base_path ~keeper_name:"alpha"));
+  List.iter (fun (path, bytes) -> Fs_compat.save_file path bytes) originals;
+  let restored = reconcile_or_fail ~base_path in
+  check int "restored exact evidence recognizes delivered source" 1 restored.already_delivered;
+  check int "restoration never recreates that source" 0 restored.enqueued
+;;
+
+let test_lifecycle_fence_defers_delivery_until_recovery () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path in
+  ensure_keeper "alpha";
+  ignore (persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"fenced-answer");
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  ignore (Keeper_shutdown_intake_fence.begin_shutdown ~base_path ~keeper_name:"alpha" ~operation_id);
+  Fun.protect ~finally:(fun () ->
+      ignore (Keeper_shutdown_intake_fence.rollback_shutdown ~base_path ~keeper_name:"alpha" ~operation_id))
+    (fun () ->
+      let blocked = reconcile_or_fail ~base_path in
+      check int "shutdown intake fence retains delivery failure" 1 (List.length blocked.failures);
+      check int "fence admits no answer source" 0 blocked.enqueued;
+      check int "pending stays empty" 0 (List.length (pending_asks ~base_path ~keeper_name:"alpha")));
+  let recovered = reconcile_or_fail ~base_path in
+  check int "existing pulse recovers after the fence opens" 1 recovered.enqueued
+;;
+
+let test_canonical_owner_survives_a_nonidentity_filename () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path in
+  let keeper_name = "alpha.one" in
+  ensure_keeper keeper_name;
+  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"owner-spelling" in
+  let path = Keeper_ask_store.log_path ~base_path ~keeper_name in
+  let stem = Filename.chop_suffix (Filename.basename path) ".jsonl" in
+  check bool "fixture crosses a nonidentity sanitizer" false (String.equal keeper_name stem);
+  (match Keeper_ask_store.rows_result ~base_path ~keeper_name:stem with
+   | Error (Keeper_ask_store.Log_decode_failed _) -> ()
+   | Error error -> fail (Keeper_ask_store.read_error_to_string error)
+   | Ok _ -> fail "filename alias was accepted as canonical owner");
+  let recovered = reconcile_or_fail ~base_path in
+  check int "discovery uses the recorded canonical Keeper name" 1 recovered.enqueued;
+  check int "owner spelling has no recovery failure" 0 (List.length recovered.failures);
+  match pending_asks ~base_path ~keeper_name with
+  | [ _, payload ] -> check string "original ask arrives at canonical owner" ask.ask_id payload.Keeper_event_queue.ask_id
+  | _ -> fail "sanitized filename lost its canonical owner"
+;;
+
+let test_already_answered_receipt_keeps_the_conflict () =
+  let ask = ask_with [ question ~id:"q1" ~header:"deploy" ~choices:[ choice ~id:"c1" ~label:"yes" ] ] in
+  let answers = answers_for ask [ "q1", Keeper_ask.Chose { choice_ids = [ "c1" ] } ] in
+  List.iter (fun delivered ->
+    let status, body = Server_routes_http_keeper_stream.ask_already_answered_response
+        ~ask_id:ask.ask_id ~answers ~answered_at:200. ~delivered in
+    check bool "canonical answer remains HTTP409" true (status = `Conflict);
+    let open Yojson.Safe.Util in
+    check string "receipt uses exact ask id" ask.ask_id (body |> member "ask_id" |> to_string);
+    check bool "canonical answer is recorded" true (body |> member "recorded" |> to_bool);
+    check bool "delivery is explicit" delivered (body |> member "delivered" |> to_bool);
+    check string "canonical state is answered" "answered" (body |> member "state" |> to_string);
+    check bool "no requesting losing actor is called winner" true (member "actor" body = `Null)) [ true; false ]
+;;
+
 let () =
   run "keeper_ask_answer_wake"
     [ ( "wake"
@@ -273,6 +503,18 @@ let () =
             test_an_undelivered_answer_is_not_reported_as_success
         ; test_case "a delivered answer is a success" `Quick
             test_a_delivered_answer_is_a_success
+        ; test_case "recorded answer recovers once on original continuation" `Quick
+            test_recorded_answer_recovers_once_on_original_continuation
+        ; test_case "durable write failure recovers from the answer record" `Quick
+            test_durable_write_failure_is_recovered_from_the_answer_record
+        ; test_case "corrupt delivery evidence cannot recreate accepted source" `Quick
+            test_corrupt_delivery_evidence_cannot_recreate_an_accepted_source
+        ; test_case "lifecycle fence defers answer delivery" `Quick
+            test_lifecycle_fence_defers_delivery_until_recovery
+        ; test_case "canonical owner survives nonidentity filename" `Quick
+            test_canonical_owner_survives_a_nonidentity_filename
+        ; test_case "already answered receipt keeps the conflict" `Quick
+            test_already_answered_receipt_keeps_the_conflict
 
         ] )
     ; ( "row"

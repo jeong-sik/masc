@@ -220,6 +220,99 @@ let the_log_is_per_keeper () =
   Alcotest.(check int) "another keeper sees none" 0
     (Keeper_ask_store.open_ask_count ~base_path ~keeper_name:"analyst")
 
+let strict_reads_distinguish_missing_empty_and_damage () =
+  let base_path = temp_dir () in
+  (match Keeper_ask_store.rows_result ~base_path ~keeper_name:keeper with
+   | Ok Keeper_ask_store.Missing_log -> ()
+   | Ok (Stored_rows _) | Error _ -> Alcotest.fail "missing log was not classified as missing");
+  record base_path "ask-1";
+  let path = Keeper_ask_store.log_path ~base_path ~keeper_name:keeper in
+  let out = open_out path in close_out out;
+  (match Keeper_ask_store.rows_result ~base_path ~keeper_name:keeper with
+   | Ok (Keeper_ask_store.Stored_rows []) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "existing empty log was not classified as stored");
+  record base_path "ask-1";
+  append_raw base_path "{broken middle row}\n";
+  record base_path "ask-2";
+  let before = (Unix.stat path).Unix.st_size in
+  (match Keeper_ask_store.rows_result ~base_path ~keeper_name:keeper with
+   | Error (Keeper_ask_store.Log_decode_failed _) -> ()
+   | Error error -> Alcotest.fail (Keeper_ask_store.read_error_to_string error)
+   | Ok _ -> Alcotest.fail "damaged history authorized a complete fold");
+  (match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+      ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "a" ] } ] ~responder ~now:1200. with
+   | Error (Keeper_ask_store.Store_failed _) -> ()
+   | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error)
+   | Ok _ -> Alcotest.fail "damaged history authorized an answer");
+  Alcotest.(check int) "failed authoritative read writes no answer" before (Unix.stat path).Unix.st_size
+
+let optimistic_answer_reports_the_canonical_first_writer () =
+  let base_path = temp_dir () in
+  record base_path "ask-1";
+  let loser = { responder with Keeper_ask.actor_id = Some "other-operator" } in
+  let before_append () =
+    match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+        ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "a" ] } ] ~responder ~now:1100. with
+    | Ok _ -> ()
+    | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error) in
+  match Keeper_ask_store.For_testing.answer_with_interleaving ~before_append
+      ~after_append:(fun () -> ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+      ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "b" ] } ] ~responder:loser ~now:1200. with
+  | Error (Keeper_ask_store.Already_answered
+      { answers = [ { response = Keeper_ask.Chose { choice_ids = [ chosen ] }; _ } ]; responder = canonical; answered_at }) ->
+      Alcotest.(check string) "optimistic loser returns the stored winning choice" "a" chosen;
+      Alcotest.(check bool) "stored responder is the winner" true (canonical = responder);
+      Alcotest.(check (float 0.)) "stored first-answer time is retained" 1100. answered_at
+  | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error)
+  | Ok _ -> Alcotest.fail "optimistic loser was acknowledged as the canonical winner"
+
+let committed_answer_with_unreadable_winner_is_explicit () =
+  let base_path = temp_dir () in
+  record base_path "ask-1";
+  let path = Keeper_ask_store.log_path ~base_path ~keeper_name:keeper in
+  let saved = path ^ ".committed" in
+  let after_append () =
+    Unix.rename path saved;
+    let out = open_out path in
+    output_string out ("{broken middle row}\n" ^
+      Yojson.Safe.to_string (Keeper_ask.event_to_json (Keeper_ask.Asked (an_ask ~ask_id:"ask-1"))) ^ "\n");
+    close_out out in
+  (match Keeper_ask_store.For_testing.answer_with_interleaving
+      ~before_append:(fun () -> ()) ~after_append ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+      ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "a" ] } ] ~responder ~now:1100. with
+   | Error (Keeper_ask_store.Answer_recorded_unconfirmed _) -> ()
+   | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error)
+   | Ok _ -> Alcotest.fail "unreadable first-winner read became confirmed success");
+  Unix.unlink path;
+  Unix.rename saved path;
+  match Keeper_ask_store.rows_result ~base_path ~keeper_name:keeper with
+  | Ok (Keeper_ask_store.Stored_rows [ _, (_, Keeper_ask.Answered_by _) ]) -> ()
+  | Ok _ | Error _ -> Alcotest.fail "the committed answer did not survive the failed reread"
+
+let same_size_external_mutation_cannot_reuse_a_cached_answer () =
+  let base_path = temp_dir () in
+  record base_path "ask-1";
+  (match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+      ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "a" ] } ] ~responder ~now:1100. with
+   | Ok _ -> () | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error));
+  ignore (Keeper_ask_store.rows_result ~base_path ~keeper_name:keeper);
+  let path = Keeper_ask_store.log_path ~base_path ~keeper_name:keeper in
+  let before = Unix.stat path in
+  let ask = an_ask ~ask_id:"ask-1" in
+  let answers = Keeper_ask.parse_answers ~ask
+      ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "b" ] } ] |> Result.get_ok in
+  let bytes = String.concat "" (List.map (fun event ->
+      Yojson.Safe.to_string (Keeper_ask.event_to_json event) ^ "\n")
+      [ Keeper_ask.Asked ask; Keeper_ask.Answered { ask_id = "ask-1"; answers; responder; answered_at = 1100. } ]) in
+  Alcotest.(check int) "external mutation preserves byte length" before.st_size (String.length bytes);
+  let out = open_out path in output_string out bytes; close_out out;
+  Unix.utimes path before.st_atime before.st_mtime;
+  match Keeper_ask_store.rows_result ~base_path ~keeper_name:keeper with
+  | Ok (Keeper_ask_store.Stored_rows
+      [ _, (_, Keeper_ask.Answered_by { answers = [ { response = Keeper_ask.Chose { choice_ids = [ chosen ] }; _ } ]; _ }) ]) ->
+      Alcotest.(check string) "owned current bytes determine the answer" "b" chosen
+  | Ok _ | Error _ -> Alcotest.fail "external mutation was not read canonically"
+
 let () =
   Alcotest.run "keeper_ask_store"
     [
@@ -243,6 +336,10 @@ let () =
             a_withdrawn_question_refuses_answers;
           Alcotest.test_case "an answer that does not fit is refused" `Quick
             an_answer_that_does_not_fit_the_question_is_refused;
+          Alcotest.test_case "optimistic answer reports the first writer" `Quick
+            optimistic_answer_reports_the_canonical_first_writer;
+          Alcotest.test_case "committed answer with unreadable winner is explicit" `Quick
+            committed_answer_with_unreadable_winner_is_explicit;
         ] );
       ( "a damaged log",
         [
@@ -252,5 +349,9 @@ let () =
             a_truncated_final_line_does_not_erase_the_history;
           Alcotest.test_case "a damaged middle line fails the read" `Quick
             a_damaged_middle_line_fails_the_read;
+          Alcotest.test_case "strict reads distinguish missing empty and damage" `Quick
+            strict_reads_distinguish_missing_empty_and_damage;
+          Alcotest.test_case "same-size external mutation changes the cached answer" `Quick
+            same_size_external_mutation_cannot_reuse_a_cached_answer;
         ] );
     ]

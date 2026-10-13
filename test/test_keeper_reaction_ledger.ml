@@ -1220,6 +1220,17 @@ let test_exact_delivery_survives_unrelated_corruption () =
   delivery_seen_strict ~base_path ~keeper_name source
     |> require_strict_delivery "exact valid positive overrides unrelated damaged rows" true;
   let unknown = board_stimulus ~post_id:"never-delivered-source" () in
+  let snapshot = match Keeper_reaction_ledger.strict_source_delivery_snapshot_result
+      ~base_path ~keeper_name with
+    | Ok snapshot -> snapshot
+    | Error error -> fail (Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error) in
+  Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+    ~post_id:source.post_id ~stimulus_kind:Keeper_reaction_ledger.Board_signal
+    |> require_strict_delivery "batch snapshot preserves the canonical positive" true;
+  (match Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+      ~post_id:source.post_id ~stimulus_kind:Keeper_reaction_ledger.Ask_answered with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete _) -> ()
+   | _ -> fail "a different typed source cannot inherit another delivery proof");
   match delivery_seen_strict ~base_path ~keeper_name unknown with
   | Error (Keeper_reaction_ledger.Evidence_incomplete
       { malformed_row_count; semantic_invalid_row_count; _ }) ->
@@ -1231,7 +1242,23 @@ let test_exact_delivery_survives_unrelated_corruption () =
 ;;
 
 let test_valid_complete_delivery_scan_can_prove_absence () =
-  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source:_ ->
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  let snapshot = match Keeper_reaction_ledger.strict_source_delivery_snapshot_result
+      ~base_path ~keeper_name with
+    | Ok snapshot -> snapshot
+    | Error error -> fail (Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error) in
+  let unknown = board_stimulus ~post_id:"never-delivered-source" () in
+  Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+    ~post_id:unknown.post_id ~stimulus_kind:Keeper_reaction_ledger.Board_signal
+    |> require_strict_delivery "one batch read proves valid absence" false;
+  let restore = corrupt_exact_ack ~base_path ~keeper_name ~source (fun _ -> "not-json") in
+  Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+    ~post_id:source.post_id ~stimulus_kind:Keeper_reaction_ledger.Board_signal
+    |> require_strict_delivery "a snapshot is immutable across later file changes" true;
+  (match delivery_seen_strict ~base_path ~keeper_name source with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete _) -> ()
+   | _ -> fail "fresh owner evidence must reread the changed journal");
+  restore ();
   delivery_seen_strict ~base_path ~keeper_name (board_stimulus ~post_id:"never-delivered-source" ())
     |> require_strict_delivery "complete valid ledger proves exact absence" false
 ;;

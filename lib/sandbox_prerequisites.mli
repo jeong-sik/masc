@@ -3,6 +3,11 @@
 type distribution = Debian | Ubuntu | Other
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
   | Muse_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
+  | Geckodriver | Firefox
+  (** The two programs the browser lanes start: [\[browser.automation\]] names
+      geckodriver by absolute path and starts it with the server;
+      [\[browser.live.bidi\]] names Firefox. Neither is installed with MASC, and
+      no action here edits runtime.toml. *)
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client

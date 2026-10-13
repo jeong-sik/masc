@@ -113,6 +113,107 @@ let test_presentation_install_is_workspace_owned () =
   check int "venv failure cannot install a package into another Python" 1 (List.length !calls);
   check bool "failed environment creation remains failed" true (match outcome with P.Failed _ -> true | _ -> false)
 
+(* geckodriver and Firefox are the two programs the browser lanes start. On a
+   mac they are one Homebrew step each and need no administrator; on Linux the
+   package names differ by distribution, so the catalog opens the project's own
+   page rather than guess one. *)
+let test_browser_tools_use_the_selected_package_manager () =
+  List.iter (fun (dependency, id, expected) ->
+    let action = find id (P.catalog ~host:(mac S.Arm64 26) ~distribution:P.Other dependency) in
+    check bool "Homebrew needs no administrator" false action.requires_admin;
+    match action.action_effect with
+    | P.Run_commands steps -> check (list (list string)) "explicit Homebrew command" expected steps
+    | _ -> fail "a mac install must be a command")
+    [P.Geckodriver, "geckodriver_brew_install", [["brew";"install";"geckodriver"]];
+     P.Firefox, "firefox_brew_install", [["brew";"install";"--cask";"firefox"]]];
+  List.iter (fun distribution ->
+    List.iter (fun (dependency, id) ->
+      let actions = P.catalog ~host:(S.Linux S.X64) ~distribution dependency in
+      check int "one action and no guessed package command" 1 (List.length actions);
+      let action = find id actions in
+      check bool "opening a page needs no administrator" false action.requires_admin;
+      match action.action_effect with
+      | P.Open_official_installer {url; argv} ->
+        check bool "an https page" true (String.starts_with ~prefix:"https://" url);
+        check (list string) "URL passed as one argv item" ["xdg-open"; url] argv
+      | _ -> fail "Linux must open the project's page")
+      [P.Geckodriver, "geckodriver_releases"; P.Firefox, "firefox_install_instructions"])
+    [P.Debian; P.Ubuntu; P.Other];
+  List.iter (fun dependency ->
+    check int "nothing is offered on an unsupported host" 0
+      (List.length (P.catalog ~host:S.Unsupported ~distribution:P.Other dependency)))
+    [P.Geckodriver; P.Firefox]
+
+(* An install action for these never writes runtime.toml: naming the executable
+   there needs the path the install leaves behind. *)
+let test_browser_tool_actions_write_no_file () =
+  List.iter (fun dependency ->
+    List.iter (fun host ->
+      List.iter (fun (action : P.action) ->
+        check (option string) "no file is left behind" None action.writes)
+        (P.catalog ~host ~distribution:P.Ubuntu dependency))
+      [mac S.Arm64 26; S.Linux S.X64])
+    [P.Geckodriver; P.Firefox]
+
+module B = Masc.Browser_runtime_dependencies
+
+let with_executable ~name contents f =
+  let dir = Filename.temp_file "browser-tools" "" in
+  Sys.remove dir; Unix.mkdir dir 0o700;
+  let path = Filename.concat dir name in
+  Out_channel.with_open_bin path (fun out -> output_string out contents);
+  Unix.chmod path 0o755;
+  Fun.protect ~finally:(fun () ->
+    (try Sys.remove path with Sys_error _ -> ());
+    (try Unix.rmdir dir with Unix.Unix_error _ -> ()))
+    (fun () -> f dir path)
+
+(* A program that answers its version entry point is what "available" means;
+   the path it answered at is what runtime.toml has to name. *)
+let test_a_program_that_answers_is_available_at_an_absolute_path () =
+  with_executable ~name:"geckodriver" "#!/bin/sh\necho 'geckodriver 9.9.9 (fixture)'\n"
+    (fun _ path ->
+       match B.probe path with
+       | B.Started {path = answered; output; _} as result ->
+         check string "the path that answered" path answered;
+         check bool "the version text is kept" true (String_util.contains_substring output "9.9.9");
+         check bool "available" true (B.available result);
+         check (option string) "its path" (Some path) (B.path result)
+       | B.Missing _ | B.Failed _ -> fail "a program that answers must be Started")
+
+let test_a_program_that_does_not_answer_is_failed_not_missing () =
+  with_executable ~name:"geckodriver" "#!/bin/sh\necho broken >&2\nexit 3\n"
+    (fun _ path ->
+       match B.probe path with
+       | B.Failed {status = Unix.WEXITED 3; path = at; _} as result ->
+         check string "it exists at this path" path at;
+         check bool "not available" false (B.available result)
+       | B.Missing _ | B.Started _ | B.Failed _ -> fail "exit 3 must be Failed with its status");
+  (match B.probe "/nonexistent-dir/geckodriver" with
+   | B.Missing _ as result -> check bool "a missing file is not available" false (B.available result)
+   | B.Started _ | B.Failed _ -> fail "an absent file must be Missing")
+
+(* A name is looked up on PATH and answered at the absolute path it was found
+   at; an earlier PATH entry wins, as it would when the server starts it. *)
+let test_a_name_on_path_resolves_to_an_absolute_path () =
+  with_executable ~name:"geckodriver" "#!/bin/sh\necho 'geckodriver 1.2.3'\n"
+    (fun dir path ->
+       let previous = Sys.getenv_opt "PATH" in
+       Unix.putenv "PATH" (dir ^ ":" ^ Option.value previous ~default:"/usr/bin:/bin");
+       Fun.protect ~finally:(fun () -> Unix.putenv "PATH" (Option.value previous ~default:""))
+         (fun () ->
+            match B.observe B.Geckodriver with
+            | B.Started {path = answered; _} ->
+              check string "the PATH entry's file" path answered
+            | B.Missing _ | B.Failed _ -> fail "geckodriver on PATH must be found"))
+
+let test_the_dependency_names_match_the_cli () =
+  check string "geckodriver" "geckodriver" (B.name B.Geckodriver);
+  check string "firefox" "firefox" (B.name B.Firefox);
+  check bool "bundle locations are absolute" true
+    (List.for_all (fun c -> String.equal c "firefox" || not (Filename.is_relative c))
+       (B.candidates B.Firefox))
+
 (* Hearing is the only half of voice a fresh mac cannot already do: say is in
    the base system with nine Korean voices, and nothing transcribes. What the
    catalog offers for that was measured 2026-09-12 -- the brew bottle is 8.9MB,
@@ -414,6 +515,16 @@ let () = run "prerequisite actions" ["user-selected plans",[
   test_case "official client install selection" `Quick test_official_clients_are_explicit_and_not_ready;
   test_case "presentation workspace parser and host renderer" `Quick test_presentation_install_is_workspace_owned;
   test_case "PDF package manager selection" `Quick test_pdf_tools_reuse_selected_package_managers;
+  test_case "browser tool package manager selection" `Quick
+    test_browser_tools_use_the_selected_package_manager;
+  test_case "browser tool actions write no file" `Quick test_browser_tool_actions_write_no_file;
+  test_case "a program that answers is available at an absolute path" `Quick
+    test_a_program_that_answers_is_available_at_an_absolute_path;
+  test_case "a program that does not answer is failed, not missing" `Quick
+    test_a_program_that_does_not_answer_is_failed_not_missing;
+  test_case "a name on PATH resolves to an absolute path" `Quick
+    test_a_name_on_path_resolves_to_an_absolute_path;
+  test_case "the dependency names match the CLI" `Quick test_the_dependency_names_match_the_cli;
   test_case "effects are not readiness" `Quick test_completion_never_means_ready;
   test_case "a builder without Rosetta offers the two ways past it" `Quick
     test_a_builder_without_rosetta_offers_the_two_ways_past_it;

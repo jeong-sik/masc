@@ -14,6 +14,8 @@ let dependency ~base_path = function
     Some (Prerequisites.Presentation_tools
             { base_path = Env_config.normalize_masc_base_path_input (base_path ()) })
   | "whisper" -> Some Prerequisites.Whisper_cli
+  | "geckodriver" -> Some Prerequisites.Geckodriver
+  | "firefox" -> Some Prerequisites.Firefox
   | name -> Option.map (fun backend -> Prerequisites.Sandbox backend) (Sandbox.backend_of_id name)
 
 (* Where a downloaded model lands. A cache directory rather than anywhere under
@@ -50,7 +52,8 @@ let apple_builder host dependency =
     ( Prerequisites.Sandbox (Docker | Apple_container | Nerdctl_kata | Microsandbox | Remote_ssh)
     | Prerequisites.Codex_cli | Prerequisites.Claude_cli | Prerequisites.Antigravity_cli
     | Prerequisites.Muse_cli | Prerequisites.Pdf_tools | Prerequisites.Presentation_tools _
-    | Prerequisites.Whisper_cli ) -> Prerequisites.Builder_unchecked
+    | Prerequisites.Whisper_cli | Prerequisites.Geckodriver | Prerequisites.Firefox )
+    -> Prerequisites.Builder_unchecked
 let rec wait pid =
   match Unix.waitpid [] pid with
   | _, Unix.WEXITED 0 -> Ok ()
@@ -98,9 +101,9 @@ let actions host dependency =
   | Sandbox.Macos _, Prerequisites.Sandbox Docker ->
     Verified_docker_install :: Verified_docker_launch :: standard
   | (Sandbox.Macos { architecture = Sandbox.Arm64; major = _ }, Prerequisites.Sandbox (Sandbox.Nerdctl_kata | (Sandbox.Microsandbox | Sandbox.Remote_ssh)))
-  | (Sandbox.Macos { architecture = Sandbox.Arm64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Muse_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _)))))))
+  | (Sandbox.Macos { architecture = Sandbox.Arm64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Muse_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _ | Prerequisites.Geckodriver | Prerequisites.Firefox)))))))
   | (Sandbox.Macos { architecture = Sandbox.X64; major = _ }, Prerequisites.Sandbox (Sandbox.Apple_container | (Sandbox.Nerdctl_kata | (Sandbox.Microsandbox | Sandbox.Remote_ssh))))
-  | (Sandbox.Macos { architecture = Sandbox.X64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Muse_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _)))))))
+  | (Sandbox.Macos { architecture = Sandbox.X64; major = _ }, (Prerequisites.Codex_cli | (Prerequisites.Claude_cli | (Prerequisites.Antigravity_cli | (Prerequisites.Muse_cli | (Prerequisites.Pdf_tools | (Prerequisites.Whisper_cli | Prerequisites.Presentation_tools _ | Prerequisites.Geckodriver | Prerequisites.Firefox)))))))
   | ((Sandbox.Unsupported | Sandbox.Linux _), _)
   | (Macos {architecture=Arm64; _ }, Sandbox Apple_container) -> standard
 let to_json actions =
@@ -164,6 +167,25 @@ let execute host = function
       ~require_userns:(Env_config_sandbox.Hardening.require_userns ()) () with
      | Error error -> Prerequisites.Failed {step=1; reason=Docker.error_message error}
      | Ok _ -> Prerequisites.External_step_pending)
+let browser_readiness program =
+  Masc.Browser_runtime_dependencies.(to_json program (observe program))
+(* Same shape as the PDF receipt: a completed install that left a program which
+   does not start is a failure, not a success the next refresh will contradict. *)
+let browser_receipt program receipt =
+  let check = Masc.Browser_runtime_dependencies.observe program in
+  let ready = Masc.Browser_runtime_dependencies.available check in
+  let fields = match receipt with `Assoc fields -> fields
+    | _ -> invalid_arg "prerequisite outcome encoder must return an object" in
+  let fields = List.remove_assoc "readiness" fields in
+  let fields = if ready then
+    ("status",`String "commands_completed") :: List.remove_assoc "status" fields
+  else
+    ("status",`String "failed") ::
+    ("reason",`String "Installation finished, but the program could not start. Inspect dependency_readiness, correct the installation or PATH, then refresh detection.") ::
+    List.remove_assoc "status" fields in
+  `Assoc (("readiness",`String (if ready then "tool_available" else "unavailable")) ::
+    ("dependency_readiness",Masc.Browser_runtime_dependencies.to_json program check) :: fields),
+  (if ready then 0 else 1)
 let run ~base_path ~dependency:name ~action =
   match dependency ~base_path name with
   | None -> prerr_endline "Unknown prerequisite. Choose a dependency from the setup catalog."; 1
@@ -178,8 +200,15 @@ let run ~base_path ~dependency:name ~action =
           `Assoc (("dependency_readiness", Masc.Pdf_runtime_dependencies.(observe () |> to_json)) :: fields)
         | Prerequisites.Presentation_tools {base_path}, `Assoc fields ->
           `Assoc (("dependency_readiness", Masc.Presentation_runtime_dependencies.(observe ~base_path () |> to_json)) :: fields)
+        | Prerequisites.Geckodriver, `Assoc fields ->
+          `Assoc (("dependency_readiness",
+                   browser_readiness Masc.Browser_runtime_dependencies.Geckodriver) :: fields)
+        | Prerequisites.Firefox, `Assoc fields ->
+          `Assoc (("dependency_readiness",
+                   browser_readiness Masc.Browser_runtime_dependencies.Firefox) :: fields)
         | (Sandbox _ | Codex_cli | Claude_cli | Antigravity_cli | Muse_cli | Whisper_cli), _ -> catalog
-        | (Pdf_tools | Presentation_tools _), _ -> invalid_arg "prerequisite catalog encoder must return an object" in
+        | (Pdf_tools | Presentation_tools _ | Geckodriver | Firefox), _ ->
+          invalid_arg "prerequisite catalog encoder must return an object" in
       print_endline (Yojson.Safe.to_string catalog); 0
     | Some requested ->
       (match List.find_opt (fun action -> id action = requested) actions with
@@ -229,19 +258,27 @@ let run ~base_path ~dependency:name ~action =
                ("dependency_readiness",Masc.Presentation_runtime_dependencies.to_json checks) :: fields),
              (match outcome with Prerequisites.Failed _ -> 1 | External_step_pending -> 0
               | Commands_completed_recheck_required -> if selected_component_ready then 0 else 1)
+           | Prerequisites.Geckodriver, Prerequisites.Commands_completed_recheck_required ->
+             browser_receipt Masc.Browser_runtime_dependencies.Geckodriver receipt
+           | Prerequisites.Firefox, Prerequisites.Commands_completed_recheck_required ->
+             browser_receipt Masc.Browser_runtime_dependencies.Firefox receipt
            | (Prerequisites.Sandbox _, Prerequisites.Failed _)
            | (Prerequisites.Codex_cli, Prerequisites.Failed _)
            | (Prerequisites.Claude_cli, Prerequisites.Failed _)
            | (Prerequisites.Antigravity_cli, Prerequisites.Failed _)
            | (Prerequisites.Muse_cli, Prerequisites.Failed _)
            | (Prerequisites.Pdf_tools, Prerequisites.Failed _)
-           | (Prerequisites.Whisper_cli, Prerequisites.Failed _) -> receipt, 1
+           | (Prerequisites.Whisper_cli, Prerequisites.Failed _)
+           | (Prerequisites.Geckodriver, Prerequisites.Failed _)
+           | (Prerequisites.Firefox, Prerequisites.Failed _) -> receipt, 1
            | (Prerequisites.Sandbox _, (External_step_pending | Commands_completed_recheck_required))
            | (Prerequisites.Codex_cli, (External_step_pending | Commands_completed_recheck_required))
            | (Prerequisites.Claude_cli, (External_step_pending | Commands_completed_recheck_required))
            | (Prerequisites.Antigravity_cli, (External_step_pending | Commands_completed_recheck_required))
            | (Prerequisites.Muse_cli, (External_step_pending | Commands_completed_recheck_required))
            | (Prerequisites.Pdf_tools, External_step_pending)
-           | (Prerequisites.Whisper_cli, (External_step_pending | Commands_completed_recheck_required)) -> receipt, 0 in
+           | (Prerequisites.Whisper_cli, (External_step_pending | Commands_completed_recheck_required))
+           | (Prerequisites.Geckodriver, External_step_pending)
+           | (Prerequisites.Firefox, External_step_pending) -> receipt, 0 in
          print_endline (Yojson.Safe.to_string receipt);
          code)

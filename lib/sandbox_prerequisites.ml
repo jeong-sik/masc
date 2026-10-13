@@ -1,6 +1,7 @@
 type distribution = Debian | Ubuntu | Other
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
   | Muse_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
+  | Geckodriver | Firefox
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
@@ -45,6 +46,10 @@ let whisper_formula_source = "https://formulae.brew.sh/formula/whisper-cpp"
 let whisper_models_source = "https://huggingface.co/ggerganov/whisper.cpp"
 let sox_formula_source = "https://formulae.brew.sh/formula/sox"
 let sox_source = "https://sourceforge.net/projects/sox/"
+let geckodriver_formula_source = "https://formulae.brew.sh/formula/geckodriver"
+let geckodriver_source = "https://github.com/mozilla/geckodriver/releases"
+let firefox_cask_source = "https://formulae.brew.sh/cask/firefox"
+let firefox_linux_source = "https://support.mozilla.org/en-US/kb/install-firefox-linux"
 
 (* The model masc asks whisper for by default. Measured 2026-09-12: this file
    is 1,624,555,275 bytes, and on an M3 Max it transcribed a Korean sentence in
@@ -211,6 +216,29 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distributio
           ~source_url:"https://www.libreoffice.org/installation-instructions/" "https://www.libreoffice.org/installation-instructions/"]
       | Unsupported, _ -> [] in
     renderer @ [parser] @ catalog ?model_dir ~host ~distribution Pdf_tools
+  (* The automation lane starts geckodriver itself, and geckodriver starts
+     Firefox, so a workspace needs both on the host. One action each: neither
+     is a service, and neither action writes runtime.toml -- naming the
+     executable there is [browser-lane-setup]'s step, which needs the path this
+     install leaves behind and so has to follow it. *)
+  | Geckodriver, Macos _ ->
+    [commands ~id:"geckodriver_brew_install" ~label:"Install geckodriver with Homebrew"
+       ~detail:"Install the geckodriver formula through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. The executable is checked after installation. Naming it in runtime.toml and restarting the server are separate steps."
+       ~source_url:geckodriver_formula_source ~requires_admin:false
+       [[homebrew;"install";"geckodriver"]]]
+  | Geckodriver, Linux _ ->
+    [open_ ~id:"geckodriver_releases" ~label:"Open the geckodriver releases"
+       ~detail:"Download the release for this machine and make its geckodriver executable available on the service host's PATH, then refresh detection. Distributions package it under different names, so this opens the project's own releases instead of guessing one."
+       ~source_url:geckodriver_source geckodriver_source]
+  | Firefox, Macos _ ->
+    [commands ~id:"firefox_brew_install" ~label:"Install Firefox with Homebrew"
+       ~detail:"Install the Firefox cask through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. This is a second browser beside any Firefox already in use; it does not change that one."
+       ~source_url:firefox_cask_source ~requires_admin:false
+       [[homebrew;"install";"--cask";"firefox"]]]
+  | Firefox, Linux _ ->
+    [open_ ~id:"firefox_install_instructions" ~label:"Open Firefox installation instructions"
+       ~detail:"Install Firefox the way this distribution packages it, then refresh detection."
+       ~source_url:firefox_linux_source firefox_linux_source]
   | Pdf_tools, Macos _ ->
     [commands ~id:"poppler_install" ~label:"Install PDF inspection tools with Homebrew"
        ~detail:"Install Poppler through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. Both PDF commands are checked after installation."

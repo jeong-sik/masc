@@ -6152,16 +6152,6 @@ let test_config_patch_separates_control_fields () =
          (List.assoc "max_context_override" patch.Keeper_config_post.config_fields))
 ;;
 
-let test_config_patch_input_policy () =
-  List.iter (fun wire ->
-    match Keeper_config_post.validate_dashboard_config_patch ["input_policy", `String wire] with
-    | Ok _ -> () | Error error -> Alcotest.fail error) ["small"; "wide"];
-  List.iter (fun value ->
-    match Keeper_config_post.validate_dashboard_config_patch ["input_policy", value] with
-    | Error _ -> () | Ok _ -> Alcotest.fail "invalid config policy accepted")
-    [`String "automatic"; `String "Wide"; `Null; `Int 1; `Bool true]
-;;
-
 let test_config_patch_accepts_typed_skills () =
   let validate fields =
     Keeper_config_post.validate_dashboard_config_patch fields
@@ -8183,7 +8173,6 @@ let () =
             test_context_shrink_detection;
           test_case "config patch accepts typed Skills" `Quick
             test_config_patch_accepts_typed_skills;
-          test_case "config patch input policy" `Quick test_config_patch_input_policy;
           test_case "config patch separates control fields" `Quick
             test_config_patch_separates_control_fields;
           test_case "config patch shape-checks remote_endpoint" `Quick

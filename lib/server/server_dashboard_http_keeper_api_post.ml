@@ -889,12 +889,16 @@ let validate_dashboard_config_field field value =
   let key = dashboard_config_field_key field in
   let persisted = Result.map (fun () -> Persisted_field (key, value)) in
   match field with
+  (* Shape only. The apply path ([Keeper_turn_up_args.parse], then the
+     create/update resolution) reads each value and refuses one it cannot
+     read, so a second value check here would only disagree with it. *)
   | Field_name
   | Field_runtime_id
   | Field_instructions
   | Field_sandbox_profile
   | Field_network_mode
-  | Field_activation_mode ->
+  | Field_activation_mode
+  | Field_input_policy ->
     persisted
       (match value with
        | `String _ -> Ok ()
@@ -904,11 +908,6 @@ let validate_dashboard_config_field field value =
       (match value with
        | `Assoc _ -> Ok ()
        | other -> dashboard_field_type_error key "an object" other)
-  | Field_input_policy ->
-    persisted
-      (match value with
-       | `String raw when Option.is_some (Keeper_input_policy.of_string raw) -> Ok ()
-       | other -> dashboard_field_type_error key "small or wide" other)
   | Field_max_context_override ->
     validate_dashboard_max_context_override value
     |> Result.map (fun change -> Max_context_override change)

@@ -446,7 +446,9 @@ let decode_skill_evidence json =
         | Skill_evidence_composition_unavailable, None, 0
           when sec_composition_unavailable <> [] ->
           Ok ()
-        | _ -> Error "Skill evidence composition coverage disagrees with its record"
+        | ( Skill_evidence_exact_reference_latest_completed
+          | Skill_evidence_composition_unavailable ), (None | Some _), _ ->
+          Error "Skill evidence composition coverage disagrees with its record"
       in
       let owner_gap_count =
         match se_activation with

@@ -171,7 +171,7 @@ let post_close_state_of_yojson (json : Yojson.Safe.t) : post_close_state option 
        (match Agent_id.of_string closed_by_str with
         | Ok closed_by -> Some { closed_by; closed_at; successor_id; summary }
         | Error _ -> None)
-     | _ -> None)
+     | (Some _ | None), (Some _ | None), (Ok _ | Error _), (Ok _ | Error _) -> None)
   | _ -> None
 ;;
 
@@ -285,8 +285,28 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
              (post_classification_reason post)
         then Some post
         else None
-     | _ -> None)
-     | _ -> None)
+     | (Ok _ | Error _), (Ok _ | Error _), (Some _ | None), (Some _ | None) -> None)
+     | ( (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _)
+       , (Ok _ | Error _) ) -> None)
   | `Assoc _ | _ -> None
 ;;
 
@@ -340,8 +360,16 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
             ; votes_up
             ; votes_down
             }
-          | _ -> None)
-     | _ -> None)
+          | (Ok _ | Error _), (Ok _ | Error _), (Ok _ | Error _) -> None)
+     | ( (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Some _ | None)
+       , (Ok _ | Error _) ) -> None)
   | _ -> None
 ;;
 

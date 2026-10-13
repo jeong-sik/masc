@@ -672,7 +672,42 @@ let inject_wrapped_body ~action_str assert_expr expr =
           wrap_assert_as_unit body
       in
       { expr with pexp_desc = Pexp_function (params, constraint_, Pfunction_body new_body) }
-  | _ ->
+  | Pexp_function (_, _, Pfunction_cases _)
+  | Pexp_ident _
+  | Pexp_constant _
+  | Pexp_let _
+  | Pexp_apply _
+  | Pexp_match _
+  | Pexp_try _
+  | Pexp_tuple _
+  | Pexp_construct _
+  | Pexp_variant _
+  | Pexp_record _
+  | Pexp_field _
+  | Pexp_setfield _
+  | Pexp_array _
+  | Pexp_ifthenelse _
+  | Pexp_sequence _
+  | Pexp_while _
+  | Pexp_for _
+  | Pexp_constraint _
+  | Pexp_coerce _
+  | Pexp_send _
+  | Pexp_new _
+  | Pexp_setinstvar _
+  | Pexp_override _
+  | Pexp_letmodule _
+  | Pexp_letexception _
+  | Pexp_assert _
+  | Pexp_lazy _
+  | Pexp_poly _
+  | Pexp_object _
+  | Pexp_newtype _
+  | Pexp_pack _
+  | Pexp_open _
+  | Pexp_letop _
+  | Pexp_extension _
+  | Pexp_unreachable ->
       Ast_builder.Default.pexp_sequence ~loc wrap_assert_as_unit expr
 
 let fsm_guard_attr =

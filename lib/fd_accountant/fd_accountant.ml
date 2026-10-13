@@ -40,9 +40,14 @@ let resource_error_to_string = function
 ;;
 
 let resource_error_of_exn = function
-  | Unix.Unix_error (Unix.EMFILE, _, _) -> Some Process_fd_exhausted
-  | Unix.Unix_error (Unix.ENFILE, _, _) -> Some System_fd_exhausted
-  | Unix.Unix_error (Unix.ENOSPC, _, _) -> Some Storage_space_exhausted
+  | Unix.Unix_error (code, _, _) ->
+    (* Unix.error has about 70 constructors and only these three are resource
+       errors, so the remainder is not listed. *)
+    (match[@warning "-4"] code with
+     | Unix.EMFILE -> Some Process_fd_exhausted
+     | Unix.ENFILE -> Some System_fd_exhausted
+     | Unix.ENOSPC -> Some Storage_space_exhausted
+     | _ -> None)
   | _ -> None
 ;;
 

@@ -192,7 +192,7 @@ let is_executable_file path =
        true
      with
      | Unix.Unix_error _ -> false)
-  | _ -> false
+  | { Unix.st_kind = Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK; _ } -> false
   | exception Unix.Unix_error _ -> false
 
 let resolve_program ~payload_path ~is_executable name =
@@ -623,7 +623,8 @@ let rec remove_tree path =
   | { Unix.st_kind = Unix.S_DIR; _ } ->
     Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
     (try Unix.rmdir path with Unix.Unix_error _ -> ())
-  | _ -> (try Unix.unlink path with Unix.Unix_error _ -> ())
+  | { Unix.st_kind = Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK; _ } ->
+    (try Unix.unlink path with Unix.Unix_error _ -> ())
   | exception Unix.Unix_error _ -> ()
 
 (* RFC-0422 diagnosis: one line per request on the guest's tmpfs, so the

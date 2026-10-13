@@ -82,7 +82,10 @@ let observation history () =
       "subject_id", `String "msx"; "clock", `Null; "actor", `Null;
       "fields", `Assoc ["machine_loaded", `Bool false; "machine_live", live_snapshot ()]; "evidence", `List []; "related_ids", `List []]];
       "coverage", `List []])
-  | Error error -> Error (Msx_lane.error_to_string error)
+  | Error
+      (( Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved
+       | Msx_lane.Invalid_request _ | Msx_lane.Effect_unknown _ | Msx_lane.Unreadable _ ) as error) ->
+    Error (Msx_lane.error_to_string error)
   | Ok capture ->
       let o = capture.Msx_lane.observation in
       let inputs = Machine_input_history.publish history ~incarnation:capture.incarnation

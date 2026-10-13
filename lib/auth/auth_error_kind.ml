@@ -55,9 +55,18 @@ let classify : Masc_domain.t -> t = function
      the compiler enforces: every Auth_error constructor is placed above, and a
      new one cannot reach [Other] without an edit here. The remaining families
      have no auth-relevant label of their own. *)
-  | Masc_domain.Agent _
-  | Masc_domain.System _
-  | Masc_domain.Task _ ->
+  | Masc_domain.Agent (Masc_domain.Agent_error.InvalidName _)
+  | Masc_domain.System
+      ( Masc_domain.System_error.NotInitialized
+      | Masc_domain.System_error.ValidationError _
+      | Masc_domain.System_error.LockContention _ )
+  | Masc_domain.Task
+      ( Masc_domain.Task_error.NotFound _
+      | Masc_domain.Task_error.AlreadyClaimed _
+      | Masc_domain.Task_error.NotClaimed _
+      | Masc_domain.Task_error.InvalidState _
+      | Masc_domain.Task_error.InvalidId _
+      | Masc_domain.Task_error.VerificationSuperseded _ ) ->
     Other
 
 let all =

@@ -228,7 +228,15 @@ let rec pattern_scope_name (pattern : pattern) =
     (match pattern_scope_name nested with
      | Some nested_name -> Some nested_name
      | None -> Some name.txt)
-  | _ -> None
+  | Tpat_any
+  | Tpat_constant _
+  | Tpat_tuple _
+  | Tpat_construct _
+  | Tpat_variant _
+  | Tpat_record _
+  | Tpat_array _
+  | Tpat_lazy _
+  | Tpat_or _ -> None
 ;;
 
 let compare_site (left : site) (right : site) =

@@ -55,7 +55,8 @@ let call t session method_ suffix body =
   let result = t.request ~method_ ~path:(path session suffix) ~body in
   (match result with
    | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; release_resources session
-   | Ok _ | Error (Transport _) | Error (Protocol _) | Error (Remote _) -> ());
+   | Ok _ | Error (Transport _) | Error (Protocol _)
+   | Error (Remote { code = No_such_window | No_such_alert | Unexpected_alert_open | Other _; _ }) -> ());
   result
 (* State changes below never yield: cancellation can interrupt remote I/O but
    cannot leave a half-written local session. Explicit ownership releases the
@@ -78,7 +79,8 @@ let close_unlocked ?request t = match t.session with
     let result = request ~method_:`DELETE ~path:(path session "") ~body:None in
     match result with
     | Ok _ | Error (Remote { code = Invalid_session_id; _ }) -> t.session <- None; release_resources session; Ok ()
-    | Error error -> Error error
+    | Error ((Transport _ | Protocol _
+             | Remote { code = No_such_window | No_such_alert | Unexpected_alert_open | Other _; _ }) as error) -> Error error
 let close ?request t = with_session_lock t (fun () -> close_unlocked ?request t)
 let session t = match t.session with
   | Some session ->
@@ -141,7 +143,8 @@ let dialog_text t session =
   | Ok (`String text) -> Ok (`Assoc ["open",`Bool true;"text",`String text])
   | Error (Remote {code=No_such_alert;_}) -> Ok (`Assoc ["open",`Bool false])
   | Ok _ -> Error (Protocol "invalid dialog text response")
-  | Error error -> Error error
+  | Error ((Transport _ | Protocol _
+           | Remote { code = Invalid_session_id | No_such_window | Unexpected_alert_open | Other _; _ }) as error) -> Error error
 let element_call perform_effect id suffix body =
   perform_effect `POST ("/element/" ^ Uri.pct_encode id ^ suffix) (Some body)
 let interact t session ~perform_effect = function
@@ -218,7 +221,8 @@ let execute_action t action =
        (* The tab was created, and its document is waiting on a user prompt.
           Retain the identity without claiming that navigation completed. *)
        Ok (`Assoc ["tabId",`Int id;"navigation",`String "blocked_by_dialog";"requested_url",`String url])
-     | Error error -> Error (error_at_tab id error))
+     | Error ((Transport _ | Protocol _
+              | Remote { code = Invalid_session_id | No_such_window | No_such_alert | Other _; _ }) as error) -> Error (error_at_tab id error))
   | Browser_lane.Action.On_tab {tab_id=id;frame_path;interaction} ->
     let* session = session t in
     with_tab t session (Some id) (fun () ->
@@ -530,7 +534,19 @@ let execute t verb =
        | Ok data, _ -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])
        | Error error, Not_started -> Browser_lane.Rejected_before_effect (error_message error)
        | Error error, Started -> Browser_lane.Refused (error_message error))
-    | _ ->
+    | Browser_lane.Tabs_list | Browser_lane.Page_read _ | Browser_lane.Page_document _
+    | Browser_lane.Page_downloads _ | Browser_lane.Page_capture _ | Browser_lane.Page_scene _
+    | Browser_lane.Page_interact
+        { action =
+            ( Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Scroll _
+            | Browser_lane.Hover_at _ | Browser_lane.Click_at _
+            | Browser_lane.Scroll_at _ | Browser_lane.Drag _
+            | Browser_lane.Follow_link _ | Browser_lane.Click_node _
+            | Browser_lane.Fill_node _ )
+        ; _ }
+    | Browser_lane.Session_open _ | Browser_lane.Session_close
+    | Browser_lane.Session_status | Browser_lane.Page_goto _ | Browser_lane.Page_elements _
+    | Browser_lane.Page_context _ ->
       match execute_unlocked t verb with
       | Ok (`Assoc fields as data) ->
           (match verb, List.assoc_opt "interactionFailure" fields with

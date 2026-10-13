@@ -969,7 +969,17 @@ let handle_peek ~tool_name ~start_time ~base_path args =
           [ ("address", `String (Printf.sprintf "%05x" address)); ("hex", `String hex) ])
       ()
   | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
-  | Error e -> reject ~tool_name ~start_time (Dos_lane.error_to_string e)
+  | Error
+      (( Dos_lane.Activity_disabled
+       | Dos_lane.Activity_unobserved
+       | Dos_lane.Invalid_request _
+       | Dos_lane.Unreadable _
+       | Dos_lane.Held_by _
+       | Dos_lane.Guest_fault _
+       | Dos_lane.Unsaveable _
+       | Dos_lane.Checkpoint_refused _
+       | Dos_lane.Other_program _ ) as e) ->
+    reject ~tool_name ~start_time (Dos_lane.error_to_string e)
 ;;
 
 (* ---------- checkpoints ---------- *)

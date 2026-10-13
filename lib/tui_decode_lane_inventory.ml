@@ -197,7 +197,16 @@ let compatible selection state = match selection,state with
       List.for_all (fun (item : instance) -> Option.is_some item.applied_revision) instances
   | Manual_instance {instance_id;incarnation},Package_state {declaration=None;instances=[item]} ->
       item.instance_id=instance_id && item.incarnation=incarnation && item.applied_revision=None
-  | _ -> false
+  | Exact _,(Browser_clients _ | Browser_executor _ | Machine_state _ | Package_state _)
+  | Browser Browser_lane.Lane_name.Live,(Exact_state _ | Browser_executor _ | Machine_state _ | Package_state _)
+  | Browser (Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Stagehand),
+    (Exact_state _ | Browser_clients _ | Machine_state _ | Package_state _)
+  | Machine _,(Exact_state _ | Browser_clients _ | Browser_executor _ | Package_state _)
+  | Declaration _,(Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _
+                  | Package_state {declaration=None;_})
+  | Manual_instance _,(Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _
+                      | Package_state {declaration=Some _;_}
+                      | Package_state {declaration=None;instances=([] | _ :: _ :: _)}) -> false
 let row json =
   let* f = fields ["id";"label";"purpose";"selection";"state"] json in
   let* id = get nonblank "id" f in let* label = get nonblank "label" f in let* purpose = get string "purpose" f in

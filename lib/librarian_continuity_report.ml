@@ -162,7 +162,11 @@ let judgment (request : judge_request) (evaluated : Typesafeai_client.evaluated)
         ; request_body_sha256 = evaluated.request_body_sha256
         ; probability = noul
         }
-  | _ -> Error "Expected exactly the requested Noul answer with a finite probability in [0,1]"
+  | []
+  | [ _, (Typesafeai_types.Choice_answer _ | Typesafeai_types.Score_answer _) ]
+  | [ _, Typesafeai_types.Noul_answer _ ]
+  | _ :: _ :: _ ->
+      Error "Expected exactly the requested Noul answer with a finite probability in [0,1]"
 
 let validate_cases cases =
   let rec loop seen = function

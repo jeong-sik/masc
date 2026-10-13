@@ -281,7 +281,7 @@ let source_bundle_freshness ~binary_commit () =
              | _ -> Unknown_identity)
           | _ -> Unknown_identity
         with Yojson.Json_error _ -> Unknown_identity)
-     | _ -> Unknown_identity)
+     | None, (Ok _ | Error _) | Some _, Error _ -> Unknown_identity)
 
 (* Request-local observation: installed freshness and the final health verdict
    share one fully verified stamp read, never a result from an earlier request. *)
@@ -478,8 +478,16 @@ let surface_status_json_for_selection
      ; ("source_provenance", `String
           (match installed, asset_resolution with
            | Installed_dashboard.Bound _, _ -> "installed_manifest"
-           | _, Build_identity.Dashboard_asset_bound _ -> "source_manifest"
-           | _ -> (match freshness with
+           | ( ( Installed_dashboard.Not_installed
+               | Installed_dashboard.Unavailable _ )
+             , Build_identity.Dashboard_asset_bound _ ) -> "source_manifest"
+           | ( ( Installed_dashboard.Not_installed
+               | Installed_dashboard.Unavailable _ )
+             , ( Build_identity.Dashboard_assets_unbound
+               | Build_identity.Dashboard_assets_invalid _
+               | Build_identity.Dashboard_assets_unavailable
+               | Build_identity.Dashboard_asset_not_manifested ) ) ->
+             (match freshness with
              | Unknown_identity -> "unknown"
              | Fresh | Mismatched _ -> "declared_build_source")))
      ; ("index_present", `Bool index_present)

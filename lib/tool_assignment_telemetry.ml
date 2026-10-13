@@ -370,7 +370,7 @@ let rebuild_assignment_index store =
       rebuilt := Assignment_by_agent.add agent_id assignment_id !rebuilt
     | Error error ->
       decode_failures := add_decode_failure !decode_failures error
-    | _ -> ());
+    | Ok (Called _ | Completed _) -> ());
   !rebuilt, !decode_failures
 
 let rec publish_rebuilt_assignment_index () =

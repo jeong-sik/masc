@@ -99,7 +99,8 @@ let git_capture_output_result ~repo_root args =
     Process_eio.run_argv_with_status argv
   with
   | Unix.WEXITED 0, output -> Ok output
-  | status, _ -> Error status
+  | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), _ ->
+    Error status
 ;;
 
 let git_capture_output ~repo_root args =
@@ -1072,7 +1073,12 @@ let validate_executable_provenance_binding
                      (match validate_dashboard_snapshot_identity dashboard_assets with
                       | Ok _ -> Ok provenance
                       | Error _ -> Error "executable provenance dashboard snapshot differs")))
-          | _ -> Error "executable provenance sidecar metadata differs")
+          | { st_kind =
+              ( Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
+              | Unix.S_FIFO | Unix.S_SOCK )
+          ; _
+          } ->
+            Error "executable provenance sidecar metadata differs")
     with
     | Sys_error _ | Unix.Unix_error _ ->
       Error "executable provenance sidecar is unreadable"
@@ -1115,7 +1121,12 @@ let bind_executable_provenance ~path ~sha256 ~device ~inode =
           | { st_kind = Unix.S_REG; st_uid; st_perm; st_nlink; _ } as value
             when st_uid = Unix.geteuid () && st_perm = 0o500 && st_nlink = 1 ->
             Ok (value, sha256_channel ic)
-          | _ -> Error "running executable metadata differs")
+          | { st_kind =
+              ( Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
+              | Unix.S_FIFO | Unix.S_SOCK )
+          ; _
+          } ->
+            Error "running executable metadata differs")
     with
     | Sys_error _ | Unix.Unix_error _ ->
       Error "running executable cannot be inspected"

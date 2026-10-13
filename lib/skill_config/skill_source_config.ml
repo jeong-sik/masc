@@ -276,7 +276,11 @@ let string_field ~index ~field fields =
   match List.assoc_opt key fields with
   | None -> Error (Missing_source_field { index; field })
   | Some (Keeper_toml_loader.Toml_string value) -> Ok value
-  | Some value ->
+  | Some
+      (( Keeper_toml_loader.Toml_int _ | Toml_float _ | Toml_bool _
+       | Toml_string_array _ | Toml_array _ | Toml_table _ | Toml_inline_table _
+       | Toml_table_array _ | Toml_offset_datetime _ | Toml_local_datetime _
+       | Toml_local_date _ | Toml_local_time _ ) as value) ->
     Error (Invalid_source_field_type { index; field; actual = value_kind value })
 ;;
 
@@ -361,7 +365,7 @@ let parse_source ~index fields =
        (match path_rejection anchor configured_path with
         | None -> Ok { id; anchor; configured_path; access }
         | Some rejection -> Error [ Invalid_source_path { index; rejection } ])
-     | _ ->
+     | Error _, _, _ | Ok _, Error _, _ | Ok _, Ok _, Error _ ->
        let diagnostics =
          [ (match id with
             | Error diagnostic -> Some diagnostic
@@ -382,7 +386,10 @@ let parse_source ~index fields =
 let parse_entry ~index = function
   | Keeper_toml_loader.Toml_table fields
   | Toml_inline_table fields -> parse_source ~index fields
-  | value -> Error [ Invalid_source_entry_type { index; actual = value_kind value } ]
+  | ( Toml_string _ | Toml_int _ | Toml_float _ | Toml_bool _ | Toml_string_array _
+    | Toml_array _ | Toml_table_array _ | Toml_offset_datetime _
+    | Toml_local_datetime _ | Toml_local_date _ | Toml_local_time _ ) as value ->
+    Error [ Invalid_source_entry_type { index; actual = value_kind value } ]
 ;;
 
 let resource_read_max_bytes_key = top_level_namespace ^ ".resource-read-max-bytes"
@@ -403,7 +410,12 @@ let source_entries doc =
   match List.assoc_opt sources_key doc with
   | None -> Ok []
   | Some (Keeper_toml_loader.Toml_table_array entries) -> Ok entries
-  | Some value -> Error (Invalid_sources_type (value_kind value))
+  | Some
+      (( Keeper_toml_loader.Toml_string _ | Toml_int _ | Toml_float _ | Toml_bool _
+       | Toml_string_array _ | Toml_array _ | Toml_table _ | Toml_inline_table _
+       | Toml_offset_datetime _ | Toml_local_datetime _ | Toml_local_date _
+       | Toml_local_time _ ) as value) ->
+    Error (Invalid_sources_type (value_kind value))
 ;;
 
 let duplicate_diagnostics indexed_sources =

@@ -53,7 +53,10 @@ let to_string t =
   | Internal_error { detail; exn = _ } ->
       Printf.sprintf "internal_error: %s" detail
 
-let of_exn ?detail exn =
+(* Unix.error has about 70 constructors and only EACCES, ENOENT, EMFILE and
+   ENFILE are classified; the rest fall to Internal_error with the other
+   exceptions, so the wildcard arm is intentional. *)
+let[@warning "-4"] of_exn ?detail exn =
   let default_detail () =
     match detail with
     | Some d -> d

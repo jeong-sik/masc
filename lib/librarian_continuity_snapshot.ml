@@ -159,7 +159,7 @@ let checkpoint_prefix_range ~trace_id ~lines ~messages =
        let first = List.find_map (function
          | line, Ok {B.event = B.Turn_ended {turn_ref; _}; _}
            when String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id -> Some line
-         | _ -> None) lines in
+         | _, Ok {B.event = B.Turn_ended _ | B.History_restarted _; _} | _, Error _ -> None) lines in
        (match first with
         | None -> Error Uncovered_history
         | Some history_start_boundary_line -> Ok

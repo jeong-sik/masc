@@ -43,7 +43,16 @@ let create ~base_path () =
     match Machine.off_domain Dos_lane.screen with
     | Ok observation -> Ok observation.Dos_lane.controller
     | Error Dos_lane.No_machine -> Ok None
-    | Error error -> Error (Dos_lane.error_to_string error) in
+    | Error
+        (( Dos_lane.Activity_disabled
+         | Dos_lane.Activity_unobserved
+         | Dos_lane.Invalid_request _
+         | Dos_lane.Unreadable _
+         | Dos_lane.Held_by _
+         | Dos_lane.Guest_fault _
+         | Dos_lane.Unsaveable _
+         | Dos_lane.Checkpoint_refused _
+         | Dos_lane.Other_program _ ) as error) -> Error (Dos_lane.error_to_string error) in
   let authorize (call : Lane_addon_call_context.t) =
     let controlled = match call.tool with
       | "masc_dos_load" | "masc_dos_eject" | "masc_dos_step" | "masc_dos_press"
@@ -99,7 +108,17 @@ let create ~base_path () =
     match Machine.capture_png () with
     | Error (Machine.Lane Dos_lane.No_machine) ->
         failure "no_machine" (Machine.of_lane ~base_path ~tool_name ~start_time (Error Dos_lane.No_machine))
-    | Error (Machine.Lane error) -> failure "capture_failed" (Machine.of_lane ~base_path ~tool_name ~start_time (Error error))
+    | Error
+        (Machine.Lane
+           (( Dos_lane.Activity_disabled
+            | Dos_lane.Activity_unobserved
+            | Dos_lane.Invalid_request _
+            | Dos_lane.Unreadable _
+            | Dos_lane.Held_by _
+            | Dos_lane.Guest_fault _
+            | Dos_lane.Unsaveable _
+            | Dos_lane.Checkpoint_refused _
+            | Dos_lane.Other_program _ ) as error)) -> failure "capture_failed" (Machine.of_lane ~base_path ~tool_name ~start_time (Error error))
     | Error (Machine.Encode message) -> failure "encode_failed" (Machine.image_capture_failed ~tool_name ~start_time message)
     | Ok {observation; width; height; png} ->
         let pad = if not (Tool_args.get_bool arguments "include_pad" false) then [] else
@@ -145,7 +164,16 @@ let create ~base_path () =
       let answer = match released with
         | Ok released -> json_response (`Assoc ["released", `Bool released])
         | Error Dos_lane.No_machine -> json_response (`Assoc ["released", `Bool false])
-        | Error error -> response (Machine.reject ~tool_name:Controller.release_tool
+        | Error
+            (( Dos_lane.Activity_disabled
+             | Dos_lane.Activity_unobserved
+             | Dos_lane.Invalid_request _
+             | Dos_lane.Unreadable _
+             | Dos_lane.Held_by _
+             | Dos_lane.Guest_fault _
+             | Dos_lane.Unsaveable _
+             | Dos_lane.Checkpoint_refused _
+             | Dos_lane.Other_program _ ) as error) -> response (Machine.reject ~tool_name:Controller.release_tool
             ~start_time:(Tool_timing.start ()) (Dos_lane.error_to_string error)) in
       Ok {answer with S._meta=Some (`Assoc ["io.github.jeong-sik/masc.machine.events",
         `List (List.rev !events)])})) server in
@@ -207,7 +235,16 @@ let create ~base_path () =
           "subject_id", `String "dos"; "clock", `Null; "actor", `Null;
           "fields", `Assoc ["machine_loaded", `Bool false; "machine_live", live_snapshot ()]; "evidence", `List []; "related_ids", `List []]];
           "coverage", `List []]))
-      | Error error -> Error (Dos_lane.error_to_string error)
+      | Error
+          (( Dos_lane.Activity_disabled
+           | Dos_lane.Activity_unobserved
+           | Dos_lane.Invalid_request _
+           | Dos_lane.Unreadable _
+           | Dos_lane.Held_by _
+           | Dos_lane.Guest_fault _
+           | Dos_lane.Unsaveable _
+           | Dos_lane.Checkpoint_refused _
+           | Dos_lane.Other_program _ ) as error) -> Error (Dos_lane.error_to_string error)
       | Ok capture ->
           let o = capture.Dos_lane.observation in
           let inputs = Machine_input_history.publish history ~incarnation:capture.incarnation

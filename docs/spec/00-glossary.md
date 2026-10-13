@@ -2614,7 +2614,7 @@ status: reference
   보낸다.
   **다른 뜻과 구별한다**: Memory 쪽의 `claim`은 전이가 아니라 Fact의 문장 필드다(→ Fact).
   "새 claim"은 Librarian이 새로 적자고 낸 Fact를 말한다. Task 소유 기록을 가리킬 때는
-  이 전이 상태(`Claimed`/`InProgress`)로 읽고, 소스 결속 기록의 `claim_id`(→ Shared Fact)
+  이 전이 상태(`Claimed`/`InProgress`)로 읽고, 소스 결속 기록의 `claim_id`(→ Shared Claim)
   와는 다른 것이다.
 
 **Release**
@@ -3459,18 +3459,19 @@ status: reference
     2. **대조 (`Ledger.reconcile`)**: 기존 원장의 사실 배치 표(`dispositions`)와 대조하여, 아직 원장에 없는 새로 추가된 사실(`new_facts`)과 스냅샷에서 사라진 사실(`vanished`)을 가려낸다. 읽기에 성공한 스토어에서 사라짐이 확인된 사실만 원장에서 제거하며, 읽지 못한 스토어의 기존 배치는 유지한다.
     3. **모델 분류 (`Request.prepare`)**: 새로운 사실(`new_facts`)이 존재할 때만 모델 프롬프트(`workspace_memory_curator`)를 호출하여 다음 세 요소로 분류한다:
        - **사실 배치 (`facts` / `dispositions`)**: 각 키퍼 사실(`fact_ref`: 일반 사실 `Ordinary` 또는 소스 결속 사실 `Source_bound`)을 기존 공유 주장 합류(`Claim_member`), 충돌 합류(`Conflict_member`), 또는 제외 사유(`Excluded`) 중 하나로 1:1 배정한다.
-       - **공유 주장 (`claims`)**: 둘 이상의 키퍼 사실이 일치하거나 작업공간 차원에서 의미를 공유하는 항목 목록(`(claim_id, claim)`).
+       - **공유 주장 (`claims`)**: 하나 이상의 키퍼 사실이 일치하거나 작업공간 차원에서 의미를 공유하는 항목 목록(`(claim_id, claim)`). 모든 항목은 구성원을 최소 하나 가진다(→ Shared Claim).
        - **충돌 (`conflicts`)**: 서로 상충하거나 불일치하는 사실들의 설명 목록(`(conflict_id, description)`).
     4. **원자적 저장 (`Ledger.save`)**: 모델의 분류 결과를 엄격히 검증(`Ledger.apply`)한 뒤 원장에 원자적으로 교체 저장한다.
   - **불변식**: 원장은 모델이 분류한 장부일 뿐 Keeper의 자기 기억을 수정하지 않으며, 의미 검증이나 권위 있는 사실 승격을 뜻하지 않는다. Keeper는 `keeper_workspace_memory_read` 도구로 원장의 주장·충돌 ID와 소속 사실 원문을 직접 조회할 수 있다.
+  - **이름 주의**: 턴 문맥의 `## Shared workspace memory ledger` 구획(→ Shared Briefing)과 도구 이름의 `workspace_memory`는 모두 이 원장을 가리킨다. 이 원장은 Keeper 한 명의 Memory OS(개인 기억)가 아니다. 구성원은 개인 기억의 Fact이지만 원장은 그것을 바꾸지 않는다. Board의 `[원장]` 글(릴리스 사이클 기록)은 이 원장과 다른 것이다.
   → [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_context](../../lib/workspace_memory/workspace_memory_context.mli) · [workspace_memory_request](../../lib/workspace_memory/workspace_memory_request.mli) · [server_workspace_memory_curator](../../lib/server/server_workspace_memory_curator.ml)
 
-**Shared Fact (작업공간 기억 원장 행)**
-: Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장의 행 하나(`workspace_memory_ledger`의 `claim_id`가 가리키는 것). 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다. 행의 `claim_id`는 Fact의 문장 필드 `claim`(→ Fact)과 다른 것이다 — 원장 행의 식별자다.
+**Shared Claim (공유 주장)**
+: 작업공간 기억 원장 `claims`의 항목 하나(`(claim_id, claim)`). Keeper 사실 하나 이상이 같은 말이거나 작업공간 차원에서 의미를 공유한다고 Workspace Curator가 묶은 문장이고(구성원은 최소 하나다. 구성원이 하나여도 주장이다), 턴 문맥의 `Shared claims` 건수가 이것을 센다. 어떤 Keeper 사실이 이 항목에 속하는지는 사실마다 하나씩 기록하는 배치(`Claim_member`)가 정한다. 같은 원장에는 충돌 항목(`conflict_id`, `Conflict_member`)과 제외 배치(`Excluded`)가 따로 있으니 주장·충돌·제외를 한 낱말로 부르지 않는다. 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다. `claim_id`는 이 항목의 식별자이고, 항목의 `claim` 문장은 Fact의 문장 필드 `claim`(→ Fact)과 이름만 같다. 공유 주장은 Keeper 한 명이 쓴 Fact가 아니다. 이 표제어의 이전 이름은 Shared Fact였으나 코드와 프롬프트에는 그 이름이 없다.
   → [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_request](../../lib/workspace_memory/workspace_memory_request.mli) · [workspace_memory_ledger_view](../../lib/workspace_memory/workspace_memory_ledger_view.mli)
 
 **Workspace Curator (공유 맥락 합성)**
-: 여러 Keeper가 같은 원문을 반복해서 읽지 않도록 공유 맥락을 합성하는 단독 모델 레인. 코드의 `Workspace_curator`는 Keeper Memory의 변경 사실을 공유 주장·충돌로 분류한 뒤, 그 본문을 의미를 보존한 공유 요약으로 합성한다. 새 사실은 이전 요약에 합치고, 삭제·수정된 사실이나 합성 프롬프트 변경이 있으면 현재 자료로 다시 만든다. 동일한 자료의 완성본은 Keeper들이 재사용한다. 요약은 현재 작업공간의 모든 운영 상태나 검증된 사실을 뜻하지 않으며, 원본 Memory를 덮어쓰지 않는다.
+: 여러 Keeper가 같은 원문을 반복해서 읽지 않도록 공유 맥락을 합성하는 단독 모델 레인. 턴 문맥과 `config/prompts/keeper.md`는 이 레인을 `World Curator`라고도 적는다(같은 레인이다. 코드 식별자는 `Workspace_curator`). 코드의 `Workspace_curator`는 Keeper Memory의 변경 사실을 공유 주장·충돌로 분류한 뒤, 그 본문을 의미를 보존한 공유 요약으로 합성한다. 새 사실은 이전 요약에 합치고, 삭제·수정된 사실이나 합성 프롬프트 변경이 있으면 현재 자료로 다시 만든다. 동일한 자료의 완성본은 Keeper들이 재사용한다. 요약은 현재 작업공간의 모든 운영 상태나 검증된 사실을 뜻하지 않으며, 원본 Memory를 덮어쓰지 않는다.
 
 **Shared Briefing (공유 요약 / 브리핑 글)**
 : Workspace_curator가 작업공간 기억 원장(`ledger.json`)에 기록된 모든 주장과 충돌 텍스트(`Ledger.briefing_sources`)를 모델로 종합 요약한 자연어 글.

@@ -204,9 +204,6 @@ val store : unit -> Dated_jsonl.t option
 val store_dir : unit -> string option
 (** [store_dir ()] returns the initialized durable store directory, if any. *)
 
-val count_entries : unit -> int
-(** Rows in the initialized durable store, 0 when there is none. *)
-
 val current_log_path : unit -> string option
 (** [current_log_path ()] returns today's JSONL file path for the initialized
     durable store, if any. The file may not exist yet when no tool call has

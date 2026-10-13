@@ -423,12 +423,6 @@ let store () = (Atomic.get store_state).store
 
 let store_dir () = Option.map Dated_jsonl.base_dir (store ())
 
-let count_entries () =
-  match (Atomic.get store_state).store with
-  | Some store -> Dated_jsonl.count_entries store
-  | None -> 0
-;;
-
 let current_log_path () =
   let state = Atomic.get store_state in
   match state.store, state.configured with

@@ -39,7 +39,7 @@ let recent_tool_host_failures ~now () =
               let fingerprint =
                 String.concat "|"
                   [
-                    envelope.cause_code;
+                    Failure_envelope.tool_host_cause_code envelope.cause;
                     Option.value ~default:"" envelope.entity_id;
                     envelope.summary;
                   ]
@@ -49,7 +49,7 @@ let recent_tool_host_failures ~now () =
               else
                 let item =
                   {
-                    kind = envelope.cause_code;
+                    kind = Failure_envelope.tool_host_cause_code envelope.cause;
                     severity =
                       operator_severity_of_failure_envelope envelope.severity;
                     summary = envelope.summary;

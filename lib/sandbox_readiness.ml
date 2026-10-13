@@ -141,7 +141,8 @@ let probe ~host ~run ~require_rootless ~require_userns backend =
   | Remote_ssh, _ -> Needs_configuration
       "Select a configured SSH endpoint and verify its remote execution; SSH is not a disposable guest"
   | _, Unsupported -> Unsupported_host "Supported hosts are macOS and Linux on ARM64 or x64"
-  | (Apple_container, Linux (Arm64)) | (Apple_container, Linux (X64)) ->
+  | (Apple_container, Linux (Arm64)) | (Apple_container, Linux (X64))
+  | (Apple_container, Macos { architecture = X64; _ }) ->
     Unsupported_host "Apple Container requires Apple Silicon and macOS 26 or newer"
   | Apple_container, Macos {major; _} when major < 26 ->
     Unsupported_host "Apple Container requires macOS 26 or newer"

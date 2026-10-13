@@ -3,12 +3,12 @@ type t =
   ; segment_max_bytes : int
   }
 
-let create ~base_dir ~max_bytes =
+let create ~location ~max_bytes =
   (* Leave room for a completed segment alongside the current one. A segment
      equal to the whole store target would be pruned immediately on rotation,
      collapsing the history to the newly appended row. *)
   let segment_max_bytes = if max_bytes <= 0 then 0 else max 1 (max_bytes / 2) in
-  { store = Dated_jsonl.create ~base_dir ~max_bytes (); segment_max_bytes }
+  { store = Dated_jsonl.open_store ~max_bytes location; segment_max_bytes }
 
 let read_store t = t.store
 

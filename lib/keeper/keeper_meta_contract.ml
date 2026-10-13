@@ -546,6 +546,8 @@ let proactive_cycle_outcome_of_string raw =
     all_of_proactive_cycle_outcome
 ;;
 
+let all_proactive_cycle_outcomes = all_of_proactive_cycle_outcome
+
 (* -- Updater helpers -- *)
 
 let map_usage (f : usage_metrics -> usage_metrics) (m : keeper_meta) : keeper_meta =

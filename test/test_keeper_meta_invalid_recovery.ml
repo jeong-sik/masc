@@ -488,10 +488,31 @@ let test_retired_fields_dropped_reported_once_and_not_saved () =
     (List.length (retired_field_rows path))
 ;;
 
+(* The parser reads a label back as its outcome only while every outcome has
+   its own label: with two outcomes on one label, the second would read back
+   as the first. *)
+let test_every_outcome_label_reads_back_as_its_outcome () =
+  List.iter
+    (fun outcome ->
+       let label = Keeper_meta_contract.proactive_cycle_outcome_to_string outcome in
+       check
+         bool
+         (Printf.sprintf "%S reads back as its own outcome" label)
+         true
+         (Keeper_meta_contract.proactive_cycle_outcome_of_string label = Some outcome))
+    Keeper_meta_contract.all_proactive_cycle_outcomes
+;;
+
 let () =
   run
     "keeper_meta_invalid_recovery"
-    [ ( "issue-28844"
+    [ ( "outcome-labels"
+      , [ test_case
+            "every outcome label reads back as its outcome"
+            `Quick
+            test_every_outcome_label_reads_back_as_its_outcome
+        ] )
+    ; ( "issue-28844"
       , [ test_case
             "non-canonical enumerated field is auto-repaired and keeper rejoins keepalive"
             `Quick

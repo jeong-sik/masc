@@ -297,6 +297,9 @@ val proactive_cycle_outcome_of_string :
     exactly [raw]. [None] for anything else, including a label in other
     case or with surrounding whitespace. *)
 
+val all_proactive_cycle_outcomes : proactive_cycle_outcome list
+(** Every variant, in declaration order. *)
+
 (** {1 Updater helpers} *)
 
 val now_iso : unit -> string

@@ -522,9 +522,10 @@ let preflight_timeout_sec t = float_of_int t.connect_timeout_sec +. 5.0
    OpenSSH endpoint keeps its shim on the remote host and the bootstrap
    uploads it. A microVM guest runs the host's copy through a read-only mount
    ({!Config_dir_resolver.microvm_shim_dir}), so the repair is on this host
-   and reaches a running guest's next request. A Docker guest was handed its
-   shim path by the runtime that started it. One line for all three sent the
-   operator of a microVM to the SSH bootstrap (#42726). *)
+   and reaches a running guest's next request, which execs the shim anew
+   ([transport_argv]). For a Docker container the server knows only the path
+   it execs: nothing in this tree starts one or places its shim. One line for
+   all three sent the operator of a microVM to the SSH bootstrap (#42726). *)
 let outdated_shim_repair t =
   let asset =
     Printf.sprintf "the masc-exec-shim-linux-ARCH asset of %s" Build_version.current
@@ -546,7 +547,10 @@ let outdated_shim_repair t =
        that copy through a mount, so their next request uses it"
       host_shim asset
   | Docker_exec c ->
-    Printf.sprintf "replace %s in container %s with %s" c.shim_path c.container_name asset
+    Printf.sprintf
+      "replace the shim container %s runs at %s with %s; whatever started that \
+       container put it there"
+      c.container_name c.shim_path asset
 ;;
 
 (* RFC-0427 B-3. The shim names the release it was built from and the server
@@ -561,8 +565,10 @@ let outdated_shim_repair t =
    an alarm and not a fix.
 
    It fires per probe. Two of the three probe sites run once per endpoint per
-   process; the third is the keeper preflight, so an outdated endpoint says so
-   once per keeper boot. *)
+   process; the third is the keeper preflight, so an outdated OpenSSH endpoint
+   says so once per keeper boot. A guest lane runs no preflight
+   ([Keeper_sandbox_remote_lane.microvm_endpoint]), so a guest says so once
+   per server process, and a shim replaced since is seen after a restart. *)
 let warn_on_release_skew t release =
   let repair = outdated_shim_repair t in
   match release with

@@ -194,8 +194,9 @@ val outdated_shim_repair : t -> string
 (** What an operator does when this endpoint's shim came from another release
     than this server, as the [remote_shim_outdated] WARN says it. The shim is
     installed in a different place per transport: on the remote host for
-    OpenSSH, in this host's microVM shim directory for a microVM guest, and
-    inside the container for Docker. *)
+    OpenSSH and in this host's microVM shim directory for a microVM guest.
+    For Docker the server knows only the path it execs in the container, and
+    the sentence says no more than that. *)
 
 val report_openssh : base_path:string -> endpoint:Exec_ssh_endpoint.t -> lane_report
 (** Read the same endpoint-scoped observations as the runner without creating

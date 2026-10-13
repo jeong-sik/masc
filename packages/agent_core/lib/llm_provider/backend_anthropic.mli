@@ -144,8 +144,8 @@ val build_request
   -> string
 
 (** Creation-prefix identity for a response produced by this wire: the digest
-    chain over the transmitted request (head members plus every projected,
-    merged message) and over the response content. Returns [None] for kinds
+    chain over the API-checked head members plus every projected, merged
+    message, and over the response content. Returns [None] for kinds
     this backend serves without a binding (Kimi), for responses without
     reasoning, when the history refuses projection, and when
     [admitted_body_present]: an admitted body resolves frozen thinking

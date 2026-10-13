@@ -575,7 +575,14 @@ let anthropic_build_config () =
     ()
 ;;
 
-let anthropic_build_config_variant ?(system = "keeper system") ?temperature ?cap_override () =
+let anthropic_build_config_variant
+      ?(system = "keeper system")
+      ?temperature
+      ?tool_choice
+      ?cache_system_prompt
+      ?cap_override
+      ()
+  =
   let model_capabilities_override =
     match cap_override with
     | Some caps -> caps
@@ -591,6 +598,8 @@ let anthropic_build_config_variant ?(system = "keeper system") ?temperature ?cap
     ~max_tokens:4096
     ~system_prompt:system
     ?temperature
+    ?tool_choice
+    ?cache_system_prompt
     ~model_capabilities_override
     ()
 ;;
@@ -819,6 +828,33 @@ let test_prefix_binding_keeps_thinking_when_only_sampling_changes () =
   let types = wire_content_types body in
   check_bool
     "temperature steers decoding, not conversation identity"
+    true
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+let test_prefix_binding_keeps_thinking_when_tool_choice_changes () =
+  let _config, tools, carrier, assistant = round_one_fixtures () in
+  (* [tool_choice] is not part of the API's prefix check, so the head must
+     not hash it: dropping here would discard thinking the API accepts. *)
+  let rechosen = anthropic_build_config_variant ~tool_choice:Types.Any () in
+  let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config:rechosen ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "a tool_choice change keeps thinking"
+    true
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+let test_prefix_binding_keeps_thinking_when_cache_markers_toggle () =
+  let _config, tools, carrier, assistant = round_one_fixtures () in
+  (* [cache_control] markers are not part of the API's prefix check either. *)
+  let cached = anthropic_build_config_variant ~cache_system_prompt:true () in
+  let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config:cached ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "a cache toggle keeps thinking"
     true
     (List.mem "thinking" (List.nth types 1))
 ;;
@@ -1809,6 +1845,14 @@ let () =
             "prefix binding keeps thinking when only sampling changes"
             `Quick
             test_prefix_binding_keeps_thinking_when_only_sampling_changes
+        ; Alcotest.test_case
+            "prefix binding keeps thinking when tool choice changes"
+            `Quick
+            test_prefix_binding_keeps_thinking_when_tool_choice_changes
+        ; Alcotest.test_case
+            "prefix binding keeps thinking when cache markers toggle"
+            `Quick
+            test_prefix_binding_keeps_thinking_when_cache_markers_toggle
         ; Alcotest.test_case
             "prefix binding keeps thinking across chained rounds"
             `Quick

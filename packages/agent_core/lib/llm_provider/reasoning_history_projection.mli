@@ -117,11 +117,12 @@ val content_wire_digest
 
 (** Drop reasoning whose creation prefix cannot be proven identical to the
     current request. A binding wire (Anthropic today) verifies each signed
-    thinking block against the system prompt, the tools, the thinking
-    controls, and every message before it; replaying one across a rewritten
-    prefix fails the whole request with a 400 no retry clears. The fold
-    chains a digest over [head] (the request's own head members in wire
-    order) and every admitted block, and admits a message's reasoning only
+    thinking block against the system prompt, the tools, and every message
+    before it — exactly the fields the API's own prefix check covers;
+    replaying one across a rewritten prefix fails the whole request with a
+    400 no retry clears. The fold chains a digest over [head] (the
+    API-checked head members in wire order) and every admitted block, and
+    admits a message's reasoning only
     when the source is present, the recorded request digest equals the chain
     before the message, and the recorded message digest equals
     {!content_wire_digest} of its current content.

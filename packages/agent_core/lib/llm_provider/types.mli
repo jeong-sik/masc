@@ -447,9 +447,9 @@ end
 (** Creation-prefix identity stamped beside a stored reasoning artifact: the
     wire the producing request actually sent, hashed so replay can prove the
     current prefix is byte-identical before returning a signed block to an
-    endpoint that verifies the binding. [request_digest] covers the system
-    prompt, the tools, the thinking/tool-choice controls, and every
-    transmitted message before this one; [message_digest] covers this
+    endpoint that verifies the binding. [request_digest] covers the fields
+    the API's own prefix check covers — the system prompt, the tools, and
+    every transmitted message before this one; [message_digest] covers this
     message's own wire bytes, so an in-message edit fails closed too. A
     separate entry from {!Reasoning_source.t} so previously stored artifacts
     keep parsing: they carry no digest and fail closed on binding wires. *)

@@ -238,7 +238,7 @@ let test_page_rows_carry_no_stream_contract () =
   with_lane "chat-page-slim" (numbered ~total:5) (fun config name ->
     let body = Keeper_api.keeper_chat_history_page_json config name ~before:None in
     let rows = messages_of body in
-    Alcotest.(check int) "chat rows only" 5 (List.length rows);
+    Alcotest.(check int) "five rows in the slim window" 5 (List.length rows);
     List.iter
       (fun r ->
         Alcotest.(check bool)

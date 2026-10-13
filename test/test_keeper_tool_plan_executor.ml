@@ -1265,7 +1265,8 @@ let test_export_failure_preserves_independent_branch () =
     ; Plan.export ~name:"blocked" ~node_id:(node_id "d") ~pointer:(export_pointer "/profile") ] in
   let nodes = List.map (fun (node : Plan.node) ->
     if String.equal (node_name node) "d" then
-      { node with tool_name = "keeper_lane_status" }
+      Plan.node ~id:node.id ~tool_name:"keeper_lane_status"
+        ~after:node.after ~input:node.input ()
     else node) (Plan.nodes source) in
   let plan =
     match Plan.create ~descriptors:(Descriptor.all_descriptors ())

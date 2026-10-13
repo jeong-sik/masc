@@ -105,6 +105,15 @@ val base_path_config_root : cwd:string -> string -> string
     [MASC_CONFIG_DIR]; callers that need env override semantics should use
     {!resolve_for_base_path}. *)
 
+val environment_for_workspace :
+  cwd:string -> base_path:string -> env:string array -> string array
+(** Environment for a child operating on a workspace whose own configuration
+    was selected by the caller. Replaces inherited [MASC_BASE_PATH] and
+    [MASC_CONFIG_DIR] with the normalized absolute workspace and its config
+    root, retaining all other entries without changing the parent environment.
+    This is an explicit child-launch boundary, not a change to resolver
+    precedence: use it after selecting or validating the local configuration. *)
+
 val resolve_for_base_path : base_path:string -> resolution
 (** Resolve the config root for an explicit workspace [base_path]. Explicit
     [MASC_CONFIG_DIR] overrides are still honored, but

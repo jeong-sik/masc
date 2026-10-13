@@ -224,7 +224,8 @@ let prepare_server ~base_path ~port ~owned =
          | Error _ ->
            (match Masc_tui_server_lifecycle.start
                     ~masc_bin:Sys.executable_name ~base_path ~host:"127.0.0.1" ~port
-                    ~env:(Unix.environment ()) with
+                    ~env:(Config_dir_resolver.environment_for_workspace
+                      ~cwd:(Sys.getcwd ()) ~base_path ~env:(Unix.environment ())) with
             | Error message -> fail message
             | Ok server -> owned := Some server));
         (* Startup is a bounded resource operation, not a Keeper turn budget.

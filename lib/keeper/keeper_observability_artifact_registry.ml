@@ -119,9 +119,12 @@ let validate () =
     (fun artifact ->
        let row = entry artifact in
        let label = artifact_label artifact in
-       (if row.consumers = [] || not (List.for_all nonblank row.consumers)
-        then [ "artifact has no concrete consumer: " ^ label ]
-        else [])
+       let has_consumer =
+         match row.consumers with
+         | [] -> false
+         | _ :: _ as consumers -> List.for_all nonblank consumers
+       in
+       (if has_consumer then [] else [ "artifact has no concrete consumer: " ^ label ])
        @
        if nonblank row.producer && nonblank row.authority_source
        then []

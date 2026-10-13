@@ -6,6 +6,8 @@ type turn_plan =
   | Phase_not_executable of Keeper_state_machine.phase
   | Phase_executable of Keeper_state_machine.phase
 
+let supervisor_stopped = Supervisor_stopped
+
 let turn_plan_of_registry_phase = function
   | None -> Registry_phase_missing
   | Some phase when Keeper_state_machine.can_execute_turn phase ->

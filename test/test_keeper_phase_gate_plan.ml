@@ -23,19 +23,19 @@ let () =
     [ ( "manifest row"
       , [ case
             "supervisor stop has no phase field"
-            Plan.Supervisor_stopped
+            Plan.supervisor_stopped
             {|cancelled {"reason":"supervisor_stop","executable":false}|}
         ; case
             "missing registry phase is null"
-            Plan.Registry_phase_missing
+            (Plan.turn_plan_of_registry_phase None)
             {|error {"phase":null,"reason":"registry_phase_missing","executable":false}|}
         ; case
             "non-executable phase is named"
-            (Plan.Phase_not_executable Keeper_state_machine.Paused)
+            (Plan.turn_plan_of_registry_phase (Some Keeper_state_machine.Paused))
             {|skipped {"phase":"paused","reason":"non_executable_phase","executable":false}|}
         ; case
             "executable phase is named and executable"
-            (Plan.Phase_executable Keeper_state_machine.Running)
+            (Plan.turn_plan_of_registry_phase (Some Keeper_state_machine.Running))
             {|ok {"phase":"running","reason":"executable_phase","executable":true}|}
         ] )
     ]

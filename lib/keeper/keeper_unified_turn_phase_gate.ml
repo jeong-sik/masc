@@ -33,7 +33,7 @@ let decide_and_record
   in
   let turn_plan =
     if supervisor_stop_at_entry
-    then Plan.Supervisor_stopped
+    then Plan.supervisor_stopped
     else
       Plan.turn_plan_of_registry_phase
         (Keeper_registry.get_phase ~base_path:registry_base_path meta.name)

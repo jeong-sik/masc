@@ -32,10 +32,10 @@ let parse_request = function
       then Ok () else Error "unknown browser read argument" in
     Ok {route; tab_id}
   | _ -> Error "body must be a JSON object"
-type failure = Unselected of Browser_lane.selection_error | Unobserved of string
+type failure = Unselected of Browser_lane.selection_error | Unobserved of string | Unavailable of string
 let failure_message = function
   | Unselected error -> Browser_lane.selection_error_message error
-  | Unobserved detail -> detail
+  | Unobserved detail | Unavailable detail -> detail
 let unobserved result = Result.map_error (fun detail -> Unobserved detail) result
 let decode_answer ~lane = function
   | Browser_lane.Lane_absent -> Error (Browser_lane.lane_absent_message lane)
@@ -49,6 +49,12 @@ let decode_answer ~lane = function
        | Some (`String error) -> Error error
        | _ -> Error "browser backend failed without an error message")
     | _ -> Error "malformed browser response"
+let observe_answer ~lane answer =
+  match answer with
+  | Browser_lane.Lane_absent -> Error (Unavailable (Browser_lane.lane_absent_message lane))
+  | Browser_lane.Timed_out -> Error (Unavailable "browser lane timed out; read the current page before repeating an interaction")
+  | Browser_lane.Answered _ | Browser_lane.Refused _ | Browser_lane.Rejected_before_effect _ ->
+    decode_answer ~lane answer |> unobserved
 let decode_tab json =
   match field "id" json, field "title" json, field "url" json, field "active" json with
   | Some (`Int id), Some (`String title), Some (`String url), Some (`Bool active) ->
@@ -57,6 +63,19 @@ let decode_tab json =
 let rec decode_tabs = function
   | [] -> Ok []
   | json :: rest -> let* tab = decode_tab json in let* tabs = decode_tabs rest in Ok (tab :: tabs)
+let decode_inventory = function
+  | `List rows -> let* tabs = decode_tabs rows in Ok (tabs, [])
+  | `Assoc fields ->
+    (match List.assoc_opt "tabs" fields, List.assoc_opt "unavailableTabs" fields,
+           List.assoc_opt "complete" fields with
+     | Some (`List rows), Some (`List unavailable), Some (`Bool false) ->
+       let* tabs = decode_tabs rows in
+       let valid = List.for_all (fun row -> match field "id" row, field "error" row with
+         | Some (`Int id), Some (`String _) -> id >= 0
+         | _ -> false) unavailable in
+       if valid then Ok (tabs, unavailable) else Error "malformed unavailable browser tab"
+     | _ -> Error "malformed partial browser inventory")
+  | _ -> Error "browser tabs must be a list or inventory"
 let tab_json tab = `Assoc ["id",`Int tab.id;"title",`String tab.title;
   "url",`String tab.url;"active",`Bool tab.active]
 let source_name route = Browser_lane.Lane_name.to_wire (Browser_lane.route_lane_name route)
@@ -74,7 +93,7 @@ let exchange ~admission ~command =
   let target = Browser_lane.Read_admission.target admission in
   match Browser_lane.Read_admission.issue admission command ~timeout_sec:20. with
   | Error error -> Error (Unselected error)
-  | Ok answer -> decode_answer ~lane:(Browser_lane.target_lane target) answer |> unobserved
+  | Ok answer -> observe_answer ~lane:(Browser_lane.target_lane target) answer
 let read request =
   let started = Mtime_clock.elapsed_ns () in
   let lane_name = source_name request.route in
@@ -83,8 +102,17 @@ let read request =
   let target = Browser_lane.Read_admission.target admission in
   let issue command = exchange ~admission ~command in
   let* raw_tabs = issue Browser_lane.Read_admission.Tabs in
-  let* tabs = unobserved (match raw_tabs with
-    | `List tabs -> decode_tabs tabs | _ -> Error "browser tabs must be a list") in
+  let* tabs, unavailable = decode_inventory raw_tabs |> unobserved in
+  let* () = match request.tab_id with
+    | None -> Ok ()
+    | Some id ->
+      (match List.find_opt (fun row -> field "id" row = Some (`Int id)) unavailable with
+       | None -> Ok ()
+       | Some row ->
+         let detail = match field "error" row with
+           | Some (`String detail) -> detail
+           | _ -> "tab metadata could not be observed" in
+         Error (Unobserved (Printf.sprintf "selected tab %d is present but unreadable: %s" id detail))) in
   (* Without a requested tab and without an active tab no page is read: the
      answer says [selection = none_active] and [page = null] instead of the
      caller receiving whichever tab the browser listed first. *)
@@ -103,6 +131,8 @@ let read request =
   let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
   Ok (`Assoc (["tabs",`List (List.map tab_json tabs);"selection",selection_json selection;"page",page;
     "source",`String lane_name] @ Browser_lane.target_connection_fields target
+    @ (match unavailable with [] -> [] | _ :: _ ->
+        ["complete",`Bool false;"unavailableTabs",`List unavailable])
     @ ["elapsed_ms",`Float elapsed_ms]))
 
 (* Captures always name a tab. An absent/closed target must never capture the

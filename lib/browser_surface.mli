@@ -11,13 +11,21 @@ val select : tab_id:int option -> tab list -> (selection, string) result
 (** Why a read returned no observation. [Unselected] is a request that named
     no browser to ask, before or after its target was resolved; a caller that
     reports it names the connected browsers and the host configuration.
-    [Unobserved] is an answer that is not the observation asked for. *)
-type failure = Unselected of Browser_lane.selection_error | Unobserved of string
+    [Unobserved] is an answer that is not the observation asked for.
+    [Unavailable] is an absent or timed-out browser transport. *)
+type failure = Unselected of Browser_lane.selection_error | Unobserved of string | Unavailable of string
 val failure_message : failure -> string
+
+val observe_answer : lane:Browser_lane.Lane_name.t -> Browser_lane.answer -> (Yojson.Safe.t, failure) result
+(** Typed observation boundary: absent and timed-out transports remain
+    dependency failures rather than invalid page observations. *)
 
 val read : request -> (Yojson.Safe.t, failure) result
 (** Tabs, [selection] as "requested" | "active" | "none_active", the page of the
-    selected tab or null, source, clientId and elapsed_ms. *)
+    selected tab or null, source, clientId and elapsed_ms. A partial inventory
+    additionally carries [complete=false] and [unavailableTabs], retaining the
+    IDs and errors of tabs whose metadata could not be read. Naming one of
+    those tabs refuses the read without substituting another tab. *)
 
 (** [lane] names the lane the answer came from, so an absent backend is
     reported the way that lane is set up. *)

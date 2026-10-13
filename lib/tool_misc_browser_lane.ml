@@ -58,12 +58,17 @@ let answer_to_result ~lane ~tool_name ~start_time = function
          | Some (`String message) -> message
          | _ -> "browser backend failed without an error message" in
        make_workflow_err ~tool_name ~start_time message
-     | _ -> make_workflow_err ~tool_name ~start_time "invalid browser backend response")
+     | _ -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+         "invalid browser backend response")
   | Browser_lane.Answered _ ->
-    make_workflow_err ~tool_name ~start_time "invalid browser backend response"
-  | Browser_lane.Lane_absent -> make_workflow_err ~tool_name ~start_time (Browser_lane.lane_absent_message lane)
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+      "invalid browser backend response"
+  | Browser_lane.Lane_absent ->
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable
+      ~effect_disposition:Tool_result.Proven_pre_effect (Browser_lane.lane_absent_message lane)
   | Browser_lane.Timed_out ->
-    make_workflow_err ~tool_name ~start_time "the browser lane did not answer in time"
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable
+      "the browser lane did not answer in time; the dispatched outcome is unknown. Read the current page before repeating an interaction."
   | Browser_lane.Rejected_before_effect reason ->
     Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
       ~effect_disposition:Tool_result.Proven_pre_effect reason
@@ -292,6 +297,8 @@ let selection_error ?bidi_start ~base_path ~tool_name ~start_time error =
 let read_failure ~base_path ~tool_name ~start_time = function
   | Browser_surface.Unselected error -> selection_error ~base_path ~tool_name ~start_time error
   | Browser_surface.Unobserved detail -> make_workflow_err ~tool_name ~start_time detail
+  | Browser_surface.Unavailable detail ->
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable detail
 
 let handle_tabs ~base_path ~tool_name ~start_time args : Tool_result.result =
   match tool_request args with

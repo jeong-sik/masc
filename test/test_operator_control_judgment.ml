@@ -317,6 +317,45 @@ let test_operator_judgment_requires_numeric_timestamps () =
     (Error "invalid generated_at_unix")
     (Operator_judgment.of_yojson invalid)
 
+(* Every member [record] writes is required on read. A missing [surface] used
+   to read as [""], a key no lookup matches, and a non-string evidence ref was
+   dropped without a word. *)
+let test_operator_judgment_requires_every_written_member () =
+  let complete =
+    [ ("judgment_id", `String "judg-1")
+    ; ("surface", `String "command.namespace")
+    ; ("target_type", `String "workspace")
+    ; ("target_id", `Null)
+    ; ("summary", `String "summary")
+    ; ("confidence", `Float 0.5)
+    ; ("generated_at", `String "1970-01-01T00:00:01Z")
+    ; ("generated_at_unix", `Float 1.0)
+    ; ("fresh_until", `String "1970-01-01T00:00:02Z")
+    ; ("fresh_until_unix", `Float 2.0)
+    ; ("keeper_name", `String "operator-judge")
+    ; ("model_name", `Null)
+    ; ("runtime_name", `Null)
+    ; ("evidence_refs", `List [])
+    ; ("recommended_action", `Null)
+    ; ("supersedes", `List [])
+    ; ("fallback_used", `Bool false)
+    ; ("disagreement_with_truth", `Bool false)
+    ]
+  in
+  Alcotest.(check bool) "a complete record reads" true
+    (Result.is_ok (Operator_judgment.of_yojson (`Assoc complete)));
+  Alcotest.(check (result reject string))
+    "missing surface is rejected"
+    (Error "missing surface")
+    (Operator_judgment.of_yojson (`Assoc (List.remove_assoc "surface" complete)));
+  Alcotest.(check (result reject string))
+    "a non-string evidence ref is rejected"
+    (Error "invalid evidence_refs")
+    (Operator_judgment.of_yojson
+       (`Assoc
+         (("evidence_refs", `List [ `Int 1 ])
+          :: List.remove_assoc "evidence_refs" complete)))
+
 (* [confidence] used to default to 0.5 when omitted and was clamped into range
    on the way to disk. Both spellings put a number the judge never stated into
    the operator digest, next to ["authoritative": true]. No code compares the
@@ -377,6 +416,8 @@ let tests =
       test_operator_judgment_rejects_retired_target_type_aliases;
     Alcotest.test_case "requires numeric timestamps" `Quick
       test_operator_judgment_requires_numeric_timestamps;
+    Alcotest.test_case "requires every written member" `Quick
+      test_operator_judgment_requires_every_written_member;
     Alcotest.test_case "requires a stated confidence" `Quick
       test_operator_judgment_requires_stated_confidence;
   ]

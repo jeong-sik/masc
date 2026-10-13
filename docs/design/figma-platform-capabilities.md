@@ -209,6 +209,12 @@ approval. Version history is read separately from the Plugin method that creates
 a named checkpoint. See [comments][comments], [versions][versions], and
 [`saveVersionHistoryAsync`][save-version].
 
+The version-save method may return `null`, and Figma explicitly does not
+guarantee that immediately preceding Plugin edits are included in the saved
+version. Do not use a fixed delay or a returned version ID as proof of capture
+equality. Read that server version and compare the intended content before
+linking a Plugin result to it. Until then retain the two observations separately.
+
 ## Implementation changes required by this research
 
 1. **Use two explicit sources.** `plugin_live` and `rest_version` observations

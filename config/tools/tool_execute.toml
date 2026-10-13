@@ -10,7 +10,12 @@ request_effect. In auto mode an observation-only run returns its \
 actual exit status and output, including failed writes; auto never authorizes \
 an effect. Use intent=request_effect when the command needs \
 persistent writes or network effects: the configured Gate decides permission \
-before effect execution. A nonzero exit alone is not a permission request."""
+before effect execution. A nonzero exit alone is not a permission request. \
+A completed tool call means the command ran: read ok and status for its result. \
+For checks, prefer argv so the checked program supplies the exit status. \
+Shell pipelines normally report the last stage; use bash with -o pipefail \
+when an earlier stage's failure must survive a pipe to tail or tee. \
+Do not repeat a write just because its output was truncated."""
 additional_properties = false
 
 [[params]]

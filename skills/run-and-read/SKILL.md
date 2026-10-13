@@ -1,6 +1,6 @@
 ---
 name: run-and-read
-description: "Runs one shell command line with `sh -c`, waits up to `timeout_sec` for it to exit, and returns its exit status, stdout and stderr in one call instead of separate keeper_spawn, keeper_spawn_wait and keeper_spawn_read calls. Use for a command that ends on its own but may run past the bound you set. Read the `settle` action first. `exited` means the command ended: its `exit` has kind `exited` with a `code`, or kind `signalled` with the `signal` that ended it. `timed_out` means the command was still running when the bound passed: empty or partial output then is not a failure, and `settle` returns the `handle` so keeper_spawn_wait or keeper_spawn_read can continue it in this turn. The process ends when the turn ends. A server, watcher or TUI never exits, so this call can only time out on it: start it with keeper_spawn and wait with keeper_spawn_wait using until=output_contains and a needle. Execute stops a command at its timeout; use this when the command should keep running past the bound."
+description: "Runs a finite Bash command with pipefail, then returns its exit status, stdout and stderr. Use when the command may outlast one wait but should keep running within this turn. Requires bash in the sandbox. Read settle.exit first: exited with code 0 is shell success; a nonzero code or signal is not. pipefail preserves a failed pipeline stage, so piping a capture command to tail does not hide its failure. timed_out means still running: continue with the returned handle using keeper_spawn_wait/read. Processes end with the turn. Use keeper_spawn directly for a server, watcher or TUI, and wait for its readiness condition; use Execute for a finite command that can finish within its timeout."
 ---
 
 # run-and-read
@@ -16,7 +16,7 @@ frontmatter `description` 도 같은 값으로 맞춘다.
 
 | id | 도구 | 입력 |
 |---|---|---|
-| `start` | `keeper_spawn` | `argv = ["sh", "-c", command]` |
+| `start` | `keeper_spawn` | `argv = ["bash", "-o", "pipefail", "-c", command]` |
 | `settle` | `keeper_spawn_wait` | `handle = start./handle`, `until = "exit"`, `timeout_sec` |
 | `stdout` | `keeper_spawn_read` | `handle = start./handle`, `stream = "stdout"` |
 | `stderr` | `keeper_spawn_read` | `handle = start./handle`, `stream = "stderr"` |
@@ -32,13 +32,13 @@ frontmatter `description` 도 같은 값으로 맞춘다.
 ```toml composition
 [[compositions]]
 name = "run-and-read"
-description = "Runs one shell command line with `sh -c`, waits up to `timeout_sec` for it to exit, and returns its exit status, stdout and stderr in one call instead of separate keeper_spawn, keeper_spawn_wait and keeper_spawn_read calls. Use for a command that ends on its own but may run past the bound you set. Read the `settle` action first. `exited` means the command ended: its `exit` has kind `exited` with a `code`, or kind `signalled` with the `signal` that ended it. `timed_out` means the command was still running when the bound passed: empty or partial output then is not a failure, and `settle` returns the `handle` so keeper_spawn_wait or keeper_spawn_read can continue it in this turn. The process ends when the turn ends. A server, watcher or TUI never exits, so this call can only time out on it: start it with keeper_spawn and wait with keeper_spawn_wait using until=output_contains and a needle. Execute stops a command at its timeout; use this when the command should keep running past the bound."
+description = "Runs a finite Bash command with pipefail, then returns its exit status, stdout and stderr. Use when the command may outlast one wait but should keep running within this turn. Requires bash in the sandbox. Read settle.exit first: exited with code 0 is shell success; a nonzero code or signal is not. pipefail preserves a failed pipeline stage, so piping a capture command to tail does not hide its failure. timed_out means still running: continue with the returned handle using keeper_spawn_wait/read. Processes end with the turn. Use keeper_spawn directly for a server, watcher or TUI, and wait for its readiness condition; use Execute for a finite command that can finish within its timeout."
 execution = "inline"
 
 [[compositions.params]]
 name = "command"
 type = "string"
-description = "One shell command line, passed to sh -c."
+description = "One Bash command line. pipefail preserves nonzero pipeline exits; later semicolon-separated commands can still replace the exit status."
 
 [[compositions.params]]
 name = "timeout_sec"
@@ -56,7 +56,13 @@ name = "argv"
 kind = "array"
 [[compositions.nodes.input.fields.value.items]]
 kind = "literal"
-value = "sh"
+value = "bash"
+[[compositions.nodes.input.fields.value.items]]
+kind = "literal"
+value = "-o"
+[[compositions.nodes.input.fields.value.items]]
+kind = "literal"
+value = "pipefail"
 [[compositions.nodes.input.fields.value.items]]
 kind = "literal"
 value = "-c"

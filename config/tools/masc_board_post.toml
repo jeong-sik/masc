@@ -113,7 +113,7 @@ otherwise human."""
 [[params]]
 name = "ttl_hours"
 type = "integer"
-description = "Time-to-live in hours (default: 168, max: 720)"
+description = "Time-to-live in hours (default: 0, permanent; negative is rejected; no maximum)"
 
 [[params]]
 name = "hearth"

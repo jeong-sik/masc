@@ -176,6 +176,11 @@ let create ~base_dir ?mutex ?retention_days ?max_bytes () =
     last_prune_day = Atomic.make None;
   }
 
+module Store = Dated_jsonl_store
+
+let open_store ?mutex ?retention_days ?max_bytes location =
+  create ~base_dir:(Store.dir location) ?mutex ?retention_days ?max_bytes ()
+
 let base_dir t = t.base_dir
 
 (* ── Directory listing (sorted descending) ────────────── *)

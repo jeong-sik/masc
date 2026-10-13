@@ -73,6 +73,18 @@ val create :
     until the store is at or below the cap, while preserving the current
     day-file. *)
 
+module Store = Dated_jsonl_store
+(** The closed list of stores and where each one lives. *)
+
+val open_store :
+  ?mutex:Eio.Mutex.t ->
+  ?retention_days:int ->
+  ?max_bytes:int ->
+  Store.location ->
+  t
+(** Open the store at a listed location. The optional arguments mean what
+    they mean for {!create}. *)
+
 val base_dir : t -> string
 (** Return the base directory of this store. *)
 

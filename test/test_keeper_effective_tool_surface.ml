@@ -337,10 +337,12 @@ let test_projection_names_equal_turn_surface_authority () =
       profile_reasons;
     (match surface.skill_profiles with
      | [ instruction; composition ] ->
-       check string "instruction activation" "on_demand" instruction.execution;
+       check string "instruction activation" "on_demand"
+         (Keeper_skill_observability.execution_label instruction.surface);
        check (option int) "shared instruction schema is not double-counted" None
          instruction.tool_schema_bytes;
-       check string "composition execution" "async" composition.execution;
+       check string "composition execution" "async"
+         (Keeper_skill_observability.execution_label composition.surface);
        check int "composition nodes" 2 composition.node_count;
        check int "one concurrent batch" 1 composition.batch_count;
        check int "actual parallel width" 2 composition.max_parallelism;

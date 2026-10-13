@@ -687,7 +687,57 @@ export interface KeeperOperationTurnEvent {
 
 type KeeperStreamEventSource =
   | { kind: 'direct' }
-  | { kind: 'operation'; operationId: string; sequence?: number }
+  | { kind: 'operation'; operationId: string; sequence?: number; observationOnly?: true }
+  | { kind: 'autonomous'; turnRef: string; sequence: number; observationOnly?: true }
+
+function isResponseMetadataObservation(event: KeeperChatStreamEvent): boolean {
+  return event.type === 'CUSTOM' && (event.name === 'KEEPER_STREAM_MESSAGE_START'
+    || event.name === 'KEEPER_STREAM_MESSAGE_DELTA' || event.name === 'KEEPER_STREAM_MESSAGE_STOP'
+    || event.name === 'KEEPER_MODEL_CONTENT_ACTIVITY')
+}
+
+function isToolObservation(event: KeeperChatStreamEvent): boolean {
+  switch (event.type) {
+    case 'TOOL_CALL_START':
+    case 'TOOL_CALL_ARGS':
+    case 'TOOL_CALL_END': return true
+    case 'CUSTOM': return event.name === 'KEEPER_TOOL_RESULT_READY'
+    default: return false
+  }
+}
+
+/** A recovered autonomous saying is buffered, not appended as body text: a
+ * notification carries no content, so unowned speech must stay observable as a
+ * progress step until a producer boundary flushes it. */
+function flushProducerSaying(keeperName: string, entryId: string, observationOnly: boolean): void {
+  updateThreadEntry(keeperName, entryId, entry => {
+    const pending = entry.producerSayingReplay
+    if (!pending) return entry
+    return { ...entry, producerSayingReplay: undefined,
+      ...(pending.text ? { traceSteps: [...(entry.traceSteps ?? []), {
+        kind: 'progress' as const, text: pending.text,
+        ...(pending.timestamp === undefined ? {} : { ts: new Date(pending.timestamp * 1000).toISOString() }),
+      }] } : {}),
+      ...(observationOnly ? {} : { text: '', rawText: '', blocks: [], replyTextProjection: undefined, replyBlockSource: undefined }),
+    }
+  })
+}
+
+function recordProducerSaying(keeperName: string, entryId: string,
+  event: Extract<KeeperChatStreamEvent, { type: 'TEXT_MESSAGE_CONTENT' }>, sequence: number, observationOnly: boolean): void {
+  if (typeof event.delta !== 'string' || event.delta.length === 0) return
+  const owner = event.textResponse ? Object.freeze({ ...event.textResponse }) : null
+  const scope = event.textStreamScope ?? null
+  const before = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === entryId)
+  const pending = before?.producerSayingReplay
+  if (pending && (!sameKeeperResponseOwner(pending.owner ?? undefined, owner ?? undefined) || pending.scope !== scope)) {
+    flushProducerSaying(keeperName, entryId, observationOnly)
+  }
+  updateThreadEntry(keeperName, entryId, entry => ({ ...entry, producerTraceBoundary: sequence,
+    producerSayingReplay: Object.freeze({ text: (entry.producerSayingReplay?.text ?? '') + event.delta,
+      timestamp: entry.producerSayingReplay?.timestamp ?? event.timestamp, owner, scope }),
+  }))
+}
 
 /** Apply a server-pushed operation event only to the assistant bubble carrying
  * the exact operation id. Another browser can synthesize the bubble and later
@@ -814,6 +864,32 @@ function admitResponseEvent(
   return decision
 }
 
+/** Autonomous ownership is the durable turn reference, never a user request. */
+export function applyKeeperAutonomousTurnEvent(keeperName: string, turnRef: string, sequence: number,
+  event: KeeperChatStreamEvent): string | null {
+  const entries = keeperThreads.value[keeperName] ?? []
+  const existing = entries.find(entry => entry.source === 'autonomous_turn' && entry.turnRef === turnRef)
+  const entryId = existing?.id ?? `autonomous-${turnRef}`
+  const settled = existing !== undefined && existing.delivery !== 'sending' && existing.delivery !== 'streaming'
+  const observationOnly = settled && (isToolObservation(event) || isResponseMetadataObservation(event)
+    || event.type === 'TEXT_MESSAGE_CONTENT' || event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR' || event.type === 'CUSTOM'
+    && (event.name === 'KEEPER_THINKING_DELTA' || event.name === 'KEEPER_STREAM_PROTOCOL_ERROR'))
+  if (settled && !observationOnly) return null
+  if (!existing) appendThreadEntry(keeperName, {
+    id: entryId, role: 'assistant', source: 'autonomous_turn', label: keeperName,
+    turnRef, text: '', rawText: null, deliveryProvenance: null, timestamp: event.timestamp === undefined ? null : new Date(event.timestamp * 1000).toISOString(),
+    delivery: 'sending', streamState: 'opening', details: null,
+    streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'keeper_turn_stream_event' }),
+  })
+  const error = applyKeeperStreamEvent(keeperName, entryId, event,
+    { kind: 'autonomous', turnRef, sequence, ...(observationOnly ? { observationOnly: true as const } : {}) })
+  if (error && observationOnly) recordStreamProtocolError(keeperName, entryId, error)
+  else if (error) finalizeAssistantEntry(keeperName, entryId, {
+    delivery: 'error', streamState: null, error, timestamp: new Date().toISOString(),
+  })
+  return error
+}
+
 export function applyKeeperStreamEvent(
   keeperName: string,
   assistantEntryId: string,
@@ -825,7 +901,7 @@ export function applyKeeperStreamEvent(
   const frameKey = streamEntryKey(keeperName, assistantEntryId)
   if (applyingStreamFrames.has(frameKey)) return 'Reentrant Keeper stream frame'
   const beforeSequence = existing.responseState ?? initialKeeperResponseState
-  const sequenced = acknowledgeKeeperResponseSequence(beforeSequence, source.kind === 'operation' ? source.sequence : undefined)
+  const sequenced = acknowledgeKeeperResponseSequence(beforeSequence, source.kind !== 'direct' ? source.sequence : undefined)
   if (!sequenced) return null
   if (sequenced !== beforeSequence) updateThreadEntry(keeperName, assistantEntryId, entry => ({
     ...entry, responseState: sequenced,
@@ -904,6 +980,22 @@ export function applyKeeperStreamEvent(
       return null
     }
     case 'TEXT_MESSAGE_CONTENT': {
+      if (source.kind === 'operation' && source.observationOnly) {
+        const response = admitResponseEvent(keeperName, assistantEntryId, {
+          kind: 'observe', owner: event.textResponse ?? null, scope: event.textStreamScope ?? null, source: 'body',
+        })
+        if (!response.accepted || source.sequence === undefined) return null
+        recordProducerSaying(keeperName, assistantEntryId, event, source.sequence, true)
+        return null
+      }
+      if (source.kind === 'autonomous' && source.observationOnly) {
+        // Canonical history may arrive before journal replay. An observed
+        // terminal journal boundary, however, closes saying for this turn.
+        const response = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.responseState
+        if (response && response.kind === 'known' && response.phase === 'terminal') return null
+        recordProducerSaying(keeperName, assistantEntryId, event, source.sequence, true)
+        return null
+      }
       const streamState = textMessageStreamState(keeperName, assistantEntryId)
       const response = admitResponseEvent(keeperName, assistantEntryId, {
         kind: 'observe', owner: null, scope: event.textStreamScope ?? null, source: 'body',
@@ -930,6 +1022,7 @@ export function applyKeeperStreamEvent(
       } else if (typeof event.textStreamScope === 'number') {
         observeKeeperTextScope(streamState.ownership, event.textStreamScope)
       }
+      if (source.kind === 'autonomous') recordProducerSaying(keeperName, assistantEntryId, event, source.sequence, false)
       applyTextDelta(event.delta, response.authoritative)
       return null
     }
@@ -955,6 +1048,13 @@ export function applyKeeperStreamEvent(
         event.toolStreamScope,
         event.toolCallBlockIndex,
       )
+      // A TOOL_CALL_START is a producer boundary: buffered intermediate speech
+      // must flush here even when canonical history already supplied the tool
+      // row and this occurrence turns out idempotent below.
+      if (source.kind === 'autonomous' || source.kind === 'operation' && source.observationOnly) {
+        flushProducerSaying(keeperName, assistantEntryId, source.observationOnly === true)
+        if (source.sequence !== undefined) updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry, producerTraceBoundary: source.sequence }))
+      }
       if (!toolName) {
         recordStreamProtocolError(
           keeperName,
@@ -964,9 +1064,11 @@ export function applyKeeperStreamEvent(
         )
         return null
       }
-      promoteAssistantTextToProgress(keeperName, assistantEntryId, {
-        agentCoreBlockIndex: takeAgentCoreTextBlockIndex(keeperName, assistantEntryId),
-      })
+      if (!(source.kind !== 'direct' && source.observationOnly)) {
+        promoteAssistantTextToProgress(keeperName, assistantEntryId, {
+          agentCoreBlockIndex: takeAgentCoreTextBlockIndex(keeperName, assistantEntryId),
+        })
+      }
       const assistantEntry = (keeperThreads.value[keeperName] ?? [])
         .find(entry => entry.id === assistantEntryId)
       const existingOccurrence = (keeperThreads.value[keeperName] ?? [])
@@ -1378,6 +1480,51 @@ export function applyKeeperStreamEvent(
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         return null
       }
+      if (event.name === 'KEEPER_THINKING_DELTA' && source.kind === 'autonomous') {
+        const entry = (keeperThreads.value[keeperName] ?? []).find(e => e.id === assistantEntryId)
+        const current = entry?.responseState
+        if (source.observationOnly && current?.kind === 'known' && current.phase === 'terminal') return null
+        const value = isRecord(event.value) ? event.value : null
+        const rawOwner = value && isRecord(value.response) ? value.response : null
+        const ownerRaw: KeeperResponseOwner | null = rawOwner
+          && typeof rawOwner.content_generation === 'number' && typeof rawOwner.stream_scope === 'number'
+          ? { content_generation: rawOwner.content_generation, stream_scope: rawOwner.stream_scope }
+          : null
+        const response = source.observationOnly ? null : admitResponseEvent(keeperName, assistantEntryId, {
+          kind: 'observe', owner: ownerRaw, scope: null, source: 'body',
+        })
+        if (response && !response.accepted) return null
+        const delta = value && typeof value.delta === 'string' ? value.delta : undefined
+        if (!delta || delta.length === 0) return null
+        const indexValue = (value ? asNumber(value.index) : undefined) ?? 0
+        const boundaryDecision = response ?? reduceKeeperResponse(current ?? initialKeeperResponseState, {
+          kind: 'observe', owner: ownerRaw, scope: null, source: 'body',
+        })
+        const pending = entry?.producerSayingReplay
+        const unownedBoundary = pending?.owner === null && ownerRaw === null
+          && (current === undefined || current.kind === 'known' && current.floor === null && current.current === null)
+        if (boundaryDecision.authoritative || source.observationOnly && current?.kind !== 'unavailable'
+          && pending?.owner != null && sameKeeperResponseOwner(pending.owner, ownerRaw ?? undefined) || unownedBoundary) {
+          flushProducerSaying(keeperName, assistantEntryId, source.observationOnly === true)
+        }
+        const owner = ownerRaw ? Object.freeze({ ...ownerRaw }) : null
+        const before = (keeperThreads.value[keeperName] ?? []).find(e => e.id === assistantEntryId)
+        if (!before) return null
+        const slots = before.autonomousThinkingReplay ?? []
+        const boundary = before.producerTraceBoundary ?? null
+        const same = (slot: NonNullable<typeof slots[number]>) => slot.index === indexValue && slot.boundary === boundary
+          && sameKeeperResponseOwner(slot.owner ?? undefined, owner ?? undefined)
+        const previous = slots.find(same)
+        const observed = Object.freeze({ boundary, index: indexValue, owner, text: (previous?.text ?? '') + delta })
+        setAssistantThinkingSnapshot(keeperName, assistantEntryId, observed.text,
+          { agentCoreBlockIndex: indexValue, responseOwner: owner ?? undefined })
+        updateThreadEntry(keeperName, assistantEntryId, e => ({ ...e,
+          ...(source.observationOnly || response && !response.authoritative
+            ? { delivery: before.delivery, streamState: before.streamState } : {}),
+          autonomousThinkingReplay: Object.freeze([...slots.filter(slot => !same(slot)), observed]),
+        }))
+        return null
+      }
       if (event.name === 'KEEPER_THINKING_DELTA') {
         const response = admitResponseEvent(keeperName, assistantEntryId, {
           kind: 'observe', source: 'body', scope: null, owner: null,
@@ -1550,6 +1697,14 @@ export function applyKeeperStreamEvent(
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
       clearTextMessageStreamState(keeperName, assistantEntryId)
       clearQuarantinedToolOccurrences(keeperName, assistantEntryId)
+      if (source.kind === 'autonomous') {
+        updateThreadEntry(keeperName, assistantEntryId, entry => entry.source === 'autonomous_turn' && entry.turnRef === source.turnRef
+          ? { ...entry, delivery: source.observationOnly ? entry.delivery : entry.delivery === 'no_reply' ? 'no_reply' : 'delivered',
+            producerSayingReplay: undefined, streamState: null, error: null,
+            streamContract: keeperStreamContract('sse_event', 'backend_terminal_event', { eventName: 'RUN_FINISHED' }) }
+          : entry)
+        return null
+      }
       if (source.kind !== 'operation') return null
       updateThreadEntry(keeperName, assistantEntryId, entry => {
         if (!isOperationDeliveryProvenance(
@@ -1579,6 +1734,7 @@ export function applyKeeperStreamEvent(
       })
       return null
     case 'RUN_ERROR':
+      if (source.kind !== 'direct') updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry, producerSayingReplay: undefined }))
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       admitResponseEvent(keeperName, assistantEntryId, { kind: 'terminal' })
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)

@@ -1069,6 +1069,20 @@ export interface KeeperConversationEntry {
   streamState?: KeeperConversationStreamState
   runtimeAttempt?: Readonly<{ runtimeId: string; index: number }>
   responseState?: KeeperResponseState
+  /** Accumulated historical speech from this exact autonomous journal replay:
+   * a notification carries no content, so recovered unowned saying must stay
+   * observable as a progress step without claiming response ownership. */
+  producerSayingReplay?: Readonly<{ text: string; timestamp: number | undefined; owner: KeeperResponseOwner | null; scope: number | null }>
+  producerTraceBoundary?: number
+  /** Interleaved reasoning snapshots keyed by producer boundary and response
+   * owner, so a later page never overwrites an earlier one. */
+  autonomousThinkingReplay?: readonly Readonly<{ boundary: number | null; index: number; owner: KeeperResponseOwner | null; text: string }>[]
+  /** Transport recovery failure is distinct from provider response failure. */
+  autonomousJournalRecovery?: Readonly<{ kind: 'unavailable'; detail: string }> | null
+  /** Exact range created from reply text by this client, never inferred from block tags. */
+  replyTextProjection?: Readonly<{ offset: number; length: number }>
+  /** Supplied canonical history blocks represent the complete committed body. */
+  replyBlockSource?: 'canonical_body'
   streamContract?: KeeperConversationStreamContract | null
   attachments?: KeeperConversationAttachment[]
   /** Exact ordered multimodal input sent to the Keeper. Kept on optimistic and

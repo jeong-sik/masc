@@ -75,7 +75,7 @@ The structured plan request uses the same declarations:
 }
 ```
 
-This documents the request codec; it does not claim that a transient prepare/run
-public tool is already connected. That remaining work and composition concurrency,
+The [transient prepare/run tools](keeper-transient-compositions.md) use this
+request codec. Composition concurrency,
 async completion delivery, nested references and effectful jobs are tracked in
 [issue #42799](https://github.com/jeong-sik/masc/issues/42799).

@@ -841,11 +841,85 @@ let test_export_contract_survives_public_authoring_and_binding () =
   | Error _ | Ok _ -> fail "invalid export survived public plan admission"
 ;;
 
+module Draft = Masc.Keeper_composition_draft
+
+let draft_surface ?(tool_deny = []) () =
+  let snapshot = Skill_catalog_snapshot.config_unreadable ~detail:"draft test has no shared Skill source" in
+  Masc.Keeper_capability_surface.create ~tool_deny
+    ~sandbox_profile:Masc.Keeper_types_profile.Docker ~skill_names:None
+    ~global_skill_catalog:Masc.Keeper_skill_catalog.empty
+    ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot snapshot) ~task_skills:[]
+;;
+
+let with_draft_base f =
+  let base_path = Filename.temp_file "masc-composition-draft-" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  let rec remove path =
+    if Sys.is_directory path then (
+      Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path)
+    else Sys.remove path in
+  Fun.protect ~finally:(fun () -> remove base_path) (fun () -> f base_path)
+;;
+
+let draft_request = `Assoc
+  [ "nodes", `List [ `Assoc [ "id", `String "lane"; "tool", `String "keeper_lane_status" ] ]
+  ; "exports", `List [ `Assoc [ "name", `String "profile"; "node", `String "lane"; "pointer", `String "/profile" ] ] ]
+;;
+
+let test_draft_prepare_and_exact_run_binding () =
+  Eio_main.run @@ fun _env ->
+  with_draft_base @@ fun base_path ->
+  let capability_surface = draft_surface () in
+  let draft = match Draft.prepare ~base_path ~capability_surface ~keeper_name:"fixture"
+      ~execution:Catalog.Async draft_request with
+    | Ok draft -> draft | Error error -> fail (Yojson.Safe.to_string (Draft.error_to_json error)) in
+  let reference = Draft.reference draft in
+  let loaded = match Draft.load ~base_path ~capability_surface ~keeper_name:"fixture" ~sha256:reference.sha256 with
+    | Ok draft -> draft | Error error -> fail (Yojson.Safe.to_string (Draft.error_to_json error)) in
+  check bool "preview mode is execution mode" true (Draft.execution loaded = Catalog.Async);
+  check int "exact exports retained" 1 (List.length (Plan.exports (Draft.plan loaded)));
+  (match Draft.load ~base_path ~capability_surface ~keeper_name:"another" ~sha256:reference.sha256 with
+   | Error Draft.Different_keeper -> () | Error _ | Ok _ -> fail "draft crossed Keeper ownership");
+  let changed = draft_surface ~tool_deny:[ "keeper_tasks_list" ] () in
+  (match Draft.load ~base_path ~capability_surface:changed ~keeper_name:"fixture" ~sha256:reference.sha256 with
+   | Error Draft.Capability_changed -> () | Error _ | Ok _ -> fail "draft was silently rebound to a changed surface");
+  let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:"draft-run-fixture"
+      ~turn:7 ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1; execution_mode = Agent_core.Tool_contract.Serial }
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+  let run = match Draft.record_invocation ~base_path ~composition_run_id:(Plan.Composition_run_id.fresh ()) ~invocation loaded with
+    | Ok reference -> reference | Error error -> fail (Yojson.Safe.to_string (Draft.error_to_json error)) in
+  match Masc.Tool_blob_store.fetch (Masc.Tool_blob_store.create ~base_path) ~sha256:run.sha256 with
+  | Ok (Some raw) ->
+    check string "source invocation durably bound before execution" "draft-run-fixture"
+      Yojson.Safe.Util.(Yojson.Safe.from_string raw |> member "tool_use_id" |> to_string)
+  | Ok None | Error _ -> fail "pre-dispatch run binding is not durable"
+;;
+
+let test_draft_rejects_effects_and_bad_fixed_inputs () =
+  Eio_main.run @@ fun _env ->
+  with_draft_base @@ fun base_path ->
+  let capability_surface = draft_surface () in
+  let prepare json = Draft.prepare ~base_path ~capability_surface ~keeper_name:"fixture" ~execution:Catalog.Inline json in
+  let write = `Assoc [ "nodes", `List [ `Assoc [ "id", `String "write"; "tool", `String "Write" ] ] ] in
+  (match prepare write with
+   | Error (Draft.Unsupported_node { tool_name = "Write"; _ }) -> ()
+   | Error _ | Ok _ -> fail "transient draft admitted an effectful node");
+  let invalid_read = `Assoc [ "nodes", `List [ `Assoc [ "id", `String "read"; "tool", `String "Read"
+      ; "input", `Assoc [ "kind", `String "literal"; "value", `Assoc [ "file_path", `Int 3 ] ] ] ] ] in
+  match prepare invalid_read with
+  | Error (Draft.Inputs_rejected _) -> ()
+  | Error _ | Ok _ -> fail "invalid fixed input survived prepare"
+;;
+
 let () =
   run
     "keeper_tool_composition_catalog"
     [ ( "catalog"
-      , [ test_case "export contract survives binding and durable encoding" `Quick test_export_contract_survives_public_authoring_and_binding
+      , [ test_case "draft prepare and exact run binding" `Quick test_draft_prepare_and_exact_run_binding
+        ; test_case "draft rejects effects and bad fixed inputs" `Quick test_draft_rejects_effects_and_bad_fixed_inputs
+        ; test_case "export contract survives binding and durable encoding" `Quick test_export_contract_survives_public_authoring_and_binding
         ; test_case
             "builds executable typed plan"
             `Quick

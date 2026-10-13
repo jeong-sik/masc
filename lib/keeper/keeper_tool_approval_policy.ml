@@ -158,7 +158,11 @@ and node_asks_for_approval ~composition_plan_index node =
    an arm the other does not have, and the gate then passes while the tool
    still asks with a reason nobody can act on. *)
 and undescribed_kind ~identity_tool_index ?composition_plan_index tool_name =
-  if String.equal tool_name Keeper_tool_composition_catalog.status_tool_name
+  if String.equal tool_name Keeper_tool_composition_catalog.prepare_tool_name
+  then Control (Run { because = "validates and stores a read-only plan without executing nodes" })
+  else if String.equal tool_name Keeper_tool_composition_catalog.run_tool_name
+  then Control (Run { because = "executes only the prepared Keeper-bound read-only plan; leaf permissions still apply" })
+  else if String.equal tool_name Keeper_tool_composition_catalog.status_tool_name
   then Control (Run { because = "reads a composition request this keeper made" })
   else if String.equal tool_name Keeper_tool_composition_catalog.cancel_tool_name
   then Control (Run { because = "cancels a request inside masc" })

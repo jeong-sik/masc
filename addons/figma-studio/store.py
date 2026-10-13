@@ -25,6 +25,12 @@ class State(StrEnum):
     UNKNOWN = "outcome_unknown"
 
 
+class Access(StrEnum):
+    OWNER = "owner"
+    RELAY = "relay"
+    SNAPSHOT = "snapshot"
+
+
 class Refused(ValueError):
     pass
 
@@ -127,23 +133,21 @@ class Store:
                     )
             self.binding = binding
 
-    def authorize(self, caller: Json, *, relay: bool = False) -> None:
+    def authorize(self, caller: Json, *, access: Access = Access.OWNER) -> None:
         if self.binding is None:
             raise Refused("Waiting for host lane_observe binding")
-        allowed = (
-            [{"kind": "agent", "name": self.binding["relay_agent"]}]
-            if relay
-            else [
-                {"kind": "keeper", "name": self.binding["keeper"]},
-                {"kind": "operator"},
-            ]
-        )
+        relay = [{"kind": "agent", "name": self.binding["relay_agent"]}]
+        owner = [
+            {"kind": "keeper", "name": self.binding["keeper"]},
+            {"kind": "operator"},
+        ]
+        allowed = {
+            Access.OWNER: owner,
+            Access.RELAY: relay,
+            Access.SNAPSHOT: owner + relay,
+        }[access]
         if caller not in allowed:
-            raise Refused(
-                "Caller is not the configured relay"
-                if relay
-                else "Caller is not the configured Keeper/operator"
-            )
+            raise Refused(f"Caller does not have Studio {access.value} access")
 
     def session(self, identity: str) -> Json:
         row = self.db.execute(

@@ -23,7 +23,12 @@ The package exports `masc_figma_status`, `masc_figma_bind`, `masc_figma_submit`,
 `masc_figma_rest_capture`, `masc_figma_rest_operation`, and `masc_figma_relay`.
 Their private `lane_call` entrypoint receives the trusted
 host caller. Direct raw export calls are refused. Discovery can be shared;
-call authorization is enforced inside the package. Only one visible Studio
+call authorization is enforced inside the package. The configured relay may
+also read `masc_figma_snapshot` to download an existing snapshot; it cannot
+bind sessions, submit edits, request REST captures or validate snapshots.
+An HTTP Admin credential is still an authenticated agent, not an operator
+principal. Merely naming its configuration "owner" does not grant owner access.
+Only one visible Studio
 installation can currently export these names.
 
 The first host observation configures the binding. Tools are discoverable before

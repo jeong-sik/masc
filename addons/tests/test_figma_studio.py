@@ -346,6 +346,45 @@ class StudioTests(unittest.TestCase):
         self.assertEqual(len(observation["artifacts"]), 3)
         self.assertTrue(observation["rows"][0]["fields"]["latest_validation"])
 
+    def test_relay_can_download_snapshot_without_owner_write_authority(self):
+        identity = self.capture()["result"]["snapshot_id"]
+        expected = self.call("masc_figma_snapshot", {"snapshot_id": identity})
+        self.assertEqual(
+            self.call("masc_figma_snapshot", {"snapshot_id": identity}, RELAY),
+            expected,
+        )
+        for caller in (
+            {"kind": "agent", "name": "unrelated-admin"},
+            {"kind": "agent", "name": "leader"},
+        ):
+            with self.assertRaises(Refused):
+                self.call("masc_figma_snapshot", {"snapshot_id": identity}, caller)
+        for tool, args in (
+            ("masc_figma_bind", {"session_id": "plugin-1"}),
+            ("masc_figma_validate", {"snapshot_id": identity, "checks": []}),
+            (
+                "masc_figma_submit",
+                {
+                    "operation_id": "relay-edit",
+                    "session_id": "plugin-1",
+                    "root_id": "frame:1",
+                    "kind": "apply",
+                    "snapshot_id": identity,
+                    "ops": [],
+                },
+            ),
+            (
+                "masc_figma_rest_capture",
+                {
+                    "operation_id": "relay-rest",
+                    "file_key": "file",
+                    "root_id": "frame:1",
+                },
+            ),
+        ):
+            with self.assertRaises(Refused):
+                self.call(tool, args, RELAY)
+
     def test_roles_and_explicit_document_binding(self):
         for actor in (
             {"kind": "anonymous"},

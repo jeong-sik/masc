@@ -9,7 +9,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from store import Json, Refused, Store, encode, fields, text
+from store import Access, Json, Refused, Store, encode, fields, text
 from rest_queue import RestQueue
 from verify import validate
 
@@ -205,7 +205,11 @@ class Worker:
         fields(arguments, {"tool", "arguments", "caller"})
         tool = text(arguments["tool"])
         args = fields(arguments["arguments"], set(arguments["arguments"]))
-        self.store.authorize(arguments["caller"], relay=tool == "masc_figma_relay")
+        access = {
+            "masc_figma_relay": Access.RELAY,
+            "masc_figma_snapshot": Access.SNAPSHOT,
+        }.get(tool, Access.OWNER)
+        self.store.authorize(arguments["caller"], access=access)
         if tool == "masc_figma_relay":
             if args == {"kind": "status"}:
                 return result(

@@ -776,6 +776,42 @@ let kind_of_masc_internal_error error =
   wire_kind_to_string (wire_kind_of_masc_internal_error error)
 ;;
 
+(* What failed, without the envelope. A masc cause with no summary of its own
+   falls back to its wire kind: short and typed, never a JSON document. *)
+let fenced_cause_label = function
+  | Fenced_core core -> Keeper_request_failure_core.summary core
+  | Fenced_masc masc ->
+    (match summary_of_masc_internal_error masc with
+     | Some summary -> summary
+     | None -> kind_of_masc_internal_error masc)
+;;
+
+let fenced_attempt_summary = function
+  | Provider_attempt_effect_fenced { effect_disposition; cause; _ }
+  | Tool_correction_lost { effect_disposition; cause; _ } ->
+    (* The short, fixed-size disposition leads and the variable-length cause
+       follows, so a surface that clips the line loses the tail of the cause
+       rather than the disposition. *)
+    Some
+      (Printf.sprintf
+         "effect_disposition=%s; %s"
+         (Keeper_provider_attempt_effect_core.to_string effect_disposition)
+         (fenced_cause_label cause))
+  | Official_client_recovery_required _
+  | Runtime_exhausted _
+  | Resumable_cli_session _
+  | Accept_rejected _
+  | Internal_unhandled_exception _
+  | Internal_bridge_exception _
+  | Internal_contract_rejected _
+  | Incomplete_tool_transcript _
+  | Terminal_effect_failed _
+  | Host_stopped_turn _
+  | Runtime_connection_closed _
+  | Receipt_persistence_failed _
+  | Gate_replay_repair_required _ -> None
+;;
+
 let runtime_id_of_masc_internal_error = function
   | Official_client_recovery_required { runtime_id; _ }
   | Runtime_exhausted { runtime_id; _ }

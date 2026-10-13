@@ -15,10 +15,10 @@ one of these ten rounds.
 | 3 | Streamed response provenance and checkpoint collection | Source audit and independent review PASS; no defect confirmed |
 | 4 | Hook or persistence failure after provider response | Bounded source audit and independent review PASS |
 | 5 | Nested tool-result content and reasoning redaction | Repaired in #42725; independent source and focused CI PASS |
-| 6 | Checkpoint encoding, restore and metadata validation | Checkpoint audit PASS; cache provenance repaired in #42728, first execution found a test expectation defect, corrected run pending |
+| 6 | Checkpoint encoding, restore and metadata validation | Checkpoint audit PASS; cache provenance repaired in #42728; source review and corrected focused CI PASS |
 | 7 | Provider/endpoint/model rotation and replay eligibility | Rules reviewed; catalog-source drift addressed with round 9; account identity limit remains |
 | 8 | Multimodal tool-result projections and user attribution | Bounded source audit and independent review PASS |
-| 9 | Count/preview versus frozen generation input | #42727 source and focused CI PASS; #42728 HTTP and injected-transport cases PASS, corrected cache-codec run pending |
+| 9 | Count/preview versus frozen generation input | #42727 and #42728 source review and focused CI PASS |
 | 10 | Cancellation, resumed state and stale checkpoint writes | Bounded source audit and independent review PASS |
 
 ## Round 1: malformed context cannot become new user evidence
@@ -38,7 +38,7 @@ text from an untagged real user unchanged. The existing behavioral scenario now
 covers all four tagged classifications through prompt variables, rendered
 Librarian request and absorption observations. No canonical message is changed.
 
-Execution: parser and focused behavior results will be recorded separately.
+Parser validation passed; focused behavior execution is recorded below.
 Independent source review: `d16a5a884392897f47d3edfe7697671711e64dc7` PASS.
 Focused CI: https://github.com/jeong-sik/masc/actions/runs/38358072279
 completed successfully at the same head.
@@ -85,9 +85,10 @@ missing source and persists present source; `test_stream_accumulator` checks
 thinking signatures; `test_complete_http` exercises real loopback SSE with opaque
 Responses reasoning and Anthropic thinking; `test_pipeline` covers sync-to-stream
 checkpoint continuation. The latter was included in the completed successful
-seven-suite run 38357088798 at its recorded head. The HTTP/SSE suites have not
-been newly executed for this audit. This supports the inspected source contract,
-not a live-provider or all-runtime streaming certification.
+seven-suite run 38357088798 at its recorded head. The HTTP/SSE suite later
+passed in the cache follow-up run 38360117913 at
+`ec46831e2706701fe6a61c132884185beb4daa58`. This supports the inspected
+source contract, not a live-provider or all-runtime streaming certification.
 
 Independent review of these bounded source claims: `diagnosis_review`,
 `1586e9677af96915a2129de15112ec7631fbfb6c`, PASS. No P0–P2 or
@@ -251,7 +252,14 @@ decoder includes both Text and Thinking data from nested tool blocks. The
 fixture now expects the two-line summary `preview` followed by `tool data`
 and asserts every nested block,
 including its signature, equals the original. No production decoder change
-was needed. Corrected-head execution remains pending.
+was needed. Corrected head `ec46831e2706701fe6a61c132884185beb4daa58`
+received independent source PASS (full diff SHA-256 against the base above:
+`7b96e64991d06ea019f8d16e3d46c27ec4b570c27d4706ebf5b27d83c01f9e74`).
+All three targeted suites passed at that head (88 HTTP, 10 injected-transport
+and 39 cache cases; 137 total) in
+https://github.com/jeong-sik/masc/actions/runs/38360117913 .
+Subsequent completion-record edits change documentation only and do not
+relabel this execution as a run on a later commit.
 Cache decoding uses the existing content-block decoder contract; this is not a
 claim that every form of arbitrary stored corruption has been tested.
 
@@ -283,3 +291,20 @@ failure; its new context-exclusion case passed. Separate test-only PR #42723
 repairs that expectation; its targeted suite passed at
 `75ee4ca9e8f180aa58abfcc6476890e5c21fafb0` in run 38358719791. This does not
 retroactively turn the failed #42718 run into a suite success.
+
+The ten-round audit is complete as a set of reviewed repairs and bounded
+verification, rather than a release or runtime certification. The six additional
+findings are covered by #42720, #42722, #42725, #42727 and #42728, with both cache
+findings in #42728. Every repair has independent source review and focused
+behavioral execution. The #42727 matrix covers all six provider kinds in sync
+and stream modes, including present/absent catalog entries and explicit
+overrides; it uses injected transports, not paid live-provider calls.
+
+The PRs remain open with REST `stack: null`; their explicit branch-chain heads
+and bases were checked against the reviewed commits. MASC `code-reviewer` was
+asked to review the changes; a queued request is not formal approval. A final
+head refresh is sent after this documentation-only completion record is
+committed. The read-only runtime health check still reports build
+`d95d23b42b8d169946562957d9b7a363c12673ff`, so none of these branch repairs is
+claimed to be installed. Same-endpoint hidden account changes remain outside
+the source-identity guarantee described in round 7.

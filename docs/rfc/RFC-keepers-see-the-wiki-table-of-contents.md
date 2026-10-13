@@ -1,7 +1,7 @@
 ---
 rfc: "keepers-see-the-wiki-table-of-contents"
 title: "Keeper 턴에 위키 목차를 싣는다 — 위키가 읽히게 하는 첫 단계"
-status: Draft
+status: Accepted
 created: 2026-10-14
 updated: 2026-10-14
 author: claude
@@ -12,7 +12,7 @@ related: ["library-becomes-a-wiki", "shared-memory-appends-a-log-and-keepers-rea
 
 # RFC: Keeper 턴에 위키 목차를 싣는다
 
-- 상태: 초안.
+- 상태: 받아들임. 운영자가 2026-10-14 §8 의 세 가지를 제안대로 정했다.
 - 운영자 요청 (2026-10-13): 위키와 공유 기억이 어떻게 다른지 묻고, MASC 에 의견을 물어 진행하라고 했다.
 - Keeper 의견: Board `p-d4e8d2a653438684096b6c2679a9be8a` (9명, 2026-10-13).
 - 근거: §2 의 숫자는 2026-10-13 라이브 base path 의 Keeper metrics 와 위키 폴더를 읽기만 해서 셌다. §3 은 2026-10-14 `origin/main` `5d142b8fb2` 의 코드다.
@@ -28,7 +28,7 @@ Keeper 는 위키를 거의 읽지 않는다. 턴 안에서 위키가 있다는 
 ## 1. 결정
 
 - D1. 위키 목차를 Keeper 요청의 dynamic context 에 한 단락으로 싣는다. 페이지가 하나도 없으면 단락을 싣지 않는다.
-- D2. 목차는 요청마다 페이지에서 만든다. `index.md` 파일을 읽지 않는다. `masc_wiki_list` 가 쓰는 함수를 그대로 쓴다.
+- D2. 목차는 턴을 시작할 때 페이지에서 만든다. `index.md` 파일을 읽지 않는다. `masc_wiki_list` 가 쓰는 함수를 그대로 쓴다.
 - D3. 단락 끝에 읽는 길을 적는다. 이번 요청에서 `keeper_wiki_read` 를 바로 부를 수 있는지, 찾아야 하는지, 부를 수 없는지에 따라 문장이 다르다. 공유 기억 단락과 같은 판정(`Keeper_request_tool_access.route`)을 쓴다.
 - D4. 1단계에서는 목차 전체를 싣는다. 관련 있는 페이지만 고르지 않는다(§4.3).
 - D5. 배포 전후의 위키 도구 호출 수를 재고, 위키에만 답이 있는 질문을 한 번 던져 본다(§7).
@@ -76,7 +76,7 @@ Keeper 는 위키를 거의 읽지 않는다. 턴 안에서 위키가 있다는 
 
 ### 4.1 단락의 모양
 
-프롬프트 이름 다섯 개를 더한다. 공유 기억 단락의 짝이다.
+프롬프트 이름 여섯 개를 더한다. 공유 기억 단락의 짝이다.
 
 | 이름 | 변수 | 쓰임 |
 |---|---|---|
@@ -85,6 +85,7 @@ Keeper 는 위키를 거의 읽지 않는다. 턴 안에서 위키가 있다는 
 | `keeper.context.wiki.retrieval_discoverable` | 없음 | `keeper_tool_search` 로 찾아야 할 때 |
 | `keeper.context.wiki.retrieval_unavailable` | 없음 | 이번 요청에서 부를 수 없을 때 |
 | `keeper.context.wiki.retrieval_preview` | 없음 | 운영자 미리보기처럼 도구가 정해지지 않았을 때 |
+| `keeper.context.wiki.unavailable` | 없음 | 위키 폴더 목록을 읽지 못했을 때. 읽기 오류 문장은 싣지 않는다 |
 
 본문에 들어갈 내용(문구는 구현 PR 에서 정한다):
 
@@ -96,9 +97,10 @@ Keeper 는 위키를 거의 읽지 않는다. 턴 안에서 위키가 있다는 
 ### 4.2 만드는 자리
 
 - `Keeper_unified_prompt` 에 `format_wiki_observation ?access entries` 를 둔다. `format_workspace_memory_observation` 과 같은 모양이다. 페이지가 없으면 `None` 이다.
-- `entries` 는 `masc_wiki_list` 가 쓰는 것과 같은 함수로 요청마다 페이지에서 만든다. 머리말이 안 읽히는 파일도 그 줄 그대로 싣는다. 깨진 페이지가 있다는 것을 Keeper 도 알게 하려는 것이다.
-- 단락은 dynamic context 의 공유 기억 단락 옆에 둔다. 둘 다 "작업 공간이 아는 것" 이다.
-- 요청마다 페이지 머리말을 읽는 비용이 생긴다. 지금은 페이지 11개다. 줄이는 장치(캐시)는 1단계에 넣지 않는다. 재 보고 필요하면 그때 정한다.
+- `entries` 는 `Tool_wiki.read_index_entries` 가 턴을 시작할 때 페이지에서 만든다. `masc_wiki_list` 가 쓰는 `index_entries` 를 그대로 부르고, 폴더 목록을 못 읽으면 `Error` 를 돌려준다. 공유 기억 관찰과 같은 자리(자율 턴, 직접 대화 턴, dashboard 미리보기)에서 읽는다. 읽는 길은 요청마다 그 요청의 도구 접근으로 고른다.
+- 머리말이 안 읽히는 파일도 그 줄 그대로 싣는다. 깨진 페이지가 있다는 것을 Keeper 도 알게 하려는 것이다.
+- 자율 턴에서는 `Keeper_context_layers` 에 `Wiki` 층을 공유 기억 층 바로 뒤에 둔다. 둘 다 "작업 공간이 아는 것" 이다. 직접 대화 턴에서도 공유 기억 단락 바로 뒤에 붙인다.
+- 턴마다 페이지 머리말을 읽는 비용이 생긴다. 지금은 페이지 11개다. 줄이는 장치(캐시)는 1단계에 넣지 않는다. 재 보고 필요하면 그때 정한다.
 
 ### 4.3 왜 목차 전체인가 (D4)
 
@@ -111,7 +113,7 @@ Keeper 네 명은 지금 작업과 맞는 제목만 싣자고 했다. 이 RFC �
 
 ### 4.4 읽는 길
 
-`keeper_wiki_read` 는 지금 찾아야 보이는 도구다. 목차가 "읽어라" 라고 해도 Keeper 는 `keeper_tool_search` 를 한 번 더 불러야 한다. 이 단계 하나가 읽기를 막는지는 모른다. D3 는 지금 상태를 그대로 정확히 알려 주는 것까지만 한다. `defer_loading` 을 끌지는 Q2 로 둔다.
+`keeper_wiki_read` 는 지금 찾아야 보이는 도구다. 목차가 "읽어라" 라고 해도 Keeper 는 `keeper_tool_search` 를 한 번 더 불러야 한다. 이 단계 하나가 읽기를 막는지는 모른다. D3 는 지금 상태를 그대로 정확히 알려 주는 것까지만 한다. `defer_loading` 은 그대로 두고 §7 의 측정 뒤에 다시 정한다(§8).
 
 ## 5. 다음 단계 (이 RFC 에서 구현하지 않는다)
 
@@ -150,19 +152,19 @@ RFC shared-memory-appends-a-log §8 이 뒤로 미룬 "주제별 페이지" 를 
 
 - 위키 도구 호출 수: 배포 전 사흘(2026-10-14 부터, 위키 도구가 하루 전체 열려 있던 날)과 배포 뒤 사흘을 Keeper metrics `tools_used` 에서 센다. 셀 이름은 `keeper_wiki_read`, `keeper_wiki_search`, `masc_wiki_list`, `masc_wiki_read` 다. 누가 불렀는지도 나눠 센다. 한 Keeper 가 숫자를 끌고 가는지 보려는 것이다.
 - 위키에만 답이 있는 질문: 운영자가 한 Keeper 에게 §2.2 와 같은 종류의 질문을 하고, 답하기 전에 그 페이지를 읽는지 raw trace 로 본다. 한 번이다.
-- 위키 단락의 바이트: prompt metrics 에 남긴다. 상한은 두지 않는다.
+- 위키 단락의 바이트: 자율 턴의 dynamic context 영수증(`masc.dynamic-context-partition.v1`)에 `wiki` 층의 span 으로 남는다. 상한은 두지 않는다.
 
-## 8. 열어 둔 물음
+## 8. 운영자 결정 (2026-10-14)
 
-- **Q1. 목차 전체인가, 관련 있는 것만인가.** Keeper 네 명은 관련 있는 것만을 원했다. 제안은 전체로 시작하고 §7 뒤에 다시 정하는 것이다(§4.3).
-- **Q2. `keeper_wiki_read` 를 찾아야 보이는 도구에서 뺄 것인가.** 빼면 목차를 보고 바로 부를 수 있다. 대가는 도구 정의가 모든 요청에 실리는 것이다. 제안은 1단계에서는 그대로 두고, §7 에서 `keeper_tool_search` 로 위키 도구를 찾은 횟수를 같이 세어 정하는 것이다.
-- **Q3. 목차를 system prompt 쪽에 둘 것인가.** 목차는 페이지가 바뀔 때만 바뀐다. 그래도 공유 기억 단락과 같은 자리(dynamic context)에 두는 것을 제안한다. 둘이 같은 성격의 정보라서 한곳에서 보이는 편이 낫다.
+- **목차 전체를 싣는다.** Keeper 네 명은 관련 있는 것만을 원했다. 관련 페이지 고르기는 §7 의 측정 뒤에 다시 정한다(§4.3, §5.1).
+- **`keeper_wiki_read` 는 찾아야 보이는 도구로 둔다.** 빼면 목차를 보고 바로 부를 수 있지만, 도구 정의가 모든 요청에 실린다. §7 에서 `keeper_tool_search` 로 위키 도구를 찾은 횟수를 같이 세어 다시 정한다.
+- **목차는 dynamic context 에 둔다.** 목차는 페이지가 바뀔 때만 바뀌지만, 공유 기억 단락과 같은 성격의 정보라서 한곳에서 보이게 한다.
 
 ## 9. 구현 순서
 
-PR 하나로 충분하다.
+이 RFC 와 구현을 한 스택으로 올린다.
 
-1. 프롬프트 이름 다섯 개(`config/prompts/keeper.md`, `Prompt_names`), `format_wiki_observation`, dynamic context 에 붙이는 자리, §7 의 단위 테스트.
+1. 프롬프트 이름 여섯 개(`config/prompts/keeper.md`, `Prompt_names`), `format_wiki_observation`, dynamic context 에 붙이는 자리, §7 의 단위 테스트.
 2. 배포 뒤 §7 의 측정을 이 RFC 에 덧붙인다.
 
 ## 10. 확신도

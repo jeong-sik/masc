@@ -422,6 +422,7 @@ module For_testing : sig
     string ->
     Keeper_request_failure.cause option
   val persisted_reply_blocks :
+    reply:string ->
     turn_outcome:Keeper_turn_outcome.t ->
     Keeper_chat_blocks.chat_block list option ->
     Keeper_chat_blocks.chat_block list option

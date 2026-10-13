@@ -738,6 +738,11 @@ let decode_board_post ?(require_body = false) json =
     | Some other -> Some (Post_kind_unknown other)
     | None -> None
   in
+  (* Attachments decode per entry and can never fail the post: a broken
+     entry is carried as its [Error], an unknown kind as [Ak_unknown]
+     (spec decision 5 -- deliberately not the [bp_closed] shape above, where
+     one malformed nested field fails the whole read). *)
+  let bp_attachments = decode_board_attachments json in
   Ok
     {
       bp_id;
@@ -755,6 +760,7 @@ let decode_board_post ?(require_body = false) json =
       bp_hearth;
       bp_kind;
       bp_closed;
+      bp_attachments;
     }
 
 (* The board's own hearth census: name and post count, over the whole board.

@@ -521,8 +521,12 @@ BiDi 길과 두 길 선택을 더한다.
 쌓는다.
 
 1. 웹 검색 명령: #42821. 구현됨.
-2. 카탈로그에 의존성을 더한다(§4.5): `Geckodriver`, `Firefox`, `Searxng`. 감지와
-   동작만 더하고 마법사는 건드리지 않는다. `masc prerequisite-actions` 로 확인한다.
+2. 카탈로그에 의존성을 더한다(§4.5). 감지와 동작만 더하고 마법사는 건드리지 않는다.
+   `masc prerequisite-actions` 로 확인한다. 둘로 나눈다.
+   - 2a. `Geckodriver`, `Firefox`: 명령 한 줄이거나 공식 페이지 열기뿐이라 기존 동작
+     종류(`Run_commands`, `Open_official_installer`)로 된다. 구현은 별도 PR.
+   - 2b. `Searxng`: 설정 파일을 쓰고 컨테이너를 띄워야 한다. 새 동작 종류와 Docker
+     준비 확인이 필요해서 따로 한다.
 3. `Browser_lane_setup` 공통 부분과 `--mode extension`: host 설치를 바이너리로 옮기고
    확장 파일을 내장하고 `install-host.sh` 를 지운다. 부르는 쪽(`install-local-build.sh`,
    launcher 문장, README)도 같이 바꾼다.

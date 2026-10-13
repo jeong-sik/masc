@@ -3248,7 +3248,10 @@ let post_connector_unbind_owned ~(host : string) ~(port : int)
       Masc_tui_connector_unbind.outcome_of_status ~status:status_code
         ~refusal:(refusal ~status_code ~body:response)
 
-(** One [resources/list] over the MCP endpoint, on an open session. *)
+(** One [resources/list] over the MCP endpoint, on an open session. The
+    listing is paged and the entries a reader is likeliest to be missing (the
+    wiki pages) sort at its end, so this follows [nextCursor] to the last page
+    instead of keeping only the first one. *)
 let call_mcp_resources_list ~(host : string) ~(port : int)
     ~(session_id : string) ~(request_id : string) :
     (Masc_tui_mcp.resource list, string) result =
@@ -3258,13 +3261,16 @@ let call_mcp_resources_list ~(host : string) ~(port : int)
       :: ("Mcp-Session-Id", sanitize_header_value session_id)
       :: auth_headers ())
   in
-  let body = Masc_tui_mcp.resources_list_request_body ~request_id in
-  match http_post ~headers ~host ~port ~path:mcp_path ~body with
-  | Error detail -> Error detail
-  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
-    ->
-      Error (named_refusal "resources/list" ~status ~body)
-  | Ok (_, body) -> Masc_tui_mcp.resources_of_body ~request_id body
+  let fetch ~cursor =
+    let body = Masc_tui_mcp.resources_list_request_body ?cursor ~request_id () in
+    match http_post ~headers ~host ~port ~path:mcp_path ~body with
+    | Error detail -> Error detail
+    | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+      ->
+        Error (named_refusal "resources/list" ~status ~body)
+    | Ok (_, body) -> Ok body
+  in
+  Masc_tui_mcp.resources_list_all ~request_id ~fetch ()
 
 (** One [resources/read] over the MCP endpoint, on an open session. *)
 let call_mcp_resources_read ~(host : string) ~(port : int)

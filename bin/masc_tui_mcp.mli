@@ -34,8 +34,9 @@ val task_id_of_add_task : string -> (string, string) result
     which is a JSON object carrying [task_id]. [Error] for any other
     shape, with the text the tool did return. *)
 
-val resources_list_request_body : request_id:string -> string
-(** The [resources/list] request. *)
+val resources_list_request_body : ?cursor:string -> request_id:string -> unit -> string
+(** The [resources/list] request. [cursor] asks for the page that follows the
+    one a previous answer returned. *)
 
 val resources_read_request_body : request_id:string -> uri:string -> string
 (** The [resources/read] request for one resource. *)
@@ -60,8 +61,26 @@ val display_name : resource -> string
 
 val resources_of_body :
   request_id:string -> string -> (resource list, string) result
-(** Read a [resources/list] answer in server order without discarding the
-    fields that explain what each resource contains. *)
+(** Read one [resources/list] answer in server order without discarding the
+    fields that explain what each resource contains. This is the first page
+    only; a caller that can lose the rest must use [resources_page_of_body]
+    or [resources_list_all]. *)
+
+val resources_page_of_body :
+  request_id:string -> string -> (resource list * string option, string) result
+(** One [resources/list] answer as its page and the cursor for the next one,
+    [None] when this was the last page. *)
+
+val resources_list_all :
+  request_id:string ->
+  ?max_pages:int ->
+  fetch:(cursor:string option -> (string, string) result) ->
+  unit ->
+  (resource list, string) result
+(** Every page, in server order, by calling [fetch] once per page until the
+    answer carries no [nextCursor]. A cursor already seen ends the walk, and
+    [max_pages] (64 by default) bounds a server that keeps returning fresh
+    cursors. [Error] is the first [fetch] or parse failure. *)
 
 type resource_content_kind =
   | Resource_text of string

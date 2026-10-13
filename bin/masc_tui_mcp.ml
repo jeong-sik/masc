@@ -131,8 +131,13 @@ let plain_request_body ~request_id ~method_ ~params =
       ; ("params", params)
       ])
 
-let resources_list_request_body ~request_id =
-  plain_request_body ~request_id ~method_:"resources/list" ~params:(`Assoc [])
+let resources_list_request_body ?cursor ~request_id () =
+  let params =
+    match cursor with
+    | None -> `Assoc []
+    | Some cursor -> `Assoc [ ("cursor", `String cursor) ]
+  in
+  plain_request_body ~request_id ~method_:"resources/list" ~params
 
 let resources_read_request_body ~request_id ~uri =
   plain_request_body ~request_id ~method_:"resources/read"
@@ -224,34 +229,71 @@ let result_of_body ~request_id ~label body =
           if candidates = [] then Error (label ^ " answer was not JSON")
           else Error (label ^ " answered a different request id"))
 
-let resources_of_body ~request_id body =
+let resource_of_row row =
+  match row with
+  | `Assoc fields -> (
+      match string_field fields "uri" with
+      | Some uri ->
+          let name =
+            match string_field fields "name" with
+            | Some name when String.trim name <> "" -> name
+            | Some _ | None -> uri
+          in
+          Some
+            { uri
+            ; name
+            ; title = string_field fields "title"
+            ; description = string_field fields "description"
+            ; mime_type = string_field fields "mimeType"
+            ; size = int_field fields "size"
+            }
+      | None -> None)
+  | _ -> None
+
+(* One [resources/list] answer: the page it carries and the cursor that leads
+   to the next one. The server pages this listing, and the entries a reader
+   is likeliest to be missing -- the wiki pages -- sort at its end, so a
+   caller that stops after the first answer loses them whole. *)
+let resources_page_of_body ~request_id body =
   let* result = result_of_body ~request_id ~label:"resources/list" body in
+  let next_cursor =
+    match List.assoc_opt "nextCursor" result with
+    | Some (`String cursor) when String.trim cursor <> "" -> Some cursor
+    | Some _ | None -> None
+  in
   match List.assoc_opt "resources" result with
-  | Some (`List rows) ->
-      Ok
-        (List.filter_map
-           (fun row ->
-             match row with
-             | `Assoc fields -> (
-                 match string_field fields "uri" with
-                 | Some uri ->
-                     let name =
-                       match string_field fields "name" with
-                       | Some name when String.trim name <> "" -> name
-                       | Some _ | None -> uri
-                     in
-                     Some
-                       { uri
-                       ; name
-                       ; title = string_field fields "title"
-                       ; description = string_field fields "description"
-                       ; mime_type = string_field fields "mimeType"
-                       ; size = int_field fields "size"
-                       }
-                 | None -> None)
-             | _ -> None)
-           rows)
+  | Some (`List rows) -> Ok (List.filter_map resource_of_row rows, next_cursor)
   | Some _ | None -> Error "resources/list answered with no resources"
+
+let resources_of_body ~request_id body =
+  let* resources, _ = resources_page_of_body ~request_id body in
+  Ok resources
+
+(* Every page of the listing, in server order. [fetch] answers the raw body of
+   one [resources/list] request for the cursor it is given ([None] for the
+   first page), so the HTTP caller keeps its framing and this stays a pure
+   loop. Two stops keep a misbehaving server from spinning: a cursor seen
+   before ends the walk, and [max_pages] bounds even fresh cursors. *)
+let resources_list_all ~request_id ?(max_pages = 64)
+    ~(fetch : cursor:string option -> (string, string) result) () =
+  let rec loop ~cursor ~seen ~acc ~pages =
+    if pages > max_pages then Ok (List.rev acc)
+    else
+      match fetch ~cursor with
+      | Error detail -> Error detail
+      | Ok body -> (
+          match resources_page_of_body ~request_id body with
+          | Error detail -> Error detail
+          | Ok (resources, next_cursor) -> (
+              let acc = List.rev_append resources acc in
+              match next_cursor with
+              | None -> Ok (List.rev acc)
+              | Some cursor when List.mem cursor seen -> Ok (List.rev acc)
+              | Some cursor ->
+                  loop ~cursor:(Some cursor) ~seen:(cursor :: seen) ~acc
+                    ~pages:(pages + 1)))
+  in
+  loop ~cursor:None ~seen:[] ~acc:[] ~pages:1
 
 let resource_contents_of_body ~request_id body =
   let* result = result_of_body ~request_id ~label:"MCP" body in

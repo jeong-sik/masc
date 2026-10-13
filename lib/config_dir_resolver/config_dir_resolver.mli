@@ -212,9 +212,7 @@ val microvm_shim_dir : base_path:string -> string
 
 val wiki_dir : base_path:string -> string
 (** [<base_path>/.masc/wiki/]. The wiki's pages with its [index.md] and
-    [log.md]. It is state this server writes for its world, so it sits under
-    [.masc/] with the rest and not in the workspace's own [docs/], where it
-    showed up as untracked files of whatever repository the workspace is. *)
+    [log.md]. *)
 
 val tool_events_dir : base_path:string -> string
 (** [<base_path>/.masc/tool-events/]. The dated tool assignment and tool
@@ -225,8 +223,8 @@ val keeper_wake_payload_dir : base_path:string -> string
     of [Dashboard_harness_health]. *)
 
 val verdicts_dir : base_path:string -> string
-(** [<base_path>/.masc/verdicts/]. The dated verdict rows of
-    [Eval_calibration]. *)
+(** [<base_path>/.masc/verdicts/]. The dated verdict and human-label rows
+    of [Eval_calibration]. *)
 
 val event_queue_bulk_backups_dir : base_path:string -> string
 (** [<base_path>/.masc/event-queue-bulk-backups/]. One backup file per

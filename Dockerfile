@@ -65,8 +65,8 @@ RUN chmod +x \
 # Create non-root user for runtime
 RUN groupadd --system appgroup && useradd --system --gid appgroup appuser
 
-# Runtime state lives under MASC_BASE_PATH=/app, all of it in /app/.masc,
-# which must be writable by the non-root runtime user.
+# Runtime state lives under MASC_BASE_PATH=/app. The server's stores are in
+# /app/.masc, which must be writable by the non-root runtime user.
 RUN mkdir -p /app/.masc \
     && chown -R appuser:appgroup /app/.masc
 

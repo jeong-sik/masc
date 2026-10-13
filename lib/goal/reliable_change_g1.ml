@@ -34,16 +34,42 @@ type run_scenario =
   | Matrix_scenario of scenario
   | Live_scenario of live_scenario
 
+(* How a run was executed. An observation does not store it beside its
+   scenario: the scenario is one of the two families, and the family is the
+   mode. Storing both let them disagree, and the checker carried a finding
+   for each direction of that disagreement. *)
+type execution_mode =
+  | Matrix
+  | Live
+
+let execution_mode_to_string = function
+  | Matrix -> "matrix"
+  | Live -> "live"
+;;
+
+let execution_mode_of_string = function
+  | "matrix" -> Ok Matrix
+  | "live" -> Ok Live
+  | other -> Error ("unknown execution_mode: " ^ other)
+;;
+
 let run_scenario_of_string ~execution_mode s =
   match execution_mode with
-  | "live" ->
+  | Live ->
     (match live_scenario_of_string s with
      | Ok lsc -> Ok (Live_scenario lsc)
      | Error err -> Error err)
-  | _ ->
+  | Matrix ->
     (match scenario_of_string s with
      | Ok sc -> Ok (Matrix_scenario sc)
      | Error err -> Error err)
+;;
+
+let execution_mode_of_run_scenario = function
+  | Matrix_scenario
+      ( Success | Exit_nonzero | Stale_revision | Missing_artifact | Retry_success
+      | Usage_unreported ) -> Matrix
+  | Live_scenario (Live_success | Live_negative | Live_retry_success) -> Live
 ;;
 
 type usage_scope =
@@ -90,7 +116,6 @@ type run_observation =
   ; scenario : run_scenario
   ; repeat_index : int
   ; run_id : string
-  ; execution_mode : string
   ; request_or_task_identity : string option
   ; run_turn_attempt_identity : string option
   ; target_revision : string option
@@ -406,12 +431,16 @@ let check_observations
   let matrix_expected = 18 in
   let live_expected = 3 in
 
-  let matrix_obs =
-    List.filter (fun (o : run_observation) -> o.execution_mode = "matrix")
-      observations in
-  let live_obs =
-    List.filter (fun (o : run_observation) -> o.execution_mode = "live")
-      observations in
+  (* Each list carries the scenario already narrowed to its family, so
+     neither loop below has to answer for the other family. *)
+  let matrix_obs, live_obs =
+    List.partition_map
+      (fun (o : run_observation) ->
+         match o.scenario with
+         | Matrix_scenario sc -> Either.Left (o, sc)
+         | Live_scenario lsc -> Either.Right (o, lsc))
+      observations
+  in
 
   (* Group observations by run key: (case_id, repeat_index) *)
   let run_keys_matrix =
@@ -420,7 +449,7 @@ let check_observations
          match String.compare c1 c2 with
          | 0 -> Int.compare r1 r2
          | c -> c)
-      (List.map (fun (o : run_observation) -> o.case_id, o.repeat_index)
+      (List.map (fun ((o : run_observation), _) -> o.case_id, o.repeat_index)
          matrix_obs)
   in
   let matrix_observed = List.length run_keys_matrix in
@@ -431,7 +460,7 @@ let check_observations
          match String.compare c1 c2 with
          | 0 -> Int.compare r1 r2
          | c -> c)
-      (List.map (fun (o : run_observation) -> o.case_id, o.repeat_index)
+      (List.map (fun ((o : run_observation), _) -> o.case_id, o.repeat_index)
          live_obs)
   in
   let live_observed = List.length run_keys_live in
@@ -474,16 +503,21 @@ let check_observations
   let matrix_runs_passed = ref 0 in
   List.iter
     (fun (case_id, repeat_index) ->
-       let run_obs =
+       let run =
          List.filter
-           (fun (o : run_observation) ->
+           (fun ((o : run_observation), _) ->
               o.case_id = case_id && o.repeat_index = repeat_index)
            matrix_obs
        in
-       let sorted_attempts =
-         List.sort (fun a b -> Int.compare a.attempt_sequence b.attempt_sequence) run_obs
+       let run_obs = List.map fst run in
+       let sorted_run =
+         List.sort
+           (fun ((a : run_observation), _) ((b : run_observation), _) ->
+              Int.compare a.attempt_sequence b.attempt_sequence)
+           run
        in
-       let final_attempt = List.hd (List.rev sorted_attempts) in
+       let sorted_attempts = List.map fst sorted_run in
+       let final_attempt, final_scenario = List.hd (List.rev sorted_run) in
        let first_attempt = List.hd sorted_attempts in
        let run_valid = ref true in
 
@@ -703,8 +737,8 @@ let check_observations
           ));
 
        (* Check scenario-specific outcome rules using typed scenario variant *)
-       (match final_attempt.scenario with
-        | Matrix_scenario Success ->
+       (match final_scenario with
+        | Success ->
           if (not final_attempt.external_verified)
              || (not final_attempt.verdict_passed)
              || final_attempt.command_exit_code <> Some 0
@@ -718,7 +752,7 @@ let check_observations
                        final_attempt.verdict_passed
                        (match final_attempt.command_exit_code with Some c -> string_of_int c | None -> "none")))
           )
-        | Matrix_scenario Exit_nonzero ->
+        | Exit_nonzero ->
           if final_attempt.command_exit_code = Some 0 || final_attempt.external_verified then (
             incr false_verified;
             run_valid := false;
@@ -729,7 +763,7 @@ let check_observations
                        final_attempt.external_verified
                        (match final_attempt.command_exit_code with Some c -> string_of_int c | None -> "none")))
           )
-        | Matrix_scenario Stale_revision ->
+        | Stale_revision ->
           if final_attempt.external_verified then (
             incr false_verified;
             run_valid := false;
@@ -738,7 +772,7 @@ let check_observations
               false
               (Some (Printf.sprintf "rev=%s" (match final_attempt.target_revision with Some r -> r | None -> "none")))
           )
-        | Matrix_scenario Missing_artifact ->
+        | Missing_artifact ->
           if final_attempt.external_verified then (
             incr false_verified;
             run_valid := false;
@@ -747,7 +781,7 @@ let check_observations
               false
               (Some (Printf.sprintf "run_id=%s" final_attempt.run_id))
           )
-        | Matrix_scenario Retry_success ->
+        | Retry_success ->
           if first_attempt.external_verified || (not final_attempt.external_verified) then (
             run_valid := false;
             add_finding (Printf.sprintf "retry_success_sequence_invalid_%d" repeat_index)
@@ -777,7 +811,7 @@ let check_observations
                      | Some c -> c
                      | None -> "null")))
           )
-        | Matrix_scenario Usage_unreported ->
+        | Usage_unreported ->
           (match final_attempt.usage with
            | Usage_reported r ->
              if r.input_tokens = 0 || r.output_tokens = 0 || r.cost_usd = Some 0.0 then (
@@ -803,13 +837,7 @@ let check_observations
              add_finding (Printf.sprintf "usage_unreported_malformed_%d" repeat_index)
                "usage-unreported run carried a malformed usage value"
                false
-               None)
-        | Live_scenario _ ->
-          run_valid := false;
-          add_finding (Printf.sprintf "invalid_live_scenario_in_matrix_%d" repeat_index)
-            "matrix observation has live_scenario variant"
-            false
-            None);
+               None));
 
        if !run_valid then incr matrix_runs_passed)
     run_keys_matrix;
@@ -820,21 +848,25 @@ let check_observations
   let live_runs_passed = ref 0 in
   List.iter
     (fun (case_id, repeat_index) ->
-       let run_obs =
+       let run =
          List.filter
-           (fun (o : run_observation) ->
+           (fun ((o : run_observation), _) ->
               o.case_id = case_id && o.repeat_index = repeat_index)
            live_obs
        in
-       let sorted_attempts =
-         List.sort (fun a b -> Int.compare a.attempt_sequence b.attempt_sequence) run_obs
+       let sorted_run =
+         List.sort
+           (fun ((a : run_observation), _) ((b : run_observation), _) ->
+              Int.compare a.attempt_sequence b.attempt_sequence)
+           run
        in
-       let final_attempt = List.hd (List.rev sorted_attempts) in
+       let sorted_attempts = List.map fst sorted_run in
+       let final_attempt, final_scenario = List.hd (List.rev sorted_run) in
        let first_attempt = List.hd sorted_attempts in
        let run_valid = ref true in
 
-       (match final_attempt.scenario with
-        | Live_scenario Live_success ->
+       (match final_scenario with
+        | Live_success ->
           if not final_attempt.external_verified then (
             run_valid := false;
             add_finding (Printf.sprintf "live_success_failed_%d" repeat_index)
@@ -842,7 +874,7 @@ let check_observations
               false
               (Some final_attempt.run_id)
           )
-        | Live_scenario Live_negative ->
+        | Live_negative ->
           if final_attempt.external_verified then (
             incr false_verified;
             run_valid := false;
@@ -851,7 +883,7 @@ let check_observations
               false
               (Some final_attempt.run_id)
           )
-        | Live_scenario Live_retry_success ->
+        | Live_retry_success ->
           (* Rule 68: The live retry needs an observed failed attempt and a real subsequent successful attempt. *)
           if List.length sorted_attempts < 2 then (
             run_valid := false;
@@ -871,13 +903,7 @@ let check_observations
               "live retry final attempt must be verified"
               false
               None
-          )
-        | Matrix_scenario _ ->
-          run_valid := false;
-          add_finding (Printf.sprintf "invalid_matrix_scenario_in_live_%d" repeat_index)
-            "live observation has matrix_scenario variant"
-            false
-            None);
+          ));
 
        if !run_valid then incr live_runs_passed)
     run_keys_live;
@@ -1058,7 +1084,8 @@ let run_observation_to_json (o : run_observation) : Yojson.Safe.t =
     [ "case_id", `String o.case_id
     ; "repeat_index", `Int o.repeat_index
     ; "run_id", `String o.run_id
-    ; "execution_mode", `String o.execution_mode
+    ; ( "execution_mode"
+      , `String (execution_mode_to_string (execution_mode_of_run_scenario o.scenario)) )
     ; ( "request_or_task_identity"
       , match o.request_or_task_identity with Some s -> `String s | None -> `Null )
     ; ( "run_turn_attempt_identity"
@@ -1114,8 +1141,11 @@ let run_observation_of_json (json0 : Yojson.Safe.t) : (run_observation, string) 
     in
     let execution_mode =
       match json |> member "execution_mode" |> to_string_option with
-      | Some mode -> mode
-      | None -> "matrix"
+      | Some mode ->
+        (match execution_mode_of_string mode with
+         | Ok mode -> mode
+         | Error err -> failwith err)
+      | None -> Matrix
     in
     let scenario =
       match run_scenario_of_string ~execution_mode case_id with
@@ -1304,7 +1334,6 @@ let run_observation_of_json (json0 : Yojson.Safe.t) : (run_observation, string) 
       ; scenario
       ; repeat_index
       ; run_id
-      ; execution_mode
       ; request_or_task_identity
       ; run_turn_attempt_identity
       ; target_revision

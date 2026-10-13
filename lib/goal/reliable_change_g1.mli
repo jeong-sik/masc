@@ -19,7 +19,25 @@ type run_scenario =
   | Matrix_scenario of scenario
   | Live_scenario of live_scenario
 
-val run_scenario_of_string : execution_mode:string -> string -> (run_scenario, string) result
+(** How a run was executed. An observation does not store it beside its
+    scenario: {!execution_mode_of_run_scenario} reads it off the scenario's
+    family, so the two cannot disagree. *)
+type execution_mode =
+  | Matrix
+  | Live
+
+val execution_mode_to_string : execution_mode -> string
+
+(** ["matrix"] or ["live"]. Any other name is an error; it used to be read as
+    matrix. *)
+val execution_mode_of_string : string -> (execution_mode, string) result
+
+val execution_mode_of_run_scenario : run_scenario -> execution_mode
+
+val run_scenario_of_string
+  :  execution_mode:execution_mode
+  -> string
+  -> (run_scenario, string) result
 
 type usage_scope =
   | Per_request
@@ -54,7 +72,6 @@ type run_observation =
   ; scenario : run_scenario
   ; repeat_index : int
   ; run_id : string
-  ; execution_mode : string
   ; request_or_task_identity : string option
   ; run_turn_attempt_identity : string option
   ; target_revision : string option

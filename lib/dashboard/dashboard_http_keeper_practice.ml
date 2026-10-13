@@ -285,7 +285,7 @@ let record_affordance_response acc mode outcome affordance =
     | Success -> { response with resp_success = response.resp_success + 1 }
     | Checkpoint -> { response with resp_checkpoint = response.resp_checkpoint + 1 }
     | Input_required -> { response with resp_input_required = response.resp_input_required + 1 }
-    | Error -> { response with resp_error = response.resp_error + 1 }
+    | Failed -> { response with resp_error = response.resp_error + 1 }
   in
   let next = outcome_bump (mode_bump { prev with offered = prev.offered + 1 }) in
   { acc with affordance_response = Affordance_map.add affordance next acc.affordance_response }
@@ -298,7 +298,7 @@ let fold_autonomous_turn acc json outcome =
     | Success -> { acc with outcome_success = acc.outcome_success + 1 }
     | Checkpoint -> { acc with outcome_checkpoint = acc.outcome_checkpoint + 1 }
     | Input_required -> { acc with outcome_input_required = acc.outcome_input_required + 1 }
-    | Error -> { acc with outcome_error = acc.outcome_error + 1 }
+    | Failed -> { acc with outcome_error = acc.outcome_error + 1 }
   in
   let mode =
     Option.bind (raw_string_member_opt "turn_mode" json) Turn_mode_codec.turn_mode_of_string
@@ -326,7 +326,7 @@ let fold_autonomous_turn acc json outcome =
   in
   let acc =
     match (outcome : Keeper_decision_outcome.t) with
-    | Error ->
+    | Failed ->
       (match string_member_opt "terminal_reason_code" json with
        | Some code -> { acc with terminal_codes = bump acc.terminal_codes code }
        | None ->

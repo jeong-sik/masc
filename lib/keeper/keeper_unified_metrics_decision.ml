@@ -114,9 +114,9 @@ let append_decision_record
     | None -> (
         match outcome, error with
         | Keeper_decision_outcome.Success, _ -> Keeper_turn_terminal.success ()
-        | Keeper_decision_outcome.(Checkpoint | Input_required | Error), Some _ ->
+        | Keeper_decision_outcome.(Checkpoint | Input_required | Failed), Some _ ->
           Keeper_turn_terminal.of_code ~source:"decision_error" "unknown_error"
-        | Keeper_decision_outcome.(Checkpoint | Input_required | Error), None ->
+        | Keeper_decision_outcome.(Checkpoint | Input_required | Failed), None ->
           Keeper_turn_terminal.of_code "unknown_error")
   in
   let terminal_reason_code = Keeper_turn_terminal.code terminal_reason in

@@ -1523,7 +1523,7 @@ let run_keeper_cycle
                     ~turn_ctx_cell
                     ~observation
                     ~latency_ms
-                    ~outcome:Keeper_decision_outcome.Error
+                    ~outcome:Keeper_decision_outcome.Failed
                     ~execution_path
                     ~degraded_retry_applied
                     ~degraded_retry_deferred

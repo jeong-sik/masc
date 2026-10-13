@@ -2996,7 +2996,7 @@ max-concurrent = 1
   (* No run result: the turn failed and only the runtime walk's own report
      names who was dispatched. *)
   let failed =
-    append_and_read ~outcome:Keeper_decision_outcome.Error ~result:None ~executed_runtime_id:head_runtime ()
+    append_and_read ~outcome:Keeper_decision_outcome.Failed ~result:None ~executed_runtime_id:head_runtime ()
   in
   check "a failed row without a run result keeps the lane in provider_context.runtime_id"
     (member_at failed "provider_context" "runtime_id" = `String lane);

@@ -277,7 +277,7 @@ let coverage_stage_of_result
 
 let coverage_reason_of_no_result_outcome : Keeper_decision_outcome.t -> string =
   function
-  | Keeper_decision_outcome.Error -> "error_turn"
+  | Keeper_decision_outcome.Failed -> "error_turn"
   | Keeper_decision_outcome.(Success | Checkpoint | Input_required) -> "no_run_result"
 
 let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =

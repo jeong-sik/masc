@@ -6,7 +6,7 @@ type t =
   | Success  (** The turn finished. *)
   | Checkpoint  (** The turn stopped at a checkpoint to resume later. *)
   | Input_required  (** The turn stopped waiting for input. *)
-  | Error  (** The turn failed. *)
+  | Failed  (** The turn failed. Written as ["error"]. *)
 
 val to_string : t -> string
 (** ["success"], ["checkpoint"], ["input_required"], ["error"]. *)

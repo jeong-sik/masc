@@ -1,8 +1,9 @@
-# Figma Plugin and REST capabilities for the Studio Addon
+# Figma Plugin and REST research for a deferred Studio design
 
-Status: implementation reference for the
-[Figma Studio Lane Addon](figma-studio-lane-addon.md). This describes available
-platform capabilities and the proposed adapter, not completed Studio features.
+Status: archived design research, 2026-10-13. The
+[Figma Studio idea](figma-studio-lane-addon.md) is deferred. This dated inventory
+describes platform capabilities, not a shipped Addon or a current implementation
+plan. Recheck the official sources and actual account when design work resumes.
 
 [근거] Official documentation and OpenAPI checked on 2026-10-13 (Asia/Seoul).
 Confidence is high for the documented API boundaries; account entitlements,
@@ -12,12 +13,13 @@ The REST inventory below uses Figma's OpenAPI 0.44.0 at
 The specification is marked beta; endpoint documentation and actual responses
 must also be checked when implementing a capability.
 
-## Architecture decision
+## Proposed independent service boundary
 
 Use the Plugin for live document reads and native edits, REST for authorized
-server-side resources, and the Addon for durable workflow state and evidence.
-The Keeper plans the design and implements application code. This architecture
-does not require access to the Official Figma MCP endpoint.
+server-side resources, and an independent Figma service for document operation
+state and retained snapshots. A future optional MASC Addon consumes its API and
+owns the MASC workflow. The Figma service has no knowledge of MASC. This is a
+proposal and does not require access to the Official Figma MCP endpoint.
 
 Figma documents REST authentication separately from its MCP client catalog.
 A personal access token (PAT) authenticates REST calls using `X-Figma-Token`;
@@ -27,17 +29,16 @@ the token owner's resource permissions. See [PAT authentication][pat] and
 
 ```mermaid
 flowchart LR
-    K[Keeper: design and application code] <--> A[Studio Addon: requests and snapshots]
-    A <-->|Host MCP and stdio| R[Host relay: credentials and transport]
-    R <-->|Explicit document session| P[Plugin in an open Figma file]
-    R <-->|Authorized REST calls| F[Figma server resources]
-    P --> C[Native canvas edits and exports]
-    F --> D[Files, versions, comments, libraries and events]
+    K[Keeper] --> A[Optional MASC Addon and host adapter]
+    A --> S[Independent Figma service API]
+    C[Independent client] --> S
+    S --> P[Plugin in selected Figma file]
+    S --> F[Figma REST resources]
 ```
 
-The diagram's relay runs outside the network-isolated Addon worker. The Addon
-does not make direct HTTP calls. REST and Plugin observations retain separate
-origins even when they refer to the same file and node.
+MASC worker isolation remains a consumer-side concern. The Figma service does
+not call MASC. REST and Plugin observations retain separate origins even when
+they refer to the same file and node.
 
 ## Capability map
 
@@ -129,7 +130,7 @@ Plugin edits are sequential effects on a collaborative document. `commitUndo`
 creates an undo checkpoint; it is not an atomic transaction. Preflight the whole
 supported request, then record created/changed IDs and partial failure. Losing a
 reply never permits replaying a mutation automatically. See
-[`commitUndo`][undo] and the Addon's [operation contract](figma-studio-lane-addon.md#operations-and-failure-semantics).
+[`commitUndo`][undo] and the [redesign requirements](figma-studio-lane-addon.md#product-scope-to-design-before-implementing).
 
 The Variables REST endpoint has a narrower, explicitly documented guarantee:
 its bulk request is atomic on validation failure. That guarantee does not cover
@@ -161,11 +162,12 @@ credential. See [rate limits][limits].
 
 ## Credentials and optional REST surfaces
 
-`leader` is the requested Keeper owner. Its Figma Identity is not assumed to be
-configured. Store a credential reference in the host integration and resolve
-the secret outside the Plugin and model context. MASC relay authentication,
-Plugin pairing and Figma REST authentication remain separate. A PAT is suitable
-for the initial personal installation; OAuth is available for delegated user
+Keeper selection and Identity configuration belong to a future MASC adapter;
+the independent service has no Keeper identity. Figma credentials belong to that
+service, outside the Plugin and model context. Service-client authentication,
+Plugin pairing and Figma REST authentication remain separate. A future adapter
+must not pass MASC credentials to the service. A PAT can support a personal
+installation; OAuth is available for delegated user
 authorization. Organization/Enterprise plan access tokens are a separate option
 with their own resource restrictions; do not treat token types as interchangeable.
 See [authentication][auth].
@@ -215,7 +217,7 @@ version. Do not use a fixed delay or a returned version ID as proof of capture
 equality. Read that server version and compare the intended content before
 linking a Plugin result to it. Until then retain the two observations separately.
 
-## Implementation changes required by this research
+## Deferred redesign inputs from this research
 
 1. **Use two explicit sources.** `plugin_live` and `rest_version` observations
    carry distinct identities, availability and coverage. REST is a first-class
@@ -227,9 +229,9 @@ linking a Plugin result to it. Until then retain the two observations separately
 3. **Negotiate capabilities per session and credential.** Distinguish editing,
    Dev Mode inspection, PAT scopes, Enterprise variables, and unavailable fonts.
    Do not infer capabilities from a Plugin connection alone.
-4. **Keep the durable Addon workflow.** Document pairing, operation IDs, conflict
-   checks, uncertain effects and retained artifacts remain required. The Plugin
-   is an editor participant, not the durable queue.
+4. **Define state ownership.** The independent service owns document pairing,
+   operation IDs, conflict checks, uncertain effects and retained snapshots.
+   A consumer owns its workflow. The Plugin is not the durable queue.
 5. **Implement the useful closed loop.** Generate/revise native nodes; retain a
    snapshot; implement and run the selected repository; associate changed code,
    preview and review findings with the same snapshot. Visual comparison is
@@ -249,11 +251,10 @@ Dev Mode inspection and proposed APIs. The repaired `apply_ops` dispatcher has
 fixture coverage, but Studio pairing, native capture, Addon installation and
 the two complete user journeys are not established by that test.
 
-Acceptance for the next slice is an explicit editable session, native JSON/PNG
-capture, one bounded edit with actual readback, persisted outcome/artifacts, and
-reconnect without replay. The next slice adds a PAT-backed version capture and
-verified association without confusing the two sources. Real account/file
-checks are still needed for scopes, fonts and plan-specific capabilities.
+No next implementation slice is scheduled. Before resuming, review the deferred
+design requirements, capability gaps and session-close/cancellation behavior.
+Real account/file checks remain necessary for scopes, fonts, plan-specific
+capabilities and both complete user journeys.
 
 [plugins]: https://developers.figma.com/docs/plugins/
 [run]: https://developers.figma.com/docs/plugins/how-plugins-run/

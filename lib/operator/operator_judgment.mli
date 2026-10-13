@@ -7,10 +7,8 @@
     optional recommended-action JSON.
 
     One read path, {!latest_active}, whose record serializes through
-    {!to_yojson}.  This said "two read paths" and named a
-    [latest_active_json] that is not in the tree.  One write path:
-    {!record}, which auto-chains supersedes by reading the
-    current latest before append. *)
+    {!to_yojson}.  One write path: {!record}, which auto-chains
+    supersedes by reading the current latest before append. *)
 
 (** {1 Types} *)
 
@@ -21,9 +19,15 @@ type target_type = Workspace
     explicitly so the JSONL on-disk format remains
     backward-compatible. *)
 
+(** Where a judgment applies. Closed, so every per-surface policy (the
+    freshness default in {!Operator_control_action}) answers for each one. *)
+type surface =
+  | Command_namespace
+  | Intervene
+
 type record = {
   judgment_id : string;
-  surface : string;
+  surface : surface;
   target_type : target_type;
   target_id : string option;
   summary : string;
@@ -53,9 +57,19 @@ val target_type_to_string : target_type -> string
 (** [Workspace -> "workspace"].  Pinned literal for the on-disk JSONL format. *)
 
 val target_type_of_string : string -> target_type option
-(** Accepts only the canonical [["workspace"]] target type for [Workspace].
-    Historical [["root"]] / [["namespace"]] aliases are rejected at the parse
-    boundary. *)
+(** Accepts only the canonical [["workspace"]] target type for [Workspace]. *)
+
+(** {1 surface codec} *)
+
+val all_of_surface : surface list
+
+val surface_to_string : surface -> string
+(** [Command_namespace -> "command.namespace"], [Intervene -> "intervene"].
+    Pinned literals for the on-disk JSONL format. *)
+
+val surface_of_string : string -> surface option
+(** Inverse of {!surface_to_string}; exact match, no trimming or case
+    folding. *)
 
 (** {1 JSON codec} *)
 
@@ -107,7 +121,7 @@ val load_all : Workspace.config -> record list
 
 val latest_active :
   Workspace.config ->
-  surface:string ->
+  surface:surface ->
   target_type:target_type ->
   target_id:string option ->
   record option
@@ -119,7 +133,7 @@ val latest_active :
 
 val record :
   Workspace.config ->
-  surface:string ->
+  surface:surface ->
   target_type:target_type ->
   target_id:string option ->
   summary:string ->
@@ -154,6 +168,7 @@ val record :
       list if first).
     - [generated_at_unix] and [fresh_until_unix]: required numeric timestamps;
       the write boundary does not reparse display strings.
-    - [confidence]: clamped to [\[0.0, 1.0\]].
+    - [confidence]: written as given. {!of_yojson} rejects values outside
+      [\[0.0, 1.0\]], so callers check the range before recording.
     - [summary]: trimmed.
     - [evidence_refs]: trimmed + empty entries dropped. *)

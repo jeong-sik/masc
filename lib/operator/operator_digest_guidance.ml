@@ -17,7 +17,7 @@ let fresh_operator_judgment config ~target_type ~target_id =
   | None -> None
   | Some target_type ->
     let latest =
-      Operator_judgment.latest_active config ~surface:"command.namespace"
+      Operator_judgment.latest_active config ~surface:Operator_judgment.Command_namespace
         ~target_type ~target_id
     in
     (match latest with

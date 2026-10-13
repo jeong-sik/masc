@@ -165,7 +165,7 @@ let test_ollama_cloud_deepseek_cloud_suffix_resolves () =
       Model_catalog.lookup_for_provider
         catalog
         ~provider_name:"ollama_cloud"
-        ~model_id
+        ~model_id:(Model_identifiers.Model_id.of_string_exn model_id)
     with
     | None -> Alcotest.failf "ollama_cloud/%s should resolve" model_id
     | Some (entry : Model_catalog.model_entry) ->

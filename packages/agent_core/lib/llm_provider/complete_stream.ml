@@ -956,7 +956,25 @@ let complete_stream_http
                                   Backend_anthropic.observe_input_transformations
                                     (Yojson.Safe.from_string data);
                                   [ evt ], None
-                                | Some evt -> [ evt ], None
+                                | Some
+                                    (( Types.ContentBlockStart _
+                                     | Types.ContentBlockDelta _
+                                     | Types.ContentBlockStop _
+                                     | Types.MessageDelta _
+                                     | Types.MessageStop
+                                     | Types.Ping
+                                     | Types.SSEError _
+                                     | Types.NDJSONError _
+                                     | Types.SSEParseFailed _
+                                     | Types.NDJSONParseFailed _
+                                     | Types.SSEUnknownEventType _
+                                     | Types.SSEUnsupportedPart _
+                                     | Types.SSEUnsupportedResponse _
+                                     | Types.Connected
+                                     | Types.Timeout _
+                                     | Types.StreamIncomplete _
+                                     | Types.StreamRepeating _ ) as evt) ->
+                                  [ evt ], None
                                 | None ->
                                   ( [ Types.SSEParseFailed
                                         { raw = data

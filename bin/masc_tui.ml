@@ -10635,7 +10635,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
             notice ~kind:Notice_reply ("/queue clear: " ^ String.concat " · " clauses));
          drain_queued_message state ~base_path ~mailbox;
          launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Clear
-       | Some keeper_name, Ok action ->
+       | Some keeper_name,
+         Ok ((Masc_tui_queue_inspection.Inspect | Pause | Resume | Cancel _
+             | Move_to_end _ | Edit _ | Cancel_event _ | Prioritize_event _) as action) ->
          let local_id = match action with
            | Masc_tui_queue_inspection.Cancel id | Move_to_end id | Edit (id, _) -> Some id
            | Inspect | Pause | Resume | Clear | Cancel_event _ | Prioritize_event _ -> None in

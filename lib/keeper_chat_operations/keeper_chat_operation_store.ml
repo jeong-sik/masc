@@ -27,6 +27,7 @@ type error =
   | Idempotency_conflict of Id.t
   | Store_unavailable of string
   | Integrity_error of string
+  | Native_call_unsettled
 
 type admission =
   | Accepted of Operation.t
@@ -153,6 +154,8 @@ let error_to_string = function
     "Keeper chat operation idempotency conflict: " ^ Id.to_string operation_id
   | Store_unavailable detail -> "Keeper chat operation store unavailable: " ^ detail
   | Integrity_error detail -> "Keeper chat operation store integrity error: " ^ detail
+  | Native_call_unsettled ->
+    "Keeper chat operation has an active native call without a terminal disposition"
 ;;
 
 let path store = store.path
@@ -1114,7 +1117,8 @@ let submit ?priority store ~now ~operation_id ~source ~input =
        | Not_queued _
        | Not_running _
        | Idempotency_conflict _
-       | Integrity_error _ ) -> Error commit_error)
+       | Integrity_error _
+       | Native_call_unsettled ) -> Error commit_error)
 ;;
 
 let reducer_error operation_id = function
@@ -1153,7 +1157,8 @@ let persist_and_readback store expected persist =
        | Not_queued _
        | Not_running _
        | Idempotency_conflict _
-       | Integrity_error _ ) -> Error error)
+       | Integrity_error _
+       | Native_call_unsettled ) -> Error error)
 ;;
 
 let gate_state = function
@@ -1417,7 +1422,8 @@ let claim_next ?batch store ~now =
        | Not_queued _
        | Not_running _
        | Idempotency_conflict _
-       | Integrity_error _ ),
+       | Integrity_error _
+       | Native_call_unsettled ),
        _ -> Error error)
 ;;
 
@@ -1545,7 +1551,8 @@ let move_queued_to_end store ~operation_id =
        | Not_queued _
        | Not_running _
        | Idempotency_conflict _
-       | Integrity_error _ ),
+       | Integrity_error _
+       | Native_call_unsettled ),
        _ -> Error error)
 ;;
 
@@ -1830,9 +1837,14 @@ let requeue_continuation_with_db db operation =
   Ok transition.operation
 ;;
 
+let semantic_error_to_store_error = function
+  | Semantic.Native_call_unsettled -> Native_call_unsettled
+  | (Semantic.Invalid_record _ | Semantic.Invalid_transition _ | Semantic.Revision_exhausted) as error ->
+    Integrity_error (Semantic.error_to_string error)
+;;
+
 let semantic_transition ~now action execution =
-  Semantic.apply ~now action execution
-  |> Result.map_error (fun error -> Integrity_error (Semantic.error_to_string error))
+  Semantic.apply ~now action execution |> Result.map_error semantic_error_to_store_error
 ;;
 
 let defer_direct_runtime_retry store ~now ~operation_id ~execution_digest ~continuation =
@@ -1876,7 +1888,7 @@ let defer_direct_runtime_retry store ~now ~operation_id ~execution_digest ~conti
   | Error (Store_unavailable _ as error) ->
     (match read_existing () with Ok operation -> Ok operation | Error _ -> Error error)
   | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
-      | Idempotency_conflict _ | Integrity_error _) as error -> error
+      | Idempotency_conflict _ | Integrity_error _ | Native_call_unsettled) as error -> error
 ;;
 
 let update_direct_runtime_retry_wait store ~now ~operation_id ~observed ~replacement =
@@ -1924,7 +1936,7 @@ let resume_direct_runtime_retry store ~now ~operation_id ~observed =
         | Ok (Some observed) when Semantic.to_json observed = Semantic.to_json expected -> Ok ()
         | Ok _ | Error _ -> Error error))
   | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
-      | Idempotency_conflict _ | Integrity_error _) as error -> error
+      | Idempotency_conflict _ | Integrity_error _ | Native_call_unsettled) as error -> error
 ;;
 
 let defer_direct_checkpoint store ~now ~operation_id ~execution_digest ~checkpoint =
@@ -1980,7 +1992,7 @@ let defer_direct_checkpoint store ~now ~operation_id ~execution_digest ~checkpoi
   | Error (Store_unavailable _ as error) ->
     (match read_existing () with Ok operation -> Ok operation | Error _ -> Error error)
   | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
-      | Idempotency_conflict _ | Integrity_error _) as error -> error
+      | Idempotency_conflict _ | Integrity_error _ | Native_call_unsettled) as error -> error
 ;;
 
 let resume_direct_checkpoint store ~now ~operation_id ~observed =
@@ -2014,7 +2026,7 @@ let resume_direct_checkpoint store ~now ~operation_id ~observed =
         | Ok (Some observed) when Semantic.to_json observed = Semantic.to_json expected -> Ok ()
         | Ok _ | Error _ -> Error error))
   | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
-      | Idempotency_conflict _ | Integrity_error _) as error -> error
+      | Idempotency_conflict _ | Integrity_error _ | Native_call_unsettled) as error -> error
 ;;
 
 let direct_gate_state store ~operation_id =
@@ -2107,7 +2119,7 @@ let defer_direct_gate store ~now ~operation_id ~execution_digest ~waiting =
   | Ok _ -> readback ()
   | Error (Store_unavailable _ as error) -> (match readback () with Ok operation -> Ok operation | Error _ -> Error error)
   | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
-      | Idempotency_conflict _ | Integrity_error _) as error -> error
+      | Idempotency_conflict _ | Integrity_error _ | Native_call_unsettled) as error -> error
 
 let defer_direct_gate_reconciliation store ~now ~operation_id ~execution_digest ~binding ~diagnostic =
   let* () = ensure_open store in
@@ -2143,6 +2155,7 @@ let defer_direct_gate_reconciliation store ~now ~operation_id ~execution_digest 
           (Semantic.Suspend_gate_reconciliation (binding, diagnostic)) execution
         |> Result.map_error (function
           | Semantic.Invalid_transition _ as error -> Invalid_input (Semantic.error_to_string error)
+          | Semantic.Native_call_unsettled -> Native_call_unsettled
           | (Semantic.Invalid_record _ | Semantic.Revision_exhausted) as error ->
             Integrity_error (Semantic.error_to_string error)) in
       let* () = match current with None -> insert_semantic store.db suspended
@@ -2152,7 +2165,7 @@ let defer_direct_gate_reconciliation store ~now ~operation_id ~execution_digest 
   | Ok _ -> readback ()
   | Error (Store_unavailable _ as error) -> (match readback () with Ok operation -> Ok operation | Error _ -> Error error)
   | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
-      | Idempotency_conflict _ | Integrity_error _) as error -> error
+      | Idempotency_conflict _ | Integrity_error _ | Native_call_unsettled) as error -> error
 
 let confirm_semantic_transition store expected result =
   match result with
@@ -2165,7 +2178,7 @@ let confirm_semantic_transition store expected result =
        | Ok (Some observed) when Semantic.to_json observed = Semantic.to_json next -> Ok value
        | Ok (Some _) | Ok None | Error _ -> Error error)
   | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
-      | Idempotency_conflict _ | Integrity_error _) -> result
+      | Idempotency_conflict _ | Integrity_error _ | Native_call_unsettled) -> result
 
 let direct_native_call store ~operation_id =
   let* () = ensure_open store in
@@ -2202,6 +2215,7 @@ let update_direct_native_call store ~now ~operation_id ~execution_digest change 
       let* next = Semantic.update_native_call ~now ~expected:execution.native_call ~replacement execution
         |> Result.map_error (function
           | Semantic.Invalid_transition detail -> Invalid_input detail
+          | Semantic.Native_call_unsettled -> Native_call_unsettled
           | (Semantic.Invalid_record _ | Semantic.Revision_exhausted) as error ->
             Integrity_error (Semantic.error_to_string error)) in
       expected_commit := Some (next, ());

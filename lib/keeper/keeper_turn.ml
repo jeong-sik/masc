@@ -801,6 +801,7 @@ let run_keeper_invocation_turn_admitted_inner
             (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
 	            let settlement, latency_ms =
+	              Keeper_direct_native_continuation.reconcile_on_abort native_binding @@ fun () ->
 	              Inference_utils.timed (fun () ->
                       let consume = match direct_resume with
                         | None | Some (Keeper_agent_run.Gate_continuation _) -> Ok ()

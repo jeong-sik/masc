@@ -198,7 +198,11 @@ type t =
   ; created_at : float
   ; updated_at : float
   }
-type error = Invalid_record of string | Invalid_transition of string | Revision_exhausted
+type error =
+  | Invalid_record of string
+  | Invalid_transition of string
+  | Native_call_unsettled
+  | Revision_exhausted
 type action =
   | Confirm_sources
   | Begin_execution
@@ -221,6 +225,7 @@ type action =
 let error_to_string = function
   | Invalid_record detail -> "invalid semantic execution: " ^ detail
   | Invalid_transition detail -> "invalid semantic execution transition: " ^ detail
+  | Native_call_unsettled -> "native call is active and has no terminal disposition"
   | Revision_exhausted -> "semantic execution revision exhausted"
 
 let phase_name = function
@@ -513,14 +518,14 @@ let apply ~now action current =
       | Keeper_native_call.Active _ ->
         (match action with
          | Settle (Completed | Cancelled | Failed _) ->
-           Error (Invalid_transition "active native call has no terminal disposition")
+           Error Native_call_unsettled
          | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
          | Require_reconciliation _ | Suspend _ | Suspend_official_checkpoint _
          | Suspend_runtime_retry _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
          | Suspend_gate_reconciliation _ | Suspend_gate _ | Reconcile_gate_binding _
          | Resolve_gate _ | Resume_gate _ | Discharge_gate _ ->
            if phase <> current.phase then
-             Error (Invalid_transition "active native call cannot change execution phase")
+             Error Native_call_unsettled
            else Ok current.native_call)
       | Keeper_native_call.Terminal_unacknowledged (_, disposition) ->
         (match disposition.Agent_core.Agent.recovery with

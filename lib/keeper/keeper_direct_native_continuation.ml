@@ -163,6 +163,31 @@ let reconcile_terminal binding (call : Native.t) =
         ~disposition:terminal.disposition |> owner in
     Ok (Some terminal)
 
+(* Core records the terminal disposition under cancellation protection, but a
+   cancelled writer supervisor can leave the journal without it. When the run
+   ends by exception with the Owner call still Active, copy whatever terminal
+   the journal does hold into the Owner receipt before the exception reaches
+   the Owner's settlement. A journal with no terminal leaves the call Active;
+   the Owner then records its own conservative disposition. *)
+let reconcile_on_abort binding run =
+  match run () with
+  | value -> value
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Eio.Cancel.protect (fun () ->
+      let reconciled =
+        let* observed = state binding in
+        match observed with
+        | Native.Active call -> reconcile_terminal binding call |> Result.map ignore
+        | Native.No_native_call | Native.Terminal_unacknowledged _ -> Ok () in
+      match reconciled with
+      | Ok () -> ()
+      | Error detail ->
+        Log.Keeper.warn ~keeper_name:binding.keeper_name
+          "native terminal reconciliation after abort failed operation=%s: %s"
+          (Keeper_chat_operation.Operation_id.to_string binding.operation_id) detail);
+    Printexc.raise_with_backtrace exn backtrace
+
 let retired_evidence binding call disposition =
   let* terminal = inspect_terminal binding call in
   match terminal with

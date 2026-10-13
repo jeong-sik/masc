@@ -116,6 +116,7 @@ type operation_error_kind =
   | Unknown_operation
   | Operation_not_queued
   | Operation_idempotency_conflict
+  | Operation_native_call_unsettled
   | Operation_store_unavailable
 
 type error =
@@ -386,6 +387,7 @@ let operation_error_kind = function
   | Unknown_operation _ -> Unknown_operation
   | Not_queued _ | Not_running _ -> Operation_not_queued
   | Idempotency_conflict _ -> Operation_idempotency_conflict
+  | Native_call_unsettled -> Operation_native_call_unsettled
   | Store_unavailable _ | Integrity_error _ -> Operation_store_unavailable
 ;;
 
@@ -738,12 +740,29 @@ let apply_transition t store old_state transition =
     Ok state
 ;;
 
+(* What the Owner found when a child ended with its native call possibly open. *)
+type active_native_call_outcome =
+  | Native_call_not_active
+  | Native_call_left_for_restart_recovery
+  | Native_call_closed_without_disposition
+
+let native_call_unknown_effect_disposition =
+  { Agent_core.Agent.outcome = Agent_core.Agent.Terminal_cancelled
+  ; recovery =
+      Agent_core.Agent.Operator_repair_required Agent_core.Agent.Effect_outcome_unknown
+  }
+;;
+
+let native_call_without_disposition_detail =
+  "native call ended without a terminal disposition; the Owner recorded it as cancelled with an unknown effect"
+;;
+
 let owner_error_of_operation_error = function
   | Chat_operation_store.Store_unavailable detail -> Store_unavailable detail
   | Integrity_error detail ->
     Store_unavailable ("Keeper chat operation integrity failure: " ^ detail)
   | (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
-    | Idempotency_conflict _) as error ->
+    | Idempotency_conflict _ | Native_call_unsettled) as error ->
     Operation_rejected error
 ;;
 
@@ -853,7 +872,7 @@ let record_operation_error t error =
      set_operation_fault t (Operation_integrity_failure detail);
      mark_operation_store_unavailable t
    | Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
-   | Idempotency_conflict _ -> ());
+   | Idempotency_conflict _ | Native_call_unsettled -> ());
   owner_error_of_operation_error error
 ;;
 
@@ -1221,6 +1240,60 @@ let start
         keeper_name
         (Chat_operation_store.error_to_string error));
   Eio.Fiber.fork_daemon ~sw (fun () ->
+    let fail_running_operation ~operation_id ~kind ~detail ~outcome_ref =
+      run_operation_command t ~label:"fail running Keeper chat operation" (fun () ->
+        Chat_operation_store.fail_running
+          t.operation_store
+          ~now:(t.now ())
+          ~operation_id
+          ~kind
+          ~detail
+          ~outcome_ref)
+      |> Result.map (fun _ -> ())
+    in
+    (* A child can end while its native call is still Active. Core reports the
+       terminal disposition itself, but not when the call is cancelled out from
+       under it, and an Active call refuses every settlement. Reading the
+       durable state decides: no call, or a call that already has a
+       disposition, settles as before. An Active call on a stopping Owner stays
+       Active: [settle_running_after_restart] requeues it and the next process
+       resumes the same call from its checkpoint. An Active call otherwise ends
+       the operation, so the Owner records the disposition. It cannot prove from
+       here that no tool attempt is unsettled, so it records the conservative
+       one: cancelled, with an operator repair required for the unknown effect. *)
+    let close_active_native_call ~operation_id =
+      run_operation_command t ~label:"close active native call" (fun () ->
+        let ( let* ) = Result.bind in
+        let* native_call =
+          Chat_operation_store.direct_native_call t.operation_store ~operation_id
+        in
+        match native_call with
+        | Keeper_native_call.No_native_call
+        | Keeper_native_call.Terminal_unacknowledged _ -> Ok Native_call_not_active
+        | Keeper_native_call.Active call ->
+          if (Atomic.get t.projection).Keeper_owner_reducer.stopping
+          then Ok Native_call_left_for_restart_recovery
+          else
+            let* operation = Chat_operation_store.get t.operation_store operation_id in
+            let* operation =
+              match operation with
+              | Some operation -> Ok operation
+              | None -> Error (Chat_operation_store.Unknown_operation operation_id)
+            in
+            let* () =
+              Chat_operation_store.update_direct_native_call
+                t.operation_store
+                ~now:(t.now ())
+                ~operation_id
+                ~execution_digest:operation.Chat_operation.execution_digest
+                (Keeper_native_call.Terminal
+                   { call_id = call.Keeper_native_call.call_id
+                   ; disposition = native_call_unknown_effect_disposition
+                   })
+            in
+            Ok Native_call_closed_without_disposition)
+      |> Result.map fst
+    in
     let finish_operation_child claimed_operation_id execution =
       match claimed_operation_id, execution with
       | None, _ -> Ok ()
@@ -1251,23 +1324,28 @@ let start
              | Chat_operation.Running _ | Chat_operation.Succeeded _ | Chat_operation.Failed _ ->
                Error (Chat_operation_store.Integrity_error "deferred operation is not queued")))
       | Some operation_id, Operation_succeeded { outcome_ref } ->
-        run_operation_command t ~label:"succeed running Keeper chat operation" (fun () ->
-          Chat_operation_store.succeed_running
-            t.operation_store
-            ~now:(t.now ())
-            ~operation_id
-            ~outcome_ref)
-        |> Result.map (fun _ -> ())
+        Result.bind (close_active_native_call ~operation_id) (function
+          | Native_call_left_for_restart_recovery -> Ok ()
+          | Native_call_not_active ->
+            run_operation_command t ~label:"succeed running Keeper chat operation" (fun () ->
+              Chat_operation_store.succeed_running
+                t.operation_store
+                ~now:(t.now ())
+                ~operation_id
+                ~outcome_ref)
+            |> Result.map (fun _ -> ())
+          | Native_call_closed_without_disposition ->
+            (* The turn reported success, but its native call never reported
+               a terminal disposition. An unknown effect cannot complete, so
+               the claimed success is not recorded. *)
+            fail_running_operation ~operation_id ~kind:Chat_operation.Turn_invariant
+              ~detail:native_call_without_disposition_detail
+              ~outcome_ref:(Some outcome_ref))
       | Some operation_id, Operation_failed { kind; detail; outcome_ref } ->
-        run_operation_command t ~label:"fail running Keeper chat operation" (fun () ->
-          Chat_operation_store.fail_running
-            t.operation_store
-            ~now:(t.now ())
-            ~operation_id
-            ~kind
-            ~detail
-            ~outcome_ref)
-        |> Result.map (fun _ -> ())
+        Result.bind (close_active_native_call ~operation_id) (function
+          | Native_call_left_for_restart_recovery -> Ok ()
+          | Native_call_not_active | Native_call_closed_without_disposition ->
+            fail_running_operation ~operation_id ~kind ~detail ~outcome_ref)
     in
     let rec start_child_if_needed state shutdown_operation_id =
       match operation_runner with

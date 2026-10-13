@@ -13,6 +13,10 @@ type error =
   | Idempotency_conflict of Operation.Operation_id.t
   | Store_unavailable of string
   | Integrity_error of string
+  | Native_call_unsettled
+      (** The operation's native call is still active and has no terminal
+          disposition, so the operation cannot settle yet. The store is intact;
+          record the disposition and retry. *)
 
 type admission =
   | Accepted of Operation.t

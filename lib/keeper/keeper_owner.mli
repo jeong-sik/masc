@@ -165,6 +165,7 @@ type operation_error_kind =
   | Unknown_operation
   | Operation_not_queued
   | Operation_idempotency_conflict
+  | Operation_native_call_unsettled
   | Operation_store_unavailable
 
 type error =

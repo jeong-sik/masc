@@ -107,6 +107,11 @@ type t = private
 type error =
   | Invalid_record of string
   | Invalid_transition of string
+  | Native_call_unsettled
+      (** The execution has an active native call whose terminal disposition has
+          not been recorded. Settling it, or any action that changes its phase,
+          is refused until that disposition arrives. This is a reachable
+          precondition, not a damaged record. *)
   | Revision_exhausted
 
 type action =

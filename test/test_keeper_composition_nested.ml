@@ -314,6 +314,10 @@ let test_public_nested_prepare_run_records_only_admitted_children ~reject_child 
   with_base @@ fun base_path ->
   let surface, reference, snapshot = fixture_snapshot ~source:public_document () in
   let config = Masc.Workspace.default_config base_path in
+  let module Call_log = Masc.Keeper_tool_call_log in
+  Call_log.reset_for_testing ();
+  Fun.protect ~finally:Call_log.reset_for_testing @@ fun () ->
+  Call_log.init ~base_path ();
   let meta = Masc_test_deps.meta_of_json_fixture
       (`Assoc [ "name", `String "fixture"; "activation_mode", `String "manual" ]) |> require "meta fixture" in
   let trace_id = Keeper_id.Trace_id.of_string "trace-nested-public" |> require "trace identity" in

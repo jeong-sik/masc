@@ -334,6 +334,87 @@ let test_undecodable_stores_are_moved_aside_once () =
   check int "and moves nothing" 0 (List.length counted.R.quarantined)
 ;;
 
+(* Ordinary removal commits the snapshot even when its archive append fails,
+   and leaves its removal receipt and its publication receipt pending. If a
+   later boot cannot decode that snapshot, accepted quarantine does not move
+   it: the snapshot and both receipts stay where they are, and the report
+   names the store as failed. *)
+let test_memory_quarantine_refuses_pending_publication () =
+  with_workspace
+  @@ fun config ->
+  let module Current = Keeper_memory_os_current in
+  let module Types = Keeper_memory_os_types in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+  in
+  let keeper_id = "sound" in
+  let original : Types.fact =
+    { claim = "original with conditions preserved during quarantine"
+    ; category = Types.Constraint
+    ; first_seen = 100.
+    ; last_seen = 100.
+    ; origin = { kind = Types.Authored; trace_id = "boot-removal" }
+    ; basis = Types.Observed Types.Transcript
+    }
+  in
+  (match Current.upsert_fact ~keepers_dir ~keeper_id ~now:200.
+      ~source:{ Current.kind = Current.Explicit_write; trace_id = "boot-removal" }
+      original with
+   | Ok _ -> ()
+   | Error error -> fail (Current.upsert_error_to_string error));
+  let journal_path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let seed_journal = Fs_compat.load_file journal_path in
+  Fs_compat.invalidate_cached_writer journal_path;
+  Sys.remove journal_path;
+  Unix.mkdir journal_path 0o700;
+  (match Current.retract_fact ~keepers_dir ~keeper_id ~now:300.
+      ~source:{ Current.kind = Current.Explicit_retract; trace_id = "boot-removal" }
+      ~memory_id:(Types.memory_id original) ~reason:"operator withdrew this exact rule" ()
+   with
+   | Ok snapshot ->
+     check bool "the committed snapshot retains the removed original" true
+       (snapshot.change.removed = [ original ])
+   | Error _ -> fail "ordinary removal must report its committed snapshot");
+  Unix.rmdir journal_path;
+  write_bytes journal_path seed_journal;
+  let removal_path = Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id in
+  let publication_path = Current.publication_receipt_path ~keepers_dir ~keeper_id in
+  let removal_bytes = Fs_compat.load_file removal_path in
+  let publication_bytes = Fs_compat.load_file publication_path in
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let rejected_bytes =
+    match Yojson.Safe.from_string (Fs_compat.load_file snapshot_path) with
+    | `Assoc fields ->
+      Yojson.Safe.to_string (`Assoc (("unknown_snapshot_field", `Bool true) :: fields))
+    | _ -> fail "the committed snapshot is not an object"
+  in
+  write_bytes snapshot_path rejected_bytes;
+  let examination = R.examine config in
+  check (list string) "boot names the rejected snapshot" [ snapshot_path ]
+    (List.map (fun (row : R.undecodable) -> row.path) examination.undecodable);
+  let admitted =
+    match R.admit ~accept_quarantine:true examination with
+    | Ok admitted -> admitted
+    | Error _ -> fail "accepted quarantine was refused before any move"
+  in
+  let report = R.quarantine ~now:400. config admitted in
+  check int "nothing is moved aside" 0 (List.length report.R.quarantined);
+  (match report.R.failed with
+   | [ failure ] ->
+     check string "the failed store" "memory_current" (R.store_to_string failure.R.store);
+     check string "the exact snapshot" snapshot_path failure.R.path
+   | _ -> fail "the refused quarantine names the snapshot once");
+  check string "the rejected snapshot stays in place" rejected_bytes
+    (Fs_compat.load_file snapshot_path);
+  check string "the removal receipt stays in place" removal_bytes
+    (Fs_compat.load_file removal_path);
+  check string "the publication receipt stays in place" publication_bytes
+    (Fs_compat.load_file publication_path);
+  check (list string) "no rejected copy is written" []
+    (Sys.readdir keepers_dir |> Array.to_list
+     |> List.filter (fun name -> String_util.contains_substring name ".rejected-"))
+;;
+
 (* The whole preparation, as the server runs it: refused without the flag with
    the file untouched, moved aside with it. The goal store gives one line per
    boot and keeps its bytes through both. *)
@@ -1163,6 +1244,8 @@ let () =
     ; ( "quarantine"
       , [ test_case "undecodable stores are moved aside once" `Quick
             test_undecodable_stores_are_moved_aside_once
+        ; test_case "pending publication refuses the memory quarantine" `Quick
+            test_memory_quarantine_refuses_pending_publication
         ] )
     ; ( "preparation"
       , [ test_case "refuses without the flag and moves aside with it" `Quick

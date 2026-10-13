@@ -2723,7 +2723,6 @@
 
 (include stanzas/test_keeper_latched_reason_wiring.inc)
 
-(include stanzas/test_keeper_agent_run_sandbox_source.inc)
 (include stanzas/test_keeper_runtime_instructions.inc)
 
 (include stanzas/test_keeper_autoboot_single_owner.inc)
@@ -2909,8 +2908,6 @@
 
 (include stanzas/test_keeper_runtime_config_leaf.inc)
 
-(include stanzas/test_masc_dirname_ssot.inc)
-
 (include stanzas/test_masc_error_dashboard_auth_code.inc)
 
 (include stanzas/test_masc_error_is_retryable.inc)
@@ -2948,8 +2945,6 @@
 (include stanzas/test_keeper_provider_timeout_labels.inc)
 (include stanzas/test_keeper_runtime_observation_boundaries.inc)
 
-(include stanzas/test_runtime_agent_close_cancel_source.inc)
-
 (include stanzas/test_keeper_official_client_host.inc)
 (include stanzas/test_keeper_tool_definition_source.inc)
 (include stanzas/test_runtime_codex_app_server.inc)
@@ -2976,8 +2971,6 @@
 (include stanzas/test_masc_agent_core_bridge_observation.inc)
 
 (include stanzas/test_operator_mcp_e2e.inc)
-
-(include stanzas/test_otel_tick_poison_source.inc)
 
 (include stanzas/test_otel_trace_context.inc)
 

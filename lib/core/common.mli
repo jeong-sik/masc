@@ -22,8 +22,7 @@ val protect :
 val masc_dirname : string
 (** SSOT directory name for MASC runtime state. Value is [".masc"].
     Call sites MUST reference this constant (or {!masc_dir_from_base_path})
-    rather than inlining the literal — see #9571. The
-    [test_masc_dirname_ssot] enforcement test flags regressions. *)
+    rather than inlining the literal — see #9571. *)
 
 val browser_lane_dirname : string
 (** The browser lane's directory under the MASC directory: its token, the

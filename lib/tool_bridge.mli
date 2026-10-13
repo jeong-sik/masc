@@ -38,13 +38,19 @@ type externalization_error =
   }
 
 val attach_artifact_manifest :
+  ?projection:Tool_output.artifact_projection ->
   base_path:string ->
   Tool_result.result ->
   (Tool_result.result, externalization_error) result
 (** Persist and attach the canonical manifest for typed result data containing
     normalized artifact references. Producers call this inside their effect
     boundary, before returning the authoritative result. Results without
-    artifact references pass through unchanged. Cancellation propagates. *)
+    artifact references pass through unchanged. Cancellation propagates.
+    The default [Reference_only] presents the manifest marker. An explicit
+    [Inline_with_reference] retains the result's content and structured data,
+    together with the exact durable manifest reference, while the complete
+    envelope fits the descriptor's typed projection ceiling. Larger envelopes
+    use the existing manifest marker without further storage or re-execution. *)
 
 val maybe_externalize :
   ?base_path:string ->
@@ -100,7 +106,9 @@ val to_agent_core_typed_result :
 
     When typed result data contains normalized artifact references, the
     producer must first call {!attach_artifact_manifest}; the provider-facing
-    content then becomes that durable manifest's marker. Projection performs
+    content then becomes that durable manifest's marker by default. The
+    producer's explicit [Inline_with_reference] presentation keeps a bounded
+    result envelope and manifest reference inline. Projection performs
     no manifest I/O after the producer's effect boundary. This keeps the
     transcript itself as the authoritative root while preserving the original
     content and structured data inside the manifest. *)

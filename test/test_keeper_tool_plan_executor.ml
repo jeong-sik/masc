@@ -3,6 +3,7 @@ open Alcotest
 module Descriptor = Masc.Keeper_tool_descriptor
 module Plan = Masc.Keeper_tool_plan
 module Executor = Masc.Keeper_tool_plan_executor
+module Tool_bridge = Masc.Tool_bridge
 
 let node_id value =
   match Plan.Node_id.make value with
@@ -1145,12 +1146,12 @@ let with_export_base f =
   Fun.protect ~finally:(fun () -> remove base) (fun () -> f base)
 ;;
 
-let exported_read_fixture ?(branch_failure_policy = Plan.Fail_fast) () =
+let exported_read_fixture ?(branch_failure_policy = Plan.Fail_fast) ?(pointer = "/path") () =
   let nodes =
     [ make_node ~tool_name:"Read" ~after:[]
         ~input:(object_template [ "file_path", Plan.Json_template.literal (`String "probe.txt") ]) "read" ]
   in
-  let exports = [ Plan.export ~name:"path" ~node_id:(node_id "read") ~pointer:(export_pointer "/path") ] in
+  let exports = [ Plan.export ~name:"path" ~node_id:(node_id "read") ~pointer:(export_pointer pointer) ] in
   match Plan.create ~descriptors:[ canonical_descriptor "Read" ] ~branch_failure_policy ~exports nodes with
   | Ok plan -> plan
   | Error error -> failf "export fixture rejected: %s" (Plan.error_to_string error)
@@ -1161,6 +1162,46 @@ let read_export_data =
   `Assoc [ "ok", `Bool true; "path", `String "probe.txt"
          ; "bytes", `Int (String.length content); "truncated", `Bool false
          ; "offset", `Int 0; "returned_lines", `Int 1; "content", `String content ]
+;;
+
+let project_export ~base_path ~plan ~execution original =
+  match Masc.Keeper_tool_composition_surface.For_testing.project_execution_result
+          ~base_path ~plan ~execution original with
+  | Ok result -> result
+  | Error error -> fail error.Tool_bridge.message
+;;
+
+let provider_content ~base_path result =
+  let module T = Agent_core.Types in
+  let content, outcome =
+    match Tool_bridge.to_agent_core_typed_result ~base_path result with
+    | Ok output -> output.content, T.Tool_succeeded
+    | Error error -> error.message, T.Tool_failed
+        { T.failure_kind = T.Non_retryable_tool_error; error_class = error.error_class }
+  in
+  let message : T.message =
+    { role = T.Tool
+    ; content = [ T.ToolResult { tool_use_id = "export-fixture"; content; outcome
+                                ; json = None; content_blocks = None } ]
+    ; name = None; tool_call_id = Some "export-fixture"; metadata = [] }
+  in
+  match Llm_provider.Backend_openai_serialize.openai_messages_of_message message with
+  | [ wire ] ->
+    let wire_content = Yojson.Safe.Util.(wire |> member "content" |> to_string) in
+    check string "provider receives exact projected content" content wire_content;
+    wire_content
+  | _ -> fail "provider did not serialize one tool result"
+;;
+
+let execution_document ~base_path reference =
+  match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:reference.Tool_output.sha256 with
+  | Ok (Some raw) ->
+    (match Tool_output.artifact_manifest_of_json (Yojson.Safe.from_string raw) with
+     | Tool_output.Decoded_artifact_manifest { structured_content; _ } -> structured_content
+     | Tool_output.Not_artifact_manifest -> fail "execution artifact is not a typed manifest"
+     | Tool_output.Invalid_artifact_manifest { detail } -> fail detail)
+  | Ok None -> fail "advertised execution artifact is missing"
+  | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
 ;;
 
 let test_export_success_preserves_durable_original () =
@@ -1176,36 +1217,40 @@ let test_export_success_preserves_durable_original () =
   let original = Masc.Keeper_tool_composition_surface.For_testing.result_of_execution
       ~tool_name:"keeper_compose_export-fixture" ~tool_kind:Descriptor.Composition_tool
       ~start_time:(Tool_timing.start ()) execution in
-  let projected =
-    match Masc.Keeper_composition_result.project ~base_path ~plan ~execution original with
-    | Ok result -> result
-    | Error error -> fail error.Tool_bridge.message
-  in
+  let projected = project_export ~base_path ~plan ~execution original in
   check bool "success remains authoritative" true (Tool_result.is_success projected);
   let data = Tool_result.data projected in
   let open Yojson.Safe.Util in
   check string "selected path" "probe.txt" (data |> member "exports" |> member "path" |> member "value" |> to_string);
   check bool "all action data moved to the artifact" true (data |> member "actions" = `Null);
   let reference = data |> member "execution_artifact" in
-  let sha256 = match Tool_output.normalized_artifact_ref_of_json reference with
-    | Tool_output.Decoded_normalized_artifact_ref reference -> reference.sha256
+  let reference = match Tool_output.normalized_artifact_ref_of_json reference with
+    | Tool_output.Decoded_normalized_artifact_ref reference -> reference
     | Tool_output.Not_normalized_artifact_ref | Tool_output.Invalid_normalized_artifact_ref _ ->
       fail "execution artifact is not a canonical reference" in
-  let raw =
-    match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with
-    | Ok (Some raw) -> Yojson.Safe.from_string raw
-    | Ok None -> fail "advertised execution artifact is missing"
-    | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
-  in
+  check string "execution uses canonical retention edge" Tool_output.artifact_manifest_mime reference.mime;
+  let raw = execution_document ~base_path reference in
   check string "raw producer retained byte-for-byte"
     (Yojson.Safe.to_string (Tool_result.to_json original))
     (raw |> member "result" |> Yojson.Safe.to_string);
   check int "one dispatch, no replay" 1 !calls;
   check bool "artifact retained for observers" true (Tool_result.retained_artifacts projected <> []);
+  let wire_content = provider_content ~base_path projected in
+  check bool "small exports remain immediately readable" false (Tool_output.is_marker wire_content);
+  let wire = Yojson.Safe.from_string wire_content in
+  check string "selected path survives actual provider serialization" "probe.txt"
+    (wire |> member "structured_content" |> member "exports" |> member "path" |> member "value" |> to_string);
+  check bool "provider content roots the complete manifest" true
+    (wire |> member "artifact_manifest" <> `Null);
+  let baseline_wire = provider_content ~base_path original in
   export_measurement := Some
-    (`Assoc [ "scope", `String "controlled Read composition result projection"
+    (`Assoc [ "scope", `String "controlled Read composition through attach_artifact_manifest, AGENT_CORE, OpenAI serializer"
             ; "raw_result_bytes", `Int (String.length (Tool_result.message original))
             ; "export_result_bytes", `Int (String.length (Tool_result.message projected))
+            ; "provider_tool_content_bytes", `Int (String.length wire_content)
+            ; "baseline_provider_tool_content_bytes", `Int (String.length baseline_wire)
+            ; "baseline_externalized", `Bool (Tool_output.is_marker baseline_wire)
+            ; "export_externalized", `Bool (Tool_output.is_marker wire_content)
             ; "node_dispatches", `Int !calls
             ; "full_artifact_retrieved", `Bool true ])
 ;;
@@ -1239,7 +1284,7 @@ let test_export_failure_preserves_independent_branch () =
   let original = Masc.Keeper_tool_composition_surface.For_testing.result_of_execution
       ~tool_name:"keeper_compose_partial-fixture" ~tool_kind:Descriptor.Composition_tool
       ~start_time:(Tool_timing.start ()) execution in
-  match Masc.Keeper_composition_result.project ~base_path ~plan ~execution original with
+  match Masc.Keeper_tool_composition_surface.For_testing.project_execution_result ~base_path ~plan ~execution original with
   | Error error -> fail error.Tool_bridge.message
   | Ok projected ->
     (match projected with
@@ -1251,7 +1296,150 @@ let test_export_failure_preserves_independent_branch () =
     List.iter (fun name -> check bool (name ^ " is unavailable") false
       (data |> member "exports" |> member name |> member "available" |> to_bool)) [ "failed"; "blocked" ];
     check bool "failure cause remains visible" true (data |> member "cause" <> `Null);
-    check bool "full failure artifact is addressable" true (data |> member "execution_artifact" <> `Null)
+    check bool "full failure artifact is addressable" true (data |> member "execution_artifact" <> `Null);
+    let wire = provider_content ~base_path projected |> Yojson.Safe.from_string in
+    let wire_data = wire |> member "structured_content" in
+    check bool "independent result reaches provider on failure" true
+      (wire_data |> member "exports" |> member "independent" |> member "available" |> to_bool);
+    check string "unknown effect reaches provider" "effect_outcome_unknown"
+      (wire_data |> member "effect_disposition" |> to_string);
+    check bool "provider keeps failed node and cause" true (wire_data |> member "cause" <> `Null)
+;;
+
+let run_exported_read ~base_path ?(pointer = "/path") ?(retained = []) () =
+  let plan = exported_read_fixture ~pointer () in
+  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    completed ~tool_name:node.Plan.tool_name ~data:read_export_data
+    |> Tool_result.with_retained_artifacts retained
+    |> Executor.dispatch_result
+  in
+  let execution = Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () in
+  let original = Masc.Keeper_tool_composition_surface.For_testing.result_of_execution
+      ~tool_name:"keeper_compose_export-fixture" ~tool_kind:Descriptor.Composition_tool
+      ~start_time:(Tool_timing.start ()) execution in
+  let projected = project_export ~base_path ~plan ~execution original in
+  execution, original, projected
+;;
+
+let execution_reference result =
+  let json = Yojson.Safe.Util.(Tool_result.data result |> member "execution_artifact") in
+  match Tool_output.normalized_artifact_ref_of_json json with
+  | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+  | Tool_output.Not_normalized_artifact_ref | Tool_output.Invalid_normalized_artifact_ref _ ->
+    fail "missing execution artifact"
+;;
+
+let test_large_export_keeps_existing_externalization () =
+  Eio_main.run @@ fun _env ->
+  with_export_base @@ fun base_path ->
+  let _, _, projected = run_exported_read ~base_path ~pointer:"/content" () in
+  let wire = provider_content ~base_path projected in
+  match Tool_output.decode_from_agent_core wire with
+  | Tool_output.Decoded reference ->
+    check string "large export uses existing manifest transport"
+      Tool_output.artifact_manifest_mime reference.mime;
+    let stored = execution_document ~base_path reference in
+    check int "large selected value remains exact in durable result" 16384
+      Yojson.Safe.Util.(stored |> member "exports" |> member "path" |> member "value" |> to_string |> String.length)
+  | Tool_output.Not_marker -> fail "large export bypassed its typed projection ceiling"
+  | Tool_output.Invalid_marker { detail } -> fail detail
+;;
+
+let save_export_evidence config ~execution result =
+  let source_id = Skill_source_config.source_id_of_string "workspace" |> Result.get_ok in
+  let package_id = Skill_catalog_snapshot.package_id_of_directory "export-fixture" |> Result.get_ok in
+  let reference = Skill_reference.make
+      ~identity:(Skill_reference.make_identity ~source_id ~package_id ~name:"export-fixture")
+      ~content_revision:(Skill_reference.content_revision_of_string (String.make 64 'a') |> Result.get_ok) in
+  let parent_invocation = Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"export-fixture" ~turn:1
+      ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1
+                ; execution_mode = Agent_core.Tool_contract.Serial }
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+  let settlements = match execution with
+    | Ok nodes -> nodes
+    | Error (failure : Executor.failure) -> failure.settled in
+  let module Evidence = Masc.Keeper_skill_composition_evidence in
+  match Evidence.make ~reference ~composition_run_id:(Plan.Composition_run_id.fresh ())
+          ~parent_invocation ~request_id:None ~keeper_name:"alpha"
+          ~composition_tool:"keeper_compose_export-fixture"
+          ~composition_execution:Masc.Keeper_tool_composition_catalog.Inline
+          ~result ~executor_settlements:(List.map Masc.Keeper_tool_composition_projection.node_result_to_json settlements) with
+  | Error error -> fail (Evidence.error_to_string error)
+  | Ok evidence ->
+    (match Evidence.save_latest config evidence with
+     | Ok Evidence.Saved -> ()
+     | Ok (Evidence.Saved_with_lock_release_error _) -> fail "evidence lock release failed"
+     | Error error -> fail (Evidence.error_to_string error))
+;;
+
+let save_async_export ~base_path result =
+  let module Async = Masc.Keeper_msg_async in
+  let request_id = "composition-export-request" in
+  let entry : Async.entry =
+    { request_id; keeper_name = "alpha"; base_path; submitted_by = "alpha"
+    ; request_context = None; submitted_at = 1.; completed_at = Some 2.
+    ; status = Async.Done { ok = true; body = Tool_result.message result
+                           ; data = Some (Tool_result.data result) } } in
+  let path = match Async.For_testing.terminal_record_path ~base_path ~request_id with
+    | Some path -> path | None -> fail "invalid terminal fixture identity" in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file path (Masc.Keeper_msg_async_record.entry_record_to_json entry |> Yojson.Safe.to_string);
+  request_id
+;;
+
+let check_export_retention ~base_path ~child result =
+  let store = Tool_blob_store.create ~base_path in
+  let dead = Tool_blob_store.put_durable store ~bytes:"unowned export artifact" ~mime:"text/plain" in
+  let maintain mode =
+    match Tool_blob_maintenance.run ~base_path
+            ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
+    | Ok report -> report
+    | Error error -> fail (Tool_blob_maintenance.error_to_string error) in
+  ignore (maintain Tool_blob_maintenance.Observe_only);
+  ignore (maintain Tool_blob_maintenance.Delete_previous_candidates);
+  let reference = execution_reference result in
+  ignore (execution_document ~base_path reference);
+  check (option string) "intermediate retained child survives two offline passes"
+    (Some "intermediate child") (Tool_blob_store.fetch store ~sha256:child.Tool_output.sha256 |> Result.get_ok);
+  check (option string) "unowned artifact is actually collected" None
+    (Tool_blob_store.fetch store ~sha256:dead.sha256 |> Result.get_ok)
+;;
+
+let test_export_evidence_is_independent_retention_owner () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_export_base @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let child = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
+      ~bytes:"intermediate child" ~mime:"text/plain" in
+  let execution, _, projected = run_exported_read ~base_path ~retained:[ child ] () in
+  save_export_evidence config ~execution projected;
+  (* There is no Keeper checkpoint or tool-call row: Skill evidence owns this run. *)
+  check_export_retention ~base_path ~child projected
+;;
+
+let test_async_export_status_and_retention () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_export_base @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let child = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
+      ~bytes:"intermediate child" ~mime:"text/plain" in
+  let _, _, projected = run_exported_read ~base_path ~retained:[ child ] () in
+  let request_id = save_async_export ~base_path projected in
+  (* The terminal request is the sole durable owner before status retrieval. *)
+  check_export_retention ~base_path ~child projected;
+  let meta = Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "alpha"; "activation_mode", `String "manual" ]) |> Result.get_ok in
+  let status = Masc.Keeper_tool_composition_surface.For_testing.status_result ~config ~meta ~request_id in
+  let wire = provider_content ~base_path status |> Yojson.Safe.from_string in
+  let open Yojson.Safe.Util in
+  let data = wire |> member "structured_content" in
+  check string "async status is immediately readable" "done" (data |> member "status" |> to_string);
+  check string "async export survives status and provider boundaries" "probe.txt"
+    (data |> member "result" |> member "exports" |> member "path" |> member "value" |> to_string);
+  check bool "status wire preserves its durable root" true (wire |> member "artifact_manifest" <> `Null)
 ;;
 
 let test_export_storage_failure_does_not_advertise_result () =
@@ -1280,6 +1468,9 @@ let () =
     [ ( "execution"
       , [ test_case "exports persist complete execution" `Quick test_export_success_preserves_durable_original
         ; test_case "partial exports preserve unknown failures" `Quick test_export_failure_preserves_independent_branch
+        ; test_case "large selected exports keep manifest transport" `Quick test_large_export_keeps_existing_externalization
+        ; test_case "Skill evidence retains execution and child artifacts" `Quick test_export_evidence_is_independent_retention_owner
+        ; test_case "async status carries exports and roots execution artifacts" `Quick test_async_export_status_and_retention
         ; test_case "export storage failure never replays" `Quick test_export_storage_failure_does_not_advertise_result
         ; test_case "parallel dataflow schedule" `Quick test_schedule_and_parallel_dataflow
         ; test_case

@@ -82,14 +82,20 @@ let project ~base_path ~plan ~execution result =
       Tool_result.retained_artifacts result
       @ List.concat_map (fun (node : Executor.node_result) -> Tool_result.retained_artifacts node.result) nodes
     in
-    let raw =
+    let raw_document =
       `Assoc [ "result", Tool_result.to_json result
              ; "nodes", `List (List.map Projection.node_result_to_json nodes)
              ; "retained_artifacts", `List (List.map Tool_output.normalized_artifact_ref_to_json retained) ]
+    in
+    let raw =
+      Tool_output.artifact_manifest_to_json
+        ~content:(Tool_result.message result) ~structured_content:raw_document
       |> Yojson.Safe.to_string
     in
-    match Tool_blob_store.put_durable (Tool_blob_store.create ~base_path) ~bytes:raw ~mime:"application/json" with
+    match Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
+            ~bytes:raw ~mime:Tool_output.artifact_manifest_mime with
     | reference ->
+      let reference = Tool_output.with_preview reference "" in
       let nodes =
         List.map (fun (node : Plan.node) ->
           match List.find_opt (fun (result : Executor.node_result) -> Plan.Node_id.equal node.id result.node_id) nodes with
@@ -101,7 +107,7 @@ let project ~base_path ~plan ~execution result =
       let original_fields =
         match Tool_result.data result with
         | `Assoc fields -> List.filter (fun (name, _) -> List.mem name [ "composition_tool"; "tool_kind" ]) fields
-        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Tuple _ | `Variant _ -> []
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
       in
       let failure =
         match execution with

@@ -37,6 +37,19 @@ existing artifact reader with its normalized reference when those details are
 needed. Persistence failure reports failure and never advertises an unstored
 result. It does not rerun tool effects.
 
+At the model boundary, a small exported result stays immediately readable in
+`structured_content`, alongside an exact `artifact_manifest` reference. Failure
+diagnostics remain visible too. The complete envelope must fit the tool's typed
+projection ceiling; larger selected outputs keep the existing manifest marker.
+Async status retrieval follows the same rule, with the selected result under
+`structured_content.result`.
+
+The execution artifact uses the canonical manifest MIME/schema. Its
+`structured_content` contains `result`, `nodes` and `retained_artifacts`, so
+offline retention follows intermediate artifacts through explicit typed edges.
+Skill composition evidence and terminal async request records independently
+retain that execution document even when no Keeper checkpoint remains.
+
 Without exports, the composition retains its full result. Export selection is
 not a text summary or a length cutoff. Large selected values still follow the
 normal tool-output externalization contract.

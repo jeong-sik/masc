@@ -153,6 +153,7 @@ val build_prompt :
   ?active_goal_summaries:(goal_summary list, Goal_store.unavailable) result ->
   ?workspace_memory:Workspace_memory_ledger.observation ->
   ?workspace_memory_access:Keeper_request_tool_access.t ->
+  ?wiki_index:(Wiki_journal.entry list, string) result ->
   ?lane_updates:(Yojson.Safe.t, string) result ->
   ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   ?recent_work:Keeper_recent_work.transmission ->
@@ -182,7 +183,10 @@ val build_prompt :
       missing history and unavailable sources do not infer work completion.
     - [?repository_freshness]: rows for the Repository Checkouts layer,
       measured by {!Keeper_sandbox_control.checkout_freshness_rows}. Omitted
-      or empty, the layer is absent. *)
+      or empty, the layer is absent.
+    - [?wiki_index]: the Wiki layer, {!format_wiki_observation} with the
+      request's [?workspace_memory_access]. Omitted or [Ok []], the layer is
+      absent. *)
 
 val build_prompt_preview :
   current_task:Keeper_world_observation_inputs.current_task_observation ->
@@ -190,6 +194,7 @@ val build_prompt_preview :
   ?active_goal_summaries:(goal_summary list, Goal_store.unavailable) result ->
   ?workspace_memory:Workspace_memory_ledger.observation ->
   ?workspace_memory_access:Keeper_request_tool_access.t ->
+  ?wiki_index:(Wiki_journal.entry list, string) result ->
   ?lane_updates:(Yojson.Safe.t, string) result ->
   ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   ?recent_work:Keeper_recent_work.transmission ->
@@ -231,3 +236,12 @@ val format_workspace_memory_observation :
     Without [access], render an operator preview with no callable-route claim.
     Captured proposal facts are not injected or compared with current memory.
     Read failures carry no model-facing IO text. *)
+
+val format_wiki_observation :
+  ?access:Keeper_request_tool_access.t ->
+  (Wiki_journal.entry list, string) result -> string option
+(** The wiki table of contents ({!Tool_wiki.read_index_entries}): one line per
+    file, then the actual request's route to [keeper_wiki_read]. Without
+    [access], render an operator preview with no callable-route claim. [Ok []]
+    renders nothing. A listing failure renders a fixed line with no
+    model-facing IO text. Page bodies are never included. *)

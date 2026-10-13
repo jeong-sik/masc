@@ -258,7 +258,7 @@ let test_subscription_models_resolve_their_own_rows () =
   in
   List.iter
     (fun (model_id, expected_prefix) ->
-       match Model_catalog.lookup catalog model_id with
+       match Model_catalog.lookup catalog (Llm_provider.Model_identifiers.Model_id.of_string_exn model_id) with
        | None ->
          failf
            "%s resolves to no catalog row; Runtime disables uncatalogued runtimes at boot"
@@ -370,8 +370,9 @@ let test_subscription_models_admit_their_reasoning_efforts () =
     (fun (provider_name, model_id, expected) ->
        let entry =
          match provider_name with
-         | None -> Model_catalog.lookup catalog model_id
-         | Some provider_name -> Model_catalog.lookup_for_provider catalog ~provider_name ~model_id
+         | None -> Model_catalog.lookup catalog (Llm_provider.Model_identifiers.Model_id.of_string_exn model_id)
+         | Some provider_name -> Model_catalog.lookup_for_provider catalog ~provider_name
+             ~model_id:(Llm_provider.Model_identifiers.Model_id.of_string_exn model_id)
        in
        match entry with
        | None -> failf "%s resolves to no catalog row" model_id
@@ -433,7 +434,7 @@ let test_anthropic_rows_price_cache_tokens () =
   in
   List.iter
     (fun (model_id, expected_write, expected_read) ->
-       match Model_catalog.lookup catalog model_id with
+       match Model_catalog.lookup catalog (Llm_provider.Model_identifiers.Model_id.of_string_exn model_id) with
        | None -> failf "%s resolves to no catalog row" model_id
        | Some (entry : Model_catalog.model_entry) ->
          check

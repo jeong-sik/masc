@@ -33,24 +33,18 @@ let pricing_of_catalog_entry (entry : Model_catalog.model_entry) =
 
 let catalog_entry_for_model catalog ?provider_id model_id =
   match provider_id with
-  | None -> Model_catalog.lookup_result catalog model_id
+  | None -> Model_catalog.lookup catalog model_id
   | Some provider_id ->
-    (match
-       Model_catalog.lookup_for_provider_result
-         catalog ~provider_name:provider_id ~model_id
-     with
-     | Ok _ as exact -> exact
-     | Error Model_catalog.No_such_row -> Model_catalog.lookup_result catalog model_id
-     | Error (Model_catalog.Malformed_model_id _) as malformed -> malformed)
+    (match Model_catalog.lookup_for_provider catalog ~provider_name:provider_id ~model_id with
+     | Some _ as exact -> exact
+     | None -> Model_catalog.lookup catalog model_id)
 ;;
 
 let pricing_for_model_opt ?provider_id model_id =
-  match Model_catalog.global () with
-  | None -> None
-  | Some catalog ->
-    (match catalog_entry_for_model catalog ?provider_id model_id with
-     | Ok entry -> pricing_of_catalog_entry entry
-     | Error (Model_catalog.Malformed_model_id _ | Model_catalog.No_such_row) -> None)
+  match Model_catalog.global (), Model_identifiers.Model_id.of_string model_id with
+  | None, _ | _, Error _ -> None
+  | Some catalog, Ok model_id ->
+    Option.bind (catalog_entry_for_model catalog ?provider_id model_id) pricing_of_catalog_entry
 ;;
 
 let estimate_cost

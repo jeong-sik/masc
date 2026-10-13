@@ -9,9 +9,11 @@ let firefox_bundle_executable = "Firefox.app/Contents/MacOS/firefox"
 let candidates = function
   | Geckodriver -> [ "geckodriver" ]
   | Firefox ->
+    (* A relative HOME would name a bundle relative to wherever this runs, and
+       the lane takes absolute paths only. *)
     let user_applications =
       match Sys.getenv_opt "HOME" with
-      | Some home when not (String.equal home "") ->
+      | Some home when (not (String.equal home "")) && not (Filename.is_relative home) ->
         [ Filename.concat (Filename.concat home "Applications") firefox_bundle_executable ]
       | Some _ | None -> []
     in
@@ -40,23 +42,40 @@ let is_executable_file path =
   | { Unix.st_kind = Unix.(S_DIR | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } -> false
   | exception Unix.Unix_error _ -> false
 
+(* The lane takes absolute paths only ([browser.automation] geckodriver and
+   binary, [browser.live.bidi] firefox). A program found through a relative
+   PATH entry, or given as a relative path, is reported where it is on disk
+   rather than as a path that only means something from this directory. A
+   working directory that cannot be read leaves no such path to report. *)
+let absolute path =
+  if not (Filename.is_relative path)
+  then Some path
+  else (
+    match Sys.getcwd () with
+    | cwd -> Some (Filename.concat cwd path)
+    | exception Sys_error _ -> None)
+
 (* The file a name resolves to, as {!Executable_path} decides what counts as a
    search directory: an empty entry is not the current directory. *)
 let resolve command =
   let command = String.trim command in
   if String.equal command ""
   then None
-  else if String.contains command '/'
-  then if is_executable_file command then Some command else None
   else (
-    match Sys.getenv_opt "PATH" with
-    | None -> None
-    | Some raw ->
-      Executable_path.split_search_path raw
-      |> List.filter (fun directory -> not (String.equal directory ""))
-      |> List.find_map (fun directory ->
-        let candidate = Filename.concat directory command in
-        if is_executable_file candidate then Some candidate else None))
+    let found =
+      if String.contains command '/'
+      then if is_executable_file command then Some command else None
+      else (
+        match Sys.getenv_opt "PATH" with
+        | None -> None
+        | Some raw ->
+          Executable_path.split_search_path raw
+          |> List.filter (fun directory -> not (String.equal directory ""))
+          |> List.find_map (fun directory ->
+            let candidate = Filename.concat directory command in
+            if is_executable_file candidate then Some candidate else None))
+    in
+    Option.bind found absolute)
 
 let probe command =
   match resolve command with
@@ -85,18 +104,29 @@ let probe command =
      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
        Failed { command; path; status; detail = output })
 
-let observe program =
-  let checks = List.map probe (candidates program) in
-  let started =
-    List.find_opt (function Started _ -> true | Missing _ | Failed _ -> false) checks
+(* Candidates are tried in order and the first one that answers ends the walk:
+   a later candidate is never started once an earlier one has answered, which
+   matters when a candidate is a launcher that opens a window. A failure and a
+   missing file are remembered, the first of each, for when nothing answers. *)
+let first_answer ~label candidates =
+  let rec walk ~failed ~missing = function
+    | [] ->
+      (match failed, missing with
+       | Some check, _ | None, Some check -> check
+       | None, None -> Missing label)
+    | command :: rest ->
+      (match probe command with
+       | Started _ as check -> check
+       | Failed _ as check ->
+         let failed = match failed with None -> Some check | Some _ -> failed in
+         walk ~failed ~missing rest
+       | Missing _ as check ->
+         let missing = match missing with None -> Some check | Some _ -> missing in
+         walk ~failed ~missing rest)
   in
-  let failed =
-    List.find_opt (function Failed _ -> true | Missing _ | Started _ -> false) checks
-  in
-  match started, failed, checks with
-  | Some check, _, _ | None, Some check, _ -> check
-  | None, None, check :: _ -> check
-  | None, None, [] -> Missing (name program)
+  walk ~failed:None ~missing:None candidates
+
+let observe program = first_answer ~label:(name program) (candidates program)
 
 let available = function
   | Started _ -> true
@@ -135,7 +165,7 @@ let to_json program check =
   `Assoc
     [ "schema", `String "masc.browser_tools_readiness.v1"
     ; "program", `String (name program)
-    ; "status", `String (if available check then "tool_available" else "unavailable")
+    ; "status", `String (if available check then "tools_available" else "unavailable")
     ; "scope", `String "current_process_environment"
     ; "checks", `List [ `Assoc row ]
     ; "lane", `String "not_checked"

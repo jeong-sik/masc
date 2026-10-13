@@ -183,7 +183,7 @@ let browser_receipt program receipt =
     ("status",`String "failed") ::
     ("reason",`String "Installation finished, but the program could not start. Inspect dependency_readiness, correct the installation or PATH, then refresh detection.") ::
     List.remove_assoc "status" fields in
-  `Assoc (("readiness",`String (if ready then "tool_available" else "unavailable")) ::
+  `Assoc (("readiness",`String (if ready then "tools_available" else "unavailable")) ::
     ("dependency_readiness",Masc.Browser_runtime_dependencies.to_json program check) :: fields),
   (if ready then 0 else 1)
 let run ~base_path ~dependency:name ~action =

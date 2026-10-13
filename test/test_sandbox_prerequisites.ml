@@ -157,16 +157,41 @@ let test_browser_tool_actions_write_no_file () =
 
 module B = Masc.Browser_runtime_dependencies
 
-let with_executable ~name contents f =
+(* A scratch directory for fixture programs. Whatever a test leaves in it is
+   removed with it. *)
+let with_directory f =
   let dir = Filename.temp_file "browser-tools" "" in
   Sys.remove dir; Unix.mkdir dir 0o700;
+  Fun.protect ~finally:(fun () ->
+    Array.iter (fun entry ->
+      let path = Filename.concat dir entry in
+      try Sys.remove path
+      with Sys_error _ -> (try Unix.rmdir path with Unix.Unix_error _ -> ()))
+      (try Sys.readdir dir with Sys_error _ -> [||]);
+    (try Unix.rmdir dir with Unix.Unix_error _ -> ()))
+    (fun () -> f dir)
+
+let write_program ?(mode = 0o755) dir name contents =
   let path = Filename.concat dir name in
   Out_channel.with_open_bin path (fun out -> output_string out contents);
-  Unix.chmod path 0o755;
-  Fun.protect ~finally:(fun () ->
-    (try Sys.remove path with Sys_error _ -> ());
-    (try Unix.rmdir dir with Unix.Unix_error _ -> ()))
-    (fun () -> f dir path)
+  Unix.chmod path mode;
+  path
+
+let with_executable ~name contents f =
+  with_directory (fun dir -> f dir (write_program dir name contents))
+
+(* The standard library has no unsetenv, so a variable that was unset comes
+   back empty. For PATH and HOME that reads the same as unset to everything
+   under test. *)
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect ~finally:(fun () -> Unix.putenv name (Option.value previous ~default:"")) f
+
+let with_cwd dir f =
+  let previous = Sys.getcwd () in
+  Sys.chdir dir;
+  Fun.protect ~finally:(fun () -> Sys.chdir previous) f
 
 (* A program that answers its version entry point is what "available" means;
    the path it answered at is what runtime.toml has to name. *)
@@ -176,6 +201,7 @@ let test_a_program_that_answers_is_available_at_an_absolute_path () =
        match B.probe path with
        | B.Started {path = answered; output; _} as result ->
          check string "the path that answered" path answered;
+         check bool "the path is absolute" false (Filename.is_relative answered);
          check bool "the version text is kept" true (String_util.contains_substring output "9.9.9");
          check bool "available" true (B.available result);
          check (option string) "its path" (Some path) (B.path result)
@@ -198,21 +224,104 @@ let test_a_program_that_does_not_answer_is_failed_not_missing () =
 let test_a_name_on_path_resolves_to_an_absolute_path () =
   with_executable ~name:"geckodriver" "#!/bin/sh\necho 'geckodriver 1.2.3'\n"
     (fun dir path ->
-       let previous = Sys.getenv_opt "PATH" in
-       Unix.putenv "PATH" (dir ^ ":" ^ Option.value previous ~default:"/usr/bin:/bin");
-       Fun.protect ~finally:(fun () -> Unix.putenv "PATH" (Option.value previous ~default:""))
-         (fun () ->
-            match B.observe B.Geckodriver with
-            | B.Started {path = answered; _} ->
-              check string "the PATH entry's file" path answered
-            | B.Missing _ | B.Failed _ -> fail "geckodriver on PATH must be found"))
+       let inherited = Option.value (Sys.getenv_opt "PATH") ~default:"/usr/bin:/bin" in
+       with_env "PATH" (dir ^ ":" ^ inherited) (fun () ->
+         match B.observe B.Geckodriver with
+         | B.Started {path = answered; _} ->
+           check string "the PATH entry's file" path answered;
+           check bool "the path is absolute" false (Filename.is_relative answered)
+         | B.Missing _ | B.Failed _ -> fail "geckodriver on PATH must be found"))
 
-let test_the_dependency_names_match_the_cli () =
-  check string "geckodriver" "geckodriver" (B.name B.Geckodriver);
-  check string "firefox" "firefox" (B.name B.Firefox);
-  check bool "bundle locations are absolute" true
-    (List.for_all (fun c -> String.equal c "firefox" || not (Filename.is_relative c))
-       (B.candidates B.Firefox))
+(* The lane takes absolute paths only, so a program found through a relative
+   PATH entry, or named by a relative path, is reported where it is on disk. *)
+let test_a_relative_path_is_reported_by_its_absolute_path () =
+  with_executable ~name:"geckodriver" "#!/bin/sh\necho 'geckodriver 4.5.6'\n"
+    (fun dir _ ->
+       with_cwd dir (fun () ->
+         let expect_absolute label = function
+           | B.Started {path; _} ->
+             check bool (label ^ ": absolute") false (Filename.is_relative path);
+             check bool (label ^ ": the file that answered exists") true (Sys.file_exists path);
+             check string (label ^ ": names the program") "geckodriver" (Filename.basename path)
+           | B.Missing _ | B.Failed _ -> fail (label ^ ": must start") in
+         expect_absolute "relative command" (B.probe "./geckodriver");
+         with_env "PATH" ".:/usr/bin:/bin" (fun () ->
+           expect_absolute "relative PATH entry" (B.observe B.Geckodriver))))
+
+(* A shell searching PATH skips a file it may not execute, and so does the
+   check: such a file is not a program, and a directory is not one either. *)
+let test_a_file_that_cannot_be_executed_is_missing () =
+  with_directory (fun dir ->
+    let plain = write_program ~mode:0o644 dir "geckodriver" "#!/bin/sh\necho x\n" in
+    let folder = Filename.concat dir "firefox" in
+    Unix.mkdir folder 0o700;
+    List.iter (fun candidate ->
+      match B.probe candidate with
+      | B.Missing _ -> ()
+      | B.Started _ | B.Failed _ -> fail "something that cannot run is not a program")
+      [plain; folder])
+
+(* Started beats Failed beats Missing, and the walk ends at the first answer so
+   that a launcher listed after it is never run. *)
+let test_the_first_program_that_answers_ends_the_walk () =
+  with_directory (fun dir ->
+    let broken = write_program dir "broken" "#!/bin/sh\necho broken >&2\nexit 3\n" in
+    let good = write_program dir "good" "#!/bin/sh\necho 'fx 1.0'\n" in
+    let marker = Filename.concat dir "later-ran" in
+    let later =
+      write_program dir "later"
+        (Printf.sprintf "#!/bin/sh\n: > %s\necho later\n" (Filename.quote marker)) in
+    let absent = Filename.concat dir "absent" in
+    let other_absent = Filename.concat dir "other-absent" in
+    (match B.first_answer ~label:"fx" [absent; broken; good; later] with
+     | B.Started {path; _} -> check string "the first program that answers" good path
+     | B.Missing _ | B.Failed _ -> fail "an answering program must win over a failure");
+    check bool "a later candidate is never started" false (Sys.file_exists marker);
+    (match B.first_answer ~label:"fx" [absent; broken; other_absent] with
+     | B.Failed {path; _} -> check string "a failure outranks a missing file" broken path
+     | B.Missing _ | B.Started _ -> fail "a failure must outrank a missing file");
+    (match B.first_answer ~label:"fx" [absent; other_absent] with
+     | B.Missing command -> check string "the first candidate is named" absent command
+     | B.Started _ | B.Failed _ -> fail "nothing exists, so it is missing");
+    (match B.first_answer ~label:"fx" [] with
+     | B.Missing command -> check string "an empty list names the program" "fx" command
+     | B.Started _ | B.Failed _ -> fail "no candidate is missing"))
+
+(* Firefox on macOS is inside its application bundle, system-wide or in the
+   user's own Applications folder. A HOME that is not absolute lists nothing
+   that would only mean something from one directory. *)
+let test_firefox_bundle_locations_follow_an_absolute_home () =
+  with_env "HOME" "/Users/fixture" (fun () ->
+    check bool "the user's Applications folder is listed" true
+      (List.mem "/Users/fixture/Applications/Firefox.app/Contents/MacOS/firefox"
+         (B.candidates B.Firefox)));
+  List.iter (fun home ->
+    with_env "HOME" home (fun () ->
+      check bool "only absolute bundle locations" true
+        (List.for_all (fun c -> String.equal c "firefox" || not (Filename.is_relative c))
+           (B.candidates B.Firefox))))
+    [""; "relative/home"];
+  check (list string) "geckodriver is a bare name" ["geckodriver"] (B.candidates B.Geckodriver)
+
+(* Same words as the PDF and presentation checks, because one reader walks all
+   three. *)
+let test_the_readiness_json_uses_the_shared_status_words () =
+  with_executable ~name:"geckodriver" "#!/bin/sh\necho 'geckodriver 7.7.7'\n"
+    (fun _ path ->
+       let json = B.to_json B.Geckodriver (B.probe path) in
+       let member key value = Yojson.Safe.Util.member key value in
+       check string "schema" "masc.browser_tools_readiness.v1"
+         (Yojson.Safe.Util.to_string (member "schema" json));
+       check string "available" "tools_available"
+         (Yojson.Safe.Util.to_string (member "status" json));
+       match Yojson.Safe.Util.to_list (member "checks" json) with
+       | [row] ->
+         check string "row status" "started" (Yojson.Safe.Util.to_string (member "status" row));
+         check string "row path" path (Yojson.Safe.Util.to_string (member "path" row))
+       | _ -> fail "one program is one row");
+  let missing = B.to_json B.Firefox (B.Missing "firefox") in
+  check string "unavailable" "unavailable"
+    (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "status" missing))
 
 (* Hearing is the only half of voice a fresh mac cannot already do: say is in
    the base system with nine Korean voices, and nothing transcribes. What the
@@ -524,7 +633,16 @@ let () = run "prerequisite actions" ["user-selected plans",[
     test_a_program_that_does_not_answer_is_failed_not_missing;
   test_case "a name on PATH resolves to an absolute path" `Quick
     test_a_name_on_path_resolves_to_an_absolute_path;
-  test_case "the dependency names match the CLI" `Quick test_the_dependency_names_match_the_cli;
+  test_case "a relative path is reported by its absolute path" `Quick
+    test_a_relative_path_is_reported_by_its_absolute_path;
+  test_case "a file that cannot be executed is missing" `Quick
+    test_a_file_that_cannot_be_executed_is_missing;
+  test_case "the first program that answers ends the walk" `Quick
+    test_the_first_program_that_answers_ends_the_walk;
+  test_case "Firefox bundle locations follow an absolute HOME" `Quick
+    test_firefox_bundle_locations_follow_an_absolute_home;
+  test_case "the readiness JSON uses the shared status words" `Quick
+    test_the_readiness_json_uses_the_shared_status_words;
   test_case "effects are not readiness" `Quick test_completion_never_means_ready;
   test_case "a builder without Rosetta offers the two ways past it" `Quick
     test_a_builder_without_rosetta_offers_the_two_ways_past_it;

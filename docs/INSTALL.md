@@ -150,10 +150,14 @@ On macOS the actions use an existing Homebrew: the
 [`firefox`](https://formulae.brew.sh/cask/firefox) cask. On Linux they open the
 project's own download or instruction page, because the package names differ by
 distribution. The default MASC bootstrap does not install Homebrew or these
-programs.
+programs. Homebrew refuses the Firefox cask when `Firefox.app` is already in
+`/Applications`; the `firefox` result then reports that copy and no install is
+needed.
 
 The result says whether the program answers `--version` in the current process
-environment, and at which absolute path. It does not edit `runtime.toml`: naming
+environment, and at which absolute path. The program runs with the same reduced
+environment the PDF check uses, so a program that needs a display variable to
+print its version is reported as not answering. It does not edit `runtime.toml`: naming
 the executable in `[browser.automation]` and restarting the server are separate
 steps.
 

@@ -144,9 +144,14 @@ macOS에서는 기존 Homebrew의 [`geckodriver`](https://formulae.brew.sh/formu
 formula와 [`firefox`](https://formulae.brew.sh/cask/firefox) cask를 사용합니다.
 Linux에서는 배포판마다 패키지 이름이 달라서 프로젝트의 다운로드·설치 안내 페이지를
 엽니다. 기본 MASC 설치 과정은 Homebrew나 이 프로그램들을 자동으로 설치하지 않습니다.
+`/Applications`에 `Firefox.app`이 이미 있으면 Homebrew가 Firefox cask 설치를
+거절합니다. 그때는 `firefox` 결과가 그 Firefox를 이미 보여 주므로 설치가 필요
+없습니다.
 
 결과는 현재 프로세스 환경에서 프로그램이 `--version`에 답하는지와 그 절대 경로를
-알려 줍니다. `runtime.toml`은 고치지 않습니다. `[browser.automation]`에 실행 파일을
+알려 줍니다. 프로그램은 PDF 검사와 같이 일부만 남긴 환경 변수로 실행합니다.
+버전을 출력하는 데 `DISPLAY` 같은 변수가 필요한 프로그램은 답하지 않는 것으로
+나옵니다. `runtime.toml`은 고치지 않습니다. `[browser.automation]`에 실행 파일을
 적는 일과 서버 재시작은 별도 단계입니다.
 
 ## 설치

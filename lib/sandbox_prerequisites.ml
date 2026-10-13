@@ -219,7 +219,7 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distributio
   (* The automation lane starts geckodriver itself, and geckodriver starts
      Firefox, so a workspace needs both on the host. One action each: neither
      is a service, and neither action writes runtime.toml -- naming the
-     executable there is [browser-lane-setup]'s step, which needs the path this
+     executable there is a separate step, which needs the absolute path this
      install leaves behind and so has to follow it. *)
   | Geckodriver, Macos _ ->
     [commands ~id:"geckodriver_brew_install" ~label:"Install geckodriver with Homebrew"
@@ -228,11 +228,11 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distributio
        [[homebrew;"install";"geckodriver"]]]
   | Geckodriver, Linux _ ->
     [open_ ~id:"geckodriver_releases" ~label:"Open the geckodriver releases"
-       ~detail:"Download the release for this machine and make its geckodriver executable available on the service host's PATH, then refresh detection. Distributions package it under different names, so this opens the project's own releases instead of guessing one."
+       ~detail:"Download the release for this machine and put its geckodriver executable on the PATH of the shell that runs this check, then refresh detection. Detection reports the absolute path it found; that path is what runtime.toml names. Distributions package it under different names, so this opens the project's own releases instead of guessing one."
        ~source_url:geckodriver_source geckodriver_source]
   | Firefox, Macos _ ->
     [commands ~id:"firefox_brew_install" ~label:"Install Firefox with Homebrew"
-       ~detail:"Install the Firefox cask through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. This is a second browser beside any Firefox already in use; it does not change that one."
+       ~detail:"Install the Firefox cask through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. Homebrew stops without changing anything when Firefox.app is already in /Applications; that Firefox is used as it is. The executable is checked after installation."
        ~source_url:firefox_cask_source ~requires_admin:false
        [[homebrew;"install";"--cask";"firefox"]]]
   | Firefox, Linux _ ->

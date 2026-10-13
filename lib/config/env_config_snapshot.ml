@@ -20,7 +20,11 @@ let keeper_runtime_entries =
 ;;
 
 let keeper_web_search_entries =
-  keeper_registry_entries (fun row -> String.equal row.category "web_search")
+  keeper_registry_entries (fun row ->
+    match row.category with
+    | Keeper_runtime_setting_registry.Web_search -> true
+    | Spawn | Turn | Bootstrap | Lifecycle | Heartbeat | Diagnostics | Supervisor
+    | Metrics | Memory | Media | Transport | Sandbox | Otel -> false)
 ;;
 
 let server_entries =

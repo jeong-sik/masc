@@ -378,19 +378,27 @@ let test_queue_clear_treats_a_message_by_where_it_stands () =
         { Queue.request = entry.sent_request; submitted_at = 2.; submission_seq = 0
         ; intent = Queue.Next; causal_parent_request_id = None } } in
   let reading_again (entry : Tui.inflight) = { entry with phase = Tui.Turn_reconciling } in
-  let stream_failed (entry : Tui.inflight) =
-    Masc_tui_keeper_chat_transcript.note_rejection ~now:5. entry.log.tl_transcript "cut";
+  (* A failure heard in the stream with the owner still held. The server ends
+     a POST it refuses this way, and the watcher then posts the same operation
+     again; these owners are in [Turn_streaming], where the events of that POST
+     leave them. *)
+  let hear_failure (entry : Tui.inflight) =
+    Tui.turn_log_add ~now:20. entry.log ~seq:None
+      (Live.Run_failed { message = "keeper owner store unavailable" });
     entry in
   let owners =
     [ before_first_post (inflight ~request_id:"handed-over" ~at:2. ())
     ; inflight ~request_id:"posting" ~at:3. ()
     ; reading_again (inflight ~request_id:"rechecking" ~at:4. ())
-    ; stream_failed (inflight ~request_id:"stream-failed" ~at:5. ())
+    ; hear_failure (inflight ~request_id:"refused-unanswered" ~at:5. ())
     ; accept Live.Queued (inflight ~request_id:"queued" ~at:6. ())
     ; reading_again (accept Live.Queued (inflight ~request_id:"queued-rereading" ~at:7. ()))
     ; before_first_post (accept Live.Queued (inflight ~request_id:"queued-reposting" ~at:8. ()))
     ; accept Live.Running (inflight ~request_id:"started" ~at:9. ())
-    ; accept Live.Queued (inflight ~keeper_name:"beta" ~request_id:"beta-queued" ~at:10. ())
+    ; hear_failure (accept Live.Queued (inflight ~request_id:"queued-then-refused" ~at:10. ()))
+    ; hear_failure (accept Live.Running (inflight ~request_id:"started-then-failed" ~at:11. ()))
+    ; hear_failure (accept Live.Settled (inflight ~request_id:"ended-then-failed" ~at:12. ()))
+    ; accept Live.Queued (inflight ~keeper_name:"beta" ~request_id:"beta-queued" ~at:13. ())
     ] in
   (* In-flight owners are kept newest first. *)
   state.msg_inflight <- List.rev owners;
@@ -409,11 +417,14 @@ let test_queue_clear_treats_a_message_by_where_it_stands () =
     [ "handed-over", ("withdraw", "Local_pending")
     ; "posting", ("leave", "Awaiting_receipt")
     ; "rechecking", ("leave", "Rechecking_delivery")
-    ; "stream-failed", ("leave", "Rechecking_delivery")
+    ; "refused-unanswered", ("leave", "Rechecking_delivery")
     ; "queued", ("cancel on server", "Keeper_queued")
     ; "queued-rereading", ("cancel on server", "Rechecking_delivery")
     ; "queued-reposting", ("cancel on server", "Local_pending")
     ; "started", ("leave", "Keeper_queued")
+    ; "queued-then-refused", ("cancel on server", "Rechecking_delivery")
+    ; "started-then-failed", ("leave", "Rechecking_delivery")
+    ; "ended-then-failed", ("leave", "Rechecking_delivery")
     ; "local-1", ("drop", "Local_pending")
     ; "local-2", ("drop", "Local_pending") ]
     (Tui.keeper_message_waiting_positions state ~keeper_name:"alpha"

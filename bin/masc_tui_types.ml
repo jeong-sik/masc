@@ -11400,8 +11400,14 @@ type keeper_server_answer =
   | Server_queued  (** It waits in the Keeper's queue. *)
   | Server_started  (** It had started. *)
 
-(* An in-flight owner's phase, without the queue item a preflight owner
-   carries. *)
+(* What this client is doing with an in-flight request.
+
+   While the request's stream has reported no failure this is the owner's
+   phase, without the queue item a preflight owner carries. Once it has
+   reported one and the owner is still held, the request is being read again
+   whatever the phase says: the watcher posts the same operation again until
+   it learns how it ended, and the events of each of those POSTs put the owner
+   back in [Turn_streaming]. *)
 type keeper_owner_stage =
   | Before_first_post
   | Stream_open
@@ -11417,7 +11423,9 @@ type keeper_owner_stage =
    other. Today an owner is created before its first POST with an empty log
    and has left that stage by the time an answer reaches it, so
    [Server_answered (_, Before_first_post)] has no producer. The pair is still
-   a value, and both functions below say what it gets. *)
+   a value, and both functions below say what it gets. Nothing has drawn its
+   label yet: whoever adds a producer checks that [Local_pending] is what the
+   pair should draw. *)
 type keeper_message_waiting_position =
   | In_local_queue
       (** Waits in this client's queue; nothing was handed to a dispatch. *)
@@ -11426,8 +11434,9 @@ type keeper_message_waiting_position =
           server has never answered for it. *)
   | Posting  (** The POST is out and the server has not answered. *)
   | Rechecking
-      (** The server has not answered and the delivery is being read again,
-          or the stream failed. *)
+      (** The delivery is being read again, and the server either never
+          answered for the message or last answered that its operation had
+          already ended. *)
   | Server_answered of keeper_server_answer * keeper_owner_stage
 
 let pending_delivery_of_position = function
@@ -11495,7 +11504,16 @@ let keeper_message_waiting_positions (state : state) ~keeper_name =
         | Waiting, Some (Masc_tui_keeper_chat_live.Running, _)
           when not (Masc_tui_keeper_chat_transcript.awaiting_continuation transcript) ->
             Some (entry.sent_request, Server_answered (Server_started, stage))
-        | Stream_failed _, _ -> Some (entry.sent_request, Rechecking)
+        (* A failure heard in the stream does not withdraw the server's last
+           answer. A POST the server refuses, as it does while the Keeper's
+           store is unavailable, ends with an error and no acceptance, and an
+           operation it had answered as queued is still queued. *)
+        | Stream_failed _, Some (Masc_tui_keeper_chat_live.Queued, _) ->
+            Some (entry.sent_request, Server_answered (Server_queued, Reading_delivery_again))
+        | Stream_failed _, Some (Masc_tui_keeper_chat_live.Running, _) ->
+            Some (entry.sent_request, Server_answered (Server_started, Reading_delivery_again))
+        | Stream_failed _, (None | Some (Masc_tui_keeper_chat_live.Settled, _)) ->
+            Some (entry.sent_request, Rechecking)
         | Waiting, (None | Some _) | (Working | Stream_ended), _ -> None)
   in
   submitted @ List.map (fun (item : Masc_tui_keeper_chat_queue.item) ->
@@ -11520,8 +11538,9 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
    or about to post again then reads an operation that was cancelled.
 
    The rest are left. The outcome of a POST that is out, or of a delivery
-   being read again with no answer, is not known. A line the server answered
-   as started is stopped with Esc. *)
+   being read again with no answer, is not known, and an operation the server
+   says has already ended has nothing left to cancel. A line the server
+   answered as started is stopped with Esc. *)
 type keeper_queue_clear_treatment =
   | Drop_from_local_queue
   | Withdraw_before_post

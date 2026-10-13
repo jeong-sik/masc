@@ -1049,6 +1049,9 @@ let microvm_imp backend =
 let sandbox_of state = Onboarding_status.sandbox_check_of_entry
   { Readiness.backend = Readiness.Apple_container; state; guest_verification = Readiness.Not_run }
 
+let sandbox_check_of_entry_for backend state = Onboarding_status.sandbox_check_of_entry
+  { Readiness.backend; state; guest_verification = Readiness.Not_run }
+
 let sandbox_check_of observed =
   List.find (fun (c : Onboarding_status.check) -> c.id = Onboarding_status.Sandbox)
     observed.Onboarding_status.checks
@@ -1170,28 +1173,64 @@ let every_probe_state_has_one_condition () =
     check bool "a probe reason reaches the operator whole" true
       (String_util.contains_substring (sandbox_of state).message "the one reason"))
     Readiness.[ Missing_prerequisite "the one reason"; Unsupported_host "the one reason";
-                Unsupported_capability "the one reason"; Probe_failed "the one reason";
-                Needs_configuration "the one reason" ]
+                Unsupported_capability "the one reason"; Probe_failed "the one reason" ];
+  (* The reason of Needs_configuration asks the operator to choose an endpoint,
+     which the declaration the doctor already read has done. *)
+  check bool "Needs_configuration does not repeat the probe's request" true
+    (sandbox_of (Readiness.Needs_configuration "the one reason")
+     = sandbox_of (Readiness.Needs_configuration "another reason"));
+  check bool "Needs_configuration shows no probe reason" false
+    (String_util.contains_substring
+       (sandbox_of (Readiness.Needs_configuration "the one reason")).message "the one reason")
 
-(* The Keeper declaration loads, but its sandbox names no backend, so there is
-   nothing to probe. The doctor carries the declaration's own reason. *)
-let a_declaration_that_names_no_backend_is_not_probed () = with_workspace @@ fun base ->
+(* A microvm declaration that names no backend boots: the server takes the
+   host's runtime through [microvm_backend_of_profile_defaults]. The doctor
+   reads the same answer, so a host with a runtime probes it and a host
+   without one reports the reason boot refuses with, probing nothing. The
+   expected side is computed from the same host default, which is the only
+   thing the test machine decides. *)
+let a_declaration_that_names_no_backend_is_read_as_boot_reads_it () = with_workspace @@ fun base ->
   imp_workspace base
     "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"microvm\"\nsandbox_image = \"base\"\nnetwork_mode = \"inherit\"\ninstructions = \"Respond to the operator.\"\n";
-  let run, calls = fixture_runner macos26_arm64_host in
+  let healthy = macos26_arm64_host
+    @ [ apple_inventory, Ok "[]"; rosetta_installed; apple_settings ~rosetta:true ~kernel:true ] in
+  let run, calls = fixture_runner healthy in
   let observed = Onboarding_status.inspect ~sandbox_run:run ~base_path:(Some base) in
   let sandbox = sandbox_check_of observed in
   check bool "the Keeper declaration itself loads" true
     (condition Onboarding_status.Keeper_declaration observed = Onboarding_status.Satisfied);
-  check bool "an unnamed microvm backend needs setup" true
-    (sandbox.condition = Onboarding_status.Needs_setup);
-  (match Readiness.declaration ~base_path:base with
-   | Error { Readiness.kind = Readiness.Declaration_invalid; detail } ->
-     check string "the declaration's reason is the message" detail sandbox.message
-   | Error { Readiness.kind = Readiness.Declaration_unreadable; _ } | Ok _ ->
-     fail "the declaration should be invalid");
-  check bool "setup is the action" true (sandbox.actions = [Onboarding_status.Configure_sandbox]);
-  check int "nothing is probed without a backend" 0 (List.length (calls ()))
+  (match Masc.Keeper_microvm_backend.default_for_host () with
+   | Some Masc.Keeper_microvm_backend.Apple_container ->
+     check bool "boot resolves it to Apple Container, so that is what is probed" true
+       (sandbox = sandbox_of Readiness.Service_ready);
+     check bool "the service was asked" true (List.mem apple_inventory (calls ()))
+   | Some Masc.Keeper_microvm_backend.Nerdctl_kata | Some Masc.Keeper_microvm_backend.Microsandbox ->
+     fail "no host assumes a runtime other than Apple Container"
+   | None ->
+     (match Readiness.boot_declaration ~base_path:base with
+      | Error { Readiness.kind = Readiness.Declaration_invalid; detail } ->
+        check string "the reason boot refuses with is the message" detail sandbox.message;
+        check bool "a host with no runtime needs setup" true
+          (sandbox.condition = Onboarding_status.Needs_setup);
+        check bool "setup is the action" true
+          (sandbox.actions = [Onboarding_status.Configure_sandbox]);
+        check int "nothing is probed without a backend" 0 (List.length (calls ()))
+      | Error { Readiness.kind = Readiness.Declaration_unreadable; _ } | Ok _ ->
+        fail "the declaration should be invalid on a host with no runtime"))
+
+(* A declared backend is never replaced by the host's. *)
+let a_named_backend_is_not_replaced_by_the_host_default () = with_workspace @@ fun base ->
+  imp_workspace base (microvm_imp "nerdctl_kata");
+  let run, calls = fixture_runner macos26_arm64_host in
+  let observed = Onboarding_status.inspect ~sandbox_run:run ~base_path:(Some base) in
+  check bool "nerdctl_kata is read from the file" true
+    (sandbox_check_of observed
+     = Onboarding_status.sandbox_check_of_entry
+         { Readiness.backend = Readiness.Nerdctl_kata;
+           state = Readiness.Unsupported_host "Kata setup requires a Linux host with hardware virtualization";
+           guest_verification = Readiness.Not_run });
+  check bool "the host default's service is not asked" false
+    (List.mem apple_inventory (calls ()))
 
 (* A selected remote SSH backend cannot be observed from here: the probe says
    Needs_configuration whatever the declaration holds. The doctor reaches the
@@ -1204,8 +1243,21 @@ let a_declared_remote_ssh_backend_is_unverified_not_unconfigured () = with_works
   let observed = Onboarding_status.inspect ~sandbox_run:run ~base_path:(Some base) in
   match Readiness.declaration ~base_path:base with
   | Ok { Readiness.backend = Readiness.Remote_ssh; _ } ->
+    let sandbox = sandbox_check_of observed in
+    let asked_again = match
+        (Readiness.probe ~host:(Readiness.Linux Readiness.X64) ~run
+           ~require_rootless:false ~require_userns:false Readiness.Remote_ssh).state with
+      | Readiness.Needs_configuration reason -> reason
+      | Readiness.Service_ready | Readiness.Missing_prerequisite _ | Readiness.Unsupported_host _
+      | Readiness.Unsupported_capability _ | Readiness.Probe_failed _ ->
+        fail "the probe should ask remote SSH for configuration" in
     check bool "a declared endpoint is unverified" true
-      (condition Onboarding_status.Sandbox observed = Onboarding_status.Needs_verification)
+      (sandbox.condition = Onboarding_status.Needs_verification);
+    check bool "the request to choose an endpoint is not repeated" false
+      (String_util.contains_substring sandbox.message asked_again);
+    check bool "the check is the one built from the typed state" true
+      (sandbox = sandbox_check_of_entry_for Readiness.Remote_ssh
+                   (Readiness.Needs_configuration asked_again))
   | Ok _ | Error _ -> fail "the fixture should declare remote_ssh"
 
 let () = run "Onboarding observations"
@@ -1232,8 +1284,10 @@ let () = run "Onboarding observations"
                        a_declared_docker_is_probed_as_docker;
                      test_case "every probe state has one condition" `Quick
                        every_probe_state_has_one_condition;
-                     test_case "a declaration that names no backend is not probed" `Quick
-                       a_declaration_that_names_no_backend_is_not_probed;
+                     test_case "a declaration that names no backend is read as boot reads it" `Quick
+                       a_declaration_that_names_no_backend_is_read_as_boot_reads_it;
+                     test_case "a named backend is not replaced by the host default" `Quick
+                       a_named_backend_is_not_replaced_by_the_host_default;
                      test_case "a declared remote SSH backend is unverified, not unconfigured" `Quick
                        a_declared_remote_ssh_backend_is_unverified_not_unconfigured];
    "BiDi host", [test_case "a workspace without a browser lane says nothing of a BiDi host" `Quick

@@ -72,7 +72,8 @@ val inspect_loaded :
     that cannot be used now is never read as one that merely was not verified.
     [Needs_configuration] is [Needs_verification]: it is raised for remote SSH,
     which the probe cannot observe, and the declaration already names the
-    endpoint it asks for. *)
+    endpoint the probe's reason asks for, so that reason is not shown and the
+    message says the server verifies the declared endpoint. *)
 val sandbox_check_of_entry : Sandbox_readiness.entry -> check
 
 (** The wire name of a check, as serialized in [id]. *)

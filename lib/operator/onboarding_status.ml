@@ -175,17 +175,23 @@ let persistence_check base_path =
    the same state as one nobody has asked. Reading it as Needs_verification
    would make a stopped daemon indistinguishable, by condition, from a healthy
    one. Needs_configuration comes only from a backend the probe cannot observe
-   from here (remote SSH); it is reached after [Sandbox_readiness.declaration]
-   accepted the selection, so the choice it asks for already exists and what
-   remains is verification. *)
+   from here (remote SSH). It is reached after [Sandbox_readiness.boot_declaration]
+   accepted the selection, so the endpoint the probe's reason asks the operator
+   to choose is already declared. The probe's reason is not shown for it; the
+   doctor says what is left, which is that the server verifies the endpoint. *)
+let remote_endpoint_message =
+  "The declared endpoint is verified by the server; this check boots no guest and reaches no remote host."
+
 let sandbox_check_of_entry (entry : Sandbox_readiness.entry) =
-  let message = Sandbox_readiness.backend_id entry.Sandbox_readiness.backend ^ ": "
-    ^ Sandbox_readiness.state_message entry.Sandbox_readiness.state in
+  let backend_message sentence =
+    Sandbox_readiness.backend_id entry.Sandbox_readiness.backend ^ ": " ^ sentence in
+  let message = backend_message (Sandbox_readiness.state_message entry.Sandbox_readiness.state) in
   match entry.Sandbox_readiness.state with
   | Sandbox_readiness.Service_ready ->
     check Sandbox Needs_verification message [Configure_sandbox; Start_imp]
   | Sandbox_readiness.Needs_configuration _ ->
-    check Sandbox Needs_verification message [Configure_sandbox; Start_imp]
+    check Sandbox Needs_verification (backend_message remote_endpoint_message)
+      [Configure_sandbox; Start_imp]
   | Sandbox_readiness.Missing_prerequisite _ ->
     check Sandbox Needs_setup message [Configure_sandbox]
   | Sandbox_readiness.Unsupported_host _ ->
@@ -196,9 +202,12 @@ let sandbox_check_of_entry (entry : Sandbox_readiness.entry) =
     check Sandbox Needs_setup message [Configure_sandbox]
 
 (* A declaration that names no usable backend cannot be probed. The detail is
-   the declaration's own reason, so the operator sees which line to repair. *)
+   the declaration's own reason, so the operator sees which line to repair.
+   The backend is the one the server boots with: a microvm profile that names
+   none takes the host's runtime there, so it is probed here as well instead
+   of being reported as a choice the operator still owes. *)
 let sandbox_check ~sandbox_run ~base_path =
-  match Sandbox_readiness.declaration ~base_path with
+  match Sandbox_readiness.boot_declaration ~base_path with
   | Error { Sandbox_readiness.kind = Declaration_unreadable; detail } ->
     check Sandbox Needs_setup detail [Inspect_configuration; Configure_sandbox]
   | Error { Sandbox_readiness.kind = Declaration_invalid; detail } ->

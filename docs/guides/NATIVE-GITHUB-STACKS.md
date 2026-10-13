@@ -5,6 +5,19 @@ its native stack base. `gh pr view --json baseRefName` alone cannot do this.
 GitHub CLI and API capabilities change; check installed help and the official
 [stack API contract](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests-apis-and-webhooks).
 
+## Build and maintain stacks with gh stack only
+
+Create and maintain stacks with `gh stack` (`gh stack init`, `gh stack add`,
+`gh stack submit`). Never pull another PR or main into a stack branch with a
+merge: this repository squash-merges, so a merge adds ancestry without ever
+removing it, chains grow by hundreds of commits ("Integrate current chat
+repairs through PR #NNN"), and GitHub stops computing mergeability — the
+2026-10-12 sweep found three PRs at `UNKNOWN` and five `DIRTY` from exactly
+this pattern. When a layer conflicts, fix that layer and rebase the whole
+stack (`gh stack rebase`); do not merge the moved base into the layer. A
+branch-chain PR opened against its parent's branch becomes a native stack
+only through the gh stack link; until then it merges layer by layer.
+
 ## Read the merge scope
 
 ```bash

@@ -332,6 +332,11 @@
       가장 아래 PR 만 main 을 base 로 삼는다. 피처 개발과 CI 개선은 각자의 스택에서 진행한다.
       스택이 main 과 충돌하면 gh stack rebase 로 스택 전체를 main 위에 다시 올리고 모든 층을 한 번에 push 한다.
       아래층만 고쳐 따로 push 하지 않는다. 충돌과 병합 불가는 맨 아래 PR 이 아니라 스택 단위로 보고한다.
+      스택은 gh stack(native stack)으로 만들고 유지한다. 스택 브랜치에 다른 PR 이나
+      main 을 merge 로 끌어들이지 않는다. squash-merge 저장소에서 merge 적분은 조상을
+      줄이지 못해 체인이 수백 커밋씩 불어나고 GitHub 의 병합 가능성 계산이 죽는다
+      (2026-10-12 PR 스윕: UNKNOWN 3건과 충돌 5건의 원인). 층 충돌은 해당 층을 고쳐
+      gh stack rebase 로 스택 전체를 다시 올린다.
     </work_unit>
     <build_and_ci>
       PR·일반 branch push 로 자동 CI 를 시작하지 않는다.

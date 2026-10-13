@@ -4,6 +4,7 @@ import {
   initialKeeperResponseState,
   keeperResponseEventOf,
   keeperResponseStateFromUnknown,
+  reconcileKeeperResponseStates,
   keeperResponseStateMayReplace,
   ownerFromUnknown,
   reduceKeeperResponse,
@@ -521,5 +522,43 @@ describe('keeperResponseStateMayReplace', () => {
   it('lets an equal or newer sequence replace the snapshot', () => {
     expect(keeperResponseStateMayReplace(at(5), at(5))).toBe(true)
     expect(keeperResponseStateMayReplace(at(5), at(6))).toBe(true)
+  })
+})
+
+describe('reconcileKeeperResponseStates', () => {
+  const observed = (generation: number, sequence: number | null = null) => {
+    const base = run([observe(generation)]).state
+    return sequence === null ? base : acknowledgeKeeperResponseSequence(base, sequence)!
+  }
+
+  it('has no answer without observations', () => {
+    expect(reconcileKeeperResponseStates([])).toBeUndefined()
+    expect(reconcileKeeperResponseStates([undefined, undefined])).toBeUndefined()
+  })
+
+  it('returns the single or agreed observation', () => {
+    expect(reconcileKeeperResponseStates([observed(3)])).toEqual(observed(3))
+    expect(reconcileKeeperResponseStates([observed(3), observed(3)])).toEqual(observed(3))
+  })
+
+  it('makes any unavailable observation unavailable', () => {
+    expect(reconcileKeeperResponseStates([observed(3), unavailableKeeperResponseState])).toBe(unavailableKeeperResponseState)
+  })
+
+  it('refuses to choose between contradictory observations', () => {
+    expect(reconcileKeeperResponseStates([observed(3), observed(4)])).toBe(unavailableKeeperResponseState)
+  })
+
+  it('ignores an untouched initial state next to a real one', () => {
+    expect(reconcileKeeperResponseStates([initialKeeperResponseState, observed(3)])).toEqual(observed(3))
+  })
+
+  it('lets the newest applied sequence win over older snapshots', () => {
+    expect(reconcileKeeperResponseStates([observed(3, 9), observed(2, 4)])).toEqual(observed(3, 9))
+    expect(reconcileKeeperResponseStates([observed(2, 4), observed(3, 9)])).toEqual(observed(3, 9))
+  })
+
+  it('carries the highest sequence across observations of the same response', () => {
+    expect(reconcileKeeperResponseStates([observed(3, 4), observed(3, 9)])).toMatchObject({ floor: owner(3), lastSequence: 9 })
   })
 })

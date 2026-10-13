@@ -1354,7 +1354,9 @@ let test_nested_dispatch_identity_and_parent_delivery_survive_reload () =
       check bool "unrelated parent has no delivery" true
         (Option.is_some value.delivery = (scope.parent_tool_use_id = "outer-run"));
       check bool "exact source identity survives restart" true
-        (Skill_reference.equal_identity value.identity (List.hd values).identity)
+        (Yojson.Safe.equal
+           (Skill_catalog_snapshot.identity_to_yojson value.identity)
+           (Skill_catalog_snapshot.identity_to_yojson (List.hd values).identity))
     | Ledger.Instruction_invocation _ | Ledger.Composition_invocation _ -> fail "nested origin was erased")
     (Ledger.activations reloaded);
   let summary = Ledger.summarize reloaded in

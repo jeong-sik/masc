@@ -67,6 +67,15 @@ durable terminal record before the new worker can take ownership. A queued,
 running, cancelling or unreadable prior request cannot authorize another worker.
 Reusing the argument is an explicit request to continue, not notification recovery.
 
+New-request acceptance reads only that request's canonical active and terminal
+records rather than inventorying unrelated active requests. Terminal precedence,
+strict identity decoding and agreement with a current-process Queued reservation
+are checked before the original source context and run ownership CAS. This proof
+describes the record at read time; the submitting callback still owns the
+before-worker boundary. Unreadable or conflicting exact evidence refuses admission
+without changing the records. Timing comparisons of these two acceptance reads
+do not measure total preparation time or external tool latency.
+
 Completed nodes retain their complete typed result and original occurrence IDs;
 they do not dispatch or emit another ordinary tool observation. Their outputs
 are validated against the frozen plan in the new executor before downstream

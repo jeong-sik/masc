@@ -129,6 +129,7 @@ type submission =
   ; terminal : Async.worker_settlement Eio.Promise.t
   ; execution : (Executor.node_result list, Executor.failure) result option ref }
 let submit ?request_context ?(caller = keeper) ?(target = keeper)
+    ?(on_acceptance_probe = fun _ -> ())
     ?(before_execute = fun _ -> ()) ?plan ?observe base_path sw prepared dispatch =
   let bound = ref None and admission_error = ref None and execution = ref None in
   let terminal, resolver = Eio.Promise.create () in
@@ -136,6 +137,7 @@ let submit ?request_context ?(caller = keeper) ?(target = keeper)
   let outcome = Async.submit_with_request_id ~request_context ~background_sw:sw ~base_path
       ~caller ~keeper_name:target
       ~on_accepted:(fun request_id ->
+        on_acceptance_probe request_id;
         match Journal.bind_request prepared.journal ~request_id with
         | Error error -> admission_error := Some error; Error (Journal.error_to_string error)
         | Ok worker -> bound := Some worker;
@@ -583,6 +585,118 @@ let test_public_run_resume_keeps_original_task () = with_workspace (fun env sw b
       |> Masc.Keeper_composition_completion_result.to_json in
   check_json "public wake carries task A" (`String "task-A") (projected |> member "source" |> member "source_task_id"))
 
+let test_exact_queued_admission () = with_workspace (fun env sw base_path ->
+  Eio_context.with_test_env ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
+    ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
+  let prepared = prepare base_path in
+  let exact ?(caller = keeper) request_id =
+    Async.load_canonical_durable_queued ~base_path ~caller request_id in
+  let proof request_id = exact request_id
+    |> function Ok proof -> Async.durable_queued_entry proof
+      | Error error -> fail (Async.canonical_queued_error_to_string error) in
+  let reject label predicate = function
+    | Error error when predicate error -> ()
+    | Error error -> failf "%s: %s" label (Async.canonical_queued_error_to_string error)
+    | Ok _ -> fail (label ^ " unexpectedly admitted") in
+  let replace name value = function
+    | `Assoc fields -> `Assoc ((name, value) :: List.remove_assoc name fields)
+    | _ -> fail "actual canonical record must be an object" in
+  let path request_id = Async.For_testing.active_record_path ~base_path ~request_id
+    |> function Some path -> path | None -> fail "canonical active path" in
+  let terminal_path request_id = Async.For_testing.terminal_record_path ~base_path ~request_id
+    |> function Some path -> path | None -> fail "canonical terminal path" in
+  let known_request = ref None in
+  let probe request_id =
+    known_request := Some request_id;
+    let expected = proof request_id in
+    check bool "actual acceptance is Queued" true (expected.status = Async.Queued);
+    let original = read (path request_id) in
+    let json = Yojson.Safe.from_string original in
+    exact ~caller:"foreign-caller" request_id
+    |> reject "foreign exact read" (function Async.Canonical_queued_access_rejected _ -> true | _ -> false);
+    exact "absent-queued-fixture"
+    |> reject "absent exact record" (function Async.Canonical_queued_absent -> true | _ -> false);
+    Fun.protect ~finally:(fun () -> write (path request_id) original) (fun () ->
+      write (path request_id) "{invalid";
+      exact request_id |> reject "unreadable exact record"
+        (function Async.Canonical_queued_unreadable _ -> true | _ -> false);
+      check string "unavailable authority is not rewritten" "{invalid" (read (path request_id));
+      write (path request_id) (replace "submitted_at" (`Float (expected.submitted_at +. 1.0)) json |> Yojson.Safe.to_string);
+      exact request_id |> reject "cached reservation does not authorize conflicting disk"
+        (function Async.Canonical_queued_runtime_conflict -> true | _ -> false));
+    let terminal = terminal_path request_id in
+    Fs_compat.mkdir_p (Filename.dirname terminal);
+    Fun.protect ~finally:(fun () -> Unix.unlink terminal) (fun () ->
+      let done_json = json |> replace "status" (`String "done")
+        |> replace "completed_at" (`Float (expected.submitted_at +. 1.0))
+        |> replace "ok" (`Bool true) |> replace "body" (`String "already settled") in
+      write terminal (Yojson.Safe.to_string done_json);
+      exact request_id |> reject "canonical terminal takes precedence over Queued memory and disk"
+        (function Async.Canonical_queued_not_queued (Async.Done _) -> true | _ -> false);
+      check string "active source remains unchanged" original (read (path request_id)));
+    let created = ref [] in
+    Fun.protect ~finally:(fun () -> List.iter Unix.unlink !created) (fun () ->
+      let population = ref 0 in
+      List.iter (fun unrelated ->
+        for index = !population + 1 to unrelated do
+          let clone_id = Printf.sprintf "queued-population-%d" index in
+          let clone_path = path clone_id in
+          write clone_path (replace "request_id" (`String clone_id) json |> Yojson.Safe.to_string);
+          created := clone_path :: !created
+        done;
+        population := unrelated;
+        let inventory () = Async.read_durable_active_inventory ~base_path
+          |> require "actual baseline active inventory" in
+        let baseline () =
+          let inventory = inventory () in
+          if List.length inventory.entries <> unrelated + 1 || inventory.record_errors <> []
+          then fail "baseline population did not decode exactly";
+          let entry = match List.filter (fun (entry : Async.entry) -> entry.request_id = request_id) inventory.entries with
+            | [entry] -> entry | _ -> fail "one known baseline request" in
+          if not (Async.same_entry_record entry expected) then fail "baseline original record changed";
+          List.length inventory.entries in
+        let candidate () =
+          if not (Async.same_entry_record (proof request_id) expected) then fail "exact original record changed";
+          1 in
+        let measure read =
+          let started = Monotonic_deadline.start () in
+          let returned = read () + read () in
+          Monotonic_deadline.elapsed_seconds started *. 1000.0, returned in
+        (* Counts and sample repetitions describe this isolated experiment;
+           neither controls product admission nor asserts a timing threshold. *)
+        for sample = 1 to 5 do
+          let (baseline_ms, baseline_records), (exact_ms, exact_records) =
+            if sample mod 2 = 1 then let baseline = measure baseline in baseline, measure candidate
+            else let candidate = measure candidate in measure baseline, candidate in
+          Printf.printf "QUEUED_ACCEPTANCE_READ %s\n%!"
+            (Yojson.Safe.to_string (`Assoc
+              ["unrelated_active_records", `Int unrelated; "sample", `Int sample;
+               "reads_per_path", `Int 2; "baseline_ms", `Float baseline_ms; "exact_ms", `Float exact_ms;
+               "baseline_returned_records", `Int baseline_records; "exact_returned_records", `Int exact_records]))
+        done) [0; 16; 64; 256];
+      let poison = path "unrelated-corrupt-queued" in
+      write poison "{unrelated-corruption";
+      created := poison :: !created;
+      check bool "unrelated corruption is observable in inventory" true
+        (List.exists (fun (error : Async.active_inventory_record_error) -> error.request_id = Some "unrelated-corrupt-queued")
+          (Async.read_durable_active_inventory ~base_path |> require "corrupt unrelated inventory").record_errors);
+      check bool "exact admission is independent of unrelated corrupt records" true
+        (Async.same_entry_record (proof request_id) expected)) in
+  let calls = ref 0 in
+  let submission = submit ~on_acceptance_probe:probe
+      ~before_execute:(fun _ ->
+        let request_id = !known_request |> Option.get in
+        exact request_id |> reject "a started request cannot be admitted as Queued"
+          (function Async.Canonical_queued_not_queued Async.Running
+            | Canonical_queued_runtime_nonqueued Async.Running -> true | _ -> false))
+      base_path sw prepared (fun node _ -> incr calls; Executor.dispatch_result (success base_path node "original-profile"))
+    |> accepted in
+  ignore (await base_path submission);
+  ignore (executed submission |> require "exact-proof admission executes original plan");
+  check int "real admitted plan dispatches each original node once" 3 !calls;
+  exact submission.request.request_id |> reject "terminal request cannot be re-admitted"
+    (function Async.Canonical_queued_not_queued (Async.Done _) -> true | _ -> false))
+
 let () = match Array.to_list Sys.argv with
   | [_; "--resume-child"; base_path; run_id] -> child_resume base_path run_id
   | [_; "--refuse-active-child"; base_path; run_id] -> child_refuse_active base_path run_id
@@ -594,4 +708,5 @@ let () = match Array.to_list Sys.argv with
         test_case "canonical ownership, concurrent resume and stale worker" `Quick test_owned_transport_and_race;
         test_case "unknown, post-effect and deferred results are not replayed" `Quick test_unproven_outcomes_refuse_replay;
         test_case "owned cancellation retries only declared readonly unfinished work" `Quick test_cancelled_readonly_attempt;
-        test_case "public prepare run resume preserves original task" `Quick test_public_run_resume_keeps_original_task]]
+        test_case "public prepare run resume preserves original task" `Quick test_public_run_resume_keeps_original_task;
+        test_case "exact Queued admission and matched inventory read measurements" `Quick test_exact_queued_admission]]

@@ -128,6 +128,24 @@ val durable_terminal_entry : durable_terminal_proof -> entry
 (** Read-only identity/status carried by a proof.  The proof constructor stays
     private to this module. *)
 
+(** Exact read-time evidence of a canonical active-partition [Queued] record.
+    It is not a reservation and does not exclude a later worker transition. *)
+type durable_queued_proof
+
+type canonical_queued_error =
+  | Canonical_queued_absent
+  | Canonical_queued_unreadable of string
+  | Canonical_queued_access_rejected of access_rejection
+  | Canonical_queued_runtime_nonqueued of request_status
+  | Canonical_queued_publication_ambiguous of request_status
+  | Canonical_queued_runtime_conflict
+  | Canonical_queued_not_queued of request_status
+  | Canonical_queued_noncanonical_location of request_status
+
+val canonical_queued_error_to_string : canonical_queued_error -> string
+val durable_queued_entry : durable_queued_proof -> entry
+(** The original immutable entry, whose status is exactly [Queued]. *)
+
 (** Recovery observations for canonical v3 storage only. [finalized] counts
     terminal states moved from the active partition after a crash; [cleaned]
     counts duplicate active sources removed after terminal durability was
@@ -374,6 +392,20 @@ val load_canonical_durable_terminal :
   caller:string ->
   string ->
   (durable_terminal_proof, canonical_terminal_error) result
+
+val load_canonical_durable_queued :
+  base_path:string ->
+  caller:string ->
+  string ->
+  (durable_queued_proof, canonical_queued_error) result
+(** Read only the exact request's canonical terminal/active filenames under
+    the existing store-transition lock. Terminal precedence and strict record
+    conflicts remain authoritative. A process-local [Queued] reservation is
+    accepted only when it equals the whole canonical durable entry; running,
+    cancelling, terminal overlays and differing memory records are refused.
+    This works inside [on_accepted], after the initial durable write and before
+    worker fork. No inventory, recovery, status mutation, or inference about
+    another process's worker ownership occurs. *)
 
 (** Mark persisted non-terminal request records that have no live in-memory
     worker as [Lost], returning the number of records transitioned. This is

@@ -53,16 +53,18 @@ let to_string t =
   | Internal_error { detail; exn = _ } ->
       Printf.sprintf "internal_error: %s" detail
 
-(* Unix.error has about 70 constructors and only EACCES, ENOENT, EMFILE and
-   ENFILE are classified; the rest fall to Internal_error with the other
-   exceptions, so the wildcard arm is intentional. *)
+(* Only EACCES, ENOENT, EMFILE and ENFILE are classified.  Every other errno
+   and every other exception becomes Internal_error. *)
 let of_exn ?detail exn =
   let default_detail () =
     match detail with
     | Some d -> d
     | None -> Printexc.to_string exn
   in
-  match[@warning "-4"] exn with
+  let internal_error () =
+    Internal_error { detail = default_detail (); exn = Some exn }
+  in
+  match exn with
   | Stdlib.Not_found ->
       Not_found { what = default_detail () }
   | Failure msg ->
@@ -71,13 +73,17 @@ let of_exn ?detail exn =
   | Sys_error msg ->
       let d = match detail with Some d -> d | None -> msg in
       Internal_error { detail = d; exn = Some exn }
-  | Unix.Unix_error (Unix.EACCES, _, path) ->
-      let p = if path = "" then default_detail () else path in
-      Permission_denied { path = p }
-  | Unix.Unix_error (Unix.ENOENT, _, path) ->
-      let p = if path = "" then default_detail () else path in
-      Not_found { what = p }
-  | Unix.Unix_error ((Unix.EMFILE | Unix.ENFILE), op, _) ->
-      Resource_exhausted { resource = "fd"; detail = op }
-  | _ ->
-      Internal_error { detail = default_detail (); exn = Some exn }
+  | Unix.Unix_error (code, op, path) ->
+      (match System_error_class.errno_of_unix_error code with
+       | System_error_class.Eacces ->
+           let p = if path = "" then default_detail () else path in
+           Permission_denied { path = p }
+       | System_error_class.Enoent ->
+           let p = if path = "" then default_detail () else path in
+           Not_found { what = p }
+       | System_error_class.(Emfile | Enfile) ->
+           Resource_exhausted { resource = "fd"; detail = op }
+       | System_error_class.(
+           Enospc | Eperm | Econnrefused | Etimedout | Other_errno _) ->
+           internal_error ())
+  | _ -> internal_error ()

@@ -268,15 +268,19 @@ manifest 갱신은 RFC-0071 의 inventory regeneration step (§4 Phase 5) 에서
 
 (a) Intentional 사이트의 패턴:
 
+외부 라이브러리의 닫힌 variant(예: `Unix.error`, 약 70개)를 일부만 분류해야 하면 속성으로 경고를 끄지 않는다. 그 variant 를 우리 variant 로 옮기는 total 함수를 한 곳에 두고, 이 함수만 모든 생성자를 나열한다. 호출부는 우리 variant 를 와일드카드 없이 match 한다. 구현은 `System_error_class.errno_of_unix_error` 이다.
+
 ```ocaml
-(* Unix.error has about 70 constructors and only ENOSPC is acted on, so the
-   others are not listed. *)
-match[@warning "-4"] exn with
-| Unix.Unix_error (Unix.ENOSPC, _, _) -> ...
-| _ -> ()
+match System_error_class.errno_of_exn exn with
+| Some System_error_class.Enospc -> ...
+| Some System_error_class.(Emfile | Enfile | Eacces | Eperm | Enoent
+                           | Econnrefused | Etimedout | Other_errno _)
+| None -> ()
 ```
 
-`[@warning "-4"]` 는 그 `match` 식 하나에만 붙인다. 컴파일러(OCaml 5.5.1 로 확인)는 이 경고를 갈래가 아니라 `match` 식 전체 위치에 보고한다. 그래서 `| _ [@warning "-4"] -> ...` 처럼 갈래나 그 오른쪽 식에 붙이면 억제되지 않고, `match[@warning "-4"] ... with` 또는 식 뒤에 붙인 형태만 억제된다. 함수(`let[@warning "-4"] f`)·파일·모듈 단위 suppression 은 금지.
+errno 를 추가하면 그 variant 를 match 하는 모든 호출부가 컴파일에서 멈춘다. OCaml 이 `Unix.error` 에 생성자를 더하면 total 함수 한 곳만 멈춘다.
+
+이 방식을 쓸 수 없는 사이트에 한해 `[@warning "-4"]` 를 붙인다. 컴파일러(OCaml 5.5.1 로 확인)는 이 경고를 갈래가 아니라 `match` 식 전체 위치에 보고한다. 그래서 `| _ [@warning "-4"] -> ...` 처럼 갈래나 그 오른쪽 식에 붙이면 억제되지 않고, `match[@warning "-4"] ... with` 또는 식 뒤에 붙인 형태만 억제된다. 함수(`let[@warning "-4"] f`)·파일·모듈 단위 suppression 은 금지.
 
 #### 3.4.2 검출 도구 우선순위
 

@@ -150,6 +150,22 @@ let test_unrelated_exception_is_not_reported () =
   check int "observer not called" before (Atomic.get observer_calls)
 ;;
 
+let test_unlisted_errno_is_not_reported () =
+  (* EAGAIN and EACCES are real OS errors but neither is a resource error. *)
+  List.iter
+    (fun unix_error ->
+      let before = Atomic.get observer_calls in
+      (match
+         FA.observe ~kind:Provider_http (fun () ->
+           raise (Unix.Unix_error (unix_error, "read", "fixture")))
+       with
+       | _ -> fail "unlisted errno should be re-raised"
+       | exception Unix.Unix_error (actual, _, _) when actual = unix_error -> ()
+       | exception exn -> failf "unexpected exception: %s" (Printexc.to_string exn));
+      check int "observer not called" before (Atomic.get observer_calls))
+    [ Unix.EAGAIN; Unix.EACCES; Unix.EUNKNOWNERR 4242 ]
+;;
+
 let test_observer_failure_does_not_replace_os_error () =
   Atomic.set observer_should_raise true;
   Fun.protect
@@ -236,6 +252,7 @@ let () =
     ; ( "resource errors"
       , [ test_case "typed OS errors are reported" `Quick test_typed_resource_errors_are_reported
         ; test_case "unrelated errors are ignored" `Quick test_unrelated_exception_is_not_reported
+        ; test_case "unlisted errno is ignored" `Quick test_unlisted_errno_is_not_reported
         ; test_case "observer failure preserves original" `Quick
             test_observer_failure_does_not_replace_os_error
         ] )

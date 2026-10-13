@@ -40,9 +40,6 @@ Thumbs.db
 .worktrees/
 
 
-# Tool metrics JSONL persistence (runtime data)
-data/tool-metrics/
-
 # Database files
 *.db
 *.sqlite3
@@ -186,8 +183,6 @@ tmp_edit/
 /refute_tmp/
 
 # Runtime data directories (not source)
-data/economy/
-data/harness-pre-compact/
 data/bench/
 memory/
 !dashboard/src/components/memory/

@@ -280,7 +280,7 @@ Tool Librarian은 다음 3가지 조건을 모두 충족할 때만 컴포지션 
 - **분자 `N_c`**: 모델이 `keeper_compose_<name>` 을 부른 횟수.
 - **분모 `N_u`**: 같은 일을 모델이 풀어서 한 횟수. 컴포지션의 노드 도구를 한 턴 안에서 연달아 부른 경우를 센다.
   `after`·pointer 로 순서가 정해진 노드는 그 순서일 때만, 순서가 없는 노드는 어떤 순서든 센다.
-- `N_u` 는 그때 그 Keeper 에게 컴포지션이 보였던 경우만 센다. 첫 호출 시각 전 마지막 `Assigned` 기록(`Tool_assignment_telemetry.emit_assigned`, data 디렉터리의 `tool-events`)의 `tool_list` 에 `keeper_compose_<name>` 이 있으면 보였던 것이다.
+- `N_u` 는 그때 그 Keeper 에게 컴포지션이 보였던 경우만 센다. 첫 호출 시각 전 마지막 `Assigned` 기록(`Tool_assignment_telemetry.emit_assigned`, `.masc/tool-events`)의 `tool_list` 에 `keeper_compose_<name>` 이 있으면 보였던 것이다.
   등록하기 전이나 그 레인에 없던 때 풀어서 한 것은 세지 않는다.
 - 두 수 모두 컴포지션이 대신 부른 노드 줄(`composition_run_id` 가 있는 줄)은 세지 않는다.
   이 줄을 분모에 넣으면 컴포지션을 부를 때마다 분모도 같이 늘어난다.

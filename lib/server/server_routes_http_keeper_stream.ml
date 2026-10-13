@@ -3582,6 +3582,7 @@ let operation_submit_error_code = function
      | Unknown_operation -> "unknown_operation"
      | Operation_not_queued -> "not_queued"
      | Operation_idempotency_conflict -> "idempotency_conflict"
+     | Operation_native_call_unsettled -> "native_call_unsettled"
      | Operation_store_unavailable -> "store_unavailable")
   | Command_rejected
       (Keeper_owner.Store_unavailable _ | Reducer_rejected _) ->

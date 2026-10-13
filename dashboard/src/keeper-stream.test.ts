@@ -99,6 +99,33 @@ describe('Keeper operation stream projection', () => {
     expect(stopped?.streamState).toBe('finalizing')
   })
 
+  it('refuses a pre-floor stop once an attempt boundary cleared the current owner', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: { stream_scope: 0 },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_MODEL_CONTENT_ACTIVITY',
+      value: { generation: 3, stream_scope: 0, block_index: 0, channel: 'text', state: 'observed' },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED',
+      value: { runtime_id: 'claude', attempt_index: 0 },
+    })
+    const entry = () => requiredFixture(keeperThreads.value.sangsu?.find(row => row.id === 'reply-1'))
+    // The attempt cleared the current owner but kept the floor: a stop for
+    // an older generation is stale and must not finalize the live response.
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_STOP', value: { content_generation: 2, stream_scope: 0 },
+    })
+    expect(entry().streamState).toBe('streaming')
+    // The floor generation's own stop still finalizes.
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_STOP', value: { content_generation: 3, stream_scope: 0 },
+    })
+    expect(entry().streamState).toBe('finalizing')
+  })
+
   it('accepts retry activity only for the observed running runtime attempt', () => {
     assistantEntry('op-retry')
     const retry = (runtime_id = 'claude', lane_attempt_index = 0): KeeperChatStreamEvent => ({

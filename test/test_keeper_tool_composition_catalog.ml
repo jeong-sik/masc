@@ -1088,8 +1088,9 @@ let test_read_only_outer_invocations_overlap_without_identity_mixing () =
   check bool "a mutable callback without its causal cell stays serial" true
     (Agent_core.Tool.execution_mode callback_only_tool ~input:(`Assoc []) = Agent_core.Tool_contract.Serial);
   let files = [ "left", "left evidence"; "right", "right evidence" ] in
+  let read_root = Masc.Keeper_tool_shared_runtime.keeper_playground_root ~config ~meta in
   List.iter (fun (file, content) ->
-    let channel = open_out (Filename.concat base_path file) in
+    let channel = open_out (Filename.concat read_root file) in
     Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel content)) files;
   let run index file =
     let id = "outer-" ^ file in
@@ -1098,13 +1099,13 @@ let test_read_only_outer_invocations_overlap_without_identity_mixing () =
                   ; execution_mode = Agent_core.Tool_contract.Concurrent }
         ~completion:Agent_core.Tool_contract.Continue_after_success in
     let output = match Agent_core.Tool.execute ~invocation tool
-        (`Assoc [ "file", `String (Filename.concat base_path file) ]) with
+        (`Assoc [ "file", `String (Filename.concat read_root file) ]) with
       | Ok output -> output | Error error -> fail error.Agent_core.Types.message in
     let open Yojson.Safe.Util in
     let selected = Yojson.Safe.from_string output.content |> member "structured_content"
         |> member "exports" |> member "path" in
     check bool (file ^ " selected result available") true (selected |> member "available" |> to_bool);
-    check string (file ^ " receives its own path") (Filename.concat base_path file)
+    check string (file ^ " receives its own path") (Filename.concat read_root file)
       (selected |> member "value" |> to_string)
   in
   Eio.Fiber.both (fun () -> run 0 "left") (fun () -> run 1 "right");
@@ -1120,7 +1121,7 @@ let test_read_only_outer_invocations_overlap_without_identity_mixing () =
       Ledger.activation_to_yojson activation |> member "skill_tool_use_id" |> to_string) |> List.sort String.compare);
   Call_log.flush_now ();
   let rows = Call_log.read_recent ~keeper_name:meta.name () |> Result.get_ok in
-  let summaries = List.filter (fun row -> member "tool_name" row = `String Surface.composition_run_summary_tool_name) rows in
+  let summaries = List.filter (fun row -> member "tool" row = `String Surface.composition_run_summary_tool_name) rows in
   check int "each overlapping invocation has one run summary" 2 (List.length summaries);
   let run_ids = List.map (fun row -> row |> member "composition_run_id" |> to_string) summaries in
   check int "overlapping invocations have distinct run identities" 2 (List.sort_uniq String.compare run_ids |> List.length);
@@ -1128,7 +1129,7 @@ let test_read_only_outer_invocations_overlap_without_identity_mixing () =
     let run_id = summary |> member "composition_run_id" |> to_string in
     let parent = summary |> member "tool_use_id" |> to_string in
     let leaf = List.filter (fun row -> member "composition_run_id" row = `String run_id
-        && member "tool_name" row <> `String Surface.composition_run_summary_tool_name) rows in
+        && member "tool" row <> `String Surface.composition_run_summary_tool_name) rows in
     match leaf with
     | [ row ] -> check string "leaf observation keeps its own outer parent" parent
         (row |> member "parent_tool_use_id" |> to_string)

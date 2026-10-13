@@ -249,6 +249,9 @@ let invalidate_operator_snapshot_views config =
   invalidate_snapshot_cache ();
   Dashboard_projection_cache.invalidate_snapshot_json ~config
 
+(* Every action is staged for confirmation and runs from [confirm_json]. A
+   request that reaches this point named a catalog action, and the catalog
+   answers "requires confirmation" for each of them. *)
 let action_json ?actor_hint (ctx : _ context) args :
     (Yojson.Safe.t, string) result =
   let* request = action_request_of_args ?actor_hint ctx args in
@@ -256,82 +259,50 @@ let action_json ?actor_hint (ctx : _ context) args :
   let* request = normalize_request_target_type request in
   let* delegated_tool = delegated_tool_for request.action_type in
   let trace_id = trace_id "ops" in
-  let started_at = Unix.gettimeofday () in
-  if confirm_required request.action_type then (
-    let expires_at = Masc_domain.iso8601_of_unix_seconds (Unix.gettimeofday () +. remote_confirm_ttl_seconds) in
-    let* token = generate_confirm_token ~clock:ctx.clock ctx.config in
-    let preview = preview_of_action request in
-    let entry =
-      {
-        confirm_token = token;
-        trace_id;
-        actor = request.actor;
-        action_type = request.action_type;
-        target_type = request.target_type;
-        target_id = request.target_id;
-        payload = request.payload;
-        delegated_tool;
-        created_at = Masc_domain.now_iso ();
-        expires_at = Some expires_at;
-      }
-    in
-    let* () = upsert_pending_confirm ctx.config entry in
-    let () = invalidate_operator_snapshot_views ctx.config in
-    append_action_log ctx.config
-      {
-        trace_id;
-        actor = request.actor;
-        remote_session_id = ctx.mcp_session_id;
-        remote_client_type = remote_client_type_of_context ctx;
-        action_type = request.action_type;
-        target_type = request.target_type;
-        target_id = request.target_id;
-        delegated_tool;
-        confirmation_state = Preview;
-        result_status = ActionOk;
-        latency_ms = 0;
-        created_at = Masc_domain.now_iso ();
-      };
-    Ok
-      (Tool_args.ok_assoc
-         [
-           ("trace_id", `String trace_id);
-           ("confirm_required", `Bool true);
-           ("confirm_token", `String entry.confirm_token);
-           ("preview", preview);
-           ("tool_name", `String delegated_tool);
-           ("expires_at", `String expires_at);
-         ]))
-  else
-    let* executed, result_status = execute_action ctx request in
-    let latency_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
-    append_action_log ctx.config
-      {
-        trace_id;
-        actor = request.actor;
-        remote_session_id = ctx.mcp_session_id;
-        remote_client_type = remote_client_type_of_context ctx;
-        action_type = request.action_type;
-        target_type = request.target_type;
-        target_id = request.target_id;
-        delegated_tool;
-        confirmation_state = Immediate;
-        result_status;
-        latency_ms;
-        created_at = Masc_domain.now_iso ();
-      };
-    let fields =
-      [ ("trace_id", `String trace_id)
-      ; ("confirm_required", `Bool false)
-      ; ("tool_name", `String delegated_tool)
-      ; ("result", executed)
-      ]
-    in
-    Ok
-      (match result_status with
-       | ActionOk -> Tool_args.ok_assoc fields
-       | ActionDeferred -> `Assoc (("status", `String "deferred") :: fields)
-       | ActionError -> Tool_args.error_assoc fields)
+  let expires_at = Masc_domain.iso8601_of_unix_seconds (Unix.gettimeofday () +. remote_confirm_ttl_seconds) in
+  let* token = generate_confirm_token ~clock:ctx.clock ctx.config in
+  let preview = preview_of_action request in
+  let entry =
+    {
+      confirm_token = token;
+      trace_id;
+      actor = request.actor;
+      action_type = request.action_type;
+      target_type = request.target_type;
+      target_id = request.target_id;
+      payload = request.payload;
+      delegated_tool;
+      created_at = Masc_domain.now_iso ();
+      expires_at = Some expires_at;
+    }
+  in
+  let* () = upsert_pending_confirm ctx.config entry in
+  let () = invalidate_operator_snapshot_views ctx.config in
+  append_action_log ctx.config
+    {
+      trace_id;
+      actor = request.actor;
+      remote_session_id = ctx.mcp_session_id;
+      remote_client_type = remote_client_type_of_context ctx;
+      action_type = request.action_type;
+      target_type = request.target_type;
+      target_id = request.target_id;
+      delegated_tool;
+      confirmation_state = Preview;
+      result_status = ActionOk;
+      latency_ms = 0;
+      created_at = Masc_domain.now_iso ();
+    };
+  Ok
+    (Tool_args.ok_assoc
+       [
+         ("trace_id", `String trace_id);
+         ("confirm_required", `Bool true);
+         ("confirm_token", `String entry.confirm_token);
+         ("preview", preview);
+         ("tool_name", `String delegated_tool);
+         ("expires_at", `String expires_at);
+       ])
 
 (** The closed decision type of the operator confirm gate. Parsing an
     incoming "decision" field yields exactly one of these; unknown values

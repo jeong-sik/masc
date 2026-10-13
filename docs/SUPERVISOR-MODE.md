@@ -40,24 +40,31 @@ Supervisor Mode is for:
    - `broadcast`
    - `namespace_pause`
    - `namespace_resume`
+   - `task_inject`
    - `keeper_message`
    - `keeper_probe`
    - `keeper_recover`
 4. Call `masc_operator_action`.
-5. If `confirm_required=true`, inspect the preview and wait for human approval.
+5. Inspect the preview and wait for human approval. Every action returns
+   `confirm_required=true` with a `confirm_token`; nothing runs before step 6.
 6. Call `masc_operator_confirm`.
 7. Re-check with `masc_operator_snapshot` and `masc_operator_digest`.
 
 ## Intervention Policy
 
-| Action | Use when | Confirmation |
-|---|---|---|
-| `broadcast` | Namespace-wide guidance is needed | Immediate |
-| `namespace_pause` | Automation should stop before more work lands | Preview + confirm |
-| `namespace_resume` | Recovery after an operator pause | Immediate |
-| `keeper_message` | One keeper needs direct corrective input | Immediate |
-| `keeper_probe` | A keeper needs a fresh diagnostic snapshot | Immediate |
-| `keeper_recover` | A keeper whose keepalive has stopped needs a controlled restart | Preview + confirm |
+Every action is staged first. `masc_operator_action` returns a preview and a
+`confirm_token`, and the action runs when `masc_operator_confirm` is called with
+that token.
+
+| Action | Use when |
+|---|---|
+| `broadcast` | Namespace-wide guidance is needed |
+| `namespace_pause` | Automation should stop before more work lands |
+| `namespace_resume` | Recovery after an operator pause |
+| `task_inject` | A backlog task should be added to the namespace |
+| `keeper_message` | One keeper needs direct corrective input |
+| `keeper_probe` | A keeper needs a fresh diagnostic snapshot |
+| `keeper_recover` | A keeper whose keepalive has stopped needs a controlled restart |
 
 ## Notes
 

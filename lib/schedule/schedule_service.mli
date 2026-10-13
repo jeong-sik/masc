@@ -42,6 +42,7 @@ val update :
   Workspace_utils.config ->
   now:float ->
   runner_tick_sec:float ->
+  ?timing_update:Schedule_store.timing_update ->
   schedule_id:string ->
   ?requested_at:float ->
   ?expires_at:float ->
@@ -58,7 +59,8 @@ val update :
     terminal schedules. [now] is the updating call's clock: the store refuses
     a due time that changes and lands before the current whole second
     ({!Schedule_store.Changed_due_already_past}), and accepts the stored due
-    time sent back unchanged. *)
+    time sent back unchanged. [Keep_timing] preserves the latest stored due
+    time and recurrence under the mutation lock, independently of the supplied snapshot. *)
 
 val cancel :
   Workspace_utils.config ->

@@ -147,10 +147,17 @@ val insert_request :
   Schedule_domain.schedule_request ->
   (Schedule_domain.schedule_request, store_error) result
 
+type timing_update = Replace_timing | Keep_timing
+(** [Keep_timing] reads the current due time, recurrence and expiry under the
+    mutation lock. A content editor cannot restore a stale timing snapshot.
+    An expiry on the replacement request replaces the stored one; an absent
+    expiry keeps it. Only [Replace_timing] can remove an expiry. *)
+
 val update_request :
   Workspace_utils.config ->
   now:float ->
   runner_tick_sec:float ->
+  ?timing_update:timing_update ->
   Schedule_domain.schedule_request ->
   (Schedule_domain.schedule_request, store_error) result
 (** Atomically replaces an existing [Scheduled] or [Due] request. The caller
@@ -160,7 +167,9 @@ val update_request :
     are immutable. [now] is the updating call's clock: a due time that
     changes and lands before the current whole second is
     [Changed_due_already_past]; the stored due time sent back unchanged is
-    accepted whatever the clock says. *)
+    accepted whatever the clock says. [timing_update] defaults to
+    [Replace_timing]; [Keep_timing] retains the latest stored time, recurrence
+    and expiry. *)
 
 val cancel_request :
   Workspace_utils.config ->

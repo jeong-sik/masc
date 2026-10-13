@@ -57,7 +57,7 @@ val schema : string
     a test that spells the generation out is asserting against a literal the
     writer can move without it. *)
 
-val store_dir : masc_root:string -> keeper_name:string -> string
+val store_dir : base_path:string -> keeper_name:string -> string
 (** Where rows are written and read, generation included. A reader that
     rebuilds this path itself keeps looking at the old namespace after a
     generation bump and sees an empty store rather than an error. *)

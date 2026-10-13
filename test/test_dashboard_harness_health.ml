@@ -73,7 +73,7 @@ let test_wake_payloads_live_under_the_masc_directory () =
 let test_a_date_filter_does_not_remove_the_row_cap () =
   reset_after @@ fun () ->
   with_temp_dir "wake-payload-cap" @@ fun dir ->
-  H.set_wake_payload_store_for_testing ~base_dir:dir;
+  H.set_wake_payload_store_for_testing ~base_path:dir;
   let store = H.get_wake_payload_store () in
   ignore (record_wake_payload ~trace_id:"cap-seed");
   (* Copy the recorded row instead of hand-writing the schema, so this test
@@ -97,7 +97,7 @@ let test_a_date_filter_does_not_remove_the_row_cap () =
 let test_wake_payload_store_round_trip () =
   reset_after @@ fun () ->
   with_temp_dir "wake-payload-store" @@ fun dir ->
-  H.set_wake_payload_store_for_testing ~base_dir:dir;
+  H.set_wake_payload_store_for_testing ~base_path:dir;
   ignore (H.get_wake_payload_store ());
   ignore (record_wake_payload ~trace_id:"trace-round-trip");
   match H.read_wake_payload_events () with
@@ -117,10 +117,10 @@ let test_reset_rebinds_wake_payload_store () =
   reset_after @@ fun () ->
   with_temp_dir "wake-payload-store-a" @@ fun first_dir ->
   with_temp_dir "wake-payload-store-b" @@ fun second_dir ->
-  H.set_wake_payload_store_for_testing ~base_dir:first_dir;
+  H.set_wake_payload_store_for_testing ~base_path:first_dir;
   ignore (record_wake_payload ~trace_id:"trace-first");
   H.reset_runtime_stores_for_testing ();
-  H.set_wake_payload_store_for_testing ~base_dir:second_dir;
+  H.set_wake_payload_store_for_testing ~base_path:second_dir;
   ignore (record_wake_payload ~trace_id:"trace-second");
   match H.read_wake_payload_events () with
   | [ event ] -> check string "trace after reset" "trace-second" event.trace_id
@@ -129,7 +129,7 @@ let test_reset_rebinds_wake_payload_store () =
 let test_wake_payload_reader_rejects_malformed_exact_records () =
   reset_after @@ fun () ->
   with_temp_dir "wake-payload-strict-reader" @@ fun dir ->
-  H.set_wake_payload_store_for_testing ~base_dir:dir;
+  H.set_wake_payload_store_for_testing ~base_path:dir;
   let valid_fields =
     [ "record_type", `String "wake_payload"
     ; "timestamp", `Float 1.0

@@ -82,18 +82,19 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
          ])
 ;;
 
-let store_dir ~masc_root ~keeper_name =
-  Filename.concat
-    (Filename.concat
-       (Filename.concat (Filename.concat masc_root Common.keepers_runtime_dirname) keeper_name)
-       "reaction-ledger")
-    storage_generation
+let location ~base_path ~keeper_name =
+  Dated_jsonl.Store.reaction_ledger
+    ~base_path
+    ~keeper:keeper_name
+    ~generation:storage_generation
+;;
+
+let store_dir ~base_path ~keeper_name =
+  Dated_jsonl.Store.dir (location ~base_path ~keeper_name)
 ;;
 
 let store_for_base_path ~base_path ~keeper_name =
-  Dated_jsonl.create
-    ~base_dir:(store_dir ~masc_root:(Common.masc_dir_from_base_path ~base_path) ~keeper_name)
-    ()
+  Dated_jsonl.open_store (location ~base_path ~keeper_name)
 ;;
 
 (* An occurrence whose queue witness was retired needs an exact, bounded

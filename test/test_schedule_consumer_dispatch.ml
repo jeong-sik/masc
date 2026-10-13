@@ -85,9 +85,7 @@ let rec jsonl_rows_under path =
 let reaction_ledger_dir ~base_path ~keeper_name =
   (* Ask the writer where it writes. Rebuilding the path here made a storage
      generation bump silently point the test at an empty old namespace. *)
-  Masc.Keeper_reaction_ledger.store_dir
-    ~masc_root:(Common.masc_dir_from_base_path ~base_path)
-    ~keeper_name
+  Masc.Keeper_reaction_ledger.store_dir ~base_path ~keeper_name
 ;;
 
 let write_malformed_reaction_ledger_row ~base_path ~keeper_name =

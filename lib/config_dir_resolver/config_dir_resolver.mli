@@ -216,10 +216,21 @@ val wiki_dir : base_path:string -> string
     [.masc/] with the rest and not in the workspace's own [docs/], where it
     showed up as untracked files of whatever repository the workspace is. *)
 
-val data_dir : base_path:string -> string
-(** [<base_path>/data/]. Bulk tool data (tool-events).
-    Sibling of [.masc/]; callers historically wrote here without going
-    through [.masc/]. Layout preserved for backwards compatibility. *)
+val tool_events_dir : base_path:string -> string
+(** [<base_path>/.masc/tool-events/]. The dated tool assignment and tool
+    call events of [Tool_assignment_telemetry]. *)
+
+val keeper_wake_payload_dir : base_path:string -> string
+(** [<base_path>/.masc/keeper-wake-payload/]. The dated wake payload rows
+    of [Dashboard_harness_health]. *)
+
+val verdicts_dir : base_path:string -> string
+(** [<base_path>/.masc/verdicts/]. The dated verdict rows of
+    [Eval_calibration]. *)
+
+val event_queue_bulk_backups_dir : base_path:string -> string
+(** [<base_path>/.masc/event-queue-bulk-backups/]. One backup file per
+    bulk event-queue operation, written before the rows change. *)
 
 (** {2 Config-rooted file accessors} *)
 

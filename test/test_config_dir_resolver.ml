@@ -414,10 +414,25 @@ let test_wiki_dir () =
     "/x/.masc/wiki"
     (Config_dir_resolver.wiki_dir ~base_path:"/x")
 
-let test_rfc0121_data_dir () =
-  check string "data is sibling of .masc"
-    "/x/data"
-    (Config_dir_resolver.data_dir ~base_path:"/x")
+let test_tool_events_dir () =
+  check string "tool events under .masc"
+    "/x/.masc/tool-events"
+    (Config_dir_resolver.tool_events_dir ~base_path:"/x")
+
+let test_keeper_wake_payload_dir () =
+  check string "wake payloads under .masc"
+    "/x/.masc/keeper-wake-payload"
+    (Config_dir_resolver.keeper_wake_payload_dir ~base_path:"/x")
+
+let test_verdicts_dir () =
+  check string "verdicts under .masc"
+    "/x/.masc/verdicts"
+    (Config_dir_resolver.verdicts_dir ~base_path:"/x")
+
+let test_event_queue_bulk_backups_dir () =
+  check string "bulk backups under .masc"
+    "/x/.masc/event-queue-bulk-backups"
+    (Config_dir_resolver.event_queue_bulk_backups_dir ~base_path:"/x")
 
 let test_rfc0121_repositories_toml () =
   check string "repositories.toml under .masc/config"
@@ -606,7 +621,11 @@ let () =
           test_case "tmp_dir" `Quick test_rfc0121_tmp_dir;
           test_case "locks_dir" `Quick test_rfc0121_locks_dir;
           test_case "wiki_dir" `Quick test_wiki_dir;
-          test_case "data_dir sibling of .masc" `Quick test_rfc0121_data_dir;
+          test_case "tool_events_dir" `Quick test_tool_events_dir;
+          test_case "keeper_wake_payload_dir" `Quick test_keeper_wake_payload_dir;
+          test_case "verdicts_dir" `Quick test_verdicts_dir;
+          test_case "event_queue_bulk_backups_dir" `Quick
+            test_event_queue_bulk_backups_dir;
           test_case "repositories_toml under config" `Quick
             test_rfc0121_repositories_toml;
           test_case "runtime.toml uses explicit workspace config root" `Quick

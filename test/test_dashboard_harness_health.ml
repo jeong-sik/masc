@@ -27,6 +27,14 @@ let with_temp_dir prefix f =
   in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
+let with_base_path dir f =
+  let previous = Sys.getenv_opt "MASC_BASE_PATH" in
+  Unix.putenv "MASC_BASE_PATH" dir;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "MASC_BASE_PATH" (Option.value previous ~default:""))
+    f
+
 let reset_after f =
   H.reset_runtime_stores_for_testing ();
   Fun.protect ~finally:H.reset_runtime_stores_for_testing f
@@ -43,6 +51,19 @@ let record_wake_payload ~trace_id =
     ~message_count:3
     ~role_counts:[ "user", 1; "assistant", 2 ]
     ~tool_count:4
+
+(* A store nobody bound by hand opens where the workspace keeps its state.
+   It used to open in the workspace's own [data/] folder, beside [.masc]. *)
+let test_wake_payloads_live_under_the_masc_directory () =
+  reset_after @@ fun () ->
+  with_temp_dir "wake-payload-home" @@ fun dir ->
+  with_base_path dir @@ fun () ->
+  ignore (record_wake_payload ~trace_id:"home");
+  check int "the row is read back" 1 (List.length (H.read_wake_payload_events ()));
+  check bool "the store is under .masc" true
+    (Sys.is_directory (Filename.concat dir ".masc/keeper-wake-payload"));
+  check bool "nothing is written beside .masc" false
+    (Sys.file_exists (Filename.concat dir "data"))
 
 (* The reader capped an unfiltered read and did not cap a filtered one, so
    supplying a date — which narrows the request — removed the row bound and
@@ -228,6 +249,8 @@ let () =
       ( "runtime_stores",
         [
           test_case "wake payload round trip" `Quick test_wake_payload_store_round_trip;
+          test_case "wake payloads live under .masc" `Quick
+            test_wake_payloads_live_under_the_masc_directory;
           test_case "a date filter does not remove the row cap" `Quick
             test_a_date_filter_does_not_remove_the_row_cap;
           test_case "wake payload reset rebinds store" `Quick

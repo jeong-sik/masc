@@ -188,7 +188,6 @@ tmp_edit/
 # Runtime data directories (not source)
 data/economy/
 data/harness-pre-compact/
-data/verdicts/
 data/bench/
 memory/
 !dashboard/src/components/memory/

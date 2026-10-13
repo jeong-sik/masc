@@ -522,8 +522,17 @@ let microvm_shim_dir ~base_path =
 
 let wiki_dir ~base_path = Filename.concat (masc_root ~base_path) "wiki"
 
-let data_dir ~base_path =
-  Filename.concat base_path "data"
+let tool_events_dir ~base_path =
+  Filename.concat (masc_root ~base_path) "tool-events"
+
+let keeper_wake_payload_dir ~base_path =
+  Filename.concat (masc_root ~base_path) "keeper-wake-payload"
+
+let verdicts_dir ~base_path =
+  Filename.concat (masc_root ~base_path) "verdicts"
+
+let event_queue_bulk_backups_dir ~base_path =
+  Filename.concat (masc_root ~base_path) "event-queue-bulk-backups"
 
 let repositories_toml_basename = "repositories.toml"
 

@@ -221,7 +221,7 @@ let fresh_operation_id () = Random_id.uuid_v7 ()
 
 let backup_path ~base_path operation_id =
   Filename.concat
-    (Filename.concat base_path "event-queue-bulk-backups")
+    (Config_dir_resolver.event_queue_bulk_backups_dir ~base_path)
     (operation_id ^ ".json")
 ;;
 

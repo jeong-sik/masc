@@ -200,10 +200,26 @@ let test_census_read_failure_is_an_error () =
       | Error _ -> ())
 ;;
 
+(* The backup of a bulk operation is state this server writes, so it is kept
+   with the rest under [.masc] and not at the top of the workspace. *)
+let test_backup_is_kept_under_the_masc_directory () =
+  check
+    string
+    "backup path"
+    "/x/.masc/event-queue-bulk-backups/op-1.json"
+    (Bulk.backup_path ~base_path:"/x" "op-1")
+;;
+
 let () =
   run
     "keeper_event_queue_bulk"
-    [ ( "parse"
+    [ ( "backup"
+      , [ test_case
+            "is kept under .masc"
+            `Quick
+            test_backup_is_kept_under_the_masc_directory
+        ] )
+    ; ( "parse"
       , [ test_case "defaults to dry run" `Quick test_parse_defaults_to_dry_run
         ; test_case "rejects unknown schema" `Quick test_parse_rejects_unknown_schema
         ; test_case

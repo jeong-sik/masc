@@ -108,6 +108,28 @@ let test_a_date_filter_does_not_remove_the_row_cap () =
     check int "a date filter reads no more than an unfiltered read" unfiltered
       filtered)
 
+(* A store nobody bound by hand opens where the workspace keeps its state.
+   It used to open in the workspace's own [data/] folder, beside [.masc]. *)
+let test_verdicts_live_under_the_masc_directory () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir () in
+  let previous = Sys.getenv_opt "MASC_BASE_PATH" in
+  Unix.putenv "MASC_BASE_PATH" dir;
+  Cal.For_testing.reset_store ();
+  Fun.protect
+    ~finally:(fun () ->
+      Cal.For_testing.reset_store ();
+      Unix.putenv "MASC_BASE_PATH" (Option.value previous ~default:""))
+    (fun () ->
+      Cal.record_verdict ~task_id:"home" ~req:(make_req ()) ~result:(make_result ()) ();
+      check int "the verdict is read back" 1
+        (List.length (Dated_jsonl.read_recent (Cal.get_store ()) 10));
+      check bool "the store is under .masc" true
+        (Sys.is_directory (Filename.concat dir ".masc/verdicts"));
+      check bool "nothing is written beside .masc" false
+        (Sys.file_exists (Filename.concat dir "data")))
+
 let test_record_verdict_writes () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -437,6 +459,8 @@ let () =
     ];
     "record_verdict", [
       test_case "writes to store" `Quick test_record_verdict_writes;
+      test_case "verdicts live under .masc" `Quick
+        test_verdicts_live_under_the_masc_directory;
       test_case "a date filter does not remove the row cap" `Quick
         test_a_date_filter_does_not_remove_the_row_cap;
       test_case "reject verdict" `Quick test_record_verdict_reject;

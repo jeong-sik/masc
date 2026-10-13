@@ -1,7 +1,7 @@
 (** Eval_calibration — Verdict logging and evaluator calibration loop.
 
     Persists anti-rationalization verdicts to date-partitioned JSONL
-    ([data/verdicts/YYYY-MM/DD.jsonl]).  Supports human-label ground-truth
+    ([.masc/verdicts/YYYY-MM/DD.jsonl]).  Supports human-label ground-truth
     tracking, divergence analysis, and few-shot calibration example
     generation.
 
@@ -61,7 +61,7 @@ type calibration_example = {
 (** {1 Store management} *)
 
 val get_store : unit -> Dated_jsonl.t
-(** Get or create the global verdict store at [data/verdicts/]. *)
+(** Get or create the global verdict store at [.masc/verdicts/]. *)
 
 module For_testing : sig
   val reset_store : unit -> unit

@@ -208,7 +208,10 @@ let uses_anthropic_schema_prefill (config : Provider_config.t) messages =
   | ( Provider_config.Anthropic
     , Types.JsonSchema _
     , ({ role = Types.Assistant; _ } : Types.message) :: _ ) -> true
-  | Provider_config.Anthropic, Types.JsonSchema _, _ -> false
+  | ( Provider_config.Anthropic
+    , Types.JsonSchema _
+    , ([] | ({ role = Types.System | Types.User | Types.Tool; _ } : Types.message) :: _) )
+    -> false
   | Provider_config.Anthropic, (Types.Off | Types.JsonMode), _
   | ( ( Provider_config.Kimi
       | Provider_config.OpenAI_compat
@@ -699,7 +702,8 @@ let%test "JsonMode records syntax-only validation provenance" =
   match normalize_response Types.JsonMode response with
   | Ok { value = `Assoc [ ("accepted", `Bool true) ]; validation = Json_syntax_validated }
     -> true
-  | Ok _ -> fail "returned a different value or provenance than expected"
+  | Ok { value = _; validation = Json_syntax_validated | Provider_schema_requested_client_validation_required }
+    -> fail "returned a different value or provenance than expected"
   | Error e ->
     fail "normalize_response unexpectedly failed: %s" (normalization_error_name e)
 ;;
@@ -717,7 +721,8 @@ let%test "Off reads the prompt-requested JSON locally and refuses other text" =
   (match normalize_response Types.Off (response {|{"accepted":true}|}) with
    | Ok { value = `Assoc [ ("accepted", `Bool true) ]; validation = Json_syntax_validated }
      -> true
-   | Ok _ | Error _ -> false)
+   | Ok { value = _; validation = Json_syntax_validated | Provider_schema_requested_client_validation_required }
+   | Error _ -> false)
   &&
   match normalize_response Types.Off (response "not json") with
   | Error (Invalid_json _) -> true
@@ -802,7 +807,21 @@ let%test "exact preflight refuses a connect-only wire" =
       ~body_timeout_s:None ~anthropic_thinking_control:None
   with
   | Error (Missing_deadline _) -> true
-  | Error e -> failwith ("connect-only preflight hit another rejection: " ^ rejection_name e)
+  | Error
+      (( Explicit_capability_snapshot_required
+       | Unsupported_output_contract _
+       | Unsupported_exact_cross_feature
+       | Global_admission_not_allowed
+       | Invalid_connect_timeout _
+       | Invalid_body_timeout _
+       | Caller_supplied_header_not_allowed _
+       | Unsupported_image_input
+       | Unsupported_document_input
+       | Unsupported_audio_input
+       | Unsupported_system_prompt
+       | Provider_request_rejected _
+       | Request_serialization_rejected _ ) as e) ->
+    failwith ("connect-only preflight hit another rejection: " ^ rejection_name e)
   | Ok _ -> false
 ;;
 

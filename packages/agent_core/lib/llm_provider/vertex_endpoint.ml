@@ -25,5 +25,5 @@ let parse_base_url value =
     let location = if region = "global" then Global else Regional region in
     (match base_url ~project ~location with
      | Ok expected when String.equal expected value -> Ok (project, location)
-     | _ -> Error "Vertex endpoint must be the canonical HTTPS Google publisher endpoint")
+     | Ok _ | Error _ -> Error "Vertex endpoint must be the canonical HTTPS Google publisher endpoint")
   | _ -> Error "Vertex endpoint must include project, location and Google publisher"

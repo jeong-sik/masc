@@ -243,7 +243,13 @@ let validate_run run_ref =
            Hashtbl.replace outstanding key (count - 1);
            incr paired_tool_result_count)
        | (Tool_execution_started | Tool_execution_finished), None -> ordering_ok := false
-       | _ -> ())
+       | ( ( Run_started
+           | Assistant_block
+           | Native_tool_started
+           | Native_tool_finished
+           | Hook_invoked
+           | Run_finished )
+         , _ ) -> ())
     records;
   let tool_pairs_ok =
     !ordering_ok && outstanding |> Hashtbl.to_seq_values |> Seq.for_all (Int.equal 0)

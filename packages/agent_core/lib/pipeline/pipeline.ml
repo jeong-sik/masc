@@ -946,7 +946,7 @@ let%test "last_tool_results_from finds tool results in last tool message" =
   | [ Ok { content = "result1"; _ }
     ; Error { message = "error msg"; recoverable = false; error_class = None }
     ] -> true
-  | _ -> false
+  | [] | [ (Ok _ | Error _) ] | _ :: _ :: _ -> false
 ;;
 
 let%test "last_tool_results_from ignores tool results outside tool role" =
@@ -1055,7 +1055,7 @@ let%test "last_tool_results_from picks last tool-result message" =
   in
   match Agent_turn.last_tool_results_from msgs with
   | [ Ok { content = "second"; _ } ] -> true
-  | _ -> false
+  | [] | [ (Ok _ | Error _) ] | _ :: _ :: _ -> false
 ;;
 
 let%test "last_tool_results_from ignores mixed content outside tool role" =
@@ -1102,7 +1102,7 @@ let%test "last_tool_results_from error tool result" =
   in
   match Agent_turn.last_tool_results_from msgs with
   | [ Error { message = "fail msg"; recoverable = false; error_class = None } ] -> true
-  | _ -> false
+  | [] | [ (Ok _ | Error _) ] | _ :: _ :: _ -> false
 ;;
 
 (* --- Additional pipeline tests --- *)

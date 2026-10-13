@@ -644,7 +644,16 @@ let provider_invocations_settled provider =
              (Some
                 { materialized = Journal.Tool_invocation_state { result = None; _ }; _ })
            -> Ok false
-         | Ok (Some _) ->
+         | Ok
+             (Some
+                { materialized =
+                    ( Journal.Agent_run_state
+                    | Journal.Agent_turn_state
+                    | Journal.Provider_attempt_state _
+                    | Journal.Output_block_state _
+                    | Journal.Tool_attempt_state )
+                ; _
+                }) ->
            Error (Resume_topology_mismatch "provider child changed node kind"))
     in
     (match invocation_nodes with
@@ -875,7 +884,16 @@ let provider_response provider =
       (Some
          { Journal.materialized = Journal.Provider_attempt_state { response = None }; _ })
     -> Error (Resume_topology_mismatch "provider response authority is not materialized")
-  | Ok (Some _) ->
+  | Ok
+      (Some
+         { Journal.materialized =
+             ( Journal.Agent_run_state
+             | Journal.Agent_turn_state
+             | Journal.Output_block_state _
+             | Journal.Tool_invocation_state _
+             | Journal.Tool_attempt_state )
+         ; _
+         }) ->
     Error
       (Resume_topology_mismatch "provider attempt has an incompatible materialized state")
 ;;

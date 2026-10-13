@@ -676,7 +676,8 @@ let merge_tool_result_followup_user_messages messages =
         }
       in
       aux (merged :: acc) rest
-    | msg :: rest -> aux (msg :: acc) rest
+    | ({ role = System | User | Assistant | Tool; _ } as msg) :: rest ->
+      aux (msg :: acc) rest
     | [] -> List.rev acc
   in
   aux [] messages

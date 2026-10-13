@@ -129,7 +129,7 @@ let resume_user_input agent user_blocks =
                 "resume input differs from the original User prompt in the restored \
                  Agent checkpoint"
             }))
-  | Some _ | None ->
+  | Some { role = System | Assistant | Tool; _ } | None ->
     Error
       (Error.Config
          (Error.InvalidConfig

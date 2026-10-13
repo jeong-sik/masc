@@ -165,7 +165,40 @@ let%test "oversized payload remains a typed wire fact" =
             { format = Http_client.Ndjson; kind = Http_client.Oversized_payload }
       ; message = "NDJSON payload of 11 bytes exceeded the 10 byte limit"
       } -> true
-  | _ -> false
+  | Http_client.HttpError _
+  | Http_client.NetworkError _
+  | Http_client.TimeoutError _
+  | Http_client.AcceptRejected _
+  | Http_client.ProviderTerminal _
+  | Http_client.ProviderFailure
+      { kind =
+          ( Http_client.Capacity_exhausted _
+          | Http_client.Hard_quota _
+          | Http_client.Capability_mismatch _
+          | Http_client.Cli_policy_invalid _
+          | Http_client.Cli_startup_failed _
+          | Http_client.Provider_parse_error _
+          | Http_client.Provider_reported_error _
+          | Http_client.Provider_interrupted
+          | Http_client.Response_body_too_large _
+          | Http_client.Empty_completion _
+          | Http_client.Context_overflow _
+          | Http_client.Repeating_generation _
+          | Http_client.Unknown_provider_failure _ )
+      ; _
+      }
+  | Http_client.ProviderFailure
+      { kind =
+          Http_client.Provider_wire_error
+            { format = Http_client.Sse | Http_client.Ndjson
+            ; kind =
+                ( Http_client.Malformed_payload
+                | Http_client.Unknown_event
+                | Http_client.Incomplete_stream
+                | Http_client.Oversized_payload )
+            }
+      ; _
+      } -> false
 ;;
 
 (* Preserve the distinction between a provider-owned error envelope and a
@@ -344,7 +377,24 @@ let%test "an errored choice with no object reads as an interrupted generation" =
         that shape. *)
      | Http_client.ProviderFailure { kind = Http_client.Provider_interrupted; message = _ } ->
        true
-     | Http_client.ProviderFailure _ | Http_client.HttpError _
+     | Http_client.ProviderFailure
+         { kind =
+             ( Http_client.Capacity_exhausted _
+             | Http_client.Hard_quota _
+             | Http_client.Capability_mismatch _
+             | Http_client.Cli_policy_invalid _
+             | Http_client.Cli_startup_failed _
+             | Http_client.Provider_parse_error _
+             | Http_client.Provider_wire_error _
+             | Http_client.Provider_reported_error _
+             | Http_client.Response_body_too_large _
+             | Http_client.Empty_completion _
+             | Http_client.Context_overflow _
+             | Http_client.Repeating_generation _
+             | Http_client.Unknown_provider_failure _ )
+         ; _
+         }
+     | Http_client.HttpError _
      | Http_client.NetworkError _ | Http_client.TimeoutError _
      | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false)
   | Streaming.Openai_chunk _
@@ -370,7 +420,29 @@ let%test "generic stream provider type stays diagnostic" =
           Http_client.Provider_reported_error { error_type = Some "provider_owned_type" }
       ; _
       } -> true
-  | _ -> false
+  | Http_client.HttpError _
+  | Http_client.NetworkError _
+  | Http_client.TimeoutError _
+  | Http_client.AcceptRejected _
+  | Http_client.ProviderTerminal _
+  | Http_client.ProviderFailure
+      { kind =
+          ( Http_client.Capacity_exhausted _
+          | Http_client.Hard_quota _
+          | Http_client.Capability_mismatch _
+          | Http_client.Cli_policy_invalid _
+          | Http_client.Cli_startup_failed _
+          | Http_client.Provider_parse_error _
+          | Http_client.Provider_wire_error _
+          | Http_client.Provider_interrupted
+          | Http_client.Response_body_too_large _
+          | Http_client.Empty_completion _
+          | Http_client.Context_overflow _
+          | Http_client.Repeating_generation _
+          | Http_client.Unknown_provider_failure _ )
+      ; _
+      }
+  | Http_client.ProviderFailure { kind = Http_client.Provider_reported_error _; _ } -> false
 ;;
 
 (* End to end from the chunk text: a choice-level error that declares 429
@@ -407,7 +479,30 @@ let%test "a choice-level 429 is a rate limit classified from its error object al
         | Retry.ServerError _ | Retry.AuthError _ | Retry.AuthorizationError _
         | Retry.PaymentRequired _ | Retry.InvalidRequest _ | Retry.NotFound _
         | Retry.ContextOverflow _ | Retry.InputCapacity _ | Retry.NetworkError _ | Retry.Timeout _ -> false)
-     | _ -> false)
+     | Http_client.HttpError
+         { body = Http_client.Received _ | Http_client.Not_received_in_window; _ }
+     | Http_client.NetworkError _
+     | Http_client.TimeoutError _
+     | Http_client.AcceptRejected _
+     | Http_client.ProviderTerminal _
+     | Http_client.ProviderFailure
+         { kind =
+             ( Http_client.Capacity_exhausted _
+             | Http_client.Hard_quota _
+             | Http_client.Capability_mismatch _
+             | Http_client.Cli_policy_invalid _
+             | Http_client.Cli_startup_failed _
+             | Http_client.Provider_parse_error _
+             | Http_client.Provider_wire_error _
+             | Http_client.Provider_reported_error _
+             | Http_client.Provider_interrupted
+             | Http_client.Response_body_too_large _
+             | Http_client.Empty_completion _
+             | Http_client.Context_overflow _
+             | Http_client.Repeating_generation _
+             | Http_client.Unknown_provider_failure _ )
+         ; _
+         } -> false)
   | Streaming.Openai_chunk _
   | Streaming.Openai_done
   | Streaming.Openai_empty
@@ -440,8 +535,44 @@ let%test "a top-level 502 is a server error and a 4xx code stays provider-owned"
      (match Retry.classify_refusal ~retry_after_header:None ~status:502 ~body with
       | Retry.ServerError { status = 502; message } ->
         String.equal message "Provider disconnected"
-      | _ -> false)
-   | _ -> false)
+      | Retry.ServerError _
+      | Retry.RateLimited _
+      | Retry.Overloaded _
+      | Retry.AuthError _
+      | Retry.AuthorizationError _
+      | Retry.PaymentRequired _
+      | Retry.InvalidRequest _
+      | Retry.NotFound _
+      | Retry.ContextOverflow _
+      | Retry.InputCapacity _
+      | Retry.NetworkError _
+      | Retry.Timeout _ -> false)
+   | None
+   | Some
+       ( Http_client.HttpError
+           { body = Http_client.Received _ | Http_client.Not_received_in_window; _ }
+       | Http_client.NetworkError _
+       | Http_client.TimeoutError _
+       | Http_client.AcceptRejected _
+       | Http_client.ProviderTerminal _
+       | Http_client.ProviderFailure
+           { kind =
+               ( Http_client.Capacity_exhausted _
+               | Http_client.Hard_quota _
+               | Http_client.Capability_mismatch _
+               | Http_client.Cli_policy_invalid _
+               | Http_client.Cli_startup_failed _
+               | Http_client.Provider_parse_error _
+               | Http_client.Provider_wire_error _
+               | Http_client.Provider_reported_error _
+               | Http_client.Provider_interrupted
+               | Http_client.Response_body_too_large _
+               | Http_client.Empty_completion _
+               | Http_client.Context_overflow _
+               | Http_client.Repeating_generation _
+               | Http_client.Unknown_provider_failure _ )
+           ; _
+           } ) -> false)
   &&
   match http_error (parse 403) with
   | Some
@@ -450,7 +581,31 @@ let%test "a top-level 502 is a server error and a 4xx code stays provider-owned"
              Http_client.Provider_reported_error { error_type = Some "provider_unavailable" }
          ; _
          }) -> true
-  | _ -> false
+  | None
+  | Some
+      ( Http_client.HttpError _
+      | Http_client.NetworkError _
+      | Http_client.TimeoutError _
+      | Http_client.AcceptRejected _
+      | Http_client.ProviderTerminal _
+      | Http_client.ProviderFailure
+          { kind =
+              ( Http_client.Capacity_exhausted _
+              | Http_client.Hard_quota _
+              | Http_client.Capability_mismatch _
+              | Http_client.Cli_policy_invalid _
+              | Http_client.Cli_startup_failed _
+              | Http_client.Provider_parse_error _
+              | Http_client.Provider_wire_error _
+              | Http_client.Provider_reported_error _
+              | Http_client.Provider_interrupted
+              | Http_client.Response_body_too_large _
+              | Http_client.Empty_completion _
+              | Http_client.Context_overflow _
+              | Http_client.Repeating_generation _
+              | Http_client.Unknown_provider_failure _ )
+          ; _
+          } ) -> false
 ;;
 
 let%test "provider error diagnostic uses the active wire format" =
@@ -482,7 +637,35 @@ let[@warning "-32"] maps_to_sse_wire_failure ~expected_kind stream_error =
   | Http_client.TimeoutError _
   | Http_client.AcceptRejected _
   | Http_client.ProviderTerminal _
-  | Http_client.ProviderFailure _ -> false
+  | Http_client.ProviderFailure
+      { kind =
+          ( Http_client.Capacity_exhausted _
+          | Http_client.Hard_quota _
+          | Http_client.Capability_mismatch _
+          | Http_client.Cli_policy_invalid _
+          | Http_client.Cli_startup_failed _
+          | Http_client.Provider_parse_error _
+          | Http_client.Provider_reported_error _
+          | Http_client.Provider_interrupted
+          | Http_client.Response_body_too_large _
+          | Http_client.Empty_completion _
+          | Http_client.Context_overflow _
+          | Http_client.Repeating_generation _
+          | Http_client.Unknown_provider_failure _ )
+      ; _
+      }
+  | Http_client.ProviderFailure
+      { kind =
+          Http_client.Provider_wire_error
+            { format = Http_client.Ndjson
+            ; kind =
+                ( Http_client.Malformed_payload
+                | Http_client.Unknown_event
+                | Http_client.Incomplete_stream
+                | Http_client.Oversized_payload )
+            }
+      ; _
+      } -> false
 ;;
 
 let%test "stream parse failure is malformed wire evidence" =

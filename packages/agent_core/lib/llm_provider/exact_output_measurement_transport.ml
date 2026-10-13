@@ -57,7 +57,24 @@ let%test "ordinary unclassified transport exceptions remain typed" =
     | Reserved_transport_exception | Typed_transport_error (HttpError _)
     | Typed_transport_error (NetworkError _) | Typed_transport_error (TimeoutError _)
     | Typed_transport_error (AcceptRejected _) | Typed_transport_error (ProviderTerminal _)
-    | Typed_transport_error (ProviderFailure _) -> false
+    | Typed_transport_error
+        (ProviderFailure
+           { kind =
+               ( Capacity_exhausted _
+               | Hard_quota _
+               | Capability_mismatch _
+               | Cli_policy_invalid _
+               | Cli_startup_failed _
+               | Provider_parse_error _
+               | Provider_wire_error _
+               | Provider_reported_error _
+               | Provider_interrupted
+               | Response_body_too_large _
+               | Empty_completion _
+               | Context_overflow _
+               | Repeating_generation _ )
+           ; _
+           }) -> false
   in
   is_unknown (Failure "opaque failure") && is_unknown (Sys_error "opaque sys error")
 ;;

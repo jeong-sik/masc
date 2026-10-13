@@ -522,8 +522,11 @@ let validate_anthropic_thinking_tool_choice (config : t) =
     Error
       (Unsupported_named_tool_choice_with_thinking
          { provider_kind = config.kind; model_id = config.model_id; tool_name })
-  | Anthropic, _, _ | (Kimi | OpenAI_compat | Ollama | Gemini | Glm), _, _ ->
-    Ok ()
+  | ( Anthropic
+    , (None | Some false)
+    , (None | Some (Types.Auto | Types.Any | Types.Tool _ | Types.None_)) )
+  | Anthropic, Some true, (None | Some (Types.Auto | Types.None_))
+  | (Kimi | OpenAI_compat | Ollama | Gemini | Glm), _, _ -> Ok ()
 ;;
 
 let validate_tool_choice_request_typed (config : t) =

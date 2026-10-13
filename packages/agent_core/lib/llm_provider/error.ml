@@ -425,7 +425,16 @@ let is_retryable = function
   | ServerError r -> r.transient
   | NetworkError { kind = Http_client.Tls_error; _ } -> false
   | NetworkError { kind = Http_client.Local_resource_exhaustion; _ } -> false
-  | NetworkError _ -> true
+  | NetworkError
+      { kind =
+          ( Http_client.Connection_refused
+          | Http_client.Dns_failure
+          | Http_client.Timeout
+          | Http_client.Connection_reset
+          | Http_client.End_of_file
+          | Http_client.Unknown )
+      ; _
+      } -> true
   | Timeout _ -> true
   | MissingApiKey _
   | InvalidConfig _

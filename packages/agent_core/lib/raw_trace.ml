@@ -396,7 +396,7 @@ let record_of_json_unchecked json =
        | None, Some (Call_id call_id) when String.trim call_id <> "" -> Ok ()
        | None, Some (Provider_step { conversation_id; step_index })
          when String.trim conversation_id <> "" && step_index >= 0 -> Ok ()
-       | None, Some _ ->
+       | None, Some (Call_id _ | Provider_step _) ->
          Error
            (Error.Serialization
               (JsonParseError { detail = "native tool identity is invalid" })))

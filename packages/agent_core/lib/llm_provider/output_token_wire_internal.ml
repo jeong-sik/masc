@@ -297,7 +297,14 @@ let receipt_of_yojson json =
             Required_fallback_resolution
               { ceiling; source = Required_capability_override_source }
         }
-    | _ -> Error "output_token_receipt: inconsistent requested/effective policy fields"
+    | ( ( Omitted
+        | Explicit
+        | Explicit_clamped
+        | Required_catalog_fallback
+        | Required_capability_override_fallback )
+      , _
+      , _
+      , _ ) -> Error "output_token_receipt: inconsistent requested/effective policy fields"
   with
   | Yojson.Safe.Util.Type_error (message, _) -> Error message
 ;;

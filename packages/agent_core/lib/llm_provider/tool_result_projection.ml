@@ -227,11 +227,20 @@ let with_image_followups messages =
                let followup = result_label tool_use_id outcome :: List.concat_map media_parts blocks in
                (ToolResult { tool_use_id; content = summary; outcome; json; content_blocks = None } :: content,
                 List.rev_append followup pending)
-             | _ -> block :: content, pending)
+             | ( Text _
+               | Thinking _
+               | ReasoningDetails _
+               | RedactedThinking _
+               | ToolUse _
+               | ToolResult _
+               | Image _
+               | Document _
+               | Audio _ ) as block -> block :: content, pending)
           ([], pending) message.content
       in
       loop ({ message with content = List.rev content } :: reversed) pending rest
-    | message :: rest -> loop (message :: flush pending reversed) [] rest
+    | ({ role = System | User | Assistant; _ } as message) :: rest ->
+      loop (message :: flush pending reversed) [] rest
   in
   loop [] [] messages
 ;;

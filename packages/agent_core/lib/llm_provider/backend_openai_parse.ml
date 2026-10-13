@@ -499,7 +499,11 @@ let%test "an error finish with no object says the generation was interrupted" =
   with
   | Error (Provider_error { report = Types.Unstated_errored_choice; provider_status = None; _ })
     -> true
-  | Error (Provider_error _) | Ok _ | Error (Unreadable_response _) | Error (Empty_completion _) -> false
+  | Error
+      (Provider_error { report = Types.Provider_stated | Types.Unstated_errored_choice; _ })
+  | Ok _
+  | Error (Unreadable_response _)
+  | Error (Empty_completion _) -> false
 ;;
 
 let%test "an error finish carries the envelope's type and provider condition" =
@@ -519,7 +523,11 @@ let%test "an error finish carries the envelope's type and provider condition" =
               }
         ; report = Types.Provider_stated
         }) -> true
-  | Error (Provider_error _) | Ok _ | Error (Unreadable_response _) | Error (Empty_completion _) -> false
+  | Error
+      (Provider_error { report = Types.Provider_stated | Types.Unstated_errored_choice; _ })
+  | Ok _
+  | Error (Unreadable_response _)
+  | Error (Empty_completion _) -> false
 ;;
 
 let%test "usage_of_openai_json supports mlx_vlm input/output token fields" =

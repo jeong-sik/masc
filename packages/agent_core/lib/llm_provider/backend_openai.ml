@@ -795,7 +795,17 @@ let%test "parse_openai_response_result list content" =
   | Ok resp ->
     (match resp.content with
      | [ Text t ] -> String.length t > 0
-     | _ -> false)
+     | []
+     | [ ( Thinking _
+         | ReasoningDetails _
+         | RedactedThinking _
+         | ToolUse _
+         | ToolResult _
+         | Image _
+         | Document _
+         | Audio _ )
+       ]
+     | _ :: _ :: _ -> false)
   | Error _ -> false
 ;;
 
@@ -825,7 +835,17 @@ let%test "parse_openai_response_result list content with assoc text blocks" =
   | Ok resp ->
     (match resp.content with
      | [ Text t ] -> t = "block1block2"
-     | _ -> false)
+     | []
+     | [ ( Thinking _
+         | ReasoningDetails _
+         | RedactedThinking _
+         | ToolUse _
+         | ToolResult _
+         | Image _
+         | Document _
+         | Audio _ )
+       ]
+     | _ :: _ :: _ -> false)
   | Error _ -> false
 ;;
 

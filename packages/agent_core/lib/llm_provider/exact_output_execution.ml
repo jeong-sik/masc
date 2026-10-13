@@ -166,7 +166,33 @@ let execute_once_with_evidence ~net ~clock ?on_phase plan =
         Not_received_in_window refusal contract. Observer exceptions are
         Unknown_provider_failure, not this typed transport outcome. *)
      error (response_received_receipt status) Response_body_deadline_exceeded
-   | Error transport_error ->
+   | Error
+       (( Http_client.Before_dispatch_error _
+        | Http_client.Dispatch_started_error _
+        | Http_client.Response_received_error
+            { status = _
+            ; error =
+                ( Http_client.HttpError _
+                | Http_client.NetworkError _
+                | Http_client.TimeoutError
+                    { message = _
+                    ; phase =
+                        ( Http_client.Queue
+                        | Http_client.First_token
+                        | Http_client.Wall_clock
+                        | Http_client.Capacity_backpressure
+                        | Http_client.Http_operation
+                        | Http_client.Non_streaming_body
+                        | Http_client.Stream_body
+                        | Http_client.Stream_idle _
+                        | Http_client.Provider_step
+                        | Http_client.Cli_stdout_idle
+                        | Http_client.Unknown_timeout )
+                    }
+                | Http_client.AcceptRejected _
+                | Http_client.ProviderTerminal _
+                | Http_client.ProviderFailure _ )
+            } ) as transport_error) ->
      let receipt, provider_error = transport_error_receipt transport_error in
      error receipt (Provider_error provider_error)
    | Ok receipt

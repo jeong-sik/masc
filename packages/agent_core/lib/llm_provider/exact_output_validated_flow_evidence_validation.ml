@@ -167,7 +167,18 @@ let normalize ~(declared_candidates : candidate list) ~(steps : step list) =
         | ( Normalized_rejected _
           , None
           , Normalized_advance { failure = Candidate_rejected; _ } ) -> Ok ()
-        | (Normalized_rejected _, None, Normalized_advance _)
+        | (Normalized_rejected _, None, Normalized_advance
+            { failure =
+                ( Completion_failed_before_dispatch
+                  | Response_body_deadline_exceeded
+                  | Serialized_request_refused _
+                  | Rate_limited _
+                  | Overloaded _
+                  | Server_error _
+                  | Output_limit_reached
+                  | Invalid_json_output )
+            ; _
+            })
         | (Normalized_rejected _, None, Normalized_semantic_rejected _)
         | (Normalized_rejected _, None, Normalized_accepted _) ->
           Error (Rejected_admission_did_not_advance { ordinal })
@@ -180,7 +191,22 @@ let normalize ~(declared_candidates : candidate list) ~(steps : step list) =
           , Normalized_advance { failure = Candidate_rejected; _ } ) ->
           let _ = admitted, attempt in
           Error (Advance_failure_mismatch { ordinal })
-        | Normalized_admitted admitted, Some attempt, outcome ->
+        | ( Normalized_admitted admitted
+          , Some attempt
+          , (( Normalized_advance
+            { failure =
+                ( Completion_failed_before_dispatch
+                  | Response_body_deadline_exceeded
+                  | Serialized_request_refused _
+                  | Rate_limited _
+                  | Overloaded _
+                  | Server_error _
+                  | Output_limit_reached
+                  | Invalid_json_output )
+            ; _
+            }
+             | Normalized_semantic_rejected _
+             | Normalized_accepted _ ) as outcome) ) ->
           Check.check_attempt ~ordinal ~candidate ~admitted ~call_ids ~outcome attempt
       in
       let normalized =

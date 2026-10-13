@@ -453,10 +453,14 @@ and anthropic_tool_result_content_block_to_json = function
       ]
 ;;
 
+let anthropic_role_tag = function
+  | Assistant -> "assistant"
+  | User | System | Tool -> "user"
+;;
+
 let anthropic_message_to_json (msg : message) =
-  let role = match msg.role with Assistant -> "assistant" | User | System | Tool -> "user" in
   `Assoc
-    [ "role", `String role
+    [ "role", `String (anthropic_role_tag msg.role)
     ; "content", `List (List.map anthropic_content_block_to_json msg.content)
     ]
 ;;
@@ -526,6 +530,36 @@ let project_tools_for_kind kind tools =
   | Provider_config.Ollama
   | Provider_config.Gemini
   | Provider_config.Glm -> tools
+;;
+
+(* The request head the prefix digest chains from. This models the API's own
+   prefix check — top-level [system] text and the [tools] set — not the wire
+   bytes: parameters outside those ([output_config], [tool_choice], [thinking]
+   settings, sampling, budgets) and [cache_control] markers are not part of
+   the check, so hashing them would drop thinking the API accepts and force
+   needless regeneration. Deliberately not shared with the body builders: if
+   the wire gains a marker, the head must not follow. *)
+let prefix_head ~tools (config : Provider_config.t) =
+  let system =
+    match config.system_prompt with
+    | Some s when not (Api_common.string_is_blank s) ->
+      Some ("system", `String (Utf8_sanitize.sanitize s))
+    | _ -> None
+  in
+  let tools =
+    match tools with
+    | [] -> None
+    | ts -> Some ("tools", `List (project_tools_for_kind config.kind ts))
+  in
+  List.filter_map Fun.id [ system; tools ]
+;;
+
+let verify_prefix_binding ~head messages =
+  Reasoning_history_projection.verify_prefix_binding
+    ~head
+    ~encode_block:anthropic_content_block_to_json
+    ~role_tag:anthropic_role_tag
+    messages
 ;;
 
 let build_request_payload
@@ -606,6 +640,35 @@ let build_request_payload
       projection.messages
   in
   let messages = Api_common.merge_tool_result_followup_user_messages projected_messages in
+  (* Prefix binding runs on the merged list the wire serializes: only the
+     Anthropic kind verifies here. Its thinking toggle always resolves
+     Require_identical_source, while Kimi — the one other kind reaching
+     serialization — carries rotation-tolerant reasoning this backend must
+     not second-guess. *)
+  let messages =
+    match config.kind with
+    | Provider_config.Anthropic -> (
+      let head = prefix_head ~tools config in
+      match verify_prefix_binding ~head messages with
+      | Error error ->
+        invalid_arg
+          ("Backend_anthropic.build_request: "
+           ^ Reasoning_history_projection.prefix_verify_error_to_string error)
+      | Ok verdict ->
+        Reasoning_history_projection.observe_prefix_drops
+          ~component:"backend_anthropic"
+          ~stream:
+            (match request_mode with
+             | Completion { stream; _ } -> stream
+             | Count_tokens -> false)
+          verdict;
+        verdict.Reasoning_history_projection.messages)
+    | Provider_config.Kimi
+    | Provider_config.OpenAI_compat
+    | Provider_config.Ollama
+    | Provider_config.Gemini
+    | Provider_config.Glm -> messages
+  in
   (match config.kind, caps.supports_assistant_prefill, List.rev messages with
    | Provider_config.Anthropic, false, { role = Assistant; _ } :: _ ->
      invalid_arg
@@ -927,4 +990,51 @@ let build_count_tokens_request ~config ~messages ?tools () =
     invalid_arg
       ("Backend_anthropic.build_count_tokens_request: Anthropic-compatible Messages "
        ^ "provider required")
+;;
+
+let transmitted_reasoning_prefix
+      ~(config : Provider_config.t)
+      ~messages
+      ~tools
+      ~response_content
+      ()
+  =
+  (* This backend records for the Anthropic kind only; every other kind it
+     can serve returns None, and replay fails closed. (Gemini binds
+     signatures too and gets its own adoption separately.) An admitted body
+     is recorded too: [Complete_common.serialize_final_http_request_unadmitted]
+     builds it with [build_request_artifact] from the same config, messages
+     and tools read here, and the head covers only system and tools. Frozen
+     thinking control is serialized only on the exact-output and count-tokens
+     paths, which never reach this function. *)
+  match config.kind with
+  | Provider_config.Anthropic -> (
+    match Types.content_has_reasoning_artifact response_content with
+    | false -> None
+    | true -> (
+      match project_history config messages with
+      | Error _ -> None
+      | Ok projection ->
+        let merged =
+          Api_common.merge_tool_result_followup_user_messages projection.messages
+        in
+        let head = prefix_head ~tools config in
+        (match verify_prefix_binding ~head merged with
+         | Error _ -> None
+         | Ok verdict ->
+           let message_digest =
+             Reasoning_history_projection.content_wire_digest
+               ~encode_block:anthropic_content_block_to_json
+               response_content
+           in
+           Some
+             { Types.Reasoning_prefix.request_digest =
+                 verdict.Reasoning_history_projection.final_digest
+             ; message_digest
+             })))
+  | Provider_config.Kimi
+  | Provider_config.OpenAI_compat
+  | Provider_config.Ollama
+  | Provider_config.Gemini
+  | Provider_config.Glm -> None
 ;;

@@ -249,6 +249,7 @@ let patch_telemetry
       ~(config : Provider_config.t)
       ?(ttfrc_ms : float option = None)
       ?(prefill_ms : float option = None)
+      ?(reasoning_prefix : Types.Reasoning_prefix.t option = None)
       (latency_ms : int option)
   : Types.api_response
   =
@@ -272,6 +273,7 @@ let patch_telemetry
         ; provider_kind = pk
         ; canonical_model_id = canonical
         ; reasoning_source
+        ; reasoning_prefix
         ; effective_context_window = ctx_window
         ; ttfrc_ms =
             (match ttfrc_ms with
@@ -289,6 +291,7 @@ let patch_telemetry
         ; provider_kind = pk
         ; canonical_model_id = canonical
         ; reasoning_source
+        ; reasoning_prefix
         ; effective_context_window = ctx_window
         ; ttfrc_ms
         ; prefill_ms

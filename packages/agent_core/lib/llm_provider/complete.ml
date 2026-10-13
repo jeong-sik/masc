@@ -340,7 +340,15 @@ let complete_prepared_sync
             Pricing.annotate_response_cost ?provider_id:config.provider_id resp
           in
           let reported_model = resp.Types.model in
-          let resp = patch_telemetry resp ~config latency_ms in
+          let reasoning_prefix =
+            Backend_anthropic.transmitted_reasoning_prefix
+              ~config
+              ~messages
+              ~tools
+              ~response_content:resp.Types.content
+              ()
+          in
+          let resp = patch_telemetry resp ~config ~reasoning_prefix latency_ms in
           let resp = match model_identity with
             | Reported_model -> {resp with model=reported_model}
             | Configured_model_fallback -> resp in
@@ -682,7 +690,17 @@ let complete_prepared_stream
          let existing_telemetry = resp.telemetry in
          let ttfrc_ms = Option.bind existing_telemetry (fun t -> t.ttfrc_ms) in
          let prefill_ms = Option.bind existing_telemetry (fun t -> t.prefill_ms) in
-         let resp = patch_telemetry resp ~config ~ttfrc_ms ~prefill_ms latency_ms in
+         let reasoning_prefix =
+           Backend_anthropic.transmitted_reasoning_prefix
+             ~config
+             ~messages
+             ~tools
+             ~response_content:resp.Types.content
+             ()
+         in
+         let resp =
+           patch_telemetry resp ~config ~ttfrc_ms ~prefill_ms ~reasoning_prefix latency_ms
+         in
          emit_tool_call_metrics
            metrics
            ~provider:(Provider_registry.provider_name_of_config config)

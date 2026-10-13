@@ -553,6 +553,446 @@ let test_anthropic_honors_a_latest_turn_replay_declaration () =
     (content_has_reasoning (List.nth projected 3).content)
 ;;
 
+(* Creation-prefix binding: a signed thinking block replays only while the
+   system prompt, the tools, the controls, and every byte before it are
+   unchanged. The live failure these pin: round one carries an extra-context
+   block the post-tool round drops, so round two's replay of round one's
+   thinking fails the whole request with an unretryable "Invalid signature
+   in thinking block" 400. The fold drops the stale block instead, and the
+   turn proceeds. *)
+
+let anthropic_build_config () =
+  Provider_config.make
+    ~kind:Anthropic
+    ~model_id:"claude-sonnet-5-5"
+    ~base_url:"https://api.anthropic.com"
+    ~max_tokens:4096
+    ~system_prompt:"keeper system"
+    ~model_capabilities_override:
+      { (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
+        reasoning_replay_override = Capabilities.Force_latest_user_turn_tool_calls
+      }
+    ()
+;;
+
+let anthropic_build_config_variant
+      ?(system = "keeper system")
+      ?temperature
+      ?tool_choice
+      ?cache_system_prompt
+      ?cap_override
+      ()
+  =
+  let model_capabilities_override =
+    match cap_override with
+    | Some caps -> caps
+    | None ->
+      { (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
+        reasoning_replay_override = Capabilities.Force_latest_user_turn_tool_calls
+      }
+  in
+  Provider_config.make
+    ~kind:Anthropic
+    ~model_id:"claude-sonnet-5-5"
+    ~base_url:"https://api.anthropic.com"
+    ~max_tokens:4096
+    ~system_prompt:system
+    ?temperature
+    ?tool_choice
+    ?cache_system_prompt
+    ~model_capabilities_override
+    ()
+;;
+
+let prefix_test_tool_schema =
+  `Assoc
+    [ "name", `String "inspect"
+    ; "description", `String "inspect something"
+    ; "input_schema", `Assoc [ "type", `String "object" ]
+    ]
+;;
+
+let stamped_assistant ~config ~request_messages ~tools response_content =
+  let prefix =
+    Backend_anthropic.transmitted_reasoning_prefix
+      ~config
+      ~messages:request_messages
+      ~tools
+      ~response_content
+      ()
+  in
+  check_bool "the producing request records a digest" true (Option.is_some prefix);
+  let telemetry =
+    { Types.default_inference_telemetry with
+      reasoning_source = Some (source_for_config config)
+    ; reasoning_prefix = prefix
+    }
+  in
+  let response =
+    { Types.id = "msg_test_round_one"
+    ; model = "claude-sonnet-5-5"
+    ; stop_reason = Types.EndTurn
+    ; content = response_content
+    ; usage = None
+    ; telemetry = Some telemetry
+    }
+  in
+  match Types.assistant_message_of_response response with
+  | Ok message -> message
+  | Error _ -> Alcotest.fail "a sourced response must stamp"
+;;
+
+let wire_content_types body =
+  let open Yojson.Safe.Util in
+  Yojson.Safe.from_string body |> member "messages" |> to_list
+  |> List.map (fun message ->
+      message |> member "content" |> to_list
+      |> List.map (fun block -> block |> member "type" |> to_string))
+;;
+
+let round_one_fixtures () =
+  let config = anthropic_build_config () in
+  let tools = [ prefix_test_tool_schema ] in
+  let carrier = message User [ Text "trigger"; Text "extra context block" ] in
+  let response_content =
+    [ Thinking { content = "round one reasoning"; signature = Some "sig-round-one" }
+    ; Text "round one text"
+    ; ToolUse { id = "call-1"; name = "inspect"; input = `Assoc [] }
+    ]
+  in
+  let assistant =
+    stamped_assistant ~config ~request_messages:[ carrier ] ~tools response_content
+  in
+  config, tools, carrier, assistant
+;;
+
+(* The agent pipeline admits every request body before it dispatches
+   ([Pipeline_stage_route]: [admit_request_body], then [complete_serialized]
+   or [complete_stream_serialized]), so a Keeper turn's response always
+   arrives with an admitted body. It must still record its prefix, or the
+   next round drops every thinking block as [Prefix_digest_absent]. *)
+let admitted_round_one ~stream =
+  let config = anthropic_build_config () in
+  let tools = [ prefix_test_tool_schema ] in
+  let carrier = message User [ Text "trigger"; Text "extra context block" ] in
+  let response =
+    { Types.id = "msg_admitted_round_one"
+    ; model = "claude-sonnet-5-5"
+    ; stop_reason = Types.EndTurn
+    ; content =
+        [ Thinking { content = "admitted round reasoning"; signature = Some "sig-admitted" }
+        ; Text "admitted round text"
+        ; ToolUse { id = "call-1"; name = "inspect"; input = `Assoc [] }
+        ]
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  let transport =
+    { Llm_transport.complete_sync =
+        (fun _ -> { Llm_transport.response = Ok response; latency_ms = None })
+    ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok response)
+    }
+  in
+  let completed =
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    let prepared = Complete.prepare_request ~config ~messages:[ carrier ] ~tools () in
+    match Complete.admit_request_body ~stream prepared with
+    | Error _ -> Alcotest.fail "the round-one body must be admitted"
+    | Ok serialized ->
+      if stream
+      then
+        Complete.complete_stream_serialized
+          ~sw
+          ~net
+          ~transport
+          serialized
+          ~on_event:ignore
+          ()
+      else Complete.complete_serialized ~sw ~net ~transport serialized ()
+  in
+  match completed with
+  | Error _ -> Alcotest.fail "the stubbed admitted completion must succeed"
+  | Ok resp -> config, tools, carrier, resp
+;;
+
+let check_admitted_round_two_keeps_thinking ~stream =
+  let config, tools, carrier, resp = admitted_round_one ~stream in
+  check_bool
+    "the admitted response records its prefix"
+    true
+    (match resp.telemetry with
+     | Some telemetry -> Option.is_some telemetry.reasoning_prefix
+     | None -> false);
+  match Types.assistant_message_of_response resp with
+  | Error _ -> Alcotest.fail "the admitted response must stamp"
+  | Ok assistant ->
+    let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+    let body = Backend_anthropic.build_request ~config ~messages:round_two ~tools () in
+    check_bool
+      "round one's thinking replays in round two"
+      true
+      (List.mem "thinking" (List.nth (wire_content_types body) 1))
+;;
+
+let test_an_admitted_completion_keeps_thinking_for_the_next_round () =
+  check_admitted_round_two_keeps_thinking ~stream:false
+;;
+
+let test_an_admitted_stream_keeps_thinking_for_the_next_round () =
+  check_admitted_round_two_keeps_thinking ~stream:true
+;;
+
+let test_prefix_binding_keeps_thinking_on_a_stable_prefix () =
+  let config, tools, carrier, assistant = round_one_fixtures () in
+  let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_int "three wire messages" 3 (List.length types);
+  check_bool
+    "round one's thinking replays verbatim"
+    true
+    (List.mem "thinking" (List.nth types 1));
+  check_bool
+    "round one's text still rides"
+    true
+    (List.mem "text" (List.nth types 1))
+;;
+
+let test_prefix_binding_drops_thinking_when_the_carrier_block_is_gone () =
+  let config, tools, _carrier, assistant = round_one_fixtures () in
+  (* The post-tool round drops the extra-context block the signature was
+     bound to: the live 400 shape. *)
+  let round_two =
+    [ message User [ Text "trigger" ]; assistant; message Tool [ tool_result "call-1" ] ]
+  in
+  let body = Backend_anthropic.build_request ~config ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_int "three wire messages" 3 (List.length types);
+  check_bool
+    "the stale thinking block is dropped instead of failing the request"
+    false
+    (List.mem "thinking" (List.nth types 1));
+  check_bool "the answer text still rides" true (List.mem "text" (List.nth types 1));
+  check_bool
+    "the tool call still rides"
+    true
+    (List.mem "tool_use" (List.nth types 1))
+;;
+
+let test_prefix_binding_drops_thinking_edited_in_place () =
+  let config, tools, carrier, assistant = round_one_fixtures () in
+  let edited =
+    { assistant with
+      content =
+        List.map
+          (function
+            | Thinking thinking -> Thinking { thinking with content = "edited reasoning" }
+            | block -> block)
+          assistant.content
+    }
+  in
+  let round_two = [ carrier; edited; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "edited thinking fails the message digest"
+    false
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+let test_prefix_binding_drops_legacy_thinking_without_a_digest () =
+  let config = anthropic_build_config () in
+  let tools = [ prefix_test_tool_schema ] in
+  let source = source_for_config config in
+  let assistant =
+    with_source
+      source
+      Assistant
+      [ Thinking { content = "legacy reasoning"; signature = Some "sig-legacy" }
+      ; ToolUse { id = "call-1"; name = "inspect"; input = `Assoc [] }
+      ]
+  in
+  let round_two =
+    [ message User [ Text "trigger" ]; assistant; message Tool [ tool_result "call-1" ] ]
+  in
+  let body = Backend_anthropic.build_request ~config ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "a stamp without a digest fails closed"
+    false
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+let test_prefix_entry_round_trip_and_classification () =
+  let prefix =
+    { Types.Reasoning_prefix.request_digest = String.make 64 'a'
+    ; message_digest = String.make 64 'b'
+    }
+  in
+  (match Types.Reasoning_prefix.classify (Types.Reasoning_prefix.metadata prefix) with
+   | Present
+       { Types.Reasoning_prefix.request_digest = request_digest
+       ; message_digest = message_digest
+       } ->
+     check_bool
+       "metadata round-trip"
+       true
+       (String.equal request_digest (String.make 64 'a')
+        && String.equal message_digest (String.make 64 'b'))
+   | Absent | Invalid | Duplicate -> Alcotest.fail "expected a present prefix");
+  (match Types.Reasoning_prefix.classify [] with
+   | Absent -> ()
+   | Present _ | Invalid | Duplicate -> Alcotest.fail "expected absent prefix");
+  let bad_hex =
+    { Types.Reasoning_prefix.request_digest = "not-hex"
+    ; message_digest = String.make 64 'b'
+    }
+  in
+  (match Types.Reasoning_prefix.classify (Types.Reasoning_prefix.metadata bad_hex) with
+   | Invalid -> ()
+   | Absent | Present _ | Duplicate -> Alcotest.fail "expected an invalid prefix");
+  let entry = Types.Reasoning_prefix.entry prefix in
+  (match Types.Reasoning_prefix.classify [ entry; entry ] with
+   | Duplicate -> ()
+   | Absent | Present _ | Invalid -> Alcotest.fail "expected a duplicate prefix")
+;;
+
+let test_prefix_malformed_entry_refuses_verification () =
+  let prefix =
+    { Types.Reasoning_prefix.request_digest = "not-hex"
+    ; message_digest = String.make 64 'b'
+    }
+  in
+  let config = anthropic_build_config () in
+  let source = source_for_config config in
+  let base =
+    with_source source Assistant [ Thinking { content = "t"; signature = Some "s" } ]
+  in
+  let message =
+    { base with metadata = base.metadata @ Types.Reasoning_prefix.metadata prefix }
+  in
+  match
+    Reasoning_history_projection.verify_prefix_binding
+      ~head:[]
+      ~encode_block:Api_common.content_block_to_json
+      ~role_tag:(fun _ -> "assistant")
+      [ message ]
+  with
+  | Error (Reasoning_history_projection.Malformed_prefix_entry { message_index; _ }) ->
+    check_int "the refusal names its message" 0 message_index
+  | Ok _ -> Alcotest.fail "expected verification to refuse a malformed entry"
+;;
+
+let test_prefix_binding_drops_thinking_when_the_request_head_changes () =
+  let _config, tools, carrier, assistant = round_one_fixtures () in
+  let changed = anthropic_build_config_variant ~system:"a different system prompt" () in
+  let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config:changed ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "a new system prompt fails the request digest"
+    false
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+let test_prefix_binding_keeps_thinking_when_only_sampling_changes () =
+  let _config, tools, carrier, assistant = round_one_fixtures () in
+  let resampled = anthropic_build_config_variant ~temperature:0.7 () in
+  let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config:resampled ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "temperature steers decoding, not conversation identity"
+    true
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+let test_prefix_binding_keeps_thinking_when_tool_choice_changes () =
+  let _config, tools, carrier, assistant = round_one_fixtures () in
+  (* [tool_choice] is not part of the API's prefix check, so the head must
+     not hash it: dropping here would discard thinking the API accepts. *)
+  let rechosen = anthropic_build_config_variant ~tool_choice:Types.Any () in
+  let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config:rechosen ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "a tool_choice change keeps thinking"
+    true
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+let test_prefix_binding_keeps_thinking_when_cache_markers_toggle () =
+  let _config, tools, carrier, assistant = round_one_fixtures () in
+  (* [cache_control] markers are not part of the API's prefix check either. *)
+  let cached = anthropic_build_config_variant ~cache_system_prompt:true () in
+  let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config:cached ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "a cache toggle keeps thinking"
+    true
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+let test_prefix_binding_keeps_thinking_across_chained_rounds () =
+  let preserve_always =
+    { (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
+      reasoning_replay_override = Capabilities.Force_preserve_always
+    }
+  in
+  let config = anthropic_build_config_variant ~cap_override:preserve_always () in
+  let tools = [ prefix_test_tool_schema ] in
+  let thinking ~call_id reasoning signature =
+    [ Thinking { content = reasoning; signature = Some signature }
+    ; Text (reasoning ^ " text")
+    ; ToolUse { id = call_id; name = "inspect"; input = `Assoc [] }
+    ]
+  in
+  let u1 = message User [ Text "one" ] in
+  let asst1 =
+    stamped_assistant
+      ~config
+      ~request_messages:[ u1 ]
+      ~tools
+      (thinking ~call_id:"call-1" "round one reasoning" "sig-one")
+  in
+  let t1 = message Tool [ tool_result "call-1" ] in
+  let u2 = message User [ Text "two" ] in
+  let asst2 =
+    stamped_assistant
+      ~config
+      ~request_messages:[ u1; asst1; t1; u2 ]
+      ~tools
+      (thinking ~call_id:"call-2" "round two reasoning" "sig-two")
+  in
+  let t2 = message Tool [ tool_result "call-2" ] in
+  let body =
+    Backend_anthropic.build_request
+      ~config
+      ~messages:[ u1; asst1; t1; u2; asst2; t2 ]
+      ~tools
+      ()
+  in
+  (* The tool-result/user merge folds the six history messages into five
+     wire messages; both assistants keep their thinking at their merged
+     positions. *)
+  let types = wire_content_types body in
+  check_int "five merged wire messages" 5 (List.length types);
+  check_bool
+    "round one thinking survives round three"
+    true
+    (List.mem "thinking" (List.nth types 1));
+  check_bool
+    "round two thinking survives round three"
+    true
+    (List.mem "thinking" (List.nth types 3))
+;;
+
 (* Every codec has to answer, because the caller asks before it knows which
    serializer will run. The expectation is not written down per codec — it is
    read off that codec's own replay contract, so a codec whose dispatch was
@@ -1453,6 +1893,58 @@ let () =
             "anthropic honors a latest-turn replay declaration"
             `Quick
             test_anthropic_honors_a_latest_turn_replay_declaration
+        ; Alcotest.test_case
+            "an admitted completion keeps thinking for the next round"
+            `Quick
+            test_an_admitted_completion_keeps_thinking_for_the_next_round
+        ; Alcotest.test_case
+            "an admitted stream keeps thinking for the next round"
+            `Quick
+            test_an_admitted_stream_keeps_thinking_for_the_next_round
+        ; Alcotest.test_case
+            "prefix binding keeps thinking on a stable prefix"
+            `Quick
+            test_prefix_binding_keeps_thinking_on_a_stable_prefix
+        ; Alcotest.test_case
+            "prefix binding drops thinking when the carrier block is gone"
+            `Quick
+            test_prefix_binding_drops_thinking_when_the_carrier_block_is_gone
+        ; Alcotest.test_case
+            "prefix binding drops thinking edited in place"
+            `Quick
+            test_prefix_binding_drops_thinking_edited_in_place
+        ; Alcotest.test_case
+            "prefix binding drops legacy thinking without a digest"
+            `Quick
+            test_prefix_binding_drops_legacy_thinking_without_a_digest
+        ; Alcotest.test_case
+            "prefix entry round-trip and classification"
+            `Quick
+            test_prefix_entry_round_trip_and_classification
+        ; Alcotest.test_case
+            "prefix malformed entry refuses verification"
+            `Quick
+            test_prefix_malformed_entry_refuses_verification
+        ; Alcotest.test_case
+            "prefix binding drops thinking when the request head changes"
+            `Quick
+            test_prefix_binding_drops_thinking_when_the_request_head_changes
+        ; Alcotest.test_case
+            "prefix binding keeps thinking when only sampling changes"
+            `Quick
+            test_prefix_binding_keeps_thinking_when_only_sampling_changes
+        ; Alcotest.test_case
+            "prefix binding keeps thinking when tool choice changes"
+            `Quick
+            test_prefix_binding_keeps_thinking_when_tool_choice_changes
+        ; Alcotest.test_case
+            "prefix binding keeps thinking when cache markers toggle"
+            `Quick
+            test_prefix_binding_keeps_thinking_when_cache_markers_toggle
+        ; Alcotest.test_case
+            "prefix binding keeps thinking across chained rounds"
+            `Quick
+            test_prefix_binding_keeps_thinking_across_chained_rounds
         ; Alcotest.test_case
             "a malformed tag anywhere refuses the projection"
             `Quick

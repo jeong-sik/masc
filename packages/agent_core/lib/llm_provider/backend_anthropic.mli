@@ -8,8 +8,11 @@ val project_history
   :  Provider_config.t
   -> Types.message list
   -> (Reasoning_history_projection.t, Reasoning_history_projection.error) result
-(** The history this codec will actually serialize: reasoning blocks it cannot
-    carry, and blocks the config's replay policy excludes, are already gone.
+(** The history this codec will actually serialize, before prefix-binding
+    verification: reasoning blocks it cannot carry, and blocks the config's
+    replay policy excludes, are already gone, and on the Anthropic kind the
+    fold can only remove further reasoning, so sizing from this answer
+    stays conservative.
 
     Exported so a caller that must size a request before building it asks the
     same function the wire does, rather than keeping a second opinion about
@@ -152,6 +155,25 @@ val build_request
   -> ?tools:Yojson.Safe.t list
   -> unit
   -> string
+
+(** Creation-prefix identity for a response produced by this wire: the digest
+    chain over the API-checked head members plus every projected, merged
+    message, and over the response content. Returns [None] for kinds
+    this backend serves without a binding (Kimi), for responses without
+    reasoning, and when the history refuses projection. Every [None] fails
+    closed at replay instead of recording a digest the wire cannot honor.
+    Pure: it replays the same projection, merge, and fold {!build_request}
+    runs, so the value matches the bytes the provider verified. That holds
+    for an admitted body too, which {!build_request_artifact} serialized
+    from the same config, messages and tools; the agent pipeline admits
+    every request, so recording it is what lets a Keeper turn replay. *)
+val transmitted_reasoning_prefix
+  :  config:Provider_config.t
+  -> messages:Types.message list
+  -> tools:Yojson.Safe.t list
+  -> response_content:Types.content_block list
+  -> unit
+  -> Types.Reasoning_prefix.t option
 
 (** Build an Anthropic-compatible Messages count-tokens request from the same
     provider-specific canonical input projection as {!build_request}.

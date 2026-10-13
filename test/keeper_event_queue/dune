@@ -11,4 +11,4 @@
 (test
  (name test_fleet_projection)
  (modules test_fleet_projection)
- (libraries alcotest masc.masc_core masc.keeper_runtime unix))
+ (libraries alcotest masc.masc_core masc.keeper_runtime unix yojson))

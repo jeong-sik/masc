@@ -163,6 +163,7 @@ type fixture_step =
   | Close_transport
 
 let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = false)
+    ?(auth_body = auth_subscription) ?(auth_exit = 0) ?auth_stderr
     lines =
   let path = Filename.temp_file "masc-keeper-claude-code-" ".sh" in
   let output = open_out_bin path in
@@ -175,10 +176,12 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
      the turn body instead, which answers it with turn output and reports
      nothing. *)
   output_string output "case \" $* \" in *\" auth status \"*)\n";
-  output_string output ("  printf '%s\\n' " ^ shell_quote auth_subscription ^ "\n");
+  output_string output ("  printf '%s\\n' " ^ shell_quote auth_body ^ "\n");
+  Option.iter (fun text ->
+    output_string output ("  printf '%s\\n' " ^ shell_quote text ^ " >&2\n")) auth_stderr;
   if remove_after_auth
   then output_string output "  rm -- \"$0\"\n";
-  output_string output "  exit 0\n";
+  output_string output (Printf.sprintf "  exit %d\n" auth_exit);
   output_string output "  ;;\nesac\n";
   Option.iter (fun marker ->
     output_string output ("previous_arg=''\nfor arg in \"$@\"; do\n" ^
@@ -230,8 +233,12 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
   path
 ;;
 
-let with_fixture ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp lines f =
-  let path = fixture_script ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp lines in
+let with_fixture ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?auth_body ?auth_exit
+    ?auth_stderr lines f =
+  let path =
+    fixture_script ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?auth_body ?auth_exit
+      ?auth_stderr lines
+  in
   Fun.protect
     ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
     (fun () -> f path)
@@ -4797,6 +4804,42 @@ let test_subscription_spawn_failure_is_pre_dispatch () =
        |> check_pre_dispatch_attempt "subscription probe spawn failure")
 ;;
 
+(* A CLI that dies mid-status leaves its reason on stderr: the probe keeps
+   an excerpt with the parse failure instead of only the cut. *)
+let test_truncated_auth_probe_keeps_cli_stderr () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1
+         ~auth_stderr:"boom:\tkeychain denied" []
+         (fun cli_path ->
+            match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+            | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+                check bool "truncated probe names the stage" true
+                  (String.starts_with ~prefix:"auth status: invalid JSON: " detail);
+                check bool "truncated probe keeps the cli stderr" true
+                  (Astring.String.is_infix ~affix:"; stderr: boom: keychain denied" detail)
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok _ -> fail "truncated auth probe completed the Keeper turn"))
+;;
+
+let test_truncated_auth_probe_without_stderr_keeps_detail () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 [] (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+         | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+             check bool "truncated probe names the stage" true
+               (String.starts_with ~prefix:"auth status: invalid JSON: " detail);
+             check bool "no stderr marker without stderr" false
+               (Astring.String.is_infix ~affix:"; stderr:" detail)
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> fail "truncated auth probe completed the Keeper turn"))
+;;
+
 let test_turn_spawn_failure_is_pre_dispatch_with_tools () =
   let base_path = temp_workspace () in
   let tool =
@@ -5972,6 +6015,14 @@ let () =
             "subscription spawn failure is pre-dispatch"
             `Quick
             test_subscription_spawn_failure_is_pre_dispatch
+        ; test_case
+            "truncated auth probe keeps cli stderr"
+            `Quick
+            test_truncated_auth_probe_keeps_cli_stderr
+        ; test_case
+            "truncated auth probe without stderr keeps detail"
+            `Quick
+            test_truncated_auth_probe_without_stderr_keeps_detail
         ; test_case
             "turn spawn failure is pre-dispatch with tools"
             `Quick

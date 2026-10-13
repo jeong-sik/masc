@@ -604,13 +604,48 @@ let parse_subscription json =
     Ok { authentication; subscription_type; api_provider }
 ;;
 
+(* The CLI's stderr is the only witness when its stdout stops mid-document:
+   keep an excerpt with the probe's protocol failures so the next truncated
+   probe names the crash instead of only the cut. One trimmed line's worth
+   of text with control bytes neutralised: the detail is shown in the UI. *)
+let subscription_stderr_limit = 300
+
+let subscription_stderr_excerpt stderr_buf =
+  let mapped =
+    Buffer.contents stderr_buf
+    |> String.trim
+    |> String.map (fun char ->
+      if char = '\n' || char = '\r' || char = '\t' then ' '
+      else if Char.code char < 0x20 || char = '\x7f' then '?'
+      else char)
+  in
+  if mapped = "" then None
+  else if String.length mapped <= subscription_stderr_limit then Some mapped
+  else Some (String.sub mapped 0 subscription_stderr_limit ^ "…")
+
 let read_subscription ~mgr ~cwd config =
+  let stderr_buf = Buffer.create 256 in
+  let enrich result =
+    match result, subscription_stderr_excerpt stderr_buf with
+    | Error (Protocol_error { stage; detail }), Some excerpt ->
+        Error (Protocol_error { stage; detail = detail ^ "; stderr: " ^ excerpt })
+    | Error (Protocol_error _), None -> result
+    | ( Ok _
+      | Error
+          ( Invalid_config _ | Spawn_failed _ | Subscription_required _
+          | Unsupported_control_request _ | Turn_transport_interrupted _
+          | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+          | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+          | Unhandled_exception _ | Timeout _ ) ),
+      (None | Some _) -> result
+  in
   try
     Eio.Process.parse_out
       mgr
       Eio.Buf_read.take_all
       ~is_success:(fun code -> code = 0 || code = 1)
       ~cwd
+      ~stderr:(Eio.Flow.buffer_sink stderr_buf)
       ~env:(client_environment config.account_home)
       [ config.cli_path
       ; Runtime_native_tools.claude_setting_sources_arg
@@ -618,6 +653,7 @@ let read_subscription ~mgr ~cwd config =
     |> String.trim
     |> parse_json ~stage:"auth status"
     |> fun result -> Result.bind result parse_subscription
+    |> enrich
   with
   | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn

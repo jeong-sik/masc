@@ -23,11 +23,14 @@
 
 include Dashboard_http_keeper_types
 
+let execution_receipt_location config keeper_name =
+  Dated_jsonl.Store.keeper
+    (Workspace.dated_store_cluster_root config)
+    ~keeper:keeper_name
+    Dated_jsonl.Store.Keeper.Execution_receipts
+
 let execution_receipt_dir config keeper_name =
-  Filename.concat
-    (Filename.concat (Workspace.keepers_runtime_dir config)
-       keeper_name)
-    "execution-receipts"
+  Dated_jsonl.Store.dir (execution_receipt_location config keeper_name)
 
 let execution_receipt_store_pattern config =
   Filename.concat
@@ -43,7 +46,7 @@ let count_execution_receipt_entries config keeper_names =
          else
            acc
            +
-           (match Dated_jsonl.create ~base_dir:dir () with
+           (match Dated_jsonl.open_store (execution_receipt_location config keeper_name) with
             | store -> Dated_jsonl.count_entries store
             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
             | exception exn ->

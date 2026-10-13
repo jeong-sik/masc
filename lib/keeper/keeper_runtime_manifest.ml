@@ -552,11 +552,13 @@ let decode_persisted_row json =
 let execution_receipt_path_for_today config ~keeper_name =
   (* [Jsonl_writer.dated_path_now] is the same calculation the writer runs;
      a second copy here is free to drift to a different calendar (#27143). *)
-  let base_dir =
-    Keeper_types_support.keeper_execution_receipt_store config keeper_name
-    |> Dated_jsonl.base_dir
+  let location =
+    Keeper_types_support.keeper_store_location
+      config
+      keeper_name
+      Dated_jsonl.Store.Keeper.Execution_receipts
   in
-  (Jsonl_writer.dated_path_now ~base_dir).Jsonl_writer.path
+  (Dated_jsonl.Store.dated_path_now location).Jsonl_writer.path
 
 let base_dir config ~keeper_name =
   Filename.concat

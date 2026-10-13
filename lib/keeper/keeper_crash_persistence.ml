@@ -1,7 +1,7 @@
 (** Durable per-Keeper crash observation store. *)
 
 type crash_event =
-  { keepers_dir : string
+  { cluster_root : Dated_jsonl.Store.cluster_root
   ; name : string
   ; ts : float
   ; reason : string
@@ -12,27 +12,29 @@ let queue : crash_event Queue.t = Queue.create ()
 let store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
 let store_mu = Eio.Mutex.create ()
 
-let crash_store ~keepers_dir name =
-  let dir =
-    Filename.concat
-      (Filename.concat keepers_dir name)
-      (Common.keeper_runtime_store_dirname Common.Keeper_crash_events)
+let crash_store ~cluster_root name =
+  let location =
+    Dated_jsonl.Store.keeper
+      cluster_root
+      ~keeper:name
+      Dated_jsonl.Store.Keeper.Crash_events
   in
+  let dir = Dated_jsonl.Store.dir location in
   Eio_guard.with_mutex store_mu (fun () ->
     match Hashtbl.find_opt store_cache dir with
     | Some store -> store
     | None ->
-      let store = Dated_jsonl.create ~base_dir:dir () in
+      let store = Dated_jsonl.open_store location in
       Hashtbl.replace store_cache dir store;
       store)
 ;;
 
-let enqueue_record ~keepers_dir ~name ~ts ~reason ~restart_count =
-  Queue.push { keepers_dir; name; ts; reason; restart_count } queue
+let enqueue_record ~cluster_root ~name ~ts ~reason ~restart_count =
+  Queue.push { cluster_root; name; ts; reason; restart_count } queue
 ;;
 
 let write_event (event : crash_event) =
-  let store = crash_store ~keepers_dir:event.keepers_dir event.name in
+  let store = crash_store ~cluster_root:event.cluster_root event.name in
   Dated_jsonl.append
     store
     (`Assoc
@@ -91,7 +93,7 @@ let start_drain_fiber ~sw ~clock =
     `Stop_daemon)
 ;;
 
-let recent_crashes ~keepers_dir ~name ~max_entries =
-  let store = crash_store ~keepers_dir name in
+let recent_crashes ~cluster_root ~name ~max_entries =
+  let store = crash_store ~cluster_root name in
   Dated_jsonl.read_recent store max_entries
 ;;

@@ -40,7 +40,7 @@ Keeper 턴에 위키 목차를 싣는 일은 이 RFC 가 다루지 않는다. �
 - D8. lint 의 판단은 순수 모듈 다섯 개에 두고 서버 도구는 얇게 둔다. 동작을 바꾸지 않는 리팩터링 PR 이 먼저다(§4.4).
 - D9. 쓸모는 질문 10개를 세 조건에서 채점해 잰다(§10.2).
 
-## 2. 지금 구조 (직독, 좌표는 §13)
+## 2. 지금 구조 (직독과 옮김, 좌표는 §13)
 
 - 페이지: `<base_path>/.masc/wiki/<page>.md`. 이름은 `[a-z0-9-]+` 이고 처음과 끝에 `-` 를 둘 수 없으며 `index`, `log` 는 예약이다(옮김: ocaml-agent-ic, `tool_wiki.ml:384-402`).
 - 헤더: YAML frontmatter 일곱 키(`title`, `summary`, `source`, `author`, `created`, `revision`, `tags`)를 읽고 모두 필수다. `updated` 는 쓰지만 읽지 않는다(`tool_wiki.ml:140-151` 주석과 타입). `source` 는 `direct_experience`, `research`, `experiment`, `observation` 넷이고, 모르는 값이면 `Unknown_source` 로 그 페이지가 읽히지 않는다(`tool_wiki.ml:211`, 235). update 는 `source` 변경을 거절한다(`tool_wiki.ml:682`).
@@ -89,7 +89,7 @@ llm-wiki 의 작업은 ingest, query, lint 셋이다. promote 는 운영자 지�
 | 필드 | 타입 | 뜻 |
 |---|---|---|
 | `schema` | string | `"masc.wiki_lint.v1"` |
-| `pages_total` | int | 위키 디렉터리의 페이지 파일 수. `index.md`, `log.md` 는 빼고 센다(`Wiki_journal.is_own_file` 을 그대로 쓴다) |
+| `pages_total` | int | 위키 디렉터리의 페이지 파일 수. `Tool_wiki.list_pages` 와 같은 거름을 쓴다: `.md` 로 끝나는 파일 가운데 `Wiki_journal.is_own_file` 이 거르는 `index.md`, `log.md` 를 뺀다. `.wiki.lock` 은 페이지로 세지 않는다(옮김: code-reviewer, `tool_wiki.ml:250-259`) |
 | `pages_unreadable` | int | 헤더가 읽히지 않은 파일 수 |
 | `counts` | object | `kind` 마다 int 하나. 걸러 내기 전의 전체 건수 |
 | `findings` | array of finding | 이름순, 같은 페이지 안에서는 줄 번호순 |
@@ -113,7 +113,7 @@ finding 은 `kind` 로 갈리는 객체다.
 ### 4.3 첫 조각에 넣지 않는 것
 
 - `revision_log_gap` (log 와 페이지 revision 의 어긋남). log 파서가 필요하고 §7 의 규칙이 먼저다. 2단계.
-- 모순 후보. 원장을 입력으로 쓰는 일이고 §9 가 닫아 둔다.
+- 모순 후보. 첫 조각에서 뺀다(리더 정리). 원장을 lint 입력으로 쓰는 일은 닫은 것이 아니라 미룬 것이다. §9 의 "이 RFC 의 결정"이 조건을 적고, 다시 다루는 자리는 §11.2 의 3단계다.
 - 입구에서 닿지 않는 페이지(`unreachable`). 입구를 적는 스키마 페이지가 아직 없다. 2단계.
 - 순환. 지금 11장은 서로 링크하는 구조라 순환은 결함이 아니다(옮김: ocaml-refactor-woman). 오류로 내지 않는다.
 
@@ -164,7 +164,7 @@ finding 은 `kind` 로 갈리는 객체다.
 |---|---|---|
 | 새 필수 키를 더함 | 새 바이너리가 지금 있는 페이지 전부를 `Missing_field` 로 못 읽는다 | 하지 않는다. 새 키는 선택 키로만 더한다 |
 | `source` 에 새 값을 더함 | 옛 바이너리가 그 값을 가진 새 페이지를 `Unknown_source` 로 못 읽는다(`tool_wiki.ml:211`) | 모르는 `source` 값을 견디는 읽기가 먼저 배포되고, 그 판이 운영에 깔린 뒤에만 새 값을 쓴다. 두 변경은 같은 PR 에 넣지 않는다 |
-| 선택 키를 더함 | 읽기는 키를 이름으로 찾으므로 모르는 키가 있어도 읽힌다(`tool_wiki.ml:189`, `List.assoc_opt`) | 허용. 다만 update 가 헤더를 다시 쓸 때 모르는 키를 보존하는지는 미확인이다. 선택 키를 더하는 PR 은 "옛 바이너리로 update 한 뒤에도 키가 남는가"를 테스트로 답해야 한다 |
+| 선택 키를 더함 | 읽기는 키를 이름으로 찾으므로(`tool_wiki.ml:189`, `List.assoc_opt`) 모르는 키가 있어도 읽히는 것으로 보인다(추정). 그 앞 단계인 `Frontmatter.read` 가 모르는 키를 거절하는지는 읽지 않았다(미확인) | 조건부 허용. update 가 헤더를 다시 쓸 때 모르는 키를 보존하는지도 미확인이다. 선택 키를 더하는 PR 은 "모르는 키가 있는 페이지가 옛 바이너리에서 읽히는가"와 "옛 바이너리로 update 한 뒤에도 키가 남는가"를 테스트로 답해야 한다 |
 
 이 RFC 의 1단계는 헤더를 바꾸지 않는다. 출처를 헤더 칸이 아니라 본문 절에 두는 이유가 이것이다.
 
@@ -205,11 +205,12 @@ finding 은 `kind` 로 갈리는 객체다.
 
 ## 9. Curator 와의 경계
 
-- 원장 claim 은 위키 출처가 될 수 없다. Curator 는 분류만 하고 프롬프트가 "Do not claim semantic verification" 이라고 적는다(옮김: claude-mcp-client). claim 의 id 는 글에서 나오므로 글이 바뀌면 id 가 바뀌고, 구성원이 사라지면 claim 도 지워진다(옮김: context-reviewer, `workspace_memory_ledger.mli`). 가리킬 대상이 남지 않는다. claim 을 근거로 쓰려면 구성원 사실의 원 출처까지 내려가 `board:` 나 `repo:` 로 적는다.
-- 위키에서 원장으로 가는 방향은 닫아 둔다. 두 코드는 서로를 이름으로 부르지 않는다(옮김: context-reviewer, 양쪽 검색 0건). 다만 Keeper 가 페이지를 읽고 각자 기억하면 원장이 그것을 여러 구성원의 주장으로 묶는 길은 사람을 거쳐 이미 있다. `keeper_memory_write` 의 근거 종류에 위키가 없으므로 그렇게 들어온 사실을 가려낼 수 없다(옮김: claude-mcp-client, `config/tools/keeper_memory_write.toml`). "위키에서 온 사실" 표지가 생기기 전에는 lint 가 원장을 입력으로 쓰지 않는다.
+- 원장 claim 은 위키 출처가 될 수 없다. Curator 는 분류만 하고 프롬프트가 "Do not claim semantic verification" 이라고 적는다(옮김: claude-mcp-client). claim 의 id 는 글에서 나오므로 글이 바뀌면 id 가 바뀌고, 구성원이 모두 사라져 0 이 되면 claim 도 지워진다(옮김: context-reviewer, `workspace_memory_ledger.mli` 의 문서 주석 기준, 구현 `workspace_memory_ledger.ml` 은 미독). 그 경우 가리킬 대상이 남지 않는다. claim 을 근거로 쓰려면 구성원 사실의 원 출처까지 내려가 `board:` 나 `repo:` 로 적는다.
+- 위키에서 원장으로 가는 방향은 닫아 둔다. 두 코드는 서로를 이름으로 부르지 않는다(옮김: context-reviewer, 양쪽 검색 0건). 다만 Keeper 가 페이지를 읽고 각자 기억하면 원장이 그것을 여러 구성원의 주장으로 묶는 길은 사람을 거쳐 이미 있다. `keeper_memory_write` 의 근거 종류에 위키가 없으므로 그렇게 들어온 사실을 가려낼 수 없다(옮김: claude-mcp-client, `config/tools/keeper_memory_write.toml`).
+- 이 RFC 의 결정(옮긴 의견이 아니다): "위키에서 온 사실" 표지가 생기기 전에는 lint 가 원장을 입력으로 쓰지 않는다. 설계 창에서 표지는 위키에서 원장으로 가는 방향의 조건이었고, 원장에서 위키로 가는 방향에 대한 context-reviewer 의 제안은 "후보로만 쓴다"였다(`c-925b5ac63ec9ea5ae60d90e6b17ab883`). 리더 정리는 "첫 조각에서 모순 후보를 뺀다"다. 이 RFC 는 그보다 좁게 잡아 같은 조건을 원장에서 위키로 가는 방향에도 건다. 불어난 주장이 lint 를 타고 위키로 돌아오는 길을 막으려는 것이다. 영구히 닫는 것이 아니라 §11.2 의 3단계로 미루는 것이다.
 - 구성원 수는 "여럿이 확인했다"는 뜻이 아니다. 원장은 구성원의 근거가 서로 독립인지 보지 않는다.
 - Curator 가 위키에 직접 쓰는 일은 이 RFC 범위 밖이다(보류). 하게 되면 Curator 페이지는 `author` 칸이나 이름 접두로 구분한다. `source` 에 Curator 용 값을 더하지 않는다(§6).
-- 전제 상태(옮김: claude-mcp-client `c-fe7fee86ed973568c3536a6ea88d993b`, 미검증): 라이브 Curator lane 은 `cli_slots` 만 있어 briefing 이 2026-10-08 이후 갱신되지 않았다. 설정이 적용되기 전에는 Curator 가 원장 입력을 처리한다고 가정하지 않는다.
+- 전제 상태(옮김: claude-mcp-client `c-fe7fee86ed973568c3536a6ea88d993b`, 미검증): 라이브 Curator lane 에는 `cli_slots` 만 있다. briefing 은 2026-10-08 이후 갱신되지 않았다. 둘 사이의 인과는 확인되지 않았다(원 댓글 `c-659bceab4f021414c2362be1c064d988` 이 로그로 확인하지 못했다고 적음). 설정이 적용되기 전에는 Curator 가 원장 입력을 처리한다고 가정하지 않는다.
 
 저장소 경계의 한 줄 정의는 초안이고 운영자 채택 전이다. 기준으로 삼는 제안은 이렇다(옮김: glossary-maniac): 개인 기억은 한 Keeper 가 확인한 사실, 위키는 사람과 Keeper 가 함께 쓴 페이지, 원장은 모델이 분류한 공유 주장과 충돌. 채택 경로는 용어집 문서 PR 이다.
 
@@ -225,6 +226,8 @@ finding 은 `kind` 로 갈리는 객체다.
 | 재는 것 | 발견 건수, §10.2 의 정답률 | 위키 도구 호출 수의 전후 변화 |
 
 이 RFC 는 프롬프트를 바꾸지 않고 위키 목차를 어디에도 싣지 않는다. #42951 은 lint 를 다루지 않는다. 둘이 만나는 곳은 하나다: 목차가 실리면 페이지가 더 자주 읽히므로, 출처 없는 페이지와 깨진 링크의 건수를 먼저 아는 편이 안전하다. 순서를 강제하지는 않는다. 리더 정리는 프롬프트 탑재를 "A/B 후 켠다"로 보류했다.
+
+설계 창의 Q9 에서 채택된 것 가운데 셋은 이 RFC 의 범위 밖이다: 도구 설명 양쪽에 "올리는 조건"을 붙인 상호 참조 한 줄, 일이 끝나는 순간(Task 완료, 원장 등기)에 "이 발견은 위키 후보인가"를 묻는 한 줄, 절차(Skill)를 다섯째 자리로 인정하는 것. 채택은 유효하고(리더 정리 `c-331058eea665b8c6e0401f40c5eb907b`) 이 문서가 구현을 정하지 않을 뿐이다. 어느 문서가 맡을지는 이 RFC 가 정하지 않는다.
 
 ### 10.2 쓸모 측정
 
@@ -272,10 +275,10 @@ finding 은 `kind` 로 갈리는 객체다.
 | 1b | 순수 코어 | `Wiki_link`, `Wiki_graph`, `Wiki_lint` 와 테스트. 아직 도구 없음 | 해당 없음 | 해당 없음 |
 | 1c | 도구 | `Tool_wiki_lint`, 도구 toml, 사용 가이드 `docs/guides/wiki-lint.md`, 변경 조각(Experimental) | 설정 없음. 도구를 부른다 | 설정 없음. 부르지 않으면 아무 일도 일어나지 않는다 |
 | 2 | 별도 PR 들 | 스키마 페이지, 절 끝 두 줄, log 파서와 `revision_log_gap`, 입구에서 닿지 않는 페이지 | 읽기 전용이면 설정 없음 | 같음 |
-| 3 | 별도 RFC | 프롬프트 탑재(#42951), Curator 가 위키에 쓰기, promote, 모델을 쓰는 모순 후보 | 자기 테이블의 `enabled`, 기본 꺼짐 | 그 키를 끈다 |
+| 3 | 별도 RFC | 프롬프트 탑재(#42951), Curator 가 위키에 쓰기, promote, 원장이나 모델을 쓰는 모순 후보 | 자기 테이블의 `enabled`, 기본 꺼짐 | 그 키를 끈다 |
 
 - 1c 의 사용 가이드는 규약 a-dababc7a 의 여섯 항목을 담고, 실행 예시는 와이어 이름 그대로 적는다. Keeper 쪽 이름으로 투영할지(`keeper_wiki_lint`)는 1c 가 정한다.
-- 스위치가 필요해지는 조건은 쓰기가 생기거나, 모델을 부르거나, 주기적으로 돌거나, 요청마다 비용이 생길 때다. 그때의 모양은 기존 관례대로 자기 테이블 안의 `enabled` 다(`config/runtime.toml` 의 `[fusion]`, `[typesafeai]`, `[browser.*]`). 최상위 테이블은 `Runtime_toml_namespace` 나 `Keeper_runtime_config.owned_namespaces` 에 등록되어야 하고 `wiki` 는 지금 어느 쪽에도 없다(뒤쪽 레지스트리는 미확인).
+- 이 RFC 가 다루는 위키 도구에 한해서, 스위치를 다시 논의하는 조건은 쓰기가 생기거나, 모델을 부르거나, 주기적으로 돌거나, 요청마다 비용이 생길 때다. 다른 기능에 적용되는 일반 규칙이 아니다. 그때의 모양은 기존 관례대로 자기 테이블 안의 `enabled` 다(`config/runtime.toml` 의 `[fusion]`, `[typesafeai]`, `[browser.*]`). 최상위 테이블은 `Runtime_toml_namespace` 나 `Keeper_runtime_config.owned_namespaces` 에 등록되어야 한다. `wiki` 는 앞쪽에는 없다(직독). 뒤쪽은 `Keeper_runtime_setting_registry` 에서 나오는데 그 레지스트리를 읽지 않아 미확인이다.
 - 구현 PR 은 v0.54.0 컷 브랜치에 넣지 않는다.
 
 ### 11.3 기존 헌법 조항과의 대응 (새 규칙 없음)
@@ -317,7 +320,7 @@ finding 은 `kind` 로 갈리는 객체다.
 
 확신도:
 
-- 지금 구조(§2)와 호환 위험(§6): 높음. 코드와 라이브 페이지를 읽었고 두 사람 이상이 같은 줄을 따로 읽었다.
+- 지금 구조(§2)와 호환 위험(§6): 높음. 다만 근거의 폭이 항목마다 다르다. §2 의 일곱 항목 중 넷은 옮긴 읽기다. 이름 규칙, 헤더 일곱 키와 `Unknown_source`, log 형식, 잠금 파일, 16,384 바이트, 리소스 설명 문구는 PR #42963 의 리뷰 5509563867 에서 context-reviewer 가 따로 읽어 일치를 확인했으므로 두 사람이 읽은 것이다. "log 의 동작 단어를 해석하는 코드가 없다"는 두 사람의 검색 범위 안에서 0건이라는 뜻이고 확정은 아니다. §6 의 "모르는 선택 키가 있어도 읽힌다"는 추정이다.
 - lint 의 다섯 가지 발견이 쓸모 있는 신호인지: 중간. 지금 11장에서는 `missing_sources` 11 과 `orphan` 1 만 나온다. 페이지가 늘기 전에는 값이 작다.
 - 출력 스키마(§4.2)와 링크 표(§5)의 세부: 중간. 제안이고 구현 리뷰에서 바뀔 수 있다.
 - 위키가 Keeper 의 답을 낫게 하는지: 모름. §10.2 가 그것을 재는 방법이고, 잰 값은 아직 없다.

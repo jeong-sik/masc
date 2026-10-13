@@ -689,7 +689,9 @@ let test_exact_queued_admission () = with_workspace (fun env sw base_path ->
         exact request_id |> reject "a started request cannot be admitted as Queued"
           (function Async.Canonical_queued_not_queued Async.Running
             | Canonical_queued_runtime_nonqueued Async.Running -> true | _ -> false))
-      base_path sw prepared (fun node _ -> incr calls; Executor.dispatch_result (success base_path node "original-profile"))
+      base_path sw prepared
+      (fun ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ ->
+        incr calls; Executor.dispatch_result (success base_path node "original-profile"))
     |> accepted in
   ignore (await base_path submission);
   ignore (executed submission |> require "exact-proof admission executes original plan");

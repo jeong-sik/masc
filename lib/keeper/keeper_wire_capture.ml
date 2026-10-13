@@ -10,7 +10,11 @@ let redact redaction text =
 (* Dated per-day store, mirroring the cost-ledger appender
    ([Keeper_hooks_agent_core_cost_events.emit_cost_event]); concurrent keepers
    serialise on a per-day file rather than one global blob. *)
-let wire_capture_dir masc_root = Filename.concat masc_root "wire-capture"
+let wire_capture_location masc_root =
+  Dated_jsonl.Store.(cluster (cluster_root masc_root) Cluster.Wire_capture)
+;;
+
+let wire_capture_dir masc_root = Dated_jsonl.Store.dir (wire_capture_location masc_root)
 
 (** Cache [Dated_jsonl.t] handles per MASC root so the diagnostic harness does
     not recreate the store (and re-scan/re-prune) on every request/response
@@ -35,11 +39,10 @@ let store_for ~masc_root =
       entry
     | _ ->
       let store =
-        Dated_jsonl.create
-          ~base_dir:(wire_capture_dir masc_root)
+        Dated_jsonl.open_store
           ~retention_days
           ~max_bytes
-          ()
+          (wire_capture_location masc_root)
       in
       let entry = { store; retention_days; max_bytes } in
       Hashtbl.replace store_cache masc_root entry;

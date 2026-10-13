@@ -86,10 +86,12 @@ let keeper_tool_call_lookup_response ~config ~keeper_name req =
     if not (Keeper_config.validate_name keeper_name) then
       error `Bad_request "invalid_keeper_name" "invalid keeper name"
     else
-      let ledger_dir =
-        Filename.concat (Workspace.masc_root_dir config) "tool_calls"
+      let store =
+        Dated_jsonl.open_store
+          (Dated_jsonl.Store.cluster
+             (Workspace.dated_store_cluster_root config)
+             Dated_jsonl.Store.Cluster.Tool_calls)
       in
-      let store = Dated_jsonl.create ~base_dir:ledger_dir () in
       (match
          Keeper_tool_call_index.by_execution_ids
            ~store ~keeper_name ~execution_ids:[ execution_id ]

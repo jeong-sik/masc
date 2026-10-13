@@ -665,7 +665,7 @@ let schedule_signal_decode_error_dashboard_json ordinal error =
 let schedule_signal_rows_and_errors config limit =
   let entries =
     Dated_jsonl.read_recent
-      (Dated_jsonl.create ~base_dir:(Schedule_runner.signals_dir config) ())
+      (Schedule_runner.signal_store config)
       limit
     |> List.mapi (fun ordinal json ->
       match Schedule_runner.wake_signal_of_yojson json with

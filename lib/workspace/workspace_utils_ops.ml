@@ -753,13 +753,18 @@ let with_file_lock_r config path f : ('a, masc_error) result =
 (* ============================================ *)
 
 let log_event config event_json =
-  let events_dir = Filename.concat (masc_dir config) "events" in
+  let location =
+    Dated_jsonl.Store.cluster
+      (dated_store_cluster_root config)
+      Dated_jsonl.Store.Cluster.Events
+  in
+  let events_dir = Dated_jsonl.Store.dir location in
   mkdir_p events_dir;
 
   (* Two gmtime calls used to pick the month and the day, so a midnight
      between them filed the last day of one month under the next one's
      directory. [Jsonl_writer] runs one call behind both (#27143). *)
-  let dated = Jsonl_writer.dated_path_now ~base_dir:events_dir in
+  let dated = Dated_jsonl.Store.dated_path_now location in
   let month_dir = Filename.concat events_dir dated.Jsonl_writer.month_dir in
   mkdir_p month_dir;
   let log_file = dated.Jsonl_writer.path in

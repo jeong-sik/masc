@@ -28,13 +28,13 @@ open Masc
    even if the offending path component is renamed. *)
 let host_root_marker = "/tmp/HOST_ROOT_MARKER_NEVER_LEAK"
 
-let mk_local_sandbox () : Keeper_sandbox.t =
-  { keeper_name = "test-local"
-  ; sandbox_id = "keeper:test-local"
+let mk_remote_ssh_sandbox () : Keeper_sandbox.t =
+  { keeper_name = "test-remote-ssh"
+  ; sandbox_id = "keeper:test-remote-ssh"
   ; backend = Remote_ssh
   ; network_mode = Keeper_types_profile.Network_inherit
-  ; host_root_rel = ".masc/playground/test-local/"
-  ; host_root_abs = host_root_marker ^ "/.masc/playground/test-local"
+  ; host_root_rel = ".masc/playground/test-remote-ssh/"
+  ; host_root_abs = host_root_marker ^ "/.masc/playground/test-remote-ssh"
   ; container_root = None
   ; root_arg = "."
   }
@@ -51,11 +51,11 @@ let mk_docker_sandbox () : Keeper_sandbox.t =
   ; root_arg = "."
   }
 
-let local_response ~host_cwd =
+let remote_ssh_response ~host_cwd =
   Keeper_cwd_response.of_sandbox
-    ~sandbox:(mk_local_sandbox ())
+    ~sandbox:(mk_remote_ssh_sandbox ())
     ~host_cwd
-    ~container_cwd_for_docker:"IGNORED_FOR_LOCAL_BACKEND"
+    ~container_cwd_for_docker:"IGNORED_FOR_REMOTE_SSH_BACKEND"
 ;;
 
 let docker_response ~host_cwd ~container_cwd =
@@ -66,29 +66,28 @@ let docker_response ~host_cwd ~container_cwd =
 ;;
 
 (* --- Remote_ssh backend: passthrough semantics -------------- *)
-(* These were written against [Local], which no longer exists. Remote_ssh
-   answers with the host bookkeeping path the same way, so the contract
-   they pin still has a subject. *)
+(* The endpoint owns a Remote_ssh tree, so this side answers with the host
+   bookkeeping path; the remote lane translates it on the way out. *)
 
-let test_local_backend_passthrough () =
+let test_remote_ssh_backend_passthrough () =
   let host_cwd =
-    host_root_marker ^ "/.masc/playground/test-local/repos/foo"
+    host_root_marker ^ "/.masc/playground/test-remote-ssh/repos/foo"
   in
-  let r = local_response ~host_cwd in
+  let r = remote_ssh_response ~host_cwd in
   check string "keeper_visible == host_cwd" host_cwd
     (Keeper_cwd_response.keeper_visible r);
   check string "operator_host == host_cwd" host_cwd
     (Keeper_cwd_response.operator_host r)
 
-let test_local_json_emits_host_path () =
+let test_remote_ssh_json_emits_host_path () =
   (* For this backend the host path IS the keeper-visible path,
      so the JSON response will (correctly) contain it. The
      positive check here is that [to_yojson_response] returns
      exactly the host_cwd string. *)
   let host_cwd =
-    host_root_marker ^ "/.masc/playground/test-local/repos/foo"
+    host_root_marker ^ "/.masc/playground/test-remote-ssh/repos/foo"
   in
-  let r = local_response ~host_cwd in
+  let r = remote_ssh_response ~host_cwd in
   let json = Keeper_cwd_response.to_yojson_response r in
   match json with
   | `String s -> check string "JSON String == host_cwd" host_cwd s
@@ -126,12 +125,12 @@ let test_docker_json_does_not_leak_host_root () =
 
 (* --- of_sandbox dispatches on backend ----------------------- *)
 
-let test_of_sandbox_local_dispatch () =
-  let sandbox = mk_local_sandbox () in
+let test_of_sandbox_remote_ssh_dispatch () =
+  let sandbox = mk_remote_ssh_sandbox () in
   let host_cwd = sandbox.host_root_abs ^ "/repos/x" in
   let r =
     Keeper_cwd_response.of_sandbox ~sandbox ~host_cwd
-      ~container_cwd_for_docker:"IGNORED_FOR_LOCAL_BACKEND"
+      ~container_cwd_for_docker:"IGNORED_FOR_REMOTE_SSH_BACKEND"
   in
   check string "Remote_ssh of_sandbox returns host path" host_cwd
     (Keeper_cwd_response.keeper_visible r);
@@ -141,7 +140,7 @@ let test_of_sandbox_local_dispatch () =
   check bool
     "ignored container_cwd_for_docker value never appears in JSON"
     false
-    (Astring.String.is_infix ~affix:"IGNORED_FOR_LOCAL_BACKEND" json_str)
+    (Astring.String.is_infix ~affix:"IGNORED_FOR_REMOTE_SSH_BACKEND" json_str)
 
 let test_of_sandbox_docker_dispatch () =
   let sandbox = mk_docker_sandbox () in
@@ -215,14 +214,14 @@ let test_profile_independent_cwd_no_match () =
 let () =
   run "keeper_cwd_response"
     [
-      ( "local-backend"
+      ( "remote-ssh-backend"
       , [
-          test_case "local backend: passthrough" `Quick
-            test_local_backend_passthrough
-        ; test_case "local JSON emits host path (== visible)" `Quick
-            test_local_json_emits_host_path
+          test_case "remote_ssh backend: passthrough" `Quick
+            test_remote_ssh_backend_passthrough
+        ; test_case "remote_ssh JSON emits host path (== visible)" `Quick
+            test_remote_ssh_json_emits_host_path
         ; test_case "of_sandbox dispatches Remote_ssh to host path" `Quick
-            test_of_sandbox_local_dispatch
+            test_of_sandbox_remote_ssh_dispatch
         ] )
     ; ( "docker-backend"
       , [

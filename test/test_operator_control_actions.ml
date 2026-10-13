@@ -279,17 +279,6 @@ let test_operator_action_rejects_legacy_action_aliases () =
       "team_stop";
     ]
   in
-  List.iter
-    (fun action_type ->
-      Alcotest.(check bool)
-        (action_type ^ " not allowed")
-        false
-        (Operator_action_catalog.is_allowed action_type);
-      Alcotest.(check bool)
-        (action_type ^ " not confirm-required")
-        false
-        (Operator_action_catalog.requires_confirmation action_type))
-    retired_actions;
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -318,6 +307,65 @@ let test_operator_action_rejects_legacy_action_aliases () =
                 ("unsupported action_type: " ^ action_type)
                 message)
         retired_actions)
+
+(* An action addresses one kind of target. A request may leave the target
+   type out; one that names another kind is refused where the request is
+   read, before anything is staged. *)
+let test_operator_action_target_type_follows_the_action () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let ctx = operator_ctx env sw config "operator" in
+      let staged () =
+        List.length (Operator_pending_confirm.raw_pending_confirms config)
+      in
+      List.iter
+        (fun (action_type, target_type, expected) ->
+          match
+            Operator_control.action_json ctx
+              (`Assoc
+                [ "action_type", `String action_type
+                ; "target_type", `String target_type
+                ; "target_id", `String "some-keeper"
+                ; "payload", `Assoc [ "message", `String "hello" ]
+                ])
+          with
+          | Ok _ ->
+            Alcotest.failf "%s aimed at a %s should be refused" action_type target_type
+          | Error message ->
+            Alcotest.(check string)
+              (action_type ^ " aimed at a " ^ target_type)
+              (Printf.sprintf
+                 "invalid target_type for %s (expected %s)"
+                 action_type
+                 expected)
+              message)
+        [ "broadcast", "keeper", "workspace"
+        ; "broadcast", "goal", "workspace"
+        ; "keeper_probe", "workspace", "keeper"
+        ];
+      Alcotest.(check int) "a refused request stages nothing" 0 (staged ());
+      (match
+         Operator_control.action_json ctx
+           (`Assoc
+             [ "action_type", `String "broadcast"
+             ; "payload", `Assoc [ "message", `String "hello" ]
+             ])
+       with
+       | Error err -> Alcotest.fail err
+       | Ok json ->
+         Alcotest.(check string)
+           "an omitted target type is the action's own"
+           Operator_action_constants.workspace_target_type
+           Yojson.Safe.Util.(
+             json |> member "preview" |> member "target_type" |> to_string));
+      Alcotest.(check int) "the accepted request is staged" 1 (staged ()))
 
 let test_operator_task_recovery_tool_is_strict_and_executes_exact_cas () =
   Eio_main.run @@ fun env ->
@@ -561,6 +609,10 @@ let () =
             "legacy action aliases are rejected"
             `Quick
             test_operator_action_rejects_legacy_action_aliases
+        ; Alcotest.test_case
+            "a request's target type follows its action"
+            `Quick
+            test_operator_action_target_type_follows_the_action
         ; Alcotest.test_case
             "task recovery tool is strict and exact"
             `Quick

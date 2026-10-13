@@ -66,12 +66,13 @@ val to_yojson : record -> Yojson.Safe.t
     judgment posts from other JSONL records. *)
 
 val of_yojson : Yojson.Safe.t -> (record, string) result
-(** Parses the JSON object back to a record.  Fail-fast:
-    returns [Error "missing target_type"] / [Error "invalid
-    target_type"] when the [target_type] field is missing or
-    unrecognised; field-by-field reads via Yojson.Util may
-    raise [Type_error] which is caught and surfaced as
-    [Error]. *)
+(** Parses the JSON object back to a record.  Fail-fast: every member
+    {!to_yojson} writes is required, so a missing one is
+    [Error "missing <key>"] and a wrong JSON type, an unrecognised
+    [target_type] or an out-of-range [confidence] is
+    [Error "invalid <key>"] / [Error "confidence out of range"].
+    [target_id], [model_name], [runtime_name] and [recommended_action]
+    may be [null]. *)
 
 (** {1 Freshness} *)
 

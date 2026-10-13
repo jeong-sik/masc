@@ -1442,6 +1442,11 @@ let test_runtime_context_is_not_new_memory_evidence () =
     [ Agent_core.Types.user_msg "actual new observation"
     ; carrier Context.metadata "injected current memory payload"
     ; carrier Context.historical_metadata "injected historical memory payload"
+    ; carrier (List.map (fun (key, _) -> key, `Bool false) Context.metadata)
+        "injected invalid memory payload"
+    ; carrier (Context.metadata @ Context.historical_metadata)
+        "injected duplicate memory payload"
+    ; Agent_core.Types.user_msg "[system context] is literal user text"
     ; Agent_core.Types.assistant_msg "actual response"
     ]
   in
@@ -1450,26 +1455,29 @@ let test_runtime_context_is_not_new_memory_evidence () =
     List.iter (fun text ->
       check bool (label ^ ": omits " ^ text) false
         (String_util.contains_substring rendered text))
-      ["injected current memory payload"; "injected historical memory payload"];
+      ["injected current memory payload"; "injected historical memory payload";
+       "injected invalid memory payload"; "injected duplicate memory payload"];
     List.iter (fun text ->
       check bool (label ^ ": retains " ^ text) true
         (String_util.contains_substring rendered text))
-      ["actual new observation"; "actual response"; "source=runtime_context"]
+      ["actual new observation"; "actual response"; "source=runtime_context";
+       "provenance=invalid"; "provenance=duplicate";
+       "[system context] is literal user text"]
   in
   let history = List.assoc "conversation_history" (Librarian.prompt_variables selected) in
   check_rendering "prompt variables" history;
   check bool "context keeps its original position" true
     (String_util.contains_substring history "[turn=2 role=user source=runtime_context]");
   check bool "following observation keeps its original position" true
-    (String_util.contains_substring history "[turn=3 role=assistant] actual response");
+    (String_util.contains_substring history "[turn=6 role=assistant] actual response");
   (match Runtime.messages_for_librarian selected with
    | Error detail -> failf "librarian render failed: %s" detail
    | Ok rendered -> check_rendering "rendered request" (user_text_of_messages rendered));
   let observations = Librarian.observations_for_absorption selected
     |> List.filter (fun observation ->
       Json_util.assoc_string_opt "kind" observation = Some "conversation") in
-  check int "absorption keeps one slot per canonical message" 4 (List.length observations);
-  check (list int) "absorption positions are unchanged" [0; 1; 2; 3]
+  check int "absorption keeps one slot per canonical message" 7 (List.length observations);
+  check (list int) "absorption positions are unchanged" [0; 1; 2; 3; 4; 5; 6]
     (List.map (fun observation ->
       Yojson.Safe.Util.(member "local_position" observation |> to_int)) observations);
   check_rendering "absorption observations" (Yojson.Safe.to_string (`List observations));

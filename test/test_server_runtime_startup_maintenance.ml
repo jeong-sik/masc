@@ -155,7 +155,9 @@ let test_prune_shared_jsonl_stores_production_geometry () =
      (3 days by default). *)
   let provider_usage_old = p [ "provider_usage_history"; "2020-01"; "01.jsonl" ] in
   let wire_capture_old = p [ "wire-capture"; "2020-01"; "01.jsonl" ] in
-  (* Stores the list keeps for now: nothing removes them by date. *)
+  (* Written under <base>/.masc and on no prune list until the store list
+     gave them rules: tool events and continuity requests follow the
+     window, verdicts are kept. *)
   let tool_events_old = p [ "tool-events"; "2020-01"; "01.jsonl" ] in
   let verdicts_old = p [ "verdicts"; "2020-01"; "01.jsonl" ] in
   let continuity_old =
@@ -195,15 +197,16 @@ let test_prune_shared_jsonl_stores_production_geometry () =
     (fun f -> Unix.utimes f old_ts old_ts)
     [ logs_old; raw_old; manifest_old; message_old ];
   let n = SM.prune_shared_jsonl_stores ~days:30 ~base_path ~masc_root in
-  Alcotest.(check int) "fourteen stale files pruned" 14 n;
+  Alcotest.(check int) "sixteen stale files pruned" 16 n;
   Alcotest.(check bool)
     "stale provider usage day removed" false (Sys.file_exists provider_usage_old);
   Alcotest.(check bool)
     "stale wire capture day removed" false (Sys.file_exists wire_capture_old);
-  Alcotest.(check bool) "kept tool-events day stays" true (Sys.file_exists tool_events_old);
+  Alcotest.(check bool)
+    "stale tool-events day removed" false (Sys.file_exists tool_events_old);
   Alcotest.(check bool) "kept verdicts day stays" true (Sys.file_exists verdicts_old);
   Alcotest.(check bool)
-    "kept continuity-requests day stays" true (Sys.file_exists continuity_old);
+    "stale continuity-requests day removed" false (Sys.file_exists continuity_old);
   Alcotest.(check bool) "stale message removed" false (Sys.file_exists message_old);
   Alcotest.(check bool) "fresh message kept" true (Sys.file_exists message_fresh);
   Alcotest.(check bool) "stale tool_usage day removed" false (Sys.file_exists tool_usage_old);

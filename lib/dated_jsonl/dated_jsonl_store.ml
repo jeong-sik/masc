@@ -125,8 +125,13 @@ type retention =
 let provider_usage_history_days = 16
 
 let base_retention = function
-  | Base.Transition_audit | Base.Audit_approvals -> Operator_window
-  | Base.Tool_events | Base.Keeper_wake_payload | Base.Verdicts -> Kept
+  | Base.Transition_audit
+  | Base.Audit_approvals
+  | Base.Tool_events
+  | Base.Keeper_wake_payload -> Operator_window
+  (* Human labels cannot be made again, and the verdict statistics read
+     the newest 5,000 rows (about half a year at the 2026-10 rate). *)
+  | Base.Verdicts -> Kept
 
 let cluster_retention = function
   | Cluster.Audit
@@ -139,7 +144,9 @@ let cluster_retention = function
   | Cluster.Costs -> Operator_window
   | Cluster.Provider_usage_history -> Fixed_days provider_usage_history_days
   | Cluster.Wire_capture -> Own_days Env_config_keeper.KeeperWireCapture.retention_days
-  | Cluster.Schedule_signals | Cluster.Telemetry_coverage_gaps -> Kept
+  (* Only the dashboard reads signal rows; [schedules/signal_keys.json]
+     keeps a signal from firing twice. *)
+  | Cluster.Schedule_signals | Cluster.Telemetry_coverage_gaps -> Operator_window
 
 let keeper_retention = function
   | Keeper.Metrics
@@ -147,8 +154,8 @@ let keeper_retention = function
   | Keeper.Turn_records
   | Keeper.Provider_inputs
   | Keeper.Memory_recall_artifacts
-  | Keeper.Crash_events -> Operator_window
-  | Keeper.Continuity_requests -> Kept
+  | Keeper.Crash_events
+  | Keeper.Continuity_requests -> Operator_window
 
 let retention = function
   | Base store -> base_retention store

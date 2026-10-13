@@ -11,8 +11,8 @@
     runtime switch, etc.) is appended as one JSONL line to
     `<operator_dir>/action_log.jsonl`. The schema covers identity
     (trace_id, actor, remote session/client), target (type/id), the
-    delegated tool, confirmation state (preview/immediate/expired/
-    denied/confirmed), result (ok/error), latency, and timestamp.
+    delegated tool, confirmation state (preview/expired/denied/
+    confirmed), result (ok/deferred/error), latency, and timestamp.
 
     [recent_actions_json] returns the trailing 20 entries via a
     bounded ring buffer ([Queue.t]) so the JSONL never materializes
@@ -33,14 +33,12 @@ let action_result_status_to_string = function
 
 type confirmation_state =
   | Preview
-  | Immediate
   | Expired
   | Denied
   | Confirmed
 
 let confirmation_state_to_string = function
   | Preview -> "preview"
-  | Immediate -> "immediate"
   | Expired -> "expired"
   | Denied -> "denied"
   | Confirmed -> "confirmed"

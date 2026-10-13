@@ -110,10 +110,6 @@ val delegated_tool_for : string -> (string, string) result
     action type from {!Operator_pending_confirm.available_actions} or rejects
     an action without a registered tool contract. *)
 
-val confirm_required : string -> bool
-(** Re-export of {!Operator_action_catalog.requires_confirmation}. Pinned here
-    to keep the action contract surface in one place. *)
-
 val preview_of_action : action_request -> Yojson.Safe.t
 (** [preview_of_action r] renders a JSON preview for UI
     confirmation panes.  Schema:

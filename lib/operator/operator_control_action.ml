@@ -218,8 +218,6 @@ let delegated_tool_for action_type =
   | Some action -> Ok action.tool_name
   | None -> Error (Printf.sprintf "unsupported action_type: %s" action_type)
 
-let confirm_required = Operator_action_catalog.requires_confirmation
-
 let preview_of_action (request : action_request) =
   let base =
     [

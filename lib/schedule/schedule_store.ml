@@ -833,9 +833,9 @@ let changed_due_not_past ~now ~(current : schedule_request) (request : schedule_
          })
 ;;
 
-type due_time_update = Replace_due_time | Keep_due_time
+type timing_update = Replace_timing | Keep_timing
 
-let update_request config ~now ~runner_tick_sec ?(due_time_update = Replace_due_time)
+let update_request config ~now ~runner_tick_sec ?(timing_update = Replace_timing)
     (request : Schedule_domain.schedule_request) =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
@@ -844,9 +844,9 @@ let update_request config ~now ~runner_tick_sec ?(due_time_update = Replace_due_
     | Some current ->
       if Schedule_domain.modify_allowed current.status
       then (
-        let request = match due_time_update with
-          | Replace_due_time -> request
-          | Keep_due_time -> { request with due_at = current.due_at }
+        let request = match timing_update with
+          | Replace_timing -> request
+          | Keep_timing -> { request with due_at = current.due_at; recurrence = current.recurrence }
         in
         let* () = validate_initial_request request in
         let* () = changed_due_not_past ~now ~current request in

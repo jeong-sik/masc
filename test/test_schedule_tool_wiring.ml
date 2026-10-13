@@ -518,12 +518,14 @@ let test_content_edit_preserves_concurrently_changed_due () =
   let original = create_service_exn config ~schedule_id ~due_at:future_due_at
       ~payload:(keeper_wake_payload "before") () in
   let latest_due = future_due_at +. 600. in
+  let latest_recurrence = Schedule_domain.Daily
+      {hour=10; minute=0; second=0; timezone="UTC"} in
   let context = { (schedule_ctx config) with
     admit_keeper_wake_creation = (fun _config ~keeper_name:_ write ->
       match Schedule_service.update config ~now:100. ~runner_tick_sec ~schedule_id
           ~requested_by:original.requested_by ~scheduled_by:original.scheduled_by
           ~due_at:latest_due ~payload:(Schedule_domain.payload_to_yojson original.payload)
-          ~source:original.source ~recurrence:original.recurrence () with
+          ~source:original.source ~recurrence:latest_recurrence () with
       | Error error -> Error error
       | Ok _ -> write ()) } in
   let result = match Tool_schedule.dispatch context
@@ -535,6 +537,8 @@ let test_content_edit_preserves_concurrently_changed_due () =
   let stored = match Schedule_store.get_schedule config ~schedule_id with
     | Some request -> request | None -> fail "concurrent edit lost schedule" in
   check (float 0.) "latest committed due wins over observed snapshot" latest_due stored.due_at;
+  check bool "latest committed recurrence survives content edit" true
+    (latest_recurrence = stored.recurrence);
   check string "new content is committed" "after"
     Yojson.Safe.Util.(Schedule_domain.payload_to_yojson stored.payload
       |> member "body" |> member "message" |> to_string)

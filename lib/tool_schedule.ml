@@ -780,15 +780,15 @@ let handle_write ~action ~tool_name ~start_time ctx args =
       | Some requested_at -> Ok requested_at
     in
     let* due_inputs = due_inputs_of_args args in
-    let* due_at, due_time_update =
+    let* due_at, timing_update =
       match action, stored, supplied_kind, due_inputs with
       | Update_schedule, Some request, None, [] ->
         (* The observed time validates the replacement definition; the
            mutation re-reads its current value under the ledger lock. *)
-        Ok (request.due_at, Schedule_store.Keep_due_time)
+        Ok (request.due_at, Schedule_store.Keep_timing)
       | (Create_schedule | Update_schedule), _, _, _ ->
         let* due_at = resolve_due_at ~dispatched_at recurrence args in
-        Ok (due_at, Schedule_store.Replace_due_time)
+        Ok (due_at, Schedule_store.Replace_timing)
     in
     let* schedule_id =
       match action, string_opt args "schedule_id" with
@@ -854,7 +854,7 @@ let handle_write ~action ~tool_name ~start_time ctx args =
           ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
       | Update_schedule, Some schedule_id ->
         Schedule_service.update
-          ctx.config ~now:dispatched_at ~runner_tick_sec ~due_time_update ~schedule_id ~requested_at ?expires_at
+          ctx.config ~now:dispatched_at ~runner_tick_sec ~timing_update ~schedule_id ~requested_at ?expires_at
           ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
       | Update_schedule, None ->
         Error (Schedule_service.Invalid_request "schedule_id is required")

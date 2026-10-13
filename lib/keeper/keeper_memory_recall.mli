@@ -2,7 +2,12 @@
 
     The keyword-classifier recall eval was removed with the legacy memory
     bank: recall is the keeper's own judgment via the [keeper_memory_search]
-    tool, not a substring heuristic. *)
+    tool, not a substring heuristic.
+
+    Disk history rows parse through [Keeper_context_core.message_of_json]:
+    a row that fails (including old rows without content blocks) counts as
+    unreadable rather than as empty text, so counts differ from the
+    previous empty-on-failure reader for the same input. *)
 
 open Keeper_types
 open Keeper_meta_contract
